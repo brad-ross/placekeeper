@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   chmod,
   open,
+  readdir,
   readFile,
   rename,
   rm,
@@ -84,9 +85,7 @@ export class DraftSnapshotStore {
 
   async initialize(): Promise<void> {
     await ensurePrivateDirectory(this.directory);
-    const entries = await import("node:fs/promises").then((fs) =>
-      fs.readdir(this.directory, { withFileTypes: true }),
-    );
+    const entries = await readdir(this.directory, { withFileTypes: true });
     await Promise.all(
       entries
         .filter(
@@ -154,9 +153,7 @@ export class DraftSnapshotStore {
   async allocatedBytes(): Promise<number> {
     await this.initialize();
     let total = 0;
-    const entries = await import("node:fs/promises").then((fs) =>
-      fs.readdir(this.directory, { withFileTypes: true }),
-    );
+    const entries = await readdir(this.directory, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isFile() || entry.name.endsWith(".tmp")) continue;
       total += (await stat(join(this.directory, entry.name))).size;

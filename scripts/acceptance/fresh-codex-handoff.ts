@@ -20,9 +20,8 @@ const codexBinary =
   process.env.PDF_PROOFREADER_CODEX_BINARY ??
   "/Applications/ChatGPT.app/Contents/Resources/codex";
 
-type Scenario = "success" | "missing-synctex" | "build-failure" | "permission-denial";
-
 const scenarios = ["success", "missing-synctex", "build-failure", "permission-denial"] as const;
+type Scenario = (typeof scenarios)[number];
 
 function parseArguments(): { readonly scenario: Scenario; readonly output?: string } {
   const values = process.argv.slice(2).filter((value) => value !== "--");

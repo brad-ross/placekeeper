@@ -79,8 +79,8 @@ export async function exportCodexHandoff(
   if (input.reviewedPdf.revision !== input.delivery.revision) {
     throw new Error("The reviewed PDF and handoff must use the same frozen revision");
   }
-  const frozenIds = [...input.delivery.items.map(({ id }) => id)].sort();
-  const reviewedIds = [...input.reviewedPdf.verification.annotationIds].sort();
+  const frozenIds = input.delivery.items.map(({ id }) => id).sort();
+  const reviewedIds = input.reviewedPdf.verification.annotationIds.toSorted();
   if (JSON.stringify(frozenIds) !== JSON.stringify(reviewedIds)) {
     throw new Error("The reviewed PDF does not account for the exact frozen stable-ID set");
   }

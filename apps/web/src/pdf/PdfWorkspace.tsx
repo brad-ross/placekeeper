@@ -8,6 +8,7 @@ import { Scroller } from '@embedpdf/plugin-scroll/react';
 import { SelectionLayer } from '@embedpdf/plugin-selection/react';
 import { Viewport } from '@embedpdf/plugin-viewport/react';
 import { ZoomGestureWrapper } from '@embedpdf/plugin-zoom/react';
+import { useMemo } from 'react';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import { positionOwnedRect } from './owned-overlay.js';
 
@@ -26,6 +27,16 @@ export function PdfWorkspace({
   onInitialized,
   ownedAnnotations = [],
 }: PdfWorkspaceProps) {
+  const annotationsByPage = useMemo(() => {
+    const result = new Map<number, ReviewAnnotation[]>();
+    for (const annotation of ownedAnnotations) {
+      const page = result.get(annotation.pageIndex);
+      if (page === undefined) result.set(annotation.pageIndex, [annotation]);
+      else page.push(annotation);
+    }
+    return result;
+  }, [ownedAnnotations]);
+
   return (
     <div aria-label={documentLabel} role="region" style={{ height: '100%', minHeight: 480 }}>
       <EmbedPDF
@@ -67,8 +78,7 @@ export function PdfWorkspace({
                         data-owned-annotation-layer
                         style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
                       >
-                        {ownedAnnotations
-                          .filter(({ pageIndex }) => pageIndex === layout.pageIndex)
+                        {(annotationsByPage.get(layout.pageIndex) ?? [])
                           .flatMap((annotation) => {
                             const page = activePdf.pages[layout.pageIndex];
                             if (!page) return [];

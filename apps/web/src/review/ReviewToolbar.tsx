@@ -20,13 +20,17 @@ export interface ReviewToolbarProps {
   onListOpenChange(open: boolean): void;
 }
 
-const tools: ReadonlyArray<{ kind: ReviewItemKind; label: string; shortcut: string }> = [
+export const reviewTools: ReadonlyArray<{ kind: ReviewItemKind; label: string; shortcut: string }> = [
   { kind: 'replace', label: 'Replace', shortcut: 'Alt+Shift+R' },
   { kind: 'delete', label: 'Delete', shortcut: 'Alt+Shift+D' },
   { kind: 'insert', label: 'Insert', shortcut: 'Alt+Shift+I' },
   { kind: 'highlight', label: 'Highlight', shortcut: 'Alt+Shift+H' },
   { kind: 'pageNote', label: 'Page Note', shortcut: 'Alt+Shift+N' },
 ];
+
+export function reviewToolForKey(key: string): ReviewItemKind | undefined {
+  return reviewTools.find(({ shortcut }) => shortcut.endsWith(key.toUpperCase()))?.kind;
+}
 
 export function ReviewToolbar(props: ReviewToolbarProps) {
   const invokeTool = (kind: ReviewItemKind) => {
@@ -40,17 +44,17 @@ export function ReviewToolbar(props: ReviewToolbarProps) {
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.defaultPrevented) return;
     if (!event.altKey || !event.shiftKey) return;
-    const match = tools.find(({ shortcut }) => shortcut.endsWith(event.key.toUpperCase()));
-    if (!match) return;
+    const kind = reviewToolForKey(event.key);
+    if (!kind) return;
     event.preventDefault();
-    invokeTool(match.kind);
+    invokeTool(kind);
   };
   return (
     <div role="toolbar" aria-label="Review tools" onKeyDown={onKeyDown}>
       <button type="button" aria-pressed={props.active} onClick={() => props.onActiveChange(!props.active)}>
         Proofread mode
       </button>
-      {tools.map(({ kind, label, shortcut }) => (
+      {reviewTools.map(({ kind, label, shortcut }) => (
         <button
           key={kind}
           ref={kind === 'pageNote' ? props.pageNoteTriggerRef : undefined}

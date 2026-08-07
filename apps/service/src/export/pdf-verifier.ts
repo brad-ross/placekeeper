@@ -52,7 +52,7 @@ function stableAnnotation(
     subtype: annotation.subtype,
     contents: annotation.contents,
     author: annotation.author ?? null,
-    flags: [...annotation.flags].sort(),
+    flags: annotation.flags.toSorted(),
     hasNormalAppearance: annotation.hasNormalAppearance,
     rect: annotation.rect,
     segmentRects: annotation.segmentRects ?? null,
@@ -139,7 +139,8 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
   if (requestedIds.size !== annotations.length) {
     fail("The frozen review contains duplicate annotation IDs.");
   }
-  if (source.annotations.some(({ id }) => requestedIds.has(id))) {
+  const sourceIds = new Set(source.annotations.map(({ id }) => id));
+  if ([...requestedIds].some((id) => sourceIds.has(id))) {
     fail("A review annotation ID collides with a pre-existing annotation.");
   }
 
@@ -167,8 +168,14 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
     fail("The reviewed PDF annotation inventory contains unexpected entries.");
   }
 
+  const candidateById = new Map<string, InspectedPdfAnnotation[]>();
+  for (const annotation of candidate.annotations) {
+    const matches = candidateById.get(annotation.id);
+    if (matches === undefined) candidateById.set(annotation.id, [annotation]);
+    else matches.push(annotation);
+  }
   for (const requested of annotations) {
-    const matches = candidate.annotations.filter(({ id }) => id === requested.id);
+    const matches = candidateById.get(requested.id) ?? [];
     const written = matches[0];
     if (
       matches.length !== 1 ||

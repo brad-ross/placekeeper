@@ -27,7 +27,7 @@ import {
   createProofreadInputController,
   type ProofreadInputIntent,
 } from '../review/input-controller.js';
-import { ReviewToolbar } from '../review/ReviewToolbar.js';
+import { ReviewToolbar, reviewToolForKey } from '../review/ReviewToolbar.js';
 import './review-layout.css';
 
 type TextDraft =
@@ -137,7 +137,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey) {
-      const tool = ({ r: 'replace', d: 'delete', i: 'insert', h: 'highlight', n: 'pageNote' } as Readonly<Record<string, ReviewItemKind>>)[event.key.toLowerCase()];
+      const tool = reviewToolForKey(event.key);
       if (tool) {
         event.preventDefault();
         props.onToolChange(tool);
@@ -223,8 +223,8 @@ export function ReviewShell(props: ReviewShellProps) {
     inputController.clearDraft();
   };
 
-  const canUndo = (props.state.historyCursor ?? 0) > 0;
-  const canRedo = (props.state.historyCursor ?? 0) < (props.state.history?.length ?? 0);
+  const canUndo = props.state.historyCursor > 0;
+  const canRedo = props.state.historyCursor < props.state.history.length;
 
   return (
     <section

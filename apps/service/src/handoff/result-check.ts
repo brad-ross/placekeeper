@@ -172,8 +172,8 @@ export async function checkCodexResult(input: CheckCodexResultInput): Promise<Co
     (sha256(reviewedBytes) !== input.expectedReviewedPdfSha256 || disposition.reviewedPdfSha256 !== input.expectedReviewedPdfSha256)
   ) issues.push("The reviewed PDF digest does not match the immutable evidence.");
 
-  const expectedIds = [...handoff.items.map(({ id }) => id)].sort();
-  const returnedIds = [...disposition.items.map(({ id }) => id)].sort();
+  const expectedIds = handoff.items.map(({ id }) => id).sort();
+  const returnedIds = disposition.items.map(({ id }) => id).sort();
   if (JSON.stringify(expectedIds) !== JSON.stringify(returnedIds)) {
     issues.push("The disposition must account for every stable review ID exactly once.");
   }
@@ -195,7 +195,7 @@ export async function checkCodexResult(input: CheckCodexResultInput): Promise<Co
     const observed = await checkedRelativePaths(sourceRoot, input.observableChangedPaths);
     if (
       observed === undefined ||
-      JSON.stringify([...observed].sort()) !== JSON.stringify([...changedPaths].sort())
+      JSON.stringify(observed.toSorted()) !== JSON.stringify(changedPaths.toSorted())
     ) issues.push("Reported changed paths do not match the observable source changes.");
   }
 

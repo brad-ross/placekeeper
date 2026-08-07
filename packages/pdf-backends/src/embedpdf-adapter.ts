@@ -361,9 +361,8 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
 
     const reopened = await inspectWithEngine(engine, output);
     assertPreexistingPreserved(preexisting, reopened.annotations);
-    const created = reopened.annotations.filter(({ id }) =>
-      request.annotations.some((annotation) => annotation.id === id),
-    );
+    const requestedIds = new Set(request.annotations.map(({ id }) => id));
+    const created = reopened.annotations.filter(({ id }) => requestedIds.has(id));
     if (created.length !== request.annotations.length) {
       throw new PdfWriterError('backend-error', 'Not every requested annotation reopened.');
     }
