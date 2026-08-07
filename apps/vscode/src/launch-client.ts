@@ -1,0 +1,51 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import {
+  parseLaunchResponse,
+  type FailedLaunch,
+  type RecoveryDecision,
+  type RecoveryLaunch,
+  type SuccessfulLaunch,
+} from "./review-panel.js";
+
+const execFileAsync = promisify(execFile);
+
+export interface LaunchInvocationOptions {
+  readonly shell: false;
+  readonly timeoutMs: number;
+  readonly maxOutputBytes: number;
+}
+
+export type LaunchInvoker = (
+  executable: string,
+  args: readonly string[],
+  options: LaunchInvocationOptions,
+) => Promise<{ readonly stdout: string; readonly stderr: string }>;
+
+const defaultInvoker: LaunchInvoker = async (executable, args, options) => {
+  const result = await execFileAsync(executable, [...args], {
+    shell: options.shell,
+    timeout: options.timeoutMs,
+    maxBuffer: options.maxOutputBytes,
+    encoding: "utf8",
+  });
+  return { stdout: result.stdout, stderr: result.stderr };
+};
+
+export async function runLaunchClient(
+  executable: string,
+  pdfPath: string,
+  sourceRoot: string | undefined,
+  invoke: LaunchInvoker = defaultInvoker,
+  recovery?: RecoveryDecision,
+): Promise<SuccessfulLaunch | RecoveryLaunch | FailedLaunch> {
+  const args = ["open", "--json", "--surface", "vscode", "--pdf", pdfPath];
+  if (sourceRoot !== undefined) args.push("--source-root", sourceRoot);
+  if (recovery !== undefined) args.push("--recovery", recovery);
+  const { stdout } = await invoke(executable, args, {
+    shell: false,
+    timeoutMs: 15_000,
+    maxOutputBytes: 65_536,
+  });
+  return parseLaunchResponse(stdout.trim());
+}

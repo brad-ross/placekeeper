@@ -1,0 +1,10 @@
+node_modules/
+.pnpm-store/
+test-results/
+playwright-report/
+tmp/
+output/pdf/*.pdf
+test/fixtures/pdfs/*.pdf
+test/fixtures/pdfium/*.wasm
+dist/
+apps/*/dist/

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "selectedViewer": "embedpdf-browser-worker",
+  "selectedWriter": "embedpdf-node-pdfium",
+  "targets": ["darwin-arm64", "darwin-x64"],
+  "nodeVersion": "24.14.0",
+  "packages": {
+    "@embedpdf/core": "2.14.4",
+    "@embedpdf/engines": "2.14.4",
+    "@embedpdf/models": "2.14.4",
+    "@embedpdf/pdfium": "2.14.4"
+  },
+  "assets": [
+    {
+      "id": "pdfium-wasm",
+      "source": "node_modules/@embedpdf/pdfium/dist/pdfium.wasm",
+      "installPath": "Resources/pdfium/pdfium.wasm",
+      "sha256": "c0af5a6aca30d7e54a149c3a68e317116ca906d6edc28fd3318b12c7d9478ac8",
+      "networkFallbackAllowed": false
+    }
+  ],
+  "conditionalRuntimes": {
+    "java": false,
+    "pdfbox": false
+  },
+  "releaseGate": {
+    "automatedConformance": "pass",
+    "applePreview": "pass",
+    "adobeAcrobatReader": "pending"
+  }
+}

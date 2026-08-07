@@ -1,0 +1,59 @@
+name: Release macOS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm validate:distribution
+      - run: pnpm fixtures:pdf
+      - run: pnpm build
+      - name: Import Developer ID certificate
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: scripts/ci/import-signing-certificate.sh
+      - name: Build and sign app
+        env:
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: pnpm package:macos -- --arch "${{ matrix.arch }}" --node-runtime "$(command -v node)" --service-dist dist/service --web-dist dist/web --output "artifacts/${{ matrix.arch }}" --sign-identity "$SIGNING_IDENTITY"
+      - name: Installed offline writer smoke
+        run: pnpm smoke:installed -- "artifacts/${{ matrix.arch }}/PDF Proofreader.app" test/fixtures/pdfs/text-native.pdf
+      - name: Archive signed app
+        run: ditto -c -k --keepParent "artifacts/${{ matrix.arch }}/PDF Proofreader.app" "artifacts/PDF-Proofreader-${{ matrix.arch }}-submission.zip"
+      - name: Notarize and staple
+        env:
+          PDF_PROOFREADER_NOTARY_PROFILE: ${{ secrets.MACOS_NOTARY_PROFILE }}
+        run: pnpm notarize:macos -- "artifacts/PDF-Proofreader-${{ matrix.arch }}-submission.zip" "artifacts/${{ matrix.arch }}/PDF Proofreader.app"
+      - name: Archive stapled app
+        run: ditto -c -k --keepParent "artifacts/${{ matrix.arch }}/PDF Proofreader.app" "artifacts/PDF-Proofreader-${{ matrix.arch }}.zip"
+      - name: Gatekeeper assessment
+        run: spctl --assess --type execute --verbose=4 "artifacts/${{ matrix.arch }}/PDF Proofreader.app"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PDF-Proofreader-${{ matrix.arch }}
+          path: artifacts/PDF-Proofreader-${{ matrix.arch }}.zip
+          if-no-files-found: error

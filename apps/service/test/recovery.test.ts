@@ -1,0 +1,394 @@
+import { randomUUID } from "node:crypto";
+import {
+  access,
+  chmod,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  createReviewState,
+  type ReviewCommand,
+  type ReviewState,
+} from "../../../packages/core/src/review-model.js";
+import {
+  DraftSnapshotStore,
+  type RecoverableDraft,
+} from "../src/recovery/draft-snapshot.js";
+import { enforceRetention } from "../src/recovery/retention.js";
+import { SessionBroker } from "../src/sessions/session-broker.js";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories.splice(0).map((path) =>
+      rm(path, { recursive: true, force: true }),
+    ),
+  );
+});
+
+async function temporaryDirectory(): Promise<string> {
+  const path = await mkdtemp(join(tmpdir(), "pdf-proofreader-recovery-"));
+  temporaryDirectories.push(path);
+  return path;
+}
+
+function addCommand(expectedRevision: number, comment = "remember this"): ReviewCommand {
+  const timestamp = new Date().toISOString();
+  return {
+    type: "add",
+    expectedRevision,
+    item: {
+      id: randomUUID(),
+      kind: "highlight",
+      pageIndex: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      payload: {
+        quote: "remember",
+        prefix: "please ",
+        suffix: " this",
+        rect: { x: 72, y: 92, width: 80, height: 14 },
+        segmentRects: [{ x: 72, y: 92, width: 80, height: 14 }],
+        reliable: true,
+        comment,
+      },
+    },
+  };
+}
+
+function draft(revision: number): RecoverableDraft {
+  const base = createReviewState({
+    sessionId: "a011ee5d-5e5c-4f34-929d-41f49256f427",
+    source: {
+      fileId: "6d257008-2bf5-4768-89dd-304233697051",
+      digest: "a".repeat(64),
+      byteLength: 12,
+    },
+  });
+  const state: ReviewState = { ...base, revision };
+  return {
+    schemaVersion: 1,
+    canonicalSourcePath: "/private/example/paper.pdf",
+    sourceSnapshotPath: "/private/example/source.pdf",
+    state,
+    acknowledgedAt: new Date(revision * 1_000).toISOString(),
+  };
+}
+
+describe("atomic recovery generations", () => {
+  it("recovers the previous complete generation after failure between rotation and final rename", async () => {
+    const directory = await temporaryDirectory();
+    const stable = new DraftSnapshotStore(directory);
+    await stable.persist(draft(1));
+    const failing = new DraftSnapshotStore(directory, {
+      beforeFinalRename: () => {
+        throw new Error("simulated ENOSPC/rename failure");
+      },
+    });
+    await expect(failing.persist(draft(2))).rejects.toThrow("simulated");
+    await expect(stable.recover()).resolves.toMatchObject({ state: { revision: 1 } });
+  });
+
+  it("preserves the current generation when persistence stops after syncing the temporary file", async () => {
+    const directory = await temporaryDirectory();
+    const stable = new DraftSnapshotStore(directory);
+    await stable.persist(draft(1));
+    const failing = new DraftSnapshotStore(directory, {
+      afterTemporarySync: () => {
+        throw new Error("simulated crash after temporary sync");
+      },
+    });
+    await expect(failing.persist(draft(2))).rejects.toThrow("temporary sync");
+    await expect(stable.recover()).resolves.toMatchObject({ state: { revision: 1 } });
+  });
+
+  it("ignores a torn current file, retains the previous checksum-valid generation, and cleans staging files", async () => {
+    const directory = await temporaryDirectory();
+    const store = new DraftSnapshotStore(directory);
+    await store.persist(draft(1));
+    await store.persist(draft(2));
+    await writeFile(store.currentPath, '{"checksum":"torn"');
+    await writeFile(join(directory, ".draft-abandoned.tmp"), "sensitive staging");
+    await writeFile(join(directory, ".source-abandoned.tmp"), "source staging");
+    await expect(store.recover()).resolves.toMatchObject({ state: { revision: 1 } });
+    await expect(access(join(directory, ".draft-abandoned.tmp"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(join(directory, ".source-abandoned.tmp"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("forces 0700 directories and 0600 snapshots independent of umask", async () => {
+    const directory = await temporaryDirectory();
+    const originalUmask = process.umask(0o000);
+    try {
+      const store = new DraftSnapshotStore(join(directory, "session"));
+      await store.persist(draft(0));
+      expect((await stat(store.directory)).mode & 0o777).toBe(0o700);
+      expect((await stat(store.currentPath)).mode & 0o777).toBe(0o600);
+      process.umask(0o777);
+      await store.persist(draft(1));
+      expect((await stat(store.currentPath)).mode & 0o777).toBe(0o600);
+      expect((await stat(store.previousPath)).mode & 0o777).toBe(0o600);
+    } finally {
+      process.umask(originalUmask);
+    }
+  });
+});
+
+describe("broker acknowledgement and restart recovery", () => {
+  it("recovers exactly the last acknowledged revision while leaving original bytes unchanged", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    const original = Buffer.from("%PDF-1.7\noriginal immutable bytes\n%%EOF");
+    await writeFile(pdf, original);
+    const recoveryRoot = join(directory, "recovery");
+    const firstBroker = new SessionBroker({ recoveryRoot });
+    const opened = await firstBroker.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected a new review");
+    const acknowledged = await firstBroker.acceptMutation(
+      opened.launch.sessionId,
+      addCommand(0),
+    );
+    expect(acknowledged.revision).toBe(1);
+    expect(await readFile(pdf)).toEqual(original);
+
+    const restarted = new SessionBroker({ recoveryRoot });
+    await expect(restarted.openReview({ pdfPath: pdf })).resolves.toEqual({
+      kind: "recovery-offered",
+      recoverySessionId: opened.launch.sessionId,
+      choices: ["resume", "discard", "fork"],
+    });
+    const resumed = await restarted.openReview({
+      pdfPath: pdf,
+      recoveryDecision: "resume",
+    });
+    if (resumed.kind !== "opened") throw new Error("Expected resumed review");
+    expect(restarted.state(resumed.launch.sessionId)).toMatchObject({
+      revision: 1,
+      items: [{ payload: { comment: "remember this" } }],
+    });
+    expect(await restarted.documentBytes(resumed.launch.sessionId)).toEqual(original);
+  });
+
+  it("never acknowledges a mutation whose atomic persistence fails", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\noriginal\n%%EOF");
+    let renameBoundary = 0;
+    const broker = new SessionBroker({
+      recoveryRoot: join(directory, "recovery"),
+      snapshotHooks: {
+        beforeFinalRename: () => {
+          renameBoundary += 1;
+          if (renameBoundary === 2) throw new Error("disk full");
+        },
+      },
+    });
+    const opened = await broker.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected a new review");
+    await expect(
+      broker.acceptMutation(opened.launch.sessionId, addCommand(0)),
+    ).rejects.toThrow("disk full");
+    expect(broker.state(opened.launch.sessionId)?.revision).toBe(0);
+    const store = new DraftSnapshotStore(
+      join(directory, "recovery", opened.launch.sessionId),
+    );
+    await expect(store.recover()).resolves.toMatchObject({ state: { revision: 0 } });
+  });
+
+  it("cancels and awaits in-flight persistence before Finish removes private recovery", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\noriginal\n%%EOF");
+    let boundary = 0;
+    let release!: () => void;
+    let entered!: () => void;
+    const enteredBoundary = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const broker = new SessionBroker({
+      recoveryRoot: join(directory, "recovery"),
+      snapshotHooks: {
+        beforeFinalRename: async () => {
+          boundary += 1;
+          if (boundary === 2) {
+            entered();
+            await blocked;
+          }
+        },
+      },
+    });
+    const opened = await broker.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected a new review");
+    const mutation = broker.acceptMutation(opened.launch.sessionId, addCommand(0));
+    await enteredBoundary;
+    const finishing = broker.finish(opened.launch.sessionId);
+    let finished = false;
+    void finishing.then(() => {
+      finished = true;
+    });
+    await Promise.resolve();
+    expect(finished).toBe(false);
+    release();
+    await expect(mutation).rejects.toThrow();
+    await finishing;
+    await expect(
+      access(join(directory, "recovery", opened.launch.sessionId)),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("does not apply a draft after source bytes change", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\nversion one\n%%EOF");
+    const recoveryRoot = join(directory, "recovery");
+    const first = new SessionBroker({ recoveryRoot });
+    const opened = await first.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected a new review");
+    await first.acceptMutation(opened.launch.sessionId, addCommand(0));
+    await writeFile(pdf, "%PDF-1.7\nversion two rebuilt\n%%EOF");
+
+    const restarted = new SessionBroker({ recoveryRoot });
+    const changed = await restarted.openReview({ pdfPath: pdf });
+    if (changed.kind !== "opened") throw new Error("Changed bytes must open independently");
+    expect(changed.launch.sessionId).not.toBe(opened.launch.sessionId);
+    expect(restarted.state(changed.launch.sessionId)?.revision).toBe(0);
+  });
+
+  it("refuses recovery when the private immutable source snapshot fails integrity", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\nversion one\n%%EOF");
+    const recoveryRoot = join(directory, "recovery");
+    const first = new SessionBroker({ recoveryRoot });
+    const opened = await first.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected a new review");
+    await writeFile(
+      join(recoveryRoot, opened.launch.sessionId, "source.pdf"),
+      "tampered bytes",
+    );
+    const restart = new SessionBroker({ recoveryRoot });
+    await expect(
+      restart.openReview({ pdfPath: pdf, recoveryDecision: "resume" }),
+    ).rejects.toThrow("integrity");
+  });
+
+  it("focuses an active identity, supports explicit forks, and implements all recovery choices", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\nversion one\n%%EOF");
+    const recoveryRoot = join(directory, "recovery");
+    const broker = new SessionBroker({ recoveryRoot });
+    const first = await broker.openReview({ pdfPath: pdf });
+    if (first.kind !== "opened") throw new Error("Expected a new review");
+    const focused = await broker.openReview({ pdfPath: pdf });
+    expect(focused).toMatchObject({
+      kind: "focused",
+      launch: { sessionId: first.launch.sessionId },
+    });
+    const forked = await broker.openReview({ pdfPath: pdf, recoveryDecision: "fork" });
+    if (forked.kind !== "opened") throw new Error("Expected independent fork");
+    expect(forked.launch.sessionId).not.toBe(first.launch.sessionId);
+    await broker.finish(forked.launch.sessionId);
+    const refocused = await broker.openReview({ pdfPath: pdf });
+    expect(refocused).toMatchObject({
+      kind: "focused",
+      launch: { sessionId: first.launch.sessionId },
+    });
+
+    const restart = new SessionBroker({ recoveryRoot });
+    const offered = await restart.openReview({ pdfPath: pdf });
+    expect(offered.kind).toBe("recovery-offered");
+    const discarded = await restart.openReview({ pdfPath: pdf, recoveryDecision: "discard" });
+    expect(discarded.kind).toBe("opened");
+  });
+
+  it("keeps recovery and access after export, but Finish and Discard revoke and remove them", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\nversion one\n%%EOF");
+    const recoveryRoot = join(directory, "recovery");
+    const broker = new SessionBroker({ recoveryRoot });
+    const first = await broker.openReview({ pdfPath: pdf });
+    if (first.kind !== "opened") throw new Error("Expected a new review");
+    const firstCapability = first.launch.fragment.slice("#cap=".length);
+    const firstCredential = broker.exchangeBootstrap(first.launch.sessionId, firstCapability)!;
+    await broker.recordSuccessfulExport(first.launch.sessionId);
+    expect(broker.authenticate(first.launch.sessionId, firstCredential)).toBe(true);
+    await expect(access(join(recoveryRoot, first.launch.sessionId))).resolves.toBeUndefined();
+    await broker.finish(first.launch.sessionId);
+    expect(broker.authenticate(first.launch.sessionId, firstCredential)).toBe(false);
+    await expect(access(join(recoveryRoot, first.launch.sessionId))).rejects.toMatchObject({ code: "ENOENT" });
+
+    const second = await broker.openReview({ pdfPath: pdf, recoveryDecision: "fork" });
+    if (second.kind !== "opened") throw new Error("Expected a new review");
+    const secondCredential = broker.exchangeBootstrap(
+      second.launch.sessionId,
+      second.launch.fragment.slice("#cap=".length),
+    )!;
+    await broker.discard(second.launch.sessionId);
+    expect(broker.authenticate(second.launch.sessionId, secondCredential)).toBe(false);
+    await expect(access(join(recoveryRoot, second.launch.sessionId))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("drops a stale source-root capability unless the root is explicitly reapproved on resume", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    const sourceRoot = join(directory, "source");
+    await mkdir(sourceRoot);
+    await writeFile(pdf, "%PDF-1.7\nversion one\n%%EOF");
+    const recoveryRoot = join(directory, "recovery");
+    const first = new SessionBroker({ recoveryRoot });
+    const opened = await first.openReview({ pdfPath: pdf, sourceRootPath: sourceRoot });
+    if (opened.kind !== "opened") throw new Error("Expected a new review");
+    expect(first.state(opened.launch.sessionId)?.sourceRootId).toBeDefined();
+
+    const restart = new SessionBroker({ recoveryRoot });
+    const resumed = await restart.openReview({ pdfPath: pdf, recoveryDecision: "resume" });
+    if (resumed.kind !== "opened") throw new Error("Expected a resumed review");
+    expect(restart.state(resumed.launch.sessionId)?.sourceRootId).toBeUndefined();
+    expect(resumed.launch.rootId).toBeUndefined();
+  });
+});
+
+describe("retention", () => {
+  it("never age- or storage-evicts active drafts and deterministically removes oldest inactive data", async () => {
+    const root = await temporaryDirectory();
+    const activeId = "active";
+    const inactiveId = "inactive";
+    const activeStore = new DraftSnapshotStore(join(root, activeId));
+    const inactiveStore = new DraftSnapshotStore(join(root, inactiveId));
+    await activeStore.persist(draft(10));
+    await inactiveStore.persist(draft(1));
+    await writeFile(join(activeStore.directory, "source.pdf"), Buffer.alloc(4_096));
+    await writeFile(join(inactiveStore.directory, "source.pdf"), Buffer.alloc(8_192));
+    expect(await activeStore.allocatedBytes()).toBeGreaterThan(4_096);
+    expect(await inactiveStore.allocatedBytes()).toBeGreaterThan(8_192);
+    const old = new Date(0);
+    await utimes(activeStore.directory, old, old);
+    await utimes(inactiveStore.directory, old, old);
+    await chmod(activeStore.directory, 0o700);
+
+    const result = await enforceRetention(
+      root,
+      new Set([activeId]),
+      { maxBytes: 1, maxInactiveAgeMs: 1 },
+      Date.now(),
+    );
+    expect(result.retainedActiveSessionIds).toContain(activeId);
+    expect(result.removedSessionIds).toContain(inactiveId);
+    expect(result.overLimit).toBe(true);
+    await expect(access(activeStore.currentPath)).resolves.toBeUndefined();
+    await expect(access(inactiveStore.directory)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});

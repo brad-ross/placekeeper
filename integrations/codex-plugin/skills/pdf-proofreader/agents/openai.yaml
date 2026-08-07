@@ -1,0 +1,4 @@
+interface:
+  display_name: "PDF Proofreader"
+  short_description: "Open local PDFs in the proofreader"
+  default_prompt: "Use $pdf-proofreader to open this local PDF for review."

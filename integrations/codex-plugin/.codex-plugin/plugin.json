@@ -1,0 +1,18 @@
+{
+  "name": "codex-plugin",
+  "version": "0.1.0",
+  "description": "Open a referenced local PDF in the installed PDF Proofreader.",
+  "author": {
+    "name": "PDF Proofreader"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "PDF Proofreader",
+    "shortDescription": "Open a local PDF for private review.",
+    "longDescription": "Launches the installed local PDF Proofreader for one explicitly referenced PDF and opens its scoped loopback session in the desktop built-in browser.",
+    "developerName": "PDF Proofreader",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Open this local PDF in PDF Proofreader."
+  }
+}

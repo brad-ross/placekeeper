@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pdf-proofreader.local/schemas/disposition-v1.schema.json",
+  "title": "PDF Proofreader Codex disposition v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "reviewId", "handoffSha256", "reviewedPdfSha256", "build", "changedPaths", "items"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "reviewId": { "$ref": "#/$defs/uuid" },
+    "handoffSha256": { "$ref": "#/$defs/sha256" },
+    "reviewedPdfSha256": { "$ref": "#/$defs/sha256" },
+    "build": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["status", "outputSha256"],
+          "properties": { "status": { "const": "succeeded" }, "outputSha256": { "$ref": "#/$defs/sha256" }, "logSha256": { "$ref": "#/$defs/sha256" } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["status"],
+          "properties": { "status": { "const": "failed" }, "logSha256": { "$ref": "#/$defs/sha256" } }
+        }
+      ]
+    },
+    "changedPaths": { "type": "array", "maxItems": 10000, "uniqueItems": true, "items": { "$ref": "#/$defs/relativePath" } },
+    "revisedPdf": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": { "path": { "$ref": "#/$defs/absolutePath" }, "sha256": { "$ref": "#/$defs/sha256" } }
+    },
+    "items": {
+      "type": "array", "minItems": 1, "maxItems": 10000, "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "status", "explanation"],
+        "properties": {
+          "id": { "$ref": "#/$defs/uuid" },
+          "status": { "enum": ["Applied", "Already satisfied", "Ambiguous", "Not applied"] },
+          "explanation": { "type": "string", "minLength": 1, "maxLength": 100000 },
+          "changedPaths": { "type": "array", "maxItems": 10000, "uniqueItems": true, "items": { "$ref": "#/$defs/relativePath" } }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "absolutePath": { "type": "string", "minLength": 2, "maxLength": 4096, "pattern": "^/" },
+    "relativePath": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*\\u0000).+$" }
+  }
+}

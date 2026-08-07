@@ -1,0 +1,17 @@
+.review-shell { display: grid; grid-template-rows: auto 1fr; min-height: 100%; color: #24231f; background: #f6f4ef; }
+.review-shell > [role="toolbar"] { display: flex; gap: .4rem; overflow-x: auto; padding: .65rem; border-bottom: 1px solid #cbc6ba; background: #fff; }
+.review-shell > [role="toolbar"] button[aria-pressed="true"] { color: #fff; background: #315a46; }
+.review-layout { display: grid; grid-template-columns: minmax(0, 1fr) 22rem; min-height: 0; }
+.review-document { min-width: 0; overflow: auto; }
+.review-list { overflow: auto; border-left: 1px solid #cbc6ba; background: #fff; }
+.review-list li { display: grid; grid-template-columns: 1fr auto auto; gap: .3rem; margin-block: .4rem; }
+.review-list li[data-active="true"] { outline: 2px solid #315a46; }
+.comment-composer { position: fixed; z-index: 3; inset: 20% max(1rem, calc(50% - 18rem)) auto; padding: 1rem; border: 1px solid #777; border-radius: .5rem; background: #fff; box-shadow: 0 1rem 3rem #0005; }
+.comment-composer textarea { display: block; width: 100%; min-height: 7rem; }
+
+@media (max-width: 1023.98px) {
+  .review-shell > [role="toolbar"] { gap: .25rem; }
+  .review-layout { grid-template-columns: minmax(0, 1fr); }
+  .review-list { position: fixed; z-index: 2; inset: 3.4rem 0 0 15%; border-left: 1px solid #777; box-shadow: -.5rem 0 1.5rem #0003; transform: translateX(102%); visibility: hidden; pointer-events: none; }
+  .review-list[data-list-open="true"] { transform: none; visibility: visible; pointer-events: auto; }
+}

@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>AMApplicationBuild</key><string>512</string>
+  <key>AMApplicationVersion</key><string>2.10</string>
+  <key>AMDocumentVersion</key><string>2</string>
+  <key>actions</key><array><dict><key>action</key><dict>
+    <key>AMAccepts</key><dict><key>Container</key><string>List</string><key>Optional</key><false/><key>Types</key><array><string>com.adobe.pdf</string></array></dict>
+    <key>AMActionVersion</key><string>2.0.3</string>
+    <key>AMApplication</key><array><string>Automator</string></array>
+    <key>AMParameterProperties</key><dict/>
+    <key>AMProvides</key><dict><key>Container</key><string>List</string><key>Types</key><array><string>public.data</string></array></dict>
+    <key>ActionBundlePath</key><string>/System/Library/Automator/Run Shell Script.action</string>
+    <key>ActionName</key><string>Run Shell Script</string>
+    <key>ActionParameters</key><dict>
+      <key>COMMAND_STRING</key><string>launcher="/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader"
+if [ "$#" -eq 1 ]; then
+  response=$("$launcher" open --json --surface finder --pdf "$1")
+else
+  response=$("$launcher" open --json --surface finder)
+fi
+kind=$(/usr/bin/plutil -extract kind raw -o - - &lt;&lt;&lt; "$response" 2&gt;/dev/null || true)
+if [ "$kind" = "recovery-offered" ]; then
+  choice=$(/usr/bin/osascript -e 'choose from list {"resume", "discard", "fork"} with title "Recover PDF Proofreader draft" with prompt "Resume, discard, or start an independent review" without multiple selections allowed and empty selection allowed')
+  case "$choice" in resume|discard|fork) ;; *) exit 0 ;; esac
+  response=$("$launcher" open --json --surface finder --pdf "$1" --recovery "$choice")
+fi
+ok=$(/usr/bin/plutil -extract ok raw -o - - &lt;&lt;&lt; "$response") || exit 1
+if [ "$ok" != "true" ]; then
+  kind=$(/usr/bin/plutil -extract error.kind raw -o - - &lt;&lt;&lt; "$response") || exit 1
+  case "$kind" in input-unavailable|unsupported-context) ;; *) exit 1 ;; esac
+  message=$(/usr/bin/plutil -extract error.message raw -o - - &lt;&lt;&lt; "$response") || exit 1
+  action=$(/usr/bin/plutil -extract error.recoveryAction raw -o - - &lt;&lt;&lt; "$response") || exit 1
+  PDF_PROOFREADER_MESSAGE="$message" PDF_PROOFREADER_ACTION="$action" /usr/bin/osascript -e 'display alert (system attribute "PDF_PROOFREADER_MESSAGE") buttons {(system attribute "PDF_PROOFREADER_ACTION")}' &gt;/dev/null
+  if [ "$kind" = "input-unavailable" ]; then
+    selected=$(/usr/bin/osascript -e 'POSIX path of (choose file of type {"com.adobe.pdf"} with prompt "Choose one readable local PDF")') || exit 0
+    response=$("$launcher" open --json --surface finder --pdf "$selected")
+    ok=$(/usr/bin/plutil -extract ok raw -o - - &lt;&lt;&lt; "$response") || exit 1
+    [ "$ok" = "true" ] || exit 1
+  else
+    exit 1
+  fi
+fi
+kind=$(/usr/bin/plutil -extract kind raw -o - - &lt;&lt;&lt; "$response") || exit 1
+if [ "$kind" = "recovery-offered" ]; then
+  choice=$(/usr/bin/osascript -e 'choose from list {"resume", "discard", "fork"} with title "Recover PDF Proofreader draft" with prompt "Resume, discard, or start an independent review" without multiple selections allowed and empty selection allowed')
+  case "$choice" in resume|discard|fork) ;; *) exit 0 ;; esac
+  response=$("$launcher" open --json --surface finder --pdf "$selected" --recovery "$choice")
+  kind=$(/usr/bin/plutil -extract kind raw -o - - &lt;&lt;&lt; "$response") || exit 1
+fi
+case "$kind" in opened|focused) ;; *) exit 1 ;; esac
+url=$(/usr/bin/plutil -extract url raw -o - - &lt;&lt;&lt; "$response") || exit 1
+case "$url" in
+  http://127.0.0.1:*/s/*/bootstrap#cap=*) PDF_PROOFREADER_URL="$url" /usr/bin/osascript -e 'open location (system attribute "PDF_PROOFREADER_URL")' ;;
+  *) exit 1 ;;
+esac</string>
+      <key>CheckedForUserDefaultShell</key><true/>
+      <key>inputMethod</key><integer>1</integer>
+      <key>shell</key><string>/bin/zsh</string>
+    </dict>
+    <key>BundleIdentifier</key><string>com.apple.RunShellScript</string>
+    <key>CFBundleVersion</key><string>2.0.3</string>
+  </dict><key>isViewVisible</key><integer>1</integer></dict></array>
+  <key>connectors</key><dict/>
+  <key>workflowMetaData</key><dict>
+    <key>applicationBundleID</key><string>com.apple.finder</string>
+    <key>inputTypeIdentifier</key><string>com.adobe.pdf</string>
+    <key>outputTypeIdentifier</key><string>com.apple.Automator.nothing</string>
+    <key>processesInput</key><integer>0</integer>
+    <key>serviceInputTypeIdentifier</key><string>com.adobe.pdf</string>
+    <key>serviceOutputTypeIdentifier</key><string>com.apple.Automator.nothing</string>
+    <key>serviceProcessesInput</key><integer>0</integer>
+    <key>workflowTypeIdentifier</key><string>com.apple.Automator.servicesMenu</string>
+  </dict>
+</dict></plist>

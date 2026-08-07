@@ -1,0 +1,403 @@
+import { randomUUID } from "node:crypto";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
+import { createConnection } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  SessionCredentialStore,
+  validateRequestSecurity,
+  type RequestSecurityContext,
+} from "../../../packages/core/src/session-security.js";
+import { FileCapabilityRegistry } from "../src/files/file-capabilities.js";
+import { startHttpServer, type LocalHttpServer } from "../src/server/http-server.js";
+import { SessionBroker } from "../src/sessions/session-broker.js";
+import type { SessionLaunch } from "../src/sessions/session-broker.js";
+
+const temporaryDirectories: string[] = [];
+const servers: LocalHttpServer[] = [];
+
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map((server) => server.close()));
+  await Promise.all(
+    temporaryDirectories.splice(0).map((path) =>
+      rm(path, { recursive: true, force: true }),
+    ),
+  );
+});
+
+async function temporaryDirectory(): Promise<string> {
+  const path = await mkdtemp(join(tmpdir(), "pdf-proofreader-security-"));
+  temporaryDirectories.push(path);
+  return path;
+}
+
+function secureRequest(
+  overrides: Partial<RequestSecurityContext> = {},
+): RequestSecurityContext {
+  return {
+    method: "POST",
+    rawHeaders: ["Host", "127.0.0.1:43123"],
+    headers: {
+      host: "127.0.0.1:43123",
+      origin: "http://127.0.0.1:43123",
+      "content-type": "application/json",
+      "sec-fetch-site": "same-origin",
+    },
+    remoteAddress: "127.0.0.1",
+    mutates: true,
+    expectsJson: true,
+    bodyLength: 10,
+    ...overrides,
+  };
+}
+
+describe("one-use document-scoped session credentials", () => {
+  it("rejects expiry, replay, cross-session theft, and revoked credentials", () => {
+    let now = 1_000;
+    const credentials = new SessionCredentialStore(() => now);
+    const expired = credentials.issueBootstrap("session-a", 10);
+    now += 11;
+    expect(credentials.exchangeBootstrap("session-a", expired)).toBeUndefined();
+
+    const boundary = credentials.issueBootstrap("session-a", 10);
+    now += 10;
+    expect(credentials.exchangeBootstrap("session-a", boundary)).toBeUndefined();
+
+    const capability = credentials.issueBootstrap("session-a");
+    const credential = credentials.exchangeBootstrap("session-a", capability);
+    expect(credential).toHaveLength(43);
+    expect(credentials.exchangeBootstrap("session-a", capability)).toBeUndefined();
+    expect(credentials.authenticate("session-a", credential!)).toBe(true);
+    expect(credentials.authenticate("session-b", credential!)).toBe(false);
+    expect(credentials.authenticate("session-a", `${credential!.slice(0, -1)}x`)).toBe(false);
+    credentials.revokeSession("session-a");
+    expect(credentials.authenticate("session-a", credential!)).toBe(false);
+  });
+});
+
+describe("request preflight", () => {
+  const policy = {
+    host: "127.0.0.1:43123",
+    origin: "http://127.0.0.1:43123",
+    maxBodyBytes: 1_024,
+  };
+
+  it("accepts only the exact loopback peer and exact single Host", () => {
+    expect(validateRequestSecurity(secureRequest(), policy)).toBeUndefined();
+    expect(
+      validateRequestSecurity(
+        secureRequest({ remoteAddress: "192.0.2.1" }),
+        policy,
+      ),
+    ).toBe("peer");
+    expect(
+      validateRequestSecurity(
+        secureRequest({ rawHeaders: ["Host", "localhost:43123"] }),
+        policy,
+      ),
+    ).toBe("host");
+    expect(
+      validateRequestSecurity(
+        secureRequest({
+          rawHeaders: [
+            "Host",
+            "127.0.0.1:43123",
+            "Host",
+            "127.0.0.1:43123",
+          ],
+        }),
+        policy,
+      ),
+    ).toBe("host");
+  });
+
+  it.each([
+    ["forwarding header", { headers: { ...secureRequest().headers, forwarded: "for=127.0.0.1" } }, "forwarded"],
+    ["cross-site Fetch Metadata", { headers: { ...secureRequest().headers, "sec-fetch-site": "cross-site" } }, "cross-site"],
+    ["null Origin", { headers: { ...secureRequest().headers, origin: "null" } }, "origin"],
+    ["state-changing GET", { method: "GET" }, "method"],
+    ["form content type", { headers: { ...secureRequest().headers, "content-type": "application/x-www-form-urlencoded" } }, "content-type"],
+    ["oversized body", { bodyLength: 1_025 }, "body-size"],
+  ] as const)("rejects %s", (_label, overrides, failure) => {
+    expect(
+      validateRequestSecurity(
+        secureRequest(overrides as Partial<RequestSecurityContext>),
+        policy,
+      ),
+    ).toBe(failure);
+  });
+});
+
+describe("opaque file and root capabilities", () => {
+  it("rejects traversal, absolute paths, sibling prefixes, and escaping symlinks", async () => {
+    const directory = await temporaryDirectory();
+    const root = join(directory, "root");
+    const sibling = join(directory, "root-sibling");
+    await mkdir(root);
+    await mkdir(sibling);
+    await writeFile(join(root, "inside.tex"), "inside");
+    await writeFile(join(sibling, "outside.tex"), "outside");
+    await symlink(join(sibling, "outside.tex"), join(root, "escape.tex"));
+    const capabilities = new FileCapabilityRegistry();
+    const approved = await capabilities.approveRoot(root);
+
+    await expect(capabilities.resolveRootEntry(approved.id, "inside.tex")).resolves.toBe(
+      join(approved.canonicalPath, "inside.tex"),
+    );
+    await expect(capabilities.resolveRootEntry(approved.id, "../root-sibling/outside.tex")).rejects.toMatchObject({ code: "OUTSIDE_ROOT" });
+    await expect(capabilities.resolveRootEntry(approved.id, join(sibling, "outside.tex"))).rejects.toMatchObject({ code: "INVALID_PATH" });
+    await expect(capabilities.resolveRootEntry(approved.id, "escape.tex")).rejects.toMatchObject({ code: "OUTSIDE_ROOT" });
+    await expect(capabilities.resolveRootEntry(approved.id, "file:///etc/passwd")).rejects.toMatchObject({ code: "INVALID_PATH" });
+  });
+
+  it("detects destination appearance and original source drift immediately before commit", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\noriginal\n%%EOF");
+    const capabilities = new FileCapabilityRegistry();
+    const approved = await capabilities.approvePdf(pdf);
+    const destination = join(directory, "reviewed.pdf");
+    const destinationCapability = await capabilities.preauthorizeDestination(destination);
+    await writeFile(destination, "swapped");
+    await expect(capabilities.validateDestination(destinationCapability.id)).rejects.toMatchObject({ code: "TARGET_CHANGED" });
+
+    const originalBytes = await readFile(pdf);
+    const { createHash } = await import("node:crypto");
+    const digest = createHash("sha256").update(originalBytes).digest("hex");
+    await writeFile(pdf, "%PDF-1.7\nrebuilt\n%%EOF");
+    await expect(capabilities.validateOriginalForReplacement(approved.id, digest)).rejects.toMatchObject({ code: "SOURCE_CHANGED" });
+  });
+});
+
+async function openBroker(): Promise<{
+  directory: string;
+  pdf: string;
+  broker: SessionBroker;
+  launch: SessionLaunch;
+  server: LocalHttpServer;
+}> {
+  const directory = await temporaryDirectory();
+  const pdf = join(directory, "paper.pdf");
+  const assets = join(directory, "assets");
+  await mkdir(assets);
+  await writeFile(join(assets, "app.js"), "export function start() {}\n");
+  await writeFile(pdf, "%PDF-1.7\nprivate document text\n%%EOF");
+  const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
+  const opened = await broker.openReview({ pdfPath: pdf });
+  if (opened.kind !== "opened") throw new Error("Expected a new review");
+  const server = await startHttpServer(broker, { webAssets: { root: assets } });
+  servers.push(server);
+  return { directory, pdf, broker, launch: opened.launch, server };
+}
+
+function postJson(
+  url: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  const origin = new URL(url).origin;
+  return fetch(url, {
+    method: "POST",
+    headers: {
+      origin,
+      "content-type": "application/json",
+      "sec-fetch-site": "same-origin",
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+describe("loopback HTTP boundary", () => {
+  it("exchanges the fragment once, scrubs it before protected assets, and scopes all bytes", async () => {
+    const { broker, launch, server } = await openBroker();
+    const bootstrap = await fetch(`${server.origin}${launch.launchPath}`);
+    const html = await bootstrap.text();
+    expect(bootstrap.status).toBe(200);
+    expect(html).not.toContain(launch.fragment.slice("#cap=".length));
+    expect(html.indexOf("history.replaceState")).toBeLessThan(html.indexOf("stylesheet.href"));
+    expect(html).not.toMatch(/https?:\/\/(?!127\.0\.0\.1)/u);
+    expect(bootstrap.headers.get("content-security-policy")).toContain("default-src 'none'");
+
+    const assetBeforeExchange = await fetch(
+      `${server.origin}/s/${launch.sessionId}/assets/app.js`,
+    );
+    expect(assetBeforeExchange.status).toBe(401);
+
+    const capability = launch.fragment.slice("#cap=".length);
+    const exchanged = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability },
+    );
+    expect(exchanged.status).toBe(200);
+    const { credential } = (await exchanged.json()) as { credential: string };
+    const assetCookie = exchanged.headers.get("set-cookie")?.split(";", 1)[0];
+    const replay = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability },
+    );
+    expect(replay.status).toBe(401);
+
+    const authorization = { authorization: `Bearer ${credential}` };
+    const asset = await fetch(
+      `${server.origin}/s/${launch.sessionId}/assets/app.js`,
+      { headers: { cookie: assetCookie! } },
+    );
+    expect(asset.status).toBe(200);
+    const document = await fetch(
+      `${server.origin}/s/${launch.sessionId}/document/${launch.fileId}`,
+      { headers: authorization },
+    );
+    expect(document.status).toBe(200);
+    expect(await document.text()).toContain("private document text");
+    const arbitrary = await fetch(
+      `${server.origin}/s/${launch.sessionId}/document/${randomUUID()}`,
+      { headers: authorization },
+    );
+    expect(arbitrary.status).toBe(404);
+    expect(broker.state(launch.sessionId)?.revision).toBe(0);
+  });
+
+  it("rejects hostile forms, aliases, forwarding, cross-site metadata, null origins, and oversized bodies without mutation", async () => {
+    const { broker, launch, server } = await openBroker();
+    const capability = launch.fragment.slice("#cap=".length);
+    const exchange = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability },
+    );
+    const { credential } = (await exchange.json()) as { credential: string };
+    const commandUrl = `${server.origin}/s/${launch.sessionId}/commands`;
+    const command = {
+      type: "add",
+      expectedRevision: 0,
+      item: {
+        id: randomUUID(),
+        kind: "highlight",
+        pageIndex: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        payload: { comment: "must not persist" },
+      },
+    };
+    const auth = { authorization: `Bearer ${credential}` };
+    expect(
+      (await fetch(commandUrl, { method: "POST", headers: { ...auth, origin: server.origin, "content-type": "application/x-www-form-urlencoded" }, body: "x=1" })).status,
+    ).toBe(403);
+    expect(
+      (await fetch(commandUrl, { method: "POST", headers: { ...auth, origin: "null", "content-type": "application/json" }, body: JSON.stringify(command) })).status,
+    ).toBe(403);
+    expect(
+      (await postJson(commandUrl, command, { ...auth, "sec-fetch-site": "cross-site" })).status,
+    ).toBe(403);
+    expect(
+      (await postJson(commandUrl, command, { ...auth, forwarded: "for=127.0.0.1" })).status,
+    ).toBe(403);
+    expect(
+      (await fetch(commandUrl, { method: "GET", headers: auth })).status,
+    ).not.toBe(200);
+    expect(
+      (await fetch(`http://localhost:${server.port}/s/${launch.sessionId}/state`, { headers: auth })).status,
+    ).toBe(403);
+    expect(
+      (await fetch(commandUrl, {
+        method: "POST",
+        headers: { ...auth, origin: server.origin, "content-type": "application/json" },
+        body: `"${"x".repeat(256 * 1024)}"`,
+      })).status,
+    ).toBe(413);
+    expect(
+      (await postJson(
+        commandUrl,
+        { type: "unknown", expectedRevision: 0 },
+        auth,
+      )).status,
+    ).toBe(409);
+    expect(broker.state(launch.sessionId)?.revision).toBe(0);
+  });
+
+  it("rejects duplicate Host and unauthenticated upgraded connections", async () => {
+    const { launch, server } = await openBroker();
+    const rawStatus = await new Promise<number>((resolve, reject) => {
+      const socket = createConnection({ host: "127.0.0.1", port: server.port });
+      let response = "";
+      socket.on("connect", () => {
+        socket.write(
+          `GET /s/${launch.sessionId}/state HTTP/1.1\r\nHost: 127.0.0.1:${server.port}\r\nHost: 127.0.0.1:${server.port}\r\nConnection: close\r\n\r\n`,
+        );
+      });
+      socket.on("data", (chunk) => {
+        response += chunk.toString();
+      });
+      socket.on("end", () => {
+        resolve(Number(/^HTTP\/1\.1 (\d{3})/u.exec(response)?.[1] ?? 0));
+      });
+      socket.on("error", reject);
+    });
+    expect(rawStatus).toBe(403);
+
+    const upgradeClosed = await new Promise<boolean>((resolve) => {
+      const request = httpRequest({
+        host: "127.0.0.1",
+        port: server.port,
+        path: `/s/${launch.sessionId}/control`,
+        headers: {
+          host: `127.0.0.1:${server.port}`,
+          origin: server.origin,
+          connection: "Upgrade",
+          upgrade: "websocket",
+          "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+          "sec-websocket-version": "13",
+        },
+      });
+      request.on("upgrade", () => resolve(false));
+      request.on("error", () => resolve(true));
+      request.on("close", () => resolve(true));
+      request.end();
+    });
+    expect(upgradeClosed).toBe(true);
+  });
+
+  it("authenticates upgraded connections without reflecting the credential", async () => {
+    const { broker, launch, server } = await openBroker();
+    const exchange = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability: launch.fragment.slice("#cap=".length) },
+    );
+    const { credential } = (await exchange.json()) as { credential: string };
+    const upgraded = await new Promise<{
+      protocol: string | undefined;
+      rawHeaders: readonly string[];
+      close: Promise<void>;
+    }>((resolve, reject) => {
+      const request = httpRequest({
+        host: "127.0.0.1",
+        port: server.port,
+        path: `/s/${launch.sessionId}/control`,
+        headers: {
+          host: `127.0.0.1:${server.port}`,
+          origin: server.origin,
+          connection: "Upgrade",
+          upgrade: "websocket",
+          "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+          "sec-websocket-version": "13",
+          "sec-websocket-protocol": `proofreader, proofreader-auth.${credential}`,
+        },
+      });
+      request.on("upgrade", (response, socket) => {
+        resolve({
+          protocol: response.headers["sec-websocket-protocol"],
+          rawHeaders: response.rawHeaders,
+          close: new Promise<void>((closed) => socket.once("close", closed)),
+        });
+      });
+      request.on("error", reject);
+      request.end();
+    });
+    expect(upgraded.protocol).toBe("proofreader");
+    expect(upgraded.rawHeaders.join("\n")).not.toContain(credential);
+    await broker.finish(launch.sessionId);
+    await upgraded.close;
+  });
+});

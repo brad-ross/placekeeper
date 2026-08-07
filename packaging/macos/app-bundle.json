@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "productName": "PDF Proofreader",
+  "bundleIdentifier": "local.pdf-proofreader",
+  "bundleVersion": "0.1.0",
+  "minimumSystemVersion": "13.0",
+  "architectures": ["arm64", "x64"],
+  "nodeVersion": "24.14.0",
+  "executable": "pdf-proofreader",
+  "runtimeDataDirectory": "Library/Application Support/PDF Proofreader",
+  "documentTypes": [
+    {
+      "contentType": "com.adobe.pdf",
+      "role": "Viewer",
+      "rank": "Alternate"
+    }
+  ],
+  "embeddedArtifacts": {
+    "finderQuickAction": "integrations/finder/PdfProofreader.workflow",
+    "codexPlugin": "integrations/codex-plugin",
+    "vscodeExtension": "apps/vscode"
+  },
+  "signing": {
+    "hardenedRuntime": true,
+    "secureTimestamp": true,
+    "entitlements": "packaging/macos/entitlements.plist"
+  }
+}
