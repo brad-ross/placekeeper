@@ -1,7 +1,7 @@
 # PDF backend decision
 
 - Date: 2026-08-07
-- Status: Selected, with the Acrobat Reader interoperability row still pending
+- Status: Selected; Acrobat Reader and Apple Preview interoperability rows pass
 - Viewer: EmbedPDF browser-worker engine 2.14.4
 - Writer: EmbedPDF/PDFium Node engine 2.14.4
 
@@ -28,7 +28,7 @@ The Insert representation is an evidence-driven variance from the plan's provisi
 - A genuinely AES-256 encrypted fixture with annotation permission disabled and a DocMDP certification fixture both fail closed without output.
 - Backend-host tests cover digest mismatch, source/output size caps, cancellation, timeout, typed failures, output digest evidence, and structural reopen.
 - Apple Preview 11.0 on macOS 26.5.2 renders every intended mark and exposes every non-empty review comment, including the Insert note, in its Highlights and Notes sidebar.
-- Adobe Acrobat Reader is not installed on the test machine, so that manual row remains pending and U1 is not fully signed off under the current plan.
+- Adobe Acrobat Reader 26.001.21771 on macOS 26.5.2 renders every intended mark at the expected location and exposes every non-empty review comment in its Comments pane. The pre-existing Highlight and Stamp remain present. Together with the passing Apple Preview rows, this signs off the external-viewer portion of U1.
 
 ## Packaging consequences
 
