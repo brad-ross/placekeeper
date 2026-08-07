@@ -14,6 +14,8 @@ Run the automated host evidence with `pnpm test:u7-host`, then run `pnpm build`,
 
 Local environment audit on 2026-08-07: the arm64 host built `/var/folders/.../pdf-proofreader-package-arm64-HJfewe/PDF Proofreader.app` through the argument-free `pnpm package:macos` command, and `pnpm smoke:installed` passed its one-page offline EmbedPDF/PDFium writer doctor. VS Code is installed, but PDF Proofreader is not installed in `/Applications`. The keychain reports zero valid code-signing identities, the configured notary profile is unavailable, and no x64 host is available. These facts support the automated unsigned row only; they cannot satisfy the installed/release rows below.
 
+The same unsigned arm64 bundle was then run against an isolated temporary home through its actual packaged launcher and daemon. A Finder-surface open returned `opened`; a duplicate Codex-surface launch returned `focused` with the same session ID; and an explicit VS Code fork returned `opened` with a distinct session ID and the `embed=vscode` bootstrap. The daemon was stopped after the check. This proves the packaged open/focus/fork and surface-routing contracts without installing the app or claiming native GUI, signing, notarization, or clean-host evidence.
+
 ## Pending installed/release evidence
 
 - [ ] Import a Developer ID Application identity, build the arm64 package with hardened runtime and secure timestamp, notarize it, staple it, and pass `spctl` on a clean Apple-silicon Mac.

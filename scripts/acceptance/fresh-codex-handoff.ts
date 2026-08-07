@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { access, cp, mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,32 @@ const fixtureRoot = join(repositoryRoot, "test/fixtures/latex");
 const codexBinary =
   process.env.PDF_PROOFREADER_CODEX_BINARY ??
   "/Applications/ChatGPT.app/Contents/Resources/codex";
+
+type Scenario = "success" | "missing-synctex" | "build-failure";
+
+function parseArguments(): { readonly scenario: Scenario; readonly output?: string } {
+  const values = process.argv.slice(2).filter((value) => value !== "--");
+  let scenario: Scenario = "success";
+  let output: string | undefined;
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index]!;
+    if (value === "--scenario") {
+      const selected = values[index + 1];
+      if (!(["success", "missing-synctex", "build-failure"] as const).includes(selected as Scenario)) {
+        throw new Error("--scenario must be success, missing-synctex, or build-failure");
+      }
+      scenario = selected as Scenario;
+      index += 1;
+    } else if (value.startsWith("--")) {
+      throw new Error(`Unknown acceptance option: ${value}`);
+    } else if (output === undefined) {
+      output = value;
+    } else {
+      throw new Error("Pass at most one acceptance output directory");
+    }
+  }
+  return { scenario, ...(output === undefined ? {} : { output }) };
+}
 
 function run(
   executable: string,
@@ -53,10 +79,11 @@ function selection(y: number, quote: string): ReviewSelectionAnchor {
 }
 
 async function main(): Promise<void> {
-  const runRoot = process.argv[2] === undefined
+  const options = parseArguments();
+  const runRoot = options.output === undefined
     ? await mkdtemp(join(tmpdir(), "pdf-proofreader-fresh-codex-"))
-    : resolve(process.argv[2]);
-  if (process.argv[2] !== undefined) {
+    : resolve(options.output);
+  if (options.output !== undefined) {
     await access(runRoot).then(
       () => { throw new Error(`Acceptance output already exists: ${runRoot}`); },
       () => undefined,
@@ -74,6 +101,24 @@ async function main(): Promise<void> {
     "-halt-on-error",
     "paper.tex",
   ], { cwd: sourceRoot, quiet: true });
+
+  if (options.scenario === "missing-synctex") {
+    await unlink(join(sourceRoot, "paper.synctex.gz"));
+  } else if (options.scenario === "build-failure") {
+    const sourcePath = join(sourceRoot, "paper.tex");
+    const source = await readFile(sourcePath, "utf8");
+    await writeFile(
+      sourcePath,
+      source.replace(
+        "\\end{document}",
+        "\\input{intentionally-missing-required-fixture}\n\\end{document}",
+      ),
+    );
+    await writeFile(
+      join(sourceRoot, "BUILD-FAILURE.md"),
+      "This acceptance fixture intentionally has a missing required input. Do not create, remove, or replace that input directive. Apply reviewable source edits, attempt the checked-in latexmk build, and report the resulting build failure exactly as the handoff protocol requires.\n",
+    );
+  }
 
   const pdfPath = join(sourceRoot, "paper.pdf");
   const broker = new SessionBroker({ recoveryRoot });
@@ -160,7 +205,8 @@ async function main(): Promise<void> {
     handoff: await hashFile(prepared.handoffPath),
     reviewedPdf: await hashFile(prepared.reviewedPdfPath),
   };
-  console.log(JSON.stringify({
+  const report = {
+    scenario: options.scenario,
     runRoot,
     sourceRoot,
     instructionPath,
@@ -173,7 +219,12 @@ async function main(): Promise<void> {
     immutableEvidence: before.handoff === after.handoff && before.reviewedPdf === after.reviewedPdf,
     codexApprovalPolicy: "never",
     codexSandbox: "workspace-write",
-  }, null, 2));
+  };
+  console.log(JSON.stringify(report, null, 2));
+  const expectedStatus = options.scenario === "build-failure" ? "Partial" : "Complete";
+  if (checked.status !== expectedStatus || report.immutableEvidence !== true) {
+    throw new Error(`Acceptance scenario ${options.scenario} expected ${expectedStatus}`);
+  }
 }
 
 await main();
