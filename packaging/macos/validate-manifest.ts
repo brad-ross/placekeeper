@@ -15,7 +15,7 @@ export interface BackendRuntimeManifest {
   readonly schemaVersion: 1;
   readonly selectedViewer: string;
   readonly selectedWriter: string;
-  readonly targets: readonly ["darwin-arm64", "darwin-x64"];
+  readonly targets: readonly ["darwin-arm64"];
   readonly nodeVersion: string;
   readonly packages: Readonly<Record<string, string>>;
   readonly assets: readonly RuntimeAsset[];
@@ -33,12 +33,13 @@ export interface AppBundleManifest {
   readonly bundleIdentifier: string;
   readonly bundleVersion: string;
   readonly minimumSystemVersion: string;
-  readonly architectures: readonly ["arm64", "x64"];
+  readonly architectures: readonly ["arm64"];
   readonly nodeVersion: string;
   readonly executable: string;
   readonly runtimeDataDirectory: string;
   readonly documentTypes: readonly [{ readonly contentType: "com.adobe.pdf"; readonly role: "Viewer"; readonly rank: "Alternate" }];
   readonly embeddedArtifacts: Readonly<Record<string, string>>;
+  readonly distribution: { readonly mode: "source-first"; readonly signingRequired: false };
   readonly signing: { readonly hardenedRuntime: true; readonly secureTimestamp: true; readonly entitlements: string };
 }
 
@@ -89,14 +90,14 @@ export function validateBackendRuntimeManifest(value: unknown): BackendRuntimeMa
     throw new Error("The selected PDF runtime requires passing automated, Preview, and Acrobat gates");
   }
   const packages = record(root.packages, "packages");
-  if (!Array.isArray(root.targets) || root.targets.length !== 2 || root.targets[0] !== "darwin-arm64" || root.targets[1] !== "darwin-x64") {
-    throw new Error("Both macOS runtime targets are required");
+  if (!Array.isArray(root.targets) || root.targets.length !== 1 || root.targets[0] !== "darwin-arm64") {
+    throw new Error("The source-first runtime target must be Apple silicon");
   }
   return {
     schemaVersion: 1,
     selectedViewer: boundedString(root.selectedViewer, "selected viewer"),
     selectedWriter: boundedString(root.selectedWriter, "selected writer"),
-    targets: ["darwin-arm64", "darwin-x64"],
+    targets: ["darwin-arm64"],
     nodeVersion: boundedString(root.nodeVersion, "Node version"),
     packages: Object.fromEntries(Object.entries(packages).map(([name, version]) => [name, boundedString(version, `package ${name}`)])),
     assets: checkedAssets,
@@ -112,8 +113,8 @@ export function validateBackendRuntimeManifest(value: unknown): BackendRuntimeMa
 export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   const root = record(value, "app bundle manifest");
   if (root.schemaVersion !== 1) throw new Error("Unsupported app bundle manifest version");
-  if (!Array.isArray(root.architectures) || root.architectures.length !== 2 || root.architectures[0] !== "arm64" || root.architectures[1] !== "x64") {
-    throw new Error("Both arm64 and x64 package targets are required");
+  if (!Array.isArray(root.architectures) || root.architectures.length !== 1 || root.architectures[0] !== "arm64") {
+    throw new Error("The source-first app target must be Apple silicon");
   }
   const documentTypes = root.documentTypes;
   if (!Array.isArray(documentTypes) || documentTypes.length !== 1) throw new Error("Exactly one PDF document type is required");
@@ -123,6 +124,10 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   }
   const signing = record(root.signing, "signing");
   if (signing.hardenedRuntime !== true || signing.secureTimestamp !== true) throw new Error("Hardened runtime and secure timestamp are required");
+  const distribution = record(root.distribution, "distribution");
+  if (distribution.mode !== "source-first" || distribution.signingRequired !== false) {
+    throw new Error("Distribution must be source-first with optional signing");
+  }
   const runtimeDataDirectory = boundedString(root.runtimeDataDirectory, "runtime data directory");
   if (runtimeDataDirectory.startsWith("/") || runtimeDataDirectory.startsWith("Contents/") || runtimeDataDirectory.split("/").includes("..")) {
     throw new Error("Mutable runtime data must be a user-relative path outside the signed bundle");
@@ -137,12 +142,13 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
     bundleIdentifier: boundedString(root.bundleIdentifier, "bundle identifier"),
     bundleVersion: boundedString(root.bundleVersion, "bundle version"),
     minimumSystemVersion: boundedString(root.minimumSystemVersion, "minimum system version"),
-    architectures: ["arm64", "x64"],
+    architectures: ["arm64"],
     nodeVersion: boundedString(root.nodeVersion, "Node version"),
     executable: boundedString(root.executable, "executable"),
     runtimeDataDirectory,
     documentTypes: [{ contentType: "com.adobe.pdf", role: "Viewer", rank: "Alternate" }],
     embeddedArtifacts,
+    distribution: { mode: "source-first", signingRequired: false },
     signing: {
       hardenedRuntime: true,
       secureTimestamp: true,

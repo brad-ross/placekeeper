@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "selectedViewer": "embedpdf-browser-worker",
   "selectedWriter": "embedpdf-node-pdfium",
-  "targets": ["darwin-arm64", "darwin-x64"],
+  "targets": ["darwin-arm64"],
   "nodeVersion": "24.14.0",
   "packages": {
     "@embedpdf/core": "2.14.4",

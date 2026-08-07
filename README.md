@@ -1,0 +1,23 @@
+# PDF Proofreader
+
+PDF Proofreader is a personal, local-only macOS app for marking up text-native PDFs with Replace, Delete, Insert, Highlight, and Page Note feedback. It produces a portable reviewed PDF and an optional source-aware Codex handoff from one recoverable review session.
+
+## Install
+
+On an Apple-silicon Mac running macOS 13 or newer, download or clone this repository and run one command from the repository folder:
+
+```sh
+./install.sh
+```
+
+The installer uses a checksum-pinned local Node toolchain, installs locked dependencies, builds into a temporary directory, verifies the packaged PDF writer offline, and transactionally installs the app under `~/Applications` plus the Finder Quick Action. A failed update restores the previous app and action. It does not require an Apple Developer account or a global Node installation.
+
+See [Install and uninstall](docs/installation.md) for first-launch, update, optional Codex/VS Code integration, and removal instructions. See [Privacy and recovery](docs/privacy-and-recovery.md) for local storage behavior.
+
+## Use
+
+After installation, select one local PDF in Finder and choose **Open With -> PDF Proofreader** or **Quick Actions -> PDF Proofreader**. The app runs on numeric loopback, bundles its browser and PDF assets, performs no telemetry, and leaves the original PDF unchanged unless you explicitly choose the separately confirmed Replace Original action.
+
+## Supported release scope
+
+The current personal release is source-first and Apple-silicon-only. Developer ID signing, notarization, Intel/x64, DMG/PKG packaging, auto-update, and release CI are optional future work, not installation requirements.

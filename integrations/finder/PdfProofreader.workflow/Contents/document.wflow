@@ -13,7 +13,14 @@
     <key>ActionBundlePath</key><string>/System/Library/Automator/Run Shell Script.action</string>
     <key>ActionName</key><string>Run Shell Script</string>
     <key>ActionParameters</key><dict>
-      <key>COMMAND_STRING</key><string>launcher="/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader"
+      <key>COMMAND_STRING</key><string>launcher=""
+for app in "$HOME/Applications/PDF Proofreader.app" "/Applications/PDF Proofreader.app"; do
+  if [ -x "$app/Contents/MacOS/pdf-proofreader" ]; then
+    launcher="$app/Contents/MacOS/pdf-proofreader"
+    break
+  fi
+done
+[ -n "$launcher" ] || exit 1
 if [ "$#" -eq 1 ]; then
   response=$("$launcher" open --json --surface finder --pdf "$1")
 else

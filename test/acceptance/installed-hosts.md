@@ -1,28 +1,33 @@
-# Installed host and release acceptance evidence
+# Source install and host acceptance evidence
 
-This checklist separates deterministic adapter/package coverage from checks that require signed artifacts, installed host applications, or a second architecture.
+The required v1 distribution is a source-first Apple-silicon install for a personal/friends app. Developer ID signing, notarization, stapling, Intel/x64, DMG/PKG packaging, auto-update, and release CI are optional future distribution work rather than blockers.
 
-## Automated local evidence
+## Required automated evidence
 
-- `apps/service/test/launch-host.test.ts` and `apps/service/test/open-command.test.ts`: one persistent broker, open-or-focus, explicit fork/recovery choices, two shared error classes, ordinary and VS Code embedding policy, and capability-safe structured launch results.
-- `apps/vscode/test/extension.test.ts`: desktop-local extension kind, selected/active PDF handling, workspace source-root selection, remote/virtual refusal, restricted webview, in-memory capability delivery, and recovery choice handling.
-- `test/acceptance/launch-surfaces.spec.ts`: Finder, Codex plugin, and VS Code manifests all target the shared launcher without Terminal use or automatic task submission.
-- `test/acceptance/production-flow.spec.ts`: the installed-style ordinary-browser tree reaches the shared viewer, all delivery controls, responsive state, verified Human Save, and Codex preparation through the real host.
-- `packaging/macos/packaging.test.ts`, `pnpm validate:distribution`, and `pnpm smoke:installed`: pinned offline runtime, arm64/x64 manifests, self-contained service bundle, local assets, and an unsigned arm64 app whose packaged Node/PDFium writer opens a fixture offline.
+- `packaging/macos/packaging.test.ts`: the manifests accept only `arm64` / `darwin-arm64`, signing is optional, `./install.sh --dry-run` is content-free and non-mutating, and a partial replacement restores the previous app and Finder action.
+- `pnpm validate:distribution`: the selected runtime manifest and pinned local PDFium asset agree.
+- `./install.sh`: downloads a SHA-256-pinned Node 24.14.0 arm64 toolchain with bounded network waits, invokes pnpm 11.16.0 with the frozen lockfile, builds the app, runs the packaged writer doctor offline with a deadline and output bound, and transactionally installs the app and Finder action for the current user.
+- `apps/service/test/launch-host.test.ts` and `apps/service/test/open-command.test.ts`: one persistent broker, open-or-focus, explicit fork/recovery choices, two shared error classes, ordinary and VS Code embedding policy, and capability-safe launch results.
+- `test/acceptance/launch-surfaces.spec.ts`: Finder, Codex plugin, and VS Code manifests target the same launcher without automatic task submission.
+- `test/acceptance/production-flow.spec.ts`: the installed-style ordinary-browser tree reaches the shared viewer, responsive state, Human Save, and Codex preparation through the real host.
 
-Run the automated host evidence with `pnpm test:u7-host`, then run `pnpm build`, `pnpm validate:distribution`, and the installed smoke against a temporary unsigned bundle.
+## Required source-first acceptance
 
-Local environment audit on 2026-08-07: the arm64 host built `/var/folders/.../pdf-proofreader-package-arm64-HJfewe/PDF Proofreader.app` through the argument-free `pnpm package:macos` command, and `pnpm smoke:installed` passed its one-page offline EmbedPDF/PDFium writer doctor. VS Code is installed, but PDF Proofreader is not installed in `/Applications`. The keychain reports zero valid code-signing identities, the configured notary profile is unavailable, and no x64 host is available. These facts support the automated unsigned row only; they cannot satisfy the installed/release rows below.
+- [x] From a dependency-free Apple-silicon source copy, `./install.sh --dry-run` reports the pinned toolchain and user-local destinations without changing files.
+- [x] From that dependency-free source copy, `./install.sh` downloads Node 24.14.0, installs pnpm 11.16.0 dependencies from the frozen lockfile, and succeeds without Apple signing credentials.
+- [x] The isolated acceptance install creates the app and Finder action at the configured user-local destinations; the default destinations are `~/Applications/PDF Proofreader.app` and `~/Library/Services/PDF Proofreader.workflow`.
+- [x] The installer finishes only after the packaged Node/PDFium writer opens the generated fixture offline.
+- [ ] After the intentional unsigned-app first-open confirmation, Finder Open With and Quick Actions open one PDF without Terminal; duplicate launch focuses the same recoverable review and explicit fork creates a separate review.
+- [x] Re-running the installer replaces the app and Quick Action without deleting recovery data or user-owned review artifacts; the transaction test proves a partial replacement restores both prior artifacts.
 
-The same unsigned arm64 bundle was then run against an isolated temporary home through its actual packaged launcher and daemon. A Finder-surface open returned `opened`; a duplicate Codex-surface launch returned `focused` with the same session ID; and an explicit VS Code fork returned `opened` with a distinct session ID and the `embed=vscode` bootstrap. The daemon was stopped after the check. This proves the packaged open/focus/fork and surface-routing contracts without installing the app or claiming native GUI, signing, notarization, or clean-host evidence.
+Observed on 2026-08-07: the acceptance run began from an isolated source copy with no `node_modules`, `.local`, or `dist`; downloaded and verified the pinned 48.6 MB Node archive; installed 129 locked packages with pnpm 11.16.0; built the service, web app, and VS Code adapter; installed into isolated user directories; and passed the packaged offline writer doctor. A separate repeat-install run passed against existing app and workflow destinations. The Finder first-open row remains a deliberate manual check because the implementation run did not install into the user's real home directory or drive Finder UI.
 
-## Pending installed/release evidence
+## Optional integration evidence
 
-- [ ] Import a Developer ID Application identity, build the arm64 package with hardened runtime and secure timestamp, notarize it, staple it, and pass `spctl` on a clean Apple-silicon Mac.
-- [ ] Repeat the signed, notarized, stapled, offline installed smoke on a clean Intel/x64 Mac using the x64 Node runtime and package.
-- [ ] From Finder Open With and the bundled Quick Action, open one PDF without Terminal and verify duplicate launch focuses the same recoverable review while explicit fork creates a separate review.
-- [ ] Install the bundled Codex plugin, invoke it with a referenced PDF, choose any offered recovery action natively, and verify Codex's built-in browser reaches the same scoped production UI without automatic task submission.
-- [ ] Install the bundled VS Code extension locally, open selected and active PDFs in a desktop workspace, dispose/reopen the panel without finishing the draft, and verify Remote SSH, container, Codespaces, web, virtual, and non-file workspaces are refused without forwarding or copying files.
-- [ ] On each installed host surface, exercise one side of the shared 1024px breakpoint and verify review state, active item, zoom/selection, and delivery controls match the ordinary-browser workflow.
+- Codex plugin and VS Code extension contract tests remain required because the artifacts ship in the app.
+- Manual installation and UI smoke tests for Codex desktop and VS Code desktop are recommended for users who choose those integrations, but do not block the core Finder/ordinary-browser source release.
+- VS Code Remote SSH, containers, Codespaces, web, virtual, and non-file workspaces remain intentionally refused.
 
-Do not mark these rows passed from unit tests, an unsigned local bundle, or an adapter manifest inspection.
+## Optional future prebuilt release
+
+If the project later distributes a prebuilt download, reinstate Developer ID signing, notarization, stapling, quarantine/Gatekeeper testing, and a clean Apple-silicon download smoke before calling that artifact easy to install. Do not claim those properties from the source-first build.

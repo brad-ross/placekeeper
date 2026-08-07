@@ -1,19 +1,79 @@
-import { readFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { createNotarizationPlan } from "./notarize.js";
 import { validateAppBundleManifest, validateBackendRuntimeManifest } from "./validate-manifest.js";
 import { finderServiceArgs } from "./launcher.mjs";
 import { validateDoctorEvidence } from "./smoke-installed.js";
 
+const execFileAsync = promisify(execFile);
+
 describe("macOS distribution manifests", () => {
-  it("pins one offline runtime and architecture-specific outputs", async () => {
+  it("pins one offline runtime for the Apple-silicon source-first build", async () => {
     const app = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8")) as unknown;
     const backend = JSON.parse(await readFile(resolve("packaging/macos/backend-runtime-manifest.json"), "utf8")) as unknown;
-    expect(validateAppBundleManifest(app).architectures).toEqual(["arm64", "x64"]);
+    const appManifest = validateAppBundleManifest(app);
+    expect(appManifest.architectures).toEqual(["arm64"]);
+    expect(appManifest.distribution).toEqual({ mode: "source-first", signingRequired: false });
     const runtime = validateBackendRuntimeManifest(backend);
+    expect(runtime.targets).toEqual(["darwin-arm64"]);
     expect(runtime.assets.every((asset) => asset.networkFallbackAllowed === false)).toBe(true);
     expect(runtime.releaseGate.adobeAcrobatReader).toBe("pass");
+  });
+
+  it("offers a non-mutating dry run for the one-command source installer", async () => {
+    const installer = await readFile(resolve("install.sh"), "utf8");
+    const { stdout } = await execFileAsync("/bin/sh", [resolve("install.sh"), "--dry-run"], {
+      cwd: resolve("."),
+      encoding: "utf8",
+      env: { ...process.env, PDF_PROOFREADER_USER_HOME: "/tmp/pdf-proofreader-installer-home" },
+    });
+    expect(stdout).toContain("Apple-silicon source install");
+    expect(stdout).toContain("Node 24.14.0");
+    expect(stdout).toContain("pnpm 11.16.0");
+    expect(stdout).toContain("/tmp/pdf-proofreader-installer-home/Applications/PDF Proofreader.app");
+    expect(stdout).toContain("No files were changed");
+    expect(installer).toContain("a1a54f46a750d2523d628d924aab61758a51c9dad3e0238beb14141be9615dd3");
+    expect(installer).toContain("install --frozen-lockfile");
+    expect(installer).not.toContain("xattr");
+    expect(installer).not.toContain("spctl --master-disable");
+  });
+
+  it("replaces app artifacts transactionally and restores both after a partial failure", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "pdf-proofreader-install-test-"));
+    const built = resolve(root, "built/PDF Proofreader.app");
+    const app = resolve(root, "home/Applications/PDF Proofreader.app");
+    const services = resolve(root, "home/Library/Services");
+    const action = resolve(services, "PDF Proofreader.workflow");
+    const helper = resolve("packaging/macos/install-built-app.sh");
+    try {
+      await mkdir(resolve(built, "Contents/MacOS"), { recursive: true });
+      await mkdir(resolve(built, "Contents/Library/Services/PDF Proofreader.workflow"), { recursive: true });
+      await writeFile(resolve(built, "Contents/MacOS/pdf-proofreader"), "new launcher", { mode: 0o755 });
+      await writeFile(resolve(built, "new-app"), "new app");
+      await writeFile(resolve(built, "Contents/Library/Services/PDF Proofreader.workflow/new-action"), "new action");
+      await execFileAsync("/bin/sh", [helper, built, app, action]);
+      expect(await readFile(resolve(app, "new-app"), "utf8")).toBe("new app");
+      expect(await readFile(resolve(action, "new-action"), "utf8")).toBe("new action");
+
+      await rm(app, { recursive: true });
+      await rm(action, { recursive: true });
+      await mkdir(app, { recursive: true });
+      await mkdir(action, { recursive: true });
+      await writeFile(resolve(app, "old-app"), "old app");
+      await writeFile(resolve(action, "old-action"), "old action");
+      await chmod(services, 0o500);
+      await expect(execFileAsync("/bin/sh", [helper, built, app, action])).rejects.toThrow();
+      await chmod(services, 0o700);
+      expect(await readFile(resolve(app, "old-app"), "utf8")).toBe("old app");
+      expect(await readFile(resolve(action, "old-action"), "utf8")).toBe("old action");
+    } finally {
+      await chmod(services, 0o700).catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("uses current notarytool submission followed by staple and validation", () => {

@@ -6,7 +6,7 @@ import { basename, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { validateAppBundleManifest, validateBackendRuntimeManifest } from "./validate-manifest.js";
 
-type Architecture = "arm64" | "x64";
+type Architecture = "arm64";
 
 interface BuildOptions {
   readonly arch: Architecture;
@@ -153,8 +153,8 @@ function argument(name: string): string | undefined {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const arch = argument("--arch") ?? process.arch;
-  if (arch !== "arm64" && arch !== "x64") {
-    throw new Error("The macOS package architecture must be arm64 or x64");
+  if (arch !== "arm64") {
+    throw new Error("The source-first macOS package supports Apple silicon only");
   }
   const nodeRuntime = argument("--node-runtime") ?? process.execPath;
   const serviceDist = argument("--service-dist") ?? resolve("dist/service");

@@ -4,7 +4,7 @@
   "bundleIdentifier": "local.pdf-proofreader",
   "bundleVersion": "0.1.0",
   "minimumSystemVersion": "13.0",
-  "architectures": ["arm64", "x64"],
+  "architectures": ["arm64"],
   "nodeVersion": "24.14.0",
   "executable": "pdf-proofreader",
   "runtimeDataDirectory": "Library/Application Support/PDF Proofreader",
@@ -19,6 +19,10 @@
     "finderQuickAction": "integrations/finder/PdfProofreader.workflow",
     "codexPlugin": "integrations/codex-plugin",
     "vscodeExtension": "apps/vscode"
+  },
+  "distribution": {
+    "mode": "source-first",
+    "signingRequired": false
   },
   "signing": {
     "hardenedRuntime": true,

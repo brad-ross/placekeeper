@@ -30,6 +30,7 @@
     "test:u7": "pnpm fixtures:pdf && pnpm test:service && vitest run apps/web/test/production-review-app.test.tsx apps/web/test/owned-overlay.test.ts apps/vscode/test/extension.test.ts packaging/macos/packaging.test.ts && pnpm build && playwright test test/acceptance/production-flow.spec.ts",
     "validate:distribution": "tsx packaging/macos/validate-manifest.ts",
     "package:macos": "pnpm build && tsx packaging/macos/build-app.ts",
+    "install:local": "/bin/sh ./install.sh",
     "notarize:macos": "tsx packaging/macos/notarize.ts",
     "smoke:installed": "tsx packaging/macos/smoke-installed.ts",
     "acceptance:fresh-codex": "tsx scripts/acceptance/fresh-codex-handoff.ts",

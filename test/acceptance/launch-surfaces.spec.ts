@@ -4,7 +4,9 @@ import { expect, test } from "@playwright/test";
 
 test("Finder Quick Action passes exactly one explicit path to the shared launcher", async () => {
   const workflow = await readFile(resolve("integrations/finder/PdfProofreader.workflow/Contents/document.wflow"), "utf8");
-  expect(workflow).toContain("PDF Proofreader.app/Contents/MacOS/pdf-proofreader");
+  expect(workflow).toContain('$HOME/Applications/PDF Proofreader.app');
+  expect(workflow).toContain('/Applications/PDF Proofreader.app');
+  expect(workflow).toContain('launcher="$app/Contents/MacOS/pdf-proofreader"');
   expect(workflow).toContain("--pdf");
   expect(workflow).toContain("--surface finder");
   expect(workflow).toContain("display alert");

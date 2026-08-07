@@ -8,3 +8,4 @@ test/fixtures/pdfs/*.pdf
 test/fixtures/pdfium/*.wasm
 dist/
 apps/*/dist/
+.local/
