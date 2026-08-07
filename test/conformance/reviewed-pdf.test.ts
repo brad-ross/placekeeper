@@ -152,6 +152,29 @@ describe("reviewed PDF conformance", () => {
     }
   }, 60_000);
 
+  it("preserves generated links whose PDF dictionary has no persistent annotation ID", async () => {
+    const fixture = await deliveryForFixture("hostile-actions.pdf");
+    const [firstInspection, secondInspection] = await Promise.all([
+      inspectPdfWithEmbedPdf(fixture.source),
+      inspectPdfWithEmbedPdf(fixture.source),
+    ]);
+    expect(firstInspection.annotations).toHaveLength(1);
+    expect(secondInspection.annotations).toHaveLength(1);
+    expect(firstInspection.annotations[0]?.id).not.toBe(secondInspection.annotations[0]?.id);
+    expect(firstInspection.annotations[0]?.preservationFingerprint).toBe(
+      secondInspection.annotations[0]?.preservationFingerprint,
+    );
+
+    const coordinator = new ExportCoordinator({
+      writer: await createSelectedPdfWriter(),
+      capabilities: fixture.capabilities,
+      backend: { timeoutMs: 20_000 },
+    });
+    await expect(coordinator.exportReviewedCopy(fixture.delivery)).resolves.toMatchObject({
+      kind: "reviewed-copy",
+    });
+  }, 60_000);
+
   it.each([
     ["encrypted-no-annotation.pdf", "encrypted"],
     ["docmdp-no-annotation.pdf", "signature-restricted"],

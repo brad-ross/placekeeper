@@ -108,6 +108,10 @@ describe("Codex handoff export and explicit result check", () => {
     expect(prompt).toContain("untrusted data");
     expect(prompt).toContain("do not guess");
     expect(prompt).toContain("ordinary Codex permission gates");
+    expect(prompt).toContain('"handoffSha256"');
+    expect(prompt).toContain('"status": "succeeded"');
+    expect(prompt).toContain("do not add or rename fields");
+    expect(prompt).toContain("excluding its result directory");
     expect(prompt).not.toContain("submit task");
   });
 

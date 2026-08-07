@@ -19,7 +19,8 @@ The U1 decision gate records viewer and writer outcomes separately. `PASS` means
 | Backend host | Original immutability, reopen, digest evidence, source/output limits, cancellation, timeout, malformed input | PASS | Vitest conformance suite |
 | Apple Preview 11.0 / macOS 26.5.2 | All intended marks at expected locations | PASS | Manual golden-output inspection on 2026-08-07 |
 | Apple Preview 11.0 / macOS 26.5.2 | Every non-empty comment visible in Highlights and Notes | PASS | Manual sidebar inspection on 2026-08-07, including Insert `however` and Page Note comment |
-| Adobe Acrobat Reader | All intended marks and non-empty comments | PENDING | Acrobat Reader is not installed on the test machine |
+| Adobe Acrobat 26.001.21771 / macOS 26.5.2 | All intended marks at expected locations | PASS | Manual golden-output inspection on 2026-08-07; Insert note, Replace/Delete strikeouts, commented and bare Highlights, Page Note, and pre-existing Highlight/Stamp were visible on page 1 |
+| Adobe Acrobat 26.001.21771 / macOS 26.5.2 | Every non-empty comment readable and source annotations present | PASS | Acrobat Comments pane reported 8 entries, including `however`, `locally unique equilibrium`, `Check this argument.`, `Page-level comment.`, existing supported Highlight, and existing unsupported Stamp |
 
 ## Automated command
 
@@ -27,4 +28,4 @@ The U1 decision gate records viewer and writer outcomes separately. `PASS` means
 pnpm test:pdf-conformance
 ```
 
-The selected writer is EmbedPDF. A passing Acrobat Reader row completes the external-viewer portion of U1 without creating a PDFBox adapter.
+The selected writer is EmbedPDF. Both current Acrobat and Apple Preview rows pass, so the external-viewer portion of U1 is complete without a PDFBox adapter.

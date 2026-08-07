@@ -1,4 +1,5 @@
 import { isAbsolute } from "node:path";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import type { LaunchRequest, LaunchResponse, LaunchSurface } from "../host/proofreader-host.js";
@@ -109,7 +110,15 @@ async function main(): Promise<number> {
   return runOpenCommand(process.argv.slice(2), launchThroughDaemon);
 }
 
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
+function isMainModule(): boolean {
+  try {
+    return realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
   void main().then(
     (code) => { process.exitCode = code; },
     () => {

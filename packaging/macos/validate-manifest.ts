@@ -20,6 +20,11 @@ export interface BackendRuntimeManifest {
   readonly packages: Readonly<Record<string, string>>;
   readonly assets: readonly RuntimeAsset[];
   readonly conditionalRuntimes: { readonly java: false; readonly pdfbox: false };
+  readonly releaseGate: {
+    readonly automatedConformance: "pass";
+    readonly applePreview: "pass";
+    readonly adobeAcrobatReader: "pass";
+  };
 }
 
 export interface AppBundleManifest {
@@ -75,6 +80,14 @@ export function validateBackendRuntimeManifest(value: unknown): BackendRuntimeMa
   });
   const conditional = record(root.conditionalRuntimes, "conditional runtimes");
   if (conditional.java !== false || conditional.pdfbox !== false) throw new Error("Unselected runtimes cannot be packaged");
+  const releaseGate = record(root.releaseGate, "release gate");
+  if (
+    releaseGate.automatedConformance !== "pass" ||
+    releaseGate.applePreview !== "pass" ||
+    releaseGate.adobeAcrobatReader !== "pass"
+  ) {
+    throw new Error("The selected PDF runtime requires passing automated, Preview, and Acrobat gates");
+  }
   const packages = record(root.packages, "packages");
   if (!Array.isArray(root.targets) || root.targets.length !== 2 || root.targets[0] !== "darwin-arm64" || root.targets[1] !== "darwin-x64") {
     throw new Error("Both macOS runtime targets are required");
@@ -88,6 +101,11 @@ export function validateBackendRuntimeManifest(value: unknown): BackendRuntimeMa
     packages: Object.fromEntries(Object.entries(packages).map(([name, version]) => [name, boundedString(version, `package ${name}`)])),
     assets: checkedAssets,
     conditionalRuntimes: { java: false, pdfbox: false },
+    releaseGate: {
+      automatedConformance: "pass",
+      applePreview: "pass",
+      adobeAcrobatReader: "pass",
+    },
   };
 }
 

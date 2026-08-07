@@ -11,7 +11,9 @@ describe("macOS distribution manifests", () => {
     const app = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8")) as unknown;
     const backend = JSON.parse(await readFile(resolve("packaging/macos/backend-runtime-manifest.json"), "utf8")) as unknown;
     expect(validateAppBundleManifest(app).architectures).toEqual(["arm64", "x64"]);
-    expect(validateBackendRuntimeManifest(backend).assets.every((asset) => asset.networkFallbackAllowed === false)).toBe(true);
+    const runtime = validateBackendRuntimeManifest(backend);
+    expect(runtime.assets.every((asset) => asset.networkFallbackAllowed === false)).toBe(true);
+    expect(runtime.releaseGate.adobeAcrobatReader).toBe("pass");
   });
 
   it("uses current notarytool submission followed by staple and validation", () => {
@@ -27,6 +29,7 @@ describe("macOS distribution manifests", () => {
     const launcher = await readFile(resolve("packaging/macos/launcher.mjs"), "utf8");
     expect(launcher).toContain('system attribute "PDF_PROOFREADER_URL"');
     expect(launcher).toContain("PDF_PROOFREADER_PDFIUM_WASM");
+    expect(launcher).toContain("realpathSync");
     expect(launcher).not.toContain('"/usr/bin/open"');
   });
 

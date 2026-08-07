@@ -42,9 +42,12 @@ function fail(message: string): never {
   throw new PdfVerificationError(message);
 }
 
-function stableAnnotation(annotation: InspectedPdfAnnotation): string {
+function stableAnnotation(
+  annotation: InspectedPdfAnnotation,
+  persistentIds: ReadonlySet<string>,
+): string {
   return JSON.stringify({
-    id: annotation.id,
+    id: persistentIds.has(annotation.id) ? annotation.id : null,
     pageIndex: annotation.pageIndex,
     subtype: annotation.subtype,
     contents: annotation.contents,
@@ -140,11 +143,23 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
     fail("A review annotation ID collides with a pre-existing annotation.");
   }
 
+  // PDFium invents IDs for annotations without /NM. IDs that independently
+  // match the writer's source inventory are persistent and remain mandatory;
+  // only engine-generated IDs are excluded from cross-engine comparison.
+  const writerSourceIds = new Set(evidence.preexistingAnnotationIds);
+  const persistentIds = new Set(
+    source.annotations
+      .filter(({ id }) => writerSourceIds.has(id))
+      .map(({ id }) => id),
+  );
+
   const preservedInventory = candidate.annotations
     .filter(({ id }) => !requestedIds.has(id))
-    .map(stableAnnotation)
+    .map((annotation) => stableAnnotation(annotation, persistentIds))
     .sort();
-  const sourceInventory = source.annotations.map(stableAnnotation).sort();
+  const sourceInventory = source.annotations
+    .map((annotation) => stableAnnotation(annotation, persistentIds))
+    .sort();
   if (JSON.stringify(preservedInventory) !== JSON.stringify(sourceInventory)) {
     fail("A pre-existing annotation changed or disappeared from the reviewed PDF.");
   }

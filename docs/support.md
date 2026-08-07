@@ -12,8 +12,11 @@ Release evidence not yet available in this development environment:
 - Apple notarization keychain profile: unavailable.
 - Stapling and Gatekeeper assessment of a distributed artifact: pending.
 - Clean Intel/x64 installation and offline smoke test: pending.
-- Adobe Acrobat Reader compatibility sign-off: pending in the conformance matrix.
+
+The unsigned arm64 bundle does pass the packaged offline writer doctor; `pnpm package:macos` creates a fresh temporary app bundle and prints its path, which can then be passed to `pnpm smoke:installed -- <app-path> <pdf-fixture>`.
 
 Do not mark those rows passed from unit tests or an unsigned development bundle.
+
+Detailed installed Finder, Codex, VS Code, architecture, and Gatekeeper rows are tracked in `test/acceptance/installed-hosts.md`; fresh external Codex task rows are tracked separately in `test/acceptance/codex-handoff.md`.
 
 Release implementation follows [Apple's notarization guidance](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution) and VS Code's official guidance for [UI extension hosts](https://code.visualstudio.com/api/advanced-topics/extension-host), [remote refusal](https://code.visualstudio.com/api/advanced-topics/remote-extensions), and [restricted webviews](https://code.visualstudio.com/api/extension-guides/webview).

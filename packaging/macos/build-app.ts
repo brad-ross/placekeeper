@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
-import { access, chmod, copyFile, cp, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { isBuiltin } from "node:module";
+import { tmpdir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { validateAppBundleManifest, validateBackendRuntimeManifest } from "./validate-manifest.js";
@@ -151,14 +152,15 @@ function argument(name: string): string | undefined {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  const arch = argument("--arch");
-  const nodeRuntime = argument("--node-runtime");
-  const serviceDist = argument("--service-dist");
-  const webDist = argument("--web-dist");
-  const outputDirectory = argument("--output");
-  if ((arch !== "arm64" && arch !== "x64") || nodeRuntime === undefined || serviceDist === undefined || webDist === undefined || outputDirectory === undefined) {
-    throw new Error("Usage: build-app.ts --arch <arm64|x64> --node-runtime <path> --service-dist <dir> --web-dist <dir> --output <dir> [--sign-identity <Developer ID>]");
+  const arch = argument("--arch") ?? process.arch;
+  if (arch !== "arm64" && arch !== "x64") {
+    throw new Error("The macOS package architecture must be arm64 or x64");
   }
+  const nodeRuntime = argument("--node-runtime") ?? process.execPath;
+  const serviceDist = argument("--service-dist") ?? resolve("dist/service");
+  const webDist = argument("--web-dist") ?? resolve("dist/web");
+  const outputDirectory = argument("--output") ??
+    await mkdtemp(resolve(tmpdir(), `pdf-proofreader-package-${arch}-`));
   const appPath = await buildMacApp({
     arch,
     nodeRuntime,

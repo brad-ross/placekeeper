@@ -26,6 +26,6 @@
   "releaseGate": {
     "automatedConformance": "pass",
     "applePreview": "pass",
-    "adobeAcrobatReader": "pending"
+    "adobeAcrobatReader": "pass"
   }
 }

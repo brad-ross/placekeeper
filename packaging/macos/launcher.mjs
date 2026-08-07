@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -79,4 +80,12 @@ export async function main(args = process.argv.slice(2)) {
   });
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) await main();
+function isMainModule() {
+  try {
+    return realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) await main();

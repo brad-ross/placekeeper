@@ -195,8 +195,14 @@ function inspectAnnotations(
       hasNormalAppearance: ((annotation.appearanceModes ?? 0) & NORMAL_APPEARANCE) !== 0,
       rect: annotation.rect,
       ...(segmentRects === undefined ? {} : { segmentRects }),
+      // PDFium synthesizes a fresh UUID on every open when an annotation has no
+      // persistent /NM entry (common for generated links). That runtime ID is
+      // not part of the PDF dictionary and must not make preservation checks
+      // nondeterministic. The writer still verifies persistent IDs separately.
       preservationFingerprint: createHash('sha256')
-        .update(JSON.stringify(canonical(annotation)))
+        .update(JSON.stringify(canonical(
+          Object.fromEntries(Object.entries(annotation).filter(([key]) => key !== 'id')),
+        )))
         .digest('hex'),
     };
   });
