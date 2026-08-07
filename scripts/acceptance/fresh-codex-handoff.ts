@@ -20,7 +20,9 @@ const codexBinary =
   process.env.PDF_PROOFREADER_CODEX_BINARY ??
   "/Applications/ChatGPT.app/Contents/Resources/codex";
 
-type Scenario = "success" | "missing-synctex" | "build-failure";
+type Scenario = "success" | "missing-synctex" | "build-failure" | "permission-denial";
+
+const scenarios = ["success", "missing-synctex", "build-failure", "permission-denial"] as const;
 
 function parseArguments(): { readonly scenario: Scenario; readonly output?: string } {
   const values = process.argv.slice(2).filter((value) => value !== "--");
@@ -30,8 +32,8 @@ function parseArguments(): { readonly scenario: Scenario; readonly output?: stri
     const value = values[index]!;
     if (value === "--scenario") {
       const selected = values[index + 1];
-      if (!(["success", "missing-synctex", "build-failure"] as const).includes(selected as Scenario)) {
-        throw new Error("--scenario must be success, missing-synctex, or build-failure");
+      if (!scenarios.includes(selected as Scenario)) {
+        throw new Error(`--scenario must be one of: ${scenarios.join(", ")}`);
       }
       scenario = selected as Scenario;
       index += 1;
@@ -104,19 +106,24 @@ async function main(): Promise<void> {
 
   if (options.scenario === "missing-synctex") {
     await unlink(join(sourceRoot, "paper.synctex.gz"));
-  } else if (options.scenario === "build-failure") {
+  } else if (options.scenario === "build-failure" || options.scenario === "permission-denial") {
     const sourcePath = join(sourceRoot, "paper.tex");
     const source = await readFile(sourcePath, "utf8");
+    const missingInput = options.scenario === "permission-denial"
+      ? "network-required-appendix"
+      : "intentionally-missing-required-fixture";
     await writeFile(
       sourcePath,
       source.replace(
         "\\end{document}",
-        "\\input{intentionally-missing-required-fixture}\n\\end{document}",
+        `\\input{${missingInput}}\n\\end{document}`,
       ),
     );
     await writeFile(
-      join(sourceRoot, "BUILD-FAILURE.md"),
-      "This acceptance fixture intentionally has a missing required input. Do not create, remove, or replace that input directive. Apply reviewable source edits, attempt the checked-in latexmk build, and report the resulting build failure exactly as the handoff protocol requires.\n",
+      join(sourceRoot, options.scenario === "permission-denial" ? "PERMISSION-DENIAL.md" : "BUILD-FAILURE.md"),
+      options.scenario === "permission-denial"
+        ? "This acceptance fixture intentionally references network-required-appendix.tex, which is not present locally. The review requests one ordinary fetch from https://example.invalid/network-required-appendix.tex. Do not invent the appendix, install software, request elevation, substitute a different URL, or bypass a denied network permission. Apply other reviewable source edits, attempt the checked-in latexmk build, and report the resulting failure exactly as the handoff protocol requires.\n"
+        : "This acceptance fixture intentionally has a missing required input. Do not create, remove, or replace that input directive. Apply reviewable source edits, attempt the checked-in latexmk build, and report the resulting build failure exactly as the handoff protocol requires.\n",
     );
   }
 
@@ -160,7 +167,9 @@ async function main(): Promise<void> {
       state,
       0,
       { x: 430, y: 610, width: 18, height: 18 },
-      "Add the missing appendix source, but do not invent content when no appendix source is present.",
+      options.scenario === "permission-denial"
+        ? "Fetch network-required-appendix.tex once from https://example.invalid/network-required-appendix.tex using ordinary Codex permissions. If network permission is denied or the fetch fails, do not bypass the restriction or invent content; record this item as Not applied."
+        : "Add the missing appendix source, but do not invent content when no appendix source is present.",
       undefined,
       "missing appendix source",
     ),
@@ -221,7 +230,9 @@ async function main(): Promise<void> {
     codexSandbox: "workspace-write",
   };
   console.log(JSON.stringify(report, null, 2));
-  const expectedStatus = options.scenario === "build-failure" ? "Partial" : "Complete";
+  const expectedStatus = options.scenario === "build-failure" || options.scenario === "permission-denial"
+    ? "Partial"
+    : "Complete";
   if (checked.status !== expectedStatus || report.immutableEvidence !== true) {
     throw new Error(`Acceptance scenario ${options.scenario} expected ${expectedStatus}`);
   }
