@@ -63,6 +63,35 @@ const EDITABLE_HOST_SELECTOR = [
   '[data-review-editor]',
 ].join(',');
 
+const SPACE_ACTIVATION_SELECTOR = [
+  'button',
+  'input[type="button"]',
+  'input[type="submit"]',
+  'input[type="reset"]',
+  'input[type="checkbox"]',
+  'input[type="radio"]',
+  'summary',
+  '[role="button"]',
+  '[role="checkbox"]',
+  '[role="menuitem"]',
+  '[role="menuitemcheckbox"]',
+  '[role="menuitemradio"]',
+  '[role="option"]',
+  '[role="radio"]',
+  '[role="switch"]',
+  '[role="tab"]',
+].join(',');
+
+function isSpaceActivationTarget(target: EventTarget | null | undefined): boolean {
+  if (typeof Element === 'undefined') return false;
+  const element = target instanceof Element
+    ? target
+    : typeof Node !== 'undefined' && target instanceof Node
+      ? target.parentElement
+      : null;
+  return element !== null && element.closest(SPACE_ACTIVATION_SELECTOR) !== null;
+}
+
 export function isEditableTarget(target: EventTarget | null | undefined): boolean {
   if (typeof Element === 'undefined') return false;
   const element = target instanceof Element
@@ -164,7 +193,10 @@ export function createProofreadInputController(
       const editable = composingInEditableTarget || isEditableTarget(target);
       composing = false;
       composingInEditableTarget = false;
-      if (!editable && committedText) beginTextDraft(committedText);
+      if (!editable && committedText) {
+        if (selectionUpdate.kind === 'pending') queuePendingText(committedText);
+        else beginTextDraft(committedText);
+      }
     },
     clearDraft() {
       draftOpen = false;
@@ -212,6 +244,7 @@ export function createProofreadInputController(
         discardPending();
         return;
       }
+      if (event.key === ' ' && isSpaceActivationTarget(event.target)) return;
       if (event.key?.length === 1 && selectionUpdate.kind === 'pending') {
         event.preventDefault();
         queuePendingText(event.key);

@@ -12,6 +12,7 @@ import {
 import { createLocalPdfiumViewer, type ViewerAssetUrls } from '../pdf/embedpdf-viewer.js';
 import { PdfWorkspace } from '../pdf/PdfWorkspace.js';
 import {
+  SelectionReadAuthority,
   terminalSelectionUpdate,
   type SelectionUpdate,
 } from '../pdf/selection-state.js';
@@ -59,18 +60,20 @@ export function App({
   const [detectedSelectionReliable, setDetectedSelectionReliable] = useState(true);
   const subscriptions = useRef<Array<() => void>>([]);
   const pageReadGeneration = useRef(0);
-  const selectionReadGeneration = useRef(0);
-  const activeSelectionRead = useRef<{ documentId: string; generation: number } | null>(null);
+  const selectionReads = useRef(new SelectionReadAuthority());
   const viewer = useMemo(() => createLocalPdfiumViewer(assets), [assets]);
 
   const clearSubscriptions = useCallback(() => {
     for (const unsubscribe of subscriptions.current.splice(0)) unsubscribe();
   }, []);
-  useEffect(() => clearSubscriptions, [clearSubscriptions]);
+  useEffect(() => () => {
+    clearSubscriptions();
+    selectionReads.current.invalidate();
+  }, [clearSubscriptions]);
 
   const initializeViewer = useCallback(async (registry: PluginRegistry) => {
     clearSubscriptions();
-    activeSelectionRead.current = null;
+    onSelectionUpdate?.(selectionReads.current.invalidate());
     const interaction = registry
       .getPlugin<InteractionManagerPlugin>(InteractionManagerPlugin.id)
       ?.provides();
@@ -143,28 +146,25 @@ export function App({
 
     if (selection) {
       const beginSelectionRead = (documentId: string) => {
-        if (activeSelectionRead.current?.documentId === documentId) return;
-        const generation = ++selectionReadGeneration.current;
-        activeSelectionRead.current = { documentId, generation };
+        const { generation, started } = selectionReads.current.begin(documentId);
+        if (!started) return;
         onSelectionUpdate?.({ kind: 'pending', generation });
       };
       const captureSelection = async (documentId: string, generation: number) => {
         const document = registry.getStore().getState().core.documents[documentId]?.document;
         if (!document) {
-          activeSelectionRead.current = null;
-          const clearedGeneration = ++selectionReadGeneration.current;
-          onSelectionUpdate?.({ kind: 'cleared', generation: clearedGeneration });
+          onSelectionUpdate?.(selectionReads.current.invalidate());
           return;
         }
         const captureGate = globalThis.__pdfProofreaderSelectionCaptureTestGate;
         if (captureGate !== undefined) await captureGate.wait(generation);
-        if (generation !== selectionReadGeneration.current) return;
+        if (!selectionReads.current.isCurrent(generation)) return;
         const result = await captureViewerSelection({
           documentId,
           selection,
           pages: createEngineAnchorPageReader(registry.getEngine(), document),
         });
-        if (generation === selectionReadGeneration.current) {
+        if (selectionReads.current.isCurrent(generation)) {
           setDetectedSelectionReliable(result.ok);
           onSelectionUpdate?.(terminalSelectionUpdate(generation, result));
         }
@@ -172,19 +172,16 @@ export function App({
       subscriptions.current.push(
         selection.onSelectionChange(({ documentId, selection: selectedRange }) => {
           if (selectedRange === null) {
-            activeSelectionRead.current = null;
-            const generation = ++selectionReadGeneration.current;
             setDetectedSelectionReliable(true);
-            onSelectionUpdate?.({ kind: 'cleared', generation });
+            onSelectionUpdate?.(selectionReads.current.invalidate());
           } else {
             beginSelectionRead(documentId);
           }
         }),
         selection.onEndSelection(({ documentId }) => {
-          const active = activeSelectionRead.current;
-          if (active?.documentId !== documentId) return;
-          activeSelectionRead.current = null;
-          void captureSelection(documentId, active.generation);
+          const generation = selectionReads.current.finish(documentId);
+          if (generation === null) return;
+          void captureSelection(documentId, generation);
         }),
       );
     }

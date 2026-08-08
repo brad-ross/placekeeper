@@ -118,6 +118,23 @@ test.describe('canonical review workflow', () => {
     await expect(revision).toHaveAttribute('data-revision', '0');
   });
 
+  test('preserves native Space activation on review controls', async ({ page }) => {
+    const canvas = page.getByRole('application', { name: 'PDF review canvas' });
+    await canvas.focus();
+    await page.keyboard.press('Space');
+    const replacementDialog = page.getByRole('dialog', { name: 'Replacement text' });
+    await expect(replacementDialog.getByRole('textbox', { name: 'Replacement text' })).toHaveValue(' ');
+    await replacementDialog.getByRole('button', { name: 'Cancel' }).click();
+
+    const annotations = page.getByRole('button', { name: 'Annotations' });
+    await annotations.focus();
+    await page.keyboard.press('Space');
+
+    await expect(annotations).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByRole('dialog', { name: 'Replacement text' })).toHaveCount(0);
+    await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
+  });
+
   test('invokes every semantic tool shortcut without activation', async ({ page }) => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.focus();

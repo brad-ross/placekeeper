@@ -81,6 +81,30 @@ describe('proofread input controller', () => {
     });
   });
 
+  it('buffers one exact IME commit for the matching pending generation', () => {
+    const onIntent = vi.fn();
+    const controller = createProofreadInputController(onIntent);
+    controller.setContext({
+      caret: null,
+      selectionUpdate: { kind: 'pending', generation: 4 },
+    });
+
+    controller.compositionStart();
+    controller.beforeInput(event({ inputType: 'insertCompositionText', data: '結', isComposing: true }));
+    controller.compositionEnd('結論');
+    controller.setContext({
+      caret: null,
+      selectionUpdate: { kind: 'reliable', generation: 4, anchor: selection },
+    });
+
+    expect(onIntent).toHaveBeenCalledOnce();
+    expect(onIntent).toHaveBeenCalledWith({
+      kind: 'replaceDraft',
+      anchor: selection,
+      initialText: '結論',
+    });
+  });
+
   it('does nothing without a reliable anchor, during composition, for handled events, or with modifiers', () => {
     const onGesture = vi.fn();
     const controller = createProofreadInputController(onGesture);

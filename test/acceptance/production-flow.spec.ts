@@ -253,3 +253,71 @@ for (const key of ["Delete", "Backspace"] as const) {
     expect(browserErrors).toEqual([]);
   });
 }
+
+test("discards queued typing when a pending selection is cleared", async ({ page }) => {
+  const launched = await host.open({
+    pdfPath: pdf,
+    sourceRootPath: sourceRoot,
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === "recovery-offered") {
+    throw new Error("Fresh pending-clear production launch failed");
+  }
+  await installSelectionCaptureGate(page);
+  await page.goto(launched.url);
+
+  const pageCanvas = page.locator("[data-page-index='0']").first();
+  await expect(pageCanvas).toBeVisible();
+  await waitForRenderedPageImage(pageCanvas);
+  await dragPdfPhrase(page, pageCanvas, { x: 76, y: 98 }, { x: 245, y: 98 });
+  await expect(page.getByRole("alert")).toContainText("Reading the selected text");
+  await page.keyboard.type("discard me");
+
+  await pageCanvas.click({ position: { x: 500, y: 300 } });
+  await releaseSelectionCapture(page);
+
+  await expect(page.getByRole("dialog", { name: "Replacement text" })).toHaveCount(0);
+  await expect(page.locator("[data-review-item]")).toHaveCount(0);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
+});
+
+test("keeps only typing for the newest pending selection", async ({ page }) => {
+  const launched = await host.open({
+    pdfPath: pdf,
+    sourceRootPath: sourceRoot,
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === "recovery-offered") {
+    throw new Error("Fresh pending-supersession production launch failed");
+  }
+  await installSelectionCaptureGate(page);
+  await page.goto(launched.url);
+
+  const pageCanvas = page.locator("[data-page-index='0']").first();
+  await expect(pageCanvas).toBeVisible();
+  await waitForRenderedPageImage(pageCanvas);
+  await dragPdfPhrase(page, pageCanvas, { x: 76, y: 98 }, { x: 245, y: 98 });
+  await expect(page.getByRole("alert")).toContainText("Reading the selected text");
+  await page.keyboard.type("obsolete");
+
+  await dragPdfPhrase(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
+  await page.keyboard.type("current");
+  await releaseSelectionCapture(page);
+
+  const replacementDialog = page.getByRole("dialog", { name: "Replacement text" });
+  await expect(replacementDialog).toBeVisible();
+  await expect(replacementDialog.getByRole("textbox", { name: "Replacement text" })).toHaveValue("current");
+  await replacementDialog.getByRole("button", { name: "Apply" }).click();
+  await expect(replacementDialog).toHaveCount(0);
+  await expect(page.locator("[data-review-item]")).toHaveCount(1);
+  const state = host.broker.state(launched.sessionId);
+  expect(state?.revision).toBe(1);
+  expect(state?.items).toHaveLength(1);
+  expect(state?.items[0]).toMatchObject({
+    kind: "replace",
+    payload: {
+      proposedText: "current",
+    },
+  });
+  expect(state?.items[0]?.payload.quote).not.toBe("");
+});
