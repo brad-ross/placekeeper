@@ -3,6 +3,7 @@ import { useState } from 'react';
 
 import { ReviewShell } from '../../../apps/web/src/app/ReviewShell.js';
 import { projectReviewItems } from '../../../apps/web/src/review/annotation-projection.js';
+import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
 import type { CaretAnchor, SelectionAnchor } from '../../../apps/web/src/pdf/selection-anchor.js';
 import { createReviewState, type ReviewCommand, type ReviewState } from '../../../packages/core/src/review-model.js';
 import { reduceReview } from '../../../packages/core/src/review-reducer.js';
@@ -37,6 +38,9 @@ function Harness() {
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [keyboardPageNoteActive, setKeyboardPageNoteActive] = useState(false);
   const [placedPageNote, setPlacedPageNote] = useState<{ token: number; pageIndex: number; position: { x: number; y: number; width: number; height: number }; nearbyText: string } | null>(null);
+  const [correspondingItemId, setCorrespondingItemId] = useState<string>();
+  const [activeItemId, setActiveItemId] = useState<string>();
+  const [activationRequest, setActivationRequest] = useState<{ id: string; token: number }>();
 
   const accept = async (command: ReviewCommand): Promise<ReviewState> => {
     await Promise.resolve();
@@ -70,6 +74,22 @@ function Harness() {
       onPlacedPageNoteConsumed={() => setPlacedPageNote(null)}
       onCommand={accept}
       onNavigate={(item) => setNavigated(item.id)}
+      {...(correspondingItemId === undefined ? {} : { correspondingItemId })}
+      {...(activationRequest === undefined ? {} : { activationRequest })}
+      onItemCorrespondenceChange={setCorrespondingItemId}
+      onActiveItemChange={setActiveItemId}
+      existingAnnotations={{
+        status: 'ready',
+        generation: 1,
+        items: inventoryExistingAnnotations([{
+          id: 'source-highlight',
+          subtype: 'Highlight',
+          pageIndex: 0,
+          rect: { x: 72, y: 92, width: 120, height: 14 },
+          contents: 'Source comment',
+        }]),
+      }}
+      onNavigateExisting={(item) => setNavigated(`source:${item.id}`)}
     >
       <div>
         <button type="button" onClick={() => setAnchorKind('selection')}>Use selection</button>
@@ -106,7 +126,26 @@ function Harness() {
         </div>
         <div aria-label="Owned annotation overlays" data-owned-annotation-layer>
           {projectReviewItems(state.items).map((annotation) => (
-            <span key={annotation.id} data-owned-mark={annotation.kind}>{annotation.contents}</span>
+            <span key={annotation.id}>
+              <span
+                data-owned-mark={annotation.kind}
+                data-active={activeItemId === annotation.id ? 'true' : 'false'}
+                data-corresponding={correspondingItemId === annotation.id ? 'true' : 'false'}
+              >{annotation.contents}</span>
+              <button
+                type="button"
+                data-owned-focus-id={annotation.id}
+                aria-label={`${annotation.kind} annotation on page ${annotation.pageIndex + 1}`}
+                onPointerEnter={() => setCorrespondingItemId(annotation.id)}
+                onPointerLeave={() => setCorrespondingItemId(undefined)}
+                onFocus={() => setCorrespondingItemId(annotation.id)}
+                onBlur={() => setCorrespondingItemId(undefined)}
+                onClick={() => {
+                  setActiveItemId(annotation.id);
+                  setActivationRequest({ id: annotation.id, token: Date.now() });
+                }}
+              >Inspect mark</button>
+            </span>
           ))}
         </div>
         <output data-revision={state.revision} data-kinds={state.items.map(({ kind }) => kind).join(',')} data-navigated={navigated}>

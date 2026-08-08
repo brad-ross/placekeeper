@@ -4,6 +4,7 @@ import { ScrollPlugin } from "@embedpdf/plugin-scroll";
 
 import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
 import type { CaretAnchor } from "../pdf/selection-anchor.js";
+import type { ExistingAnnotation, ExistingAnnotationsDiscovery } from "../pdf/existing-annotations.js";
 import {
   acceptSelectionUpdate,
   INITIAL_SELECTION_UPDATE,
@@ -84,6 +85,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [caretPlacement, setCaretPlacement] = useState<ViewerClientPlacement | null>(null);
   const [pageMenu, setPageMenu] = useState<ViewerPageMenuInvocation | null>(null);
   const [keyboardPageNoteActive, setKeyboardPageNoteActive] = useState(false);
+  const [existingAnnotations, setExistingAnnotations] = useState<ExistingAnnotationsDiscovery>({
+    status: 'loading', generation: 0,
+  });
+  const [inventoryRetryGeneration, setInventoryRetryGeneration] = useState(0);
+  const [correspondingItemId, setCorrespondingItemId] = useState<string>();
+  const [activeItemId, setActiveItemId] = useState<string>();
+  const [activationRequest, setActivationRequest] = useState<{ id: string; token: number }>();
   const [placedPageNote, setPlacedPageNote] = useState<{
     readonly token: number;
     readonly pageIndex: number;
@@ -95,6 +103,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const latestReceipt = useRef<string | null>(null);
   const viewerRegistry = useRef<PluginRegistry | null>(null);
   const viewerControlsRef = useRef<ViewerControls | undefined>(undefined);
+  const markHoverRef = useRef<string | undefined>(undefined);
+  const markFocusRef = useRef<string | undefined>(undefined);
+  const rowCorrespondenceRef = useRef<string | undefined>(undefined);
+  const activationTokenRef = useRef(0);
   const [viewerState, setViewerState] = useState<ViewerControlsSnapshot>(unavailableViewerControls);
   const viewerAssets = useMemo(() => ({
     pdfiumWasm: `/s/${props.session.sessionId}/assets/pdfium.wasm`,
@@ -112,6 +124,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     if (update.kind === "reliable") setToolError(null);
   };
   const readinessMessage = selectionReadinessMessage(selectionUpdate);
+  const publishCorrespondence = () => setCorrespondingItemId(
+    rowCorrespondenceRef.current ?? markFocusRef.current ?? markHoverRef.current,
+  );
   useEffect(() => () => {
     viewerControlsRef.current?.dispose();
     placementAuthority.current.clear();
@@ -155,6 +170,19 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         pageIndex: point.pageIndex,
         position: { x: point.x, y: point.y, width: 18, height: 18 },
       });
+      return;
+    }
+    if (event.type === 'owned-mark') {
+      const { id, phase } = event.value;
+      if (phase === 'enter') markHoverRef.current = id;
+      if (phase === 'leave' && markHoverRef.current === id) markHoverRef.current = undefined;
+      if (phase === 'focus') markFocusRef.current = id;
+      if (phase === 'blur' && markFocusRef.current === id) markFocusRef.current = undefined;
+      if (phase === 'activate') {
+        setActiveItemId(id);
+        setActivationRequest({ id, token: ++activationTokenRef.current });
+      }
+      publishCorrespondence();
     }
   };
   const viewer = props.viewer ?? (
@@ -167,6 +195,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       ownedAnnotations={ownedAnnotations}
       keyboardPageNoteActive={keyboardPageNoteActive}
       onViewerInteraction={onViewerInteraction}
+      {...(activeItemId === undefined ? {} : { activeOwnedAnnotationId: activeItemId })}
+      {...(correspondingItemId === undefined ? {} : { correspondingOwnedAnnotationId: correspondingItemId })}
+      onExistingAnnotationsDiscovery={setExistingAnnotations}
+      inventoryRetryGeneration={inventoryRetryGeneration}
       onViewerInitialized={async (registry) => {
         viewerRegistry.current = registry;
         viewerControlsRef.current?.dispose();
@@ -237,6 +269,15 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         }}
         placedPageNote={placedPageNote}
         keyboardPageNoteActive={keyboardPageNoteActive}
+        existingAnnotations={existingAnnotations}
+        {...(correspondingItemId === undefined ? {} : { correspondingItemId })}
+        {...(activationRequest === undefined ? {} : { activationRequest })}
+        onRetryExistingAnnotations={() => setInventoryRetryGeneration((generation) => generation + 1)}
+        onItemCorrespondenceChange={(id) => {
+          rowCorrespondenceRef.current = id;
+          publishCorrespondence();
+        }}
+        onActiveItemChange={setActiveItemId}
         onRequestKeyboardPageNote={() => {
           if (pageMenu) placementAuthority.current.dismissContext(pageMenu.invocationId);
           setPageMenu(null);
@@ -288,6 +329,19 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
                 },
               }),
               behavior: "smooth",
+              alignX: 50,
+              alignY: 35,
+            });
+          }
+        }}
+        onNavigateExisting={(annotation: ExistingAnnotation) => {
+          const registry = viewerRegistry.current;
+          const documentId = registry?.getStore().getState().core.activeDocumentId;
+          const scroll = registry?.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides();
+          if (documentId && scroll) {
+            scroll.forDocument(documentId).scrollToPage({
+              pageNumber: annotation.pageIndex + 1,
+              behavior: 'smooth',
               alignX: 50,
               alignY: 35,
             });

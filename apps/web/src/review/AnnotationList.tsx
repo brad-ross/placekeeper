@@ -1,11 +1,14 @@
-import { useRef } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
 import { documentOrderedItems } from './annotation-projection.js';
 
 export interface AnnotationListProps {
   items: readonly ReviewItem[];
   activeId?: string;
+  correspondingId?: string;
+  activationRequest?: { readonly id: string; readonly token: number };
   onNavigate(item: ReviewItem): void;
+  onCorrespondenceChange?(id: string | undefined): void;
   onEdit(item: ReviewItem, trigger: HTMLButtonElement): void;
   onDelete(item: ReviewItem): Promise<void> | void;
 }
@@ -15,10 +18,50 @@ function payloadText(item: ReviewItem): string {
   return fields.map((field) => item.payload[field]).find((value): value is string => typeof value === 'string') ?? '';
 }
 
-export function AnnotationList({ items, activeId, onNavigate, onEdit, onDelete }: AnnotationListProps) {
+export function AnnotationList({
+  items,
+  activeId,
+  correspondingId,
+  activationRequest,
+  onNavigate,
+  onCorrespondenceChange,
+  onEdit,
+  onDelete,
+}: AnnotationListProps) {
   const ordered = documentOrderedItems(items);
   const listRef = useRef<HTMLOListElement>(null);
   const entryRefs = useRef(new Map<string, HTMLButtonElement>());
+  const rowRefs = useRef(new Map<string, HTMLLIElement>());
+  const [direction, setDirection] = useState<'above' | 'below'>();
+
+  useLayoutEffect(() => {
+    if (!correspondingId) {
+      setDirection(undefined);
+      return;
+    }
+    const row = rowRefs.current.get(correspondingId);
+    const viewport = listRef.current?.closest<HTMLElement>('.review-list');
+    if (!row || !viewport) return;
+    const rowBounds = row.getBoundingClientRect();
+    const viewportBounds = viewport.getBoundingClientRect();
+    setDirection(rowBounds.bottom < viewportBounds.top
+      ? 'above'
+      : rowBounds.top > viewportBounds.bottom
+        ? 'below'
+        : undefined);
+  }, [correspondingId, items]);
+
+  useLayoutEffect(() => {
+    if (!activationRequest) return;
+    const row = rowRefs.current.get(activationRequest.id);
+    const entry = entryRefs.current.get(activationRequest.id);
+    if (row && entry) {
+      row.scrollIntoView({ block: 'nearest' });
+      entry.focus({ preventScroll: true });
+    } else {
+      listRef.current?.focus({ preventScroll: true });
+    }
+  }, [activationRequest?.id, activationRequest?.token]);
 
   const remove = async (item: ReviewItem) => {
     const index = ordered.findIndex(({ id }) => id === item.id);
@@ -33,11 +76,31 @@ export function AnnotationList({ items, activeId, onNavigate, onEdit, onDelete }
   };
 
   return (
-    <aside id="review-annotation-list" aria-label="Review annotations">
-      <h2>Annotations</h2>
+    <section aria-label="Owned annotations">
+      <h2>Owned annotations</h2>
+      {direction ? (
+        <p className="annotation-direction-cue" data-correspondence-direction={direction}>
+          Matching annotation {direction}
+        </p>
+      ) : null}
       <ol ref={listRef} tabIndex={-1} aria-label="Annotations in document order">
         {ordered.map((item) => (
-          <li key={item.id} data-review-item={item.id} data-active={activeId === item.id ? 'true' : 'false'}>
+          <li
+            key={item.id}
+            ref={(node) => {
+              if (node) rowRefs.current.set(item.id, node);
+              else rowRefs.current.delete(item.id);
+            }}
+            data-review-item={item.id}
+            data-active={activeId === item.id ? 'true' : 'false'}
+            data-corresponding={correspondingId === item.id ? 'true' : 'false'}
+            onPointerEnter={() => onCorrespondenceChange?.(item.id)}
+            onPointerLeave={() => onCorrespondenceChange?.(undefined)}
+            onFocusCapture={() => onCorrespondenceChange?.(item.id)}
+            onBlurCapture={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) onCorrespondenceChange?.(undefined);
+            }}
+          >
             <button
               ref={(node) => {
                 if (node) entryRefs.current.set(item.id, node);
@@ -56,6 +119,6 @@ export function AnnotationList({ items, activeId, onNavigate, onEdit, onDelete }
         ))}
       </ol>
       {ordered.length === 0 ? <p>No annotations yet.</p> : null}
-    </aside>
+    </section>
   );
 }

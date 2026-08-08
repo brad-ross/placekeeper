@@ -7,11 +7,19 @@ import { SelectionPlugin } from '@embedpdf/plugin-selection';
 import { transformRect, transformSize } from '@embedpdf/models';
 
 import {
+  ExistingAnnotationDiscoveryAuthority,
   inventoryDocumentAnnotations,
+  mergeExistingAnnotations,
   type ExistingAnnotation,
+  type ExistingAnnotationsDiscovery,
 } from '../pdf/existing-annotations.js';
 import { createLocalPdfiumViewer, type ViewerAssetUrls } from '../pdf/embedpdf-viewer.js';
 import { PdfWorkspace, type PageContextMenuRequest } from '../pdf/PdfWorkspace.js';
+import {
+  OwnedMarkPointerGesture,
+  groupOwnedMarkGeometry,
+  hitTestOwnedMark,
+} from '../pdf/owned-mark-hit-test.js';
 import {
   SelectionReadAuthority,
   terminalSelectionUpdate,
@@ -44,6 +52,10 @@ export interface AppProps {
   ownedAnnotations?: readonly ReviewAnnotation[];
   onViewerInteraction?: (event: ViewerInteractionEvent) => void;
   keyboardPageNoteActive?: boolean;
+  activeOwnedAnnotationId?: string;
+  correspondingOwnedAnnotationId?: string;
+  onExistingAnnotationsDiscovery?: (result: ExistingAnnotationsDiscovery) => void;
+  inventoryRetryGeneration?: number;
 }
 
 export function App({
@@ -59,8 +71,16 @@ export function App({
   ownedAnnotations = [],
   onViewerInteraction,
   keyboardPageNoteActive = false,
+  activeOwnedAnnotationId,
+  correspondingOwnedAnnotationId,
+  onExistingAnnotationsDiscovery,
+  inventoryRetryGeneration = 0,
 }: AppProps) {
   const [sourceAnnotations, setSourceAnnotations] = useState<readonly ExistingAnnotation[]>([]);
+  const [inventoryState, setInventoryState] = useState<ExistingAnnotationsDiscovery>({
+    status: 'loading',
+    generation: 0,
+  });
   const [detectedPageReliable, setDetectedPageReliable] = useState(true);
   const [detectedSelectionReliable, setDetectedSelectionReliable] = useState(true);
   const subscriptions = useRef<Array<() => void>>([]);
@@ -74,8 +94,54 @@ export function App({
   const keyboardActiveRef = useRef(keyboardPageNoteActive);
   const keyboardCursorRef = useRef<ViewerPagePoint | null>(null);
   const [keyboardCursor, setKeyboardCursor] = useState<ViewerPagePoint | null>(null);
+  const inventoryAuthority = useRef(new ExistingAnnotationDiscoveryAuthority());
+  const currentInventoryDocument = useRef<{
+    readonly id: string;
+    readonly document: Parameters<typeof inventoryDocumentAnnotations>[1];
+  } | null>(null);
+  const explicitAnnotationsRef = useRef(existingAnnotations);
+  explicitAnnotationsRef.current = existingAnnotations;
+  const ownedAnnotationsRef = useRef(ownedAnnotations);
+  ownedAnnotationsRef.current = ownedAnnotations;
+  const ownedPointerGesture = useRef(new OwnedMarkPointerGesture());
+  const hoveredOwnedId = useRef<string | undefined>(undefined);
   const viewer = useMemo(() => createLocalPdfiumViewer(assets), [assets]);
   const emit = useCallback((event: ViewerInteractionEvent) => onViewerInteraction?.(event), [onViewerInteraction]);
+  const publishInventory = useCallback((result: ExistingAnnotationsDiscovery) => {
+    setInventoryState(result);
+    if (result.status === 'ready') setSourceAnnotations(result.items);
+    if (result.status === 'empty') setSourceAnnotations([]);
+    onExistingAnnotationsDiscovery?.(result);
+  }, [onExistingAnnotationsDiscovery]);
+  const discoverExistingAnnotations = useCallback((
+    documentId: string,
+    document: Parameters<typeof inventoryDocumentAnnotations>[1],
+  ) => {
+    currentInventoryDocument.current = { id: documentId, document };
+    const token = inventoryAuthority.current.begin(documentId);
+    publishInventory({ status: 'loading', generation: token.generation });
+    void inventoryDocumentAnnotations(viewer.engine, document).then(
+      (discovered) => {
+        const result = inventoryAuthority.current.ready(
+          token,
+          discovered,
+          explicitAnnotationsRef.current,
+        );
+        if (result) publishInventory(result);
+      },
+      (error: unknown) => {
+        const result = inventoryAuthority.current.error(token, error);
+        if (result) publishInventory(result);
+      },
+    );
+  }, [publishInventory, viewer.engine]);
+
+  useEffect(() => {
+    const current = currentInventoryDocument.current;
+    if (inventoryRetryGeneration > 0 && current) {
+      discoverExistingAnnotations(current.id, current.document);
+    }
+  }, [discoverExistingAnnotations, inventoryRetryGeneration]);
 
   const clearSubscriptions = useCallback(() => {
     for (const unsubscribe of subscriptions.current.splice(0)) unsubscribe();
@@ -148,12 +214,54 @@ export function App({
       activeDocumentIdRef.current = documentId;
       const document = registry.getStore().getState().core.documents[documentId]?.document;
       if (!document) return;
+      currentInventoryDocument.current = { id: documentId, document };
       if (interaction) {
         for (const page of document.pages) {
+          const pointerId = page.index + 1;
+          const toCanonicalPoint = (position: { x: number; y: number }) => ({
+            x: position.x + (page.boxes?.crop.left ?? 0),
+            y: position.y + (page.boxes?.crop.top ?? 0),
+          });
+          const pageGeometry = () => groupOwnedMarkGeometry(
+            ownedAnnotationsRef.current.filter(({ pageIndex }) => pageIndex === page.index),
+          );
+          const setHoveredOwned = (id: string | undefined) => {
+            if (hoveredOwnedId.current === id) return;
+            if (hoveredOwnedId.current) {
+              emit({ type: 'owned-mark', value: { id: hoveredOwnedId.current, phase: 'leave' } });
+            }
+            hoveredOwnedId.current = id;
+            if (id) emit({ type: 'owned-mark', value: { id, phase: 'enter' } });
+          };
           subscriptions.current.push(interaction.registerAlways({
             scope: { type: 'page', documentId, pageIndex: page.index },
             handlers: {
+              onPointerDown: (position) => {
+                ownedPointerGesture.current.pointerDown(pointerId, toCanonicalPoint(position), pageGeometry());
+              },
+              onPointerMove: (position) => {
+                const point = toCanonicalPoint(position);
+                ownedPointerGesture.current.pointerMove(pointerId, point);
+                setHoveredOwned(hitTestOwnedMark(pageGeometry(), point));
+              },
+              onPointerLeave: () => {
+                ownedPointerGesture.current.pointerCancel(pointerId);
+                setHoveredOwned(undefined);
+              },
+              onPointerCancel: () => {
+                ownedPointerGesture.current.pointerCancel(pointerId);
+                setHoveredOwned(undefined);
+              },
               onPointerUp: (position, event) => {
+                const ownedId = ownedPointerGesture.current.pointerUp(
+                  pointerId,
+                  toCanonicalPoint(position),
+                  pageGeometry(),
+                );
+                if (ownedId) {
+                  emit({ type: 'owned-mark', value: { id: ownedId, phase: 'activate' } });
+                  return;
+                }
                 const canonicalPoint: ViewerPagePoint = {
                   documentId,
                   pageIndex: page.index,
@@ -190,12 +298,7 @@ export function App({
           }));
         }
       }
-      await Promise.all([
-        readPage(documentId, 0),
-        inventoryDocumentAnnotations(registry.getEngine(), document).then(
-          setSourceAnnotations,
-        ),
-      ]);
+      await readPage(documentId, 0);
     };
 
     const documentManager = registry
@@ -204,7 +307,12 @@ export function App({
     if (documentManager) {
       subscriptions.current.push(
         documentManager.onDocumentOpened(({ document }) => {
-          if (document) void loadDocument(document.id);
+          if (document) {
+            void loadDocument(document.id).then(() => {
+              const current = currentInventoryDocument.current;
+              if (current?.id === document.id) discoverExistingAnnotations(current.id, current.document);
+            });
+          }
         }),
       );
     }
@@ -310,9 +418,15 @@ export function App({
     }
 
     const activeDocumentId = registry.getStore().getState().core.activeDocumentId;
-    if (activeDocumentId) await loadDocument(activeDocumentId);
+    if (activeDocumentId) {
+      const activeDocument = registry.getStore().getState().core.documents[activeDocumentId]?.document;
+      if (activeDocument) currentInventoryDocument.current = { id: activeDocumentId, document: activeDocument };
+      await loadDocument(activeDocumentId);
+    }
     await onViewerInitialized?.(registry);
-  }, [clearSubscriptions, emit, initializeKeyboardCursor, onSelectionUpdate, onViewerInitialized, publishKeyboardCursor]);
+    const inventoryDocument = currentInventoryDocument.current;
+    if (inventoryDocument) discoverExistingAnnotations(inventoryDocument.id, inventoryDocument.document);
+  }, [clearSubscriptions, discoverExistingAnnotations, emit, initializeKeyboardCursor, onSelectionUpdate, onViewerInitialized, publishKeyboardCursor]);
 
   const effectivePageReliability = pageSemanticReliable ?? detectedPageReliable;
   const effectiveSelectionReliability =
@@ -373,6 +487,10 @@ export function App({
       keyboardPageNoteCursor={keyboardCursor}
       onKeyboardPageNoteKey={keyboardCursorKey}
       onPageContextMenu={pageContextMenu}
+      fillContainer={embeddedInReviewShell}
+      {...(activeOwnedAnnotationId === undefined ? {} : { activeOwnedAnnotationId })}
+      {...(correspondingOwnedAnnotationId === undefined ? {} : { correspondingOwnedAnnotationId })}
+      onOwnedMarkInteraction={(value) => emit({ type: 'owned-mark', value })}
     />
   );
   const workspaceWithStatus = (
@@ -418,9 +536,11 @@ export function App({
       </section>
       <aside aria-label="Existing annotations">
         <h2>Existing annotations</h2>
-        {existingAnnotations.length + sourceAnnotations.length === 0 ? <p>None</p> : null}
+        {inventoryState.status === 'loading' ? <p role="status">Existing annotations are loading…</p> : null}
+        {inventoryState.status === 'error' ? <p role="alert">Existing annotations unavailable.</p> : null}
+        {inventoryState.status === 'empty' ? <p>None</p> : null}
         <ol>
-          {[...sourceAnnotations, ...existingAnnotations].map((annotation, index) => (
+          {mergeExistingAnnotations(sourceAnnotations, existingAnnotations).map((annotation, index) => (
             <li key={`${annotation.pageIndex}:${annotation.id}:${index}`}>
               <span>{annotation.subtype}</span>{' '}
               <span>{`Page ${annotation.pageIndex + 1}`}</span>{' '}

@@ -191,4 +191,63 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('menu', { name: 'Page actions' })).toHaveCount(0);
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
+
+  test('delays a hoverable mark peek and opens one selected owned row without shifting the document', async ({ page }) => {
+    await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+    await page.getByRole('button', { name: 'Keep without comment' }).click();
+
+    const canvas = page.getByRole('application', { name: 'PDF review canvas' });
+    const markTarget = page.locator('[data-owned-focus-id]').first();
+    await expect(markTarget).toHaveCount(1);
+    const before = await canvas.boundingBox();
+
+    await markTarget.hover();
+    await canvas.hover();
+    await page.waitForTimeout(380);
+    await expect(page.locator('[data-annotation-peek]')).toHaveCount(0);
+
+    await markTarget.focus();
+    const peek = page.locator('[data-annotation-peek]');
+    await expect(peek).toBeVisible();
+    await expect(peek).toContainText('highlight · Page 1');
+    await page.keyboard.press('Escape');
+    await expect(peek).toHaveCount(0);
+
+    await markTarget.click();
+    const drawer = page.locator('[data-annotation-drawer]');
+    await expect(drawer).toHaveAttribute('data-list-open', 'true');
+    const row = page.locator('[data-review-item]').first();
+    await expect(row).toHaveAttribute('data-active', 'true');
+    await expect(row.getByRole('button', { name: /highlight · Page 1/ })).toBeFocused();
+    expect(await canvas.boundingBox()).toEqual(before);
+
+    const existing = page.getByRole('region', { name: 'Existing PDF annotations' });
+    await expect(existing.getByRole('button', { name: /Highlight · Page 1 · Source comment/ })).toBeVisible();
+    await expect(existing.getByRole('button', { name: /^Edit/ })).toHaveCount(0);
+    await expect(existing.getByRole('button', { name: /^Delete/ })).toHaveCount(0);
+  });
+
+  test('shows an offscreen direction cue without scrolling until explicit mark activation', async ({ page }) => {
+    for (let index = 0; index < 7; index += 1) {
+      await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+      await page.getByRole('button', { name: 'Keep without comment' }).click();
+    }
+    await page.getByRole('button', { name: 'Annotations' }).click();
+    const drawer = page.locator('[data-annotation-drawer]');
+    await drawer.evaluate((element) => {
+      Object.assign((element as HTMLElement).style, { height: '7rem', bottom: 'auto' });
+    });
+    const lastMark = page.locator('[data-owned-focus-id]').last();
+    const scrollBefore = await drawer.evaluate((element) => element.scrollTop);
+
+    await lastMark.focus();
+    await expect(page.locator('[data-correspondence-direction="below"]')).toBeVisible();
+    expect(await drawer.evaluate((element) => element.scrollTop)).toBe(scrollBefore);
+
+    await page.keyboard.press('Enter');
+    const selected = page.locator('[data-review-item][data-active="true"]');
+    await expect(selected).toHaveCount(1);
+    await expect(selected.getByRole('button', { name: /highlight · Page 1/ })).toBeFocused();
+    expect(await drawer.evaluate((element) => element.scrollTop)).toBeGreaterThan(scrollBefore);
+  });
 });

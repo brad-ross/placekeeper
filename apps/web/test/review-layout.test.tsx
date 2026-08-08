@@ -38,7 +38,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('role="toolbar"');
     expect(html).toContain('aria-label="Selection review actions"');
     expect(html).toContain('aria-keyshortcuts="Alt+Shift+H"');
-    expect(html).toContain('aria-label="Review annotations"');
+    expect(html).toContain('aria-label="All annotations"');
     expect(html).toContain('aria-live="polite"');
     expect(html).toContain('data-breakpoint="1024"');
     expect(html).toContain('data-list-open="false"');
@@ -53,6 +53,9 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-label="Redo"');
     expect(html).toContain('Annotations (0)');
     expect(html).toContain('id="review-annotation-list"');
+    expect(html).toContain('data-annotation-drawer');
+    expect(html).toContain('aria-label="Owned annotations"');
+    expect(html).toContain('aria-label="Existing PDF annotations"');
     for (const tool of ['Replace', 'Delete', 'Highlight']) {
       expect(html).toContain(`>${tool}</button>`);
     }

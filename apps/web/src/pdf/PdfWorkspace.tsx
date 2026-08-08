@@ -12,9 +12,11 @@ import { ZoomGestureWrapper } from '@embedpdf/plugin-zoom/react';
 import { useMemo } from 'react';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import { positionOwnedRect } from './owned-overlay.js';
+import { groupOwnedMarkGeometry, type OwnedMarkGeometry } from './owned-mark-hit-test.js';
 import {
   isUnsafePageContextTarget,
   normalizePageClientPoint,
+  type ViewerOwnedMarkInteraction,
   type ViewerPagePoint,
 } from './viewer-interaction-events.js';
 
@@ -36,6 +38,10 @@ export interface PdfWorkspaceProps {
   keyboardPageNoteCursor?: ViewerPagePoint | null;
   onKeyboardPageNoteKey?: (key: string) => void;
   onPageContextMenu?: (request: PageContextMenuRequest) => boolean;
+  fillContainer?: boolean;
+  activeOwnedAnnotationId?: string;
+  correspondingOwnedAnnotationId?: string;
+  onOwnedMarkInteraction?: (interaction: ViewerOwnedMarkInteraction) => void;
 }
 
 export function PdfWorkspace({
@@ -47,6 +53,10 @@ export function PdfWorkspace({
   keyboardPageNoteCursor = null,
   onKeyboardPageNoteKey,
   onPageContextMenu,
+  fillContainer = false,
+  activeOwnedAnnotationId,
+  correspondingOwnedAnnotationId,
+  onOwnedMarkInteraction,
 }: PdfWorkspaceProps) {
   const annotationsByPage = useMemo(() => {
     const result = new Map<number, ReviewAnnotation[]>();
@@ -57,9 +67,21 @@ export function PdfWorkspace({
     }
     return result;
   }, [ownedAnnotations]);
+  const geometryByPage = useMemo(() => {
+    const result = new Map<number, OwnedMarkGeometry[]>();
+    for (const [pageIndex, annotations] of annotationsByPage) {
+      result.set(pageIndex, groupOwnedMarkGeometry(annotations));
+    }
+    return result;
+  }, [annotationsByPage]);
 
   return (
-    <div aria-label={documentLabel} role="region" className="pdf-workspace">
+    <div
+      aria-label={documentLabel}
+      role="region"
+      className="pdf-workspace"
+      style={fillContainer ? undefined : { height: '70vh', minHeight: 480 }}
+    >
       <EmbedPDF
         engine={engine}
         plugins={plugins}
@@ -172,7 +194,8 @@ export function PdfWorkspace({
                                   key={`${annotation.id}:${index}`}
                                   data-owned-mark={annotation.kind}
                                   data-review-id={annotation.id}
-                                  title={annotation.contents}
+                                  data-corresponding={correspondingOwnedAnnotationId === annotation.id ? 'true' : 'false'}
+                                  data-active={activeOwnedAnnotationId === annotation.id ? 'true' : 'false'}
                                   style={{
                                     position: 'absolute',
                                     left: transformed.origin.x,
@@ -189,6 +212,36 @@ export function PdfWorkspace({
                               );
                             });
                           })}
+                      </div>
+                      <div className="owned-mark-focus-layer" data-owned-focus-layer>
+                        {(geometryByPage.get(layout.pageIndex) ?? []).map((group) => {
+                          const annotation = (annotationsByPage.get(layout.pageIndex) ?? [])
+                            .find(({ id }) => id === group.id);
+                          const page = activePdf.pages[layout.pageIndex];
+                          const rect = group.rects[0];
+                          if (!annotation || !page || !rect) return null;
+                          const transformed = positionOwnedRect(page, layout, activeDocument.rotation, rect);
+                          return (
+                            <button
+                              key={group.id}
+                              type="button"
+                              className="owned-mark-focus-proxy"
+                              data-owned-focus-id={group.id}
+                              aria-label={`${annotation.kind} annotation on page ${annotation.pageIndex + 1}`}
+                              onFocus={() => onOwnedMarkInteraction?.({ id: group.id, phase: 'focus' })}
+                              onBlur={() => onOwnedMarkInteraction?.({ id: group.id, phase: 'blur' })}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') event.preventDefault();
+                              }}
+                              onKeyUp={(event) => {
+                                if (event.key !== 'Enter' && event.key !== ' ') return;
+                                event.preventDefault();
+                                onOwnedMarkInteraction?.({ id: group.id, phase: 'activate' });
+                              }}
+                              style={{ left: transformed.origin.x, top: transformed.origin.y }}
+                            />
+                          );
+                        })}
                       </div>
                       {keyboardPageNoteCursor?.pageIndex === layout.pageIndex ? (() => {
                         const page = activePdf.pages[layout.pageIndex];

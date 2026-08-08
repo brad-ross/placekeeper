@@ -36,6 +36,11 @@ export interface ViewerSelectionPlacement {
   readonly placement: ViewerClientPlacement;
 }
 
+export interface ViewerOwnedMarkInteraction {
+  readonly id: string;
+  readonly phase: 'enter' | 'leave' | 'focus' | 'blur' | 'activate';
+}
+
 export type ViewerInteractionEvent =
   | { readonly type: 'readiness'; readonly ready: boolean; readonly reason?: string }
   | { readonly type: 'page'; readonly currentPage: number; readonly totalPages: number }
@@ -45,7 +50,8 @@ export type ViewerInteractionEvent =
   | { readonly type: 'caret'; readonly value: ViewerCaretUpdate }
   | { readonly type: 'page-menu'; readonly value: ViewerPageMenuInvocation | null }
   | { readonly type: 'page-note-cursor'; readonly value: ViewerPagePoint | null }
-  | { readonly type: 'page-note-commit'; readonly value: ViewerPagePoint };
+  | { readonly type: 'page-note-commit'; readonly value: ViewerPagePoint }
+  | { readonly type: 'owned-mark'; readonly value: ViewerOwnedMarkInteraction };
 
 export type ViewerInteractionListener = (event: ViewerInteractionEvent) => void;
 

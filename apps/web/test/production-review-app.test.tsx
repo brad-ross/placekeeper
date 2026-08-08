@@ -31,12 +31,14 @@ describe("one production review tree", () => {
       viewer={<div role="application">Real shared PDF viewer</div>}
     />);
     expect(html).toContain("Real shared PDF viewer");
-    expect(html).toContain("aria-label=\"Review tools\"");
+    expect(html).toContain("aria-label=\"Review views\"");
     expect(html).toContain("Human delivery");
     expect(html).toContain("Codex delivery");
     expect(html).toContain("Finish review");
     expect(html).toContain("Discard review");
     expect(html).toContain("data-review-finish-slot");
+    expect(html).toContain('data-annotation-drawer');
+    expect(html).toContain('Existing annotations are loading');
     expect(html).toContain("data-surface-open=\"false\"");
     expect(html).not.toContain("delivery-layout");
     expect(html.match(/Real shared PDF viewer/g)).toHaveLength(1);

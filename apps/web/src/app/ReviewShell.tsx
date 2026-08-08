@@ -24,10 +24,12 @@ import {
 } from '../../../../packages/core/src/review-commands.js';
 import type { ReviewCommand, ReviewItem, ReviewState } from '../../../../packages/core/src/review-model.js';
 import type { CaretAnchor, SelectionAnchor } from '../pdf/selection-anchor.js';
+import type { ExistingAnnotation, ExistingAnnotationsDiscovery } from '../pdf/existing-annotations.js';
 import { reliableSelection, type SelectionUpdate } from '../pdf/selection-state.js';
 import type { ViewerControls, ViewerControlsSnapshot } from '../pdf/viewer-controls.js';
 import { unavailableViewerControls } from '../pdf/viewer-controls.js';
 import { AnnotationList } from '../review/AnnotationList.js';
+import { AnnotationPeek } from '../review/AnnotationPeek.js';
 import { CommentComposer } from '../review/CommentComposer.js';
 import { ContextActionPalette, type ContextPlacement } from '../review/ContextActionPalette.js';
 import { PageActionMenu } from '../review/PageActionMenu.js';
@@ -85,6 +87,13 @@ export interface ReviewShellProps {
   onPageNoteComposerComplete?(): void;
   onCommand(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
   onNavigate?(item: ReviewItem): void;
+  onNavigateExisting?(item: ExistingAnnotation): void;
+  existingAnnotations?: ExistingAnnotationsDiscovery;
+  onRetryExistingAnnotations?(): void;
+  correspondingItemId?: string;
+  activationRequest?: { readonly id: string; readonly token: number };
+  onItemCorrespondenceChange?(id: string | undefined): void;
+  onActiveItemChange?(id: string | undefined): void;
   viewerControls?: ViewerControls;
   viewerState?: ViewerControlsSnapshot;
   finishSlot?: ReactNode;
@@ -113,6 +122,11 @@ export function ReviewShell(props: ReviewShellProps) {
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
   const [composer, setComposer] = useState<Composer | null>(null);
   const [activeItemId, setActiveItemId] = useState<string>();
+  const [listActivation, setListActivation] = useState<{ readonly id: string; readonly token: number }>();
+  const localActivationToken = useRef(0);
+  const [peekItemId, setPeekItemId] = useState<string>();
+  const peekHeldRef = useRef(false);
+  const peekTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [announcement, setAnnouncement] = useState(`Review revision ${props.state.revision}.`);
   const acknowledgedRef = useRef(props.state);
   const commandTailRef = useRef<Promise<ReviewState>>(Promise.resolve(props.state));
@@ -124,6 +138,38 @@ export function ReviewShell(props: ReviewShellProps) {
   const listOpen = surface.baseSurface === 'annotations';
   const selectionAnchor = reliableSelection(props.selectionUpdate);
   const lastPlacedPageNoteToken = useRef<number | undefined>(undefined);
+  const existingAnnotations = props.existingAnnotations ?? { status: 'loading', generation: 0 };
+
+  const clearPeekTimer = () => {
+    if (peekTimerRef.current !== undefined) clearTimeout(peekTimerRef.current);
+    peekTimerRef.current = undefined;
+  };
+  useEffect(() => {
+    clearPeekTimer();
+    if (listOpen) {
+      setPeekItemId(undefined);
+      return;
+    }
+    const id = props.correspondingItemId;
+    if (id) {
+      peekTimerRef.current = setTimeout(() => setPeekItemId(id), 320);
+    } else if (!peekHeldRef.current) {
+      peekTimerRef.current = setTimeout(() => setPeekItemId(undefined), 180);
+    }
+    return clearPeekTimer;
+  }, [listOpen, props.correspondingItemId]);
+
+  useEffect(() => {
+    const request = props.activationRequest;
+    if (!request) return;
+    setActiveItemId(request.id);
+    setListActivation(request);
+    props.onActiveItemChange?.(request.id);
+    setPeekItemId(undefined);
+    dispatchSurface({ type: 'open-base', surface: 'annotations' });
+    const item = props.state.items.find(({ id }) => id === request.id);
+    if (item) props.onNavigate?.(item);
+  }, [props.activationRequest?.id, props.activationRequest?.token]);
 
   const rememberSurfaceTrigger = (surfaceName: ReviewBaseSurface) => {
     if (document.activeElement instanceof HTMLElement) {
@@ -216,6 +262,13 @@ export function ReviewShell(props: ReviewShellProps) {
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const editable = isEditableTarget(event.target);
     if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+      if (peekItemId !== undefined) {
+        event.preventDefault();
+        clearPeekTimer();
+        peekHeldRef.current = false;
+        setPeekItemId(undefined);
+        return;
+      }
       if (surface.nestedLayer !== 'none') {
         event.preventDefault();
         closeNested();
@@ -413,17 +466,54 @@ export function ReviewShell(props: ReviewShellProps) {
               }}
             />
           ) : null}
-          <div
+          {!listOpen && peekItemId ? (() => {
+            const item = props.state.items.find(({ id }) => id === peekItemId);
+            return item ? (
+              <AnnotationPeek
+                item={item}
+                onHoldChange={(held) => {
+                  peekHeldRef.current = held;
+                  clearPeekTimer();
+                  if (!held && props.correspondingItemId === undefined) {
+                    peekTimerRef.current = setTimeout(() => setPeekItemId(undefined), 180);
+                  }
+                }}
+                onDismiss={() => {
+                  peekHeldRef.current = false;
+                  setPeekItemId(undefined);
+                }}
+                onActivate={() => {
+                  setActiveItemId(item.id);
+                  setListActivation({ id: item.id, token: ++localActivationToken.current });
+                  props.onActiveItemChange?.(item.id);
+                  props.onNavigate?.(item);
+                  dispatchSurface({ type: 'open-base', surface: 'annotations' });
+                }}
+              />
+            ) : null;
+          })() : null}
+        </div>
+        <div className="review-drawer-host" data-review-drawer-host>
+          <aside
+            id="review-annotation-list"
             className="review-list"
+            data-annotation-drawer
             data-list-open={listOpen ? 'true' : 'false'}
+            aria-label="All annotations"
             aria-hidden={!listOpen}
             inert={!listOpen}
           >
             <AnnotationList
               items={props.state.items}
               {...(activeItemId === undefined ? {} : { activeId: activeItemId })}
+              {...(props.correspondingItemId === undefined ? {} : { correspondingId: props.correspondingItemId })}
+              {...(!listOpen || listActivation === undefined ? {} : { activationRequest: listActivation })}
+              {...(props.onItemCorrespondenceChange === undefined
+                ? {}
+                : { onCorrespondenceChange: props.onItemCorrespondenceChange })}
               onNavigate={(item) => {
                 setActiveItemId(item.id);
+                props.onActiveItemChange?.(item.id);
                 props.onNavigate?.(item);
               }}
               onEdit={(item, trigger) => {
@@ -436,12 +526,34 @@ export function ReviewShell(props: ReviewShellProps) {
                 if (activeItemId === item.id) {
                   const ordered = next.items;
                   setActiveItemId(ordered[0]?.id);
+                  props.onActiveItemChange?.(ordered[0]?.id);
                 }
               }}
             />
-          </div>
-        </div>
-        <div className="review-drawer-host" data-review-drawer-host>
+            <section aria-label="Existing PDF annotations">
+              <h2>Existing PDF annotations</h2>
+              {existingAnnotations.status === 'loading' ? <p role="status">Existing annotations are loading…</p> : null}
+              {existingAnnotations.status === 'empty' ? <p>No existing annotations.</p> : null}
+              {existingAnnotations.status === 'error' ? (
+                <div role="alert">
+                  <p>Existing annotations unavailable.</p>
+                  <button type="button" onClick={props.onRetryExistingAnnotations}>Retry</button>
+                </div>
+              ) : null}
+              {existingAnnotations.status === 'ready' ? (
+                <ol>
+                  {existingAnnotations.items.map((annotation) => (
+                    <li key={`${annotation.pageIndex}:${annotation.id}`} data-existing-annotation={annotation.id}>
+                      <button type="button" onClick={() => props.onNavigateExisting?.(annotation)}>
+                        {annotation.subtype} · Page {annotation.pageIndex + 1}
+                        {annotation.contents ? ` · ${annotation.contents}` : ''}
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              ) : null}
+            </section>
+          </aside>
           <aside
             id="review-finish-drawer"
             className="review-finish-drawer"

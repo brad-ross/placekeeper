@@ -28,6 +28,10 @@
 
 .review-contextual-host, .review-drawer-host { position: absolute; z-index: 2; inset: 0; overflow: hidden; pointer-events: none; }
 .review-context-palette, .review-page-menu { position: fixed; z-index: 3; display: flex; gap: .25rem; padding: .3rem; border: 1px solid #817c72; border-radius: .45rem; background: #fff; box-shadow: 0 .4rem 1.2rem #0003; pointer-events: auto; }
+.annotation-peek { position: absolute; z-index: 3; top: 50%; right: .65rem; width: min(19rem, calc(100vw - 2rem)); padding: .7rem; transform: translateY(-50%); border: 1px solid #817c72; border-right: 4px solid #315a46; border-radius: .45rem; background: #fff; box-shadow: 0 .4rem 1.2rem #0003; pointer-events: auto; }
+.annotation-peek p { margin: 0 0 .45rem; overflow-wrap: anywhere; }
+.annotation-peek > div { display: flex; justify-content: space-between; gap: .5rem; }
+.annotation-peek button { min-height: 2rem; }
 .review-context-palette button, .review-page-menu button { min-height: 2rem; border: 1px solid #b9b4a9; border-radius: .3rem; color: #24231f; background: #fff; }
 .review-page-menu { transform: translate(.35rem, .35rem); }
 .page-note-placement-cursor { position: absolute; z-index: 3; display: grid; width: 1.75rem; height: 1.75rem; padding: 0; place-items: center; transform: translate(-50%, -50%); border: 2px solid #153e70; border-radius: 50%; color: #153e70; background: #fff; font-size: 1.25rem; font-weight: 800; line-height: 1; box-shadow: 0 0 0 2px #fff; }
@@ -37,7 +41,16 @@
 .review-finish-drawer { padding: 1rem; transform: translateX(102%); visibility: hidden; }
 .review-finish-drawer[data-surface-open="true"] { transform: none; visibility: visible; pointer-events: auto; transition-timing-function: ease-out, step-start; }
 .review-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: .3rem; margin-block: .4rem; }
-.review-list li[data-active="true"] { outline: 2px solid #315a46; outline-offset: 2px; }
+.review-list li[data-active="true"] { outline: 2px solid #315a46; outline-offset: 2px; background: #e9f2ed; }
+.review-list li[data-corresponding="true"] { box-shadow: inset 4px 0 #315a46; background: #f3f7f4; }
+.annotation-direction-cue { position: sticky; z-index: 1; margin: .25rem 0; padding: .35rem .5rem; border: 1px dashed #315a46; background: #f3f7f4; font-weight: 650; }
+.annotation-direction-cue[data-correspondence-direction="above"] { top: 0; }
+.annotation-direction-cue[data-correspondence-direction="below"] { bottom: 0; }
+.owned-mark-focus-layer { position: absolute; inset: 0; pointer-events: none; }
+.owned-mark-focus-proxy { position: absolute; z-index: 2; width: 1rem; height: 1rem; padding: 0; transform: translate(-50%, -50%); opacity: .01; border: 0; border-radius: 50%; pointer-events: none; }
+.owned-mark-focus-proxy:focus-visible { opacity: 1; outline: 3px solid #153e70; outline-offset: 2px; background: #fff; }
+[data-owned-mark][data-corresponding="true"] { outline: 2px dashed #315a46; outline-offset: 1px; }
+[data-owned-mark][data-active="true"] { outline: 2px solid #315a46; outline-offset: 2px; filter: saturate(.8); }
 .review-delivery-content { display: grid; gap: 1.5rem; }
 .review-nested-host { position: absolute; z-index: 4; inset: 0; pointer-events: none; }
 .review-nested-host > * { pointer-events: auto; }
@@ -49,9 +62,11 @@
   .review-chrome { grid-template-columns: minmax(0, 1fr) auto; gap: .4rem; }
   .review-chrome__viewer-controls { grid-column: 1 / -1; grid-row: 2; justify-self: center; }
   .review-chrome__saved { display: none; }
+  .review-list, .review-finish-drawer { width: min(22rem, 96vw); }
+  .annotation-peek { right: .35rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .review-list, .review-finish-drawer, .review-context-palette, .review-page-menu, .page-note-placement-cursor { transition: none; animation: none; }
+  .review-list, .review-finish-drawer, .review-context-palette, .review-page-menu, .page-note-placement-cursor, .annotation-peek { transition: none; animation: none; }
   .review-shell, .review-shell *, .review-shell *::before, .review-shell *::after { scroll-behavior: auto !important; }
 }
