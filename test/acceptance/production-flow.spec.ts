@@ -115,7 +115,7 @@ test("one installed-style browser tree preserves review state across responsive 
   await installSelectionCaptureGate(page);
   await page.goto(launchUrl);
   await expect(page.getByRole("heading", { name: "paper.pdf" })).toBeVisible();
-  await expect(page.getByRole("toolbar", { name: "Review tools" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Review views" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Human delivery", includeHidden: true })).toBeHidden();
   await expect(page.getByRole("heading", { name: "Codex delivery", includeHidden: true })).toBeHidden();
   await expect.poll(() => assetResponses.some((url) => url.endsWith("/app.css"))).toBe(true);
@@ -185,20 +185,14 @@ test("one installed-style browser tree preserves review state across responsive 
     height: 16,
   });
 
-  await pageCanvas.click({ position: { x: 80, y: 100 } });
-  await page.getByRole("button", { name: "Page Note" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox").fill("Production review note");
-  await dialog.getByRole("button", { name: /save/i }).click();
-  await expect(page.getByText("Production review note")).toBeVisible();
-  await expect(page.locator("[data-owned-mark='pageNote']")).toHaveCount(1);
-
   await page.setViewportSize({ width: 760, height: 900 });
-  await expect(page.locator("[data-owned-mark='pageNote']")).toHaveCount(1);
+  await expect(page.locator("[data-owned-mark='replace']")).toHaveCount(1);
   await page.setViewportSize({ width: 1280, height: 900 });
-  await expect(page.locator("[data-owned-mark='pageNote']")).toHaveCount(1);
+  await expect(page.locator("[data-owned-mark='replace']")).toHaveCount(1);
 
   await page.getByRole("button", { name: "Finish" }).click();
+  await expect(page.getByRole("heading", { name: "Finish review" })).toBeVisible();
+  await expect(page.getByText("1 review item")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Human delivery" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Codex delivery" })).toBeVisible();
   await expect(pageCanvas).toHaveCount(1);
@@ -216,6 +210,21 @@ test("one installed-style browser tree preserves review state across responsive 
   await page.getByRole("button", { name: "Prepare Codex handoff" }).click();
   const confirm = page.getByRole("alertdialog", { name: "Confirm this external data flow" });
   await expect(confirm).toBeVisible();
+  await expect(confirm.getByRole("button", { name: "Confirm and prepare" })).toBeFocused();
+  await page.setViewportSize({ width: 640, height: 900 });
+  await expect(confirm).toBeVisible();
+  await expect(pageCanvas).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(confirm).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Finish review" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Prepare Codex handoff" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("heading", { name: "Finish review", includeHidden: true })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Finish" })).toBeFocused();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByRole("button", { name: "Finish" }).click();
+  await page.getByRole("button", { name: "Prepare Codex handoff" }).click();
+  await expect(confirm).toBeVisible();
   await expect(page.getByRole("definition").filter({ hasText: sourceRoot })).toBeVisible();
   await confirm.getByRole("button", { name: "Confirm and prepare" }).click();
   await expect(page.getByText(/^Handoff JSON:/u)).toBeVisible();
@@ -227,6 +236,10 @@ test("one installed-style browser tree preserves review state across responsive 
   await access(codexReviewedPath!);
   expect((await realpath(handoffPath!)).startsWith(`${await realpath(sourceRoot)}/`)).toBe(true);
   await expect(page.locator("#codex-instruction")).toContainText(handoffPath!);
+  await page.getByRole("button", { name: "Close finish options" }).click();
+  await expect(page.getByText(/^Handoff JSON:/u)).toBeHidden();
+  await page.getByRole("button", { name: "Finish" }).click();
+  await expect(page.getByText(/^Handoff JSON:/u)).toHaveText(`Handoff JSON: ${handoffPath}`);
   expect(contactedOrigins).toEqual(new Set([new URL(launchUrl).origin]));
   expect(browserErrors).toEqual([]);
 });

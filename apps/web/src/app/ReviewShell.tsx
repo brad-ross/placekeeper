@@ -34,6 +34,7 @@ import { CommentComposer } from '../review/CommentComposer.js';
 import { ContextActionPalette, type ContextPlacement } from '../review/ContextActionPalette.js';
 import { PageActionMenu } from '../review/PageActionMenu.js';
 import { ReviewChrome } from '../review/ReviewChrome.js';
+import { FinishReviewDrawer } from './FinishReviewDrawer.js';
 import {
   createProofreadInputController,
   isEditableTarget,
@@ -97,6 +98,9 @@ export interface ReviewShellProps {
   viewerControls?: ViewerControls;
   viewerState?: ViewerControlsSnapshot;
   finishSlot?: ReactNode;
+  finishConfirmationActive?: boolean;
+  onFinishReview?(): void | Promise<void>;
+  onDiscardReview?(): void | Promise<void>;
   children?: ReactNode;
 }
 
@@ -274,6 +278,14 @@ export function ReviewShell(props: ReviewShellProps) {
         closeNested();
         return;
       }
+      if (
+        surface.baseSurface === 'finish' &&
+        (event.currentTarget.querySelector('[role="alertdialog"]') !== null ||
+          (event.target instanceof Element && event.target.closest('[role="alertdialog"]')) ||
+          props.finishConfirmationActive)
+      ) {
+        return;
+      }
       if (props.keyboardPageNoteActive) {
         event.preventDefault();
         props.onCancelKeyboardPageNote?.();
@@ -400,6 +412,10 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const canUndo = props.state.historyCursor > 0;
   const canRedo = props.state.historyCursor < props.state.history.length;
+  const closeFinish = () => {
+    dispatchSurface({ type: 'open-base', surface: 'reading' });
+    restoreSurfaceTrigger('finish');
+  };
 
   return (
     <section
@@ -554,17 +570,15 @@ export function ReviewShell(props: ReviewShellProps) {
               ) : null}
             </section>
           </aside>
-          <aside
-            id="review-finish-drawer"
-            className="review-finish-drawer"
-            data-review-finish-slot
-            data-surface-open={surface.baseSurface === 'finish' ? 'true' : 'false'}
-            aria-label="Finish review"
-            aria-hidden={surface.baseSurface !== 'finish'}
-            inert={surface.baseSurface !== 'finish'}
+          <FinishReviewDrawer
+            state={props.state}
+            open={surface.baseSurface === 'finish'}
+            onClose={closeFinish}
+            onFinish={props.onFinishReview ?? (() => undefined)}
+            onDiscard={props.onDiscardReview ?? (() => undefined)}
           >
             {props.finishSlot}
-          </aside>
+          </FinishReviewDrawer>
         </div>
       </div>
       <div className="review-nested-host" data-review-nested-host>

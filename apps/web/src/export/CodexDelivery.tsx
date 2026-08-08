@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 
 import type { ReviewState } from "../../../../packages/core/src/review-model.js";
 import { deliveryUnavailableReason } from "./HumanDelivery.js";
@@ -49,6 +49,7 @@ export interface CodexDeliveryProps extends CodexDeliveryScope {
     readonly disposition: File;
     readonly revisedPdf?: File;
   }) => Promise<CheckedCodexResult>;
+  readonly onConfirmationActiveChange?: (active: boolean) => void;
 }
 
 export function CodexDelivery(props: CodexDeliveryProps) {
@@ -60,12 +61,58 @@ export function CodexDelivery(props: CodexDeliveryProps) {
   const [revisedPdf, setRevisedPdf] = useState<File | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const prepareTriggerRef = useRef<HTMLButtonElement>(null);
+  const confirmPrepareRef = useRef<HTMLButtonElement>(null);
+  const readyFocusRef = useRef<HTMLTextAreaElement>(null);
   const unavailable = deliveryUnavailableReason(props.state);
   const scope: CodexDeliveryScope = {
     sourceRoot: props.sourceRoot,
     provider: props.provider,
     revisedPdfDestination: props.revisedPdfDestination,
     retention: props.retention,
+  };
+
+  useLayoutEffect(() => {
+    props.onConfirmationActiveChange?.(confirming);
+    return () => props.onConfirmationActiveChange?.(false);
+  }, [confirming, props.onConfirmationActiveChange]);
+
+  useEffect(() => {
+    if (confirming) confirmPrepareRef.current?.focus();
+  }, [confirming]);
+
+  useEffect(() => {
+    if (confirming) return;
+    const target = phase === "Ready" ? readyFocusRef.current : prepareTriggerRef.current;
+    if (!target?.closest('[aria-hidden="true"]')) target?.focus();
+  }, [confirming, phase]);
+
+  const closeConfirmation = () => {
+    setConfirming(false);
+    queueMicrotask(() => {
+      const trigger = prepareTriggerRef.current;
+      if (!trigger?.closest('[aria-hidden="true"]')) trigger?.focus();
+    });
+  };
+
+  const confirmationKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeConfirmation();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first?.focus();
+    }
   };
 
   const prepare = async () => {
@@ -90,12 +137,12 @@ export function CodexDelivery(props: CodexDeliveryProps) {
     setError(null);
     try {
       await props.onConfirmScope(codexDeliveryScopeSignature(scope));
-      setConfirming(false);
       setPrepared(await props.onPrepare());
       setPhase("Ready");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Codex handoff preparation failed safely.");
     } finally {
+      setConfirming(false);
       setBusy(false);
     }
   };
@@ -164,6 +211,8 @@ export function CodexDelivery(props: CodexDeliveryProps) {
         <div>
           {unavailable ? <p id="codex-disabled-reason">{unavailable}</p> : null}
           <button
+            ref={prepareTriggerRef}
+            data-primary-action="true"
             type="button"
             disabled={unavailable !== undefined || busy}
             aria-describedby={unavailable ? "codex-disabled-reason" : undefined}
@@ -175,11 +224,11 @@ export function CodexDelivery(props: CodexDeliveryProps) {
       ) : null}
 
       {confirming ? (
-        <div role="alertdialog" aria-modal="true" aria-labelledby="codex-confirm-heading">
+        <div role="alertdialog" aria-modal="true" aria-labelledby="codex-confirm-heading" onKeyDown={confirmationKeyDown}>
           <h3 id="codex-confirm-heading">Confirm this external data flow</h3>
           <p>Confirm the source root, provider, destination, and retention setting shown above.</p>
-          <button type="button" disabled={busy} onClick={() => void confirmAndPrepare()}>Confirm and prepare</button>
-          <button type="button" disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
+          <button ref={confirmPrepareRef} type="button" disabled={busy} onClick={() => void confirmAndPrepare()}>Confirm and prepare</button>
+          <button type="button" disabled={busy} onClick={closeConfirmation}>Cancel</button>
         </div>
       ) : null}
 
@@ -190,7 +239,7 @@ export function CodexDelivery(props: CodexDeliveryProps) {
           <p>Handoff JSON: {prepared.handoffPath}</p>
           <p>Handoff SHA-256: {prepared.handoffSha256}</p>
           <label htmlFor="codex-instruction">Ready-to-paste instruction</label>
-          <textarea id="codex-instruction" readOnly value={prepared.prompt} rows={16} />
+          <textarea ref={readyFocusRef} id="codex-instruction" readOnly value={prepared.prompt} rows={16} />
           <button type="button" onClick={() => void copyInstruction()}>Copy instruction</button>
           <button type="button" disabled={busy} onClick={() => void saveInstruction()}>Save instruction</button>
           <button type="button" data-primary-action="true" onClick={() => setPhase("Result")}>Continue to Result</button>

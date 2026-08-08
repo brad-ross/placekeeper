@@ -34,6 +34,11 @@ describe("one production review tree", () => {
     expect(html).toContain("aria-label=\"Review views\"");
     expect(html).toContain("Human delivery");
     expect(html).toContain("Codex delivery");
+    expect(html).toContain("Review summary");
+    expect(html).toContain("1 review item");
+    expect(html).toContain("Reviewed PDF");
+    expect(html).toContain("Codex handoff");
+    expect(html).toContain("Close finish options");
     expect(html).toContain("Finish review");
     expect(html).toContain("Discard review");
     expect(html).toContain("data-review-finish-slot");
@@ -43,5 +48,6 @@ describe("one production review tree", () => {
     expect(html).not.toContain("delivery-layout");
     expect(html.match(/Real shared PDF viewer/g)).toHaveLength(1);
     expect(html).not.toContain("Submit task");
+    expect(html).not.toContain('aria-modal="true" aria-labelledby="finish-review-heading"');
   });
 });

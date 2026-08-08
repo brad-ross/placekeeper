@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import type { ReviewState } from "../../../../packages/core/src/review-model.js";
 
@@ -15,6 +15,8 @@ export interface HumanDeliveryProps {
   readonly onReplaceOriginal: () => Promise<DeliveryArtifact>;
   readonly onFinish: () => void | Promise<void>;
   readonly onDiscard: () => void | Promise<void>;
+  readonly showLifecycleActions?: boolean;
+  readonly onConfirmationActiveChange?: (active: boolean) => void;
 }
 
 export const EMPTY_DELIVERY_EXPLANATION =
@@ -36,16 +38,57 @@ export function HumanDelivery({
   onReplaceOriginal,
   onFinish,
   onDiscard,
+  showLifecycleActions = true,
+  onConfirmationActiveChange,
 }: HumanDeliveryProps) {
   const [busyAction, setBusyAction] = useState<"save" | "replace" | null>(null);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const replaceTriggerRef = useRef<HTMLButtonElement>(null);
+  const confirmReplaceRef = useRef<HTMLButtonElement>(null);
   const saveReason = deliveryUnavailableReason(state, exportUnavailableReason);
   const replaceReason = deliveryUnavailableReason(
     state,
     replaceUnavailableReason ?? exportUnavailableReason,
   );
+
+  useLayoutEffect(() => {
+    onConfirmationActiveChange?.(confirmReplace);
+    return () => onConfirmationActiveChange?.(false);
+  }, [confirmReplace, onConfirmationActiveChange]);
+
+  useEffect(() => {
+    if (confirmReplace) confirmReplaceRef.current?.focus();
+  }, [confirmReplace]);
+
+  const closeReplaceConfirmation = () => {
+    setConfirmReplace(false);
+    queueMicrotask(() => {
+      const trigger = replaceTriggerRef.current;
+      if (!trigger?.closest('[aria-hidden="true"]')) trigger?.focus();
+    });
+  };
+
+  const confirmationKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeReplaceConfirmation();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first?.focus();
+    }
+  };
 
   const run = async (
     action: "save" | "replace",
@@ -65,7 +108,7 @@ export function HumanDelivery({
       setError(cause instanceof Error ? cause.message : "PDF delivery failed safely.");
     } finally {
       setBusyAction(null);
-      setConfirmReplace(false);
+      if (action === "replace") closeReplaceConfirmation();
     }
   };
 
@@ -76,6 +119,7 @@ export function HumanDelivery({
       {saveReason ? <p id="delivery-disabled-reason">{saveReason}</p> : null}
       <div>
         <button
+          data-primary-action="true"
           type="button"
           disabled={saveReason !== undefined || busyAction !== null}
           aria-describedby={saveReason ? "delivery-disabled-reason" : undefined}
@@ -84,6 +128,7 @@ export function HumanDelivery({
           {busyAction === "save" ? "Saving reviewed copy…" : "Save reviewed copy"}
         </button>
         <button
+          ref={replaceTriggerRef}
           type="button"
           disabled={replaceReason !== undefined || busyAction !== null}
           aria-describedby={
@@ -102,34 +147,37 @@ export function HumanDelivery({
         <p id="replace-disabled-reason">{replaceReason}</p>
       ) : null}
       {confirmReplace ? (
-        <div role="alertdialog" aria-modal="true" aria-labelledby="replace-heading">
+        <div role="alertdialog" aria-modal="true" aria-labelledby="replace-heading" onKeyDown={confirmationKeyDown}>
           <h3 id="replace-heading">Replace the original PDF?</h3>
           <p>
             This explicit action replaces the original only after a final safety and
             drift check. Saving a reviewed copy is the safer default.
           </p>
           <button
+            ref={confirmReplaceRef}
             type="button"
             disabled={busyAction !== null}
             onClick={() => void run("replace", onReplaceOriginal)}
           >
             Confirm Replace Original
           </button>
-          <button type="button" onClick={() => setConfirmReplace(false)}>
+          <button type="button" onClick={closeReplaceConfirmation}>
             Cancel
           </button>
         </div>
       ) : null}
       {message ? <p role="status">{message}</p> : null}
       {error ? <p role="alert">{error}</p> : null}
-      <div aria-label="Review lifecycle">
-        <button type="button" onClick={() => void onFinish()}>
-          Finish review
-        </button>
-        <button type="button" onClick={() => void onDiscard()}>
-          Discard review
-        </button>
-      </div>
+      {showLifecycleActions ? (
+        <div aria-label="Review lifecycle">
+          <button type="button" onClick={() => void onFinish()}>
+            Finish review
+          </button>
+          <button type="button" onClick={() => void onDiscard()}>
+            Discard review
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }

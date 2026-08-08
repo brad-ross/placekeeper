@@ -80,6 +80,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [selectionUpdate, setSelectionUpdate] = useState<SelectionUpdate>(INITIAL_SELECTION_UPDATE);
   const [toolError, setToolError] = useState<string | null>(null);
   const [confirmedScope, setConfirmedScope] = useState<string | null>(null);
+  const [humanConfirmationActive, setHumanConfirmationActive] = useState(false);
+  const [codexConfirmationActive, setCodexConfirmationActive] = useState(false);
   const [selectionPlacement, setSelectionPlacement] = useState<ViewerClientPlacement | null>(null);
   const [caret, setCaret] = useState<CaretAnchor | null>(null);
   const [caretPlacement, setCaretPlacement] = useState<ViewerClientPlacement | null>(null);
@@ -214,6 +216,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     <div className="review-delivery-content">
       <HumanDelivery
         state={state}
+        showLifecycleActions={false}
+        onConfirmationActiveChange={setHumanConfirmationActive}
         onSave={() => props.api.saveReviewedCopy()}
         onReplaceOriginal={() => props.api.replaceOriginal()}
         onFinish={() => props.api.finish()}
@@ -221,6 +225,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       />
       <CodexDelivery
         state={state}
+        onConfirmationActiveChange={setCodexConfirmationActive}
         sourceRoot={sourceRoot}
         provider="Codex desktop"
         revisedPdfDestination="A fresh result directory inside the approved source root"
@@ -257,6 +262,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         {...(viewerControlsRef.current === undefined ? {} : { viewerControls: viewerControlsRef.current })}
         viewerState={viewerState}
         finishSlot={delivery}
+        finishConfirmationActive={humanConfirmationActive || codexConfirmationActive}
+        onFinishReview={() => props.api.finish()}
+        onDiscardReview={() => props.api.discard()}
         selectionUpdate={selectionUpdate}
         selectionPlacement={selectionPlacement}
         caretAnchor={caret}
