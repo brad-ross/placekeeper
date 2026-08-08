@@ -189,7 +189,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const restoreSurfaceTrigger = (surfaceName: ReviewBaseSurface) => {
     const trigger = surfaceTriggersRef.current.get(surfaceName);
-    queueMicrotask(() => trigger?.focus());
+    requestAnimationFrame(() => trigger?.focus());
   };
 
   if (props.state.revision >= acknowledgedRef.current.revision) acknowledgedRef.current = props.state;
@@ -242,7 +242,7 @@ export function ReviewShell(props: ReviewShellProps) {
     }
     if (composer) setComposer(null);
     dispatchSurface({ type: 'close-nested' });
-    queueMicrotask(() => trigger?.focus());
+    requestAnimationFrame(() => trigger?.focus());
   };
   useLayoutEffect(() => {
     inputController.focusChanged(isEditableTarget(document.activeElement));
@@ -416,6 +416,10 @@ export function ReviewShell(props: ReviewShellProps) {
     dispatchSurface({ type: 'open-base', surface: 'reading' });
     restoreSurfaceTrigger('finish');
   };
+  const closeAnnotations = () => {
+    dispatchSurface({ type: 'open-base', surface: 'reading' });
+    restoreSurfaceTrigger('annotations');
+  };
 
   return (
     <section
@@ -545,8 +549,9 @@ export function ReviewShell(props: ReviewShellProps) {
                   props.onActiveItemChange?.(ordered[0]?.id);
                 }
               }}
+              onClose={closeAnnotations}
             />
-            <section aria-label="Existing PDF annotations">
+            <section className="existing-annotations" aria-label="Existing PDF annotations">
               <h2>Existing PDF annotations</h2>
               {existingAnnotations.status === 'loading' ? <p role="status">Existing annotations are loading…</p> : null}
               {existingAnnotations.status === 'empty' ? <p>No existing annotations.</p> : null}
@@ -557,12 +562,12 @@ export function ReviewShell(props: ReviewShellProps) {
                 </div>
               ) : null}
               {existingAnnotations.status === 'ready' ? (
-                <ol>
+                <ol className="existing-annotations__list">
                   {existingAnnotations.items.map((annotation) => (
                     <li key={`${annotation.pageIndex}:${annotation.id}`} data-existing-annotation={annotation.id}>
-                      <button type="button" onClick={() => props.onNavigateExisting?.(annotation)}>
-                        {annotation.subtype} · Page {annotation.pageIndex + 1}
-                        {annotation.contents ? ` · ${annotation.contents}` : ''}
+                      <button className="existing-annotation__content" type="button" aria-label={`${annotation.subtype} · Page ${annotation.pageIndex + 1}${annotation.contents ? ` · ${annotation.contents}` : ''}`} onClick={() => props.onNavigateExisting?.(annotation)}>
+                        <span className="annotation-item__meta"><strong>{annotation.subtype}</strong><span>Page {annotation.pageIndex + 1}</span></span>
+                        {annotation.contents ? <span className="annotation-item__excerpt">{annotation.contents}</span> : null}
                       </button>
                     </li>
                   ))}

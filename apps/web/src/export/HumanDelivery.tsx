@@ -64,7 +64,7 @@ export function HumanDelivery({
 
   const closeReplaceConfirmation = () => {
     setConfirmReplace(false);
-    queueMicrotask(() => {
+    requestAnimationFrame(() => {
       const trigger = replaceTriggerRef.current;
       if (!trigger?.closest('[aria-hidden="true"]')) trigger?.focus();
     });
@@ -147,23 +147,27 @@ export function HumanDelivery({
         <p id="replace-disabled-reason">{replaceReason}</p>
       ) : null}
       {confirmReplace ? (
-        <div role="alertdialog" aria-modal="true" aria-labelledby="replace-heading" onKeyDown={confirmationKeyDown}>
-          <h3 id="replace-heading">Replace the original PDF?</h3>
-          <p>
-            This explicit action replaces the original only after a final safety and
-            drift check. Saving a reviewed copy is the safer default.
-          </p>
-          <button
-            ref={confirmReplaceRef}
-            type="button"
-            disabled={busyAction !== null}
-            onClick={() => void run("replace", onReplaceOriginal)}
-          >
-            Confirm Replace Original
-          </button>
-          <button type="button" onClick={closeReplaceConfirmation}>
-            Cancel
-          </button>
+        <div className="delivery-confirmation-backdrop">
+          <div className="delivery-confirmation" role="alertdialog" aria-modal="true" aria-labelledby="replace-heading" onKeyDown={confirmationKeyDown}>
+            <h3 id="replace-heading">Replace the original PDF?</h3>
+            <p>
+              This explicit action replaces the original only after a final safety and
+              drift check. Saving a reviewed copy is the safer default.
+            </p>
+            <div className="delivery-confirmation__actions">
+              <button
+                ref={confirmReplaceRef}
+                type="button"
+                disabled={busyAction !== null}
+                onClick={() => void run("replace", onReplaceOriginal)}
+              >
+                Confirm Replace Original
+              </button>
+              <button type="button" onClick={closeReplaceConfirmation}>
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
       {message ? <p role="status">{message}</p> : null}

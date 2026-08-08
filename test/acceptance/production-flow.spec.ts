@@ -124,6 +124,9 @@ test("one installed-style browser tree preserves review state across responsive 
   await expect(page.getByRole("button", { name: "Proofread mode" })).toHaveCount(0);
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
+  await expect(page.getByLabel('Current page')).toHaveText('1 / 1');
+  const workspace = page.locator('.pdf-workspace');
+  await workspace.evaluate((element) => { element.setAttribute('data-mount-probe', 'stable'); });
   const renderedPageImage = await waitForRenderedPageImage(pageCanvas);
   const canvasBoxBeforeSelection = await pageCanvas.boundingBox();
   expect(canvasBoxBeforeSelection).not.toBeNull();
@@ -189,6 +192,7 @@ test("one installed-style browser tree preserves review state across responsive 
   await expect(page.locator("[data-owned-mark='replace']")).toHaveCount(1);
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(page.locator("[data-owned-mark='replace']")).toHaveCount(1);
+  const canvasBoxBeforeFinish = await pageCanvas.boundingBox();
 
   await page.getByRole("button", { name: "Finish" }).click();
   await expect(page.getByRole("heading", { name: "Finish review" })).toBeVisible();
@@ -196,6 +200,8 @@ test("one installed-style browser tree preserves review state across responsive 
   await expect(page.getByRole("heading", { name: "Human delivery" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Codex delivery" })).toBeVisible();
   await expect(pageCanvas).toHaveCount(1);
+  await expect(workspace).toHaveAttribute('data-mount-probe', 'stable');
+  expect(await pageCanvas.boundingBox()).toEqual(canvasBoxBeforeFinish);
 
   const originalDigest = await sha256(pdf);
   await page.getByRole("button", { name: "Save reviewed copy" }).click();
@@ -211,7 +217,7 @@ test("one installed-style browser tree preserves review state across responsive 
   const confirm = page.getByRole("alertdialog", { name: "Confirm this external data flow" });
   await expect(confirm).toBeVisible();
   await expect(confirm.getByRole("button", { name: "Confirm and prepare" })).toBeFocused();
-  await page.setViewportSize({ width: 640, height: 900 });
+  await page.setViewportSize({ width: 320, height: 720 });
   await expect(confirm).toBeVisible();
   await expect(pageCanvas).toHaveCount(1);
   await page.keyboard.press("Escape");
@@ -242,6 +248,26 @@ test("one installed-style browser tree preserves review state across responsive 
   await expect(page.getByText(/^Handoff JSON:/u)).toHaveText(`Handoff JSON: ${handoffPath}`);
   expect(contactedOrigins).toEqual(new Set([new URL(launchUrl).origin]));
   expect(browserErrors).toEqual([]);
+});
+
+test('uses the same compact review tree for a narrow VS Code embed launch', async ({ page }) => {
+  const launched = await host.open({
+    pdfPath: pdf,
+    sourceRootPath: sourceRoot,
+    surface: 'vscode',
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === 'recovery-offered') throw new Error('VS Code embed launch failed');
+  expect(new URL(launched.url).searchParams.get('embed')).toBe('vscode');
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto(launched.url);
+  await expect(page.locator('[data-production-review]')).toHaveCount(1);
+  await expect(page.locator('[data-review-chrome]')).toHaveCount(1);
+  await expect(page.locator('.pdf-workspace')).toHaveCount(1);
+  await page.getByRole('button', { name: /Annotations/u }).click();
+  await expect(page.getByRole('button', { name: 'Close annotations' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close annotations' }).click();
+  await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'false');
 });
 
 for (const key of ["Delete", "Backspace"] as const) {

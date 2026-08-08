@@ -32,7 +32,9 @@ export function CommentComposer({
     const input = inputRef.current;
     input?.focus();
     input?.setSelectionRange(input.value.length, input.value.length);
-    return () => triggerRef?.current?.focus();
+    return () => {
+      requestAnimationFrame(() => triggerRef?.current?.focus());
+    };
   }, [triggerRef]);
 
   return (

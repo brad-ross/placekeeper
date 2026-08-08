@@ -28,6 +28,19 @@ Observed on 2026-08-07: the acceptance run began from an isolated source copy wi
 - Manual installation and UI smoke tests for Codex desktop and VS Code desktop are recommended for users who choose those integrations, but do not block the core Finder/ordinary-browser source release.
 - VS Code Remote SSH, containers, Codespaces, web, virtual, and non-file workspaces remain intentionally refused.
 
+## Reading-first interface evidence
+
+Automated release-candidate coverage added on 2026-08-08 exercises the same production review tree in an ordinary Chromium launch and a narrow 320-CSS-pixel `vscode` embed launch. The checks record one mounted viewer, one compact chrome, page `1 / 1`, unchanged page bounds and viewer mount identity through disclosure, preserved review state through breakpoint changes, visible drawer close controls, and deterministic focus restoration. The WebKit gate runs both the joined review workflow and installed-style production flow. Capability URLs are deliberately excluded from test output and this record.
+
+The implementation was visually compared at 1280×900 and narrow widths with the plan-linked `reading-first-core-states.html` and `reading-first-drawer-states.html` mockups. The resulting hierarchy keeps the PDF full-bleed within the content area, exposes annotation and Finish drawers only on request, uses a side peek for mark correspondence, and removes spatial transitions under reduced-motion preferences.
+
+Installed Codex and VS Code desktop UI evidence still requires a release-candidate install and is not claimed by this source-tree run. For that release check, append one row per host without recording the capability URL:
+
+| Date | Build | Surface | Viewport width | Initial page / zoom / scroll | Open surface | Final page / zoom / scroll | Final focus | Screenshot or checklist |
+|---|---|---|---:|---|---|---|---|---|
+| Pending | Pending | Codex desktop | — | — | — | — | — | Pending |
+| Pending | Pending | VS Code desktop | — | — | — | — | — | Pending |
+
 ## Optional future prebuilt release
 
 If the project later distributes a prebuilt download, reinstate Developer ID signing, notarization, stapling, quarantine/Gatekeeper testing, and a clean Apple-silicon download smoke before calling that artifact easy to install. Do not claim those properties from the source-first build.

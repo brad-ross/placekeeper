@@ -51,6 +51,9 @@ export function createViewerControls(registry: PluginRegistry): ViewerControls {
   const zoomCapability = registry.getPlugin<ZoomPlugin>(ZoomPlugin.id)?.provides();
   const scroll = documentId && scrollCapability ? scrollCapability.forDocument(documentId) : null;
   const zoom = documentId && zoomCapability ? zoomCapability.forDocument(documentId) : null;
+  const documentPageCount = documentId
+    ? core.documents?.[documentId]?.document?.pages.length ?? 0
+    : 0;
   const listeners = new Set<ViewerInteractionListener>();
   const subscriptions: Array<() => void> = [];
   const pageReady = scroll !== null;
@@ -60,7 +63,7 @@ export function createViewerControls(registry: PluginRegistry): ViewerControls {
     pageReady,
     zoomReady,
     currentPage: scroll?.getCurrentPage() ?? 0,
-    totalPages: scroll?.getTotalPages() ?? 0,
+    totalPages: scroll ? Math.max(scroll.getTotalPages(), documentPageCount) : 0,
     zoomPercent: zoom ? Math.round(zoom.getState().currentZoomLevel * 100) : 0,
     ...(pageReady ? {} : { pageUnavailableReason: PAGE_UNAVAILABLE }),
     ...(zoomReady ? {} : { zoomUnavailableReason: ZOOM_UNAVAILABLE }),
@@ -71,14 +74,26 @@ export function createViewerControls(registry: PluginRegistry): ViewerControls {
     for (const listener of listeners) listener(event);
   };
   if (documentId && scrollCapability && scroll) {
+    const updatePage = (currentPage: number, reportedTotalPages: number) => {
+      const loadedPageCount = registry.getStore().getState().core.documents?.[documentId]
+        ?.document?.pages.length ?? documentPageCount;
+      const totalPages = Math.max(reportedTotalPages, loadedPageCount);
+      state = { ...state, currentPage, totalPages };
+      emit({ type: 'page', currentPage, totalPages });
+    };
     subscriptions.push(
       scrollCapability.onPageChange((event) => {
         if (event.documentId !== documentId) return;
-        state = { ...state, currentPage: event.pageNumber, totalPages: event.totalPages };
-        emit({ type: 'page', currentPage: event.pageNumber, totalPages: event.totalPages });
+        updatePage(event.pageNumber, event.totalPages);
       }),
       scroll.onScroll(() => emit({ type: 'scroll' })),
     );
+    if (scrollCapability.onLayoutReady) {
+      subscriptions.push(scrollCapability.onLayoutReady((event) => {
+        if (event.documentId !== documentId) return;
+        updatePage(event.pageNumber, event.totalPages);
+      }));
+    }
   }
   if (documentId && zoomCapability && zoom) {
     subscriptions.push(

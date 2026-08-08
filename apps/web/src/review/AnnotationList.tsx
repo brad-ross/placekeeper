@@ -11,6 +11,7 @@ export interface AnnotationListProps {
   onCorrespondenceChange?(id: string | undefined): void;
   onEdit(item: ReviewItem, trigger: HTMLButtonElement): void;
   onDelete(item: ReviewItem): Promise<void> | void;
+  onClose?(): void;
 }
 
 function payloadText(item: ReviewItem): string {
@@ -27,6 +28,7 @@ export function AnnotationList({
   onCorrespondenceChange,
   onEdit,
   onDelete,
+  onClose,
 }: AnnotationListProps) {
   const ordered = documentOrderedItems(items);
   const listRef = useRef<HTMLOListElement>(null);
@@ -76,8 +78,18 @@ export function AnnotationList({
   };
 
   return (
-    <section aria-label="Owned annotations">
-      <h2>Owned annotations</h2>
+    <section className="annotation-drawer__owned" aria-label="Owned annotations">
+      <header className="annotation-drawer__header">
+        <div>
+          <p className="annotation-drawer__eyebrow">Review comments</p>
+          <h2>Annotations <span className="annotation-drawer__count">{ordered.length}</span></h2>
+        </div>
+        {onClose ? (
+          <button type="button" className="annotation-drawer__close" aria-label="Close annotations" onClick={onClose}>
+            <span aria-hidden="true">×</span>
+          </button>
+        ) : null}
+      </header>
       {direction ? (
         <p className="annotation-direction-cue" data-correspondence-direction={direction}>
           Matching annotation {direction}
@@ -107,14 +119,19 @@ export function AnnotationList({
                 else entryRefs.current.delete(item.id);
               }}
               type="button"
+              className="annotation-item__content"
+              aria-label={`${item.kind} · Page ${item.pageIndex + 1}${payloadText(item) ? ` · ${payloadText(item)}` : ''}`}
               onClick={() => onNavigate(item)}
             >
-              {item.kind} · Page {item.pageIndex + 1}{payloadText(item) ? ` · ${payloadText(item)}` : ''}
+              <span className="annotation-item__meta">
+                <strong>{item.kind}</strong><span>Page {item.pageIndex + 1}</span>
+              </span>
+              {payloadText(item) ? <span className="annotation-item__excerpt">{payloadText(item)}</span> : null}
             </button>
             {item.kind === 'delete' ? null : (
-              <button type="button" aria-label={`Edit ${item.kind} on page ${item.pageIndex + 1}`} onClick={(event) => onEdit(item, event.currentTarget)}>Edit</button>
+              <button type="button" className="annotation-item__action" aria-label={`Edit ${item.kind} on page ${item.pageIndex + 1}`} onClick={(event) => onEdit(item, event.currentTarget)}>Edit</button>
             )}
-            <button type="button" aria-label={`Delete ${item.kind} on page ${item.pageIndex + 1}`} onClick={() => void remove(item)}>Delete</button>
+            <button type="button" className="annotation-item__action annotation-item__delete" aria-label={`Delete ${item.kind} on page ${item.pageIndex + 1}`} onClick={() => void remove(item)}>Delete</button>
           </li>
         ))}
       </ol>

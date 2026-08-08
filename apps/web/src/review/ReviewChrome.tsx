@@ -52,8 +52,8 @@ export function ReviewChrome({
       <nav className="review-chrome__actions" aria-label="Review views">
         <button type="button" aria-label="Undo" disabled={!canUndo} onClick={onUndo}>↶</button>
         <button type="button" aria-label="Redo" disabled={!canRedo} onClick={onRedo}>↷</button>
-        <button type="button" aria-expanded={annotationsOpen} aria-controls="review-annotation-list" onClick={onAnnotations}>Annotations ({annotationCount})</button>
-        <button type="button" className="review-chrome__finish" aria-expanded={finishOpen} aria-controls="review-finish-drawer" onClick={onFinish}>Finish</button>
+        <button type="button" aria-expanded={annotationsOpen} aria-controls="review-annotation-list" onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); onAnnotations(); }}>Annotations ({annotationCount})</button>
+        <button type="button" className="review-chrome__finish" aria-expanded={finishOpen} aria-controls="review-finish-drawer" onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); onFinish(); }}>Finish</button>
       </nav>
       {!viewerState.pageReady ? <p id={pageUnavailableId} className="sr-only">{viewerState.pageUnavailableReason}</p> : null}
       {!viewerState.zoomReady ? <p id={zoomUnavailableId} className="sr-only">{viewerState.zoomUnavailableReason}</p> : null}

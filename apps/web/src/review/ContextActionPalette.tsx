@@ -36,12 +36,12 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
     >
       {props.kind === 'selection' ? (
         <>
-          <button type="button" aria-keyshortcuts={shortcutForReviewAction('replace')} onClick={props.onReplace}>Replace</button>
-          <button type="button" aria-keyshortcuts={shortcutForReviewAction('delete')} onClick={props.onDelete}>Delete</button>
-          <button type="button" aria-keyshortcuts={shortcutForReviewAction('highlight')} onClick={props.onHighlight}>Highlight</button>
+          <button type="button" aria-keyshortcuts={shortcutForReviewAction('replace')} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); props.onReplace?.(); }}>Replace</button>
+          <button type="button" aria-keyshortcuts={shortcutForReviewAction('delete')} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); props.onDelete?.(); }}>Delete</button>
+          <button type="button" aria-keyshortcuts={shortcutForReviewAction('highlight')} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); props.onHighlight?.(); }}>Highlight</button>
         </>
       ) : (
-        <button type="button" aria-keyshortcuts={shortcutForReviewAction('insert')} onClick={props.onInsert}>Insert</button>
+        <button type="button" aria-keyshortcuts={shortcutForReviewAction('insert')} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); props.onInsert?.(); }}>Insert</button>
       )}
     </div>
   );

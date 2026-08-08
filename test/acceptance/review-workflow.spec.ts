@@ -57,8 +57,12 @@ test.describe('canonical review workflow', () => {
     await page.keyboard.press('r');
     const input = page.getByRole('textbox', { name: 'Replacement text' });
     await input.fill('revised wording');
-    await page.setViewportSize({ width: 800, height: 800 });
+    await page.setViewportSize({ width: 320, height: 720 });
     await expect(input).toHaveValue('revised wording');
+    const inputBounds = await input.boundingBox();
+    expect(inputBounds).not.toBeNull();
+    expect(inputBounds!.x).toBeGreaterThanOrEqual(0);
+    expect(inputBounds!.x + inputBounds!.width).toBeLessThanOrEqual(320);
     await page.getByRole('button', { name: 'Apply' }).click();
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect(page.locator('[data-owned-mark]')).toHaveCount(0);
@@ -66,11 +70,21 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-owned-mark="replace"]')).toHaveCount(1);
 
     await page.getByRole('button', { name: 'Annotations' }).click();
+    await expect(page.getByRole('button', { name: 'Close annotations' })).toBeVisible();
     const entry = page.getByRole('button', { name: /replace · Page 1/ });
     await entry.click();
     await expect(page.locator('[data-navigated]')).not.toHaveAttribute('data-navigated', 'none');
     await page.getByRole('button', { name: 'Delete replace on page 1' }).click();
     await expect(page.getByLabel('Annotations in document order')).toBeFocused();
+  });
+
+  test('removes spatial disclosure motion when reduced motion is requested', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.getByRole('button', { name: 'Annotations' }).click();
+    const drawer = page.locator('[data-annotation-drawer]');
+    await expect(drawer).toBeVisible();
+    await expect(drawer).toHaveCSS('transition-duration', '0s');
+    await expect(drawer).toHaveCSS('animation-duration', '0s');
   });
 
   test('keeps native editors and composer fields outside semantic command capture', async ({ page }) => {
@@ -130,7 +144,7 @@ test.describe('canonical review workflow', () => {
     await expect(replacementDialog.getByRole('textbox', { name: 'Replacement text' })).toHaveValue(' ');
     await replacementDialog.getByRole('button', { name: 'Cancel' }).click();
 
-    const annotations = page.getByRole('button', { name: 'Annotations' });
+    const annotations = page.getByRole('button', { name: /^Annotations/u });
     await annotations.focus();
     await page.keyboard.press('Space');
 

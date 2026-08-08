@@ -89,7 +89,7 @@ export function CodexDelivery(props: CodexDeliveryProps) {
 
   const closeConfirmation = () => {
     setConfirming(false);
-    queueMicrotask(() => {
+    requestAnimationFrame(() => {
       const trigger = prepareTriggerRef.current;
       if (!trigger?.closest('[aria-hidden="true"]')) trigger?.focus();
     });
@@ -224,11 +224,15 @@ export function CodexDelivery(props: CodexDeliveryProps) {
       ) : null}
 
       {confirming ? (
-        <div role="alertdialog" aria-modal="true" aria-labelledby="codex-confirm-heading" onKeyDown={confirmationKeyDown}>
-          <h3 id="codex-confirm-heading">Confirm this external data flow</h3>
-          <p>Confirm the source root, provider, destination, and retention setting shown above.</p>
-          <button ref={confirmPrepareRef} type="button" disabled={busy} onClick={() => void confirmAndPrepare()}>Confirm and prepare</button>
-          <button type="button" disabled={busy} onClick={closeConfirmation}>Cancel</button>
+        <div className="delivery-confirmation-backdrop">
+          <div className="delivery-confirmation" role="alertdialog" aria-modal="true" aria-labelledby="codex-confirm-heading" onKeyDown={confirmationKeyDown}>
+            <h3 id="codex-confirm-heading">Confirm this external data flow</h3>
+            <p>Confirm the source root, provider, destination, and retention setting shown above.</p>
+            <div className="delivery-confirmation__actions">
+              <button ref={confirmPrepareRef} type="button" disabled={busy} onClick={() => void confirmAndPrepare()}>Confirm and prepare</button>
+              <button type="button" disabled={busy} onClick={closeConfirmation}>Cancel</button>
+            </div>
+          </div>
         </div>
       ) : null}
 
