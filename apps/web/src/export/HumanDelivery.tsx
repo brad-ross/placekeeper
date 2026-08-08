@@ -1,6 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { ReviewState } from "../../../../packages/core/src/review-model.js";
+import {
+  focusDeliveryConfirmation,
+  handleDeliveryConfirmationKey,
+} from "./delivery-confirmation.js";
 
 export interface DeliveryArtifact {
   readonly path: string;
@@ -46,7 +50,7 @@ export function HumanDelivery({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const replaceTriggerRef = useRef<HTMLButtonElement>(null);
-  const confirmReplaceRef = useRef<HTMLButtonElement>(null);
+  const confirmationRef = useRef<HTMLDivElement>(null);
   const saveReason = deliveryUnavailableReason(state, exportUnavailableReason);
   const replaceReason = deliveryUnavailableReason(
     state,
@@ -59,8 +63,8 @@ export function HumanDelivery({
   }, [confirmReplace, onConfirmationActiveChange]);
 
   useEffect(() => {
-    if (confirmReplace) confirmReplaceRef.current?.focus();
-  }, [confirmReplace]);
+    if (confirmReplace) focusDeliveryConfirmation(confirmationRef.current);
+  }, [busyAction, confirmReplace]);
 
   const closeReplaceConfirmation = () => {
     setConfirmReplace(false);
@@ -68,26 +72,6 @@ export function HumanDelivery({
       const trigger = replaceTriggerRef.current;
       if (!trigger?.closest('[aria-hidden="true"]')) trigger?.focus();
     });
-  };
-
-  const confirmationKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      closeReplaceConfirmation();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
-    const first = controls[0];
-    const last = controls.at(-1);
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last?.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first?.focus();
-    }
   };
 
   const run = async (
@@ -148,7 +132,21 @@ export function HumanDelivery({
       ) : null}
       {confirmReplace ? (
         <div className="delivery-confirmation-backdrop">
-          <div className="delivery-confirmation" role="alertdialog" aria-modal="true" aria-labelledby="replace-heading" onKeyDown={confirmationKeyDown}>
+          <div
+            ref={confirmationRef}
+            className="delivery-confirmation"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="replace-heading"
+            tabIndex={-1}
+            onKeyDown={(event) =>
+              handleDeliveryConfirmationKey(
+                event,
+                closeReplaceConfirmation,
+                busyAction === null,
+              )
+            }
+          >
             <h3 id="replace-heading">Replace the original PDF?</h3>
             <p>
               This explicit action replaces the original only after a final safety and
@@ -156,14 +154,17 @@ export function HumanDelivery({
             </p>
             <div className="delivery-confirmation__actions">
               <button
-                ref={confirmReplaceRef}
                 type="button"
                 disabled={busyAction !== null}
                 onClick={() => void run("replace", onReplaceOriginal)}
               >
                 Confirm Replace Original
               </button>
-              <button type="button" onClick={closeReplaceConfirmation}>
+              <button
+                type="button"
+                disabled={busyAction !== null}
+                onClick={closeReplaceConfirmation}
+              >
                 Cancel
               </button>
             </div>

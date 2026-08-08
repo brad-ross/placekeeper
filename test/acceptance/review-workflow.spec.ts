@@ -206,6 +206,32 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
 
+  test('supersedes Page Note placement when opening a review drawer', async ({ page }) => {
+    const canvas = page.getByRole('application', { name: 'PDF review canvas' });
+    const annotations = page.getByRole('button', { name: /^Annotations/u });
+    const finish = page.getByRole('button', { name: 'Finish' });
+
+    await canvas.focus();
+    await page.keyboard.press('Alt+Shift+N');
+    await expect(page.getByRole('button', { name: 'Place Page Note' })).toBeVisible();
+    await annotations.click();
+
+    await expect(page.getByRole('button', { name: 'Place Page Note' })).toHaveCount(0);
+    await expect(page.locator('[data-annotation-drawer]')).toHaveAttribute('data-list-open', 'true');
+    await page.keyboard.press('Escape');
+    await expect(annotations).toBeFocused();
+
+    await page.getByRole('button', { name: 'Open page actions' }).click();
+    await expect(page.getByRole('menu', { name: 'Page actions' })).toBeVisible();
+    await finish.click();
+
+    await expect(page.getByRole('menu', { name: 'Page actions' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Finish review' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(finish).toBeFocused();
+    await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
+  });
+
   test('delays a hoverable mark peek and opens one selected owned row without shifting the document', async ({ page }) => {
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     await page.getByRole('button', { name: 'Keep without comment' }).click();

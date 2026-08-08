@@ -272,10 +272,6 @@
   background: var(--review-panel, #fff);
   box-shadow: -.65rem 0 2rem rgb(29 34 29 / 16%);
   transition: transform 160ms ease-out, visibility 160ms step-end;
-}
-
-.review-list,
-.review-finish-drawer {
   transform: translateX(102%);
   visibility: hidden;
 }

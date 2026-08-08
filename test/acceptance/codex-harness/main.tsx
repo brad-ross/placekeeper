@@ -15,6 +15,8 @@ declare global {
       saved(): number;
       open(): void;
       close(): void;
+      holdPrepare(): void;
+      resolvePrepare(): void;
     };
   }
 }
@@ -36,6 +38,8 @@ let makeEmpty: (() => void) | undefined;
 let prepareCount = 0;
 let saveCount = 0;
 let setDrawerOpen: ((open: boolean) => void) | undefined;
+let prepareHeld = false;
+let releasePrepare: (() => void) | undefined;
 
 function Harness() {
   const [key, setKey] = useState(0);
@@ -67,6 +71,11 @@ function Harness() {
         onConfirmScope={setConfirmed}
         onPrepare={async () => {
           prepareCount += 1;
+          if (prepareHeld) {
+            await new Promise<void>((resolve) => {
+              releasePrepare = resolve;
+            });
+          }
           return { prompt: "Full local instruction", handoffPath: "/tmp/result/handoff.json", handoffSha256: "b".repeat(64), reviewedPdfPath: "/tmp/paper-reviewed.pdf", reviewedPdfSha256: "c".repeat(64) };
         }}
         onSaveInstruction={() => { saveCount += 1; }}
@@ -84,6 +93,14 @@ window.codexHarness = {
   saved: () => saveCount,
   open: () => setDrawerOpen?.(true),
   close: () => setDrawerOpen?.(false),
+  holdPrepare: () => {
+    prepareHeld = true;
+  },
+  resolvePrepare: () => {
+    prepareHeld = false;
+    releasePrepare?.();
+    releasePrepare = undefined;
+  },
 };
 
 const root = document.querySelector("#root");

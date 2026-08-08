@@ -2,6 +2,10 @@ import { transformRect, type PdfPageObject, type Rect, type Rotation } from "@em
 import type { PageLayout } from "@embedpdf/plugin-scroll";
 import type { PdfRect } from "../../../../packages/core/src/pdf-writer.js";
 
+export function combinePageRotation(pageRotation: Rotation, documentRotation: Rotation): Rotation {
+  return ((pageRotation + documentRotation) % 4) as Rotation;
+}
+
 /** Map canonical PDF user-space evidence into the scaled, rotated crop-relative page canvas. */
 export function positionOwnedRect(
   page: PdfPageObject,
@@ -11,7 +15,7 @@ export function positionOwnedRect(
 ): Rect {
   const crop = page.boxes?.crop;
   const scale = layout.width / page.size.width;
-  const rotation = ((page.rotation + documentRotation) % 4) as Rotation;
+  const rotation = combinePageRotation(page.rotation, documentRotation);
   return transformRect(
     page.size,
     {

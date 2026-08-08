@@ -330,22 +330,44 @@ function textOccurrences(text: string, content: string, from: number): number[] 
 
 function alignTextRects(page: AnchorPage): readonly MappedTextRect[] | null {
   const rects = page.textRects.filter(({ content }) => content.length > 0);
-  const solutions: MappedTextRect[][] = [];
-  const visit = (index: number, offset: number, mapped: MappedTextRect[]) => {
-    if (solutions.length > 1) return;
-    if (index === rects.length) {
-      solutions.push(mapped);
-      return;
+  const occurrenceCache = new Map<string, Map<number, readonly number[]>>();
+  const occurrences = (content: string, offset: number) => {
+    let byOffset = occurrenceCache.get(content);
+    if (!byOffset) {
+      byOffset = new Map();
+      occurrenceCache.set(content, byOffset);
     }
-    const current = rects[index]!;
-    for (const start of textOccurrences(page.extractedText, current.content, offset)) {
-      visit(index + 1, start + current.content.length, [
-        ...mapped,
-        { content: current.content, rect: current.rect, start, end: start + current.content.length },
-      ]);
-    }
+    const cached = byOffset.get(offset);
+    if (cached) return cached;
+    const result = textOccurrences(page.extractedText, content, offset);
+    byOffset.set(offset, result);
+    return result;
   };
-  visit(0, 0, []);
+  const solutionCache = new Map<string, readonly MappedTextRect[][]>();
+  const solve = (index: number, offset: number): readonly MappedTextRect[][] => {
+    if (index === rects.length) return [[]];
+    const cacheKey = `${index}:${offset}`;
+    const cached = solutionCache.get(cacheKey);
+    if (cached) return cached;
+    const current = rects[index]!;
+    const solutions: MappedTextRect[][] = [];
+    for (const start of occurrences(current.content, offset)) {
+      const mapped = {
+        content: current.content,
+        rect: current.rect,
+        start,
+        end: start + current.content.length,
+      };
+      for (const suffix of solve(index + 1, mapped.end)) {
+        solutions.push([mapped, ...suffix]);
+        if (solutions.length > 1) break;
+      }
+      if (solutions.length > 1) break;
+    }
+    solutionCache.set(cacheKey, solutions);
+    return solutions;
+  };
+  const solutions = solve(0, 0);
   return solutions.length === 1 ? solutions[0]! : null;
 }
 

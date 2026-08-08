@@ -55,6 +55,23 @@ export type ViewerInteractionEvent =
 
 export type ViewerInteractionListener = (event: ViewerInteractionEvent) => void;
 
+// EmbedPDF deliberately exposes an engine-neutral pointer event that omits the DOM
+// `button` field. The page wrapper records it during capture so neutral handlers can
+// still distinguish primary activation from a secondary-button context gesture.
+const pointerButtonByTarget = new WeakMap<object, number>();
+
+export function recordViewerPointerButton(target: object, button: number): void {
+  pointerButtonByTarget.set(target, button);
+}
+
+export function viewerPointerButton(event: { readonly currentTarget: unknown }): number | undefined {
+  const { currentTarget } = event;
+  if ((typeof currentTarget !== 'object' && typeof currentTarget !== 'function') || currentTarget === null) {
+    return undefined;
+  }
+  return pointerButtonByTarget.get(currentTarget);
+}
+
 export interface PageEventGeometry {
   readonly pageSize: Size;
   readonly rotation: Rotation;

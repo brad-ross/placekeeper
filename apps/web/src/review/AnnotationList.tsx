@@ -96,44 +96,47 @@ export function AnnotationList({
         </p>
       ) : null}
       <ol ref={listRef} tabIndex={-1} aria-label="Annotations in document order">
-        {ordered.map((item) => (
-          <li
-            key={item.id}
-            ref={(node) => {
-              if (node) rowRefs.current.set(item.id, node);
-              else rowRefs.current.delete(item.id);
-            }}
-            data-review-item={item.id}
-            data-active={activeId === item.id ? 'true' : 'false'}
-            data-corresponding={correspondingId === item.id ? 'true' : 'false'}
-            onPointerEnter={() => onCorrespondenceChange?.(item.id)}
-            onPointerLeave={() => onCorrespondenceChange?.(undefined)}
-            onFocusCapture={() => onCorrespondenceChange?.(item.id)}
-            onBlurCapture={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget)) onCorrespondenceChange?.(undefined);
-            }}
-          >
-            <button
+        {ordered.map((item) => {
+          const text = payloadText(item);
+          return (
+            <li
+              key={item.id}
               ref={(node) => {
-                if (node) entryRefs.current.set(item.id, node);
-                else entryRefs.current.delete(item.id);
+                if (node) rowRefs.current.set(item.id, node);
+                else rowRefs.current.delete(item.id);
               }}
-              type="button"
-              className="annotation-item__content"
-              aria-label={`${item.kind} · Page ${item.pageIndex + 1}${payloadText(item) ? ` · ${payloadText(item)}` : ''}`}
-              onClick={() => onNavigate(item)}
+              data-review-item={item.id}
+              data-active={activeId === item.id ? 'true' : 'false'}
+              data-corresponding={correspondingId === item.id ? 'true' : 'false'}
+              onPointerEnter={() => onCorrespondenceChange?.(item.id)}
+              onPointerLeave={() => onCorrespondenceChange?.(undefined)}
+              onFocusCapture={() => onCorrespondenceChange?.(item.id)}
+              onBlurCapture={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) onCorrespondenceChange?.(undefined);
+              }}
             >
-              <span className="annotation-item__meta">
-                <strong>{item.kind}</strong><span>Page {item.pageIndex + 1}</span>
-              </span>
-              {payloadText(item) ? <span className="annotation-item__excerpt">{payloadText(item)}</span> : null}
-            </button>
-            {item.kind === 'delete' ? null : (
-              <button type="button" className="annotation-item__action" aria-label={`Edit ${item.kind} on page ${item.pageIndex + 1}`} onClick={(event) => onEdit(item, event.currentTarget)}>Edit</button>
-            )}
-            <button type="button" className="annotation-item__action annotation-item__delete" aria-label={`Delete ${item.kind} on page ${item.pageIndex + 1}`} onClick={() => void remove(item)}>Delete</button>
-          </li>
-        ))}
+              <button
+                ref={(node) => {
+                  if (node) entryRefs.current.set(item.id, node);
+                  else entryRefs.current.delete(item.id);
+                }}
+                type="button"
+                className="annotation-item__content"
+                aria-label={`${item.kind} · Page ${item.pageIndex + 1}${text ? ` · ${text}` : ''}`}
+                onClick={() => onNavigate(item)}
+              >
+                <span className="annotation-item__meta">
+                  <strong>{item.kind}</strong><span>Page {item.pageIndex + 1}</span>
+                </span>
+                {text ? <span className="annotation-item__excerpt">{text}</span> : null}
+              </button>
+              {item.kind === 'delete' ? null : (
+                <button type="button" className="annotation-item__action" aria-label={`Edit ${item.kind} on page ${item.pageIndex + 1}`} onClick={(event) => onEdit(item, event.currentTarget)}>Edit</button>
+              )}
+              <button type="button" className="annotation-item__action annotation-item__delete" aria-label={`Delete ${item.kind} on page ${item.pageIndex + 1}`} onClick={() => void remove(item)}>Delete</button>
+            </li>
+          );
+        })}
       </ol>
       {ordered.length === 0 ? <p>No annotations yet.</p> : null}
     </section>

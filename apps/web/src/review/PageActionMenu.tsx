@@ -15,6 +15,10 @@ export function PageActionMenu(props: PageActionMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const dismissOutside = (event: PointerEvent) => {
+      // Chromium dispatches `contextmenu` before the secondary pointerup. Ignore
+      // that trailing event so the gesture which opens the menu cannot also
+      // dismiss it; primary outside-click and touch dismissal remain intact.
+      if (event.button !== 0) return;
       if (!menuRef.current?.contains(event.target as Node)) props.onDismiss();
     };
     document.addEventListener('pointerup', dismissOutside);

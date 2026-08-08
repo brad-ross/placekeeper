@@ -46,7 +46,8 @@ export type ReliabilityDiagnostic =
   | 'caret-reading-order-unsupported'
   | 'caret-point-inside-multichar-rect'
   | 'caret-point-out-of-tolerance'
-  | 'caret-candidate-tied';
+  | 'caret-candidate-tied'
+  | 'caret-read-unavailable';
 
 export type ReliabilityResult =
   | { reliable: true }

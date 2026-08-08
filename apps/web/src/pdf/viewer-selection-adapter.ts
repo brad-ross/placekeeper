@@ -62,28 +62,36 @@ export function createEngineAnchorPageReader(
   engine: PdfEngine,
   document: PdfDocumentObject,
 ): AnchorPageReader {
+  const reads = new Map<number, Promise<AnchorPage>>();
   return {
-    async read(pageIndex) {
-      const page = document.pages[pageIndex];
-      if (!page) throw new Error(`PDF page ${pageIndex} is unavailable.`);
-      const [extractedText, textRects] = await Promise.all([
-        engine.extractText(document, [pageIndex]).toPromise(),
-        engine.getPageTextRects(document, page).toPromise(),
-      ]);
-      const crop = page.boxes?.crop ?? {
-        left: 0,
-        top: 0,
-        right: page.size.width,
-        bottom: page.size.height,
-      };
-      return {
-        pageIndex,
-        size: page.size,
-        cropBox: crop,
-        rotation: page.rotation,
-        extractedText,
-        textRects: textRects.map(({ content, rect }) => ({ content, rect })),
-      };
+    read(pageIndex) {
+      const cached = reads.get(pageIndex);
+      if (cached) return cached;
+      const reading = (async () => {
+        const page = document.pages[pageIndex];
+        if (!page) throw new Error(`PDF page ${pageIndex} is unavailable.`);
+        const [extractedText, textRects] = await Promise.all([
+          engine.extractText(document, [pageIndex]).toPromise(),
+          engine.getPageTextRects(document, page).toPromise(),
+        ]);
+        const crop = page.boxes?.crop ?? {
+          left: 0,
+          top: 0,
+          right: page.size.width,
+          bottom: page.size.height,
+        };
+        return {
+          pageIndex,
+          size: page.size,
+          cropBox: crop,
+          rotation: page.rotation,
+          extractedText,
+          textRects: textRects.map(({ content, rect }) => ({ content, rect })),
+        };
+      })();
+      reads.set(pageIndex, reading);
+      void reading.catch(() => reads.delete(pageIndex));
+      return reading;
     },
   };
 }

@@ -11,6 +11,7 @@ let host: ProofreaderHost;
 let launchUrl = "";
 let sourceRoot = "";
 let pdf = "";
+let rotatedPdf = "";
 let initialSessionId = "";
 
 async function installSelectionCaptureGate(page: Page): Promise<void> {
@@ -87,7 +88,9 @@ test.beforeAll(async () => {
   sourceRoot = join(root, "source");
   await mkdir(sourceRoot);
   pdf = join(root, "paper.pdf");
+  rotatedPdf = join(root, "rotated.pdf");
   await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
+  await copyFile(resolve("test/fixtures/pdfs/rotation-90-crop.pdf"), rotatedPdf);
   await copyFile(resolve("test/fixtures/latex/paper.tex"), join(sourceRoot, "paper.tex"));
   host = await ProofreaderHost.start({
     recoveryRoot: join(root, "recovery"),
@@ -268,6 +271,168 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   await expect(page.getByRole('button', { name: 'Close annotations' })).toBeVisible();
   await page.getByRole('button', { name: 'Close annotations' }).click();
   await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'false');
+});
+
+test("creates a canonical Page Note from a real PDF context gesture without secondary-activating its mark", async ({ page }) => {
+  const launched = await host.open({
+    pdfPath: pdf,
+    sourceRootPath: sourceRoot,
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === "recovery-offered") {
+    throw new Error("Fresh Page Note production launch failed");
+  }
+  const browserErrors = collectBrowserErrors(page);
+  await page.goto(launched.url);
+
+  const pageCanvas = page.locator("[data-page-index='0']").first();
+  await expect(pageCanvas).toBeVisible();
+  await expect(page.getByLabel("Current page")).toHaveText("1 / 1");
+  await waitForRenderedPageImage(pageCanvas);
+  const canvasBox = await pageCanvas.boundingBox();
+  if (!canvasBox) throw new Error("Rendered PDF page has no bounds.");
+  const scale = canvasBox.width / 612;
+  const point = { x: 500 * scale, y: 600 * scale };
+
+  await pageCanvas.click({ button: "right", position: point });
+  const addPageNote = page.getByRole("menuitem", { name: "Add Page Note" });
+  await expect(addPageNote).toBeVisible();
+  await expect(addPageNote).toBeFocused();
+  await addPageNote.click();
+
+  const composer = page.getByRole("dialog", { name: "Page Note" });
+  await expect(composer).toBeVisible();
+  await composer.getByRole("textbox", { name: "Comment" }).fill("Check the conclusion.");
+  await composer.getByRole("button", { name: "Save comment" }).click();
+
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+  const state = host.broker.state(launched.sessionId);
+  expect(state?.revision).toBe(1);
+  expect(state?.items).toHaveLength(1);
+  const note = state?.items[0];
+  expect(note).toMatchObject({
+    kind: "pageNote",
+    pageIndex: 0,
+    payload: {
+      comment: "Check the conclusion.",
+      position: { width: 18, height: 18 },
+    },
+  });
+  const position = note?.payload.position;
+  expect(position).toMatchObject({ x: 500, y: 1392, width: 18, height: 18 });
+  expect(note?.id).toBeTruthy();
+  const mark = page.locator(`[data-owned-mark="pageNote"][data-review-id="${note!.id}"]`);
+  await expect(mark).toHaveCount(1);
+  await expect(mark).toHaveAttribute("data-active", "false");
+
+  const markBox = await mark.boundingBox();
+  if (!markBox) throw new Error("Rendered Page Note mark has no bounds.");
+  await page.mouse.click(markBox.x + markBox.width / 2, markBox.y + markBox.height / 2, {
+    button: "right",
+  });
+  await expect(page.getByRole("menu", { name: "Page actions" })).toHaveCount(0);
+  await expect(mark).toHaveAttribute("data-active", "false");
+  await expect(page.getByRole("button", { name: /Annotations/u })).toHaveAttribute("aria-expanded", "false");
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(1);
+  expect(browserErrors).toEqual([]);
+});
+
+test("places a canonical Page Note through the real PDF keyboard cursor", async ({ page }) => {
+  const launched = await host.open({
+    pdfPath: pdf,
+    sourceRootPath: sourceRoot,
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === "recovery-offered") {
+    throw new Error("Fresh keyboard Page Note production launch failed");
+  }
+  const browserErrors = collectBrowserErrors(page);
+  await page.goto(launched.url);
+
+  const pageCanvas = page.locator("[data-page-index='0']").first();
+  await expect(pageCanvas).toBeVisible();
+  await expect(page.getByLabel("Current page")).toHaveText("1 / 1");
+  await waitForRenderedPageImage(pageCanvas);
+  await pageCanvas.focus();
+  await page.keyboard.press("Alt+Shift+N");
+  const cursor = page.getByRole("button", { name: /^Page Note placement cursor/u });
+  await expect(cursor).toBeVisible();
+  await expect(cursor).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+
+  const composer = page.getByRole("dialog", { name: "Page Note" });
+  await expect(composer).toBeVisible();
+  await composer.getByRole("textbox", { name: "Comment" }).fill("Keyboard-placed note.");
+  await composer.getByRole("button", { name: "Save comment" }).click();
+
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+  const state = host.broker.state(launched.sessionId);
+  expect(state?.revision).toBe(1);
+  expect(state?.items).toHaveLength(1);
+  const note = state?.items[0];
+  expect(note).toMatchObject({
+    kind: "pageNote",
+    pageIndex: 0,
+    payload: {
+      comment: "Keyboard-placed note.",
+      position: { x: 310, y: 1192, width: 18, height: 18 },
+    },
+  });
+  expect(note?.id).toBeTruthy();
+  await expect(page.locator(
+    `[data-owned-mark="pageNote"][data-review-id="${note!.id}"]`,
+  )).toHaveCount(1);
+  expect(browserErrors).toEqual([]);
+});
+
+test("normalizes a real context gesture on a rotated cropped PDF into canonical page space", async ({ page }) => {
+  const launched = await host.open({
+    pdfPath: rotatedPdf,
+    sourceRootPath: sourceRoot,
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === "recovery-offered") {
+    throw new Error("Rotated Page Note production launch failed");
+  }
+  const browserErrors = collectBrowserErrors(page);
+  await page.goto(launched.url);
+
+  const pageCanvas = page.locator("[data-page-index='0']").first();
+  await expect(pageCanvas).toBeVisible();
+  await expect(page.getByLabel("Current page")).toHaveText("1 / 1");
+  await waitForRenderedPageImage(pageCanvas);
+  const canvasBox = await pageCanvas.boundingBox();
+  if (!canvasBox) throw new Error("Rendered rotated PDF page has no bounds.");
+  const scale = canvasBox.width / 720;
+
+  await pageCanvas.click({
+    button: "right",
+    position: { x: 300 * scale, y: 200 * scale },
+  });
+  await page.getByRole("menuitem", { name: "Add Page Note" }).click();
+  const composer = page.getByRole("dialog", { name: "Page Note" });
+  await composer.getByRole("textbox", { name: "Comment" }).fill("Rotated geometry note.");
+  await composer.getByRole("button", { name: "Save comment" }).click();
+
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+  const state = host.broker.state(launched.sessionId);
+  expect(state?.items).toHaveLength(1);
+  const note = state?.items[0];
+  expect(note).toMatchObject({
+    kind: "pageNote",
+    pageIndex: 0,
+    payload: {
+      comment: "Rotated geometry note.",
+      position: { x: 236, y: 1176, width: 18, height: 18 },
+    },
+  });
+  expect(note?.id).toBeTruthy();
+  await expect(page.locator(
+    `[data-owned-mark="pageNote"][data-review-id="${note!.id}"]`,
+  )).toHaveCount(1);
+  expect(browserErrors).toEqual([]);
 });
 
 for (const key of ["Delete", "Backspace"] as const) {

@@ -43,6 +43,23 @@ export function groupOwnedMarkGeometry(
   return [...groups.values()];
 }
 
+export function groupOwnedMarkGeometryByPage(
+  annotations: readonly ReviewAnnotation[],
+): ReadonlyMap<number, readonly OwnedMarkGeometry[]> {
+  const annotationsByPage = new Map<number, ReviewAnnotation[]>();
+  for (const annotation of annotations) {
+    const page = annotationsByPage.get(annotation.pageIndex);
+    if (page) page.push(annotation);
+    else annotationsByPage.set(annotation.pageIndex, [annotation]);
+  }
+  return new Map(
+    [...annotationsByPage].map(([pageIndex, pageAnnotations]) => [
+      pageIndex,
+      groupOwnedMarkGeometry(pageAnnotations),
+    ]),
+  );
+}
+
 function contains(rect: OwnedMarkGeometry['rects'][number], point: OwnedMarkPoint): boolean {
   return point.x >= rect.x && point.y >= rect.y &&
     point.x <= rect.x + rect.width && point.y <= rect.y + rect.height;
@@ -52,10 +69,16 @@ export function hitTestOwnedMark(
   groups: readonly OwnedMarkGeometry[],
   point: OwnedMarkPoint,
 ): string | undefined {
-  return groups
-    .filter((group) => group.rects.some((rect) => contains(rect, point)))
-    .toSorted((left, right) => right.paintOrder - left.paintOrder || left.id.localeCompare(right.id))[0]
-    ?.id;
+  let best: OwnedMarkGeometry | undefined;
+  for (const group of groups) {
+    if (!group.rects.some((rect) => contains(rect, point))) continue;
+    if (
+      best === undefined ||
+      group.paintOrder > best.paintOrder ||
+      (group.paintOrder === best.paintOrder && group.id.localeCompare(best.id) < 0)
+    ) best = group;
+  }
+  return best?.id;
 }
 
 interface PendingGesture {
@@ -73,9 +96,14 @@ export class OwnedMarkPointerGesture {
 
   pointerDown(
     pointerId: number,
+    button: number | undefined,
     point: OwnedMarkPoint,
     groups: readonly OwnedMarkGeometry[],
   ): string | undefined {
+    if (button !== 0) {
+      this.#pending = null;
+      return undefined;
+    }
     const id = hitTestOwnedMark(groups, point);
     this.#pending = id === undefined ? null : { pointerId, id, start: point, dragged: false };
     return id;
@@ -91,12 +119,15 @@ export class OwnedMarkPointerGesture {
 
   pointerUp(
     pointerId: number,
+    button: number | undefined,
     point: OwnedMarkPoint,
     groups: readonly OwnedMarkGeometry[],
   ): string | undefined {
     const pending = this.#pending;
     this.#pending = null;
-    if (!pending || pending.pointerId !== pointerId || pending.dragged) return undefined;
+    if (button !== 0 || !pending || pending.pointerId !== pointerId || pending.dragged) {
+      return undefined;
+    }
     return hitTestOwnedMark(groups, point) === pending.id ? pending.id : undefined;
   }
 

@@ -51,4 +51,28 @@ test.describe("human delivery controls", () => {
     await page.evaluate(() => window.deliveryHarness.resolveReplace());
     await expect(page.getByRole("status")).toContainText("Original explicitly replaced");
   });
+
+  test("contains focus while replacement controls are disabled", async ({ page }) => {
+    await page.evaluate(() => window.deliveryHarness.addFeedback());
+    await page.getByRole("button", { name: "Replace Original…" }).click();
+
+    const confirmation = page.getByRole("alertdialog", {
+      name: "Replace the original PDF?",
+    });
+    await confirmation.getByRole("button", { name: "Confirm Replace Original" }).click();
+    await expect(confirmation.getByRole("button", { name: "Confirm Replace Original" })).toBeDisabled();
+    await expect(confirmation.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await expect(confirmation).toBeFocused();
+
+    await page.keyboard.press("Tab");
+    await expect(confirmation).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(confirmation).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation).toBeFocused();
+
+    await page.evaluate(() => window.deliveryHarness.resolveReplace());
+    await expect(page.getByRole("status")).toContainText("Original explicitly replaced");
+  });
 });

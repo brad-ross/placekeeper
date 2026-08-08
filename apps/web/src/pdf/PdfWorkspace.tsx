@@ -11,11 +11,12 @@ import { Viewport } from '@embedpdf/plugin-viewport/react';
 import { ZoomGestureWrapper } from '@embedpdf/plugin-zoom/react';
 import { useMemo } from 'react';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
-import { positionOwnedRect } from './owned-overlay.js';
-import { groupOwnedMarkGeometry, type OwnedMarkGeometry } from './owned-mark-hit-test.js';
+import { combinePageRotation, positionOwnedRect } from './owned-overlay.js';
+import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
 import {
   isUnsafePageContextTarget,
   normalizePageClientPoint,
+  recordViewerPointerButton,
   type ViewerOwnedMarkInteraction,
   type ViewerPagePoint,
 } from './viewer-interaction-events.js';
@@ -67,13 +68,10 @@ export function PdfWorkspace({
     }
     return result;
   }, [ownedAnnotations]);
-  const geometryByPage = useMemo(() => {
-    const result = new Map<number, OwnedMarkGeometry[]>();
-    for (const [pageIndex, annotations] of annotationsByPage) {
-      result.set(pageIndex, groupOwnedMarkGeometry(annotations));
-    }
-    return result;
-  }, [annotationsByPage]);
+  const geometryByPage = useMemo(
+    () => groupOwnedMarkGeometryByPage(ownedAnnotations),
+    [ownedAnnotations],
+  );
 
   return (
     <div
@@ -108,28 +106,42 @@ export function PdfWorkspace({
                       aria-label={`Page ${layout.pageNumber}`}
                       data-page-index={layout.pageIndex}
                       tabIndex={-1}
-                      onPointerDownCapture={(event) => event.currentTarget.focus({ preventScroll: true })}
+                      onPointerDownCapture={(event) => {
+                        recordViewerPointerButton(event.currentTarget, event.button);
+                        event.currentTarget.focus({ preventScroll: true });
+                      }}
+                      onPointerUpCapture={(event) => {
+                        recordViewerPointerButton(event.currentTarget, event.button);
+                      }}
                       onContextMenu={(event) => {
                         if (onPageContextMenu === undefined || isUnsafePageContextTarget(event.target)) return;
                         const page = activePdf.pages[layout.pageIndex];
                         if (!page) return;
                         const bounds = event.currentTarget.getBoundingClientRect();
-                        const rotatedSize = transformSize(page.size, activeDocument.rotation, 1);
+                        const rotation = combinePageRotation(page.rotation, activeDocument.rotation);
+                        const rotatedSize = transformSize(page.size, rotation, 1);
                         const point = normalizePageClientPoint(
                           { x: event.clientX, y: event.clientY },
                           {
                             pageSize: page.size,
-                            rotation: activeDocument.rotation,
+                            rotation,
                             scale: bounds.width / rotatedSize.width,
                             elementLeft: bounds.left,
                             elementTop: bounds.top,
                           },
                         );
                         if (!point) return;
-                        const accepted = onPageContextMenu({
-                          pageIndex: layout.pageIndex,
+                        const canonicalPoint = {
                           x: point.x + (page.boxes?.crop.left ?? 0),
                           y: point.y + (page.boxes?.crop.top ?? 0),
+                        };
+                        if (hitTestOwnedMark(
+                          geometryByPage.get(layout.pageIndex) ?? [],
+                          canonicalPoint,
+                        )) return;
+                        const accepted = onPageContextMenu({
+                          pageIndex: layout.pageIndex,
+                          ...canonicalPoint,
                           clientX: event.clientX,
                           clientY: event.clientY,
                           keyboard: false,

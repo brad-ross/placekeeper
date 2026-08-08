@@ -10,6 +10,8 @@ declare global {
       saved(): number;
       open(): void;
       close(): void;
+      holdPrepare(): void;
+      resolvePrepare(): void;
     };
   }
 }
@@ -81,5 +83,30 @@ test.describe("manual Codex delivery phases", () => {
     await expect(page.getByRole("button", { name: "Prepare Codex handoff" })).toBeDisabled();
     await expect(page.getByText("Human and Codex delivery are unavailable", { exact: false })).toBeVisible();
     await expect(page.getByText("local-only Human delivery", { exact: false })).toBeVisible();
+  });
+
+  test("contains focus while confirmation controls are disabled during preparation", async ({ page }) => {
+    await page.goto("/test/acceptance/codex-harness/index.html");
+    await page.evaluate(() => window.codexHarness.holdPrepare());
+    await page.getByRole("button", { name: "Prepare Codex handoff" }).click();
+
+    const confirmation = page.getByRole("alertdialog", {
+      name: "Confirm this external data flow",
+    });
+    await confirmation.getByRole("button", { name: "Confirm and prepare" }).click();
+    await expect(confirmation.getByRole("button", { name: "Confirm and prepare" })).toBeDisabled();
+    await expect(confirmation.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await expect(confirmation).toBeFocused();
+
+    await page.keyboard.press("Tab");
+    await expect(confirmation).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(confirmation).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation).toBeFocused();
+
+    await page.evaluate(() => window.codexHarness.resolvePrepare());
+    await expect(page.getByText("Ready —", { exact: false })).toBeVisible();
   });
 });

@@ -1,7 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent } from "react";
 
 import type { ReviewState } from "../../../../packages/core/src/review-model.js";
 import { deliveryUnavailableReason } from "./HumanDelivery.js";
+import {
+  focusDeliveryConfirmation,
+  handleDeliveryConfirmationKey,
+} from "./delivery-confirmation.js";
 
 export interface CodexDeliveryScope {
   readonly sourceRoot: string;
@@ -62,7 +66,7 @@ export function CodexDelivery(props: CodexDeliveryProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const prepareTriggerRef = useRef<HTMLButtonElement>(null);
-  const confirmPrepareRef = useRef<HTMLButtonElement>(null);
+  const confirmationRef = useRef<HTMLDivElement>(null);
   const readyFocusRef = useRef<HTMLTextAreaElement>(null);
   const unavailable = deliveryUnavailableReason(props.state);
   const scope: CodexDeliveryScope = {
@@ -78,8 +82,8 @@ export function CodexDelivery(props: CodexDeliveryProps) {
   }, [confirming, props.onConfirmationActiveChange]);
 
   useEffect(() => {
-    if (confirming) confirmPrepareRef.current?.focus();
-  }, [confirming]);
+    if (confirming) focusDeliveryConfirmation(confirmationRef.current);
+  }, [busy, confirming]);
 
   useEffect(() => {
     if (confirming) return;
@@ -93,26 +97,6 @@ export function CodexDelivery(props: CodexDeliveryProps) {
       const trigger = prepareTriggerRef.current;
       if (!trigger?.closest('[aria-hidden="true"]')) trigger?.focus();
     });
-  };
-
-  const confirmationKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      closeConfirmation();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
-    const first = controls[0];
-    const last = controls.at(-1);
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last?.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first?.focus();
-    }
   };
 
   const prepare = async () => {
@@ -225,11 +209,21 @@ export function CodexDelivery(props: CodexDeliveryProps) {
 
       {confirming ? (
         <div className="delivery-confirmation-backdrop">
-          <div className="delivery-confirmation" role="alertdialog" aria-modal="true" aria-labelledby="codex-confirm-heading" onKeyDown={confirmationKeyDown}>
+          <div
+            ref={confirmationRef}
+            className="delivery-confirmation"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="codex-confirm-heading"
+            tabIndex={-1}
+            onKeyDown={(event) =>
+              handleDeliveryConfirmationKey(event, closeConfirmation, !busy)
+            }
+          >
             <h3 id="codex-confirm-heading">Confirm this external data flow</h3>
             <p>Confirm the source root, provider, destination, and retention setting shown above.</p>
             <div className="delivery-confirmation__actions">
-              <button ref={confirmPrepareRef} type="button" disabled={busy} onClick={() => void confirmAndPrepare()}>Confirm and prepare</button>
+              <button type="button" disabled={busy} onClick={() => void confirmAndPrepare()}>Confirm and prepare</button>
               <button type="button" disabled={busy} onClick={closeConfirmation}>Cancel</button>
             </div>
           </div>

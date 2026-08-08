@@ -144,6 +144,15 @@ export function ReviewShell(props: ReviewShellProps) {
   const lastPlacedPageNoteToken = useRef<number | undefined>(undefined);
   const existingAnnotations = props.existingAnnotations ?? { status: 'loading', generation: 0 };
 
+  const dismissPageNoteAuthority = () => {
+    if (props.keyboardPageNoteActive) props.onCancelKeyboardPageNote?.();
+    if (props.pageMenu) props.onPageMenuDismiss?.(props.pageMenu.invocationId);
+  };
+  const transitionBaseSurface = (surfaceName: ReviewBaseSurface) => {
+    dismissPageNoteAuthority();
+    dispatchSurface({ type: 'open-base', surface: surfaceName });
+  };
+
   const clearPeekTimer = () => {
     if (peekTimerRef.current !== undefined) clearTimeout(peekTimerRef.current);
     peekTimerRef.current = undefined;
@@ -170,7 +179,7 @@ export function ReviewShell(props: ReviewShellProps) {
     setListActivation(request);
     props.onActiveItemChange?.(request.id);
     setPeekItemId(undefined);
-    dispatchSurface({ type: 'open-base', surface: 'annotations' });
+    transitionBaseSurface('annotations');
     const item = props.state.items.find(({ id }) => id === request.id);
     if (item) props.onNavigate?.(item);
   }, [props.activationRequest?.id, props.activationRequest?.token]);
@@ -182,10 +191,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const openBase = (surfaceName: ReviewBaseSurface) => {
     rememberSurfaceTrigger(surfaceName);
-    dispatchSurface({
-      type: 'open-base',
-      surface: surface.baseSurface === surfaceName ? 'reading' : surfaceName,
-    });
+    transitionBaseSurface(surface.baseSurface === surfaceName ? 'reading' : surfaceName);
   };
   const restoreSurfaceTrigger = (surfaceName: ReviewBaseSurface) => {
     const trigger = surfaceTriggersRef.current.get(surfaceName);
@@ -413,11 +419,11 @@ export function ReviewShell(props: ReviewShellProps) {
   const canUndo = props.state.historyCursor > 0;
   const canRedo = props.state.historyCursor < props.state.history.length;
   const closeFinish = () => {
-    dispatchSurface({ type: 'open-base', surface: 'reading' });
+    transitionBaseSurface('reading');
     restoreSurfaceTrigger('finish');
   };
   const closeAnnotations = () => {
-    dispatchSurface({ type: 'open-base', surface: 'reading' });
+    transitionBaseSurface('reading');
     restoreSurfaceTrigger('annotations');
   };
 
@@ -468,7 +474,7 @@ export function ReviewShell(props: ReviewShellProps) {
               onInsert={() => startTextTool('insert')}
             />
           ) : null}
-          {surface.nestedLayer === 'none' && props.pageMenu ? (
+          {surface.baseSurface === 'reading' && surface.nestedLayer === 'none' && props.pageMenu ? (
             <PageActionMenu
               placement={props.pageMenu.placement}
               triggerRef={pageNoteTriggerRef}
@@ -507,7 +513,7 @@ export function ReviewShell(props: ReviewShellProps) {
                   setListActivation({ id: item.id, token: ++localActivationToken.current });
                   props.onActiveItemChange?.(item.id);
                   props.onNavigate?.(item);
-                  dispatchSurface({ type: 'open-base', surface: 'annotations' });
+                  transitionBaseSurface('annotations');
                 }}
               />
             ) : null;
@@ -526,7 +532,9 @@ export function ReviewShell(props: ReviewShellProps) {
             <AnnotationList
               items={props.state.items}
               {...(activeItemId === undefined ? {} : { activeId: activeItemId })}
-              {...(props.correspondingItemId === undefined ? {} : { correspondingId: props.correspondingItemId })}
+              {...(!listOpen || props.correspondingItemId === undefined
+                ? {}
+                : { correspondingId: props.correspondingItemId })}
               {...(!listOpen || listActivation === undefined ? {} : { activationRequest: listActivation })}
               {...(props.onItemCorrespondenceChange === undefined
                 ? {}

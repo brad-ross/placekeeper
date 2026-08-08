@@ -141,7 +141,7 @@ export async function inventoryDocumentAnnotations(
   document: PdfDocumentObject,
 ): Promise<readonly ExistingAnnotation[]> {
   const byPage = await engine.getAllAnnotations(document).toPromise();
-  return Object.entries(byPage).flatMap(([page, annotations]) =>
+  const sources = Object.entries(byPage).flatMap(([page, annotations]) =>
     annotations.map((annotation) => ({
       id: annotation.id,
       subtype: PdfAnnotationSubtypeName[annotation.type] ?? `Unsupported ${annotation.type}`,
@@ -152,11 +152,12 @@ export async function inventoryDocumentAnnotations(
         width: annotation.rect.size.width,
         height: annotation.rect.size.height,
       },
-      contents: annotation.contents ?? '',
-      author: annotation.author ?? '',
-      flags: [...(annotation.flags ?? [])],
+      ...(annotation.contents === undefined ? {} : { contents: annotation.contents }),
+      ...(annotation.author === undefined ? {} : { author: annotation.author }),
+      ...(annotation.flags === undefined ? {} : { flags: annotation.flags }),
       appearanceModes: appearanceModeNames(annotation.appearanceModes),
       supportedAppearance: annotation.type !== PdfAnnotationSubtype.UNKNOWN,
     })),
   );
+  return inventoryExistingAnnotations(sources);
 }

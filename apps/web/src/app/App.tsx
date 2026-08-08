@@ -4,7 +4,7 @@ import { DocumentManagerPlugin } from '@embedpdf/plugin-document-manager';
 import { InteractionManagerPlugin } from '@embedpdf/plugin-interaction-manager';
 import { ScrollPlugin } from '@embedpdf/plugin-scroll';
 import { SelectionPlugin } from '@embedpdf/plugin-selection';
-import { transformRect, transformSize } from '@embedpdf/models';
+import { transformRect, transformSize, type PdfPageObject, type Position } from '@embedpdf/models';
 
 import {
   ExistingAnnotationDiscoveryAuthority,
@@ -15,9 +15,10 @@ import {
 } from '../pdf/existing-annotations.js';
 import { createLocalPdfiumViewer, type ViewerAssetUrls } from '../pdf/embedpdf-viewer.js';
 import { PdfWorkspace, type PageContextMenuRequest } from '../pdf/PdfWorkspace.js';
+import { combinePageRotation } from '../pdf/owned-overlay.js';
 import {
   OwnedMarkPointerGesture,
-  groupOwnedMarkGeometry,
+  groupOwnedMarkGeometryByPage,
   hitTestOwnedMark,
 } from '../pdf/owned-mark-hit-test.js';
 import {
@@ -35,8 +36,56 @@ import {
   captureViewerSelection,
   createEngineAnchorPageReader,
 } from '../pdf/viewer-selection-adapter.js';
-import type { ViewerInteractionEvent, ViewerPagePoint } from '../pdf/viewer-interaction-events.js';
+import {
+  viewerPointerButton,
+  type ViewerInteractionEvent,
+  type ViewerPagePoint,
+} from '../pdf/viewer-interaction-events.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+
+type ViewerCaretResult = Awaited<ReturnType<typeof captureViewerCaret>>;
+
+const FALLBACK_PAGE_NOTE_CURSOR_RADIUS_PX = 18;
+
+export function clampPageNotePoint(
+  point: Position,
+  page: Pick<PdfPageObject, 'size' | 'boxes'>,
+  inset = 0,
+): Position {
+  const cropOrigin = page.boxes?.crop ?? { left: 0, top: 0 };
+  const clampAxis = (value: number, start: number, end: number) => {
+    const safeInset = Math.min(Math.max(0, inset), Math.max(0, end - start) / 2);
+    return Math.min(end - safeInset, Math.max(start + safeInset, value));
+  };
+  return {
+    x: clampAxis(point.x, cropOrigin.left, cropOrigin.left + page.size.width),
+    y: clampAxis(point.y, cropOrigin.top, cropOrigin.top + page.size.height),
+  };
+}
+
+export async function publishViewerCaretRead(input: {
+  readonly read: Promise<ViewerCaretResult>;
+  readonly isCurrent: () => boolean;
+  readonly placement: { readonly left: number; readonly top: number; readonly suggestTop: true };
+  readonly emit: (event: ViewerInteractionEvent) => void;
+}): Promise<void> {
+  try {
+    const result = await input.read;
+    if (!input.isCurrent()) return;
+    input.emit({
+      type: 'caret',
+      value: result.ok
+        ? { anchor: result.anchor, placement: input.placement }
+        : { anchor: null, placement: null, diagnostic: result.diagnostic },
+    });
+  } catch {
+    if (!input.isCurrent()) return;
+    input.emit({
+      type: 'caret',
+      value: { anchor: null, placement: null, diagnostic: 'caret-read-unavailable' },
+    });
+  }
+}
 
 export interface AppProps {
   assets: ViewerAssetUrls;
@@ -47,7 +96,7 @@ export interface AppProps {
   onSelectionUpdate?: (update: SelectionUpdate) => void;
   documentTitle?: string;
   toolError?: string | null;
-  /** Production composes the viewer inside the canonical ReviewShell toolbar. */
+  /** Production composes the viewer inside the canonical reading-first ReviewShell. */
   embeddedInReviewShell?: boolean;
   ownedAnnotations?: readonly ReviewAnnotation[];
   onViewerInteraction?: (event: ViewerInteractionEvent) => void;
@@ -101,8 +150,12 @@ export function App({
   } | null>(null);
   const explicitAnnotationsRef = useRef(existingAnnotations);
   explicitAnnotationsRef.current = existingAnnotations;
-  const ownedAnnotationsRef = useRef(ownedAnnotations);
-  ownedAnnotationsRef.current = ownedAnnotations;
+  const ownedGeometryByPage = useMemo(
+    () => groupOwnedMarkGeometryByPage(ownedAnnotations),
+    [ownedAnnotations],
+  );
+  const ownedGeometryByPageRef = useRef(ownedGeometryByPage);
+  ownedGeometryByPageRef.current = ownedGeometryByPage;
   const ownedPointerGesture = useRef(new OwnedMarkPointerGesture());
   const hoveredOwnedId = useRef<string | undefined>(undefined);
   const viewer = useMemo(() => createLocalPdfiumViewer(assets), [assets]);
@@ -149,7 +202,8 @@ export function App({
   useEffect(() => () => {
     clearSubscriptions();
     selectionReads.current.invalidate();
-  }, [clearSubscriptions]);
+    caretReadGeneration.current += 1;
+  }, [clearSubscriptions, viewer]);
 
   const publishKeyboardCursor = useCallback((point: ViewerPagePoint | null) => {
     keyboardCursorRef.current = point;
@@ -167,12 +221,13 @@ export function App({
     const pageIndex = Math.max(0, (scroll?.getCurrentPage() ?? 1) - 1);
     const page = document?.pages[pageIndex];
     if (!page) return;
+    const cropOrigin = page.boxes?.crop ?? { left: 0, top: 0 };
     publishKeyboardCursor({
       documentId,
       pageIndex,
       viewportGeneration: viewportGenerationRef.current,
-      x: page.size.width / 2 + (page.boxes?.crop.left ?? 0),
-      y: page.size.height / 2 + (page.boxes?.crop.top ?? 0),
+      x: cropOrigin.left + page.size.width / 2,
+      y: cropOrigin.top + page.size.height / 2,
     });
   }, [publishKeyboardCursor]);
 
@@ -183,6 +238,7 @@ export function App({
   }, [initializeKeyboardCursor, keyboardPageNoteActive, publishKeyboardCursor]);
 
   const initializeViewer = useCallback(async (registry: PluginRegistry) => {
+    caretReadGeneration.current += 1;
     registryRef.current = registry;
     clearSubscriptions();
     onSelectionUpdate?.(selectionReads.current.invalidate());
@@ -199,18 +255,33 @@ export function App({
       });
     }
 
+    const pageReaders = new Map<string, {
+      document: Parameters<typeof createEngineAnchorPageReader>[1];
+      reader: ReturnType<typeof createEngineAnchorPageReader>;
+    }>();
+    const pageReaderFor = (
+      documentId: string,
+      document: Parameters<typeof createEngineAnchorPageReader>[1],
+    ) => {
+      const current = pageReaders.get(documentId);
+      if (current?.document === document) return current.reader;
+      const reader = createEngineAnchorPageReader(registry.getEngine(), document);
+      pageReaders.set(documentId, { document, reader });
+      return reader;
+    };
+
     const readPage = async (documentId: string, pageIndex: number) => {
       const generation = ++pageReadGeneration.current;
       const document = registry.getStore().getState().core.documents[documentId]?.document;
       if (!document) return;
-      const reader = createEngineAnchorPageReader(registry.getEngine(), document);
-      const page = await reader.read(pageIndex);
+      const page = await pageReaderFor(documentId, document).read(pageIndex);
       if (generation === pageReadGeneration.current) {
         setDetectedPageReliable(assessPageTextReliability(page).reliable);
         setDetectedSelectionReliable(true);
       }
     };
     const loadDocument = async (documentId: string) => {
+      caretReadGeneration.current += 1;
       activeDocumentIdRef.current = documentId;
       const document = registry.getStore().getState().core.documents[documentId]?.document;
       if (!document) return;
@@ -222,9 +293,7 @@ export function App({
             x: position.x + (page.boxes?.crop.left ?? 0),
             y: position.y + (page.boxes?.crop.top ?? 0),
           });
-          const pageGeometry = () => groupOwnedMarkGeometry(
-            ownedAnnotationsRef.current.filter(({ pageIndex }) => pageIndex === page.index),
-          );
+          const pageGeometry = () => ownedGeometryByPageRef.current.get(page.index) ?? [];
           const setHoveredOwned = (id: string | undefined) => {
             if (hoveredOwnedId.current === id) return;
             if (hoveredOwnedId.current) {
@@ -236,8 +305,13 @@ export function App({
           subscriptions.current.push(interaction.registerAlways({
             scope: { type: 'page', documentId, pageIndex: page.index },
             handlers: {
-              onPointerDown: (position) => {
-                ownedPointerGesture.current.pointerDown(pointerId, toCanonicalPoint(position), pageGeometry());
+              onPointerDown: (position, event) => {
+                ownedPointerGesture.current.pointerDown(
+                  pointerId,
+                  viewerPointerButton(event) ?? -1,
+                  toCanonicalPoint(position),
+                  pageGeometry(),
+                );
               },
               onPointerMove: (position) => {
                 const point = toCanonicalPoint(position);
@@ -255,6 +329,7 @@ export function App({
               onPointerUp: (position, event) => {
                 const ownedId = ownedPointerGesture.current.pointerUp(
                   pointerId,
+                  viewerPointerButton(event) ?? -1,
                   toCanonicalPoint(position),
                   pageGeometry(),
                 );
@@ -277,21 +352,15 @@ export function App({
                 }
                 if (selection?.getState(documentId).selection !== null) return;
                 const generation = ++caretReadGeneration.current;
-                void captureViewerCaret({
-                  pageIndex: page.index,
-                  point: position,
-                  pages: createEngineAnchorPageReader(registry.getEngine(), document),
-                }).then((result) => {
-                  if (generation !== caretReadGeneration.current) return;
-                  emit({
-                    type: 'caret',
-                    value: result.ok
-                      ? {
-                          anchor: result.anchor,
-                          placement: { left: event.clientX, top: event.clientY, suggestTop: true },
-                        }
-                      : { anchor: null, placement: null, diagnostic: result.diagnostic },
-                  });
+                void publishViewerCaretRead({
+                  read: captureViewerCaret({
+                    pageIndex: page.index,
+                    point: position,
+                    pages: pageReaderFor(documentId, document),
+                  }),
+                  isCurrent: () => generation === caretReadGeneration.current,
+                  placement: { left: event.clientX, top: event.clientY, suggestTop: true },
+                  emit,
                 });
               },
             },
@@ -354,7 +423,7 @@ export function App({
         const result = await captureViewerSelection({
           documentId,
           selection,
-          pages: createEngineAnchorPageReader(registry.getEngine(), document),
+          pages: pageReaderFor(documentId, document),
         });
         if (selectionReads.current.isCurrent(generation)) {
           setDetectedSelectionReliable(result.ok);
@@ -390,7 +459,7 @@ export function App({
           const element = document.querySelector<HTMLElement>(`[data-page-index="${placement.pageIndex}"]`);
           if (!page || !element) return;
           const bounds = element.getBoundingClientRect();
-          const rotation = active.rotation;
+          const rotation = combinePageRotation(page.rotation, active.rotation);
           const rotatedSize = transformSize(page.size, rotation, 1);
           const scale = bounds.width / rotatedSize.width;
           const transformed = transformRect(page.size, placement.rect, rotation, scale);
@@ -458,6 +527,29 @@ export function App({
     return true;
   }, [emit]);
 
+  const clampKeyboardCursor = useCallback((cursor: ViewerPagePoint): ViewerPagePoint => {
+    const registry = registryRef.current;
+    const active = registry?.getStore().getState().core.documents[cursor.documentId];
+    const page = active?.document?.pages[cursor.pageIndex];
+    if (!page) return cursor;
+    const pageElement = globalThis.document?.querySelector<HTMLElement>(
+      `[data-page-index="${cursor.pageIndex}"]`,
+    );
+    const cursorElement = globalThis.document?.querySelector<HTMLElement>('.page-note-placement-cursor');
+    const pageBounds = pageElement?.getBoundingClientRect();
+    const cursorBounds = cursorElement?.getBoundingClientRect();
+    const rotation = combinePageRotation(page.rotation, active.rotation);
+    const rotatedSize = transformSize(page.size, rotation, 1);
+    const scale = pageBounds && pageBounds.width > 0
+      ? pageBounds.width / rotatedSize.width
+      : 0;
+    const cursorRadius = cursorBounds && cursorBounds.width > 0 && cursorBounds.height > 0
+      ? Math.max(cursorBounds.width, cursorBounds.height) / 2
+      : FALLBACK_PAGE_NOTE_CURSOR_RADIUS_PX;
+    const inset = scale > 0 ? cursorRadius / scale : 0;
+    return { ...cursor, ...clampPageNotePoint(cursor, page, inset) };
+  }, []);
+
   const keyboardCursorKey = useCallback((key: string) => {
     const cursor = keyboardCursorRef.current;
     if (!cursor) return;
@@ -466,17 +558,17 @@ export function App({
       return;
     }
     if (key === 'Enter') {
-      emit({ type: 'page-note-commit', value: cursor });
+      emit({ type: 'page-note-commit', value: clampKeyboardCursor(cursor) });
       publishKeyboardCursor(null);
       return;
     }
     const delta = 4;
-    publishKeyboardCursor({
+    publishKeyboardCursor(clampKeyboardCursor({
       ...cursor,
       x: cursor.x + (key === 'ArrowLeft' ? -delta : key === 'ArrowRight' ? delta : 0),
       y: cursor.y + (key === 'ArrowUp' ? -delta : key === 'ArrowDown' ? delta : 0),
-    });
-  }, [emit, publishKeyboardCursor]);
+    }));
+  }, [clampKeyboardCursor, emit, publishKeyboardCursor]);
   const workspace = (
     <PdfWorkspace
       engine={viewer.engine}

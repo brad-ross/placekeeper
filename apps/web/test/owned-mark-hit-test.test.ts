@@ -61,18 +61,31 @@ describe('owned mark page-space hit testing', () => {
     ]);
     const gesture = new OwnedMarkPointerGesture(5);
 
-    gesture.pointerDown(1, { x: 20, y: 20 }, groups);
-    expect(gesture.pointerUp(1, { x: 21, y: 20 }, groups)).toBe('mark');
+    gesture.pointerDown(1, 0, { x: 20, y: 20 }, groups);
+    expect(gesture.pointerUp(1, 0, { x: 21, y: 20 }, groups)).toBe('mark');
 
-    gesture.pointerDown(2, { x: 20, y: 20 }, groups);
+    gesture.pointerDown(2, 0, { x: 20, y: 20 }, groups);
     gesture.pointerMove(2, { x: 28, y: 20 });
-    expect(gesture.pointerUp(2, { x: 28, y: 20 }, groups)).toBeUndefined();
+    expect(gesture.pointerUp(2, 0, { x: 28, y: 20 }, groups)).toBeUndefined();
 
-    gesture.pointerDown(3, { x: 20, y: 20 }, groups);
-    expect(gesture.pointerUp(3, { x: 60, y: 20 }, groups)).toBeUndefined();
+    gesture.pointerDown(3, 0, { x: 20, y: 20 }, groups);
+    expect(gesture.pointerUp(3, 0, { x: 60, y: 20 }, groups)).toBeUndefined();
 
-    gesture.pointerDown(4, { x: 20, y: 20 }, groups);
+    gesture.pointerDown(4, 0, { x: 20, y: 20 }, groups);
     gesture.pointerCancel(4);
-    expect(gesture.pointerUp(4, { x: 20, y: 20 }, groups)).toBeUndefined();
+    expect(gesture.pointerUp(4, 0, { x: 20, y: 20 }, groups)).toBeUndefined();
+  });
+
+  it('never starts or completes activation for a secondary pointer button', () => {
+    const groups = groupOwnedMarkGeometry([
+      annotation('mark', [{ x: 10, y: 10, width: 30, height: 20 }]),
+    ]);
+    const gesture = new OwnedMarkPointerGesture(5);
+
+    expect(gesture.pointerDown(1, 2, { x: 20, y: 20 }, groups)).toBeUndefined();
+    expect(gesture.pointerUp(1, 2, { x: 20, y: 20 }, groups)).toBeUndefined();
+
+    gesture.pointerDown(2, 0, { x: 20, y: 20 }, groups);
+    expect(gesture.pointerUp(2, 2, { x: 20, y: 20 }, groups)).toBeUndefined();
   });
 });
