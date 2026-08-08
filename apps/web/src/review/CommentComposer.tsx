@@ -29,7 +29,9 @@ export function CommentComposer({
   const canSave = optional || (allowWhitespace ? value.length > 0 : value.trim().length > 0);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    const input = inputRef.current;
+    input?.focus();
+    input?.setSelectionRange(input.value.length, input.value.length);
     return () => triggerRef?.current?.focus();
   }, [triggerRef]);
 

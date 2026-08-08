@@ -149,12 +149,15 @@ test("one installed-style browser tree preserves review state across responsive 
   await expect(page.getByRole("alert")).toContainText("Reading the selected text");
   await expect.poll(async () => (await pageCanvas.boundingBox())?.y)
     .toBe(canvasBoxBeforeSelection.y);
-  await page.keyboard.type("revised");
+  await page.keyboard.press("b");
   await releaseSelectionCapture(page);
 
   const replacementDialog = page.getByRole("dialog", { name: "Replacement text" });
   await expect(replacementDialog).toBeVisible();
-  await expect(replacementDialog.getByRole("textbox", { name: "Replacement text" })).toHaveValue("revised");
+  const replacementTextbox = replacementDialog.getByRole("textbox", { name: "Replacement text" });
+  await expect(replacementTextbox).toHaveValue("b");
+  await page.keyboard.type("la");
+  await expect(replacementTextbox).toHaveValue("bla");
   await replacementDialog.getByRole("button", { name: "Apply" }).click();
   await expect(replacementDialog).toHaveCount(0);
   await expect(page.locator("[data-review-item]")).toHaveCount(1);
@@ -166,7 +169,7 @@ test("one installed-style browser tree preserves review state across responsive 
     pageIndex: 0,
     payload: {
       quote: "Selectable proofreader text: unique equilibrium clearly",
-      proposedText: "revised",
+      proposedText: "bla",
       reliable: true,
     },
   });

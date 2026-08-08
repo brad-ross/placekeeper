@@ -12,6 +12,8 @@ test.describe('canonical review workflow', () => {
     await page.keyboard.press('l');
     const replacement = page.getByRole('textbox', { name: 'Replacement text' });
     await expect(replacement).toBeFocused();
+    await page.keyboard.type('oc');
+    await expect(replacement).toHaveValue('loc');
     await replacement.fill('locally unique equilibrium');
     await page.getByRole('button', { name: 'Apply' }).click();
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '1');
