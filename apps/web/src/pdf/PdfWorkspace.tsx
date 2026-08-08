@@ -71,7 +71,11 @@ export function PdfWorkspace({
                         background: 'white',
                       }}
                     >
-                      <RenderLayer documentId={activeDocumentId} pageIndex={layout.pageIndex} />
+                      <RenderLayer
+                        documentId={activeDocumentId}
+                        pageIndex={layout.pageIndex}
+                        style={{ pointerEvents: 'none' }}
+                      />
                       <SelectionLayer documentId={activeDocumentId} pageIndex={layout.pageIndex} />
                       <div
                         aria-hidden="true"
