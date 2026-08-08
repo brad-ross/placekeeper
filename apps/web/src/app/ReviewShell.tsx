@@ -1,5 +1,6 @@
 import {
   useLayoutEffect,
+  useReducer,
   useRef,
   useState,
   type CompositionEvent,
@@ -23,14 +24,22 @@ import {
 import type { ReviewCommand, ReviewItem, ReviewItemKind, ReviewState } from '../../../../packages/core/src/review-model.js';
 import type { CaretAnchor, SelectionAnchor } from '../pdf/selection-anchor.js';
 import { reliableSelection, type SelectionUpdate } from '../pdf/selection-state.js';
+import type { ViewerControls, ViewerControlsSnapshot } from '../pdf/viewer-controls.js';
+import { unavailableViewerControls } from '../pdf/viewer-controls.js';
 import { AnnotationList } from '../review/AnnotationList.js';
 import { CommentComposer } from '../review/CommentComposer.js';
+import { ReviewChrome } from '../review/ReviewChrome.js';
 import {
   createProofreadInputController,
   isEditableTarget,
   type ProofreadInputIntent,
 } from '../review/input-controller.js';
 import { ReviewToolbar, reviewToolForKey } from '../review/ReviewToolbar.js';
+import {
+  INITIAL_REVIEW_SURFACE_STATE,
+  reduceReviewSurface,
+  type ReviewBaseSurface,
+} from '../review/review-surface-state.js';
 import './review-layout.css';
 
 type TextDraft =
@@ -44,6 +53,8 @@ type Composer =
 
 export interface ReviewShellProps {
   state: ReviewState;
+  documentTitle?: string;
+  savedLabel?: string;
   currentTool: ReviewItemKind;
   listOpen?: boolean;
   selectionUpdate: SelectionUpdate;
@@ -52,6 +63,9 @@ export interface ReviewShellProps {
   onToolChange(tool: ReviewItemKind): void;
   onCommand(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
   onNavigate?(item: ReviewItem): void;
+  viewerControls?: ViewerControls;
+  viewerState?: ViewerControlsSnapshot;
+  finishSlot?: ReactNode;
   children?: ReactNode;
 }
 
@@ -68,7 +82,12 @@ function mutableField(item: ReviewItem): 'proposedText' | 'comment' | undefined 
 }
 
 export function ReviewShell(props: ReviewShellProps) {
-  const [internalListOpen, setInternalListOpen] = useState(false);
+  const [surface, dispatchSurface] = useReducer(
+    reduceReviewSurface,
+    props.listOpen === true
+      ? { baseSurface: 'annotations', nestedLayer: 'none' }
+      : INITIAL_REVIEW_SURFACE_STATE,
+  );
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
   const [composer, setComposer] = useState<Composer | null>(null);
   const [activeItemId, setActiveItemId] = useState<string>();
@@ -79,8 +98,26 @@ export function ReviewShell(props: ReviewShellProps) {
   const pageNoteTriggerRef = useRef<HTMLButtonElement>(null);
   const draftTriggerRef = useRef<HTMLElement>(null);
   const editTriggerRef = useRef<HTMLButtonElement>(null);
-  const listOpen = props.listOpen ?? internalListOpen;
+  const surfaceTriggersRef = useRef(new Map<ReviewBaseSurface, HTMLElement>());
+  const listOpen = surface.baseSurface === 'annotations';
   const selectionAnchor = reliableSelection(props.selectionUpdate);
+
+  const rememberSurfaceTrigger = (surfaceName: ReviewBaseSurface) => {
+    if (document.activeElement instanceof HTMLElement) {
+      surfaceTriggersRef.current.set(surfaceName, document.activeElement);
+    }
+  };
+  const openBase = (surfaceName: ReviewBaseSurface) => {
+    rememberSurfaceTrigger(surfaceName);
+    dispatchSurface({
+      type: 'open-base',
+      surface: surface.baseSurface === surfaceName ? 'reading' : surfaceName,
+    });
+  };
+  const restoreSurfaceTrigger = (surfaceName: ReviewBaseSurface) => {
+    const trigger = surfaceTriggersRef.current.get(surfaceName);
+    queueMicrotask(() => trigger?.focus());
+  };
 
   if (props.state.revision >= acknowledgedRef.current.revision) acknowledgedRef.current = props.state;
 
@@ -112,6 +149,7 @@ export function ReviewShell(props: ReviewShellProps) {
       anchor: intent.anchor,
       initialText: intent.initialText,
     } as TextDraft);
+    dispatchSurface({ type: 'open-nested' });
   };
 
   const inputIntentRef = useRef(handleInputIntent);
@@ -121,6 +159,18 @@ export function ReviewShell(props: ReviewShellProps) {
     inputControllerRef.current = createProofreadInputController((intent) => inputIntentRef.current(intent));
   }
   const inputController = inputControllerRef.current;
+  const closeNested = () => {
+    const trigger = textDraft ? draftTriggerRef.current
+      : composer?.kind === 'edit' ? editTriggerRef.current
+      : modalTriggerRef.current;
+    if (textDraft) {
+      setTextDraft(null);
+      inputController.clearDraft();
+    }
+    if (composer) setComposer(null);
+    dispatchSurface({ type: 'close-nested' });
+    queueMicrotask(() => trigger?.focus());
+  };
   useLayoutEffect(() => {
     inputController.focusChanged(isEditableTarget(document.activeElement));
     inputController.setContext({
@@ -142,6 +192,20 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const editable = isEditableTarget(event.target);
+    if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+      if (surface.nestedLayer !== 'none') {
+        event.preventDefault();
+        closeNested();
+        return;
+      }
+      if (surface.baseSurface !== 'reading') {
+        event.preventDefault();
+        const closing = surface.baseSurface;
+        dispatchSurface({ type: 'escape' });
+        restoreSurfaceTrigger(closing);
+        return;
+      }
+    }
     if (event.defaultPrevented || editable || event.nativeEvent.isComposing) return;
     if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey) {
       const tool = reviewToolForKey(event.key);
@@ -193,6 +257,7 @@ export function ReviewShell(props: ReviewShellProps) {
     }).then((next) => {
       if (addedId && next.items.some(({ id }) => id === addedId)) {
         setComposer({ kind: 'highlight', itemId: addedId });
+        dispatchSurface({ type: 'open-nested' });
       }
     });
   };
@@ -207,6 +272,7 @@ export function ReviewShell(props: ReviewShellProps) {
     }
     draftTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setTextDraft({ kind, anchor, initialText: '' } as TextDraft);
+    dispatchSurface({ type: 'open-nested' });
   };
 
   const deleteSelection = () => {
@@ -225,11 +291,13 @@ export function ReviewShell(props: ReviewShellProps) {
     modalTriggerRef.current = pageNoteTriggerRef.current
       ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     setComposer({ kind: 'pageNote', ...props.pageNoteAnchor });
+    dispatchSurface({ type: 'open-nested' });
   };
 
   const closeTextDraft = () => {
     setTextDraft(null);
     inputController.clearDraft();
+    dispatchSurface({ type: 'close-nested' });
   };
 
   const canUndo = props.state.historyCursor > 0;
@@ -245,6 +313,21 @@ export function ReviewShell(props: ReviewShellProps) {
       onCompositionStartCapture={(event) => inputController.compositionStart(event.target)}
       onCompositionEndCapture={compositionEnd}
     >
+      <ReviewChrome
+        documentTitle={props.documentTitle ?? 'Local PDF'}
+        {...(props.savedLabel === undefined ? {} : { savedLabel: props.savedLabel })}
+        {...(props.viewerControls === undefined ? {} : { controls: props.viewerControls })}
+        viewerState={props.viewerState ?? unavailableViewerControls()}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        annotationCount={props.state.items.length}
+        annotationsOpen={listOpen}
+        finishOpen={surface.baseSurface === 'finish'}
+        onUndo={() => void submit(undoReview)}
+        onRedo={() => void submit(redoReview)}
+        onAnnotations={() => openBase('annotations')}
+        onFinish={() => openBase('finish')}
+      />
       <ReviewToolbar
         currentTool={props.currentTool}
         canUndo={canUndo}
@@ -259,103 +342,140 @@ export function ReviewShell(props: ReviewShellProps) {
         onInsert={() => startTextTool('insert')}
         onUndo={() => void submit(undoReview)}
         onRedo={() => void submit(redoReview)}
-        onListOpenChange={setInternalListOpen}
+        onListOpenChange={(open) => {
+          if (open !== listOpen) openBase('annotations');
+        }}
       />
       <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
-      <div className="review-layout">
+      <div className="review-layout" data-review-stage>
         <div className="review-document">{props.children}</div>
-        <div className="review-list" data-list-open={listOpen ? 'true' : 'false'}>
-          <AnnotationList
-            items={props.state.items}
-            {...(activeItemId === undefined ? {} : { activeId: activeItemId })}
-            onNavigate={(item) => {
-              setActiveItemId(item.id);
-              props.onNavigate?.(item);
-            }}
-            onEdit={(item, trigger) => {
-              editTriggerRef.current = trigger;
-              setComposer({ kind: 'edit', item });
-            }}
-            onDelete={async (item) => {
-              const next = await submit((state) => removeReviewItem(state, item.id));
-              if (activeItemId === item.id) {
-                const ordered = next.items;
-                setActiveItemId(ordered[0]?.id);
-              }
-            }}
-          />
+        <div className="review-contextual-host" data-review-contextual-host>
+          <div
+            className="review-list"
+            data-list-open={listOpen ? 'true' : 'false'}
+            aria-hidden={!listOpen}
+            inert={!listOpen}
+          >
+            <AnnotationList
+              items={props.state.items}
+              {...(activeItemId === undefined ? {} : { activeId: activeItemId })}
+              onNavigate={(item) => {
+                setActiveItemId(item.id);
+                props.onNavigate?.(item);
+              }}
+              onEdit={(item, trigger) => {
+                editTriggerRef.current = trigger;
+                setComposer({ kind: 'edit', item });
+                dispatchSurface({ type: 'open-nested' });
+              }}
+              onDelete={async (item) => {
+                const next = await submit((state) => removeReviewItem(state, item.id));
+                if (activeItemId === item.id) {
+                  const ordered = next.items;
+                  setActiveItemId(ordered[0]?.id);
+                }
+              }}
+            />
+          </div>
+        </div>
+        <div className="review-drawer-host" data-review-drawer-host>
+          <aside
+            id="review-finish-drawer"
+            className="review-finish-drawer"
+            data-review-finish-slot
+            data-surface-open={surface.baseSurface === 'finish' ? 'true' : 'false'}
+            aria-label="Finish review"
+            aria-hidden={surface.baseSurface !== 'finish'}
+            inert={surface.baseSurface !== 'finish'}
+          >
+            {props.finishSlot}
+          </aside>
         </div>
       </div>
-      {textDraft ? (
-        <CommentComposer
-          title={textDraft.kind === 'replace' ? 'Replacement text' : 'Insertion text'}
-          fieldLabel={textDraft.kind === 'replace' ? 'Replacement text' : 'Insertion text'}
-          saveLabel="Apply"
-          allowWhitespace
-          initialValue={textDraft.initialText}
-          triggerRef={draftTriggerRef}
-          onDismiss={closeTextDraft}
-          onSave={async (value) => {
-            const frozen = textDraft;
-            await submit((state) => frozen.kind === 'replace'
-              ? addReplace(state, frozen.anchor, value)
-              : addInsert(state, frozen.anchor, value));
-            closeTextDraft();
-          }}
-        />
-      ) : null}
-      {composer?.kind === 'highlight' ? (
-        <CommentComposer
-          title="Highlight comment"
-          optional
-          triggerRef={modalTriggerRef}
-          onDismiss={() => setComposer(null)}
-          onSave={async (value) => {
-            if (value) await submit((state) => editReviewItem(state, composer.itemId, { comment: value }));
-            setComposer(null);
-          }}
-        />
-      ) : null}
-      {composer?.kind === 'pageNote' ? (
-        <CommentComposer
-          title="Page Note"
-          triggerRef={modalTriggerRef}
-          onDismiss={() => setComposer(null)}
-          onSave={async (value) => {
-            const frozen = composer;
-            await submit((state) => addPageNote(
-              state,
-              frozen.pageIndex,
-              frozen.position,
-              value,
-              undefined,
-              frozen.nearbyText,
-            ));
-            setComposer(null);
-          }}
-        />
-      ) : null}
-      {composer?.kind === 'edit' && mutableField(composer.item) ? (
-        <CommentComposer
-          title={`Edit ${composer.item.kind}`}
-          {...(composer.item.kind === 'replace' || composer.item.kind === 'insert'
-            ? {
-                allowWhitespace: true,
-                fieldLabel: composer.item.kind === 'replace' ? 'Replacement text' : 'Insertion text',
-                saveLabel: 'Apply',
-              }
-            : {})}
-          initialValue={String(composer.item.payload[mutableField(composer.item)!] ?? '')}
-          optional={composer.item.kind === 'highlight'}
-          triggerRef={editTriggerRef}
-          onDismiss={() => setComposer(null)}
-          onSave={async (value) => {
-            const field = mutableField(composer.item)!;
-            await submit((state) => editReviewItem(state, composer.item.id, { [field]: value }));
-            setComposer(null);
-          }}
-        />
-      ) : null}
+      <div className="review-nested-host" data-review-nested-host>
+        {textDraft ? (
+          <CommentComposer
+            title={textDraft.kind === 'replace' ? 'Replacement text' : 'Insertion text'}
+            fieldLabel={textDraft.kind === 'replace' ? 'Replacement text' : 'Insertion text'}
+            saveLabel="Apply"
+            allowWhitespace
+            initialValue={textDraft.initialText}
+            triggerRef={draftTriggerRef}
+            onDismiss={closeTextDraft}
+            onSave={async (value) => {
+              const frozen = textDraft;
+              await submit((state) => frozen.kind === 'replace'
+                ? addReplace(state, frozen.anchor, value)
+                : addInsert(state, frozen.anchor, value));
+              closeTextDraft();
+            }}
+          />
+        ) : null}
+        {composer?.kind === 'highlight' ? (
+          <CommentComposer
+            title="Highlight comment"
+            optional
+            triggerRef={modalTriggerRef}
+            onDismiss={() => {
+              setComposer(null);
+              dispatchSurface({ type: 'close-nested' });
+            }}
+            onSave={async (value) => {
+              if (value) await submit((state) => editReviewItem(state, composer.itemId, { comment: value }));
+              setComposer(null);
+              dispatchSurface({ type: 'close-nested' });
+            }}
+          />
+        ) : null}
+        {composer?.kind === 'pageNote' ? (
+          <CommentComposer
+            title="Page Note"
+            triggerRef={modalTriggerRef}
+            onDismiss={() => {
+              setComposer(null);
+              dispatchSurface({ type: 'close-nested' });
+            }}
+            onSave={async (value) => {
+              const frozen = composer;
+              await submit((state) => addPageNote(
+                state,
+                frozen.pageIndex,
+                frozen.position,
+                value,
+                undefined,
+                frozen.nearbyText,
+              ));
+              setComposer(null);
+              dispatchSurface({ type: 'close-nested' });
+            }}
+          />
+        ) : null}
+        {composer?.kind === 'edit' && mutableField(composer.item) ? (
+          <CommentComposer
+            title={`Edit ${composer.item.kind}`}
+            {...(composer.item.kind === 'replace' || composer.item.kind === 'insert'
+              ? {
+                  allowWhitespace: true,
+                  fieldLabel: composer.item.kind === 'replace' ? 'Replacement text' : 'Insertion text',
+                  saveLabel: 'Apply',
+                }
+              : {})}
+            initialValue={String(composer.item.payload[mutableField(composer.item)!] ?? '')}
+            optional={composer.item.kind === 'highlight'}
+            triggerRef={editTriggerRef}
+            onDismiss={() => {
+              setComposer(null);
+              dispatchSurface({ type: 'close-nested' });
+            }}
+            onSave={async (value) => {
+              const field = mutableField(composer.item)!;
+              await submit((state) => editReviewItem(state, composer.item.id, { [field]: value }));
+              setComposer(null);
+              dispatchSurface({ type: 'close-nested' });
+            }}
+          />
+        ) : null}
+      </div>
     </section>
   );
 }

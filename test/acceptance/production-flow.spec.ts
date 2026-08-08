@@ -114,10 +114,10 @@ test("one installed-style browser tree preserves review state across responsive 
   const browserErrors = collectBrowserErrors(page);
   await installSelectionCaptureGate(page);
   await page.goto(launchUrl);
-  await expect(page.getByRole("heading", { name: "Local PDF Proofreader" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "paper.pdf" })).toBeVisible();
   await expect(page.getByRole("toolbar", { name: "Review tools" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Human delivery" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Codex delivery" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Human delivery", includeHidden: true })).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Codex delivery", includeHidden: true })).toBeHidden();
   await expect.poll(() => assetResponses.some((url) => url.endsWith("/app.css"))).toBe(true);
   await expect.poll(() => assetResponses.some((url) => url.endsWith("/pdfium.wasm"))).toBe(true);
 
@@ -197,6 +197,11 @@ test("one installed-style browser tree preserves review state across responsive 
   await expect(page.locator("[data-owned-mark='pageNote']")).toHaveCount(1);
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(page.locator("[data-owned-mark='pageNote']")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "Finish" }).click();
+  await expect(page.getByRole("heading", { name: "Human delivery" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Codex delivery" })).toBeVisible();
+  await expect(pageCanvas).toHaveCount(1);
 
   const originalDigest = await sha256(pdf);
   await page.getByRole("button", { name: "Save reviewed copy" }).click();

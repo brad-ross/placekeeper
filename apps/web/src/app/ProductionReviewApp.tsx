@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { PluginRegistry } from "@embedpdf/core";
 import { ScrollPlugin } from "@embedpdf/plugin-scroll";
 
@@ -16,6 +16,12 @@ import { HumanDelivery, type DeliveryArtifact } from "../export/HumanDelivery.js
 import { App } from "./App.js";
 import { ReviewShell, type RejectedReviewCommand } from "./ReviewShell.js";
 import { projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
+import {
+  createViewerControls,
+  unavailableViewerControls,
+  type ViewerControls,
+  type ViewerControlsSnapshot,
+} from "../pdf/viewer-controls.js";
 
 function itemCoordinates(item: ReviewState["items"][number]): { x: number; y: number } | undefined {
   const value = item.payload[item.kind === "insert" || item.kind === "pageNote" ? "position" : "rect"];
@@ -94,6 +100,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   } | null>(null);
   const latestReceipt = useRef<string | null>(null);
   const viewerRegistry = useRef<PluginRegistry | null>(null);
+  const viewerControlsRef = useRef<ViewerControls | undefined>(undefined);
+  const [viewerState, setViewerState] = useState<ViewerControlsSnapshot>(unavailableViewerControls);
   const selection = reliableSelection(selectionUpdate);
   const caret = useMemo(() => caretFromSelection(selection), [selection]);
   const viewerAssets = useMemo(() => ({
@@ -112,6 +120,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     if (update.kind === "reliable") setToolError(null);
   };
   const readinessMessage = selectionReadinessMessage(selectionUpdate);
+  useEffect(() => () => viewerControlsRef.current?.dispose(), []);
   const viewer = props.viewer ?? (
     <App
       embeddedInReviewShell
@@ -123,15 +132,63 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       onPagePoint={setPagePoint}
       onViewerInitialized={async (registry) => {
         viewerRegistry.current = registry;
+        viewerControlsRef.current?.dispose();
+        const controls = createViewerControls(registry);
+        viewerControlsRef.current = controls;
+        setViewerState(controls.snapshot());
+        controls.subscribe(() => setViewerState(controls.snapshot()));
       }}
     />
+  );
+
+  const delivery = (
+    <div className="review-delivery-content">
+      <HumanDelivery
+        state={state}
+        onSave={() => props.api.saveReviewedCopy()}
+        onReplaceOriginal={() => props.api.replaceOriginal()}
+        onFinish={() => props.api.finish()}
+        onDiscard={() => props.api.discard()}
+      />
+      <CodexDelivery
+        state={state}
+        sourceRoot={sourceRoot}
+        provider="Codex desktop"
+        revisedPdfDestination="A fresh result directory inside the approved source root"
+        retention="Artifacts remain local until you delete them"
+        confirmedScopeSignature={confirmedScope}
+        onConfirmScope={setConfirmedScope}
+        onPrepare={async () => {
+          const prepared = await props.api.prepareCodex();
+          latestReceipt.current = prepared.receiptId;
+          return prepared;
+        }}
+        onSaveInstruction={async () => {
+          if (latestReceipt.current === null) throw new Error("Prepare a handoff first");
+          await props.api.saveInstruction(latestReceipt.current);
+        }}
+        onCheckResult={async ({ disposition, revisedPdf }) => {
+          if (latestReceipt.current === null) throw new Error("Prepare a handoff first");
+          return props.api.checkCodex({
+            receiptId: latestReceipt.current,
+            dispositionText: await disposition.text(),
+            revisedPdfSelected: revisedPdf !== undefined,
+          });
+        }}
+      />
+    </div>
   );
 
   return (
     <main data-production-review>
       <ReviewShell
         state={state}
+        documentTitle={props.scope.documentTitle}
+        savedLabel={`Saved · revision ${state.revision}`}
         currentTool={tool}
+        {...(viewerControlsRef.current === undefined ? {} : { viewerControls: viewerControlsRef.current })}
+        viewerState={viewerState}
+        finishSlot={delivery}
         selectionUpdate={selectionUpdate}
         caretAnchor={caret}
         pageNoteAnchor={pagePoint === null ? null : {
@@ -171,41 +228,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       >
         {viewer}
       </ReviewShell>
-      <div className="delivery-layout">
-        <HumanDelivery
-          state={state}
-          onSave={() => props.api.saveReviewedCopy()}
-          onReplaceOriginal={() => props.api.replaceOriginal()}
-          onFinish={() => props.api.finish()}
-          onDiscard={() => props.api.discard()}
-        />
-        <CodexDelivery
-          state={state}
-          sourceRoot={sourceRoot}
-          provider="Codex desktop"
-          revisedPdfDestination="A fresh result directory inside the approved source root"
-          retention="Artifacts remain local until you delete them"
-          confirmedScopeSignature={confirmedScope}
-          onConfirmScope={setConfirmedScope}
-          onPrepare={async () => {
-            const prepared = await props.api.prepareCodex();
-            latestReceipt.current = prepared.receiptId;
-            return prepared;
-          }}
-          onSaveInstruction={async () => {
-            if (latestReceipt.current === null) throw new Error("Prepare a handoff first");
-            await props.api.saveInstruction(latestReceipt.current);
-          }}
-          onCheckResult={async ({ disposition, revisedPdf }) => {
-            if (latestReceipt.current === null) throw new Error("Prepare a handoff first");
-            return props.api.checkCodex({
-              receiptId: latestReceipt.current,
-              dispositionText: await disposition.text(),
-              revisedPdfSelected: revisedPdf !== undefined,
-            });
-          }}
-        />
-      </div>
     </main>
   );
 }

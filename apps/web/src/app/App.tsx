@@ -208,7 +208,7 @@ export function App({
     />
   );
   const workspaceWithStatus = (
-    <div data-viewer-shell style={{ position: 'relative' }}>
+    <div data-viewer-shell>
       {workspace}
       {toolError ? (
         <p
@@ -232,24 +232,22 @@ export function App({
     </div>
   );
 
+  if (embeddedInReviewShell) return workspaceWithStatus;
+
   const content = (
     <main>
       <h1>Local PDF Proofreader</h1>
       <p data-document-title>{documentTitle}</p>
-      {embeddedInReviewShell ? (
-        workspaceWithStatus
-      ) : (
-        <section aria-label="PDF review workspace">
-          <div role="toolbar" aria-label="Review tools">
-            <button type="button">Page Note</button>
-          </div>
-          {pageMessage ? <p data-recovery-kind="page">{pageMessage}</p> : null}
-          {selectionMessage ? <p data-recovery-kind="selection">{selectionMessage}</p> : null}
-          <div data-semantic-tools-enabled={effectivePageReliability && effectiveSelectionReliability ? 'true' : 'false'}>
-            {workspaceWithStatus}
-          </div>
-        </section>
-      )}
+      <section aria-label="PDF review workspace">
+        <div role="toolbar" aria-label="Review tools">
+          <button type="button">Page Note</button>
+        </div>
+        {pageMessage ? <p data-recovery-kind="page">{pageMessage}</p> : null}
+        {selectionMessage ? <p data-recovery-kind="selection">{selectionMessage}</p> : null}
+        <div data-semantic-tools-enabled={effectivePageReliability && effectiveSelectionReliability ? 'true' : 'false'}>
+          {workspaceWithStatus}
+        </div>
+      </section>
       <aside aria-label="Existing annotations">
         <h2>Existing annotations</h2>
         {existingAnnotations.length + sourceAnnotations.length === 0 ? <p>None</p> : null}

@@ -36,6 +36,10 @@ describe("one production review tree", () => {
     expect(html).toContain("Codex delivery");
     expect(html).toContain("Finish review");
     expect(html).toContain("Discard review");
+    expect(html).toContain("data-review-finish-slot");
+    expect(html).toContain("data-surface-open=\"false\"");
+    expect(html).not.toContain("delivery-layout");
+    expect(html.match(/Real shared PDF viewer/g)).toHaveLength(1);
     expect(html).not.toContain("Submit task");
   });
 });

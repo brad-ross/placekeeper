@@ -38,7 +38,7 @@ export function PdfWorkspace({
   }, [ownedAnnotations]);
 
   return (
-    <div aria-label={documentLabel} role="region" style={{ height: '100%', minHeight: 480 }}>
+    <div aria-label={documentLabel} role="region" className="pdf-workspace">
       <EmbedPDF
         engine={engine}
         plugins={plugins}
@@ -46,14 +46,14 @@ export function PdfWorkspace({
       >
         {({ activeDocumentId, activeDocument, pluginsReady }) => {
           if (!pluginsReady || !activeDocumentId || !activeDocument?.document) {
-            return <p role="status">Loading local PDF…</p>;
+            return <div className="pdf-workspace__loading" role="status">Loading local PDF…</div>;
           }
           const activePdf = activeDocument.document;
 
           return (
             <Viewport
               documentId={activeDocumentId}
-              style={{ height: '70vh', minHeight: 480, overflow: 'auto', background: '#eceae6' }}
+              style={{ height: '100%', overflow: 'auto', background: '#eceae6' }}
             >
               <ZoomGestureWrapper documentId={activeDocumentId} style={{ minHeight: '100%' }}>
                 <Scroller
