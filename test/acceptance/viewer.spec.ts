@@ -23,7 +23,7 @@ test.describe('shared viewer foundation', () => {
     await expect(page.locator('[data-page-index="0"]')).toBeVisible();
   });
 
-  test('uses a real pointer selection without creating edits outside Proofread mode', async ({ page }) => {
+  test('uses a real pointer selection without creating edits', async ({ page }) => {
     const pdfPage = page.locator('[data-page-index="0"]');
     await page.waitForFunction(() => window.viewerAcceptance.selectionGeometryReady());
     const renderedPageImage = pdfPage.locator(':scope > img');
@@ -120,12 +120,7 @@ test.describe('shared viewer foundation', () => {
     await expect.poll(() => scrollViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
     await expect(renderedPageImage).toHaveCSS('pointer-events', 'none');
 
-    const proofread = page.getByRole('button', { name: 'Proofread mode' });
-    await proofread.focus();
-    await page.keyboard.press('Space');
-    await expect(proofread).toHaveAttribute('aria-pressed', 'true');
-    await proofread.click();
-    await expect(proofread).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByRole('button', { name: 'Proofread mode' })).toHaveCount(0);
     expect(await page.evaluate(() => window.viewerAcceptance.reviewItemCount())).toBe(0);
   });
 
@@ -148,8 +143,6 @@ test.describe('shared viewer foundation', () => {
     await page.goto('/test/acceptance/viewer-harness/index.html?fixture=mixed');
     await page.waitForFunction(() => window.viewerAcceptance?.ready === true);
     await expect(page.locator('[data-page-index="0"]')).toBeVisible();
-    const proofread = page.getByRole('button', { name: 'Proofread mode' });
-    await proofread.click();
     await expect(page.locator('[data-semantic-tools-enabled]')).toHaveAttribute(
       'data-semantic-tools-enabled',
       'true',

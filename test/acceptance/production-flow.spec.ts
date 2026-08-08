@@ -52,7 +52,7 @@ test("one installed-style browser tree preserves review state across responsive 
   await expect.poll(() => assetResponses.some((url) => url.endsWith("/app.css"))).toBe(true);
   await expect.poll(() => assetResponses.some((url) => url.endsWith("/pdfium.wasm"))).toBe(true);
 
-  await page.getByRole("button", { name: "Proofread mode" }).click();
+  await expect(page.getByRole("button", { name: "Proofread mode" })).toHaveCount(0);
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
   await pageCanvas.click({ position: { x: 80, y: 100 } });

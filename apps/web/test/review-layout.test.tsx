@@ -14,10 +14,8 @@ describe('review shell layout and accessibility contract', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
-        proofreadActive
         currentTool="highlight"
         listOpen
-        onProofreadActiveChange={() => undefined}
         onToolChange={() => undefined}
         onCommand={async () => state}
       >
@@ -31,6 +29,9 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-live="polite"');
     expect(html).toContain('data-breakpoint="1024"');
     expect(html).toContain('data-list-open="true"');
-    expect(html).toContain('Highlight');
+    for (const tool of ['Replace', 'Delete', 'Insert', 'Highlight', 'Page Note']) {
+      expect(html).toContain(`>${tool}</button>`);
+    }
+    expect(html).not.toContain('Proofread mode');
   });
 });

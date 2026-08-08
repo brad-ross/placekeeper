@@ -24,6 +24,7 @@ function event(overrides: Record<string, unknown> = {}) {
     inputType: 'insertText',
     data: 'replacement',
     isComposing: false,
+    defaultPrevented: false,
     key: '',
     preventDefault: vi.fn(),
     ...overrides,
@@ -34,15 +35,15 @@ describe('proofread input controller', () => {
   it('opens one frozen draft for typing and maps selected deletion directly to Delete', () => {
     const gestures: unknown[] = [];
     const controller = createProofreadInputController((gesture) => gestures.push(gesture));
-    controller.setContext({ active: true, selection, caret: null });
+    controller.setContext({ selection, caret: null });
     const replace = event();
     controller.beforeInput(replace);
     controller.beforeInput(event({ data: 'ignored duplicate event' }));
     controller.clearDraft();
-    controller.setContext({ active: true, selection: null, caret });
+    controller.setContext({ selection: null, caret });
     const insert = event({ data: 'perhaps ' });
     controller.beforeInput(insert);
-    controller.setContext({ active: true, selection, caret: null });
+    controller.setContext({ selection, caret: null });
     const backspace = event({ key: 'Backspace' });
     controller.keyDown(backspace);
     const remove = event({ key: 'Delete' });
@@ -63,7 +64,7 @@ describe('proofread input controller', () => {
   it('emits no interim IME intent and opens exactly one draft for the committed text', () => {
     const onIntent = vi.fn();
     const controller = createProofreadInputController(onIntent);
-    controller.setContext({ active: true, selection, caret: null });
+    controller.setContext({ selection, caret: null });
 
     controller.compositionStart();
     controller.beforeInput(event({ inputType: 'insertCompositionText', data: '結', isComposing: true }));
@@ -78,17 +79,18 @@ describe('proofread input controller', () => {
     });
   });
 
-  it('does nothing outside Proofread mode, without a reliable anchor, or during composition', () => {
+  it('does nothing without a reliable anchor, during composition, for handled events, or with modifiers', () => {
     const onGesture = vi.fn();
     const controller = createProofreadInputController(onGesture);
-    controller.setContext({ active: false, selection, caret: null });
+    controller.setContext({ selection: null, caret: null });
     controller.beforeInput(event());
-    controller.setContext({ active: true, selection: null, caret: null });
-    controller.beforeInput(event());
-    controller.setContext({ active: true, selection, caret: null });
+    controller.setContext({ selection, caret: null });
     controller.compositionStart();
     controller.beforeInput(event({ isComposing: false }));
     controller.compositionEnd();
+    controller.beforeInput(event({ defaultPrevented: true }));
+    controller.keyDown(event({ key: 'x', ctrlKey: true }));
+    controller.keyDown(event({ key: 'Delete', metaKey: true }));
 
     expect(onGesture).not.toHaveBeenCalled();
   });

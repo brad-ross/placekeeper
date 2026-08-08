@@ -25,6 +25,7 @@ import { AnnotationList } from '../review/AnnotationList.js';
 import { CommentComposer } from '../review/CommentComposer.js';
 import {
   createProofreadInputController,
+  isEditableTarget,
   type ProofreadInputIntent,
 } from '../review/input-controller.js';
 import { ReviewToolbar, reviewToolForKey } from '../review/ReviewToolbar.js';
@@ -41,13 +42,11 @@ type Composer =
 
 export interface ReviewShellProps {
   state: ReviewState;
-  proofreadActive: boolean;
   currentTool: ReviewItemKind;
   listOpen?: boolean;
   selectionAnchor?: SelectionAnchor | null;
   caretAnchor?: CaretAnchor | null;
   pageNoteAnchor?: { pageIndex: number; position: ReviewRect; nearbyText?: string } | null;
-  onProofreadActiveChange(active: boolean): void;
   onToolChange(tool: ReviewItemKind): void;
   onCommand(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
   onNavigate?(item: ReviewItem): void;
@@ -120,7 +119,6 @@ export function ReviewShell(props: ReviewShellProps) {
   }
   const inputController = inputControllerRef.current;
   inputController.setContext({
-    active: props.proofreadActive,
     selection: props.selectionAnchor ?? null,
     caret: props.caretAnchor ?? null,
   });
@@ -131,11 +129,13 @@ export function ReviewShell(props: ReviewShellProps) {
       inputType: native.inputType,
       data: native.data,
       isComposing: native.isComposing,
+      defaultPrevented: event.defaultPrevented,
       target: event.target,
       preventDefault: () => event.preventDefault(),
     });
   };
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented || isEditableTarget(event.target) || event.nativeEvent.isComposing) return;
     if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey) {
       const tool = reviewToolForKey(event.key);
       if (tool) {
@@ -160,18 +160,19 @@ export function ReviewShell(props: ReviewShellProps) {
       altKey: event.altKey,
       ctrlKey: event.ctrlKey,
       metaKey: event.metaKey,
+      defaultPrevented: event.defaultPrevented,
       target: event.target,
       preventDefault: () => event.preventDefault(),
     });
   };
   const compositionEnd = (event: CompositionEvent<HTMLDivElement>) => {
-    inputController.compositionEnd(event.data);
+    inputController.compositionEnd(event.data, event.target);
   };
 
   const startHighlight = () => {
     const anchor = props.selectionAnchor;
-    if (!props.proofreadActive || !anchor) {
-      setAnnouncement('Select reliable text in Proofread mode to add a highlight.');
+    if (!anchor) {
+      setAnnouncement('Select reliable text to add a highlight.');
       return;
     }
     modalTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -190,10 +191,10 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const startTextTool = (kind: 'replace' | 'insert') => {
     const anchor = kind === 'replace' ? props.selectionAnchor : props.caretAnchor;
-    if (!props.proofreadActive || !anchor) {
+    if (!anchor) {
       setAnnouncement(kind === 'replace'
-        ? 'Select reliable text in Proofread mode to suggest a replacement.'
-        : 'Choose a reliable text position in Proofread mode to suggest an insertion.');
+        ? 'Select reliable text to suggest a replacement.'
+        : 'Choose a reliable text position to suggest an insertion.');
       return;
     }
     draftTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -201,16 +202,16 @@ export function ReviewShell(props: ReviewShellProps) {
   };
 
   const deleteSelection = () => {
-    if (!props.proofreadActive || !props.selectionAnchor) {
-      setAnnouncement('Select reliable text in Proofread mode to suggest deletion.');
+    if (!props.selectionAnchor) {
+      setAnnouncement('Select reliable text to suggest deletion.');
       return;
     }
     void submit((state) => addDelete(state, props.selectionAnchor!));
   };
 
   const startPageNote = () => {
-    if (!props.proofreadActive || !props.pageNoteAnchor) {
-      setAnnouncement('Choose a safe page location in Proofread mode to add a Page Note.');
+    if (!props.pageNoteAnchor) {
+      setAnnouncement('Choose a safe page location to add a Page Note.');
       return;
     }
     modalTriggerRef.current = pageNoteTriggerRef.current
@@ -232,17 +233,15 @@ export function ReviewShell(props: ReviewShellProps) {
       data-breakpoint="1024"
       onBeforeInputCapture={beforeInput}
       onKeyDownCapture={keyDown}
-      onCompositionStartCapture={() => inputController.compositionStart()}
+      onCompositionStartCapture={(event) => inputController.compositionStart(event.target)}
       onCompositionEndCapture={compositionEnd}
     >
       <ReviewToolbar
-        active={props.proofreadActive}
         currentTool={props.currentTool}
         canUndo={canUndo}
         canRedo={canRedo}
         listOpen={listOpen}
         pageNoteTriggerRef={pageNoteTriggerRef}
-        onActiveChange={props.onProofreadActiveChange}
         onToolChange={props.onToolChange}
         onHighlight={startHighlight}
         onPageNote={startPageNote}

@@ -12,12 +12,15 @@ import {
 import { createLocalPdfiumViewer, type ViewerAssetUrls } from '../pdf/embedpdf-viewer.js';
 import { PdfWorkspace } from '../pdf/PdfWorkspace.js';
 import type { SelectionAnchorResult } from '../pdf/selection-anchor.js';
-import { assessPageTextReliability } from '../pdf/text-reliability.js';
+import {
+  assessPageTextReliability,
+  PAGE_TEXT_UNAVAILABLE_MESSAGE,
+  SELECTION_UNAVAILABLE_MESSAGE,
+} from '../pdf/text-reliability.js';
 import {
   captureViewerSelection,
   createEngineAnchorPageReader,
 } from '../pdf/viewer-selection-adapter.js';
-import { ProofreadMode } from '../review/ProofreadMode.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 
 export interface AppProps {
@@ -30,7 +33,7 @@ export interface AppProps {
   documentTitle?: string;
   toolError?: string | null;
   /** Production composes the viewer inside the canonical ReviewShell toolbar. */
-  hideProofreadControls?: boolean;
+  embeddedInReviewShell?: boolean;
   ownedAnnotations?: readonly ReviewAnnotation[];
   onPagePoint?: (point: { readonly pageIndex: number; readonly x: number; readonly y: number }) => void;
 }
@@ -44,11 +47,10 @@ export function App({
   onSelectionAnchor,
   documentTitle = 'Local PDF',
   toolError = null,
-  hideProofreadControls = false,
+  embeddedInReviewShell = false,
   ownedAnnotations = [],
   onPagePoint,
 }: AppProps) {
-  const [proofreadActive, setProofreadActive] = useState(false);
   const [sourceAnnotations, setSourceAnnotations] = useState<readonly ExistingAnnotation[]>([]);
   const [detectedPageReliable, setDetectedPageReliable] = useState(true);
   const [detectedSelectionReliable, setDetectedSelectionReliable] = useState(true);
@@ -172,35 +174,38 @@ export function App({
   const effectivePageReliability = pageSemanticReliable ?? detectedPageReliable;
   const effectiveSelectionReliability =
     selectionSemanticReliable ?? detectedSelectionReliable;
+  const pageMessage = !effectivePageReliability ? PAGE_TEXT_UNAVAILABLE_MESSAGE : null;
+  const selectionMessage = effectivePageReliability && !effectiveSelectionReliability
+    ? SELECTION_UNAVAILABLE_MESSAGE
+    : null;
+  const workspace = (
+    <PdfWorkspace
+      engine={viewer.engine}
+      plugins={viewer.plugins}
+      documentLabel={documentTitle}
+      onInitialized={initializeViewer}
+      ownedAnnotations={ownedAnnotations}
+    />
+  );
 
   const content = (
     <main>
       <h1>Local PDF Proofreader</h1>
       <p data-document-title>{documentTitle}</p>
       {toolError ? <p role="alert">{toolError}</p> : null}
-      {hideProofreadControls ? (
-        <PdfWorkspace
-          engine={viewer.engine}
-          plugins={viewer.plugins}
-          documentLabel={documentTitle}
-          onInitialized={initializeViewer}
-          ownedAnnotations={ownedAnnotations}
-        />
+      {embeddedInReviewShell ? (
+        workspace
       ) : (
-        <ProofreadMode
-          active={proofreadActive}
-          onActiveChange={setProofreadActive}
-          pageSemanticReliable={effectivePageReliability}
-          selectionSemanticReliable={effectiveSelectionReliability}
-        >
-          <PdfWorkspace
-            engine={viewer.engine}
-            plugins={viewer.plugins}
-            documentLabel={documentTitle}
-            onInitialized={initializeViewer}
-            ownedAnnotations={ownedAnnotations}
-          />
-        </ProofreadMode>
+        <section aria-label="PDF review workspace">
+          <div role="toolbar" aria-label="Review tools">
+            <button type="button">Page Note</button>
+          </div>
+          {pageMessage ? <p data-recovery-kind="page">{pageMessage}</p> : null}
+          {selectionMessage ? <p data-recovery-kind="selection">{selectionMessage}</p> : null}
+          <div data-semantic-tools-enabled={effectivePageReliability && effectiveSelectionReliability ? 'true' : 'false'}>
+            {workspace}
+          </div>
+        </section>
       )}
       <aside aria-label="Existing annotations">
         <h2>Existing annotations</h2>

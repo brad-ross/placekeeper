@@ -76,7 +76,6 @@ function caretFromSelection(anchor: SelectionAnchor | null): CaretAnchor | null 
 
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [state, setState] = useState(props.initialState);
-  const [proofreadActive, setProofreadActive] = useState(false);
   const [tool, setTool] = useState<ReviewItemKind>("replace");
   const [selection, setSelection] = useState<SelectionAnchor | null>(null);
   const [toolError, setToolError] = useState<string | null>(null);
@@ -111,7 +110,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   };
   const viewer = props.viewer ?? (
     <App
-      hideProofreadControls
+      embeddedInReviewShell
       assets={viewerAssets}
       documentTitle={props.scope.documentTitle}
       toolError={toolError}
@@ -128,7 +127,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     <main data-production-review>
       <ReviewShell
         state={state}
-        proofreadActive={proofreadActive}
         currentTool={tool}
         selectionAnchor={selection}
         caretAnchor={caret}
@@ -136,7 +134,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           pageIndex: pagePoint.pageIndex,
           position: { x: pagePoint.x, y: pagePoint.y, width: 18, height: 18 },
         }}
-        onProofreadActiveChange={setProofreadActive}
         onToolChange={setTool}
         onCommand={async (command) => {
           const result = await props.api.command(command);

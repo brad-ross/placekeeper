@@ -11,7 +11,6 @@ export type ProofreadInputIntent =
   | { kind: 'delete'; anchor: SelectionAnchor };
 
 export interface ProofreadInputContext {
-  active: boolean;
   selection: SelectionAnchor | null;
   caret: CaretAnchor | null;
 }
@@ -20,6 +19,7 @@ export interface BeforeInputLike {
   inputType?: string;
   data?: string | null;
   isComposing?: boolean;
+  defaultPrevented?: boolean;
   target?: EventTarget | null;
   preventDefault(): void;
 }
@@ -30,31 +30,51 @@ export interface KeyDownLike {
   altKey?: boolean;
   ctrlKey?: boolean;
   metaKey?: boolean;
+  defaultPrevented?: boolean;
   target?: EventTarget | null;
   preventDefault(): void;
 }
 
 export interface ProofreadInputController {
   setContext(context: ProofreadInputContext): void;
-  compositionStart(): void;
-  compositionEnd(committedText?: string): void;
+  compositionStart(target?: EventTarget | null): void;
+  compositionEnd(committedText?: string, target?: EventTarget | null): void;
   clearDraft(): void;
   beforeInput(event: BeforeInputLike): void;
   keyDown(event: KeyDownLike): void;
 }
 
+const EDITABLE_HOST_SELECTOR = [
+  'input',
+  'textarea',
+  'select',
+  '[role="textbox"]',
+  '[role="searchbox"]',
+  '[role="combobox"]',
+  '[role="spinbutton"]',
+  '[role="dialog"]',
+  '[data-review-editor]',
+].join(',');
+
+export function isEditableTarget(target: EventTarget | null | undefined): boolean {
+  if (typeof Element === 'undefined') return false;
+  const element = target instanceof Element
+    ? target
+    : typeof Node !== 'undefined' && target instanceof Node
+      ? target.parentElement
+      : null;
+  if (element === null) return false;
+  return element.closest(EDITABLE_HOST_SELECTOR) !== null ||
+    (typeof HTMLElement !== 'undefined' && element instanceof HTMLElement && element.isContentEditable);
+}
+
 export function createProofreadInputController(
   onIntent: (intent: ProofreadInputIntent) => void,
 ): ProofreadInputController {
-  let context: ProofreadInputContext = { active: false, selection: null, caret: null };
+  let context: ProofreadInputContext = { selection: null, caret: null };
   let composing = false;
+  let composingInEditableTarget = false;
   let draftOpen = false;
-
-  const editableTarget = (event: { target?: EventTarget | null }) => {
-    const target = event.target;
-    return typeof HTMLElement !== 'undefined' && target instanceof HTMLElement &&
-      (target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement);
-  };
 
   const beginTextDraft = (text: string) => {
     if (draftOpen || !text) return;
@@ -71,18 +91,21 @@ export function createProofreadInputController(
     setContext(next) {
       context = next;
     },
-    compositionStart() {
+    compositionStart(target) {
       composing = true;
+      composingInEditableTarget = isEditableTarget(target);
     },
-    compositionEnd(committedText) {
+    compositionEnd(committedText, target) {
+      const editable = composingInEditableTarget || isEditableTarget(target);
       composing = false;
-      if (committedText) beginTextDraft(committedText);
+      composingInEditableTarget = false;
+      if (!editable && committedText) beginTextDraft(committedText);
     },
     clearDraft() {
       draftOpen = false;
     },
     beforeInput(event) {
-      if (!context.active || composing || event.isComposing || editableTarget(event)) return;
+      if (event.defaultPrevented || composing || event.isComposing || isEditableTarget(event.target)) return;
       const inputType = event.inputType ?? '';
       if (inputType === 'insertCompositionText') return;
       if (inputType.startsWith('delete')) {
@@ -99,10 +122,10 @@ export function createProofreadInputController(
     },
     keyDown(event) {
       if (
-        context.active &&
+        !event.defaultPrevented &&
         !composing &&
         !event.isComposing &&
-        !editableTarget(event) &&
+        !isEditableTarget(event.target) &&
         !event.altKey &&
         !event.ctrlKey &&
         !event.metaKey &&
@@ -114,10 +137,13 @@ export function createProofreadInputController(
         return;
       }
       if (
-        !context.active ||
+        event.defaultPrevented ||
         composing ||
         event.isComposing ||
-        editableTarget(event) ||
+        isEditableTarget(event.target) ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
         context.selection === null ||
         (event.key !== 'Delete' && event.key !== 'Backspace')
       ) return;

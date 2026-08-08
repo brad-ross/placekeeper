@@ -2,13 +2,11 @@ import type { KeyboardEvent, RefObject } from 'react';
 import type { ReviewItemKind } from '../../../../packages/core/src/review-model.js';
 
 export interface ReviewToolbarProps {
-  active: boolean;
   currentTool: ReviewItemKind;
   canUndo: boolean;
   canRedo: boolean;
   listOpen: boolean;
   pageNoteTriggerRef?: RefObject<HTMLButtonElement | null>;
-  onActiveChange(active: boolean): void;
   onToolChange(tool: ReviewItemKind): void;
   onHighlight(): void;
   onPageNote(): void;
@@ -51,9 +49,6 @@ export function ReviewToolbar(props: ReviewToolbarProps) {
   };
   return (
     <div role="toolbar" aria-label="Review tools" onKeyDown={onKeyDown}>
-      <button type="button" aria-pressed={props.active} onClick={() => props.onActiveChange(!props.active)}>
-        Proofread mode
-      </button>
       {reviewTools.map(({ kind, label, shortcut }) => (
         <button
           key={kind}

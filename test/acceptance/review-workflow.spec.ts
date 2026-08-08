@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 test.describe('canonical review workflow', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/test/acceptance/review-harness/index.html');
-    await page.getByRole('button', { name: 'Proofread mode' }).click();
+    await expect(page.getByRole('button', { name: 'Proofread mode' })).toHaveCount(0);
   });
 
   test('commits all five tools once through keyboard and toolbar paths', async ({ page }) => {
@@ -68,5 +68,91 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-navigated]')).not.toHaveAttribute('data-navigated', 'none');
     await page.getByRole('button', { name: 'Delete replace on page 1' }).click();
     await expect(page.getByLabel('Annotations in document order')).toBeFocused();
+  });
+
+  test('keeps native editors and composer fields outside semantic command capture', async ({ page }) => {
+    const revision = page.locator('[data-revision]');
+    const input = page.getByRole('textbox', { name: 'Native input' });
+    await input.fill('input value');
+    await input.press('Backspace');
+    await input.press('Alt+Shift+D');
+    await expect(input).toHaveValue('input valu');
+    await expect(revision).toHaveAttribute('data-revision', '0');
+
+    const textarea = page.getByRole('textbox', { name: 'Native textarea' });
+    await textarea.fill('textarea value');
+    await textarea.press('Delete');
+    await textarea.press('Alt+Shift+H');
+    await expect(textarea).toHaveValue('textarea value');
+    await expect(revision).toHaveAttribute('data-revision', '0');
+    await textarea.evaluate((element) => {
+      element.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      element.dispatchEvent(new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        data: '結',
+        inputType: 'insertCompositionText',
+        isComposing: true,
+      }));
+      element.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '結論' }));
+    });
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(revision).toHaveAttribute('data-revision', '0');
+
+    for (const name of ['Contenteditable editor', 'Review editor']) {
+      const editor = page.getByRole('textbox', { name });
+      await editor.focus();
+      await page.keyboard.type(' native');
+      await page.keyboard.press('Backspace');
+      await page.keyboard.press('Alt+Shift+D');
+      await expect(editor).toContainText('nativ');
+      await expect(revision).toHaveAttribute('data-revision', '0');
+    }
+
+    await page.getByRole('button', { name: 'Page Note' }).click();
+    const composer = page.getByRole('textbox', { name: 'Comment' });
+    await composer.fill('composer value');
+    await composer.press('Alt+Shift+D');
+    await composer.press('Backspace');
+    await expect(composer).toHaveValue('composer valu');
+    await expect(revision).toHaveAttribute('data-revision', '0');
+  });
+
+  test('invokes every semantic tool shortcut without activation', async ({ page }) => {
+    const canvas = page.getByRole('application', { name: 'PDF review canvas' });
+    await canvas.focus();
+    await page.keyboard.press('Alt+Shift+R');
+    await expect(page.getByRole('dialog', { name: 'Replacement text' })).toBeVisible();
+    await page.getByRole('button', { name: 'Cancel' }).click();
+
+    await canvas.focus();
+    await page.keyboard.press('Alt+Shift+D');
+    await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '1');
+
+    await page.getByRole('button', { name: 'Use caret' }).click();
+    await canvas.focus();
+    await page.keyboard.press('Alt+Shift+I');
+    await expect(page.getByRole('dialog', { name: 'Insertion text' })).toBeVisible();
+    await page.getByRole('button', { name: 'Cancel' }).click();
+
+    await page.getByRole('button', { name: 'Use selection' }).click();
+    await canvas.focus();
+    await page.keyboard.press('Alt+Shift+H');
+    await expect(page.getByRole('dialog', { name: 'Highlight comment' })).toBeVisible();
+    await page.getByRole('button', { name: 'Keep without comment' }).click();
+
+    await canvas.focus();
+    await page.keyboard.press('Alt+Shift+N');
+    await expect(page.getByRole('dialog', { name: 'Page Note' })).toBeVisible();
+  });
+
+  test('announces anchor recovery and creates no mutation when selection authority is absent', async ({ page }) => {
+    const announcement = page.locator('.review-shell > [role="status"]');
+    await page.getByRole('button', { name: 'Clear anchors' }).click();
+    await page.getByRole('button', { name: 'Replace', exact: true }).click();
+    await expect(announcement).toContainText('Select reliable text');
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(announcement).toContainText('Select reliable text');
+    await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
 });

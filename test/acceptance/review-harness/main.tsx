@@ -32,9 +32,8 @@ function Harness() {
     sessionId: 'acceptance',
     source: { fileId: 'source', digest: 'a'.repeat(64), byteLength: 100 },
   }));
-  const [proofread, setProofread] = useState(false);
   const [tool, setTool] = useState<ReviewItemKind>('replace');
-  const [anchorKind, setAnchorKind] = useState<'selection' | 'caret'>('selection');
+  const [anchorKind, setAnchorKind] = useState<'selection' | 'caret' | 'none'>('selection');
   const [navigated, setNavigated] = useState('none');
 
   const accept = async (command: ReviewCommand): Promise<ReviewState> => {
@@ -47,12 +46,10 @@ function Harness() {
   return (
     <ReviewShell
       state={state}
-      proofreadActive={proofread}
       currentTool={tool}
       selectionAnchor={anchorKind === 'selection' ? selection : null}
       caretAnchor={anchorKind === 'caret' ? caret : null}
       pageNoteAnchor={{ pageIndex: 0, position: { x: 300, y: 220, width: 18, height: 18 }, nearbyText: 'nearby paragraph' }}
-      onProofreadActiveChange={setProofread}
       onToolChange={setTool}
       onCommand={accept}
       onNavigate={(item) => setNavigated(item.id)}
@@ -60,7 +57,24 @@ function Harness() {
       <div>
         <button type="button" onClick={() => setAnchorKind('selection')}>Use selection</button>
         <button type="button" onClick={() => setAnchorKind('caret')}>Use caret</button>
+        <button type="button" onClick={() => setAnchorKind('none')}>Clear anchors</button>
         <div role="application" aria-label="PDF review canvas" tabIndex={0}>PDF page</div>
+        <label>
+          Native input
+          <input aria-label="Native input" defaultValue="native input" />
+        </label>
+        <label>
+          Native textarea
+          <textarea aria-label="Native textarea" defaultValue="native textarea" />
+        </label>
+        <div contentEditable suppressContentEditableWarning role="textbox" aria-label="Contenteditable editor">
+          contenteditable text
+        </div>
+        <div data-review-editor>
+          <div contentEditable suppressContentEditableWarning role="textbox" aria-label="Review editor">
+            review editor text
+          </div>
+        </div>
         <div aria-label="Owned annotation overlays" data-owned-annotation-layer>
           {projectReviewItems(state.items).map((annotation) => (
             <span key={annotation.id} data-owned-mark={annotation.kind}>{annotation.contents}</span>
