@@ -40,15 +40,18 @@ function infoPlist(manifest: ReturnType<typeof validateAppBundleManifest>): stri
 <plist version="1.0"><dict>
 <key>CFBundleDevelopmentRegion</key><string>en</string>
 <key>CFBundleDisplayName</key><string>${xml(manifest.productName)}</string>
-<key>CFBundleExecutable</key><string>${xml(manifest.executable)}</string>
+<key>CFBundleExecutable</key><string>${xml(manifest.finderExecutable)}</string>
 <key>CFBundleIdentifier</key><string>${xml(manifest.bundleIdentifier)}</string>
 <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 <key>CFBundleName</key><string>${xml(manifest.productName)}</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>${xml(manifest.bundleVersion)}</string>
 <key>CFBundleVersion</key><string>${xml(manifest.bundleVersion)}</string>
+<key>CFBundleIconFile</key><string>droplet</string>
+<key>CFBundleSignature</key><string>dplt</string>
 <key>LSMinimumSystemVersion</key><string>${xml(manifest.minimumSystemVersion)}</string>
 <key>LSMultipleInstancesProhibited</key><true/>
+<key>OSAAppletShowStartupScreen</key><false/>
 <key>CFBundleDocumentTypes</key><array><dict>
   <key>CFBundleTypeName</key><string>PDF document</string>
   <key>CFBundleTypeRole</key><string>${document.role}</string>
@@ -94,6 +97,11 @@ async function signBundle(appPath: string, nodePath: string, launcherPath: strin
   await run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
 }
 
+async function signAdHocBundle(appPath: string): Promise<void> {
+  await run("codesign", ["--force", "--deep", "--sign", "-", appPath]);
+  await run("codesign", ["--verify", "--deep", "--strict", appPath]);
+}
+
 export async function buildMacApp(options: BuildOptions): Promise<string> {
   const repoRoot = resolve(options.repoRoot ?? process.cwd());
   const appManifest = validateAppBundleManifest(JSON.parse(await readFile(resolve(repoRoot, "packaging/macos/app-bundle.json"), "utf8")) as unknown);
@@ -115,6 +123,7 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
+  await run("/usr/bin/osacompile", ["-o", appPath, resolve(repoRoot, "packaging/macos/finder-bridge.applescript")]);
   const contents = resolve(appPath, "Contents");
   const resources = resolve(contents, "Resources");
   const nodePath = resolve(resources, "node/bin/node");
@@ -126,7 +135,6 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   await mkdir(resolve(resources, "service"), { recursive: true, mode: 0o755 });
   await copyFile(serviceEntry, resolve(resources, "service/main.js"));
   await cp(options.webDist, resolve(resources, "web"), { recursive: true, errorOnExist: true });
-  await cp(resolve(repoRoot, appManifest.embeddedArtifacts.finderQuickAction!), resolve(contents, "Library/Services/PDF Proofreader.workflow"), { recursive: true, errorOnExist: true });
   await cp(resolve(repoRoot, appManifest.embeddedArtifacts.codexPlugin!), resolve(resources, "integrations/codex-plugin"), { recursive: true, errorOnExist: true });
   const vscodeInstall = resolve(resources, "integrations/vscode");
   await mkdir(vscodeInstall, { recursive: true, mode: 0o755 });
@@ -142,6 +150,8 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   await writeFile(launcherPath, launcherScript(), { mode: 0o755 });
   if (options.signingIdentity !== undefined) {
     await signBundle(appPath, nodePath, launcherPath, options.signingIdentity, resolve(repoRoot, appManifest.signing.entitlements));
+  } else {
+    await signAdHocBundle(appPath);
   }
   return appPath;
 }

@@ -46,7 +46,16 @@ async function nativeError(error) {
   );
 }
 
-async function openFinderPdf(nodePath, serviceEntry, pdfPath, serviceEnvironment) {
+async function chooseFinderPdf() {
+  const selected = (await run("/usr/bin/osascript", ["-e", 'POSIX path of (choose file of type {"com.adobe.pdf"} with prompt "Choose one readable local PDF")'], {
+    env: { PATH: "/usr/bin:/bin" },
+    stdio: ["ignore", "pipe", "ignore"],
+    allowNonZero: true,
+  })).trim();
+  return selected.startsWith("/") && selected.toLowerCase().endsWith(".pdf") ? selected : undefined;
+}
+
+async function openFinderPdf(nodePath, serviceEntry, pdfPath, serviceEnvironment, allowInputRecovery = true) {
   let result = parse(await run(nodePath, [serviceEntry, ...finderServiceArgs(pdfPath)], { env: serviceEnvironment, allowNonZero: true }));
   if (result.ok === true && result.kind === "recovery-offered") {
     const choice = (await run("/usr/bin/osascript", ["-e", 'choose from list {"resume", "discard", "fork"} with title "Recover PDF Proofreader draft" without multiple selections allowed and empty selection allowed'], { env: { PATH: "/usr/bin:/bin" }, stdio: ["ignore", "pipe", "ignore"] })).trim();
@@ -55,6 +64,10 @@ async function openFinderPdf(nodePath, serviceEntry, pdfPath, serviceEnvironment
   }
   if (result.ok !== true) {
     await nativeError(result.error);
+    if (allowInputRecovery && result.error?.kind === "input-unavailable") {
+      const selected = await chooseFinderPdf();
+      if (selected !== undefined) await openFinderPdf(nodePath, serviceEntry, selected, serviceEnvironment, false);
+    }
     return;
   }
   if (!["opened", "focused"].includes(result.kind) || typeof result.url !== "string" || !/^http:\/\/127\.0\.0\.1:\d+\/s\/[^/]+\/bootstrap#cap=[A-Za-z0-9_-]+$/u.test(result.url)) return;

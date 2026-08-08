@@ -2,20 +2,18 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 
-test("Finder Quick Action passes exactly one explicit path to the shared launcher", async () => {
-  const workflow = await readFile(resolve("integrations/finder/PdfProofreader.workflow/Contents/document.wflow"), "utf8");
-  expect(workflow).toContain('$HOME/Applications/PDF Proofreader.app');
-  expect(workflow).toContain('/Applications/PDF Proofreader.app');
-  expect(workflow).toContain('launcher="$app/Contents/MacOS/pdf-proofreader"');
-  expect(workflow).toContain("--pdf");
-  expect(workflow).toContain("--surface finder");
-  expect(workflow).toContain("display alert");
-  expect(workflow).toContain("choose file of type");
-  expect(workflow).toContain("choose from list");
-  expect(workflow).toContain('--recovery "$choice"');
-  expect(workflow).toContain('system attribute "PDF_PROOFREADER_URL"');
-  expect(workflow).not.toContain('/usr/bin/open "$url"');
-  expect(workflow).not.toContain("Terminal.app");
+test("Finder Open With passes exactly one explicit path through the native document bridge", async () => {
+  const bridge = await readFile(resolve("packaging/macos/finder-bridge.applescript"), "utf8");
+  const manifest = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8")) as { finderExecutable: string; documentTypes: unknown[]; embeddedArtifacts: Record<string, string> };
+  expect(manifest.finderExecutable).toBe("droplet");
+  expect(manifest.documentTypes).toHaveLength(1);
+  expect(manifest.embeddedArtifacts).not.toHaveProperty("finderQuickAction");
+  expect(bridge).toContain("on open pdfItems");
+  expect(bridge).toContain("(count of pdfItems) is not 1");
+  expect(bridge).toContain("Contents/MacOS/pdf-proofreader");
+  expect(bridge).toContain("quoted form of pdfPath");
+  expect(bridge).toContain("choose file of type");
+  expect(bridge).not.toContain("Terminal.app");
 });
 
 test("Codex plugin contains one validated launch-only skill", async () => {

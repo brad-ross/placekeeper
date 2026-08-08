@@ -17,6 +17,8 @@ describe("macOS distribution manifests", () => {
     const backend = JSON.parse(await readFile(resolve("packaging/macos/backend-runtime-manifest.json"), "utf8")) as unknown;
     const appManifest = validateAppBundleManifest(app);
     expect(appManifest.architectures).toEqual(["arm64"]);
+    expect(appManifest.finderExecutable).toBe("droplet");
+    expect(appManifest.embeddedArtifacts).not.toHaveProperty("finderQuickAction");
     expect(appManifest.distribution).toEqual({ mode: "source-first", signingRequired: false });
     const runtime = validateBackendRuntimeManifest(backend);
     expect(runtime.targets).toEqual(["darwin-arm64"]);
@@ -42,7 +44,7 @@ describe("macOS distribution manifests", () => {
     expect(installer).not.toContain("spctl --master-disable");
   });
 
-  it("replaces app artifacts transactionally and restores both after a partial failure", async () => {
+  it("replaces the app transactionally and restores the app plus obsolete action after a partial failure", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "pdf-proofreader-install-test-"));
     const built = resolve(root, "built/PDF Proofreader.app");
     const app = resolve(root, "home/Applications/PDF Proofreader.app");
@@ -51,16 +53,17 @@ describe("macOS distribution manifests", () => {
     const helper = resolve("packaging/macos/install-built-app.sh");
     try {
       await mkdir(resolve(built, "Contents/MacOS"), { recursive: true });
-      await mkdir(resolve(built, "Contents/Library/Services/PDF Proofreader.workflow"), { recursive: true });
       await writeFile(resolve(built, "Contents/MacOS/pdf-proofreader"), "new launcher", { mode: 0o755 });
+      await writeFile(resolve(built, "Contents/MacOS/droplet"), "native bridge", { mode: 0o755 });
       await writeFile(resolve(built, "new-app"), "new app");
-      await writeFile(resolve(built, "Contents/Library/Services/PDF Proofreader.workflow/new-action"), "new action");
+      await mkdir(action, { recursive: true });
+      await writeFile(resolve(action, "obsolete-action"), "obsolete action");
       await execFileAsync("/bin/sh", [helper, built, app, action]);
       expect(await readFile(resolve(app, "new-app"), "utf8")).toBe("new app");
-      expect(await readFile(resolve(action, "new-action"), "utf8")).toBe("new action");
+      await expect(readFile(resolve(action, "obsolete-action"), "utf8")).rejects.toThrow();
 
       await rm(app, { recursive: true });
-      await rm(action, { recursive: true });
+      await rm(action, { recursive: true, force: true });
       await mkdir(app, { recursive: true });
       await mkdir(action, { recursive: true });
       await writeFile(resolve(app, "old-app"), "old app");
@@ -89,8 +92,15 @@ describe("macOS distribution manifests", () => {
     const launcher = await readFile(resolve("packaging/macos/launcher.mjs"), "utf8");
     expect(launcher).toContain('system attribute "PDF_PROOFREADER_URL"');
     expect(launcher).toContain("PDF_PROOFREADER_PDFIUM_WASM");
+    expect(launcher).toContain('choose file of type {"com.adobe.pdf"}');
+    expect(launcher).toContain('result.error?.kind === "input-unavailable"');
     expect(launcher).toContain("realpathSync");
     expect(launcher).not.toContain('"/usr/bin/open"');
+    const bridge = await readFile(resolve("packaging/macos/finder-bridge.applescript"), "utf8");
+    expect(bridge).toContain("on open pdfItems");
+    expect(bridge).toContain("Contents/MacOS/pdf-proofreader");
+    expect(bridge).toContain("quoted form of pdfPath");
+    expect(bridge).not.toContain("Terminal");
   });
 
   it("requires content-free installed writer evidence matching the pinned runtime", () => {

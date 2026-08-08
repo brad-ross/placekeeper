@@ -7,6 +7,7 @@
   "architectures": ["arm64"],
   "nodeVersion": "24.14.0",
   "executable": "pdf-proofreader",
+  "finderExecutable": "droplet",
   "runtimeDataDirectory": "Library/Application Support/PDF Proofreader",
   "documentTypes": [
     {
@@ -16,7 +17,6 @@
     }
   ],
   "embeddedArtifacts": {
-    "finderQuickAction": "integrations/finder/PdfProofreader.workflow",
     "codexPlugin": "integrations/codex-plugin",
     "vscodeExtension": "apps/vscode"
   },

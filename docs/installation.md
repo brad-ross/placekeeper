@@ -10,7 +10,7 @@ Requirements are macOS 13 or newer, an Apple-silicon Mac, internet access during
 ./install.sh
 ```
 
-The installer downloads the checksum-pinned Node 24.14.0 arm64 toolchain into the checkout, runs the exact pnpm 11.16.0 dependency graph from the lockfile, builds the app, and checks the packaged writer with networking disabled. It then transactionally installs the app at `~/Applications/PDF Proofreader.app` and the Finder Quick Action at `~/Library/Services/PDF Proofreader.workflow`, and asks macOS to register the app as an alternate PDF viewer. It does not modify the system Node installation or make PDF Proofreader the default PDF handler.
+The installer downloads the checksum-pinned Node 24.14.0 arm64 toolchain into the checkout, runs the exact pnpm 11.16.0 dependency graph from the lockfile, builds the app, and checks the packaged writer with networking disabled. It then transactionally installs the app at `~/Applications/PDF Proofreader.app` and asks macOS to register its native document bridge as an alternate PDF viewer. It does not modify the system Node installation or make PDF Proofreader the default PDF handler. Reinstalling removes the obsolete beta Quick Action if present.
 
 Preview the actions without downloading or changing anything:
 
@@ -18,11 +18,11 @@ Preview the actions without downloading or changing anything:
 ./install.sh --dry-run
 ```
 
-To update, pull or download newer source and run `./install.sh` again. The installer replaces only its installed app and Quick Action; if either replacement fails, it restores the previous pair. It leaves recovery data and user-owned exports alone.
+To update, pull or download newer source and run `./install.sh` again. The installer replaces only its installed app; if replacement fails, it restores the previous app. It leaves recovery data and user-owned exports alone.
 
-Because the source build is intentionally unsigned, macOS may warn on first launch. In Finder, Control-click `~/Applications/PDF Proofreader.app`, choose **Open**, and confirm once. Do not disable Gatekeeper globally and do not recursively remove quarantine attributes.
+Because the source build is intentionally not Developer ID-signed or notarized (it receives only a local ad-hoc signature), macOS may warn on first launch. In Finder, Control-click `~/Applications/PDF Proofreader.app`, choose **Open**, and confirm once. Do not disable Gatekeeper globally and do not recursively remove quarantine attributes.
 
-After installation, select one local PDF in Finder and use **Open With -> PDF Proofreader** or **Quick Actions -> PDF Proofreader**. No terminal is needed for ordinary use.
+After installation, select one local PDF in Finder and use **Open With -> PDF Proofreader**. Alternatively, open PDF Proofreader from `~/Applications` and choose a PDF. No terminal is needed for ordinary use.
 
 ## Optional integrations
 

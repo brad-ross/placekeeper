@@ -10,13 +10,13 @@ On an Apple-silicon Mac running macOS 13 or newer, download or clone this reposi
 ./install.sh
 ```
 
-The installer uses a checksum-pinned local Node toolchain, installs locked dependencies, builds into a temporary directory, verifies the packaged PDF writer offline, and transactionally installs the app under `~/Applications` plus the Finder Quick Action. A failed update restores the previous app and action. It does not require an Apple Developer account or a global Node installation.
+The installer uses a checksum-pinned local Node toolchain, installs locked dependencies, builds into a temporary directory, verifies the packaged PDF writer offline, and transactionally installs the app under `~/Applications`. A failed update restores the previous app. It does not require an Apple Developer account or a global Node installation.
 
 See [Install and uninstall](docs/installation.md) for first-launch, update, optional Codex/VS Code integration, and removal instructions. See [Privacy and recovery](docs/privacy-and-recovery.md) for local storage behavior.
 
 ## Use
 
-After installation, select one local PDF in Finder and choose **Open With -> PDF Proofreader** or **Quick Actions -> PDF Proofreader**. The app runs on numeric loopback, bundles its browser and PDF assets, performs no telemetry, and leaves the original PDF unchanged unless you explicitly choose the separately confirmed Replace Original action.
+After installation, select one local PDF in Finder and choose **Open With -> PDF Proofreader**. You can also open the app from `~/Applications` and choose a PDF. The app runs on numeric loopback, bundles its browser and PDF assets, performs no telemetry, and leaves the original PDF unchanged unless you explicitly choose the separately confirmed Replace Original action.
 
 ## Supported release scope
 

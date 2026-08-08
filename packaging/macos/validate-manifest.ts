@@ -36,6 +36,7 @@ export interface AppBundleManifest {
   readonly architectures: readonly ["arm64"];
   readonly nodeVersion: string;
   readonly executable: string;
+  readonly finderExecutable: "droplet";
   readonly runtimeDataDirectory: string;
   readonly documentTypes: readonly [{ readonly contentType: "com.adobe.pdf"; readonly role: "Viewer"; readonly rank: "Alternate" }];
   readonly embeddedArtifacts: Readonly<Record<string, string>>;
@@ -133,6 +134,7 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
     throw new Error("Mutable runtime data must be a user-relative path outside the signed bundle");
   }
   const embeddedArtifacts = Object.fromEntries(Object.entries(record(root.embeddedArtifacts, "embedded artifacts")).map(([name, path]) => [name, boundedString(path, `artifact ${name}`)]));
+  if (root.finderExecutable !== "droplet") throw new Error("Finder executable must be the native document bridge");
   if (Object.values(embeddedArtifacts).some((path) => path.startsWith("/") || path.split("/").includes(".."))) {
     throw new Error("Embedded artifact sources must stay inside the repository");
   }
@@ -145,6 +147,7 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
     architectures: ["arm64"],
     nodeVersion: boundedString(root.nodeVersion, "Node version"),
     executable: boundedString(root.executable, "executable"),
+    finderExecutable: "droplet",
     runtimeDataDirectory,
     documentTypes: [{ contentType: "com.adobe.pdf", role: "Viewer", rank: "Alternate" }],
     embeddedArtifacts,

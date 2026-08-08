@@ -326,7 +326,7 @@ The planning sections below choose implementation mechanisms and make deferred p
 - KTD14. **Keep VS Code v1 desktop-local.** The extension runs in the local UI extension host, accepts only local file resources, embeds the shared service URL in a restricted webview, and rejects Remote SSH, containers, Codespaces, and virtual workspaces. Tunneling review content would change R2's local-only privacy boundary.
 - KTD15. **Distribute the Codex entry point as a plugin containing one canonical skill.** The skill invokes the shared launch client for a referenced PDF and asks the Codex desktop browser to open the returned localhost URL. It performs no direct task creation. (session-settled: user-directed — chosen over direct task submission and annotated-PDF-only ingestion: the explicit review file and copied prompt are the reliable v1 agent contract under R27-R30.)
 - KTD16. **Fail closed on signed and encrypted documents.** Signed PDFs can be viewed and privately reviewed, but v1 never replaces them in place. Password-protected editing is unavailable in v1. An annotated copy is enabled only when declared permissions allow annotation and the selected writer passes the signed/encrypted conformance fixture; otherwise the UI explains the restriction and leaves recovery and non-PDF review data intact.
-- KTD17. **Ship a source-first Apple-silicon installer before adding release infrastructure.** A one-command installer downloads a checksum-pinned Node toolchain with bounded waits, installs the exact pnpm dependency graph, bundles the service, web assets, launch adapters, and U1-selected local WASM runtime, proves the packaged writer offline, then transactionally installs the app and Finder action for the current user. A failed replacement restores both prior artifacts. Developer ID signing, notarization, stapling, Intel/x64 builds, DMGs, auto-update, and release CI are optional future distribution work for this personal/friends app. Mutable runtime data remains outside the app bundle. (session-settled: user-directed — chosen over signed dual-architecture distribution for a source-first personal release.)
+- KTD17. **Ship a source-first Apple-silicon installer before adding release infrastructure.** A one-command installer downloads a checksum-pinned Node toolchain with bounded waits, installs the exact pnpm dependency graph, bundles the service, web assets, launch adapters, native Finder document bridge, and U1-selected local WASM runtime, proves the packaged writer offline, then transactionally installs the app for the current user. A failed replacement restores the prior app. Developer ID signing, notarization, stapling, Intel/x64 builds, DMGs, auto-update, and release CI are optional future distribution work for this personal/friends app. Mutable runtime data remains outside the app bundle. (session-settled: user-directed — chosen over signed dual-architecture distribution for a source-first personal release.)
 - KTD18. **Keep Codex execution manual and human-authorized.** Every handoff shows a short data-flow summary naming the source root, evidence, destination, and fields the external task may use. Require confirmation on first use and whenever the source root, provider, destination, or retention setting changes rather than on every handoff. Codex discovers checked-in build guidance inside the approved root; the user does not author an executable, argument vector, or working-directory profile in the proofreader. Ordinary Codex permission gates remain authoritative for network access, installs, or elevated actions. The proofreader validates observable changed paths, hashes, evidence, output, and disposition but does not claim it can audit every external read; read containment depends on the external Codex sandbox. PDF text, annotations, source content, SyncTeX output, and build logs remain untrusted data.
 
 ### High-Level Technical Design
@@ -335,7 +335,7 @@ The component topology keeps user gestures, durable state, PDF serialization, an
 
 \`\`\`mermaid
 flowchart TB
-  F["Finder Open With / Quick Action"] --> L["Shared launch client"]
+  F["Finder Open With"] --> L["Shared launch client"]
   C["Codex plugin skill"] --> L
   V["VS Code local extension"] --> L
   L --> B["Loopback broker"]
@@ -680,7 +680,7 @@ sequenceDiagram
 - **Dependencies:** U2 for launch/session lifecycle, U5 for human delivery, and U6 for Codex delivery.
 - **Files:**
   - apps/service/src/cli/open-command.ts
-  - integrations/finder/PdfProofreader.workflow/
+  - packaging/macos/finder-bridge.applescript
   - integrations/codex-plugin/.codex-plugin/plugin.json
   - integrations/codex-plugin/skills/pdf-proofreader/SKILL.md
   - integrations/codex-plugin/skills/pdf-proofreader/agents/openai.yaml
@@ -698,20 +698,20 @@ sequenceDiagram
   - .github/workflows/release-macos.yml
 - **Approach:**
   1. Give every adapter one explicit path input and one structured URL result. U2's broker owns canonicalization, source identity, session lookup, and authorization; U7 owns the thin client that passes paths, opens or focuses the UI, and displays shared errors. Keep browser selection and review logic out of adapters.
-  2. Register a Finder Open With action and Quick Action without becoming the default PDF handler.
+  2. Register the app's native document-event bridge for Finder Open With without becoming the default PDF handler. Keep one Finder path; do not maintain a duplicate Quick Action for this personal release.
   3. Package one Codex skill that launches the referenced PDF and opens or returns the capability URL for the desktop built-in browser.
   4. Run the VS Code extension locally, use a restrictive webview around the returned service URI, close only that client connection on panel disposal without finishing or discarding the recoverable review, and reject remote or virtual workspaces.
   5. Map launch failures to two shared error classes: Input unavailable, which asks for one readable local PDF, and Unsupported context, which asks for a supported local workspace. Finder, Codex, and VS Code present those shared errors through their native notification surface.
-  6. Provide one Apple-silicon source installer that downloads a checksum-pinned local Node toolchain with bounded waits, installs locked dependencies, builds the app, runs the packaged writer doctor offline with bounded time and output, and transactionally installs it and the Finder action for the current user. Restore both prior artifacts after any partial replacement. Retain signing and notarization scripts as optional future distribution tools rather than v1 gates.
+  6. Provide one Apple-silicon source installer that downloads a checksum-pinned local Node toolchain with bounded waits, installs locked dependencies, builds the app, runs the packaged writer doctor offline with bounded time and output, and transactionally installs it with the Finder document bridge for the current user. Restore the prior app after any partial replacement. Retain signing and notarization scripts as optional future distribution tools rather than v1 gates.
 - **Execution note:** Prefer a fresh source-install smoke over release-pipeline ceremony. Finder is the required no-terminal path after installation; bundled Codex and VS Code adapters remain available as optional productivity integrations.
 - **Patterns to follow:** Thin adapters from KTD13; current Codex plugin/skill layout; current VS Code webview security and extension-testing guidance; checksum-pinned local toolchains and user-local macOS application conventions.
 - **Test scenarios:**
-  1. Covers F1 / AE11. Invoke Finder Open With and the Quick Action for a selected PDF and verify the same broker/UI opens with no terminal interaction.
+  1. Covers F1 / AE11. Invoke Finder Open With for a selected PDF and verify the same broker/UI opens with no terminal interaction; opening the app directly presents the same single-PDF chooser.
   2. Covers F2 / AE11. Invoke the Codex skill with a referenced PDF and verify the desktop built-in browser reaches the live scoped session; no undocumented URL scheme or direct task submission is used.
   3. Covers F2 / AE11. Invoke the VS Code command from an active and Explorer-selected local PDF, verify the shared UI loads inside VS Code, dispose the panel, and verify the client connection closes while reopening resumes the same recoverable review.
   4. Open VS Code in Remote SSH, container, Codespaces, virtual, and non-file workspaces; verify a clear local-only refusal, one supported recovery action, and no port forwarding or file copy.
   5. Launch unreadable, moved, non-PDF, multi-selected, remote, and virtual inputs; verify each maps to one of the two shared errors with one usable recovery action and no unscoped session.
-  6. From a fresh checkout on Apple-silicon macOS, run the one-command installer; verify the pinned toolchain and locked dependencies are used, the app and Finder action install below the user's home directory, the packaged writer passes offline without Developer ID credentials, and an injected partial replacement restores the prior app and Finder action.
+  6. From a fresh checkout on Apple-silicon macOS, run the one-command installer; verify the pinned toolchain and locked dependencies are used, the app and Finder document bridge install below the user's home directory, the packaged writer passes offline without Developer ID credentials, and an injected partial replacement restores the prior app.
   7. Run all three adapters against one fixture and verify they produce equivalent review behavior and artifact contracts.
   8. Exercise the installed ordinary-browser workflow on both sides of the shared breakpoint, then smoke-test one wide or narrow case in Codex and VS Code; verify the same control hierarchy and preserved review state.
 - **Verification:** A fresh Apple-silicon checkout installs with one command and the installed Finder and ordinary-browser workflow reach the complete UI without terminal interaction after installation. Launch failures map to one of the two shared errors, the packaged runtime passes offline, and the optional Codex and VS Code adapters retain their automated contract coverage.
@@ -723,7 +723,7 @@ sequenceDiagram
 - **Reviewer data lifecycle:** Private source snapshots, atomic session snapshots, and temporary exports live under a protected user app-support directory. Finish and Discard synchronously revoke live access and remove recovery state; exports remain user-owned files. Active drafts never expire silently, abandoned temporary files are restart-cleaned, and documentation distinguishes application deletion from copies retained by filesystem snapshots or backups.
 - **Security boundary:** The broker is the sole authority for opaque file/root identities, path containment, output authorization, export commit, and session revocation. Browser, adapter, PDF, SyncTeX, build, and Codex inputs are untrusted. Backend crashes, timeouts, and resource exhaustion return typed failures without destination access or loss of acknowledged review state.
 - **External contracts:** Persisted drafts and the user-owned reviewed PDF, handoff JSON, and disposition JSON are versioned surfaces. Launch-client responses, the backend runtime manifest, and the bundled Codex skill ship in lockstep and evolve as internal interfaces without migration promises.
-- **Packaging:** The source-first Apple-silicon installer pins its build toolchain and dependencies, bundles browser, Node, Finder, Codex, VS Code, and the U1-selected writer runtime, proves the packaged writer offline, and installs per user through a rollback-safe transaction. Signing, notarization, Intel/x64, DMG/PKG, auto-update, and release CI are deferred optional distribution work.
+- **Packaging:** The source-first Apple-silicon installer pins its build toolchain and dependencies, bundles browser, Node, the native Finder document bridge, Codex, VS Code, and the U1-selected writer runtime, proves the packaged writer offline, and installs per user through a rollback-safe transaction. Signing, notarization, Intel/x64, DMG/PKG, auto-update, and release CI are deferred optional distribution work.
 - **User-visible compatibility:** External viewer behavior and host-surface behavior can change independently. The release matrix must be rerun when the PDF engine, browser engine, VS Code, Codex desktop, macOS, or writer dependency changes materially.
 
 ---
@@ -757,7 +757,7 @@ sequenceDiagram
 | Security and recovery | Loopback broker, canonical roots, recovery store, backend isolation | pnpm test:security | Capability, Host/Origin, path-containment, hostile-PDF, revocation, private-permission, crash, and disk-pressure cases fail safely without sensitive logs or lost acknowledged state |
 | Host-surface acceptance | Finder, Codex, VS Code | test/acceptance/launch-surfaces.spec.ts plus installed-host evidence | Each adapter launches or focuses the same UI, maps failures to the two shared errors, and preserves session state; remote VS Code is refused |
 | Codex handoff acceptance | Representative and hostile-input LaTeX fixtures | test/acceptance/codex-handoff.md | A fresh task respects approved permissions; the data-flow summary states the boundary; the user-driven Result check confirms immutable evidence, observable allowed changes, a clean revised PDF, and exact-ID disposition |
-| macOS source install | Apple-silicon checkout and installed app | ./install.sh plus test/acceptance/installed-hosts.md | One command verifies the packaged writer, transactionally installs the pinned app and Finder action for the current user, and restores both prior artifacts after partial failure |
+| macOS source install | Apple-silicon checkout and installed app | ./install.sh plus test/acceptance/installed-hosts.md | One command verifies the packaged writer, transactionally installs the pinned app with its Finder document bridge for the current user, and restores the prior app after partial failure |
 
 ---
 
@@ -791,9 +791,9 @@ sequenceDiagram
 
   A human-approved build can still load hostile project configuration and execute code before the post-run validator observes changed files. Instructions and ordinary permission gates do not by themselves enforce the promised limits on network, process, read, and write access.
 
-- **Finder work may be duplicated** — Finder integration (P2, scope, confidence 100)
+- **Finder document-event compatibility** — Finder integration (P2, compatibility, confidence 100)
 
-  The source installer includes both Open With and Quick Action entry points even though the Product Contract requires only one no-terminal Finder entry point. They share the same launcher contract, and either may be removed later if maintaining both stops being useful.
+  Finder sends an open-document Apple Event rather than a shell argument. The source build therefore compiles a small standard macOS document bridge and keeps the Node launcher behind it. Open With is the single supported Finder entry point; the former duplicate Quick Action is removed during upgrade.
 
 - **“Fast” has no measurable gate** — Performance contract (P2, feasibility, confidence 75)
 

@@ -1,0 +1,29 @@
+on launchPdf(pdfItem)
+	set appRoot to POSIX path of (path to me)
+	set launcherPath to appRoot & "Contents/MacOS/pdf-proofreader"
+	set pdfPath to POSIX path of pdfItem
+	try
+		do shell script quoted form of launcherPath & space & quoted form of pdfPath
+	on error errorMessage number errorNumber
+		if errorNumber is not -128 then
+			display alert "PDF Proofreader could not open this file" message errorMessage buttons {"OK"} default button 1
+		end if
+	end try
+end launchPdf
+
+on open pdfItems
+	if (count of pdfItems) is not 1 then
+		display alert "Choose one PDF" message "PDF Proofreader opens one local PDF at a time." buttons {"Choose one PDF"} default button 1
+		return
+	end if
+	launchPdf(item 1 of pdfItems)
+end open
+
+on run
+	try
+		set pdfItem to choose file of type {"com.adobe.pdf"} with prompt "Choose one local PDF to proofread"
+		launchPdf(pdfItem)
+	on error errorMessage number errorNumber
+		if errorNumber is not -128 then error errorMessage number errorNumber
+	end try
+end run
