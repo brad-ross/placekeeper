@@ -64,6 +64,8 @@ export function PdfWorkspace({
                       pageIndex={layout.pageIndex}
                       aria-label={`Page ${layout.pageNumber}`}
                       data-page-index={layout.pageIndex}
+                      tabIndex={-1}
+                      onPointerDownCapture={(event) => event.currentTarget.focus({ preventScroll: true })}
                       style={{
                         position: 'relative',
                         width: layout.rotatedWidth,

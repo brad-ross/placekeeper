@@ -1,4 +1,8 @@
 import type { CaretAnchor, SelectionAnchor } from '../pdf/selection-anchor.js';
+import {
+  INITIAL_SELECTION_UPDATE,
+  type SelectionUpdate,
+} from '../pdf/selection-state.js';
 
 export type ProofreadGesture =
   | { kind: 'replace'; anchor: SelectionAnchor; text: string }
@@ -13,6 +17,7 @@ export type ProofreadInputIntent =
 export interface ProofreadInputContext {
   selection: SelectionAnchor | null;
   caret: CaretAnchor | null;
+  selectionUpdate?: SelectionUpdate;
 }
 
 export interface BeforeInputLike {
@@ -37,6 +42,7 @@ export interface KeyDownLike {
 
 export interface ProofreadInputController {
   setContext(context: ProofreadInputContext): void;
+  focusChanged(editable: boolean): void;
   compositionStart(target?: EventTarget | null): void;
   compositionEnd(committedText?: string, target?: EventTarget | null): void;
   clearDraft(): void;
@@ -72,9 +78,18 @@ export function createProofreadInputController(
   onIntent: (intent: ProofreadInputIntent) => void,
 ): ProofreadInputController {
   let context: ProofreadInputContext = { selection: null, caret: null };
+  let selectionUpdate: SelectionUpdate = INITIAL_SELECTION_UPDATE;
   let composing = false;
   let composingInEditableTarget = false;
   let draftOpen = false;
+  let pendingIntent:
+    | { kind: 'replace'; generation: number; text: string }
+    | { kind: 'delete'; generation: number }
+    | null = null;
+
+  const discardPending = () => {
+    pendingIntent = null;
+  };
 
   const beginTextDraft = (text: string) => {
     if (draftOpen || !text) return;
@@ -87,11 +102,59 @@ export function createProofreadInputController(
     }
   };
 
+  const queuePendingText = (text: string) => {
+    if (!text || selectionUpdate.kind !== 'pending') return;
+    if (pendingIntent === null) {
+      pendingIntent = { kind: 'replace', generation: selectionUpdate.generation, text };
+      return;
+    }
+    if (pendingIntent.kind === 'replace' && pendingIntent.generation === selectionUpdate.generation) {
+      pendingIntent.text += text;
+    }
+  };
+
+  const queuePendingDelete = () => {
+    if (selectionUpdate.kind !== 'pending' || pendingIntent !== null) return;
+    pendingIntent = { kind: 'delete', generation: selectionUpdate.generation };
+  };
+
+  const releasePending = () => {
+    if (
+      selectionUpdate.kind !== 'reliable' ||
+      pendingIntent === null ||
+      pendingIntent.generation !== selectionUpdate.generation
+    ) return;
+    const intent = pendingIntent;
+    pendingIntent = null;
+    if (intent.kind === 'replace') {
+      beginTextDraft(intent.text);
+    } else {
+      onIntent({ kind: 'delete', anchor: selectionUpdate.anchor });
+    }
+  };
+
   return {
     setContext(next) {
       context = next;
+      const nextUpdate = next.selectionUpdate ?? (next.selection === null
+        ? INITIAL_SELECTION_UPDATE
+        : { kind: 'reliable', generation: 0, anchor: next.selection });
+      if (pendingIntent !== null && pendingIntent.generation !== nextUpdate.generation) {
+        discardPending();
+      }
+      selectionUpdate = nextUpdate;
+      if (selectionUpdate.kind === 'reliable') {
+        context = { ...next, selection: selectionUpdate.anchor };
+        releasePending();
+      } else if (selectionUpdate.kind !== 'pending') {
+        discardPending();
+      }
+    },
+    focusChanged(editable) {
+      if (editable) discardPending();
     },
     compositionStart(target) {
+      discardPending();
       composing = true;
       composingInEditableTarget = isEditableTarget(target);
     },
@@ -105,16 +168,29 @@ export function createProofreadInputController(
       draftOpen = false;
     },
     beforeInput(event) {
-      if (event.defaultPrevented || composing || event.isComposing || isEditableTarget(event.target)) return;
+      if (event.defaultPrevented || composing || event.isComposing || isEditableTarget(event.target)) {
+        discardPending();
+        return;
+      }
       const inputType = event.inputType ?? '';
       if (inputType === 'insertCompositionText') return;
       if (inputType.startsWith('delete')) {
+        if (selectionUpdate.kind === 'pending') {
+          event.preventDefault();
+          queuePendingDelete();
+          return;
+        }
         if (context.selection === null) return;
         event.preventDefault();
         onIntent({ kind: 'delete', anchor: context.selection });
         return;
       }
       if (!inputType.startsWith('insert') || !event.data) return;
+      if (selectionUpdate.kind === 'pending') {
+        event.preventDefault();
+        queuePendingText(event.data);
+        return;
+      }
       if (context.selection !== null || context.caret !== null) {
         event.preventDefault();
         beginTextDraft(event.data);
@@ -122,13 +198,23 @@ export function createProofreadInputController(
     },
     keyDown(event) {
       if (
-        !event.defaultPrevented &&
-        !composing &&
-        !event.isComposing &&
-        !isEditableTarget(event.target) &&
-        !event.altKey &&
-        !event.ctrlKey &&
-        !event.metaKey &&
+        event.defaultPrevented ||
+        composing ||
+        event.isComposing ||
+        isEditableTarget(event.target) ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey
+      ) {
+        discardPending();
+        return;
+      }
+      if (event.key?.length === 1 && selectionUpdate.kind === 'pending') {
+        event.preventDefault();
+        queuePendingText(event.key);
+        return;
+      }
+      if (
         event.key?.length === 1 &&
         (context.selection !== null || context.caret !== null)
       ) {
@@ -137,13 +223,14 @@ export function createProofreadInputController(
         return;
       }
       if (
-        event.defaultPrevented ||
-        composing ||
-        event.isComposing ||
-        isEditableTarget(event.target) ||
-        event.altKey ||
-        event.ctrlKey ||
-        event.metaKey ||
+        selectionUpdate.kind === 'pending' &&
+        (event.key === 'Delete' || event.key === 'Backspace')
+      ) {
+        event.preventDefault();
+        queuePendingDelete();
+        return;
+      }
+      if (
         context.selection === null ||
         (event.key !== 'Delete' && event.key !== 'Backspace')
       ) return;

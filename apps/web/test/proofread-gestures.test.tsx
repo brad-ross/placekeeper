@@ -94,4 +94,122 @@ describe('proofread input controller', () => {
 
     expect(onGesture).not.toHaveBeenCalled();
   });
+
+  it('buffers one full printable sequence for the matching pending generation', () => {
+    const onIntent = vi.fn();
+    const controller = createProofreadInputController(onIntent);
+    controller.setContext({
+      selection: null,
+      caret: null,
+      selectionUpdate: { kind: 'pending', generation: 3 },
+    });
+    const keys = [...'revised'].map((key) => event({ key }));
+    for (const key of keys) controller.keyDown(key);
+
+    controller.setContext({
+      selection,
+      caret: null,
+      selectionUpdate: { kind: 'reliable', generation: 3, anchor: selection },
+    });
+
+    expect(onIntent).toHaveBeenCalledOnce();
+    expect(onIntent).toHaveBeenCalledWith({
+      kind: 'replaceDraft',
+      anchor: selection,
+      initialText: 'revised',
+    });
+    for (const key of keys) expect(key.preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it('buffers only one pending Delete or Backspace intent', () => {
+    const onIntent = vi.fn();
+    const controller = createProofreadInputController(onIntent);
+    controller.setContext({
+      selection: null,
+      caret: null,
+      selectionUpdate: { kind: 'pending', generation: 5 },
+    });
+    controller.keyDown(event({ key: 'Delete' }));
+    controller.keyDown(event({ key: 'Backspace' }));
+    controller.setContext({
+      selection,
+      caret: null,
+      selectionUpdate: { kind: 'reliable', generation: 5, anchor: selection },
+    });
+
+    expect(onIntent).toHaveBeenCalledOnce();
+    expect(onIntent).toHaveBeenCalledWith({ kind: 'delete', anchor: selection });
+  });
+
+  it.each([
+    ['printable text', (controller: ReturnType<typeof createProofreadInputController>) => {
+      controller.keyDown(event({ key: 'x' }));
+    }],
+    ['Delete', (controller: ReturnType<typeof createProofreadInputController>) => {
+      controller.keyDown(event({ key: 'Delete' }));
+    }],
+  ])('discards pending %s when focus enters a recognized editable host', (_name, queue) => {
+    const onIntent = vi.fn();
+    const controller = createProofreadInputController(onIntent);
+    controller.setContext({
+      selection: null,
+      caret: null,
+      selectionUpdate: { kind: 'pending', generation: 9 },
+    });
+    queue(controller);
+    controller.focusChanged(true);
+    controller.setContext({
+      selection,
+      caret: null,
+      selectionUpdate: { kind: 'reliable', generation: 9, anchor: selection },
+    });
+
+    expect(onIntent).not.toHaveBeenCalled();
+  });
+
+  it('discards pending input on clear, unreliable, supersession, composition, handled, and modifier paths', () => {
+    const discardCases = [
+      (controller: ReturnType<typeof createProofreadInputController>) => controller.setContext({
+        selection: null,
+        caret: null,
+        selectionUpdate: { kind: 'cleared', generation: 7 },
+      }),
+      (controller: ReturnType<typeof createProofreadInputController>) => controller.setContext({
+        selection: null,
+        caret: null,
+        selectionUpdate: {
+          kind: 'unreliable',
+          generation: 6,
+          userMessage: 'Reselect.',
+          diagnostic: 'selection-text-geometry-mismatch',
+        },
+      }),
+      (controller: ReturnType<typeof createProofreadInputController>) => controller.setContext({
+        selection: null,
+        caret: null,
+        selectionUpdate: { kind: 'pending', generation: 7 },
+      }),
+      (controller: ReturnType<typeof createProofreadInputController>) => controller.compositionStart(),
+      (controller: ReturnType<typeof createProofreadInputController>) => controller.keyDown(event({ key: 'x', defaultPrevented: true })),
+      (controller: ReturnType<typeof createProofreadInputController>) => controller.keyDown(event({ key: 'x', metaKey: true })),
+    ];
+
+    for (const discard of discardCases) {
+      const onIntent = vi.fn();
+      const controller = createProofreadInputController(onIntent);
+      controller.setContext({
+        selection: null,
+        caret: null,
+        selectionUpdate: { kind: 'pending', generation: 6 },
+      });
+      controller.keyDown(event({ key: 'x' }));
+      discard(controller);
+      controller.setContext({
+        selection,
+        caret: null,
+        selectionUpdate: { kind: 'reliable', generation: 6, anchor: selection },
+      });
+      expect(onIntent).not.toHaveBeenCalled();
+    }
+  });
 });

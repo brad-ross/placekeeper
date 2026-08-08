@@ -5,14 +5,14 @@ import { SelectionPlugin } from '@embedpdf/plugin-selection';
 
 import { App } from '../../../apps/web/src/app/App.js';
 import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
-import type { SelectionAnchorResult } from '../../../apps/web/src/pdf/selection-anchor.js';
+import type { SelectionUpdate } from '../../../apps/web/src/pdf/selection-state.js';
 
 const htmlPayload = '<img src=x onerror="globalThis.__htmlPayloadExecuted=true">';
 const root = document.querySelector('#root');
 if (!root) throw new Error('Acceptance root is missing.');
 
 let registry: PluginRegistry | null = null;
-let lastAnchor: SelectionAnchorResult | null = null;
+let lastSelectionUpdate: SelectionUpdate | null = null;
 const params = new URLSearchParams(globalThis.location.search);
 
 globalThis.__htmlPayloadExecuted = false;
@@ -33,8 +33,10 @@ globalThis.viewerAcceptance = {
     return selection?.getFormattedSelection(documentId).flatMap(({ segmentRects }) => segmentRects).length ?? 0;
   },
   selectionAnchorStatus() {
-    if (lastAnchor === null) return 'pending';
-    return lastAnchor.ok ? 'reliable' : lastAnchor.diagnostic;
+    if (lastSelectionUpdate === null) return 'pending';
+    return lastSelectionUpdate.kind === 'unreliable'
+      ? lastSelectionUpdate.diagnostic
+      : lastSelectionUpdate.kind;
   },
   goToPage(pageNumber: number) {
     const documentId = registry?.getStore().getState().core.activeDocumentId;
@@ -92,8 +94,8 @@ createRoot(root).render(
         registry = initialized;
         globalThis.viewerAcceptance.ready = true;
       }}
-      onSelectionAnchor={(result) => {
-        lastAnchor = result;
+      onSelectionUpdate={(update) => {
+        lastSelectionUpdate = update;
       }}
   />,
 );

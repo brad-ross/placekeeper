@@ -1,4 +1,5 @@
 import {
+  useLayoutEffect,
   useRef,
   useState,
   type CompositionEvent,
@@ -21,6 +22,7 @@ import {
 } from '../../../../packages/core/src/review-commands.js';
 import type { ReviewCommand, ReviewItem, ReviewItemKind, ReviewState } from '../../../../packages/core/src/review-model.js';
 import type { CaretAnchor, SelectionAnchor } from '../pdf/selection-anchor.js';
+import type { SelectionUpdate } from '../pdf/selection-state.js';
 import { AnnotationList } from '../review/AnnotationList.js';
 import { CommentComposer } from '../review/CommentComposer.js';
 import {
@@ -45,6 +47,7 @@ export interface ReviewShellProps {
   currentTool: ReviewItemKind;
   listOpen?: boolean;
   selectionAnchor?: SelectionAnchor | null;
+  selectionUpdate?: SelectionUpdate;
   caretAnchor?: CaretAnchor | null;
   pageNoteAnchor?: { pageIndex: number; position: ReviewRect; nearbyText?: string } | null;
   onToolChange(tool: ReviewItemKind): void;
@@ -118,10 +121,14 @@ export function ReviewShell(props: ReviewShellProps) {
     inputControllerRef.current = createProofreadInputController((intent) => inputIntentRef.current(intent));
   }
   const inputController = inputControllerRef.current;
-  inputController.setContext({
-    selection: props.selectionAnchor ?? null,
-    caret: props.caretAnchor ?? null,
-  });
+  useLayoutEffect(() => {
+    inputController.focusChanged(isEditableTarget(document.activeElement));
+    inputController.setContext({
+      selection: props.selectionAnchor ?? null,
+      caret: props.caretAnchor ?? null,
+      ...(props.selectionUpdate === undefined ? {} : { selectionUpdate: props.selectionUpdate }),
+    });
+  }, [inputController, props.caretAnchor, props.selectionAnchor, props.selectionUpdate]);
 
   const beforeInput = (event: FormEvent<HTMLDivElement>) => {
     const native = event.nativeEvent as InputEvent;
@@ -233,6 +240,7 @@ export function ReviewShell(props: ReviewShellProps) {
       data-breakpoint="1024"
       onBeforeInputCapture={beforeInput}
       onKeyDownCapture={keyDown}
+      onFocusCapture={(event) => inputController.focusChanged(isEditableTarget(event.target))}
       onCompositionStartCapture={(event) => inputController.compositionStart(event.target)}
       onCompositionEndCapture={compositionEnd}
     >

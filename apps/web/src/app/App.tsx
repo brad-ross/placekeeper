@@ -11,7 +11,10 @@ import {
 } from '../pdf/existing-annotations.js';
 import { createLocalPdfiumViewer, type ViewerAssetUrls } from '../pdf/embedpdf-viewer.js';
 import { PdfWorkspace } from '../pdf/PdfWorkspace.js';
-import type { SelectionAnchorResult } from '../pdf/selection-anchor.js';
+import {
+  terminalSelectionUpdate,
+  type SelectionUpdate,
+} from '../pdf/selection-state.js';
 import {
   assessPageTextReliability,
   PAGE_TEXT_UNAVAILABLE_MESSAGE,
@@ -29,7 +32,7 @@ export interface AppProps {
   pageSemanticReliable?: boolean;
   selectionSemanticReliable?: boolean;
   onViewerInitialized?: (registry: PluginRegistry) => Promise<void>;
-  onSelectionAnchor?: (result: SelectionAnchorResult) => void;
+  onSelectionUpdate?: (update: SelectionUpdate) => void;
   documentTitle?: string;
   toolError?: string | null;
   /** Production composes the viewer inside the canonical ReviewShell toolbar. */
@@ -44,7 +47,7 @@ export function App({
   pageSemanticReliable,
   selectionSemanticReliable,
   onViewerInitialized,
-  onSelectionAnchor,
+  onSelectionUpdate,
   documentTitle = 'Local PDF',
   toolError = null,
   embeddedInReviewShell = false,
@@ -139,8 +142,15 @@ export function App({
     if (selection) {
       const captureSelection = async (documentId: string) => {
         const generation = ++selectionReadGeneration.current;
+        onSelectionUpdate?.({ kind: 'pending', generation });
         const document = registry.getStore().getState().core.documents[documentId]?.document;
-        if (!document) return;
+        if (!document) {
+          const clearedGeneration = ++selectionReadGeneration.current;
+          onSelectionUpdate?.({ kind: 'cleared', generation: clearedGeneration });
+          return;
+        }
+        await globalThis.__pdfProofreaderSelectionCaptureTestGate?.wait(generation);
+        if (generation !== selectionReadGeneration.current) return;
         const result = await captureViewerSelection({
           documentId,
           selection,
@@ -148,14 +158,15 @@ export function App({
         });
         if (generation === selectionReadGeneration.current) {
           setDetectedSelectionReliable(result.ok);
-          onSelectionAnchor?.(result);
+          onSelectionUpdate?.(terminalSelectionUpdate(generation, result));
         }
       };
       subscriptions.current.push(
         selection.onSelectionChange(({ documentId, selection: selectedRange }) => {
           if (selectedRange === null) {
-            selectionReadGeneration.current += 1;
+            const generation = ++selectionReadGeneration.current;
             setDetectedSelectionReliable(true);
+            onSelectionUpdate?.({ kind: 'cleared', generation });
           } else {
             void captureSelection(documentId);
           }
@@ -169,7 +180,7 @@ export function App({
     const activeDocumentId = registry.getStore().getState().core.activeDocumentId;
     if (activeDocumentId) await loadDocument(activeDocumentId);
     await onViewerInitialized?.(registry);
-  }, [clearSubscriptions, onPagePoint, onSelectionAnchor, onViewerInitialized]);
+  }, [clearSubscriptions, onPagePoint, onSelectionUpdate, onViewerInitialized]);
 
   const effectivePageReliability = pageSemanticReliable ?? detectedPageReliable;
   const effectiveSelectionReliability =
@@ -223,4 +234,11 @@ export function App({
     </main>
   );
   return content;
+}
+
+declare global {
+  /** Deterministic acceptance-only gate installed before the production app starts. */
+  var __pdfProofreaderSelectionCaptureTestGate:
+    | { wait(generation: number): Promise<void> }
+    | undefined;
 }

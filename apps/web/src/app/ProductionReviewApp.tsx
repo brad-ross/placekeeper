@@ -3,7 +3,14 @@ import type { PluginRegistry } from "@embedpdf/core";
 import { ScrollPlugin } from "@embedpdf/plugin-scroll";
 
 import type { ReviewCommand, ReviewItemKind, ReviewState } from "../../../../packages/core/src/review-model.js";
-import type { CaretAnchor, SelectionAnchor, SelectionAnchorResult } from "../pdf/selection-anchor.js";
+import type { CaretAnchor, SelectionAnchor } from "../pdf/selection-anchor.js";
+import {
+  acceptSelectionUpdate,
+  INITIAL_SELECTION_UPDATE,
+  reliableSelection,
+  selectionReadinessMessage,
+  type SelectionUpdate,
+} from "../pdf/selection-state.js";
 import { CodexDelivery, type CheckedCodexResult, type PreparedCodexHandoff } from "../export/CodexDelivery.js";
 import { HumanDelivery, type DeliveryArtifact } from "../export/HumanDelivery.js";
 import { App } from "./App.js";
@@ -77,7 +84,7 @@ function caretFromSelection(anchor: SelectionAnchor | null): CaretAnchor | null 
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [state, setState] = useState(props.initialState);
   const [tool, setTool] = useState<ReviewItemKind>("replace");
-  const [selection, setSelection] = useState<SelectionAnchor | null>(null);
+  const [selectionUpdate, setSelectionUpdate] = useState<SelectionUpdate>(INITIAL_SELECTION_UPDATE);
   const [toolError, setToolError] = useState<string | null>(null);
   const [confirmedScope, setConfirmedScope] = useState<string | null>(null);
   const [pagePoint, setPagePoint] = useState<{
@@ -87,6 +94,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   } | null>(null);
   const latestReceipt = useRef<string | null>(null);
   const viewerRegistry = useRef<PluginRegistry | null>(null);
+  const selection = reliableSelection(selectionUpdate);
   const caret = useMemo(() => caretFromSelection(selection), [selection]);
   const viewerAssets = useMemo(() => ({
     pdfiumWasm: `/s/${props.session.sessionId}/assets/pdfium.wasm`,
@@ -99,22 +107,18 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   );
   const sourceRoot = props.scope.sourceRootPath ?? "No source root selected";
 
-  const onSelectionAnchor = (result: SelectionAnchorResult) => {
-    if (result.ok) {
-      setSelection(result.anchor);
-      setToolError(null);
-    } else {
-      setSelection(null);
-      setToolError(result.userMessage);
-    }
+  const onSelectionUpdate = (update: SelectionUpdate) => {
+    setSelectionUpdate((current) => acceptSelectionUpdate(current, update));
+    if (update.kind === "reliable") setToolError(null);
   };
+  const readinessMessage = selectionReadinessMessage(selectionUpdate);
   const viewer = props.viewer ?? (
     <App
       embeddedInReviewShell
       assets={viewerAssets}
       documentTitle={props.scope.documentTitle}
-      toolError={toolError}
-      onSelectionAnchor={onSelectionAnchor}
+      toolError={readinessMessage ?? toolError}
+      onSelectionUpdate={onSelectionUpdate}
       ownedAnnotations={ownedAnnotations}
       onPagePoint={setPagePoint}
       onViewerInitialized={async (registry) => {
@@ -129,6 +133,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         state={state}
         currentTool={tool}
         selectionAnchor={selection}
+        selectionUpdate={selectionUpdate}
         caretAnchor={caret}
         pageNoteAnchor={pagePoint === null ? null : {
           pageIndex: pagePoint.pageIndex,
