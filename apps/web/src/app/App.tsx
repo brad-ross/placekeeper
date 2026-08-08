@@ -60,6 +60,7 @@ export function App({
   const subscriptions = useRef<Array<() => void>>([]);
   const pageReadGeneration = useRef(0);
   const selectionReadGeneration = useRef(0);
+  const activeSelectionRead = useRef<{ documentId: string; generation: number } | null>(null);
   const viewer = useMemo(() => createLocalPdfiumViewer(assets), [assets]);
 
   const clearSubscriptions = useCallback(() => {
@@ -69,6 +70,7 @@ export function App({
 
   const initializeViewer = useCallback(async (registry: PluginRegistry) => {
     clearSubscriptions();
+    activeSelectionRead.current = null;
     const interaction = registry
       .getPlugin<InteractionManagerPlugin>(InteractionManagerPlugin.id)
       ?.provides();
@@ -140,16 +142,22 @@ export function App({
     }
 
     if (selection) {
-      const captureSelection = async (documentId: string) => {
+      const beginSelectionRead = (documentId: string) => {
+        if (activeSelectionRead.current?.documentId === documentId) return;
         const generation = ++selectionReadGeneration.current;
+        activeSelectionRead.current = { documentId, generation };
         onSelectionUpdate?.({ kind: 'pending', generation });
+      };
+      const captureSelection = async (documentId: string, generation: number) => {
         const document = registry.getStore().getState().core.documents[documentId]?.document;
         if (!document) {
+          activeSelectionRead.current = null;
           const clearedGeneration = ++selectionReadGeneration.current;
           onSelectionUpdate?.({ kind: 'cleared', generation: clearedGeneration });
           return;
         }
-        await globalThis.__pdfProofreaderSelectionCaptureTestGate?.wait(generation);
+        const captureGate = globalThis.__pdfProofreaderSelectionCaptureTestGate;
+        if (captureGate !== undefined) await captureGate.wait(generation);
         if (generation !== selectionReadGeneration.current) return;
         const result = await captureViewerSelection({
           documentId,
@@ -164,15 +172,19 @@ export function App({
       subscriptions.current.push(
         selection.onSelectionChange(({ documentId, selection: selectedRange }) => {
           if (selectedRange === null) {
+            activeSelectionRead.current = null;
             const generation = ++selectionReadGeneration.current;
             setDetectedSelectionReliable(true);
             onSelectionUpdate?.({ kind: 'cleared', generation });
           } else {
-            void captureSelection(documentId);
+            beginSelectionRead(documentId);
           }
         }),
         selection.onEndSelection(({ documentId }) => {
-          void captureSelection(documentId);
+          const active = activeSelectionRead.current;
+          if (active?.documentId !== documentId) return;
+          activeSelectionRead.current = null;
+          void captureSelection(documentId, active.generation);
         }),
       );
     }

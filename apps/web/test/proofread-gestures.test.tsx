@@ -18,6 +18,8 @@ const caret = {
   rightContext: ' true',
   reliable: true as const,
 };
+const clearedSelection = { kind: 'cleared', generation: 0 } as const;
+const reliableSelection = { kind: 'reliable', generation: 0, anchor: selection } as const;
 
 function event(overrides: Record<string, unknown> = {}) {
   return {
@@ -35,15 +37,15 @@ describe('proofread input controller', () => {
   it('opens one frozen draft for typing and maps selected deletion directly to Delete', () => {
     const gestures: unknown[] = [];
     const controller = createProofreadInputController((gesture) => gestures.push(gesture));
-    controller.setContext({ selection, caret: null });
+    controller.setContext({ selectionUpdate: reliableSelection, caret: null });
     const replace = event();
     controller.beforeInput(replace);
     controller.beforeInput(event({ data: 'ignored duplicate event' }));
     controller.clearDraft();
-    controller.setContext({ selection: null, caret });
+    controller.setContext({ selectionUpdate: clearedSelection, caret });
     const insert = event({ data: 'perhaps ' });
     controller.beforeInput(insert);
-    controller.setContext({ selection, caret: null });
+    controller.setContext({ selectionUpdate: reliableSelection, caret: null });
     const backspace = event({ key: 'Backspace' });
     controller.keyDown(backspace);
     const remove = event({ key: 'Delete' });
@@ -64,7 +66,7 @@ describe('proofread input controller', () => {
   it('emits no interim IME intent and opens exactly one draft for the committed text', () => {
     const onIntent = vi.fn();
     const controller = createProofreadInputController(onIntent);
-    controller.setContext({ selection, caret: null });
+    controller.setContext({ selectionUpdate: reliableSelection, caret: null });
 
     controller.compositionStart();
     controller.beforeInput(event({ inputType: 'insertCompositionText', data: '結', isComposing: true }));
@@ -82,9 +84,9 @@ describe('proofread input controller', () => {
   it('does nothing without a reliable anchor, during composition, for handled events, or with modifiers', () => {
     const onGesture = vi.fn();
     const controller = createProofreadInputController(onGesture);
-    controller.setContext({ selection: null, caret: null });
+    controller.setContext({ selectionUpdate: clearedSelection, caret: null });
     controller.beforeInput(event());
-    controller.setContext({ selection, caret: null });
+    controller.setContext({ selectionUpdate: reliableSelection, caret: null });
     controller.compositionStart();
     controller.beforeInput(event({ isComposing: false }));
     controller.compositionEnd();
@@ -99,7 +101,6 @@ describe('proofread input controller', () => {
     const onIntent = vi.fn();
     const controller = createProofreadInputController(onIntent);
     controller.setContext({
-      selection: null,
       caret: null,
       selectionUpdate: { kind: 'pending', generation: 3 },
     });
@@ -107,7 +108,6 @@ describe('proofread input controller', () => {
     for (const key of keys) controller.keyDown(key);
 
     controller.setContext({
-      selection,
       caret: null,
       selectionUpdate: { kind: 'reliable', generation: 3, anchor: selection },
     });
@@ -125,14 +125,12 @@ describe('proofread input controller', () => {
     const onIntent = vi.fn();
     const controller = createProofreadInputController(onIntent);
     controller.setContext({
-      selection: null,
       caret: null,
       selectionUpdate: { kind: 'pending', generation: 5 },
     });
     controller.keyDown(event({ key: 'Delete' }));
     controller.keyDown(event({ key: 'Backspace' }));
     controller.setContext({
-      selection,
       caret: null,
       selectionUpdate: { kind: 'reliable', generation: 5, anchor: selection },
     });
@@ -152,14 +150,12 @@ describe('proofread input controller', () => {
     const onIntent = vi.fn();
     const controller = createProofreadInputController(onIntent);
     controller.setContext({
-      selection: null,
       caret: null,
       selectionUpdate: { kind: 'pending', generation: 9 },
     });
     queue(controller);
     controller.focusChanged(true);
     controller.setContext({
-      selection,
       caret: null,
       selectionUpdate: { kind: 'reliable', generation: 9, anchor: selection },
     });
@@ -170,12 +166,10 @@ describe('proofread input controller', () => {
   it('discards pending input on clear, unreliable, supersession, composition, handled, and modifier paths', () => {
     const discardCases = [
       (controller: ReturnType<typeof createProofreadInputController>) => controller.setContext({
-        selection: null,
         caret: null,
         selectionUpdate: { kind: 'cleared', generation: 7 },
       }),
       (controller: ReturnType<typeof createProofreadInputController>) => controller.setContext({
-        selection: null,
         caret: null,
         selectionUpdate: {
           kind: 'unreliable',
@@ -185,7 +179,6 @@ describe('proofread input controller', () => {
         },
       }),
       (controller: ReturnType<typeof createProofreadInputController>) => controller.setContext({
-        selection: null,
         caret: null,
         selectionUpdate: { kind: 'pending', generation: 7 },
       }),
@@ -198,14 +191,12 @@ describe('proofread input controller', () => {
       const onIntent = vi.fn();
       const controller = createProofreadInputController(onIntent);
       controller.setContext({
-        selection: null,
         caret: null,
         selectionUpdate: { kind: 'pending', generation: 6 },
       });
       controller.keyDown(event({ key: 'x' }));
       discard(controller);
       controller.setContext({
-        selection,
         caret: null,
         selectionUpdate: { kind: 'reliable', generation: 6, anchor: selection },
       });

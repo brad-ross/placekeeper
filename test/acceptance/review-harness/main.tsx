@@ -47,7 +47,9 @@ function Harness() {
     <ReviewShell
       state={state}
       currentTool={tool}
-      selectionAnchor={anchorKind === 'selection' ? selection : null}
+      selectionUpdate={anchorKind === 'selection'
+        ? { kind: 'reliable', generation: 0, anchor: selection }
+        : { kind: 'cleared', generation: 0 }}
       caretAnchor={anchorKind === 'caret' ? caret : null}
       pageNoteAnchor={{ pageIndex: 0, position: { x: 300, y: 220, width: 18, height: 18 }, nearbyText: 'nearby paragraph' }}
       onToolChange={setTool}

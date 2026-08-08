@@ -64,6 +64,18 @@ async function waitForRenderedPageImage(
   return image;
 }
 
+function collectBrowserErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on("console", (message) => {
+    if (
+      message.type() === "error" &&
+      /Cannot update|while rendering|Maximum update depth|React/u.test(message.text())
+    ) errors.push(message.text());
+  });
+  page.on("pageerror", (error) => errors.push(error.message));
+  return errors;
+}
+
 async function sha256(path: string): Promise<string> {
   return createHash("sha256").update(await readFile(path)).digest("hex");
 }
@@ -97,14 +109,7 @@ test("one installed-style browser tree preserves review state across responsive 
   page.on("response", (response) => {
     if (response.url().includes("/assets/")) assetResponses.push(response.url());
   });
-  const browserErrors: string[] = [];
-  page.on("console", (message) => {
-    if (
-      message.type() === "error" &&
-      /Cannot update|while rendering|Maximum update depth|React/u.test(message.text())
-    ) browserErrors.push(message.text());
-  });
-  page.on("pageerror", (error) => browserErrors.push(error.message));
+  const browserErrors = collectBrowserErrors(page);
   await installSelectionCaptureGate(page);
   await page.goto(launchUrl);
   await expect(page.getByRole("heading", { name: "Local PDF Proofreader" })).toBeVisible();
@@ -206,14 +211,7 @@ for (const key of ["Delete", "Backspace"] as const) {
     if (!launched.ok || launched.kind === "recovery-offered") {
       throw new Error(`Fresh ${key} production launch failed`);
     }
-    const browserErrors: string[] = [];
-    page.on("console", (message) => {
-      if (
-        message.type() === "error" &&
-        /Cannot update|while rendering|Maximum update depth|React/u.test(message.text())
-      ) browserErrors.push(message.text());
-    });
-    page.on("pageerror", (error) => browserErrors.push(error.message));
+    const browserErrors = collectBrowserErrors(page);
     await installSelectionCaptureGate(page);
     await page.goto(launched.url);
 

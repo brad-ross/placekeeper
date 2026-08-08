@@ -17,7 +17,7 @@ export const INITIAL_SELECTION_UPDATE: SelectionUpdate = {
   generation: 0,
 };
 
-export const SELECTION_PENDING_MESSAGE = 'Reading the selected text…';
+const SELECTION_PENDING_MESSAGE = 'Reading the selected text…';
 
 /** Keep parent mutation authority monotonic even if an obsolete callback arrives late. */
 export function acceptSelectionUpdate(

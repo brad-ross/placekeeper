@@ -132,7 +132,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       <ReviewShell
         state={state}
         currentTool={tool}
-        selectionAnchor={selection}
         selectionUpdate={selectionUpdate}
         caretAnchor={caret}
         pageNoteAnchor={pagePoint === null ? null : {

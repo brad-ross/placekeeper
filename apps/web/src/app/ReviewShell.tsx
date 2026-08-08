@@ -22,7 +22,7 @@ import {
 } from '../../../../packages/core/src/review-commands.js';
 import type { ReviewCommand, ReviewItem, ReviewItemKind, ReviewState } from '../../../../packages/core/src/review-model.js';
 import type { CaretAnchor, SelectionAnchor } from '../pdf/selection-anchor.js';
-import type { SelectionUpdate } from '../pdf/selection-state.js';
+import { reliableSelection, type SelectionUpdate } from '../pdf/selection-state.js';
 import { AnnotationList } from '../review/AnnotationList.js';
 import { CommentComposer } from '../review/CommentComposer.js';
 import {
@@ -46,8 +46,7 @@ export interface ReviewShellProps {
   state: ReviewState;
   currentTool: ReviewItemKind;
   listOpen?: boolean;
-  selectionAnchor?: SelectionAnchor | null;
-  selectionUpdate?: SelectionUpdate;
+  selectionUpdate: SelectionUpdate;
   caretAnchor?: CaretAnchor | null;
   pageNoteAnchor?: { pageIndex: number; position: ReviewRect; nearbyText?: string } | null;
   onToolChange(tool: ReviewItemKind): void;
@@ -81,6 +80,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const draftTriggerRef = useRef<HTMLElement>(null);
   const editTriggerRef = useRef<HTMLButtonElement>(null);
   const listOpen = props.listOpen ?? internalListOpen;
+  const selectionAnchor = reliableSelection(props.selectionUpdate);
 
   if (props.state.revision >= acknowledgedRef.current.revision) acknowledgedRef.current = props.state;
 
@@ -124,11 +124,10 @@ export function ReviewShell(props: ReviewShellProps) {
   useLayoutEffect(() => {
     inputController.focusChanged(isEditableTarget(document.activeElement));
     inputController.setContext({
-      selection: props.selectionAnchor ?? null,
       caret: props.caretAnchor ?? null,
-      ...(props.selectionUpdate === undefined ? {} : { selectionUpdate: props.selectionUpdate }),
+      selectionUpdate: props.selectionUpdate,
     });
-  }, [inputController, props.caretAnchor, props.selectionAnchor, props.selectionUpdate]);
+  }, [inputController, props.caretAnchor, props.selectionUpdate]);
 
   const beforeInput = (event: FormEvent<HTMLDivElement>) => {
     const native = event.nativeEvent as InputEvent;
@@ -142,7 +141,8 @@ export function ReviewShell(props: ReviewShellProps) {
     });
   };
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.defaultPrevented || isEditableTarget(event.target) || event.nativeEvent.isComposing) return;
+    const editable = isEditableTarget(event.target);
+    if (event.defaultPrevented || editable || event.nativeEvent.isComposing) return;
     if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey) {
       const tool = reviewToolForKey(event.key);
       if (tool) {
@@ -168,6 +168,7 @@ export function ReviewShell(props: ReviewShellProps) {
       ctrlKey: event.ctrlKey,
       metaKey: event.metaKey,
       defaultPrevented: event.defaultPrevented,
+      editable,
       target: event.target,
       preventDefault: () => event.preventDefault(),
     });
@@ -177,7 +178,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
 
   const startHighlight = () => {
-    const anchor = props.selectionAnchor;
+    const anchor = selectionAnchor;
     if (!anchor) {
       setAnnouncement('Select reliable text to add a highlight.');
       return;
@@ -197,7 +198,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
 
   const startTextTool = (kind: 'replace' | 'insert') => {
-    const anchor = kind === 'replace' ? props.selectionAnchor : props.caretAnchor;
+    const anchor = kind === 'replace' ? selectionAnchor : props.caretAnchor;
     if (!anchor) {
       setAnnouncement(kind === 'replace'
         ? 'Select reliable text to suggest a replacement.'
@@ -209,11 +210,11 @@ export function ReviewShell(props: ReviewShellProps) {
   };
 
   const deleteSelection = () => {
-    if (!props.selectionAnchor) {
+    if (!selectionAnchor) {
       setAnnouncement('Select reliable text to suggest deletion.');
       return;
     }
-    void submit((state) => addDelete(state, props.selectionAnchor!));
+    void submit((state) => addDelete(state, selectionAnchor));
   };
 
   const startPageNote = () => {

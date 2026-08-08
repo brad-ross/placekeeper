@@ -16,6 +16,7 @@ describe('review shell layout and accessibility contract', () => {
         state={state}
         currentTool="highlight"
         listOpen
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
         onToolChange={() => undefined}
         onCommand={async () => state}
       >
