@@ -71,6 +71,9 @@ export function PdfWorkspace({
                         width: layout.rotatedWidth,
                         height: layout.rotatedHeight,
                         background: 'white',
+                        outline: 'none',
+                        userSelect: 'none',
+                        WebkitUserSelect: 'none',
                       }}
                     >
                       <RenderLayer

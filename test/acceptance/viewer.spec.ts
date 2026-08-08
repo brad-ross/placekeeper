@@ -52,6 +52,14 @@ test.describe('shared viewer foundation', () => {
     await page.mouse.move(box.x + 76, box.y + 98);
     await page.mouse.down();
     await page.mouse.move(box.x + Math.min(455, box.width - 30), box.y + 105, { steps: 12 });
+    await expect.poll(() => page.evaluate(() => window.viewerAcceptance.selectionRectCount()))
+      .toBeGreaterThan(0);
+    expect(await renderedPageImage.evaluate((image) => {
+      const selection = window.getSelection();
+      if (!selection) return false;
+      return Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index))
+        .some((range) => range.intersectsNode(image));
+    })).toBe(false);
     await page.mouse.up();
 
     await expect(renderedPageImage).toHaveCSS('pointer-events', 'none');

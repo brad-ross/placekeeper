@@ -44,12 +44,14 @@ async function dragPdfPhrase(
   pdfPage: ReturnType<Page["locator"]>,
   start: { x: number; y: number },
   end: { x: number; y: number },
+  whileDragging?: () => Promise<void>,
 ): Promise<void> {
   const box = await pdfPage.boundingBox();
   if (!box) throw new Error("Rendered PDF page has no bounds.");
   await page.mouse.move(box.x + start.x, box.y + start.y);
   await page.mouse.down();
   await page.mouse.move(box.x + end.x, box.y + end.y);
+  await whileDragging?.();
   await page.mouse.up();
 }
 
@@ -123,10 +125,30 @@ test("one installed-style browser tree preserves review state across responsive 
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
   const renderedPageImage = await waitForRenderedPageImage(pageCanvas);
+  const canvasBoxBeforeSelection = await pageCanvas.boundingBox();
+  expect(canvasBoxBeforeSelection).not.toBeNull();
+  if (canvasBoxBeforeSelection === null) throw new Error("Rendered PDF page has no bounds.");
   await expect(renderedPageImage).toHaveCSS("pointer-events", "none");
-  await dragPdfPhrase(page, pageCanvas, { x: 76, y: 98 }, { x: 405, y: 98 });
+  await dragPdfPhrase(
+    page,
+    pageCanvas,
+    { x: 76, y: 98 },
+    { x: 405, y: 98 },
+    async () => {
+      await expect(pageCanvas.locator(':scope > div[style*="mix-blend-mode"]')).toBeVisible();
+      expect(await renderedPageImage.evaluate((image) => {
+        const selection = window.getSelection();
+        if (!selection) return false;
+        return Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index))
+          .some((range) => range.intersectsNode(image));
+      })).toBe(false);
+    },
+  );
   await expect(pageCanvas).toBeFocused();
+  await expect(pageCanvas).toHaveCSS("outline-style", "none");
   await expect(page.getByRole("alert")).toContainText("Reading the selected text");
+  await expect.poll(async () => (await pageCanvas.boundingBox())?.y)
+    .toBe(canvasBoxBeforeSelection.y);
   await page.keyboard.type("revised");
   await releaseSelectionCapture(page);
 

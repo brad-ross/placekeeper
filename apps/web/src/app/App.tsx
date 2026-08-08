@@ -207,14 +207,37 @@ export function App({
       ownedAnnotations={ownedAnnotations}
     />
   );
+  const workspaceWithStatus = (
+    <div data-viewer-shell style={{ position: 'relative' }}>
+      {workspace}
+      {toolError ? (
+        <p
+          role="alert"
+          data-viewer-status
+          style={{
+            position: 'absolute',
+            top: 8,
+            right: 8,
+            zIndex: 2,
+            margin: 0,
+            padding: '4px 8px',
+            borderRadius: 4,
+            background: 'rgba(255, 255, 255, .92)',
+            pointerEvents: 'none',
+          }}
+        >
+          {toolError}
+        </p>
+      ) : null}
+    </div>
+  );
 
   const content = (
     <main>
       <h1>Local PDF Proofreader</h1>
       <p data-document-title>{documentTitle}</p>
-      {toolError ? <p role="alert">{toolError}</p> : null}
       {embeddedInReviewShell ? (
-        workspace
+        workspaceWithStatus
       ) : (
         <section aria-label="PDF review workspace">
           <div role="toolbar" aria-label="Review tools">
@@ -223,7 +246,7 @@ export function App({
           {pageMessage ? <p data-recovery-kind="page">{pageMessage}</p> : null}
           {selectionMessage ? <p data-recovery-kind="selection">{selectionMessage}</p> : null}
           <div data-semantic-tools-enabled={effectivePageReliability && effectiveSelectionReliability ? 'true' : 'false'}>
-            {workspace}
+            {workspaceWithStatus}
           </div>
         </section>
       )}
