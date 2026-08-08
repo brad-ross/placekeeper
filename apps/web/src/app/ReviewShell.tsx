@@ -1,5 +1,6 @@
 import {
   useLayoutEffect,
+  useEffect,
   useReducer,
   useRef,
   useState,
@@ -21,20 +22,22 @@ import {
   undoReview,
   type ReviewRect,
 } from '../../../../packages/core/src/review-commands.js';
-import type { ReviewCommand, ReviewItem, ReviewItemKind, ReviewState } from '../../../../packages/core/src/review-model.js';
+import type { ReviewCommand, ReviewItem, ReviewState } from '../../../../packages/core/src/review-model.js';
 import type { CaretAnchor, SelectionAnchor } from '../pdf/selection-anchor.js';
 import { reliableSelection, type SelectionUpdate } from '../pdf/selection-state.js';
 import type { ViewerControls, ViewerControlsSnapshot } from '../pdf/viewer-controls.js';
 import { unavailableViewerControls } from '../pdf/viewer-controls.js';
 import { AnnotationList } from '../review/AnnotationList.js';
 import { CommentComposer } from '../review/CommentComposer.js';
+import { ContextActionPalette, type ContextPlacement } from '../review/ContextActionPalette.js';
+import { PageActionMenu } from '../review/PageActionMenu.js';
 import { ReviewChrome } from '../review/ReviewChrome.js';
 import {
   createProofreadInputController,
   isEditableTarget,
   type ProofreadInputIntent,
 } from '../review/input-controller.js';
-import { ReviewToolbar, reviewToolForKey } from '../review/ReviewToolbar.js';
+import { reviewActionForKey } from '../review/review-actions.js';
 import {
   INITIAL_REVIEW_SURFACE_STATE,
   reduceReviewSurface,
@@ -55,12 +58,31 @@ export interface ReviewShellProps {
   state: ReviewState;
   documentTitle?: string;
   savedLabel?: string;
-  currentTool: ReviewItemKind;
   listOpen?: boolean;
   selectionUpdate: SelectionUpdate;
+  selectionPlacement?: ContextPlacement | null;
   caretAnchor?: CaretAnchor | null;
-  pageNoteAnchor?: { pageIndex: number; position: ReviewRect; nearbyText?: string } | null;
-  onToolChange(tool: ReviewItemKind): void;
+  caretPlacement?: ContextPlacement | null;
+  pageMenu?: {
+    readonly invocationId: string;
+    readonly placement: ContextPlacement;
+    readonly pageIndex: number;
+    readonly position: ReviewRect;
+    readonly nearbyText?: string;
+  } | null;
+  placedPageNote?: {
+    readonly token: number;
+    readonly pageIndex: number;
+    readonly position: ReviewRect;
+    readonly nearbyText?: string;
+  } | null;
+  keyboardPageNoteActive?: boolean;
+  onRequestKeyboardPageNote?(): void;
+  onCancelKeyboardPageNote?(): void;
+  onPageMenuDismiss?(invocationId: string): void;
+  onPageMenuConsumed?(invocationId: string): void;
+  onPlacedPageNoteConsumed?(token: number): void;
+  onPageNoteComposerComplete?(): void;
   onCommand(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
   onNavigate?(item: ReviewItem): void;
   viewerControls?: ViewerControls;
@@ -85,7 +107,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const [surface, dispatchSurface] = useReducer(
     reduceReviewSurface,
     props.listOpen === true
-      ? { baseSurface: 'annotations', nestedLayer: 'none' }
+      ? { baseSurface: 'annotations', nestedLayer: 'none', transientSurface: 'none' }
       : INITIAL_REVIEW_SURFACE_STATE,
   );
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
@@ -101,6 +123,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const surfaceTriggersRef = useRef(new Map<ReviewBaseSurface, HTMLElement>());
   const listOpen = surface.baseSurface === 'annotations';
   const selectionAnchor = reliableSelection(props.selectionUpdate);
+  const lastPlacedPageNoteToken = useRef<number | undefined>(undefined);
 
   const rememberSurfaceTrigger = (surfaceName: ReviewBaseSurface) => {
     if (document.activeElement instanceof HTMLElement) {
@@ -198,6 +221,18 @@ export function ReviewShell(props: ReviewShellProps) {
         closeNested();
         return;
       }
+      if (props.keyboardPageNoteActive) {
+        event.preventDefault();
+        props.onCancelKeyboardPageNote?.();
+        dispatchSurface({ type: 'close-transient' });
+        return;
+      }
+      if (props.pageMenu) {
+        event.preventDefault();
+        props.onPageMenuDismiss?.(props.pageMenu.invocationId);
+        dispatchSurface({ type: 'close-transient' });
+        return;
+      }
       if (surface.baseSurface !== 'reading') {
         event.preventDefault();
         const closing = surface.baseSurface;
@@ -208,15 +243,17 @@ export function ReviewShell(props: ReviewShellProps) {
     }
     if (event.defaultPrevented || editable || event.nativeEvent.isComposing) return;
     if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey) {
-      const tool = reviewToolForKey(event.key);
+      const tool = reviewActionForKey(event.key);
       if (tool) {
         event.preventDefault();
-        props.onToolChange(tool);
         if (tool === 'replace') startTextTool('replace');
         if (tool === 'delete') deleteSelection();
         if (tool === 'insert') startTextTool('insert');
         if (tool === 'highlight') startHighlight();
-        if (tool === 'pageNote') startPageNote();
+        if (tool === 'pageNote') {
+          props.onRequestKeyboardPageNote?.();
+          dispatchSurface({ type: 'open-transient', surface: 'page-note-cursor' });
+        }
         return;
       }
     }
@@ -283,16 +320,24 @@ export function ReviewShell(props: ReviewShellProps) {
     void submit((state) => addDelete(state, selectionAnchor));
   };
 
-  const startPageNote = () => {
-    if (!props.pageNoteAnchor) {
+  const startPageNote = (anchor?: { pageIndex: number; position: ReviewRect; nearbyText?: string } | null) => {
+    if (!anchor) {
       setAnnouncement('Choose a safe page location to add a Page Note.');
       return;
     }
     modalTriggerRef.current = pageNoteTriggerRef.current
       ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
-    setComposer({ kind: 'pageNote', ...props.pageNoteAnchor });
+    setComposer({ kind: 'pageNote', ...anchor });
     dispatchSurface({ type: 'open-nested' });
   };
+
+  useEffect(() => {
+    const placed = props.placedPageNote;
+    if (!placed || placed.token === lastPlacedPageNoteToken.current) return;
+    lastPlacedPageNoteToken.current = placed.token;
+    startPageNote(placed);
+    props.onPlacedPageNoteConsumed?.(placed.token);
+  }, [props.placedPageNote]);
 
   const closeTextDraft = () => {
     setTextDraft(null);
@@ -328,28 +373,46 @@ export function ReviewShell(props: ReviewShellProps) {
         onAnnotations={() => openBase('annotations')}
         onFinish={() => openBase('finish')}
       />
-      <ReviewToolbar
-        currentTool={props.currentTool}
-        canUndo={canUndo}
-        canRedo={canRedo}
-        listOpen={listOpen}
-        pageNoteTriggerRef={pageNoteTriggerRef}
-        onToolChange={props.onToolChange}
-        onHighlight={startHighlight}
-        onPageNote={startPageNote}
-        onReplace={() => startTextTool('replace')}
-        onDelete={deleteSelection}
-        onInsert={() => startTextTool('insert')}
-        onUndo={() => void submit(undoReview)}
-        onRedo={() => void submit(redoReview)}
-        onListOpenChange={(open) => {
-          if (open !== listOpen) openBase('annotations');
-        }}
-      />
       <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
       <div className="review-layout" data-review-stage>
         <div className="review-document">{props.children}</div>
         <div className="review-contextual-host" data-review-contextual-host>
+          {surface.baseSurface === 'reading' && selectionAnchor && props.selectionPlacement ? (
+            <ContextActionPalette
+              kind="selection"
+              placement={props.selectionPlacement}
+              hidden={surface.nestedLayer !== 'none'}
+              onReplace={() => startTextTool('replace')}
+              onDelete={deleteSelection}
+              onHighlight={startHighlight}
+            />
+          ) : null}
+          {surface.baseSurface === 'reading' && !selectionAnchor && props.caretAnchor && props.caretPlacement ? (
+            <ContextActionPalette
+              kind="insert"
+              placement={props.caretPlacement}
+              hidden={surface.nestedLayer !== 'none'}
+              onInsert={() => startTextTool('insert')}
+            />
+          ) : null}
+          {surface.nestedLayer === 'none' && props.pageMenu ? (
+            <PageActionMenu
+              placement={props.pageMenu.placement}
+              triggerRef={pageNoteTriggerRef}
+              onAddPageNote={() => {
+                const menu = props.pageMenu;
+                if (!menu) return;
+                props.onPageMenuConsumed?.(menu.invocationId);
+                startPageNote(menu);
+              }}
+              onDismiss={() => {
+                const menu = props.pageMenu;
+                if (!menu) return;
+                props.onPageMenuDismiss?.(menu.invocationId);
+                dispatchSurface({ type: 'close-transient' });
+              }}
+            />
+          ) : null}
           <div
             className="review-list"
             data-list-open={listOpen ? 'true' : 'false'}
@@ -434,6 +497,7 @@ export function ReviewShell(props: ReviewShellProps) {
             onDismiss={() => {
               setComposer(null);
               dispatchSurface({ type: 'close-nested' });
+              props.onPageNoteComposerComplete?.();
             }}
             onSave={async (value) => {
               const frozen = composer;
@@ -447,6 +511,7 @@ export function ReviewShell(props: ReviewShellProps) {
               ));
               setComposer(null);
               dispatchSurface({ type: 'close-nested' });
+              props.onPageNoteComposerComplete?.();
             }}
           />
         ) : null}

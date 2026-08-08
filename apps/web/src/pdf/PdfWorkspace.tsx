@@ -1,6 +1,7 @@
 import type { PluginRegistry } from '@embedpdf/core';
 import { EmbedPDF, type PluginBatchRegistrations } from '@embedpdf/core/react';
 import type { PdfEngine } from '@embedpdf/models';
+import { transformSize } from '@embedpdf/models';
 import { AnnotationLayer } from '@embedpdf/plugin-annotation/react';
 import { PagePointerProvider } from '@embedpdf/plugin-interaction-manager/react';
 import { RenderLayer } from '@embedpdf/plugin-render/react';
@@ -11,6 +12,20 @@ import { ZoomGestureWrapper } from '@embedpdf/plugin-zoom/react';
 import { useMemo } from 'react';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import { positionOwnedRect } from './owned-overlay.js';
+import {
+  isUnsafePageContextTarget,
+  normalizePageClientPoint,
+  type ViewerPagePoint,
+} from './viewer-interaction-events.js';
+
+export interface PageContextMenuRequest {
+  readonly pageIndex: number;
+  readonly x: number;
+  readonly y: number;
+  readonly clientX: number;
+  readonly clientY: number;
+  readonly keyboard: boolean;
+}
 
 export interface PdfWorkspaceProps {
   engine: PdfEngine;
@@ -18,6 +33,9 @@ export interface PdfWorkspaceProps {
   documentLabel?: string;
   onInitialized?: (registry: PluginRegistry) => Promise<void>;
   ownedAnnotations?: readonly ReviewAnnotation[];
+  keyboardPageNoteCursor?: ViewerPagePoint | null;
+  onKeyboardPageNoteKey?: (key: string) => void;
+  onPageContextMenu?: (request: PageContextMenuRequest) => boolean;
 }
 
 export function PdfWorkspace({
@@ -26,6 +44,9 @@ export function PdfWorkspace({
   documentLabel = 'PDF document',
   onInitialized,
   ownedAnnotations = [],
+  keyboardPageNoteCursor = null,
+  onKeyboardPageNoteKey,
+  onPageContextMenu,
 }: PdfWorkspaceProps) {
   const annotationsByPage = useMemo(() => {
     const result = new Map<number, ReviewAnnotation[]>();
@@ -66,6 +87,49 @@ export function PdfWorkspace({
                       data-page-index={layout.pageIndex}
                       tabIndex={-1}
                       onPointerDownCapture={(event) => event.currentTarget.focus({ preventScroll: true })}
+                      onContextMenu={(event) => {
+                        if (onPageContextMenu === undefined || isUnsafePageContextTarget(event.target)) return;
+                        const page = activePdf.pages[layout.pageIndex];
+                        if (!page) return;
+                        const bounds = event.currentTarget.getBoundingClientRect();
+                        const rotatedSize = transformSize(page.size, activeDocument.rotation, 1);
+                        const point = normalizePageClientPoint(
+                          { x: event.clientX, y: event.clientY },
+                          {
+                            pageSize: page.size,
+                            rotation: activeDocument.rotation,
+                            scale: bounds.width / rotatedSize.width,
+                            elementLeft: bounds.left,
+                            elementTop: bounds.top,
+                          },
+                        );
+                        if (!point) return;
+                        const accepted = onPageContextMenu({
+                          pageIndex: layout.pageIndex,
+                          x: point.x + (page.boxes?.crop.left ?? 0),
+                          y: point.y + (page.boxes?.crop.top ?? 0),
+                          clientX: event.clientX,
+                          clientY: event.clientY,
+                          keyboard: false,
+                        });
+                        if (accepted) event.preventDefault();
+                      }}
+                      onKeyDown={(event) => {
+                        if (onPageContextMenu === undefined) return;
+                        if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+                        const page = activePdf.pages[layout.pageIndex];
+                        if (!page) return;
+                        const bounds = event.currentTarget.getBoundingClientRect();
+                        const accepted = onPageContextMenu({
+                          pageIndex: layout.pageIndex,
+                          x: page.size.width / 2 + (page.boxes?.crop.left ?? 0),
+                          y: page.size.height / 2 + (page.boxes?.crop.top ?? 0),
+                          clientX: bounds.left + bounds.width / 2,
+                          clientY: bounds.top + bounds.height / 2,
+                          keyboard: true,
+                        });
+                        if (accepted) event.preventDefault();
+                      }}
                       style={{
                         position: 'relative',
                         width: layout.rotatedWidth,
@@ -126,6 +190,39 @@ export function PdfWorkspace({
                             });
                           })}
                       </div>
+                      {keyboardPageNoteCursor?.pageIndex === layout.pageIndex ? (() => {
+                        const page = activePdf.pages[layout.pageIndex];
+                        if (!page) return null;
+                        const transformed = positionOwnedRect(
+                          page,
+                          layout,
+                          activeDocument.rotation,
+                          {
+                            x: keyboardPageNoteCursor.x,
+                            y: keyboardPageNoteCursor.y,
+                            width: 1,
+                            height: 1,
+                          },
+                        );
+                        return (
+                          <button
+                            type="button"
+                            autoFocus
+                            className="page-note-placement-cursor"
+                            data-review-contextual-ui
+                            aria-label="Page Note placement cursor. Use arrow keys to move, Enter to place, or Escape to cancel."
+                            onKeyDown={(event) => {
+                              if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter', 'Escape'].includes(event.key)) return;
+                              event.preventDefault();
+                              event.stopPropagation();
+                              onKeyboardPageNoteKey?.(event.key);
+                            }}
+                            style={{ left: transformed.origin.x, top: transformed.origin.y }}
+                          >
+                            <span aria-hidden="true">+</span>
+                          </button>
+                        );
+                      })() : null}
                       <div
                         aria-hidden="true"
                         data-source-annotation-layer

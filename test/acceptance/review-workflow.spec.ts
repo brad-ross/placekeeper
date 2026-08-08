@@ -38,7 +38,8 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('textbox', { name: 'Comment (optional)' }).fill('Check the claim.');
     await page.getByRole('button', { name: 'Save comment' }).click();
 
-    await page.getByRole('button', { name: 'Page Note' }).click();
+    await page.getByRole('button', { name: 'Open page actions' }).click();
+    await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
     await page.getByRole('textbox', { name: 'Comment' }).fill('Rewrite this paragraph.');
     await page.getByRole('button', { name: 'Save comment' }).click();
 
@@ -111,7 +112,8 @@ test.describe('canonical review workflow', () => {
       await expect(revision).toHaveAttribute('data-revision', '0');
     }
 
-    await page.getByRole('button', { name: 'Page Note' }).click();
+    await page.getByRole('button', { name: 'Open page actions' }).click();
+    await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
     const composer = page.getByRole('textbox', { name: 'Comment' });
     await composer.fill('composer value');
     await composer.press('Alt+Shift+D');
@@ -162,16 +164,31 @@ test.describe('canonical review workflow', () => {
 
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+N');
+    await expect(page.getByRole('button', { name: 'Place Page Note' })).toBeVisible();
+    await page.getByRole('button', { name: 'Place Page Note' }).click();
     await expect(page.getByRole('dialog', { name: 'Page Note' })).toBeVisible();
   });
 
   test('announces anchor recovery and creates no mutation when selection authority is absent', async ({ page }) => {
     const announcement = page.locator('.review-shell > [role="status"]');
     await page.getByRole('button', { name: 'Clear anchors' }).click();
-    await page.getByRole('button', { name: 'Replace', exact: true }).click();
+    await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toHaveCount(0);
+    await page.getByRole('application', { name: 'PDF review canvas' }).focus();
+    await page.keyboard.press('Alt+Shift+R');
     await expect(announcement).toContainText('Select reliable text');
-    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await page.keyboard.press('Alt+Shift+D');
     await expect(announcement).toContainText('Select reliable text');
+    await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
+  });
+
+  test('light-dismisses the Page Note menu without mutating the review', async ({ page }) => {
+    await page.getByRole('button', { name: 'Open page actions' }).click();
+    await expect(page.getByRole('menu', { name: 'Page actions' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Add Page Note' })).toBeFocused();
+
+    await page.getByRole('application', { name: 'PDF review canvas' }).click();
+
+    await expect(page.getByRole('menu', { name: 'Page actions' })).toHaveCount(0);
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
 });

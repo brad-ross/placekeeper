@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { ReviewShell } from '../../../apps/web/src/app/ReviewShell.js';
 import { projectReviewItems } from '../../../apps/web/src/review/annotation-projection.js';
 import type { CaretAnchor, SelectionAnchor } from '../../../apps/web/src/pdf/selection-anchor.js';
-import { createReviewState, type ReviewCommand, type ReviewItemKind, type ReviewState } from '../../../packages/core/src/review-model.js';
+import { createReviewState, type ReviewCommand, type ReviewState } from '../../../packages/core/src/review-model.js';
 import { reduceReview } from '../../../packages/core/src/review-reducer.js';
 
 const root = document.querySelector('#root');
@@ -32,9 +32,11 @@ function Harness() {
     sessionId: 'acceptance',
     source: { fileId: 'source', digest: 'a'.repeat(64), byteLength: 100 },
   }));
-  const [tool, setTool] = useState<ReviewItemKind>('replace');
   const [anchorKind, setAnchorKind] = useState<'selection' | 'caret' | 'none'>('selection');
   const [navigated, setNavigated] = useState('none');
+  const [pageMenuOpen, setPageMenuOpen] = useState(false);
+  const [keyboardPageNoteActive, setKeyboardPageNoteActive] = useState(false);
+  const [placedPageNote, setPlacedPageNote] = useState<{ token: number; pageIndex: number; position: { x: number; y: number; width: number; height: number }; nearbyText: string } | null>(null);
 
   const accept = async (command: ReviewCommand): Promise<ReviewState> => {
     await Promise.resolve();
@@ -46,13 +48,26 @@ function Harness() {
   return (
     <ReviewShell
       state={state}
-      currentTool={tool}
       selectionUpdate={anchorKind === 'selection'
         ? { kind: 'reliable', generation: 0, anchor: selection }
         : { kind: 'cleared', generation: 0 }}
       caretAnchor={anchorKind === 'caret' ? caret : null}
-      pageNoteAnchor={{ pageIndex: 0, position: { x: 300, y: 220, width: 18, height: 18 }, nearbyText: 'nearby paragraph' }}
-      onToolChange={setTool}
+      selectionPlacement={anchorKind === 'selection' ? { left: 240, top: 120, suggestTop: false } : null}
+      caretPlacement={anchorKind === 'caret' ? { left: 240, top: 120, suggestTop: true } : null}
+      pageMenu={pageMenuOpen ? {
+        invocationId: 'harness-menu',
+        placement: { left: 300, top: 220 },
+        pageIndex: 0,
+        position: { x: 300, y: 220, width: 18, height: 18 },
+        nearbyText: 'nearby paragraph',
+      } : null}
+      placedPageNote={placedPageNote}
+      keyboardPageNoteActive={keyboardPageNoteActive}
+      onRequestKeyboardPageNote={() => setKeyboardPageNoteActive(true)}
+      onCancelKeyboardPageNote={() => setKeyboardPageNoteActive(false)}
+      onPageMenuDismiss={() => setPageMenuOpen(false)}
+      onPageMenuConsumed={() => setPageMenuOpen(false)}
+      onPlacedPageNoteConsumed={() => setPlacedPageNote(null)}
       onCommand={accept}
       onNavigate={(item) => setNavigated(item.id)}
     >
@@ -60,6 +75,18 @@ function Harness() {
         <button type="button" onClick={() => setAnchorKind('selection')}>Use selection</button>
         <button type="button" onClick={() => setAnchorKind('caret')}>Use caret</button>
         <button type="button" onClick={() => setAnchorKind('none')}>Clear anchors</button>
+        <button type="button" onClick={() => setPageMenuOpen(true)}>Open page actions</button>
+        {keyboardPageNoteActive ? (
+          <button type="button" onClick={() => {
+            setKeyboardPageNoteActive(false);
+            setPlacedPageNote({
+              token: Date.now(),
+              pageIndex: 0,
+              position: { x: 300, y: 220, width: 18, height: 18 },
+              nearbyText: 'nearby paragraph',
+            });
+          }}>Place Page Note</button>
+        ) : null}
         <div role="application" aria-label="PDF review canvas" tabIndex={0}>PDF page</div>
         <label>
           Native input

@@ -15,10 +15,20 @@ describe('review shell layout and accessibility contract', () => {
       <ReviewShell
         state={state}
         documentTitle="paper.pdf"
-        currentTool="highlight"
-        listOpen
-        selectionUpdate={{ kind: 'cleared', generation: 0 }}
-        onToolChange={() => undefined}
+        selectionUpdate={{
+          kind: 'reliable',
+          generation: 0,
+          anchor: {
+            pageIndex: 0,
+            quote: 'text',
+            prefix: '',
+            suffix: '',
+            rect: { x: 10, y: 10, width: 20, height: 10 },
+            segmentRects: [{ x: 10, y: 10, width: 20, height: 10 }],
+            reliable: true,
+          },
+        }}
+        selectionPlacement={{ left: 20, top: 30, suggestTop: true }}
         onCommand={async () => state}
       >
         <div>Document canvas</div>
@@ -26,11 +36,12 @@ describe('review shell layout and accessibility contract', () => {
     );
 
     expect(html).toContain('role="toolbar"');
+    expect(html).toContain('aria-label="Selection review actions"');
     expect(html).toContain('aria-keyshortcuts="Alt+Shift+H"');
     expect(html).toContain('aria-label="Review annotations"');
     expect(html).toContain('aria-live="polite"');
     expect(html).toContain('data-breakpoint="1024"');
-    expect(html).toContain('data-list-open="true"');
+    expect(html).toContain('data-list-open="false"');
     expect(html).toContain('data-review-chrome');
     expect(html).toContain('paper.pdf');
     expect(html).toContain('data-review-contextual-host');
@@ -42,9 +53,12 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-label="Redo"');
     expect(html).toContain('Annotations (0)');
     expect(html).toContain('id="review-annotation-list"');
-    for (const tool of ['Replace', 'Delete', 'Insert', 'Highlight', 'Page Note']) {
+    for (const tool of ['Replace', 'Delete', 'Highlight']) {
       expect(html).toContain(`>${tool}</button>`);
     }
+    expect(html).not.toContain('>Insert</button>');
+    expect(html).not.toContain('>Page Note</button>');
+    expect(html).not.toContain('aria-pressed');
     expect(html).not.toContain('Proofread mode');
   });
 
@@ -53,9 +67,7 @@ describe('review shell layout and accessibility contract', () => {
       <ReviewShell
         state={state}
         documentTitle="paper.pdf"
-        currentTool="replace"
         selectionUpdate={{ kind: 'cleared', generation: 0 }}
-        onToolChange={() => undefined}
         onCommand={async () => state}
       >
         <div>Document canvas</div>

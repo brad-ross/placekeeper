@@ -1,4 +1,4 @@
-import { Rotation, type Rect, type Size } from '@embedpdf/models';
+import { Rotation, type Position, type Rect, type Size } from '@embedpdf/models';
 
 import {
   assessPageTextReliability,
@@ -205,9 +205,13 @@ export interface CreateCaretAnchorInput {
   contextCharacters?: number;
 }
 
+export type CaretAnchorResult =
+  | { ok: true; anchor: CaretAnchor }
+  | { ok: false; userMessage: string; diagnostic: ReliabilityDiagnostic };
+
 export function createCaretAnchor(
   input: CreateCaretAnchorInput,
-): { ok: true; anchor: CaretAnchor } | SelectionAnchorResult {
+): CaretAnchorResult {
   const pageReliability = assessPageTextReliability(input.page);
   if (!pageReliability.reliable) {
     return {
@@ -273,4 +277,193 @@ export function createCaretAnchor(
       reliable: true,
     },
   };
+}
+
+interface MappedTextRect {
+  readonly content: string;
+  readonly rect: Rect;
+  readonly start: number;
+  readonly end: number;
+}
+
+export interface CreateCaretAnchorAtPointInput {
+  readonly page: AnchorPage;
+  /** Pointer in the declared presentation coordinate space. */
+  readonly point: Position;
+  readonly coordinateRotation?: Rotation;
+  readonly coordinateScale?: number;
+  readonly contextCharacters?: number;
+}
+
+export type CaretAnchorDiagnosticResult = CaretAnchorResult;
+
+function caretFailure(diagnostic: ReliabilityDiagnostic): CaretAnchorDiagnosticResult {
+  return { ok: false, userMessage: SELECTION_UNAVAILABLE_MESSAGE, diagnostic };
+}
+
+export function restorePagePoint(size: Size, point: Position, rotation: Rotation, scale: number): Position {
+  const x = point.x / scale;
+  const y = point.y / scale;
+  switch (rotation) {
+    case Rotation.Degree90:
+      return { x: y, y: size.height - x };
+    case Rotation.Degree180:
+      return { x: size.width - x, y: size.height - y };
+    case Rotation.Degree270:
+      return { x: size.width - y, y: x };
+    default:
+      return { x, y };
+  }
+}
+
+function textOccurrences(text: string, content: string, from: number): number[] {
+  const offsets: number[] = [];
+  let cursor = from;
+  while (cursor <= text.length - content.length) {
+    const next = text.indexOf(content, cursor);
+    if (next < 0) break;
+    offsets.push(next);
+    cursor = next + Math.max(content.length, 1);
+  }
+  return offsets;
+}
+
+function alignTextRects(page: AnchorPage): readonly MappedTextRect[] | null {
+  const rects = page.textRects.filter(({ content }) => content.length > 0);
+  const solutions: MappedTextRect[][] = [];
+  const visit = (index: number, offset: number, mapped: MappedTextRect[]) => {
+    if (solutions.length > 1) return;
+    if (index === rects.length) {
+      solutions.push(mapped);
+      return;
+    }
+    const current = rects[index]!;
+    for (const start of textOccurrences(page.extractedText, current.content, offset)) {
+      visit(index + 1, start + current.content.length, [
+        ...mapped,
+        { content: current.content, rect: current.rect, start, end: start + current.content.length },
+      ]);
+    }
+  };
+  visit(0, 0, []);
+  return solutions.length === 1 ? solutions[0]! : null;
+}
+
+function rectsOverlap(a: Rect, b: Rect): boolean {
+  return (
+    a.origin.x < b.origin.x + b.size.width &&
+    a.origin.x + a.size.width > b.origin.x &&
+    a.origin.y < b.origin.y + b.size.height &&
+    a.origin.y + a.size.height > b.origin.y
+  );
+}
+
+function readingOrderSupported(mapped: readonly MappedTextRect[]): boolean {
+  for (let index = 1; index < mapped.length; index += 1) {
+    const previous = mapped[index - 1]!.rect;
+    const current = mapped[index]!.rect;
+    const sameLine = Math.abs(current.origin.y - previous.origin.y) <= Math.min(6, previous.size.height / 2);
+    if (sameLine && current.origin.x < previous.origin.x) return false;
+    if (!sameLine && current.origin.y < previous.origin.y) return false;
+  }
+  return true;
+}
+
+interface CaretCandidate {
+  readonly textOffset: number;
+  readonly position: Rect;
+  readonly distance: number;
+}
+
+/**
+ * Reliably maps a fresh pointer release to an exact engine text edge.
+ * Multi-character runs remain atomic: their interior never fabricates a
+ * proportional character offset.
+ */
+export function createCaretAnchorAtPoint(input: CreateCaretAnchorAtPointInput): CaretAnchorDiagnosticResult {
+  const pageReliability = assessPageTextReliability(input.page);
+  if (!pageReliability.reliable) return caretFailure(pageReliability.diagnostic);
+  const scale = input.coordinateScale ?? 1;
+  if (!Number.isFinite(scale) || scale <= 0) return caretFailure('selection-geometry-invalid');
+  const naturalPoint = restorePagePoint(
+    input.page.size,
+    input.point,
+    input.coordinateRotation ?? Rotation.Degree0,
+    scale,
+  );
+  if (!Number.isFinite(naturalPoint.x) || !Number.isFinite(naturalPoint.y)) {
+    return caretFailure('selection-geometry-invalid');
+  }
+
+  const mapped = alignTextRects(input.page);
+  if (mapped === null) return caretFailure('caret-text-rect-alignment-nonunique');
+  for (let first = 0; first < mapped.length; first += 1) {
+    for (let second = first + 1; second < mapped.length; second += 1) {
+      if (mapped[first]!.start !== mapped[second]!.start && rectsOverlap(mapped[first]!.rect, mapped[second]!.rect)) {
+        return caretFailure('caret-text-rects-overlap');
+      }
+    }
+  }
+  if (!readingOrderSupported(mapped)) return caretFailure('caret-reading-order-unsupported');
+
+  const candidates: CaretCandidate[] = [];
+  let insideMultiCharacterRect = false;
+  for (const item of mapped) {
+    const { rect } = item;
+    const centerY = rect.origin.y + rect.size.height / 2;
+    const tolerance = Math.min(6, rect.size.height / 2);
+    if (Math.abs(naturalPoint.y - centerY) > tolerance) continue;
+    const left = rect.origin.x;
+    const right = rect.origin.x + rect.size.width;
+    const inside = naturalPoint.x > left + 0.001 && naturalPoint.x < right - 0.001;
+    if (Array.from(item.content).length === 1 && naturalPoint.x >= left && naturalPoint.x <= right) {
+      const after = naturalPoint.x >= left + rect.size.width / 2;
+      candidates.push({
+        textOffset: after ? item.end : item.start,
+        position: {
+          origin: { x: after ? right : left, y: rect.origin.y },
+          size: { width: 2, height: rect.size.height },
+        },
+        distance: 0,
+      });
+      continue;
+    }
+    if (inside) insideMultiCharacterRect = true;
+    for (const edge of [
+      { x: left, textOffset: item.start },
+      { x: right, textOffset: item.end },
+    ]) {
+      const distance = Math.hypot(naturalPoint.x - edge.x, naturalPoint.y - centerY);
+      if (distance <= tolerance) {
+        candidates.push({
+          textOffset: edge.textOffset,
+          position: {
+            origin: { x: edge.x, y: rect.origin.y },
+            size: { width: 2, height: rect.size.height },
+          },
+          distance,
+        });
+      }
+    }
+  }
+  if (candidates.length === 0) {
+    return caretFailure(insideMultiCharacterRect
+      ? 'caret-point-inside-multichar-rect'
+      : 'caret-point-out-of-tolerance');
+  }
+  candidates.sort((a, b) => a.distance - b.distance);
+  const chosen = candidates[0]!;
+  if (
+    candidates[1] !== undefined &&
+    Math.abs(candidates[1].distance - chosen.distance) < 0.001 &&
+    candidates[1].textOffset !== chosen.textOffset
+  ) return caretFailure('caret-candidate-tied');
+
+  return createCaretAnchor({
+    page: input.page,
+    textOffset: chosen.textOffset,
+    position: chosen.position,
+    coordinateRotation: Rotation.Degree0,
+    ...(input.contextCharacters === undefined ? {} : { contextCharacters: input.contextCharacters }),
+  });
 }

@@ -1,10 +1,11 @@
-import { Rotation, type PdfDocumentObject, type PdfEngine } from '@embedpdf/models';
+import { Rotation, type PdfDocumentObject, type PdfEngine, type Position } from '@embedpdf/models';
 import type {
   FormattedSelection as ViewerFormattedSelection,
   SelectionDocumentState,
 } from '@embedpdf/plugin-selection';
 
 import {
+  createCaretAnchorAtPoint,
   createSelectionAnchor,
   type AnchorPage,
   type SelectionAnchorResult,
@@ -85,4 +86,20 @@ export function createEngineAnchorPageReader(
       };
     },
   };
+}
+
+export async function captureViewerCaret(input: {
+  readonly pageIndex: number;
+  readonly point: Position;
+  readonly pages: AnchorPageReader;
+  readonly coordinateRotation?: Rotation;
+  readonly coordinateScale?: number;
+}) {
+  const page = await input.pages.read(input.pageIndex);
+  return createCaretAnchorAtPoint({
+    page,
+    point: input.point,
+    ...(input.coordinateRotation === undefined ? {} : { coordinateRotation: input.coordinateRotation }),
+    ...(input.coordinateScale === undefined ? {} : { coordinateScale: input.coordinateScale }),
+  });
 }

@@ -4,13 +4,14 @@ import { DocumentManagerPlugin } from '@embedpdf/plugin-document-manager';
 import { InteractionManagerPlugin } from '@embedpdf/plugin-interaction-manager';
 import { ScrollPlugin } from '@embedpdf/plugin-scroll';
 import { SelectionPlugin } from '@embedpdf/plugin-selection';
+import { transformRect, transformSize } from '@embedpdf/models';
 
 import {
   inventoryDocumentAnnotations,
   type ExistingAnnotation,
 } from '../pdf/existing-annotations.js';
 import { createLocalPdfiumViewer, type ViewerAssetUrls } from '../pdf/embedpdf-viewer.js';
-import { PdfWorkspace } from '../pdf/PdfWorkspace.js';
+import { PdfWorkspace, type PageContextMenuRequest } from '../pdf/PdfWorkspace.js';
 import {
   SelectionReadAuthority,
   terminalSelectionUpdate,
@@ -22,9 +23,11 @@ import {
   SELECTION_UNAVAILABLE_MESSAGE,
 } from '../pdf/text-reliability.js';
 import {
+  captureViewerCaret,
   captureViewerSelection,
   createEngineAnchorPageReader,
 } from '../pdf/viewer-selection-adapter.js';
+import type { ViewerInteractionEvent, ViewerPagePoint } from '../pdf/viewer-interaction-events.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 
 export interface AppProps {
@@ -39,7 +42,8 @@ export interface AppProps {
   /** Production composes the viewer inside the canonical ReviewShell toolbar. */
   embeddedInReviewShell?: boolean;
   ownedAnnotations?: readonly ReviewAnnotation[];
-  onPagePoint?: (point: { readonly pageIndex: number; readonly x: number; readonly y: number }) => void;
+  onViewerInteraction?: (event: ViewerInteractionEvent) => void;
+  keyboardPageNoteActive?: boolean;
 }
 
 export function App({
@@ -53,7 +57,8 @@ export function App({
   toolError = null,
   embeddedInReviewShell = false,
   ownedAnnotations = [],
-  onPagePoint,
+  onViewerInteraction,
+  keyboardPageNoteActive = false,
 }: AppProps) {
   const [sourceAnnotations, setSourceAnnotations] = useState<readonly ExistingAnnotation[]>([]);
   const [detectedPageReliable, setDetectedPageReliable] = useState(true);
@@ -61,7 +66,16 @@ export function App({
   const subscriptions = useRef<Array<() => void>>([]);
   const pageReadGeneration = useRef(0);
   const selectionReads = useRef(new SelectionReadAuthority());
+  const registryRef = useRef<PluginRegistry | null>(null);
+  const activeDocumentIdRef = useRef<string | null>(null);
+  const viewportGenerationRef = useRef(0);
+  const caretReadGeneration = useRef(0);
+  const menuInvocation = useRef(0);
+  const keyboardActiveRef = useRef(keyboardPageNoteActive);
+  const keyboardCursorRef = useRef<ViewerPagePoint | null>(null);
+  const [keyboardCursor, setKeyboardCursor] = useState<ViewerPagePoint | null>(null);
   const viewer = useMemo(() => createLocalPdfiumViewer(assets), [assets]);
+  const emit = useCallback((event: ViewerInteractionEvent) => onViewerInteraction?.(event), [onViewerInteraction]);
 
   const clearSubscriptions = useCallback(() => {
     for (const unsubscribe of subscriptions.current.splice(0)) unsubscribe();
@@ -71,13 +85,46 @@ export function App({
     selectionReads.current.invalidate();
   }, [clearSubscriptions]);
 
+  const publishKeyboardCursor = useCallback((point: ViewerPagePoint | null) => {
+    keyboardCursorRef.current = point;
+    setKeyboardCursor(point);
+    emit({ type: 'page-note-cursor', value: point });
+  }, [emit]);
+
+  const initializeKeyboardCursor = useCallback(() => {
+    const registry = registryRef.current;
+    const documentId = activeDocumentIdRef.current;
+    if (!registry || !documentId || !keyboardActiveRef.current) return;
+    const core = registry.getStore().getState().core;
+    const document = core.documents[documentId]?.document;
+    const scroll = registry.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides()?.forDocument(documentId);
+    const pageIndex = Math.max(0, (scroll?.getCurrentPage() ?? 1) - 1);
+    const page = document?.pages[pageIndex];
+    if (!page) return;
+    publishKeyboardCursor({
+      documentId,
+      pageIndex,
+      viewportGeneration: viewportGenerationRef.current,
+      x: page.size.width / 2 + (page.boxes?.crop.left ?? 0),
+      y: page.size.height / 2 + (page.boxes?.crop.top ?? 0),
+    });
+  }, [publishKeyboardCursor]);
+
+  useEffect(() => {
+    keyboardActiveRef.current = keyboardPageNoteActive;
+    if (keyboardPageNoteActive) initializeKeyboardCursor();
+    else if (keyboardCursorRef.current !== null) publishKeyboardCursor(null);
+  }, [initializeKeyboardCursor, keyboardPageNoteActive, publishKeyboardCursor]);
+
   const initializeViewer = useCallback(async (registry: PluginRegistry) => {
+    registryRef.current = registry;
     clearSubscriptions();
     onSelectionUpdate?.(selectionReads.current.invalidate());
     const interaction = registry
       .getPlugin<InteractionManagerPlugin>(InteractionManagerPlugin.id)
       ?.provides();
-    const selection = registry.getPlugin<SelectionPlugin>(SelectionPlugin.id)?.provides();
+    const selectionPlugin = registry.getPlugin<SelectionPlugin>(SelectionPlugin.id);
+    const selection = selectionPlugin?.provides();
     if (interaction && selection) {
       selection.enableForMode(interaction.getDefaultMode(), {
         enableSelection: true,
@@ -98,20 +145,47 @@ export function App({
       }
     };
     const loadDocument = async (documentId: string) => {
+      activeDocumentIdRef.current = documentId;
       const document = registry.getStore().getState().core.documents[documentId]?.document;
       if (!document) return;
-      if (interaction && onPagePoint) {
+      if (interaction) {
         for (const page of document.pages) {
           subscriptions.current.push(interaction.registerAlways({
             scope: { type: 'page', documentId, pageIndex: page.index },
             handlers: {
-              onClick: (position) => onPagePoint({
-                pageIndex: page.index,
-                // PagePointerProvider returns natural, unscaled, crop-relative
-                // coordinates. Canonical review geometry is PDF user space.
-                x: position.x + (page.boxes?.crop.left ?? 0),
-                y: position.y + (page.boxes?.crop.top ?? 0),
-              }),
+              onPointerUp: (position, event) => {
+                const canonicalPoint: ViewerPagePoint = {
+                  documentId,
+                  pageIndex: page.index,
+                  viewportGeneration: viewportGenerationRef.current,
+                  x: position.x + (page.boxes?.crop.left ?? 0),
+                  y: position.y + (page.boxes?.crop.top ?? 0),
+                };
+                if (keyboardActiveRef.current) {
+                  publishKeyboardCursor(canonicalPoint);
+                  emit({ type: 'page-note-commit', value: canonicalPoint });
+                  publishKeyboardCursor(null);
+                  return;
+                }
+                if (selection?.getState(documentId).selection !== null) return;
+                const generation = ++caretReadGeneration.current;
+                void captureViewerCaret({
+                  pageIndex: page.index,
+                  point: position,
+                  pages: createEngineAnchorPageReader(registry.getEngine(), document),
+                }).then((result) => {
+                  if (generation !== caretReadGeneration.current) return;
+                  emit({
+                    type: 'caret',
+                    value: result.ok
+                      ? {
+                          anchor: result.anchor,
+                          placement: { left: event.clientX, top: event.clientY, suggestTop: true },
+                        }
+                      : { anchor: null, placement: null, diagnostic: result.diagnostic },
+                  });
+                });
+              },
             },
           }));
         }
@@ -139,7 +213,17 @@ export function App({
     if (scroll) {
       subscriptions.current.push(
         scroll.onPageChange(({ documentId, pageNumber }) => {
+          viewportGenerationRef.current += 1;
+          initializeKeyboardCursor();
           void readPage(documentId, pageNumber - 1);
+        }),
+        scroll.onScroll(() => {
+          viewportGenerationRef.current += 1;
+          initializeKeyboardCursor();
+        }),
+        scroll.onLayoutChange(() => {
+          viewportGenerationRef.current += 1;
+          initializeKeyboardCursor();
         }),
       );
     }
@@ -174,7 +258,9 @@ export function App({
           if (selectedRange === null) {
             setDetectedSelectionReliable(true);
             onSelectionUpdate?.(selectionReads.current.invalidate());
+            emit({ type: 'selection-placement', value: null });
           } else {
+            emit({ type: 'caret', value: { anchor: null, placement: null } });
             beginSelectionRead(documentId);
           }
         }),
@@ -184,12 +270,49 @@ export function App({
           void captureSelection(documentId, generation);
         }),
       );
+      const activeId = registry.getStore().getState().core.activeDocumentId;
+      if (selectionPlugin && activeId) {
+        subscriptions.current.push(selectionPlugin.onMenuPlacement(activeId, (placement) => {
+          if (!placement?.isVisible) {
+            emit({ type: 'selection-placement', value: null });
+            return;
+          }
+          const active = registry.getStore().getState().core.documents[activeId];
+          const page = active?.document?.pages[placement.pageIndex];
+          const element = document.querySelector<HTMLElement>(`[data-page-index="${placement.pageIndex}"]`);
+          if (!page || !element) return;
+          const bounds = element.getBoundingClientRect();
+          const rotation = active.rotation;
+          const rotatedSize = transformSize(page.size, rotation, 1);
+          const scale = bounds.width / rotatedSize.width;
+          const transformed = transformRect(page.size, placement.rect, rotation, scale);
+          emit({
+            type: 'selection-placement',
+            value: {
+              pageIndex: placement.pageIndex,
+              rect: {
+                x: placement.rect.origin.x + (page.boxes?.crop.left ?? 0),
+                y: placement.rect.origin.y + (page.boxes?.crop.top ?? 0),
+                width: placement.rect.size.width,
+                height: placement.rect.size.height,
+              },
+              placement: {
+                left: bounds.left + transformed.origin.x + transformed.size.width / 2,
+                top: bounds.top + (placement.suggestTop
+                  ? transformed.origin.y
+                  : transformed.origin.y + transformed.size.height),
+                suggestTop: placement.suggestTop,
+              },
+            },
+          });
+        }));
+      }
     }
 
     const activeDocumentId = registry.getStore().getState().core.activeDocumentId;
     if (activeDocumentId) await loadDocument(activeDocumentId);
     await onViewerInitialized?.(registry);
-  }, [clearSubscriptions, onPagePoint, onSelectionUpdate, onViewerInitialized]);
+  }, [clearSubscriptions, emit, initializeKeyboardCursor, onSelectionUpdate, onViewerInitialized, publishKeyboardCursor]);
 
   const effectivePageReliability = pageSemanticReliable ?? detectedPageReliable;
   const effectiveSelectionReliability =
@@ -198,6 +321,48 @@ export function App({
   const selectionMessage = effectivePageReliability && !effectiveSelectionReliability
     ? SELECTION_UNAVAILABLE_MESSAGE
     : null;
+  const pageContextMenu = useCallback((request: PageContextMenuRequest): boolean => {
+    const registry = registryRef.current;
+    const documentId = activeDocumentIdRef.current;
+    if (!registry || !documentId) return false;
+    const selection = registry.getPlugin<SelectionPlugin>(SelectionPlugin.id)?.provides();
+    if (selection?.getState(documentId).selection !== null) return false;
+    emit({
+      type: 'page-menu',
+      value: {
+        invocationId: `page-menu-${++menuInvocation.current}`,
+        point: {
+          documentId,
+          pageIndex: request.pageIndex,
+          viewportGeneration: viewportGenerationRef.current,
+          x: request.x,
+          y: request.y,
+        },
+        placement: { left: request.clientX, top: request.clientY },
+      },
+    });
+    return true;
+  }, [emit]);
+
+  const keyboardCursorKey = useCallback((key: string) => {
+    const cursor = keyboardCursorRef.current;
+    if (!cursor) return;
+    if (key === 'Escape') {
+      publishKeyboardCursor(null);
+      return;
+    }
+    if (key === 'Enter') {
+      emit({ type: 'page-note-commit', value: cursor });
+      publishKeyboardCursor(null);
+      return;
+    }
+    const delta = 4;
+    publishKeyboardCursor({
+      ...cursor,
+      x: cursor.x + (key === 'ArrowLeft' ? -delta : key === 'ArrowRight' ? delta : 0),
+      y: cursor.y + (key === 'ArrowUp' ? -delta : key === 'ArrowDown' ? delta : 0),
+    });
+  }, [emit, publishKeyboardCursor]);
   const workspace = (
     <PdfWorkspace
       engine={viewer.engine}
@@ -205,6 +370,9 @@ export function App({
       documentLabel={documentTitle}
       onInitialized={initializeViewer}
       ownedAnnotations={ownedAnnotations}
+      keyboardPageNoteCursor={keyboardCursor}
+      onKeyboardPageNoteKey={keyboardCursorKey}
+      onPageContextMenu={pageContextMenu}
     />
   );
   const workspaceWithStatus = (

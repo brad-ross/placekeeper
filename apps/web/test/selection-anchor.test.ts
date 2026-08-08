@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { Rotation, transformRect } from '@embedpdf/models';
+import { Rotation, transformPosition, transformRect } from '@embedpdf/models';
 
 import {
   createCaretAnchor,
+  createCaretAnchorAtPoint,
   createSelectionAnchor,
   type AnchorPage,
 } from '../src/pdf/selection-anchor.js';
@@ -183,6 +184,98 @@ describe('selection anchors', () => {
         reliable: true,
       },
     });
+  });
+
+  it.each([Rotation.Degree0, Rotation.Degree90, Rotation.Degree180, Rotation.Degree270])(
+    'hit-tests an atomic text rect after normalizing rotation %s and zoom',
+    (rotation) => {
+      const hitPage: AnchorPage = {
+        ...page(rotation),
+        extractedText: 'ab',
+        textRects: [
+          { content: 'a', rect: { origin: { x: 20, y: 30 }, size: { width: 8, height: 12 } } },
+          { content: 'b', rect: { origin: { x: 28, y: 30 }, size: { width: 8, height: 12 } } },
+        ],
+      };
+      const transformedPoint = transformPosition(hitPage.size, { x: 34, y: 36 }, rotation, 2);
+      const result = createCaretAnchorAtPoint({
+        page: hitPage,
+        point: transformedPoint,
+        coordinateRotation: rotation,
+        coordinateScale: 2,
+      });
+
+      expect(result).toMatchObject({
+        ok: true,
+        anchor: { leftContext: 'ab', rightContext: '', reliable: true },
+      });
+    },
+  );
+
+  it('uses only exact edges for multi-character rects', () => {
+    const hitPage = {
+      ...page(Rotation.Degree0),
+      extractedText: 'word',
+      textRects: [{ content: 'word', rect: { origin: { x: 20, y: 30 }, size: { width: 40, height: 12 } } }],
+    };
+
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 20, y: 36 } }))
+      .toMatchObject({ ok: true, anchor: { leftContext: '', rightContext: 'word' } });
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 60, y: 36 } }))
+      .toMatchObject({ ok: true, anchor: { leftContext: 'word', rightContext: '' } });
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 40, y: 36 } }))
+      .toMatchObject({ ok: false, diagnostic: 'caret-point-inside-multichar-rect' });
+  });
+
+  it.each([
+    ['ambiguous alignment', {
+      extractedText: 'same same',
+      textRects: [{ content: 'same', rect: naturalRect }],
+      point: { x: naturalRect.origin.x, y: naturalRect.origin.y + 4 },
+      diagnostic: 'caret-text-rect-alignment-nonunique',
+    }],
+    ['overlapping mapped rects', {
+      extractedText: 'ab',
+      textRects: [
+        { content: 'a', rect: naturalRect },
+        { content: 'b', rect: naturalRect },
+      ],
+      point: { x: naturalRect.origin.x, y: naturalRect.origin.y + 4 },
+      diagnostic: 'caret-text-rects-overlap',
+    }],
+    ['out of tolerance', {
+      extractedText: 'a',
+      textRects: [{ content: 'a', rect: naturalRect }],
+      point: { x: 400, y: 400 },
+      diagnostic: 'caret-point-out-of-tolerance',
+    }],
+    ['unsupported reading order', {
+      extractedText: 'ab',
+      textRects: [
+        { content: 'a', rect: { origin: { x: 80, y: 30 }, size: { width: 8, height: 12 } } },
+        { content: 'b', rect: { origin: { x: 20, y: 30 }, size: { width: 8, height: 12 } } },
+      ],
+      point: { x: 80, y: 36 },
+      diagnostic: 'caret-reading-order-unsupported',
+    }],
+  ])('rejects %s with a typed diagnostic', (_name, fixture) => {
+    expect(createCaretAnchorAtPoint({
+      page: { ...page(Rotation.Degree0), extractedText: fixture.extractedText, textRects: fixture.textRects },
+      point: fixture.point,
+    })).toMatchObject({ ok: false, diagnostic: fixture.diagnostic });
+  });
+
+  it('rejects tied edge candidates instead of choosing arbitrarily', () => {
+    const hitPage = {
+      ...page(Rotation.Degree0),
+      extractedText: 'aabb',
+      textRects: [
+        { content: 'aa', rect: { origin: { x: 20, y: 24 }, size: { width: 8, height: 12 } } },
+        { content: 'bb', rect: { origin: { x: 20, y: 36 }, size: { width: 8, height: 12 } } },
+      ],
+    };
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 28, y: 36 } }))
+      .toMatchObject({ ok: false, diagnostic: 'caret-candidate-tied' });
   });
 
   it('captures the public viewer selection seam without applying presentation rotation', async () => {

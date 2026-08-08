@@ -40,7 +40,13 @@ export type ReliabilityDiagnostic =
   | 'selection-text-geometry-mismatch'
   | 'selection-has-ambiguous-characters'
   | 'selection-reading-order-unsupported'
-  | 'selection-reading-order-ambiguous';
+  | 'selection-reading-order-ambiguous'
+  | 'caret-text-rect-alignment-nonunique'
+  | 'caret-text-rects-overlap'
+  | 'caret-reading-order-unsupported'
+  | 'caret-point-inside-multichar-rect'
+  | 'caret-point-out-of-tolerance'
+  | 'caret-candidate-tied';
 
 export type ReliabilityResult =
   | { reliable: true }
