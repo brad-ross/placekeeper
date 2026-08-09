@@ -139,6 +139,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const draftTriggerRef = useRef<HTMLElement>(null);
   const editTriggerRef = useRef<HTMLButtonElement>(null);
   const surfaceTriggersRef = useRef(new Map<ReviewBaseSurface, HTMLElement>());
+  const annotationDrawerRef = useRef<HTMLElement>(null);
   const listOpen = surface.baseSurface === 'annotations';
   const selectionAnchor = reliableSelection(props.selectionUpdate);
   const lastPlacedPageNoteToken = useRef<number | undefined>(undefined);
@@ -436,6 +437,13 @@ export function ReviewShell(props: ReviewShellProps) {
       onFocusCapture={(event) => inputController.focusChanged(isEditableTarget(event.target))}
       onCompositionStartCapture={(event) => inputController.compositionStart(event.target)}
       onCompositionEndCapture={compositionEnd}
+      onClickCapture={(event) => {
+        if (
+          listOpen
+          && event.target instanceof Node
+          && !annotationDrawerRef.current?.contains(event.target)
+        ) closeAnnotations();
+      }}
     >
       <ReviewChrome
         documentTitle={props.documentTitle ?? 'Local PDF'}
@@ -520,7 +528,9 @@ export function ReviewShell(props: ReviewShellProps) {
           })() : null}
         </div>
         <div className="review-drawer-host" data-review-drawer-host>
+          {listOpen ? <div className="review-list-dismiss" data-annotation-drawer-dismiss aria-hidden="true" /> : null}
           <aside
+            ref={annotationDrawerRef}
             id="review-annotation-list"
             className="review-list"
             data-annotation-drawer
@@ -557,7 +567,6 @@ export function ReviewShell(props: ReviewShellProps) {
                   props.onActiveItemChange?.(ordered[0]?.id);
                 }
               }}
-              onClose={closeAnnotations}
             />
             <section className="existing-annotations" aria-label="Existing PDF annotations">
               <h2>Existing PDF annotations</h2>

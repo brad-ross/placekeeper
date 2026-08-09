@@ -70,7 +70,8 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-owned-mark="replace"]')).toHaveCount(1);
 
     await page.getByRole('button', { name: 'Annotations' }).click();
-    await expect(page.getByRole('button', { name: 'Close annotations' })).toBeVisible();
+    await expect(page.locator('[data-annotation-drawer]')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Close annotations' })).toHaveCount(0);
     const entry = page.getByRole('button', { name: /replace · Page 1/ });
     await entry.click();
     await expect(page.locator('[data-navigated]')).not.toHaveAttribute('data-navigated', 'none');

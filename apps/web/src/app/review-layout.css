@@ -181,6 +181,7 @@
 .review-drawer-host {
   display: grid;
   grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  overflow: clip;
 }
 
 .review-context-palette,
@@ -269,6 +270,7 @@
 .review-list,
 .review-finish-drawer {
   position: relative;
+  z-index: 1;
   grid-area: 1 / 1;
   align-self: stretch;
   justify-self: end;
@@ -293,6 +295,14 @@
 
 .review-list {
   padding: 0;
+}
+
+.review-list-dismiss {
+  z-index: 0;
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  pointer-events: auto;
 }
 
 .annotation-drawer__owned,
@@ -348,7 +358,6 @@
   font-size: .75rem;
 }
 
-.annotation-drawer__close,
 .finish-review-drawer__close {
   flex: none;
   width: 2rem;

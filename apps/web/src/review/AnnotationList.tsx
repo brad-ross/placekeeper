@@ -11,7 +11,6 @@ export interface AnnotationListProps {
   onCorrespondenceChange?(id: string | undefined): void;
   onEdit(item: ReviewItem, trigger: HTMLButtonElement): void;
   onDelete(item: ReviewItem): Promise<void> | void;
-  onClose?(): void;
 }
 
 function payloadText(item: ReviewItem): string {
@@ -28,7 +27,6 @@ export function AnnotationList({
   onCorrespondenceChange,
   onEdit,
   onDelete,
-  onClose,
 }: AnnotationListProps) {
   const ordered = documentOrderedItems(items);
   const listRef = useRef<HTMLOListElement>(null);
@@ -84,11 +82,6 @@ export function AnnotationList({
           <p className="annotation-drawer__eyebrow">Review comments</p>
           <h2>Annotations <span className="annotation-drawer__count">{ordered.length}</span></h2>
         </div>
-        {onClose ? (
-          <button type="button" className="annotation-drawer__close" aria-label="Close annotations" onClick={onClose}>
-            <span aria-hidden="true">×</span>
-          </button>
-        ) : null}
       </header>
       {direction ? (
         <p className="annotation-direction-cue" data-correspondence-direction={direction}>

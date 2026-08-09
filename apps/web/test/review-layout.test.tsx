@@ -54,7 +54,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('Annotations (0)');
     expect(html).toContain('id="review-annotation-list"');
     expect(html).toContain('data-annotation-drawer');
-    expect(html).toContain('aria-label="Close annotations"');
+    expect(html).not.toContain('aria-label="Close annotations"');
     expect(html).toContain('class="annotation-drawer__header"');
     expect(html).toContain('aria-label="Owned annotations"');
     expect(html).toContain('aria-label="Existing PDF annotations"');

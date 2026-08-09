@@ -272,12 +272,17 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   await expect(page.locator('[data-review-chrome]')).toHaveCount(1);
   await expect(page.locator('.pdf-workspace')).toHaveCount(1);
   await page.getByRole('button', { name: /Annotations/u }).click();
-  await expect(page.getByRole('button', { name: 'Close annotations' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Close annotations' })).toHaveCount(0);
   await expect.poll(async () => {
     const box = await page.locator('[data-annotation-drawer]').boundingBox();
     return box === null ? Number.POSITIVE_INFINITY : Math.abs(box.x + box.width - 320);
   }).toBeLessThanOrEqual(1);
-  await page.getByRole('button', { name: 'Close annotations' }).click();
+  await page.getByRole('button', { name: /highlight · Page 1 · Existing supported highlight/iu }).click();
+  await expect.poll(async () => {
+    const box = await page.locator('[data-annotation-drawer]').boundingBox();
+    return box === null ? Number.POSITIVE_INFINITY : Math.abs(box.x + box.width - 320);
+  }).toBeLessThanOrEqual(1);
+  await page.locator('[data-annotation-drawer-dismiss]').click({ position: { x: 8, y: 8 } });
   await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'false');
 });
 
