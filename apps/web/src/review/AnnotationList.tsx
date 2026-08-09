@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
 import { documentOrderedItems } from './annotation-projection.js';
+import { ReviewIcon } from './ReviewIcon.js';
 
 export interface AnnotationListProps {
   items: readonly ReviewItem[];
@@ -16,6 +17,13 @@ export interface AnnotationListProps {
 function payloadText(item: ReviewItem): string {
   const fields = ['proposedText', 'comment', 'quote'];
   return fields.map((field) => item.payload[field]).find((value): value is string => typeof value === 'string') ?? '';
+}
+
+function annotationState(active: boolean, corresponding: boolean): string {
+  if (active && corresponding) return 'active-corresponding';
+  if (active) return 'active';
+  if (corresponding) return 'corresponding';
+  return 'default';
 }
 
 export function AnnotationList({
@@ -85,7 +93,7 @@ export function AnnotationList({
   };
 
   return (
-    <section className="annotation-drawer__owned" aria-label="Owned annotations">
+    <section className="annotation-drawer__owned" data-annotation-origin="owned" aria-label="Owned annotations">
       <header className="annotation-drawer__header">
         <div>
           <p className="annotation-drawer__eyebrow">Review comments</p>
@@ -94,12 +102,15 @@ export function AnnotationList({
       </header>
       {direction ? (
         <p className="annotation-direction-cue" data-correspondence-direction={direction}>
-          Matching annotation {direction}
+          <ReviewIcon name="chevron-right" className="review-icon annotation-direction-cue__icon" />
+          <span>Matching annotation {direction}</span>
         </p>
       ) : null}
       <ol ref={listRef} tabIndex={-1} aria-label="Annotations in document order">
         {ordered.map((item) => {
           const text = payloadText(item);
+          const active = activeId === item.id;
+          const corresponding = correspondingId === item.id;
           return (
             <li
               key={item.id}
@@ -108,8 +119,11 @@ export function AnnotationList({
                 else rowRefs.current.delete(item.id);
               }}
               data-review-item={item.id}
-              data-active={activeId === item.id ? 'true' : 'false'}
-              data-corresponding={correspondingId === item.id ? 'true' : 'false'}
+              data-annotation-origin="owned"
+              data-annotation-kind={item.kind}
+              data-annotation-state={annotationState(active, corresponding)}
+              data-active={active ? 'true' : 'false'}
+              data-corresponding={corresponding ? 'true' : 'false'}
               onPointerEnter={() => onCorrespondenceChange?.(item.id)}
               onPointerLeave={() => onCorrespondenceChange?.(undefined)}
               onFocusCapture={() => onCorrespondenceChange?.(item.id)}
@@ -133,14 +147,14 @@ export function AnnotationList({
                 {text ? <span className="annotation-item__excerpt">{text}</span> : null}
               </button>
               {item.kind === 'delete' ? null : (
-                <button type="button" className="annotation-item__action" aria-label={`Edit ${item.kind} on page ${item.pageIndex + 1}`} onClick={(event) => onEdit(item, event.currentTarget)}>Edit</button>
+                <button type="button" className="annotation-item__action" data-annotation-action="edit" aria-label={`Edit ${item.kind} on page ${item.pageIndex + 1}`} onClick={(event) => onEdit(item, event.currentTarget)}>Edit</button>
               )}
-              <button type="button" className="annotation-item__action annotation-item__delete" aria-label={`Delete ${item.kind} on page ${item.pageIndex + 1}`} onClick={() => void remove(item)}>Delete</button>
+              <button type="button" className="annotation-item__action annotation-item__delete" data-annotation-action="delete" aria-label={`Delete ${item.kind} on page ${item.pageIndex + 1}`} onClick={() => void remove(item)}>Delete</button>
             </li>
           );
         })}
       </ol>
-      {ordered.length === 0 ? <p>No annotations yet.</p> : null}
+      {ordered.length === 0 ? <p className="annotation-empty" data-annotation-status="empty">No annotations yet.</p> : null}
     </section>
   );
 }

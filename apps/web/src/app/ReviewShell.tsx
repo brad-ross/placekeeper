@@ -36,6 +36,7 @@ import { CommentComposer } from '../review/CommentComposer.js';
 import { ContextActionPalette, type ContextPlacement } from '../review/ContextActionPalette.js';
 import { PageActionMenu } from '../review/PageActionMenu.js';
 import { ReviewChrome } from '../review/ReviewChrome.js';
+import { ReviewIcon } from '../review/ReviewIcon.js';
 import { FinishReviewDrawer } from './FinishReviewDrawer.js';
 import {
   createProofreadInputController,
@@ -727,20 +728,39 @@ export function ReviewShell(props: ReviewShellProps) {
                 }
               }}
             />
-            <section className="existing-annotations" aria-label="Existing PDF annotations">
-              <h2>Existing PDF annotations</h2>
-              {existingAnnotations.status === 'loading' ? <p role="status">Existing annotations are loading…</p> : null}
-              {existingAnnotations.status === 'empty' ? <p>No existing annotations.</p> : null}
+            <section className="existing-annotations" data-existing-annotations-state={existingAnnotations.status} aria-label="Existing PDF annotations">
+              <header className="existing-annotations__header">
+                <div>
+                  <p className="existing-annotations__eyebrow">Source PDF</p>
+                  <h2>Existing PDF annotations</h2>
+                </div>
+                <span className="existing-annotations__readonly">Read only</span>
+              </header>
+              {existingAnnotations.status === 'loading' ? (
+                <p className="annotation-status" data-annotation-status="loading" role="status">
+                  <ReviewIcon name="loading" className="review-icon annotation-status__icon" />
+                  <span>Existing annotations are loading…</span>
+                </p>
+              ) : null}
+              {existingAnnotations.status === 'empty' ? <p className="annotation-empty" data-annotation-status="empty">No existing annotations.</p> : null}
               {existingAnnotations.status === 'error' ? (
-                <div role="alert">
-                  <p>Existing annotations unavailable.</p>
+                <div className="annotation-status annotation-status--error" data-annotation-status="error" role="alert">
+                  <ReviewIcon name="alert" className="review-icon annotation-status__icon" />
+                  <p><strong>Existing annotations unavailable.</strong><span>{existingAnnotations.message}</span></p>
                   <button type="button" onClick={props.onRetryExistingAnnotations}>Retry</button>
                 </div>
               ) : null}
               {existingAnnotations.status === 'ready' ? (
                 <ol className="existing-annotations__list">
                   {existingAnnotations.items.map((annotation) => (
-                    <li key={`${annotation.pageIndex}:${annotation.id}`} data-existing-annotation={annotation.id}>
+                    <li
+                      key={`${annotation.pageIndex}:${annotation.id}`}
+                      data-existing-annotation={annotation.id}
+                      data-annotation-origin="source"
+                      data-annotation-kind={annotation.subtype}
+                      data-annotation-state="readonly"
+                      data-readonly="true"
+                    >
                       <button className="existing-annotation__content" type="button" aria-label={`${annotation.subtype} · Page ${annotation.pageIndex + 1}${annotation.contents ? ` · ${annotation.contents}` : ''}`} onClick={() => { markFramingUserIntent(); props.onNavigateExisting?.(annotation); }}>
                         <span className="annotation-item__meta"><strong>{annotation.subtype}</strong><span>Page {annotation.pageIndex + 1}</span></span>
                         {annotation.contents ? <span className="annotation-item__excerpt">{annotation.contents}</span> : null}

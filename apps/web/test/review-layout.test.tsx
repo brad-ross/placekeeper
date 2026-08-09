@@ -2,13 +2,24 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { ReviewShell } from '../src/app/ReviewShell.js';
+import { AnnotationList } from '../src/review/AnnotationList.js';
+import { AnnotationPeek } from '../src/review/AnnotationPeek.js';
 import { ReviewIcon } from '../src/review/ReviewIcon.js';
-import { createReviewState } from '../../../packages/core/src/review-model.js';
+import { createReviewState, type ReviewItem } from '../../../packages/core/src/review-model.js';
 
 const state = createReviewState({
   sessionId: 'layout-test',
   source: { fileId: 'file', digest: 'a'.repeat(64), byteLength: 10 },
 });
+
+const ownedAnnotation: ReviewItem = {
+  id: 'owned-highlight',
+  kind: 'highlight',
+  pageIndex: 3,
+  createdAt: '2026-08-09T00:00:00.000Z',
+  updatedAt: '2026-08-09T00:00:00.000Z',
+  payload: { comment: 'Clarify the identifying variation behind this claim.' },
+};
 
 describe('review shell layout and accessibility contract', () => {
   it('keeps review icons decorative and button labels authoritative', () => {
@@ -22,6 +33,36 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-hidden="true"');
     expect(html).toContain('focusable="false"');
     expect(html).toMatch(/class="[^"]*review-icon[^"]*"/);
+  });
+
+  it('exposes annotation kind, ownership, and state hooks with icon-owned peek dismissal', () => {
+    const listHtml = renderToStaticMarkup(
+      <AnnotationList
+        items={[ownedAnnotation]}
+        activeId={ownedAnnotation.id}
+        correspondingId={ownedAnnotation.id}
+        onNavigate={() => undefined}
+        onEdit={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
+    const peekHtml = renderToStaticMarkup(
+      <AnnotationPeek
+        item={ownedAnnotation}
+        onActivate={() => undefined}
+        onDismiss={() => undefined}
+        onHoldChange={() => undefined}
+      />,
+    );
+
+    expect(listHtml).toContain('data-annotation-origin="owned"');
+    expect(listHtml).toContain('data-annotation-kind="highlight"');
+    expect(listHtml).toContain('data-annotation-state="active-corresponding"');
+    expect(peekHtml).toContain('data-annotation-origin="owned"');
+    expect(peekHtml).toContain('data-annotation-kind="highlight"');
+    expect(peekHtml).toContain('aria-label="Dismiss annotation preview"');
+    expect(peekHtml).toContain('aria-hidden="true"');
+    expect(peekHtml).not.toContain('>×</button>');
   });
 
   it('exposes keyboard-equivalent controls, live status, and state-preserving drawer semantics', () => {
@@ -77,6 +118,8 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('class="annotation-drawer__header"');
     expect(html).toContain('aria-label="Owned annotations"');
     expect(html).toContain('aria-label="Existing PDF annotations"');
+    expect(html).toContain('data-existing-annotations-state="loading"');
+    expect(html).toContain('data-annotation-status="loading"');
     for (const tool of ['Replace', 'Delete', 'Highlight']) {
       expect(html).toContain(tool);
     }
@@ -86,6 +129,42 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('>Page Note</button>');
     expect(html).not.toContain('aria-pressed');
     expect(html).not.toContain('Proofread mode');
+  });
+
+  it('keeps source annotations explicitly read-only and distinct from owned rows', () => {
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        documentTitle="paper.pdf"
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        existingAnnotations={{
+          status: 'ready',
+          generation: 1,
+          items: [{
+            id: 'source-highlight',
+            subtype: 'Highlight',
+            pageIndex: 1,
+            rect: { x: 1, y: 2, width: 3, height: 4 },
+            contents: 'Source-only comment',
+            author: 'Reviewer',
+            flags: [],
+            appearanceModes: ['normal'],
+            supportedAppearance: true,
+          }],
+        }}
+        onCommand={async () => state}
+      >
+        <div>Document canvas</div>
+      </ReviewShell>,
+    );
+
+    expect(html).toContain('data-existing-annotations-state="ready"');
+    expect(html).toContain('data-annotation-origin="source"');
+    expect(html).toContain('data-annotation-kind="Highlight"');
+    expect(html).toContain('data-annotation-state="readonly"');
+    expect(html).toContain('data-readonly="true"');
+    expect(html).not.toContain('aria-label="Edit Highlight on page 2"');
+    expect(html).not.toContain('aria-label="Delete Highlight on page 2"');
   });
 
   it('fails viewer controls safely when capabilities are absent', () => {
