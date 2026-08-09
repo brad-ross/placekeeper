@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { ViewerInteractionEvent } from '../../apps/web/src/pdf/viewer-interaction-events.js';
 
 declare global {
   interface Window {
@@ -10,6 +11,7 @@ declare global {
       selectionAnchorStatus(): string;
       goToPage(pageNumber: number): void;
       reviewItemCount(): number;
+      interactionCount(type: ViewerInteractionEvent['type']): number;
     };
   }
 }
@@ -130,6 +132,69 @@ test.describe('shared viewer foundation', () => {
 
     await expect(page.getByRole('button', { name: 'Proofread mode' })).toHaveCount(0);
     expect(await page.evaluate(() => window.viewerAcceptance.reviewItemCount())).toBe(0);
+  });
+
+  test('never arms text selection from a secondary pointer gesture', async ({ page }) => {
+    const pdfPage = page.locator('[data-page-index="0"]');
+    await page.waitForFunction(() => window.viewerAcceptance.selectionGeometryReady());
+    const box = await pdfPage.boundingBox();
+    if (!box) throw new Error('Rendered PDF page has no bounds.');
+
+    await page.mouse.move(box.x + 76, box.y + 98);
+    await page.mouse.down({ button: 'right' });
+    await page.mouse.up({ button: 'right' });
+    await page.mouse.click(box.x + 500, box.y + 500);
+    await page.mouse.move(box.x + 245, box.y + 98);
+
+    await expect.poll(() => page.evaluate(() => window.viewerAcceptance.selectionRectCount()))
+      .toBe(0);
+  });
+
+  test('treats Control-click as a context gesture without publishing a caret', async ({ page }) => {
+    const pdfPage = page.locator('[data-page-index="0"]');
+    await page.waitForFunction(() => window.viewerAcceptance.selectionGeometryReady());
+    const box = await pdfPage.boundingBox();
+    if (!box) throw new Error('Rendered PDF page has no bounds.');
+    const caretCountBefore = await page.evaluate(() => window.viewerAcceptance.interactionCount('caret'));
+
+    await page.mouse.move(box.x + 500, box.y + 500);
+    await page.keyboard.down('Control');
+    await page.mouse.down();
+    await page.keyboard.up('Control');
+    await page.mouse.up();
+
+    await page.waitForTimeout(250);
+    expect(await page.evaluate(() => window.viewerAcceptance.interactionCount('caret')))
+      .toBe(caretCountBefore);
+  });
+
+  test('repairs a missing primary release before hover movement', async ({ page }) => {
+    const pdfPage = page.locator('[data-page-index="0"]');
+    await page.waitForFunction(() => window.viewerAcceptance.selectionGeometryReady());
+    const box = await pdfPage.boundingBox();
+    if (!box) throw new Error('Rendered PDF page has no bounds.');
+
+    await pdfPage.dispatchEvent('pointerdown', {
+      pointerId: 92,
+      pointerType: 'mouse',
+      isPrimary: true,
+      button: 0,
+      buttons: 1,
+      clientX: box.x + 76,
+      clientY: box.y + 98,
+    });
+    await pdfPage.dispatchEvent('pointermove', {
+      pointerId: 92,
+      pointerType: 'mouse',
+      isPrimary: true,
+      button: 0,
+      buttons: 0,
+      clientX: box.x + 245,
+      clientY: box.y + 98,
+    });
+
+    await expect.poll(() => page.evaluate(() => window.viewerAcceptance.selectionRectCount()))
+      .toBe(0);
   });
 
   test('renders source and tool strings as inert text and keeps annotations read-only', async ({ page }) => {

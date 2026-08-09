@@ -30,6 +30,7 @@ import { reliableSelection, type SelectionUpdate } from '../pdf/selection-state.
 import type { ViewerControls, ViewerControlsSnapshot } from '../pdf/viewer-controls.js';
 import { unavailableViewerControls } from '../pdf/viewer-controls.js';
 import type { ViewerFramingControls, ViewerPosition } from '../pdf/viewer-framing.js';
+import { dispatchNeutralViewerPointerUp } from '../pdf/viewer-interaction-events.js';
 import { AnnotationList } from '../review/AnnotationList.js';
 import { AnnotationPeek } from '../review/AnnotationPeek.js';
 import { CommentComposer } from '../review/CommentComposer.js';
@@ -561,10 +562,11 @@ export function ReviewShell(props: ReviewShellProps) {
         });
       }}
       onPointerDownCapture={(event) => {
-        outsidePointerRef.current = listOpen
+        const tracksOutsideDismiss = listOpen
           && event.isPrimary
           && event.button === 0
-          && !isAnnotationDrawerOrChrome(event.target)
+          && !isAnnotationDrawerOrChrome(event.target);
+        outsidePointerRef.current = tracksOutsideDismiss
           ? {
               phase: 'tracking',
               id: event.pointerId,
@@ -608,6 +610,8 @@ export function ReviewShell(props: ReviewShellProps) {
           outsidePointerRef.current = { phase: 'settled', dismiss: false };
           return;
         }
+        outsidePointerRef.current = undefined;
+        dispatchNeutralViewerPointerUp(start.target, event);
         start.target.dispatchEvent(new PointerEvent('pointercancel', {
           bubbles: true,
           composed: true,

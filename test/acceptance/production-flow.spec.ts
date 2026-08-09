@@ -533,6 +533,68 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
 });
 
+test('closing the Annotation Tray from PDF text does not arm drag selection', async ({ page }) => {
+  const launched = await host.open({
+    pdfPath: pdf,
+    sourceRootPath: sourceRoot,
+    surface: 'vscode',
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === 'recovery-offered') {
+    throw new Error('Fresh tray-dismiss launch failed');
+  }
+  await page.setViewportSize({ width: 760, height: 900 });
+  await page.goto(launched.url);
+  const pdfPage = page.locator("[data-page-index='0']").first();
+  await waitForRenderedPageImage(pdfPage);
+  await page.getByRole('button', { name: /Annotations/u }).click();
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-annotation-presentation', 'bottom');
+
+  const selectionRects = pdfPage.locator(':scope > div[style*="mix-blend-mode"]');
+  const rectCountBeforeDismiss = await selectionRects.count();
+  const box = await pdfPage.boundingBox();
+  if (!box) throw new Error('Rendered PDF page has no bounds.');
+  await page.mouse.click(box.x + 76, box.y + 98);
+  await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'false');
+  await page.mouse.move(box.x + 245, box.y + 98);
+  await page.waitForTimeout(250);
+
+  await expect(selectionRects).toHaveCount(rectCountBeforeDismiss);
+  await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('keeps PDF drag selection available while the Annotation Tray is open', async ({ page }) => {
+  const launched = await host.open({
+    pdfPath: pdf,
+    sourceRootPath: sourceRoot,
+    surface: 'vscode',
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === 'recovery-offered') {
+    throw new Error('Fresh tray-selection launch failed');
+  }
+  await page.setViewportSize({ width: 760, height: 900 });
+  await page.goto(launched.url);
+  const pdfPage = page.locator("[data-page-index='0']").first();
+  await waitForRenderedPageImage(pdfPage);
+  await page.getByRole('button', { name: /Annotations/u }).click();
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-annotation-presentation', 'bottom');
+
+  const selectionRects = pdfPage.locator(':scope > div[style*="mix-blend-mode"]');
+  const rectCountBeforeDrag = await selectionRects.count();
+  const box = await pdfPage.boundingBox();
+  if (!box) throw new Error('Rendered PDF page has no bounds.');
+  await page.mouse.move(box.x + 76, box.y + 98);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 245, box.y + 98, { steps: 8 });
+  await expect.poll(() => selectionRects.count()).toBeGreaterThan(rectCountBeforeDrag);
+  await page.mouse.up();
+
+  await expect.poll(() => selectionRects.count()).toBeGreaterThan(rectCountBeforeDrag);
+  await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'true');
+});
+
 test("creates a canonical Page Note from a real PDF context gesture without secondary-activating its mark", async ({ page }) => {
   const launched = await host.open({
     pdfPath: pdf,

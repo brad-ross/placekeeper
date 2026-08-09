@@ -6,6 +6,7 @@ import { SelectionPlugin } from '@embedpdf/plugin-selection';
 import { App } from '../../../apps/web/src/app/App.js';
 import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
 import type { SelectionUpdate } from '../../../apps/web/src/pdf/selection-state.js';
+import type { ViewerInteractionEvent } from '../../../apps/web/src/pdf/viewer-interaction-events.js';
 
 const htmlPayload = '<img src=x onerror="globalThis.__htmlPayloadExecuted=true">';
 const root = document.querySelector('#root');
@@ -13,6 +14,7 @@ if (!root) throw new Error('Acceptance root is missing.');
 
 let registry: PluginRegistry | null = null;
 let lastSelectionUpdate: SelectionUpdate | null = null;
+const viewerInteractionCounts = new Map<ViewerInteractionEvent['type'], number>();
 const params = new URLSearchParams(globalThis.location.search);
 
 globalThis.__htmlPayloadExecuted = false;
@@ -47,6 +49,9 @@ globalThis.viewerAcceptance = {
   },
   reviewItemCount() {
     return document.querySelectorAll('[data-review-item]').length;
+  },
+  interactionCount(type: ViewerInteractionEvent['type']) {
+    return viewerInteractionCounts.get(type) ?? 0;
   },
 };
 
@@ -97,6 +102,9 @@ createRoot(root).render(
       onSelectionUpdate={(update) => {
         lastSelectionUpdate = update;
       }}
+      onViewerInteraction={(event) => {
+        viewerInteractionCounts.set(event.type, (viewerInteractionCounts.get(event.type) ?? 0) + 1);
+      }}
   />,
 );
 
@@ -109,5 +117,6 @@ declare global {
     selectionAnchorStatus(): string;
     goToPage(pageNumber: number): void;
     reviewItemCount(): number;
+    interactionCount(type: ViewerInteractionEvent['type']): number;
   };
 }

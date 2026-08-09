@@ -39,6 +39,7 @@ import {
   createEngineAnchorPageReader,
 } from '../pdf/viewer-selection-adapter.js';
 import {
+  VIEWER_POINTER_BUTTON_NONE,
   viewerPointerButton,
   type ViewerInteractionEvent,
   type ViewerPagePoint,
@@ -356,12 +357,14 @@ export function App({
                 setHoveredOwned(undefined);
               },
               onPointerUp: (position, event) => {
+                const button = viewerPointerButton(event) ?? VIEWER_POINTER_BUTTON_NONE;
                 const ownedId = ownedPointerGesture.current.pointerUp(
                   pointerId,
-                  viewerPointerButton(event) ?? -1,
+                  button,
                   toCanonicalPoint(position),
                   pageGeometry(),
                 );
+                if (button !== 0) return;
                 if (ownedId) {
                   emit({ type: 'owned-mark', value: { id: ownedId, phase: 'activate' } });
                   return;

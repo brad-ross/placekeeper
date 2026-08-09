@@ -59,6 +59,35 @@ export type ViewerInteractionListener = (event: ViewerInteractionEvent) => void;
 // `button` field. The page wrapper records it during capture so neutral handlers can
 // still distinguish primary activation from a secondary-button context gesture.
 const pointerButtonByTarget = new WeakMap<object, number>();
+export const VIEWER_POINTER_BUTTON_NONE = -1;
+
+export function dispatchNeutralViewerPointerUp(target: EventTarget, event: {
+  readonly altKey: boolean;
+  readonly clientX: number;
+  readonly clientY: number;
+  readonly ctrlKey: boolean;
+  readonly isPrimary: boolean;
+  readonly metaKey: boolean;
+  readonly pointerId: number;
+  readonly pointerType: string;
+  readonly shiftKey: boolean;
+}): void {
+  target.dispatchEvent(new PointerEvent('pointerup', {
+    bubbles: true,
+    composed: true,
+    pointerId: event.pointerId,
+    pointerType: event.pointerType,
+    isPrimary: event.isPrimary,
+    button: VIEWER_POINTER_BUTTON_NONE,
+    buttons: 0,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    ctrlKey: event.ctrlKey,
+    shiftKey: event.shiftKey,
+    altKey: event.altKey,
+    metaKey: event.metaKey,
+  }));
+}
 
 export function recordViewerPointerButton(target: object, button: number): void {
   pointerButtonByTarget.set(target, button);

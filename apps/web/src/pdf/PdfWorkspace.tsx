@@ -9,16 +9,18 @@ import { Scroller } from '@embedpdf/plugin-scroll/react';
 import { SelectionLayer } from '@embedpdf/plugin-selection/react';
 import { Viewport } from '@embedpdf/plugin-viewport/react';
 import { ZoomGestureWrapper } from '@embedpdf/plugin-zoom/react';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
 import { combinePageRotation, positionOwnedRect } from './owned-overlay.js';
 import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
 import type { ViewerRunway } from './viewer-framing.js';
 import {
+  dispatchNeutralViewerPointerUp,
   isUnsafePageContextTarget,
   normalizePageClientPoint,
   recordViewerPointerButton,
+  VIEWER_POINTER_BUTTON_NONE,
   type ViewerOwnedMarkInteraction,
   type ViewerPagePoint,
 } from './viewer-interaction-events.js';
@@ -49,6 +51,14 @@ export interface PdfWorkspaceProps {
   onWorkspaceElement?: (element: HTMLDivElement | null) => void;
 }
 
+function isContextPointerGesture(event: {
+  readonly button: number;
+  readonly ctrlKey: boolean;
+  readonly pointerType: string;
+}): boolean {
+  return event.button !== 0 || (event.pointerType === 'mouse' && event.ctrlKey);
+}
+
 export function PdfWorkspace({
   engine,
   plugins,
@@ -65,6 +75,9 @@ export function PdfWorkspace({
   runway = { right: 0, bottom: 0 },
   onWorkspaceElement,
 }: PdfWorkspaceProps) {
+  const pressedPrimaryPointers = useRef(new Map<number, HTMLDivElement>());
+  const contextPointers = useRef(new Set<number>());
+  const contextResetTarget = useRef<HTMLDivElement | null>(null);
   const annotationsByPage = useMemo(() => {
     const result = new Map<number, ReviewAnnotation[]>();
     for (const annotation of ownedAnnotations) {
@@ -120,11 +133,56 @@ export function PdfWorkspace({
                       data-page-index={layout.pageIndex}
                       tabIndex={-1}
                       onPointerDownCapture={(event) => {
-                        recordViewerPointerButton(event.currentTarget, event.button);
+                        const contextGesture = isContextPointerGesture(event);
+                        recordViewerPointerButton(
+                          event.currentTarget,
+                          contextGesture ? VIEWER_POINTER_BUTTON_NONE : event.button,
+                        );
                         event.currentTarget.focus({ preventScroll: true });
+                        if (contextGesture) {
+                          contextPointers.current.add(event.pointerId);
+                          if (event.pointerType === 'mouse') contextResetTarget.current = event.currentTarget;
+                          event.stopPropagation();
+                          return;
+                        }
+                        contextPointers.current.delete(event.pointerId);
+                        pressedPrimaryPointers.current.set(event.pointerId, event.currentTarget);
+                      }}
+                      onPointerMoveCapture={(event) => {
+                        if (
+                          event.pointerType === 'mouse'
+                          && (event.buttons & 1) !== 0
+                          && contextResetTarget.current === event.currentTarget
+                        ) {
+                          contextResetTarget.current = null;
+                        }
+                        const resetsContextGesture = event.pointerType === 'mouse'
+                          && event.buttons === 0
+                          && contextResetTarget.current === event.currentTarget;
+                        const lostReleaseTarget = event.pointerType === 'mouse' && event.buttons === 0
+                          ? pressedPrimaryPointers.current.get(event.pointerId)
+                          : undefined;
+                        if (!resetsContextGesture && !lostReleaseTarget) return;
+                        if (resetsContextGesture) contextResetTarget.current = null;
+                        pressedPrimaryPointers.current.delete(event.pointerId);
+                        event.stopPropagation();
+                        const resetTarget = lostReleaseTarget ?? event.currentTarget;
+                        recordViewerPointerButton(resetTarget, VIEWER_POINTER_BUTTON_NONE);
+                        dispatchNeutralViewerPointerUp(resetTarget, event);
                       }}
                       onPointerUpCapture={(event) => {
-                        recordViewerPointerButton(event.currentTarget, event.button);
+                        pressedPrimaryPointers.current.delete(event.pointerId);
+                        const startedAsContext = contextPointers.current.delete(event.pointerId);
+                        recordViewerPointerButton(
+                          event.currentTarget,
+                          startedAsContext || isContextPointerGesture(event)
+                            ? VIEWER_POINTER_BUTTON_NONE
+                            : event.button,
+                        );
+                      }}
+                      onPointerCancelCapture={(event) => {
+                        pressedPrimaryPointers.current.delete(event.pointerId);
+                        contextPointers.current.delete(event.pointerId);
                       }}
                       onContextMenu={(event) => {
                         if (onPageContextMenu === undefined || isUnsafePageContextTarget(event.target)) return;
