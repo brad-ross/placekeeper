@@ -82,13 +82,45 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByLabel('Annotations in document order')).toBeFocused();
   });
 
+  test('keeps a focused delete-only row cohesive in the bottom annotation tray', async ({ page }) => {
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await page.locator('#root').evaluate((element) => element.setAttribute('data-production-root', 'true'));
+    await page.setViewportSize({ width: 320, height: 720 });
+    await page.getByRole('button', { name: 'Annotations' }).click();
+
+    const drawer = page.locator('[data-annotation-drawer]');
+    await expect(drawer).toHaveAttribute('data-annotation-presentation', 'bottom');
+
+    const row = drawer.locator('[data-annotation-origin="owned"][data-annotation-kind="delete"]');
+    const content = row.getByRole('button', { name: /delete · Page 1/u });
+    const action = row.getByRole('button', { name: 'Delete delete on page 1' });
+    await content.focus();
+
+    await expect(action).toHaveAttribute('title', 'Delete annotation');
+    await expect(action.locator('svg')).toHaveCount(1);
+    await expect(action).toHaveText('');
+    await expect(content).toHaveCSS('outline-style', 'none');
+    await expect(row).toHaveCSS('outline-style', 'solid');
+
+    const kind = row.locator('.annotation-item__meta strong');
+    const pageNumber = row.locator('.annotation-item__page');
+    const [kindBounds, pageBounds] = await Promise.all([kind.boundingBox(), pageNumber.boundingBox()]);
+    expect(kindBounds).not.toBeNull();
+    expect(pageBounds).not.toBeNull();
+    expect(pageBounds!.x - (kindBounds!.x + kindBounds!.width)).toBeLessThanOrEqual(12);
+  });
+
   test('keeps the annotations tray open while editing an owned annotation', async ({ page }) => {
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     await page.getByRole('button', { name: 'Keep without comment' }).click();
     const annotations = page.getByRole('button', { name: 'Annotations' });
     await annotations.click();
 
-    await page.getByRole('button', { name: 'Edit highlight on page 1' }).click();
+    const edit = page.getByRole('button', { name: 'Edit highlight on page 1' });
+    await expect(edit).toHaveAttribute('title', 'Edit annotation');
+    await expect(edit.locator('svg')).toHaveCount(1);
+    await expect(edit).toHaveText('');
+    await edit.click();
     const editor = page.getByRole('dialog', { name: 'Edit highlight' });
     await expect(editor).toBeVisible();
     await editor.getByRole('textbox', { name: 'Comment (optional)' }).fill('Edited in the open tray.');

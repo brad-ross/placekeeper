@@ -142,14 +142,18 @@ export function AnnotationList({
                 onClick={() => onNavigate(item)}
               >
                 <span className="annotation-item__meta">
-                  <strong>{item.kind}</strong><span>Page {item.pageIndex + 1}</span>
+                  <strong>{item.kind}</strong><span className="annotation-item__page">Page {item.pageIndex + 1}</span>
                 </span>
                 {text ? <span className="annotation-item__excerpt">{text}</span> : null}
               </button>
               {item.kind === 'delete' ? null : (
-                <button type="button" className="annotation-item__action" data-annotation-action="edit" aria-label={`Edit ${item.kind} on page ${item.pageIndex + 1}`} onClick={(event) => onEdit(item, event.currentTarget)}>Edit</button>
+                <button type="button" className="annotation-item__action" data-annotation-action="edit" aria-label={`Edit ${item.kind} on page ${item.pageIndex + 1}`} title="Edit annotation" onClick={(event) => onEdit(item, event.currentTarget)}>
+                  <ReviewIcon name="edit" size={15} />
+                </button>
               )}
-              <button type="button" className="annotation-item__action annotation-item__delete" data-annotation-action="delete" aria-label={`Delete ${item.kind} on page ${item.pageIndex + 1}`} onClick={() => void remove(item)}>Delete</button>
+              <button type="button" className="annotation-item__action annotation-item__delete" data-annotation-action="delete" aria-label={`Delete ${item.kind} on page ${item.pageIndex + 1}`} title="Delete annotation" onClick={() => void remove(item)}>
+                <ReviewIcon name="delete" size={15} />
+              </button>
             </li>
           );
         })}

@@ -302,7 +302,7 @@
 .annotation-item__meta {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: .6rem;
   color: var(--review-ink-muted);
   font-size: 11px;
@@ -327,6 +327,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+.annotation-item__page::before {
+  margin-right: .35rem;
+  color: var(--review-ink-quiet);
+  content: "·";
+}
+
 .annotation-item__excerpt {
   display: -webkit-box;
   min-width: 0;
@@ -340,18 +346,28 @@
 }
 
 .annotation-item__action {
+  display: grid;
   align-self: center;
-  min-width: var(--review-control-compact);
+  width: var(--review-control-compact);
   min-height: var(--review-control-compact);
-  padding: 0 7px;
+  padding: 0;
+  place-items: center;
   border: 1px solid transparent;
   border-radius: var(--review-radius-control);
   color: var(--review-ink-muted);
   background: transparent;
-  font-size: 11px;
-  font-weight: 680;
   opacity: 0;
   transition: color var(--review-motion-fast) ease, border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, opacity var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
+}
+
+.review-shell .annotation-item__content:focus-visible,
+.review-shell .existing-annotation__content:focus-visible {
+  outline: none;
+}
+
+.review-list li[data-annotation-origin]:focus-within {
+  outline: 3px solid var(--review-focus);
+  outline-offset: 2px;
 }
 
 .review-list li:hover .annotation-item__action,
@@ -575,4 +591,3 @@
   outline-offset: 2px;
   filter: saturate(.8);
 }
-

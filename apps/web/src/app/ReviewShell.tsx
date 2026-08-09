@@ -762,7 +762,7 @@ export function ReviewShell(props: ReviewShellProps) {
                       data-readonly="true"
                     >
                       <button className="existing-annotation__content" type="button" aria-label={`${annotation.subtype} · Page ${annotation.pageIndex + 1}${annotation.contents ? ` · ${annotation.contents}` : ''}`} onClick={() => { markFramingUserIntent(); props.onNavigateExisting?.(annotation); }}>
-                        <span className="annotation-item__meta"><strong>{annotation.subtype}</strong><span>Page {annotation.pageIndex + 1}</span></span>
+                        <span className="annotation-item__meta"><strong>{annotation.subtype}</strong><span className="annotation-item__page">Page {annotation.pageIndex + 1}</span></span>
                         {annotation.contents ? <span className="annotation-item__excerpt">{annotation.contents}</span> : null}
                       </button>
                     </li>
