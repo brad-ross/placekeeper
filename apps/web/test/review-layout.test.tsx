@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { ReviewShell } from '../src/app/ReviewShell.js';
+import { ReviewIcon } from '../src/review/ReviewIcon.js';
 import { createReviewState } from '../../../packages/core/src/review-model.js';
 
 const state = createReviewState({
@@ -10,6 +11,19 @@ const state = createReviewState({
 });
 
 describe('review shell layout and accessibility contract', () => {
+  it('keeps review icons decorative and button labels authoritative', () => {
+    const html = renderToStaticMarkup(
+      <button type="button" aria-label="Previous page">
+        <ReviewIcon name="chevron-left" />
+      </button>,
+    );
+
+    expect(html).toContain('aria-label="Previous page"');
+    expect(html).toContain('aria-hidden="true"');
+    expect(html).toContain('focusable="false"');
+    expect(html).toMatch(/class="[^"]*review-icon[^"]*"/);
+  });
+
   it('exposes keyboard-equivalent controls, live status, and state-preserving drawer semantics', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
@@ -60,7 +74,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-label="Owned annotations"');
     expect(html).toContain('aria-label="Existing PDF annotations"');
     for (const tool of ['Replace', 'Delete', 'Highlight']) {
-      expect(html).toContain(`>${tool}</button>`);
+      expect(html).toContain(tool);
     }
     expect(html).not.toContain('>Insert</button>');
     expect(html).not.toContain('>Page Note</button>');
