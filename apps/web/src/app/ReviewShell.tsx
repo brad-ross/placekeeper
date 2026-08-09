@@ -110,6 +110,18 @@ export interface RejectedReviewCommand {
   readonly message: string;
 }
 
+const OUTSIDE_TAP_SLOP_PX = 6;
+
+type OutsidePointerGesture =
+  | {
+      readonly phase: 'tracking';
+      readonly id: number;
+      readonly x: number;
+      readonly y: number;
+      readonly target: EventTarget;
+    }
+  | { readonly phase: 'settled'; readonly dismiss: boolean };
+
 function mutableField(item: ReviewItem): 'proposedText' | 'comment' | undefined {
   if (item.kind === 'replace' || item.kind === 'insert') return 'proposedText';
   if (item.kind === 'highlight' || item.kind === 'pageNote') return 'comment';
@@ -140,6 +152,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const editTriggerRef = useRef<HTMLButtonElement>(null);
   const surfaceTriggersRef = useRef(new Map<ReviewBaseSurface, HTMLElement>());
   const annotationDrawerRef = useRef<HTMLElement>(null);
+  const outsidePointerRef = useRef<OutsidePointerGesture | undefined>(undefined);
   const listOpen = surface.baseSurface === 'annotations';
   const selectionAnchor = reliableSelection(props.selectionUpdate);
   const lastPlacedPageNoteToken = useRef<number | undefined>(undefined);
@@ -427,6 +440,10 @@ export function ReviewShell(props: ReviewShellProps) {
     transitionBaseSurface('reading');
     restoreSurfaceTrigger('annotations');
   };
+  const isAnnotationDrawerOrChrome = (target: EventTarget | null) => (
+    (target instanceof Node && annotationDrawerRef.current?.contains(target) === true)
+    || (target instanceof Element && target.closest('[data-review-chrome]') !== null)
+  );
 
   return (
     <section
@@ -437,16 +454,58 @@ export function ReviewShell(props: ReviewShellProps) {
       onFocusCapture={(event) => inputController.focusChanged(isEditableTarget(event.target))}
       onCompositionStartCapture={(event) => inputController.compositionStart(event.target)}
       onCompositionEndCapture={compositionEnd}
-      onClickCapture={(event) => {
-        const annotationToggle = event.target instanceof Element
-          ? event.target.closest('[aria-controls="review-annotation-list"]')
-          : null;
+      onPointerDownCapture={(event) => {
+        outsidePointerRef.current = listOpen
+          && event.isPrimary
+          && event.button === 0
+          && !isAnnotationDrawerOrChrome(event.target)
+          ? { phase: 'tracking', id: event.pointerId, x: event.clientX, y: event.clientY, target: event.target }
+          : undefined;
+      }}
+      onPointerUpCapture={(event) => {
+        const start = outsidePointerRef.current;
         if (
-          listOpen
-          && annotationToggle === null
-          && event.target instanceof Node
-          && !annotationDrawerRef.current?.contains(event.target)
-        ) closeAnnotations();
+          !listOpen
+          || start?.phase !== 'tracking'
+          || start?.id !== event.pointerId
+        ) {
+          outsidePointerRef.current = undefined;
+          return;
+        }
+        const dismiss = Math.hypot(event.clientX - start.x, event.clientY - start.y) <= OUTSIDE_TAP_SLOP_PX;
+        if (!dismiss) {
+          outsidePointerRef.current = { phase: 'settled', dismiss: false };
+          return;
+        }
+        start.target.dispatchEvent(new PointerEvent('pointercancel', {
+          bubbles: true,
+          composed: true,
+          pointerId: event.pointerId,
+          pointerType: event.pointerType,
+          isPrimary: event.isPrimary,
+          clientX: event.clientX,
+          clientY: event.clientY,
+        }));
+        outsidePointerRef.current = { phase: 'settled', dismiss: true };
+        event.stopPropagation();
+        closeAnnotations();
+      }}
+      onPointerCancelCapture={() => { outsidePointerRef.current = undefined; }}
+      onClickCapture={(event) => {
+        const keyboardMarkActivation = event.detail === 0
+          && event.target instanceof Element
+          && event.target.closest('[data-owned-focus-id]') !== null;
+        if (keyboardMarkActivation) return;
+        const pointerGesture = outsidePointerRef.current;
+        if (event.detail > 0 && pointerGesture?.phase === 'settled') {
+          outsidePointerRef.current = undefined;
+          if (pointerGesture.dismiss) event.stopPropagation();
+          return;
+        }
+        if (listOpen && !isAnnotationDrawerOrChrome(event.target)) {
+          event.stopPropagation();
+          closeAnnotations();
+        }
       }}
     >
       <ReviewChrome
@@ -532,7 +591,6 @@ export function ReviewShell(props: ReviewShellProps) {
           })() : null}
         </div>
         <div className="review-drawer-host" data-review-drawer-host>
-          {listOpen ? <div className="review-list-dismiss" data-annotation-drawer-dismiss aria-hidden="true" /> : null}
           <aside
             ref={annotationDrawerRef}
             id="review-annotation-list"

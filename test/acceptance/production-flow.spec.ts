@@ -271,6 +271,8 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   await expect(page.locator('[data-production-review]')).toHaveCount(1);
   await expect(page.locator('[data-review-chrome]')).toHaveCount(1);
   await expect(page.locator('.pdf-workspace')).toHaveCount(1);
+  const pdfPage = page.locator("[data-page-index='0']").first();
+  await expect(pdfPage).toBeVisible();
   await page.getByRole('button', { name: /Annotations/u }).click();
   await expect(page.getByRole('button', { name: 'Close annotations' })).toHaveCount(0);
   await expect.poll(async () => {
@@ -282,8 +284,67 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
     const box = await page.locator('[data-annotation-drawer]').boundingBox();
     return box === null ? Number.POSITIVE_INFINITY : Math.abs(box.x + box.width - 320);
   }).toBeLessThanOrEqual(1);
-  await page.locator('[data-annotation-drawer-dismiss]').click({ position: { x: 8, y: 8 } });
+
+  const zoomBefore = await page.getByLabel('Zoom level').textContent();
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+  await expect(page.getByLabel('Zoom level')).not.toHaveText(zoomBefore ?? '');
+  await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'true');
+
+  await pdfPage.evaluate((element) => {
+    for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      const overflowY = getComputedStyle(ancestor).overflowY;
+      if (/^(auto|scroll)$/u.test(overflowY)) {
+        ancestor.dataset.viewerScrollViewport = 'true';
+        return;
+      }
+    }
+    throw new Error('Viewer scroll viewport is missing.');
+  });
+  const scrollViewport = page.locator('[data-viewer-scroll-viewport="true"]');
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const scrollable = await scrollViewport.evaluate((element) => element.scrollHeight > element.clientHeight);
+    if (scrollable) break;
+    await page.getByRole('button', { name: 'Zoom in' }).click();
+  }
+  await expect.poll(() => scrollViewport.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'true');
+  const scrollBefore = await scrollViewport.evaluate((element) => element.scrollTop);
+  const stage = await page.locator('[data-review-stage]').boundingBox();
+  if (!stage) throw new Error('Review stage has no bounds.');
+  await page.mouse.move(stage.x + 24, stage.y + stage.height / 2);
+  await page.mouse.wheel(0, 240);
+  await expect.poll(() => scrollViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(scrollBefore);
+  await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'true');
+
+  await scrollViewport.dispatchEvent('pointerdown', {
+    pointerId: 41, pointerType: 'touch', isPrimary: true, button: 0, clientX: 24, clientY: 300,
+  });
+  await scrollViewport.dispatchEvent('pointerdown', {
+    pointerId: 42, pointerType: 'touch', isPrimary: false, button: 0, clientX: 30, clientY: 300,
+  });
+  await scrollViewport.dispatchEvent('pointerup', {
+    pointerId: 42, pointerType: 'touch', isPrimary: false, button: 0, clientX: 30, clientY: 300,
+  });
+  await scrollViewport.dispatchEvent('pointerup', {
+    pointerId: 41, pointerType: 'touch', isPrimary: true, button: 0, clientX: 24, clientY: 300,
+  });
+  await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'true');
+
+  await page.mouse.down();
+  await page.mouse.move(stage.x + 24, stage.y + stage.height / 2 + 18);
+  await page.mouse.up();
+  await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'true');
+
+  await scrollViewport.evaluate((element) => {
+    element.dataset.pointerCancels = '0';
+    element.addEventListener('pointercancel', () => {
+      element.dataset.pointerCancels = String(Number(element.dataset.pointerCancels ?? '0') + 1);
+    });
+  });
+  await page.mouse.click(stage.x + 24, stage.y + stage.height / 2);
   await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'false');
+  await expect(scrollViewport).toHaveAttribute('data-pointer-cancels', '1');
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
 });
 
 test("creates a canonical Page Note from a real PDF context gesture without secondary-activating its mark", async ({ page }) => {
