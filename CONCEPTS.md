@@ -34,6 +34,13 @@ The interval during which an open review surface may automatically reveal docume
 
 Automatic movement is reversible per axis; deliberate user navigation takes ownership of the affected axis and supersedes stale automatic work.
 
+## Visual language
+
+### Warm Neutral
+The review session's light-theme visual language: warm gray and ivory environmental surfaces, soft borders and generous radii, neutral high-contrast routine chrome, and color reserved for selection, focus, annotation meaning, success, warning, and danger.
+
+Warm Neutral changes presentation only; reading-first behavior and adaptive Annotation Tray framing remain governed by their product contracts.
+
 ## Relationships
 
 A Review Item projects to an Owned Annotation. Existing PDF Annotations remain a separate read-only population. The Annotation Tray presents both populations, while a Framing Session may use Viewer Runway to keep the relevant PDF content reachable.

@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Warm Neutral synthesis</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      --ink: #181a17;
+      --muted: #676a63;
+      --quiet: #8b8e87;
+      --canvas: #e8e9e4;
+      --panel: #fffefa;
+      --soft: #f1f2ed;
+      --line: #d1d5cc;
+      --line-soft: #e2e4de;
+      --selection: #dbe7ff;
+      --selection-ink: #244b87;
+      --focus: #245c9c;
+      --success: #2d684d;
+      --danger: #9a3d34;
+      --warning: #d9ad2b;
+      --shadow-float: 0 14px 34px rgba(24,27,23,.17), 0 2px 7px rgba(24,27,23,.08);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body { margin: 0; background: #f4f4f1; color: var(--ink); }
+    .page { width: min(1460px, calc(100vw - 48px)); margin: 34px auto 58px; }
+    .head { display: grid; grid-template-columns: 1.2fr .8fr; gap: 44px; align-items: end; margin-bottom: 24px; }
+    .eyebrow { margin: 0 0 8px; color: var(--success); font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: 32px; line-height: 1.12; letter-spacing: -.04em; }
+    .subtitle { margin: 8px 0 0; color: var(--muted); font-size: 15px; }
+    .formula { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 10px; align-items: center; }
+    .formula-card { min-height: 64px; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: 12px; background: #fff; }
+    .formula-card b { display: block; margin-bottom: 4px; font-size: 12px; }
+    .formula-card span { color: var(--muted); font-size: 11px; line-height: 1.35; }
+    .op { color: var(--quiet); font-weight: 800; }
+    .formula-card.result { border-color: #aeb6aa; background: #f9faf6; }
+    .frame { overflow: hidden; border: 1px solid #d0d3cc; border-radius: 18px; background: var(--panel); box-shadow: 0 22px 60px rgba(31,33,29,.10); }
+    .frame-label { display: flex; justify-content: space-between; align-items: center; padding: 13px 17px; border-bottom: 1px solid var(--line-soft); background: #f8f8f5; }
+    .frame-label b { font-size: 12px; letter-spacing: .01em; }
+    .frame-label span { color: var(--muted); font-size: 11px; }
+    .app { position: relative; height: 630px; overflow: hidden; background: var(--canvas); }
+    .topbar { position: relative; z-index: 4; height: 58px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--line); background: rgba(255,254,250,.97); }
+    .doc, .nav, .actions { display: flex; align-items: center; }
+    .doc { gap: 9px; }
+    .file { display: grid; place-items: center; width: 25px; height: 25px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); font-size: 10px; font-weight: 800; }
+    .doc strong { font-size: 13px; letter-spacing: -.01em; }
+    .saved { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; }
+    .saved::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+    button { border: 0; color: inherit; font: inherit; }
+    .nav { justify-self: center; gap: 2px; }
+    .icon { display: grid; place-items: center; width: 31px; height: 31px; border-radius: 9px; background: transparent; color: var(--muted); font-size: 14px; }
+    .icon:hover { background: var(--soft); color: var(--ink); }
+    .stat { min-width: 60px; color: var(--muted); font-size: 11px; text-align: center; font-variant-numeric: tabular-nums; }
+    .actions { justify-self: end; gap: 4px; }
+    .annotations { height: 32px; padding: 0 9px; border-radius: 9px; background: transparent; color: var(--muted); font-size: 11px; }
+    .annotations b { margin-left: 5px; padding: 2px 5px; border-radius: 999px; background: var(--soft); color: var(--ink); font-size: 9px; }
+    .finish { height: 33px; padding: 0 13px; border-radius: 9px; background: var(--ink); color: #fff; font-size: 11px; font-weight: 750; }
+    .stage { position: absolute; inset: 58px 0 0; padding: 30px 372px 40px 38px; }
+    .paper { position: relative; width: 470px; height: 610px; margin: 0 auto; padding: 57px 54px; border: 1px solid #d5d6d1; background: #fff; box-shadow: 0 2px 4px rgba(25,27,23,.07), 0 19px 48px rgba(25,27,23,.10); }
+    .paper h2 { margin: 0 0 32px; font: 500 18px/1.2 Georgia, "Times New Roman", serif; text-align: center; }
+    .line { height: 7px; margin: 0 0 10px; border-radius: 6px; background: #d5d6d1; }
+    .line.short { width: 57%; }
+    .line.mid { width: 82%; }
+    .line.selected { width: 64%; background: var(--selection); box-shadow: 0 0 0 3px var(--selection); }
+    .page-no { position: absolute; bottom: 20px; inset-inline: 0; color: #777972; font: 12px Georgia, serif; text-align: center; }
+    .palette { position: absolute; left: 50%; top: 236px; transform: translateX(-69%); display: flex; align-items: center; gap: 2px; padding: 5px; border: 1px solid #cdd1c8; border-radius: 13px; background: var(--panel); box-shadow: var(--shadow-float); }
+    .palette button { height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 11px; border-radius: 9px; background: transparent; font-size: 11px; font-weight: 650; }
+    .palette .active { background: #e5e6e1; color: #111310; }
+    .palette .glyph { color: var(--muted); font-size: 12px; }
+    .palette .active .glyph { color: var(--ink); }
+    .drawer { position: absolute; z-index: 3; top: 58px; right: 0; bottom: 0; width: 344px; border-left: 1px solid var(--line); background: var(--panel); box-shadow: -14px 0 34px rgba(30,32,28,.13); }
+    .drawer-head { height: 75px; display: flex; justify-content: space-between; padding: 17px 17px 14px; border-bottom: 1px solid var(--line-soft); }
+    .kicker { margin-bottom: 4px; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+    .drawer-head h3 { margin: 0; font-size: 17px; letter-spacing: -.025em; }
+    .close { width: 29px; height: 29px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--muted); }
+    .drawer-body { padding: 13px; }
+    .row { position: relative; padding: 12px 12px 12px 17px; border: 1px solid var(--line-soft); border-radius: 11px; background: #f7f7f4; }
+    .row::before { content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; border-radius: 3px; background: #3f63a1; }
+    .row-top { display: flex; justify-content: space-between; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+    .row p { margin: 8px 0 0; font-size: 11px; line-height: 1.45; }
+    .drawer-foot { position: absolute; right: 14px; bottom: 13px; color: var(--quiet); font-size: 9px; }
+    .rules { display: grid; grid-template-columns: 1.25fr 1fr 1fr 1fr; gap: 12px; margin-top: 16px; }
+    .rule { min-height: 104px; padding: 15px; border: 1px solid var(--line-soft); border-radius: 13px; background: #fff; }
+    .rule b { display: block; margin-bottom: 7px; font-size: 12px; }
+    .rule p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+    .swatches { display: flex; gap: 7px; margin-top: 12px; }
+    .swatches i { width: 24px; height: 24px; border: 1px solid rgba(0,0,0,.09); border-radius: 50%; }
+    .do-not { background: #f7f7f3; }
+    .do-not b { color: #6b3e37; }
+    @media (max-width: 900px) {
+      .page { width: calc(100% - 20px); margin-top: 18px; }
+      .head, .rules { grid-template-columns: 1fr; }
+      .formula { margin-top: 18px; }
+      .app { height: 560px; }
+      .stage { padding-right: 30px; }
+      .drawer { width: 300px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="head">
+      <div>
+        <p class="eyebrow">Recommended synthesis</p>
+        <h1>D · Warm Neutral</h1>
+        <p class="subtitle">A’s humane surfaces and soft geometry with C’s neutral palette and contrast discipline.</p>
+      </div>
+      <div class="formula">
+        <div class="formula-card"><b>From A</b><span>Warm canvas, ivory surfaces, editorial calm</span></div>
+        <span class="op">+</span>
+        <div class="formula-card"><b>From C</b><span>Neutral controls, decisive hierarchy, selective color</span></div>
+        <span class="op">=</span>
+        <div class="formula-card result"><b>Direction D</b><span>Soft physical language; unmistakable semantic contrast</span></div>
+      </div>
+    </header>
+    <section class="frame">
+      <div class="frame-label"><b>Selected visual target</b><span>Match this visual system at high perceptual fidelity; demo content and placeholder glyphs are illustrative.</span></div>
+      <div class="app">
+        <header class="topbar">
+          <div class="doc"><span class="file">PDF</span><strong>working-paper.pdf</strong><span class="saved">Saved</span></div>
+          <div class="nav"><button class="icon">‹</button><span class="stat">4 / 18</span><button class="icon">›</button><button class="icon">−</button><span class="stat">125%</span><button class="icon">+</button></div>
+          <div class="actions"><button class="icon">↶</button><button class="annotations">Annotations <b>3</b></button><button class="finish">Finish review</button></div>
+        </header>
+        <div class="stage">
+          <article class="paper">
+            <h2>Identification in Dynamic Markets</h2>
+            <div class="line"></div><div class="line mid"></div><div class="line"></div><div class="line selected"></div><div class="line"></div><div class="line mid"></div><div class="line"></div><div class="line short"></div>
+            <span class="page-no">4</span>
+          </article>
+          <div class="palette"><button class="active"><span class="glyph">✎</span>Replace</button><button><span class="glyph">⌫</span>Delete</button><button><span class="glyph">◒</span>Highlight</button></div>
+        </div>
+        <aside class="drawer">
+          <div class="drawer-head"><div><div class="kicker">Document review</div><h3>Annotations</h3></div><button class="close">×</button></div>
+          <div class="drawer-body"><div class="row"><div class="row-top"><span>Replace</span><span>Page 4</span></div><p>Clarify the identifying variation behind this claim.</p></div></div>
+          <div class="drawer-foot">3 annotations · saved locally</div>
+        </aside>
+      </div>
+    </section>
+    <section class="rules">
+      <div class="rule"><b>Warmth lives in large surfaces</b><p>The canvas and panels use warm gray and ivory. Text and controls stay neutral, so the product feels humane without becoming “earth-toned.”</p><div class="swatches"><i style="background:#181a17"></i><i style="background:#fffefa"></i><i style="background:#e8e9e4"></i><i style="background:#f1f2ed"></i></div></div>
+      <div class="rule"><b>Contrast carries hierarchy</b><p>Near-black primary actions, strong type hierarchy, discrete active fills, and sparse elevation make states legible without hard outlines.</p></div>
+      <div class="rule"><b>Color has a job</b><p>Blue marks selection and focus; annotation hues identify type; green confirms safe success. Routine chrome remains neutral.</p></div>
+      <div class="rule do-not"><b>Explicitly avoid</b><p>No green wash, capsule-everything styling, hard black outlines, decorative gradients, glass effects, or shadow on every surface.</p></div>
+    </section>
+  </main>
+</body>
+</html>
