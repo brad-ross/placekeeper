@@ -40,47 +40,6 @@
   line-height: 1.5;
 }
 
-.annotation-peek__actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.annotation-peek button {
-  display: inline-flex;
-  min-height: var(--review-control-compact);
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--review-border);
-  border-radius: var(--review-radius-control);
-  font-size: 11px;
-  font-weight: 680;
-  transition: color var(--review-motion-fast) ease, border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
-}
-
-.annotation-peek button:hover {
-  border-color: var(--review-border-strong);
-}
-
-.annotation-peek button:active {
-  box-shadow: inset 0 1px 2px rgb(24 26 23 / 16%);
-}
-
-.annotation-peek__open {
-  padding: 0 11px;
-  color: var(--review-surface-panel);
-  background: var(--review-ink-primary);
-}
-
-.annotation-peek__dismiss {
-  width: var(--review-control-compact);
-  padding: 0;
-  color: var(--review-ink-muted);
-  background: var(--review-surface-subtle);
-}
-
 .page-note-placement-cursor {
   position: absolute;
   z-index: 3;

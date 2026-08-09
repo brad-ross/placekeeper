@@ -35,7 +35,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toMatch(/class="[^"]*review-icon[^"]*"/);
   });
 
-  it('exposes annotation kind, ownership, and state hooks with icon-owned peek dismissal', () => {
+  it('exposes annotation kind, ownership, and state hooks with a read-only peek', () => {
     const listHtml = renderToStaticMarkup(
       <AnnotationList
         items={[ownedAnnotation]}
@@ -49,8 +49,6 @@ describe('review shell layout and accessibility contract', () => {
     const peekHtml = renderToStaticMarkup(
       <AnnotationPeek
         item={ownedAnnotation}
-        onActivate={() => undefined}
-        onDismiss={() => undefined}
         onHoldChange={() => undefined}
       />,
     );
@@ -60,9 +58,9 @@ describe('review shell layout and accessibility contract', () => {
     expect(listHtml).toContain('data-annotation-state="active-corresponding"');
     expect(peekHtml).toContain('data-annotation-origin="owned"');
     expect(peekHtml).toContain('data-annotation-kind="highlight"');
-    expect(peekHtml).toContain('aria-label="Dismiss annotation preview"');
-    expect(peekHtml).toContain('aria-hidden="true"');
-    expect(peekHtml).not.toContain('>×</button>');
+    expect(peekHtml).toContain('Clarify the identifying variation behind this claim.');
+    expect(peekHtml).not.toContain('Page 4');
+    expect(peekHtml).not.toContain('<button');
   });
 
   it('exposes keyboard-equivalent controls, live status, and state-preserving drawer semantics', () => {

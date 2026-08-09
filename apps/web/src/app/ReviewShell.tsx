@@ -56,7 +56,12 @@ import {
 import './review-layout.css';
 
 type TextDraft =
-  | { kind: 'replace'; anchor: SelectionAnchor; initialText: string }
+  | {
+      kind: 'replace';
+      anchor: SelectionAnchor;
+      initialText: string;
+      selectionGeneration: number;
+    }
   | { kind: 'insert'; anchor: CaretAnchor; initialText: string };
 
 type Composer =
@@ -148,8 +153,8 @@ export function ReviewShell(props: ReviewShellProps) {
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
   const [composer, setComposer] = useState<Composer | null>(null);
   const [activeItemId, setActiveItemId] = useState<string>();
+  const [consumedSelectionGeneration, setConsumedSelectionGeneration] = useState<number>();
   const [listActivation, setListActivation] = useState<{ readonly id: string; readonly token: number }>();
-  const localActivationToken = useRef(0);
   const [peekItemId, setPeekItemId] = useState<string>();
   const peekHeldRef = useRef(false);
   const peekTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -169,6 +174,8 @@ export function ReviewShell(props: ReviewShellProps) {
   });
   const listOpen = surface.baseSurface === 'annotations';
   const selectionAnchor = reliableSelection(props.selectionUpdate);
+  const selectionActionsAvailable = selectionAnchor !== null
+    && props.selectionUpdate.generation !== consumedSelectionGeneration;
   const lastPlacedPageNoteToken = useRef<number | undefined>(undefined);
   const existingAnnotations = props.existingAnnotations ?? { status: 'loading', generation: 0 };
   const trayFraming = useAnnotationTrayFraming({
@@ -177,12 +184,24 @@ export function ReviewShell(props: ReviewShellProps) {
     request: annotationRequest,
   });
 
+  useEffect(() => {
+    if (props.selectionUpdate.kind !== 'reliable') setConsumedSelectionGeneration(undefined);
+  }, [props.selectionUpdate.kind, props.selectionUpdate.generation]);
+
   const dismissPageNoteAuthority = () => {
     if (props.keyboardPageNoteActive) props.onCancelKeyboardPageNote?.();
     if (props.pageMenu) props.onPageMenuDismiss?.(props.pageMenu.invocationId);
   };
+  const clearActiveAnnotation = () => {
+    if (activeItemId === undefined) return;
+    setActiveItemId(undefined);
+    props.onActiveItemChange?.(undefined);
+  };
   const transitionBaseSurface = (surfaceName: ReviewBaseSurface) => {
     dismissPageNoteAuthority();
+    if (surface.baseSurface === 'annotations' && surfaceName !== 'annotations') {
+      clearActiveAnnotation();
+    }
     dispatchSurface({ type: 'open-base', surface: surfaceName });
   };
 
@@ -243,34 +262,57 @@ export function ReviewShell(props: ReviewShellProps) {
 
   if (props.state.revision >= acknowledgedRef.current.revision) acknowledgedRef.current = props.state;
 
-  const submit = (build: (state: ReviewState) => ReviewCommand): Promise<ReviewState> => {
+  const submit = (
+    build: (state: ReviewState) => ReviewCommand,
+    options?: { readonly onAccepted?: () => void },
+  ): Promise<ReviewState> => {
     const result = commandTailRef.current.then(async () => {
       const command = build(acknowledgedRef.current);
       const result = await props.onCommand(command);
-      const next = 'accepted' in result ? result.state : result;
+      const accepted = !('accepted' in result);
+      const next = accepted ? result : result.state;
       acknowledgedRef.current = next;
-      setAnnouncement('accepted' in result
-        ? result.message
-        : `Review revision ${next.revision} saved.`);
+      setAnnouncement(accepted ? `Review revision ${next.revision} saved.` : result.message);
+      if (accepted) options?.onAccepted?.();
       return next;
     });
     commandTailRef.current = result.catch(() => acknowledgedRef.current);
     return result;
   };
+  const consumeSelectionActions = (generation: number) => {
+    setConsumedSelectionGeneration(generation);
+  };
 
   const handleInputIntent = (intent: ProofreadInputIntent) => {
+    const selectionGeneration = props.selectionUpdate.kind === 'reliable'
+      ? props.selectionUpdate.generation
+      : undefined;
     if (intent.kind === 'delete') {
-      void submit((state) => addDelete(state, intent.anchor));
+      void submit(
+        (state) => addDelete(state, intent.anchor),
+        selectionGeneration === undefined
+          ? undefined
+          : { onAccepted: () => consumeSelectionActions(selectionGeneration) },
+      );
       return;
     }
     draftTriggerRef.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
-    setTextDraft({
-      kind: intent.kind === 'replaceDraft' ? 'replace' : 'insert',
-      anchor: intent.anchor,
-      initialText: intent.initialText,
-    } as TextDraft);
+    if (intent.kind === 'replaceDraft') {
+      if (selectionGeneration === undefined) {
+        setAnnouncement('Select reliable text to suggest a replacement.');
+        return;
+      }
+      setTextDraft({
+        kind: 'replace',
+        anchor: intent.anchor,
+        initialText: intent.initialText,
+        selectionGeneration,
+      });
+    } else {
+      setTextDraft({ kind: 'insert', anchor: intent.anchor, initialText: intent.initialText });
+    }
     dispatchSurface({ type: 'open-nested' });
   };
 
@@ -357,9 +399,8 @@ export function ReviewShell(props: ReviewShellProps) {
       }
       if (surface.baseSurface !== 'reading') {
         event.preventDefault();
-        const closing = surface.baseSurface;
-        dispatchSurface({ type: 'escape' });
-        restoreSurfaceTrigger(closing);
+        if (surface.baseSurface === 'annotations') closeAnnotations();
+        else closeFinish();
         return;
       }
     }
@@ -402,7 +443,10 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const startHighlight = () => {
     const anchor = selectionAnchor;
-    if (!anchor) {
+    const selectionGeneration = props.selectionUpdate.kind === 'reliable'
+      ? props.selectionUpdate.generation
+      : undefined;
+    if (!anchor || selectionGeneration === undefined) {
       setAnnouncement('Select reliable text to add a highlight.');
       return;
     }
@@ -415,6 +459,7 @@ export function ReviewShell(props: ReviewShellProps) {
       return command;
     }).then((next) => {
       if (addedId && next.items.some(({ id }) => id === addedId)) {
+        consumeSelectionActions(selectionGeneration);
         setComposer({ kind: 'highlight', itemId: addedId });
         dispatchSurface({ type: 'open-nested' });
       }
@@ -422,24 +467,41 @@ export function ReviewShell(props: ReviewShellProps) {
   };
 
   const startTextTool = (kind: 'replace' | 'insert') => {
-    const anchor = kind === 'replace' ? selectionAnchor : props.caretAnchor;
-    if (!anchor) {
-      setAnnouncement(kind === 'replace'
-        ? 'Select reliable text to suggest a replacement.'
-        : 'Choose a reliable text position to suggest an insertion.');
-      return;
+    if (kind === 'replace') {
+      if (!selectionAnchor || props.selectionUpdate.kind !== 'reliable') {
+        setAnnouncement('Select reliable text to suggest a replacement.');
+        return;
+      }
+      draftTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setTextDraft({
+        kind,
+        anchor: selectionAnchor,
+        initialText: '',
+        selectionGeneration: props.selectionUpdate.generation,
+      });
+    } else {
+      if (!props.caretAnchor) {
+        setAnnouncement('Choose a reliable text position to suggest an insertion.');
+        return;
+      }
+      draftTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setTextDraft({ kind, anchor: props.caretAnchor, initialText: '' });
     }
-    draftTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setTextDraft({ kind, anchor, initialText: '' } as TextDraft);
     dispatchSurface({ type: 'open-nested' });
   };
 
   const deleteSelection = () => {
-    if (!selectionAnchor) {
+    const selectionGeneration = props.selectionUpdate.kind === 'reliable'
+      ? props.selectionUpdate.generation
+      : undefined;
+    if (!selectionAnchor || selectionGeneration === undefined) {
       setAnnouncement('Select reliable text to suggest deletion.');
       return;
     }
-    void submit((state) => addDelete(state, selectionAnchor));
+    void submit(
+      (state) => addDelete(state, selectionAnchor),
+      { onAccepted: () => consumeSelectionActions(selectionGeneration) },
+    );
   };
 
   const startPageNote = (anchor?: { pageIndex: number; position: ReviewRect; nearbyText?: string } | null) => {
@@ -615,7 +677,7 @@ export function ReviewShell(props: ReviewShellProps) {
       >
         <div className="review-document">{props.children}</div>
         <div className="review-contextual-host" data-review-contextual-host>
-          {surface.baseSurface === 'reading' && selectionAnchor && props.selectionPlacement ? (
+          {surface.baseSurface === 'reading' && selectionActionsAvailable && props.selectionPlacement ? (
             <ContextActionPalette
               kind="selection"
               placement={props.selectionPlacement}
@@ -662,25 +724,6 @@ export function ReviewShell(props: ReviewShellProps) {
                   if (!held && props.correspondingItemId === undefined) {
                     peekTimerRef.current = setTimeout(() => setPeekItemId(undefined), 180);
                   }
-                }}
-                onDismiss={() => {
-                  peekHeldRef.current = false;
-                  setPeekItemId(undefined);
-                }}
-                onActivate={() => {
-                  const markTrigger = Array.from(document.querySelectorAll<HTMLElement>('[data-owned-focus-id]'))
-                    .find((element) => element.dataset.ownedFocusId === item.id);
-                  if (markTrigger) surfaceTriggersRef.current.set('annotations', markTrigger);
-                  setActiveItemId(item.id);
-                  setListActivation({ id: item.id, token: ++localActivationToken.current });
-                  props.onActiveItemChange?.(item.id);
-                  setAnnotationRequest({
-                    kind: 'mark',
-                    reviewId: item.id,
-                    pageIndex: item.pageIndex,
-                    token: ++annotationRequestTokenRef.current,
-                  });
-                  transitionBaseSurface('annotations');
                 }}
               />
             ) : null;
@@ -794,9 +837,14 @@ export function ReviewShell(props: ReviewShellProps) {
             onDismiss={closeTextDraft}
             onSave={async (value) => {
               const frozen = textDraft;
-              await submit((state) => frozen.kind === 'replace'
-                ? addReplace(state, frozen.anchor, value)
-                : addInsert(state, frozen.anchor, value));
+              await submit(
+                (state) => frozen.kind === 'replace'
+                  ? addReplace(state, frozen.anchor, value)
+                  : addInsert(state, frozen.anchor, value),
+                frozen.kind === 'replace'
+                  ? { onAccepted: () => consumeSelectionActions(frozen.selectionGeneration) }
+                  : undefined,
+              );
               closeTextDraft();
             }}
           />

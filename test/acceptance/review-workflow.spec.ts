@@ -33,7 +33,9 @@ test.describe('canonical review workflow', () => {
     await highlight.click();
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.getByRole('button', { name: 'Keep without comment' }).click();
-    await expect(highlight).toBeFocused();
+    await expect(highlight).toHaveCount(0);
+    await page.getByRole('button', { name: 'Clear anchors' }).click();
+    await page.getByRole('button', { name: 'Use selection' }).click();
     await highlight.click();
     await page.getByRole('textbox', { name: 'Comment (optional)' }).fill('Check the claim.');
     await page.getByRole('button', { name: 'Save comment' }).click();
@@ -49,6 +51,51 @@ test.describe('canonical review workflow', () => {
       'replace,delete,insert,highlight,highlight,pageNote',
     );
     await expect(page.locator('[data-owned-annotation-layer] [data-owned-mark]')).toHaveCount(6);
+  });
+
+  test('dismisses selection actions after an annotation is completed', async ({ page }) => {
+    const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+
+    await expect(selectionActions).toBeVisible();
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(selectionActions).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Clear anchors' }).click();
+    await page.getByRole('button', { name: 'Use selection' }).click();
+    await page.getByRole('button', { name: 'Replace', exact: true }).click();
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await expect(selectionActions).toBeVisible();
+
+    await page.getByRole('button', { name: 'Replace', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Replacement text' }).fill('replacement');
+    await page.getByRole('button', { name: 'Apply' }).click();
+    await expect(selectionActions).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Clear anchors' }).click();
+    await page.getByRole('button', { name: 'Use selection' }).click();
+    await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+    await page.getByRole('button', { name: 'Keep without comment' }).click();
+    await expect(selectionActions).toHaveCount(0);
+  });
+
+  test('keeps selection actions after rejection and for a newer selection', async ({ page }) => {
+    const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+
+    await page.getByRole('button', { name: 'Reject next command' }).click();
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(selectionActions).toBeVisible();
+
+    await page.getByRole('button', { name: 'Reject next command' }).click();
+    await page.getByRole('button', { name: 'Replace', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Replacement text' }).fill('rejected replacement');
+    await page.getByRole('button', { name: 'Apply' }).click();
+    await expect(selectionActions).toBeVisible();
+
+    await page.getByRole('button', { name: 'Replace', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Replacement text' }).fill('accepted replacement');
+    await page.getByRole('button', { name: 'Use selection' }).evaluate((button: HTMLButtonElement) => button.click());
+    await page.getByRole('button', { name: 'Apply' }).click();
+    await expect(selectionActions).toBeVisible();
   });
 
   test('keeps canonical history, focus, and mounted draft state across the breakpoint', async ({ page }) => {
@@ -301,8 +348,10 @@ test.describe('canonical review workflow', () => {
     await markTarget.focus();
     const peek = page.locator('[data-annotation-peek]');
     await expect(peek).toBeVisible();
-    await expect(peek).toContainText('highlight · Page 1');
-    await page.keyboard.press('Escape');
+    await expect(peek).toContainText('highlight');
+    await expect(peek).not.toContainText('Page 1');
+    await expect(peek.getByRole('button')).toHaveCount(0);
+    await canvas.click();
     await expect(peek).toHaveCount(0);
 
     const beforeActivation = await canvas.boundingBox();
@@ -320,10 +369,16 @@ test.describe('canonical review workflow', () => {
     await expect(existing.getByRole('button', { name: /^Delete/ })).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(markTarget).toBeFocused();
+    await expect(page.locator('[data-owned-mark]').first()).toHaveAttribute('data-active', 'false');
+    await expect(row).toHaveAttribute('data-active', 'false');
   });
 
   test('shows an offscreen direction cue without scrolling until explicit mark activation', async ({ page }) => {
     for (let index = 0; index < 7; index += 1) {
+      if (index > 0) {
+        await page.getByRole('button', { name: 'Clear anchors' }).click();
+        await page.getByRole('button', { name: 'Use selection' }).click();
+      }
       await page.getByRole('button', { name: 'Highlight', exact: true }).click();
       await page.getByRole('button', { name: 'Keep without comment' }).click();
     }

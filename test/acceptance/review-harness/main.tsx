@@ -1,7 +1,10 @@
 import { createRoot } from 'react-dom/client';
 import { useState } from 'react';
 
-import { ReviewShell } from '../../../apps/web/src/app/ReviewShell.js';
+import {
+  ReviewShell,
+  type RejectedReviewCommand,
+} from '../../../apps/web/src/app/ReviewShell.js';
 import { projectReviewItems } from '../../../apps/web/src/review/annotation-projection.js';
 import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
 import type { CaretAnchor, SelectionAnchor } from '../../../apps/web/src/pdf/selection-anchor.js';
@@ -39,6 +42,8 @@ function Harness() {
   const [anchorKind, setAnchorKind] = useState<'selection' | 'caret' | 'none'>(
     visualScenario ? (visualScenario.name === 'contextual' ? 'selection' : 'none') : 'selection',
   );
+  const [selectionGeneration, setSelectionGeneration] = useState(0);
+  const [rejectNextCommand, setRejectNextCommand] = useState(false);
   const [navigated, setNavigated] = useState('none');
   const [pageMenuOpen, setPageMenuOpen] = useState(visualScenario?.pageMenuOpen ?? false);
   const [keyboardPageNoteActive, setKeyboardPageNoteActive] = useState(false);
@@ -47,8 +52,12 @@ function Harness() {
   const [activeItemId, setActiveItemId] = useState<string>();
   const [activationRequest, setActivationRequest] = useState<{ id: string; token: number }>();
 
-  const accept = async (command: ReviewCommand): Promise<ReviewState> => {
+  const accept = async (command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> => {
     await Promise.resolve();
+    if (rejectNextCommand) {
+      setRejectNextCommand(false);
+      return { accepted: false, state, message: 'Review changed elsewhere. Try again.' };
+    }
     const next = reduceReview(state, command);
     setState(next);
     return next;
@@ -66,8 +75,8 @@ function Harness() {
         finishSlot: visualScenario.finishSlot,
       } : {})}
       selectionUpdate={anchorKind === 'selection'
-        ? { kind: 'reliable', generation: 0, anchor: selection }
-        : { kind: 'cleared', generation: 0 }}
+        ? { kind: 'reliable', generation: selectionGeneration, anchor: selection }
+        : { kind: 'cleared', generation: selectionGeneration }}
       caretAnchor={anchorKind === 'caret' ? caret : null}
       selectionPlacement={anchorKind === 'selection' ? { left: 240, top: 120, suggestTop: false } : null}
       caretPlacement={anchorKind === 'caret' ? { left: 240, top: 120, suggestTop: true } : null}
@@ -107,9 +116,13 @@ function Harness() {
       {visualScenario ? (
         <VisualDocument items={state.items} onCorrespondenceChange={setCorrespondingItemId} />
       ) : <div>
-        <button type="button" onClick={() => setAnchorKind('selection')}>Use selection</button>
+        <button type="button" onClick={() => {
+          setSelectionGeneration((generation) => generation + 1);
+          setAnchorKind('selection');
+        }}>Use selection</button>
         <button type="button" onClick={() => setAnchorKind('caret')}>Use caret</button>
         <button type="button" onClick={() => setAnchorKind('none')}>Clear anchors</button>
+        <button type="button" onClick={() => setRejectNextCommand(true)}>Reject next command</button>
         <button type="button" onClick={() => setPageMenuOpen(true)}>Open page actions</button>
         {keyboardPageNoteActive ? (
           <button type="button" onClick={() => {

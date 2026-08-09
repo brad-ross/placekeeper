@@ -75,8 +75,7 @@
 
   .review-chrome button,
   .review-context-palette button,
-  .review-page-menu button,
-  .annotation-peek button {
+  .review-page-menu button {
     min-height: var(--review-control-touch);
   }
 
