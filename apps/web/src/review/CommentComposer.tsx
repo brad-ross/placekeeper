@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 
+import { ReviewIcon } from './ReviewIcon.js';
+
 export interface CommentComposerProps {
   title: string;
   initialValue?: string;
@@ -38,11 +40,21 @@ export function CommentComposer({
   }, [triggerRef]);
 
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby={titleId} className="comment-composer">
-      <h2 id={titleId}>{title}</h2>
-      <label>
-        {fieldLabel}
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      className="comment-composer"
+      data-comment-composer
+    >
+      <header className="comment-composer__header">
+        <p className="comment-composer__eyebrow">Review note</p>
+        <h2 id={titleId}>{title}</h2>
+      </header>
+      <label className="comment-composer__field">
+        <span className="comment-composer__label">{fieldLabel}</span>
         <textarea
+          className="comment-composer__input"
           ref={inputRef}
           value={value}
           onChange={(event) => setValue(event.currentTarget.value)}
@@ -54,10 +66,18 @@ export function CommentComposer({
           }}
         />
       </label>
-      <div>
-        <button type="button" onClick={onDismiss}>{optional ? 'Keep without comment' : 'Cancel'}</button>
-        <button type="button" disabled={!canSave} onClick={() => void onSave(value)}>
-          {saveLabel}
+      <div className="comment-composer__actions">
+        <button className="review-button review-button--secondary" type="button" onClick={onDismiss}>
+          {optional ? 'Keep without comment' : 'Cancel'}
+        </button>
+        <button
+          className="review-button review-button--primary"
+          type="button"
+          disabled={!canSave}
+          onClick={() => void onSave(value)}
+        >
+          <ReviewIcon name="check" />
+          <span>{saveLabel}</span>
         </button>
       </div>
     </div>

@@ -29,6 +29,11 @@ describe("Codex delivery UI", () => {
       onCheckResult={async () => ({ status: "Complete", message: "Checked" })}
     />);
     expect(html).toContain("Setup");
+    expect(html).toContain('data-delivery-phase="setup"');
+    expect(html).toContain('data-review-status="phase"');
+    expect(html).toContain('class="review-delivery__metadata"');
+    expect(html).toContain('class="review-delivery__phase-panel" data-phase-panel="setup"');
+    expect(html).toContain('class="lucide lucide-clipboard review-icon"');
     expect(html).toContain("Prepare Codex handoff");
     expect(html).toContain("local-only Human delivery");
     expect(html).toContain("read containment depends on the external Codex sandbox");

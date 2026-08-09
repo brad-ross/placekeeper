@@ -34,6 +34,10 @@ describe("one production review tree", () => {
     expect(html).toContain("aria-label=\"Review views\"");
     expect(html).toContain("Human delivery");
     expect(html).toContain("Codex delivery");
+    expect(html).toContain('data-delivery-kind="human"');
+    expect(html).toContain('data-delivery-kind="codex"');
+    expect(html).toContain('data-review-status="phase"');
+    expect(html).toContain('data-lifecycle-state="idle"');
     expect(html).toContain("Review summary");
     expect(html).toContain("1 review item");
     expect(html).toContain("Reviewed PDF");

@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 
 import type { ReviewState } from "../../../../packages/core/src/review-model.js";
+import { ReviewIcon } from "../review/ReviewIcon.js";
 
 export interface FinishReviewDrawerProps {
   readonly state: Pick<ReviewState, "items" | "revision">;
@@ -23,6 +24,7 @@ export function FinishReviewDrawer({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const itemLabel = `${state.items.length} review ${state.items.length === 1 ? "item" : "items"}`;
+  const lifecycleState = error ? "error" : message ? "success" : busyAction ? "busy" : "idle";
 
   const runLifecycle = async (
     action: "finish" | "discard",
@@ -58,7 +60,7 @@ export function FinishReviewDrawer({
           <h2 id="finish-review-heading">Finish review</h2>
         </div>
         <button type="button" className="finish-review-drawer__close" aria-label="Close finish options" onClick={onClose}>
-          <span aria-hidden="true">×</span>
+          <ReviewIcon name="close" />
         </button>
       </header>
       <p className="finish-review-drawer__summary">
@@ -68,28 +70,43 @@ export function FinishReviewDrawer({
         The PDF stays open while you save a reviewed copy or prepare a Codex handoff.
       </p>
       <div className="finish-review-drawer__delivery-options">{children}</div>
-      <section className="finish-review-drawer__lifecycle" aria-labelledby="review-lifecycle-heading">
+      <section
+        className="finish-review-drawer__lifecycle"
+        data-lifecycle-state={lifecycleState}
+        aria-labelledby="review-lifecycle-heading"
+      >
         <h3 id="review-lifecycle-heading">Close the review</h3>
         <p>Finish after delivering what you need. Discard closes the review without delivering its feedback.</p>
         <div className="finish-review-drawer__lifecycle-actions">
           <button
+            className="review-button review-button--primary"
             type="button"
             disabled={busyAction !== null}
             onClick={() => void runLifecycle("finish", onFinish)}
           >
-            {busyAction === "finish" ? "Finishing…" : "Finish review"}
+            <ReviewIcon name={busyAction === "finish" ? "loading" : "check"} />
+            <span>{busyAction === "finish" ? "Finishing…" : "Finish review"}</span>
           </button>
           <button
             type="button"
-            className="finish-review-drawer__discard"
+            className="review-button review-button--destructive finish-review-drawer__discard"
             disabled={busyAction !== null}
             onClick={() => void runLifecycle("discard", onDiscard)}
           >
-            {busyAction === "discard" ? "Discarding…" : "Discard review"}
+            <ReviewIcon name={busyAction === "discard" ? "loading" : "delete"} />
+            <span>{busyAction === "discard" ? "Discarding…" : "Discard review"}</span>
           </button>
         </div>
-        {message ? <p role="status">{message}</p> : null}
-        {error ? <p role="alert">{error}</p> : null}
+        {message ? (
+          <p className="review-status review-status--success" data-review-status="success" role="status">
+            <ReviewIcon name="check" /><span>{message}</span>
+          </p>
+        ) : null}
+        {error ? (
+          <p className="review-status review-status--error" data-review-status="error" role="alert">
+            <ReviewIcon name="alert" /><span>{error}</span>
+          </p>
+        ) : null}
       </section>
     </aside>
   );

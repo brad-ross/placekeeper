@@ -41,6 +41,11 @@ describe("FinishReviewDrawer", () => {
     expect(html).toContain("Revision 3");
     expect(html).toContain("Reviewed PDF and Codex handoff paths");
     expect(html).toContain("Close finish options");
+    expect(html).toContain('class="lucide lucide-x review-icon"');
+    expect(html).not.toContain("×");
+    expect(html).toContain('data-lifecycle-state="idle"');
+    expect(html).toContain('review-button review-button--primary');
+    expect(html).toContain('review-button review-button--destructive');
     expect(html).toContain("Finish review");
     expect(html).toContain("Discard review");
   });

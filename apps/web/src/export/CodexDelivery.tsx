@@ -6,6 +6,7 @@ import {
   focusDeliveryConfirmation,
   handleDeliveryConfirmationKey,
 } from "./delivery-confirmation.js";
+import { ReviewIcon, type ReviewIconName } from "../review/ReviewIcon.js";
 
 export interface CodexDeliveryScope {
   readonly sourceRoot: string;
@@ -173,12 +174,39 @@ export function CodexDelivery(props: CodexDeliveryProps) {
   };
 
   const firstFile = (event: ChangeEvent<HTMLInputElement>) => event.currentTarget.files?.[0] ?? null;
+  const phaseIcon: ReviewIconName = phase === "Setup" ? "clipboard" : phase === "Ready" ? "check" : "upload";
+  const messageTone = message?.startsWith("Instruction saved") || message?.startsWith("Complete:")
+    ? "success"
+    : message?.startsWith("Partial:")
+      ? "warning"
+      : message?.startsWith("Invalid:")
+        ? "error"
+        : "notice";
+  const messageIcon: ReviewIconName = messageTone === "success"
+    ? "check"
+    : messageTone === "warning"
+      ? "warning"
+      : messageTone === "error"
+        ? "alert"
+        : "clipboard";
 
   return (
-    <section aria-labelledby="codex-delivery-heading">
-      <h2 id="codex-delivery-heading">Codex delivery</h2>
-      <p><strong>{phase}</strong> — no task is submitted or monitored by this app.</p>
-      <dl aria-label="Codex data flow summary">
+    <section
+      className="review-delivery review-delivery--codex"
+      data-delivery-kind="codex"
+      data-delivery-phase={phase.toLowerCase()}
+      aria-labelledby="codex-delivery-heading"
+    >
+      <header className="review-delivery__header">
+        <ReviewIcon name="clipboard" className="review-icon review-delivery__header-icon" />
+        <div>
+          <h2 id="codex-delivery-heading">Codex delivery</h2>
+          <p className="review-delivery__phase" data-review-status="phase">
+            <ReviewIcon name={phaseIcon} /><span><strong>{phase}</strong> — no task is submitted or monitored by this app.</span>
+          </p>
+        </div>
+      </header>
+      <dl className="review-delivery__metadata" aria-label="Codex data flow summary">
         <dt>Approved source root</dt><dd>{props.sourceRoot}</dd>
         <dt>Provider</dt><dd>{props.provider}</dd>
         <dt>Destination</dt><dd>{props.revisedPdfDestination}</dd>
@@ -186,15 +214,20 @@ export function CodexDelivery(props: CodexDeliveryProps) {
         <dt>External fields</dt>
         <dd>Reviewed PDF and digest; handoff JSON; stable IDs; semantic intent; pageIndex; coordinates; quote, caret, or page context; proposed text or comment; optional relative SyncTeX file and line.</dd>
       </dl>
-      <p>
+      <p className="review-delivery__body">
         The reviewed PDF and handoff stay local until you deliberately use them. Writes are limited to the approved source root and fresh result directory; read containment depends on the external Codex sandbox.
       </p>
-      <p>The local-only Human delivery remains available if you only want to share the reviewed PDF.</p>
+      <p className="review-delivery__body">The local-only Human delivery remains available if you only want to share the reviewed PDF.</p>
 
       {phase === "Setup" ? (
-        <div>
-          {unavailable ? <p id="codex-disabled-reason">{unavailable}</p> : null}
+        <div className="review-delivery__phase-panel" data-phase-panel="setup">
+          {unavailable ? (
+            <p className="review-status review-status--empty" data-review-status="empty" id="codex-disabled-reason">
+              <ReviewIcon name="file" /><span>{unavailable}</span>
+            </p>
+          ) : null}
           <button
+            className="review-button review-button--primary"
             ref={prepareTriggerRef}
             data-primary-action="true"
             type="button"
@@ -202,7 +235,8 @@ export function CodexDelivery(props: CodexDeliveryProps) {
             aria-describedby={unavailable ? "codex-disabled-reason" : undefined}
             onClick={() => void prepare()}
           >
-            {busy ? "Preparing…" : "Prepare Codex handoff"}
+            <ReviewIcon name={busy ? "loading" : "clipboard"} />
+            <span>{busy ? "Preparing…" : "Prepare Codex handoff"}</span>
           </button>
         </div>
       ) : null}
@@ -220,41 +254,74 @@ export function CodexDelivery(props: CodexDeliveryProps) {
               handleDeliveryConfirmationKey(event, closeConfirmation, !busy)
             }
           >
-            <h3 id="codex-confirm-heading">Confirm this external data flow</h3>
-            <p>Confirm the source root, provider, destination, and retention setting shown above.</p>
+            <div className="delivery-confirmation__notice">
+              <ReviewIcon name="warning" className="review-icon delivery-confirmation__icon" />
+              <div>
+                <h3 id="codex-confirm-heading">Confirm this external data flow</h3>
+                <p>Confirm the source root, provider, destination, and retention setting shown above.</p>
+              </div>
+            </div>
             <div className="delivery-confirmation__actions">
-              <button type="button" disabled={busy} onClick={() => void confirmAndPrepare()}>Confirm and prepare</button>
-              <button type="button" disabled={busy} onClick={closeConfirmation}>Cancel</button>
+              <button className="review-button review-button--primary" type="button" disabled={busy} onClick={() => void confirmAndPrepare()}>
+                <ReviewIcon name={busy ? "loading" : "check"} /><span>Confirm and prepare</span>
+              </button>
+              <button className="review-button review-button--secondary" type="button" disabled={busy} onClick={closeConfirmation}>Cancel</button>
             </div>
           </div>
         </div>
       ) : null}
 
       {phase === "Ready" && prepared ? (
-        <div>
-          <p>Reviewed PDF: {prepared.reviewedPdfPath}</p>
-          <p>Reviewed PDF SHA-256: {prepared.reviewedPdfSha256}</p>
-          <p>Handoff JSON: {prepared.handoffPath}</p>
-          <p>Handoff SHA-256: {prepared.handoffSha256}</p>
-          <label htmlFor="codex-instruction">Ready-to-paste instruction</label>
-          <textarea ref={readyFocusRef} id="codex-instruction" readOnly value={prepared.prompt} rows={16} />
-          <button type="button" onClick={() => void copyInstruction()}>Copy instruction</button>
-          <button type="button" disabled={busy} onClick={() => void saveInstruction()}>Save instruction</button>
-          <button type="button" data-primary-action="true" onClick={() => setPhase("Result")}>Continue to Result</button>
+        <div className="review-delivery__phase-panel" data-phase-panel="ready">
+          <div className="review-delivery__artifact-metadata">
+            <p>Reviewed PDF: {prepared.reviewedPdfPath}</p>
+            <p>Reviewed PDF SHA-256: {prepared.reviewedPdfSha256}</p>
+            <p>Handoff JSON: {prepared.handoffPath}</p>
+            <p>Handoff SHA-256: {prepared.handoffSha256}</p>
+          </div>
+          <label className="review-delivery__field" htmlFor="codex-instruction">
+            <span>Ready-to-paste instruction</span>
+            <textarea ref={readyFocusRef} id="codex-instruction" readOnly value={prepared.prompt} rows={16} />
+          </label>
+          <div className="review-delivery__actions">
+            <button className="review-button review-button--secondary" type="button" onClick={() => void copyInstruction()}>
+              <ReviewIcon name="clipboard" /><span>Copy instruction</span>
+            </button>
+            <button className="review-button review-button--secondary" type="button" disabled={busy} onClick={() => void saveInstruction()}>
+              <ReviewIcon name={busy ? "loading" : "save"} /><span>Save instruction</span>
+            </button>
+            <button className="review-button review-button--primary" type="button" data-primary-action="true" onClick={() => setPhase("Result") }>
+              <ReviewIcon name="upload" /><span>Continue to Result</span>
+            </button>
+          </div>
         </div>
       ) : null}
 
       {phase === "Result" ? (
-        <div>
-          <label>Returned disposition JSON<input type="file" accept="application/json,.json" onChange={(event) => setDisposition(firstFile(event))} /></label>
-          <label>Revised PDF, if the build succeeded<input type="file" accept="application/pdf,.pdf" onChange={(event) => setRevisedPdf(firstFile(event))} /></label>
-          <button type="button" disabled={disposition === null || busy} onClick={() => void checkResult()}>
-            {busy ? "Checking…" : "Check Result"}
+        <div className="review-delivery__phase-panel" data-phase-panel="result">
+          <label className="review-delivery__field">
+            <span>Returned disposition JSON</span>
+            <input type="file" accept="application/json,.json" onChange={(event) => setDisposition(firstFile(event))} />
+          </label>
+          <label className="review-delivery__field">
+            <span>Revised PDF, if the build succeeded</span>
+            <input type="file" accept="application/pdf,.pdf" onChange={(event) => setRevisedPdf(firstFile(event))} />
+          </label>
+          <button className="review-button review-button--primary" type="button" disabled={disposition === null || busy} onClick={() => void checkResult()}>
+            <ReviewIcon name={busy ? "loading" : "check"} /><span>{busy ? "Checking…" : "Check Result"}</span>
           </button>
         </div>
       ) : null}
-      {message ? <p role="status">{message}</p> : null}
-      {error ? <p role="alert">{error}</p> : null}
+      {message ? (
+        <p className={`review-status review-status--${messageTone}`} data-review-status={messageTone} role={messageTone === "error" ? "alert" : "status"}>
+          <ReviewIcon name={messageIcon} /><span>{message}</span>
+        </p>
+      ) : null}
+      {error ? (
+        <p className="review-status review-status--error" data-review-status="error" role="alert">
+          <ReviewIcon name="alert" /><span>{error}</span>
+        </p>
+      ) : null}
     </section>
   );
 }
