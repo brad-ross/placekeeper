@@ -44,6 +44,7 @@ import {
   type ViewerPagePoint,
 } from '../pdf/viewer-interaction-events.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+import { ReviewIcon } from '../review/ReviewIcon.js';
 
 type ViewerCaretResult = Awaited<ReturnType<typeof captureViewerCaret>>;
 
@@ -620,21 +621,11 @@ export function App({
       {workspace}
       {toolError ? (
         <p
+          className="pdf-workspace__status"
           role="alert"
           data-viewer-status
-          style={{
-            position: 'absolute',
-            top: 8,
-            right: 8,
-            zIndex: 2,
-            margin: 0,
-            padding: '4px 8px',
-            borderRadius: 4,
-            background: 'rgba(255, 255, 255, .92)',
-            pointerEvents: 'none',
-          }}
         >
-          {toolError}
+          <ReviewIcon name="alert" />{toolError}
         </p>
       ) : null}
     </div>

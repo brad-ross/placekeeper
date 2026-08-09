@@ -11,6 +11,7 @@ import { Viewport } from '@embedpdf/plugin-viewport/react';
 import { ZoomGestureWrapper } from '@embedpdf/plugin-zoom/react';
 import { useMemo } from 'react';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+import { ReviewIcon } from '../review/ReviewIcon.js';
 import { combinePageRotation, positionOwnedRect } from './owned-overlay.js';
 import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
 import type { ViewerRunway } from './viewer-framing.js';
@@ -93,15 +94,15 @@ export function PdfWorkspace({
       >
         {({ activeDocumentId, activeDocument, pluginsReady }) => {
           if (!pluginsReady || !activeDocumentId || !activeDocument?.document) {
-            return <div className="pdf-workspace__loading" role="status">Loading local PDF…</div>;
+            return <div className="pdf-workspace__loading" role="status"><ReviewIcon name="loading" />Loading local PDF…</div>;
           }
           const activePdf = activeDocument.document;
 
           return (
             <Viewport
               documentId={activeDocumentId}
+              className="pdf-workspace__viewport"
               data-viewer-framing-viewport
-              style={{ height: '100%', overflow: 'auto', background: '#eceae6' }}
             >
               <ZoomGestureWrapper
                 documentId={activeDocumentId}
@@ -115,6 +116,7 @@ export function PdfWorkspace({
                       documentId={activeDocumentId}
                       pageIndex={layout.pageIndex}
                       aria-label={`Page ${layout.pageNumber}`}
+                      className="pdf-workspace__page"
                       data-page-index={layout.pageIndex}
                       tabIndex={-1}
                       onPointerDownCapture={(event) => {
@@ -179,7 +181,6 @@ export function PdfWorkspace({
                         position: 'relative',
                         width: layout.rotatedWidth,
                         height: layout.rotatedHeight,
-                        background: 'white',
                         outline: 'none',
                         userSelect: 'none',
                         WebkitUserSelect: 'none',
@@ -207,11 +208,6 @@ export function PdfWorkspace({
                                 activeDocument.rotation,
                                 rect,
                               );
-                              const fill = annotation.kind === 'highlight'
-                                ? 'rgba(255, 213, 79, .42)'
-                                : annotation.kind === 'insert' || annotation.kind === 'pageNote'
-                                  ? 'rgba(21, 101, 192, .22)'
-                                  : 'rgba(211, 47, 47, .2)';
                               return (
                                 <span
                                   key={`${annotation.id}:${index}`}
@@ -225,11 +221,6 @@ export function PdfWorkspace({
                                     top: transformed.origin.y,
                                     width: transformed.size.width,
                                     height: transformed.size.height,
-                                    background: fill,
-                                    borderBottom: annotation.kind === 'replace' || annotation.kind === 'delete'
-                                      ? '2px solid #d32f2f'
-                                      : undefined,
-                                    boxSizing: 'border-box',
                                   }}
                                 />
                               );
@@ -295,7 +286,7 @@ export function PdfWorkspace({
                             }}
                             style={{ left: transformed.origin.x, top: transformed.origin.y }}
                           >
-                            <span aria-hidden="true">+</span>
+                            <ReviewIcon name="plus" />
                           </button>
                         );
                       })() : null}

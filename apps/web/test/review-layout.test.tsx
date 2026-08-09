@@ -56,6 +56,10 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-live="polite"');
     expect(html).toContain('data-list-open="false"');
     expect(html).toContain('data-review-chrome');
+    expect(html).toContain('data-review-file-badge');
+    expect(html).toContain('data-review-saved-status');
+    expect(html).toContain('data-review-stat');
+    expect(html).toContain('data-review-count');
     expect(html).toContain('paper.pdf');
     expect(html).toContain('data-review-contextual-host');
     expect(html).toContain('data-review-drawer-host');
@@ -66,7 +70,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('Finish');
     expect(html).toContain('aria-label="Undo"');
     expect(html).toContain('aria-label="Redo"');
-    expect(html).toContain('Annotations (0)');
+    expect(html).toContain('aria-label="Annotations (0)"');
     expect(html).toContain('id="review-annotation-list"');
     expect(html).toContain('data-annotation-drawer');
     expect(html).not.toContain('aria-label="Close annotations"');
@@ -76,6 +80,8 @@ describe('review shell layout and accessibility contract', () => {
     for (const tool of ['Replace', 'Delete', 'Highlight']) {
       expect(html).toContain(tool);
     }
+    expect(html.match(/class="[^"]*review-action-button[^"]*"/g)).toHaveLength(3);
+    expect(html).not.toMatch(/>(?:‹|›|−|\+|↶|↷)<\/button>/u);
     expect(html).not.toContain('>Insert</button>');
     expect(html).not.toContain('>Page Note</button>');
     expect(html).not.toContain('aria-pressed');

@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 
+import { ReviewIcon } from './ReviewIcon.js';
 import { shortcutForReviewAction } from './review-actions.js';
 
 export interface ContextPlacement {
@@ -36,12 +37,12 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
     >
       {props.kind === 'selection' ? (
         <>
-          <button type="button" aria-keyshortcuts={shortcutForReviewAction('replace')} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); props.onReplace?.(); }}>Replace</button>
-          <button type="button" aria-keyshortcuts={shortcutForReviewAction('delete')} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); props.onDelete?.(); }}>Delete</button>
-          <button type="button" aria-keyshortcuts={shortcutForReviewAction('highlight')} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); props.onHighlight?.(); }}>Highlight</button>
+          <button type="button" className="review-action-button" aria-keyshortcuts={shortcutForReviewAction('replace')} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); props.onReplace?.(); }}><ReviewIcon name="replace" />Replace</button>
+          <button type="button" className="review-action-button" aria-keyshortcuts={shortcutForReviewAction('delete')} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); props.onDelete?.(); }}><ReviewIcon name="delete" />Delete</button>
+          <button type="button" className="review-action-button" aria-keyshortcuts={shortcutForReviewAction('highlight')} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); props.onHighlight?.(); }}><ReviewIcon name="highlight" />Highlight</button>
         </>
       ) : (
-        <button type="button" aria-keyshortcuts={shortcutForReviewAction('insert')} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); props.onInsert?.(); }}>Insert</button>
+        <button type="button" className="review-action-button" aria-keyshortcuts={shortcutForReviewAction('insert')} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); props.onInsert?.(); }}><ReviewIcon name="insert" />Insert</button>
       )}
     </div>
   );

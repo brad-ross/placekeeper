@@ -1,6 +1,7 @@
 import { useEffect, useRef, type CSSProperties, type RefObject } from 'react';
 
 import type { ContextPlacement } from './ContextActionPalette.js';
+import { ReviewIcon } from './ReviewIcon.js';
 import { shortcutForReviewAction } from './review-actions.js';
 
 export interface PageActionMenuProps {
@@ -34,7 +35,7 @@ export function PageActionMenu(props: PageActionMenuProps) {
         aria-keyshortcuts={shortcutForReviewAction('pageNote')}
         onClick={props.onAddPageNote}
       >
-        Add Page Note
+        <ReviewIcon name="note" />Add Page Note
       </button>
     </div>
   );
