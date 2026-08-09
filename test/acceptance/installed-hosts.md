@@ -36,6 +36,27 @@ The implementation was visually compared at 1280×900 and narrow widths with the
 
 Installed Codex and VS Code desktop UI evidence still requires a release-candidate install and is not claimed by this source-tree run. For that release check, append one row per host without recording the capability URL:
 
+## Warm Neutral reference review (2026-08-09)
+
+The deterministic production-root scenes were compared in the source harness with `docs/plans/assets/2026-08-09-warm-neutral-design-language/warm-neutral-synthesis.html`. The source comparison covers the shared production review tree only; it does not claim an installed Codex or VS Code desktop inspection.
+
+| R2 dimension | Source-scene finding |
+|---|---|
+| Warmth | Pass: warm-gray canvas and ivory panels retain the reference's environmental temperature. |
+| Neutrality | Pass: routine chrome remains neutral; blue, green, amber, and red are reserved for state meaning. |
+| Contrast hierarchy | Pass: primary, muted, and quiet text roles remain visibly ordered without hard black outlines. |
+| Corner softness | Pass: controls, palettes, drawers, cards, and composers share the soft-radius family. |
+| Border subtlety | Pass: panel and control edges use the semantic subtle/standard border roles. |
+| Typography density | Pass: compact chrome and annotation metadata remain subordinate to document content. |
+| Control treatment | Pass: Lucide-plus-label actions, hover, focus, active, and disabled treatments remain distinct. |
+| Elevation | Pass: page, contextual palette, peek, composer, and drawers retain increasing semantic elevation. |
+
+Accepted R3 deviations: production keeps the settled adaptive Annotation Tray geometry (24rem maximum right tray and 43% bottom sheet) rather than the synthesis's literal drawer dimensions, and intentionally has no tray close control because the Annotations disclosure owns dismissal. Real PDF/fixture content and the production Lucide subset differ from the synthesis's sample copy and placeholder glyphs; these are non-normative differences, not R3 deviations.
+
+The committed visual suite captures only `[data-production-review]`, uses fixed 1280×900 and 320×720 scenes, and includes long deterministic titles, paths, messages, counts, focus, hover, loading, empty, success, warning, and error states. Goldens are compared by bundled Chromium at device scale factor 1 on macOS 15 CI; CI does not use an update flag.
+
+Host status remains honest: the ordinary-browser installed-style production flow is automated and verifies one mounted viewer, local-only assets, real PDF rendering, responsive framing, and browser errors. Actual Codex desktop and VS Code desktop visual inspection was not performed in this source-tree run and remains pending below.
+
 | Date | Build | Surface | Viewport width | Initial page / zoom / scroll | Open surface | Final page / zoom / scroll | Final focus | Screenshot or checklist |
 |---|---|---|---:|---|---|---|---|---|
 | Pending | Pending | Codex desktop | — | — | — | — | — | Pending |

@@ -7,9 +7,12 @@ import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing
 import type { CaretAnchor, SelectionAnchor } from '../../../apps/web/src/pdf/selection-anchor.js';
 import { createReviewState, type ReviewCommand, type ReviewState } from '../../../packages/core/src/review-model.js';
 import { reduceReview } from '../../../packages/core/src/review-reducer.js';
+import { resolveVisualScenario, VisualDocument } from './visual-scenarios.js';
 
 const root = document.querySelector('#root');
 if (!root) throw new Error('Review harness root is missing');
+const visualScenario = resolveVisualScenario(window.location.search);
+if (visualScenario) root.setAttribute('data-production-root', 'true');
 
 const selection: SelectionAnchor = {
   pageIndex: 0,
@@ -29,16 +32,18 @@ const caret: CaretAnchor = {
 };
 
 function Harness() {
-  const [state, setState] = useState(() => createReviewState({
+  const [state, setState] = useState(() => visualScenario?.state ?? createReviewState({
     sessionId: 'acceptance',
     source: { fileId: 'source', digest: 'a'.repeat(64), byteLength: 100 },
   }));
-  const [anchorKind, setAnchorKind] = useState<'selection' | 'caret' | 'none'>('selection');
+  const [anchorKind, setAnchorKind] = useState<'selection' | 'caret' | 'none'>(
+    visualScenario?.name === 'contextual' ? 'selection' : 'none',
+  );
   const [navigated, setNavigated] = useState('none');
-  const [pageMenuOpen, setPageMenuOpen] = useState(false);
+  const [pageMenuOpen, setPageMenuOpen] = useState(visualScenario?.pageMenuOpen ?? false);
   const [keyboardPageNoteActive, setKeyboardPageNoteActive] = useState(false);
   const [placedPageNote, setPlacedPageNote] = useState<{ token: number; pageIndex: number; position: { x: number; y: number; width: number; height: number }; nearbyText: string } | null>(null);
-  const [correspondingItemId, setCorrespondingItemId] = useState<string>();
+  const [correspondingItemId, setCorrespondingItemId] = useState<string | undefined>(visualScenario?.correspondingItemId);
   const [activeItemId, setActiveItemId] = useState<string>();
   const [activationRequest, setActivationRequest] = useState<{ id: string; token: number }>();
 
@@ -49,9 +54,17 @@ function Harness() {
     return next;
   };
 
-  return (
+  const shell = (
     <ReviewShell
       state={state}
+      {...(visualScenario ? {
+        documentTitle: visualScenario.documentTitle,
+        savedLabel: `Saved · revision ${state.revision}`,
+        listOpen: visualScenario.listOpen,
+        viewerState: visualScenario.viewerState,
+        existingAnnotations: visualScenario.existingAnnotations,
+        finishSlot: visualScenario.finishSlot,
+      } : {})}
       selectionUpdate={anchorKind === 'selection'
         ? { kind: 'reliable', generation: 0, anchor: selection }
         : { kind: 'cleared', generation: 0 }}
@@ -78,7 +91,7 @@ function Harness() {
       {...(activationRequest === undefined ? {} : { activationRequest })}
       onItemCorrespondenceChange={setCorrespondingItemId}
       onActiveItemChange={setActiveItemId}
-      existingAnnotations={{
+      existingAnnotations={visualScenario?.existingAnnotations ?? {
         status: 'ready',
         generation: 1,
         items: inventoryExistingAnnotations([{
@@ -91,7 +104,9 @@ function Harness() {
       }}
       onNavigateExisting={(item) => setNavigated(`source:${item.id}`)}
     >
-      <div>
+      {visualScenario ? (
+        <VisualDocument items={state.items} onCorrespondenceChange={setCorrespondingItemId} />
+      ) : <div>
         <button type="button" onClick={() => setAnchorKind('selection')}>Use selection</button>
         <button type="button" onClick={() => setAnchorKind('caret')}>Use caret</button>
         <button type="button" onClick={() => setAnchorKind('none')}>Clear anchors</button>
@@ -151,9 +166,13 @@ function Harness() {
         <output data-revision={state.revision} data-kinds={state.items.map(({ kind }) => kind).join(',')} data-navigated={navigated}>
           Revision {state.revision}
         </output>
-      </div>
+      </div>}
     </ReviewShell>
   );
+
+  return visualScenario
+    ? <main data-production-review data-visual-scene={visualScenario.name}>{shell}</main>
+    : shell;
 }
 
 createRoot(root).render(<Harness />);
