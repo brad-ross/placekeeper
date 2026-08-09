@@ -178,6 +178,11 @@
   pointer-events: none;
 }
 
+.review-drawer-host {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+}
+
 .review-context-palette,
 .review-page-menu {
   position: fixed;
@@ -263,10 +268,12 @@
 
 .review-list,
 .review-finish-drawer {
-  position: absolute;
-  inset-block: 0;
-  right: 0;
+  position: relative;
+  grid-area: 1 / 1;
+  align-self: stretch;
+  justify-self: end;
   width: min(24rem, calc(100vw - 3rem));
+  min-height: 0;
   overflow: auto;
   border-left: 1px solid var(--review-border, #d2d6cf);
   background: var(--review-panel, #fff);

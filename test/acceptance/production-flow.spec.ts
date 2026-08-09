@@ -199,6 +199,10 @@ test("one installed-style browser tree preserves review state across responsive 
 
   await page.getByRole("button", { name: "Finish" }).click();
   await expect(page.getByRole("heading", { name: "Finish review" })).toBeVisible();
+  await expect.poll(async () => {
+    const box = await page.locator('[data-review-finish-slot]').boundingBox();
+    return box === null ? Number.POSITIVE_INFINITY : Math.abs(box.x + box.width - 1280);
+  }).toBeLessThanOrEqual(1);
   await expect(page.getByText("1 review item")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Human delivery" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Codex delivery" })).toBeVisible();
@@ -269,6 +273,10 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   await expect(page.locator('.pdf-workspace')).toHaveCount(1);
   await page.getByRole('button', { name: /Annotations/u }).click();
   await expect(page.getByRole('button', { name: 'Close annotations' })).toBeVisible();
+  await expect.poll(async () => {
+    const box = await page.locator('[data-annotation-drawer]').boundingBox();
+    return box === null ? Number.POSITIVE_INFINITY : Math.abs(box.x + box.width - 320);
+  }).toBeLessThanOrEqual(1);
   await page.getByRole('button', { name: 'Close annotations' }).click();
   await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'false');
 });
