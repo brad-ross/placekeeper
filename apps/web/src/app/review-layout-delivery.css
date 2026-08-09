@@ -222,6 +222,7 @@
 .review-delivery textarea,
 .review-delivery input[type="file"],
 .comment-composer__input {
+  box-sizing: border-box;
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -440,6 +441,7 @@
 .comment-composer {
   position: fixed;
   z-index: 5;
+  box-sizing: border-box;
   inset: 20% max(1rem, calc(50% - 18rem)) auto;
   width: min(36rem, calc(100vw - 2rem));
   max-height: calc(100dvh - 2rem);
@@ -496,4 +498,3 @@
 .finish-review-drawer__lifecycle .lucide-loader-circle {
   animation: annotation-status-spin 900ms linear infinite;
 }
-

@@ -37,7 +37,7 @@ function Harness() {
     source: { fileId: 'source', digest: 'a'.repeat(64), byteLength: 100 },
   }));
   const [anchorKind, setAnchorKind] = useState<'selection' | 'caret' | 'none'>(
-    visualScenario?.name === 'contextual' ? 'selection' : 'none',
+    visualScenario ? (visualScenario.name === 'contextual' ? 'selection' : 'none') : 'selection',
   );
   const [navigated, setNavigated] = useState('none');
   const [pageMenuOpen, setPageMenuOpen] = useState(visualScenario?.pageMenuOpen ?? false);

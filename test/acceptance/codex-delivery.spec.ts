@@ -27,16 +27,18 @@ test.describe("manual Codex delivery phases", () => {
   });
 
   test("confirms changed scope, preserves a selectable prompt on clipboard denial, and checks user-selected results", async ({ page }) => {
-    const externalRequests: string[] = [];
+    const requestedUrls: string[] = [];
     const mutationRequests: string[] = [];
     page.on("request", (request) => {
-      if (!request.url().startsWith("http://127.0.0.1:4173/")) externalRequests.push(request.url());
+      requestedUrls.push(request.url());
       if (request.method() !== "GET") mutationRequests.push(`${request.method()} ${request.url()}`);
     });
     await page.goto("/test/acceptance/codex-harness/index.html");
+    const localOrigin = new URL(page.url()).origin;
+    const externalRequests = () => requestedUrls.filter((url) => new URL(url).origin !== localOrigin);
     await page.getByRole("button", { name: "Prepare Codex handoff" }).click();
     await expect(page.getByRole("alertdialog")).toBeVisible();
-    expect(externalRequests).toEqual([]);
+    expect(externalRequests()).toEqual([]);
     expect(mutationRequests).toEqual([]);
     expect(await page.evaluate(() => window.codexHarness.prepared())).toBe(0);
     await page.getByRole("button", { name: "Confirm and prepare" }).click();
@@ -73,7 +75,7 @@ test.describe("manual Codex delivery phases", () => {
     await page.evaluate(() => window.codexHarness.changeRetention());
     await page.getByRole("button", { name: "Prepare Codex handoff" }).click();
     await expect(page.getByRole("alertdialog")).toBeVisible();
-    expect(externalRequests).toEqual([]);
+    expect(externalRequests()).toEqual([]);
     expect(mutationRequests).toEqual([]);
   });
 
