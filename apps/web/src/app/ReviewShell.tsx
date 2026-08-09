@@ -438,8 +438,12 @@ export function ReviewShell(props: ReviewShellProps) {
       onCompositionStartCapture={(event) => inputController.compositionStart(event.target)}
       onCompositionEndCapture={compositionEnd}
       onClickCapture={(event) => {
+        const annotationToggle = event.target instanceof Element
+          ? event.target.closest('[aria-controls="review-annotation-list"]')
+          : null;
         if (
           listOpen
+          && annotationToggle === null
           && event.target instanceof Node
           && !annotationDrawerRef.current?.contains(event.target)
         ) closeAnnotations();

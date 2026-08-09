@@ -72,6 +72,9 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Annotations' }).click();
     await expect(page.locator('[data-annotation-drawer]')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Close annotations' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Annotations' }).click();
+    await expect(page.getByRole('button', { name: 'Annotations' })).toHaveAttribute('aria-expanded', 'false');
+    await page.getByRole('button', { name: 'Annotations' }).click();
     const entry = page.getByRole('button', { name: /replace · Page 1/ });
     await entry.click();
     await expect(page.locator('[data-navigated]')).not.toHaveAttribute('data-navigated', 'none');
