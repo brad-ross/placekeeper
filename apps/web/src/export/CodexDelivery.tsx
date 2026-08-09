@@ -44,6 +44,13 @@ export interface CheckedCodexResult {
   readonly message: string;
 }
 
+type DeliveryNoticeTone = "notice" | "success" | "warning" | "error";
+
+interface DeliveryNotice {
+  readonly message: string;
+  readonly tone: DeliveryNoticeTone;
+}
+
 export interface CodexDeliveryProps extends CodexDeliveryScope {
   readonly state: ReviewState;
   readonly confirmedScopeSignature: string | null;
@@ -64,7 +71,7 @@ export function CodexDelivery(props: CodexDeliveryProps) {
   const [prepared, setPrepared] = useState<PreparedCodexHandoff | null>(null);
   const [disposition, setDisposition] = useState<File | null>(null);
   const [revisedPdf, setRevisedPdf] = useState<File | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<DeliveryNotice | null>(null);
   const [error, setError] = useState<string | null>(null);
   const prepareTriggerRef = useRef<HTMLButtonElement>(null);
   const confirmationRef = useRef<HTMLDivElement>(null);
@@ -136,9 +143,15 @@ export function CodexDelivery(props: CodexDeliveryProps) {
     if (!prepared) return;
     try {
       await navigator.clipboard.writeText(prepared.prompt);
-      setMessage("Instruction copied. Start a fresh Codex task and paste it when you are ready.");
+      setNotice({
+        message: "Instruction copied. Start a fresh Codex task and paste it when you are ready.",
+        tone: "notice",
+      });
     } catch {
-      setMessage("Clipboard access was denied. The full instruction remains selectable and saveable below.");
+      setNotice({
+        message: "Clipboard access was denied. The full instruction remains selectable and saveable below.",
+        tone: "notice",
+      });
     }
   };
 
@@ -148,7 +161,7 @@ export function CodexDelivery(props: CodexDeliveryProps) {
     setError(null);
     try {
       await props.onSaveInstruction(prepared.prompt);
-      setMessage("Instruction saved locally.");
+      setNotice({ message: "Instruction saved locally.", tone: "success" });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The instruction could not be saved.");
     } finally {
@@ -165,7 +178,12 @@ export function CodexDelivery(props: CodexDeliveryProps) {
         disposition,
         ...(revisedPdf === null ? {} : { revisedPdf }),
       });
-      setMessage(`${result.status}: ${result.message}`);
+      const tone: DeliveryNoticeTone = result.status === "Complete"
+        ? "success"
+        : result.status === "Partial"
+          ? "warning"
+          : "error";
+      setNotice({ message: `${result.status}: ${result.message}`, tone });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Result checking failed safely.");
     } finally {
@@ -175,18 +193,11 @@ export function CodexDelivery(props: CodexDeliveryProps) {
 
   const firstFile = (event: ChangeEvent<HTMLInputElement>) => event.currentTarget.files?.[0] ?? null;
   const phaseIcon: ReviewIconName = phase === "Setup" ? "clipboard" : phase === "Ready" ? "check" : "upload";
-  const messageTone = message?.startsWith("Instruction saved") || message?.startsWith("Complete:")
-    ? "success"
-    : message?.startsWith("Partial:")
-      ? "warning"
-      : message?.startsWith("Invalid:")
-        ? "error"
-        : "notice";
-  const messageIcon: ReviewIconName = messageTone === "success"
+  const messageIcon: ReviewIconName = notice?.tone === "success"
     ? "check"
-    : messageTone === "warning"
+    : notice?.tone === "warning"
       ? "warning"
-      : messageTone === "error"
+      : notice?.tone === "error"
         ? "alert"
         : "clipboard";
 
@@ -312,9 +323,9 @@ export function CodexDelivery(props: CodexDeliveryProps) {
           </button>
         </div>
       ) : null}
-      {message ? (
-        <p className={`review-status review-status--${messageTone}`} data-review-status={messageTone} role={messageTone === "error" ? "alert" : "status"}>
-          <ReviewIcon name={messageIcon} /><span>{message}</span>
+      {notice ? (
+        <p className={`review-status review-status--${notice.tone}`} data-review-status={notice.tone} role={notice.tone === "error" ? "alert" : "status"}>
+          <ReviewIcon name={messageIcon} /><span>{notice.message}</span>
         </p>
       ) : null}
       {error ? (
