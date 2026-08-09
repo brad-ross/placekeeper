@@ -174,3 +174,22 @@ test.describe('shared viewer foundation', () => {
     await expect(page.getByRole('button', { name: 'Page Note' })).toBeEnabled();
   });
 });
+
+test('stops the PDF loading indicator animation under reduced motion', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  let releaseDocument: (() => void) | undefined;
+  await page.route('**/text-native-with-annotations.pdf', async (route) => {
+    await new Promise<void>((resolve) => { releaseDocument = resolve; });
+    await route.continue();
+  });
+
+  try {
+    await page.goto('/test/acceptance/viewer-harness/index.html', { waitUntil: 'domcontentloaded' });
+    const loader = page.locator('.pdf-workspace__loading');
+    await expect(loader).toBeVisible();
+    await expect(loader.locator('.review-icon')).toHaveCSS('animation-name', 'none');
+  } finally {
+    releaseDocument?.();
+    await page.unrouteAll({ behavior: 'wait' });
+  }
+});

@@ -31,10 +31,13 @@ test.describe("human delivery controls", () => {
   });
 
   test("does not report save success before completion and confirms replacement explicitly", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await page.evaluate(() => window.deliveryHarness.addFeedback());
     const save = page.getByRole("button", { name: "Save reviewed copy" });
     await save.click();
-    await expect(page.getByRole("button", { name: "Saving reviewed copy…" })).toBeDisabled();
+    const saving = page.getByRole("button", { name: "Saving reviewed copy…" });
+    await expect(saving).toBeDisabled();
+    await expect(saving.locator(".lucide-loader-circle")).toHaveCSS("animation-name", "none");
     await expect(page.getByRole("button", { name: "Finish review" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "Discard review" })).toBeEnabled();
     await expect(page.getByRole("status")).toHaveCount(0);

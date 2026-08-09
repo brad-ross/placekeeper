@@ -61,6 +61,15 @@ test('wide reading', async ({ page }) => {
   await expectScene(product, 'wide-reading.png');
 });
 
+test('unavailable viewer controls', async ({ page }) => {
+  const product = await openScene(page, 'unavailable-controls');
+  await expect(page.getByRole('button', { name: 'Previous page' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Zoom out' })).toBeDisabled();
+  await expect(page.getByLabel('Current page')).toHaveText('— / —');
+  await expect(page.getByLabel('Zoom level')).toHaveText('—%');
+  await expectScene(product, 'unavailable-viewer-controls.png');
+});
+
 test('installed real PDF reading', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(installedLaunchUrl);

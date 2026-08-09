@@ -3,11 +3,15 @@ import type { CSSProperties, ReactNode } from 'react';
 import { CodexDelivery } from '../../../apps/web/src/export/CodexDelivery.js';
 import { HumanDelivery } from '../../../apps/web/src/export/HumanDelivery.js';
 import type { ExistingAnnotationsDiscovery } from '../../../apps/web/src/pdf/existing-annotations.js';
-import type { ViewerControlsSnapshot } from '../../../apps/web/src/pdf/viewer-controls.js';
+import {
+  unavailableViewerControls,
+  type ViewerControlsSnapshot,
+} from '../../../apps/web/src/pdf/viewer-controls.js';
 import type { ReviewItem, ReviewState } from '../../../packages/core/src/review-model.js';
 
 export type VisualSceneName =
   | 'reading'
+  | 'unavailable-controls'
   | 'contextual'
   | 'tray'
   | 'peek'
@@ -152,7 +156,7 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
   const requested = parameters.get('visual');
   if (!requested) return null;
   const name = requested as VisualSceneName;
-  if (!['reading', 'contextual', 'tray', 'peek', 'page-note', 'finish', 'exceptional'].includes(name)) return null;
+  if (!['reading', 'unavailable-controls', 'contextual', 'tray', 'peek', 'page-note', 'finish', 'exceptional'].includes(name)) return null;
   const state = stateFor(name === 'contextual' || name === 'page-note' ? [] : seededItems);
   const exception = parameters.get('exception');
   const exceptionalAnnotations: ExistingAnnotationsDiscovery = exception === 'loading'
@@ -167,7 +171,7 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
     listOpen: name === 'tray' || name === 'exceptional',
     pageMenuOpen: name === 'page-note',
     existingAnnotations: name === 'exceptional' ? exceptionalAnnotations : readyAnnotations,
-    viewerState,
+    viewerState: name === 'unavailable-controls' ? unavailableViewerControls() : viewerState,
   };
   if (name === 'finish' || name === 'exceptional') {
     const outcome = exception === 'success' || exception === 'error' ? exception : 'warning';
