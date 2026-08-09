@@ -22,6 +22,7 @@ import {
   type ViewerControls,
   type ViewerControlsSnapshot,
 } from "../pdf/viewer-controls.js";
+import type { ViewerFramingControls } from "../pdf/viewer-framing.js";
 import type {
   ViewerClientPlacement,
   ViewerInteractionEvent,
@@ -105,6 +106,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const latestReceipt = useRef<string | null>(null);
   const viewerRegistry = useRef<PluginRegistry | null>(null);
   const viewerControlsRef = useRef<ViewerControls | undefined>(undefined);
+  const [viewerFraming, setViewerFraming] = useState<ViewerFramingControls>();
   const markHoverRef = useRef<string | undefined>(undefined);
   const markFocusRef = useRef<string | undefined>(undefined);
   const rowCorrespondenceRef = useRef<string | undefined>(undefined);
@@ -209,6 +211,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         setViewerState(controls.snapshot());
         controls.subscribe(() => setViewerState(controls.snapshot()));
       }}
+      onViewerFramingInitialized={(controls) => {
+        setViewerFraming(controls);
+      }}
     />
   );
 
@@ -260,6 +265,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         documentTitle={props.scope.documentTitle}
         savedLabel={`Saved · revision ${state.revision}`}
         {...(viewerControlsRef.current === undefined ? {} : { viewerControls: viewerControlsRef.current })}
+        {...(viewerFraming === undefined ? {} : { viewerFraming })}
         viewerState={viewerState}
         finishSlot={delivery}
         finishConfirmationActive={humanConfirmationActive || codexConfirmationActive}

@@ -257,6 +257,192 @@ test("one installed-style browser tree preserves review state across responsive 
   expect(browserErrors).toEqual([]);
 });
 
+test('minimally reveals the PDF beside the adaptive annotations surface and restores untouched movement', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const launched = await host.open({
+    pdfPath: pdf,
+    sourceRootPath: sourceRoot,
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === 'recovery-offered') {
+    throw new Error('Fresh adaptive annotations launch failed');
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(launched.url);
+
+  const stage = page.locator('[data-review-stage]');
+  const drawer = page.locator('[data-annotation-drawer]');
+  const viewport = page.locator('[data-viewer-framing-viewport]');
+  const pdfPage = page.locator("[data-page-index='0']").first();
+  const runway = page.locator('[data-viewer-runway]');
+  const workspace = page.locator('.pdf-workspace');
+  const annotations = page.getByRole('button', { name: /Annotations/u });
+  await expect(pdfPage).toBeVisible();
+  await expect(viewport).toHaveCount(1);
+  await expect(runway).toHaveCount(1);
+  await expect(page.getByLabel('Zoom level')).toHaveText(/\d+%/u);
+  await workspace.evaluate((element) => { element.setAttribute('data-adaptive-mount-probe', 'stable'); });
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const pageBounds = await pdfPage.boundingBox();
+    const stageBounds = await stage.boundingBox();
+    if (pageBounds && stageBounds && pageBounds.width > stageBounds.width - 384) break;
+    await page.getByRole('button', { name: 'Zoom in' }).click();
+  }
+  await expect.poll(() => viewport.evaluate(async (element) => {
+    const before = element.scrollTop;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    return Math.abs(element.scrollTop - before);
+  })).toBeLessThan(0.5);
+
+  const widePageBefore = await pdfPage.boundingBox();
+  const wideScrollBefore = await viewport.evaluate((element) => ({
+    left: element.scrollLeft,
+    top: element.scrollTop,
+    width: element.scrollWidth,
+  }));
+  const zoomBefore = await page.getByLabel('Zoom level').textContent();
+  if (!widePageBefore) throw new Error('Wide PDF page has no bounds.');
+
+  await annotations.click();
+  await expect(stage).toHaveAttribute('data-annotation-presentation', 'right');
+  await expect(drawer).toHaveAttribute('data-annotation-presentation', 'right');
+  await expect(drawer).toBeVisible();
+  const wideDrawer = await drawer.boundingBox();
+  const wideViewport = await viewport.boundingBox();
+  if (!wideDrawer || !wideViewport) throw new Error('Wide annotations geometry is unavailable.');
+  const expectedHorizontalReveal = Math.max(
+    0,
+    Math.min(widePageBefore.x + widePageBefore.width, wideViewport.x + wideViewport.width) - wideDrawer.x,
+  );
+  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
+    .toBeCloseTo(wideScrollBefore.left + expectedHorizontalReveal, 0);
+  const widePageAfter = await pdfPage.boundingBox();
+  if (!widePageAfter) throw new Error('Revealed PDF page has no bounds.');
+  expect(widePageBefore.x - widePageAfter.x).toBeCloseTo(expectedHorizontalReveal, 0);
+  expect(widePageAfter.y).toBeCloseTo(widePageBefore.y, 0);
+  expect(widePageAfter.width).toBeCloseTo(widePageBefore.width, 0);
+  expect(await page.getByLabel('Zoom level').textContent()).toBe(zoomBefore);
+  expect(await viewport.evaluate((element) => element.scrollWidth)).toBeGreaterThanOrEqual(
+    wideScrollBefore.width + Math.floor(expectedHorizontalReveal),
+  );
+
+  await annotations.click();
+  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
+    .toBeCloseTo(wideScrollBefore.left, 0);
+  const widePageRestored = await pdfPage.boundingBox();
+  expect(widePageRestored?.x).toBeCloseTo(widePageBefore.x, 0);
+
+  await annotations.click();
+  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
+    .toBeCloseTo(wideScrollBefore.left + expectedHorizontalReveal, 0);
+  await viewport.dispatchEvent('wheel', { deltaX: 40, deltaY: 0 });
+  const deliberateLeft = await viewport.evaluate((element) => {
+    element.scrollLeft += 32;
+    return element.scrollLeft;
+  });
+  await annotations.click();
+  const naturalHorizontalMaximum = await viewport.evaluate((element) => (
+    Math.max(0, element.scrollWidth - element.clientWidth)
+  ));
+  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
+    .toBeCloseTo(Math.min(deliberateLeft, naturalHorizontalMaximum), 0);
+  await viewport.evaluate((element, left) => { element.scrollLeft = left; }, wideScrollBefore.left);
+
+  await annotations.click();
+  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
+    .toBeCloseTo(wideScrollBefore.left + expectedHorizontalReveal, 0);
+  await page.setViewportSize({ width: 1240, height: 900 });
+  await expect(stage).toHaveAttribute('data-annotation-presentation', 'right');
+  await annotations.click();
+  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
+    .toBeCloseTo(wideScrollBefore.left, 0);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  await page.setViewportSize({ width: 760, height: 900 });
+  await expect(stage).toHaveAttribute('data-annotation-presentation', 'bottom');
+  const narrowScrollBefore = await viewport.evaluate((element) => ({
+    left: element.scrollLeft,
+    top: element.scrollTop,
+  }));
+  await annotations.click();
+  await expect(drawer).toHaveAttribute('data-annotation-presentation', 'bottom');
+  const narrowStage = await stage.boundingBox();
+  const bottomDrawer = await drawer.boundingBox();
+  if (!narrowStage || !bottomDrawer) throw new Error('Bottom annotations geometry is unavailable.');
+  expect(bottomDrawer.x).toBeCloseTo(narrowStage.x, 0);
+  expect(bottomDrawer.width).toBeCloseTo(narrowStage.width, 0);
+  expect(bottomDrawer.y + bottomDrawer.height).toBeCloseTo(narrowStage.y + narrowStage.height, 0);
+  expect(bottomDrawer.height).toBeCloseTo(narrowStage.height * 0.43, 0);
+  expect(await viewport.evaluate((element) => element.scrollTop)).toBeCloseTo(narrowScrollBefore.top, 0);
+  await annotations.click();
+
+  const pageBox = await pdfPage.boundingBox();
+  if (!pageBox) throw new Error('Narrow PDF page has no bounds.');
+  const futureSheetTop = narrowStage.y + narrowStage.height * (1 - 0.43);
+  const noteClientY = Math.min(pageBox.y + pageBox.height - 28, futureSheetTop + 48);
+  await pdfPage.click({
+    button: 'right',
+    position: {
+      x: Math.min(pageBox.width - 28, pageBox.width * 0.7),
+      y: noteClientY - pageBox.y,
+    },
+  });
+  await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
+  await page.getByRole('textbox', { name: 'Comment' }).fill('Reveal this note above the sheet.');
+  await page.getByRole('button', { name: 'Save comment' }).click();
+
+  const noteMark = page.locator('[data-owned-mark="pageNote"]').last();
+  const noteFocus = page.locator('[data-owned-focus-id]').last();
+  await expect(noteMark).toBeVisible();
+  const markBefore = await noteMark.boundingBox();
+  const markScrollBefore = await viewport.evaluate((element) => element.scrollTop);
+  if (!markBefore) throw new Error('Page Note mark has no bounds.');
+  expect(markBefore.y + markBefore.height).toBeGreaterThan(futureSheetTop);
+
+  await noteFocus.evaluate((element) => {
+    (element as HTMLElement).focus({ preventScroll: true });
+    element.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+  });
+  await expect(drawer).toBeVisible();
+  await expect(drawer).toHaveAttribute('data-annotation-presentation', 'bottom');
+  const activeReviewId = await noteMark.getAttribute('data-review-id');
+  if (!activeReviewId) throw new Error('Page Note mark has no canonical review id.');
+  await expect(page.locator(`[data-review-item="${activeReviewId}"]`)).toHaveAttribute('data-active', 'true');
+  await expect.poll(async () => {
+    const mark = await noteMark.boundingBox();
+    const sheet = await drawer.boundingBox();
+    return mark && sheet ? sheet.y - (mark.y + mark.height) : Number.NEGATIVE_INFINITY;
+  }).toBeGreaterThanOrEqual(9);
+  expect(await viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(markScrollBefore);
+
+  await page.setViewportSize({ width: 760, height: 820 });
+  await expect(stage).toHaveAttribute('data-annotation-presentation', 'bottom');
+  await expect.poll(async () => {
+    const mark = await noteMark.boundingBox();
+    const sheet = await drawer.boundingBox();
+    return mark && sheet ? sheet.y - (mark.y + mark.height) : Number.NEGATIVE_INFINITY;
+  }).toBeGreaterThanOrEqual(9);
+
+  const responsiveZoom = await page.getByLabel('Zoom level').textContent();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(stage).toHaveAttribute('data-annotation-presentation', 'right');
+  await expect(drawer).toBeVisible();
+  await expect(page.locator(`[data-review-item="${activeReviewId}"]`)).toHaveAttribute('data-active', 'true');
+  await expect(workspace).toHaveAttribute('data-adaptive-mount-probe', 'stable');
+  expect(await page.getByLabel('Zoom level').textContent()).toBe(responsiveZoom);
+  await page.setViewportSize({ width: 760, height: 900 });
+  await expect(stage).toHaveAttribute('data-annotation-presentation', 'bottom');
+  await expect(drawer).toBeVisible();
+  await expect(page.locator(`[data-review-item="${activeReviewId}"]`)).toHaveAttribute('data-active', 'true');
+  await expect(workspace).toHaveAttribute('data-adaptive-mount-probe', 'stable');
+
+  await annotations.click();
+  await expect.poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBeCloseTo(markScrollBefore, 0);
+  expect(await viewport.evaluate((element) => element.scrollLeft)).toBeCloseTo(narrowScrollBefore.left, 0);
+});
+
 test('uses the same compact review tree for a narrow VS Code embed launch', async ({ page }) => {
   const launched = await host.open({
     pdfPath: pdf,
@@ -275,6 +461,7 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   await expect(pdfPage).toBeVisible();
   await page.getByRole('button', { name: /Annotations/u }).click();
   await expect(page.getByRole('button', { name: 'Close annotations' })).toHaveCount(0);
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-annotation-presentation', 'bottom');
   await expect.poll(async () => {
     const box = await page.locator('[data-annotation-drawer]').boundingBox();
     return box === null ? Number.POSITIVE_INFINITY : Math.abs(box.x + box.width - 320);
@@ -290,17 +477,7 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   await expect(page.getByLabel('Zoom level')).not.toHaveText(zoomBefore ?? '');
   await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'true');
 
-  await pdfPage.evaluate((element) => {
-    for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
-      const overflowY = getComputedStyle(ancestor).overflowY;
-      if (/^(auto|scroll)$/u.test(overflowY)) {
-        ancestor.dataset.viewerScrollViewport = 'true';
-        return;
-      }
-    }
-    throw new Error('Viewer scroll viewport is missing.');
-  });
-  const scrollViewport = page.locator('[data-viewer-scroll-viewport="true"]');
+  const scrollViewport = page.locator('[data-viewer-framing-viewport]');
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const scrollable = await scrollViewport.evaluate((element) => element.scrollHeight > element.clientHeight);
     if (scrollable) break;
@@ -314,6 +491,7 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   await page.mouse.move(stage.x + 24, stage.y + stage.height / 2);
   await page.mouse.wheel(0, 240);
   await expect.poll(() => scrollViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(scrollBefore);
+  const scrolledTop = await scrollViewport.evaluate((element) => element.scrollTop);
   await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'true');
 
   await scrollViewport.dispatchEvent('pointerdown', {
@@ -330,8 +508,11 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   });
   await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'true');
 
+  const dragStart = { x: stage.x + 24, y: stage.y + stage.height / 2 };
+  await page.mouse.move(dragStart.x, dragStart.y);
   await page.mouse.down();
-  await page.mouse.move(stage.x + 24, stage.y + stage.height / 2 + 18);
+  await page.mouse.move(dragStart.x, dragStart.y + 18);
+  await page.mouse.move(dragStart.x, dragStart.y);
   await page.mouse.up();
   await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'true');
 
@@ -344,6 +525,11 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   await page.mouse.click(stage.x + 24, stage.y + stage.height / 2);
   await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'false');
   await expect(scrollViewport).toHaveAttribute('data-pointer-cancels', '1');
+  const maximumAfterClose = await scrollViewport.evaluate((element) => (
+    Math.max(0, element.scrollHeight - element.clientHeight)
+  ));
+  await expect.poll(() => scrollViewport.evaluate((element) => element.scrollTop))
+    .toBeCloseTo(Math.min(scrolledTop, maximumAfterClose), 0);
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
 });
 

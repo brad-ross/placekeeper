@@ -40,12 +40,13 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-keyshortcuts="Alt+Shift+H"');
     expect(html).toContain('aria-label="All annotations"');
     expect(html).toContain('aria-live="polite"');
-    expect(html).toContain('data-breakpoint="1024"');
     expect(html).toContain('data-list-open="false"');
     expect(html).toContain('data-review-chrome');
     expect(html).toContain('paper.pdf');
     expect(html).toContain('data-review-contextual-host');
     expect(html).toContain('data-review-drawer-host');
+    expect(html).toContain('data-annotation-presentation="right"');
+    expect(html).toContain('--annotation-side-width:0px');
     expect(html).toContain('data-review-nested-host');
     expect(html.match(/Document canvas/g)).toHaveLength(1);
     expect(html).toContain('Finish');

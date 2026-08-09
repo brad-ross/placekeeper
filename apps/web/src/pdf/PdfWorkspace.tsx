@@ -13,6 +13,7 @@ import { useMemo } from 'react';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import { combinePageRotation, positionOwnedRect } from './owned-overlay.js';
 import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
+import type { ViewerRunway } from './viewer-framing.js';
 import {
   isUnsafePageContextTarget,
   normalizePageClientPoint,
@@ -43,6 +44,8 @@ export interface PdfWorkspaceProps {
   activeOwnedAnnotationId?: string;
   correspondingOwnedAnnotationId?: string;
   onOwnedMarkInteraction?: (interaction: ViewerOwnedMarkInteraction) => void;
+  runway?: ViewerRunway;
+  onWorkspaceElement?: (element: HTMLDivElement | null) => void;
 }
 
 export function PdfWorkspace({
@@ -58,6 +61,8 @@ export function PdfWorkspace({
   activeOwnedAnnotationId,
   correspondingOwnedAnnotationId,
   onOwnedMarkInteraction,
+  runway = { right: 0, bottom: 0 },
+  onWorkspaceElement,
 }: PdfWorkspaceProps) {
   const annotationsByPage = useMemo(() => {
     const result = new Map<number, ReviewAnnotation[]>();
@@ -75,6 +80,7 @@ export function PdfWorkspace({
 
   return (
     <div
+      ref={onWorkspaceElement}
       aria-label={documentLabel}
       role="region"
       className="pdf-workspace"
@@ -94,9 +100,14 @@ export function PdfWorkspace({
           return (
             <Viewport
               documentId={activeDocumentId}
+              data-viewer-framing-viewport
               style={{ height: '100%', overflow: 'auto', background: '#eceae6' }}
             >
-              <ZoomGestureWrapper documentId={activeDocumentId} style={{ minHeight: '100%' }}>
+              <ZoomGestureWrapper
+                documentId={activeDocumentId}
+                data-viewer-framing-content
+                style={{ minHeight: '100%', minWidth: '100%', position: 'relative' }}
+              >
                 <Scroller
                   documentId={activeDocumentId}
                   renderPage={(layout) => (
@@ -300,6 +311,19 @@ export function PdfWorkspace({
                       </div>
                     </PagePointerProvider>
                   )}
+                />
+                <div
+                  aria-hidden="true"
+                  data-viewer-runway
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    width: `calc(100% + ${runway.right}px)`,
+                    height: `calc(100% + ${runway.bottom}px)`,
+                    pointerEvents: 'none',
+                    visibility: 'hidden',
+                  }}
                 />
               </ZoomGestureWrapper>
             </Viewport>

@@ -56,7 +56,16 @@ export function AnnotationList({
     const row = rowRefs.current.get(activationRequest.id);
     const entry = entryRefs.current.get(activationRequest.id);
     if (row && entry) {
-      row.scrollIntoView({ block: 'nearest' });
+      const viewport = listRef.current?.closest<HTMLElement>('.review-list');
+      if (viewport) {
+        const rowBounds = row.getBoundingClientRect();
+        const viewportBounds = viewport.getBoundingClientRect();
+        if (rowBounds.top < viewportBounds.top) {
+          viewport.scrollTop += rowBounds.top - viewportBounds.top;
+        } else if (rowBounds.bottom > viewportBounds.bottom) {
+          viewport.scrollTop += rowBounds.bottom - viewportBounds.bottom;
+        }
+      }
       entry.focus({ preventScroll: true });
     } else {
       listRef.current?.focus({ preventScroll: true });

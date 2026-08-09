@@ -82,6 +82,23 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByLabel('Annotations in document order')).toBeFocused();
   });
 
+  test('keeps the annotations tray open while editing an owned annotation', async ({ page }) => {
+    await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+    await page.getByRole('button', { name: 'Keep without comment' }).click();
+    const annotations = page.getByRole('button', { name: 'Annotations' });
+    await annotations.click();
+
+    await page.getByRole('button', { name: 'Edit highlight on page 1' }).click();
+    const editor = page.getByRole('dialog', { name: 'Edit highlight' });
+    await expect(editor).toBeVisible();
+    await editor.getByRole('textbox', { name: 'Comment (optional)' }).fill('Edited in the open tray.');
+    await editor.getByRole('button', { name: 'Save comment' }).click();
+
+    await expect(editor).toHaveCount(0);
+    await expect(annotations).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByRole('button', { name: /highlight · Page 1 · Edited in the open tray\./u })).toBeVisible();
+  });
+
   test('removes spatial disclosure motion when reduced motion is requested', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.getByRole('button', { name: 'Annotations' }).click();
@@ -243,7 +260,6 @@ test.describe('canonical review workflow', () => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     const markTarget = page.locator('[data-owned-focus-id]').first();
     await expect(markTarget).toHaveCount(1);
-    const before = await canvas.boundingBox();
 
     await markTarget.hover();
     await canvas.hover();
@@ -257,18 +273,21 @@ test.describe('canonical review workflow', () => {
     await page.keyboard.press('Escape');
     await expect(peek).toHaveCount(0);
 
+    const beforeActivation = await canvas.boundingBox();
     await markTarget.click();
     const drawer = page.locator('[data-annotation-drawer]');
     await expect(drawer).toHaveAttribute('data-list-open', 'true');
     const row = page.locator('[data-review-item]').first();
     await expect(row).toHaveAttribute('data-active', 'true');
     await expect(row.getByRole('button', { name: /highlight · Page 1/ })).toBeFocused();
-    expect(await canvas.boundingBox()).toEqual(before);
+    expect(await canvas.boundingBox()).toEqual(beforeActivation);
 
     const existing = page.getByRole('region', { name: 'Existing PDF annotations' });
     await expect(existing.getByRole('button', { name: /Highlight · Page 1 · Source comment/ })).toBeVisible();
     await expect(existing.getByRole('button', { name: /^Edit/ })).toHaveCount(0);
     await expect(existing.getByRole('button', { name: /^Delete/ })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(markTarget).toBeFocused();
   });
 
   test('shows an offscreen direction cue without scrolling until explicit mark activation', async ({ page }) => {

@@ -8,6 +8,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
+  type CSSProperties,
 } from 'react';
 
 import {
@@ -28,6 +29,7 @@ import type { ExistingAnnotation, ExistingAnnotationsDiscovery } from '../pdf/ex
 import { reliableSelection, type SelectionUpdate } from '../pdf/selection-state.js';
 import type { ViewerControls, ViewerControlsSnapshot } from '../pdf/viewer-controls.js';
 import { unavailableViewerControls } from '../pdf/viewer-controls.js';
+import type { ViewerFramingControls, ViewerPosition } from '../pdf/viewer-framing.js';
 import { AnnotationList } from '../review/AnnotationList.js';
 import { AnnotationPeek } from '../review/AnnotationPeek.js';
 import { CommentComposer } from '../review/CommentComposer.js';
@@ -41,6 +43,10 @@ import {
   type ProofreadInputIntent,
 } from '../review/input-controller.js';
 import { reviewActionForKey } from '../review/review-actions.js';
+import {
+  useAnnotationTrayFraming,
+  type AnnotationOpenRequest,
+} from '../review/use-annotation-tray-framing.js';
 import {
   INITIAL_REVIEW_SURFACE_STATE,
   reduceReviewSurface,
@@ -97,6 +103,7 @@ export interface ReviewShellProps {
   onActiveItemChange?(id: string | undefined): void;
   viewerControls?: ViewerControls;
   viewerState?: ViewerControlsSnapshot;
+  viewerFraming?: ViewerFramingControls;
   finishSlot?: ReactNode;
   finishConfirmationActive?: boolean;
   onFinishReview?(): void | Promise<void>;
@@ -119,6 +126,8 @@ type OutsidePointerGesture =
       readonly x: number;
       readonly y: number;
       readonly target: EventTarget;
+      readonly scroll: ViewerPosition | null;
+      movedBeyondSlop: boolean;
     }
   | { readonly phase: 'settled'; readonly dismiss: boolean };
 
@@ -151,12 +160,21 @@ export function ReviewShell(props: ReviewShellProps) {
   const draftTriggerRef = useRef<HTMLElement>(null);
   const editTriggerRef = useRef<HTMLButtonElement>(null);
   const surfaceTriggersRef = useRef(new Map<ReviewBaseSurface, HTMLElement>());
-  const annotationDrawerRef = useRef<HTMLElement>(null);
   const outsidePointerRef = useRef<OutsidePointerGesture | undefined>(undefined);
+  const annotationRequestTokenRef = useRef(0);
+  const [annotationRequest, setAnnotationRequest] = useState<AnnotationOpenRequest>({
+    kind: 'reading',
+    token: 0,
+  });
   const listOpen = surface.baseSurface === 'annotations';
   const selectionAnchor = reliableSelection(props.selectionUpdate);
   const lastPlacedPageNoteToken = useRef<number | undefined>(undefined);
   const existingAnnotations = props.existingAnnotations ?? { status: 'loading', generation: 0 };
+  const trayFraming = useAnnotationTrayFraming({
+    listOpen,
+    ...(props.viewerFraming === undefined ? {} : { controls: props.viewerFraming }),
+    request: annotationRequest,
+  });
 
   const dismissPageNoteAuthority = () => {
     if (props.keyboardPageNoteActive) props.onCancelKeyboardPageNote?.();
@@ -193,9 +211,16 @@ export function ReviewShell(props: ReviewShellProps) {
     setListActivation(request);
     props.onActiveItemChange?.(request.id);
     setPeekItemId(undefined);
-    transitionBaseSurface('annotations');
     const item = props.state.items.find(({ id }) => id === request.id);
-    if (item) props.onNavigate?.(item);
+    setAnnotationRequest(item
+      ? {
+          kind: 'mark',
+          reviewId: item.id,
+          pageIndex: item.pageIndex,
+          token: ++annotationRequestTokenRef.current,
+        }
+      : { kind: 'reading', token: ++annotationRequestTokenRef.current });
+    transitionBaseSurface('annotations');
   }, [props.activationRequest?.id, props.activationRequest?.token]);
 
   const rememberSurfaceTrigger = (surfaceName: ReviewBaseSurface) => {
@@ -205,11 +230,14 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const openBase = (surfaceName: ReviewBaseSurface) => {
     rememberSurfaceTrigger(surfaceName);
+    if (surfaceName === 'annotations' && surface.baseSurface !== 'annotations') {
+      setAnnotationRequest({ kind: 'reading', token: ++annotationRequestTokenRef.current });
+    }
     transitionBaseSurface(surface.baseSurface === surfaceName ? 'reading' : surfaceName);
   };
   const restoreSurfaceTrigger = (surfaceName: ReviewBaseSurface) => {
     const trigger = surfaceTriggersRef.current.get(surfaceName);
-    requestAnimationFrame(() => trigger?.focus());
+    requestAnimationFrame(() => trigger?.focus({ preventScroll: true }));
   };
 
   if (props.state.revision >= acknowledgedRef.current.revision) acknowledgedRef.current = props.state;
@@ -285,6 +313,14 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const editable = isEditableTarget(event.target);
+    if (listOpen && !editable && !isAnnotationDrawerOrChrome(event.target)) {
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        markFramingUserIntent({ left: true });
+      }
+      if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
+        markFramingUserIntent({ top: true });
+      }
+    }
     if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
       if (peekItemId !== undefined) {
         event.preventDefault();
@@ -440,27 +476,50 @@ export function ReviewShell(props: ReviewShellProps) {
     transitionBaseSurface('reading');
     restoreSurfaceTrigger('annotations');
   };
+  const markFramingUserIntent = trayFraming.markUserIntent;
   const isAnnotationDrawerOrChrome = (target: EventTarget | null) => (
-    (target instanceof Node && annotationDrawerRef.current?.contains(target) === true)
-    || (target instanceof Element && target.closest('[data-review-chrome]') !== null)
+    (target instanceof Node && trayFraming.drawerRef.current?.contains(target) === true)
+    || (target instanceof Element && target.closest('[data-review-chrome], [data-review-nested-host]') !== null)
   );
 
   return (
     <section
       className="review-shell"
-      data-breakpoint="1024"
       onBeforeInputCapture={beforeInput}
       onKeyDownCapture={keyDown}
       onFocusCapture={(event) => inputController.focusChanged(isEditableTarget(event.target))}
       onCompositionStartCapture={(event) => inputController.compositionStart(event.target)}
       onCompositionEndCapture={compositionEnd}
+      onWheelCapture={(event) => {
+        if (!listOpen || isAnnotationDrawerOrChrome(event.target)) return;
+        markFramingUserIntent({
+          left: event.deltaX !== 0 || (event.shiftKey && event.deltaY !== 0),
+          top: event.deltaY !== 0 && !event.shiftKey,
+        });
+      }}
       onPointerDownCapture={(event) => {
         outsidePointerRef.current = listOpen
           && event.isPrimary
           && event.button === 0
           && !isAnnotationDrawerOrChrome(event.target)
-          ? { phase: 'tracking', id: event.pointerId, x: event.clientX, y: event.clientY, target: event.target }
+          ? {
+              phase: 'tracking',
+              id: event.pointerId,
+              x: event.clientX,
+              y: event.clientY,
+              target: event.target,
+              scroll: trayFraming.currentScroll(),
+              movedBeyondSlop: false,
+            }
           : undefined;
+      }}
+      onPointerMoveCapture={(event) => {
+        const start = outsidePointerRef.current;
+        if (start?.phase !== 'tracking' || start.id !== event.pointerId) return;
+        const deltaX = event.clientX - start.x;
+        const deltaY = event.clientY - start.y;
+        if (Math.hypot(deltaX, deltaY) <= OUTSIDE_TAP_SLOP_PX) return;
+        start.movedBeyondSlop = true;
       }}
       onPointerUpCapture={(event) => {
         const start = outsidePointerRef.current;
@@ -472,8 +531,17 @@ export function ReviewShell(props: ReviewShellProps) {
           outsidePointerRef.current = undefined;
           return;
         }
-        const dismiss = Math.hypot(event.clientX - start.x, event.clientY - start.y) <= OUTSIDE_TAP_SLOP_PX;
+        const currentScroll = trayFraming.currentScroll();
+        const scrollAxes = start.scroll && currentScroll ? {
+          left: Math.abs(currentScroll.left - start.scroll.left) > 1,
+          top: Math.abs(currentScroll.top - start.scroll.top) > 1,
+        } : { left: false, top: false };
+        const scrollChanged = scrollAxes.left || scrollAxes.top;
+        const dismiss = !start.movedBeyondSlop
+          && !scrollChanged
+          && Math.hypot(event.clientX - start.x, event.clientY - start.y) <= OUTSIDE_TAP_SLOP_PX;
         if (!dismiss) {
+          if (scrollChanged) markFramingUserIntent(scrollAxes);
           outsidePointerRef.current = { phase: 'settled', dismiss: false };
           return;
         }
@@ -492,6 +560,17 @@ export function ReviewShell(props: ReviewShellProps) {
       }}
       onPointerCancelCapture={() => { outsidePointerRef.current = undefined; }}
       onClickCapture={(event) => {
+        if (event.target instanceof Element) {
+          const markTrigger = event.target.closest<HTMLElement>('[data-owned-focus-id]');
+          if (markTrigger) surfaceTriggersRef.current.set('annotations', markTrigger);
+        }
+        if (
+          listOpen
+          && event.target instanceof Element
+          && event.target.closest('.review-chrome__viewer-controls') !== null
+        ) {
+          markFramingUserIntent();
+        }
         const keyboardMarkActivation = event.detail === 0
           && event.target instanceof Element
           && event.target.closest('[data-owned-focus-id]') !== null;
@@ -524,7 +603,15 @@ export function ReviewShell(props: ReviewShellProps) {
         onFinish={() => openBase('finish')}
       />
       <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
-      <div className="review-layout" data-review-stage>
+      <div
+        ref={trayFraming.stageRef}
+        className="review-layout"
+        data-review-stage
+        data-annotation-presentation={trayFraming.presentation}
+        style={{
+          '--annotation-side-width': `${trayFraming.sideWidth}px`,
+        } as CSSProperties}
+      >
         <div className="review-document">{props.children}</div>
         <div className="review-contextual-host" data-review-contextual-host>
           {surface.baseSurface === 'reading' && selectionAnchor && props.selectionPlacement ? (
@@ -580,10 +667,18 @@ export function ReviewShell(props: ReviewShellProps) {
                   setPeekItemId(undefined);
                 }}
                 onActivate={() => {
+                  const markTrigger = Array.from(document.querySelectorAll<HTMLElement>('[data-owned-focus-id]'))
+                    .find((element) => element.dataset.ownedFocusId === item.id);
+                  if (markTrigger) surfaceTriggersRef.current.set('annotations', markTrigger);
                   setActiveItemId(item.id);
                   setListActivation({ id: item.id, token: ++localActivationToken.current });
                   props.onActiveItemChange?.(item.id);
-                  props.onNavigate?.(item);
+                  setAnnotationRequest({
+                    kind: 'mark',
+                    reviewId: item.id,
+                    pageIndex: item.pageIndex,
+                    token: ++annotationRequestTokenRef.current,
+                  });
                   transitionBaseSurface('annotations');
                 }}
               />
@@ -592,10 +687,11 @@ export function ReviewShell(props: ReviewShellProps) {
         </div>
         <div className="review-drawer-host" data-review-drawer-host>
           <aside
-            ref={annotationDrawerRef}
+            ref={trayFraming.drawerRef}
             id="review-annotation-list"
             className="review-list"
             data-annotation-drawer
+            data-annotation-presentation={trayFraming.presentation}
             data-list-open={listOpen ? 'true' : 'false'}
             aria-label="All annotations"
             aria-hidden={!listOpen}
@@ -612,6 +708,7 @@ export function ReviewShell(props: ReviewShellProps) {
                 ? {}
                 : { onCorrespondenceChange: props.onItemCorrespondenceChange })}
               onNavigate={(item) => {
+                markFramingUserIntent();
                 setActiveItemId(item.id);
                 props.onActiveItemChange?.(item.id);
                 props.onNavigate?.(item);
@@ -644,7 +741,7 @@ export function ReviewShell(props: ReviewShellProps) {
                 <ol className="existing-annotations__list">
                   {existingAnnotations.items.map((annotation) => (
                     <li key={`${annotation.pageIndex}:${annotation.id}`} data-existing-annotation={annotation.id}>
-                      <button className="existing-annotation__content" type="button" aria-label={`${annotation.subtype} · Page ${annotation.pageIndex + 1}${annotation.contents ? ` · ${annotation.contents}` : ''}`} onClick={() => props.onNavigateExisting?.(annotation)}>
+                      <button className="existing-annotation__content" type="button" aria-label={`${annotation.subtype} · Page ${annotation.pageIndex + 1}${annotation.contents ? ` · ${annotation.contents}` : ''}`} onClick={() => { markFramingUserIntent(); props.onNavigateExisting?.(annotation); }}>
                         <span className="annotation-item__meta"><strong>{annotation.subtype}</strong><span>Page {annotation.pageIndex + 1}</span></span>
                         {annotation.contents ? <span className="annotation-item__excerpt">{annotation.contents}</span> : null}
                       </button>

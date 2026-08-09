@@ -15,6 +15,8 @@ import {
 } from '../pdf/existing-annotations.js';
 import { createLocalPdfiumViewer, type ViewerAssetUrls } from '../pdf/embedpdf-viewer.js';
 import { PdfWorkspace, type PageContextMenuRequest } from '../pdf/PdfWorkspace.js';
+import { createViewerFramingControls } from '../pdf/viewer-framing-adapter.js';
+import type { ViewerFramingControls, ViewerRunway } from '../pdf/viewer-framing.js';
 import { combinePageRotation } from '../pdf/owned-overlay.js';
 import {
   OwnedMarkPointerGesture,
@@ -93,6 +95,7 @@ export interface AppProps {
   pageSemanticReliable?: boolean;
   selectionSemanticReliable?: boolean;
   onViewerInitialized?: (registry: PluginRegistry) => Promise<void>;
+  onViewerFramingInitialized?: (controls: ViewerFramingControls) => void;
   onSelectionUpdate?: (update: SelectionUpdate) => void;
   documentTitle?: string;
   toolError?: string | null;
@@ -113,6 +116,7 @@ export function App({
   pageSemanticReliable,
   selectionSemanticReliable,
   onViewerInitialized,
+  onViewerFramingInitialized,
   onSelectionUpdate,
   documentTitle = 'Local PDF',
   toolError = null,
@@ -136,6 +140,9 @@ export function App({
   const pageReadGeneration = useRef(0);
   const selectionReads = useRef(new SelectionReadAuthority());
   const registryRef = useRef<PluginRegistry | null>(null);
+  const framingControlsRef = useRef<ViewerFramingControls | null>(null);
+  const workspaceElementRef = useRef<HTMLDivElement | null>(null);
+  const [viewerRunway, setViewerRunway] = useState<ViewerRunway>({ right: 0, bottom: 0 });
   const activeDocumentIdRef = useRef<string | null>(null);
   const viewportGenerationRef = useRef(0);
   const caretReadGeneration = useRef(0);
@@ -201,9 +208,19 @@ export function App({
   }, []);
   useEffect(() => () => {
     clearSubscriptions();
+    framingControlsRef.current?.dispose();
+    framingControlsRef.current = null;
     selectionReads.current.invalidate();
     caretReadGeneration.current += 1;
   }, [clearSubscriptions, viewer]);
+  const updateViewerRunway = useCallback((runway: ViewerRunway) => {
+    setViewerRunway((current) => current.right === runway.right && current.bottom === runway.bottom
+      ? current
+      : runway);
+  }, []);
+  const setWorkspaceElement = useCallback((element: HTMLDivElement | null) => {
+    workspaceElementRef.current = element;
+  }, []);
 
   const publishKeyboardCursor = useCallback((point: ViewerPagePoint | null) => {
     keyboardCursorRef.current = point;
@@ -242,6 +259,16 @@ export function App({
     registryRef.current = registry;
     clearSubscriptions();
     onSelectionUpdate?.(selectionReads.current.invalidate());
+    const installViewerFraming = () => {
+      framingControlsRef.current?.dispose();
+      const framingControls = createViewerFramingControls({
+        registry,
+        root: () => workspaceElementRef.current,
+        updateRunway: updateViewerRunway,
+      });
+      framingControlsRef.current = framingControls;
+      onViewerFramingInitialized?.(framingControls);
+    };
     const interaction = registry
       .getPlugin<InteractionManagerPlugin>(InteractionManagerPlugin.id)
       ?.provides();
@@ -285,6 +312,7 @@ export function App({
       activeDocumentIdRef.current = documentId;
       const document = registry.getStore().getState().core.documents[documentId]?.document;
       if (!document) return;
+      installViewerFraming();
       currentInventoryDocument.current = { id: documentId, document };
       if (interaction) {
         for (const page of document.pages) {
@@ -495,7 +523,7 @@ export function App({
     await onViewerInitialized?.(registry);
     const inventoryDocument = currentInventoryDocument.current;
     if (inventoryDocument) discoverExistingAnnotations(inventoryDocument.id, inventoryDocument.document);
-  }, [clearSubscriptions, discoverExistingAnnotations, emit, initializeKeyboardCursor, onSelectionUpdate, onViewerInitialized, publishKeyboardCursor]);
+  }, [clearSubscriptions, discoverExistingAnnotations, emit, initializeKeyboardCursor, onSelectionUpdate, onViewerFramingInitialized, onViewerInitialized, publishKeyboardCursor, updateViewerRunway]);
 
   const effectivePageReliability = pageSemanticReliable ?? detectedPageReliable;
   const effectiveSelectionReliability =
@@ -583,6 +611,8 @@ export function App({
       {...(activeOwnedAnnotationId === undefined ? {} : { activeOwnedAnnotationId })}
       {...(correspondingOwnedAnnotationId === undefined ? {} : { correspondingOwnedAnnotationId })}
       onOwnedMarkInteraction={(value) => emit({ type: 'owned-mark', value })}
+      runway={viewerRunway}
+      onWorkspaceElement={setWorkspaceElement}
     />
   );
   const workspaceWithStatus = (
