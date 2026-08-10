@@ -1,0 +1,94 @@
+import type { LoadDocumentUrlOptions } from '@embedpdf/plugin-document-manager';
+import { describe, expect, it, vi } from 'vitest';
+
+import {
+  MAIN_PDF_DOCUMENT_ID,
+  REFERENCE_PDF_DOCUMENT_ID,
+  buildReferenceDocumentOptions,
+  createReferenceDocumentController,
+} from '../src/pdf/reference-document.js';
+
+function resolvedTask<T>(value: T) {
+  return { toPromise: () => Promise.resolve(value) };
+}
+
+describe('reference document scope', () => {
+  it('opens once with a fresh safe non-active clone and retries the stable failed id', async () => {
+    let failed = false;
+    const loadTask = resolvedTask({ id: REFERENCE_PDF_DOCUMENT_ID });
+    const openDocumentUrl = vi.fn((options: LoadDocumentUrlOptions) => resolvedTask({
+      documentId: options.documentId!, task: loadTask,
+    }));
+    const retryDocument = vi.fn(() => resolvedTask({
+      documentId: REFERENCE_PDF_DOCUMENT_ID, task: loadTask,
+    }));
+    const closeDocument = vi.fn(() => resolvedTask(undefined));
+    const getActiveDocumentId = vi.fn(() => MAIN_PDF_DOCUMENT_ID);
+    const controller = createReferenceDocumentController({
+      documentManager: {
+        openDocumentUrl, retryDocument, closeDocument, getActiveDocumentId,
+        getDocumentState: () => failed ? { status: 'error' } : null,
+      },
+      assetUrls: {
+        pdfiumWasm: '/pdfium.wasm', documentUrl: '/document.pdf',
+        requestHeaders: { Authorization: 'Bearer memory-only-secret' },
+      },
+      origin: 'http://127.0.0.1:4173',
+      documentGeneration: 9,
+    });
+
+    const [first, repeated] = await Promise.all([controller.open(), controller.open()]);
+    expect(first).toBe(true);
+    expect(repeated).toBe(true);
+    expect(openDocumentUrl).toHaveBeenCalledOnce();
+    const options = openDocumentUrl.mock.calls[0]![0];
+    expect(options).toMatchObject({
+      url: 'http://127.0.0.1:4173/document.pdf',
+      documentId: REFERENCE_PDF_DOCUMENT_ID,
+      autoActivate: false,
+      requestOptions: {
+        credentials: 'omit', headers: { Authorization: 'Bearer memory-only-secret' },
+      },
+    });
+    const fresh = buildReferenceDocumentOptions({
+      pdfiumWasm: '/pdfium.wasm', documentUrl: '/document.pdf',
+      requestHeaders: { Authorization: 'Bearer memory-only-secret' },
+    }, 'http://127.0.0.1:4173');
+    expect(options).not.toBe(fresh);
+    expect(options.requestOptions?.headers).not.toBe(fresh.requestOptions?.headers);
+    expect(getActiveDocumentId()).toBe(MAIN_PDF_DOCUMENT_ID);
+
+    failed = true;
+    expect(await controller.retry()).toBe(true);
+    expect(retryDocument).toHaveBeenCalledWith(REFERENCE_PDF_DOCUMENT_ID);
+    await controller.close();
+    expect(closeDocument).toHaveBeenCalledWith(REFERENCE_PDF_DOCUMENT_ID);
+  });
+
+  it('invalidates stale in-flight opens without exposing raw failures', async () => {
+    let resolveLoad: ((document: { id: string }) => void) | undefined;
+    const loading = new Promise<{ id: string }>((resolve) => { resolveLoad = resolve; });
+    const closeDocument = vi.fn(() => resolvedTask(undefined));
+    const controller = createReferenceDocumentController({
+      documentManager: {
+        openDocumentUrl: vi.fn(() => resolvedTask({
+          documentId: REFERENCE_PDF_DOCUMENT_ID,
+          task: { toPromise: () => loading },
+        })),
+        retryDocument: vi.fn(), closeDocument,
+        getActiveDocumentId: () => MAIN_PDF_DOCUMENT_ID,
+        getDocumentState: () => ({ status: 'loading' }),
+      },
+      assetUrls: { pdfiumWasm: '/pdfium.wasm', documentUrl: '/document.pdf' },
+      origin: 'http://127.0.0.1:4173', documentGeneration: 1,
+    });
+
+    const open = controller.open();
+    const reset = controller.replaceDocument(2);
+    resolveLoad?.({ id: REFERENCE_PDF_DOCUMENT_ID });
+    expect(await open).toBe(false);
+    await reset;
+    expect(closeDocument).toHaveBeenCalledWith(REFERENCE_PDF_DOCUMENT_ID);
+    expect(JSON.stringify(controller.snapshot())).not.toMatch(/credentials|requestOptions|error|secret/iu);
+  });
+});

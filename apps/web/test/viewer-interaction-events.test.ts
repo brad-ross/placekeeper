@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { combinePageRotation } from '../src/pdf/owned-overlay.js';
 import {
+  fixedViewerClientRect,
   normalizePageClientPoint,
   recordViewerPointerButton,
   viewerPointerButton,
@@ -28,5 +29,18 @@ describe('viewer page interaction coordinates', () => {
 
     expect(viewerPointerButton({ currentTarget: pageTarget })).toBe(2);
     expect(viewerPointerButton({ currentTarget: null })).toBeUndefined();
+  });
+
+  it('copies a stable client rect instead of retaining a live DOMRect', () => {
+    const rect = {
+      left: 10, top: 20, right: 40, bottom: 60, width: 30, height: 40,
+    };
+    const fixed = fixedViewerClientRect(rect);
+    rect.left = 999;
+
+    expect(fixed).toEqual({
+      left: 10, top: 20, right: 40, bottom: 60, width: 30, height: 40,
+    });
+    expect(Object.isFrozen(fixed)).toBe(true);
   });
 });

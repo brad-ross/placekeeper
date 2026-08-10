@@ -3,11 +3,40 @@ import type { Position, Rotation, Size } from '@embedpdf/models';
 import type { CaretAnchor, PdfSpaceRect } from './selection-anchor.js';
 import type { ReliabilityDiagnostic } from './text-reliability.js';
 import { restorePagePoint } from './selection-anchor.js';
+import type { PdfNavigationMetadata } from './pdf-navigation-metadata.js';
+import type { PdfNavigationTarget } from './pdf-navigation-target.js';
 
 export interface ViewerClientPlacement {
   readonly left: number;
   readonly top: number;
   readonly suggestTop?: boolean;
+}
+
+export interface ViewerFixedClientRect {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export type ViewerPdfLinkSourceScope = 'main' | 'reference';
+
+export interface ViewerPdfLinkInvocation {
+  readonly sourceScope: ViewerPdfLinkSourceScope;
+  readonly sourcePageIndex: number;
+  readonly target: PdfNavigationTarget;
+  readonly metadata: PdfNavigationMetadata;
+  /** Transient focus return target. It must never enter durable application state. */
+  readonly opener: HTMLButtonElement;
+  /** Fixed activation-time geometry for the U5 chooser placement seam. */
+  readonly clientRect: ViewerFixedClientRect;
+}
+
+export interface ViewerPdfLinkUnavailable {
+  readonly sourceScope: ViewerPdfLinkSourceScope;
+  readonly sourcePageIndex: number;
 }
 
 export interface ViewerPagePoint {
@@ -51,7 +80,9 @@ export type ViewerInteractionEvent =
   | { readonly type: 'page-menu'; readonly value: ViewerPageMenuInvocation | null }
   | { readonly type: 'page-note-cursor'; readonly value: ViewerPagePoint | null }
   | { readonly type: 'page-note-commit'; readonly value: ViewerPagePoint }
-  | { readonly type: 'owned-mark'; readonly value: ViewerOwnedMarkInteraction };
+  | { readonly type: 'owned-mark'; readonly value: ViewerOwnedMarkInteraction }
+  | { readonly type: 'pdf-link'; readonly value: ViewerPdfLinkInvocation }
+  | { readonly type: 'pdf-link-unavailable'; readonly value: ViewerPdfLinkUnavailable };
 
 export type ViewerInteractionListener = (event: ViewerInteractionEvent) => void;
 
@@ -60,6 +91,18 @@ export type ViewerInteractionListener = (event: ViewerInteractionEvent) => void;
 // still distinguish primary activation from a secondary-button context gesture.
 const pointerButtonByTarget = new WeakMap<object, number>();
 export const VIEWER_POINTER_BUTTON_NONE = -1;
+
+export function fixedViewerClientRect(rect: Pick<DOMRectReadOnly,
+  'left' | 'top' | 'right' | 'bottom' | 'width' | 'height'>): ViewerFixedClientRect {
+  return Object.freeze({
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+    width: rect.width,
+    height: rect.height,
+  });
+}
 
 export function dispatchNeutralViewerPointerUp(target: EventTarget, event: {
   readonly altKey: boolean;
@@ -137,6 +180,8 @@ export function isUnsafePageContextTarget(target: EventTarget | null): boolean {
     '[data-owned-mark]',
     '[data-owned-annotation-layer]',
     '[data-source-annotation-layer]',
+    '[data-source-link-layer]',
+    '[data-pdf-link-control]',
     '[data-review-contextual-ui]',
     '[data-review-editor]',
     'input',
