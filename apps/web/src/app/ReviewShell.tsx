@@ -681,7 +681,7 @@ export function ReviewShell(props: ReviewShellProps) {
       >
         <div className="review-document">{props.children}</div>
         <div className="review-contextual-host" data-review-contextual-host>
-          {surface.baseSurface === 'reading' && selectionActionsAvailable && props.selectionPlacement ? (
+          {surface.baseSurface !== 'finish' && selectionActionsAvailable && props.selectionPlacement ? (
             <ContextActionPalette
               kind="selection"
               placement={props.selectionPlacement}

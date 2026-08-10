@@ -78,6 +78,23 @@ test.describe('canonical review workflow', () => {
     await expect(selectionActions).toHaveCount(0);
   });
 
+  test('keeps selection actions visible while the Annotation Tray is toggled', async ({ page }) => {
+    const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+    const annotations = page.getByRole('button', { name: 'Annotations' });
+
+    await expect(selectionActions).toBeVisible();
+    await annotations.click();
+    await expect(annotations).toHaveAttribute('aria-expanded', 'true');
+    await expect(selectionActions).toBeVisible();
+
+    await annotations.click();
+    await expect(annotations).toHaveAttribute('aria-expanded', 'false');
+    await expect(selectionActions).toBeVisible();
+
+    await page.getByRole('button', { name: 'Clear anchors' }).click();
+    await expect(selectionActions).toHaveCount(0);
+  });
+
   test('keeps selection actions after rejection and for a newer selection', async ({ page }) => {
     const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
 
