@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -13,6 +15,11 @@ const state = createReviewState({
   sessionId: 'layout-test',
   source: { fileId: 'file', digest: 'a'.repeat(64), byteLength: 10 },
 });
+
+const responsiveStyles = readFileSync(
+  new URL('../src/app/review-layout-responsive.css', import.meta.url),
+  'utf8',
+);
 
 const ownedAnnotation: ReviewItem = {
   id: 'owned-highlight',
@@ -259,5 +266,18 @@ describe('review shell layout and accessibility contract', () => {
     expect(validPageNumber('1.5', 12)).toBeUndefined();
     expect(validPageNumber('1e1', 12)).toBeUndefined();
     expect(validPageNumber('', 12)).toBeUndefined();
+  });
+
+  it('matches the page editor to coarse-pointer control height', () => {
+    const coarsePointerRules = responsiveStyles.match(
+      /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*?)\n\}/u,
+    )?.[1];
+
+    expect(coarsePointerRules).toMatch(
+      /\.review-chrome__page-editor \{\s*min-height: var\(--review-control-touch\);\s*\}/u,
+    );
+    expect(coarsePointerRules).toMatch(
+      /\.review-chrome__page-input \{\s*height: var\(--review-control-touch\);\s*\}/u,
+    );
   });
 });

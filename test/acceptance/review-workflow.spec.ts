@@ -122,6 +122,10 @@ test.describe('canonical review workflow', () => {
       'data-viewer-page-commands',
       'go:8',
     );
+    await expect(page.locator('[data-viewer-page-requests]')).toHaveAttribute(
+      'data-viewer-page-requests',
+      '8',
+    );
 
     await page.getByRole('button', {
       name: 'Current page 8 of 12. Enter a page number',
@@ -137,6 +141,10 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-viewer-page-commands]')).toHaveAttribute(
       'data-viewer-page-commands',
       'go:8,go:5',
+    );
+    await expect(page.locator('[data-viewer-page-requests]')).toHaveAttribute(
+      'data-viewer-page-requests',
+      '8,5',
     );
   });
 
@@ -156,6 +164,10 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-annotation-drawer]')).toBeVisible();
     await expect(page.locator('[data-viewer-page-commands]')).toHaveAttribute(
       'data-viewer-page-commands',
+      '',
+    );
+    await expect(page.locator('[data-viewer-page-requests]')).toHaveAttribute(
+      'data-viewer-page-requests',
       '',
     );
   });
@@ -180,6 +192,10 @@ test.describe('canonical review workflow', () => {
       'data-viewer-page-commands',
       '',
     );
+    await expect(page.locator('[data-viewer-page-requests]')).toHaveAttribute(
+      'data-viewer-page-requests',
+      '',
+    );
 
     await pageNumber.fill('1.5');
     await expect(pageNumber).toHaveAttribute('aria-invalid', 'false');
@@ -191,6 +207,10 @@ test.describe('canonical review workflow', () => {
       'data-viewer-page-commands',
       '',
     );
+    await expect(page.locator('[data-viewer-page-requests]')).toHaveAttribute(
+      'data-viewer-page-requests',
+      '',
+    );
 
     await pageNumber.fill('');
     await expect(pageNumber).toHaveAttribute('aria-invalid', 'false');
@@ -200,6 +220,10 @@ test.describe('canonical review workflow', () => {
     await expect(currentPage).toBeVisible();
     await expect(page.locator('[data-viewer-page-commands]')).toHaveAttribute(
       'data-viewer-page-commands',
+      '',
+    );
+    await expect(page.locator('[data-viewer-page-requests]')).toHaveAttribute(
+      'data-viewer-page-requests',
       '',
     );
   });
@@ -231,13 +255,18 @@ test.describe('canonical review workflow', () => {
       'data-viewer-page-commands',
       'next:4',
     );
+    await expect(page.locator('[data-viewer-page-requests]')).toHaveAttribute(
+      'data-viewer-page-requests',
+      '',
+    );
 
     await page.getByRole('button', {
       name: 'Current page 4 of 12. Enter a page number',
     }).click();
     await pageNumber.fill('11');
     const previousPage = page.getByRole('button', { name: 'Previous page' });
-    await previousPage.click();
+    await expect(pageNumber).toBeFocused();
+    await previousPage.evaluate((button: HTMLButtonElement) => button.click());
 
     await expect(previousPage).toBeFocused();
     await expect(page.getByRole('button', {
@@ -246,6 +275,31 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-viewer-page-commands]')).toHaveAttribute(
       'data-viewer-page-commands',
       'next:4,previous:3',
+    );
+    await expect(page.locator('[data-viewer-page-requests]')).toHaveAttribute(
+      'data-viewer-page-requests',
+      '',
+    );
+
+    await page.getByRole('button', {
+      name: 'Current page 3 of 12. Enter a page number',
+    }).click();
+    await pageNumber.fill('10');
+    await nextPage.dispatchEvent('pointerdown', { button: 0, pointerId: 1 });
+    await pageNumber.evaluate((input: HTMLInputElement) => input.blur());
+    await nextPage.evaluate((button: HTMLButtonElement) => button.click());
+
+    await expect(nextPage).toBeFocused();
+    await expect(page.getByRole('button', {
+      name: 'Current page 4 of 12. Enter a page number',
+    })).toBeVisible();
+    await expect(page.locator('[data-viewer-page-commands]')).toHaveAttribute(
+      'data-viewer-page-commands',
+      'next:4,previous:3,next:4',
+    );
+    await expect(page.locator('[data-viewer-page-requests]')).toHaveAttribute(
+      'data-viewer-page-requests',
+      '',
     );
   });
 

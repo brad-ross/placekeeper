@@ -49,6 +49,7 @@ export function ReviewChrome({
   const pageTriggerRef = useRef<HTMLButtonElement>(null);
   const pageInputRef = useRef<HTMLInputElement>(null);
   const restorePageTriggerFocus = useRef(false);
+  const pageStepIntent = useRef(false);
   const pageErrorId = useId();
   const pageUnavailableId = 'viewer-page-controls-readiness';
   const zoomUnavailableId = 'viewer-zoom-controls-readiness';
@@ -93,6 +94,18 @@ export function ReviewChrome({
     goToDraftPage();
     closePageEdit(false);
   };
+  const preparePageStep = () => {
+    pageStepIntent.current = true;
+  };
+  const clearPageStepIntent = () => {
+    pageStepIntent.current = false;
+  };
+  const runPageStep = (button: HTMLButtonElement, step: () => void) => {
+    clearPageStepIntent();
+    button.focus({ preventScroll: true });
+    if (editingPage) closePageEdit(false);
+    step();
+  };
 
   return (
     <header className="review-chrome" data-review-chrome>
@@ -104,7 +117,7 @@ export function ReviewChrome({
         <span className="review-chrome__saved" data-review-saved-status>{savedLabel}</span>
       </div>
       <div className="review-chrome__viewer-controls" role="group" aria-label="PDF navigation and zoom">
-        <button type="button" className="review-chrome__icon-control" data-review-page-step="previous" aria-label="Previous page" aria-describedby={pageUnavailable} disabled={!viewerState.pageReady || viewerState.currentPage <= 1} onClick={() => controls?.previousPage()}><ReviewIcon name="chevron-left" /></button>
+        <button type="button" className="review-chrome__icon-control" data-review-page-step="previous" aria-label="Previous page" aria-describedby={pageUnavailable} disabled={!viewerState.pageReady || viewerState.currentPage <= 1} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.previousPage())}><ReviewIcon name="chevron-left" /></button>
         {viewerState.pageReady ? (
           <span className="review-chrome__page-control" data-review-stat>
             {editingPage ? (
@@ -131,8 +144,12 @@ export function ReviewChrome({
                       const pageStep = event.relatedTarget instanceof Element
                         ? event.relatedTarget.closest('[data-review-page-step]')
                         : null;
-                      if (pageStep) closePageEdit(false);
-                      else submitPageEditOnBlur();
+                      if (pageStepIntent.current || pageStep) {
+                        clearPageStepIntent();
+                        closePageEdit(false);
+                      } else {
+                        submitPageEditOnBlur();
+                      }
                     }}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
@@ -169,7 +186,7 @@ export function ReviewChrome({
         ) : (
           <span className="review-chrome__stat" data-review-stat aria-label="Current page">— / —</span>
         )}
-        <button type="button" className="review-chrome__icon-control" data-review-page-step="next" aria-label="Next page" aria-describedby={pageUnavailable} disabled={!viewerState.pageReady || viewerState.currentPage >= viewerState.totalPages} onClick={() => controls?.nextPage()}><ReviewIcon name="chevron-right" /></button>
+        <button type="button" className="review-chrome__icon-control" data-review-page-step="next" aria-label="Next page" aria-describedby={pageUnavailable} disabled={!viewerState.pageReady || viewerState.currentPage >= viewerState.totalPages} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.nextPage())}><ReviewIcon name="chevron-right" /></button>
         <button type="button" className="review-chrome__icon-control" aria-label="Zoom out" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onClick={() => controls?.zoomOut()}><ReviewIcon name="minus" /></button>
         <span className="review-chrome__stat" data-review-stat aria-label="Zoom level">{viewerState.zoomReady ? `${viewerState.zoomPercent}%` : '—%'}</span>
         <button type="button" className="review-chrome__icon-control" aria-label="Zoom in" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onClick={() => controls?.zoomIn()}><ReviewIcon name="plus" /></button>

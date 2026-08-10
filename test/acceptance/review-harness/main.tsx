@@ -38,12 +38,17 @@ const caret: CaretAnchor = {
 
 interface HarnessViewerControls extends ViewerControls {
   readonly pageCommands: string[];
+  readonly directPageRequests: number[];
+  pageRequestsSnapshot(): string;
+  subscribePageRequests(listener: () => void): () => void;
   makePageControlsUnavailable(): void;
 }
 
 function createHarnessViewerControls(): HarnessViewerControls {
   const listeners = new Set<ViewerInteractionListener>();
+  const pageRequestListeners = new Set<() => void>();
   const pageCommands: string[] = [];
+  const directPageRequests: number[] = [];
   let state: ViewerControlsSnapshot = {
     ready: true,
     pageReady: true,
@@ -72,6 +77,14 @@ function createHarnessViewerControls(): HarnessViewerControls {
 
   return {
     pageCommands,
+    directPageRequests,
+    pageRequestsSnapshot: () => directPageRequests.join(','),
+    subscribePageRequests(listener) {
+      pageRequestListeners.add(listener);
+      return () => {
+        pageRequestListeners.delete(listener);
+      };
+    },
     snapshot: () => state,
     previousPage() {
       if (!state.pageReady || state.currentPage <= 1) return;
@@ -86,6 +99,8 @@ function createHarnessViewerControls(): HarnessViewerControls {
       publishPage(destination);
     },
     goToPage(pageNumber) {
+      directPageRequests.push(pageNumber);
+      for (const listener of pageRequestListeners) listener();
       if (
         !state.pageReady
         || !Number.isSafeInteger(pageNumber)
@@ -125,6 +140,7 @@ function createHarnessViewerControls(): HarnessViewerControls {
     },
     dispose() {
       listeners.clear();
+      pageRequestListeners.clear();
     },
   };
 }
@@ -158,6 +174,10 @@ function Harness() {
   }
   const viewerControls = viewerControlsRef.current;
   const viewerState = useSyncExternalStore(viewerControls.subscribe, viewerControls.snapshot);
+  const directPageRequests = useSyncExternalStore(
+    viewerControls.subscribePageRequests,
+    viewerControls.pageRequestsSnapshot,
+  );
 
   const accept = async (command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> => {
     await Promise.resolve();
@@ -305,6 +325,7 @@ function Harness() {
           data-navigated={navigated}
           data-anchor-kind={anchorKind}
           data-viewer-page-commands={viewerControls.pageCommands.join(',')}
+          data-viewer-page-requests={directPageRequests}
         >
           Revision {state.revision}
         </output>
