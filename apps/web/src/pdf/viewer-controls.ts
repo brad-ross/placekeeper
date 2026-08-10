@@ -20,6 +20,7 @@ export interface ViewerControls {
   snapshot(): ViewerControlsSnapshot;
   previousPage(): void;
   nextPage(): void;
+  goToPage(pageNumber: number): void;
   zoomOut(): void;
   zoomIn(): void;
   subscribe(listener: ViewerInteractionListener): () => void;
@@ -110,6 +111,10 @@ export function createViewerControls(registry: PluginRegistry): ViewerControls {
     snapshot: () => state,
     previousPage: () => scroll?.scrollToPreviousPage('smooth'),
     nextPage: () => scroll?.scrollToNextPage('smooth'),
+    goToPage: (pageNumber) => {
+      if (!scroll || !Number.isSafeInteger(pageNumber) || pageNumber < 1 || pageNumber > state.totalPages) return;
+      scroll.scrollToPage({ pageNumber, behavior: 'smooth' });
+    },
     zoomOut: () => zoom?.zoomOut(),
     zoomIn: () => zoom?.zoomIn(),
     subscribe(listener) {

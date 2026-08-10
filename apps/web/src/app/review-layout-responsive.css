@@ -63,7 +63,8 @@
     gap: 0;
   }
 
-  .review-chrome__stat {
+  .review-chrome__stat,
+  .review-chrome__page-control {
     min-width: 52px;
   }
 
@@ -88,6 +89,14 @@
   .review-chrome__icon-control {
     width: var(--review-control-touch);
     min-width: var(--review-control-touch);
+  }
+
+  .review-chrome__page-editor {
+    min-height: var(--review-control-touch);
+  }
+
+  .review-chrome__page-input {
+    height: var(--review-control-touch);
   }
 
   .review-context-palette .review-action-button--icon {

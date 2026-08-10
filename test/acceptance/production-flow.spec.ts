@@ -11,6 +11,7 @@ let host: ProofreaderHost;
 let launchUrl = "";
 let sourceRoot = "";
 let pdf = "";
+let multiPagePdf = "";
 let rotatedPdf = "";
 let referencePdf = "";
 let initialSessionId = "";
@@ -136,9 +137,11 @@ test.beforeAll(async () => {
   sourceRoot = join(root, "source");
   await mkdir(sourceRoot);
   pdf = join(root, "paper.pdf");
+  multiPagePdf = join(root, "multi-page.pdf");
   rotatedPdf = join(root, "rotated.pdf");
   referencePdf = join(root, "reference-navigation.pdf");
   await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
+  await copyFile(resolve("test/fixtures/pdfs/mixed-text-image.pdf"), multiPagePdf);
   await copyFile(resolve("test/fixtures/pdfs/rotation-90-crop.pdf"), rotatedPdf);
   await copyFile(resolve("test/fixtures/pdfs/reference-navigation.pdf"), referencePdf);
   await copyFile(resolve("test/fixtures/latex/paper.tex"), join(sourceRoot, "paper.tex"));
@@ -324,10 +327,9 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
 
   const rightSplitter = page.getByRole("separator", { name: "Resize References" });
   await expect(rightSplitter).toHaveAttribute("aria-orientation", "vertical");
-  await rightSplitter.focus();
-  await page.keyboard.press("Home");
+  await rightSplitter.press("Home");
   const minimumRightValue = Number(await rightSplitter.getAttribute("aria-valuenow"));
-  await page.keyboard.press("ArrowLeft");
+  await rightSplitter.press("ArrowLeft");
   await expect.poll(async () => Number(await rightSplitter.getAttribute("aria-valuenow")))
     .toBeGreaterThan(minimumRightValue);
   const rememberedRightValue = Number(await rightSplitter.getAttribute("aria-valuenow"));
@@ -758,6 +760,74 @@ test("one installed-style browser tree preserves review state across responsive 
   expect(browserErrors).toEqual([]);
 });
 
+test('edits the current page in a real multi-page viewer without losing adjacent state', async ({ page }) => {
+  const launched = await host.open({
+    pdfPath: multiPagePdf,
+    sourceRootPath: sourceRoot,
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === 'recovery-offered') {
+    throw new Error('Fresh multi-page navigation launch failed');
+  }
+  const browserErrors = collectBrowserErrors(page);
+  await page.goto(launched.url);
+
+  const firstPage = page.locator("[data-page-index='0']").first();
+  const secondPage = page.locator("[data-page-index='1']").first();
+  await expect(firstPage).toBeVisible();
+  await expect(page.getByLabel('Current page')).toHaveText('1 / 2');
+  await waitForRenderedPageImage(firstPage);
+
+  const workspace = page.locator('.pdf-workspace');
+  await workspace.evaluate((element) => {
+    element.setAttribute('data-page-navigation-mount-probe', 'stable');
+  });
+  const firstPageBox = await firstPage.boundingBox();
+  if (!firstPageBox) throw new Error('First rendered PDF page has no bounds.');
+  await firstPage.click({
+    button: 'right',
+    position: { x: firstPageBox.width * 0.8, y: firstPageBox.height * 0.7 },
+  });
+  await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
+  const composer = page.getByRole('dialog', { name: 'Page Note' });
+  await composer.getByRole('textbox', { name: 'Comment' }).fill('Keep this surrounding review state.');
+  await composer.getByRole('button', { name: 'Save comment' }).click();
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+
+  const { annotations, workspace: workspaceRail } = await openAnnotationsWorkspace(page);
+  const noteRow = page.getByRole('button', {
+    name: /pageNote · Page 1 · Keep this surrounding review state\./u,
+  });
+  await expect(noteRow).toBeVisible();
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+  const zoomBeforeNavigation = await page.getByLabel('Zoom level').textContent();
+
+  const currentPage = page.getByRole('button', {
+    name: 'Current page 1 of 2. Enter a page number',
+  });
+  await currentPage.click();
+  const pageNumber = page.getByRole('spinbutton', { name: 'Page number' });
+  await expect(pageNumber).toBeFocused();
+  await page.keyboard.type('2');
+  await expect(pageNumber).toHaveValue('2');
+  await pageNumber.press('Enter');
+
+  await expect(page.getByRole('button', {
+    name: 'Current page 2 of 2. Enter a page number',
+  })).toBeFocused();
+  await expect(secondPage).toBeVisible();
+  await expect(firstPage).toHaveCount(1);
+  await expect(secondPage).toHaveCount(1);
+  await expect(workspace).toHaveAttribute('data-page-navigation-mount-probe', 'stable');
+  expect(await page.getByLabel('Zoom level').textContent()).toBe(zoomBeforeNavigation);
+  await expect(workspaceRail).toHaveAttribute('aria-expanded', 'true');
+  await expect(annotations).toHaveAttribute('aria-selected', 'true');
+  await expect(noteRow).toBeVisible();
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(1);
+  expect(host.broker.state(launched.sessionId)?.items).toHaveLength(1);
+  expect(browserErrors).toEqual([]);
+});
+
 test('minimally reveals the PDF beside the adaptive annotations surface and restores untouched movement', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const launched = await host.open({
@@ -846,6 +916,11 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
     return element.scrollLeft;
   });
   await toggleWorkspace(page);
+  await expect.poll(() => runway.evaluate((element) => {
+    const parent = element.parentElement;
+    if (!parent) return Number.NaN;
+    return element.getBoundingClientRect().width - parent.getBoundingClientRect().width;
+  })).toBeCloseTo(0, 0);
   const naturalHorizontalMaximum = await viewport.evaluate((element) => (
     Math.max(0, element.scrollWidth - element.clientWidth)
   ));
@@ -944,7 +1019,8 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
   await toggleWorkspace(page);
   await expect.poll(() => viewport.evaluate((element) => element.scrollTop))
     .toBeCloseTo(markScrollBefore, 0);
-  expect(await viewport.evaluate((element) => element.scrollLeft)).toBeCloseTo(narrowScrollBefore.left, 0);
+  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
+    .toBeCloseTo(narrowScrollBefore.left, 0);
 });
 
 test('uses the same compact review tree for a narrow VS Code embed launch', async ({ page }) => {
