@@ -1,7 +1,6 @@
 import {
   PdfActionType,
   PdfZoomMode,
-  type PdfDestinationObject,
 } from '@embedpdf/models';
 
 export interface PdfNavigationTargetContext {
@@ -137,9 +136,4 @@ export function classifyPdfNavigationTarget(
     identity,
   });
   return { ok: true, target };
-}
-
-export function isResolvedPdfDestination(value: unknown): value is PdfDestinationObject {
-  if (!isRecord(value) || !Number.isSafeInteger(value.pageIndex)) return false;
-  return normalizedZoom(value) !== null;
 }

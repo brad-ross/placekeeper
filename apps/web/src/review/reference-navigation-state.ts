@@ -180,20 +180,15 @@ export function createReferenceNavigationState(
   };
 }
 
-export const INITIAL_REFERENCE_NAVIGATION_STATE = Object.freeze(
-  createReferenceNavigationState(0),
-);
-
 function exactlySameLocation(
   first: PdfViewerLocation,
   second: PdfViewerLocation,
 ): boolean {
-  return first.pageIndex === second.pageIndex
-    && first.anchor.x === second.anchor.x
-    && first.anchor.y === second.anchor.y
-    && first.alignment.xPercent === second.alignment.xPercent
-    && first.alignment.yPercent === second.alignment.yPercent
-    && first.zoom === second.zoom;
+  return samePdfViewerLocation(first, second, {
+    anchor: 0,
+    alignment: 0,
+    zoom: 0,
+  });
 }
 
 function replaceTabLocation(

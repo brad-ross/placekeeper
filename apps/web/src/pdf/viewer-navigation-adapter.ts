@@ -603,5 +603,3 @@ export function createViewerNavigation(
     },
   };
 }
-
-export const createViewerNavigationAdapter = createViewerNavigation;

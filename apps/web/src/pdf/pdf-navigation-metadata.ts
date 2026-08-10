@@ -38,10 +38,16 @@ function normalizeAuthorText(value: unknown): string | null {
 }
 
 function boundDisplayText(value: string, maxLength: number): string {
-  const codePoints = [...value];
-  if (codePoints.length <= maxLength) return value;
-  if (maxLength === 1) return '…';
-  return `${codePoints.slice(0, maxLength - 1).join('')}…`;
+  const prefix: string[] = [];
+  let count = 0;
+  for (const codePoint of value) {
+    count += 1;
+    if (count > maxLength) {
+      return maxLength === 1 ? '…' : `${prefix.join('')}…`;
+    }
+    if (count < maxLength) prefix.push(codePoint);
+  }
+  return value;
 }
 
 /** Creates inert, bounded labels while preserving trusted page context separately. */
