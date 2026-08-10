@@ -188,6 +188,30 @@ test.describe('canonical review workflow', () => {
     expect(pageBounds!.x - (kindBounds!.x + kindBounds!.width)).toBeLessThanOrEqual(12);
   });
 
+  test('keeps the complete annotation header fixed while the tray scrolls', async ({ page }) => {
+    for (let index = 0; index < 5; index += 1) {
+      if (index > 0) await page.getByRole('button', { name: 'Use selection' }).click();
+      await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+      await page.getByRole('button', { name: 'Keep without comment' }).click();
+    }
+    await page.getByRole('button', { name: 'Annotations' }).click();
+
+    const drawer = page.locator('[data-annotation-drawer]');
+    await drawer.evaluate((element) => {
+      Object.assign((element as HTMLElement).style, { height: '8rem', bottom: 'auto' });
+    });
+    const header = drawer.locator('.annotation-drawer__header');
+    const before = await header.boundingBox();
+    expect(before).not.toBeNull();
+
+    await drawer.evaluate((element) => { element.scrollTop = 10; });
+    await expect.poll(() => drawer.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    const after = await header.boundingBox();
+    expect(after).not.toBeNull();
+    expect(after!.y).toBeCloseTo(before!.y, 0);
+    expect(after!.height).toBeCloseTo(before!.height, 0);
+  });
+
   test('keeps the annotations tray open while editing an owned annotation', async ({ page }) => {
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     await page.getByRole('button', { name: 'Keep without comment' }).click();
