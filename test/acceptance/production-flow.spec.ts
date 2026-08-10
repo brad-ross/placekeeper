@@ -11,6 +11,7 @@ let host: ProofreaderHost;
 let launchUrl = "";
 let sourceRoot = "";
 let pdf = "";
+let multiPagePdf = "";
 let rotatedPdf = "";
 let initialSessionId = "";
 
@@ -88,8 +89,10 @@ test.beforeAll(async () => {
   sourceRoot = join(root, "source");
   await mkdir(sourceRoot);
   pdf = join(root, "paper.pdf");
+  multiPagePdf = join(root, "multi-page.pdf");
   rotatedPdf = join(root, "rotated.pdf");
   await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
+  await copyFile(resolve("test/fixtures/pdfs/mixed-text-image.pdf"), multiPagePdf);
   await copyFile(resolve("test/fixtures/pdfs/rotation-90-crop.pdf"), rotatedPdf);
   await copyFile(resolve("test/fixtures/latex/paper.tex"), join(sourceRoot, "paper.tex"));
   host = await ProofreaderHost.start({
@@ -259,6 +262,74 @@ test("one installed-style browser tree preserves review state across responsive 
   await page.getByRole("button", { name: "Finish" }).click();
   await expect(page.getByText(/^Handoff JSON:/u)).toHaveText(`Handoff JSON: ${handoffPath}`);
   expect(contactedOrigins).toEqual(new Set([new URL(launchUrl).origin]));
+  expect(browserErrors).toEqual([]);
+});
+
+test('edits the current page in a real multi-page viewer without losing adjacent state', async ({ page }) => {
+  const launched = await host.open({
+    pdfPath: multiPagePdf,
+    sourceRootPath: sourceRoot,
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === 'recovery-offered') {
+    throw new Error('Fresh multi-page navigation launch failed');
+  }
+  const browserErrors = collectBrowserErrors(page);
+  await page.goto(launched.url);
+
+  const firstPage = page.locator("[data-page-index='0']").first();
+  const secondPage = page.locator("[data-page-index='1']").first();
+  await expect(firstPage).toBeVisible();
+  await expect(page.getByLabel('Current page')).toHaveText('1 / 2');
+  await waitForRenderedPageImage(firstPage);
+
+  const workspace = page.locator('.pdf-workspace');
+  await workspace.evaluate((element) => {
+    element.setAttribute('data-page-navigation-mount-probe', 'stable');
+  });
+  const firstPageBox = await firstPage.boundingBox();
+  if (!firstPageBox) throw new Error('First rendered PDF page has no bounds.');
+  await firstPage.click({
+    button: 'right',
+    position: { x: firstPageBox.width * 0.8, y: firstPageBox.height * 0.7 },
+  });
+  await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
+  const composer = page.getByRole('dialog', { name: 'Page Note' });
+  await composer.getByRole('textbox', { name: 'Comment' }).fill('Keep this surrounding review state.');
+  await composer.getByRole('button', { name: 'Save comment' }).click();
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+
+  const annotations = page.getByRole('button', { name: 'Annotations' });
+  await annotations.click();
+  const noteRow = page.getByRole('button', {
+    name: /pageNote · Page 1 · Keep this surrounding review state\./u,
+  });
+  await expect(noteRow).toBeVisible();
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+  const zoomBeforeNavigation = await page.getByLabel('Zoom level').textContent();
+
+  const currentPage = page.getByRole('button', {
+    name: 'Current page 1 of 2. Enter a page number',
+  });
+  await currentPage.click();
+  const pageNumber = page.getByRole('spinbutton', { name: 'Page number' });
+  await expect(pageNumber).toBeFocused();
+  await page.keyboard.type('2');
+  await expect(pageNumber).toHaveValue('2');
+  await pageNumber.press('Enter');
+
+  await expect(page.getByRole('button', {
+    name: 'Current page 2 of 2. Enter a page number',
+  })).toBeFocused();
+  await expect(secondPage).toBeVisible();
+  await expect(firstPage).toHaveCount(1);
+  await expect(secondPage).toHaveCount(1);
+  await expect(workspace).toHaveAttribute('data-page-navigation-mount-probe', 'stable');
+  expect(await page.getByLabel('Zoom level').textContent()).toBe(zoomBeforeNavigation);
+  await expect(annotations).toHaveAttribute('aria-expanded', 'true');
+  await expect(noteRow).toBeVisible();
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(1);
+  expect(host.broker.state(launched.sessionId)?.items).toHaveLength(1);
   expect(browserErrors).toEqual([]);
 });
 

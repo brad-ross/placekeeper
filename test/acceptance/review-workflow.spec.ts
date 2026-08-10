@@ -102,6 +102,153 @@ test.describe('canonical review workflow', () => {
     await expect(selectionActions).toHaveCount(0);
   });
 
+  test('edits the viewer-published current page through Enter and ordinary blur', async ({ page }) => {
+    const currentPage = page.getByRole('button', {
+      name: 'Current page 3 of 12. Enter a page number',
+    });
+    await currentPage.click();
+
+    const pageNumber = page.getByRole('spinbutton', { name: 'Page number' });
+    await expect(pageNumber).toBeFocused();
+    await expect(pageNumber).toHaveValue('3');
+    await page.keyboard.type('8');
+    await expect(pageNumber).toHaveValue('8');
+    await pageNumber.press('Enter');
+
+    await expect(page.getByRole('button', {
+      name: 'Current page 8 of 12. Enter a page number',
+    })).toBeFocused();
+    await expect(page.locator('[data-viewer-page-commands]')).toHaveAttribute(
+      'data-viewer-page-commands',
+      'go:8',
+    );
+
+    await page.getByRole('button', {
+      name: 'Current page 8 of 12. Enter a page number',
+    }).click();
+    await pageNumber.fill('5');
+    const nativeInput = page.getByRole('textbox', { name: 'Native input' });
+    await nativeInput.focus();
+
+    await expect(nativeInput).toBeFocused();
+    await expect(page.getByRole('button', {
+      name: 'Current page 5 of 12. Enter a page number',
+    })).toBeVisible();
+    await expect(page.locator('[data-viewer-page-commands]')).toHaveAttribute(
+      'data-viewer-page-commands',
+      'go:8,go:5',
+    );
+  });
+
+  test('cancels page editing with Escape without closing the Annotation Tray', async ({ page }) => {
+    const annotations = page.getByRole('button', { name: 'Annotations' });
+    await annotations.click();
+    const currentPage = page.getByRole('button', {
+      name: 'Current page 3 of 12. Enter a page number',
+    });
+    await currentPage.click();
+    const pageNumber = page.getByRole('spinbutton', { name: 'Page number' });
+    await pageNumber.fill('9');
+    await pageNumber.press('Escape');
+
+    await expect(currentPage).toBeFocused();
+    await expect(annotations).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('[data-annotation-drawer]')).toBeVisible();
+    await expect(page.locator('[data-viewer-page-commands]')).toHaveAttribute(
+      'data-viewer-page-commands',
+      '',
+    );
+  });
+
+  test('announces invalid page ranges, clears the error on change, and cancels invalid blur', async ({ page }) => {
+    const currentPage = page.getByRole('button', {
+      name: 'Current page 3 of 12. Enter a page number',
+    });
+    await currentPage.click();
+    const pageNumber = page.getByRole('spinbutton', { name: 'Page number' });
+    await pageNumber.fill('13');
+    await pageNumber.press('Enter');
+
+    const rangeError = page.getByRole('alert');
+    await expect(pageNumber).toHaveAttribute('aria-invalid', 'true');
+    const rangeErrorId = await rangeError.getAttribute('id');
+    expect(rangeErrorId).toBeTruthy();
+    await expect(pageNumber).toHaveAttribute('aria-describedby', rangeErrorId!);
+    await expect(pageNumber).toHaveAttribute('aria-errormessage', rangeErrorId!);
+    await expect(rangeError).toHaveText('Enter a whole page number from 1 to 12');
+    await expect(page.locator('[data-viewer-page-commands]')).toHaveAttribute(
+      'data-viewer-page-commands',
+      '',
+    );
+
+    await pageNumber.fill('1.5');
+    await expect(pageNumber).toHaveAttribute('aria-invalid', 'false');
+    await expect(rangeError).toHaveCount(0);
+    await pageNumber.press('Enter');
+    await expect(pageNumber).toHaveAttribute('aria-invalid', 'true');
+    await expect(rangeError).toHaveText('Enter a whole page number from 1 to 12');
+    await expect(page.locator('[data-viewer-page-commands]')).toHaveAttribute(
+      'data-viewer-page-commands',
+      '',
+    );
+
+    await pageNumber.fill('');
+    await expect(pageNumber).toHaveAttribute('aria-invalid', 'false');
+    await page.getByRole('textbox', { name: 'Native input' }).focus();
+
+    await expect(pageNumber).toHaveCount(0);
+    await expect(currentPage).toBeVisible();
+    await expect(page.locator('[data-viewer-page-commands]')).toHaveAttribute(
+      'data-viewer-page-commands',
+      '',
+    );
+  });
+
+  test('does not offer page editing while page controls are unavailable', async ({ page }) => {
+    await page.getByRole('button', { name: 'Make page controls unavailable' }).click();
+
+    await expect(page.getByLabel('Current page')).toHaveText('— / —');
+    await expect(page.getByRole('spinbutton', { name: 'Page number' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Enter a page number/u })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Previous page' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Next page' })).toBeDisabled();
+  });
+
+  test('lets Previous and Next win over a dirty page draft exactly once', async ({ page }) => {
+    await page.getByRole('button', {
+      name: 'Current page 3 of 12. Enter a page number',
+    }).click();
+    const pageNumber = page.getByRole('spinbutton', { name: 'Page number' });
+    await pageNumber.fill('10');
+    const nextPage = page.getByRole('button', { name: 'Next page' });
+    await nextPage.click();
+
+    await expect(nextPage).toBeFocused();
+    await expect(page.getByRole('button', {
+      name: 'Current page 4 of 12. Enter a page number',
+    })).toBeVisible();
+    await expect(page.locator('[data-viewer-page-commands]')).toHaveAttribute(
+      'data-viewer-page-commands',
+      'next:4',
+    );
+
+    await page.getByRole('button', {
+      name: 'Current page 4 of 12. Enter a page number',
+    }).click();
+    await pageNumber.fill('11');
+    const previousPage = page.getByRole('button', { name: 'Previous page' });
+    await previousPage.click();
+
+    await expect(previousPage).toBeFocused();
+    await expect(page.getByRole('button', {
+      name: 'Current page 3 of 12. Enter a page number',
+    })).toBeVisible();
+    await expect(page.locator('[data-viewer-page-commands]')).toHaveAttribute(
+      'data-viewer-page-commands',
+      'next:4,previous:3',
+    );
+  });
+
   test('keeps selection actions after rejection and for a newer selection', async ({ page }) => {
     const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
 

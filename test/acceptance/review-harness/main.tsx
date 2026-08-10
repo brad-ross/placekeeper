@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   ReviewShell,
@@ -8,6 +8,8 @@ import {
 import { projectReviewItems } from '../../../apps/web/src/review/annotation-projection.js';
 import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
 import type { CaretAnchor, SelectionAnchor } from '../../../apps/web/src/pdf/selection-anchor.js';
+import type { ViewerControls, ViewerControlsSnapshot } from '../../../apps/web/src/pdf/viewer-controls.js';
+import type { ViewerInteractionListener } from '../../../apps/web/src/pdf/viewer-interaction-events.js';
 import { createReviewState, type ReviewCommand, type ReviewState } from '../../../packages/core/src/review-model.js';
 import { reduceReview } from '../../../packages/core/src/review-reducer.js';
 import { resolveVisualScenario, VisualDocument } from './visual-scenarios.js';
@@ -34,6 +36,99 @@ const caret: CaretAnchor = {
   reliable: true,
 };
 
+interface HarnessViewerControls extends ViewerControls {
+  readonly pageCommands: string[];
+  makePageControlsUnavailable(): void;
+}
+
+function createHarnessViewerControls(): HarnessViewerControls {
+  const listeners = new Set<ViewerInteractionListener>();
+  const pageCommands: string[] = [];
+  let state: ViewerControlsSnapshot = {
+    ready: true,
+    pageReady: true,
+    zoomReady: true,
+    currentPage: 3,
+    totalPages: 12,
+    zoomPercent: 110,
+  };
+
+  const publishPage = (currentPage: number) => {
+    queueMicrotask(() => {
+      if (!state.pageReady) return;
+      state = { ...state, currentPage };
+      for (const listener of listeners) {
+        listener({ type: 'page', currentPage, totalPages: state.totalPages });
+      }
+    });
+  };
+  const publishZoom = (zoomPercent: number) => {
+    queueMicrotask(() => {
+      if (!state.zoomReady) return;
+      state = { ...state, zoomPercent };
+      for (const listener of listeners) listener({ type: 'zoom', zoomPercent });
+    });
+  };
+
+  return {
+    pageCommands,
+    snapshot: () => state,
+    previousPage() {
+      if (!state.pageReady || state.currentPage <= 1) return;
+      const destination = state.currentPage - 1;
+      pageCommands.push(`previous:${destination}`);
+      publishPage(destination);
+    },
+    nextPage() {
+      if (!state.pageReady || state.currentPage >= state.totalPages) return;
+      const destination = state.currentPage + 1;
+      pageCommands.push(`next:${destination}`);
+      publishPage(destination);
+    },
+    goToPage(pageNumber) {
+      if (
+        !state.pageReady
+        || !Number.isSafeInteger(pageNumber)
+        || pageNumber < 1
+        || pageNumber > state.totalPages
+      ) return;
+      pageCommands.push(`go:${pageNumber}`);
+      publishPage(pageNumber);
+    },
+    zoomOut() {
+      if (state.zoomReady) publishZoom(state.zoomPercent - 10);
+    },
+    zoomIn() {
+      if (state.zoomReady) publishZoom(state.zoomPercent + 10);
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      listener({ type: 'readiness', ready: state.ready });
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    makePageControlsUnavailable() {
+      const unavailableReason = 'Some viewer controls are unavailable in this harness state.';
+      state = {
+        ...state,
+        ready: false,
+        pageReady: false,
+        currentPage: 0,
+        totalPages: 0,
+        pageUnavailableReason: 'Page controls are unavailable in this harness state.',
+        unavailableReason,
+      };
+      for (const listener of listeners) {
+        listener({ type: 'readiness', ready: false, reason: unavailableReason });
+      }
+    },
+    dispose() {
+      listeners.clear();
+    },
+  };
+}
+
 function Harness() {
   const [state, setState] = useState(() => visualScenario?.state ?? createReviewState({
     sessionId: 'acceptance',
@@ -57,6 +152,16 @@ function Harness() {
   const [correspondingItemId, setCorrespondingItemId] = useState<string | undefined>(visualScenario?.correspondingItemId);
   const [activeItemId, setActiveItemId] = useState<string>();
   const [activationRequest, setActivationRequest] = useState<{ id: string; token: number }>();
+  const viewerControlsRef = useRef<HarnessViewerControls | undefined>(undefined);
+  if (viewerControlsRef.current === undefined) {
+    viewerControlsRef.current = createHarnessViewerControls();
+  }
+  const viewerControls = viewerControlsRef.current;
+  const [viewerState, setViewerState] = useState(() => viewerControls.snapshot());
+
+  useEffect(() => viewerControls.subscribe(() => {
+    setViewerState(viewerControls.snapshot());
+  }), [viewerControls]);
 
   const accept = async (command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> => {
     await Promise.resolve();
@@ -85,6 +190,7 @@ function Harness() {
         existingAnnotations: visualScenario.existingAnnotations,
         finishSlot: visualScenario.finishSlot,
       } : {})}
+      {...(visualScenario ? {} : { viewerControls, viewerState })}
       selectionUpdate={anchorKind === 'selection'
         ? { kind: 'reliable', generation: selectionGeneration, anchor: selection }
         : { kind: 'cleared', generation: selectionGeneration }}
@@ -142,6 +248,9 @@ function Harness() {
         <button type="button" onClick={() => setHoldNextCommand(true)}>Hold next command</button>
         <button type="button" onClick={() => commandReleaseRef.current?.()}>Release command</button>
         <button type="button" onClick={() => setPageMenuOpen(true)}>Open page actions</button>
+        <button type="button" onClick={() => viewerControls.makePageControlsUnavailable()}>
+          Make page controls unavailable
+        </button>
         {keyboardPageNoteActive ? (
           <button type="button" onClick={() => {
             setKeyboardPageNoteActive(false);
@@ -199,6 +308,7 @@ function Harness() {
           data-kinds={state.items.map(({ kind }) => kind).join(',')}
           data-navigated={navigated}
           data-anchor-kind={anchorKind}
+          data-viewer-page-commands={viewerControls.pageCommands.join(',')}
         >
           Revision {state.revision}
         </output>
