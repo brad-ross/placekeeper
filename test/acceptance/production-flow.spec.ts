@@ -418,6 +418,11 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
     return element.scrollLeft;
   });
   await annotations.click();
+  await expect.poll(() => runway.evaluate((element) => {
+    const parent = element.parentElement;
+    if (!parent) return Number.NaN;
+    return element.getBoundingClientRect().width - parent.getBoundingClientRect().width;
+  })).toBeCloseTo(0, 0);
   const naturalHorizontalMaximum = await viewport.evaluate((element) => (
     Math.max(0, element.scrollWidth - element.clientWidth)
   ));
