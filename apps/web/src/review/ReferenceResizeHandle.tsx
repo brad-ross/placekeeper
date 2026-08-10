@@ -29,6 +29,7 @@ export interface ReferenceResizePointerInput extends Omit<ReferenceResizeInput, 
 export interface ReferenceResizeHandleProps extends ReferenceResizeInput {
   readonly controls: string;
   readonly onChange: (value: number) => void;
+  readonly onCommit?: () => void;
   readonly label?: string;
 }
 
@@ -74,6 +75,7 @@ export function ReferenceResizeHandle({
   min,
   max,
   onChange,
+  onCommit,
   label = 'Resize References',
 }: ReferenceResizeHandleProps) {
   const handleRef = useRef<HTMLDivElement>(null);
@@ -84,6 +86,7 @@ export function ReferenceResizeHandle({
     if (gestureRef.current?.pointerId !== pointerId) return;
     gestureRef.current = null;
     if (element.hasPointerCapture?.(pointerId)) element.releasePointerCapture(pointerId);
+    onCommit?.();
   };
 
   useEffect(() => () => {
@@ -100,6 +103,7 @@ export function ReferenceResizeHandle({
     if (next === null) return;
     event.preventDefault();
     onChange(next);
+    onCommit?.();
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {

@@ -17,6 +17,57 @@ export interface ViewerRunway {
   bottom: number;
 }
 
+export interface OccupiedViewerSurface {
+  readonly presentation: AnnotationPresentation;
+  readonly bounds: ViewerRect | null;
+}
+
+export function occupiedRunway(input: {
+  readonly stage: ViewerRect;
+  readonly surfaces: readonly OccupiedViewerSurface[];
+}): ViewerRunway {
+  const runway: ViewerRunway = { right: 0, bottom: 0 };
+  for (const surface of input.surfaces) {
+    if (!surface.bounds) continue;
+    const intersection = intersectViewerRects(input.stage, surface.bounds);
+    if (!intersection) continue;
+    if (surface.presentation === 'right') {
+      runway.right = Math.max(runway.right, intersection.right - intersection.left);
+    } else {
+      runway.bottom = Math.max(runway.bottom, intersection.bottom - intersection.top);
+    }
+  }
+  return runway;
+}
+
+export class LatestFrameRequest<T> {
+  private handle: number | null = null;
+  private latest: T | undefined;
+
+  constructor(private readonly options: {
+    readonly schedule: (callback: () => void) => number;
+    readonly cancel: (handle: number) => void;
+    readonly commit: (value: T) => void;
+  }) {}
+
+  publish(value: T): void {
+    this.latest = value;
+    if (this.handle !== null) return;
+    this.handle = this.options.schedule(() => {
+      this.handle = null;
+      const latest = this.latest;
+      this.latest = undefined;
+      if (latest !== undefined) this.options.commit(latest);
+    });
+  }
+
+  cancel(): void {
+    if (this.handle !== null) this.options.cancel(this.handle);
+    this.handle = null;
+    this.latest = undefined;
+  }
+}
+
 export interface ViewerFramingTarget {
   pageIndex?: number;
   reviewId?: string;

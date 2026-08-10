@@ -9,8 +9,10 @@ import {
 
 import {
   FramingSessionAuthority,
+  LatestFrameRequest,
   chooseAnnotationPresentation,
   intersectViewerRects,
+  occupiedRunway,
   restoreViewportPosition,
   revealDelta,
   type AnnotationPresentation,
@@ -22,8 +24,18 @@ const WORKSPACE_SIDE_MAX_PX = 24 * 16;
 const WORKSPACE_SIDE_EDGE_GAP_PX = 3 * 16;
 const ANNOTATION_MARK_GUTTER_PX = 10;
 
-function waitForWorkspaceLayout(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+function waitForWorkspaceLayout(signal: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    const frame = requestAnimationFrame(() => {
+      signal.removeEventListener('abort', abort);
+      resolve(true);
+    });
+    const abort = () => {
+      cancelAnimationFrame(frame);
+      resolve(false);
+    };
+    signal.addEventListener('abort', abort, { once: true });
+  });
 }
 
 export type WorkspaceOpenRequest =
@@ -48,10 +60,12 @@ interface ActiveFramingSession {
 }
 
 export interface WorkspaceFraming {
-  readonly workspaceRef: RefObject<HTMLElement | null>;
+  readonly referenceSurfaceRef: RefObject<HTMLElement | null>;
+  readonly toolsSurfaceRef: RefObject<HTMLElement | null>;
   readonly stageRef: RefObject<HTMLDivElement | null>;
   readonly presentation: AnnotationPresentation;
   readonly sideWidth: number;
+  requestSettledReframe(): void;
   markUserIntent(axes?: { left?: boolean; top?: boolean }): void;
   currentScroll(): ViewerPosition | null;
 }
@@ -60,13 +74,18 @@ export function useWorkspaceFraming(input: {
   readonly workspaceOpen: boolean;
   readonly controls?: ViewerFramingControls;
   readonly request: WorkspaceOpenRequest;
+  readonly documentGeneration?: number;
+  readonly layoutGeneration?: string | number;
 }): WorkspaceFraming {
-  const workspaceRef = useRef<HTMLElement>(null);
+  const referenceSurfaceRef = useRef<HTMLElement>(null);
+  const toolsSurfaceRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const authorityRef = useRef(new FramingSessionAuthority());
   const sessionRef = useRef<ActiveFramingSession | null>(null);
   const [presentation, setPresentation] = useState<AnnotationPresentation>('right');
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
+  const [geometryRevision, setGeometryRevision] = useState(0);
+  const requestGeometryFrameRef = useRef<() => void>(() => undefined);
   const sideWidth = Math.min(
     WORKSPACE_SIDE_MAX_PX,
     Math.max(0, stageSize.width - WORKSPACE_SIDE_EDGE_GAP_PX),
@@ -101,6 +120,80 @@ export function useWorkspaceFraming(input: {
     return () => observer.disconnect();
   }, []);
 
+  useLayoutEffect(() => {
+    const elements = [stageRef.current, referenceSurfaceRef.current, toolsSurfaceRef.current]
+      .filter((element): element is HTMLElement => element !== null);
+    const transitioning = new Set<HTMLElement>();
+    let sample = 0;
+    let scheduler: LatestFrameRequest<number>;
+    scheduler = new LatestFrameRequest<number>({
+      schedule: (callback) => requestAnimationFrame(callback),
+      cancel: (handle) => cancelAnimationFrame(handle),
+      commit: () => {
+        setGeometryRevision((revision) => revision + 1);
+        if (transitioning.size > 0) scheduler.publish(++sample);
+      },
+    });
+    const publish = () => scheduler.publish(++sample);
+    requestGeometryFrameRef.current = publish;
+
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(publish);
+    for (const element of elements) resizeObserver?.observe(element);
+
+    const mutationObserver = typeof MutationObserver === 'undefined'
+      ? null
+      : new MutationObserver(publish);
+    for (const surface of [referenceSurfaceRef.current, toolsSurfaceRef.current]) {
+      if (!surface) continue;
+      mutationObserver?.observe(surface, {
+        attributes: true,
+        attributeFilter: [
+          'aria-hidden',
+          'class',
+          'data-tools-workspace-open',
+          'data-workspace-open',
+          'data-workspace-presentation',
+          'inert',
+          'style',
+        ],
+      });
+    }
+
+    const onTransitionRun = (event: TransitionEvent) => {
+      if (!(event.currentTarget instanceof HTMLElement) || event.target !== event.currentTarget) return;
+      transitioning.add(event.currentTarget);
+      publish();
+    };
+    const onTransitionSettled = (event: TransitionEvent) => {
+      if (!(event.currentTarget instanceof HTMLElement) || event.target !== event.currentTarget) return;
+      transitioning.delete(event.currentTarget);
+      publish();
+    };
+    for (const surface of [referenceSurfaceRef.current, toolsSurfaceRef.current]) {
+      surface?.addEventListener('transitionrun', onTransitionRun);
+      surface?.addEventListener('transitionend', onTransitionSettled);
+      surface?.addEventListener('transitioncancel', onTransitionSettled);
+    }
+    publish();
+
+    return () => {
+      requestGeometryFrameRef.current = () => undefined;
+      scheduler.cancel();
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+      for (const surface of [referenceSurfaceRef.current, toolsSurfaceRef.current]) {
+        surface?.removeEventListener('transitionrun', onTransitionRun);
+        surface?.removeEventListener('transitionend', onTransitionSettled);
+        surface?.removeEventListener('transitioncancel', onTransitionSettled);
+      }
+      transitioning.clear();
+    };
+  }, []);
+
+  const requestSettledReframe = useCallback(() => requestGeometryFrameRef.current(), []);
+
   const currentScroll = useCallback((): ViewerPosition | null => {
     const snapshot = input.controls?.snapshot();
     return snapshot?.ready ? snapshot.scroll : null;
@@ -133,6 +226,7 @@ export function useWorkspaceFraming(input: {
   useLayoutEffect(() => {
     const controls = input.controls;
     if (!controls) return;
+    const settlement = new AbortController();
     const target = input.request.kind === 'mark'
       ? { pageIndex: input.request.pageIndex, reviewId: input.request.reviewId }
       : undefined;
@@ -143,6 +237,8 @@ export function useWorkspaceFraming(input: {
       return;
     }
     const operation = authorityRef.current.open(operationDocumentId, presentation);
+    const operationIsCurrent = () => authorityRef.current.isCurrent(operation)
+      && controls.snapshot().documentId === operationDocumentId;
 
     const closeSession = async () => {
       const session = sessionRef.current;
@@ -160,7 +256,7 @@ export function useWorkspaceFraming(input: {
         maximum: current.maximum,
       });
       const withoutRunway = await controls.setRunway({ right: 0, bottom: 0 });
-      if (!authorityRef.current.isCurrent(operation)) return;
+      if (!operationIsCurrent()) return;
       controls.scrollTo({
         left: Math.min(restored.left, withoutRunway.maximum.left),
         top: Math.min(restored.top, withoutRunway.maximum.top),
@@ -207,19 +303,26 @@ export function useWorkspaceFraming(input: {
         session.requestToken = input.request.token;
       }
 
-      const workspaceBounds = workspaceRef.current?.getBoundingClientRect();
-      const exclusionWidth = workspaceBounds?.width ?? sideWidth;
-      const exclusionHeight = workspaceBounds?.height ?? 0;
-      const runway = presentation === 'right'
-        ? { right: exclusionWidth, bottom: 0 }
-        : { right: 0, bottom: exclusionHeight };
+      const stageBounds = stageRef.current?.getBoundingClientRect();
+      if (!stageBounds) return;
+      const surfaces = [referenceSurfaceRef.current, toolsSurfaceRef.current]
+        .filter((surface): surface is HTMLElement => surface !== null)
+        .map((surface) => ({
+          presentation: surface.dataset.workspacePresentation === 'bottom'
+            ? 'bottom' as const
+            : 'right' as const,
+          bounds: surface.getBoundingClientRect(),
+        }));
+      const runway = occupiedRunway({ stage: stageBounds, surfaces });
+      const exclusionWidth = runway.right;
+      const exclusionHeight = runway.bottom;
       await controls.setRunway(runway);
-      if (!authorityRef.current.isCurrent(operation) || !input.workspaceOpen) return;
+      if (!operationIsCurrent() || !input.workspaceOpen) return;
       // WebKit can commit the runway element before exposing its updated
       // scroll extent. Measure only after one guarded layout frame so reveal
       // coordinates are not clamped against the preceding maximum.
-      await waitForWorkspaceLayout();
-      if (!authorityRef.current.isCurrent(operation) || !input.workspaceOpen) return;
+      if (!await waitForWorkspaceLayout(settlement.signal)) return;
+      if (!operationIsCurrent() || !input.workspaceOpen) return;
 
       const measured = controls.snapshot(target);
       const stage = stageRef.current?.getBoundingClientRect();
@@ -233,7 +336,9 @@ export function useWorkspaceFraming(input: {
 
       let leftDelta = 0;
       let topDelta = 0;
-      if (presentation === 'right' && !session.userAxes.left) {
+      if (runway.right === 0 && !session.userAxes.left && session.automatic.left !== 0) {
+        leftDelta = session.baseline.left - measured.scroll.left;
+      } else if (runway.right > 0 && !session.userAxes.left) {
         leftDelta = revealDelta(
           { start: revealTarget.left, end: revealTarget.right },
           {
@@ -242,7 +347,10 @@ export function useWorkspaceFraming(input: {
           },
           input.request.kind === 'mark' ? ANNOTATION_MARK_GUTTER_PX : 0,
         );
-      } else if (input.request.kind === 'mark' && !session.userAxes.top) {
+      }
+      if (runway.bottom === 0 && !session.userAxes.top && session.automatic.top !== 0) {
+        topDelta = session.baseline.top - measured.scroll.top;
+      } else if (runway.bottom > 0 && input.request.kind === 'mark' && !session.userAxes.top) {
         topDelta = revealDelta(
           { start: revealTarget.top, end: revealTarget.bottom },
           {
@@ -266,14 +374,29 @@ export function useWorkspaceFraming(input: {
     };
 
     void (input.workspaceOpen ? openSession() : closeSession());
-    return () => authorityRef.current.supersede(operation);
-  }, [input.controls, input.workspaceOpen, input.request, presentation, sideWidth, stageSize.height]);
+    return () => {
+      settlement.abort();
+      authorityRef.current.supersede(operation);
+    };
+  }, [
+    input.controls,
+    input.documentGeneration,
+    input.layoutGeneration,
+    input.workspaceOpen,
+    input.request,
+    geometryRevision,
+    presentation,
+    sideWidth,
+    stageSize.height,
+  ]);
 
   return {
-    workspaceRef,
+    referenceSurfaceRef,
+    toolsSurfaceRef,
     stageRef,
     presentation,
     sideWidth,
+    requestSettledReframe,
     markUserIntent,
     currentScroll,
   };

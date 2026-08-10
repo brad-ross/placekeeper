@@ -6,7 +6,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   FramingSessionAuthority,
+  LatestFrameRequest,
   chooseAnnotationPresentation,
+  occupiedRunway,
   intersectViewerRects,
   revealDelta,
   restoreViewportPosition,
@@ -16,6 +18,59 @@ import { createViewerFramingControls } from '../src/pdf/viewer-framing-adapter.j
 import { workspaceRequestRequiresReframe } from '../src/review/use-annotation-tray-framing.js';
 
 describe('viewer framing', () => {
+  it('composes stage-clamped committed right and bottom surface bounds', () => {
+    expect(occupiedRunway({
+      stage: { left: 100, top: 50, right: 1100, bottom: 850 },
+      surfaces: [
+        {
+          presentation: 'right',
+          bounds: { left: 780, top: 50, right: 1160, bottom: 620 },
+        },
+        {
+          presentation: 'bottom',
+          bounds: { left: 40, top: 610, right: 1160, bottom: 920 },
+        },
+      ],
+    })).toEqual({ right: 320, bottom: 240 });
+
+    expect(occupiedRunway({
+      stage: { left: 100, top: 50, right: 1100, bottom: 850 },
+      surfaces: [
+        {
+          presentation: 'bottom',
+          bounds: { left: 40, top: 610, right: 1160, bottom: 920 },
+        },
+      ],
+    })).toEqual({ right: 0, bottom: 240 });
+  });
+
+  it('commits only the latest rapid sample once per animation frame', () => {
+    const callbacks: Array<() => void> = [];
+    const cancelled: number[] = [];
+    const commits: string[] = [];
+    const request = new LatestFrameRequest<string>({
+      schedule: (callback) => {
+        callbacks.push(callback);
+        return callbacks.length;
+      },
+      cancel: (handle) => cancelled.push(handle),
+      commit: (value) => commits.push(value),
+    });
+
+    request.publish('right:320');
+    request.publish('right:340');
+    request.publish('right:360');
+    expect(callbacks).toHaveLength(1);
+    callbacks.shift()!();
+    expect(commits).toEqual(['right:360']);
+
+    request.publish('bottom:240');
+    request.cancel();
+    callbacks.shift()!();
+    expect(commits).toEqual(['right:360']);
+    expect(cancelled).toEqual([1]);
+  });
+
   it('uses existing margin and moves only by the remaining overlap', () => {
     expect(revealDelta({ start: 100, end: 600 }, { start: 0, end: 700 })).toBe(0);
     expect(revealDelta({ start: 100, end: 820 }, { start: 0, end: 700 })).toBe(120);

@@ -318,6 +318,15 @@ export function ReviewShell(props: ReviewShellProps) {
     workspaceOpen: anyWorkspaceOpen,
     ...(props.viewerFraming === undefined ? {} : { controls: props.viewerFraming }),
     request: workspaceRequest,
+    documentGeneration: navigation.documentGeneration,
+    layoutGeneration: [
+      effectiveReferenceLayout.kind,
+      referenceSurfaceOpen,
+      toolsSurfaceOpen,
+      referenceLayout.referenceDock,
+      referenceLayout.rightReferenceWidth,
+      referenceLayout.bottomReferenceHeight,
+    ].join(':'),
   });
 
   useLayoutEffect(() => {
@@ -732,7 +741,10 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const markFramingUserIntent = workspaceFraming.markUserIntent;
   const isWorkspaceOrChrome = (target: EventTarget | null) => (
-    (target instanceof Node && workspaceFraming.workspaceRef.current?.contains(target) === true)
+    (target instanceof Node && (
+      workspaceFraming.referenceSurfaceRef.current?.contains(target) === true
+      || workspaceFraming.toolsSurfaceRef.current?.contains(target) === true
+    ))
     || (target instanceof Element && target.closest(
       '[data-review-chrome], [data-review-nested-host], [data-link-action-popover]',
     ) !== null)
@@ -909,7 +921,7 @@ export function ReviewShell(props: ReviewShellProps) {
             </>
           )}
           <ReferenceWorkspace
-            workspaceRef={workspaceFraming.workspaceRef}
+            workspaceRef={workspaceFraming.referenceSurfaceRef}
             open={referenceSurfaceOpen}
             mode={effectiveReferenceLayout.kind === 'narrow-unified'
               ? effectiveReferenceLayout.activeMode
@@ -972,6 +984,7 @@ export function ReviewShell(props: ReviewShellProps) {
             annotations={null}
           />
           <OutlineAnnotationsWorkspace
+            workspaceRef={workspaceFraming.toolsSurfaceRef}
             open={toolsSurfaceOpen}
             mode={effectiveWorkspaceMode}
             presentation={effectiveReferenceLayout.kind === 'narrow-unified' ? 'bottom' : 'right'}
@@ -1088,6 +1101,7 @@ export function ReviewShell(props: ReviewShellProps) {
                 && effectiveReferenceLayout.referenceDock === 'right'
                 ? { type: 'resize-right-references', size }
                 : { type: 'resize-bottom-references', size })}
+              onCommit={workspaceFraming.requestSettledReframe}
             />
           ) : null}
           <FinishReviewDrawer

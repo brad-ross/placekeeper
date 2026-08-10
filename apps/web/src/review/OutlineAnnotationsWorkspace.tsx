@@ -3,6 +3,7 @@ import {
   useRef,
   type KeyboardEvent,
   type ReactNode,
+  type Ref,
 } from 'react';
 
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
@@ -19,6 +20,7 @@ const TOOL_LABELS: Readonly<Record<RightWorkspaceMode, string>> = {
 };
 
 export interface OutlineAnnotationsWorkspaceProps {
+  readonly workspaceRef?: Ref<HTMLElement>;
   readonly open: boolean;
   readonly mode: WorkspaceMode;
   readonly presentation: AnnotationPresentation;
@@ -36,6 +38,7 @@ function focusWithoutScroll(element: HTMLElement | null | undefined): void {
 }
 
 export function OutlineAnnotationsWorkspace({
+  workspaceRef,
   open,
   mode,
   presentation,
@@ -85,6 +88,7 @@ export function OutlineAnnotationsWorkspace({
 
   return (
     <aside
+      ref={workspaceRef}
       id="review-tools-workspace"
       className="review-tools-workspace"
       data-tools-workspace-open={open ? 'true' : 'false'}
