@@ -19,6 +19,7 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '1');
     await expect(page.locator('[data-owned-mark="replace"]')).toHaveText('locally unique equilibrium');
 
+    await page.getByRole('button', { name: 'Use selection' }).click();
     await canvas.focus();
     await page.keyboard.press('Backspace');
     await page.getByRole('button', { name: 'Use caret' }).click();
@@ -59,6 +60,7 @@ test.describe('canonical review workflow', () => {
     await expect(selectionActions).toBeVisible();
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
     await expect(selectionActions).toHaveCount(0);
+    await expect(page.locator('[data-anchor-kind]')).toHaveAttribute('data-anchor-kind', 'none');
 
     await page.getByRole('button', { name: 'Clear anchors' }).click();
     await page.getByRole('button', { name: 'Use selection' }).click();
@@ -112,6 +114,18 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('textbox', { name: 'Replacement text' }).fill('accepted replacement');
     await page.getByRole('button', { name: 'Use selection' }).evaluate((button: HTMLButtonElement) => button.click());
     await page.getByRole('button', { name: 'Apply' }).click();
+    await expect(selectionActions).toBeVisible();
+  });
+
+  test('does not clear a newer selection when an older annotation finishes saving', async ({ page }) => {
+    const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+
+    await page.getByRole('button', { name: 'Hold next command' }).click();
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await page.getByRole('button', { name: 'Use selection' }).click();
+    await page.getByRole('button', { name: 'Release command' }).click();
+
+    await expect(page.locator('[data-anchor-kind]')).toHaveAttribute('data-anchor-kind', 'selection');
     await expect(selectionActions).toBeVisible();
   });
 

@@ -99,6 +99,7 @@ export interface ReviewShellProps {
   onPageMenuConsumed?(invocationId: string): void;
   onPlacedPageNoteConsumed?(token: number): void;
   onPageNoteComposerComplete?(): void;
+  onSelectionConsumed?(generation: number): void;
   onCommand(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
   onNavigate?(item: ReviewItem): void;
   onNavigateExisting?(item: ExistingAnnotation): void;
@@ -282,6 +283,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const consumeSelectionActions = (generation: number) => {
     setConsumedSelectionGeneration(generation);
+    props.onSelectionConsumed?.(generation);
   };
 
   const handleInputIntent = (intent: ProofreadInputIntent) => {

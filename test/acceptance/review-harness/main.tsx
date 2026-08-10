@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import {
   ReviewShell,
@@ -43,7 +43,13 @@ function Harness() {
     visualScenario ? (visualScenario.name === 'contextual' ? 'selection' : 'none') : 'selection',
   );
   const [selectionGeneration, setSelectionGeneration] = useState(0);
+  const anchorKindRef = useRef(anchorKind);
+  anchorKindRef.current = anchorKind;
+  const selectionGenerationRef = useRef(selectionGeneration);
+  selectionGenerationRef.current = selectionGeneration;
   const [rejectNextCommand, setRejectNextCommand] = useState(false);
+  const [holdNextCommand, setHoldNextCommand] = useState(false);
+  const commandReleaseRef = useRef<(() => void) | null>(null);
   const [navigated, setNavigated] = useState('none');
   const [pageMenuOpen, setPageMenuOpen] = useState(visualScenario?.pageMenuOpen ?? false);
   const [keyboardPageNoteActive, setKeyboardPageNoteActive] = useState(false);
@@ -54,6 +60,11 @@ function Harness() {
 
   const accept = async (command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> => {
     await Promise.resolve();
+    if (holdNextCommand) {
+      setHoldNextCommand(false);
+      await new Promise<void>((resolve) => { commandReleaseRef.current = resolve; });
+      commandReleaseRef.current = null;
+    }
     if (rejectNextCommand) {
       setRejectNextCommand(false);
       return { accepted: false, state, message: 'Review changed elsewhere. Try again.' };
@@ -94,6 +105,11 @@ function Harness() {
       onPageMenuDismiss={() => setPageMenuOpen(false)}
       onPageMenuConsumed={() => setPageMenuOpen(false)}
       onPlacedPageNoteConsumed={() => setPlacedPageNote(null)}
+      onSelectionConsumed={(generation) => {
+        if (anchorKindRef.current === 'selection' && selectionGenerationRef.current === generation) {
+          setAnchorKind('none');
+        }
+      }}
       onCommand={accept}
       onNavigate={(item) => setNavigated(item.id)}
       {...(correspondingItemId === undefined ? {} : { correspondingItemId })}
@@ -123,6 +139,8 @@ function Harness() {
         <button type="button" onClick={() => setAnchorKind('caret')}>Use caret</button>
         <button type="button" onClick={() => setAnchorKind('none')}>Clear anchors</button>
         <button type="button" onClick={() => setRejectNextCommand(true)}>Reject next command</button>
+        <button type="button" onClick={() => setHoldNextCommand(true)}>Hold next command</button>
+        <button type="button" onClick={() => commandReleaseRef.current?.()}>Release command</button>
         <button type="button" onClick={() => setPageMenuOpen(true)}>Open page actions</button>
         {keyboardPageNoteActive ? (
           <button type="button" onClick={() => {
@@ -176,7 +194,12 @@ function Harness() {
             </span>
           ))}
         </div>
-        <output data-revision={state.revision} data-kinds={state.items.map(({ kind }) => kind).join(',')} data-navigated={navigated}>
+        <output
+          data-revision={state.revision}
+          data-kinds={state.items.map(({ kind }) => kind).join(',')}
+          data-navigated={navigated}
+          data-anchor-kind={anchorKind}
+        >
           Revision {state.revision}
         </output>
       </div>}

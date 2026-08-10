@@ -166,6 +166,8 @@ test("one installed-style browser tree preserves review state across responsive 
   await expect(replacementTextbox).toHaveValue("bla");
   await replacementDialog.getByRole("button", { name: "Apply" }).click();
   await expect(replacementDialog).toHaveCount(0);
+  await expect(pageCanvas.locator(':scope > div[style*="mix-blend-mode"]')).toHaveCount(0);
+  await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toHaveCount(0);
   await expect(page.locator("[data-review-item]")).toHaveCount(1);
   const replacementState = host.broker.state(initialSessionId);
   expect(replacementState?.revision).toBe(1);

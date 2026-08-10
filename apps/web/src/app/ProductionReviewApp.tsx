@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { PluginRegistry } from "@embedpdf/core";
 import { ScrollPlugin } from "@embedpdf/plugin-scroll";
+import { SelectionPlugin } from "@embedpdf/plugin-selection";
 
 import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
 import type { CaretAnchor } from "../pdf/selection-anchor.js";
@@ -79,6 +80,8 @@ export interface ProductionReviewAppProps {
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [state, setState] = useState(props.initialState);
   const [selectionUpdate, setSelectionUpdate] = useState<SelectionUpdate>(INITIAL_SELECTION_UPDATE);
+  const selectionUpdateRef = useRef(selectionUpdate);
+  selectionUpdateRef.current = selectionUpdate;
   const [toolError, setToolError] = useState<string | null>(null);
   const [confirmedScope, setConfirmedScope] = useState<string | null>(null);
   const [humanConfirmationActive, setHumanConfirmationActive] = useState(false);
@@ -318,6 +321,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           placementAuthority.current.clear();
           setPageMenu(null);
           setKeyboardPageNoteActive(false);
+        }}
+        onSelectionConsumed={(generation) => {
+          const currentSelection = selectionUpdateRef.current;
+          if (currentSelection.kind !== "reliable" || currentSelection.generation !== generation) return;
+          const registry = viewerRegistry.current;
+          const documentId = registry?.getStore().getState().core.activeDocumentId;
+          if (!documentId) return;
+          registry.getPlugin<SelectionPlugin>(SelectionPlugin.id)?.provides()?.clear(documentId);
         }}
         onCommand={async (command) => {
           const result = await props.api.command(command);
