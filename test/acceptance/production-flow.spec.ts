@@ -910,11 +910,12 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
   await toggleWorkspace(page);
   await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
     .toBeCloseTo(wideScrollBefore.left + expectedHorizontalReveal, 0);
-  await viewport.dispatchEvent('wheel', { deltaX: 40, deltaY: 0 });
-  const deliberateLeft = await viewport.evaluate((element) => {
-    element.scrollLeft += 32;
-    return element.scrollLeft;
-  });
+  const automaticLeft = await viewport.evaluate((element) => element.scrollLeft);
+  await viewport.hover();
+  await page.mouse.wheel(40, 0);
+  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
+    .toBeGreaterThan(automaticLeft);
+  const deliberateLeft = await viewport.evaluate((element) => element.scrollLeft);
   await toggleWorkspace(page);
   await expect.poll(() => runway.evaluate((element) => {
     const parent = element.parentElement;

@@ -69,7 +69,10 @@ export interface WorkspaceFraming {
   readonly presentation: AnnotationPresentation;
   readonly sideWidth: number;
   requestSettledReframe(): void;
-  markUserIntent(axes?: { left?: boolean; top?: boolean }): void;
+  markUserIntent(
+    axes?: { left?: boolean; top?: boolean },
+    options?: { stopAutomaticScroll?: boolean },
+  ): void;
   currentScroll(): ViewerPosition | null;
 }
 
@@ -204,6 +207,7 @@ export function useWorkspaceFraming(input: {
 
   const markUserIntent = useCallback((
     axes: { left?: boolean; top?: boolean } = { left: true, top: true },
+    options: { stopAutomaticScroll?: boolean } = {},
   ) => {
     const session = sessionRef.current;
     if (!session) return;
@@ -225,8 +229,12 @@ export function useWorkspaceFraming(input: {
     }
     authorityRef.current.markUserNavigation();
 
-    // Taking ownership must also stop an in-flight native smooth scroll.
-    if (current?.ready) input.controls?.scrollTo(current.scroll, 'auto');
+    // Programmatic ownership changes stop any in-flight smooth scroll. Native
+    // wheel gestures cancel through browser behavior; forcing a same-position
+    // write during wheel capture suppresses WebKit's default movement.
+    if (current?.ready && options.stopAutomaticScroll !== false) {
+      input.controls?.scrollTo(current.scroll, 'auto');
+    }
   }, [input.controls]);
 
   useEffect(() => {

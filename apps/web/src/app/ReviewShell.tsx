@@ -814,7 +814,7 @@ export function ReviewShell(props: ReviewShellProps) {
         markFramingUserIntent({
           left: event.deltaX !== 0 || (event.shiftKey && event.deltaY !== 0),
           top: event.deltaY !== 0 && !event.shiftKey,
-        });
+        }, { stopAutomaticScroll: false });
       }}
       onPointerDownCapture={(event) => {
         if (!workspaceOpen || isWorkspaceOrChrome(event.target)) {
