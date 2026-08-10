@@ -71,6 +71,8 @@ interface NavigationOperation {
   readonly documentId: string;
   readonly document: object;
   readonly signal: AbortSignal;
+  readonly origin: PdfViewerLocation | null;
+  mutated: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 1_500;
@@ -285,12 +287,20 @@ export function createViewerNavigation(
   let documentGeneration = options.documentGeneration;
   let operationGeneration = 0;
   let activeOperation: { operation: NavigationOperation; abort: AbortController } | null = null;
+  let rollbackBarrier: Promise<void> | null = null;
   let disposed = false;
 
   const cancelPendingNavigation = () => {
-    activeOperation?.abort.abort();
+    const cancelled = activeOperation;
+    cancelled?.abort.abort();
     activeOperation = null;
     operationGeneration += 1;
+    if (cancelled?.operation.mutated && cancelled.operation.origin !== null) {
+      rollbackBarrier = (rollbackBarrier ?? Promise.resolve()).then(
+        () => rollbackOperation(cancelled.operation),
+        () => rollbackOperation(cancelled.operation),
+      );
+    }
   };
 
   const activeViewer = (): ActiveViewer | null => {
@@ -325,8 +335,14 @@ export function createViewerNavigation(
     }
   };
 
-  const beginOperation = (viewer: ActiveViewer): NavigationOperation => {
+  const beginOperation = async (viewer: ActiveViewer): Promise<NavigationOperation | null> => {
     cancelPendingNavigation();
+    const precedingRollback = rollbackBarrier;
+    if (precedingRollback !== null) {
+      await precedingRollback;
+      if (rollbackBarrier === precedingRollback) rollbackBarrier = null;
+    }
+    if (!viewerStillOwnsDocument(viewer)) return null;
     const abort = new AbortController();
     const operation = {
       generation: operationGeneration,
@@ -334,6 +350,8 @@ export function createViewerNavigation(
       documentId: viewer.documentId,
       document: viewer.document,
       signal: abort.signal,
+      origin: captureLocation(),
+      mutated: false,
     };
     activeOperation = { operation, abort };
     return operation;
@@ -349,6 +367,12 @@ export function createViewerNavigation(
     ) return false;
     const core = options.registry.getStore().getState().core;
     return core.documents[operation.documentId]?.document === operation.document;
+  };
+
+  const viewerStillOwnsDocument = (viewer: ActiveViewer): boolean => {
+    if (disposed || viewer.documentGeneration !== documentGeneration) return false;
+    const core = options.registry.getStore().getState().core;
+    return core.documents[viewer.documentId]?.document === viewer.document;
   };
 
   const pageGeometry = (viewer: ActiveViewer, pageIndex: number) => {
@@ -430,6 +454,45 @@ export function createViewerNavigation(
     };
     return isPdfViewerLocation(location) ? location : null;
   };
+
+  async function rollbackOperation(operation: NavigationOperation): Promise<void> {
+    const origin = operation.origin;
+    const viewer = activeViewer();
+    if (
+      origin === null
+      || viewer === null
+      || viewer.documentId !== operation.documentId
+      || viewer.document !== operation.document
+      || !viewerStillOwnsDocument(viewer)
+    ) return;
+    const deadline = Date.now() + timeoutMs;
+    try {
+      if (Math.abs(viewer.zoom.getState().currentZoomLevel - origin.zoom) > zoomTolerance) {
+        viewer.zoom.requestZoom(origin.zoom);
+        while (
+          viewerStillOwnsDocument(viewer)
+          && Date.now() < deadline
+          && Math.abs(viewer.zoom.getState().currentZoomLevel - origin.zoom) > zoomTolerance
+        ) {
+          if (!await waitForPromise(nextFrame(), new AbortController().signal, deadline - Date.now())) {
+            return;
+          }
+        }
+      }
+      if (!viewerStillOwnsDocument(viewer) || Date.now() >= deadline) return;
+      viewer.scroll.scrollToPage({
+        pageNumber: origin.pageIndex + 1,
+        pageCoordinates: origin.anchor,
+        behavior: 'instant',
+        alignX: origin.alignment.xPercent,
+        alignY: origin.alignment.yPercent,
+      });
+      await nextFrame();
+      await nextFrame();
+    } catch {
+      // Best-effort restoration: a replacement/disposal owns the newer state.
+    }
+  }
 
   const locationMatchesView = (viewer: ActiveViewer, location: PdfViewerLocation): boolean => {
     const geometry = pageGeometry(viewer, location.pageIndex);
@@ -517,6 +580,7 @@ export function createViewerNavigation(
         alignY: location.alignment.yPercent,
       });
       const targetWasMounted = pageGeometry(viewer, location.pageIndex) !== null;
+      operation.mutated = true;
       scrollToLocation();
       // Distant virtualized pages are commonly absent until the scroll request
       // expands the mounted page window. Wait only after issuing that request.
@@ -576,13 +640,16 @@ export function createViewerNavigation(
     }
     const zoomed = Math.abs(currentZoom - location.zoom) <= zoomTolerance
       ? true
-      : await waitForZoom(
-        viewer.zoom,
-        location.zoom,
-        zoomTolerance,
-        operation.signal,
-        deadline - Date.now(),
-      );
+      : await (async () => {
+        operation.mutated = true;
+        return waitForZoom(
+          viewer.zoom,
+          location.zoom,
+          zoomTolerance,
+          operation.signal,
+          deadline - Date.now(),
+        );
+      })();
     if (!zoomed || !operationIsCurrent(operation)) return false;
     if (!await waitForFrames(operation, 2, deadline)) return false;
     if (!await scrollAndWait(viewer, location, operation, deadline)) return false;
@@ -597,8 +664,17 @@ export function createViewerNavigation(
   const applyLocation = async (location: PdfViewerLocation): Promise<boolean> => {
     const viewer = activeViewer();
     if (!viewer) return false;
-    const operation = beginOperation(viewer);
-    return applyResolvedLocation(viewer, location, operation);
+    const operation = await beginOperation(viewer);
+    if (operation === null) return false;
+    try {
+      const applied = await applyResolvedLocation(viewer, location, operation);
+      if (!applied && !operation.signal.aborted && operation.mutated) {
+        await rollbackOperation(operation);
+      }
+      return applied;
+    } finally {
+      if (activeOperation?.operation === operation) activeOperation = null;
+    }
   };
 
   const resolveTarget = (
@@ -652,39 +728,50 @@ export function createViewerNavigation(
   const applyTarget = async (target: PdfNavigationTarget): Promise<boolean> => {
     const viewer = activeViewer();
     if (!viewer) return false;
-    const operation = beginOperation(viewer);
-    if (!operationIsCurrent(operation)) return false;
-    // A newly opened inactive document can notify before its portaled viewport
-    // has committed usable metrics. Let that bounded render settle rather than
-    // treating the target as malformed.
-    const initialLocation = await waitForTargetLocation(viewer, target, operation);
-    if (initialLocation === null) return false;
-    let currentPageIndex = -1;
+    const operation = await beginOperation(viewer);
+    if (operation === null) return false;
     try {
-      currentPageIndex = viewer.scroll.getCurrentPage() - 1;
-    } catch {
-      return false;
+      if (!operationIsCurrent(operation)) return false;
+      // A newly opened inactive document can notify before its portaled viewport
+      // has committed usable metrics. Let that bounded render settle rather than
+      // treating the target as malformed.
+      const initialLocation = await waitForTargetLocation(viewer, target, operation);
+      if (initialLocation === null) return false;
+      let currentPageIndex = -1;
+      try {
+        currentPageIndex = viewer.scroll.getCurrentPage() - 1;
+      } catch {
+        return false;
+      }
+      const waitForAdjacentTarget = Math.abs(target.pageIndex - currentPageIndex) <= 1;
+      const readinessDeadline = Date.now() + timeoutMs;
+      while (operationIsCurrent(operation) && Date.now() < readinessDeadline) {
+        const hasPageTree = hasUsablePageTree(viewer);
+        const targetReady = pageGeometry(viewer, target.pageIndex) !== null;
+        if (hasPageTree && (!waitForAdjacentTarget || targetReady)) break;
+        if (!await waitForPromise(
+          nextFrame(),
+          operation.signal,
+          readinessDeadline - Date.now(),
+        )) return false;
+      }
+      if (
+        !hasUsablePageTree(viewer)
+        || (waitForAdjacentTarget && pageGeometry(viewer, target.pageIndex) === null)
+      ) return false;
+      // Viewport metrics can change while the portaled page tree settles. Resolve
+      // again so fitted zoom/alignment use the committed viewport dimensions.
+      const settledLocation = resolveTarget(viewer, target);
+      const applied = settledLocation
+        ? await applyResolvedLocation(viewer, settledLocation, operation)
+        : false;
+      if (!applied && !operation.signal.aborted && operation.mutated) {
+        await rollbackOperation(operation);
+      }
+      return applied;
+    } finally {
+      if (activeOperation?.operation === operation) activeOperation = null;
     }
-    const waitForAdjacentTarget = Math.abs(target.pageIndex - currentPageIndex) <= 1;
-    const readinessDeadline = Date.now() + timeoutMs;
-    while (operationIsCurrent(operation) && Date.now() < readinessDeadline) {
-      const hasPageTree = hasUsablePageTree(viewer);
-      const targetReady = pageGeometry(viewer, target.pageIndex) !== null;
-      if (hasPageTree && (!waitForAdjacentTarget || targetReady)) break;
-      if (!await waitForPromise(
-        nextFrame(),
-        operation.signal,
-        readinessDeadline - Date.now(),
-      )) return false;
-    }
-    if (
-      !hasUsablePageTree(viewer)
-      || (waitForAdjacentTarget && pageGeometry(viewer, target.pageIndex) === null)
-    ) return false;
-    // Viewport metrics can change while the portaled page tree settles. Resolve
-    // again so fitted zoom/alignment use the committed viewport dimensions.
-    const settledLocation = resolveTarget(viewer, target);
-    return settledLocation ? applyResolvedLocation(viewer, settledLocation, operation) : false;
   };
 
   const unsubscribeStore = options.registry.getStore().subscribe((_action, state) => {

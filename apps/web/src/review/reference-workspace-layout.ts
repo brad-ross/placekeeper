@@ -128,20 +128,11 @@ export function reduceReferenceWorkspaceLayout(
     case 'set-stage-size': {
       const stageWidth = finiteNonNegative(action.width);
       const stageHeight = finiteNonNegative(action.height);
-      const rightReferenceWidth = clampRightReferenceWidth(state.rightReferenceWidth, stageWidth);
-      const bottomReferenceHeight = clampBottomReferenceHeight(
-        state.bottomReferenceHeight,
-        stageHeight,
-      );
-      if (stageWidth === state.stageWidth && stageHeight === state.stageHeight
-        && rightReferenceWidth === state.rightReferenceWidth
-        && bottomReferenceHeight === state.bottomReferenceHeight) return state;
+      if (stageWidth === state.stageWidth && stageHeight === state.stageHeight) return state;
       return {
         ...state,
         stageWidth,
         stageHeight,
-        rightReferenceWidth,
-        bottomReferenceHeight,
       };
     }
     case 'set-regime':
@@ -163,8 +154,12 @@ export function reduceReferenceWorkspaceLayout(
         narrowSurface: state.regime === 'narrow' ? 'right' : state.narrowSurface,
       };
     case 'hide-right-workspace':
+      if (state.regime === 'narrow') return { ...state, narrowOpen: false };
       return { ...state, rightWorkspaceOpen: false };
     case 'toggle-right-workspace':
+      if (state.regime === 'narrow') {
+        return { ...state, narrowOpen: !state.narrowOpen, narrowSurface: 'right' };
+      }
       return { ...state, rightWorkspaceOpen: !state.rightWorkspaceOpen };
     case 'show-references':
       return state.referenceDock === 'right'
@@ -179,17 +174,33 @@ export function reduceReferenceWorkspaceLayout(
             narrowSurface: state.regime === 'narrow' ? 'references' : state.narrowSurface,
           };
     case 'hide-references':
+      if (state.regime === 'narrow') {
+        const showRememberedRight = state.referenceDock === 'bottom' && state.rightWorkspaceOpen;
+        return {
+          ...state,
+          rightWorkspaceOpen: state.referenceDock === 'right'
+            ? false
+            : state.rightWorkspaceOpen,
+          bottomReferencesOpen: state.referenceDock === 'bottom'
+            ? false
+            : state.bottomReferencesOpen,
+          narrowOpen: showRememberedRight,
+          narrowSurface: showRememberedRight ? 'right' : state.narrowSurface,
+        };
+      }
       if (state.referenceDock === 'right') {
-        return { ...state, rightWorkspaceOpen: false, narrowOpen: false };
+        return { ...state, rightWorkspaceOpen: false };
       }
       return {
         ...state,
         bottomReferencesOpen: false,
-        narrowOpen: state.regime === 'narrow' ? state.rightWorkspaceOpen : state.narrowOpen,
-        narrowSurface: state.regime === 'narrow' && state.rightWorkspaceOpen
-          ? 'right' : state.narrowSurface,
       };
     case 'toggle-references':
+      if (state.regime === 'narrow') {
+        return state.narrowOpen && state.narrowSurface === 'references'
+          ? reduceReferenceWorkspaceLayout(state, { type: 'hide-references' })
+          : reduceReferenceWorkspaceLayout(state, { type: 'show-references' });
+      }
       return state.referenceDock === 'right'
         ? { ...state, rightWorkspaceOpen: !state.rightWorkspaceOpen }
         : { ...state, bottomReferencesOpen: !state.bottomReferencesOpen };
@@ -273,7 +284,7 @@ export function deriveReferenceWorkspaceLayout(
       open: state.narrowOpen,
       activeMode,
       bottomHeight: referenceActive
-        ? state.bottomReferenceHeight
+        ? clampBottomReferenceHeight(state.bottomReferenceHeight, state.stageHeight)
         : clampBottomReferenceHeight(
           state.stageHeight * DEFAULT_BOTTOM_REFERENCE_HEIGHT_RATIO,
           state.stageHeight,
@@ -300,9 +311,11 @@ export function deriveReferenceWorkspaceLayout(
     rightWorkspaceOpen: rightOpen,
     bottomReferencesOpen: bottomOpen,
     rightWidth: referenceRightActive
-      ? state.rightReferenceWidth
+      ? clampRightReferenceWidth(state.rightReferenceWidth, state.stageWidth)
       : Math.min(DEFAULT_RIGHT_WORKSPACE_WIDTH, state.stageWidth),
-    bottomHeight: bottomOpen ? state.bottomReferenceHeight : 0,
+    bottomHeight: bottomOpen
+      ? clampBottomReferenceHeight(state.bottomReferenceHeight, state.stageHeight)
+      : 0,
     referenceResizable: referenceRightActive || bottomOpen,
   };
 }

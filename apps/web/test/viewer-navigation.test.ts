@@ -203,7 +203,10 @@ function navigationHarness(options: {
     getState: () => ({ currentZoomLevel: currentZoom }),
     requestZoom: (level: number | string) => {
       log.push(`zoom:${String(level)}`);
-      if (!options.manualZoom && typeof level === 'number') emitZoom(level);
+      if (typeof level === 'number') {
+        if (options.manualZoom) currentZoom = level;
+        else emitZoom(level);
+      }
     },
     onZoomChange: (listener: (event: { newZoom: number }) => void) => {
       zoomListeners.add(listener);
@@ -431,7 +434,7 @@ describe('viewer navigation adapter', () => {
   });
 
   it('cancels stale operations on supersession and document replacement', async () => {
-    const harness = navigationHarness({ manualZoom: true });
+    const harness = navigationHarness({ manualZoom: true, timeoutMs: 250 });
     const first = harness.navigation.applyLocation({
       pageIndex: 0,
       anchor: { x: 20, y: 30 },
@@ -445,7 +448,7 @@ describe('viewer navigation adapter', () => {
       alignment: { xPercent: 0, yPercent: 0 },
       zoom: 2,
     });
-    await Promise.resolve();
+    await vi.waitFor(() => expect(harness.log).toContain('zoom:2'));
     harness.completeZoom(2);
 
     expect(await first).toBe(false);
@@ -470,6 +473,32 @@ describe('viewer navigation adapter', () => {
     await Promise.resolve();
     harness.navigation.cancelPendingNavigation();
     expect(await cancelled).toBe(false);
+  });
+
+  it('restores a semantic origin before a superseding jump starts', async () => {
+    const harness = navigationHarness({ manualZoom: true, timeoutMs: 250 });
+    const origin = harness.navigation.captureLocation();
+    const first = harness.navigation.applyLocation({
+      pageIndex: 0,
+      anchor: { x: 20, y: 30 },
+      alignment: { xPercent: 0, yPercent: 0 },
+      zoom: 1.5,
+    });
+    await Promise.resolve();
+
+    const second = harness.navigation.applyLocation({
+      pageIndex: 0,
+      anchor: { x: 40, y: 50 },
+      alignment: { xPercent: 0, yPercent: 0 },
+      zoom: 2,
+    });
+    await vi.waitFor(() => expect(harness.log).toContain('zoom:2'));
+    harness.completeZoom(2);
+
+    expect(await first).toBe(false);
+    expect(await second).toBe(true);
+    expect(harness.log.slice(0, 3)).toEqual(['zoom:1.5', 'zoom:1', 'scroll']);
+    expect(origin?.zoom).toBe(1);
   });
 
   it('returns false on bounded timeout, malformed input, or failed postconditions', async () => {

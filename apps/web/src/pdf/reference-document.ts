@@ -107,7 +107,7 @@ export function createReferenceDocumentController(input: {
   const performPhysicalClose = async (): Promise<void> => {
     try {
       const closeTask = input.documentManager.closeDocument(REFERENCE_PDF_DOCUMENT_ID);
-      await closeTask.toPromise();
+      await waitWithin(closeTask.toPromise(), timeoutMs);
     } catch {
       // Deliberately quiet: raw engine/load failures cannot enter UI state or logs here.
     }
@@ -138,8 +138,13 @@ export function createReferenceDocumentController(input: {
         if (operation !== operationGeneration || startedGeneration !== documentGeneration) return false;
         const documentStatus = input.documentManager.getDocumentState(REFERENCE_PDF_DOCUMENT_ID)?.status;
         if (documentStatus === 'loaded') {
+          if (input.documentManager.getActiveDocumentId() !== MAIN_PDF_DOCUMENT_ID) {
+            status = 'failed';
+            void startPhysicalClose();
+            return false;
+          }
           status = 'loaded';
-          return input.documentManager.getActiveDocumentId() === MAIN_PDF_DOCUMENT_ID;
+          return true;
         }
         const task = kind === 'retry' && documentStatus === 'error'
           ? input.documentManager.retryDocument(REFERENCE_PDF_DOCUMENT_ID)
@@ -148,6 +153,7 @@ export function createReferenceDocumentController(input: {
         if (operation !== operationGeneration || startedGeneration !== documentGeneration) return false;
         if (input.documentManager.getActiveDocumentId() !== MAIN_PDF_DOCUMENT_ID) {
           status = 'failed';
+          void startPhysicalClose();
           return false;
         }
         status = 'loaded';

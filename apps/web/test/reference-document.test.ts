@@ -242,4 +242,74 @@ describe('reference document scope', () => {
     await second;
     expect(closeDocument).toHaveBeenCalledOnce();
   });
+
+  it('closes an active loaded clone and validates ownership again on retry', async () => {
+    let activeDocumentId = REFERENCE_PDF_DOCUMENT_ID;
+    let documentStatus: 'loaded' | null = 'loaded';
+    const closeDocument = vi.fn(() => resolvedTask(undefined));
+    const openDocumentUrl = vi.fn(() => {
+      documentStatus = 'loaded';
+      activeDocumentId = MAIN_PDF_DOCUMENT_ID;
+      return resolvedTask({
+        documentId: REFERENCE_PDF_DOCUMENT_ID,
+        task: resolvedTask(undefined),
+      });
+    });
+    closeDocument.mockImplementation(() => {
+      documentStatus = null;
+      activeDocumentId = MAIN_PDF_DOCUMENT_ID;
+      return resolvedTask(undefined);
+    });
+    const controller = createReferenceDocumentController({
+      documentManager: {
+        openDocumentUrl,
+        retryDocument: vi.fn(),
+        closeDocument,
+        getActiveDocumentId: () => activeDocumentId,
+        getDocumentState: () => documentStatus === null ? null : { status: documentStatus },
+      },
+      assetUrls: { pdfiumWasm: '/pdfium.wasm', documentUrl: '/document.pdf' },
+      origin: 'http://127.0.0.1:4173', documentGeneration: 1,
+    });
+
+    expect(await controller.open()).toBe(false);
+    expect(controller.snapshot().status).toBe('failed');
+    await Promise.resolve();
+    expect(closeDocument).toHaveBeenCalledOnce();
+
+    expect(await controller.retry()).toBe(true);
+    expect(openDocumentUrl).toHaveBeenCalledOnce();
+    expect(controller.snapshot().status).toBe('loaded');
+  });
+
+  it('bounds a stalled physical close so a later open can proceed', async () => {
+    vi.useFakeTimers();
+    try {
+      const never = new Promise<void>(() => undefined);
+      const openDocumentUrl = vi.fn(() => resolvedTask({
+        documentId: REFERENCE_PDF_DOCUMENT_ID,
+        task: resolvedTask(undefined),
+      }));
+      const controller = createReferenceDocumentController({
+        documentManager: {
+          openDocumentUrl,
+          retryDocument: vi.fn(),
+          closeDocument: vi.fn(() => ({ toPromise: () => never })),
+          getActiveDocumentId: () => MAIN_PDF_DOCUMENT_ID,
+          getDocumentState: () => null,
+        },
+        assetUrls: { pdfiumWasm: '/pdfium.wasm', documentUrl: '/document.pdf' },
+        origin: 'http://127.0.0.1:4173', documentGeneration: 1, timeoutMs: 20,
+      });
+
+      const close = controller.close();
+      const reopen = controller.open();
+      await vi.advanceTimersByTimeAsync(21);
+      await close;
+      expect(await reopen).toBe(true);
+      expect(openDocumentUrl).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

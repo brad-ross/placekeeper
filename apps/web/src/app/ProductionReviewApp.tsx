@@ -223,7 +223,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       getReferenceController: () => referenceControllerRef.current,
       layout: {
         revealReferences: () => {
-          dispatchLayout({ type: 'show-references' });
+          const layout = referenceLayoutStateRef.current;
+          if (layout.regime !== 'narrow' || !layout.narrowOpen) {
+            dispatchLayout({ type: 'show-references' });
+          }
           dispatchLayout({ type: 'focus-surface', surface: 'references' });
         },
         hideReferences: () => dispatchLayout({ type: 'hide-references' }),
@@ -546,7 +549,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           }
           setRightWorkspaceMode(mode);
           dispatchNavigation({ type: 'select-workspace-mode', mode });
-          dispatchLayout({ type: 'show-right-workspace' });
+          if (referenceLayoutState.regime !== 'narrow' || !referenceLayoutState.narrowOpen) {
+            dispatchLayout({ type: 'show-right-workspace' });
+          }
           dispatchLayout({ type: 'focus-surface', surface: 'right' });
         }}
         onWorkspaceDismiss={() => {

@@ -130,6 +130,53 @@ describe('reference workspace layout state', () => {
     expect(state).toMatchObject(wideTuple);
   });
 
+  it('clamps rendered sizes during a temporary shrink without erasing preferences', () => {
+    let state = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'resize-right-references', size: 520 });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'resize-bottom-references', size: 510 });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'show-references' });
+
+    state = reduceReferenceWorkspaceLayout(state, {
+      type: 'set-stage-size', width: 700, height: 500,
+    });
+    expect(state).toMatchObject({ rightReferenceWidth: 520, bottomReferenceHeight: 510 });
+    expect(deriveReferenceWorkspaceLayout(state, 'outline')).toMatchObject({
+      bottomHeight: 500 - MIN_MAIN_READING_HEIGHT,
+    });
+
+    state = reduceReferenceWorkspaceLayout(state, {
+      type: 'set-stage-size', width: 1440, height: 900,
+    });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'move-references-right' });
+    expect(deriveReferenceWorkspaceLayout(state, 'outline', 'references')).toMatchObject({
+      rightWidth: 520,
+    });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'move-references-bottom' });
+    expect(deriveReferenceWorkspaceLayout(state, 'outline')).toMatchObject({
+      bottomHeight: 510,
+    });
+  });
+
+  it('keeps narrow tab choices independent from the remembered wide tuple', () => {
+    let bottomOnly = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
+    bottomOnly = reduceReferenceWorkspaceLayout(bottomOnly, { type: 'show-references' });
+    bottomOnly = reduceReferenceWorkspaceLayout(bottomOnly, { type: 'set-regime', regime: 'narrow' });
+    bottomOnly = reduceReferenceWorkspaceLayout(bottomOnly, { type: 'focus-surface', surface: 'right' });
+    bottomOnly = reduceReferenceWorkspaceLayout(bottomOnly, { type: 'set-regime', regime: 'wide' });
+    expect(bottomOnly).toMatchObject({
+      referenceDock: 'bottom', rightWorkspaceOpen: false, bottomReferencesOpen: true,
+    });
+
+    let rightOnly = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
+    rightOnly = reduceReferenceWorkspaceLayout(rightOnly, { type: 'move-references-right' });
+    rightOnly = reduceReferenceWorkspaceLayout(rightOnly, { type: 'set-regime', regime: 'narrow' });
+    rightOnly = reduceReferenceWorkspaceLayout(rightOnly, { type: 'focus-surface', surface: 'references' });
+    rightOnly = reduceReferenceWorkspaceLayout(rightOnly, { type: 'set-regime', regime: 'wide' });
+    expect(rightOnly).toMatchObject({
+      referenceDock: 'right', rightWorkspaceOpen: true, bottomReferencesOpen: false,
+    });
+  });
+
   it('opens a fresh narrow rail to Outline and remembers later narrow focus', () => {
     let state = createReferenceWorkspaceLayout({ width: 600, height: 800 });
     state = reduceReferenceWorkspaceLayout(state, { type: 'toggle-narrow-workspace' });
