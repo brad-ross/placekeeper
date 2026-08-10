@@ -45,6 +45,21 @@ import {
 } from '../review/ReferenceWorkspace.js';
 import { ReviewChrome } from '../review/ReviewChrome.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
+import { OutlineAnnotationsWorkspace } from '../review/OutlineAnnotationsWorkspace.js';
+import { ReferenceResizeHandle } from '../review/ReferenceResizeHandle.js';
+import { WorkspaceEdgeRail } from '../review/WorkspaceEdgeRail.js';
+import {
+  MIN_BOTTOM_REFERENCE_HEIGHT,
+  MIN_RIGHT_REFERENCE_WIDTH,
+  clampBottomReferenceHeight,
+  clampRightReferenceWidth,
+  createReferenceWorkspaceLayout,
+  deriveReferenceWorkspaceLayout,
+  reduceReferenceWorkspaceLayout,
+  type ReferenceWorkspaceLayoutAction,
+  type ReferenceWorkspaceLayoutState,
+  type RightWorkspaceMode,
+} from '../review/reference-workspace-layout.js';
 import { FinishReviewDrawer } from './FinishReviewDrawer.js';
 import {
   createProofreadInputController,
@@ -154,6 +169,9 @@ export interface ReviewShellProps {
   onOutlineActivate?(item: PdfOutlineItem): void;
   onReferenceViewportHost?(element: HTMLDivElement | null): void;
   onWorkspaceModeFocusTokenChange?(mode: WorkspaceMode, token: string): void;
+  referenceLayoutState?: ReferenceWorkspaceLayoutState;
+  onReferenceLayoutAction?(action: ReferenceWorkspaceLayoutAction): void;
+  rightWorkspaceMode?: RightWorkspaceMode;
   children?: ReactNode;
 }
 
@@ -196,6 +214,22 @@ function mutableField(item: ReviewItem): 'proposedText' | 'comment' | undefined 
 }
 
 export function ReviewShell(props: ReviewShellProps) {
+  const [localReferenceLayout, dispatchLocalReferenceLayout] = useReducer(
+    reduceReferenceWorkspaceLayout,
+    undefined,
+    () => {
+      let initial = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
+      if (props.workspaceOpen === true || props.listOpen === true) {
+        const initialMode = props.listOpen === true
+          ? 'annotations'
+          : props.navigationState?.workspace.lastMode ?? 'outline';
+        initial = reduceReferenceWorkspaceLayout(initial, initialMode === 'references'
+          ? { type: 'show-references' }
+          : { type: 'show-right-workspace' });
+      }
+      return initial;
+    },
+  );
   const [surface, dispatchSurface] = useReducer(
     reduceReviewSurface,
     props.workspaceOpen === true
@@ -238,7 +272,34 @@ export function ReviewShell(props: ReviewShellProps) {
   const workspaceRequestedOpen = props.workspaceOpen ?? surface.baseSurface === 'workspace';
   const workspaceOpen = workspaceIsVisible(workspaceRequestedOpen, surface.baseSurface);
   const workspaceMode = navigation.workspace.lastMode;
-  const annotationsVisible = workspaceOpen && workspaceMode === 'annotations';
+  const rightWorkspaceMode: RightWorkspaceMode = props.rightWorkspaceMode
+    ?? (workspaceMode === 'references' ? 'outline' : workspaceMode);
+  const referenceLayout = props.referenceLayoutState ?? localReferenceLayout;
+  const effectiveReferenceLayout = deriveReferenceWorkspaceLayout(referenceLayout, rightWorkspaceMode);
+  const dispatchReferenceLayout = (action: ReferenceWorkspaceLayoutAction) => {
+    if (props.referenceLayoutState === undefined) dispatchLocalReferenceLayout(action);
+    props.onReferenceLayoutAction?.(action);
+  };
+  const finishOpen = surface.baseSurface === 'finish';
+  const referenceSurfaceOpen = !finishOpen && (effectiveReferenceLayout.kind === 'narrow-unified'
+    ? effectiveReferenceLayout.open
+    : effectiveReferenceLayout.referenceDock === 'right'
+      ? effectiveReferenceLayout.rightWorkspaceOpen
+      : effectiveReferenceLayout.bottomReferencesOpen);
+  const rightSurfaceOpen = !finishOpen && effectiveReferenceLayout.kind !== 'narrow-unified'
+    && effectiveReferenceLayout.rightWorkspaceOpen;
+  const sharedWorkspace = effectiveReferenceLayout.kind === 'narrow-unified'
+    || effectiveReferenceLayout.referenceDock === 'right';
+  const toolsSurfaceOpen = !finishOpen && (effectiveReferenceLayout.kind === 'narrow-unified'
+    ? effectiveReferenceLayout.open
+    : effectiveReferenceLayout.referenceDock === 'bottom'
+      ? rightSurfaceOpen
+      : referenceSurfaceOpen);
+  const effectiveWorkspaceMode = effectiveReferenceLayout.kind === 'narrow-unified'
+    ? effectiveReferenceLayout.activeMode
+    : effectiveReferenceLayout.referenceDock === 'bottom' ? rightWorkspaceMode : workspaceMode;
+  const anyWorkspaceOpen = workspaceOpen || referenceSurfaceOpen || toolsSurfaceOpen;
+  const annotationsVisible = anyWorkspaceOpen && effectiveWorkspaceMode === 'annotations';
   const selectionAnchor = reliableSelection(props.selectionUpdate);
   const selectionActionsAvailable = selectionAnchor !== null
     && props.selectionUpdate.generation !== consumedSelectionGeneration;
@@ -254,10 +315,37 @@ export function ReviewShell(props: ReviewShellProps) {
     documentGeneration: navigation.documentGeneration,
   };
   const workspaceFraming = useWorkspaceFraming({
-    workspaceOpen,
+    workspaceOpen: anyWorkspaceOpen,
     ...(props.viewerFraming === undefined ? {} : { controls: props.viewerFraming }),
     request: workspaceRequest,
   });
+
+  useLayoutEffect(() => {
+    const stage = workspaceFraming.stageRef.current;
+    if (!stage) return;
+    const publish = () => {
+      const bounds = stage.getBoundingClientRect();
+      const action: ReferenceWorkspaceLayoutAction = {
+        type: 'set-stage-size',
+        width: Math.max(0, bounds.width),
+        height: Math.max(0, bounds.height),
+      };
+      if (props.referenceLayoutState === undefined) dispatchLocalReferenceLayout(action);
+      props.onReferenceLayoutAction?.(action);
+    };
+    publish();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(publish);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, [props.onReferenceLayoutAction, props.referenceLayoutState, workspaceFraming.stageRef]);
+
+  useLayoutEffect(() => {
+    dispatchReferenceLayout({
+      type: 'set-regime',
+      regime: workspaceFraming.presentation === 'right' ? 'wide' : 'narrow',
+    });
+  }, [workspaceFraming.presentation]);
 
   useLayoutEffect(() => {
     if (props.workspaceOpen === undefined) return;
@@ -297,7 +385,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   useEffect(() => {
     clearPeekTimer();
-    if (workspaceOpen) {
+    if (anyWorkspaceOpen) {
       setPeekItemId(undefined);
       return;
     }
@@ -308,7 +396,7 @@ export function ReviewShell(props: ReviewShellProps) {
       peekTimerRef.current = setTimeout(() => setPeekItemId(undefined), 180);
     }
     return clearPeekTimer;
-  }, [workspaceOpen, props.correspondingItemId]);
+  }, [anyWorkspaceOpen, props.correspondingItemId]);
 
   useEffect(() => {
     const request = props.activationRequest;
@@ -348,17 +436,6 @@ export function ReviewShell(props: ReviewShellProps) {
       type: 'reference-navigation',
       action: { type: 'select-workspace-mode', mode },
     });
-    props.onWorkspaceModeChange?.(mode);
-  };
-  const openWorkspace = (mode: WorkspaceMode = workspaceMode) => {
-    if (document.activeElement instanceof HTMLElement) {
-      surfaceTriggersRef.current.set('workspace', document.activeElement);
-    }
-    if (mode === 'annotations') {
-      setWorkspaceRequest({ kind: 'reading', token: ++annotationRequestTokenRef.current });
-    }
-    dismissPageNoteAuthority();
-    dispatchSurface({ type: 'open-workspace', mode });
     props.onWorkspaceModeChange?.(mode);
   };
   const restoreSurfaceTrigger = (surfaceName: ReviewBaseSurface) => {
@@ -725,25 +802,32 @@ export function ReviewShell(props: ReviewShellProps) {
         canRedo={canRedo}
         canNavigateBack={props.canNavigateBack ?? false}
         canNavigateForward={props.canNavigateForward ?? false}
-        annotationCount={props.state.items.length}
-        workspaceOpen={workspaceOpen}
-        finishOpen={surface.baseSurface === 'finish'}
-        workspaceControlRef={workspaceControlRef}
+        finishOpen={finishOpen}
         onUndo={() => void submit(undoReview)}
         onRedo={() => void submit(redoReview)}
         onNavigateBack={() => props.onNavigateBack?.()}
         onNavigateForward={() => props.onNavigateForward?.()}
-        onWorkspace={() => workspaceOpen ? closeWorkspace() : openWorkspace()}
         onFinish={() => openBase('finish')}
       />
       <div
         ref={workspaceFraming.stageRef}
         className="review-layout"
         data-review-stage
+        data-reference-layout={effectiveReferenceLayout.kind}
         data-workspace-presentation={workspaceFraming.presentation}
         data-annotation-presentation={workspaceFraming.presentation}
         style={{
           '--workspace-side-width': `${workspaceFraming.sideWidth}px`,
+          '--reference-right-width': `${effectiveReferenceLayout.kind === 'narrow-unified'
+            ? referenceLayout.rightReferenceWidth : effectiveReferenceLayout.rightWidth}px`,
+          '--reference-bottom-height': `${effectiveReferenceLayout.kind === 'narrow-unified'
+            ? effectiveReferenceLayout.bottomHeight : referenceLayout.bottomReferenceHeight}px`,
+          '--tools-right-width': `${effectiveReferenceLayout.kind === 'narrow-unified'
+            ? referenceLayout.rightReferenceWidth : effectiveReferenceLayout.rightWidth}px`,
+          '--tools-bottom-offset': `${effectiveReferenceLayout.kind === 'wide-split'
+            ? effectiveReferenceLayout.bottomHeight : 0}px`,
+          '--tools-bottom-height': `${effectiveReferenceLayout.kind === 'narrow-unified'
+            ? effectiveReferenceLayout.bottomHeight : referenceLayout.bottomReferenceHeight}px`,
         } as CSSProperties}
       >
         <div className="review-document">{props.children}</div>
@@ -801,11 +885,45 @@ export function ReviewShell(props: ReviewShellProps) {
           })() : null}
         </div>
         <div className="review-drawer-host" data-review-drawer-host>
+          {effectiveReferenceLayout.kind === 'narrow-unified' ? (
+            <WorkspaceEdgeRail
+              surface="bottom"
+              open={effectiveReferenceLayout.open}
+              controls="review-workspace"
+              onToggle={() => dispatchReferenceLayout({ type: 'toggle-narrow-workspace' })}
+            />
+          ) : (
+            <>
+              <WorkspaceEdgeRail
+                surface="right"
+                open={rightSurfaceOpen}
+                controls="review-tools-workspace"
+                onToggle={() => dispatchReferenceLayout({ type: 'toggle-right-workspace' })}
+              />
+              <WorkspaceEdgeRail
+                surface="bottom"
+                open={effectiveReferenceLayout.bottomReferencesOpen}
+                controls="review-workspace"
+                onToggle={() => dispatchReferenceLayout({ type: 'toggle-references' })}
+              />
+            </>
+          )}
           <ReferenceWorkspace
             workspaceRef={workspaceFraming.workspaceRef}
-            open={workspaceOpen}
-            mode={workspaceMode}
-            presentation={workspaceFraming.presentation}
+            open={referenceSurfaceOpen}
+            mode={effectiveReferenceLayout.kind === 'narrow-unified'
+              ? effectiveReferenceLayout.activeMode
+              : effectiveReferenceLayout.referenceDock === 'bottom' ? 'references' : workspaceMode}
+            presentation={effectiveReferenceLayout.kind === 'narrow-unified'
+              || effectiveReferenceLayout.referenceDock === 'bottom'
+              ? 'bottom' : 'right'}
+            modes={effectiveReferenceLayout.kind === 'narrow-unified'
+              || effectiveReferenceLayout.referenceDock === 'right'
+              ? ['outline', 'annotations', 'references'] : ['references']}
+            headerVariant={effectiveReferenceLayout.kind !== 'narrow-unified'
+              && effectiveReferenceLayout.referenceDock === 'bottom' ? 'references' : 'tabs'}
+            onMoveReferencesRight={() => dispatchReferenceLayout({ type: 'move-references-right' })}
+            onMoveReferencesBottom={() => dispatchReferenceLayout({ type: 'move-references-bottom' })}
             tabs={referenceTabs}
             activeTabIdentity={navigation.activeTabIdentity}
             outline={outlineDiscovery}
@@ -837,6 +955,31 @@ export function ReviewShell(props: ReviewShellProps) {
             onOutlineActivate={(item) => props.onOutlineActivate?.(item)}
             onDismiss={closeWorkspace}
             onReferenceViewportHost={props.onReferenceViewportHost ?? ignoreReferenceViewportHost}
+            onModeFocusTokenChange={(mode, token) => {
+              if (props.navigationState === undefined) {
+                dispatchSurface({
+                  type: 'reference-navigation',
+                  action: {
+                    type: 'remember-workspace-view',
+                    mode,
+                    logicalScrollToken: surface.navigation.workspace.modes[mode].logicalScrollToken,
+                    logicalFocusToken: token,
+                  },
+                });
+              }
+              props.onWorkspaceModeFocusTokenChange?.(mode, token);
+            }}
+            annotations={null}
+          />
+          <OutlineAnnotationsWorkspace
+            open={toolsSurfaceOpen}
+            mode={effectiveWorkspaceMode}
+            presentation={effectiveReferenceLayout.kind === 'narrow-unified' ? 'bottom' : 'right'}
+            headerVariant={sharedWorkspace ? 'shared' : 'tools'}
+            outline={outlineDiscovery}
+            currentOutlineItemId={props.currentOutlineItemId ?? null}
+            onModeChange={selectWorkspaceMode}
+            onOutlineActivate={(item) => props.onOutlineActivate?.(item)}
             onModeFocusTokenChange={(mode, token) => {
               if (props.navigationState === undefined) {
                 dispatchSurface({
@@ -926,6 +1069,27 @@ export function ReviewShell(props: ReviewShellProps) {
             </section>
             </div>}
           />
+          {referenceSurfaceOpen && effectiveReferenceLayout.referenceResizable ? (
+            <ReferenceResizeHandle
+              dock={effectiveReferenceLayout.kind !== 'narrow-unified'
+                ? effectiveReferenceLayout.referenceDock : 'bottom'}
+              controls="workspace-panel-references"
+              value={effectiveReferenceLayout.kind !== 'narrow-unified'
+                && effectiveReferenceLayout.referenceDock === 'right'
+                ? referenceLayout.rightReferenceWidth : referenceLayout.bottomReferenceHeight}
+              min={effectiveReferenceLayout.kind !== 'narrow-unified'
+                && effectiveReferenceLayout.referenceDock === 'right'
+                ? MIN_RIGHT_REFERENCE_WIDTH : MIN_BOTTOM_REFERENCE_HEIGHT}
+              max={effectiveReferenceLayout.kind !== 'narrow-unified'
+                && effectiveReferenceLayout.referenceDock === 'right'
+                ? clampRightReferenceWidth(Number.MAX_SAFE_INTEGER, referenceLayout.stageWidth)
+                : clampBottomReferenceHeight(Number.MAX_SAFE_INTEGER, referenceLayout.stageHeight)}
+              onChange={(size) => dispatchReferenceLayout(effectiveReferenceLayout.kind !== 'narrow-unified'
+                && effectiveReferenceLayout.referenceDock === 'right'
+                ? { type: 'resize-right-references', size }
+                : { type: 'resize-bottom-references', size })}
+            />
+          ) : null}
           <FinishReviewDrawer
             state={props.state}
             open={surface.baseSurface === 'finish'}

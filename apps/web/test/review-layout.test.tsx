@@ -14,6 +14,10 @@ import {
   INITIAL_REVIEW_SURFACE_STATE,
   reduceReviewSurface,
 } from '../src/review/review-surface-state.js';
+import {
+  createReferenceWorkspaceLayout,
+  reduceReferenceWorkspaceLayout,
+} from '../src/review/reference-workspace-layout.js';
 
 const state = createReviewState({
   sessionId: 'layout-test',
@@ -84,7 +88,7 @@ describe('review shell layout and accessibility contract', () => {
         <div>Document canvas</div>
       </ReviewShell>,
     );
-    expect(html).toContain('data-workspace-open="true"');
+    expect(html).toContain('data-tools-workspace-open="true"');
     expect(html).toContain('aria-label="Selection review actions"');
     expect(html).not.toContain('aria-label="Page actions"');
   });
@@ -165,7 +169,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('data-review-file-badge');
     expect(html).toContain('data-review-saved-status');
     expect(html).toContain('data-review-stat');
-    expect(html).toContain('data-review-count');
+    expect(html).not.toContain('data-review-count');
     expect(html).toContain('paper.pdf');
     expect(html).toContain('data-review-contextual-host');
     expect(html).toContain('data-review-drawer-host');
@@ -179,18 +183,18 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toMatch(/data-main-history="back"[^>]*aria-label="Back in document history"[^>]*disabled=""/u);
     expect(html).toMatch(/data-main-history="forward"[^>]*aria-label="Forward in document history"[^>]*disabled=""/u);
     expect(html.match(/data-main-history=/g)).toHaveLength(2);
-    expect(html).toContain('aria-label="Workspace (0 annotations)"');
-    expect(html).toContain('aria-controls="review-workspace"');
-    expect(html).toContain('aria-label="Workspace modes"');
-    expect(html.match(/role="tab"/g)).toHaveLength(3);
-    expect(html.match(/aria-selected="true"/g)).toHaveLength(1);
-    expect(html.match(/tabindex="0"/g)).toHaveLength(1);
-    expect(html).toMatch(/id="workspace-panel-references"[^>]*hidden=""[^>]*inert=""/u);
+    expect(html).not.toContain('aria-label="Workspace (0 annotations)"');
+    expect(html).toContain('data-workspace-edge-rail="right"');
+    expect(html).toContain('data-workspace-edge-rail="bottom"');
+    expect(html).toContain('class="review-workspace__title">References</strong>');
+    expect(html).toContain('aria-label="Move References to right"');
+    expect(html).toMatch(/id="workspace-panel-references"[^>]*role="tabpanel"/u);
     expect(html).toMatch(/id="workspace-panel-annotations"[^>]*hidden=""[^>]*inert=""/u);
     expect(html).toContain('id="review-annotation-list"');
     expect(html).toContain('data-review-workspace');
     expect(html).toContain('data-annotation-drawer');
     expect(html).not.toContain('aria-label="Close annotations"');
+    expect(html).not.toContain('aria-label="Close workspace"');
     expect(html).toContain('class="annotation-drawer__header"');
     expect(html).toContain('aria-label="Owned annotations"');
     expect(html).toContain('aria-label="Existing PDF annotations"');
@@ -208,6 +212,25 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('>Page Note</button>');
     expect(html).not.toContain('aria-pressed');
     expect(html).not.toContain('Proofread mode');
+  });
+
+  it('tiles wide tools above one independent References surface', () => {
+    let layout = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
+    layout = reduceReferenceWorkspaceLayout(layout, { type: 'show-references' });
+    layout = reduceReferenceWorkspaceLayout(layout, { type: 'show-right-workspace' });
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        referenceLayoutState={layout}
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        onCommand={async () => state}
+      ><div>Document canvas</div></ReviewShell>,
+    );
+    expect(html).toContain('data-reference-layout="wide-split"');
+    expect(html).toContain('aria-label="Outline and annotations"');
+    expect(html).toContain('aria-label="References"');
+    expect(html.match(/data-reference-viewport-host/g)).toHaveLength(1);
+    expect(html.match(/id="workspace-panel-references"/g)).toHaveLength(1);
   });
 
   it('keeps source annotations explicitly read-only and distinct from owned rows', () => {

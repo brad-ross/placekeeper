@@ -99,10 +99,27 @@
     width: var(--review-control-touch);
     height: var(--review-control-touch);
   }
+
+  .workspace-edge-rail {
+    width: var(--review-control-touch);
+    min-width: var(--review-control-touch);
+    height: var(--review-control-touch);
+  }
+
+  .reference-resize-handle[data-reference-resize-handle="right"] {
+    left: -22px;
+    width: 44px;
+  }
+
+  .reference-resize-handle[data-reference-resize-handle="bottom"] {
+    top: -22px;
+    height: 44px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .review-workspace,
+  .review-tools-workspace,
   .review-finish-drawer,
   .review-context-palette,
   .review-page-menu,

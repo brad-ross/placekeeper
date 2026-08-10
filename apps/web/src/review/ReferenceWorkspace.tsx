@@ -13,10 +13,9 @@ import {
   type WorkspaceMode,
 } from './reference-navigation-state.js';
 import { horizontalTabFocusIndex } from './LinkActionPopover.js';
-import { OutlineNavigator } from './OutlineNavigator.js';
 import { ReviewIcon } from './ReviewIcon.js';
 
-const WORKSPACE_MODES: readonly WorkspaceMode[] = ['outline', 'references', 'annotations'];
+const WORKSPACE_MODES: readonly WorkspaceMode[] = ['outline', 'annotations', 'references'];
 const MODE_LABELS: Readonly<Record<WorkspaceMode, string>> = {
   outline: 'Outline',
   references: 'References',
@@ -60,6 +59,10 @@ export interface ReferenceWorkspaceProps {
   readonly onRetryReference: () => void;
   readonly onOutlineActivate: (item: PdfOutlineItem) => void;
   readonly onDismiss: () => void;
+  readonly modes?: readonly WorkspaceMode[];
+  readonly headerVariant?: 'tabs' | 'references';
+  readonly onMoveReferencesRight?: () => void;
+  readonly onMoveReferencesBottom?: () => void;
   readonly onReferenceViewportHost: (element: HTMLDivElement | null) => void;
   readonly onModeFocusTokenChange?: (mode: WorkspaceMode, token: string) => void;
 }
@@ -97,17 +100,16 @@ export function ReferenceWorkspace({
   tabs,
   activeTabIdentity,
   pendingReference = null,
-  outline,
-  currentOutlineItemId = null,
-  annotations,
   announcement = '',
   onModeChange,
   onReferenceTabActivate,
   onReferenceTabClose,
   onSendToMain,
   onRetryReference,
-  onOutlineActivate,
-  onDismiss,
+  modes = WORKSPACE_MODES,
+  headerVariant = 'tabs',
+  onMoveReferencesRight,
+  onMoveReferencesBottom,
   onReferenceViewportHost,
   onModeFocusTokenChange,
 }: ReferenceWorkspaceProps) {
@@ -168,16 +170,16 @@ export function ReferenceWorkspace({
   }, [tabs]);
 
   const moveModeFocus = (event: KeyboardEvent<HTMLButtonElement>) => {
-    const currentIndex = WORKSPACE_MODES.indexOf(event.currentTarget.dataset.workspaceMode as WorkspaceMode);
-    const nextIndex = horizontalTabFocusIndex(currentIndex, WORKSPACE_MODES.length, event.key);
+    const currentIndex = modes.indexOf(event.currentTarget.dataset.workspaceMode as WorkspaceMode);
+    const nextIndex = horizontalTabFocusIndex(currentIndex, modes.length, event.key);
     if (nextIndex !== null) {
       event.preventDefault();
-      focusWithoutScroll(modeTabRefs.current.get(WORKSPACE_MODES[nextIndex]!));
+      focusWithoutScroll(modeTabRefs.current.get(modes[nextIndex]!));
       return;
     }
     if ((event.key === 'Enter' || event.key === ' ') && currentIndex >= 0) {
       event.preventDefault();
-      onModeChange(WORKSPACE_MODES[currentIndex]!);
+      onModeChange(modes[currentIndex]!);
     }
   };
 
@@ -226,20 +228,21 @@ export function ReferenceWorkspace({
       data-annotation-presentation={presentation}
       data-workspace-open={open ? 'true' : 'false'}
       data-list-open={open ? 'true' : 'false'}
-      aria-label="Review workspace"
+      aria-label={headerVariant === 'references' ? 'References' : 'Review workspace'}
       aria-hidden={!open}
       inert={!open}
     >
       <header className="review-workspace__header">
-        <button type="button" className="review-workspace__close" aria-label="Close workspace" onClick={onDismiss}>
-          <ReviewIcon name="close" />
-        </button>
+        {headerVariant === 'references' ? (
+          <strong id="references-workspace-title" className="review-workspace__title">References</strong>
+        ) : null}
+        {headerVariant === 'tabs' ? (
         <div className="review-workspace__tabs" role="tablist" aria-label="Workspace modes">
-          {WORKSPACE_MODES.map((workspaceMode) => {
+          {modes.map((workspaceMode) => {
             const selected = workspaceMode === mode;
             return (
+              <span key={workspaceMode} className="review-workspace__tab-segment" data-workspace-tab-segment={workspaceMode}>
               <button
-                key={workspaceMode}
                 ref={(element) => {
                   if (element) modeTabRefs.current.set(workspaceMode, element);
                   else modeTabRefs.current.delete(workspaceMode);
@@ -256,32 +259,22 @@ export function ReferenceWorkspace({
               >
                 {MODE_LABELS[workspaceMode]}
               </button>
+              {workspaceMode === 'references' && onMoveReferencesBottom ? (
+                <button type="button" className="review-workspace__move" aria-label="Move References to bottom" onClick={onMoveReferencesBottom}>
+                  <ReviewIcon name="chevron-down" size={14} />
+                </button>
+              ) : null}
+              </span>
             );
           })}
         </div>
+        ) : null}
+        {headerVariant === 'references' && onMoveReferencesRight ? (
+          <button type="button" className="review-workspace__move" aria-label="Move References to right" onClick={onMoveReferencesRight}>
+            <ReviewIcon name="chevron-right" size={14} />
+          </button>
+        ) : null}
       </header>
-
-      <section
-        ref={(element) => {
-          if (element) panelRefs.current.set('outline', element);
-          else panelRefs.current.delete('outline');
-        }}
-        id="workspace-panel-outline"
-        className="review-workspace__panel"
-        role="tabpanel"
-        aria-labelledby="workspace-mode-outline"
-        tabIndex={-1}
-        hidden={mode !== 'outline'}
-        inert={mode !== 'outline'}
-        onFocusCapture={(event) => rememberPanelFocus('outline', event.target)}
-      >
-        <OutlineNavigator
-          discovery={outline}
-          currentItemId={currentOutlineItemId}
-          onActivate={onOutlineActivate}
-          onFocusTokenChange={(token) => onModeFocusTokenChange?.('outline', token)}
-        />
-      </section>
 
       <section
         ref={(element) => {
@@ -291,10 +284,12 @@ export function ReferenceWorkspace({
         id="workspace-panel-references"
         className="review-workspace__panel review-workspace__panel--references"
         role="tabpanel"
-        aria-labelledby="workspace-mode-references"
+        aria-labelledby={headerVariant === 'references'
+          ? 'references-workspace-title'
+          : 'workspace-mode-references'}
         tabIndex={-1}
-        hidden={mode !== 'references'}
-        inert={mode !== 'references'}
+        hidden={mode !== 'references' || !modes.includes('references')}
+        inert={mode !== 'references' || !modes.includes('references')}
         onFocusCapture={(event) => rememberPanelFocus('references', event.target)}
       >
         {tabs.length > 0 ? (
@@ -402,24 +397,6 @@ export function ReferenceWorkspace({
             inert={pendingReference?.status === 'error' || (activeTab === null && pendingReference === null)}
           />
         </div>
-      </section>
-
-      <section
-        ref={(element) => {
-          if (element) panelRefs.current.set('annotations', element);
-          else panelRefs.current.delete('annotations');
-        }}
-        id="workspace-panel-annotations"
-        className="review-workspace__panel review-workspace__panel--annotations"
-        data-annotation-scroll-viewport
-        role="tabpanel"
-        aria-labelledby="workspace-mode-annotations"
-        tabIndex={-1}
-        hidden={mode !== 'annotations'}
-        inert={mode !== 'annotations'}
-        onFocusCapture={(event) => rememberPanelFocus('annotations', event.target)}
-      >
-        {annotations}
       </section>
 
     </aside>

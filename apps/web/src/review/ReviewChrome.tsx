@@ -1,5 +1,4 @@
 import type { ViewerControls, ViewerControlsSnapshot } from '../pdf/viewer-controls.js';
-import type { RefObject } from 'react';
 import { ReviewIcon } from './ReviewIcon.js';
 
 export interface ReviewChromeProps {
@@ -11,15 +10,11 @@ export interface ReviewChromeProps {
   readonly canRedo: boolean;
   readonly canNavigateBack?: boolean;
   readonly canNavigateForward?: boolean;
-  readonly annotationCount: number;
-  readonly workspaceOpen: boolean;
   readonly finishOpen: boolean;
-  readonly workspaceControlRef?: RefObject<HTMLButtonElement | null>;
   readonly onUndo: () => void;
   readonly onRedo: () => void;
   readonly onNavigateBack?: () => void;
   readonly onNavigateForward?: () => void;
-  readonly onWorkspace: () => void;
   readonly onFinish: () => void;
 }
 
@@ -32,15 +27,11 @@ export function ReviewChrome({
   canRedo,
   canNavigateBack = false,
   canNavigateForward = false,
-  annotationCount,
-  workspaceOpen,
   finishOpen,
-  workspaceControlRef,
   onUndo,
   onRedo,
   onNavigateBack = () => undefined,
   onNavigateForward = () => undefined,
-  onWorkspace,
   onFinish,
 }: ReviewChromeProps) {
   const pageUnavailableId = 'viewer-page-controls-readiness';
@@ -69,10 +60,6 @@ export function ReviewChrome({
         <button type="button" className="review-chrome__icon-control review-chrome__main-history-control" data-main-history="forward" aria-label="Forward in document history" disabled={!canNavigateForward} onClick={onNavigateForward}><ReviewIcon name="chevron-right" /></button>
         <button type="button" className="review-chrome__icon-control review-chrome__history-control" aria-label="Undo" disabled={!canUndo} onClick={onUndo}><ReviewIcon name="undo" /></button>
         <button type="button" className="review-chrome__icon-control review-chrome__history-control" aria-label="Redo" disabled={!canRedo} onClick={onRedo}><ReviewIcon name="redo" /></button>
-        <button ref={workspaceControlRef} type="button" className="review-chrome__workspace" aria-label={`Workspace (${annotationCount} annotations)`} aria-expanded={workspaceOpen} aria-controls="review-workspace" onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); onWorkspace(); }}>
-          <span>Workspace</span>
-          <span className="review-chrome__count" data-review-count aria-hidden="true">{annotationCount}</span>
-        </button>
         <button type="button" className="review-chrome__finish" aria-expanded={finishOpen} aria-controls="review-finish-drawer" onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); onFinish(); }}>Finish</button>
       </nav>
       {!viewerState.pageReady ? <p id={pageUnavailableId} className="sr-only">{viewerState.pageUnavailableReason}</p> : null}

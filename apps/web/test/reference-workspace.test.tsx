@@ -16,6 +16,13 @@ import {
   chooseWorkspaceModeFocusTarget,
   ReferenceWorkspace,
 } from '../src/review/ReferenceWorkspace.js';
+import {
+  ReferenceResizeHandle,
+  referenceResizeKeyValue,
+  referenceResizePointerValue,
+} from '../src/review/ReferenceResizeHandle.js';
+import { WorkspaceEdgeRail } from '../src/review/WorkspaceEdgeRail.js';
+import { OutlineAnnotationsWorkspace } from '../src/review/OutlineAnnotationsWorkspace.js';
 import type { PdfOutlineItem } from '../src/pdf/pdf-outline.js';
 
 const target = (identity: string, pageIndex: number) => ({
@@ -96,6 +103,26 @@ describe('link action chooser', () => {
 });
 
 describe('shared reference workspace', () => {
+  it('keeps Outline and Annotations under one tools-surface owner', () => {
+    const html = renderToStaticMarkup(
+      <OutlineAnnotationsWorkspace
+        open
+        mode="outline"
+        presentation="right"
+        headerVariant="tools"
+        outline={{ status: 'loaded-empty', documentGeneration: 1 }}
+        currentOutlineItemId={null}
+        annotations={<div>Owned annotation rows</div>}
+        onModeChange={() => undefined}
+        onOutlineActivate={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('id="review-tools-workspace"');
+    expect(html.match(/id="workspace-panel-outline"/g)).toHaveLength(1);
+    expect(html.match(/id="workspace-panel-annotations"/g)).toHaveLength(1);
+    expect(html).toContain('aria-label="Outline and annotations"');
+  });
   it('prioritizes a newly available retry control over remembered loading-panel focus', () => {
     const remembered = { isConnected: true } as HTMLElement;
     const retry = {} as HTMLElement;
@@ -149,21 +176,96 @@ describe('shared reference workspace', () => {
     );
 
     expect(html).toContain('aria-label="Workspace modes"');
-    expect(html.indexOf('aria-label="Close workspace"'))
-      .toBeLessThan(html.indexOf('aria-label="Workspace modes"'));
+    expect(html).not.toContain('aria-label="Close workspace"');
     expect(html.match(/role="tab"/g)).toHaveLength(5);
     expect(html.match(/aria-selected="true"/g)).toHaveLength(2);
     expect(html.match(/tabindex="0"/g)).toHaveLength(2);
     expect(html).toMatch(/id="workspace-mode-references"[^>]*aria-controls="workspace-panel-references"/u);
     expect(html).toMatch(/id="workspace-panel-references"[^>]*aria-labelledby="workspace-mode-references"/u);
-    expect(html).toMatch(/id="workspace-panel-outline"[^>]*hidden=""[^>]*inert=""/u);
-    expect(html).toMatch(/id="workspace-panel-annotations"[^>]*hidden=""[^>]*inert=""/u);
+    expect(html).not.toContain('id="workspace-panel-outline"');
+    expect(html).not.toContain('id="workspace-panel-annotations"');
     expect(html).toContain('aria-label="Open references"');
     expect(html).toContain('role="tabpanel"');
     expect(html).toContain('data-reference-viewport-host');
     expect(html).toContain('aria-label="Close active reference"');
     expect(html).not.toMatch(/role="tab"[^>]*>[^<]*Close/u);
     expect(html).toContain('aria-live="polite"');
+  });
+
+  it('exposes surface-specific rails and an accessible reference splitter', () => {
+    const rightRail = renderToStaticMarkup(
+      <WorkspaceEdgeRail
+        surface="right"
+        open
+        controls="review-tools-workspace"
+        onToggle={() => undefined}
+      />,
+    );
+    const bottomRail = renderToStaticMarkup(
+      <WorkspaceEdgeRail
+        surface="bottom"
+        open={false}
+        controls="review-workspace"
+        onToggle={() => undefined}
+      />,
+    );
+    const splitter = renderToStaticMarkup(
+      <ReferenceResizeHandle
+        dock="bottom"
+        controls="workspace-panel-references"
+        value={384}
+        min={192}
+        max={640}
+        onChange={() => undefined}
+      />,
+    );
+
+    expect(rightRail).toContain('data-workspace-edge-rail="right"');
+    expect(rightRail).toContain('aria-expanded="true"');
+    expect(rightRail).toContain('aria-controls="review-tools-workspace"');
+    expect(bottomRail).toContain('data-workspace-edge-rail="bottom"');
+    expect(bottomRail).toContain('aria-expanded="false"');
+    expect(splitter).toContain('role="separator"');
+    expect(splitter).toContain('aria-orientation="horizontal"');
+    expect(splitter).toContain('aria-valuemin="192"');
+    expect(splitter).toContain('aria-valuemax="640"');
+    expect(splitter).toContain('aria-valuenow="384"');
+    expect(splitter).toContain('aria-controls="workspace-panel-references"');
+  });
+
+  it('adjusts each splitter axis by one rem and honors its exact limits', () => {
+    expect(referenceResizeKeyValue({
+      dock: 'right', key: 'ArrowLeft', value: 384, min: 288, max: 640,
+    })).toBe(400);
+    expect(referenceResizeKeyValue({
+      dock: 'right', key: 'ArrowRight', value: 384, min: 288, max: 640,
+    })).toBe(368);
+    expect(referenceResizeKeyValue({
+      dock: 'bottom', key: 'ArrowUp', value: 384, min: 192, max: 640,
+    })).toBe(400);
+    expect(referenceResizeKeyValue({
+      dock: 'bottom', key: 'ArrowDown', value: 384, min: 192, max: 640,
+    })).toBe(368);
+    expect(referenceResizeKeyValue({
+      dock: 'bottom', key: 'Home', value: 384, min: 192, max: 640,
+    })).toBe(192);
+    expect(referenceResizeKeyValue({
+      dock: 'bottom', key: 'End', value: 384, min: 192, max: 640,
+    })).toBe(640);
+    expect(referenceResizeKeyValue({
+      dock: 'bottom', key: 'ArrowLeft', value: 384, min: 192, max: 640,
+    })).toBeNull();
+  });
+
+  it('translates captured pointer movement into clamped dock size', () => {
+    expect(referenceResizePointerValue({
+      dock: 'right', startCoordinate: 1000, currentCoordinate: 920,
+      startValue: 384, min: 288, max: 640,
+    })).toBe(464);
+    expect(referenceResizePointerValue({
+      dock: 'bottom', startCoordinate: 700, currentCoordinate: 520,
+      startValue: 384, min: 192, max: 500,
+    })).toBe(500);
   });
 
   it('keeps empty, loading, and failure reference regions stable and retryable', () => {
