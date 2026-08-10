@@ -1,16 +1,25 @@
+import { readFileSync } from 'node:fs';
+
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ReviewShell } from '../src/app/ReviewShell.js';
 import { AnnotationList } from '../src/review/AnnotationList.js';
 import { AnnotationPeek } from '../src/review/AnnotationPeek.js';
+import { ReviewChrome, validPageNumber } from '../src/review/ReviewChrome.js';
 import { ReviewIcon } from '../src/review/ReviewIcon.js';
+import type { ViewerControls } from '../src/pdf/viewer-controls.js';
 import { createReviewState, type ReviewItem } from '../../../packages/core/src/review-model.js';
 
 const state = createReviewState({
   sessionId: 'layout-test',
   source: { fileId: 'file', digest: 'a'.repeat(64), byteLength: 10 },
 });
+
+const responsiveStyles = readFileSync(
+  new URL('../src/app/review-layout-responsive.css', import.meta.url),
+  'utf8',
+);
 
 const ownedAnnotation: ReviewItem = {
   id: 'owned-highlight',
@@ -22,6 +31,50 @@ const ownedAnnotation: ReviewItem = {
 };
 
 describe('review shell layout and accessibility contract', () => {
+  const viewerControls: ViewerControls = {
+    snapshot: () => ({
+      ready: true,
+      pageReady: true,
+      zoomReady: true,
+      currentPage: 3,
+      totalPages: 12,
+      zoomPercent: 100,
+    }),
+    previousPage: vi.fn(),
+    nextPage: vi.fn(),
+    goToPage: vi.fn(),
+    zoomOut: vi.fn(),
+    zoomIn: vi.fn(),
+    subscribe: vi.fn(() => () => undefined),
+    dispose: vi.fn(),
+  };
+
+  const renderChrome = (pageReady: boolean) => renderToStaticMarkup(
+    <ReviewChrome
+      documentTitle="paper.pdf"
+      controls={viewerControls}
+      viewerState={pageReady ? viewerControls.snapshot() : {
+        ready: false,
+        pageReady: false,
+        zoomReady: false,
+        currentPage: 0,
+        totalPages: 0,
+        zoomPercent: 0,
+        pageUnavailableReason: 'Page controls become available when PDF navigation is ready.',
+        zoomUnavailableReason: 'Zoom controls become available when PDF zoom is ready.',
+      }}
+      canUndo={false}
+      canRedo={false}
+      annotationCount={0}
+      annotationsOpen={false}
+      finishOpen={false}
+      onUndo={vi.fn()}
+      onRedo={vi.fn()}
+      onAnnotations={vi.fn()}
+      onFinish={vi.fn()}
+    />,
+  );
+
   it('keeps review icons decorative and button labels authoritative', () => {
     const html = renderToStaticMarkup(
       <button type="button" aria-label="Previous page">
@@ -184,5 +237,47 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('Zoom controls become available when PDF zoom is ready.');
     expect(html).toMatch(/aria-label="Previous page"[^>]*disabled=""/);
     expect(html).toMatch(/aria-label="Zoom in"[^>]*disabled=""/);
+  });
+
+  it('keeps unavailable page status noneditable with its existing description', () => {
+    const html = renderChrome(false);
+
+    expect(html).toContain('aria-label="Current page"');
+    expect(html).toContain('>— / —</span>');
+    expect(html).not.toContain('aria-label="Page number"');
+    expect(html).not.toContain('review-chrome__page-trigger');
+    expect(html).toContain('Page controls become available when PDF navigation is ready.');
+  });
+
+  it('renders the ready current page as an activation control with numeric metadata and visible total', () => {
+    const html = renderChrome(true);
+
+    expect(html).toContain('class="review-chrome__page-trigger review-chrome__stat"');
+    expect(html).toContain('aria-label="Current page 3 of 12. Enter a page number"');
+    expect(html).toContain('>3<span aria-hidden="true"> / 12</span></button>');
+    expect(html).not.toContain('aria-label="Page number"');
+  });
+
+  it('accepts only whole one-based page numbers within the latest total', () => {
+    expect(validPageNumber('1', 12)).toBe(1);
+    expect(validPageNumber(' 12 ', 12)).toBe(12);
+    expect(validPageNumber('0', 12)).toBeUndefined();
+    expect(validPageNumber('13', 12)).toBeUndefined();
+    expect(validPageNumber('1.5', 12)).toBeUndefined();
+    expect(validPageNumber('1e1', 12)).toBeUndefined();
+    expect(validPageNumber('', 12)).toBeUndefined();
+  });
+
+  it('matches the page editor to coarse-pointer control height', () => {
+    const coarsePointerRules = responsiveStyles.match(
+      /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*?)\n\}/u,
+    )?.[1];
+
+    expect(coarsePointerRules).toMatch(
+      /\.review-chrome__page-editor \{\s*min-height: var\(--review-control-touch\);\s*\}/u,
+    );
+    expect(coarsePointerRules).toMatch(
+      /\.review-chrome__page-input \{\s*height: var\(--review-control-touch\);\s*\}/u,
+    );
   });
 });
