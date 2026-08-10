@@ -8,6 +8,22 @@ type ViewerInspection = {
   renderedWidth: number;
   activeContentExecuted: boolean;
   remoteRequests: string[];
+  navigationLinks: Array<{
+    pageIndex: number;
+    contents: string;
+    subject: string;
+    target: {
+      kind: 'destination' | 'goto' | 'remote-goto' | 'uri' | 'launch' | 'unsupported' | 'missing';
+      pageIndex?: number;
+      zoomMode?: number;
+      params?: number[];
+    };
+  }>;
+  bookmarks: Array<{
+    title: string;
+    depth: number;
+    target: { kind: string; pageIndex?: number };
+  }>;
 };
 
 declare global {
@@ -69,5 +85,43 @@ test.describe('EmbedPDF browser-worker viewer gate', () => {
         window.viewerGate.inspect('/test/fixtures/pdfs/malformed.pdf', 1_000),
       ),
     ).rejects.toThrow(/invalid|malformed|open|timeout/i);
+  });
+
+  test('exposes only embedded reference metadata without requesting rejected targets', async ({ page }) => {
+    const remoteRequests: string[] = [];
+    page.on('request', (request) => {
+      if (!request.url().startsWith('http://127.0.0.1:4173/')) remoteRequests.push(request.url());
+    });
+
+    const result = await page.evaluate(() =>
+      window.viewerGate.inspect('/test/fixtures/pdfs/reference-navigation.pdf'),
+    );
+
+    expect(result.pageCount).toBe(4);
+    expect(result.navigationLinks).toHaveLength(14);
+    expect(result.navigationLinks.map(({ target }) => target.kind)).toEqual(expect.arrayContaining([
+      'destination',
+      'uri',
+      'launch',
+      'unsupported',
+      'missing',
+    ]));
+    expect(result.navigationLinks.filter(({ target }) => target.pageIndex === 1)).toHaveLength(4);
+    expect(result.navigationLinks.find(({ contents }) => contents === 'Malformed local destination')?.target)
+      .toMatchObject({ kind: 'destination', pageIndex: -1 });
+    expect(result.navigationLinks.find(({ contents }) => contents === 'Out-of-bounds destination')?.target)
+      .toMatchObject({ kind: 'destination', pageIndex: 99 });
+    expect(result.bookmarks.map(({ title, depth }) => ({ title, depth }))).toEqual(expect.arrayContaining([
+      { title: 'Overview', depth: 0 },
+      { title: 'Details', depth: 0 },
+      { title: 'Nested result', depth: 1 },
+    ]));
+    expect(result.remoteRequests).toEqual([]);
+    expect(remoteRequests).toEqual([]);
+
+    const absent = await page.evaluate(() =>
+      window.viewerGate.inspect('/test/fixtures/pdfs/text-native.pdf'),
+    );
+    expect(absent.bookmarks).toEqual([]);
   });
 });
