@@ -9,3 +9,13 @@ test/fixtures/pdfium/*.wasm
 dist/
 apps/*/dist/
 .local/
+
+# Local environment and credential files
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.key
+*.pem
+*.p12
+*.pfx
