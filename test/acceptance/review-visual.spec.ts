@@ -86,16 +86,58 @@ test('installed real PDF reading', async ({ page }) => {
 
 test('wide Annotation Tray', async ({ page }) => {
   const product = await openScene(page, 'tray');
-  await expect(page.locator('[data-annotation-drawer]')).toHaveAttribute('data-annotation-presentation', 'right');
+  await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-workspace-presentation', 'right');
   await page.getByRole('button', { name: /highlight · Page 1/u }).focus();
   await expectScene(product, 'wide-annotation-tray.png');
 });
 
 test('narrow Annotation Tray', async ({ page }) => {
   const product = await openScene(page, 'tray', { width: 320, height: 720 });
-  await expect(page.locator('[data-annotation-drawer]')).toHaveAttribute('data-annotation-presentation', 'bottom');
+  await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-workspace-presentation', 'bottom');
+  const rail = page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
+  if (await rail.getAttribute('aria-expanded') !== 'true') await rail.click();
+  const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
+  if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
   await page.getByRole('button', { name: /highlight · Page 1/u }).focus();
   await expectScene(product, 'narrow-annotation-tray.png');
+});
+
+test('wide bottom References tray', async ({ page }) => {
+  const product = await openScene(page, 'reference-layout');
+  await page.getByRole('button', { name: 'Open References tray' }).click();
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'wide-bottom');
+  await expect(page.locator('[data-reference-empty]')).toBeVisible();
+  await expectScene(product, 'wide-bottom-references.png');
+});
+
+test('wide coordinated References and tools trays', async ({ page }) => {
+  const product = await openScene(page, 'reference-layout');
+  await page.getByRole('button', { name: 'Open References tray' }).click();
+  await page.getByRole('button', { name: 'Open right workspace' }).click();
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'wide-split');
+  await expect(page.locator('#review-tools-workspace')).toBeVisible();
+  await expectScene(product, 'wide-split-reference-tools.png');
+});
+
+test('wide right-docked References tray', async ({ page }) => {
+  const product = await openScene(page, 'reference-layout');
+  await page.getByRole('button', { name: 'Open References tray' }).click();
+  await page.getByRole('button', { name: 'Move References to right' }).click();
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'wide-right');
+  await expect(page.getByRole('tab', { name: 'References', exact: true })).toBeVisible();
+  await expectScene(product, 'wide-right-references.png');
+});
+
+test('narrow unified References tray', async ({ page }) => {
+  const product = await openScene(page, 'reference-layout', { width: 760, height: 900 });
+  await page.getByRole('button', { name: 'Open References tray' }).click();
+  await page.getByRole('tab', { name: 'References', exact: true }).click();
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'narrow-unified');
+  await expect(page.getByRole('tab', { name: 'References', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expectScene(product, 'narrow-unified-references.png');
 });
 
 test('annotation peek', async ({ page }) => {

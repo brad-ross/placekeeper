@@ -60,7 +60,8 @@ export function OutlineAnnotationsWorkspace({
     previous.current = { open, mode };
     if (!open || mode === 'references' || (was.open && was.mode === mode)) return;
     const target = focusMemory.current.get(mode) ?? panelRefs.current.get(mode);
-    requestAnimationFrame(() => focusWithoutScroll(target));
+    const timeout = setTimeout(() => focusWithoutScroll(target), 0);
+    return () => clearTimeout(timeout);
   }, [mode, open]);
 
   const moveModeFocus = (event: KeyboardEvent<HTMLButtonElement>) => {
@@ -153,6 +154,7 @@ export function OutlineAnnotationsWorkspace({
         }}
         id="workspace-panel-annotations"
         className="review-workspace__panel"
+        data-annotation-scroll-viewport
         role="tabpanel"
         aria-labelledby="workspace-mode-annotations"
         tabIndex={-1}

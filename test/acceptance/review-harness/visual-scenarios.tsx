@@ -14,6 +14,7 @@ export type VisualSceneName =
   | 'unavailable-controls'
   | 'contextual'
   | 'tray'
+  | 'reference-layout'
   | 'peek'
   | 'page-note'
   | 'finish'
@@ -156,7 +157,7 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
   const requested = parameters.get('visual');
   if (!requested) return null;
   const name = requested as VisualSceneName;
-  if (!['reading', 'unavailable-controls', 'contextual', 'tray', 'peek', 'page-note', 'finish', 'exceptional'].includes(name)) return null;
+  if (!['reading', 'unavailable-controls', 'contextual', 'tray', 'reference-layout', 'peek', 'page-note', 'finish', 'exceptional'].includes(name)) return null;
   const state = stateFor(name === 'contextual' || name === 'page-note' ? [] : seededItems);
   const exception = parameters.get('exception');
   const exceptionalAnnotations: ExistingAnnotationsDiscovery = exception === 'loading'

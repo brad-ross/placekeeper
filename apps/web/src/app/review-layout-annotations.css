@@ -197,6 +197,10 @@
   box-shadow: var(--review-shadow-bottom);
 }
 
+.review-tools-workspace[data-tools-workspace-open="true"] {
+  pointer-events: auto;
+}
+
 .review-tools-workspace[data-tools-workspace-shared="true"] {
   border: 0;
   background: transparent;
@@ -232,6 +236,11 @@
   padding: 9px 6px;
   border-bottom: 1px solid var(--review-border);
   background: var(--review-surface-panel);
+}
+
+.review-workspace[data-workspace-presentation="right"] > .review-workspace__header,
+.review-tools-workspace[data-workspace-presentation="right"] > .review-workspace__header {
+  padding-right: calc(var(--review-control-default) + 6px);
 }
 
 .review-workspace__tabs {
@@ -627,7 +636,7 @@
   list-style: none;
 }
 
-.review-workspace li[data-annotation-origin] {
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin] {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -641,27 +650,27 @@
   transition: border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
 }
 
-.review-workspace li[data-annotation-origin]:hover,
-.review-workspace li[data-annotation-origin]:focus-within {
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:hover,
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:focus-within {
   border-color: var(--review-border-strong);
 }
 
-.review-workspace li[data-annotation-origin]:active {
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:active {
   background: var(--review-surface-interactive);
   box-shadow: inset 0 1px 2px rgb(24 26 23 / 16%);
 }
 
-.review-workspace li[data-active="true"] {
+:is(.review-workspace, .review-tools-workspace) li[data-active="true"] {
   border-color: var(--review-border-strong);
   background: var(--review-selection-bg);
   box-shadow: inset 0 0 0 1px var(--review-selection-ink);
 }
 
-.review-workspace li[data-active="true"] .annotation-item__meta strong {
+:is(.review-workspace, .review-tools-workspace) li[data-active="true"] .annotation-item__meta strong {
   font-weight: 820;
 }
 
-.review-workspace li[data-corresponding="true"]::before {
+:is(.review-workspace, .review-tools-workspace) li[data-corresponding="true"]::before {
   position: absolute;
   z-index: 1;
   top: 9px;
@@ -673,7 +682,7 @@
   content: "";
 }
 
-.review-workspace li[data-corresponding="true"]:not([data-active="true"]) {
+:is(.review-workspace, .review-tools-workspace) li[data-corresponding="true"]:not([data-active="true"]) {
   background: color-mix(in srgb, var(--review-selection-bg) 62%, var(--review-surface-subtle));
 }
 
@@ -757,13 +766,13 @@
   outline: none;
 }
 
-.review-workspace li[data-annotation-origin]:focus-within {
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:focus-within {
   outline: 3px solid var(--review-focus);
   outline-offset: 2px;
 }
 
-.review-workspace li:hover .annotation-item__action,
-.review-workspace li:focus-within .annotation-item__action {
+:is(.review-workspace, .review-tools-workspace) li:hover .annotation-item__action,
+:is(.review-workspace, .review-tools-workspace) li:focus-within .annotation-item__action {
   opacity: 1;
 }
 

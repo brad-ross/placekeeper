@@ -57,6 +57,7 @@ interface ActiveFramingSession {
   userAxes: { left: boolean; top: boolean };
   presentation: AnnotationPresentation;
   requestToken: number;
+  closing?: ViewerPosition;
 }
 
 export interface WorkspaceFraming {
@@ -247,7 +248,7 @@ export function useWorkspaceFraming(input: {
         return;
       }
       const current = controls.snapshot(target);
-      const restored = restoreViewportPosition({
+      const restored = session.closing ?? restoreViewportPosition({
         baseline: session.baseline,
         current: current.scroll,
         automatic: session.automatic,
@@ -255,14 +256,28 @@ export function useWorkspaceFraming(input: {
         userAxes: session.userAxes,
         maximum: current.maximum,
       });
-      const withoutRunway = await controls.setRunway({ right: 0, bottom: 0 });
+      // A close can restart as surface/layout observers settle. Retain the
+      // first chosen target so a later pass cannot mistake native anchoring
+      // during runway removal for a new reviewer-owned position.
+      session.closing = restored;
+      await controls.setRunway({ right: 0, bottom: 0 });
+      // WebKit can report the preceding maximum until the runway removal has
+      // completed a layout turn. Clamp only against settled viewer metrics.
+      if (!await waitForWorkspaceLayout(settlement.signal)) return;
       if (!operationIsCurrent()) return;
-      controls.scrollTo({
+      const withoutRunway = controls.snapshot(target);
+      const closedPosition = {
         left: Math.min(restored.left, withoutRunway.maximum.left),
         top: Math.min(restored.top, withoutRunway.maximum.top),
-      }, 'auto');
+      };
+      controls.scrollTo(closedPosition, 'auto');
+      session.baseline = closedPosition;
+      session.automatic = { left: 0, top: 0 };
       authorityRef.current.close(operation);
-      sessionRef.current = null;
+      // Keep the document-scoped baseline and per-axis user ownership through
+      // a close/reopen cycle. Clearing it here made a fast reopen depend on
+      // whether the asynchronous runway close settled first (Chromium and
+      // WebKit could consequently choose different reading anchors).
     };
 
     const openSession = async () => {
@@ -302,6 +317,7 @@ export function useWorkspaceFraming(input: {
         // explicit mark request needs a new target reveal.
         session.requestToken = input.request.token;
       }
+      delete session.closing;
 
       const stageBounds = stageRef.current?.getBoundingClientRect();
       if (!stageBounds) return;
@@ -362,8 +378,21 @@ export function useWorkspaceFraming(input: {
       }
 
       const destination = {
-        left: Math.min(Math.max(0, measured.scroll.left + leftDelta), measured.maximum.left),
-        top: Math.min(Math.max(0, measured.scroll.top + topDelta), measured.maximum.top),
+        // WebKit may apply native scroll anchoring while the runway grows.
+        // Once the reviewer owns an axis, keep the pre-runway position instead
+        // of accepting that browser-generated shift as user movement.
+        left: Math.min(
+          Math.max(0, session.userAxes.left
+            ? session.baseline.left
+            : measured.scroll.left + leftDelta),
+          measured.maximum.left,
+        ),
+        top: Math.min(
+          Math.max(0, session.userAxes.top
+            ? session.baseline.top
+            : measured.scroll.top + topDelta),
+          measured.maximum.top,
+        ),
       };
       if (!session.userAxes.left) session.automatic.left = destination.left - session.baseline.left;
       if (!session.userAxes.top) session.automatic.top = destination.top - session.baseline.top;
@@ -384,7 +413,9 @@ export function useWorkspaceFraming(input: {
     input.layoutGeneration,
     input.workspaceOpen,
     input.request,
-    geometryRevision,
+    // Geometry samples matter while a tray is open. Once closing begins they
+    // must not supersede the one operation restoring the reading anchor.
+    input.workspaceOpen ? geometryRevision : 0,
     presentation,
     sideWidth,
     stageSize.height,

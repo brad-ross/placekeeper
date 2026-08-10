@@ -128,12 +128,20 @@ export function reduceReferenceWorkspaceLayout(
     case 'set-stage-size': {
       const stageWidth = finiteNonNegative(action.width);
       const stageHeight = finiteNonNegative(action.height);
+      const rightReferenceWidth = clampRightReferenceWidth(state.rightReferenceWidth, stageWidth);
+      const bottomReferenceHeight = clampBottomReferenceHeight(
+        state.bottomReferenceHeight,
+        stageHeight,
+      );
+      if (stageWidth === state.stageWidth && stageHeight === state.stageHeight
+        && rightReferenceWidth === state.rightReferenceWidth
+        && bottomReferenceHeight === state.bottomReferenceHeight) return state;
       return {
         ...state,
         stageWidth,
         stageHeight,
-        rightReferenceWidth: clampRightReferenceWidth(state.rightReferenceWidth, stageWidth),
-        bottomReferenceHeight: clampBottomReferenceHeight(state.bottomReferenceHeight, stageHeight),
+        rightReferenceWidth,
+        bottomReferenceHeight,
       };
     }
     case 'set-regime':
@@ -242,6 +250,7 @@ export function reduceReferenceWorkspaceLayout(
 export function deriveReferenceWorkspaceLayout(
   state: ReferenceWorkspaceLayoutState,
   rightMode: RightWorkspaceMode,
+  wideMode: WorkspaceMode = rightMode,
 ): EffectiveReferenceWorkspaceLayout {
   if (state.regime === 'narrow') {
     const activeMode: WorkspaceMode = state.narrowSurface === 'references'
@@ -264,7 +273,9 @@ export function deriveReferenceWorkspaceLayout(
 
   const bottomOpen = state.referenceDock === 'bottom' && state.bottomReferencesOpen;
   const rightOpen = state.rightWorkspaceOpen;
-  const referenceRightActive = state.referenceDock === 'right' && rightOpen;
+  const referenceRightActive = state.referenceDock === 'right'
+    && rightOpen
+    && wideMode === 'references';
   const kind = rightOpen && bottomOpen
     ? 'wide-split'
     : rightOpen

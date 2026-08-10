@@ -39,7 +39,11 @@ export function WorkspaceEdgeRail({
       aria-label={railLabel(surface, open)}
       aria-expanded={open}
       aria-controls={controls}
-      onClick={onToggle}
+      onClick={(event) => {
+        const button = event.currentTarget;
+        onToggle();
+        if (open) requestAnimationFrame(() => button.focus({ preventScroll: true }));
+      }}
     >
       <span className="workspace-edge-rail__glyph">
         <ReviewIcon name={railIcon(surface, open)} size={14} />

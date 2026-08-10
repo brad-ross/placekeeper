@@ -30,6 +30,16 @@ describe('reference workspace layout state', () => {
     });
   });
 
+  it('keeps reducer identity when a ResizeObserver republishes unchanged stage bounds', () => {
+    const state = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
+
+    expect(reduceReferenceWorkspaceLayout(state, {
+      type: 'set-stage-size',
+      width: 1440,
+      height: 900,
+    })).toBe(state);
+  });
+
   it('moves References between docks with the required visibility transitions', () => {
     let state = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
     state = reduceReferenceWorkspaceLayout(state, { type: 'show-references' });
@@ -64,6 +74,17 @@ describe('reference workspace layout state', () => {
     state = reduceReferenceWorkspaceLayout(state, { type: 'focus-surface', surface: 'references' });
     const resized = reduceReferenceWorkspaceLayout(state, { type: 'resize-bottom-references', size: 500 });
     expect(resized.lastFocusedSurface).toBe('references');
+  });
+
+  it('uses the remembered reference width only while right-docked References is active', () => {
+    let state = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'resize-right-references', size: 304 });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'move-references-right' });
+
+    expect(deriveReferenceWorkspaceLayout(state, 'annotations', 'references'))
+      .toMatchObject({ rightWidth: 304 });
+    expect(deriveReferenceWorkspaceLayout(state, 'annotations', 'annotations'))
+      .toMatchObject({ rightWidth: DEFAULT_RIGHT_WORKSPACE_WIDTH });
   });
 
   it('projects wide state into narrow mode and restores the exact wide tuple', () => {

@@ -186,13 +186,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     navigationStateRef.current = next;
     setNavigationState(next);
   };
-  const dispatchLayout = (action: ReferenceWorkspaceLayoutAction) => {
+  const dispatchLayout = useCallback((action: ReferenceWorkspaceLayoutAction) => {
     if (action.type !== 'set-stage-size' && action.type !== 'resize-right-references'
       && action.type !== 'resize-bottom-references' && action.type !== 'focus-surface') {
       layoutGenerationRef.current += 1;
     }
     dispatchReferenceLayout(action);
-  };
+  }, []);
   const coordinatorRef = useRef<NavigationCoordinator | null>(null);
   if (coordinatorRef.current === null) {
     coordinatorRef.current = new NavigationCoordinator({
@@ -485,6 +485,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const effectiveReferenceLayout = deriveReferenceWorkspaceLayout(
     referenceLayoutState,
     rightWorkspaceMode,
+    navigationState.workspace.lastMode,
   );
   const anyTrayOpen = effectiveReferenceLayout.kind === 'narrow-unified'
     ? effectiveReferenceLayout.open

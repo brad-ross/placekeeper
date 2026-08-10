@@ -1,23 +1,53 @@
 import { expect, test, type Page } from '@playwright/test';
 
 async function openAnnotationsWorkspace(page: Page) {
-  const workspace = page.getByRole('button', { name: /^Workspace/u });
+  const rightRail = page.getByRole('button', { name: /^(?:Open|Close) right workspace$/u });
+  const bottomRail = page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
+  const stage = page.locator('[data-review-stage]');
+  const expectedPresentation = (page.viewportSize()?.width ?? 1280) < 900 ? 'bottom' : 'right';
+  await expect(stage).toHaveAttribute('data-workspace-presentation', expectedPresentation);
+  const workspace = expectedPresentation === 'right'
+    ? rightRail
+    : bottomRail;
   if (await workspace.getAttribute('aria-expanded') !== 'true') await workspace.click();
   await expect(workspace).toHaveAttribute('aria-expanded', 'true');
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
   await expect(annotations).toBeVisible();
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
   await expect(annotations).toHaveAttribute('aria-selected', 'true');
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
   await expect(page.locator('#workspace-panel-outline')).toBeHidden();
   await expect(page.locator('#workspace-panel-references')).toBeHidden();
   return { annotations, workspace };
 }
 
 async function closeWorkspace(page: Page) {
-  const workspace = page.getByRole('button', { name: /^Workspace/u });
+  const rightRail = page.getByRole('button', { name: /^(?:Open|Close) right workspace$/u });
+  const bottomRail = page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
+  const expectedPresentation = (page.viewportSize()?.width ?? 1280) < 900 ? 'bottom' : 'right';
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+    'data-workspace-presentation',
+    expectedPresentation,
+  );
+  const workspace = expectedPresentation === 'right'
+    ? rightRail
+    : bottomRail;
   if (await workspace.getAttribute('aria-expanded') === 'true') await workspace.click();
   await expect(workspace).toHaveAttribute('aria-expanded', 'false');
   return workspace;
+}
+
+async function currentWorkspaceRail(page: Page) {
+  const expectedPresentation = (page.viewportSize()?.width ?? 1280) < 900 ? 'bottom' : 'right';
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+    'data-workspace-presentation',
+    expectedPresentation,
+  );
+  return expectedPresentation === 'right'
+    ? page.getByRole('button', { name: /^(?:Open|Close) right workspace$/u })
+    : page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
 }
 
 test.describe('canonical review workflow', () => {
@@ -177,7 +207,7 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-owned-mark="replace"]')).toHaveCount(1);
 
     await openAnnotationsWorkspace(page);
-    await expect(page.locator('[data-annotation-drawer]')).toBeVisible();
+    await expect(page.locator('#review-tools-workspace')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Close annotations' })).toHaveCount(0);
     await closeWorkspace(page);
     await openAnnotationsWorkspace(page);
@@ -198,8 +228,8 @@ test.describe('canonical review workflow', () => {
     await page.setViewportSize({ width: 320, height: 720 });
     await openAnnotationsWorkspace(page);
 
-    const drawer = page.locator('[data-annotation-drawer]');
-    await expect(drawer).toHaveAttribute('data-annotation-presentation', 'bottom');
+    const drawer = page.locator('#review-tools-workspace');
+    await expect(drawer).toHaveAttribute('data-workspace-presentation', 'bottom');
 
     const row = drawer.locator('[data-annotation-origin="owned"][data-annotation-kind="delete"]');
     const content = row.getByRole('button', { name: /delete · Page 1/u });
@@ -270,7 +300,7 @@ test.describe('canonical review workflow', () => {
   test('removes spatial disclosure motion when reduced motion is requested', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openAnnotationsWorkspace(page);
-    const drawer = page.locator('[data-annotation-drawer]');
+    const drawer = page.locator('#review-tools-workspace');
     await expect(drawer).toBeVisible();
     await expect(drawer).toHaveCSS('transition-duration', '0s');
     await expect(drawer).toHaveCSS('animation-duration', '0s');
@@ -332,10 +362,10 @@ test.describe('canonical review workflow', () => {
     const replacementDialog = page.getByRole('dialog', { name: 'Replacement text' });
     await expect(replacementDialog.getByRole('textbox', { name: 'Replacement text' })).toHaveValue(' ');
     await replacementDialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(canvas).toBeFocused();
 
-    const workspace = page.getByRole('button', { name: /^Workspace/u });
-    await workspace.focus();
-    await page.keyboard.press('Space');
+    const workspace = await currentWorkspaceRail(page);
+    await workspace.press('Space');
 
     await expect(workspace).toHaveAttribute('aria-expanded', 'true');
     await expect(page.getByRole('dialog', { name: 'Replacement text' })).toHaveCount(0);
@@ -397,16 +427,15 @@ test.describe('canonical review workflow', () => {
 
   test('supersedes Page Note placement when opening a review drawer', async ({ page }) => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
-    const workspace = page.getByRole('button', { name: /^Workspace/u });
     const finish = page.getByRole('button', { name: 'Finish' });
 
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+N');
     await expect(page.getByRole('button', { name: 'Place Page Note' })).toBeVisible();
-    await openAnnotationsWorkspace(page);
+    const { workspace } = await openAnnotationsWorkspace(page);
 
     await expect(page.getByRole('button', { name: 'Place Page Note' })).toHaveCount(0);
-    await expect(page.locator('[data-annotation-drawer]')).toHaveAttribute('data-list-open', 'true');
+    await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
     await page.keyboard.press('Escape');
     await expect(workspace).toBeFocused();
 
@@ -445,8 +474,8 @@ test.describe('canonical review workflow', () => {
 
     const beforeActivation = await canvas.boundingBox();
     await markTarget.click();
-    const drawer = page.locator('[data-annotation-drawer]');
-    await expect(drawer).toHaveAttribute('data-list-open', 'true');
+    const drawer = page.locator('#review-tools-workspace');
+    await expect(drawer).toHaveAttribute('data-tools-workspace-open', 'true');
     const row = page.locator('[data-review-item]').first();
     await expect(row).toHaveAttribute('data-active', 'true');
     await expect(row.getByRole('button', { name: /highlight · Page 1/ })).toBeFocused();
@@ -457,7 +486,7 @@ test.describe('canonical review workflow', () => {
     await expect(existing.getByRole('button', { name: /^Edit/ })).toHaveCount(0);
     await expect(existing.getByRole('button', { name: /^Delete/ })).toHaveCount(0);
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('button', { name: /^Workspace/u })).toBeFocused();
+    await expect(await currentWorkspaceRail(page)).toBeFocused();
     await expect(page.locator('[data-owned-mark]').first()).toHaveAttribute('data-active', 'true');
     await expect(row).toHaveAttribute('data-active', 'true');
   });
