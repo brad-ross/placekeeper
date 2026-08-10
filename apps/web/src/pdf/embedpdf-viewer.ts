@@ -9,6 +9,7 @@ import { SelectionPluginPackage } from '@embedpdf/plugin-selection/react';
 import { ViewportPluginPackage } from '@embedpdf/plugin-viewport/react';
 import { ZoomPluginPackage } from '@embedpdf/plugin-zoom/react';
 import type { LoadDocumentUrlOptions } from '@embedpdf/plugin-document-manager';
+import { PDF_LINK_INTERACTION_ATTRIBUTE } from './viewer-interaction-events.js';
 import { MAIN_PDF_DOCUMENT_ID } from './viewer-document-ids.js';
 
 export interface ViewerAssetUrls {
@@ -45,7 +46,7 @@ export function createLocalPdfiumViewerPlugins(
       initialDocuments: [document],
     }),
     createPluginRegistration(InteractionManagerPluginPackage, {
-      exclusionRules: { dataAttributes: ['data-pdf-link-control'] },
+      exclusionRules: { dataAttributes: [PDF_LINK_INTERACTION_ATTRIBUTE] },
     }),
     createPluginRegistration(ViewportPluginPackage),
     createPluginRegistration(ScrollPluginPackage),

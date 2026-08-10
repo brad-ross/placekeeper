@@ -5,9 +5,11 @@ import type { ReliabilityDiagnostic } from './text-reliability.js';
 import { restorePagePoint } from './selection-anchor.js';
 import type { PdfNavigationMetadata } from './pdf-navigation-metadata.js';
 import type { PdfNavigationTarget } from './pdf-navigation-target.js';
+import type { PdfViewerScope } from './viewer-document-ids.js';
 
 /** Stable relationship target for the one active link-action menu. */
 export const PDF_LINK_ACTION_MENU_ID = 'pdf-link-action-menu';
+export const PDF_LINK_INTERACTION_ATTRIBUTE = 'data-pdf-link-control';
 
 export interface ViewerClientPlacement {
   readonly left: number;
@@ -24,7 +26,7 @@ export interface ViewerFixedClientRect {
   readonly height: number;
 }
 
-export type ViewerPdfLinkSourceScope = 'main' | 'reference';
+export type ViewerPdfLinkSourceScope = PdfViewerScope;
 
 export interface ViewerPdfLinkInvocation {
   readonly sourceScope: ViewerPdfLinkSourceScope;
@@ -33,7 +35,7 @@ export interface ViewerPdfLinkInvocation {
   readonly metadata: PdfNavigationMetadata;
   /** Transient focus return target. It must never enter durable application state. */
   readonly opener: HTMLButtonElement;
-  /** Fixed activation-time geometry for the U5 chooser placement seam. */
+  /** Fixed activation-time geometry for chooser placement. */
   readonly clientRect: ViewerFixedClientRect;
 }
 
@@ -184,7 +186,7 @@ export function isUnsafePageContextTarget(target: EventTarget | null): boolean {
     '[data-owned-annotation-layer]',
     '[data-source-annotation-layer]',
     '[data-source-link-layer]',
-    '[data-pdf-link-control]',
+    `[${PDF_LINK_INTERACTION_ATTRIBUTE}]`,
     '[data-review-contextual-ui]',
     '[data-review-editor]',
     'input',

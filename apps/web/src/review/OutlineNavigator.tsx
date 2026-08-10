@@ -6,74 +6,6 @@ import type {
 } from '../pdf/pdf-outline.js';
 import { ReviewIcon } from './ReviewIcon.js';
 
-export interface OutlineOrderPoint {
-  readonly pageIndex: number;
-  /** A monotonic, top-to-bottom offset in one agreed document coordinate system. */
-  readonly offset: number;
-}
-
-function compareOrder(first: OutlineOrderPoint, second: OutlineOrderPoint): number {
-  return first.pageIndex - second.pageIndex || first.offset - second.offset;
-}
-
-interface OrderedOutlineItem {
-  readonly item: PdfOutlineItem;
-  readonly depth: number;
-  readonly documentIndex: number;
-  readonly point: OutlineOrderPoint;
-}
-
-/**
- * Finds the last safely ordered bookmark at or before a settled main-view anchor.
- * The caller supplies coordinate conversion because raw PDF destinations do not
- * carry enough page geometry to compare their offsets safely with viewer anchors.
- */
-export function findCurrentOutlineItem(
-  items: readonly PdfOutlineItem[],
-  anchor: OutlineOrderPoint,
-  orderPointFor: (item: PdfOutlineItem) => OutlineOrderPoint | null,
-): PdfOutlineItem | null {
-  const ordered: OrderedOutlineItem[] = [];
-  let documentIndex = 0;
-  const visit = (nodes: readonly PdfOutlineItem[], depth: number): boolean => {
-    for (const item of nodes) {
-      const index = documentIndex++;
-      if (item.target) {
-        const point = orderPointFor(item);
-        if (point === null || !Number.isSafeInteger(point.pageIndex)
-          || point.pageIndex < 0 || !Number.isFinite(point.offset)) return false;
-        ordered.push({ item, depth, documentIndex: index, point });
-      }
-      if (!visit(item.children, depth + 1)) return false;
-    }
-    return true;
-  };
-  if (!visit(items, 0)) return null;
-
-  let current: OrderedOutlineItem | null = null;
-  for (const candidate of ordered) {
-    if (compareOrder(candidate.point, anchor) > 0) continue;
-    if (current === null) {
-      current = candidate;
-      continue;
-    }
-    const relative = compareOrder(candidate.point, current.point);
-    if (
-      relative > 0
-      || (
-        relative === 0
-        && candidate.depth > current.depth
-      )
-      || (
-        relative === 0
-        && candidate.depth === current.depth
-        && candidate.documentIndex > current.documentIndex
-      )
-    ) current = candidate;
-  }
-  return current?.item ?? null;
-}
-
 function branchIds(items: readonly PdfOutlineItem[]): string[] {
   return items.flatMap((item) => [
     ...(item.children.length > 0 ? [item.id] : []),
@@ -84,7 +16,7 @@ function branchIds(items: readonly PdfOutlineItem[]): string[] {
 export interface OutlineNavigatorProps {
   readonly discovery: PdfOutlineDiscovery;
   readonly currentItemId: string | null;
-  readonly onActivate: (item: PdfOutlineItem, control: HTMLButtonElement) => void;
+  readonly onActivate: (item: PdfOutlineItem) => void;
   readonly onFocusTokenChange?: (token: string) => void;
 }
 
@@ -165,8 +97,8 @@ export function OutlineNavigator({
                 disabled={item.target === null}
                 inert={item.target === null}
                 onFocus={() => onFocusTokenChange?.(`outline:${item.id}`)}
-                onClick={(event) => {
-                  if (item.target) onActivate(item, event.currentTarget);
+                onClick={() => {
+                  if (item.target) onActivate(item);
                 }}
               >
                 <span>{item.label}</span>

@@ -142,7 +142,7 @@ async function hostileActionsPdf() {
   );
   await document.attach(new TextEncoder().encode('Untrusted embedded fixture payload.'), 'payload.txt', {
     mimeType: 'text/plain',
-    description: 'U1 inert embedded-file fixture',
+    description: 'Inert embedded-file fixture',
   });
   return document.save({ useObjectStreams: false });
 }
@@ -370,7 +370,7 @@ async function referenceNavigationPdf() {
   await document.attach(
     new TextEncoder().encode('Embedded content must remain local and inert.'),
     'reference-payload.txt',
-    { mimeType: 'text/plain', description: 'U1 rejected embedded content fixture' },
+    { mimeType: 'text/plain', description: 'Rejected embedded-content fixture' },
   );
   return document.save({ useObjectStreams: false });
 }

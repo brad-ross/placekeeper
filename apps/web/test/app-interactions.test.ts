@@ -2,11 +2,11 @@ import { Rotation } from '@embedpdf/models';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  MAIN_PDF_DOCUMENT_ID,
   clampPageNotePoint,
   subscribeToMainDocumentOpened,
   publishViewerCaretRead,
 } from '../src/app/App.js';
+import { MAIN_PDF_DOCUMENT_ID } from '../src/pdf/viewer-document-ids.js';
 import type { PdfOutlineDiscovery } from '../src/pdf/pdf-outline.js';
 import { combinePageRotation } from '../src/pdf/owned-overlay.js';
 import type { ViewerInteractionEvent } from '../src/pdf/viewer-interaction-events.js';

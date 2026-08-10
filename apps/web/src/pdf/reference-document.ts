@@ -12,8 +12,6 @@ import {
   REFERENCE_PDF_DOCUMENT_ID,
 } from './viewer-document-ids.js';
 
-export { MAIN_PDF_DOCUMENT_ID, REFERENCE_PDF_DOCUMENT_ID } from './viewer-document-ids.js';
-
 interface PromiseTask<T> {
   toPromise(): Promise<T>;
 }
@@ -120,6 +118,7 @@ export function createReferenceDocumentController(input: {
   };
 
   const close = (): Promise<void> => {
+    if (closing !== null && pending === null) return closing;
     const inFlight = pending;
     const precedingClose = closing;
     operationGeneration += 1;

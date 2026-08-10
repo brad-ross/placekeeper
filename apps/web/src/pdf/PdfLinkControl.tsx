@@ -14,13 +14,13 @@ import { createPdfNavigationMetadata } from './pdf-navigation-metadata.js';
 import { classifyPdfNavigationTarget } from './pdf-navigation-target.js';
 import {
   PDF_LINK_ACTION_MENU_ID,
+  PDF_LINK_INTERACTION_ATTRIBUTE,
   fixedViewerClientRect,
   type ViewerInteractionEvent,
   type ViewerPdfLinkSourceScope,
 } from './viewer-interaction-events.js';
 
 export const PDF_LINK_RENDERER_ID = 'link';
-export const PDF_LINK_INTERACTION_ATTRIBUTE = 'data-pdf-link-control';
 
 export interface PdfLinkControlProps {
   readonly annotation: PdfLinkAnnoObject;
@@ -47,9 +47,7 @@ function linkBorderStyle(annotation: PdfLinkAnnoObject): CSSProperties {
   const color = annotation.strokeColor ?? 'transparent';
   const style = annotation.strokeStyle === PdfAnnotationBorderStyle.DASHED
     ? 'dashed'
-    : annotation.strokeStyle === PdfAnnotationBorderStyle.UNDERLINE
-      ? 'solid'
-      : 'solid';
+    : 'solid';
   return annotation.strokeStyle === PdfAnnotationBorderStyle.UNDERLINE
     ? { borderBottom: `${width}px ${style} ${color}` }
     : { border: `${width}px ${style} ${color}` };

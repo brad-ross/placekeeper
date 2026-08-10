@@ -238,8 +238,8 @@ function appendHistoryDestination(
   return { entries, index: entries.length - 1 };
 }
 
-function successorAfterRemoval(
-  tabs: readonly ReferenceTab[],
+export function referenceTabSuccessorIdentity(
+  tabs: readonly { readonly identity: string }[],
   removedIndex: number,
 ): string | null {
   return tabs[removedIndex + 1]?.identity ?? tabs[removedIndex - 1]?.identity ?? null;
@@ -255,7 +255,7 @@ function withoutTab(
   return {
     tabs,
     activeTabIdentity: state.activeTabIdentity === targetIdentity
-      ? successorAfterRemoval(state.tabs, removedIndex)
+      ? referenceTabSuccessorIdentity(state.tabs, removedIndex)
       : state.activeTabIdentity,
   };
 }

@@ -103,7 +103,7 @@ export function reduceReviewSurface(
         ...state,
         baseSurface: 'reading',
         transientSurface: 'none',
-        navigation: createReferenceNavigationState(action.documentGeneration),
+        navigation: reduceReferenceNavigation(state.navigation, action),
       };
     case 'open-nested':
       return state.nestedLayer === 'composer'

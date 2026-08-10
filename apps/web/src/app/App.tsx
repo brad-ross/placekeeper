@@ -60,6 +60,7 @@ import {
 import {
   MAIN_PDF_DOCUMENT_ID,
   REFERENCE_PDF_DOCUMENT_ID,
+  type PdfViewerScope,
 } from '../pdf/viewer-document-ids.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
@@ -67,10 +68,6 @@ import { ReviewIcon } from '../review/ReviewIcon.js';
 type ViewerCaretResult = Awaited<ReturnType<typeof captureViewerCaret>>;
 
 const FALLBACK_PAGE_NOTE_CURSOR_RADIUS_PX = 18;
-
-export { MAIN_PDF_DOCUMENT_ID, REFERENCE_PDF_DOCUMENT_ID } from '../pdf/viewer-document-ids.js';
-
-export type ViewerNavigationScope = 'main' | 'reference';
 
 export interface MainDocumentOpenedSource {
   onDocumentOpened(listener: (event: { document: { id: string } | null }) => void): () => void;
@@ -149,7 +146,7 @@ export interface AppProps {
   referenceViewportHost?: HTMLElement | null;
   onReferenceDocumentControls?: (controls: ReferenceDocumentController | null) => void;
   onViewerNavigationInitialized?: (
-    scope: ViewerNavigationScope,
+    scope: PdfViewerScope,
     navigation: PdfViewerNavigation | null,
   ) => void;
   onOutlineDiscovery?: (result: PdfOutlineDiscovery) => void;

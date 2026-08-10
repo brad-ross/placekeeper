@@ -8,7 +8,10 @@ import {
 
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
 import type { AnnotationPresentation } from '../pdf/viewer-framing.js';
-import type { WorkspaceMode } from './reference-navigation-state.js';
+import {
+  referenceTabSuccessorIdentity,
+  type WorkspaceMode,
+} from './reference-navigation-state.js';
 import { horizontalTabFocusIndex } from './LinkActionPopover.js';
 import { OutlineNavigator } from './OutlineNavigator.js';
 import { ReviewIcon } from './ReviewIcon.js';
@@ -55,7 +58,7 @@ export interface ReferenceWorkspaceProps {
   readonly onReferenceTabClose: (identity: string) => void;
   readonly onSendToMain: (identity: string) => void;
   readonly onRetryReference: () => void;
-  readonly onOutlineActivate: (item: PdfOutlineItem, control: HTMLButtonElement) => void;
+  readonly onOutlineActivate: (item: PdfOutlineItem) => void;
   readonly onDismiss: () => void;
   readonly onReferenceViewportHost: (element: HTMLDivElement | null) => void;
   readonly onModeFocusTokenChange?: (mode: WorkspaceMode, token: string) => void;
@@ -184,9 +187,7 @@ export function ReferenceWorkspace({
       event.preventDefault();
       const identity = tabs[currentIndex]?.identity;
       if (identity) {
-        closeFocusIdentity.current = tabs[currentIndex + 1]?.identity
-          ?? tabs[currentIndex - 1]?.identity
-          ?? null;
+        closeFocusIdentity.current = referenceTabSuccessorIdentity(tabs, currentIndex);
         onReferenceTabClose(identity);
       }
       return;

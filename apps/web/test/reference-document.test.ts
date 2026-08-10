@@ -2,11 +2,13 @@ import type { LoadDocumentUrlOptions } from '@embedpdf/plugin-document-manager';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  MAIN_PDF_DOCUMENT_ID,
-  REFERENCE_PDF_DOCUMENT_ID,
   buildReferenceDocumentOptions,
   createReferenceDocumentController,
 } from '../src/pdf/reference-document.js';
+import {
+  MAIN_PDF_DOCUMENT_ID,
+  REFERENCE_PDF_DOCUMENT_ID,
+} from '../src/pdf/viewer-document-ids.js';
 
 function resolvedTask<T>(value: T) {
   return { toPromise: () => Promise.resolve(value) };
@@ -132,5 +134,27 @@ describe('reference document scope', () => {
     expect(closeDocument).toHaveBeenCalledOnce();
     expect(openDocumentUrl).toHaveBeenCalledOnce();
     expect(controller.snapshot()).toMatchObject({ status: 'loaded', documentGeneration: 1 });
+  });
+
+  it('coalesces repeated close requests without an intervening open', async () => {
+    const closeDocument = vi.fn(() => resolvedTask(undefined));
+    const controller = createReferenceDocumentController({
+      documentManager: {
+        openDocumentUrl: vi.fn(),
+        retryDocument: vi.fn(),
+        closeDocument,
+        getActiveDocumentId: () => MAIN_PDF_DOCUMENT_ID,
+        getDocumentState: () => null,
+      },
+      assetUrls: { pdfiumWasm: '/pdfium.wasm', documentUrl: '/document.pdf' },
+      origin: 'http://127.0.0.1:4173',
+      documentGeneration: 1,
+    });
+
+    const first = controller.close();
+    const second = controller.close();
+    expect(second).toBe(first);
+    await second;
+    expect(closeDocument).toHaveBeenCalledOnce();
   });
 });

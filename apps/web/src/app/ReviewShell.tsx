@@ -85,6 +85,8 @@ type Composer =
   | { kind: 'pageNote'; pageIndex: number; position: ReviewRect; nearbyText?: string }
   | { kind: 'edit'; item: ReviewItem };
 
+function ignoreReferenceViewportHost(_element: HTMLDivElement | null): void {}
+
 export interface ReviewShellProps {
   state: ReviewState;
   documentTitle?: string;
@@ -131,7 +133,7 @@ export interface ReviewShellProps {
   finishConfirmationActive?: boolean;
   onFinishReview?(): void | Promise<void>;
   onDiscardReview?(): void | Promise<void>;
-  /** U6 may control workspace visibility and retained navigation state. */
+  /** The production shell may control workspace visibility and retained navigation state. */
   workspaceOpen?: boolean;
   navigationState?: ReferenceNavigationState;
   referenceTabs?: readonly ReferenceWorkspaceTab[];
@@ -152,7 +154,7 @@ export interface ReviewShellProps {
   onReferenceTabClose?(identity: string): void;
   onReferenceSendToMain?(identity: string): void;
   onReferenceRetry?(): void;
-  onOutlineActivate?(item: PdfOutlineItem, control: HTMLButtonElement): void;
+  onOutlineActivate?(item: PdfOutlineItem): void;
   onReferenceViewportHost?(element: HTMLDivElement | null): void;
   onWorkspaceModeFocusTokenChange?(mode: WorkspaceMode, token: string): void;
   children?: ReactNode;
@@ -908,9 +910,9 @@ export function ReviewShell(props: ReviewShellProps) {
             }}
             onSendToMain={(identity) => props.onReferenceSendToMain?.(identity)}
             onRetryReference={() => props.onReferenceRetry?.()}
-            onOutlineActivate={(item, control) => props.onOutlineActivate?.(item, control)}
+            onOutlineActivate={(item) => props.onOutlineActivate?.(item)}
             onDismiss={closeWorkspace}
-            onReferenceViewportHost={(element) => props.onReferenceViewportHost?.(element)}
+            onReferenceViewportHost={props.onReferenceViewportHost ?? ignoreReferenceViewportHost}
             onModeFocusTokenChange={(mode, token) => {
               if (props.navigationState === undefined) {
                 dispatchSurface({

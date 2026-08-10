@@ -17,6 +17,7 @@ import type {
   ReferenceNavigationAction,
   ReferenceNavigationState,
 } from './reference-navigation-state.js';
+import { referenceTabSuccessorIdentity } from './reference-navigation-state.js';
 
 export interface NavigationDestinationMetadata {
   readonly label: string;
@@ -85,12 +86,10 @@ export function resolveCurrentOutlineItemId(input: {
   if (input.discovery.status !== 'loaded-tree') return null;
   const currentOrder = locationOrder(input.currentLocation);
   if (currentOrder === null) return null;
-  const candidates: Array<{
-    readonly id: string;
-    readonly order: readonly number[];
-    readonly depth: number;
-    readonly documentOrder: number;
-  }> = [];
+  let bestId: string | null = null;
+  let bestOrder: readonly number[] | null = null;
+  let bestDepth = -1;
+  let bestDocumentOrder = -1;
   let documentOrder = 0;
   let unsafeTarget = false;
   const visit = (items: readonly PdfOutlineItem[], depth: number) => {
@@ -102,7 +101,28 @@ export function resolveCurrentOutlineItemId(input: {
         if (order === null) {
           unsafeTarget = true;
         } else if (compareOrder(order, currentOrder) <= 0) {
-          candidates.push({ id: item.id, order, depth, documentOrder: itemOrder });
+          if (bestOrder === null) {
+            bestId = item.id;
+            bestOrder = order;
+            bestDepth = depth;
+            bestDocumentOrder = itemOrder;
+          } else {
+            const relative = compareOrder(order, bestOrder);
+            if (
+              relative > 0
+              || (relative === 0 && depth > bestDepth)
+              || (
+                relative === 0
+                && depth === bestDepth
+                && itemOrder > bestDocumentOrder
+              )
+            ) {
+              bestId = item.id;
+              bestOrder = order;
+              bestDepth = depth;
+              bestDocumentOrder = itemOrder;
+            }
+          }
         }
       }
       visit(item.children, depth + 1);
@@ -110,13 +130,7 @@ export function resolveCurrentOutlineItemId(input: {
   };
   visit(input.discovery.items, 0);
   if (unsafeTarget) return null;
-  candidates.sort((first, second) => {
-    const order = compareOrder(second.order, first.order);
-    if (order !== 0) return order;
-    const depth = second.depth - first.depth;
-    return depth !== 0 ? depth : second.documentOrder - first.documentOrder;
-  });
-  return candidates[0]?.id ?? null;
+  return bestId;
 }
 
 const REFERENCE_FAILURE = 'Reference unavailable. Retry when ready.';
@@ -370,16 +384,16 @@ export class NavigationCoordinator {
       return true;
     }
 
-    const successor = state.tabs[index + 1] ?? state.tabs[index - 1];
-    if (successor) {
-      if (!await this.restoreReferenceTab(operation, successor.identity, false)) return false;
+    const successorIdentity = referenceTabSuccessorIdentity(state.tabs, index);
+    if (successorIdentity !== null) {
+      if (!await this.restoreReferenceTab(operation, successorIdentity, false)) return false;
       if (!this.isCurrent(operation)) return false;
       this.dependencies.dispatch({
         type: 'close-reference',
         targetIdentity: identity,
         focusReturnToken: 'toolbar:workspace',
       });
-      this.dependencies.focusReferenceTab(successor.identity);
+      this.dependencies.focusReferenceTab(successorIdentity);
       this.dependencies.setAnnouncement('Reference closed. Adjacent reference active.');
       return true;
     }

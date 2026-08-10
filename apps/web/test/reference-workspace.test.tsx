@@ -10,11 +10,7 @@ import {
   setLinkActionOpenerExpanded,
 } from '../src/review/LinkActionPopover.js';
 import { PDF_LINK_ACTION_MENU_ID } from '../src/pdf/viewer-interaction-events.js';
-import {
-  OutlineNavigator,
-  findCurrentOutlineItem,
-  type OutlineOrderPoint,
-} from '../src/review/OutlineNavigator.js';
+import { OutlineNavigator } from '../src/review/OutlineNavigator.js';
 import {
   chooseWorkspaceModeFocusTarget,
   ReferenceWorkspace,
@@ -235,52 +231,6 @@ describe('outline navigator', () => {
     expect(html).toContain('aria-controls="outline-children-intro"');
     expect(html).toContain('aria-current="location"');
     expect(html).toContain('Setup');
-  });
-
-  it('chooses the deepest safely ordered destination and fails closed on unknown ordering', () => {
-    const order = new Map<string, OutlineOrderPoint>([
-      ['intro-target', { pageIndex: 0, offset: 0 }],
-      ['setup-target', { pageIndex: 2, offset: 20 }],
-      ['results-target', { pageIndex: 7, offset: 10 }],
-    ]);
-    expect(findCurrentOutlineItem(items, { pageIndex: 2, offset: 30 }, (item) => (
-      item.target ? order.get(item.target.identity) ?? null : null
-    ))?.id).toBe('setup');
-    expect(findCurrentOutlineItem(items, { pageIndex: 8, offset: 0 }, () => null)).toBeNull();
-  });
-
-  it('prefers depth before later document order and then the later equal-depth sibling', () => {
-    const tiedItems: readonly PdfOutlineItem[] = [{
-      id: 'parent',
-      label: 'Parent',
-      pageContext: 'Page 4',
-      target: target('parent-target', 3),
-      children: [{
-        id: 'first-child',
-        label: 'First child',
-        pageContext: 'Page 4',
-        target: target('first-child-target', 3),
-        children: [],
-      }, {
-        id: 'later-child',
-        label: 'Later child',
-        pageContext: 'Page 4',
-        target: target('later-child-target', 3),
-        children: [],
-      }],
-    }, {
-      id: 'later-root',
-      label: 'Later root',
-      pageContext: 'Page 4',
-      target: target('later-root-target', 3),
-      children: [],
-    }];
-    const current = findCurrentOutlineItem(
-      tiedItems,
-      { pageIndex: 3, offset: 20 },
-      () => ({ pageIndex: 3, offset: 20 }),
-    );
-    expect(current?.id).toBe('later-child');
   });
 
   it('distinguishes loading, loaded-empty, and unavailable states', () => {

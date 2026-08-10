@@ -131,7 +131,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     readonly resolve: (navigation: PdfViewerNavigation | null) => void;
   }>>([]);
   const documentGenerationRef = useRef(0);
-  const [documentGeneration, setDocumentGeneration] = useState(0);
   const navigationStateRef = useRef(createReferenceNavigationState(0));
   const [navigationState, setNavigationState] = useState(navigationStateRef.current);
   const [workspaceOpen, setWorkspaceOpenState] = useState(false);
@@ -252,7 +251,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     sourceIdentityRef.current = sourceIdentity;
     const nextGeneration = documentGenerationRef.current + 1;
     documentGenerationRef.current = nextGeneration;
-    setDocumentGeneration(nextGeneration);
     for (const waiter of referenceNavigationWaiters.current.splice(0)) waiter.resolve(null);
     outlineDiscoveryRef.current = { status: 'loading', documentGeneration: nextGeneration };
     setOutlineDiscovery(outlineDiscoveryRef.current);
@@ -381,7 +379,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       {...(correspondingItemId === undefined ? {} : { correspondingOwnedAnnotationId: correspondingItemId })}
       onExistingAnnotationsDiscovery={setExistingAnnotations}
       inventoryRetryGeneration={inventoryRetryGeneration}
-      documentGeneration={documentGeneration}
+      documentGeneration={navigationState.documentGeneration}
       referenceViewportHost={referenceViewportHost}
       onReferenceDocumentControls={onReferenceDocumentControls}
       onViewerNavigationInitialized={onViewerNavigationInitialized}

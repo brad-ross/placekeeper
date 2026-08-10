@@ -12,6 +12,7 @@ import { ViewportPlugin, type ViewportScope } from '@embedpdf/plugin-viewport';
 import { ZoomPlugin, type ZoomScope } from '@embedpdf/plugin-zoom';
 
 import type { PdfNavigationTarget } from './pdf-navigation-target.js';
+import { combinePageRotation } from './owned-overlay.js';
 import {
   isPdfViewerLocation,
   pdfBottomOriginPointToNaturalAnchor,
@@ -351,7 +352,7 @@ export function createViewerNavigation(
     if (!page || !viewportElement || !pageElement) return null;
     const viewportRect = viewportElement.getBoundingClientRect();
     const pageRect = pageElement.getBoundingClientRect();
-    const rotation = ((page.rotation + viewer.documentRotation) % 4) as Rotation;
+    const rotation = combinePageRotation(page.rotation, viewer.documentRotation);
     const rotatedPage = transformSize(page.size, rotation, 1);
     const scale = pageRect.width / rotatedPage.width;
     if (
@@ -548,7 +549,7 @@ export function createViewerNavigation(
     } catch {
       return null;
     }
-    const rotation = ((page.rotation + viewer.documentRotation) % 4) as Rotation;
+    const rotation = combinePageRotation(page.rotation, viewer.documentRotation);
     return createPdfTargetLocation(target, {
       page: {
         ...page.size,
