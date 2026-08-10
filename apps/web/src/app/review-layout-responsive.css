@@ -116,13 +116,19 @@
   }
 
   .reference-resize-handle[data-reference-resize-handle="right"] {
-    left: -22px;
+    right: calc(var(--reference-right-width) - 22px);
     width: 44px;
   }
 
   .reference-resize-handle[data-reference-resize-handle="bottom"] {
-    top: -22px;
+    bottom: calc(var(--reference-bottom-height) - 22px);
     height: 44px;
+  }
+
+  .review-workspace__move {
+    width: var(--review-control-touch);
+    min-width: var(--review-control-touch);
+    min-height: var(--review-control-touch);
   }
 }
 

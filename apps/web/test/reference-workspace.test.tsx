@@ -14,6 +14,7 @@ import { PDF_LINK_ACTION_MENU_ID } from '../src/pdf/viewer-interaction-events.js
 import { OutlineNavigator } from '../src/review/OutlineNavigator.js';
 import {
   chooseWorkspaceModeFocusTarget,
+  referenceTabFocusIndex,
   ReferenceWorkspace,
 } from '../src/review/ReferenceWorkspace.js';
 import {
@@ -167,6 +168,7 @@ describe('shared reference workspace', () => {
         onReferenceTabClose={() => undefined}
         onSendToMain={() => undefined}
         onRetryReference={() => undefined}
+        onMoveReferencesBottom={() => undefined}
         onReferenceViewportHost={() => undefined}
       />,
     );
@@ -181,11 +183,53 @@ describe('shared reference workspace', () => {
     expect(html).not.toContain('id="workspace-panel-outline"');
     expect(html).not.toContain('id="workspace-panel-annotations"');
     expect(html).toContain('aria-label="Open references"');
+    expect(html).toContain('aria-orientation="horizontal"');
+    expect(html).toContain('data-reference-tabs-orientation="horizontal"');
     expect(html).toContain('role="tabpanel"');
     expect(html).toContain('data-reference-viewport-host');
     expect(html).toContain('aria-label="Close active reference"');
     expect(html).not.toMatch(/role="tab"[^>]*>[^<]*Close/u);
     expect(html).toContain('aria-live="polite"');
+    expect(html).toMatch(/data-workspace-tab-segment="references"[^>]*data-workspace-tab-selected="true"[\s\S]*data-reference-move="bottom"/u);
+  });
+
+  it('stacks reference tabs vertically beside the PDF only in the independent bottom tray', () => {
+    const html = renderToStaticMarkup(
+      <ReferenceWorkspace
+        open
+        mode="references"
+        presentation="bottom"
+        modes={['references']}
+        headerVariant="references"
+        tabs={[
+          { identity: 'lemma', label: 'Lemma A.7', pageContext: 'Page 18' },
+          { identity: 'proof', label: 'Proof', pageContext: 'Page 31' },
+        ]}
+        activeTabIdentity="lemma"
+        onModeChange={() => undefined}
+        onReferenceTabActivate={() => undefined}
+        onReferenceTabClose={() => undefined}
+        onSendToMain={() => undefined}
+        onRetryReference={() => undefined}
+        onMoveReferencesRight={() => undefined}
+        onReferenceViewportHost={() => undefined}
+      />,
+    );
+
+    expect(html).not.toContain('aria-label="Workspace modes"');
+    expect(html).toContain('aria-label="Open references"');
+    expect(html).toContain('aria-orientation="vertical"');
+    expect(html).toContain('data-reference-tabs-orientation="vertical"');
+    expect(html).toContain('data-reference-panel-layout="split"');
+    expect(html).toContain('data-reference-move="right"');
+  });
+
+  it('uses the arrow axis that matches the rendered reference-tab orientation', () => {
+    expect(referenceTabFocusIndex(0, 3, 'ArrowDown', 'vertical')).toBe(1);
+    expect(referenceTabFocusIndex(0, 3, 'ArrowUp', 'vertical')).toBe(2);
+    expect(referenceTabFocusIndex(0, 3, 'ArrowRight', 'vertical')).toBeNull();
+    expect(referenceTabFocusIndex(0, 3, 'ArrowRight', 'horizontal')).toBe(1);
+    expect(referenceTabFocusIndex(0, 3, 'ArrowDown', 'horizontal')).toBeNull();
   });
 
   it('exposes surface-specific rails and an accessible reference splitter', () => {
@@ -289,11 +333,14 @@ describe('shared reference workspace', () => {
     />);
 
     expect(empty).toContain('data-reference-empty');
+    expect(empty).toContain('data-reference-panel-layout="full"');
     expect(empty).toContain('An internal PDF link can open a reference here.');
     expect(empty).toContain('tabindex="-1"');
     expect(loading).toContain('aria-busy="true"');
+    expect(loading).toContain('data-reference-panel-layout="full"');
     expect(loading).toContain('Equation (4)');
     expect(failed).toContain('Reference unavailable.');
+    expect(failed).toContain('data-reference-panel-layout="full"');
     expect(failed).toContain('Retry reference');
     expect(failed).not.toContain('role="alert"');
   });

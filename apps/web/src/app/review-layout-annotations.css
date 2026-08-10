@@ -76,9 +76,17 @@
   right: 0;
 }
 
+.workspace-edge-rail[data-workspace-edge-rail="right"][data-edge-rail-open="true"] {
+  right: var(--tools-right-width);
+}
+
 .workspace-edge-rail[data-workspace-edge-rail="bottom"] {
   bottom: 0;
   left: 0;
+}
+
+.workspace-edge-rail[data-workspace-edge-rail="bottom"][data-edge-rail-open="true"] {
+  bottom: var(--reference-bottom-height);
 }
 
 .workspace-edge-rail__glyph {
@@ -112,15 +120,39 @@
 }
 
 .reference-resize-handle[data-reference-resize-handle="right"] {
-  inset: 0 auto 0 -5px;
+  inset: 0 calc(var(--reference-right-width) - 5px) 0 auto;
   width: 10px;
   cursor: ew-resize;
 }
 
 .reference-resize-handle[data-reference-resize-handle="bottom"] {
-  inset: -5px 0 auto;
+  inset: auto 0 calc(var(--reference-bottom-height) - 5px);
   height: 10px;
   cursor: ns-resize;
+}
+
+.reference-resize-handle::after {
+  position: absolute;
+  content: '';
+  border-radius: var(--review-radius-round);
+  background: color-mix(in srgb, var(--review-focus) 55%, transparent);
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+
+.reference-resize-handle[data-reference-resize-handle="right"]::after {
+  inset: 0 auto 0 4px;
+  width: 2px;
+}
+
+.reference-resize-handle[data-reference-resize-handle="bottom"]::after {
+  inset: 4px 0 auto;
+  height: 2px;
+}
+
+.reference-resize-handle:hover::after,
+.reference-resize-handle:focus-visible::after {
+  opacity: 1;
 }
 
 .review-workspace,
@@ -259,12 +291,42 @@
 }
 
 .review-workspace__title { flex: 1; padding-inline: 8px; font-size: 12px; }
-.review-workspace__tab-segment { display: flex; min-width: 0; }
+.review-workspace__tab-segment {
+  display: flex;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--review-radius-control);
+}
 .review-workspace__tab-segment > [role="tab"] { flex: 1; }
-.review-workspace__move { display: grid; width: var(--review-control-compact); padding: 0; place-items: center; }
+.review-workspace__tab-segment[data-workspace-tab-selected="true"] {
+  border-color: var(--review-border);
+  background: var(--review-surface-panel);
+  box-shadow: 0 1px 2px rgb(24 26 23 / 8%);
+}
+.review-workspace__move {
+  display: grid;
+  width: var(--review-control-compact);
+  min-width: var(--review-control-compact);
+  padding: 0;
+  place-items: center;
+}
+
+.review-workspace__move:hover {
+  border-color: var(--review-border);
+  color: var(--review-ink-primary);
+  background: var(--review-surface-subtle);
+}
+
+.review-workspace__move--header {
+  margin-right: 3px;
+  border-color: var(--review-border-subtle);
+  background: var(--review-surface-subtle);
+  box-shadow: 0 1px 2px rgb(24 26 23 / 6%);
+}
 
 .review-workspace__tabs button,
 .reference-tabs button,
+.review-workspace__move,
 .review-workspace__close,
 .reference-panel__actions button,
 .outline-navigator button,
@@ -291,6 +353,18 @@
   color: var(--review-ink-primary);
   background: var(--review-surface-panel);
   box-shadow: 0 1px 2px rgb(24 26 23 / 8%);
+}
+
+.review-workspace__tab-segment[data-workspace-tab-selected="true"] > [role="tab"] {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.review-workspace__tab-segment > .review-workspace__move--tab {
+  width: var(--review-control-compact);
+  min-width: var(--review-control-compact);
+  padding: 0;
 }
 
 .review-workspace__close {
@@ -346,6 +420,34 @@
 
 .reference-tabs button span { color: var(--review-ink-primary); font-size: 11px; font-weight: 720; }
 .reference-tabs button small { color: var(--review-ink-muted); font-size: 10px; }
+
+.review-workspace__panel--references[data-reference-tabs-orientation="vertical"] {
+  display: grid;
+  grid-template-columns: clamp(10rem, 18vw, 15rem) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.review-workspace__panel--references[data-reference-tabs-orientation="vertical"][data-reference-panel-layout="full"]
+  > .reference-panel {
+  grid-column: 1 / -1;
+}
+
+.reference-tabs[data-reference-tabs-orientation="vertical"] {
+  min-height: 0;
+  padding: 10px 8px;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-right: 1px solid var(--review-border-subtle);
+  border-bottom: 0;
+}
+
+.reference-tabs[data-reference-tabs-orientation="vertical"] button {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: none;
+}
 
 .reference-panel {
   display: grid;

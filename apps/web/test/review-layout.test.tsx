@@ -32,6 +32,10 @@ const responsiveStyles = readFileSync(
   new URL('../src/app/review-layout-responsive.css', import.meta.url),
   'utf8',
 );
+const annotationStyles = readFileSync(
+  new URL('../src/app/review-layout-annotations.css', import.meta.url),
+  'utf8',
+);
 
 const ownedAnnotation: ReviewItem = {
   id: 'owned-highlight',
@@ -280,6 +284,55 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-label="References"');
     expect(html.match(/data-reference-viewport-host/g)).toHaveLength(1);
     expect(html.match(/id="workspace-panel-references"/g)).toHaveLength(1);
+  });
+
+  it('uses the effective clamped bottom boundary without erasing the remembered height', () => {
+    let layout = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
+    layout = reduceReferenceWorkspaceLayout(layout, {
+      type: 'resize-bottom-references', size: 510,
+    });
+    layout = reduceReferenceWorkspaceLayout(layout, { type: 'show-references' });
+    layout = reduceReferenceWorkspaceLayout(layout, {
+      type: 'set-stage-size', width: 1440, height: 500,
+    });
+
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        referenceLayoutState={layout}
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        onCommand={async () => state}
+      ><div>Document canvas</div></ReviewShell>,
+    );
+
+    expect(layout.bottomReferenceHeight).toBe(510);
+    expect(html).toContain('--reference-bottom-height:308px');
+    expect(html).not.toContain('--reference-bottom-height:510px');
+  });
+
+  it('lets full-state bottom References panels occupy both vertical-grid columns', () => {
+    expect(annotationStyles).toMatch(
+      /\[data-reference-panel-layout="full"\]\s*>\s*\.reference-panel\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;/u,
+    );
+  });
+
+  it('uses only the right rail and controls the combined surface when References is right-docked', () => {
+    let layout = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
+    layout = reduceReferenceWorkspaceLayout(layout, { type: 'show-references' });
+    layout = reduceReferenceWorkspaceLayout(layout, { type: 'move-references-right' });
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        referenceLayoutState={layout}
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        onCommand={async () => state}
+      ><div>Document canvas</div></ReviewShell>,
+    );
+
+    expect(html).toContain('data-reference-layout="wide-right"');
+    expect(html.match(/data-workspace-edge-rail="right"/g)).toHaveLength(1);
+    expect(html).not.toContain('data-workspace-edge-rail="bottom"');
+    expect(html).toContain('aria-controls="review-workspace review-tools-workspace"');
   });
 
   it('keeps source annotations explicitly read-only and distinct from owned rows', () => {

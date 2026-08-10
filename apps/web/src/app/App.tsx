@@ -215,6 +215,7 @@ export function App({
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
   const [viewerRunway, setViewerRunway] = useState<ViewerRunway>({ right: 0, bottom: 0 });
+  const viewerRunwayRef = useRef<ViewerRunway>(viewerRunway);
   const activeDocumentIdRef = useRef<string | null>(null);
   const viewportGenerationRef = useRef(0);
   const caretReadGeneration = useRef(0);
@@ -347,9 +348,14 @@ export function App({
     caretReadGeneration.current += 1;
   }, [clearReferenceSubscriptions, clearSubscriptions, onReferenceDocumentControls, onViewerNavigationInitialized, viewer]);
   const updateViewerRunway = useCallback((runway: ViewerRunway) => {
-    setViewerRunway((current) => current.right === runway.right && current.bottom === runway.bottom
+    const next = {
+      right: Math.max(0, runway.right),
+      bottom: Math.max(0, runway.bottom),
+    };
+    viewerRunwayRef.current = next;
+    setViewerRunway((current) => current.right === next.right && current.bottom === next.bottom
       ? current
-      : runway);
+      : next);
   }, []);
   const setWorkspaceElement = useCallback((element: HTMLDivElement | null) => {
     workspaceElementRef.current = element;
@@ -465,6 +471,7 @@ export function App({
         root: () => workspaceElementRef.current,
         documentId: MAIN_PDF_DOCUMENT_ID,
         documentGeneration,
+        runway: () => viewerRunwayRef.current,
       });
       mainNavigationRef.current = mainNavigation;
       onViewerNavigationInitialized?.('main', mainNavigation);

@@ -13,6 +13,7 @@ import { ZoomPlugin, type ZoomScope } from '@embedpdf/plugin-zoom';
 
 import type { PdfNavigationTarget } from './pdf-navigation-target.js';
 import { combinePageRotation } from './owned-overlay.js';
+import { intersectViewerRects, type ViewerRunway } from './viewer-framing.js';
 import {
   isPdfViewerLocation,
   pdfBottomOriginPointToNaturalAnchor,
@@ -39,6 +40,8 @@ export interface ViewerNavigationAdapterOptions {
   /** Stable EmbedPDF document scope; it need not be the globally active document. */
   readonly documentId: string;
   readonly documentGeneration: number;
+  /** Live right/bottom area covered by trays in this viewer's DOM viewport. */
+  readonly runway?: () => ViewerRunway;
   readonly timeoutMs?: number;
   readonly coordinateTolerancePixels?: number;
   readonly zoomTolerance?: number;
@@ -73,6 +76,15 @@ interface NavigationOperation {
   readonly signal: AbortSignal;
   readonly origin: PdfViewerLocation | null;
   mutated: boolean;
+}
+
+interface EffectiveViewportRect {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly width: number;
+  readonly height: number;
 }
 
 const DEFAULT_TIMEOUT_MS = 1_500;
@@ -375,14 +387,62 @@ export function createViewerNavigation(
     return core.documents[viewer.documentId]?.document === viewer.document;
   };
 
-  const pageGeometry = (viewer: ActiveViewer, pageIndex: number) => {
+  const currentRunway = (): ViewerRunway => {
+    try {
+      const runway = options.runway?.() ?? { right: 0, bottom: 0 };
+      return {
+        right: Number.isFinite(runway.right) ? Math.max(0, runway.right) : 0,
+        bottom: Number.isFinite(runway.bottom) ? Math.max(0, runway.bottom) : 0,
+      };
+    } catch {
+      return { right: 0, bottom: 0 };
+    }
+  };
+
+  const effectiveViewportRect = (viewportRect: DOMRect): EffectiveViewportRect => {
+    const runway = currentRunway();
+    const right = Math.max(viewportRect.left, viewportRect.right - runway.right);
+    const bottom = Math.max(viewportRect.top, viewportRect.bottom - runway.bottom);
+    const width = right - viewportRect.left;
+    const height = bottom - viewportRect.top;
+    return {
+      left: viewportRect.left,
+      top: viewportRect.top,
+      right,
+      bottom,
+      width,
+      height,
+    };
+  };
+
+  const scrollAlignment = (location: PdfViewerLocation) => {
+    const root = options.root();
+    const viewportElement = root?.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
+    if (!viewportElement) return location.alignment;
+    const fullViewport = viewportElement.getBoundingClientRect();
+    const effectiveViewport = effectiveViewportRect(fullViewport);
+    if (!validDimension(fullViewport.width) || !validDimension(fullViewport.height)) {
+      return location.alignment;
+    }
+    return {
+      xPercent: effectiveViewport.width / fullViewport.width * location.alignment.xPercent,
+      yPercent: effectiveViewport.height / fullViewport.height * location.alignment.yPercent,
+    };
+  };
+
+  const pageGeometry = (
+    viewer: ActiveViewer,
+    pageIndex: number,
+    measured?: { readonly viewportRect: EffectiveViewportRect; readonly pageRect: DOMRect },
+  ) => {
     const page = viewer.pages[pageIndex];
     const root = options.root();
     const viewportElement = root?.querySelector<HTMLElement>('[data-viewer-framing-viewport]') ?? null;
     const pageElement = root?.querySelector<HTMLElement>(pageSelector(pageIndex)) ?? null;
     if (!page || !viewportElement || !pageElement) return null;
-    const viewportRect = viewportElement.getBoundingClientRect();
-    const pageRect = pageElement.getBoundingClientRect();
+    const viewportRect = measured?.viewportRect
+      ?? effectiveViewportRect(viewportElement.getBoundingClientRect());
+    const pageRect = measured?.pageRect ?? pageElement.getBoundingClientRect();
     const rotation = combinePageRotation(page.rotation, viewer.documentRotation);
     const rotatedPage = transformSize(page.size, rotation, 1);
     const scale = pageRect.width / rotatedPage.width;
@@ -402,12 +462,40 @@ export function createViewerNavigation(
     const viewport = root?.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
     const page = root?.querySelector<HTMLElement>('[data-page-index]');
     if (!viewport || !page) return false;
-    const viewportRect = viewport.getBoundingClientRect();
+    const viewportRect = effectiveViewportRect(viewport.getBoundingClientRect());
     const pageRect = page.getBoundingClientRect();
     return validDimension(viewportRect.width)
       && validDimension(viewportRect.height)
       && validDimension(pageRect.width)
       && validDimension(pageRect.height);
+  };
+
+  const mostVisibleMountedPageIndex = (viewer: ActiveViewer): {
+    readonly pageIndex: number;
+    readonly viewportRect: EffectiveViewportRect;
+    readonly pageRect: DOMRect;
+  } | null => {
+    const root = options.root();
+    const viewportElement = root?.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
+    if (!root || !viewportElement) return null;
+    const viewportRect = effectiveViewportRect(viewportElement.getBoundingClientRect());
+    let best: { readonly pageIndex: number; readonly pageRect: DOMRect } | null = null;
+    let bestVisibleArea = 0;
+    for (const pageElement of root.querySelectorAll<HTMLElement>('[data-page-index]')) {
+      const pageIndex = Number(pageElement.getAttribute('data-page-index'));
+      if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= viewer.pages.length) continue;
+      const pageRect = pageElement.getBoundingClientRect();
+      const intersection = intersectViewerRects(viewportRect, pageRect);
+      const visibleArea = intersection === null
+        ? 0
+        : (intersection.right - intersection.left) * (intersection.bottom - intersection.top);
+      if (visibleArea > bestVisibleArea) {
+        bestVisibleArea = visibleArea;
+        best = { pageIndex, pageRect };
+      }
+    }
+    if (best === null) return null;
+    return { ...best, viewportRect };
   };
 
   const captureLocation = (): PdfViewerLocation | null => {
@@ -419,7 +507,9 @@ export function createViewerNavigation(
     } catch {
       return null;
     }
-    const geometry = pageGeometry(viewer, pageIndex);
+    const visiblePage = mostVisibleMountedPageIndex(viewer);
+    if (visiblePage !== null) pageIndex = visiblePage.pageIndex;
+    const geometry = pageGeometry(viewer, pageIndex, visiblePage ?? undefined);
     if (!geometry) return null;
     const { viewportRect, pageRect, page, rotation, scale } = geometry;
     const left = Math.max(viewportRect.left, pageRect.left);
@@ -480,12 +570,13 @@ export function createViewerNavigation(
         }
       }
       if (!viewerStillOwnsDocument(viewer) || Date.now() >= deadline) return;
+      const alignment = scrollAlignment(origin);
       viewer.scroll.scrollToPage({
         pageNumber: origin.pageIndex + 1,
         pageCoordinates: origin.anchor,
         behavior: 'instant',
-        alignX: origin.alignment.xPercent,
-        alignY: origin.alignment.yPercent,
+        alignX: alignment.xPercent,
+        alignY: alignment.yPercent,
       });
       await nextFrame();
       await nextFrame();
@@ -494,7 +585,11 @@ export function createViewerNavigation(
     }
   }
 
-  const locationMatchesView = (viewer: ActiveViewer, location: PdfViewerLocation): boolean => {
+  const locationMatchesView = (
+    viewer: ActiveViewer,
+    location: PdfViewerLocation,
+    acceptScrollBoundary = false,
+  ): boolean => {
     const geometry = pageGeometry(viewer, location.pageIndex);
     if (!geometry) return false;
     const { viewportRect, pageRect, page, rotation, scale } = geometry;
@@ -508,18 +603,58 @@ export function createViewerNavigation(
       x: pageRect.left + transformed.x,
       y: pageRect.top + transformed.y,
     };
-    const metrics = viewer.viewport.getMetrics();
     const expected = {
-      x: viewportRect.left + metrics.clientWidth * location.alignment.xPercent / 100,
-      y: viewportRect.top + metrics.clientHeight * location.alignment.yPercent / 100,
+      x: viewportRect.left + viewportRect.width * location.alignment.xPercent / 100,
+      y: viewportRect.top + viewportRect.height * location.alignment.yPercent / 100,
     };
+    const metrics = viewer.viewport.getMetrics();
     // A fitted page can be narrower than its viewport, leaving no horizontal
     // range in which to honor an XYZ x-coordinate. In that case the centered
     // page position is the only valid settled postcondition.
-    const horizontalMatches = metrics.scrollWidth <= metrics.clientWidth + coordinateTolerance
-      || Math.abs(actual.x - expected.x) <= coordinateTolerance;
-    return horizontalMatches
-      && Math.abs(actual.y - expected.y) <= coordinateTolerance;
+    const axisMatchesOrIsConstrained = (
+      actualCoordinate: number,
+      expectedCoordinate: number,
+      scrollOffset: number,
+      scrollExtent: number,
+      clientExtent: number,
+      atStartBoundary: boolean,
+      atEndBoundary: boolean,
+      acceptNoRange: boolean,
+    ) => {
+      if (Math.abs(actualCoordinate - expectedCoordinate) <= coordinateTolerance) return true;
+      const maximumScroll = Math.max(0, scrollExtent - clientExtent);
+      if (acceptNoRange && maximumScroll <= coordinateTolerance) return true;
+      if (!acceptScrollBoundary) return false;
+      if (
+        atStartBoundary
+        && scrollOffset <= coordinateTolerance
+        && actualCoordinate < expectedCoordinate
+      ) return true;
+      return atEndBoundary
+        && scrollOffset >= maximumScroll - coordinateTolerance
+        && actualCoordinate > expectedCoordinate;
+    };
+    return axisMatchesOrIsConstrained(
+      actual.x,
+      expected.x,
+      metrics.scrollLeft,
+      metrics.scrollWidth,
+      metrics.clientWidth,
+      pageRect.left >= viewportRect.left - coordinateTolerance,
+      pageRect.right <= viewportRect.right + coordinateTolerance,
+      true,
+    ) && axisMatchesOrIsConstrained(
+      actual.y,
+      expected.y,
+      metrics.scrollTop,
+      metrics.scrollHeight,
+      metrics.clientHeight,
+      location.pageIndex === 0
+        && pageRect.top >= viewportRect.top - coordinateTolerance,
+      location.pageIndex === viewer.pages.length - 1
+        && pageRect.bottom <= viewportRect.bottom + coordinateTolerance,
+      false,
+    );
   };
 
   const waitForFrames = async (operation: NavigationOperation, count: number, deadline: number) => {
@@ -572,13 +707,16 @@ export function createViewerNavigation(
         }
         if (pageGeometry(viewer, location.pageIndex) === null) return false;
       }
-      const scrollToLocation = () => viewer.scroll.scrollToPage({
-        pageNumber: location.pageIndex + 1,
-        pageCoordinates: location.anchor,
-        behavior: 'instant',
-        alignX: location.alignment.xPercent,
-        alignY: location.alignment.yPercent,
-      });
+      const scrollToLocation = () => {
+        const alignment = scrollAlignment(location);
+        viewer.scroll.scrollToPage({
+          pageNumber: location.pageIndex + 1,
+          pageCoordinates: location.anchor,
+          behavior: 'instant',
+          alignX: alignment.xPercent,
+          alignY: alignment.yPercent,
+        });
+      };
       const targetWasMounted = pageGeometry(viewer, location.pageIndex) !== null;
       operation.mutated = true;
       scrollToLocation();
@@ -600,7 +738,7 @@ export function createViewerNavigation(
       // An instant scroll can have reached its semantic postcondition while
       // the viewer still reports transient scroll activity. Do not turn that
       // already-settled destination into a bounded-timeout failure.
-      if (locationMatchesView(viewer, location)) return true;
+      if (locationMatchesView(viewer, location, true)) return true;
       if (!viewer.viewport.isScrolling() && !viewer.viewport.isSmoothScrolling()) {
         resolveIdle(true);
       }
@@ -655,7 +793,7 @@ export function createViewerNavigation(
     if (!await scrollAndWait(viewer, location, operation, deadline)) return false;
     if (!operationIsCurrent(operation)) return false;
     try {
-      return locationMatchesView(viewer, location);
+      return locationMatchesView(viewer, location, true);
     } catch {
       return false;
     }

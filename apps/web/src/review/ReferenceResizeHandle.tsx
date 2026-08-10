@@ -146,9 +146,7 @@ export function ReferenceResizeHandle({
       onPointerMove={handlePointerMove}
       onPointerUp={(event) => releaseGesture(event.currentTarget, event.pointerId)}
       onPointerCancel={(event) => releaseGesture(event.currentTarget, event.pointerId)}
-      onLostPointerCapture={(event) => {
-        if (gestureRef.current?.pointerId === event.pointerId) gestureRef.current = null;
-      }}
+      onLostPointerCapture={(event) => releaseGesture(event.currentTarget, event.pointerId)}
     />
   );
 }

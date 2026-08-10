@@ -10,7 +10,7 @@ import {
   referenceTabSuccessorIdentity,
   type WorkspaceMode,
 } from './reference-navigation-state.js';
-import { horizontalTabFocusIndex } from './LinkActionPopover.js';
+import { compositeFocusIndex, horizontalTabFocusIndex } from './LinkActionPopover.js';
 import { ReviewIcon } from './ReviewIcon.js';
 
 const WORKSPACE_MODES: readonly WorkspaceMode[] = ['outline', 'annotations', 'references'];
@@ -19,6 +19,7 @@ const MODE_LABELS: Readonly<Record<WorkspaceMode, string>> = {
   references: 'References',
   annotations: 'Annotations',
 };
+type ReferenceTabOrientation = 'horizontal' | 'vertical';
 
 export interface ReferenceWorkspaceTab {
   readonly identity: string;
@@ -62,6 +63,17 @@ export interface ReferenceWorkspaceProps {
 
 function focusWithoutScroll(element: HTMLElement | null | undefined): void {
   element?.focus({ preventScroll: true });
+}
+
+export function referenceTabFocusIndex(
+  currentIndex: number,
+  count: number,
+  key: string,
+  orientation: ReferenceTabOrientation,
+): number | null {
+  return orientation === 'horizontal'
+    ? horizontalTabFocusIndex(currentIndex, count, key)
+    : compositeFocusIndex(currentIndex, count, key);
 }
 
 export function chooseWorkspaceModeFocusTarget(input: {
@@ -119,6 +131,11 @@ export function ReferenceWorkspace({
     pendingStatus: PendingReferencePanel['status'] | null;
   }>({ open: false, mode, pendingStatus: null });
   const previousActiveReference = useRef<string | null>(null);
+  const referenceTabOrientation: ReferenceTabOrientation = presentation === 'bottom'
+    && headerVariant === 'references'
+    ? 'vertical'
+    : 'horizontal';
+  const showReferenceTabs = tabs.length > 0;
 
   const modeFallback = (targetMode: WorkspaceMode): HTMLElement | null => (
     chooseWorkspaceModeFocusTarget({
@@ -187,7 +204,12 @@ export function ReferenceWorkspace({
       }
       return;
     }
-    const nextIndex = horizontalTabFocusIndex(currentIndex, tabs.length, event.key);
+    const nextIndex = referenceTabFocusIndex(
+      currentIndex,
+      tabs.length,
+      event.key,
+      referenceTabOrientation,
+    );
     if (nextIndex !== null) {
       event.preventDefault();
       focusWithoutScroll(referenceTabRefs.current.get(tabs[nextIndex]!.identity));
@@ -234,7 +256,13 @@ export function ReferenceWorkspace({
           {modes.map((workspaceMode) => {
             const selected = workspaceMode === mode;
             return (
-              <span key={workspaceMode} className="review-workspace__tab-segment" data-workspace-tab-segment={workspaceMode}>
+              <span
+                key={workspaceMode}
+                className="review-workspace__tab-segment"
+                data-workspace-tab-segment={workspaceMode}
+                data-workspace-tab-selected={selected ? 'true' : 'false'}
+                role="presentation"
+              >
               <button
                 ref={(element) => {
                   if (element) modeTabRefs.current.set(workspaceMode, element);
@@ -253,7 +281,14 @@ export function ReferenceWorkspace({
                 {MODE_LABELS[workspaceMode]}
               </button>
               {workspaceMode === 'references' && onMoveReferencesBottom ? (
-                <button type="button" className="review-workspace__move" aria-label="Move References to bottom" onClick={onMoveReferencesBottom}>
+                <button
+                  type="button"
+                  className="review-workspace__move review-workspace__move--tab"
+                  data-reference-move="bottom"
+                  aria-label="Move References to bottom"
+                  title="Move References to bottom"
+                  onClick={onMoveReferencesBottom}
+                >
                   <ReviewIcon name="chevron-down" size={14} />
                 </button>
               ) : null}
@@ -263,7 +298,14 @@ export function ReferenceWorkspace({
         </div>
         ) : null}
         {headerVariant === 'references' && onMoveReferencesRight ? (
-          <button type="button" className="review-workspace__move" aria-label="Move References to right" onClick={onMoveReferencesRight}>
+          <button
+            type="button"
+            className="review-workspace__move review-workspace__move--header"
+            data-reference-move="right"
+            aria-label="Move References to right"
+            title="Move References to right"
+            onClick={onMoveReferencesRight}
+          >
             <ReviewIcon name="chevron-right" size={14} />
           </button>
         ) : null}
@@ -276,6 +318,8 @@ export function ReferenceWorkspace({
         }}
         id="workspace-panel-references"
         className="review-workspace__panel review-workspace__panel--references"
+        data-reference-tabs-orientation={referenceTabOrientation}
+        data-reference-panel-layout={showReferenceTabs ? 'split' : 'full'}
         role="tabpanel"
         aria-labelledby={headerVariant === 'references'
           ? 'references-workspace-title'
@@ -285,8 +329,14 @@ export function ReferenceWorkspace({
         inert={mode !== 'references' || !modes.includes('references')}
         onFocusCapture={(event) => rememberPanelFocus('references', event.target)}
       >
-        {tabs.length > 0 ? (
-          <div className="reference-tabs" role="tablist" aria-label="Open references">
+        {showReferenceTabs ? (
+          <div
+            className="reference-tabs"
+            role="tablist"
+            aria-label="Open references"
+            aria-orientation={referenceTabOrientation}
+            data-reference-tabs-orientation={referenceTabOrientation}
+          >
             {tabs.map((tab, index) => {
               const selected = tab.identity === activeTabIdentity;
               return (

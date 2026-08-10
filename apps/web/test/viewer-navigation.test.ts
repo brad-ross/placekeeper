@@ -15,6 +15,7 @@ import {
   createViewerNavigation,
   focusViewerDestination,
 } from '../src/pdf/viewer-navigation-adapter.js';
+import type { ViewerRunway } from '../src/pdf/viewer-framing.js';
 
 const page = { width: 600, height: 800 } as const;
 const viewport = { width: 620, height: 820, gap: 10 } as const;
@@ -138,12 +139,15 @@ function domRect(rect: RectState): DOMRect {
 function navigationHarness(options: {
   activeDocumentId?: string;
   constrainedHorizontal?: boolean;
+  constrainedVertical?: 'start' | 'end';
   initiallyUnreadyPage?: boolean;
   farTargetInitiallyUnmounted?: boolean;
   initiallyUnready?: boolean;
   manualZoom?: boolean;
   omitZoomLayoutEvent?: boolean;
   stickyScrollActivity?: boolean;
+  staleCurrentPageWithThirdVisible?: boolean;
+  runway?: ViewerRunway;
   updateGeometry?: boolean;
   timeoutMs?: number;
 } = {}) {
@@ -164,6 +168,17 @@ function navigationHarness(options: {
   let pageMounted = options.initiallyUnreadyPage !== true;
   let farPageMounted = options.farTargetInitiallyUnmounted !== true;
   const pageElement = { getBoundingClientRect: () => domRect(pageRect), focus } as unknown as HTMLElement;
+  const thirdPageRect: RectState = { left: 0, top: 0, width: 600, height: 800 };
+  const thirdPageElement = {
+    getBoundingClientRect: () => domRect(thirdPageRect),
+    getAttribute: (name: string) => name === 'data-page-index' ? '2' : null,
+    focus,
+  } as unknown as HTMLElement;
+  Object.assign(pageElement, {
+    getAttribute: (name: string) => name === 'data-page-index'
+      ? String(options.farTargetInitiallyUnmounted && currentPage === 3 ? 2 : 0)
+      : null,
+  });
   const viewportElement = {
     getBoundingClientRect: () => domRect(viewportRect),
   } as unknown as HTMLElement;
@@ -177,9 +192,16 @@ function navigationHarness(options: {
       }
       if (selector === '[data-page-index="0"]') return pageMounted ? pageElement : null;
       if (selector === '[data-page-index="2"]') {
+        if (options.staleCurrentPageWithThirdVisible) return thirdPageElement;
         return options.farTargetInitiallyUnmounted && farPageMounted ? pageElement : null;
       }
       return null;
+    },
+    querySelectorAll: (selector: string) => {
+      if (selector !== '[data-page-index]') return [];
+      return options.staleCurrentPageWithThirdVisible
+        ? [pageElement, thirdPageElement]
+        : [pageElement];
     },
   } as unknown as HTMLElement;
 
@@ -228,9 +250,13 @@ function navigationHarness(options: {
           : viewportRect.left
             + viewportRect.width * ((request.alignX ?? 0) / 100)
             - anchor.x * currentZoom;
-        pageRect.top = viewportRect.top
-          + viewportRect.height * ((request.alignY ?? 0) / 100)
-          - anchor.y * currentZoom;
+        pageRect.top = options.constrainedVertical === 'start'
+          ? viewportRect.top
+          : options.constrainedVertical === 'end'
+            ? viewportRect.top + viewportRect.height - pageRect.height
+            : viewportRect.top
+              + viewportRect.height * ((request.alignY ?? 0) / 100)
+              - anchor.y * currentZoom;
       }
       scrolling = options.stickyScrollActivity === true;
       for (const listener of activityListeners) {
@@ -248,7 +274,7 @@ function navigationHarness(options: {
       height: viewportRect.height,
       clientWidth: viewportRect.width,
       clientHeight: viewportRect.height,
-      scrollTop: 0,
+      scrollTop: options.constrainedVertical === 'end' ? 1_600 : 0,
       scrollLeft: 0,
       scrollWidth: options.constrainedHorizontal ? pageRect.width : 2_000,
       scrollHeight: 2_000,
@@ -264,7 +290,9 @@ function navigationHarness(options: {
     },
   };
   const document = {
-    pages: (options.farTargetInitiallyUnmounted ? [0, 1, 2] : [0]).map((index) => ({
+    pages: (options.farTargetInitiallyUnmounted || options.staleCurrentPageWithThirdVisible
+      ? [0, 1, 2]
+      : [0]).map((index) => ({
       index, size: page, rotation: Rotation.Degree0, objectNumber: index + 1,
     })),
   };
@@ -304,6 +332,7 @@ function navigationHarness(options: {
     root: () => root,
     documentId: 'doc',
     documentGeneration: 4,
+    runway: () => options.runway ?? { right: 0, bottom: 0 },
     timeoutMs: options.timeoutMs ?? 25,
     nextFrame: async () => {
       if (options.initiallyUnready && viewportRect.width === 0) {
@@ -318,6 +347,7 @@ function navigationHarness(options: {
     navigation,
     log,
     pageRect,
+    thirdPageRect,
     focus,
     completeZoom: emitZoom,
     setCurrentZoom(zoom: number) {
@@ -331,6 +361,58 @@ function navigationHarness(options: {
 }
 
 describe('viewer navigation adapter', () => {
+  it('captures the most-visible mounted page when the scroll plugin current-page state is stale', () => {
+    const harness = navigationHarness({ staleCurrentPageWithThirdVisible: true });
+    harness.pageRect.top = -900;
+
+    expect(harness.navigation.captureLocation()?.pageIndex).toBe(2);
+  });
+
+  it('does not rank a larger page hidden behind the bottom runway as visible', () => {
+    const harness = navigationHarness({
+      staleCurrentPageWithThirdVisible: true,
+      runway: { right: 0, bottom: 180 },
+    });
+    Object.assign(harness.pageRect, { left: 0, top: 220, width: 600, height: 180 });
+    Object.assign(harness.thirdPageRect, { left: 0, top: 0, width: 600, height: 100 });
+
+    expect(harness.navigation.captureLocation()?.pageIndex).toBe(2);
+  });
+
+  it('does not rank a larger page hidden behind the right runway as visible', () => {
+    const harness = navigationHarness({
+      staleCurrentPageWithThirdVisible: true,
+      runway: { right: 250, bottom: 0 },
+    });
+    Object.assign(harness.pageRect, { left: 350, top: 0, width: 250, height: 400 });
+    Object.assign(harness.thirdPageRect, { left: 0, top: 0, width: 200, height: 400 });
+
+    expect(harness.navigation.captureLocation()?.pageIndex).toBe(2);
+  });
+
+  it('captures and reapplies anchors and alignment against the runway-clipped viewport', async () => {
+    const harness = navigationHarness({ runway: { right: 200, bottom: 100 } });
+    const captured = harness.navigation.captureLocation();
+
+    expect(captured).toEqual({
+      pageIndex: 0,
+      anchor: { x: 300, y: 350 },
+      alignment: { xPercent: 50, yPercent: 50 },
+      zoom: 1,
+    });
+    harness.pageRect.left = -320;
+    harness.pageRect.top = -500;
+
+    expect(await harness.navigation.applyLocation(captured!)).toBe(true);
+    expect(samePdfViewerLocation(harness.navigation.captureLocation(), captured)).toBe(true);
+  });
+
+  it('keeps target zoom resolution based on the viewer metrics when a runway is active', () => {
+    const harness = navigationHarness({ runway: { right: 200, bottom: 100 } });
+
+    expect(harness.navigation.resolveTarget(target(PdfZoomMode.FitPage))?.zoom).toBe(0.5);
+  });
+
   it('captures and reapplies a semantic location, zooming before final page-coordinate alignment', async () => {
     const harness = navigationHarness();
     const captured = harness.navigation.captureLocation();
@@ -407,6 +489,24 @@ describe('viewer navigation adapter', () => {
     });
 
     expect(await harness.navigation.applyTarget(target(PdfZoomMode.XYZ, [72, 640, 0]))).toBe(true);
+    expect(harness.log).toEqual(['scroll']);
+  });
+
+  it.each([
+    ['start', 0],
+    ['end', 800],
+  ] as const)('accepts a semantic alignment constrained at the vertical %s boundary', async (
+    constrainedVertical,
+    anchorY,
+  ) => {
+    const harness = navigationHarness({ constrainedVertical, stickyScrollActivity: true, timeoutMs: 5 });
+
+    expect(await harness.navigation.applyLocation({
+      pageIndex: 0,
+      anchor: { x: 300, y: anchorY },
+      alignment: { xPercent: 50, yPercent: 50 },
+      zoom: 1,
+    })).toBe(true);
     expect(harness.log).toEqual(['scroll']);
   });
 

@@ -243,10 +243,12 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
-  await detailLink.evaluate((element) => (element as HTMLButtonElement).click());
+  await detailLink.focus();
+  await expect(detailLink).toBeFocused();
+  await detailLink.press('Enter');
   const openDetailReference = page.getByRole("menuitem", { name: /Open in References/u });
   await expect(openDetailReference).toBeFocused();
-  await openDetailReference.evaluate((element) => (element as HTMLButtonElement).click());
+  await openDetailReference.click();
   const detailTab = page.getByRole("tab", { name: /Target-to-target detail link/u });
   await expect(detailTab).toHaveAttribute("aria-selected", "true");
   await expect(detailTab).toBeFocused();
@@ -261,6 +263,15 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(primaryTab).toHaveAttribute("aria-selected", "true");
   await expect(primaryTab).toBeFocused();
   await expect(page.getByRole("tablist", { name: "Open references" }).getByRole("tab")).toHaveCount(2);
+  const referenceTabsList = page.getByRole("tablist", { name: "Open references" });
+  await expect(referenceTabsList).toHaveAttribute("aria-orientation", "vertical");
+  const [bottomPrimaryTabBox, bottomDetailTabBox] = await Promise.all([
+    primaryTab.boundingBox(),
+    detailTab.boundingBox(),
+  ]);
+  if (!bottomPrimaryTabBox || !bottomDetailTabBox) throw new Error("Bottom reference tabs have no bounds.");
+  expect(bottomDetailTabBox.y).toBeGreaterThan(bottomPrimaryTabBox.y + bottomPrimaryTabBox.height - 1);
+  expect(bottomDetailTabBox.x).toBeCloseTo(bottomPrimaryTabBox.x, 0);
   await expect.poll(() => documentRequests.length).toBe(2);
   expect(new Set(documentRequests.map(({ url }) => url)).size).toBe(1);
   expect(documentRequests.every(({ authorization, cookie }) => (
@@ -280,9 +291,25 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   const zoomBeforeDocking = await page.getByLabel("Zoom level").textContent();
   const bottomSplitter = page.getByRole("separator", { name: "Resize References" });
   await expect(bottomSplitter).toHaveAttribute("aria-orientation", "horizontal");
+  await expect(bottomSplitter).toBeVisible();
+  await expect(workspace).toBeVisible();
   const initialBottomValue = Number(await bottomSplitter.getAttribute("aria-valuenow"));
-  const bottomSplitterBox = await bottomSplitter.boundingBox();
-  if (!bottomSplitterBox) throw new Error("Bottom References splitter has no bounds.");
+  const openBottomRail = page.locator(
+    '[data-workspace-edge-rail="bottom"][data-edge-rail-open="true"]',
+  );
+  await expect(openBottomRail).toHaveAttribute("aria-label", "Close References tray");
+  await expect(openBottomRail).toBeVisible();
+  const [bottomSplitterBox, initialBottomBounds, openBottomRailBox] = await Promise.all([
+    bottomSplitter.boundingBox(),
+    workspace.boundingBox(),
+    openBottomRail.boundingBox(),
+  ]);
+  if (!bottomSplitterBox || !initialBottomBounds || !openBottomRailBox) {
+    throw new Error("Bottom References edge controls have no bounds.");
+  }
+  expect(bottomSplitterBox.y + bottomSplitterBox.height / 2).toBeCloseTo(initialBottomBounds.y, 0);
+  expect(await bottomSplitter.evaluate((element) => getComputedStyle(element).cursor)).toBe("ns-resize");
+  expect(openBottomRailBox.y + openBottomRailBox.height).toBeCloseTo(initialBottomBounds.y, 0);
   await page.mouse.move(
     bottomSplitterBox.x + bottomSplitterBox.width / 2,
     bottomSplitterBox.y + bottomSplitterBox.height / 2,
@@ -298,6 +325,8 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await rightRail.click();
   const toolsWorkspace = page.locator("#review-tools-workspace");
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
+  await expect.poll(() => toolsWorkspace.evaluate((element) => getComputedStyle(element).transform))
+    .toBe("none");
   await expect(page.locator("[data-review-stage]")).toHaveAttribute("data-reference-layout", "wide-split");
   const [toolsBounds, bottomBounds] = await Promise.all([
     toolsWorkspace.boundingBox(),
@@ -305,15 +334,18 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   ]);
   if (!toolsBounds || !bottomBounds) throw new Error("Coordinated tray geometry is unavailable.");
   expect(toolsBounds.y + toolsBounds.height).toBeCloseTo(bottomBounds.y, 0);
+  const openRightRailBox = await page.getByRole("button", { name: "Close right workspace" }).boundingBox();
+  if (!openRightRailBox) throw new Error("Right workspace rail has no bounds.");
+  expect(openRightRailBox.x + openRightRailBox.width).toBeCloseTo(toolsBounds.x, 0);
   await mainPageOne.click({ position: { x: 24, y: 24 } });
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
   await expect(workspace).toHaveAttribute("data-workspace-open", "true");
 
   await page.getByRole("button", { name: "Move References to right" }).click();
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "right");
-  await expect(page.getByRole("button", { name: "Open References tray" })).toHaveAttribute(
-    "aria-expanded",
-    "false",
+  await expect(page.getByRole("button", { name: "Open References tray" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Close right workspace" })).toHaveAttribute(
+    "aria-expanded", "true",
   );
   const workspaceModes = page.getByRole("tablist", { name: "Workspace modes" });
   await expect(workspaceModes.getByRole("tab")).toHaveText(["Outline", "Annotations", "References"]);
@@ -321,12 +353,40 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     "aria-selected",
     "true",
   );
+  await expect(referenceTabsList).toHaveAttribute("aria-orientation", "horizontal");
+  const [rightPrimaryTabBox, rightDetailTabBox] = await Promise.all([
+    primaryTab.boundingBox(),
+    detailTab.boundingBox(),
+  ]);
+  if (!rightPrimaryTabBox || !rightDetailTabBox) throw new Error("Right reference tabs have no bounds.");
+  expect(rightDetailTabBox.x).toBeGreaterThan(rightPrimaryTabBox.x + rightPrimaryTabBox.width - 1);
+  expect(rightDetailTabBox.y).toBeCloseTo(rightPrimaryTabBox.y, 0);
   await expect(page.getByRole("button", { name: "Move References to bottom" })).toBeVisible();
   await expect(mainWorkspace).toHaveAttribute("data-reference-main-mount", "stable");
   await expect(referenceWorkspace).toHaveAttribute("data-reference-mount", "stable");
 
   const rightSplitter = page.getByRole("separator", { name: "Resize References" });
   await expect(rightSplitter).toHaveAttribute("aria-orientation", "vertical");
+  const [rightSplitterBox, initialRightBounds] = await Promise.all([
+    rightSplitter.boundingBox(),
+    workspace.boundingBox(),
+  ]);
+  if (!rightSplitterBox || !initialRightBounds) throw new Error("Right References edge has no bounds.");
+  expect(rightSplitterBox.x + rightSplitterBox.width / 2).toBeCloseTo(initialRightBounds.x, 0);
+  expect(await rightSplitter.evaluate((element) => getComputedStyle(element).cursor)).toBe("ew-resize");
+  const initialRightValue = Number(await rightSplitter.getAttribute("aria-valuenow"));
+  await page.mouse.move(
+    rightSplitterBox.x + rightSplitterBox.width / 2,
+    rightSplitterBox.y + rightSplitterBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    rightSplitterBox.x + rightSplitterBox.width / 2 - 32,
+    rightSplitterBox.y + rightSplitterBox.height / 2,
+  );
+  await page.mouse.up();
+  await expect.poll(async () => Number(await rightSplitter.getAttribute("aria-valuenow")))
+    .toBeGreaterThan(initialRightValue);
   await rightSplitter.press("Home");
   const minimumRightValue = Number(await rightSplitter.getAttribute("aria-valuenow"));
   await rightSplitter.press("ArrowLeft");
@@ -419,7 +479,6 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
       - (pageBounds.y + pageBounds.height / 2),
     );
   }).toBeLessThan(2);
-
   await page.getByRole("button", { name: "Send to main" }).click();
   await expect(workspace).toHaveAttribute("data-workspace-open", "false");
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");

@@ -883,8 +883,7 @@ export function ReviewShell(props: ReviewShellProps) {
           '--workspace-side-width': `${workspaceFraming.sideWidth}px`,
           '--reference-right-width': `${effectiveReferenceLayout.kind === 'narrow-unified'
             ? referenceLayout.rightReferenceWidth : effectiveReferenceLayout.rightWidth}px`,
-          '--reference-bottom-height': `${effectiveReferenceLayout.kind === 'narrow-unified'
-            ? effectiveReferenceLayout.bottomHeight : referenceLayout.bottomReferenceHeight}px`,
+          '--reference-bottom-height': `${effectiveReferenceLayout.bottomHeight}px`,
           '--tools-right-width': `${effectiveReferenceLayout.kind === 'narrow-unified'
             ? referenceLayout.rightReferenceWidth : effectiveReferenceLayout.rightWidth}px`,
           '--tools-bottom-offset': `${effectiveReferenceLayout.kind === 'wide-split'
@@ -967,7 +966,9 @@ export function ReviewShell(props: ReviewShellProps) {
                 buttonRef={rightWorkspaceRailRef}
                 surface="right"
                 open={rightSurfaceOpen}
-                controls="review-tools-workspace"
+                controls={effectiveReferenceLayout.referenceDock === 'right'
+                  ? 'review-workspace review-tools-workspace'
+                  : 'review-tools-workspace'}
                 onToggle={() => {
                   dismissPageNoteAuthority();
                   const opening = !rightSurfaceOpen;
@@ -975,7 +976,7 @@ export function ReviewShell(props: ReviewShellProps) {
                   if (opening) focusWorkspaceModeAfterLayout(effectiveWorkspaceMode);
                 }}
               />
-              <WorkspaceEdgeRail
+              {effectiveReferenceLayout.referenceDock === 'bottom' ? <WorkspaceEdgeRail
                 buttonRef={bottomWorkspaceRailRef}
                 surface="bottom"
                 open={effectiveReferenceLayout.bottomReferencesOpen}
@@ -986,7 +987,7 @@ export function ReviewShell(props: ReviewShellProps) {
                   dispatchReferenceLayout({ type: 'toggle-references' });
                   if (opening) focusWorkspaceModeAfterLayout('references');
                 }}
-              />
+              /> : null}
             </>
           )}
           <ReferenceWorkspace
