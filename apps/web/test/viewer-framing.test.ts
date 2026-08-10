@@ -8,6 +8,7 @@ import {
   FramingSessionAuthority,
   LatestFrameRequest,
   chooseAnnotationPresentation,
+  frameUserOwnedPosition,
   occupiedRunway,
   intersectViewerRects,
   revealDelta,
@@ -131,6 +132,27 @@ describe('viewer framing', () => {
     })).toEqual({ left: 40, top: 240 });
   });
 
+  it('keeps the pre-open user position through responsive presentation clamps', () => {
+    expect(frameUserOwnedPosition({
+      baseline: { left: 239, top: 80 },
+      restored: { left: 0, top: 20 },
+      maximum: { left: 0, top: 400 },
+      userAxes: { left: true, top: false },
+    })).toEqual({
+      position: { left: 0, top: 20 },
+      baseline: { left: 239, top: 20 },
+    });
+    expect(frameUserOwnedPosition({
+      baseline: { left: 239, top: 20 },
+      restored: { left: 0, top: 20 },
+      maximum: { left: 613, top: 400 },
+      userAxes: { left: true, top: false },
+    })).toEqual({
+      position: { left: 239, top: 20 },
+      baseline: { left: 239, top: 20 },
+    });
+  });
+
   it('invalidates stale automatic operations and document generations', () => {
     const authority = new FramingSessionAuthority();
     const first = authority.open('doc-a', 'right');
@@ -165,9 +187,15 @@ describe('viewer framing', () => {
 
   it('falls back to the native viewport when instant plugin framing is a no-op', () => {
     const pluginScroll = vi.fn();
+    const setScrollLeft = vi.fn();
+    const setScrollTop = vi.fn();
+    let scrollLeft = 0;
+    let scrollTop = 0;
     const viewportElement = {
-      scrollLeft: 0,
-      scrollTop: 0,
+      get scrollLeft() { return scrollLeft; },
+      set scrollLeft(value: number) { scrollLeft = value; setScrollLeft(value); },
+      get scrollTop() { return scrollTop; },
+      set scrollTop(value: number) { scrollTop = value; setScrollTop(value); },
       scrollWidth: 800,
       scrollHeight: 900,
       clientWidth: 500,
@@ -213,5 +241,12 @@ describe('viewer framing', () => {
     expect(pluginScroll).toHaveBeenCalledWith({ x: 233, y: 18, behavior: 'auto' });
     expect({ left: viewportElement.scrollLeft, top: viewportElement.scrollTop })
       .toEqual({ left: 233, top: 18 });
+
+    setScrollLeft.mockClear();
+    setScrollTop.mockClear();
+    controls.scrollTo({ left: 233, top: 18 }, 'auto');
+
+    expect(setScrollLeft).toHaveBeenCalledWith(233);
+    expect(setScrollTop).toHaveBeenCalledWith(18);
   });
 });

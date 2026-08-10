@@ -11,6 +11,7 @@ import {
   FramingSessionAuthority,
   LatestFrameRequest,
   chooseAnnotationPresentation,
+  frameUserOwnedPosition,
   intersectViewerRects,
   occupiedRunway,
   restoreViewportPosition,
@@ -206,15 +207,25 @@ export function useWorkspaceFraming(input: {
   ) => {
     const session = sessionRef.current;
     if (!session) return;
-    const addsLeft = axes.left === true && !session.userAxes.left;
-    const addsTop = axes.top === true && !session.userAxes.top;
-    if (!addsLeft && !addsTop) return;
-    if (addsLeft) session.userAxes.left = true;
-    if (addsTop) session.userAxes.top = true;
+    const ownsLeft = axes.left === true;
+    const ownsTop = axes.top === true;
+    if (!ownsLeft && !ownsTop) return;
+    const current = input.controls?.snapshot();
+    if (current?.ready) {
+      session.baseline = {
+        left: ownsLeft ? current.scroll.left : session.baseline.left,
+        top: ownsTop ? current.scroll.top : session.baseline.top,
+      };
+    }
+    if (ownsLeft) {
+      session.userAxes.left = true;
+    }
+    if (ownsTop) {
+      session.userAxes.top = true;
+    }
     authorityRef.current.markUserNavigation();
 
     // Taking ownership must also stop an in-flight native smooth scroll.
-    const current = input.controls?.snapshot();
     if (current?.ready) input.controls?.scrollTo(current.scroll, 'auto');
   }, [input.controls]);
 
@@ -307,8 +318,14 @@ export function useWorkspaceFraming(input: {
           userAxes: session.userAxes,
           maximum: first.maximum,
         });
-        controls.scrollTo(restored, 'auto');
-        session.baseline = restored;
+        const framed = frameUserOwnedPosition({
+          baseline: session.baseline,
+          restored,
+          maximum: first.maximum,
+          userAxes: session.userAxes,
+        });
+        controls.scrollTo(framed.position, 'auto');
+        session.baseline = framed.baseline;
         session.automatic = { left: 0, top: 0 };
         session.presentation = presentation;
         session.requestToken = input.request.token;

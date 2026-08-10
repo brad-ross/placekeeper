@@ -132,17 +132,11 @@ export function createViewerFramingControls(
       if (behavior !== 'auto') return;
       const viewportElement = options.root()
         ?.querySelector<HTMLElement>('[data-viewer-framing-viewport]') ?? null;
-      if (
-        viewportElement
-        && (
-          Math.abs(viewportElement.scrollLeft - position.left) > 0.5
-          || Math.abs(viewportElement.scrollTop - position.top) > 0.5
-        )
-      ) {
+      if (viewportElement) {
         // The EmbedPDF viewport request can remain a no-op for an inactive
-        // WebKit layout turn even after the runway extent is measurable.
-        // Native instant scrolling is the same DOM authority observed by the
-        // plugin and guarantees the requested framing position is applied.
+        // WebKit layout turn, and a same-position native write is required to
+        // cancel an earlier smooth scroll before user-owned movement begins.
+        // The DOM viewport is the same authority observed by the plugin.
         viewportElement.scrollLeft = position.left;
         viewportElement.scrollTop = position.top;
       }

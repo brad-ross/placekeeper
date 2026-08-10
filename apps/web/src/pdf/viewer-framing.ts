@@ -209,6 +209,29 @@ export function restoreViewportPosition(input: {
   };
 }
 
+export function frameUserOwnedPosition(input: {
+  readonly baseline: ViewerPosition;
+  readonly restored: ViewerPosition;
+  readonly maximum: ViewerPosition;
+  readonly userAxes: { readonly left: boolean; readonly top: boolean };
+}): { readonly position: ViewerPosition; readonly baseline: ViewerPosition } {
+  const position = {
+    left: input.userAxes.left
+      ? clamp(input.baseline.left, 0, Math.max(0, input.maximum.left))
+      : input.restored.left,
+    top: input.userAxes.top
+      ? clamp(input.baseline.top, 0, Math.max(0, input.maximum.top))
+      : input.restored.top,
+  };
+  return {
+    position,
+    baseline: {
+      left: input.userAxes.left ? input.baseline.left : position.left,
+      top: input.userAxes.top ? input.baseline.top : position.top,
+    },
+  };
+}
+
 /**
  * Owns the identity of one asynchronous framing operation. DOM measurements
  * and animation frames must check their token before mutating the viewer.

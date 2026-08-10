@@ -940,6 +940,11 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
 
   await page.setViewportSize({ width: 760, height: 900 });
   await expect(stage).toHaveAttribute('data-annotation-presentation', 'bottom');
+  const narrowHorizontalMaximum = await viewport.evaluate((element) => (
+    Math.max(0, element.scrollWidth - element.clientWidth)
+  ));
+  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
+    .toBeCloseTo(Math.min(preservedManualLeft, narrowHorizontalMaximum), 0);
   const narrowScrollBefore = await viewport.evaluate((element) => ({
     left: element.scrollLeft,
     top: element.scrollTop,
