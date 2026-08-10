@@ -149,7 +149,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const [surface, dispatchSurface] = useReducer(
     reduceReviewSurface,
     props.listOpen === true
-      ? { baseSurface: 'annotations', nestedLayer: 'none', transientSurface: 'none' }
+      ? { ...INITIAL_REVIEW_SURFACE_STATE, baseSurface: 'annotations' }
       : INITIAL_REVIEW_SURFACE_STATE,
   );
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
