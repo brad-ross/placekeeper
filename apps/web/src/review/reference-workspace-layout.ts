@@ -1,0 +1,263 @@
+import { chooseAnnotationPresentation } from '../pdf/viewer-framing.js';
+import type { WorkspaceMode } from './reference-navigation-state.js';
+
+export type ReferenceDock = 'right' | 'bottom';
+export type WorkspaceLayoutRegime = 'wide' | 'narrow';
+export type WorkspaceSurface = 'right' | 'references';
+export type RightWorkspaceMode = Exclude<WorkspaceMode, 'references'>;
+
+export const DEFAULT_RIGHT_WORKSPACE_WIDTH = 24 * 16;
+export const DEFAULT_BOTTOM_REFERENCE_HEIGHT_RATIO = 0.43;
+export const MIN_RIGHT_REFERENCE_WIDTH = 18 * 16;
+export const MIN_BOTTOM_REFERENCE_HEIGHT = 12 * 16;
+export const MIN_MAIN_READING_WIDTH = 30 * 16;
+export const MIN_MAIN_READING_HEIGHT = 12 * 16;
+
+export interface ReferenceWorkspaceLayoutState {
+  readonly regime: WorkspaceLayoutRegime;
+  readonly stageWidth: number;
+  readonly stageHeight: number;
+  readonly referenceDock: ReferenceDock;
+  readonly rightWorkspaceOpen: boolean;
+  readonly bottomReferencesOpen: boolean;
+  readonly narrowOpen: boolean;
+  readonly narrowSurface: WorkspaceSurface;
+  readonly lastFocusedSurface: WorkspaceSurface | null;
+  readonly rightReferenceWidth: number;
+  readonly bottomReferenceHeight: number;
+}
+
+export type ReferenceWorkspaceLayoutAction =
+  | { readonly type: 'set-stage-size'; readonly width: number; readonly height: number }
+  | { readonly type: 'set-regime'; readonly regime: WorkspaceLayoutRegime }
+  | { readonly type: 'show-right-workspace' }
+  | { readonly type: 'hide-right-workspace' }
+  | { readonly type: 'toggle-right-workspace' }
+  | { readonly type: 'show-references' }
+  | { readonly type: 'hide-references' }
+  | { readonly type: 'toggle-references' }
+  | { readonly type: 'toggle-narrow-workspace' }
+  | { readonly type: 'move-references-right' }
+  | { readonly type: 'move-references-bottom' }
+  | { readonly type: 'focus-surface'; readonly surface: WorkspaceSurface }
+  | { readonly type: 'resize-right-references'; readonly size: number }
+  | { readonly type: 'resize-bottom-references'; readonly size: number }
+  | { readonly type: 'replace-document' };
+
+export type EffectiveReferenceWorkspaceLayout =
+  | {
+    readonly kind: 'narrow-unified';
+    readonly open: boolean;
+    readonly activeMode: WorkspaceMode;
+    readonly bottomHeight: number;
+    readonly referenceResizable: boolean;
+  }
+  | {
+    readonly kind: 'wide-closed' | 'wide-right' | 'wide-bottom' | 'wide-split';
+    readonly referenceDock: ReferenceDock;
+    readonly rightWorkspaceOpen: boolean;
+    readonly bottomReferencesOpen: boolean;
+    readonly rightWidth: number;
+    readonly bottomHeight: number;
+    readonly referenceResizable: boolean;
+  };
+
+function finiteNonNegative(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+export function clampRightReferenceWidth(size: number, stageWidth: number): number {
+  const maximum = Math.max(0, finiteNonNegative(stageWidth) - MIN_MAIN_READING_WIDTH);
+  return Math.min(Math.max(finiteNonNegative(size), MIN_RIGHT_REFERENCE_WIDTH), maximum);
+}
+
+export function clampBottomReferenceHeight(size: number, stageHeight: number): number {
+  const maximum = Math.max(0, finiteNonNegative(stageHeight) - MIN_MAIN_READING_HEIGHT);
+  return Math.min(Math.max(finiteNonNegative(size), MIN_BOTTOM_REFERENCE_HEIGHT), maximum);
+}
+
+function regimeForWidth(width: number): WorkspaceLayoutRegime {
+  return chooseAnnotationPresentation({
+    stageWidth: finiteNonNegative(width),
+    sideWidth: DEFAULT_RIGHT_WORKSPACE_WIDTH,
+    previous: 'right',
+  }) === 'right' ? 'wide' : 'narrow';
+}
+
+export function createReferenceWorkspaceLayout(stage: {
+  readonly width: number;
+  readonly height: number;
+}): ReferenceWorkspaceLayoutState {
+  const width = finiteNonNegative(stage.width);
+  const height = finiteNonNegative(stage.height);
+  const regime = regimeForWidth(width);
+  return {
+    regime,
+    stageWidth: width,
+    stageHeight: height,
+    referenceDock: 'bottom',
+    rightWorkspaceOpen: false,
+    bottomReferencesOpen: false,
+    narrowOpen: false,
+    narrowSurface: 'right',
+    lastFocusedSurface: null,
+    rightReferenceWidth: clampRightReferenceWidth(DEFAULT_RIGHT_WORKSPACE_WIDTH, width),
+    bottomReferenceHeight: clampBottomReferenceHeight(
+      height * DEFAULT_BOTTOM_REFERENCE_HEIGHT_RATIO,
+      height,
+    ),
+  };
+}
+
+function narrowSurfaceForWideState(state: ReferenceWorkspaceLayoutState): WorkspaceSurface {
+  if (state.rightWorkspaceOpen && state.bottomReferencesOpen) {
+    return state.lastFocusedSurface ?? 'right';
+  }
+  if (state.bottomReferencesOpen) return 'references';
+  return 'right';
+}
+
+export function reduceReferenceWorkspaceLayout(
+  state: ReferenceWorkspaceLayoutState,
+  action: ReferenceWorkspaceLayoutAction,
+): ReferenceWorkspaceLayoutState {
+  switch (action.type) {
+    case 'set-stage-size': {
+      const stageWidth = finiteNonNegative(action.width);
+      const stageHeight = finiteNonNegative(action.height);
+      return {
+        ...state,
+        stageWidth,
+        stageHeight,
+        rightReferenceWidth: clampRightReferenceWidth(state.rightReferenceWidth, stageWidth),
+        bottomReferenceHeight: clampBottomReferenceHeight(state.bottomReferenceHeight, stageHeight),
+      };
+    }
+    case 'set-regime':
+      if (action.regime === state.regime) return state;
+      if (action.regime === 'narrow') {
+        return {
+          ...state,
+          regime: 'narrow',
+          narrowOpen: state.rightWorkspaceOpen || state.bottomReferencesOpen,
+          narrowSurface: narrowSurfaceForWideState(state),
+        };
+      }
+      return { ...state, regime: 'wide' };
+    case 'show-right-workspace':
+      return { ...state, rightWorkspaceOpen: true };
+    case 'hide-right-workspace':
+      return { ...state, rightWorkspaceOpen: false };
+    case 'toggle-right-workspace':
+      return { ...state, rightWorkspaceOpen: !state.rightWorkspaceOpen };
+    case 'show-references':
+      return state.referenceDock === 'right'
+        ? { ...state, rightWorkspaceOpen: true, lastFocusedSurface: 'references' }
+        : { ...state, bottomReferencesOpen: true, lastFocusedSurface: 'references' };
+    case 'hide-references':
+      return state.referenceDock === 'right'
+        ? { ...state, rightWorkspaceOpen: false }
+        : { ...state, bottomReferencesOpen: false };
+    case 'toggle-references':
+      return state.referenceDock === 'right'
+        ? { ...state, rightWorkspaceOpen: !state.rightWorkspaceOpen }
+        : { ...state, bottomReferencesOpen: !state.bottomReferencesOpen };
+    case 'toggle-narrow-workspace':
+      return {
+        ...state,
+        narrowOpen: !state.narrowOpen,
+        narrowSurface: state.narrowOpen
+          ? state.narrowSurface
+          : state.lastFocusedSurface ?? 'right',
+      };
+    case 'move-references-right':
+      return {
+        ...state,
+        referenceDock: 'right',
+        rightWorkspaceOpen: true,
+        bottomReferencesOpen: false,
+        narrowOpen: state.regime === 'narrow' ? true : state.narrowOpen,
+        narrowSurface: 'references',
+        lastFocusedSurface: 'references',
+      };
+    case 'move-references-bottom':
+      return {
+        ...state,
+        referenceDock: 'bottom',
+        rightWorkspaceOpen: false,
+        bottomReferencesOpen: true,
+        narrowOpen: state.regime === 'narrow' ? true : state.narrowOpen,
+        narrowSurface: 'references',
+        lastFocusedSurface: 'references',
+      };
+    case 'focus-surface':
+      return {
+        ...state,
+        lastFocusedSurface: action.surface,
+        narrowSurface: state.regime === 'narrow' ? action.surface : state.narrowSurface,
+      };
+    case 'resize-right-references':
+      return {
+        ...state,
+        rightReferenceWidth: clampRightReferenceWidth(action.size, state.stageWidth),
+      };
+    case 'resize-bottom-references':
+      return {
+        ...state,
+        bottomReferenceHeight: clampBottomReferenceHeight(action.size, state.stageHeight),
+      };
+    case 'replace-document':
+      return {
+        ...state,
+        rightWorkspaceOpen: false,
+        bottomReferencesOpen: false,
+        narrowOpen: false,
+      };
+  }
+}
+
+export function deriveReferenceWorkspaceLayout(
+  state: ReferenceWorkspaceLayoutState,
+  rightMode: RightWorkspaceMode,
+): EffectiveReferenceWorkspaceLayout {
+  if (state.regime === 'narrow') {
+    const activeMode: WorkspaceMode = state.narrowSurface === 'references'
+      ? 'references'
+      : state.lastFocusedSurface === null ? 'outline' : rightMode;
+    const referenceActive = activeMode === 'references';
+    return {
+      kind: 'narrow-unified',
+      open: state.narrowOpen,
+      activeMode,
+      bottomHeight: referenceActive
+        ? state.bottomReferenceHeight
+        : clampBottomReferenceHeight(
+          state.stageHeight * DEFAULT_BOTTOM_REFERENCE_HEIGHT_RATIO,
+          state.stageHeight,
+        ),
+      referenceResizable: referenceActive,
+    };
+  }
+
+  const bottomOpen = state.referenceDock === 'bottom' && state.bottomReferencesOpen;
+  const rightOpen = state.rightWorkspaceOpen;
+  const referenceRightActive = state.referenceDock === 'right' && rightOpen;
+  const kind = rightOpen && bottomOpen
+    ? 'wide-split'
+    : rightOpen
+      ? 'wide-right'
+      : bottomOpen
+        ? 'wide-bottom'
+        : 'wide-closed';
+  return {
+    kind,
+    referenceDock: state.referenceDock,
+    rightWorkspaceOpen: rightOpen,
+    bottomReferencesOpen: bottomOpen,
+    rightWidth: referenceRightActive
+      ? state.rightReferenceWidth
+      : Math.min(DEFAULT_RIGHT_WORKSPACE_WIDTH, state.stageWidth),
+    bottomHeight: bottomOpen ? state.bottomReferenceHeight : 0,
+    referenceResizable: referenceRightActive || bottomOpen,
+  };
+}
