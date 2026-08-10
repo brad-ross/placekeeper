@@ -51,6 +51,10 @@ export interface PdfWorkspaceProps {
   onWorkspaceElement?: (element: HTMLDivElement | null) => void;
 }
 
+const PDF_TEXT_SELECTION_STYLE = {
+  background: 'var(--review-selection-bg)',
+} as const;
+
 function isContextPointerGesture(event: {
   readonly button: number;
   readonly ctrlKey: boolean;
@@ -249,7 +253,11 @@ export function PdfWorkspace({
                         pageIndex={layout.pageIndex}
                         style={{ pointerEvents: 'none' }}
                       />
-                      <SelectionLayer documentId={activeDocumentId} pageIndex={layout.pageIndex} />
+                      <SelectionLayer
+                        documentId={activeDocumentId}
+                        pageIndex={layout.pageIndex}
+                        textStyle={PDF_TEXT_SELECTION_STYLE}
+                      />
                       <div
                         aria-hidden="true"
                         data-owned-annotation-layer

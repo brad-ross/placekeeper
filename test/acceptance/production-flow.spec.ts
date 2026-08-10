@@ -141,7 +141,10 @@ test("one installed-style browser tree preserves review state across responsive 
     { x: 76, y: 98 },
     { x: 405, y: 98 },
     async () => {
-      await expect(pageCanvas.locator(':scope > div[style*="mix-blend-mode"]')).toBeVisible();
+      const selectionOverlay = pageCanvas.locator(':scope > div[style*="mix-blend-mode"]');
+      await expect(selectionOverlay).toBeVisible();
+      await expect(selectionOverlay.locator(':scope > div').first())
+        .toHaveCSS('background-color', 'rgb(219, 231, 255)');
       expect(await renderedPageImage.evaluate((image) => {
         const selection = window.getSelection();
         if (!selection) return false;
