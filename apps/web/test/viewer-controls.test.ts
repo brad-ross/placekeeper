@@ -19,6 +19,7 @@ describe('viewer controls adapter', () => {
       getTotalPages: () => 8,
       scrollToPreviousPage: vi.fn(),
       scrollToNextPage: vi.fn(),
+      scrollToPage: vi.fn(),
       onScroll: vi.fn(() => unsubscribeScroll),
     };
     const zoom = {
@@ -56,10 +57,13 @@ describe('viewer controls adapter', () => {
 
     controls.previousPage();
     controls.nextPage();
+    controls.goToPage(5);
     controls.zoomOut();
     controls.zoomIn();
     expect(scroll.scrollToPreviousPage).toHaveBeenCalledWith('smooth');
     expect(scroll.scrollToNextPage).toHaveBeenCalledWith('smooth');
+    expect(scroll.scrollToPage).toHaveBeenCalledWith({ pageNumber: 5, behavior: 'smooth' });
+    expect(controls.snapshot()).toMatchObject({ currentPage: 2, totalPages: 8 });
     expect(zoom.zoomOut).toHaveBeenCalledOnce();
     expect(zoom.zoomIn).toHaveBeenCalledOnce();
 
@@ -76,6 +80,50 @@ describe('viewer controls adapter', () => {
     expect(unsubscribeZoom).toHaveBeenCalledOnce();
   });
 
+  it('forwards only current valid one-based destinations and keeps page state event-derived', () => {
+    let onPage: ((event: { documentId: string; pageNumber: number; totalPages: number }) => void) | undefined;
+    const scroll = {
+      getCurrentPage: () => 2,
+      getTotalPages: () => 3,
+      scrollToPreviousPage: vi.fn(),
+      scrollToNextPage: vi.fn(),
+      scrollToPage: vi.fn(),
+      onScroll: vi.fn(() => () => undefined),
+    };
+    const registry = {
+      getStore: () => ({ getState: () => ({ core: { activeDocumentId: 'doc' } }) }),
+      getPlugin: (id: string) => id === ScrollPlugin.id
+        ? { provides: () => ({
+            forDocument: () => scroll,
+            onPageChange: (listener: typeof onPage) => {
+              onPage = listener;
+              return () => undefined;
+            },
+          }) }
+        : undefined,
+    } as unknown as PluginRegistry;
+
+    const controls = createViewerControls(registry);
+    for (const destination of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1, 4]) {
+      controls.goToPage(destination);
+    }
+    expect(scroll.scrollToPage).not.toHaveBeenCalled();
+
+    controls.goToPage(3);
+    expect(scroll.scrollToPage).toHaveBeenCalledOnce();
+    expect(scroll.scrollToPage).toHaveBeenLastCalledWith({ pageNumber: 3, behavior: 'smooth' });
+    expect(controls.snapshot()).toMatchObject({ currentPage: 2, totalPages: 3 });
+
+    onPage?.({ documentId: 'doc', pageNumber: 2, totalPages: 5 });
+    controls.goToPage(5);
+    expect(scroll.scrollToPage).toHaveBeenCalledTimes(2);
+    expect(scroll.scrollToPage).toHaveBeenLastCalledWith({ pageNumber: 5, behavior: 'smooth' });
+    expect(controls.snapshot()).toMatchObject({ currentPage: 2, totalPages: 5 });
+
+    onPage?.({ documentId: 'doc', pageNumber: 5, totalPages: 5 });
+    expect(controls.snapshot()).toMatchObject({ currentPage: 5, totalPages: 5 });
+  });
+
   it('stays inert and explains unavailability when the document or capabilities are missing', () => {
     const registry = {
       getStore: () => ({ getState: () => ({ core: { activeDocumentId: null } }) }),
@@ -87,6 +135,7 @@ describe('viewer controls adapter', () => {
     controls.subscribe(listener);
     controls.previousPage();
     controls.nextPage();
+    controls.goToPage(1);
     controls.zoomOut();
     controls.zoomIn();
 
