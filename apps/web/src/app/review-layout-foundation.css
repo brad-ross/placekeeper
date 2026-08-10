@@ -394,7 +394,13 @@
   color: var(--review-ink-muted);
 }
 
+.review-context-palette .review-action-button--icon {
+  width: var(--review-control-default);
+  min-width: var(--review-control-default);
+  justify-content: center;
+  padding: 0;
+}
+
 .review-page-menu {
   transform: translate(.35rem, .35rem);
 }
-

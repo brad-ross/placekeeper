@@ -84,6 +84,11 @@
     min-width: var(--review-control-touch);
   }
 
+  .review-context-palette .review-action-button--icon {
+    width: var(--review-control-touch);
+    min-width: var(--review-control-touch);
+  }
+
   .page-note-placement-cursor {
     width: var(--review-control-touch);
     height: var(--review-control-touch);

@@ -58,7 +58,12 @@ test.describe('canonical review workflow', () => {
     const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
 
     await expect(selectionActions).toBeVisible();
-    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    for (const name of ['Replace', 'Delete', 'Highlight']) {
+      const action = selectionActions.getByRole('button', { name, exact: true });
+      await expect(action).toHaveAttribute('title', name);
+      await expect(action).toHaveText('');
+    }
+    await selectionActions.getByRole('button', { name: 'Delete', exact: true }).click();
     await expect(selectionActions).toHaveCount(0);
     await expect(page.locator('[data-anchor-kind]')).toHaveAttribute('data-anchor-kind', 'none');
 
