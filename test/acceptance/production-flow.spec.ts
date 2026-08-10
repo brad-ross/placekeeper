@@ -341,6 +341,27 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect.poll(async () => (await workspace.boundingBox())?.width ?? 0)
     .toBeCloseTo(rememberedRightValue, 0);
 
+  await page.setViewportSize({ width: 760, height: 900 });
+  await expect(page.locator("[data-review-stage]")).toHaveAttribute(
+    "data-reference-layout",
+    "narrow-unified",
+  );
+  await expect(page.getByRole("tab", { name: "References", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.locator("[data-review-stage]")).toHaveAttribute(
+    "data-reference-layout",
+    "wide-right",
+  );
+  await expect(page.getByRole("tab", { name: "References", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect.poll(async () => (await workspace.boundingBox())?.width ?? 0)
+    .toBeCloseTo(rememberedRightValue, 0);
+
   await page.getByRole("button", { name: "Move References to bottom" }).click();
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "bottom");
   await expect.poll(async () => Number(await bottomSplitter.getAttribute("aria-valuenow")))

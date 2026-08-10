@@ -117,6 +117,11 @@ function narrowSurfaceForWideState(state: ReferenceWorkspaceLayoutState): Worksp
     return state.lastFocusedSurface ?? 'right';
   }
   if (state.bottomReferencesOpen) return 'references';
+  if (
+    state.referenceDock === 'right'
+    && state.rightWorkspaceOpen
+    && state.lastFocusedSurface === 'references'
+  ) return 'references';
   return 'right';
 }
 

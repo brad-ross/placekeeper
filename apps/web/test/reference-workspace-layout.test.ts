@@ -177,6 +177,18 @@ describe('reference workspace layout state', () => {
     });
   });
 
+  it('keeps active right-docked References selected when the layout narrows', () => {
+    let state = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'move-references-right' });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'set-regime', regime: 'narrow' });
+
+    expect(deriveReferenceWorkspaceLayout(state, 'annotations', 'references')).toMatchObject({
+      kind: 'narrow-unified',
+      open: true,
+      activeMode: 'references',
+    });
+  });
+
   it('opens a fresh narrow rail to Outline and remembers later narrow focus', () => {
     let state = createReferenceWorkspaceLayout({ width: 600, height: 800 });
     state = reduceReferenceWorkspaceLayout(state, { type: 'toggle-narrow-workspace' });
