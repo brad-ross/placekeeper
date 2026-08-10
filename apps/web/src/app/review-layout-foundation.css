@@ -206,36 +206,35 @@
   padding: 0 !important;
 }
 
-.review-chrome__stat {
+.review-chrome__stat,
+.review-chrome__page-control {
   min-width: 60px;
   color: var(--review-ink-muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+.review-chrome__stat {
   text-align: center;
 }
 
 .review-chrome__page-control {
   position: relative;
   display: inline-flex;
-  min-width: 60px;
   align-items: center;
   justify-content: center;
-  color: var(--review-ink-muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
 }
 
 .review-chrome__page-trigger {
-  width: 60px;
+  width: 100%;
   min-height: var(--review-control-compact);
   padding: 0 !important;
   color: var(--review-ink-muted) !important;
-  font-variant-numeric: tabular-nums;
 }
 
 .review-chrome__page-editor {
   display: inline-flex;
-  width: 60px;
+  width: 100%;
   min-height: var(--review-control-compact);
   align-items: center;
   justify-content: center;

@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState, useSyncExternalStore } from 'react';
 
 import {
   ReviewShell,
@@ -157,11 +157,7 @@ function Harness() {
     viewerControlsRef.current = createHarnessViewerControls();
   }
   const viewerControls = viewerControlsRef.current;
-  const [viewerState, setViewerState] = useState(() => viewerControls.snapshot());
-
-  useEffect(() => viewerControls.subscribe(() => {
-    setViewerState(viewerControls.snapshot());
-  }), [viewerControls]);
+  const viewerState = useSyncExternalStore(viewerControls.subscribe, viewerControls.snapshot);
 
   const accept = async (command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> => {
     await Promise.resolve();

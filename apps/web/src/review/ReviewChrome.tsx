@@ -76,15 +76,22 @@ export function ReviewChrome({
     setPageInvalid(false);
     setEditingPage(false);
   };
-  const submitPageEdit = (restoreFocus: boolean) => {
+  const goToDraftPage = () => {
     const pageNumber = validPageNumber(pageDraft, viewerState.totalPages);
-    if (pageNumber === undefined) {
-      if (restoreFocus) setPageInvalid(true);
-      else closePageEdit(false);
+    if (pageNumber === undefined) return false;
+    controls?.goToPage(pageNumber);
+    return true;
+  };
+  const submitPageEditOnEnter = () => {
+    if (!goToDraftPage()) {
+      setPageInvalid(true);
       return;
     }
-    controls?.goToPage(pageNumber);
-    closePageEdit(restoreFocus);
+    closePageEdit(true);
+  };
+  const submitPageEditOnBlur = () => {
+    goToDraftPage();
+    closePageEdit(false);
   };
 
   return (
@@ -125,12 +132,12 @@ export function ReviewChrome({
                         ? event.relatedTarget.closest('[data-review-page-step]')
                         : null;
                       if (pageStep) closePageEdit(false);
-                      else submitPageEdit(false);
+                      else submitPageEditOnBlur();
                     }}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
                         event.preventDefault();
-                        submitPageEdit(true);
+                        submitPageEditOnEnter();
                       }
                       if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
                         event.preventDefault();

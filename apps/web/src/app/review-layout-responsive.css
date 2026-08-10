@@ -59,18 +59,9 @@
     gap: 0;
   }
 
-  .review-chrome__stat {
+  .review-chrome__stat,
+  .review-chrome__page-control {
     min-width: 52px;
-  }
-
-  .review-chrome__page-control,
-  .review-chrome__page-editor {
-    min-width: 52px;
-    width: 52px;
-  }
-
-  .review-chrome__page-trigger {
-    width: 52px;
   }
 
   .review-chrome h1 {
