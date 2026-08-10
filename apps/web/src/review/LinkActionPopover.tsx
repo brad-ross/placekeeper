@@ -19,6 +19,12 @@ import { PDF_LINK_ACTION_MENU_ID } from '../pdf/viewer-interaction-events.js';
 export type LinkActionChoice = 'references' | 'main';
 export type LinkActionDismissReason = 'escape' | 'outside' | 'tab' | 'anchor-invalidated';
 
+export function linkActionDismissRestoresFocus(reason: LinkActionDismissReason): boolean {
+  // Tab owns its native sequential focus movement. The other dismissal paths
+  // retain the explicit return-to-source behavior of the PDF-link chooser.
+  return reason !== 'tab';
+}
+
 export interface LinkActionPopoverProps {
   readonly request: ViewerPdfLinkInvocation | null;
   readonly onChoose: (choice: LinkActionChoice, request: ViewerPdfLinkInvocation) => void;
@@ -211,7 +217,7 @@ export function LinkActionPopover({
     dismissingRef.current = true;
     setLinkActionOpenerExpanded(request.opener, false);
     onDismissRef.current(request, reason);
-    restoreCancelFocus(request);
+    if (linkActionDismissRestoresFocus(reason)) restoreCancelFocus(request);
   }, [request, restoreCancelFocus]);
 
   useLayoutEffect(() => {

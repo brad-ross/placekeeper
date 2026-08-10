@@ -49,6 +49,8 @@ export interface PdfViewerNavigation extends ViewerNavigationControls {
   /** Resolves a semantic target without moving the viewer. */
   resolveTarget(target: PdfNavigationTarget): PdfViewerLocation | null;
   applyTarget(target: PdfNavigationTarget): Promise<boolean>;
+  /** Aborts any in-flight movement without disposing the document scope. */
+  cancelPendingNavigation(): void;
 }
 
 interface ActiveViewer {
@@ -285,6 +287,12 @@ export function createViewerNavigation(
   let activeOperation: { operation: NavigationOperation; abort: AbortController } | null = null;
   let disposed = false;
 
+  const cancelPendingNavigation = () => {
+    activeOperation?.abort.abort();
+    activeOperation = null;
+    operationGeneration += 1;
+  };
+
   const activeViewer = (): ActiveViewer | null => {
     if (disposed) return null;
     const core = options.registry.getStore().getState().core;
@@ -318,8 +326,7 @@ export function createViewerNavigation(
   };
 
   const beginOperation = (viewer: ActiveViewer): NavigationOperation => {
-    activeOperation?.abort.abort();
-    operationGeneration += 1;
+    cancelPendingNavigation();
     const abort = new AbortController();
     const operation = {
       generation: operationGeneration,
@@ -458,13 +465,59 @@ export function createViewerNavigation(
       if (!activity.isScrolling && !activity.isSmoothScrolling) resolveIdle(true);
     });
     try {
-      viewer.scroll.scrollToPage({
+      // A newly portaled inactive viewer can expose metrics before it has any
+      // mounted page tree (notably in WebKit). Wait for one page in that case,
+      // while still allowing distant virtualized targets to mount after scroll.
+      while (
+        operationIsCurrent(operation)
+        && Date.now() < deadline
+        && !viewer.pages.some((page) => pageGeometry(viewer, page.index) !== null)
+      ) {
+        if (!await waitForPromise(nextFrame(), operation.signal, deadline - Date.now())) return false;
+      }
+      if (!viewer.pages.some((page) => pageGeometry(viewer, page.index) !== null)) return false;
+      let currentPageIndex = -1;
+      try {
+        currentPageIndex = viewer.scroll.getCurrentPage() - 1;
+      } catch {
+        return false;
+      }
+      // Newly portaled viewers render the current/adjacent page buffer as part
+      // of initialization. Let that buffer settle before its first scroll;
+      // farther destinations must scroll first to expand virtualization.
+      if (Math.abs(location.pageIndex - currentPageIndex) <= 1) {
+        while (
+          operationIsCurrent(operation)
+          && Date.now() < deadline
+          && pageGeometry(viewer, location.pageIndex) === null
+        ) {
+          if (!await waitForPromise(nextFrame(), operation.signal, deadline - Date.now())) return false;
+        }
+        if (pageGeometry(viewer, location.pageIndex) === null) return false;
+      }
+      const scrollToLocation = () => viewer.scroll.scrollToPage({
         pageNumber: location.pageIndex + 1,
         pageCoordinates: location.anchor,
         behavior: 'instant',
         alignX: location.alignment.xPercent,
         alignY: location.alignment.yPercent,
       });
+      const targetWasMounted = pageGeometry(viewer, location.pageIndex) !== null;
+      scrollToLocation();
+      // Distant virtualized pages are commonly absent until the scroll request
+      // expands the mounted page window. Wait only after issuing that request.
+      while (
+        operationIsCurrent(operation)
+        && Date.now() < deadline
+        && pageGeometry(viewer, location.pageIndex) === null
+      ) {
+        if (!await waitForPromise(nextFrame(), operation.signal, deadline - Date.now())) return false;
+      }
+      if (pageGeometry(viewer, location.pageIndex) === null) return false;
+      // Some engines accept the first far-page request before the new page
+      // geometry exists but do not retain its coordinates. Reapply once after
+      // virtualization mounts that page; already-mounted targets scroll once.
+      if (!targetWasMounted) scrollToLocation();
       if (!await waitForFrames(operation, 2, deadline)) return false;
       // An instant scroll can have reached its semantic postcondition while
       // the viewer still reports transient scroll activity. Do not turn that
@@ -576,11 +629,7 @@ export function createViewerNavigation(
     const deadline = Date.now() + timeoutMs;
     while (operationIsCurrent(operation) && Date.now() < deadline) {
       const location = resolveTarget(viewer, target);
-      // Plugin metrics can become valid before the inactive document's
-      // portaled page tree commits (notably in WebKit). Applying at that point
-      // cannot verify its semantic destination, so keep the existing bounded
-      // readiness wait until the target page has usable geometry too.
-      if (location !== null && pageGeometry(viewer, location.pageIndex) !== null) return location;
+      if (location !== null) return location;
       if (!await waitForPromise(nextFrame(), operation.signal, deadline - Date.now())) return null;
     }
     return null;
@@ -594,8 +643,34 @@ export function createViewerNavigation(
     // A newly opened inactive document can notify before its portaled viewport
     // has committed usable metrics. Let that bounded render settle rather than
     // treating the target as malformed.
-    const location = await waitForTargetLocation(viewer, target, operation);
-    return location ? applyResolvedLocation(viewer, location, operation) : false;
+    const initialLocation = await waitForTargetLocation(viewer, target, operation);
+    if (initialLocation === null) return false;
+    let currentPageIndex = -1;
+    try {
+      currentPageIndex = viewer.scroll.getCurrentPage() - 1;
+    } catch {
+      return false;
+    }
+    const waitForAdjacentTarget = Math.abs(target.pageIndex - currentPageIndex) <= 1;
+    const readinessDeadline = Date.now() + timeoutMs;
+    while (operationIsCurrent(operation) && Date.now() < readinessDeadline) {
+      const hasPageTree = viewer.pages.some((page) => pageGeometry(viewer, page.index) !== null);
+      const targetReady = pageGeometry(viewer, target.pageIndex) !== null;
+      if (hasPageTree && (!waitForAdjacentTarget || targetReady)) break;
+      if (!await waitForPromise(
+        nextFrame(),
+        operation.signal,
+        readinessDeadline - Date.now(),
+      )) return false;
+    }
+    if (
+      !viewer.pages.some((page) => pageGeometry(viewer, page.index) !== null)
+      || (waitForAdjacentTarget && pageGeometry(viewer, target.pageIndex) === null)
+    ) return false;
+    // Viewport metrics can change while the portaled page tree settles. Resolve
+    // again so fitted zoom/alignment use the committed viewport dimensions.
+    const settledLocation = resolveTarget(viewer, target);
+    return settledLocation ? applyResolvedLocation(viewer, settledLocation, operation) : false;
   };
 
   const unsubscribeStore = options.registry.getStore().subscribe((_action, state) => {
@@ -613,10 +688,9 @@ export function createViewerNavigation(
     },
     applyLocation,
     applyTarget,
+    cancelPendingNavigation,
     replaceDocument(nextDocumentGeneration) {
-      activeOperation?.abort.abort();
-      operationGeneration += 1;
-      activeOperation = null;
+      cancelPendingNavigation();
       documentGeneration = nextDocumentGeneration;
     },
     focusAtDestination(pageIndex) {
@@ -625,9 +699,7 @@ export function createViewerNavigation(
     dispose() {
       if (disposed) return;
       disposed = true;
-      activeOperation?.abort.abort();
-      activeOperation = null;
-      operationGeneration += 1;
+      cancelPendingNavigation();
       unsubscribeStore();
     },
   };

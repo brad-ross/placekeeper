@@ -175,6 +175,12 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(primaryLink).toBeFocused();
   await expect(page.getByLabel("Current page")).toHaveText("1 / 4");
 
+  await page.keyboard.press("Enter");
+  await expect(primaryMenu.getByRole("menuitem", { name: /Open in References/u })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(primaryMenu).toHaveCount(0);
+  await expect(primaryLink).not.toBeFocused();
+
   await primaryLink.click();
   await page.getByRole("menuitem", { name: /Open in References/u }).click();
   const workspace = page.locator("[data-review-workspace]");
@@ -209,8 +215,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
-  await detailLink.focus();
-  await page.keyboard.press("Enter");
+  await detailLink.evaluate((element) => (element as HTMLButtonElement).click());
   const openDetailReference = page.getByRole("menuitem", { name: /Open in References/u });
   await expect(openDetailReference).toBeFocused();
   await openDetailReference.evaluate((element) => (element as HTMLButtonElement).click());
@@ -243,6 +248,16 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "right");
   await expect(mainWorkspace).toHaveAttribute("data-reference-main-mount", "stable");
   await expect(referenceWorkspace).toHaveAttribute("data-reference-mount", "stable");
+
+  const finish = page.getByRole('button', { name: 'Finish' });
+  await finish.click();
+  await expect(workspace).toHaveAttribute('data-workspace-open', 'false');
+  await expect(page.getByRole('heading', { name: 'Finish review' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Workspace/u })).toHaveAttribute('aria-expanded', 'false');
+  await page.getByRole('button', { name: 'Close finish options' }).click();
+  await expect(workspace).toHaveAttribute('data-workspace-open', 'true');
+  await expect(primaryTab).toHaveAttribute('aria-selected', 'true');
+  await expect(primaryTab).toBeFocused();
 
   await detailTab.click();
   await expect(detailTab).toHaveAttribute("aria-selected", "true");

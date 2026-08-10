@@ -177,6 +177,10 @@
   outline: none;
 }
 
+.review-workspace__panel[hidden] {
+  display: none;
+}
+
 .review-workspace__panel--references {
   display: flex;
   overflow: hidden;

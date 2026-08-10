@@ -152,6 +152,25 @@ export interface AppProps {
   onOutlineDiscovery?: (result: PdfOutlineDiscovery) => void;
 }
 
+export class ViewerInitializationAuthority {
+  private generation = 0;
+  private registry: object | null = null;
+
+  begin(registry: object): number {
+    this.registry = registry;
+    return ++this.generation;
+  }
+
+  isCurrent(generation: number, registry: object): boolean {
+    return this.generation === generation && this.registry === registry;
+  }
+
+  invalidate(): void {
+    this.generation += 1;
+    this.registry = null;
+  }
+}
+
 export function App({
   assets,
   existingAnnotations = [],
@@ -186,6 +205,7 @@ export function App({
   const subscriptions = useRef<Array<() => void>>([]);
   const referenceSubscriptions = useRef<Array<() => void>>([]);
   const pageReadGeneration = useRef(0);
+  const viewerInitialization = useRef(new ViewerInitializationAuthority());
   const selectionReads = useRef(new SelectionReadAuthority());
   const registryRef = useRef<PluginRegistry | null>(null);
   const framingControlsRef = useRef<ViewerFramingControls | null>(null);
@@ -310,6 +330,8 @@ export function App({
     onViewerNavigationInitialized?.('reference', null);
   }, [onViewerNavigationInitialized]);
   useEffect(() => () => {
+    viewerInitialization.current.invalidate();
+    registryRef.current = null;
     clearSubscriptions();
     clearReferenceSubscriptions();
     mainNavigationRef.current?.dispose();
@@ -369,6 +391,11 @@ export function App({
   }, [initializeKeyboardCursor, keyboardPageNoteActive, publishKeyboardCursor]);
 
   const initializeViewer = useCallback(async (registry: PluginRegistry) => {
+    const initializationGeneration = viewerInitialization.current.begin(registry);
+    const initializationIsCurrent = () => (
+      viewerInitialization.current.isCurrent(initializationGeneration, registry)
+      && registryRef.current === registry
+    );
     caretReadGeneration.current += 1;
     registryRef.current = registry;
     clearSubscriptions();
@@ -421,13 +448,13 @@ export function App({
       const document = registry.getStore().getState().core.documents[documentId]?.document;
       if (!document) return;
       const page = await pageReaderFor(documentId, document).read(pageIndex);
-      if (generation === pageReadGeneration.current) {
+      if (generation === pageReadGeneration.current && initializationIsCurrent()) {
         setDetectedPageReliable(assessPageTextReliability(page).reliable);
         setDetectedSelectionReliable(true);
       }
     };
     const loadDocument = async (documentId: string) => {
-      if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
+      if (documentId !== MAIN_PDF_DOCUMENT_ID || !initializationIsCurrent()) return;
       caretReadGeneration.current += 1;
       activeDocumentIdRef.current = MAIN_PDF_DOCUMENT_ID;
       const document = registry.getStore().getState().core.documents[documentId]?.document;
@@ -528,6 +555,7 @@ export function App({
         }
       }
       await readPage(documentId, 0);
+      if (!initializationIsCurrent()) return;
     };
 
     const documentManager = registry
@@ -535,7 +563,9 @@ export function App({
       ?.provides();
     if (documentManager) {
       const initializeMain = (documentId: string) => {
+        if (!initializationIsCurrent()) return;
         void loadDocument(documentId).then(() => {
+          if (!initializationIsCurrent()) return;
           const current = currentInventoryDocument.current;
           if (current?.id === documentId) {
             discoverExistingAnnotations(current.id, current.document);
@@ -690,7 +720,9 @@ export function App({
       currentInventoryDocument.current = { id: MAIN_PDF_DOCUMENT_ID, document: mainDocument };
       await loadDocument(MAIN_PDF_DOCUMENT_ID);
     }
+    if (!initializationIsCurrent()) return;
     await onViewerInitialized?.(registry);
+    if (!initializationIsCurrent()) return;
     const inventoryDocument = currentInventoryDocument.current;
     if (inventoryDocument) discoverExistingAnnotations(inventoryDocument.id, inventoryDocument.document);
   }, [assets, clearReferenceSubscriptions, clearSubscriptions, discoverExistingAnnotations, discoverOutline, documentGeneration, emit, initializeKeyboardCursor, onReferenceDocumentControls, onSelectionUpdate, onViewerFramingInitialized, onViewerInitialized, onViewerNavigationInitialized, publishKeyboardCursor, updateViewerRunway]);

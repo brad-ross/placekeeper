@@ -6,6 +6,7 @@ import {
   LinkActionMenuContent,
   compositeFocusIndex,
   horizontalTabFocusIndex,
+  linkActionDismissRestoresFocus,
   placeLinkActionPopover,
   setLinkActionOpenerExpanded,
 } from '../src/review/LinkActionPopover.js';
@@ -25,6 +26,13 @@ const target = (identity: string, pageIndex: number) => ({
 });
 
 describe('link action chooser', () => {
+  it('lets Tab keep native focus movement while cancellation returns to the source', () => {
+    expect(linkActionDismissRestoresFocus('tab')).toBe(false);
+    expect(linkActionDismissRestoresFocus('escape')).toBe(true);
+    expect(linkActionDismissRestoresFocus('outside')).toBe(true);
+    expect(linkActionDismissRestoresFocus('anchor-invalidated')).toBe(true);
+  });
+
   it('keeps the default action first and exposes a nonmodal menu contract', () => {
     const html = renderToStaticMarkup(
       <LinkActionMenuContent

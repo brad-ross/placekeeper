@@ -5,6 +5,7 @@ import {
   clampPageNotePoint,
   subscribeToMainDocumentOpened,
   publishViewerCaretRead,
+  ViewerInitializationAuthority,
 } from '../src/app/App.js';
 import { MAIN_PDF_DOCUMENT_ID } from '../src/pdf/viewer-document-ids.js';
 import type { PdfOutlineDiscovery } from '../src/pdf/pdf-outline.js';
@@ -18,6 +19,19 @@ const unavailableCaret = {
 };
 
 describe('App interaction boundaries', () => {
+  it('invalidates an older async viewer initialization when a replacement begins', () => {
+    const authority = new ViewerInitializationAuthority();
+    const oldRegistry = {};
+    const newRegistry = {};
+    const oldGeneration = authority.begin(oldRegistry);
+    const newGeneration = authority.begin(newRegistry);
+
+    expect(authority.isCurrent(oldGeneration, oldRegistry)).toBe(false);
+    expect(authority.isCurrent(newGeneration, newRegistry)).toBe(true);
+    authority.invalidate();
+    expect(authority.isCurrent(newGeneration, newRegistry)).toBe(false);
+  });
+
   it('initializes main-only services only for the fixed main document', () => {
     let opened: ((event: { document: { id: string } | null }) => void) | undefined;
     const initializeMain = vi.fn();

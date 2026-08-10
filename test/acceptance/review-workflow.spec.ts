@@ -8,6 +8,8 @@ async function openAnnotationsWorkspace(page: Page) {
   await expect(annotations).toBeVisible();
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
   await expect(annotations).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#workspace-panel-outline')).toBeHidden();
+  await expect(page.locator('#workspace-panel-references')).toBeHidden();
   return { annotations, workspace };
 }
 
@@ -227,7 +229,9 @@ test.describe('canonical review workflow', () => {
 
     const drawer = page.locator('[data-annotation-scroll-viewport]');
     await drawer.evaluate((element) => {
-      Object.assign((element as HTMLElement).style, { height: '8rem', bottom: 'auto' });
+      Object.assign((element as HTMLElement).style, {
+        flex: 'none', height: '8rem', bottom: 'auto',
+      });
     });
     const header = drawer.locator('.annotation-drawer__header');
     const before = await header.boundingBox();
@@ -469,7 +473,9 @@ test.describe('canonical review workflow', () => {
     await openAnnotationsWorkspace(page);
     const drawer = page.locator('[data-annotation-scroll-viewport]');
     await drawer.evaluate((element) => {
-      Object.assign((element as HTMLElement).style, { height: '7rem', bottom: 'auto' });
+      Object.assign((element as HTMLElement).style, {
+        flex: 'none', height: '7rem', bottom: 'auto',
+      });
     });
     const lastMark = page.locator('[data-owned-focus-id]').last();
     const scrollBefore = await drawer.evaluate((element) => element.scrollTop);

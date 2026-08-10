@@ -5,6 +5,7 @@ import {
   controlledWorkspaceSurfaceAction,
   isPdfLinkControlTarget,
   ReviewShell,
+  workspaceIsVisible,
 } from '../src/app/ReviewShell.js';
 import { AnnotationList } from '../src/review/AnnotationList.js';
 import { AnnotationPeek } from '../src/review/AnnotationPeek.js';
@@ -68,6 +69,8 @@ describe('review shell layout and accessibility contract', () => {
       transientSurface: 'none',
       mode: 'references',
     })).toBeNull();
+    expect(workspaceIsVisible(true, 'finish')).toBe(false);
+    expect(workspaceIsVisible(true, 'workspace')).toBe(true);
   });
 
   it('does not render reading-only contextual actions for an externally opened workspace', () => {

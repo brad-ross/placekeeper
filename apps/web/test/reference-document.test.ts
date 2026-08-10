@@ -97,7 +97,46 @@ describe('reference document scope', () => {
     expect(await open).toBe(false);
     await reset;
     expect(closeDocument).toHaveBeenCalledWith(REFERENCE_PDF_DOCUMENT_ID);
+    expect(closeDocument).toHaveBeenCalledOnce();
     expect(JSON.stringify(controller.snapshot())).not.toMatch(/credentials|requestOptions|error|secret/iu);
+  });
+
+  it('bounds stalled opens, catches synchronous task creation, and exposes retryable failure', async () => {
+    vi.useFakeTimers();
+    try {
+      const never = new Promise<unknown>(() => undefined);
+      const closeDocument = vi.fn(() => resolvedTask(undefined));
+      const openDocumentUrl = vi.fn()
+        .mockReturnValueOnce(resolvedTask({
+          documentId: REFERENCE_PDF_DOCUMENT_ID,
+          task: { toPromise: () => never },
+        }))
+        .mockImplementationOnce(() => { throw new Error('raw engine failure'); });
+      const controller = createReferenceDocumentController({
+        documentManager: {
+          openDocumentUrl,
+          retryDocument: vi.fn(),
+          closeDocument,
+          getActiveDocumentId: () => MAIN_PDF_DOCUMENT_ID,
+          getDocumentState: () => null,
+        },
+        assetUrls: { pdfiumWasm: '/pdfium.wasm', documentUrl: '/document.pdf' },
+        origin: 'http://127.0.0.1:4173', documentGeneration: 1, timeoutMs: 20,
+      });
+
+      const stalled = controller.open();
+      await vi.advanceTimersByTimeAsync(21);
+      expect(await stalled).toBe(false);
+      expect(controller.snapshot().status).toBe('failed');
+      await Promise.resolve();
+      expect(closeDocument).toHaveBeenCalledOnce();
+
+      expect(await controller.retry()).toBe(false);
+      expect(controller.snapshot().status).toBe('failed');
+      expect(openDocumentUrl).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('serializes a newer open behind physical close settlement', async () => {
@@ -134,6 +173,52 @@ describe('reference document scope', () => {
     expect(closeDocument).toHaveBeenCalledOnce();
     expect(openDocumentUrl).toHaveBeenCalledOnce();
     expect(controller.snapshot()).toMatchObject({ status: 'loaded', documentGeneration: 1 });
+  });
+
+  it('uses one tracked close when an invalidated open is followed by a queued reopen', async () => {
+    const oldLoad = deferred<void>();
+    const physicalClose = deferred<void>();
+    let openCount = 0;
+    let documentStatus: 'loading' | undefined = 'loading';
+    const openDocumentUrl = vi.fn(() => {
+      openCount += 1;
+      return resolvedTask({
+        documentId: REFERENCE_PDF_DOCUMENT_ID,
+        task: openCount === 1
+          ? { toPromise: () => oldLoad.promise }
+          : resolvedTask(undefined),
+      });
+    });
+    const closeDocument = vi.fn(() => ({
+      toPromise: () => physicalClose.promise.then(() => { documentStatus = undefined; }),
+    }));
+    const controller = createReferenceDocumentController({
+      documentManager: {
+        openDocumentUrl,
+        retryDocument: vi.fn(),
+        closeDocument,
+        getActiveDocumentId: () => MAIN_PDF_DOCUMENT_ID,
+        getDocumentState: () => documentStatus === undefined ? null : { status: documentStatus },
+      },
+      assetUrls: { pdfiumWasm: '/pdfium.wasm', documentUrl: '/document.pdf' },
+      origin: 'http://127.0.0.1:4173', documentGeneration: 1,
+    });
+
+    const staleOpen = controller.open();
+    const replacement = controller.replaceDocument(2);
+    const reopened = controller.open();
+    oldLoad.resolve();
+    expect(await staleOpen).toBe(false);
+    await Promise.resolve();
+    expect(closeDocument).toHaveBeenCalledOnce();
+    expect(openDocumentUrl).toHaveBeenCalledOnce();
+
+    physicalClose.resolve();
+    await replacement;
+    expect(await reopened).toBe(true);
+    expect(closeDocument).toHaveBeenCalledOnce();
+    expect(openDocumentUrl).toHaveBeenCalledTimes(2);
+    expect(controller.snapshot()).toMatchObject({ status: 'loaded', documentGeneration: 2 });
   });
 
   it('coalesces repeated close requests without an intervening open', async () => {

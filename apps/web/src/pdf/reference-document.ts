@@ -44,6 +44,8 @@ export interface ReferenceDocumentController {
   snapshot(): ReferenceDocumentSnapshot;
 }
 
+const DEFAULT_REFERENCE_OPEN_TIMEOUT_MS = 5_000;
+
 export function buildReferenceDocumentOptions(
   assetUrls: ViewerAssetUrls,
   origin: string,
@@ -55,9 +57,32 @@ export function buildReferenceDocumentOptions(
   };
 }
 
-async function waitForOpen(responseTask: PromiseTask<ReferenceOpenResponse>): Promise<void> {
-  const response = await responseTask.toPromise();
-  await response.task.toPromise();
+function waitWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return Promise.reject(new Error('Timed out'));
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (result: { readonly value: T } | { readonly error: unknown }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if ('value' in result) resolve(result.value);
+      else reject(result.error);
+    };
+    const timer = setTimeout(() => finish({ error: new Error('Timed out') }), timeoutMs);
+    promise.then(
+      (value) => finish({ value }),
+      (error: unknown) => finish({ error }),
+    );
+  });
+}
+
+async function waitForOpen(
+  responseTask: PromiseTask<ReferenceOpenResponse>,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  const response = await waitWithin(responseTask.toPromise(), deadline - Date.now());
+  await waitWithin(response.task.toPromise(), deadline - Date.now());
 }
 
 export function createReferenceDocumentController(input: {
@@ -65,17 +90,41 @@ export function createReferenceDocumentController(input: {
   readonly assetUrls: ViewerAssetUrls;
   readonly origin: string;
   readonly documentGeneration: number;
+  readonly timeoutMs?: number;
 }): ReferenceDocumentController {
   let documentGeneration = input.documentGeneration;
   let status: ReferenceDocumentStatus = 'idle';
   let operationGeneration = 0;
   let pending: Promise<boolean> | null = null;
   let closing: Promise<void> | null = null;
+  const timeoutMs = input.timeoutMs ?? DEFAULT_REFERENCE_OPEN_TIMEOUT_MS;
 
   const currentSnapshot = (): ReferenceDocumentSnapshot => Object.freeze({
     documentGeneration,
     status,
   });
+
+  const performPhysicalClose = async (): Promise<void> => {
+    try {
+      const closeTask = input.documentManager.closeDocument(REFERENCE_PDF_DOCUMENT_ID);
+      await closeTask.toPromise();
+    } catch {
+      // Deliberately quiet: raw engine/load failures cannot enter UI state or logs here.
+    }
+  };
+
+  const trackPhysicalClose = (task: Promise<void>): Promise<void> => {
+    let lifecycle!: Promise<void>;
+    lifecycle = task.finally(() => {
+      if (closing === lifecycle) closing = null;
+    });
+    closing = lifecycle;
+    return lifecycle;
+  };
+
+  const startPhysicalClose = (): Promise<void> => (
+    closing ?? trackPhysicalClose(performPhysicalClose())
+  );
 
   const run = (kind: 'open' | 'retry'): Promise<boolean> => {
     if (pending) return pending;
@@ -84,23 +133,19 @@ export function createReferenceDocumentController(input: {
     const startedGeneration = documentGeneration;
     const precedingClose = closing;
     pending = (async () => {
-      if (precedingClose) await precedingClose;
-      if (operation !== operationGeneration || startedGeneration !== documentGeneration) return false;
-      const documentStatus = input.documentManager.getDocumentState(REFERENCE_PDF_DOCUMENT_ID)?.status;
-      if (kind === 'open' && documentStatus === 'loaded') {
-        status = 'loaded';
-        return input.documentManager.getActiveDocumentId() === MAIN_PDF_DOCUMENT_ID;
-      }
-      if (kind === 'retry' && documentStatus !== 'error') return false;
-      const task = kind === 'open'
-        ? input.documentManager.openDocumentUrl(buildReferenceDocumentOptions(input.assetUrls, input.origin))
-        : input.documentManager.retryDocument(REFERENCE_PDF_DOCUMENT_ID);
       try {
-        await waitForOpen(task);
-        if (operation !== operationGeneration || startedGeneration !== documentGeneration) {
-          void input.documentManager.closeDocument(REFERENCE_PDF_DOCUMENT_ID).toPromise().catch(() => undefined);
-          return false;
+        if (precedingClose) await waitWithin(precedingClose, timeoutMs);
+        if (operation !== operationGeneration || startedGeneration !== documentGeneration) return false;
+        const documentStatus = input.documentManager.getDocumentState(REFERENCE_PDF_DOCUMENT_ID)?.status;
+        if (documentStatus === 'loaded') {
+          status = 'loaded';
+          return input.documentManager.getActiveDocumentId() === MAIN_PDF_DOCUMENT_ID;
         }
+        const task = kind === 'retry' && documentStatus === 'error'
+          ? input.documentManager.retryDocument(REFERENCE_PDF_DOCUMENT_ID)
+          : input.documentManager.openDocumentUrl(buildReferenceDocumentOptions(input.assetUrls, input.origin));
+        await waitForOpen(task, timeoutMs);
+        if (operation !== operationGeneration || startedGeneration !== documentGeneration) return false;
         if (input.documentManager.getActiveDocumentId() !== MAIN_PDF_DOCUMENT_ID) {
           status = 'failed';
           return false;
@@ -108,7 +153,10 @@ export function createReferenceDocumentController(input: {
         status = 'loaded';
         return true;
       } catch {
-        if (operation === operationGeneration && startedGeneration === documentGeneration) status = 'failed';
+        if (operation === operationGeneration && startedGeneration === documentGeneration) {
+          status = 'failed';
+          void startPhysicalClose();
+        }
         return false;
       }
     })().finally(() => {
@@ -118,27 +166,16 @@ export function createReferenceDocumentController(input: {
   };
 
   const close = (): Promise<void> => {
-    if (closing !== null && pending === null) return closing;
     const inFlight = pending;
-    const precedingClose = closing;
     operationGeneration += 1;
     pending = null;
     status = 'idle';
+    if (closing !== null) return closing;
     const task = (async () => {
-      if (precedingClose) await precedingClose;
       if (inFlight) await inFlight;
-      try {
-        await input.documentManager.closeDocument(REFERENCE_PDF_DOCUMENT_ID).toPromise();
-      } catch {
-        // Deliberately quiet: raw engine/load failures cannot enter UI state or logs here.
-      }
+      await performPhysicalClose();
     })();
-    let lifecycle!: Promise<void>;
-    lifecycle = task.finally(() => {
-      if (closing === lifecycle) closing = null;
-    });
-    closing = lifecycle;
-    return lifecycle;
+    return trackPhysicalClose(task);
   };
 
   return {

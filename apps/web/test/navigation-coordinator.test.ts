@@ -52,6 +52,7 @@ function navigation(initial = location(0)) {
         current = value;
         return true;
       }),
+      cancelPendingNavigation: vi.fn(),
       replaceDocument: vi.fn(),
       focusAtDestination: vi.fn(() => true),
       dispose: vi.fn(),
@@ -108,7 +109,15 @@ describe('document-scoped navigation coordinator', () => {
   it('cancels the reducer transaction before a newer link supersedes deferred viewer work', async () => {
     const run = harness();
     const applied = deferred<boolean>();
-    vi.mocked(run.main.controls.applyTarget).mockReturnValueOnce(applied.promise);
+    let cancelled = false;
+    vi.mocked(run.main.controls.cancelPendingNavigation).mockImplementation(() => {
+      cancelled = true;
+    });
+    vi.mocked(run.main.controls.applyTarget).mockImplementationOnce(async () => {
+      await applied.promise;
+      if (!cancelled) run.main.set(location(3));
+      return !cancelled;
+    });
     const stale = run.coordinator.navigateMainTarget(target(3), 'direct');
     expect(run.state().pendingMainNavigation).not.toBeNull();
 
@@ -122,11 +131,30 @@ describe('document-scoped navigation coordinator', () => {
     };
     expect(run.coordinator.requestLink(newest)).toBe(true);
     expect(run.state().pendingMainNavigation).toBeNull();
+    expect(run.main.controls.cancelPendingNavigation).toHaveBeenCalled();
+    expect(run.reference.controls.cancelPendingNavigation).toHaveBeenCalled();
 
     applied.resolve(true);
     expect(await stale).toBe(false);
+    expect(run.main.controls.captureLocation()?.pageIndex).toBe(0);
     expect(run.state().pendingMainNavigation).toBeNull();
     expect(run.state().mainHistory.entries).toEqual([]);
+  });
+
+  it('clears a superseded pending reference request and loading panel', async () => {
+    const run = harness();
+    const opened = deferred<boolean>();
+    vi.mocked(run.controller.open).mockReturnValueOnce(opened.promise);
+
+    const stale = run.coordinator.openReference(target(3), {
+      label: 'Pending proof', pageContext: 'Page 4',
+    });
+    expect(run.pending()).toMatchObject({ status: 'loading' });
+
+    expect(await run.coordinator.switchReference('missing')).toBe(false);
+    expect(run.pending()).toBeNull();
+    opened.resolve(true);
+    expect(await stale).toBe(false);
   });
 
   it('keeps a verified main jump committed when newer work arrives during workspace settlement', async () => {

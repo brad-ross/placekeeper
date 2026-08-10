@@ -87,6 +87,31 @@ describe('viewer navigation math', () => {
       zoom: 1.2505,
     })).toBe(true);
   });
+
+  it('maps cropped and rotated destinations in natural page coordinates', () => {
+    expect(createPdfTargetLocation(target(PdfZoomMode.XYZ, [172, 740, 1]), {
+      page: { ...page, cropOrigin: { x: 100, y: 200 } },
+      viewport,
+      currentZoom: 1,
+      rotation: Rotation.Degree90,
+    })).toEqual({
+      pageIndex: 0,
+      anchor: { x: 72, y: 260 },
+      alignment: { xPercent: 0, yPercent: 0 },
+      zoom: 1,
+    });
+    expect(createPdfTargetLocation(target(PdfZoomMode.FitRectangle, [100, 200, 300, 600]), {
+      page: { ...page, cropOrigin: { x: 100, y: 100 } },
+      viewport,
+      currentZoom: 1,
+      rotation: Rotation.Degree90,
+    })).toEqual({
+      pageIndex: 0,
+      anchor: { x: 100, y: 500 },
+      alignment: { xPercent: 50, yPercent: 50 },
+      zoom: 1.5,
+    });
+  });
 });
 
 interface RectState {
@@ -114,6 +139,7 @@ function navigationHarness(options: {
   activeDocumentId?: string;
   constrainedHorizontal?: boolean;
   initiallyUnreadyPage?: boolean;
+  farTargetInitiallyUnmounted?: boolean;
   initiallyUnready?: boolean;
   manualZoom?: boolean;
   omitZoomLayoutEvent?: boolean;
@@ -136,6 +162,7 @@ function navigationHarness(options: {
   };
   const focus = vi.fn();
   let pageMounted = options.initiallyUnreadyPage !== true;
+  let farPageMounted = options.farTargetInitiallyUnmounted !== true;
   const pageElement = { getBoundingClientRect: () => domRect(pageRect), focus } as unknown as HTMLElement;
   const viewportElement = {
     getBoundingClientRect: () => domRect(viewportRect),
@@ -144,6 +171,9 @@ function navigationHarness(options: {
     querySelector: (selector: string) => {
       if (selector === '[data-viewer-framing-viewport]') return viewportElement;
       if (selector === '[data-page-index="0"]') return pageMounted ? pageElement : null;
+      if (selector === '[data-page-index="2"]') {
+        return options.farTargetInitiallyUnmounted && farPageMounted ? pageElement : null;
+      }
       return null;
     },
   } as unknown as HTMLElement;
@@ -180,6 +210,7 @@ function navigationHarness(options: {
     scrollToPage: (request: ScrollToPageOptions) => {
       log.push('scroll');
       currentPage = request.pageNumber;
+      if (request.pageNumber === 3) farPageMounted = true;
       const anchor = request.pageCoordinates ?? { x: 0, y: 0 };
       if (options.updateGeometry !== false) {
         pageRect.width = page.width * currentZoom;
@@ -225,7 +256,9 @@ function navigationHarness(options: {
     },
   };
   const document = {
-    pages: [{ index: 0, size: page, rotation: Rotation.Degree0, objectNumber: 1 }],
+    pages: (options.farTargetInitiallyUnmounted ? [0, 1, 2] : [0]).map((index) => ({
+      index, size: page, rotation: Rotation.Degree0, objectNumber: index + 1,
+    })),
   };
   const coreState = () => ({
     activeDocumentId,
@@ -349,6 +382,15 @@ describe('viewer navigation adapter', () => {
     expect(harness.navigation.captureLocation()).not.toBeNull();
   });
 
+  it('scrolls before waiting for a distant virtualized target page to mount', async () => {
+    const harness = navigationHarness({ farTargetInitiallyUnmounted: true });
+    const distantTarget = { ...target(PdfZoomMode.XYZ, [72, 640, 0]), pageIndex: 2 };
+
+    expect(await harness.navigation.applyTarget(distantTarget)).toBe(true);
+    expect(harness.log).toEqual(['scroll', 'scroll']);
+    expect(harness.navigation.captureLocation()?.pageIndex).toBe(2);
+  });
+
   it('accepts settled instant navigation on an axis with no available scroll range', async () => {
     const harness = navigationHarness({
       constrainedHorizontal: true,
@@ -413,6 +455,16 @@ describe('viewer navigation adapter', () => {
     await Promise.resolve();
     harness.navigation.replaceDocument(5);
     expect(await replaced).toBe(false);
+
+    const cancelled = harness.navigation.applyLocation({
+      pageIndex: 0,
+      anchor: { x: 60, y: 70 },
+      alignment: { xPercent: 0, yPercent: 0 },
+      zoom: 3,
+    });
+    await Promise.resolve();
+    harness.navigation.cancelPendingNavigation();
+    expect(await cancelled).toBe(false);
   });
 
   it('returns false on bounded timeout, malformed input, or failed postconditions', async () => {

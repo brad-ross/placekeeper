@@ -42,6 +42,7 @@ import {
   type ReferenceNavigationAction,
 } from "../review/reference-navigation-state.js";
 import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
+import { createTrailingTaskScheduler } from "../review/main-location-refresh.js";
 
 function itemCoordinates(item: ReviewState["items"][number]): { x: number; y: number } | undefined {
   const value = item.payload[item.kind === "insert" || item.kind === "pageNote" ? "position" : "rect"];
@@ -221,6 +222,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     });
   }
   const navigationCoordinator = coordinatorRef.current;
+  const mainLocationRefresh = useMemo(
+    () => createTrailingTaskScheduler(() => navigationCoordinator.refreshMainLocation()),
+    [navigationCoordinator],
+  );
 
   const onSelectionUpdate = useCallback((update: SelectionUpdate) => {
     setSelectionUpdate((current) => acceptSelectionUpdate(current, update));
@@ -232,9 +237,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   );
   useEffect(() => () => {
     navigationCoordinator.dispose();
+    mainLocationRefresh.cancel();
     viewerControlsRef.current?.dispose();
     placementAuthority.current.clear();
-  }, []);
+  }, [mainLocationRefresh, navigationCoordinator]);
   const sourceIdentity = `${state.source.fileId}:${state.source.digest}`;
   const sourceIdentityRef = useRef(sourceIdentity);
   const initialSourceIdentityRef = useRef(
@@ -248,6 +254,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [props.initialState]);
   useEffect(() => {
     if (sourceIdentity === sourceIdentityRef.current) return;
+    mainLocationRefresh.cancel();
     sourceIdentityRef.current = sourceIdentity;
     const nextGeneration = documentGenerationRef.current + 1;
     documentGenerationRef.current = nextGeneration;
@@ -255,7 +262,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     outlineDiscoveryRef.current = { status: 'loading', documentGeneration: nextGeneration };
     setOutlineDiscovery(outlineDiscoveryRef.current);
     navigationCoordinator.replaceDocument(nextGeneration);
-  }, [navigationCoordinator, sourceIdentity]);
+  }, [mainLocationRefresh, navigationCoordinator, sourceIdentity]);
   const onViewerInteraction = useCallback((event: ViewerInteractionEvent) => {
     if (event.type === 'pdf-link') {
       navigationCoordinator.requestLink(event.value);
@@ -266,7 +273,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       return;
     }
     if (event.type === 'scroll') {
-      navigationCoordinator.refreshMainLocation();
+      mainLocationRefresh.schedule();
       return;
     }
     if (event.type === "selection-placement") {
@@ -321,7 +328,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       }
       publishCorrespondence();
     }
-  }, [navigationCoordinator]);
+  }, [mainLocationRefresh, navigationCoordinator]);
   const onReferenceDocumentControls = useCallback((controls: ReferenceDocumentController | null) => {
     referenceControllerRef.current = controls;
   }, []);
@@ -359,9 +366,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setViewerState(controls.snapshot());
     controls.subscribe(() => {
       setViewerState(controls.snapshot());
-      navigationCoordinator.refreshMainLocation();
+      mainLocationRefresh.schedule();
     });
-  }, [navigationCoordinator]);
+  }, [mainLocationRefresh]);
   const onViewerFramingInitialized = useCallback((controls: ViewerFramingControls) => {
     setViewerFraming(controls);
   }, []);

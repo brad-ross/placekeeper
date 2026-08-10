@@ -295,7 +295,7 @@ export class NavigationCoordinator {
     ) return false;
     const status = controller.snapshot().status;
     if (status !== 'failed' && status !== 'loaded') return false;
-    const operation = this.begin(pending.documentGeneration);
+    const operation = this.begin(pending.documentGeneration, true);
     if (operation === null) return false;
     this.dependencies.setPendingReference({ status: 'loading', ...pending.metadata });
     const opened = status === 'failed' ? await controller.retry() : true;
@@ -712,9 +712,12 @@ export class NavigationCoordinator {
     return false;
   }
 
-  private begin(documentGeneration = this.documentGeneration): Operation | null {
+  private begin(
+    documentGeneration = this.documentGeneration,
+    preservePendingReference = false,
+  ): Operation | null {
     if (!this.generationMatches(documentGeneration)) return null;
-    this.cancelPendingTransactions();
+    this.cancelPendingTransactions(preservePendingReference);
     return {
       token: ++this.operationToken,
       documentGeneration: this.documentGeneration,
@@ -726,8 +729,14 @@ export class NavigationCoordinator {
     this.operationToken += 1;
   }
 
-  private cancelPendingTransactions(): void {
+  private cancelPendingTransactions(preservePendingReference = false): void {
+    this.dependencies.getMainNavigation()?.cancelPendingNavigation();
+    this.dependencies.getReferenceNavigation()?.cancelPendingNavigation();
     this.dependencies.dispatch({ type: 'cancel-pending-navigation' });
+    if (!preservePendingReference && this.pendingReference !== null) {
+      this.pendingReference = null;
+      this.dependencies.setPendingReference(null);
+    }
   }
 
   private generationMatches(documentGeneration: number): boolean {

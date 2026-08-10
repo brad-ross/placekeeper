@@ -185,6 +185,10 @@ export function controlledWorkspaceSurfaceAction(input: {
     : null;
 }
 
+export function workspaceIsVisible(requestedOpen: boolean, baseSurface: ReviewBaseSurface): boolean {
+  return requestedOpen && baseSurface !== 'finish';
+}
+
 /** Project-owned PDF links keep the adaptive workspace non-modal. */
 export function isPdfLinkControlTarget(target: EventTarget | null): boolean {
   const candidate = target as (EventTarget & { closest?: (selector: string) => Element | null }) | null;
@@ -250,7 +254,8 @@ export function ReviewShell(props: ReviewShellProps) {
     token: 0,
   });
   const navigation = props.navigationState ?? surface.navigation;
-  const workspaceOpen = props.workspaceOpen ?? surface.baseSurface === 'workspace';
+  const workspaceRequestedOpen = props.workspaceOpen ?? surface.baseSurface === 'workspace';
+  const workspaceOpen = workspaceIsVisible(workspaceRequestedOpen, surface.baseSurface);
   const workspaceMode = navigation.workspace.lastMode;
   const annotationsVisible = workspaceOpen && workspaceMode === 'annotations';
   const selectionAnchor = reliableSelection(props.selectionUpdate);
