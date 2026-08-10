@@ -608,9 +608,10 @@ export function createViewerNavigation(
       y: viewportRect.top + viewportRect.height * location.alignment.yPercent / 100,
     };
     const metrics = viewer.viewport.getMetrics();
-    // A fitted page can be narrower than its viewport, leaving no horizontal
-    // range in which to honor an XYZ x-coordinate. In that case the centered
-    // page position is the only valid settled postcondition.
+    // A fitted page can be smaller than the readable viewport while the
+    // document stack or an interface runway still reports scroll range. When
+    // the entire page is visible on an axis, that axis is already a stronger
+    // postcondition than exact anchor alignment.
     const axisMatchesOrIsConstrained = (
       actualCoordinate: number,
       expectedCoordinate: number,
@@ -634,7 +635,11 @@ export function createViewerNavigation(
         && scrollOffset >= maximumScroll - coordinateTolerance
         && actualCoordinate > expectedCoordinate;
     };
-    return axisMatchesOrIsConstrained(
+    const horizontalPageFullyVisible = pageRect.left >= viewportRect.left - coordinateTolerance
+      && pageRect.right <= viewportRect.right + coordinateTolerance;
+    const verticalPageFullyVisible = pageRect.top >= viewportRect.top - coordinateTolerance
+      && pageRect.bottom <= viewportRect.bottom + coordinateTolerance;
+    const horizontalMatches = horizontalPageFullyVisible || axisMatchesOrIsConstrained(
       actual.x,
       expected.x,
       metrics.scrollLeft,
@@ -643,7 +648,8 @@ export function createViewerNavigation(
       pageRect.left >= viewportRect.left - coordinateTolerance,
       pageRect.right <= viewportRect.right + coordinateTolerance,
       true,
-    ) && axisMatchesOrIsConstrained(
+    );
+    const verticalMatches = verticalPageFullyVisible || axisMatchesOrIsConstrained(
       actual.y,
       expected.y,
       metrics.scrollTop,
@@ -655,6 +661,7 @@ export function createViewerNavigation(
         && pageRect.bottom <= viewportRect.bottom + coordinateTolerance,
       false,
     );
+    return horizontalMatches && verticalMatches;
   };
 
   const waitForFrames = async (operation: NavigationOperation, count: number, deadline: number) => {

@@ -265,6 +265,23 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.reference.controls.applyLocation).toHaveBeenLastCalledWith(location(6, 80, 1.4));
   });
 
+  it('waits for dock layout settlement before restoring another reference tab', async () => {
+    const run = harness();
+    await run.coordinator.openReference(target(2), { label: 'A', pageContext: 'Page 3' });
+    await run.coordinator.openReference(target(5), { label: 'B', pageContext: 'Page 6' });
+    const settled = deferred<void>();
+    vi.mocked(run.dependencies.layout.settle).mockReturnValueOnce(settled.promise);
+    vi.mocked(run.reference.controls.applyLocation).mockClear();
+
+    const switching = run.coordinator.switchReference(target(2).identity);
+    await Promise.resolve();
+    expect(run.reference.controls.applyLocation).not.toHaveBeenCalled();
+
+    settled.resolve();
+    expect(await switching).toBe(true);
+    expect(run.state().activeTabIdentity).toBe(target(2).identity);
+  });
+
   it('lets only the newest rapid reference operation commit', async () => {
     const run = harness();
     const first = deferred<boolean>();

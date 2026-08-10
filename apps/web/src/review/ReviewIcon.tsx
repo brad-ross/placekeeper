@@ -1,5 +1,7 @@
 import {
   AlertCircle,
+  ArrowLeft,
+  ArrowRight,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -28,6 +30,8 @@ import {
 
 const reviewIcons = {
   alert: AlertCircle,
+  'arrow-left': ArrowLeft,
+  'arrow-right': ArrowRight,
   check: Check,
   'chevron-left': ChevronLeft,
   'chevron-right': ChevronRight,

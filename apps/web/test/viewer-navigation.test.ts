@@ -139,6 +139,7 @@ function domRect(rect: RectState): DOMRect {
 function navigationHarness(options: {
   activeDocumentId?: string;
   constrainedHorizontal?: boolean;
+  artificialHorizontalRunway?: boolean;
   constrainedVertical?: 'start' | 'end';
   initiallyUnreadyPage?: boolean;
   farTargetInitiallyUnmounted?: boolean;
@@ -276,7 +277,9 @@ function navigationHarness(options: {
       clientHeight: viewportRect.height,
       scrollTop: options.constrainedVertical === 'end' ? 1_600 : 0,
       scrollLeft: 0,
-      scrollWidth: options.constrainedHorizontal ? pageRect.width : 2_000,
+      scrollWidth: options.artificialHorizontalRunway
+        ? 1_000
+        : options.constrainedHorizontal ? pageRect.width : 2_000,
       scrollHeight: 2_000,
       clientLeft: 0,
       clientTop: 0,
@@ -405,6 +408,35 @@ describe('viewer navigation adapter', () => {
 
     expect(await harness.navigation.applyLocation(captured!)).toBe(true);
     expect(samePdfViewerLocation(harness.navigation.captureLocation(), captured)).toBe(true);
+  });
+
+  it('accepts a fully visible fitted page when a tray runway creates artificial horizontal scroll range', async () => {
+    const harness = navigationHarness({
+      constrainedHorizontal: true,
+      artificialHorizontalRunway: true,
+      runway: { right: 100, bottom: 0 },
+    });
+
+    expect(await harness.navigation.applyLocation({
+      pageIndex: 0,
+      anchor: { x: 300, y: 400 },
+      alignment: { xPercent: 50, yPercent: 50 },
+      zoom: 0.5,
+    })).toBe(true);
+  });
+
+  it('accepts a fully visible fitted page when document stacking leaves vertical scroll range', async () => {
+    const harness = navigationHarness({
+      constrainedHorizontal: true,
+      constrainedVertical: 'start',
+    });
+
+    expect(await harness.navigation.applyLocation({
+      pageIndex: 0,
+      anchor: { x: 300, y: 400 },
+      alignment: { xPercent: 50, yPercent: 50 },
+      zoom: 0.4,
+    })).toBe(true);
   });
 
   it('keeps target zoom resolution based on the viewer metrics when a runway is active', () => {

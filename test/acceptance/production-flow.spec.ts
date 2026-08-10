@@ -362,6 +362,48 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   expect(rightDetailTabBox.x).toBeGreaterThan(rightPrimaryTabBox.x + rightPrimaryTabBox.width - 1);
   expect(rightDetailTabBox.y).toBeCloseTo(rightPrimaryTabBox.y, 0);
   await expect(page.getByRole("button", { name: "Move References to bottom" })).toBeVisible();
+  const expectRightWorkspaceSelectorGeometry = async () => {
+    const geometry = await workspaceModes.evaluate((tablist) => {
+      const header = tablist.closest(".review-workspace__header");
+      const referencesSegment = tablist.querySelector<HTMLElement>(
+        "[data-workspace-tab-segment='references']",
+      );
+      const referencesTab = referencesSegment?.querySelector<HTMLElement>("[role='tab']");
+      const referencesLabel = referencesSegment?.querySelector<HTMLElement>(
+        ".review-workspace__tab-label",
+      );
+      const moveButton = referencesSegment?.querySelector<HTMLElement>(
+        "[data-reference-move='bottom']",
+      );
+      if (!header || !referencesSegment || !referencesTab || !referencesLabel || !moveButton) {
+        throw new Error("Right workspace selector geometry is incomplete.");
+      }
+      const headerRect = header.getBoundingClientRect();
+      const tablistRect = tablist.getBoundingClientRect();
+      const segmentRect = referencesSegment.getBoundingClientRect();
+      const labelRect = referencesLabel.getBoundingClientRect();
+      const moveRect = moveButton.getBoundingClientRect();
+      return {
+        leftInset: tablistRect.left - headerRect.left,
+        rightInset: headerRect.right - tablistRect.right,
+        segmentCenter: segmentRect.left + segmentRect.width / 2,
+        clusterCenter: (labelRect.left + moveRect.right) / 2,
+        gap: moveRect.left - labelRect.right,
+      };
+    });
+    expect(geometry.rightInset).toBeCloseTo(geometry.leftInset, 0);
+    expect(geometry.clusterCenter).toBeCloseTo(geometry.segmentCenter, 0);
+    expect(geometry.gap).toBeGreaterThanOrEqual(0);
+    expect(geometry.gap).toBeLessThanOrEqual(4);
+  };
+  await expectRightWorkspaceSelectorGeometry();
+  const referencesMode = workspaceModes.getByRole("tab", { name: "References", exact: true });
+  await workspaceModes.getByRole("tab", { name: "Outline", exact: true }).click();
+  const referencesSegment = workspaceModes.locator("[data-workspace-tab-segment='references']");
+  const referencesSegmentBox = await referencesSegment.boundingBox();
+  if (!referencesSegmentBox) throw new Error("References selector segment has no bounds.");
+  await referencesSegment.click({ position: { x: 3, y: referencesSegmentBox.height / 2 } });
+  await expect(referencesMode).toHaveAttribute("aria-selected", "true");
   await expect(mainWorkspace).toHaveAttribute("data-reference-main-mount", "stable");
   await expect(referenceWorkspace).toHaveAttribute("data-reference-mount", "stable");
 
@@ -395,6 +437,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   const rememberedRightValue = Number(await rightSplitter.getAttribute("aria-valuenow"));
   const referenceRightBounds = await workspace.boundingBox();
   expect(referenceRightBounds?.width).toBeCloseTo(rememberedRightValue, 0);
+  await expectRightWorkspaceSelectorGeometry();
 
   await page.getByRole("tab", { name: "Annotations", exact: true }).click();
   await expect.poll(async () => (await workspace.boundingBox())?.width ?? 0)
@@ -500,6 +543,52 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(emptyReference).toBeVisible();
   await expect(emptyReference).toBeFocused();
   expect(contactedOrigins).toEqual(new Set([new URL(documentRequests[0]!.url).origin]));
+});
+
+test("switches and sends references from the right-docked workspace", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFreshProductionFixture(page, referencePdf, "Right-docked reference launch failed");
+  const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
+  await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
+
+  await mainWorkspace.getByRole("button", {
+    name: "Open PDF link to Primary result, Page 2",
+  }).click();
+  await page.getByRole("menuitem", { name: /Open in References/u }).click();
+  const workspace = page.locator("[data-review-workspace]");
+  const primaryTab = page.getByRole("tab", { name: /Primary result/u });
+  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+
+  const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
+  const detailLink = referenceWorkspace.getByRole("button", {
+    name: "Open PDF link to Target-to-target detail link, Page 3",
+  });
+  await detailLink.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  await detailLink.focus();
+  await detailLink.press('Enter');
+  await page.getByRole("menuitem", { name: /Open in References/u }).click();
+  const detailTab = page.getByRole("tab", { name: /Target-to-target detail link/u });
+  await expect(detailTab).toHaveAttribute("aria-selected", "true");
+
+  await page.getByRole("button", { name: "Move References to right" }).click();
+  await expect(workspace).toHaveAttribute("data-workspace-presentation", "right");
+  await primaryTab.click();
+  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+  await detailTab.click();
+  await expect(page.locator(".review-workspace__status")).toHaveText("Reference active.");
+  await expect(detailTab).toHaveAttribute("aria-selected", "true");
+
+  await page.getByRole("button", { name: "Send to main" }).click();
+  await expect(page.locator(".review-workspace__status")).toHaveText(
+    "Reference sent to the main document.",
+  );
+  await expect(workspace).toHaveAttribute("data-workspace-open", "false");
+  await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
+  await expect(detailTab).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: /Primary result/u, includeHidden: true })).toHaveCount(1);
 });
 
 test("keeps outline and rejected link metadata inert inside the installed local session", async ({ page }) => {

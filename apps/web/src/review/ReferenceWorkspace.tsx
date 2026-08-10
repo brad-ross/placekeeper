@@ -255,10 +255,13 @@ export function ReferenceWorkspace({
         <div className="review-workspace__tabs" role="tablist" aria-label="Workspace modes">
           {modes.map((workspaceMode) => {
             const selected = workspaceMode === mode;
+            const hasMoveControl = workspaceMode === 'references' && Boolean(onMoveReferencesBottom);
             return (
               <span
                 key={workspaceMode}
-                className="review-workspace__tab-segment"
+                className={`review-workspace__tab-segment${
+                  hasMoveControl ? ' review-workspace__tab-segment--compound' : ''
+                }`}
                 data-workspace-tab-segment={workspaceMode}
                 data-workspace-tab-selected={selected ? 'true' : 'false'}
                 role="presentation"
@@ -278,9 +281,16 @@ export function ReferenceWorkspace({
                 onKeyDown={moveModeFocus}
                 onClick={() => onModeChange(workspaceMode)}
               >
-                {MODE_LABELS[workspaceMode]}
+                {hasMoveControl ? (
+                  <span className="sr-only">{MODE_LABELS[workspaceMode]}</span>
+                ) : MODE_LABELS[workspaceMode]}
               </button>
-              {workspaceMode === 'references' && onMoveReferencesBottom ? (
+              {hasMoveControl ? (
+                <span className="review-workspace__tab-label" aria-hidden="true">
+                  {MODE_LABELS[workspaceMode]}
+                </span>
+              ) : null}
+              {hasMoveControl ? (
                 <button
                   type="button"
                   className="review-workspace__move review-workspace__move--tab"

@@ -190,6 +190,8 @@ describe('shared reference workspace', () => {
     expect(html).toContain('aria-label="Close active reference"');
     expect(html).not.toMatch(/role="tab"[^>]*>[^<]*Close/u);
     expect(html).toContain('aria-live="polite"');
+    expect(html).toContain('review-workspace__tab-segment--compound');
+    expect(html).toContain('class="review-workspace__tab-label" aria-hidden="true">References</span>');
     expect(html).toMatch(/data-workspace-tab-segment="references"[^>]*data-workspace-tab-selected="true"[\s\S]*data-reference-move="bottom"/u);
   });
 

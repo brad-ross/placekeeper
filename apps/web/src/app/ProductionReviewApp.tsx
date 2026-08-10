@@ -233,6 +233,16 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         settle: async () => {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          const animations = [
+            ...productionRootRef.current?.querySelectorAll<HTMLElement>(
+              '[data-review-workspace], [data-tools-workspace]',
+            ) ?? [],
+          ].flatMap((surface) => surface.getAnimations())
+            .filter((animation) => animation.playState === 'running');
+          if (animations.length > 0) {
+            await Promise.allSettled(animations.map((animation) => animation.finished));
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          }
         },
         focusReferenceRail: () => {
           const layoutGeneration = layoutGenerationRef.current;

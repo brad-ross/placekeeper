@@ -331,6 +331,8 @@ export class NavigationCoordinator {
   async switchReference(identity: string): Promise<boolean> {
     const operation = this.begin();
     if (operation === null) return false;
+    await this.dependencies.layout.settle();
+    if (!this.isCurrent(operation)) return false;
     return this.restoreReferenceTab(operation, identity);
   }
 

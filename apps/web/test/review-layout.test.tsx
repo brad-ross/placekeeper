@@ -159,6 +159,44 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toMatch(/class="[^"]*review-icon[^"]*"/);
   });
 
+  it('groups document history and edit history in the centered controls with distinct icons', () => {
+    const html = renderToStaticMarkup(
+      <ReviewChrome
+        documentTitle="paper.pdf"
+        controls={viewerControls}
+        viewerState={viewerControls.snapshot()}
+        canUndo
+        canRedo
+        canNavigateBack
+        canNavigateForward
+        finishOpen={false}
+        onUndo={vi.fn()}
+        onRedo={vi.fn()}
+        onNavigateBack={vi.fn()}
+        onNavigateForward={vi.fn()}
+        onFinish={vi.fn()}
+      />,
+    );
+    const centerStart = html.indexOf('aria-label="PDF navigation, zoom, and history"');
+    const actionsStart = html.indexOf('aria-label="Review views"');
+
+    expect(centerStart).toBeGreaterThanOrEqual(0);
+    for (const label of [
+      'Back in document history',
+      'Forward in document history',
+      'Undo',
+      'Redo',
+    ]) {
+      const control = html.indexOf(`aria-label="${label}"`);
+      expect(control).toBeGreaterThan(centerStart);
+      expect(control).toBeLessThan(actionsStart);
+    }
+    expect(html).toMatch(/aria-label="Previous page"[^>]*>.*lucide-chevron-left/u);
+    expect(html).toMatch(/data-main-history="back"[^>]*>.*lucide-arrow-left/u);
+    expect(html).toMatch(/aria-label="Next page"[^>]*>.*lucide-chevron-right/u);
+    expect(html).toMatch(/data-main-history="forward"[^>]*>.*lucide-arrow-right/u);
+  });
+
   it('exposes annotation kind, ownership, and state hooks with a read-only peek', () => {
     const listHtml = renderToStaticMarkup(
       <AnnotationList
