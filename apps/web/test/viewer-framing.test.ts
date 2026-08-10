@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import type { PluginRegistry } from '@embedpdf/core';
+import { ScrollPlugin } from '@embedpdf/plugin-scroll';
+import { ViewportPlugin } from '@embedpdf/plugin-viewport';
+import { ZoomPlugin } from '@embedpdf/plugin-zoom';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   FramingSessionAuthority,
@@ -8,6 +12,8 @@ import {
   restoreViewportPosition,
   unionViewerRects,
 } from '../src/pdf/viewer-framing.js';
+import { createViewerFramingControls } from '../src/pdf/viewer-framing-adapter.js';
+import { workspaceRequestRequiresReframe } from '../src/review/use-annotation-tray-framing.js';
 
 describe('viewer framing', () => {
   it('uses existing margin and moves only by the remaining overlap', () => {
@@ -82,5 +88,75 @@ describe('viewer framing', () => {
     expect(authority.isCurrent(second)).toBe(true);
     authority.invalidateDocument('doc-b');
     expect(authority.isCurrent(second)).toBe(false);
+  });
+
+  it('preserves framing for reading-mode switches but reframes explicit mark requests', () => {
+    expect(workspaceRequestRequiresReframe({
+      presentationChanged: false,
+      requestChanged: true,
+      requestKind: 'reading',
+    })).toBe(false);
+    expect(workspaceRequestRequiresReframe({
+      presentationChanged: false,
+      requestChanged: true,
+      requestKind: 'mark',
+    })).toBe(true);
+    expect(workspaceRequestRequiresReframe({
+      presentationChanged: true,
+      requestChanged: false,
+      requestKind: 'reading',
+    })).toBe(true);
+  });
+
+  it('falls back to the native viewport when instant plugin framing is a no-op', () => {
+    const pluginScroll = vi.fn();
+    const viewportElement = {
+      scrollLeft: 0,
+      scrollTop: 0,
+      scrollWidth: 800,
+      scrollHeight: 900,
+      clientWidth: 500,
+      clientHeight: 600,
+      getBoundingClientRect: () => ({ left: 0, top: 0, right: 500, bottom: 600 }),
+    } as unknown as HTMLElement;
+    const registry = {
+      getStore: () => ({ getState: () => ({ core: { activeDocumentId: 'doc' } }) }),
+      getPlugin: (id: string) => id === ViewportPlugin.id
+        ? { provides: () => ({
+          forDocument: () => ({
+            getMetrics: () => ({
+              scrollLeft: 0,
+              scrollTop: 0,
+              scrollWidth: 800,
+              scrollHeight: 900,
+              clientWidth: 500,
+              clientHeight: 600,
+            }),
+            scrollTo: pluginScroll,
+          }),
+        }) }
+        : id === ScrollPlugin.id
+          ? { provides: () => ({ forDocument: () => ({ getCurrentPage: () => 1 }) }) }
+          : id === ZoomPlugin.id
+            ? { provides: () => ({
+              forDocument: () => ({ onZoomChange: () => () => undefined }),
+            }) }
+            : null,
+    } as unknown as PluginRegistry;
+    const controls = createViewerFramingControls({
+      registry,
+      root: () => ({
+        querySelector: (selector: string) => selector === '[data-viewer-framing-viewport]'
+          ? viewportElement
+          : null,
+      }) as unknown as HTMLElement,
+      updateRunway: vi.fn(),
+    });
+
+    controls.scrollTo({ left: 233, top: 18 }, 'auto');
+
+    expect(pluginScroll).toHaveBeenCalledWith({ x: 233, y: 18, behavior: 'auto' });
+    expect({ left: viewportElement.scrollLeft, top: viewportElement.scrollTop })
+      .toEqual({ left: 233, top: 18 });
   });
 });

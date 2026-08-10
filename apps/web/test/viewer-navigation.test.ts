@@ -112,14 +112,30 @@ function domRect(rect: RectState): DOMRect {
 
 function navigationHarness(options: {
   activeDocumentId?: string;
+  constrainedHorizontal?: boolean;
+  initiallyUnreadyPage?: boolean;
+  initiallyUnready?: boolean;
   manualZoom?: boolean;
+  omitZoomLayoutEvent?: boolean;
+  stickyScrollActivity?: boolean;
   updateGeometry?: boolean;
   timeoutMs?: number;
 } = {}) {
   const log: string[] = [];
-  const viewportRect: RectState = { left: 0, top: 0, width: 600, height: 400 };
-  const pageRect: RectState = { left: -100, top: -200, width: 600, height: 800 };
+  const viewportRect: RectState = {
+    left: 0,
+    top: 0,
+    width: options.initiallyUnready ? 0 : options.constrainedHorizontal ? 620 : 600,
+    height: options.initiallyUnready ? 0 : 400,
+  };
+  const pageRect: RectState = {
+    left: options.constrainedHorizontal ? 10 : -100,
+    top: -200,
+    width: 600,
+    height: 800,
+  };
   const focus = vi.fn();
+  let pageMounted = options.initiallyUnreadyPage !== true;
   const pageElement = { getBoundingClientRect: () => domRect(pageRect), focus } as unknown as HTMLElement;
   const viewportElement = {
     getBoundingClientRect: () => domRect(viewportRect),
@@ -127,7 +143,7 @@ function navigationHarness(options: {
   const root = {
     querySelector: (selector: string) => {
       if (selector === '[data-viewer-framing-viewport]') return viewportElement;
-      if (selector === '[data-page-index="0"]') return pageElement;
+      if (selector === '[data-page-index="0"]') return pageMounted ? pageElement : null;
       return null;
     },
   } as unknown as HTMLElement;
@@ -144,7 +160,9 @@ function navigationHarness(options: {
   const emitZoom = (zoom: number) => {
     currentZoom = zoom;
     for (const listener of zoomListeners) listener({ newZoom: zoom });
-    for (const listener of layoutListeners) listener();
+    if (!options.omitZoomLayoutEvent) {
+      for (const listener of layoutListeners) listener();
+    }
   };
   const zoom = {
     getState: () => ({ currentZoomLevel: currentZoom }),
@@ -166,16 +184,18 @@ function navigationHarness(options: {
       if (options.updateGeometry !== false) {
         pageRect.width = page.width * currentZoom;
         pageRect.height = page.height * currentZoom;
-        pageRect.left = viewportRect.left
-          + viewportRect.width * ((request.alignX ?? 0) / 100)
-          - anchor.x * currentZoom;
+        pageRect.left = options.constrainedHorizontal
+          ? viewportRect.left + (viewportRect.width - pageRect.width) / 2
+          : viewportRect.left
+            + viewportRect.width * ((request.alignX ?? 0) / 100)
+            - anchor.x * currentZoom;
         pageRect.top = viewportRect.top
           + viewportRect.height * ((request.alignY ?? 0) / 100)
           - anchor.y * currentZoom;
       }
-      scrolling = false;
+      scrolling = options.stickyScrollActivity === true;
       for (const listener of activityListeners) {
-        listener({ isScrolling: false, isSmoothScrolling: false });
+        listener({ isScrolling: scrolling, isSmoothScrolling: false });
       }
     },
     onLayoutChange: (listener: () => void) => {
@@ -191,7 +211,7 @@ function navigationHarness(options: {
       clientHeight: viewportRect.height,
       scrollTop: 0,
       scrollLeft: 0,
-      scrollWidth: 2_000,
+      scrollWidth: options.constrainedHorizontal ? pageRect.width : 2_000,
       scrollHeight: 2_000,
       clientLeft: 0,
       clientTop: 0,
@@ -244,7 +264,13 @@ function navigationHarness(options: {
     documentId: 'doc',
     documentGeneration: 4,
     timeoutMs: options.timeoutMs ?? 25,
-    nextFrame: async () => undefined,
+    nextFrame: async () => {
+      if (options.initiallyUnready && viewportRect.width === 0) {
+        viewportRect.width = 600;
+        viewportRect.height = 400;
+      }
+      if (options.initiallyUnreadyPage) pageMounted = true;
+    },
   });
 
   return {
@@ -304,6 +330,36 @@ describe('viewer navigation adapter', () => {
     expect(harness.log.at(-1)).toBe('scroll');
   });
 
+  it('waits for a newly portaled inactive-document viewport before applying its target', async () => {
+    const harness = navigationHarness({ activeDocumentId: 'shell-doc', initiallyUnready: true });
+
+    expect(await harness.navigation.applyTarget(target(PdfZoomMode.XYZ, [72, 640, 0]))).toBe(true);
+    expect(harness.log).toEqual(['scroll']);
+    expect(harness.navigation.captureLocation()).not.toBeNull();
+  });
+
+  it('waits when inactive-document metrics precede the portaled target page', async () => {
+    const harness = navigationHarness({
+      activeDocumentId: 'shell-doc',
+      initiallyUnreadyPage: true,
+    });
+
+    expect(await harness.navigation.applyTarget(target(PdfZoomMode.XYZ, [72, 640, 0]))).toBe(true);
+    expect(harness.log).toEqual(['scroll']);
+    expect(harness.navigation.captureLocation()).not.toBeNull();
+  });
+
+  it('accepts settled instant navigation on an axis with no available scroll range', async () => {
+    const harness = navigationHarness({
+      constrainedHorizontal: true,
+      stickyScrollActivity: true,
+      timeoutMs: 5,
+    });
+
+    expect(await harness.navigation.applyTarget(target(PdfZoomMode.XYZ, [72, 640, 0]))).toBe(true);
+    expect(harness.log).toEqual(['scroll']);
+  });
+
   it('relocates at unchanged zoom without waiting for a zoom event', async () => {
     const harness = navigationHarness({ manualZoom: true });
     expect(await harness.navigation.applyLocation({
@@ -313,6 +369,18 @@ describe('viewer navigation adapter', () => {
       zoom: 1,
     })).toBe(true);
     expect(harness.log).toEqual(['scroll']);
+  });
+
+  it('continues after zoom state settles without a redundant scroll-layout event', async () => {
+    const harness = navigationHarness({ omitZoomLayoutEvent: true, timeoutMs: 5 });
+
+    expect(await harness.navigation.applyLocation({
+      pageIndex: 0,
+      anchor: { x: 10, y: 20 },
+      alignment: { xPercent: 0, yPercent: 0 },
+      zoom: 1.5,
+    })).toBe(true);
+    expect(harness.log).toEqual(['zoom:1.5', 'scroll']);
   });
 
   it('cancels stale operations on supersession and document replacement', async () => {

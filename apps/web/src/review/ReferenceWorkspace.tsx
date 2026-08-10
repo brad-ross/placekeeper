@@ -65,6 +65,27 @@ function focusWithoutScroll(element: HTMLElement | null | undefined): void {
   element?.focus({ preventScroll: true });
 }
 
+export function chooseWorkspaceModeFocusTarget(input: {
+  readonly mode: WorkspaceMode;
+  readonly pendingStatus: PendingReferencePanel['status'] | null;
+  readonly remembered: HTMLElement | null;
+  readonly panel: HTMLElement | null;
+  readonly retry: HTMLElement | null;
+  readonly activeReference: HTMLElement | null;
+  readonly emptyReference: HTMLElement | null;
+}): HTMLElement | null {
+  if (input.mode === 'references') {
+    if (input.pendingStatus === 'error') return input.retry;
+    if (input.pendingStatus === 'loading') return input.panel;
+    // Once the final tab is gone, a connected panel remembered from an older
+    // transient focus is less specific than the current empty-state target.
+    if (input.emptyReference !== null) return input.emptyReference;
+  }
+  if (input.remembered?.isConnected) return input.remembered;
+  if (input.mode === 'references') return input.activeReference ?? input.emptyReference;
+  return input.panel;
+}
+
 export function ReferenceWorkspace({
   open,
   workspaceRef,
@@ -101,17 +122,19 @@ export function ReferenceWorkspace({
   }>({ open: false, mode, pendingStatus: null });
   const previousActiveReference = useRef<string | null>(null);
 
-  const modeFallback = (targetMode: WorkspaceMode): HTMLElement | null => {
-    const remembered = modeFocusMemory.current.get(targetMode);
-    if (remembered?.isConnected) return remembered;
-    if (targetMode === 'references') {
-      if (pendingReference?.status === 'error') return retryReferenceRef.current;
-      if (pendingReference?.status === 'loading') return panelRefs.current.get('references') ?? null;
-      if (activeTabIdentity) return referenceTabRefs.current.get(activeTabIdentity) ?? null;
-      return emptyReferenceRef.current;
-    }
-    return panelRefs.current.get(targetMode) ?? null;
-  };
+  const modeFallback = (targetMode: WorkspaceMode): HTMLElement | null => (
+    chooseWorkspaceModeFocusTarget({
+      mode: targetMode,
+      pendingStatus: pendingReference?.status ?? null,
+      remembered: modeFocusMemory.current.get(targetMode) ?? null,
+      panel: panelRefs.current.get(targetMode) ?? null,
+      retry: retryReferenceRef.current,
+      activeReference: activeTabIdentity
+        ? referenceTabRefs.current.get(activeTabIdentity) ?? null
+        : null,
+      emptyReference: emptyReferenceRef.current,
+    })
+  );
 
   useLayoutEffect(() => {
     const was = previous.current;

@@ -55,6 +55,7 @@ describe('installed EmbedPDF link renderer replacement', () => {
 
     expect(PDF_LINK_RENDERER_ID).toBe('link');
     expect(renderer.id).toBe('link');
+    expect(renderer.zIndex).toBeGreaterThan(2);
     const rendered = renderer.render(rendererProps(link({ type: 'destination', destination })));
     expect(rendered.type).toBe(PdfLinkControl);
     const button = PdfLinkControl(rendered.props);
@@ -64,6 +65,7 @@ describe('installed EmbedPDF link renderer replacement', () => {
     expect(button.props['aria-haspopup']).toBe('menu');
     expect(button.props['aria-controls']).toBe(PDF_LINK_ACTION_MENU_ID);
     expect(button.props['aria-expanded']).toBe(false);
+    expect(button.props.style.pointerEvents).toBe('auto');
     const opener = {
       getBoundingClientRect: () => ({
         left: 10, top: 20, right: 90, bottom: 40, width: 80, height: 20,

@@ -183,6 +183,13 @@ export function controlledWorkspaceSurfaceAction(input: {
     : null;
 }
 
+/** Project-owned PDF links keep the adaptive workspace non-modal. */
+export function isPdfLinkControlTarget(target: EventTarget | null): boolean {
+  const candidate = target as (EventTarget & { closest?: (selector: string) => Element | null }) | null;
+  return typeof candidate?.closest === 'function'
+    && candidate.closest('[data-pdf-link-control]') !== null;
+}
+
 type OutsidePointerGesture =
   | {
       readonly phase: 'tracking';
@@ -665,7 +672,6 @@ export function ReviewShell(props: ReviewShellProps) {
       '[data-review-chrome], [data-review-nested-host], [data-link-action-popover]',
     ) !== null)
   );
-
   return (
     <section
       className="review-shell"
@@ -690,6 +696,7 @@ export function ReviewShell(props: ReviewShellProps) {
         const tracksOutsideDismiss = workspaceOpen
           && event.isPrimary
           && event.button === 0
+          && !isPdfLinkControlTarget(event.target)
           && !isWorkspaceOrChrome(event.target);
         outsidePointerRef.current = tracksOutsideDismiss
           ? {
@@ -753,6 +760,9 @@ export function ReviewShell(props: ReviewShellProps) {
       onPointerCancelCapture={() => { outsidePointerRef.current = undefined; }}
       onClickCapture={(event) => {
         if (props.linkActionRequest) return;
+        // The reference workspace is intentionally non-modal: source links in
+        // either PDF remain actionable so they can add or reactivate tabs.
+        if (isPdfLinkControlTarget(event.target)) return;
         if (event.target instanceof Element) {
           const markTrigger = event.target.closest<HTMLElement>('[data-owned-focus-id]');
           if (markTrigger) surfaceTriggersRef.current.set('workspace', markTrigger);

@@ -12,6 +12,7 @@ let launchUrl = "";
 let sourceRoot = "";
 let pdf = "";
 let rotatedPdf = "";
+let referencePdf = "";
 let initialSessionId = "";
 
 async function installSelectionCaptureGate(page: Page): Promise<void> {
@@ -83,14 +84,39 @@ async function sha256(path: string): Promise<string> {
   return createHash("sha256").update(await readFile(path)).digest("hex");
 }
 
+async function openFreshProductionFixture(
+  page: Page,
+  pdfPath: string,
+  failureMessage: string,
+): Promise<{ sessionId: string; url: string }> {
+  const launched = await host.open({ pdfPath, sourceRootPath: sourceRoot, fork: true });
+  if (!launched.ok || launched.kind === "recovery-offered") throw new Error(failureMessage);
+  await page.goto(launched.url);
+  await expect(page.locator("[data-production-review]")).toBeVisible();
+  return { sessionId: launched.sessionId, url: launched.url };
+}
+
+async function openAnnotationsWorkspace(page: Page) {
+  const workspace = page.getByRole("button", { name: /^Workspace/u });
+  if (await workspace.getAttribute("aria-expanded") !== "true") await workspace.click();
+  await expect(workspace).toHaveAttribute("aria-expanded", "true");
+  const annotations = page.getByRole("tab", { name: "Annotations", exact: true });
+  await expect(annotations).toBeVisible();
+  if (await annotations.getAttribute("aria-selected") !== "true") await annotations.click();
+  await expect(annotations).toHaveAttribute("aria-selected", "true");
+  return { annotations, workspace };
+}
+
 test.beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "pdf-proofreader-production-"));
   sourceRoot = join(root, "source");
   await mkdir(sourceRoot);
   pdf = join(root, "paper.pdf");
   rotatedPdf = join(root, "rotated.pdf");
+  referencePdf = join(root, "reference-navigation.pdf");
   await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
   await copyFile(resolve("test/fixtures/pdfs/rotation-90-crop.pdf"), rotatedPdf);
+  await copyFile(resolve("test/fixtures/pdfs/reference-navigation.pdf"), referencePdf);
   await copyFile(resolve("test/fixtures/latex/paper.tex"), join(sourceRoot, "paper.tex"));
   host = await ProofreaderHost.start({
     recoveryRoot: join(root, "recovery"),
@@ -105,6 +131,317 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await host?.close();
   if (root) await rm(root, { recursive: true, force: true });
+});
+
+test("keeps a real reference chain beside the anchored main PDF through reflow and history", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const documentRequests: Array<{ url: string; authorization?: string; cookie?: string }> = [];
+  page.on("request", (request) => {
+    if (!/\/document\//u.test(new URL(request.url()).pathname)) return;
+    const headers = request.headers();
+    documentRequests.push({
+      url: request.url(),
+      ...(headers.authorization === undefined ? {} : { authorization: headers.authorization }),
+      ...(headers.cookie === undefined ? {} : { cookie: headers.cookie }),
+    });
+  });
+  const contactedOrigins = new Set<string>();
+  page.on("request", (request) => contactedOrigins.add(new URL(request.url()).origin));
+
+  await openFreshProductionFixture(page, referencePdf, "Reference navigation launch failed");
+  const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
+  const mainViewport = mainWorkspace.locator("[data-viewer-framing-viewport]");
+  const mainPageOne = mainWorkspace.locator("[data-page-index='0']");
+  await expect(mainPageOne).toBeVisible();
+  await expect(page.getByLabel("Current page")).toHaveText("1 / 4");
+  await mainWorkspace.evaluate((element) => element.setAttribute("data-reference-main-mount", "stable"));
+
+  const primaryLink = mainWorkspace.getByRole("button", {
+    name: "Open PDF link to Primary result, Page 2",
+  });
+  await primaryLink.focus();
+  await page.keyboard.press("Enter");
+  const primaryMenu = page.getByRole("menu", { name: "Open Primary result, Page 2" });
+  await expect(primaryMenu).toBeVisible();
+  await expect(primaryMenu.getByRole("menuitem", { name: /Open in References/u })).toBeFocused();
+  const menuBounds = await primaryMenu.boundingBox();
+  expect(menuBounds).not.toBeNull();
+  expect(menuBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(menuBounds!.y).toBeGreaterThanOrEqual(0);
+  expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(1280);
+  expect(menuBounds!.y + menuBounds!.height).toBeLessThanOrEqual(900);
+  await page.keyboard.press("Escape");
+  await expect(primaryMenu).toHaveCount(0);
+  await expect(primaryLink).toBeFocused();
+  await expect(page.getByLabel("Current page")).toHaveText("1 / 4");
+
+  await primaryLink.click();
+  await page.getByRole("menuitem", { name: /Open in References/u }).click();
+  const workspace = page.locator("[data-review-workspace]");
+  await expect(workspace).toHaveAttribute("data-workspace-open", "true");
+  await expect(workspace).toHaveAttribute("data-workspace-presentation", "right");
+  const primaryTab = page.getByRole("tab", { name: /Primary result/u });
+  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+  await expect(primaryTab).toBeFocused();
+  await expect.poll(() => workspace.evaluate((element) => getComputedStyle(element).transform))
+    .toBe('none');
+
+  const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
+  const referenceViewport = referenceWorkspace.locator("[data-viewer-framing-viewport]");
+  await expect(referenceWorkspace.locator("[data-page-index='1']")).toBeVisible();
+  await referenceWorkspace.evaluate((element) => element.setAttribute("data-reference-mount", "stable"));
+  const mainScrollBefore = await mainViewport.evaluate((element) => ({
+    left: element.scrollLeft,
+    top: element.scrollTop,
+  }));
+  await referenceViewport.evaluate((element) => { element.scrollTop += 96; });
+  await expect.poll(() => referenceViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(await mainViewport.evaluate((element) => ({
+    left: element.scrollLeft,
+    top: element.scrollTop,
+  }))).toEqual(mainScrollBefore);
+  await expect(page.getByLabel("Current page")).toHaveText("1 / 4");
+
+  const detailLink = referenceWorkspace.getByRole("button", {
+    name: "Open PDF link to Target-to-target detail link, Page 3",
+  });
+  await detailLink.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  await detailLink.focus();
+  await page.keyboard.press("Enter");
+  const openDetailReference = page.getByRole("menuitem", { name: /Open in References/u });
+  await expect(openDetailReference).toBeFocused();
+  await openDetailReference.evaluate((element) => (element as HTMLButtonElement).click());
+  const detailTab = page.getByRole("tab", { name: /Target-to-target detail link/u });
+  await expect(detailTab).toHaveAttribute("aria-selected", "true");
+  await expect(detailTab).toBeFocused();
+  await expect(page.getByRole("tablist", { name: "Open references" }).getByRole("tab")).toHaveCount(2);
+
+  const repeatedAlias = mainWorkspace.getByRole("button", {
+    name: "Open PDF link to Repeated primary result, Page 2",
+  });
+  await repeatedAlias.click();
+  await expect(page.getByRole("menuitem", { name: /Open in References/u })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+  await expect(primaryTab).toBeFocused();
+  await expect(page.getByRole("tablist", { name: "Open references" }).getByRole("tab")).toHaveCount(2);
+  await expect.poll(() => documentRequests.length).toBe(2);
+  expect(new Set(documentRequests.map(({ url }) => url)).size).toBe(1);
+  expect(documentRequests.every(({ authorization, cookie }) => (
+    authorization?.startsWith("Bearer ") === true && cookie === undefined
+  ))).toBe(true);
+
+  await page.setViewportSize({ width: 760, height: 900 });
+  await expect(workspace).toHaveAttribute("data-workspace-presentation", "bottom");
+  await expect(mainWorkspace).toHaveAttribute("data-reference-main-mount", "stable");
+  await expect(referenceWorkspace).toHaveAttribute("data-reference-mount", "stable");
+  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(workspace).toHaveAttribute("data-workspace-presentation", "right");
+  await expect(mainWorkspace).toHaveAttribute("data-reference-main-mount", "stable");
+  await expect(referenceWorkspace).toHaveAttribute("data-reference-mount", "stable");
+
+  await detailTab.click();
+  await expect(detailTab).toHaveAttribute("aria-selected", "true");
+  await primaryTab.click();
+  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("button", { name: "Close active reference" }).click();
+  await expect(primaryTab).toHaveCount(0);
+  await expect(detailTab).toHaveAttribute("aria-selected", "true");
+  await expect(detailTab).toBeFocused();
+  const liveDetailPage = referenceWorkspace.locator("[data-page-index='2']");
+  await liveDetailPage.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  await expect.poll(async () => {
+    const [viewportBounds, pageBounds] = await Promise.all([
+      referenceViewport.boundingBox(),
+      liveDetailPage.boundingBox(),
+    ]);
+    if (!viewportBounds || !pageBounds) return Number.POSITIVE_INFINITY;
+    return Math.abs(
+      (viewportBounds.y + viewportBounds.height / 2)
+      - (pageBounds.y + pageBounds.height / 2),
+    );
+  }).toBeLessThan(2);
+
+  await page.getByRole("button", { name: "Send to main" }).click();
+  await expect(workspace).toHaveAttribute("data-workspace-open", "false");
+  await expect(page.getByRole("tablist", { name: "Open references", includeHidden: true })).toHaveCount(0);
+  await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
+  await expect(mainWorkspace.locator("[data-page-index='2']")).toBeFocused();
+  const back = page.getByRole("button", { name: "Back in document history" });
+  const forward = page.getByRole("button", { name: "Forward in document history" });
+  await expect(back).toBeEnabled();
+  await back.click();
+  await expect(page.getByLabel("Current page")).toHaveText("1 / 4");
+  await expect(forward).toBeEnabled();
+  await forward.click();
+  await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
+
+  const workspaceControl = page.getByRole("button", { name: /Workspace/u });
+  await workspaceControl.click();
+  const emptyReference = page.locator("[data-reference-empty]");
+  await expect(emptyReference).toBeVisible();
+  await expect(emptyReference).toBeFocused();
+  expect(contactedOrigins).toEqual(new Set([new URL(documentRequests[0]!.url).origin]));
+});
+
+test("keeps outline and rejected link metadata inert inside the installed local session", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const contactedOrigins = new Set<string>();
+  page.on("request", (request) => contactedOrigins.add(new URL(request.url()).origin));
+  const opened = await openFreshProductionFixture(
+    page,
+    referencePdf,
+    "Reference safety launch failed",
+  );
+  const sessionOrigin = new URL(opened.url).origin;
+  const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
+  await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
+  await mainWorkspace.evaluate((element) => element.setAttribute("data-safety-main-mount", "stable"));
+
+  const workspaceControl = page.getByRole("button", { name: /Workspace/u });
+  await workspaceControl.click();
+  const workspace = page.locator("[data-review-workspace]");
+  await expect(workspace).toHaveAttribute("data-workspace-open", "true");
+  await expect(page.getByRole("tab", { name: "Outline" })).toHaveAttribute("aria-selected", "true");
+  const outline = page.getByRole("navigation", { name: "Document outline" });
+  await expect(outline).toBeVisible();
+  await expect(outline.getByRole("button", { name: "Collapse Details" })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+  await expect(outline.getByRole("button", { name: "Nested result, Page 3" })).toBeVisible();
+  const hostileOutline = outline.getByRole("button", {
+    name: "scriptalert(1)/script hostile outline, Page 2",
+  });
+  await expect(hostileOutline).toBeVisible();
+  await expect(outline.locator("script,img")).toHaveCount(0);
+  expect(await hostileOutline.textContent()).not.toMatch(/[<>\u202e\u0000]/u);
+
+  const details = outline.getByRole("button", { name: "Details, Page 3", exact: true });
+  await details.focus();
+  await page.keyboard.press("Enter");
+  await expect(details).toBeFocused();
+  await expect(workspace).toHaveAttribute("data-workspace-open", "true");
+  await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
+  await expect(outline.locator("[aria-current='location']")).toHaveAccessibleName(
+    "Nested result, Page 3",
+  );
+  await page.getByRole("button", { name: "Close workspace" }).click();
+  await expect(workspaceControl).toBeFocused();
+
+  const back = page.getByRole("button", { name: "Back in document history" });
+  const forward = page.getByRole("button", { name: "Forward in document history" });
+  await back.click();
+  await expect(page.getByLabel("Current page")).toHaveText("1 / 4");
+  await expect(back).toBeDisabled();
+  await expect(forward).toBeEnabled();
+
+  const hostileLink = mainWorkspace.getByRole("button", {
+    name: "Open PDF link to img src=x onerror=alert(1), Page 3",
+  });
+  await hostileLink.click();
+  const hostileMenu = page.getByRole("menu", {
+    name: "Open img src=x onerror=alert(1), Page 3",
+  });
+  await expect(hostileMenu).toBeVisible();
+  await expect(hostileMenu.locator("script,img")).toHaveCount(0);
+  expect(await hostileMenu.textContent()).not.toMatch(/[<>\u202e\u0000]/u);
+  await page.keyboard.press("Escape");
+  await expect(hostileLink).toBeFocused();
+  await expect(page.getByLabel("Current page")).toHaveText("1 / 4");
+
+  const next = page.getByRole("button", { name: "Next page" });
+  for (const expectedPage of ["2 / 4", "3 / 4", "4 / 4"]) {
+    await next.click();
+    await expect(page.getByLabel("Current page")).toHaveText(expectedPage);
+  }
+  await expect(back).toBeDisabled();
+  await expect(forward).toBeEnabled();
+  const unavailable = mainWorkspace.getByRole("button", { name: "PDF link target unavailable" });
+  await expect(unavailable).toHaveCount(6);
+  for (let index = 0; index < 6; index += 1) {
+    await unavailable.nth(index).click();
+    await expect(page.locator("[data-link-action-popover]")).toHaveCount(0);
+  }
+  await expect(page.locator(".review-workspace__status")).toHaveText(
+    "This PDF link cannot be opened safely.",
+  );
+  await expect(page.getByLabel("Current page")).toHaveText("4 / 4");
+  await expect(back).toBeDisabled();
+  await expect(forward).toBeEnabled();
+  await expect(page.locator("[data-reference-tab]")).toHaveCount(0);
+  await expect(workspace).toHaveAttribute("data-workspace-open", "false");
+  await expect(mainWorkspace).toHaveAttribute("data-safety-main-mount", "stable");
+  expect(await page.locator("body").textContent()).not.toMatch(/example\.invalid|Calculator\.app|Bearer /u);
+  expect(contactedOrigins).toEqual(new Set([sessionOrigin]));
+});
+
+test("reports an honest empty outline and restores workspace focus", async ({ page }) => {
+  await openFreshProductionFixture(page, pdf, "No-outline launch failed");
+  const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
+  await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
+  await mainWorkspace.evaluate((element) => element.setAttribute("data-empty-outline-main-mount", "stable"));
+  const workspaceControl = page.getByRole("button", { name: /Workspace/u });
+  await workspaceControl.click();
+  const outlinePanel = page.locator("#workspace-panel-outline");
+  await expect(page.locator("[data-outline-state='empty']")).toHaveText(
+    "This PDF has no embedded outline.",
+  );
+  await expect(outlinePanel).toBeFocused();
+  await page.getByRole("button", { name: "Close workspace" }).click();
+  await expect(workspaceControl).toBeFocused();
+  await expect(mainWorkspace).toHaveAttribute("data-empty-outline-main-mount", "stable");
+});
+
+test("retries one failed reference clone without exposing raw load details", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  let documentRequestCount = 0;
+  const documentHeaders: Array<{ authorization?: string; cookie?: string }> = [];
+  await page.route("**/document/**", async (route) => {
+    documentRequestCount += 1;
+    const headers = route.request().headers();
+    documentHeaders.push({
+      ...(headers.authorization === undefined ? {} : { authorization: headers.authorization }),
+      ...(headers.cookie === undefined ? {} : { cookie: headers.cookie }),
+    });
+    if (documentRequestCount === 2) {
+      await route.abort("failed");
+      return;
+    }
+    await route.continue();
+  });
+  await openFreshProductionFixture(page, referencePdf, "Reference retry launch failed");
+  const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
+  const primaryLink = mainWorkspace.getByRole("button", {
+    name: "Open PDF link to Primary result, Page 2",
+  });
+  await primaryLink.click();
+  await page.getByRole("menuitem", { name: /Open in References/u }).click();
+
+  const retry = page.getByRole("button", { name: "Retry reference" });
+  await expect(retry).toBeVisible();
+  await expect(retry).toBeFocused();
+  await expect(page.locator("[data-reference-state='error']")).toContainText(
+    "Reference unavailable.",
+  );
+  await expect(page.locator(".review-workspace__status")).toHaveText(
+    "Reference unavailable. Retry when ready.",
+  );
+  expect(await page.locator("body").textContent()).not.toMatch(/net::|ERR_|Bearer /u);
+
+  await retry.click();
+  const primaryTab = page.getByRole("tab", { name: /Primary result/u });
+  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+  await expect(primaryTab).toBeFocused();
+  await expect(page.locator("[data-reference-pdf-viewport] [data-page-index='1']")).toBeVisible();
+  expect(documentRequestCount).toBe(3);
+  expect(documentHeaders.every(({ authorization, cookie }) => (
+    authorization?.startsWith("Bearer ") === true && cookie === undefined
+  ))).toBe(true);
 });
 
 test("one installed-style browser tree preserves review state across responsive layout", async ({ page }) => {
@@ -281,7 +618,7 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
   const pdfPage = page.locator("[data-page-index='0']").first();
   const runway = page.locator('[data-viewer-runway]');
   const workspace = page.locator('.pdf-workspace');
-  const annotations = page.getByRole('button', { name: /Annotations/u });
+  const workspaceControl = page.getByRole('button', { name: /^Workspace/u });
   await expect(pdfPage).toBeVisible();
   await expect(viewport).toHaveCount(1);
   await expect(runway).toHaveCount(1);
@@ -309,7 +646,7 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
   const zoomBefore = await page.getByLabel('Zoom level').textContent();
   if (!widePageBefore) throw new Error('Wide PDF page has no bounds.');
 
-  await annotations.click();
+  await openAnnotationsWorkspace(page);
   await expect(stage).toHaveAttribute('data-annotation-presentation', 'right');
   await expect(drawer).toHaveAttribute('data-annotation-presentation', 'right');
   await expect(drawer).toBeVisible();
@@ -332,13 +669,13 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
     wideScrollBefore.width + Math.floor(expectedHorizontalReveal),
   );
 
-  await annotations.click();
+  await workspaceControl.click();
   await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
     .toBeCloseTo(wideScrollBefore.left, 0);
   const widePageRestored = await pdfPage.boundingBox();
   expect(widePageRestored?.x).toBeCloseTo(widePageBefore.x, 0);
 
-  await annotations.click();
+  await workspaceControl.click();
   await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
     .toBeCloseTo(wideScrollBefore.left + expectedHorizontalReveal, 0);
   await viewport.dispatchEvent('wheel', { deltaX: 40, deltaY: 0 });
@@ -346,7 +683,7 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
     element.scrollLeft += 32;
     return element.scrollLeft;
   });
-  await annotations.click();
+  await workspaceControl.click();
   const naturalHorizontalMaximum = await viewport.evaluate((element) => (
     Math.max(0, element.scrollWidth - element.clientWidth)
   ));
@@ -354,12 +691,12 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
     .toBeCloseTo(Math.min(deliberateLeft, naturalHorizontalMaximum), 0);
   await viewport.evaluate((element, left) => { element.scrollLeft = left; }, wideScrollBefore.left);
 
-  await annotations.click();
+  await workspaceControl.click();
   await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
     .toBeCloseTo(wideScrollBefore.left + expectedHorizontalReveal, 0);
   await page.setViewportSize({ width: 1240, height: 900 });
   await expect(stage).toHaveAttribute('data-annotation-presentation', 'right');
-  await annotations.click();
+  await workspaceControl.click();
   await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
     .toBeCloseTo(wideScrollBefore.left, 0);
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -370,7 +707,7 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
     left: element.scrollLeft,
     top: element.scrollTop,
   }));
-  await annotations.click();
+  await workspaceControl.click();
   await expect(drawer).toHaveAttribute('data-annotation-presentation', 'bottom');
   const narrowStage = await stage.boundingBox();
   const bottomDrawer = await drawer.boundingBox();
@@ -380,7 +717,7 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
   expect(bottomDrawer.y + bottomDrawer.height).toBeCloseTo(narrowStage.y + narrowStage.height, 0);
   expect(bottomDrawer.height).toBeCloseTo(narrowStage.height * 0.43, 0);
   expect(await viewport.evaluate((element) => element.scrollTop)).toBeCloseTo(narrowScrollBefore.top, 0);
-  await annotations.click();
+  await workspaceControl.click();
 
   const pageBox = await pdfPage.boundingBox();
   if (!pageBox) throw new Error('Narrow PDF page has no bounds.');
@@ -442,7 +779,7 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
   await expect(page.locator(`[data-review-item="${activeReviewId}"]`)).toHaveAttribute('data-active', 'true');
   await expect(workspace).toHaveAttribute('data-adaptive-mount-probe', 'stable');
 
-  await annotations.click();
+  await workspaceControl.click();
   await expect.poll(() => viewport.evaluate((element) => element.scrollTop))
     .toBeCloseTo(markScrollBefore, 0);
   expect(await viewport.evaluate((element) => element.scrollLeft)).toBeCloseTo(narrowScrollBefore.left, 0);
@@ -464,7 +801,7 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   await expect(page.locator('.pdf-workspace')).toHaveCount(1);
   const pdfPage = page.locator("[data-page-index='0']").first();
   await expect(pdfPage).toBeVisible();
-  await page.getByRole('button', { name: /Annotations/u }).click();
+  const { workspace: workspaceControl } = await openAnnotationsWorkspace(page);
   await expect(page.getByRole('button', { name: 'Close annotations' })).toHaveCount(0);
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-annotation-presentation', 'bottom');
   await expect.poll(async () => {
@@ -480,7 +817,7 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   const zoomBefore = await page.getByLabel('Zoom level').textContent();
   await page.getByRole('button', { name: 'Zoom in' }).click();
   await expect(page.getByLabel('Zoom level')).not.toHaveText(zoomBefore ?? '');
-  await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'true');
+  await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
 
   const scrollViewport = page.locator('[data-viewer-framing-viewport]');
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -489,7 +826,7 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
     await page.getByRole('button', { name: 'Zoom in' }).click();
   }
   await expect.poll(() => scrollViewport.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
-  await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'true');
+  await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
   const scrollBefore = await scrollViewport.evaluate((element) => element.scrollTop);
   const stage = await page.locator('[data-review-stage]').boundingBox();
   if (!stage) throw new Error('Review stage has no bounds.');
@@ -497,7 +834,7 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   await page.mouse.wheel(0, 240);
   await expect.poll(() => scrollViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(scrollBefore);
   const scrolledTop = await scrollViewport.evaluate((element) => element.scrollTop);
-  await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'true');
+  await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
 
   await scrollViewport.dispatchEvent('pointerdown', {
     pointerId: 41, pointerType: 'touch', isPrimary: true, button: 0, clientX: 24, clientY: 300,
@@ -511,7 +848,7 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   await scrollViewport.dispatchEvent('pointerup', {
     pointerId: 41, pointerType: 'touch', isPrimary: true, button: 0, clientX: 24, clientY: 300,
   });
-  await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'true');
+  await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
 
   const dragStart = { x: stage.x + 24, y: stage.y + stage.height / 2 };
   await page.mouse.move(dragStart.x, dragStart.y);
@@ -519,7 +856,7 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   await page.mouse.move(dragStart.x, dragStart.y + 18);
   await page.mouse.move(dragStart.x, dragStart.y);
   await page.mouse.up();
-  await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'true');
+  await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
 
   await scrollViewport.evaluate((element) => {
     element.dataset.pointerCancels = '0';
@@ -528,7 +865,7 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
     });
   });
   await page.mouse.click(stage.x + 24, stage.y + stage.height / 2);
-  await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'false');
+  await expect(workspaceControl).toHaveAttribute('aria-expanded', 'false');
   await expect(scrollViewport).toHaveAttribute('data-pointer-cancels', '1');
   const maximumAfterClose = await scrollViewport.evaluate((element) => (
     Math.max(0, element.scrollHeight - element.clientHeight)
@@ -552,7 +889,7 @@ test('closing the Annotation Tray from PDF text does not arm drag selection', as
   await page.goto(launched.url);
   const pdfPage = page.locator("[data-page-index='0']").first();
   await waitForRenderedPageImage(pdfPage);
-  await page.getByRole('button', { name: /Annotations/u }).click();
+  const { workspace: workspaceControl } = await openAnnotationsWorkspace(page);
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-annotation-presentation', 'bottom');
 
   const selectionRects = pdfPage.locator(':scope > div[style*="mix-blend-mode"]');
@@ -560,7 +897,7 @@ test('closing the Annotation Tray from PDF text does not arm drag selection', as
   const box = await pdfPage.boundingBox();
   if (!box) throw new Error('Rendered PDF page has no bounds.');
   await page.mouse.click(box.x + 76, box.y + 98);
-  await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'false');
+  await expect(workspaceControl).toHaveAttribute('aria-expanded', 'false');
   await page.mouse.move(box.x + 245, box.y + 98);
   await page.waitForTimeout(250);
 
@@ -583,7 +920,7 @@ test('keeps PDF drag selection available while the Annotation Tray is open', asy
   await page.goto(launched.url);
   const pdfPage = page.locator("[data-page-index='0']").first();
   await waitForRenderedPageImage(pdfPage);
-  await page.getByRole('button', { name: /Annotations/u }).click();
+  const { workspace: workspaceControl } = await openAnnotationsWorkspace(page);
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-annotation-presentation', 'bottom');
 
   const selectionRects = pdfPage.locator(':scope > div[style*="mix-blend-mode"]');
@@ -597,7 +934,7 @@ test('keeps PDF drag selection available while the Annotation Tray is open', asy
   await page.mouse.up();
 
   await expect.poll(() => selectionRects.count()).toBeGreaterThan(rectCountBeforeDrag);
-  await expect(page.getByRole('button', { name: /Annotations/u })).toHaveAttribute('aria-expanded', 'true');
+  await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
 });
 
 test("creates a canonical Page Note from a real PDF context gesture without secondary-activating its mark", async ({ page }) => {
@@ -659,7 +996,7 @@ test("creates a canonical Page Note from a real PDF context gesture without seco
   });
   await expect(page.getByRole("menu", { name: "Page actions" })).toHaveCount(0);
   await expect(mark).toHaveAttribute("data-active", "false");
-  await expect(page.getByRole("button", { name: /Annotations/u })).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("button", { name: /^Workspace/u })).toHaveAttribute("aria-expanded", "false");
   expect(host.broker.state(launched.sessionId)?.revision).toBe(1);
   expect(browserErrors).toEqual([]);
 });

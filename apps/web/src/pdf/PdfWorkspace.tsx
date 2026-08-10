@@ -420,7 +420,7 @@ export function PdfWorkspace({
                 />
               </ZoomGestureWrapper>
             </Viewport>
-            {referenceViewportHost && referenceDocument?.document ? (
+            {referenceViewportHost && referenceDocument ? (
               <ReferencePdfViewport
                 documentId={REFERENCE_PDF_DOCUMENT_ID}
                 documentState={referenceDocument}

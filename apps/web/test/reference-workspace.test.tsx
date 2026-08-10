@@ -15,7 +15,10 @@ import {
   findCurrentOutlineItem,
   type OutlineOrderPoint,
 } from '../src/review/OutlineNavigator.js';
-import { ReferenceWorkspace } from '../src/review/ReferenceWorkspace.js';
+import {
+  chooseWorkspaceModeFocusTarget,
+  ReferenceWorkspace,
+} from '../src/review/ReferenceWorkspace.js';
 import type { PdfOutlineItem } from '../src/pdf/pdf-outline.js';
 
 const target = (identity: string, pageIndex: number) => ({
@@ -89,6 +92,34 @@ describe('link action chooser', () => {
 });
 
 describe('shared reference workspace', () => {
+  it('prioritizes a newly available retry control over remembered loading-panel focus', () => {
+    const remembered = { isConnected: true } as HTMLElement;
+    const retry = {} as HTMLElement;
+    expect(chooseWorkspaceModeFocusTarget({
+      mode: 'references',
+      pendingStatus: 'error',
+      remembered,
+      panel: remembered,
+      retry,
+      activeReference: null,
+      emptyReference: null,
+    })).toBe(retry);
+  });
+
+  it('focuses the current empty References state instead of stale connected panel memory', () => {
+    const remembered = { isConnected: true } as HTMLElement;
+    const emptyReference = {} as HTMLElement;
+    expect(chooseWorkspaceModeFocusTarget({
+      mode: 'references',
+      pendingStatus: null,
+      remembered,
+      panel: remembered,
+      retry: null,
+      activeReference: null,
+      emptyReference,
+    })).toBe(emptyReference);
+  });
+
   it('renders one selected outer mode, hidden inert siblings, and manual reference tabs', () => {
     const html = renderToStaticMarkup(
       <ReferenceWorkspace

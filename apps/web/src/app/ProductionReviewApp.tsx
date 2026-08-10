@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { PluginRegistry } from "@embedpdf/core";
 import { ScrollPlugin } from "@embedpdf/plugin-scroll";
 import { SelectionPlugin } from "@embedpdf/plugin-selection";
@@ -223,10 +223,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }
   const navigationCoordinator = coordinatorRef.current;
 
-  const onSelectionUpdate = (update: SelectionUpdate) => {
+  const onSelectionUpdate = useCallback((update: SelectionUpdate) => {
     setSelectionUpdate((current) => acceptSelectionUpdate(current, update));
     if (update.kind === "reliable") setToolError(null);
-  };
+  }, []);
   const readinessMessage = selectionReadinessMessage(selectionUpdate);
   const publishCorrespondence = () => setCorrespondingItemId(
     rowCorrespondenceRef.current ?? markFocusRef.current ?? markHoverRef.current,
@@ -258,7 +258,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setOutlineDiscovery(outlineDiscoveryRef.current);
     navigationCoordinator.replaceDocument(nextGeneration);
   }, [navigationCoordinator, sourceIdentity]);
-  const onViewerInteraction = (event: ViewerInteractionEvent) => {
+  const onViewerInteraction = useCallback((event: ViewerInteractionEvent) => {
     if (event.type === 'pdf-link') {
       navigationCoordinator.requestLink(event.value);
       return;
@@ -323,7 +323,50 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       }
       publishCorrespondence();
     }
-  };
+  }, [navigationCoordinator]);
+  const onReferenceDocumentControls = useCallback((controls: ReferenceDocumentController | null) => {
+    referenceControllerRef.current = controls;
+  }, []);
+  const onViewerNavigationInitialized = useCallback((
+    scope: 'main' | 'reference',
+    navigation: PdfViewerNavigation | null,
+  ) => {
+    if (scope === 'main') {
+      mainNavigationRef.current = navigation;
+      navigation?.replaceDocument(documentGenerationRef.current);
+      navigationCoordinator.refreshMainLocation();
+      return;
+    }
+    referenceNavigationRef.current = navigation;
+    navigation?.replaceDocument(documentGenerationRef.current);
+    if (navigation) {
+      const generation = documentGenerationRef.current;
+      const current = referenceNavigationWaiters.current.splice(0);
+      for (const waiter of current) {
+        waiter.resolve(waiter.documentGeneration === generation ? navigation : null);
+      }
+    }
+  }, [navigationCoordinator]);
+  const onOutlineDiscovery = useCallback((discovery: PdfOutlineDiscovery) => {
+    if (discovery.documentGeneration !== documentGenerationRef.current) return;
+    outlineDiscoveryRef.current = discovery;
+    setOutlineDiscovery(discovery);
+    navigationCoordinator.refreshCurrentOutline();
+  }, [navigationCoordinator]);
+  const onViewerInitialized = useCallback(async (registry: PluginRegistry) => {
+    viewerRegistry.current = registry;
+    viewerControlsRef.current?.dispose();
+    const controls = createViewerControls(registry);
+    viewerControlsRef.current = controls;
+    setViewerState(controls.snapshot());
+    controls.subscribe(() => {
+      setViewerState(controls.snapshot());
+      navigationCoordinator.refreshMainLocation();
+    });
+  }, [navigationCoordinator]);
+  const onViewerFramingInitialized = useCallback((controls: ViewerFramingControls) => {
+    setViewerFraming(controls);
+  }, []);
   const viewer = props.viewer ?? (
     <App
       embeddedInReviewShell
@@ -340,46 +383,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       inventoryRetryGeneration={inventoryRetryGeneration}
       documentGeneration={documentGeneration}
       referenceViewportHost={referenceViewportHost}
-      onReferenceDocumentControls={(controls) => {
-        referenceControllerRef.current = controls;
-      }}
-      onViewerNavigationInitialized={(scope, navigation) => {
-        if (scope === 'main') {
-          mainNavigationRef.current = navigation;
-          navigation?.replaceDocument(documentGenerationRef.current);
-          navigationCoordinator.refreshMainLocation();
-          return;
-        }
-        referenceNavigationRef.current = navigation;
-        navigation?.replaceDocument(documentGenerationRef.current);
-        if (navigation) {
-          const generation = documentGenerationRef.current;
-          const current = referenceNavigationWaiters.current.splice(0);
-          for (const waiter of current) {
-            waiter.resolve(waiter.documentGeneration === generation ? navigation : null);
-          }
-        }
-      }}
-      onOutlineDiscovery={(discovery) => {
-        if (discovery.documentGeneration !== documentGenerationRef.current) return;
-        outlineDiscoveryRef.current = discovery;
-        setOutlineDiscovery(discovery);
-        navigationCoordinator.refreshCurrentOutline();
-      }}
-      onViewerInitialized={async (registry) => {
-        viewerRegistry.current = registry;
-        viewerControlsRef.current?.dispose();
-        const controls = createViewerControls(registry);
-        viewerControlsRef.current = controls;
-        setViewerState(controls.snapshot());
-        controls.subscribe(() => {
-          setViewerState(controls.snapshot());
-          navigationCoordinator.refreshMainLocation();
-        });
-      }}
-      onViewerFramingInitialized={(controls) => {
-        setViewerFraming(controls);
-      }}
+      onReferenceDocumentControls={onReferenceDocumentControls}
+      onViewerNavigationInitialized={onViewerNavigationInitialized}
+      onOutlineDiscovery={onOutlineDiscovery}
+      onViewerInitialized={onViewerInitialized}
+      onViewerFramingInitialized={onViewerFramingInitialized}
     />
   );
 

@@ -22,9 +22,21 @@ const WORKSPACE_SIDE_MAX_PX = 24 * 16;
 const WORKSPACE_SIDE_EDGE_GAP_PX = 3 * 16;
 const ANNOTATION_MARK_GUTTER_PX = 10;
 
+function waitForWorkspaceLayout(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 export type WorkspaceOpenRequest =
   | { readonly kind: 'reading'; readonly token: number }
   | { readonly kind: 'mark'; readonly reviewId: string; readonly pageIndex: number; readonly token: number };
+
+export function workspaceRequestRequiresReframe(input: {
+  readonly presentationChanged: boolean;
+  readonly requestChanged: boolean;
+  readonly requestKind: WorkspaceOpenRequest['kind'];
+}): boolean {
+  return input.presentationChanged || (input.requestChanged && input.requestKind === 'mark');
+}
 
 interface ActiveFramingSession {
   readonly documentId: string;
@@ -170,10 +182,11 @@ export function useWorkspaceFraming(input: {
           requestToken: input.request.token,
         };
         sessionRef.current = session;
-      } else if (
-        session.presentation !== presentation
-        || session.requestToken !== input.request.token
-      ) {
+      } else if (workspaceRequestRequiresReframe({
+        presentationChanged: session.presentation !== presentation,
+        requestChanged: session.requestToken !== input.request.token,
+        requestKind: input.request.kind,
+      })) {
         const restored = restoreViewportPosition({
           baseline: session.baseline,
           current: first.scroll,
@@ -187,6 +200,11 @@ export function useWorkspaceFraming(input: {
         session.automatic = { left: 0, top: 0 };
         session.presentation = presentation;
         session.requestToken = input.request.token;
+      } else {
+        // Switching workspace modes can issue a fresh reading request while the
+        // tray remains open. Preserve the established reading frame; only an
+        // explicit mark request needs a new target reveal.
+        session.requestToken = input.request.token;
       }
 
       const workspaceBounds = workspaceRef.current?.getBoundingClientRect();
@@ -196,6 +214,11 @@ export function useWorkspaceFraming(input: {
         ? { right: exclusionWidth, bottom: 0 }
         : { right: 0, bottom: exclusionHeight };
       await controls.setRunway(runway);
+      if (!authorityRef.current.isCurrent(operation) || !input.workspaceOpen) return;
+      // WebKit can commit the runway element before exposing its updated
+      // scroll extent. Measure only after one guarded layout frame so reveal
+      // coordinates are not clamped against the preceding maximum.
+      await waitForWorkspaceLayout();
       if (!authorityRef.current.isCurrent(operation) || !input.workspaceOpen) return;
 
       const measured = controls.snapshot(target);

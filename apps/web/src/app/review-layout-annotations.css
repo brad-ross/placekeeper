@@ -247,6 +247,7 @@
 .reference-panel__actions button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; font-size: 10px; }
 
 .reference-panel__viewport {
+  grid-area: 2 / 1;
   min-width: 0;
   min-height: 0;
   overflow: hidden;

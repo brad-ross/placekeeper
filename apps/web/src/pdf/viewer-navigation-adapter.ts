@@ -240,7 +240,6 @@ function waitForPromise(
 
 function waitForZoom(
   zoom: ZoomScope,
-  scroll: ScrollScope,
   requestedZoom: number,
   tolerance: number,
   signal: AbortSignal,
@@ -249,32 +248,20 @@ function waitForZoom(
   if (signal.aborted || timeoutMs <= 0) return Promise.resolve(false);
   return new Promise((resolve) => {
     let settled = false;
-    let zoomReady = false;
-    let layoutReady = false;
     let unsubscribeZoom: () => void = () => undefined;
-    let unsubscribeLayout: () => void = () => undefined;
     const finish = (result: boolean) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       signal.removeEventListener('abort', abort);
       unsubscribeZoom();
-      unsubscribeLayout();
       resolve(result);
     };
     const abort = () => finish(false);
     const timer = setTimeout(() => finish(false), timeoutMs);
     signal.addEventListener('abort', abort, { once: true });
-    const finishWhenReady = () => {
-      if (zoomReady && layoutReady) finish(true);
-    };
     unsubscribeZoom = zoom.onZoomChange((event) => {
-      if (Math.abs(event.newZoom - requestedZoom) <= tolerance) zoomReady = true;
-      finishWhenReady();
-    });
-    unsubscribeLayout = scroll.onLayoutChange(() => {
-      layoutReady = true;
-      finishWhenReady();
+      if (Math.abs(event.newZoom - requestedZoom) <= tolerance) finish(true);
     });
     try {
       zoom.requestZoom(requestedZoom);
@@ -441,7 +428,12 @@ export function createViewerNavigation(
       x: viewportRect.left + metrics.clientWidth * location.alignment.xPercent / 100,
       y: viewportRect.top + metrics.clientHeight * location.alignment.yPercent / 100,
     };
-    return Math.abs(actual.x - expected.x) <= coordinateTolerance
+    // A fitted page can be narrower than its viewport, leaving no horizontal
+    // range in which to honor an XYZ x-coordinate. In that case the centered
+    // page position is the only valid settled postcondition.
+    const horizontalMatches = metrics.scrollWidth <= metrics.clientWidth + coordinateTolerance
+      || Math.abs(actual.x - expected.x) <= coordinateTolerance;
+    return horizontalMatches
       && Math.abs(actual.y - expected.y) <= coordinateTolerance;
   };
 
@@ -473,6 +465,10 @@ export function createViewerNavigation(
         alignY: location.alignment.yPercent,
       });
       if (!await waitForFrames(operation, 2, deadline)) return false;
+      // An instant scroll can have reached its semantic postcondition while
+      // the viewer still reports transient scroll activity. Do not turn that
+      // already-settled destination into a bounded-timeout failure.
+      if (locationMatchesView(viewer, location)) return true;
       if (!viewer.viewport.isScrolling() && !viewer.viewport.isSmoothScrolling()) {
         resolveIdle(true);
       }
@@ -513,13 +509,12 @@ export function createViewerNavigation(
     const zoomed = Math.abs(currentZoom - location.zoom) <= zoomTolerance
       ? true
       : await waitForZoom(
-          viewer.zoom,
-          viewer.scroll,
-          location.zoom,
-          zoomTolerance,
-          operation.signal,
-          deadline - Date.now(),
-        );
+        viewer.zoom,
+        location.zoom,
+        zoomTolerance,
+        operation.signal,
+        deadline - Date.now(),
+      );
     if (!zoomed || !operationIsCurrent(operation)) return false;
     if (!await waitForFrames(operation, 2, deadline)) return false;
     if (!await scrollAndWait(viewer, location, operation, deadline)) return false;
@@ -572,12 +567,33 @@ export function createViewerNavigation(
     });
   };
 
+  const waitForTargetLocation = async (
+    viewer: ActiveViewer,
+    target: PdfNavigationTarget,
+    operation: NavigationOperation,
+  ): Promise<PdfViewerLocation | null> => {
+    const deadline = Date.now() + timeoutMs;
+    while (operationIsCurrent(operation) && Date.now() < deadline) {
+      const location = resolveTarget(viewer, target);
+      // Plugin metrics can become valid before the inactive document's
+      // portaled page tree commits (notably in WebKit). Applying at that point
+      // cannot verify its semantic destination, so keep the existing bounded
+      // readiness wait until the target page has usable geometry too.
+      if (location !== null && pageGeometry(viewer, location.pageIndex) !== null) return location;
+      if (!await waitForPromise(nextFrame(), operation.signal, deadline - Date.now())) return null;
+    }
+    return null;
+  };
+
   const applyTarget = async (target: PdfNavigationTarget): Promise<boolean> => {
     const viewer = activeViewer();
     if (!viewer) return false;
     const operation = beginOperation(viewer);
     if (!operationIsCurrent(operation)) return false;
-    const location = resolveTarget(viewer, target);
+    // A newly opened inactive document can notify before its portaled viewport
+    // has committed usable metrics. Let that bounded render settle rather than
+    // treating the target as malformed.
+    const location = await waitForTargetLocation(viewer, target, operation);
     return location ? applyResolvedLocation(viewer, location, operation) : false;
   };
 

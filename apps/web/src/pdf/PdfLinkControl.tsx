@@ -140,6 +140,9 @@ export function PdfLinkControl({
         border: 0,
         background: 'transparent',
         cursor: classification.ok ? 'pointer' : 'not-allowed',
+        // EmbedPDF's annotation container disables pointer events by default;
+        // the project-owned native control is the intentional hit target.
+        pointerEvents: 'auto',
         ...linkBorderStyle(annotation),
       }}
     />
@@ -151,6 +154,9 @@ export function createPdfLinkAnnotationRenderer(
 ): BoxedAnnotationRenderer {
   return createRenderer<PdfLinkAnnoObject>({
     id: PDF_LINK_RENDERER_ID,
+    // Keep project-owned link hit targets above the render/selection layers.
+    // Keyboard focus can reach a lower layer, but pointer hit testing cannot.
+    zIndex: 10,
     matches: (annotation): annotation is PdfLinkAnnoObject => annotation.type === PdfAnnotationSubtype.LINK,
     render: ({ currentObject }) => (
       <PdfLinkControl annotation={currentObject} {...options} />

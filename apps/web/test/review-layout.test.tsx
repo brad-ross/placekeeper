@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   controlledWorkspaceSurfaceAction,
+  isPdfLinkControlTarget,
   ReviewShell,
 } from '../src/app/ReviewShell.js';
 import { AnnotationList } from '../src/review/AnnotationList.js';
@@ -29,6 +30,17 @@ const ownedAnnotation: ReviewItem = {
 };
 
 describe('review shell layout and accessibility contract', () => {
+  it('keeps project-owned PDF links outside the workspace-dismiss path', () => {
+    const linkTarget = {
+      closest: (selector: string) => selector === '[data-pdf-link-control]' ? {} : null,
+    } as unknown as EventTarget;
+    const ordinaryTarget = { closest: () => null } as unknown as EventTarget;
+
+    expect(isPdfLinkControlTarget(linkTarget)).toBe(true);
+    expect(isPdfLinkControlTarget(ordinaryTarget)).toBe(false);
+    expect(isPdfLinkControlTarget(null)).toBe(false);
+  });
+
   it('synchronizes externally controlled workspace open and hide without disturbing Finish', () => {
     const openedAction = controlledWorkspaceSurfaceAction({
       open: true,

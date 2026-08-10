@@ -111,11 +111,28 @@ test.describe('EmbedPDF browser-worker viewer gate', () => {
       .toMatchObject({ kind: 'destination', pageIndex: -1 });
     expect(result.navigationLinks.find(({ contents }) => contents === 'Out-of-bounds destination')?.target)
       .toMatchObject({ kind: 'destination', pageIndex: 99 });
+    const primary = result.navigationLinks.find(({ contents }) => contents === 'Primary result');
+    const repeated = result.navigationLinks.find(({ subject }) => subject === 'Repeated primary result');
+    const alias = result.navigationLinks.find(({ contents }) => contents === 'Named alias for primary result');
+    const distinct = result.navigationLinks.find(({ contents }) => contents === 'Distinct coordinate on primary page');
+    expect(repeated?.target).toEqual(primary?.target);
+    expect(alias?.target).toMatchObject({
+      kind: primary?.target.kind,
+      pageIndex: primary?.target.pageIndex,
+      zoomMode: primary?.target.zoomMode,
+      params: primary?.target.params,
+    });
+    expect(distinct?.target.pageIndex).toBe(primary?.target.pageIndex);
+    expect(distinct?.target.params).not.toEqual(primary?.target.params);
+    expect(result.navigationLinks.filter(({ pageIndex }) => pageIndex === 3).map(({ target }) => target.kind))
+      .toEqual(['uri', 'unsupported', 'launch', 'destination', 'missing', 'destination']);
     expect(result.bookmarks.map(({ title, depth }) => ({ title, depth }))).toEqual(expect.arrayContaining([
       { title: 'Overview', depth: 0 },
       { title: 'Details', depth: 0 },
       { title: 'Nested result', depth: 1 },
     ]));
+    expect(result.bookmarks.some(({ title }) => title.includes('<script>alert(1)</script>'))).toBe(true);
+    expect(result.activeContentExecuted).toBe(false);
     expect(result.remoteRequests).toEqual([]);
     expect(remoteRequests).toEqual([]);
 

@@ -31,12 +31,10 @@ export function ReferencePdfViewport({
   onInteraction,
   onViewportElement,
 }: ReferencePdfViewportProps) {
-  const document = documentState.document;
-  if (!document) return null;
   const linkRenderers = sourceAnnotationLinkRenderers({
     sourceScope: 'reference',
     documentGeneration,
-    pageCount: document.pages.length,
+    pageCount: documentState.document?.pages.length ?? 0,
     ...(onInteraction === undefined ? {} : { onInteraction }),
   });
 
