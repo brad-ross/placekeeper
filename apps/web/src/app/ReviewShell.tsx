@@ -30,12 +30,22 @@ import { reliableSelection, type SelectionUpdate } from '../pdf/selection-state.
 import type { ViewerControls, ViewerControlsSnapshot } from '../pdf/viewer-controls.js';
 import { unavailableViewerControls } from '../pdf/viewer-controls.js';
 import type { ViewerFramingControls, ViewerPosition } from '../pdf/viewer-framing.js';
-import { dispatchNeutralViewerPointerUp } from '../pdf/viewer-interaction-events.js';
+import {
+  dispatchNeutralViewerPointerUp,
+  type ViewerPdfLinkInvocation,
+} from '../pdf/viewer-interaction-events.js';
+import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
 import { AnnotationList } from '../review/AnnotationList.js';
 import { AnnotationPeek } from '../review/AnnotationPeek.js';
 import { CommentComposer } from '../review/CommentComposer.js';
 import { ContextActionPalette, type ContextPlacement } from '../review/ContextActionPalette.js';
 import { PageActionMenu } from '../review/PageActionMenu.js';
+import { LinkActionPopover, type LinkActionChoice, type LinkActionDismissReason } from '../review/LinkActionPopover.js';
+import {
+  ReferenceWorkspace,
+  type PendingReferencePanel,
+  type ReferenceWorkspaceTab,
+} from '../review/ReferenceWorkspace.js';
 import { ReviewChrome } from '../review/ReviewChrome.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
 import { FinishReviewDrawer } from './FinishReviewDrawer.js';
@@ -46,14 +56,18 @@ import {
 } from '../review/input-controller.js';
 import { reviewActionForKey } from '../review/review-actions.js';
 import {
-  useAnnotationTrayFraming,
-  type AnnotationOpenRequest,
+  useWorkspaceFraming,
+  type WorkspaceOpenRequest,
 } from '../review/use-annotation-tray-framing.js';
 import {
   INITIAL_REVIEW_SURFACE_STATE,
   reduceReviewSurface,
   type ReviewBaseSurface,
 } from '../review/review-surface-state.js';
+import type {
+  ReferenceNavigationState,
+  WorkspaceMode,
+} from '../review/reference-navigation-state.js';
 import './review-layout.css';
 
 type TextDraft =
@@ -116,6 +130,26 @@ export interface ReviewShellProps {
   finishConfirmationActive?: boolean;
   onFinishReview?(): void | Promise<void>;
   onDiscardReview?(): void | Promise<void>;
+  /** U6 may control workspace visibility and retained navigation state. */
+  workspaceOpen?: boolean;
+  navigationState?: ReferenceNavigationState;
+  referenceTabs?: readonly ReferenceWorkspaceTab[];
+  pendingReference?: PendingReferencePanel | null;
+  outlineDiscovery?: PdfOutlineDiscovery;
+  currentOutlineItemId?: string | null;
+  linkActionRequest?: ViewerPdfLinkInvocation | null;
+  navigationAnnouncement?: string;
+  onLinkActionChoose?(choice: LinkActionChoice, request: ViewerPdfLinkInvocation): void;
+  onLinkActionDismiss?(request: ViewerPdfLinkInvocation, reason: LinkActionDismissReason): void;
+  onWorkspaceModeChange?(mode: WorkspaceMode): void;
+  onWorkspaceDismiss?(): void;
+  onReferenceTabActivate?(identity: string): void;
+  onReferenceTabClose?(identity: string): void;
+  onReferenceSendToMain?(identity: string): void;
+  onReferenceRetry?(): void;
+  onOutlineActivate?(item: PdfOutlineItem, control: HTMLButtonElement): void;
+  onReferenceViewportHost?(element: HTMLDivElement | null): void;
+  onWorkspaceModeFocusTokenChange?(mode: WorkspaceMode, token: string): void;
   children?: ReactNode;
 }
 
@@ -149,7 +183,10 @@ export function ReviewShell(props: ReviewShellProps) {
   const [surface, dispatchSurface] = useReducer(
     reduceReviewSurface,
     props.listOpen === true
-      ? { ...INITIAL_REVIEW_SURFACE_STATE, baseSurface: 'annotations' }
+      ? reduceReviewSurface(INITIAL_REVIEW_SURFACE_STATE, {
+          type: 'open-workspace',
+          mode: 'annotations',
+        })
       : INITIAL_REVIEW_SURFACE_STATE,
   );
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
@@ -168,22 +205,36 @@ export function ReviewShell(props: ReviewShellProps) {
   const draftTriggerRef = useRef<HTMLElement>(null);
   const editTriggerRef = useRef<HTMLButtonElement>(null);
   const surfaceTriggersRef = useRef(new Map<ReviewBaseSurface, HTMLElement>());
+  const workspaceControlRef = useRef<HTMLButtonElement>(null);
+  const shellRef = useRef<HTMLElement>(null);
   const outsidePointerRef = useRef<OutsidePointerGesture | undefined>(undefined);
   const annotationRequestTokenRef = useRef(0);
-  const [annotationRequest, setAnnotationRequest] = useState<AnnotationOpenRequest>({
+  const [workspaceRequest, setWorkspaceRequest] = useState<WorkspaceOpenRequest>({
     kind: 'reading',
     token: 0,
   });
-  const listOpen = surface.baseSurface === 'annotations';
+  const navigation = props.navigationState ?? surface.navigation;
+  const workspaceOpen = props.workspaceOpen ?? surface.baseSurface === 'workspace';
+  const workspaceMode = navigation.workspace.lastMode;
+  const annotationsVisible = workspaceOpen && workspaceMode === 'annotations';
   const selectionAnchor = reliableSelection(props.selectionUpdate);
   const selectionActionsAvailable = selectionAnchor !== null
     && props.selectionUpdate.generation !== consumedSelectionGeneration;
   const lastPlacedPageNoteToken = useRef<number | undefined>(undefined);
   const existingAnnotations = props.existingAnnotations ?? { status: 'loading', generation: 0 };
-  const trayFraming = useAnnotationTrayFraming({
-    listOpen,
+  const referenceTabs = props.referenceTabs ?? navigation.tabs.map((tab) => ({
+    identity: tab.identity,
+    label: `Page ${tab.originalTarget.pageIndex + 1}`,
+    pageContext: `Page ${tab.originalTarget.pageIndex + 1}`,
+  }));
+  const outlineDiscovery = props.outlineDiscovery ?? {
+    status: 'loading' as const,
+    documentGeneration: navigation.documentGeneration,
+  };
+  const workspaceFraming = useWorkspaceFraming({
+    workspaceOpen,
     ...(props.viewerFraming === undefined ? {} : { controls: props.viewerFraming }),
-    request: annotationRequest,
+    request: workspaceRequest,
   });
 
   useEffect(() => {
@@ -201,7 +252,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const transitionBaseSurface = (surfaceName: ReviewBaseSurface) => {
     dismissPageNoteAuthority();
-    if (surface.baseSurface === 'annotations' && surfaceName !== 'annotations') {
+    if (surface.baseSurface === 'workspace' && surfaceName === 'finish') {
       clearActiveAnnotation();
     }
     dispatchSurface({ type: 'open-base', surface: surfaceName });
@@ -213,7 +264,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   useEffect(() => {
     clearPeekTimer();
-    if (listOpen) {
+    if (workspaceOpen) {
       setPeekItemId(undefined);
       return;
     }
@@ -224,7 +275,7 @@ export function ReviewShell(props: ReviewShellProps) {
       peekTimerRef.current = setTimeout(() => setPeekItemId(undefined), 180);
     }
     return clearPeekTimer;
-  }, [listOpen, props.correspondingItemId]);
+  }, [workspaceOpen, props.correspondingItemId]);
 
   useEffect(() => {
     const request = props.activationRequest;
@@ -234,7 +285,7 @@ export function ReviewShell(props: ReviewShellProps) {
     props.onActiveItemChange?.(request.id);
     setPeekItemId(undefined);
     const item = props.state.items.find(({ id }) => id === request.id);
-    setAnnotationRequest(item
+    setWorkspaceRequest(item
       ? {
           kind: 'mark',
           reviewId: item.id,
@@ -242,7 +293,9 @@ export function ReviewShell(props: ReviewShellProps) {
           token: ++annotationRequestTokenRef.current,
         }
       : { kind: 'reading', token: ++annotationRequestTokenRef.current });
-    transitionBaseSurface('annotations');
+    dismissPageNoteAuthority();
+    dispatchSurface({ type: 'open-workspace', mode: 'annotations' });
+    props.onWorkspaceModeChange?.('annotations');
   }, [props.activationRequest?.id, props.activationRequest?.token]);
 
   const rememberSurfaceTrigger = (surfaceName: ReviewBaseSurface) => {
@@ -252,10 +305,28 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const openBase = (surfaceName: ReviewBaseSurface) => {
     rememberSurfaceTrigger(surfaceName);
-    if (surfaceName === 'annotations' && surface.baseSurface !== 'annotations') {
-      setAnnotationRequest({ kind: 'reading', token: ++annotationRequestTokenRef.current });
-    }
     transitionBaseSurface(surface.baseSurface === surfaceName ? 'reading' : surfaceName);
+  };
+  const selectWorkspaceMode = (mode: WorkspaceMode) => {
+    if (mode === 'annotations' && (!workspaceOpen || workspaceMode !== 'annotations')) {
+      setWorkspaceRequest({ kind: 'reading', token: ++annotationRequestTokenRef.current });
+    }
+    dispatchSurface({
+      type: 'reference-navigation',
+      action: { type: 'select-workspace-mode', mode },
+    });
+    props.onWorkspaceModeChange?.(mode);
+  };
+  const openWorkspace = (mode: WorkspaceMode = workspaceMode) => {
+    if (document.activeElement instanceof HTMLElement) {
+      surfaceTriggersRef.current.set('workspace', document.activeElement);
+    }
+    if (mode === 'annotations') {
+      setWorkspaceRequest({ kind: 'reading', token: ++annotationRequestTokenRef.current });
+    }
+    dismissPageNoteAuthority();
+    dispatchSurface({ type: 'open-workspace', mode });
+    props.onWorkspaceModeChange?.(mode);
   };
   const restoreSurfaceTrigger = (surfaceName: ReviewBaseSurface) => {
     const trigger = surfaceTriggersRef.current.get(surfaceName);
@@ -358,8 +429,13 @@ export function ReviewShell(props: ReviewShellProps) {
     });
   };
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (
+      props.linkActionRequest
+      && event.target instanceof Element
+      && event.target.closest('[data-link-action-popover]') !== null
+    ) return;
     const editable = isEditableTarget(event.target);
-    if (listOpen && !editable && !isAnnotationDrawerOrChrome(event.target)) {
+    if (workspaceOpen && !editable && !isWorkspaceOrChrome(event.target)) {
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
         markFramingUserIntent({ left: true });
       }
@@ -400,9 +476,9 @@ export function ReviewShell(props: ReviewShellProps) {
         dispatchSurface({ type: 'close-transient' });
         return;
       }
-      if (surface.baseSurface !== 'reading') {
+      if (workspaceOpen || surface.baseSurface !== 'reading') {
         event.preventDefault();
-        if (surface.baseSurface === 'annotations') closeAnnotations();
+        if (workspaceOpen) closeWorkspace();
         else closeFinish();
         return;
       }
@@ -538,14 +614,18 @@ export function ReviewShell(props: ReviewShellProps) {
     transitionBaseSurface('reading');
     restoreSurfaceTrigger('finish');
   };
-  const closeAnnotations = () => {
-    transitionBaseSurface('reading');
-    restoreSurfaceTrigger('annotations');
+  const closeWorkspace = () => {
+    dismissPageNoteAuthority();
+    dispatchSurface({ type: 'hide-workspace', focusReturnToken: 'toolbar:workspace' });
+    props.onWorkspaceDismiss?.();
+    requestAnimationFrame(() => workspaceControlRef.current?.focus({ preventScroll: true }));
   };
-  const markFramingUserIntent = trayFraming.markUserIntent;
-  const isAnnotationDrawerOrChrome = (target: EventTarget | null) => (
-    (target instanceof Node && trayFraming.drawerRef.current?.contains(target) === true)
-    || (target instanceof Element && target.closest('[data-review-chrome], [data-review-nested-host]') !== null)
+  const markFramingUserIntent = workspaceFraming.markUserIntent;
+  const isWorkspaceOrChrome = (target: EventTarget | null) => (
+    (target instanceof Node && workspaceFraming.workspaceRef.current?.contains(target) === true)
+    || (target instanceof Element && target.closest(
+      '[data-review-chrome], [data-review-nested-host], [data-link-action-popover]',
+    ) !== null)
   );
 
   return (
@@ -556,18 +636,23 @@ export function ReviewShell(props: ReviewShellProps) {
       onFocusCapture={(event) => inputController.focusChanged(isEditableTarget(event.target))}
       onCompositionStartCapture={(event) => inputController.compositionStart(event.target)}
       onCompositionEndCapture={compositionEnd}
+      ref={shellRef}
       onWheelCapture={(event) => {
-        if (!listOpen || isAnnotationDrawerOrChrome(event.target)) return;
+        if (!workspaceOpen || isWorkspaceOrChrome(event.target)) return;
         markFramingUserIntent({
           left: event.deltaX !== 0 || (event.shiftKey && event.deltaY !== 0),
           top: event.deltaY !== 0 && !event.shiftKey,
         });
       }}
       onPointerDownCapture={(event) => {
-        const tracksOutsideDismiss = listOpen
+        if (props.linkActionRequest) {
+          outsidePointerRef.current = undefined;
+          return;
+        }
+        const tracksOutsideDismiss = workspaceOpen
           && event.isPrimary
           && event.button === 0
-          && !isAnnotationDrawerOrChrome(event.target);
+          && !isWorkspaceOrChrome(event.target);
         outsidePointerRef.current = tracksOutsideDismiss
           ? {
               phase: 'tracking',
@@ -575,7 +660,7 @@ export function ReviewShell(props: ReviewShellProps) {
               x: event.clientX,
               y: event.clientY,
               target: event.target,
-              scroll: trayFraming.currentScroll(),
+              scroll: workspaceFraming.currentScroll(),
               movedBeyondSlop: false,
             }
           : undefined;
@@ -591,14 +676,14 @@ export function ReviewShell(props: ReviewShellProps) {
       onPointerUpCapture={(event) => {
         const start = outsidePointerRef.current;
         if (
-          !listOpen
+          !workspaceOpen
           || start?.phase !== 'tracking'
           || start?.id !== event.pointerId
         ) {
           outsidePointerRef.current = undefined;
           return;
         }
-        const currentScroll = trayFraming.currentScroll();
+        const currentScroll = workspaceFraming.currentScroll();
         const scrollAxes = start.scroll && currentScroll ? {
           left: Math.abs(currentScroll.left - start.scroll.left) > 1,
           top: Math.abs(currentScroll.top - start.scroll.top) > 1,
@@ -625,16 +710,17 @@ export function ReviewShell(props: ReviewShellProps) {
         }));
         outsidePointerRef.current = { phase: 'settled', dismiss: true };
         event.stopPropagation();
-        closeAnnotations();
+        closeWorkspace();
       }}
       onPointerCancelCapture={() => { outsidePointerRef.current = undefined; }}
       onClickCapture={(event) => {
+        if (props.linkActionRequest) return;
         if (event.target instanceof Element) {
           const markTrigger = event.target.closest<HTMLElement>('[data-owned-focus-id]');
-          if (markTrigger) surfaceTriggersRef.current.set('annotations', markTrigger);
+          if (markTrigger) surfaceTriggersRef.current.set('workspace', markTrigger);
         }
         if (
-          listOpen
+          workspaceOpen
           && event.target instanceof Element
           && event.target.closest('.review-chrome__viewer-controls') !== null
         ) {
@@ -650,9 +736,9 @@ export function ReviewShell(props: ReviewShellProps) {
           if (pointerGesture.dismiss) event.stopPropagation();
           return;
         }
-        if (listOpen && !isAnnotationDrawerOrChrome(event.target)) {
+        if (workspaceOpen && !isWorkspaceOrChrome(event.target)) {
           event.stopPropagation();
-          closeAnnotations();
+          closeWorkspace();
         }
       }}
     >
@@ -664,21 +750,22 @@ export function ReviewShell(props: ReviewShellProps) {
         canUndo={canUndo}
         canRedo={canRedo}
         annotationCount={props.state.items.length}
-        annotationsOpen={listOpen}
+        workspaceOpen={workspaceOpen}
         finishOpen={surface.baseSurface === 'finish'}
+        workspaceControlRef={workspaceControlRef}
         onUndo={() => void submit(undoReview)}
         onRedo={() => void submit(redoReview)}
-        onAnnotations={() => openBase('annotations')}
+        onWorkspace={() => workspaceOpen ? closeWorkspace() : openWorkspace()}
         onFinish={() => openBase('finish')}
       />
-      <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
       <div
-        ref={trayFraming.stageRef}
+        ref={workspaceFraming.stageRef}
         className="review-layout"
         data-review-stage
-        data-annotation-presentation={trayFraming.presentation}
+        data-workspace-presentation={workspaceFraming.presentation}
+        data-annotation-presentation={workspaceFraming.presentation}
         style={{
-          '--annotation-side-width': `${trayFraming.sideWidth}px`,
+          '--workspace-side-width': `${workspaceFraming.sideWidth}px`,
         } as CSSProperties}
       >
         <div className="review-document">{props.children}</div>
@@ -719,7 +806,7 @@ export function ReviewShell(props: ReviewShellProps) {
               }}
             />
           ) : null}
-          {!listOpen && peekItemId ? (() => {
+          {!workspaceOpen && peekItemId ? (() => {
             const item = props.state.items.find(({ id }) => id === peekItemId);
             return item ? (
               <AnnotationPeek
@@ -736,24 +823,64 @@ export function ReviewShell(props: ReviewShellProps) {
           })() : null}
         </div>
         <div className="review-drawer-host" data-review-drawer-host>
-          <aside
-            ref={trayFraming.drawerRef}
-            id="review-annotation-list"
-            className="review-list"
-            data-annotation-drawer
-            data-annotation-presentation={trayFraming.presentation}
-            data-list-open={listOpen ? 'true' : 'false'}
-            aria-label="All annotations"
-            aria-hidden={!listOpen}
-            inert={!listOpen}
-          >
+          <ReferenceWorkspace
+            workspaceRef={workspaceFraming.workspaceRef}
+            open={workspaceOpen}
+            mode={workspaceMode}
+            presentation={workspaceFraming.presentation}
+            tabs={referenceTabs}
+            activeTabIdentity={navigation.activeTabIdentity}
+            outline={outlineDiscovery}
+            {...(props.pendingReference === undefined ? {} : { pendingReference: props.pendingReference })}
+            {...(props.currentOutlineItemId === undefined
+              ? {}
+              : { currentOutlineItemId: props.currentOutlineItemId })}
+            announcement={props.navigationAnnouncement ?? announcement}
+            onModeChange={selectWorkspaceMode}
+            onReferenceTabActivate={(identity) => props.onReferenceTabActivate?.(identity)}
+            onReferenceTabClose={(identity) => {
+              props.onReferenceTabClose?.(identity);
+              if (props.navigationState === undefined) {
+                dispatchSurface({
+                  type: 'reference-navigation',
+                  action: {
+                    type: 'close-reference',
+                    targetIdentity: identity,
+                    focusReturnToken: 'toolbar:workspace',
+                  },
+                });
+              }
+              if (referenceTabs.length === 1) {
+                requestAnimationFrame(() => workspaceControlRef.current?.focus({ preventScroll: true }));
+              }
+            }}
+            onSendToMain={(identity) => props.onReferenceSendToMain?.(identity)}
+            onRetryReference={() => props.onReferenceRetry?.()}
+            onOutlineActivate={(item, control) => props.onOutlineActivate?.(item, control)}
+            onDismiss={closeWorkspace}
+            onReferenceViewportHost={(element) => props.onReferenceViewportHost?.(element)}
+            onModeFocusTokenChange={(mode, token) => {
+              if (props.navigationState === undefined) {
+                dispatchSurface({
+                  type: 'reference-navigation',
+                  action: {
+                    type: 'remember-workspace-view',
+                    mode,
+                    logicalScrollToken: surface.navigation.workspace.modes[mode].logicalScrollToken,
+                    logicalFocusToken: token,
+                  },
+                });
+              }
+              props.onWorkspaceModeFocusTokenChange?.(mode, token);
+            }}
+            annotations={<div id="review-annotation-list" aria-label="All annotations">
             <AnnotationList
               items={props.state.items}
               {...(activeItemId === undefined ? {} : { activeId: activeItemId })}
-              {...(!listOpen || props.correspondingItemId === undefined
+              {...(!annotationsVisible || props.correspondingItemId === undefined
                 ? {}
                 : { correspondingId: props.correspondingItemId })}
-              {...(!listOpen || listActivation === undefined ? {} : { activationRequest: listActivation })}
+              {...(!annotationsVisible || listActivation === undefined ? {} : { activationRequest: listActivation })}
               {...(props.onItemCorrespondenceChange === undefined
                 ? {}
                 : { onCorrespondenceChange: props.onItemCorrespondenceChange })}
@@ -819,7 +946,8 @@ export function ReviewShell(props: ReviewShellProps) {
                 </ol>
               ) : null}
             </section>
-          </aside>
+            </div>}
+          />
           <FinishReviewDrawer
             state={props.state}
             open={surface.baseSurface === 'finish'}
@@ -922,6 +1050,27 @@ export function ReviewShell(props: ReviewShellProps) {
           />
         ) : null}
       </div>
+      <LinkActionPopover
+        request={props.linkActionRequest ?? null}
+        onChoose={(choice, request) => props.onLinkActionChoose?.(choice, request)}
+        onDismiss={(request, reason) => props.onLinkActionDismiss?.(request, reason)}
+        sourceFocusFallback={(source) => {
+          const shell = shellRef.current;
+          if (!shell) return null;
+          if (source === 'reference') {
+            const activeTab = navigation.activeTabIdentity;
+            const activeTabElement = activeTab
+              ? [...shell.querySelectorAll<HTMLElement>('[data-reference-tab]')]
+                .find((element) => element.dataset.referenceTab === activeTab)
+              : null;
+            return activeTabElement
+              ?? shell.querySelector<HTMLElement>('[data-reference-pdf-viewport] [data-page-index]');
+          }
+          return shell.querySelector<HTMLElement>(
+            `.pdf-workspace:not(.pdf-workspace--reference) [data-page-index="${props.linkActionRequest?.sourcePageIndex ?? 0}"]`,
+          ) ?? shell.querySelector<HTMLElement>('.pdf-workspace:not(.pdf-workspace--reference) [data-page-index]');
+        }}
+      />
     </section>
   );
 }

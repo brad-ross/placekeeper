@@ -6,8 +6,7 @@ import {
   type WorkspaceMode,
 } from './reference-navigation-state.js';
 
-/** `annotations` remains an input-compatible legacy surface until UI integration. */
-export type ReviewBaseSurface = 'reading' | 'workspace' | 'annotations' | 'finish';
+export type ReviewBaseSurface = 'reading' | 'workspace' | 'finish';
 export type ReviewNestedLayer = 'none' | 'composer';
 export type ReviewTransientSurface = 'none' | 'selection-actions' | 'insert-action' | 'page-menu' | 'page-note-cursor';
 

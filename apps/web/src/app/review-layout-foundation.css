@@ -218,7 +218,7 @@
   color: var(--review-ink-muted);
 }
 
-.review-chrome__annotations {
+.review-chrome__workspace {
   white-space: nowrap;
 }
 

@@ -6,6 +6,9 @@ import { restorePagePoint } from './selection-anchor.js';
 import type { PdfNavigationMetadata } from './pdf-navigation-metadata.js';
 import type { PdfNavigationTarget } from './pdf-navigation-target.js';
 
+/** Stable relationship target for the one active link-action menu. */
+export const PDF_LINK_ACTION_MENU_ID = 'pdf-link-action-menu';
+
 export interface ViewerClientPlacement {
   readonly left: number;
   readonly top: number;

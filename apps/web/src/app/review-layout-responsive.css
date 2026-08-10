@@ -10,6 +10,10 @@
   border: 0;
 }
 
+.review-workspace__status {
+  position: fixed;
+}
+
 @media (max-width: 720px) {
   .review-chrome {
     height: auto;
@@ -75,7 +79,9 @@
 
   .review-chrome button,
   .review-context-palette button,
-  .review-page-menu button {
+  .review-page-menu button,
+  .review-workspace button,
+  .link-action-popover button {
     min-height: var(--review-control-touch);
   }
 
@@ -96,13 +102,14 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .review-list,
+  .review-workspace,
   .review-finish-drawer,
   .review-context-palette,
   .review-page-menu,
   .page-note-placement-cursor,
   .annotation-peek,
   .annotation-status__icon,
+  .workspace-state .review-icon,
   .pdf-workspace__loading .review-icon,
   .review-delivery .lucide-loader-circle,
   .finish-review-drawer__lifecycle .lucide-loader-circle {

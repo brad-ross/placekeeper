@@ -13,6 +13,7 @@ import type { CSSProperties, MouseEvent, PointerEvent } from 'react';
 import { createPdfNavigationMetadata } from './pdf-navigation-metadata.js';
 import { classifyPdfNavigationTarget } from './pdf-navigation-target.js';
 import {
+  PDF_LINK_ACTION_MENU_ID,
   fixedViewerClientRect,
   type ViewerInteractionEvent,
   type ViewerPdfLinkSourceScope,
@@ -124,6 +125,9 @@ export function PdfLinkControl({
       aria-label={metadata === null
         ? 'PDF link target unavailable'
         : accessibleLinkName(metadata.label, metadata.pageContext)}
+      aria-haspopup="menu"
+      aria-controls={PDF_LINK_ACTION_MENU_ID}
+      aria-expanded={false}
       onPointerDown={stopPointerFallthrough}
       onPointerUp={stopPointerFallthrough}
       onClick={(event) => activate(annotation.target, event)}

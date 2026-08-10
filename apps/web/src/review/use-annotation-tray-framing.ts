@@ -18,11 +18,11 @@ import {
   type ViewerPosition,
 } from '../pdf/viewer-framing.js';
 
-const ANNOTATION_SIDE_MAX_PX = 24 * 16;
-const ANNOTATION_SIDE_EDGE_GAP_PX = 3 * 16;
+const WORKSPACE_SIDE_MAX_PX = 24 * 16;
+const WORKSPACE_SIDE_EDGE_GAP_PX = 3 * 16;
 const ANNOTATION_MARK_GUTTER_PX = 10;
 
-export type AnnotationOpenRequest =
+export type WorkspaceOpenRequest =
   | { readonly kind: 'reading'; readonly token: number }
   | { readonly kind: 'mark'; readonly reviewId: string; readonly pageIndex: number; readonly token: number };
 
@@ -35,8 +35,8 @@ interface ActiveFramingSession {
   requestToken: number;
 }
 
-export interface AnnotationTrayFraming {
-  readonly drawerRef: RefObject<HTMLElement | null>;
+export interface WorkspaceFraming {
+  readonly workspaceRef: RefObject<HTMLElement | null>;
   readonly stageRef: RefObject<HTMLDivElement | null>;
   readonly presentation: AnnotationPresentation;
   readonly sideWidth: number;
@@ -44,20 +44,20 @@ export interface AnnotationTrayFraming {
   currentScroll(): ViewerPosition | null;
 }
 
-export function useAnnotationTrayFraming(input: {
-  readonly listOpen: boolean;
+export function useWorkspaceFraming(input: {
+  readonly workspaceOpen: boolean;
   readonly controls?: ViewerFramingControls;
-  readonly request: AnnotationOpenRequest;
-}): AnnotationTrayFraming {
-  const drawerRef = useRef<HTMLElement>(null);
+  readonly request: WorkspaceOpenRequest;
+}): WorkspaceFraming {
+  const workspaceRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const authorityRef = useRef(new FramingSessionAuthority());
   const sessionRef = useRef<ActiveFramingSession | null>(null);
   const [presentation, setPresentation] = useState<AnnotationPresentation>('right');
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const sideWidth = Math.min(
-    ANNOTATION_SIDE_MAX_PX,
-    Math.max(0, stageSize.width - ANNOTATION_SIDE_EDGE_GAP_PX),
+    WORKSPACE_SIDE_MAX_PX,
+    Math.max(0, stageSize.width - WORKSPACE_SIDE_EDGE_GAP_PX),
   );
 
   useLayoutEffect(() => {
@@ -68,8 +68,8 @@ export function useAnnotationTrayFraming(input: {
       const width = Math.max(0, bounds.width);
       const height = Math.max(0, bounds.height);
       const prospectiveSideWidth = Math.min(
-        ANNOTATION_SIDE_MAX_PX,
-        Math.max(0, width - ANNOTATION_SIDE_EDGE_GAP_PX),
+        WORKSPACE_SIDE_MAX_PX,
+        Math.max(0, width - WORKSPACE_SIDE_EDGE_GAP_PX),
       );
       setStageSize((current) => current.width === width && current.height === height
         ? current
@@ -112,11 +112,11 @@ export function useAnnotationTrayFraming(input: {
   }, [input.controls]);
 
   useEffect(() => {
-    if (!input.listOpen || !input.controls) return;
+    if (!input.workspaceOpen || !input.controls) return;
     return input.controls.subscribe((event) => {
       if (event.type === 'zoom') markUserIntent();
     });
-  }, [input.controls, input.listOpen, markUserIntent]);
+  }, [input.controls, input.workspaceOpen, markUserIntent]);
 
   useLayoutEffect(() => {
     const controls = input.controls;
@@ -127,7 +127,7 @@ export function useAnnotationTrayFraming(input: {
     const first = controls.snapshot(target);
     const operationDocumentId = first.documentId ?? sessionRef.current?.documentId;
     if (!operationDocumentId) {
-      if (!input.listOpen) void controls.setRunway({ right: 0, bottom: 0 });
+      if (!input.workspaceOpen) void controls.setRunway({ right: 0, bottom: 0 });
       return;
     }
     const operation = authorityRef.current.open(operationDocumentId, presentation);
@@ -189,14 +189,14 @@ export function useAnnotationTrayFraming(input: {
         session.requestToken = input.request.token;
       }
 
-      const drawerBounds = drawerRef.current?.getBoundingClientRect();
-      const exclusionWidth = drawerBounds?.width ?? sideWidth;
-      const exclusionHeight = drawerBounds?.height ?? 0;
+      const workspaceBounds = workspaceRef.current?.getBoundingClientRect();
+      const exclusionWidth = workspaceBounds?.width ?? sideWidth;
+      const exclusionHeight = workspaceBounds?.height ?? 0;
       const runway = presentation === 'right'
         ? { right: exclusionWidth, bottom: 0 }
         : { right: 0, bottom: exclusionHeight };
       await controls.setRunway(runway);
-      if (!authorityRef.current.isCurrent(operation) || !input.listOpen) return;
+      if (!authorityRef.current.isCurrent(operation) || !input.workspaceOpen) return;
 
       const measured = controls.snapshot(target);
       const stage = stageRef.current?.getBoundingClientRect();
@@ -242,12 +242,12 @@ export function useAnnotationTrayFraming(input: {
       }
     };
 
-    void (input.listOpen ? openSession() : closeSession());
+    void (input.workspaceOpen ? openSession() : closeSession());
     return () => authorityRef.current.supersede(operation);
-  }, [input.controls, input.listOpen, input.request, presentation, sideWidth, stageSize.height]);
+  }, [input.controls, input.workspaceOpen, input.request, presentation, sideWidth, stageSize.height]);
 
   return {
-    drawerRef,
+    workspaceRef,
     stageRef,
     presentation,
     sideWidth,

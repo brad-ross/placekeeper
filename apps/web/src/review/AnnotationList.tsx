@@ -48,7 +48,7 @@ export function AnnotationList({
       return;
     }
     const row = rowRefs.current.get(correspondingId);
-    const viewport = listRef.current?.closest<HTMLElement>('.review-list');
+    const viewport = listRef.current?.closest<HTMLElement>('[data-annotation-scroll-viewport], .review-workspace');
     if (!row || !viewport) return;
     const rowBounds = row.getBoundingClientRect();
     const viewportBounds = viewport.getBoundingClientRect();
@@ -64,7 +64,7 @@ export function AnnotationList({
     const row = rowRefs.current.get(activationRequest.id);
     const entry = entryRefs.current.get(activationRequest.id);
     if (row && entry) {
-      const viewport = listRef.current?.closest<HTMLElement>('.review-list');
+      const viewport = listRef.current?.closest<HTMLElement>('[data-annotation-scroll-viewport], .review-workspace');
       if (viewport) {
         const rowBounds = row.getBoundingClientRect();
         const viewportBounds = viewport.getBoundingClientRect();

@@ -12,6 +12,7 @@ import {
   PdfLinkControl,
   createPdfLinkAnnotationRenderer,
 } from '../src/pdf/PdfLinkControl.js';
+import { PDF_LINK_ACTION_MENU_ID } from '../src/pdf/viewer-interaction-events.js';
 
 const destination: PdfDestinationObject = {
   pageIndex: 1,
@@ -60,6 +61,9 @@ describe('installed EmbedPDF link renderer replacement', () => {
     expect(button.type).toBe('button');
     expect(button.props['data-pdf-link-control']).toBe('');
     expect(button.props['aria-label']).toBe('Open PDF link to img Equation 4, Page 2');
+    expect(button.props['aria-haspopup']).toBe('menu');
+    expect(button.props['aria-controls']).toBe(PDF_LINK_ACTION_MENU_ID);
+    expect(button.props['aria-expanded']).toBe(false);
     const opener = {
       getBoundingClientRect: () => ({
         left: 10, top: 20, right: 90, bottom: 40, width: 80, height: 20,
