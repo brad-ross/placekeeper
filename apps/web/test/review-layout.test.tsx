@@ -1,11 +1,18 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { ReviewShell } from '../src/app/ReviewShell.js';
+import {
+  controlledWorkspaceSurfaceAction,
+  ReviewShell,
+} from '../src/app/ReviewShell.js';
 import { AnnotationList } from '../src/review/AnnotationList.js';
 import { AnnotationPeek } from '../src/review/AnnotationPeek.js';
 import { ReviewIcon } from '../src/review/ReviewIcon.js';
 import { createReviewState, type ReviewItem } from '../../../packages/core/src/review-model.js';
+import {
+  INITIAL_REVIEW_SURFACE_STATE,
+  reduceReviewSurface,
+} from '../src/review/review-surface-state.js';
 
 const state = createReviewState({
   sessionId: 'layout-test',
@@ -22,6 +29,63 @@ const ownedAnnotation: ReviewItem = {
 };
 
 describe('review shell layout and accessibility contract', () => {
+  it('synchronizes externally controlled workspace open and hide without disturbing Finish', () => {
+    const openedAction = controlledWorkspaceSurfaceAction({
+      open: true,
+      baseSurface: 'reading',
+      transientSurface: 'page-menu',
+      mode: 'references',
+    });
+    expect(openedAction).toEqual({ type: 'open-workspace', mode: 'references' });
+    const opened = reduceReviewSurface(INITIAL_REVIEW_SURFACE_STATE, openedAction!);
+    expect(opened).toMatchObject({ baseSurface: 'workspace', transientSurface: 'none' });
+
+    const hiddenAction = controlledWorkspaceSurfaceAction({
+      open: false,
+      baseSurface: opened.baseSurface,
+      transientSurface: opened.transientSurface,
+      mode: 'references',
+    });
+    expect(reduceReviewSurface(opened, hiddenAction!)).toMatchObject({
+      baseSurface: 'reading',
+      transientSurface: 'none',
+    });
+    expect(controlledWorkspaceSurfaceAction({
+      open: true,
+      baseSurface: 'finish',
+      transientSurface: 'none',
+      mode: 'references',
+    })).toBeNull();
+  });
+
+  it('does not render reading-only contextual actions for an externally opened workspace', () => {
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        workspaceOpen
+        selectionUpdate={{
+          kind: 'reliable', generation: 1,
+          anchor: {
+            pageIndex: 0, quote: 'text', prefix: '', suffix: '', reliable: true,
+            rect: { x: 1, y: 1, width: 2, height: 2 },
+            segmentRects: [{ x: 1, y: 1, width: 2, height: 2 }],
+          },
+        }}
+        selectionPlacement={{ left: 10, top: 10 }}
+        pageMenu={{
+          invocationId: 'menu', placement: { left: 10, top: 10 }, pageIndex: 0,
+          position: { x: 1, y: 1, width: 2, height: 2 },
+        }}
+        onCommand={async () => state}
+      >
+        <div>Document canvas</div>
+      </ReviewShell>,
+    );
+    expect(html).toContain('data-workspace-open="true"');
+    expect(html).not.toContain('aria-label="Selection review actions"');
+    expect(html).not.toContain('aria-label="Page actions"');
+  });
+
   it('keeps review icons decorative and button labels authoritative', () => {
     const html = renderToStaticMarkup(
       <button type="button" aria-label="Previous page">
@@ -109,6 +173,9 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('Finish');
     expect(html).toContain('aria-label="Undo"');
     expect(html).toContain('aria-label="Redo"');
+    expect(html).toMatch(/data-main-history="back"[^>]*aria-label="Back in document history"[^>]*disabled=""/u);
+    expect(html).toMatch(/data-main-history="forward"[^>]*aria-label="Forward in document history"[^>]*disabled=""/u);
+    expect(html.match(/data-main-history=/g)).toHaveLength(2);
     expect(html).toContain('aria-label="Workspace (0 annotations)"');
     expect(html).toContain('aria-controls="review-workspace"');
     expect(html).toContain('aria-label="Workspace modes"');

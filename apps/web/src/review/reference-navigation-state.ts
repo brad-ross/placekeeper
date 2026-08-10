@@ -23,6 +23,8 @@ export interface ReferenceTab {
   readonly originalTarget: PdfNavigationTarget;
   /** The most recently settled, fully restorable view for this tab. */
   readonly settledLocation: PdfViewerLocation;
+  readonly label?: string;
+  readonly pageContext?: string;
 }
 
 export interface MainViewerHistory {
@@ -84,10 +86,13 @@ type SendCompletionSuccess = {
 };
 
 export type ReferenceNavigationAction =
+  | { readonly type: 'cancel-pending-navigation' }
   | {
       readonly type: 'open-reference';
       readonly target: PdfNavigationTarget;
       readonly settledLocation: PdfViewerLocation;
+      readonly label?: string;
+      readonly pageContext?: string;
     }
   | { readonly type: 'refresh-active-reference'; readonly settledLocation: PdfViewerLocation }
   | {
@@ -125,7 +130,11 @@ export type ReferenceNavigationAction =
       readonly type: 'complete-main-jump';
       readonly token: number;
       readonly documentGeneration: number;
-    } & (CompletionFailure | { readonly success: true }))
+    } & (CompletionFailure | {
+      readonly success: true;
+      /** The verified settled location wins over the preflight resolution. */
+      readonly settledLocation?: PdfViewerLocation;
+    }))
   | {
       readonly type: 'request-history-back' | 'request-history-forward';
       readonly token: number;
@@ -263,6 +272,18 @@ export function reduceReferenceNavigation(
   action: ReferenceNavigationAction,
 ): ReferenceNavigationState {
   switch (action.type) {
+    case 'cancel-pending-navigation':
+      if (
+        state.pendingReferenceSwitch === null
+        && state.pendingSendToMain === null
+        && state.pendingMainNavigation === null
+      ) return state;
+      return {
+        ...state,
+        pendingReferenceSwitch: null,
+        pendingSendToMain: null,
+        pendingMainNavigation: null,
+      };
     case 'open-reference': {
       if (action.target.documentGeneration !== state.documentGeneration) return state;
       const existing = state.tabs.find((tab) => tab.identity === action.target.identity);
@@ -283,6 +304,8 @@ export function reduceReferenceNavigation(
         identity: action.target.identity,
         originalTarget: action.target,
         settledLocation: action.settledLocation,
+        ...(action.label === undefined ? {} : { label: action.label }),
+        ...(action.pageContext === undefined ? {} : { pageContext: action.pageContext }),
       };
       return {
         ...state,
@@ -414,7 +437,7 @@ export function reduceReferenceNavigation(
         mainHistory: appendHistoryDestination(
           state.mainHistory,
           pending.currentLocation,
-          pending.destination,
+          action.settledLocation ?? pending.destination,
         ),
       };
     }

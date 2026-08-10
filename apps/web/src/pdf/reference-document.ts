@@ -72,6 +72,7 @@ export function createReferenceDocumentController(input: {
   let status: ReferenceDocumentStatus = 'idle';
   let operationGeneration = 0;
   let pending: Promise<boolean> | null = null;
+  let closing: Promise<void> | null = null;
 
   const currentSnapshot = (): ReferenceDocumentSnapshot => Object.freeze({
     documentGeneration,
@@ -80,22 +81,24 @@ export function createReferenceDocumentController(input: {
 
   const run = (kind: 'open' | 'retry'): Promise<boolean> => {
     if (pending) return pending;
-    if (kind === 'open' && input.documentManager.getDocumentState(REFERENCE_PDF_DOCUMENT_ID)?.status === 'loaded') {
-      status = 'loaded';
-      return Promise.resolve(input.documentManager.getActiveDocumentId() === MAIN_PDF_DOCUMENT_ID);
-    }
-    if (kind === 'retry' && input.documentManager.getDocumentState(REFERENCE_PDF_DOCUMENT_ID)?.status !== 'error') {
-      return Promise.resolve(false);
-    }
-
     status = 'opening';
     const operation = ++operationGeneration;
     const startedGeneration = documentGeneration;
-    const task = kind === 'open'
-      ? input.documentManager.openDocumentUrl(buildReferenceDocumentOptions(input.assetUrls, input.origin))
-      : input.documentManager.retryDocument(REFERENCE_PDF_DOCUMENT_ID);
-    pending = waitForOpen(task).then(
-      () => {
+    const precedingClose = closing;
+    pending = (async () => {
+      if (precedingClose) await precedingClose;
+      if (operation !== operationGeneration || startedGeneration !== documentGeneration) return false;
+      const documentStatus = input.documentManager.getDocumentState(REFERENCE_PDF_DOCUMENT_ID)?.status;
+      if (kind === 'open' && documentStatus === 'loaded') {
+        status = 'loaded';
+        return input.documentManager.getActiveDocumentId() === MAIN_PDF_DOCUMENT_ID;
+      }
+      if (kind === 'retry' && documentStatus !== 'error') return false;
+      const task = kind === 'open'
+        ? input.documentManager.openDocumentUrl(buildReferenceDocumentOptions(input.assetUrls, input.origin))
+        : input.documentManager.retryDocument(REFERENCE_PDF_DOCUMENT_ID);
+      try {
+        await waitForOpen(task);
         if (operation !== operationGeneration || startedGeneration !== documentGeneration) {
           void input.documentManager.closeDocument(REFERENCE_PDF_DOCUMENT_ID).toPromise().catch(() => undefined);
           return false;
@@ -106,26 +109,37 @@ export function createReferenceDocumentController(input: {
         }
         status = 'loaded';
         return true;
-      },
-      () => {
+      } catch {
         if (operation === operationGeneration && startedGeneration === documentGeneration) status = 'failed';
         return false;
-      },
-    ).finally(() => {
+      }
+    })().finally(() => {
       if (operation === operationGeneration) pending = null;
     });
     return pending;
   };
 
-  const close = async (): Promise<void> => {
+  const close = (): Promise<void> => {
+    const inFlight = pending;
+    const precedingClose = closing;
     operationGeneration += 1;
     pending = null;
     status = 'idle';
-    try {
-      await input.documentManager.closeDocument(REFERENCE_PDF_DOCUMENT_ID).toPromise();
-    } catch {
-      // Deliberately quiet: raw engine/load failures cannot enter UI state or logs here.
-    }
+    const task = (async () => {
+      if (precedingClose) await precedingClose;
+      if (inFlight) await inFlight;
+      try {
+        await input.documentManager.closeDocument(REFERENCE_PDF_DOCUMENT_ID).toPromise();
+      } catch {
+        // Deliberately quiet: raw engine/load failures cannot enter UI state or logs here.
+      }
+    })();
+    let lifecycle!: Promise<void>;
+    lifecycle = task.finally(() => {
+      if (closing === lifecycle) closing = null;
+    });
+    closing = lifecycle;
+    return lifecycle;
   };
 
   return {

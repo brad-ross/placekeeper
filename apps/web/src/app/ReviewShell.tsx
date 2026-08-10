@@ -63,6 +63,7 @@ import {
   INITIAL_REVIEW_SURFACE_STATE,
   reduceReviewSurface,
   type ReviewBaseSurface,
+  type ReviewSurfaceAction,
 } from '../review/review-surface-state.js';
 import type {
   ReferenceNavigationState,
@@ -139,8 +140,12 @@ export interface ReviewShellProps {
   currentOutlineItemId?: string | null;
   linkActionRequest?: ViewerPdfLinkInvocation | null;
   navigationAnnouncement?: string;
+  canNavigateBack?: boolean;
+  canNavigateForward?: boolean;
   onLinkActionChoose?(choice: LinkActionChoice, request: ViewerPdfLinkInvocation): void;
   onLinkActionDismiss?(request: ViewerPdfLinkInvocation, reason: LinkActionDismissReason): void;
+  onNavigateBack?(): void;
+  onNavigateForward?(): void;
   onWorkspaceModeChange?(mode: WorkspaceMode): void;
   onWorkspaceDismiss?(): void;
   onReferenceTabActivate?(identity: string): void;
@@ -160,6 +165,23 @@ export interface RejectedReviewCommand {
 }
 
 const OUTSIDE_TAP_SLOP_PX = 6;
+
+export function controlledWorkspaceSurfaceAction(input: {
+  readonly open: boolean;
+  readonly baseSurface: ReviewBaseSurface;
+  readonly transientSurface: 'none' | 'selection-actions' | 'insert-action' | 'page-menu' | 'page-note-cursor';
+  readonly mode: WorkspaceMode;
+}): ReviewSurfaceAction | null {
+  if (input.baseSurface === 'finish') return null;
+  if (input.open) {
+    return input.baseSurface !== 'workspace' || input.transientSurface !== 'none'
+      ? { type: 'open-workspace', mode: input.mode }
+      : null;
+  }
+  return input.baseSurface === 'workspace'
+    ? { type: 'hide-workspace', focusReturnToken: 'toolbar:workspace' }
+    : null;
+}
 
 type OutsidePointerGesture =
   | {
@@ -182,7 +204,12 @@ function mutableField(item: ReviewItem): 'proposedText' | 'comment' | undefined 
 export function ReviewShell(props: ReviewShellProps) {
   const [surface, dispatchSurface] = useReducer(
     reduceReviewSurface,
-    props.listOpen === true
+    props.workspaceOpen === true
+      ? reduceReviewSurface(INITIAL_REVIEW_SURFACE_STATE, {
+          type: 'open-workspace',
+          mode: props.navigationState?.workspace.lastMode ?? 'outline',
+        })
+      : props.listOpen === true
       ? reduceReviewSurface(INITIAL_REVIEW_SURFACE_STATE, {
           type: 'open-workspace',
           mode: 'annotations',
@@ -236,6 +263,17 @@ export function ReviewShell(props: ReviewShellProps) {
     ...(props.viewerFraming === undefined ? {} : { controls: props.viewerFraming }),
     request: workspaceRequest,
   });
+
+  useLayoutEffect(() => {
+    if (props.workspaceOpen === undefined) return;
+    const action = controlledWorkspaceSurfaceAction({
+      open: props.workspaceOpen,
+      baseSurface: surface.baseSurface,
+      transientSurface: surface.transientSurface,
+      mode: workspaceMode,
+    });
+    if (action !== null) dispatchSurface(action);
+  }, [props.workspaceOpen, surface.baseSurface, surface.transientSurface, workspaceMode]);
 
   useEffect(() => {
     if (props.selectionUpdate.kind !== 'reliable') setConsumedSelectionGeneration(undefined);
@@ -749,12 +787,16 @@ export function ReviewShell(props: ReviewShellProps) {
         viewerState={props.viewerState ?? unavailableViewerControls()}
         canUndo={canUndo}
         canRedo={canRedo}
+        canNavigateBack={props.canNavigateBack ?? false}
+        canNavigateForward={props.canNavigateForward ?? false}
         annotationCount={props.state.items.length}
         workspaceOpen={workspaceOpen}
         finishOpen={surface.baseSurface === 'finish'}
         workspaceControlRef={workspaceControlRef}
         onUndo={() => void submit(undoReview)}
         onRedo={() => void submit(redoReview)}
+        onNavigateBack={() => props.onNavigateBack?.()}
+        onNavigateForward={() => props.onNavigateForward?.()}
         onWorkspace={() => workspaceOpen ? closeWorkspace() : openWorkspace()}
         onFinish={() => openBase('finish')}
       />
@@ -770,7 +812,7 @@ export function ReviewShell(props: ReviewShellProps) {
       >
         <div className="review-document">{props.children}</div>
         <div className="review-contextual-host" data-review-contextual-host>
-          {surface.baseSurface !== 'finish' && selectionActionsAvailable && props.selectionPlacement ? (
+          {surface.baseSurface === 'reading' && selectionActionsAvailable && props.selectionPlacement ? (
             <ContextActionPalette
               kind="selection"
               placement={props.selectionPlacement}

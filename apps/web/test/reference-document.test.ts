@@ -12,6 +12,12 @@ function resolvedTask<T>(value: T) {
   return { toPromise: () => Promise.resolve(value) };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 describe('reference document scope', () => {
   it('opens once with a fresh safe non-active clone and retries the stable failed id', async () => {
     let failed = false;
@@ -90,5 +96,41 @@ describe('reference document scope', () => {
     await reset;
     expect(closeDocument).toHaveBeenCalledWith(REFERENCE_PDF_DOCUMENT_ID);
     expect(JSON.stringify(controller.snapshot())).not.toMatch(/credentials|requestOptions|error|secret/iu);
+  });
+
+  it('serializes a newer open behind physical close settlement', async () => {
+    let documentStatus: 'loaded' | undefined = 'loaded';
+    const closed = deferred<void>();
+    const loaded = resolvedTask(undefined);
+    const openDocumentUrl = vi.fn(() => resolvedTask({
+      documentId: REFERENCE_PDF_DOCUMENT_ID,
+      task: loaded,
+    }));
+    const closeDocument = vi.fn(() => ({
+      toPromise: () => closed.promise.then(() => { documentStatus = undefined; }),
+    }));
+    const controller = createReferenceDocumentController({
+      documentManager: {
+        openDocumentUrl,
+        retryDocument: vi.fn(),
+        closeDocument,
+        getActiveDocumentId: () => MAIN_PDF_DOCUMENT_ID,
+        getDocumentState: () => documentStatus === undefined ? null : { status: documentStatus },
+      },
+      assetUrls: { pdfiumWasm: '/pdfium.wasm', documentUrl: '/document.pdf' },
+      origin: 'http://127.0.0.1:4173',
+      documentGeneration: 1,
+    });
+
+    const close = controller.close();
+    const reopen = controller.open();
+    await Promise.resolve();
+    expect(openDocumentUrl).not.toHaveBeenCalled();
+    closed.resolve();
+    await close;
+    expect(await reopen).toBe(true);
+    expect(closeDocument).toHaveBeenCalledOnce();
+    expect(openDocumentUrl).toHaveBeenCalledOnce();
+    expect(controller.snapshot()).toMatchObject({ status: 'loaded', documentGeneration: 1 });
   });
 });

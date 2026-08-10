@@ -94,7 +94,11 @@ export function ReferenceWorkspace({
   const emptyReferenceRef = useRef<HTMLDivElement>(null);
   const retryReferenceRef = useRef<HTMLButtonElement>(null);
   const closeFocusIdentity = useRef<string | null>(null);
-  const previous = useRef({ open: false, mode });
+  const previous = useRef<{
+    open: boolean;
+    mode: WorkspaceMode;
+    pendingStatus: PendingReferencePanel['status'] | null;
+  }>({ open: false, mode, pendingStatus: null });
   const previousActiveReference = useRef<string | null>(null);
 
   const modeFallback = (targetMode: WorkspaceMode): HTMLElement | null => {
@@ -102,6 +106,7 @@ export function ReferenceWorkspace({
     if (remembered?.isConnected) return remembered;
     if (targetMode === 'references') {
       if (pendingReference?.status === 'error') return retryReferenceRef.current;
+      if (pendingReference?.status === 'loading') return panelRefs.current.get('references') ?? null;
       if (activeTabIdentity) return referenceTabRefs.current.get(activeTabIdentity) ?? null;
       return emptyReferenceRef.current;
     }
@@ -110,8 +115,13 @@ export function ReferenceWorkspace({
 
   useLayoutEffect(() => {
     const was = previous.current;
-    previous.current = { open, mode };
-    if (!open || (was.open && was.mode === mode)) return;
+    const pendingStatus = pendingReference?.status ?? null;
+    previous.current = { open, mode, pendingStatus };
+    const retryBecameAvailable = open
+      && mode === 'references'
+      && pendingStatus === 'error'
+      && was.pendingStatus !== 'error';
+    if (!open || (was.open && was.mode === mode && !retryBecameAvailable)) return;
     requestAnimationFrame(() => focusWithoutScroll(modeFallback(mode)));
   }, [open, mode, activeTabIdentity, pendingReference?.status]);
 

@@ -45,6 +45,8 @@ export interface ViewerNavigationAdapterOptions {
 }
 
 export interface PdfViewerNavigation extends ViewerNavigationControls {
+  /** Resolves a semantic target without moving the viewer. */
+  resolveTarget(target: PdfNavigationTarget): PdfViewerLocation | null;
   applyTarget(target: PdfNavigationTarget): Promise<boolean>;
 }
 
@@ -536,25 +538,23 @@ export function createViewerNavigation(
     return applyResolvedLocation(viewer, location, operation);
   };
 
-  const applyTarget = async (target: PdfNavigationTarget): Promise<boolean> => {
-    const viewer = activeViewer();
-    if (!viewer) return false;
-    const operation = beginOperation(viewer);
-    if (target.documentGeneration !== viewer.documentGeneration || !operationIsCurrent(operation)) {
-      return false;
-    }
+  const resolveTarget = (
+    viewer: ActiveViewer,
+    target: PdfNavigationTarget,
+  ): PdfViewerLocation | null => {
+    if (target.documentGeneration !== viewer.documentGeneration) return null;
     const page = viewer.pages[target.pageIndex];
-    if (!page) return false;
+    if (!page) return null;
     let metrics;
     let currentZoom;
     try {
       metrics = viewer.viewport.getMetrics();
       currentZoom = viewer.zoom.getState().currentZoomLevel;
     } catch {
-      return false;
+      return null;
     }
     const rotation = ((page.rotation + viewer.documentRotation) % 4) as Rotation;
-    const location = createPdfTargetLocation(target, {
+    return createPdfTargetLocation(target, {
       page: {
         ...page.size,
         cropOrigin: {
@@ -570,6 +570,14 @@ export function createViewerNavigation(
       currentZoom,
       rotation,
     });
+  };
+
+  const applyTarget = async (target: PdfNavigationTarget): Promise<boolean> => {
+    const viewer = activeViewer();
+    if (!viewer) return false;
+    const operation = beginOperation(viewer);
+    if (!operationIsCurrent(operation)) return false;
+    const location = resolveTarget(viewer, target);
     return location ? applyResolvedLocation(viewer, location, operation) : false;
   };
 
@@ -582,6 +590,10 @@ export function createViewerNavigation(
 
   return {
     captureLocation,
+    resolveTarget(target) {
+      const viewer = activeViewer();
+      return viewer ? resolveTarget(viewer, target) : null;
+    },
     applyLocation,
     applyTarget,
     replaceDocument(nextDocumentGeneration) {

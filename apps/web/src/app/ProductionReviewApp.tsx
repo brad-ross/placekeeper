@@ -24,12 +24,24 @@ import {
   type ViewerControlsSnapshot,
 } from "../pdf/viewer-controls.js";
 import type { ViewerFramingControls } from "../pdf/viewer-framing.js";
+import type { PdfViewerNavigation } from "../pdf/viewer-navigation-adapter.js";
+import type { ReferenceDocumentController } from "../pdf/reference-document.js";
+import type { PdfOutlineDiscovery } from "../pdf/pdf-outline.js";
 import type {
   ViewerClientPlacement,
   ViewerInteractionEvent,
   ViewerPageMenuInvocation,
 } from "../pdf/viewer-interaction-events.js";
 import { PageNotePlacementAuthority } from "../review/review-surface-state.js";
+import {
+  NavigationCoordinator,
+} from "../review/navigation-coordinator.js";
+import {
+  createReferenceNavigationState,
+  reduceReferenceNavigation,
+  type ReferenceNavigationAction,
+} from "../review/reference-navigation-state.js";
+import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
 
 function itemCoordinates(item: ReviewState["items"][number]): { x: number; y: number } | undefined {
   const value = item.payload[item.kind === "insert" || item.kind === "pageNote" ? "position" : "rect"];
@@ -110,6 +122,33 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const viewerRegistry = useRef<PluginRegistry | null>(null);
   const viewerControlsRef = useRef<ViewerControls | undefined>(undefined);
   const [viewerFraming, setViewerFraming] = useState<ViewerFramingControls>();
+  const productionRootRef = useRef<HTMLElement | null>(null);
+  const mainNavigationRef = useRef<PdfViewerNavigation | null>(null);
+  const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
+  const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
+  const referenceNavigationWaiters = useRef<Array<{
+    readonly documentGeneration: number;
+    readonly resolve: (navigation: PdfViewerNavigation | null) => void;
+  }>>([]);
+  const documentGenerationRef = useRef(0);
+  const [documentGeneration, setDocumentGeneration] = useState(0);
+  const navigationStateRef = useRef(createReferenceNavigationState(0));
+  const [navigationState, setNavigationState] = useState(navigationStateRef.current);
+  const [workspaceOpen, setWorkspaceOpenState] = useState(false);
+  const [pendingReference, setPendingReference] = useState<PendingReferencePanel | null>(null);
+  const [linkActionRequest, setLinkActionRequest] = useState<
+    Extract<ViewerInteractionEvent, { readonly type: 'pdf-link' }>['value'] | null
+  >(null);
+  const [navigationAnnouncement, setNavigationAnnouncement] = useState('');
+  const outlineDiscoveryRef = useRef<PdfOutlineDiscovery>({
+    status: 'loading',
+    documentGeneration: 0,
+  });
+  const [outlineDiscovery, setOutlineDiscovery] = useState<PdfOutlineDiscovery>(
+    outlineDiscoveryRef.current,
+  );
+  const [currentOutlineItemId, setCurrentOutlineItemId] = useState<string | null>(null);
+  const [referenceViewportHost, setReferenceViewportHost] = useState<HTMLDivElement | null>(null);
   const markHoverRef = useRef<string | undefined>(undefined);
   const markFocusRef = useRef<string | undefined>(undefined);
   const rowCorrespondenceRef = useRef<string | undefined>(undefined);
@@ -125,6 +164,64 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     [state.items],
   );
   const sourceRoot = props.scope.sourceRootPath ?? "No source root selected";
+  const dispatchNavigation = (action: ReferenceNavigationAction) => {
+    const next = reduceReferenceNavigation(navigationStateRef.current, action);
+    navigationStateRef.current = next;
+    setNavigationState(next);
+  };
+  const coordinatorRef = useRef<NavigationCoordinator | null>(null);
+  if (coordinatorRef.current === null) {
+    coordinatorRef.current = new NavigationCoordinator({
+      getState: () => navigationStateRef.current,
+      dispatch: dispatchNavigation,
+      getMainNavigation: () => mainNavigationRef.current,
+      getReferenceNavigation: () => referenceNavigationRef.current,
+      waitForReferenceNavigation: () => {
+        const current = referenceNavigationRef.current;
+        if (current) return Promise.resolve(current);
+        const generation = documentGenerationRef.current;
+        return new Promise((resolve) => {
+          const waiter = { documentGeneration: generation, resolve };
+          referenceNavigationWaiters.current.push(waiter);
+          setTimeout(() => {
+            const index = referenceNavigationWaiters.current.indexOf(waiter);
+            if (index < 0) return;
+            referenceNavigationWaiters.current.splice(index, 1);
+            resolve(null);
+          }, 1_600);
+        });
+      },
+      getReferenceController: () => referenceControllerRef.current,
+      setWorkspaceOpen: (open) => {
+        setWorkspaceOpenState(open);
+      },
+      settleWorkspace: async () => {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      },
+      setPendingReference,
+      setLinkActionRequest,
+      setAnnouncement: setNavigationAnnouncement,
+      focusReferenceTab: (identity) => {
+        requestAnimationFrame(() => {
+          const target = [...(productionRootRef.current?.querySelectorAll<HTMLElement>(
+            '[data-reference-tab]',
+          ) ?? [])].find((element) => element.dataset.referenceTab === identity);
+          target?.focus({ preventScroll: true });
+        });
+        return true;
+      },
+      focusWorkspaceControl: () => {
+        requestAnimationFrame(() => productionRootRef.current
+          ?.querySelector<HTMLButtonElement>('[aria-controls="review-workspace"]')
+          ?.focus({ preventScroll: true }));
+        return true;
+      },
+      getOutlineDiscovery: () => outlineDiscoveryRef.current,
+      setCurrentOutlineItemId,
+    });
+  }
+  const navigationCoordinator = coordinatorRef.current;
 
   const onSelectionUpdate = (update: SelectionUpdate) => {
     setSelectionUpdate((current) => acceptSelectionUpdate(current, update));
@@ -135,10 +232,45 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     rowCorrespondenceRef.current ?? markFocusRef.current ?? markHoverRef.current,
   );
   useEffect(() => () => {
+    navigationCoordinator.dispose();
     viewerControlsRef.current?.dispose();
     placementAuthority.current.clear();
   }, []);
+  const sourceIdentity = `${state.source.fileId}:${state.source.digest}`;
+  const sourceIdentityRef = useRef(sourceIdentity);
+  const initialSourceIdentityRef = useRef(
+    `${props.initialState.source.fileId}:${props.initialState.source.digest}`,
+  );
+  useEffect(() => {
+    const next = `${props.initialState.source.fileId}:${props.initialState.source.digest}`;
+    if (next === initialSourceIdentityRef.current) return;
+    initialSourceIdentityRef.current = next;
+    setState(props.initialState);
+  }, [props.initialState]);
+  useEffect(() => {
+    if (sourceIdentity === sourceIdentityRef.current) return;
+    sourceIdentityRef.current = sourceIdentity;
+    const nextGeneration = documentGenerationRef.current + 1;
+    documentGenerationRef.current = nextGeneration;
+    setDocumentGeneration(nextGeneration);
+    for (const waiter of referenceNavigationWaiters.current.splice(0)) waiter.resolve(null);
+    outlineDiscoveryRef.current = { status: 'loading', documentGeneration: nextGeneration };
+    setOutlineDiscovery(outlineDiscoveryRef.current);
+    navigationCoordinator.replaceDocument(nextGeneration);
+  }, [navigationCoordinator, sourceIdentity]);
   const onViewerInteraction = (event: ViewerInteractionEvent) => {
+    if (event.type === 'pdf-link') {
+      navigationCoordinator.requestLink(event.value);
+      return;
+    }
+    if (event.type === 'pdf-link-unavailable') {
+      navigationCoordinator.unavailableLink(event.value);
+      return;
+    }
+    if (event.type === 'scroll') {
+      navigationCoordinator.refreshMainLocation();
+      return;
+    }
     if (event.type === "selection-placement") {
       setSelectionPlacement(event.value?.placement ?? null);
       return;
@@ -206,13 +338,44 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       {...(correspondingItemId === undefined ? {} : { correspondingOwnedAnnotationId: correspondingItemId })}
       onExistingAnnotationsDiscovery={setExistingAnnotations}
       inventoryRetryGeneration={inventoryRetryGeneration}
+      documentGeneration={documentGeneration}
+      referenceViewportHost={referenceViewportHost}
+      onReferenceDocumentControls={(controls) => {
+        referenceControllerRef.current = controls;
+      }}
+      onViewerNavigationInitialized={(scope, navigation) => {
+        if (scope === 'main') {
+          mainNavigationRef.current = navigation;
+          navigation?.replaceDocument(documentGenerationRef.current);
+          navigationCoordinator.refreshMainLocation();
+          return;
+        }
+        referenceNavigationRef.current = navigation;
+        navigation?.replaceDocument(documentGenerationRef.current);
+        if (navigation) {
+          const generation = documentGenerationRef.current;
+          const current = referenceNavigationWaiters.current.splice(0);
+          for (const waiter of current) {
+            waiter.resolve(waiter.documentGeneration === generation ? navigation : null);
+          }
+        }
+      }}
+      onOutlineDiscovery={(discovery) => {
+        if (discovery.documentGeneration !== documentGenerationRef.current) return;
+        outlineDiscoveryRef.current = discovery;
+        setOutlineDiscovery(discovery);
+        navigationCoordinator.refreshCurrentOutline();
+      }}
       onViewerInitialized={async (registry) => {
         viewerRegistry.current = registry;
         viewerControlsRef.current?.dispose();
         const controls = createViewerControls(registry);
         viewerControlsRef.current = controls;
         setViewerState(controls.snapshot());
-        controls.subscribe(() => setViewerState(controls.snapshot()));
+        controls.subscribe(() => {
+          setViewerState(controls.snapshot());
+          navigationCoordinator.refreshMainLocation();
+        });
       }}
       onViewerFramingInitialized={(controls) => {
         setViewerFraming(controls);
@@ -262,7 +425,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   );
 
   return (
-    <main data-production-review>
+    <main data-production-review ref={productionRootRef}>
       <ReviewShell
         state={state}
         documentTitle={props.scope.documentTitle}
@@ -270,10 +433,72 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         {...(viewerControlsRef.current === undefined ? {} : { viewerControls: viewerControlsRef.current })}
         {...(viewerFraming === undefined ? {} : { viewerFraming })}
         viewerState={viewerState}
+        workspaceOpen={workspaceOpen}
+        navigationState={navigationState}
+        referenceTabs={navigationState.tabs.map((tab) => ({
+          identity: tab.identity,
+          label: tab.label ?? `Page ${tab.originalTarget.pageIndex + 1}`,
+          pageContext: tab.pageContext ?? `Page ${tab.originalTarget.pageIndex + 1}`,
+        }))}
+        pendingReference={pendingReference}
+        outlineDiscovery={outlineDiscovery}
+        currentOutlineItemId={currentOutlineItemId}
+        linkActionRequest={linkActionRequest}
+        navigationAnnouncement={navigationAnnouncement}
+        canNavigateBack={navigationState.pendingMainNavigation === null
+          && navigationState.mainHistory.index > 0}
+        canNavigateForward={navigationState.pendingMainNavigation === null
+          && navigationState.mainHistory.index >= 0
+          && navigationState.mainHistory.index < navigationState.mainHistory.entries.length - 1}
         finishSlot={delivery}
         finishConfirmationActive={humanConfirmationActive || codexConfirmationActive}
         onFinishReview={() => props.api.finish()}
         onDiscardReview={() => props.api.discard()}
+        onLinkActionChoose={(choice, request) => {
+          void navigationCoordinator.chooseLink(choice, request);
+        }}
+        onLinkActionDismiss={(request) => navigationCoordinator.dismissLink(request)}
+        onNavigateBack={() => { void navigationCoordinator.historyBack(); }}
+        onNavigateForward={() => { void navigationCoordinator.historyForward(); }}
+        onWorkspaceModeChange={(mode) => {
+          if (mode === 'references' && !workspaceOpen) {
+            void navigationCoordinator.openReferencesWorkspace();
+            return;
+          }
+          dispatchNavigation({ type: 'select-workspace-mode', mode });
+          setWorkspaceOpenState(true);
+        }}
+        onWorkspaceDismiss={() => {
+          setWorkspaceOpenState(false);
+          dispatchNavigation({
+            type: 'hide-workspace',
+            focusReturnToken: 'toolbar:workspace',
+          });
+        }}
+        onReferenceTabActivate={(identity) => {
+          void navigationCoordinator.switchReference(identity);
+        }}
+        onReferenceTabClose={(identity) => {
+          void navigationCoordinator.closeReference(identity);
+        }}
+        onReferenceSendToMain={(identity) => {
+          void navigationCoordinator.sendToMain(identity);
+        }}
+        onReferenceRetry={() => { void navigationCoordinator.retryReference(); }}
+        onOutlineActivate={(item) => {
+          if (item.target === null) navigationCoordinator.unavailableDestination();
+          else void navigationCoordinator.navigateMainTarget(item.target, 'outline');
+        }}
+        onReferenceViewportHost={setReferenceViewportHost}
+        onWorkspaceModeFocusTokenChange={(mode, token) => {
+          const current = navigationStateRef.current.workspace.modes[mode];
+          dispatchNavigation({
+            type: 'remember-workspace-view',
+            mode,
+            logicalScrollToken: current.logicalScrollToken,
+            logicalFocusToken: token,
+          });
+        }}
         selectionUpdate={selectionUpdate}
         selectionPlacement={selectionPlacement}
         caretAnchor={caret}

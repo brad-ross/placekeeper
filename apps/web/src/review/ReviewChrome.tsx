@@ -9,12 +9,16 @@ export interface ReviewChromeProps {
   readonly viewerState: ViewerControlsSnapshot;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
+  readonly canNavigateBack?: boolean;
+  readonly canNavigateForward?: boolean;
   readonly annotationCount: number;
   readonly workspaceOpen: boolean;
   readonly finishOpen: boolean;
   readonly workspaceControlRef?: RefObject<HTMLButtonElement | null>;
   readonly onUndo: () => void;
   readonly onRedo: () => void;
+  readonly onNavigateBack?: () => void;
+  readonly onNavigateForward?: () => void;
   readonly onWorkspace: () => void;
   readonly onFinish: () => void;
 }
@@ -26,12 +30,16 @@ export function ReviewChrome({
   viewerState,
   canUndo,
   canRedo,
+  canNavigateBack = false,
+  canNavigateForward = false,
   annotationCount,
   workspaceOpen,
   finishOpen,
   workspaceControlRef,
   onUndo,
   onRedo,
+  onNavigateBack = () => undefined,
+  onNavigateForward = () => undefined,
   onWorkspace,
   onFinish,
 }: ReviewChromeProps) {
@@ -57,6 +65,8 @@ export function ReviewChrome({
         <button type="button" className="review-chrome__icon-control" aria-label="Zoom in" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onClick={() => controls?.zoomIn()}><ReviewIcon name="plus" /></button>
       </div>
       <nav className="review-chrome__actions" aria-label="Review views">
+        <button type="button" className="review-chrome__icon-control review-chrome__main-history-control" data-main-history="back" aria-label="Back in document history" disabled={!canNavigateBack} onClick={onNavigateBack}><ReviewIcon name="chevron-left" /></button>
+        <button type="button" className="review-chrome__icon-control review-chrome__main-history-control" data-main-history="forward" aria-label="Forward in document history" disabled={!canNavigateForward} onClick={onNavigateForward}><ReviewIcon name="chevron-right" /></button>
         <button type="button" className="review-chrome__icon-control review-chrome__history-control" aria-label="Undo" disabled={!canUndo} onClick={onUndo}><ReviewIcon name="undo" /></button>
         <button type="button" className="review-chrome__icon-control review-chrome__history-control" aria-label="Redo" disabled={!canRedo} onClick={onRedo}><ReviewIcon name="redo" /></button>
         <button ref={workspaceControlRef} type="button" className="review-chrome__workspace" aria-label={`Workspace (${annotationCount} annotations)`} aria-expanded={workspaceOpen} aria-controls="review-workspace" onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); onWorkspace(); }}>

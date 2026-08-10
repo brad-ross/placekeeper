@@ -62,6 +62,35 @@ function switchTo(
 }
 
 describe('reference tab state', () => {
+  it('cancels every pending transaction without changing durable navigation state', () => {
+    let state = open(createReferenceNavigationState(4), target('a', 0), location(0));
+    state = open(state, target('b', 1), location(1));
+    state = reduceReferenceNavigation(state, {
+      type: 'request-reference-switch', token: 1, targetIdentity: 'a', outgoingLocation: location(1, 10),
+    });
+    state = reduceReferenceNavigation(state, {
+      type: 'request-send-to-main', token: 2, currentMainLocation: location(4),
+    });
+    state = reduceReferenceNavigation(state, {
+      type: 'request-main-jump', token: 3, currentLocation: location(4), destination: location(5),
+    });
+    const durable = {
+      tabs: state.tabs,
+      activeTabIdentity: state.activeTabIdentity,
+      mainHistory: state.mainHistory,
+      workspace: state.workspace,
+    };
+
+    const cancelled = reduceReferenceNavigation(state, { type: 'cancel-pending-navigation' });
+    expect(cancelled).toMatchObject({
+      pendingReferenceSwitch: null,
+      pendingSendToMain: null,
+      pendingMainNavigation: null,
+      ...durable,
+    });
+    expect(reduceReferenceNavigation(cancelled, { type: 'cancel-pending-navigation' })).toBe(cancelled);
+  });
+
   it('deduplicates canonical aliases without replacing the original target or its live snapshot', () => {
     const original = target('same-target', 1);
     const alias = { ...original, zoom: { ...original.zoom, params: [...original.zoom.params] } };

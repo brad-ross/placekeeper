@@ -32,6 +32,10 @@ describe("one production review tree", () => {
     />);
     expect(html).toContain("Real shared PDF viewer");
     expect(html).toContain("aria-label=\"Review views\"");
+    expect(html).toContain('aria-label="Back in document history"');
+    expect(html).toContain('aria-label="Forward in document history"');
+    expect(html).toContain('aria-label="Undo"');
+    expect(html).toContain('aria-label="Redo"');
     expect(html).toContain("Human delivery");
     expect(html).toContain("Codex delivery");
     expect(html).toContain('data-delivery-kind="human"');
