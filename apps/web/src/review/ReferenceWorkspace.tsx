@@ -2,11 +2,9 @@ import {
   useLayoutEffect,
   useRef,
   type KeyboardEvent,
-  type ReactNode,
   type Ref,
 } from 'react';
 
-import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
 import type { AnnotationPresentation } from '../pdf/viewer-framing.js';
 import {
   referenceTabSuccessorIdentity,
@@ -48,17 +46,12 @@ export interface ReferenceWorkspaceProps {
   readonly tabs: readonly ReferenceWorkspaceTab[];
   readonly activeTabIdentity: string | null;
   readonly pendingReference?: PendingReferencePanel | null;
-  readonly outline: PdfOutlineDiscovery;
-  readonly currentOutlineItemId?: string | null;
-  readonly annotations: ReactNode;
   readonly announcement?: string;
   readonly onModeChange: (mode: WorkspaceMode) => void;
   readonly onReferenceTabActivate: (identity: string) => void;
   readonly onReferenceTabClose: (identity: string) => void;
   readonly onSendToMain: (identity: string) => void;
   readonly onRetryReference: () => void;
-  readonly onOutlineActivate: (item: PdfOutlineItem) => void;
-  readonly onDismiss: () => void;
   readonly modes?: readonly WorkspaceMode[];
   readonly headerVariant?: 'tabs' | 'references';
   readonly onMoveReferencesRight?: () => void;

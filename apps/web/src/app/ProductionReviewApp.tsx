@@ -139,6 +139,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const referenceNavigationWaiters = useRef<Array<{
     readonly documentGeneration: number;
     readonly resolve: (navigation: PdfViewerNavigation | null) => void;
+    timeout: ReturnType<typeof setTimeout> | null;
   }>>([]);
   const documentGenerationRef = useRef(0);
   const navigationStateRef = useRef(createReferenceNavigationState(0));
@@ -205,9 +206,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         if (current) return Promise.resolve(current);
         const generation = documentGenerationRef.current;
         return new Promise((resolve) => {
-          const waiter = { documentGeneration: generation, resolve };
+          const waiter: (typeof referenceNavigationWaiters.current)[number] = {
+            documentGeneration: generation,
+            resolve,
+            timeout: null,
+          };
           referenceNavigationWaiters.current.push(waiter);
-          setTimeout(() => {
+          waiter.timeout = setTimeout(() => {
             const index = referenceNavigationWaiters.current.indexOf(waiter);
             if (index < 0) return;
             referenceNavigationWaiters.current.splice(index, 1);
@@ -302,7 +307,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     sourceIdentityRef.current = sourceIdentity;
     const nextGeneration = documentGenerationRef.current + 1;
     documentGenerationRef.current = nextGeneration;
-    for (const waiter of referenceNavigationWaiters.current.splice(0)) waiter.resolve(null);
+    for (const waiter of referenceNavigationWaiters.current.splice(0)) {
+      if (waiter.timeout !== null) clearTimeout(waiter.timeout);
+      waiter.resolve(null);
+    }
     outlineDiscoveryRef.current = { status: 'loading', documentGeneration: nextGeneration };
     setOutlineDiscovery(outlineDiscoveryRef.current);
     navigationCoordinator.replaceDocument(nextGeneration);
@@ -394,6 +402,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       const generation = documentGenerationRef.current;
       const current = referenceNavigationWaiters.current.splice(0);
       for (const waiter of current) {
+        if (waiter.timeout !== null) clearTimeout(waiter.timeout);
         waiter.resolve(waiter.documentGeneration === generation ? navigation : null);
       }
     }

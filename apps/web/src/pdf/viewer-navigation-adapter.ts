@@ -372,6 +372,20 @@ export function createViewerNavigation(
     return { page, viewportRect, pageRect, rotation, scale };
   };
 
+  const hasUsablePageTree = (viewer: ActiveViewer): boolean => {
+    if (viewer.pages.length === 0) return false;
+    const root = options.root();
+    const viewport = root?.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
+    const page = root?.querySelector<HTMLElement>('[data-page-index]');
+    if (!viewport || !page) return false;
+    const viewportRect = viewport.getBoundingClientRect();
+    const pageRect = page.getBoundingClientRect();
+    return validDimension(viewportRect.width)
+      && validDimension(viewportRect.height)
+      && validDimension(pageRect.width)
+      && validDimension(pageRect.height);
+  };
+
   const captureLocation = (): PdfViewerLocation | null => {
     const viewer = activeViewer();
     if (!viewer) return null;
@@ -471,11 +485,11 @@ export function createViewerNavigation(
       while (
         operationIsCurrent(operation)
         && Date.now() < deadline
-        && !viewer.pages.some((page) => pageGeometry(viewer, page.index) !== null)
+        && !hasUsablePageTree(viewer)
       ) {
         if (!await waitForPromise(nextFrame(), operation.signal, deadline - Date.now())) return false;
       }
-      if (!viewer.pages.some((page) => pageGeometry(viewer, page.index) !== null)) return false;
+      if (!hasUsablePageTree(viewer)) return false;
       let currentPageIndex = -1;
       try {
         currentPageIndex = viewer.scroll.getCurrentPage() - 1;
@@ -654,7 +668,7 @@ export function createViewerNavigation(
     const waitForAdjacentTarget = Math.abs(target.pageIndex - currentPageIndex) <= 1;
     const readinessDeadline = Date.now() + timeoutMs;
     while (operationIsCurrent(operation) && Date.now() < readinessDeadline) {
-      const hasPageTree = viewer.pages.some((page) => pageGeometry(viewer, page.index) !== null);
+      const hasPageTree = hasUsablePageTree(viewer);
       const targetReady = pageGeometry(viewer, target.pageIndex) !== null;
       if (hasPageTree && (!waitForAdjacentTarget || targetReady)) break;
       if (!await waitForPromise(
@@ -664,7 +678,7 @@ export function createViewerNavigation(
       )) return false;
     }
     if (
-      !viewer.pages.some((page) => pageGeometry(viewer, page.index) !== null)
+      !hasUsablePageTree(viewer)
       || (waitForAdjacentTarget && pageGeometry(viewer, target.pageIndex) === null)
     ) return false;
     // Viewport metrics can change while the portaled page tree settles. Resolve

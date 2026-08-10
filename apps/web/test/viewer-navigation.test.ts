@@ -170,6 +170,11 @@ function navigationHarness(options: {
   const root = {
     querySelector: (selector: string) => {
       if (selector === '[data-viewer-framing-viewport]') return viewportElement;
+      if (selector === '[data-page-index]') {
+        return pageMounted || (options.farTargetInitiallyUnmounted && farPageMounted)
+          ? pageElement
+          : null;
+      }
       if (selector === '[data-page-index="0"]') return pageMounted ? pageElement : null;
       if (selector === '[data-page-index="2"]') {
         return options.farTargetInitiallyUnmounted && farPageMounted ? pageElement : null;

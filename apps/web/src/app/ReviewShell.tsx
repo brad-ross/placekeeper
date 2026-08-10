@@ -338,24 +338,19 @@ export function ReviewShell(props: ReviewShellProps) {
   });
 
   useLayoutEffect(() => {
-    const stage = workspaceFraming.stageRef.current;
-    if (!stage) return;
-    const publish = () => {
-      const bounds = stage.getBoundingClientRect();
-      const action: ReferenceWorkspaceLayoutAction = {
-        type: 'set-stage-size',
-        width: Math.max(0, bounds.width),
-        height: Math.max(0, bounds.height),
-      };
-      if (!referenceLayoutControlled) dispatchLocalReferenceLayout(action);
-      props.onReferenceLayoutAction?.(action);
+    const action: ReferenceWorkspaceLayoutAction = {
+      type: 'set-stage-size',
+      width: workspaceFraming.stageSize.width,
+      height: workspaceFraming.stageSize.height,
     };
-    publish();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(publish);
-    observer.observe(stage);
-    return () => observer.disconnect();
-  }, [props.onReferenceLayoutAction, referenceLayoutControlled, workspaceFraming.stageRef]);
+    if (!referenceLayoutControlled) dispatchLocalReferenceLayout(action);
+    props.onReferenceLayoutAction?.(action);
+  }, [
+    props.onReferenceLayoutAction,
+    referenceLayoutControlled,
+    workspaceFraming.stageSize.height,
+    workspaceFraming.stageSize.width,
+  ]);
 
   useLayoutEffect(() => {
     dispatchReferenceLayout({
@@ -775,6 +770,20 @@ export function ReviewShell(props: ReviewShellProps) {
       target?.focus({ preventScroll: true });
     }));
   };
+  const rememberWorkspaceModeFocus = (mode: WorkspaceMode, token: string) => {
+    if (props.navigationState === undefined) {
+      dispatchSurface({
+        type: 'reference-navigation',
+        action: {
+          type: 'remember-workspace-view',
+          mode,
+          logicalScrollToken: surface.navigation.workspace.modes[mode].logicalScrollToken,
+          logicalFocusToken: token,
+        },
+      });
+    }
+    props.onWorkspaceModeFocusTokenChange?.(mode, token);
+  };
   const markFramingUserIntent = workspaceFraming.markUserIntent;
   const isWorkspaceOrChrome = (target: EventTarget | null) => (
     (target instanceof Node && (
@@ -1000,11 +1009,7 @@ export function ReviewShell(props: ReviewShellProps) {
             }}
             tabs={referenceTabs}
             activeTabIdentity={navigation.activeTabIdentity}
-            outline={outlineDiscovery}
             {...(props.pendingReference === undefined ? {} : { pendingReference: props.pendingReference })}
-            {...(props.currentOutlineItemId === undefined
-              ? {}
-              : { currentOutlineItemId: props.currentOutlineItemId })}
             announcement={props.navigationAnnouncement ?? announcement}
             onModeChange={selectWorkspaceMode}
             onReferenceTabActivate={(identity) => props.onReferenceTabActivate?.(identity)}
@@ -1026,24 +1031,8 @@ export function ReviewShell(props: ReviewShellProps) {
             }}
             onSendToMain={(identity) => props.onReferenceSendToMain?.(identity)}
             onRetryReference={() => props.onReferenceRetry?.()}
-            onOutlineActivate={(item) => props.onOutlineActivate?.(item)}
-            onDismiss={closeWorkspace}
             onReferenceViewportHost={props.onReferenceViewportHost ?? ignoreReferenceViewportHost}
-            onModeFocusTokenChange={(mode, token) => {
-              if (props.navigationState === undefined) {
-                dispatchSurface({
-                  type: 'reference-navigation',
-                  action: {
-                    type: 'remember-workspace-view',
-                    mode,
-                    logicalScrollToken: surface.navigation.workspace.modes[mode].logicalScrollToken,
-                    logicalFocusToken: token,
-                  },
-                });
-              }
-              props.onWorkspaceModeFocusTokenChange?.(mode, token);
-            }}
-            annotations={null}
+            onModeFocusTokenChange={rememberWorkspaceModeFocus}
           />
           <OutlineAnnotationsWorkspace
             workspaceRef={workspaceFraming.toolsSurfaceRef}
@@ -1055,20 +1044,7 @@ export function ReviewShell(props: ReviewShellProps) {
             currentOutlineItemId={props.currentOutlineItemId ?? null}
             onModeChange={selectWorkspaceMode}
             onOutlineActivate={(item) => props.onOutlineActivate?.(item)}
-            onModeFocusTokenChange={(mode, token) => {
-              if (props.navigationState === undefined) {
-                dispatchSurface({
-                  type: 'reference-navigation',
-                  action: {
-                    type: 'remember-workspace-view',
-                    mode,
-                    logicalScrollToken: surface.navigation.workspace.modes[mode].logicalScrollToken,
-                    logicalFocusToken: token,
-                  },
-                });
-              }
-              props.onWorkspaceModeFocusTokenChange?.(mode, token);
-            }}
+            onModeFocusTokenChange={rememberWorkspaceModeFocus}
             annotations={<div id="review-annotation-list" aria-label="All annotations">
             <AnnotationList
               items={props.state.items}

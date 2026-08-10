@@ -40,6 +40,28 @@ describe('reference workspace layout state', () => {
     })).toBe(state);
   });
 
+  it('keeps reducer identity for clamped resize and repeated focus commands', () => {
+    const state = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
+
+    expect(reduceReferenceWorkspaceLayout(state, {
+      type: 'resize-right-references',
+      size: state.rightReferenceWidth,
+    })).toBe(state);
+    expect(reduceReferenceWorkspaceLayout(state, {
+      type: 'resize-bottom-references',
+      size: state.bottomReferenceHeight,
+    })).toBe(state);
+
+    const focused = reduceReferenceWorkspaceLayout(state, {
+      type: 'focus-surface',
+      surface: 'references',
+    });
+    expect(reduceReferenceWorkspaceLayout(focused, {
+      type: 'focus-surface',
+      surface: 'references',
+    })).toBe(focused);
+  });
+
   it('moves References between docks with the required visibility transitions', () => {
     let state = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
     state = reduceReferenceWorkspaceLayout(state, { type: 'show-references' });

@@ -162,16 +162,12 @@ describe('shared reference workspace', () => {
           { identity: 'proof', label: 'Proof', pageContext: 'Page 31' },
         ]}
         activeTabIdentity="lemma"
-        outline={{ status: 'loaded-empty', documentGeneration: 3 }}
         onModeChange={() => undefined}
         onReferenceTabActivate={() => undefined}
         onReferenceTabClose={() => undefined}
         onSendToMain={() => undefined}
         onRetryReference={() => undefined}
-        onOutlineActivate={() => undefined}
-        onDismiss={() => undefined}
         onReferenceViewportHost={() => undefined}
-        annotations={<div>Annotation inventory</div>}
       />,
     );
 
@@ -275,16 +271,12 @@ describe('shared reference workspace', () => {
       presentation: 'bottom' as const,
       tabs: [],
       activeTabIdentity: null,
-      outline: { status: 'loading' as const, documentGeneration: 3 },
       onModeChange: vi.fn(),
       onReferenceTabActivate: vi.fn(),
       onReferenceTabClose: vi.fn(),
       onSendToMain: vi.fn(),
       onRetryReference: vi.fn(),
-      onOutlineActivate: vi.fn(),
-      onDismiss: vi.fn(),
       onReferenceViewportHost: vi.fn(),
-      annotations: <div />,
     };
     const empty = renderToStaticMarkup(<ReferenceWorkspace {...base} />);
     const loading = renderToStaticMarkup(<ReferenceWorkspace

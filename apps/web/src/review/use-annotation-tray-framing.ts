@@ -64,6 +64,7 @@ export interface WorkspaceFraming {
   readonly referenceSurfaceRef: RefObject<HTMLElement | null>;
   readonly toolsSurfaceRef: RefObject<HTMLElement | null>;
   readonly stageRef: RefObject<HTMLDivElement | null>;
+  readonly stageSize: { readonly width: number; readonly height: number };
   readonly presentation: AnnotationPresentation;
   readonly sideWidth: number;
   requestSettledReframe(): void;
@@ -425,6 +426,7 @@ export function useWorkspaceFraming(input: {
     referenceSurfaceRef,
     toolsSurfaceRef,
     stageRef,
+    stageSize,
     presentation,
     sideWidth,
     requestSettledReframe,

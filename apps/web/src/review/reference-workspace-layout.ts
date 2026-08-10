@@ -221,22 +221,33 @@ export function reduceReferenceWorkspaceLayout(
         narrowSurface: 'references',
         lastFocusedSurface: 'references',
       };
-    case 'focus-surface':
+    case 'focus-surface': {
+      const narrowSurface = state.regime === 'narrow' ? action.surface : state.narrowSurface;
+      if (state.lastFocusedSurface === action.surface && state.narrowSurface === narrowSurface) {
+        return state;
+      }
       return {
         ...state,
         lastFocusedSurface: action.surface,
-        narrowSurface: state.regime === 'narrow' ? action.surface : state.narrowSurface,
+        narrowSurface,
       };
-    case 'resize-right-references':
+    }
+    case 'resize-right-references': {
+      const rightReferenceWidth = clampRightReferenceWidth(action.size, state.stageWidth);
+      if (rightReferenceWidth === state.rightReferenceWidth) return state;
       return {
         ...state,
-        rightReferenceWidth: clampRightReferenceWidth(action.size, state.stageWidth),
+        rightReferenceWidth,
       };
-    case 'resize-bottom-references':
+    }
+    case 'resize-bottom-references': {
+      const bottomReferenceHeight = clampBottomReferenceHeight(action.size, state.stageHeight);
+      if (bottomReferenceHeight === state.bottomReferenceHeight) return state;
       return {
         ...state,
-        bottomReferenceHeight: clampBottomReferenceHeight(action.size, state.stageHeight),
+        bottomReferenceHeight,
       };
+    }
     case 'replace-document':
       return {
         ...state,
