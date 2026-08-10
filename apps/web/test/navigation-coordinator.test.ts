@@ -63,7 +63,7 @@ function navigation(initial = location(0)) {
 
 function harness() {
   let state: ReferenceNavigationState = createReferenceNavigationState(1);
-  let workspaceOpen = false;
+  let referencesOpen = false;
   let pending: Parameters<NavigationCoordinatorDependencies['setPendingReference']>[0] = null;
   let announcement = '';
   const main = navigation(location(0));
@@ -82,13 +82,17 @@ function harness() {
     getReferenceNavigation: () => reference.controls,
     waitForReferenceNavigation: async () => reference.controls,
     getReferenceController: () => controller,
-    setWorkspaceOpen: (open) => { workspaceOpen = open; },
-    settleWorkspace: vi.fn(async () => undefined),
+    layout: {
+      revealReferences: vi.fn(() => { referencesOpen = true; }),
+      hideReferences: vi.fn(() => { referencesOpen = false; }),
+      settle: vi.fn(async () => undefined),
+      focusReferenceRail: vi.fn(() => true),
+      referenceRailFocusToken: vi.fn(() => 'rail:bottom-references'),
+    },
     setPendingReference: (value) => { pending = value; },
     setLinkActionRequest: vi.fn(),
     setAnnouncement: (value) => { announcement = value; },
     focusReferenceTab: vi.fn(() => true),
-    focusWorkspaceControl: vi.fn(() => true),
     getOutlineDiscovery: () => ({ status: 'loaded-empty', documentGeneration: state.documentGeneration }),
     setCurrentOutlineItemId: vi.fn(),
   };
@@ -99,7 +103,7 @@ function harness() {
     reference,
     controller,
     state: () => state,
-    workspaceOpen: () => workspaceOpen,
+    referencesOpen: () => referencesOpen,
     pending: () => pending,
     announcement: () => announcement,
   };
@@ -160,7 +164,7 @@ describe('document-scoped navigation coordinator', () => {
   it('keeps a verified main jump committed when newer work arrives during workspace settlement', async () => {
     const run = harness();
     const settled = deferred<void>();
-    vi.mocked(run.dependencies.settleWorkspace).mockReturnValueOnce(settled.promise);
+    vi.mocked(run.dependencies.layout.settle).mockReturnValueOnce(settled.promise);
 
     const jump = run.coordinator.navigateMainTarget(target(3), 'direct');
     await Promise.resolve();
@@ -183,7 +187,7 @@ describe('document-scoped navigation coordinator', () => {
     const operation = run.coordinator.openReference(target(3), {
       label: 'Equation (4)', pageContext: 'Page 4',
     });
-    expect(run.workspaceOpen()).toBe(true);
+    expect(run.referencesOpen()).toBe(true);
     expect(run.pending()).toMatchObject({ status: 'loading', label: 'Equation (4)' });
     expect(run.state().tabs).toEqual([]);
 
@@ -213,7 +217,7 @@ describe('document-scoped navigation coordinator', () => {
     expect(await run.coordinator.chooseLink('references', first)).toBe(false);
     expect(await run.coordinator.chooseLink('references', newest)).toBe(true);
     expect(run.state().tabs.map(({ identity }) => identity)).toEqual([target(5).identity]);
-    expect(run.workspaceOpen()).toBe(true);
+    expect(run.referencesOpen()).toBe(true);
   });
 
   it('keeps durable state on failure and retries only a stable failed reference', async () => {
@@ -288,9 +292,10 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.state().activeTabIdentity).toBe(target(4).identity);
     expect(await run.coordinator.closeReference(target(4).identity)).toBe(true);
     expect(run.state().tabs).toEqual([]);
-    expect(run.workspaceOpen()).toBe(false);
+    expect(run.referencesOpen()).toBe(false);
     expect(run.controller.close).toHaveBeenCalled();
-    expect(run.dependencies.focusWorkspaceControl).toHaveBeenCalled();
+    expect(run.dependencies.layout.focusReferenceRail).toHaveBeenCalled();
+    expect(run.state().workspace.returnFocusToken).toBe('rail:bottom-references');
   });
 
   it('commits final logical close before a newer same-target open waits for physical close', async () => {
@@ -305,15 +310,15 @@ describe('document-scoped navigation coordinator', () => {
 
     const staleClose = run.coordinator.closeReference(target(2).identity);
     expect(run.state().tabs).toEqual([]);
-    expect(run.workspaceOpen()).toBe(false);
+    expect(run.referencesOpen()).toBe(false);
     const reopened = run.coordinator.openReference(target(2), { label: 'A', pageContext: 'Page 3' });
-    expect(run.workspaceOpen()).toBe(true);
+    expect(run.referencesOpen()).toBe(true);
     closed.resolve();
 
     expect(await staleClose).toBe(false);
     expect(await reopened).toBe(true);
     expect(run.state().tabs.map(({ identity }) => identity)).toEqual([target(2).identity]);
-    expect(run.workspaceOpen()).toBe(true);
+    expect(run.referencesOpen()).toBe(true);
   });
 
   it('uses the live scrolled reference for Send and consumes only after main success', async () => {
@@ -327,7 +332,9 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.main.controls.applyLocation).toHaveBeenCalledWith(scrolled);
     expect(run.state().tabs).toEqual([]);
     expect(run.state().mainHistory.entries).toEqual([location(1, 45, 1.1), scrolled]);
-    expect(run.workspaceOpen()).toBe(false);
+    expect(run.referencesOpen()).toBe(false);
+    expect(run.dependencies.layout.hideReferences).toHaveBeenCalled();
+    expect(run.dependencies.layout.focusReferenceRail).not.toHaveBeenCalled();
   });
 
   it('restores the surviving active tab when References reopens after Send', async () => {
@@ -342,12 +349,12 @@ describe('document-scoped navigation coordinator', () => {
     expect(await run.coordinator.sendToMain(target(4).identity)).toBe(true);
     expect(run.state().activeTabIdentity).toBe(target(2).identity);
     expect(run.state().tabs[0]!.settledLocation).toEqual(surviving);
-    expect(run.workspaceOpen()).toBe(false);
+    expect(run.referencesOpen()).toBe(false);
 
     expect(await run.coordinator.openReferencesWorkspace()).toBe(true);
     expect(run.reference.controls.applyLocation).toHaveBeenLastCalledWith(surviving);
     expect(run.state().tabs[0]!.settledLocation).toEqual(surviving);
-    expect(run.workspaceOpen()).toBe(true);
+    expect(run.referencesOpen()).toBe(true);
   });
 
   it('preserves the live active reference when an ordinary hidden workspace reopens', async () => {
@@ -355,7 +362,7 @@ describe('document-scoped navigation coordinator', () => {
     await run.coordinator.openReference(target(2), { label: 'A', pageContext: 'Page 3' });
     const live = location(6, 140, 1.45);
     run.reference.set(live);
-    run.dependencies.setWorkspaceOpen(false);
+    run.dependencies.layout.hideReferences();
     vi.mocked(run.reference.controls.applyLocation).mockClear();
 
     expect(await run.coordinator.openReferencesWorkspace()).toBe(true);
@@ -395,17 +402,17 @@ describe('document-scoped navigation coordinator', () => {
 
   it('treats semantic no-op direct and outline targets as successful without history', async () => {
     const run = harness();
-    run.dependencies.setWorkspaceOpen(true);
+    run.dependencies.layout.revealReferences();
     expect(await run.coordinator.navigateMainTarget(target(0), 'direct')).toBe(true);
     expect(run.state().mainHistory.entries).toEqual([]);
-    expect(run.workspaceOpen()).toBe(false);
+    expect(run.referencesOpen()).toBe(false);
     expect(run.main.controls.focusAtDestination).toHaveBeenCalledWith(0);
 
-    run.dependencies.setWorkspaceOpen(true);
+    run.dependencies.layout.revealReferences();
     vi.mocked(run.main.controls.focusAtDestination).mockClear();
     expect(await run.coordinator.navigateMainTarget(target(0), 'outline')).toBe(true);
     expect(run.state().mainHistory.entries).toEqual([]);
-    expect(run.workspaceOpen()).toBe(true);
+    expect(run.referencesOpen()).toBe(true);
     expect(run.main.controls.focusAtDestination).not.toHaveBeenCalled();
   });
 
@@ -424,6 +431,7 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.controller.replaceDocument).toHaveBeenCalledWith(2);
     expect(run.pending()).toBeNull();
     expect(run.announcement()).toBe('');
+    expect(run.dependencies.layout.hideReferences).toHaveBeenCalled();
     expect(run.dependencies.focusReferenceTab).not.toHaveBeenCalled();
   });
 });

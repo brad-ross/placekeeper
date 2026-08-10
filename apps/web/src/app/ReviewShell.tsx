@@ -49,8 +49,10 @@ import { OutlineAnnotationsWorkspace } from '../review/OutlineAnnotationsWorkspa
 import { ReferenceResizeHandle } from '../review/ReferenceResizeHandle.js';
 import { WorkspaceEdgeRail } from '../review/WorkspaceEdgeRail.js';
 import {
+  BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN,
   MIN_BOTTOM_REFERENCE_HEIGHT,
   MIN_RIGHT_REFERENCE_WIDTH,
+  RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
   clampBottomReferenceHeight,
   clampRightReferenceWidth,
   createReferenceWorkspaceLayout,
@@ -194,7 +196,7 @@ export function controlledWorkspaceSurfaceAction(input: {
       : null;
   }
   return input.baseSurface === 'workspace'
-    ? { type: 'hide-workspace', focusReturnToken: 'toolbar:workspace' }
+    ? { type: 'hide-workspace', focusReturnToken: BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN }
     : null;
 }
 
@@ -260,7 +262,8 @@ export function ReviewShell(props: ReviewShellProps) {
   const draftTriggerRef = useRef<HTMLElement>(null);
   const editTriggerRef = useRef<HTMLButtonElement>(null);
   const surfaceTriggersRef = useRef(new Map<ReviewBaseSurface, HTMLElement>());
-  const workspaceControlRef = useRef<HTMLButtonElement>(null);
+  const rightWorkspaceRailRef = useRef<HTMLButtonElement>(null);
+  const bottomWorkspaceRailRef = useRef<HTMLButtonElement>(null);
   const shellRef = useRef<HTMLElement>(null);
   const pointerScrollRef = useRef<PointerScrollGesture | undefined>(undefined);
   const annotationRequestTokenRef = useRef(0);
@@ -735,9 +738,16 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const closeWorkspace = () => {
     dismissPageNoteAuthority();
-    dispatchSurface({ type: 'hide-workspace', focusReturnToken: 'toolbar:workspace' });
+    const bottomRail = effectiveReferenceLayout.kind === 'narrow-unified'
+      || effectiveReferenceLayout.referenceDock === 'bottom';
+    const focusReturnToken = bottomRail
+      ? BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN
+      : RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN;
+    dispatchSurface({ type: 'hide-workspace', focusReturnToken });
+    dispatchReferenceLayout({ type: 'hide-references' });
     props.onWorkspaceDismiss?.();
-    requestAnimationFrame(() => workspaceControlRef.current?.focus({ preventScroll: true }));
+    requestAnimationFrame(() => (bottomRail ? bottomWorkspaceRailRef : rightWorkspaceRailRef)
+      .current?.focus({ preventScroll: true }));
   };
   const markFramingUserIntent = workspaceFraming.markUserIntent;
   const isWorkspaceOrChrome = (target: EventTarget | null) => (
@@ -899,6 +909,7 @@ export function ReviewShell(props: ReviewShellProps) {
         <div className="review-drawer-host" data-review-drawer-host>
           {effectiveReferenceLayout.kind === 'narrow-unified' ? (
             <WorkspaceEdgeRail
+              buttonRef={bottomWorkspaceRailRef}
               surface="bottom"
               open={effectiveReferenceLayout.open}
               controls="review-workspace"
@@ -907,12 +918,14 @@ export function ReviewShell(props: ReviewShellProps) {
           ) : (
             <>
               <WorkspaceEdgeRail
+                buttonRef={rightWorkspaceRailRef}
                 surface="right"
                 open={rightSurfaceOpen}
                 controls="review-tools-workspace"
                 onToggle={() => dispatchReferenceLayout({ type: 'toggle-right-workspace' })}
               />
               <WorkspaceEdgeRail
+                buttonRef={bottomWorkspaceRailRef}
                 surface="bottom"
                 open={effectiveReferenceLayout.bottomReferencesOpen}
                 controls="review-workspace"
@@ -954,12 +967,12 @@ export function ReviewShell(props: ReviewShellProps) {
                   action: {
                     type: 'close-reference',
                     targetIdentity: identity,
-                    focusReturnToken: 'toolbar:workspace',
+                    focusReturnToken: effectiveReferenceLayout.kind === 'narrow-unified'
+                      || effectiveReferenceLayout.referenceDock === 'bottom'
+                      ? BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN
+                      : RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
                   },
                 });
-              }
-              if (referenceTabs.length === 1) {
-                requestAnimationFrame(() => workspaceControlRef.current?.focus({ preventScroll: true }));
               }
             }}
             onSendToMain={(identity) => props.onReferenceSendToMain?.(identity)}

@@ -42,13 +42,17 @@ export interface NavigationCoordinatorDependencies {
   readonly getReferenceNavigation: () => PdfViewerNavigation | null;
   readonly waitForReferenceNavigation: () => Promise<PdfViewerNavigation | null>;
   readonly getReferenceController: () => ReferenceDocumentController | null;
-  readonly setWorkspaceOpen: (open: boolean) => void;
-  readonly settleWorkspace: (open: boolean) => Promise<void>;
+  readonly layout: {
+    readonly revealReferences: () => void;
+    readonly hideReferences: () => void;
+    readonly settle: () => Promise<void>;
+    readonly focusReferenceRail: () => boolean;
+    readonly referenceRailFocusToken: () => string;
+  };
   readonly setPendingReference: (pending: PendingReferencePanel | null) => void;
   readonly setLinkActionRequest: (request: ViewerPdfLinkInvocation | null) => void;
   readonly setAnnouncement: (announcement: string) => void;
   readonly focusReferenceTab: (identity: string) => boolean;
-  readonly focusWorkspaceControl: () => boolean;
   readonly getOutlineDiscovery: () => PdfOutlineDiscovery;
   readonly setCurrentOutlineItemId: (identity: string | null) => void;
 }
@@ -224,11 +228,11 @@ export class NavigationCoordinator {
     const existing = state.tabs.find((tab) => tab.identity === target.identity);
 
     this.dependencies.dispatch({ type: 'select-workspace-mode', mode: 'references' });
-    this.dependencies.setWorkspaceOpen(true);
+    this.dependencies.layout.revealReferences();
     if (existing) {
       this.pendingReference = null;
       this.dependencies.setPendingReference(null);
-      await this.dependencies.settleWorkspace(true);
+      await this.dependencies.layout.settle();
       if (!this.isCurrent(operation)) return false;
       if (!await this.restoreReferenceTab(operation, existing.identity, false)) return false;
       if (!this.isCurrent(operation)) return false;
@@ -334,8 +338,8 @@ export class NavigationCoordinator {
     const operation = this.begin();
     if (operation === null) return false;
     this.dependencies.dispatch({ type: 'select-workspace-mode', mode: 'references' });
-    this.dependencies.setWorkspaceOpen(true);
-    await this.dependencies.settleWorkspace(true);
+    this.dependencies.layout.revealReferences();
+    await this.dependencies.layout.settle();
     if (!this.isCurrent(operation)) return false;
 
     const state = this.dependencies.getState();
@@ -378,7 +382,7 @@ export class NavigationCoordinator {
       this.dependencies.dispatch({
         type: 'close-reference',
         targetIdentity: identity,
-        focusReturnToken: 'toolbar:workspace',
+        focusReturnToken: this.dependencies.layout.referenceRailFocusToken(),
       });
       this.dependencies.setAnnouncement('Reference closed.');
       return true;
@@ -391,7 +395,7 @@ export class NavigationCoordinator {
       this.dependencies.dispatch({
         type: 'close-reference',
         targetIdentity: identity,
-        focusReturnToken: 'toolbar:workspace',
+        focusReturnToken: this.dependencies.layout.referenceRailFocusToken(),
       });
       this.dependencies.focusReferenceTab(successorIdentity);
       this.dependencies.setAnnouncement('Reference closed. Adjacent reference active.');
@@ -401,14 +405,14 @@ export class NavigationCoordinator {
     this.dependencies.dispatch({
       type: 'close-reference',
       targetIdentity: identity,
-      focusReturnToken: 'toolbar:workspace',
+      focusReturnToken: this.dependencies.layout.referenceRailFocusToken(),
     });
-    this.dependencies.setWorkspaceOpen(false);
+    this.dependencies.layout.hideReferences();
     await this.dependencies.getReferenceController()?.close();
     if (!this.isCurrent(operation)) return false;
-    await this.dependencies.settleWorkspace(false);
+    await this.dependencies.layout.settle();
     if (!this.isCurrent(operation)) return false;
-    this.dependencies.focusWorkspaceControl();
+    this.dependencies.layout.focusReferenceRail();
     this.dependencies.setAnnouncement('Final reference closed.');
     return true;
   }
@@ -456,12 +460,12 @@ export class NavigationCoordinator {
     this.referenceRestoreIdentity = this.dependencies.getState().activeTabIdentity;
     this.dependencies.setAnnouncement('Reference sent to the main document.');
     this.refreshCurrentOutline(settledLocation);
-    this.dependencies.setWorkspaceOpen(false);
+    this.dependencies.layout.hideReferences();
     const closeFinalReference = state.tabs.length === 1
       ? this.dependencies.getReferenceController()?.close()
       : undefined;
     await Promise.all([
-      this.dependencies.settleWorkspace(false),
+      this.dependencies.layout.settle(),
       closeFinalReference ?? Promise.resolve(),
     ]);
     if (this.isCurrent(operation)) main.focusAtDestination(settledLocation.pageIndex);
@@ -483,8 +487,8 @@ export class NavigationCoordinator {
     }
     if (samePdfViewerLocation(currentLocation, destination)) {
       if (kind === 'direct') {
-        this.dependencies.setWorkspaceOpen(false);
-        await this.dependencies.settleWorkspace(false);
+        this.dependencies.layout.hideReferences();
+        await this.dependencies.layout.settle();
         if (this.isCurrent(operation)) main.focusAtDestination(destination.pageIndex);
       }
       if (this.isCurrent(operation)) {
@@ -526,8 +530,8 @@ export class NavigationCoordinator {
     );
     this.refreshCurrentOutline(settledLocation);
     if (kind === 'direct') {
-      this.dependencies.setWorkspaceOpen(false);
-      await this.dependencies.settleWorkspace(false);
+      this.dependencies.layout.hideReferences();
+      await this.dependencies.layout.settle();
       if (this.isCurrent(operation)) main.focusAtDestination(settledLocation.pageIndex);
     }
     return true;
@@ -577,7 +581,7 @@ export class NavigationCoordinator {
     this.dependencies.dispatch({ type: 'replace-document', documentGeneration });
     this.dependencies.setLinkActionRequest(null);
     this.dependencies.setPendingReference(null);
-    this.dependencies.setWorkspaceOpen(false);
+    this.dependencies.layout.hideReferences();
     this.dependencies.setCurrentOutlineItemId(null);
     this.dependencies.setAnnouncement('');
   }

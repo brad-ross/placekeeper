@@ -102,6 +102,25 @@ describe('reference workspace layout state', () => {
     });
   });
 
+  it('reveals narrow References and hides only References when wide tools are remembered', () => {
+    let state = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'show-right-workspace' });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'show-references' });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'set-regime', regime: 'narrow' });
+    expect(deriveReferenceWorkspaceLayout(state, 'annotations')).toMatchObject({
+      kind: 'narrow-unified', open: true, activeMode: 'references',
+    });
+
+    state = reduceReferenceWorkspaceLayout(state, { type: 'hide-references' });
+    expect(deriveReferenceWorkspaceLayout(state, 'annotations')).toMatchObject({
+      kind: 'narrow-unified', open: true, activeMode: 'annotations',
+    });
+    state = reduceReferenceWorkspaceLayout(state, { type: 'set-regime', regime: 'wide' });
+    expect(deriveReferenceWorkspaceLayout(state, 'annotations')).toMatchObject({
+      kind: 'wide-right', rightWorkspaceOpen: true, bottomReferencesOpen: false,
+    });
+  });
+
   it('uses reference height only for active narrow References', () => {
     let state = createReferenceWorkspaceLayout({ width: 600, height: 1000 });
     state = reduceReferenceWorkspaceLayout(state, { type: 'resize-bottom-references', size: 520 });

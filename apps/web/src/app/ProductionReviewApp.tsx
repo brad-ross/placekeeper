@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import type { PluginRegistry } from "@embedpdf/core";
 import { ScrollPlugin } from "@embedpdf/plugin-scroll";
 import { SelectionPlugin } from "@embedpdf/plugin-selection";
@@ -43,6 +43,15 @@ import {
 } from "../review/reference-navigation-state.js";
 import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
 import { createTrailingTaskScheduler } from "../review/main-location-refresh.js";
+import {
+  BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN,
+  RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
+  createReferenceWorkspaceLayout,
+  deriveReferenceWorkspaceLayout,
+  reduceReferenceWorkspaceLayout,
+  type ReferenceWorkspaceLayoutAction,
+  type RightWorkspaceMode,
+} from "../review/reference-workspace-layout.js";
 
 function itemCoordinates(item: ReviewState["items"][number]): { x: number; y: number } | undefined {
   const value = item.payload[item.kind === "insert" || item.kind === "pageNote" ? "position" : "rect"];
@@ -134,7 +143,15 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const documentGenerationRef = useRef(0);
   const navigationStateRef = useRef(createReferenceNavigationState(0));
   const [navigationState, setNavigationState] = useState(navigationStateRef.current);
-  const [workspaceOpen, setWorkspaceOpenState] = useState(false);
+  const [referenceLayoutState, dispatchReferenceLayout] = useReducer(
+    reduceReferenceWorkspaceLayout,
+    undefined,
+    () => createReferenceWorkspaceLayout({ width: 1440, height: 900 }),
+  );
+  const referenceLayoutStateRef = useRef(referenceLayoutState);
+  referenceLayoutStateRef.current = referenceLayoutState;
+  const layoutGenerationRef = useRef(0);
+  const [rightWorkspaceMode, setRightWorkspaceMode] = useState<RightWorkspaceMode>('outline');
   const [pendingReference, setPendingReference] = useState<PendingReferencePanel | null>(null);
   const [linkActionRequest, setLinkActionRequest] = useState<
     Extract<ViewerInteractionEvent, { readonly type: 'pdf-link' }>['value'] | null
@@ -169,6 +186,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     navigationStateRef.current = next;
     setNavigationState(next);
   };
+  const dispatchLayout = (action: ReferenceWorkspaceLayoutAction) => {
+    if (action.type !== 'set-stage-size' && action.type !== 'resize-right-references'
+      && action.type !== 'resize-bottom-references' && action.type !== 'focus-surface') {
+      layoutGenerationRef.current += 1;
+    }
+    dispatchReferenceLayout(action);
+  };
   const coordinatorRef = useRef<NavigationCoordinator | null>(null);
   if (coordinatorRef.current === null) {
     coordinatorRef.current = new NavigationCoordinator({
@@ -192,29 +216,49 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         });
       },
       getReferenceController: () => referenceControllerRef.current,
-      setWorkspaceOpen: (open) => {
-        setWorkspaceOpenState(open);
-      },
-      settleWorkspace: async () => {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      layout: {
+        revealReferences: () => {
+          dispatchLayout({ type: 'show-references' });
+          dispatchLayout({ type: 'focus-surface', surface: 'references' });
+        },
+        hideReferences: () => dispatchLayout({ type: 'hide-references' }),
+        settle: async () => {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        },
+        focusReferenceRail: () => {
+          const layoutGeneration = layoutGenerationRef.current;
+          const documentGeneration = documentGenerationRef.current;
+          requestAnimationFrame(() => {
+            if (layoutGeneration !== layoutGenerationRef.current
+              || documentGeneration !== documentGenerationRef.current) return;
+            const surface = referenceLayoutStateRef.current.regime === 'narrow'
+              || referenceLayoutStateRef.current.referenceDock === 'bottom' ? 'bottom' : 'right';
+            productionRootRef.current
+              ?.querySelector<HTMLButtonElement>(`[data-workspace-edge-rail="${surface}"]`)
+              ?.focus({ preventScroll: true });
+          });
+          return true;
+        },
+        referenceRailFocusToken: () => referenceLayoutStateRef.current.regime === 'narrow'
+          || referenceLayoutStateRef.current.referenceDock === 'bottom'
+          ? BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN
+          : RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
       },
       setPendingReference,
       setLinkActionRequest,
       setAnnouncement: setNavigationAnnouncement,
       focusReferenceTab: (identity) => {
+        const layoutGeneration = layoutGenerationRef.current;
+        const documentGeneration = documentGenerationRef.current;
         requestAnimationFrame(() => {
+          if (layoutGeneration !== layoutGenerationRef.current
+            || documentGeneration !== documentGenerationRef.current) return;
           const target = [...(productionRootRef.current?.querySelectorAll<HTMLElement>(
             '[data-reference-tab]',
           ) ?? [])].find((element) => element.dataset.referenceTab === identity);
           target?.focus({ preventScroll: true });
         });
-        return true;
-      },
-      focusWorkspaceControl: () => {
-        requestAnimationFrame(() => productionRootRef.current
-          ?.querySelector<HTMLButtonElement>('[aria-controls="review-workspace"]')
-          ?.focus({ preventScroll: true }));
         return true;
       },
       getOutlineDiscovery: () => outlineDiscoveryRef.current,
@@ -262,6 +306,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     outlineDiscoveryRef.current = { status: 'loading', documentGeneration: nextGeneration };
     setOutlineDiscovery(outlineDiscoveryRef.current);
     navigationCoordinator.replaceDocument(nextGeneration);
+    dispatchLayout({ type: 'replace-document' });
+    setRightWorkspaceMode('outline');
   }, [mainLocationRefresh, navigationCoordinator, sourceIdentity]);
   const onViewerInteraction = useCallback((event: ViewerInteractionEvent) => {
     if (event.type === 'pdf-link') {
@@ -436,6 +482,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       />
     </div>
   );
+  const effectiveReferenceLayout = deriveReferenceWorkspaceLayout(
+    referenceLayoutState,
+    rightWorkspaceMode,
+  );
+  const anyTrayOpen = effectiveReferenceLayout.kind === 'narrow-unified'
+    ? effectiveReferenceLayout.open
+    : effectiveReferenceLayout.rightWorkspaceOpen || effectiveReferenceLayout.bottomReferencesOpen;
 
   return (
     <main data-production-review ref={productionRootRef}>
@@ -446,7 +499,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         {...(viewerControlsRef.current === undefined ? {} : { viewerControls: viewerControlsRef.current })}
         {...(viewerFraming === undefined ? {} : { viewerFraming })}
         viewerState={viewerState}
-        workspaceOpen={workspaceOpen}
+        workspaceOpen={anyTrayOpen}
+        referenceLayoutState={referenceLayoutState}
+        rightWorkspaceMode={rightWorkspaceMode}
+        onReferenceLayoutAction={dispatchLayout}
         navigationState={navigationState}
         referenceTabs={navigationState.tabs.map((tab) => ({
           identity: tab.identity,
@@ -474,18 +530,23 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         onNavigateBack={() => { void navigationCoordinator.historyBack(); }}
         onNavigateForward={() => { void navigationCoordinator.historyForward(); }}
         onWorkspaceModeChange={(mode) => {
-          if (mode === 'references' && !workspaceOpen) {
+          if (mode === 'references') {
             void navigationCoordinator.openReferencesWorkspace();
             return;
           }
+          setRightWorkspaceMode(mode);
           dispatchNavigation({ type: 'select-workspace-mode', mode });
-          setWorkspaceOpenState(true);
+          dispatchLayout({ type: 'show-right-workspace' });
+          dispatchLayout({ type: 'focus-surface', surface: 'right' });
         }}
         onWorkspaceDismiss={() => {
-          setWorkspaceOpenState(false);
+          dispatchLayout({ type: 'hide-references' });
           dispatchNavigation({
             type: 'hide-workspace',
-            focusReturnToken: 'toolbar:workspace',
+            focusReturnToken: referenceLayoutState.regime === 'narrow'
+              || referenceLayoutState.referenceDock === 'bottom'
+              ? BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN
+              : RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
           });
         }}
         onReferenceTabActivate={(identity) => {
@@ -510,6 +571,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             mode,
             logicalScrollToken: current.logicalScrollToken,
             logicalFocusToken: token,
+          });
+          dispatchLayout({
+            type: 'focus-surface',
+            surface: mode === 'references' ? 'references' : 'right',
           });
         }}
         selectionUpdate={selectionUpdate}
