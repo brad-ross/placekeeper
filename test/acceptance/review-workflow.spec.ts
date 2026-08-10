@@ -504,10 +504,10 @@ test.describe('canonical review workflow', () => {
     const replacementDialog = page.getByRole('dialog', { name: 'Replacement text' });
     await expect(replacementDialog.getByRole('textbox', { name: 'Replacement text' })).toHaveValue(' ');
     await replacementDialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(canvas).toBeFocused();
 
     const annotations = page.getByRole('button', { name: /^Annotations/u });
-    await annotations.focus();
-    await page.keyboard.press('Space');
+    await annotations.press('Space');
 
     await expect(annotations).toHaveAttribute('aria-expanded', 'true');
     await expect(page.getByRole('dialog', { name: 'Replacement text' })).toHaveCount(0);
