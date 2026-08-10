@@ -105,19 +105,20 @@ test.describe('canonical review workflow', () => {
     await expect(selectionActions).toHaveCount(0);
   });
 
-  test('preserves selection authority while Workspace Annotations is toggled', async ({ page }) => {
+  test('keeps selection actions visible while Workspace Annotations is toggled', async ({ page }) => {
     const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
 
     await expect(selectionActions).toBeVisible();
     await openAnnotationsWorkspace(page);
     await expect(page.locator('[data-anchor-kind]')).toHaveAttribute('data-anchor-kind', 'selection');
-    await expect(selectionActions).toHaveCount(0);
+    await expect(selectionActions).toBeVisible();
 
     await closeWorkspace(page);
     await expect(selectionActions).toBeVisible();
 
     await openAnnotationsWorkspace(page);
     await expect(page.locator('[data-anchor-kind]')).toHaveAttribute('data-anchor-kind', 'selection');
+    await expect(selectionActions).toBeVisible();
     await closeWorkspace(page);
     await expect(selectionActions).toBeVisible();
 

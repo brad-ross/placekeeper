@@ -322,6 +322,17 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   const workspace = page.locator("[data-review-workspace]");
   await expect(workspace).toHaveAttribute("data-workspace-open", "true");
   await expect(page.getByRole("tab", { name: "Outline" })).toHaveAttribute("aria-selected", "true");
+  const workspaceHeader = workspace.locator('.review-workspace__header');
+  const workspaceClose = page.getByRole('button', { name: 'Close workspace' });
+  const workspaceModes = page.getByRole('tablist', { name: 'Workspace modes' });
+  await expect.poll(() => workspace.evaluate((element) => getComputedStyle(element).transform))
+    .toBe('none');
+  const headerBox = await workspaceHeader.boundingBox();
+  const closeBox = await workspaceClose.boundingBox();
+  const modesBox = await workspaceModes.boundingBox();
+  if (!headerBox || !closeBox || !modesBox) throw new Error('Workspace header controls have no bounds.');
+  expect(closeBox.x).toBeLessThan(modesBox.x);
+  expect(closeBox.x - headerBox.x).toBeCloseTo(modesBox.x - (closeBox.x + closeBox.width), 0);
   const outline = page.getByRole("navigation", { name: "Document outline" });
   await expect(outline).toBeVisible();
   await expect(outline.getByRole("button", { name: "Collapse Details" })).toHaveAttribute(
@@ -848,12 +859,16 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   await page.mouse.move(stage.x + 24, stage.y + stage.height / 2);
   await page.mouse.wheel(0, 240);
   await expect.poll(() => scrollViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(scrollBefore);
-  const scrolledTop = await scrollViewport.evaluate((element) => element.scrollTop);
   await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
 
   await scrollViewport.dispatchEvent('pointerdown', {
     pointerId: 41, pointerType: 'touch', isPrimary: true, button: 0, clientX: 24, clientY: 300,
   });
+  const touchScrollLeft = await scrollViewport.evaluate((element) => {
+    element.scrollLeft = Math.min(element.scrollLeft + 48, element.scrollWidth - element.clientWidth);
+    return element.scrollLeft;
+  });
+  expect(touchScrollLeft).toBeGreaterThan(0);
   await scrollViewport.dispatchEvent('pointerdown', {
     pointerId: 42, pointerType: 'touch', isPrimary: false, button: 0, clientX: 30, clientY: 300,
   });
@@ -880,17 +895,15 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
     });
   });
   await page.mouse.click(stage.x + 24, stage.y + stage.height / 2);
+  await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
+  await expect(scrollViewport).toHaveAttribute('data-pointer-cancels', '0');
+  await page.getByRole('button', { name: 'Close workspace' }).click();
   await expect(workspaceControl).toHaveAttribute('aria-expanded', 'false');
-  await expect(scrollViewport).toHaveAttribute('data-pointer-cancels', '1');
-  const maximumAfterClose = await scrollViewport.evaluate((element) => (
-    Math.max(0, element.scrollHeight - element.clientHeight)
-  ));
-  await expect.poll(() => scrollViewport.evaluate((element) => element.scrollTop))
-    .toBeCloseTo(Math.min(scrolledTop, maximumAfterClose), 0);
+  expect(await scrollViewport.evaluate((element) => element.scrollLeft)).toBeCloseTo(touchScrollLeft, 0);
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
 });
 
-test('closing the Annotation Tray from PDF text does not arm drag selection', async ({ page }) => {
+test('allows PDF text interaction without dismissing the Annotation Tray', async ({ page }) => {
   const launched = await host.open({
     pdfPath: pdf,
     sourceRootPath: sourceRoot,
@@ -907,18 +920,13 @@ test('closing the Annotation Tray from PDF text does not arm drag selection', as
   const { workspace: workspaceControl } = await openAnnotationsWorkspace(page);
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-annotation-presentation', 'bottom');
 
-  const selectionRects = pdfPage.locator(':scope > div[style*="mix-blend-mode"]');
-  const rectCountBeforeDismiss = await selectionRects.count();
   const box = await pdfPage.boundingBox();
   if (!box) throw new Error('Rendered PDF page has no bounds.');
   await page.mouse.click(box.x + 76, box.y + 98);
-  await expect(workspaceControl).toHaveAttribute('aria-expanded', 'false');
+  await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
   await page.mouse.move(box.x + 245, box.y + 98);
   await page.waitForTimeout(250);
-
-  await expect(selectionRects).toHaveCount(rectCountBeforeDismiss);
-  await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toHaveCount(0);
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
 });
 
 test('keeps PDF drag selection available while the Annotation Tray is open', async ({ page }) => {
@@ -949,6 +957,20 @@ test('keeps PDF drag selection available while the Annotation Tray is open', asy
   await page.mouse.up();
 
   await expect.poll(() => selectionRects.count()).toBeGreaterThan(rectCountBeforeDrag);
+  const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+  await expect(selectionActions).toBeVisible();
+  const overlayOrder = await page.locator('[data-review-stage]').evaluate((stage) => {
+    const contextual = stage.querySelector<HTMLElement>('[data-review-contextual-host]');
+    const drawerHost = stage.querySelector<HTMLElement>('[data-review-drawer-host]');
+    if (!contextual || !drawerHost) throw new Error('Review overlay layers are unavailable.');
+    return {
+      contextual: Number.parseInt(getComputedStyle(contextual).zIndex, 10),
+      drawer: Number.parseInt(getComputedStyle(drawerHost).zIndex, 10),
+    };
+  });
+  expect(overlayOrder.contextual).toBeGreaterThan(overlayOrder.drawer);
+  await selectionActions.getByRole('button', { name: 'Highlight', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Highlight comment' })).toBeVisible();
   await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
 });
 

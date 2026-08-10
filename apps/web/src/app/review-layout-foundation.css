@@ -339,6 +339,10 @@
   pointer-events: none;
 }
 
+.review-contextual-host {
+  z-index: 3;
+}
+
 .review-drawer-host {
   display: grid;
   grid-template: minmax(0, 1fr) / minmax(0, 1fr);

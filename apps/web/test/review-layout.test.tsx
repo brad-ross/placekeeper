@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   controlledWorkspaceSurfaceAction,
-  isPdfLinkControlTarget,
   ReviewShell,
   workspaceIsVisible,
 } from '../src/app/ReviewShell.js';
@@ -31,17 +30,6 @@ const ownedAnnotation: ReviewItem = {
 };
 
 describe('review shell layout and accessibility contract', () => {
-  it('keeps project-owned PDF links outside the workspace-dismiss path', () => {
-    const linkTarget = {
-      closest: (selector: string) => selector === '[data-pdf-link-control]' ? {} : null,
-    } as unknown as EventTarget;
-    const ordinaryTarget = { closest: () => null } as unknown as EventTarget;
-
-    expect(isPdfLinkControlTarget(linkTarget)).toBe(true);
-    expect(isPdfLinkControlTarget(ordinaryTarget)).toBe(false);
-    expect(isPdfLinkControlTarget(null)).toBe(false);
-  });
-
   it('synchronizes externally controlled workspace open and hide without disturbing Finish', () => {
     const openedAction = controlledWorkspaceSurfaceAction({
       open: true,
@@ -73,7 +61,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(workspaceIsVisible(true, 'workspace')).toBe(true);
   });
 
-  it('does not render reading-only contextual actions for an externally opened workspace', () => {
+  it('keeps selection actions available beside an externally opened workspace', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
@@ -97,7 +85,7 @@ describe('review shell layout and accessibility contract', () => {
       </ReviewShell>,
     );
     expect(html).toContain('data-workspace-open="true"');
-    expect(html).not.toContain('aria-label="Selection review actions"');
+    expect(html).toContain('aria-label="Selection review actions"');
     expect(html).not.toContain('aria-label="Page actions"');
   });
 

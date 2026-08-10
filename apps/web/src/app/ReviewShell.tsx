@@ -30,10 +30,7 @@ import { reliableSelection, type SelectionUpdate } from '../pdf/selection-state.
 import type { ViewerControls, ViewerControlsSnapshot } from '../pdf/viewer-controls.js';
 import { unavailableViewerControls } from '../pdf/viewer-controls.js';
 import type { ViewerFramingControls, ViewerPosition } from '../pdf/viewer-framing.js';
-import {
-  dispatchNeutralViewerPointerUp,
-  type ViewerPdfLinkInvocation,
-} from '../pdf/viewer-interaction-events.js';
+import type { ViewerPdfLinkInvocation } from '../pdf/viewer-interaction-events.js';
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
 import { AnnotationList } from '../review/AnnotationList.js';
 import { AnnotationPeek } from '../review/AnnotationPeek.js';
@@ -166,8 +163,6 @@ export interface RejectedReviewCommand {
   readonly message: string;
 }
 
-const OUTSIDE_TAP_SLOP_PX = 6;
-
 export function controlledWorkspaceSurfaceAction(input: {
   readonly open: boolean;
   readonly baseSurface: ReviewBaseSurface;
@@ -189,24 +184,10 @@ export function workspaceIsVisible(requestedOpen: boolean, baseSurface: ReviewBa
   return requestedOpen && baseSurface !== 'finish';
 }
 
-/** Project-owned PDF links keep the adaptive workspace non-modal. */
-export function isPdfLinkControlTarget(target: EventTarget | null): boolean {
-  const candidate = target as (EventTarget & { closest?: (selector: string) => Element | null }) | null;
-  return typeof candidate?.closest === 'function'
-    && candidate.closest('[data-pdf-link-control]') !== null;
+interface PointerScrollGesture {
+  readonly id: number;
+  readonly scroll: ViewerPosition | null;
 }
-
-type OutsidePointerGesture =
-  | {
-      readonly phase: 'tracking';
-      readonly id: number;
-      readonly x: number;
-      readonly y: number;
-      readonly target: EventTarget;
-      readonly scroll: ViewerPosition | null;
-      movedBeyondSlop: boolean;
-    }
-  | { readonly phase: 'settled'; readonly dismiss: boolean };
 
 function mutableField(item: ReviewItem): 'proposedText' | 'comment' | undefined {
   if (item.kind === 'replace' || item.kind === 'insert') return 'proposedText';
@@ -247,7 +228,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const surfaceTriggersRef = useRef(new Map<ReviewBaseSurface, HTMLElement>());
   const workspaceControlRef = useRef<HTMLButtonElement>(null);
   const shellRef = useRef<HTMLElement>(null);
-  const outsidePointerRef = useRef<OutsidePointerGesture | undefined>(undefined);
+  const pointerScrollRef = useRef<PointerScrollGesture | undefined>(undefined);
   const annotationRequestTokenRef = useRef(0);
   const [workspaceRequest, setWorkspaceRequest] = useState<WorkspaceOpenRequest>({
     kind: 'reading',
@@ -696,80 +677,32 @@ export function ReviewShell(props: ReviewShellProps) {
         });
       }}
       onPointerDownCapture={(event) => {
-        if (props.linkActionRequest) {
-          outsidePointerRef.current = undefined;
+        if (!workspaceOpen || isWorkspaceOrChrome(event.target)) {
+          pointerScrollRef.current = undefined;
           return;
         }
-        const tracksOutsideDismiss = workspaceOpen
-          && event.isPrimary
-          && event.button === 0
-          && !isPdfLinkControlTarget(event.target)
-          && !isWorkspaceOrChrome(event.target);
-        outsidePointerRef.current = tracksOutsideDismiss
-          ? {
-              phase: 'tracking',
-              id: event.pointerId,
-              x: event.clientX,
-              y: event.clientY,
-              target: event.target,
-              scroll: workspaceFraming.currentScroll(),
-              movedBeyondSlop: false,
-            }
-          : undefined;
-      }}
-      onPointerMoveCapture={(event) => {
-        const start = outsidePointerRef.current;
-        if (start?.phase !== 'tracking' || start.id !== event.pointerId) return;
-        const deltaX = event.clientX - start.x;
-        const deltaY = event.clientY - start.y;
-        if (Math.hypot(deltaX, deltaY) <= OUTSIDE_TAP_SLOP_PX) return;
-        start.movedBeyondSlop = true;
+        if (!event.isPrimary || event.button !== 0) return;
+        pointerScrollRef.current = {
+          id: event.pointerId,
+          scroll: workspaceFraming.currentScroll(),
+        };
       }}
       onPointerUpCapture={(event) => {
-        const start = outsidePointerRef.current;
-        if (
-          !workspaceOpen
-          || start?.phase !== 'tracking'
-          || start?.id !== event.pointerId
-        ) {
-          outsidePointerRef.current = undefined;
-          return;
-        }
-        const currentScroll = workspaceFraming.currentScroll();
-        const scrollAxes = start.scroll && currentScroll ? {
-          left: Math.abs(currentScroll.left - start.scroll.left) > 1,
-          top: Math.abs(currentScroll.top - start.scroll.top) > 1,
-        } : { left: false, top: false };
-        const scrollChanged = scrollAxes.left || scrollAxes.top;
-        const dismiss = !start.movedBeyondSlop
-          && !scrollChanged
-          && Math.hypot(event.clientX - start.x, event.clientY - start.y) <= OUTSIDE_TAP_SLOP_PX;
-        if (!dismiss) {
-          if (scrollChanged) markFramingUserIntent(scrollAxes);
-          outsidePointerRef.current = { phase: 'settled', dismiss: false };
-          return;
-        }
-        outsidePointerRef.current = undefined;
-        dispatchNeutralViewerPointerUp(start.target, event);
-        start.target.dispatchEvent(new PointerEvent('pointercancel', {
-          bubbles: true,
-          composed: true,
-          pointerId: event.pointerId,
-          pointerType: event.pointerType,
-          isPrimary: event.isPrimary,
-          clientX: event.clientX,
-          clientY: event.clientY,
-        }));
-        outsidePointerRef.current = { phase: 'settled', dismiss: true };
-        event.stopPropagation();
-        closeWorkspace();
+        const start = pointerScrollRef.current;
+        if (!workspaceOpen || !start || start.id !== event.pointerId) return;
+        pointerScrollRef.current = undefined;
+        const current = workspaceFraming.currentScroll();
+        if (!start.scroll || !current) return;
+        markFramingUserIntent({
+          left: Math.abs(current.left - start.scroll.left) > 1,
+          top: Math.abs(current.top - start.scroll.top) > 1,
+        });
       }}
-      onPointerCancelCapture={() => { outsidePointerRef.current = undefined; }}
+      onPointerCancelCapture={(event) => {
+        if (pointerScrollRef.current?.id === event.pointerId) pointerScrollRef.current = undefined;
+      }}
       onClickCapture={(event) => {
         if (props.linkActionRequest) return;
-        // The reference workspace is intentionally non-modal: source links in
-        // either PDF remain actionable so they can add or reactivate tabs.
-        if (isPdfLinkControlTarget(event.target)) return;
         if (event.target instanceof Element) {
           const markTrigger = event.target.closest<HTMLElement>('[data-owned-focus-id]');
           if (markTrigger) surfaceTriggersRef.current.set('workspace', markTrigger);
@@ -780,20 +713,6 @@ export function ReviewShell(props: ReviewShellProps) {
           && event.target.closest('.review-chrome__viewer-controls') !== null
         ) {
           markFramingUserIntent();
-        }
-        const keyboardMarkActivation = event.detail === 0
-          && event.target instanceof Element
-          && event.target.closest('[data-owned-focus-id]') !== null;
-        if (keyboardMarkActivation) return;
-        const pointerGesture = outsidePointerRef.current;
-        if (event.detail > 0 && pointerGesture?.phase === 'settled') {
-          outsidePointerRef.current = undefined;
-          if (pointerGesture.dismiss) event.stopPropagation();
-          return;
-        }
-        if (workspaceOpen && !isWorkspaceOrChrome(event.target)) {
-          event.stopPropagation();
-          closeWorkspace();
         }
       }}
     >
@@ -829,7 +748,7 @@ export function ReviewShell(props: ReviewShellProps) {
       >
         <div className="review-document">{props.children}</div>
         <div className="review-contextual-host" data-review-contextual-host>
-          {surface.baseSurface === 'reading' && selectionActionsAvailable && props.selectionPlacement ? (
+          {surface.baseSurface !== 'finish' && selectionActionsAvailable && props.selectionPlacement ? (
             <ContextActionPalette
               kind="selection"
               placement={props.selectionPlacement}

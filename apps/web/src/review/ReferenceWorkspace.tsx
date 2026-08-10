@@ -231,6 +231,9 @@ export function ReferenceWorkspace({
       inert={!open}
     >
       <header className="review-workspace__header">
+        <button type="button" className="review-workspace__close" aria-label="Close workspace" onClick={onDismiss}>
+          <ReviewIcon name="close" />
+        </button>
         <div className="review-workspace__tabs" role="tablist" aria-label="Workspace modes">
           {WORKSPACE_MODES.map((workspaceMode) => {
             const selected = workspaceMode === mode;
@@ -256,9 +259,6 @@ export function ReferenceWorkspace({
             );
           })}
         </div>
-        <button type="button" className="review-workspace__close" aria-label="Close workspace" onClick={onDismiss}>
-          <ReviewIcon name="close" />
-        </button>
       </header>
 
       <section

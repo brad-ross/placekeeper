@@ -149,6 +149,8 @@ describe('shared reference workspace', () => {
     );
 
     expect(html).toContain('aria-label="Workspace modes"');
+    expect(html.indexOf('aria-label="Close workspace"'))
+      .toBeLessThan(html.indexOf('aria-label="Workspace modes"'));
     expect(html.match(/role="tab"/g)).toHaveLength(5);
     expect(html.match(/aria-selected="true"/g)).toHaveLength(2);
     expect(html.match(/tabindex="0"/g)).toHaveLength(2);
