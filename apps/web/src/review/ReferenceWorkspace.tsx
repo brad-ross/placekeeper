@@ -349,27 +349,68 @@ export function ReferenceWorkspace({
           >
             {tabs.map((tab, index) => {
               const selected = tab.identity === activeTabIdentity;
+              const showActions = selected && pendingReference === null;
+              const destinationLabel = tab.label === tab.pageContext
+                ? tab.label
+                : `${tab.label}, ${tab.pageContext}`;
               return (
-                <button
+                <span
                   key={tab.identity}
-                  ref={(element) => {
-                    if (element) referenceTabRefs.current.set(tab.identity, element);
-                    else referenceTabRefs.current.delete(tab.identity);
-                  }}
-                  id={`reference-tab-${index}`}
-                  type="button"
-                  role="tab"
-                  data-reference-tab={tab.identity}
-                  data-workspace-focus-token={`reference:${tab.identity}`}
-                  aria-selected={selected}
-                  aria-controls="active-reference-panel"
-                  tabIndex={selected ? 0 : -1}
-                  onKeyDown={moveReferenceFocus}
-                  onClick={() => onReferenceTabActivate(tab.identity)}
+                  className={`reference-tab-segment${
+                    showActions ? ' reference-tab-segment--compound' : ''
+                  }`}
+                  data-reference-tab-segment={tab.identity}
+                  data-reference-tab-selected={selected ? 'true' : 'false'}
+                  role="presentation"
                 >
-                  <span>{tab.label}</span>
-                  {tab.label === tab.pageContext ? null : <small>{tab.pageContext}</small>}
-                </button>
+                  <button
+                    ref={(element) => {
+                      if (element) referenceTabRefs.current.set(tab.identity, element);
+                      else referenceTabRefs.current.delete(tab.identity);
+                    }}
+                    id={`reference-tab-${index}`}
+                    className="reference-tab-segment__selector"
+                    type="button"
+                    role="tab"
+                    data-reference-tab={tab.identity}
+                    data-workspace-focus-token={`reference:${tab.identity}`}
+                    aria-label={destinationLabel}
+                    aria-selected={selected}
+                    aria-controls="active-reference-panel"
+                    tabIndex={selected ? 0 : -1}
+                    onKeyDown={moveReferenceFocus}
+                    onClick={() => onReferenceTabActivate(tab.identity)}
+                  >
+                    <span>{tab.label}</span>
+                    {tab.label === tab.pageContext ? null : <small>{tab.pageContext}</small>}
+                  </button>
+                  {showActions ? (
+                    <button
+                      type="button"
+                      className="reference-tab-segment__action"
+                      data-reference-tab-action="send"
+                      data-workspace-focus-token={`reference-send:${tab.identity}`}
+                      aria-label="Send to main"
+                      title="Send to main"
+                      onClick={() => onSendToMain(tab.identity)}
+                    >
+                      <ReviewIcon name="main" />
+                    </button>
+                  ) : null}
+                  {showActions ? (
+                    <button
+                      type="button"
+                      className="reference-tab-segment__action"
+                      data-reference-tab-action="close"
+                      data-workspace-focus-token={`reference-close:${tab.identity}`}
+                      aria-label="Close active reference"
+                      title="Close active reference"
+                      onClick={() => onReferenceTabClose(tab.identity)}
+                    >
+                      <ReviewIcon name="close" />
+                    </button>
+                  ) : null}
+                </span>
               );
             })}
           </div>
@@ -383,31 +424,6 @@ export function ReferenceWorkspace({
           aria-labelledby={activeTab ? `reference-tab-${tabs.indexOf(activeTab)}` : undefined}
           aria-busy={pendingReference?.status === 'loading' ? true : undefined}
         >
-          {activeTab && pendingReference === null ? (
-            <header className="reference-panel__actions">
-              <div>
-                <strong>{activeTab.label}</strong>
-                {activeTab.label === activeTab.pageContext ? null : <span>{activeTab.pageContext}</span>}
-              </div>
-              <button
-                type="button"
-                data-workspace-focus-token={`reference-close:${activeTab.identity}`}
-                aria-label="Close active reference"
-                onClick={() => onReferenceTabClose(activeTab.identity)}
-              >
-                <ReviewIcon name="close" />
-                <span>Close</span>
-              </button>
-              <button
-                type="button"
-                data-workspace-focus-token={`reference-send:${activeTab.identity}`}
-                onClick={() => onSendToMain(activeTab.identity)}
-              >
-                Send to main
-              </button>
-            </header>
-          ) : null}
-
           {pendingReference ? (
             <div className="reference-panel__pending" data-reference-pending={pendingReference.status}>
               <p><strong>{pendingReference.label}</strong><span>{pendingReference.pageContext}</span></p>

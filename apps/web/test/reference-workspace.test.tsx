@@ -199,6 +199,82 @@ describe('shared reference workspace', () => {
     expect(html).toMatch(/data-workspace-tab-segment="references"[^>]*data-workspace-tab-selected="true"[\s\S]*data-reference-move="bottom"/u);
   });
 
+  it('keeps active reference actions beside, rather than inside, the selected semantic tab', () => {
+    const renderReferences = (activeTabIdentity: string) => renderToStaticMarkup(
+      <ReferenceWorkspace
+        open
+        mode="references"
+        presentation="right"
+        modes={['references']}
+        tabs={[
+          { identity: 'lemma', label: 'Lemma A.7', pageContext: 'Page 18' },
+          { identity: 'proof', label: 'Proof', pageContext: 'Page 31' },
+        ]}
+        activeTabIdentity={activeTabIdentity}
+        onModeChange={() => undefined}
+        onReferenceTabActivate={() => undefined}
+        onReferenceTabClose={() => undefined}
+        onSendToMain={() => undefined}
+        onRetryReference={() => undefined}
+        onReferenceViewportHost={() => undefined}
+      />,
+    );
+
+    const lemmaActive = renderReferences('lemma');
+    const proofActive = renderReferences('proof');
+    const semanticTabs = lemmaActive.match(/<button[^>]*role="tab"[\s\S]*?<\/button>/gu) ?? [];
+    const referenceSemanticTabs = semanticTabs.filter((tab) => tab.includes('data-reference-tab='));
+
+    expect(lemmaActive.match(/data-reference-tab-segment=/g)).toHaveLength(2);
+    expect(lemmaActive.match(/data-reference-tab-selected="true"/g)).toHaveLength(1);
+    expect(lemmaActive.match(/data-reference-tab-action=/g)).toHaveLength(2);
+    expect(lemmaActive).toMatch(
+      /data-reference-tab-segment="lemma"[^>]*data-reference-tab-selected="true"[\s\S]*role="tab"[\s\S]*data-reference-tab-action="send"[\s\S]*data-reference-tab-action="close"/u,
+    );
+    expect(lemmaActive).toContain('aria-label="Send to main"');
+    expect(lemmaActive).toContain('title="Send to main"');
+    expect(lemmaActive).toContain('data-workspace-focus-token="reference-send:lemma"');
+    expect(lemmaActive).toContain('aria-label="Close active reference"');
+    expect(lemmaActive).toContain('title="Close active reference"');
+    expect(lemmaActive).toContain('data-workspace-focus-token="reference-close:lemma"');
+    expect(lemmaActive).toContain('aria-label="Lemma A.7, Page 18"');
+    expect(referenceSemanticTabs).toHaveLength(2);
+    expect(semanticTabs.every((tab) => !/<button/u.test(tab.slice(1)))).toBe(true);
+    expect(lemmaActive).not.toContain('reference-panel__actions');
+    expect(lemmaActive.match(/>Lemma A\.7</g)).toHaveLength(1);
+    expect(lemmaActive.match(/>Page 18</g)).toHaveLength(1);
+
+    expect(proofActive).toMatch(
+      /data-reference-tab-segment="proof"[^>]*data-reference-tab-selected="true"[\s\S]*data-workspace-focus-token="reference-send:proof"[\s\S]*data-workspace-focus-token="reference-close:proof"/u,
+    );
+    expect(proofActive).not.toContain('data-workspace-focus-token="reference-send:lemma"');
+    expect(proofActive).not.toContain('data-workspace-focus-token="reference-close:lemma"');
+  });
+
+  it('does not expose selected-tab actions while a reference is pending', () => {
+    const html = renderToStaticMarkup(
+      <ReferenceWorkspace
+        open
+        mode="references"
+        presentation="right"
+        modes={['references']}
+        tabs={[{ identity: 'lemma', label: 'Lemma A.7', pageContext: 'Page 18' }]}
+        activeTabIdentity="lemma"
+        pendingReference={{ status: 'loading', label: 'Proof', pageContext: 'Page 31' }}
+        onModeChange={() => undefined}
+        onReferenceTabActivate={() => undefined}
+        onReferenceTabClose={() => undefined}
+        onSendToMain={() => undefined}
+        onRetryReference={() => undefined}
+        onReferenceViewportHost={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain('Opening reference…');
+    expect(html).not.toContain('data-reference-tab-action');
+  });
+
   it('stacks reference tabs vertically beside the PDF only in the independent bottom tray', () => {
     const html = renderToStaticMarkup(
       <ReferenceWorkspace
