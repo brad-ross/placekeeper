@@ -764,7 +764,7 @@ test("switches and sends references from the right-docked workspace", async ({ p
       };
     }));
   expect(rightTabGeometry).toHaveLength(2);
-  expect(rightTabGeometry[0]!.width).toBeCloseTo(208, 0);
+  expect(rightTabGeometry[0]!.width).toBeCloseTo(184, 0);
   expect(rightTabGeometry[1]!.width).toBeCloseTo(rightTabGeometry[0]!.width, 0);
   expect(rightTabGeometry[1]!.selectorWidth).toBeLessThan(rightTabGeometry[1]!.width - 50);
   expect(rightTabGeometry[1]!.actionSizes).toHaveLength(2);

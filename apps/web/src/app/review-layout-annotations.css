@@ -452,9 +452,9 @@
 }
 
 .review-workspace[data-workspace-presentation="right"] .reference-tab-segment {
-  width: 13rem;
-  max-width: 13rem;
-  flex-basis: 13rem;
+  width: 11.5rem;
+  max-width: 11.5rem;
+  flex-basis: 11.5rem;
 }
 
 .reference-tab-segment__selector {
@@ -533,6 +533,11 @@
   display: grid;
   grid-template-columns: clamp(10rem, 18vw, 15rem) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
+}
+
+.review-workspace[data-workspace-presentation="right"]
+  .review-workspace__panel--references[data-reference-tabs-orientation="vertical"] {
+  grid-template-columns: 12.5rem minmax(0, 1fr);
 }
 
 .review-workspace__panel--references[data-reference-tabs-orientation="vertical"][data-reference-panel-layout="full"]
