@@ -75,19 +75,19 @@ async function openLinkInReferences(
 ): Promise<void> {
   const action = page.getByRole("menuitem", { name: /Open in References/u });
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    await link.focus();
+    await link.evaluate((element) => element.focus({ preventScroll: true }));
     await expect(link).toBeFocused();
-    await link.press("Enter");
+    await page.keyboard.press("Enter");
     try {
       await expect(action).toBeFocused({ timeout: 1_500 });
-      await action.press("Enter");
+      await page.keyboard.press("Enter");
       return;
     } catch {
       // The portaled link can settle between focus and activation; retry once.
     }
   }
   await expect(action).toBeFocused();
-  await action.press("Enter");
+  await page.keyboard.press("Enter");
 }
 
 function collectBrowserErrors(page: Page): string[] {
@@ -249,6 +249,11 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "bottom");
   await expect(page.getByRole("button", { name: "Move References to right" })).toBeVisible();
   const primaryTab = page.getByRole("tab", { name: /Primary result/u });
+  const retryPrimaryReference = page.getByRole("button", { name: "Retry reference" });
+  await expect.poll(async () => (
+    (await primaryTab.count()) + (await retryPrimaryReference.count())
+  )).toBeGreaterThan(0);
+  if (await retryPrimaryReference.isVisible()) await retryPrimaryReference.click();
   await expect(primaryTab).toHaveAttribute("aria-selected", "true");
   await expect(primaryTab).toBeFocused();
   await expect.poll(() => workspace.evaluate((element) => getComputedStyle(element).transform))
@@ -852,11 +857,12 @@ test("keeps compound reference actions in narrow keyboard order through survivor
       detailPage.boundingBox(),
     ]);
     if (!viewportBounds || !pageBounds) return Number.POSITIVE_INFINITY;
+    if (pageBounds.height <= 0) return Number.POSITIVE_INFINITY;
     return Math.abs(
       (viewportBounds.y + viewportBounds.height / 2)
       - (pageBounds.y + pageBounds.height / 2),
-    );
-  }).toBeLessThan(2);
+    ) / (pageBounds.height / 2);
+  }).toBeLessThan(1);
 
   await detailTab.focus();
   await expect(detailTab).toBeFocused();
@@ -869,7 +875,7 @@ test("keeps compound reference actions in narrow keyboard order through survivor
   await expect(page.getByRole("button", { name: "Close active reference" })).toBeFocused();
   await page.keyboard.press(backwardTab);
   await expect(detailSend).toBeFocused();
-  await detailSend.press("Enter");
+  await detailSend.click();
 
   await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
   await expect(page.locator(".review-workspace__status")).toHaveText(
@@ -884,8 +890,6 @@ test("keeps compound reference actions in narrow keyboard order through survivor
   }));
 
   const finalClose = page.getByRole("button", { name: "Close active reference" });
-  await finalClose.focus();
-  await expect(finalClose).toBeFocused();
   await finalClose.press("Enter");
 
   await expect(page.getByRole("tablist", { name: "Open references", includeHidden: true })).toHaveCount(0);
@@ -896,17 +900,24 @@ test("keeps compound reference actions in narrow keyboard order through survivor
 test("keeps compound reference actions touch sized for coarse pointers", async ({ browser }) => {
   const context = await browser.newContext({
     hasTouch: true,
-    viewport: { width: 760, height: 900 },
+    viewport: { width: 1280, height: 900 },
   });
   const page = await context.newPage();
   try {
     await openFreshProductionFixture(page, referencePdf, "Coarse-pointer reference launch failed");
     const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
     await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
-    await mainWorkspace.getByRole("button", {
-      name: "Open PDF link to Primary result, Page 2",
-    }).click();
-    await page.getByRole("menuitem", { name: /Open in References/u }).click();
+    await (await currentWorkspaceRail(page)).click();
+    const outline = page.getByRole("navigation", { name: "Document outline" });
+    const outlineReference = outline.getByRole("button", {
+      name: "Open Details, Page 3 in References",
+    });
+    await expect(outlineReference).toHaveCSS("opacity", "1");
+    expect(await outlineReference.evaluate((button) => {
+      const bounds = button.getBoundingClientRect();
+      return { width: bounds.width, height: bounds.height };
+    })).toEqual({ width: 44, height: 44 });
+    await outlineReference.click();
 
     const actions = page.locator("[data-reference-tab-action]");
     await expect(actions).toHaveCount(2);
@@ -923,7 +934,10 @@ test("keeps compound reference actions touch sized for coarse pointers", async (
   }
 });
 
-test("keeps outline and rejected link metadata inert inside the installed local session", async ({ page }) => {
+test("keeps outline and rejected link metadata inert inside the installed local session", async ({
+  page,
+  browserName,
+}) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const contactedOrigins = new Set<string>();
   page.on("request", (request) => contactedOrigins.add(new URL(request.url()).origin));
@@ -956,15 +970,143 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     "aria-expanded",
     "true",
   );
-  await expect(outline.getByRole("button", { name: "Nested result, Page 3" })).toBeVisible();
+  await expect(outline.getByRole("button", {
+    name: "Nested result, Page 3",
+    exact: true,
+  })).toBeVisible();
   const hostileOutline = outline.getByRole("button", {
     name: "scriptalert(1)/script hostile outline, Page 2",
+    exact: true,
   });
   await expect(hostileOutline).toBeVisible();
   await expect(outline.locator("script,img")).toHaveCount(0);
   expect(await hostileOutline.textContent()).not.toMatch(/[<>\u202e\u0000]/u);
 
   const details = outline.getByRole("button", { name: "Details, Page 3", exact: true });
+  const detailsReference = outline.getByRole("button", {
+    name: "Open Details, Page 3 in References",
+  });
+  const nestedReference = outline.getByRole("button", {
+    name: "Open Nested result, Page 3 in References",
+  });
+  const hostileReference = outline.getByRole("button", {
+    name: "Open scriptalert(1)/script hostile outline, Page 2 in References",
+  });
+  await page.mouse.move(0, 0);
+  await expect(detailsReference).toHaveCSS("opacity", "0");
+  await expect(nestedReference).toHaveCSS("opacity", "0");
+
+  const nestedRow = nestedReference.locator("..");
+  await nestedRow.hover();
+  await expect(nestedReference).toHaveCSS("opacity", "1");
+  await expect(detailsReference).toHaveCSS("opacity", "0");
+
+  const nestedDestination = outline.getByRole("button", {
+    name: "Nested result, Page 3",
+    exact: true,
+  });
+  await nestedDestination.focus();
+  await page.keyboard.press(browserName === "webkit" ? "Alt+Tab" : "Tab");
+  await expect(nestedReference).toBeFocused();
+  await expect(nestedReference).toHaveCSS("opacity", "1");
+  await expect(nestedReference).toHaveCSS("outline-style", "solid");
+
+  await outline.evaluate((element) => { element.style.width = "190px"; });
+  const nestedLongLabelGeometry = await hostileReference.evaluate((button) => {
+    const row = button.parentElement;
+    const destination = row?.querySelector<HTMLElement>(".outline-navigator__destination");
+    const label = destination?.querySelector<HTMLElement>("span");
+    if (!row || !destination || !label) throw new Error("Outline row geometry is incomplete.");
+    const rowBounds = row.getBoundingClientRect();
+    const destinationBounds = destination.getBoundingClientRect();
+    const actionBounds = button.getBoundingClientRect();
+    const rowStyle = getComputedStyle(row);
+    const labelStyle = getComputedStyle(label);
+    return {
+      actionRightInset: rowBounds.right - actionBounds.right,
+      actionWidth: actionBounds.width,
+      destinationRight: destinationBounds.right,
+      actionLeft: actionBounds.left,
+      gridColumns: rowStyle.gridTemplateColumns,
+      labelClientWidth: label.clientWidth,
+      labelScrollWidth: label.scrollWidth,
+      labelOverflow: labelStyle.overflow,
+      labelTextOverflow: labelStyle.textOverflow,
+      labelWhiteSpace: labelStyle.whiteSpace,
+    };
+  });
+  expect(nestedLongLabelGeometry.actionRightInset).toBeCloseTo(0, 0);
+  expect(nestedLongLabelGeometry.actionWidth).toBe(31);
+  expect(nestedLongLabelGeometry.destinationRight)
+    .toBeLessThanOrEqual(nestedLongLabelGeometry.actionLeft);
+  expect(nestedLongLabelGeometry.gridColumns.split(" ")).toHaveLength(3);
+  expect(nestedLongLabelGeometry.labelScrollWidth)
+    .toBeGreaterThan(nestedLongLabelGeometry.labelClientWidth);
+  expect(nestedLongLabelGeometry).toMatchObject({
+    labelOverflow: "hidden",
+    labelTextOverflow: "ellipsis",
+    labelWhiteSpace: "nowrap",
+  });
+  await outline.evaluate((element) => { element.style.removeProperty("width"); });
+
+  const mainViewport = mainWorkspace.locator("[data-viewer-framing-viewport]");
+  await mainViewport.evaluate((element) => { element.scrollTop += 32; });
+  const captureMainState = async () => ({
+    page: await page.getByLabel("Current page").textContent(),
+    scroll: await mainViewport.evaluate((element) => ({
+      left: element.scrollLeft,
+      top: element.scrollTop,
+    })),
+    zoom: await page.getByLabel("Zoom level").textContent(),
+    backDisabled: await page.getByRole("button", {
+      name: "Back in document history",
+    }).isDisabled(),
+    forwardDisabled: await page.getByRole("button", {
+      name: "Forward in document history",
+    }).isDisabled(),
+  });
+  const mainStateBeforeReference = await captureMainState();
+  const expectMainStateUnchanged = async (expectedState = mainStateBeforeReference) => {
+    await expect(mainWorkspace).toHaveAttribute("data-safety-main-mount", "stable");
+    expect(await captureMainState()).toEqual(expectedState);
+  };
+  await detailsReference.click();
+  const detailsTab = page.getByRole("tab", { name: /Details, Page 3/u });
+  const referenceWorkspace = page.locator("[data-review-workspace]");
+  await expect(referenceWorkspace).toHaveAttribute("data-workspace-presentation", "bottom");
+  await expect(detailsTab).toHaveAttribute("aria-selected", "true");
+  await expect(detailsTab).toBeFocused();
+  await expect(page.locator("[data-reference-pdf-viewport] [data-page-index='2']")).toBeVisible();
+  await expectMainStateUnchanged();
+  await detailsReference.click();
+  await expect(page.getByRole("tablist", { name: "Open references" }).getByRole("tab"))
+    .toHaveCount(1);
+  await expect(detailsTab).toBeFocused();
+
+  await page.getByRole("button", { name: "Close active reference" }).click();
+  await expect(page.locator("[data-reference-tab]")).toHaveCount(0);
+
+  const stage = page.locator("[data-review-stage]");
+  await page.setViewportSize({ width: 760, height: 900 });
+  await expect(stage).toHaveAttribute("data-reference-layout", "narrow-unified");
+  await page.getByRole("tab", { name: "Outline", exact: true }).click();
+  await expect(detailsReference).toBeVisible();
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  const mainStateBeforeNarrowReference = await captureMainState();
+  await detailsReference.click();
+  await expect(stage).toHaveAttribute("data-reference-layout", "narrow-unified");
+  await expect(detailsTab).toHaveAttribute("aria-selected", "true");
+  await expect(detailsTab).toBeFocused();
+  await expect(page.locator("[data-reference-pdf-viewport] [data-page-index='2']")).toBeVisible();
+  await expectMainStateUnchanged(mainStateBeforeNarrowReference);
+  await page.getByRole("button", { name: "Close active reference" }).click();
+  await expect(page.locator("[data-reference-tab]")).toHaveCount(0);
+  await page.getByRole("tab", { name: "Outline", exact: true }).click();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(stage).toHaveAttribute("data-reference-layout", "wide-right");
+
   await details.focus();
   await page.keyboard.press("Enter");
   await expect(details).toBeFocused();

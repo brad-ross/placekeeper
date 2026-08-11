@@ -120,6 +120,7 @@ describe('shared reference workspace', () => {
         annotations={<div>Owned annotation rows</div>}
         onModeChange={() => undefined}
         onOutlineActivate={() => undefined}
+        onOutlineReference={() => undefined}
       />,
     );
 
@@ -457,6 +458,7 @@ describe('outline navigator', () => {
         discovery={{ status: 'loaded-tree', documentGeneration: 3, items }}
         currentItemId="setup"
         onActivate={() => undefined}
+        onOpenReference={() => undefined}
       />,
     );
 
@@ -468,12 +470,51 @@ describe('outline navigator', () => {
     expect(html).toContain('Setup');
   });
 
+  it('renders target-only References actions as sibling controls with the shared icon', () => {
+    const groupingItem: PdfOutlineItem = {
+      id: 'group',
+      label: 'Appendices',
+      pageContext: null,
+      target: null,
+      children: [items[0]!],
+    };
+    const html = renderToStaticMarkup(
+      <OutlineNavigator
+        discovery={{
+          status: 'loaded-tree',
+          documentGeneration: 3,
+          items: [groupingItem, items[1]!],
+        }}
+        currentItemId="results"
+        onActivate={() => undefined}
+        onOpenReference={() => undefined}
+      />,
+    );
+    const rows = html.match(/<div class="outline-navigator__row">[\s\S]*?<\/div>/gu) ?? [];
+    const groupingRow = rows.find((row) => row.includes('Appendices')) ?? '';
+    const introductionRow = rows.find((row) => row.includes('Introduction')) ?? '';
+    const resultsRow = rows.find((row) => row.includes('Results')) ?? '';
+
+    expect(groupingRow).toContain('outline-navigator__disclosure');
+    expect(groupingRow).toContain('outline-navigator__destination');
+    expect(groupingRow).not.toContain('outline-navigator__reference');
+    expect(introductionRow).toMatch(
+      /class="outline-navigator__destination"[\s\S]*?<\/button><button[^>]*class="outline-navigator__reference"/u,
+    );
+    expect(introductionRow).toContain('aria-label="Open Introduction, Page 1 in References"');
+    expect(introductionRow).toContain('title="Open in References"');
+    expect(introductionRow).toContain('lucide-panels-top-left');
+    expect(resultsRow).toContain('aria-current="location"');
+    expect(html.match(/class="outline-navigator__reference"/g)).toHaveLength(3);
+  });
+
   it('distinguishes loading, loaded-empty, and unavailable states', () => {
     const render = (status: 'loading' | 'loaded-empty' | 'unavailable') => renderToStaticMarkup(
       <OutlineNavigator
         discovery={{ status, documentGeneration: 3 }}
         currentItemId={null}
         onActivate={() => undefined}
+        onOpenReference={() => undefined}
       />,
     );
     expect(render('loading')).toContain('Outline is loading');
