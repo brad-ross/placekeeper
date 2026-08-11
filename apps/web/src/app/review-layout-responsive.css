@@ -78,8 +78,20 @@
 }
 
 @media (hover: none), (pointer: coarse) {
-  .annotation-item__action {
+  .annotation-item__action,
+  .outline-navigator__reference {
     opacity: 1;
+  }
+
+  .outline-navigator__row {
+    grid-template-columns: var(--review-control-compact) minmax(0, 1fr) var(--review-control-touch);
+  }
+
+  .outline-navigator__reference {
+    width: var(--review-control-touch);
+    height: var(--review-control-touch);
+    min-width: var(--review-control-touch);
+    min-height: var(--review-control-touch);
   }
 
   .review-chrome button,
@@ -149,6 +161,7 @@
   .reference-tabs .reference-tab-segment__action {
     width: var(--review-control-touch);
     min-width: var(--review-control-touch);
+    min-height: var(--review-control-touch);
     flex-basis: var(--review-control-touch);
   }
 }
