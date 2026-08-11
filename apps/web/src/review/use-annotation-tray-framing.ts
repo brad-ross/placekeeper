@@ -92,6 +92,7 @@ export function useWorkspaceFraming(input: {
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [geometryRevision, setGeometryRevision] = useState(0);
   const requestGeometryFrameRef = useRef<() => void>(() => undefined);
+  const userPositionFrameRef = useRef<number | null>(null);
   const sideWidth = Math.min(
     WORKSPACE_SIDE_MAX_PX,
     Math.max(0, stageSize.width - WORKSPACE_SIDE_EDGE_GAP_PX),
@@ -229,6 +230,22 @@ export function useWorkspaceFraming(input: {
     }
     authorityRef.current.markUserNavigation();
 
+    if (userPositionFrameRef.current !== null) {
+      cancelAnimationFrame(userPositionFrameRef.current);
+    }
+    userPositionFrameRef.current = requestAnimationFrame(() => {
+      userPositionFrameRef.current = requestAnimationFrame(() => {
+        userPositionFrameRef.current = null;
+        if (sessionRef.current !== session) return;
+        const settled = input.controls?.snapshot();
+        if (!settled?.ready || settled.documentId !== session.documentId) return;
+        session.baseline = {
+          left: ownsLeft ? settled.scroll.left : session.baseline.left,
+          top: ownsTop ? settled.scroll.top : session.baseline.top,
+        };
+      });
+    });
+
     // Programmatic ownership changes stop any in-flight smooth scroll. Native
     // wheel gestures cancel through browser behavior; forcing a same-position
     // write during wheel capture suppresses WebKit's default movement.
@@ -236,6 +253,13 @@ export function useWorkspaceFraming(input: {
       input.controls?.scrollTo(current.scroll, 'auto');
     }
   }, [input.controls]);
+
+  useEffect(() => () => {
+    if (userPositionFrameRef.current !== null) {
+      cancelAnimationFrame(userPositionFrameRef.current);
+      userPositionFrameRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (!input.workspaceOpen || !input.controls) return;
@@ -286,12 +310,14 @@ export function useWorkspaceFraming(input: {
       if (!await waitForWorkspaceLayout(settlement.signal)) return;
       if (!operationIsCurrent()) return;
       const withoutRunway = controls.snapshot(target);
-      const closedPosition = {
-        left: Math.min(restored.left, withoutRunway.maximum.left),
-        top: Math.min(restored.top, withoutRunway.maximum.top),
-      };
-      controls.scrollTo(closedPosition, 'auto');
-      session.baseline = closedPosition;
+      const closedFrame = frameUserOwnedPosition({
+        baseline: session.baseline,
+        restored,
+        maximum: withoutRunway.maximum,
+        userAxes: session.userAxes,
+      });
+      controls.scrollTo(closedFrame.position, 'auto');
+      session.baseline = closedFrame.baseline;
       session.automatic = { left: 0, top: 0 };
       authorityRef.current.close(operation);
       // Keep the document-scoped baseline and per-axis user ownership through

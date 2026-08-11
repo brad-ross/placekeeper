@@ -771,6 +771,20 @@ test("keeps compound reference actions in narrow keyboard order through survivor
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
 
+  const detailPage = referenceWorkspace.locator("[data-page-index='2']");
+  await detailPage.evaluate((element) => element.scrollIntoView({ block: "center" }));
+  await expect.poll(async () => {
+    const [viewportBounds, pageBounds] = await Promise.all([
+      referenceViewport.boundingBox(),
+      detailPage.boundingBox(),
+    ]);
+    if (!viewportBounds || !pageBounds) return Number.POSITIVE_INFINITY;
+    return Math.abs(
+      (viewportBounds.y + viewportBounds.height / 2)
+      - (pageBounds.y + pageBounds.height / 2),
+    );
+  }).toBeLessThan(2);
+
   await detailTab.focus();
   await expect(detailTab).toBeFocused();
   const forwardTab = browserName === 'webkit' ? 'Alt+Tab' : 'Tab';
@@ -782,7 +796,7 @@ test("keeps compound reference actions in narrow keyboard order through survivor
   await expect(page.getByRole("button", { name: "Close active reference" })).toBeFocused();
   await page.keyboard.press(backwardTab);
   await expect(detailSend).toBeFocused();
-  await page.keyboard.press("Enter");
+  await detailSend.press("Enter");
 
   await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
   await expect(page.locator(".review-workspace__status")).toHaveText(
@@ -792,6 +806,9 @@ test("keeps compound reference actions in narrow keyboard order through survivor
   await expect(workspace).toHaveAttribute("data-workspace-open", "true");
   await expect(primaryTab).toHaveAttribute("aria-selected", "true");
   await expect(primaryTab).toBeFocused();
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
 
   const finalClose = page.getByRole("button", { name: "Close active reference" });
   await finalClose.focus();
@@ -1317,16 +1334,19 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
   ));
   await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
     .toBeCloseTo(Math.min(deliberateLeft, naturalHorizontalMaximum), 0);
-  const preservedManualLeft = Math.min(deliberateLeft, naturalHorizontalMaximum);
 
   await toggleWorkspace(page);
-  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
-    .toBeCloseTo(preservedManualLeft, 0);
+  await expect.poll(() => viewport.evaluate((element, desiredLeft) => {
+    const maximum = Math.max(0, element.scrollWidth - element.clientWidth);
+    return Math.abs(element.scrollLeft - Math.min(desiredLeft, maximum));
+  }, deliberateLeft)).toBeLessThan(1);
   await page.setViewportSize({ width: 1240, height: 900 });
   await expect(stage).toHaveAttribute('data-annotation-presentation', 'right');
   await toggleWorkspace(page);
-  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
-    .toBeCloseTo(preservedManualLeft, 0);
+  await expect.poll(() => viewport.evaluate((element, desiredLeft) => {
+    const maximum = Math.max(0, element.scrollWidth - element.clientWidth);
+    return Math.abs(element.scrollLeft - Math.min(desiredLeft, maximum));
+  }, deliberateLeft)).toBeLessThan(1);
   await page.setViewportSize({ width: 1280, height: 900 });
 
   await page.setViewportSize({ width: 760, height: 900 });
@@ -1335,7 +1355,7 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
     Math.max(0, element.scrollWidth - element.clientWidth)
   ));
   await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
-    .toBeCloseTo(Math.min(preservedManualLeft, narrowHorizontalMaximum), 0);
+    .toBeCloseTo(Math.min(deliberateLeft, narrowHorizontalMaximum), 0);
   const narrowScrollBefore = await viewport.evaluate((element) => ({
     left: element.scrollLeft,
     top: element.scrollTop,
