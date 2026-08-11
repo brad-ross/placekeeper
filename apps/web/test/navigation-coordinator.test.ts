@@ -138,7 +138,7 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.state().pendingMainNavigation).not.toBeNull();
 
     const newest: ViewerPdfLinkInvocation = {
-      sourceScope: 'reference',
+      sourceScope: 'main',
       sourcePageIndex: 2,
       target: target(5),
       metadata: createPdfNavigationMetadata({ contents: 'Newest', pageIndex: 5 }),
@@ -213,6 +213,9 @@ describe('document-scoped navigation coordinator', () => {
 
   it('routes the newest main/reference viewer link through the chooser and real reducer', async () => {
     const run = harness();
+    await run.coordinator.openReference(target(2), {
+      label: 'Source reference', pageContext: 'Page 3',
+    });
     const first = linkRequest(2, 'main');
     const newest = linkRequest(5, 'reference');
     expect(run.coordinator.requestLink(first)).toBe(true);
@@ -220,8 +223,50 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.dependencies.setLinkActionRequest).toHaveBeenLastCalledWith(newest);
     expect(await run.coordinator.chooseLink('references', first)).toBe(false);
     expect(await run.coordinator.chooseLink('references', newest)).toBe(true);
-    expect(run.state().tabs.map(({ identity }) => identity)).toEqual([target(5).identity]);
+    expect(run.state().tabs.map(({ identity }) => identity)).toEqual([
+      target(2).identity,
+      target(5).identity,
+    ]);
     expect(run.referencesOpen()).toBe(true);
+  });
+
+  it('rejects a reference link while the first durable tab is still loading', async () => {
+    const run = harness();
+    const opened = deferred<boolean>();
+    vi.mocked(run.controller.open).mockReturnValueOnce(opened.promise);
+    const opening = run.coordinator.openReference(target(2), {
+      label: 'Pending source', pageContext: 'Page 3',
+    });
+    expect(run.pending()).toMatchObject({ status: 'loading' });
+
+    expect(run.coordinator.requestLink(linkRequest(5))).toBe(false);
+    expect(run.dependencies.setLinkActionRequest).toHaveBeenLastCalledWith(null);
+    expect(run.announcement()).toBe('This PDF link cannot be opened safely.');
+
+    opened.resolve(true);
+    expect(await opening).toBe(false);
+    expect(run.state().tabs).toEqual([]);
+  });
+
+  it('rejects a reference link while the shared viewer is opening another tab', async () => {
+    const run = harness();
+    await run.coordinator.openReference(target(2), {
+      label: 'Stable source', pageContext: 'Page 3',
+    });
+    const opened = deferred<boolean>();
+    vi.mocked(run.controller.open).mockReturnValueOnce(opened.promise);
+    const opening = run.coordinator.openReference(target(4), {
+      label: 'Incoming reference', pageContext: 'Page 5',
+    });
+    expect(run.pending()).toMatchObject({ status: 'loading' });
+
+    expect(run.coordinator.requestLink(linkRequest(6))).toBe(false);
+    expect(run.dependencies.setLinkActionRequest).toHaveBeenLastCalledWith(null);
+    expect(run.state().activeTabIdentity).toBe(target(2).identity);
+
+    opened.resolve(true);
+    expect(await opening).toBe(false);
+    expect(run.state().tabs.map(({ identity }) => identity)).toEqual([target(2).identity]);
   });
 
   it('follows a reference link in the active tab without changing main state or tab identity', async () => {

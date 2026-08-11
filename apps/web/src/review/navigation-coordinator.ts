@@ -162,8 +162,20 @@ export class NavigationCoordinator {
   }
 
   requestLink(request: ViewerPdfLinkInvocation): boolean {
+    const state = this.dependencies.getState();
+    const sourceTabIdentity = request.sourceScope === 'reference'
+      && this.pendingReference === null
+      && state.pendingReferenceSwitch === null
+      && this.referenceRestoreIdentity === null
+      && state.activeTabIdentity !== null
+      && state.tabs.some((tab) => tab.identity === state.activeTabIdentity)
+      ? state.activeTabIdentity
+      : null;
     this.supersede();
-    if (!this.generationMatches(request.target.documentGeneration)) {
+    if (
+      !this.generationMatches(request.target.documentGeneration)
+      || (request.sourceScope === 'reference' && sourceTabIdentity === null)
+    ) {
       this.linkRequest = null;
       this.linkRequestSourceTabIdentity = null;
       this.dependencies.setLinkActionRequest(null);
@@ -173,12 +185,7 @@ export class NavigationCoordinator {
     this.pendingReference = null;
     this.dependencies.setPendingReference(null);
     this.linkRequest = request;
-    const state = this.dependencies.getState();
-    this.linkRequestSourceTabIdentity = request.sourceScope === 'reference'
-      && state.activeTabIdentity !== null
-      && state.tabs.some((tab) => tab.identity === state.activeTabIdentity)
-      ? state.activeTabIdentity
-      : null;
+    this.linkRequestSourceTabIdentity = sourceTabIdentity;
     this.dependencies.setLinkActionRequest(request);
     return true;
   }
