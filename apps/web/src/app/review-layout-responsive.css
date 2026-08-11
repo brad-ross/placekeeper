@@ -62,13 +62,14 @@
   }
 
   .review-chrome__viewer-controls {
-    gap: 0;
+    column-gap: .625rem;
+    row-gap: .25rem;
   }
 
   .review-chrome__stat,
   .review-chrome__page-control,
   .review-chrome__zoom-control {
-    min-width: 52px;
+    min-width: 48px;
   }
 
   .review-chrome h1 {

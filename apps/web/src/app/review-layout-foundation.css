@@ -153,17 +153,18 @@
 .review-chrome__actions {
   display: flex;
   align-items: center;
-  gap: .2rem;
 }
 
-.review-chrome__history-cluster {
+.review-chrome__viewer-controls {
+  column-gap: 1rem;
+  row-gap: .35rem;
+}
+
+.review-chrome__control-cluster {
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: .2rem;
-  margin-left: .2rem;
-  padding-left: .4rem;
-  border-left: 1px solid var(--review-border);
+  gap: .125rem;
 }
 
 .review-chrome__actions {
@@ -219,7 +220,7 @@
 .review-chrome__stat,
 .review-chrome__page-control,
 .review-chrome__zoom-control {
-  min-width: 60px;
+  min-width: 52px;
   color: var(--review-ink-muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;

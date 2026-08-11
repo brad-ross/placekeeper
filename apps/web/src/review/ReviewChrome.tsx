@@ -243,8 +243,15 @@ export function ReviewChrome({
         <h1>{documentTitle}</h1>
         <span className="review-chrome__saved" data-review-saved-status>{savedLabel}</span>
       </div>
-      <div className="review-chrome__viewer-controls" role="group" aria-label="PDF navigation, zoom, and history">
-        <button type="button" className="review-chrome__icon-control" data-review-page-step="previous" aria-label="Previous page" aria-describedby={pageUnavailable} disabled={!viewerState.pageReady || viewerState.currentPage <= 1} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.previousPage())}><ReviewIcon name="chevron-left" /></button>
+      <div className="review-chrome__viewer-controls" role="group" aria-label="PDF editing, navigation, and zoom">
+        <span className="review-chrome__control-cluster review-chrome__edit-cluster" role="group" aria-label="Edit history">
+          <button type="button" className="review-chrome__icon-control review-chrome__history-control" aria-label="Undo" disabled={!canUndo} onClick={onUndo}><ReviewIcon name="undo" /></button>
+          <button type="button" className="review-chrome__icon-control review-chrome__history-control" aria-label="Redo" disabled={!canRedo} onClick={onRedo}><ReviewIcon name="redo" /></button>
+        </span>
+        <span className="review-chrome__control-cluster review-chrome__navigation-cluster" role="group" aria-label="Document navigation">
+          <button type="button" className="review-chrome__icon-control review-chrome__main-history-control" data-main-history="back" aria-label="Back in document history" disabled={!canNavigateBack} onClick={onNavigateBack}><ReviewIcon name="arrow-left" /></button>
+          <button type="button" className="review-chrome__icon-control review-chrome__main-history-control" data-main-history="forward" aria-label="Forward in document history" disabled={!canNavigateForward} onClick={onNavigateForward}><ReviewIcon name="arrow-right" /></button>
+          <button type="button" className="review-chrome__icon-control" data-review-page-step="previous" aria-label="Previous page" aria-describedby={pageUnavailable} disabled={!viewerState.pageReady || viewerState.currentPage <= 1} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.previousPage())}><ReviewIcon name="chevron-left" /></button>
         {viewerState.pageReady ? (
           <span className="review-chrome__page-control" data-review-stat>
             {editingPage ? (
@@ -313,9 +320,12 @@ export function ReviewChrome({
         ) : (
           <span className="review-chrome__stat" data-review-stat aria-label="Current page">— / —</span>
         )}
-        <button type="button" className="review-chrome__icon-control" data-review-page-step="next" aria-label="Next page" aria-describedby={pageUnavailable} disabled={!viewerState.pageReady || viewerState.currentPage >= viewerState.totalPages} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.nextPage())}><ReviewIcon name="chevron-right" /></button>
-        <button type="button" className="review-chrome__icon-control" data-review-zoom-action="out" aria-label="Zoom out" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomOut())}><ReviewIcon name="minus" /></button>
-        {viewerState.zoomReady ? (
+          <button type="button" className="review-chrome__icon-control" data-review-page-step="next" aria-label="Next page" aria-describedby={pageUnavailable} disabled={!viewerState.pageReady || viewerState.currentPage >= viewerState.totalPages} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.nextPage())}><ReviewIcon name="chevron-right" /></button>
+        </span>
+        <span className="review-chrome__control-cluster review-chrome__zoom-cluster" role="group" aria-label="PDF zoom">
+          <button type="button" className="review-chrome__icon-control" data-review-zoom-action="out" aria-label="Zoom out" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomOut())}><ReviewIcon name="minus" /></button>
+          <button type="button" className="review-chrome__icon-control" data-review-zoom-action="in" aria-label="Zoom in" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomIn())}><ReviewIcon name="plus" /></button>
+          {viewerState.zoomReady ? (
           <span className="review-chrome__zoom-control" data-review-stat aria-label="Zoom level">
             {editingZoom ? (
               <>
@@ -384,16 +394,10 @@ export function ReviewChrome({
               </button>
             )}
           </span>
-        ) : (
-          <span className="review-chrome__stat" data-review-stat aria-label="Zoom level">—%</span>
-        )}
-        <button type="button" className="review-chrome__icon-control" data-review-zoom-action="in" aria-label="Zoom in" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomIn())}><ReviewIcon name="plus" /></button>
-        <button type="button" className="review-chrome__icon-control review-chrome__fit-width" data-review-zoom-action="fit-width" aria-label="Fit PDF to available width" aria-busy={fitWidthPending ? 'true' : 'false'} aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)} disabled={!viewerState.zoomReady || !fitWidthReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runFitWidth(event.currentTarget)}><ReviewIcon name="fit-width" /></button>
-        <span className="review-chrome__history-cluster" role="group" aria-label="Document and edit history">
-          <button type="button" className="review-chrome__icon-control review-chrome__main-history-control" data-main-history="back" aria-label="Back in document history" disabled={!canNavigateBack} onClick={onNavigateBack}><ReviewIcon name="arrow-left" /></button>
-          <button type="button" className="review-chrome__icon-control review-chrome__main-history-control" data-main-history="forward" aria-label="Forward in document history" disabled={!canNavigateForward} onClick={onNavigateForward}><ReviewIcon name="arrow-right" /></button>
-          <button type="button" className="review-chrome__icon-control review-chrome__history-control" aria-label="Undo" disabled={!canUndo} onClick={onUndo}><ReviewIcon name="undo" /></button>
-          <button type="button" className="review-chrome__icon-control review-chrome__history-control" aria-label="Redo" disabled={!canRedo} onClick={onRedo}><ReviewIcon name="redo" /></button>
+          ) : (
+            <span className="review-chrome__stat" data-review-stat aria-label="Zoom level">—%</span>
+          )}
+          <button type="button" className="review-chrome__icon-control review-chrome__fit-width" data-review-zoom-action="fit-width" aria-label="Fit PDF to available width" aria-busy={fitWidthPending ? 'true' : 'false'} aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)} disabled={!viewerState.zoomReady || !fitWidthReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runFitWidth(event.currentTarget)}><ReviewIcon name="fit-width" /></button>
         </span>
       </div>
       <nav className="review-chrome__actions" aria-label="Review views">

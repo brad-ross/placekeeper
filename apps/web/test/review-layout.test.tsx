@@ -171,7 +171,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toMatch(/class="[^"]*review-icon[^"]*"/);
   });
 
-  it('groups document history and edit history in the centered controls with distinct icons', () => {
+  it('groups edit history, document navigation, and zoom in task order', () => {
     const html = renderToStaticMarkup(
       <ReviewChrome
         documentTitle="paper.pdf"
@@ -189,18 +189,31 @@ describe('review shell layout and accessibility contract', () => {
         onFinish={vi.fn()}
       />,
     );
-    const centerStart = html.indexOf('aria-label="PDF navigation, zoom, and history"');
+    const centerStart = html.indexOf('aria-label="PDF editing, navigation, and zoom"');
+    const editGroup = html.indexOf('aria-label="Edit history"');
+    const navigationGroup = html.indexOf('aria-label="Document navigation"');
+    const zoomGroup = html.indexOf('aria-label="PDF zoom"');
     const actionsStart = html.indexOf('aria-label="Review views"');
 
     expect(centerStart).toBeGreaterThanOrEqual(0);
-    for (const label of [
-      'Back in document history',
-      'Forward in document history',
-      'Undo',
-      'Redo',
-    ]) {
-      const control = html.indexOf(`aria-label="${label}"`);
-      expect(control).toBeGreaterThan(centerStart);
+    const orderedControls = [
+      editGroup,
+      html.indexOf('aria-label="Undo"'),
+      html.indexOf('aria-label="Redo"'),
+      navigationGroup,
+      html.indexOf('aria-label="Back in document history"'),
+      html.indexOf('aria-label="Forward in document history"'),
+      html.indexOf('aria-label="Previous page"'),
+      html.indexOf('aria-label="Current page 3 of 12. Enter a page number"'),
+      html.indexOf('aria-label="Next page"'),
+      zoomGroup,
+      html.indexOf('aria-label="Zoom out"'),
+      html.indexOf('aria-label="Zoom in"'),
+      html.indexOf('aria-label="Zoom level"'),
+      html.indexOf('aria-label="Fit PDF to available width"'),
+    ];
+    for (const [index, control] of orderedControls.entries()) {
+      expect(control).toBeGreaterThan(index === 0 ? centerStart : orderedControls[index - 1]!);
       expect(control).toBeLessThan(actionsStart);
     }
     expect(html).toMatch(/aria-label="Previous page"[^>]*>.*lucide-chevron-left/u);
@@ -471,6 +484,11 @@ describe('review shell layout and accessibility contract', () => {
   it('renders ready zoom as an editable percentage beside a semantic Fit Width action', () => {
     const html = renderChrome(true, true);
 
+    const zoomOutIndex = html.indexOf('aria-label="Zoom out"');
+    const zoomInIndex = html.indexOf('aria-label="Zoom in"');
+    const zoomLevelIndex = html.indexOf('aria-label="Zoom level"');
+    const fitWidthIndex = html.indexOf('aria-label="Fit PDF to available width"');
+
     expect(html).toContain('class="review-chrome__zoom-trigger review-chrome__stat"');
     expect(html).toContain('class="review-chrome__zoom-control" data-review-stat="true" aria-label="Zoom level"');
     expect(html).toContain('aria-label="Current zoom 100 percent. Enter a zoom percentage"');
@@ -481,6 +499,9 @@ describe('review shell layout and accessibility contract', () => {
     );
     expect(html).not.toMatch(/aria-label="Fit PDF to available width"[^>]*disabled=""/u);
     expect(html.match(/data-review-zoom-action=/g)).toHaveLength(3);
+    expect(zoomOutIndex).toBeLessThan(zoomInIndex);
+    expect(zoomInIndex).toBeLessThan(zoomLevelIndex);
+    expect(zoomLevelIndex).toBeLessThan(fitWidthIndex);
   });
 
   it('accepts only whole zoom percentages within the configured viewer limits', () => {
