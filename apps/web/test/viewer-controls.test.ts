@@ -124,6 +124,54 @@ describe('viewer controls adapter', () => {
     expect(controls.snapshot()).toMatchObject({ currentPage: 5, totalPages: 5 });
   });
 
+  it('forwards only supported whole zoom percentages and keeps zoom state event-derived', () => {
+    let onZoom: ((event: { documentId: string; newZoom: number }) => void) | undefined;
+    const zoom = {
+      getState: () => ({ currentZoomLevel: 1.1 }),
+      zoomOut: vi.fn(),
+      zoomIn: vi.fn(),
+      requestZoom: vi.fn(),
+    };
+    const registry = {
+      getStore: () => ({ getState: () => ({ core: { activeDocumentId: 'doc' } }) }),
+      getPlugin: (id: string) => id === ZoomPlugin.id
+        ? { provides: () => ({
+            forDocument: () => zoom,
+            onZoomChange: (listener: typeof onZoom) => {
+              onZoom = listener;
+              return () => undefined;
+            },
+          }) }
+        : undefined,
+    } as unknown as PluginRegistry;
+
+    const controls = createViewerControls(registry);
+    expect(controls.snapshot()).toMatchObject({ zoomReady: true, zoomPercent: 110 });
+
+    for (const invalidZoom of [
+      0,
+      19,
+      20.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      Number.MAX_SAFE_INTEGER + 1,
+      6001,
+    ]) {
+      controls.zoomToPercent(invalidZoom);
+    }
+    expect(zoom.requestZoom).not.toHaveBeenCalled();
+
+    controls.zoomToPercent(20);
+    controls.zoomToPercent(125);
+    controls.zoomToPercent(6000);
+    expect(zoom.requestZoom.mock.calls).toEqual([[0.2], [1.25], [60]]);
+    expect(controls.snapshot()).toMatchObject({ zoomPercent: 110 });
+
+    onZoom?.({ documentId: 'doc', newZoom: 1.25 });
+    expect(controls.snapshot()).toMatchObject({ zoomPercent: 125 });
+  });
+
   it('stays inert and explains unavailability when the document or capabilities are missing', () => {
     const registry = {
       getStore: () => ({ getState: () => ({ core: { activeDocumentId: null } }) }),
@@ -138,6 +186,7 @@ describe('viewer controls adapter', () => {
     controls.goToPage(1);
     controls.zoomOut();
     controls.zoomIn();
+    controls.zoomToPercent(125);
 
     expect(controls.snapshot()).toMatchObject({ ready: false, currentPage: 0, totalPages: 0 });
     expect(listener).toHaveBeenCalledWith(expect.objectContaining({

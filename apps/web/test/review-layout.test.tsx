@@ -10,9 +10,19 @@ import {
 } from '../src/app/ReviewShell.js';
 import { AnnotationList } from '../src/review/AnnotationList.js';
 import { AnnotationPeek } from '../src/review/AnnotationPeek.js';
-import { ReviewChrome, validPageNumber } from '../src/review/ReviewChrome.js';
+import {
+  ReviewChrome,
+  resolveZoomDraft,
+  validPageNumber,
+  validZoomPercent,
+  zoomEditorKeyAction,
+} from '../src/review/ReviewChrome.js';
 import { ReviewIcon } from '../src/review/ReviewIcon.js';
-import type { ViewerControls } from '../src/pdf/viewer-controls.js';
+import {
+  VIEWER_ZOOM_MAX_PERCENT,
+  VIEWER_ZOOM_MIN_PERCENT,
+  type ViewerControls,
+} from '../src/pdf/viewer-controls.js';
 import { createReviewState, type ReviewItem } from '../../../packages/core/src/review-model.js';
 import {
   INITIAL_REVIEW_SURFACE_STATE,
@@ -119,11 +129,12 @@ describe('review shell layout and accessibility contract', () => {
     goToPage: vi.fn(),
     zoomOut: vi.fn(),
     zoomIn: vi.fn(),
+    zoomToPercent: vi.fn(),
     subscribe: vi.fn(() => () => undefined),
     dispose: vi.fn(),
   };
 
-  const renderChrome = (pageReady: boolean) => renderToStaticMarkup(
+  const renderChrome = (pageReady: boolean, fitWidthReady = false) => renderToStaticMarkup(
     <ReviewChrome
       documentTitle="paper.pdf"
       controls={viewerControls}
@@ -137,6 +148,7 @@ describe('review shell layout and accessibility contract', () => {
         pageUnavailableReason: 'Page controls become available when PDF navigation is ready.',
         zoomUnavailableReason: 'Zoom controls become available when PDF zoom is ready.',
       }}
+      fitWidthReady={fitWidthReady}
       canUndo={false}
       canRedo={false}
       finishOpen={false}
@@ -159,7 +171,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toMatch(/class="[^"]*review-icon[^"]*"/);
   });
 
-  it('groups document history and edit history in the centered controls with distinct icons', () => {
+  it('groups edit history, document navigation, and zoom in task order', () => {
     const html = renderToStaticMarkup(
       <ReviewChrome
         documentTitle="paper.pdf"
@@ -177,18 +189,31 @@ describe('review shell layout and accessibility contract', () => {
         onFinish={vi.fn()}
       />,
     );
-    const centerStart = html.indexOf('aria-label="PDF navigation, zoom, and history"');
+    const centerStart = html.indexOf('aria-label="PDF editing, navigation, and zoom"');
+    const editGroup = html.indexOf('aria-label="Edit history"');
+    const navigationGroup = html.indexOf('aria-label="Document navigation"');
+    const zoomGroup = html.indexOf('aria-label="PDF zoom"');
     const actionsStart = html.indexOf('aria-label="Review views"');
 
     expect(centerStart).toBeGreaterThanOrEqual(0);
-    for (const label of [
-      'Back in document history',
-      'Forward in document history',
-      'Undo',
-      'Redo',
-    ]) {
-      const control = html.indexOf(`aria-label="${label}"`);
-      expect(control).toBeGreaterThan(centerStart);
+    const orderedControls = [
+      editGroup,
+      html.indexOf('aria-label="Undo"'),
+      html.indexOf('aria-label="Redo"'),
+      navigationGroup,
+      html.indexOf('aria-label="Back in document history"'),
+      html.indexOf('aria-label="Forward in document history"'),
+      html.indexOf('aria-label="Previous page"'),
+      html.indexOf('aria-label="Current page 3 of 12. Enter a page number"'),
+      html.indexOf('aria-label="Next page"'),
+      zoomGroup,
+      html.indexOf('aria-label="Zoom out"'),
+      html.indexOf('aria-label="Zoom in"'),
+      html.indexOf('aria-label="Zoom level"'),
+      html.indexOf('aria-label="Fit PDF to available width"'),
+    ];
+    for (const [index, control] of orderedControls.entries()) {
+      expect(control).toBeGreaterThan(index === 0 ? centerStart : orderedControls[index - 1]!);
       expect(control).toBeLessThan(actionsStart);
     }
     expect(html).toMatch(/aria-label="Previous page"[^>]*>.*lucide-chevron-left/u);
@@ -565,16 +590,79 @@ describe('review shell layout and accessibility contract', () => {
     expect(validPageNumber('', 12)).toBeUndefined();
   });
 
+  it('renders ready zoom as an editable percentage beside a semantic Fit Width action', () => {
+    const html = renderChrome(true, true);
+
+    const zoomOutIndex = html.indexOf('aria-label="Zoom out"');
+    const zoomInIndex = html.indexOf('aria-label="Zoom in"');
+    const zoomLevelIndex = html.indexOf('aria-label="Zoom level"');
+    const fitWidthIndex = html.indexOf('aria-label="Fit PDF to available width"');
+
+    expect(html).toContain('class="review-chrome__zoom-trigger review-chrome__stat"');
+    expect(html).toContain('class="review-chrome__zoom-control" data-review-stat="true" aria-label="Zoom level"');
+    expect(html).toContain('aria-label="Current zoom 100 percent. Enter a zoom percentage"');
+    expect(html).toContain('>100<span aria-hidden="true">%</span></button>');
+    expect(html).not.toContain('aria-label="Zoom percentage"');
+    expect(html).toMatch(
+      /aria-label="Fit PDF to available width"[^>]*>.*lucide-move-horizontal/u,
+    );
+    expect(html).not.toMatch(/aria-label="Fit PDF to available width"[^>]*disabled=""/u);
+    expect(html.match(/data-review-zoom-action=/g)).toHaveLength(3);
+    expect(zoomOutIndex).toBeLessThan(zoomInIndex);
+    expect(zoomInIndex).toBeLessThan(zoomLevelIndex);
+    expect(zoomLevelIndex).toBeLessThan(fitWidthIndex);
+  });
+
+  it('accepts only whole zoom percentages within the configured viewer limits', () => {
+    expect(validZoomPercent(String(VIEWER_ZOOM_MIN_PERCENT))).toBe(VIEWER_ZOOM_MIN_PERCENT);
+    expect(validZoomPercent(' 125 ')).toBe(125);
+    expect(validZoomPercent(String(VIEWER_ZOOM_MAX_PERCENT))).toBe(VIEWER_ZOOM_MAX_PERCENT);
+    expect(validZoomPercent(String(VIEWER_ZOOM_MIN_PERCENT - 1))).toBeUndefined();
+    expect(validZoomPercent(String(VIEWER_ZOOM_MAX_PERCENT + 1))).toBeUndefined();
+    expect(validZoomPercent('125.5')).toBeUndefined();
+    expect(validZoomPercent('1e2')).toBeUndefined();
+    expect(validZoomPercent('Infinity')).toBeUndefined();
+    expect(validZoomPercent('')).toBeUndefined();
+  });
+
+  it('resolves changed drafts without turning an unchanged rounded display into a request', () => {
+    expect(resolveZoomDraft('125', 100)).toEqual({ valid: true, request: 125 });
+    expect(resolveZoomDraft('100', 100)).toEqual({ valid: true });
+    expect(resolveZoomDraft('100.5', 100)).toEqual({ valid: false });
+  });
+
+  it('ignores editor shortcuts during IME composition', () => {
+    expect(zoomEditorKeyAction('Enter', false)).toBe('submit');
+    expect(zoomEditorKeyAction('Escape', false)).toBe('cancel');
+    expect(zoomEditorKeyAction('Enter', true)).toBeUndefined();
+    expect(zoomEditorKeyAction('Escape', true)).toBeUndefined();
+    expect(zoomEditorKeyAction('ArrowUp', false)).toBeUndefined();
+  });
+
+  it('keeps unavailable zoom noneditable and disables every zoom action with one explanation', () => {
+    const html = renderChrome(false);
+
+    expect(html).toContain('aria-label="Zoom level">—%</span>');
+    expect(html).not.toContain('review-chrome__zoom-trigger');
+    expect(html).not.toContain('aria-label="Zoom percentage"');
+    for (const label of ['Zoom out', 'Zoom in', 'Fit PDF to available width']) {
+      expect(html).toMatch(
+        new RegExp(`aria-label="${label}"[^>]*aria-describedby="viewer-zoom-controls-readiness"[^>]*disabled=""`),
+      );
+    }
+    expect(html).toContain('Zoom controls become available when PDF zoom is ready.');
+  });
+
   it('matches the page editor to coarse-pointer control height', () => {
     const coarsePointerRules = responsiveStyles.match(
       /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*?)\n\}/u,
     )?.[1];
 
     expect(coarsePointerRules).toMatch(
-      /\.review-chrome__page-editor \{\s*min-height: var\(--review-control-touch\);\s*\}/u,
+      /\.review-chrome__page-editor,\s*\.review-chrome__zoom-editor \{\s*min-height: var\(--review-control-touch\);\s*\}/u,
     );
     expect(coarsePointerRules).toMatch(
-      /\.review-chrome__page-input \{\s*height: var\(--review-control-touch\);\s*\}/u,
+      /\.review-chrome__page-input,\s*\.review-chrome__zoom-input \{\s*height: var\(--review-control-touch\);\s*\}/u,
     );
   });
 });
