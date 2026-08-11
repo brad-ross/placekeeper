@@ -459,16 +459,27 @@ export class NavigationCoordinator {
       success: true,
       settledLocation,
     });
-    this.referenceRestoreIdentity = this.dependencies.getState().activeTabIdentity;
+    const survivingIdentity = this.dependencies.getState().activeTabIdentity;
+    this.referenceRestoreIdentity = survivingIdentity;
     this.dependencies.setAnnouncement('Reference sent to the main document.');
     this.refreshCurrentOutline(settledLocation);
+
+    if (survivingIdentity !== null) {
+      const restored = await this.restoreReferenceTab(operation, survivingIdentity, false);
+      if (!this.isCurrent(operation)) return true;
+      if (!restored) {
+        this.dependencies.setAnnouncement(
+          'Reference sent to the main document. Select the adjacent reference to retry it.',
+        );
+      }
+      main.focusAtDestination(settledLocation.pageIndex);
+      return true;
+    }
+
     this.dependencies.layout.hideReferences();
-    const closeFinalReference = state.tabs.length === 1
-      ? this.dependencies.getReferenceController()?.close()
-      : undefined;
     await Promise.all([
       this.dependencies.layout.settle(),
-      closeFinalReference ?? Promise.resolve(),
+      this.dependencies.getReferenceController()?.close() ?? Promise.resolve(),
     ]);
     if (this.isCurrent(operation)) main.focusAtDestination(settledLocation.pageIndex);
     return true;

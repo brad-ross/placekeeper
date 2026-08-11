@@ -15,6 +15,7 @@ import type {
   ViewerPdfLinkSourceScope,
 } from '../pdf/viewer-interaction-events.js';
 import { PDF_LINK_ACTION_MENU_ID } from '../pdf/viewer-interaction-events.js';
+import { ReviewIcon } from './ReviewIcon.js';
 
 export type LinkActionChoice = 'references' | 'main';
 export type LinkActionDismissReason = 'escape' | 'outside' | 'tab' | 'anchor-invalidated';
@@ -141,17 +142,25 @@ export function LinkActionMenuContent({
       aria-label={`Open ${label}, ${pageContext}`}
       onKeyDown={onKeyDown}
     >
-      <p className="link-action-popover__destination">
-        <strong>{label}</strong>
-        {label === pageContext ? null : <span>{pageContext}</span>}
-      </p>
-      <button ref={firstItemRef} type="button" role="menuitem" onClick={() => onChoose('references')}>
-        <span>Open in References</span>
-        <small>Keep the main view in place</small>
+      <button
+        ref={firstItemRef}
+        type="button"
+        role="menuitem"
+        aria-label="Open in References"
+        title="Open in References"
+        onClick={() => onChoose('references')}
+      >
+        <ReviewIcon name="references" />
       </button>
-      <button ref={secondItemRef} type="button" role="menuitem" onClick={() => onChoose('main')}>
-        <span>Open in main</span>
-        <small>Move the reading thread</small>
+      <button
+        ref={secondItemRef}
+        type="button"
+        role="menuitem"
+        aria-label="Open in main"
+        title="Open in main"
+        onClick={() => onChoose('main')}
+      >
+        <ReviewIcon name="main" />
       </button>
     </div>
   );

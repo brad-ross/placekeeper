@@ -41,7 +41,7 @@ describe('link action chooser', () => {
     expect(linkActionDismissRestoresFocus('anchor-invalidated')).toBe(true);
   });
 
-  it('keeps the default action first and exposes a nonmodal menu contract', () => {
+  it('keeps the default action first in a compact icon-only nonmodal menu', () => {
     const html = renderToStaticMarkup(
       <LinkActionMenuContent
         label="Lemma A.7"
@@ -55,8 +55,12 @@ describe('link action chooser', () => {
 
     expect(html).toContain('role="menu"');
     expect(html).toContain(`id="${PDF_LINK_ACTION_MENU_ID}"`);
-    expect(html).toMatch(/Open in References[\s\S]*Open in main/u);
+    expect(html).toMatch(/aria-label="Open in References"[\s\S]*aria-label="Open in main"/u);
+    expect(html).toMatch(/title="Open in References"[\s\S]*title="Open in main"/u);
     expect(html.match(/role="menuitem"/g)).toHaveLength(2);
+    expect(html.match(/<svg/g)).toHaveLength(2);
+    expect(html).not.toContain('<small>');
+    expect(html).not.toContain('<span>Open in');
     expect(html).not.toContain('role="dialog"');
     expect(html).toContain('Lemma A.7');
     expect(html).toContain('Page 18');

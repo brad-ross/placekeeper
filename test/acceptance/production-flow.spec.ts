@@ -191,8 +191,21 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   const primaryMenu = page.getByRole("menu", { name: "Open Primary result, Page 2" });
   await expect(primaryMenu).toBeVisible();
   await expect(primaryMenu.getByRole("menuitem", { name: /Open in References/u })).toBeFocused();
+  await expect(primaryMenu.getByRole("menuitem")).toHaveCount(2);
+  await expect(primaryMenu.locator("svg")).toHaveCount(2);
+  await expect(primaryMenu.getByRole("menuitem").first()).toHaveText("");
+  await expect(primaryMenu.getByRole("menuitem").last()).toHaveText("");
+  const firstMenuItemBounds = await primaryMenu.getByRole("menuitem").first().boundingBox();
+  expect(firstMenuItemBounds).not.toBeNull();
+  expect(firstMenuItemBounds!.width).toBe(34);
+  expect(firstMenuItemBounds!.height).toBe(34);
   const menuBounds = await primaryMenu.boundingBox();
   expect(menuBounds).not.toBeNull();
+  expect(menuBounds!.width).toBeLessThan(100);
+  expect(menuBounds!.height).toBe(44);
+  const popoverBounds = await page.locator("[data-link-action-popover]").boundingBox();
+  expect(popoverBounds).not.toBeNull();
+  expect(popoverBounds!.height).toBe(46);
   expect(menuBounds!.x).toBeGreaterThanOrEqual(0);
   expect(menuBounds!.y).toBeGreaterThanOrEqual(0);
   expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(1280);
@@ -585,10 +598,12 @@ test("switches and sends references from the right-docked workspace", async ({ p
   await expect(page.locator(".review-workspace__status")).toHaveText(
     "Reference sent to the main document.",
   );
-  await expect(workspace).toHaveAttribute("data-workspace-open", "false");
+  await expect(workspace).toHaveAttribute("data-workspace-open", "true");
+  await expect(workspace).toHaveAttribute("data-workspace-presentation", "right");
   await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
   await expect(detailTab).toHaveCount(0);
-  await expect(page.getByRole("tab", { name: /Primary result/u, includeHidden: true })).toHaveCount(1);
+  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+  await expect(referenceWorkspace.locator("[data-page-index='1']")).toBeVisible();
 });
 
 test("keeps outline and rejected link metadata inert inside the installed local session", async ({ page }) => {

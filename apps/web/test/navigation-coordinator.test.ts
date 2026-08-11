@@ -351,10 +351,11 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.state().mainHistory.entries).toEqual([location(1, 45, 1.1), scrolled]);
     expect(run.referencesOpen()).toBe(false);
     expect(run.dependencies.layout.hideReferences).toHaveBeenCalled();
+    expect(run.controller.close).toHaveBeenCalledOnce();
     expect(run.dependencies.layout.focusReferenceRail).not.toHaveBeenCalled();
   });
 
-  it('restores the surviving active tab when References reopens after Send', async () => {
+  it('keeps References open and restores the surviving active tab after Send', async () => {
     const run = harness();
     await run.coordinator.openReference(target(2), { label: 'A', pageContext: 'Page 3' });
     const surviving = run.state().tabs[0]!.settledLocation;
@@ -366,12 +367,11 @@ describe('document-scoped navigation coordinator', () => {
     expect(await run.coordinator.sendToMain(target(4).identity)).toBe(true);
     expect(run.state().activeTabIdentity).toBe(target(2).identity);
     expect(run.state().tabs[0]!.settledLocation).toEqual(surviving);
-    expect(run.referencesOpen()).toBe(false);
-
-    expect(await run.coordinator.openReferencesWorkspace()).toBe(true);
+    expect(run.referencesOpen()).toBe(true);
     expect(run.reference.controls.applyLocation).toHaveBeenLastCalledWith(surviving);
     expect(run.state().tabs[0]!.settledLocation).toEqual(surviving);
-    expect(run.referencesOpen()).toBe(true);
+    expect(run.dependencies.layout.hideReferences).not.toHaveBeenCalled();
+    expect(run.controller.close).not.toHaveBeenCalled();
   });
 
   it('preserves the live active reference when an ordinary hidden workspace reopens', async () => {
