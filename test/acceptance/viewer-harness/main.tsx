@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client';
 import type { PluginRegistry } from '@embedpdf/core';
 import { ScrollPlugin } from '@embedpdf/plugin-scroll';
 import { SelectionPlugin } from '@embedpdf/plugin-selection';
+import { ZoomPlugin } from '@embedpdf/plugin-zoom';
 
 import { App } from '../../../apps/web/src/app/App.js';
 import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
@@ -33,6 +34,16 @@ globalThis.viewerAcceptance = {
     if (!documentId) return 0;
     const selection = registry.getPlugin<SelectionPlugin>(SelectionPlugin.id)?.provides();
     return selection?.getFormattedSelection(documentId).flatMap(({ segmentRects }) => segmentRects).length ?? 0;
+  },
+  zoomLevel() {
+    if (!registry) return 0;
+    const documentId = registry.getStore().getState().core.activeDocumentId;
+    if (!documentId) return 0;
+    return registry.getPlugin<ZoomPlugin>(ZoomPlugin.id)
+      ?.provides()
+      .forDocument(documentId)
+      .getState()
+      .currentZoomLevel ?? 0;
   },
   selectionAnchorStatus() {
     if (lastSelectionUpdate === null) return 'pending';
@@ -114,6 +125,7 @@ declare global {
     ready: boolean;
     selectionGeometryReady(): boolean;
     selectionRectCount(): number;
+    zoomLevel(): number;
     selectionAnchorStatus(): string;
     goToPage(pageNumber: number): void;
     reviewItemCount(): number;

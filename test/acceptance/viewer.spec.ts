@@ -8,6 +8,7 @@ declare global {
       ready: boolean;
       selectionGeometryReady(): boolean;
       selectionRectCount(): number;
+      zoomLevel(): number;
       selectionAnchorStatus(): string;
       goToPage(pageNumber: number): void;
       reviewItemCount(): number;
@@ -87,6 +88,8 @@ test.describe('shared viewer foundation', () => {
     await page.keyboard.down('Control');
     await page.mouse.wheel(0, -10);
     await page.keyboard.up('Control');
+    await expect.poll(() => page.evaluate(() => window.viewerAcceptance.zoomLevel()))
+      .toBeGreaterThan(1);
     await expect.poll(async () => (await pdfPage.boundingBox())?.width ?? 0).toBeGreaterThan(box.width);
 
     await pdfPage.evaluate((element) => element.scrollIntoView({ block: 'start' }));
