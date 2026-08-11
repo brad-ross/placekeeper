@@ -650,15 +650,7 @@
 .outline-navigator__destination[aria-current="location"] { background: var(--review-selection-bg); box-shadow: inset 3px 0 var(--review-selection-ink); }
 
 .outline-navigator__reference {
-  display: grid;
-  align-self: center;
-  width: var(--review-control-compact);
   min-width: var(--review-control-compact);
-  padding: 0;
-  place-items: center;
-  color: var(--review-ink-muted);
-  opacity: 0;
-  transition: color var(--review-motion-fast) ease, border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, opacity var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
 }
 
 .outline-navigator__row:hover > .outline-navigator__reference,
@@ -939,7 +931,8 @@
   -webkit-line-clamp: 3;
 }
 
-.annotation-item__action {
+.annotation-item__action,
+.outline-navigator__reference {
   display: grid;
   align-self: center;
   width: var(--review-control-compact);
