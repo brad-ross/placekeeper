@@ -9,7 +9,7 @@ import {
 } from '@embedpdf/models';
 import { ScrollPlugin, type ScrollScope } from '@embedpdf/plugin-scroll';
 import { ViewportPlugin, type ViewportScope } from '@embedpdf/plugin-viewport';
-import { ZoomPlugin, type ZoomScope } from '@embedpdf/plugin-zoom';
+import { ZoomPlugin, type ZoomChangeEvent, type ZoomScope } from '@embedpdf/plugin-zoom';
 
 import type { PdfNavigationTarget } from './pdf-navigation-target.js';
 import { combinePageRotation } from './owned-overlay.js';
@@ -297,6 +297,10 @@ function waitForZoom(
   tolerance: number,
   signal: AbortSignal,
   timeoutMs: number,
+  onMatchingZoom?: (event: Pick<
+    ZoomChangeEvent,
+    'oldZoom' | 'newZoom' | 'center' | 'desiredScrollLeft' | 'desiredScrollTop'
+  >) => void,
 ): Promise<boolean> {
   if (signal.aborted || timeoutMs <= 0) return Promise.resolve(false);
   return new Promise((resolve) => {
@@ -314,7 +318,13 @@ function waitForZoom(
     const timer = setTimeout(() => finish(false), timeoutMs);
     signal.addEventListener('abort', abort, { once: true });
     unsubscribeZoom = zoom.onZoomChange((event) => {
-      if (Math.abs(event.newZoom - requestedZoom) <= tolerance) finish(true);
+      if (Math.abs(event.newZoom - requestedZoom) > tolerance) return;
+      try {
+        onMatchingZoom?.(event);
+        finish(true);
+      } catch {
+        finish(false);
+      }
     });
     try {
       zoom.requestZoom(requestedZoom);
@@ -505,7 +515,7 @@ export function createViewerNavigation(
       || !validDimension(pageRect.height)
       || !validDimension(scale)
     ) return null;
-    return { page, viewportRect, pageRect, rotation, scale };
+    return { page, viewportElement, viewportRect, pageRect, rotation, scale };
   };
 
   const hasUsablePageTree = (viewer: ActiveViewer): boolean => {
@@ -890,6 +900,7 @@ export function createViewerNavigation(
     if (!viewer) return false;
     const operation = await beginOperation(viewer);
     if (operation === null) return false;
+    let fitLayoutObserver: ResizeObserver | null = null;
     try {
       const deadline = Date.now() + timeoutMs;
       if (waitForSettledGeometry) {
@@ -941,7 +952,66 @@ export function createViewerNavigation(
         },
         zoom: requestedZoom,
       };
+      let observerPositionedPage = false;
+      const positionFittedPage = (requireTargetScale = true): boolean => {
+        if (!operationIsCurrent(operation)) return false;
+        const fittedGeometry = pageGeometry(viewer, visible.pageIndex);
+        if (fittedGeometry === null) return false;
+        if (
+          requireTargetScale
+          && Math.abs(fittedGeometry.scale - requestedZoom) > zoomTolerance
+        ) return false;
+        const transformedAnchor = transformPosition(
+          fittedGeometry.page.size,
+          location.anchor,
+          fittedGeometry.rotation,
+          fittedGeometry.scale,
+        );
+        const horizontalCorrection = fittedGeometry.pageRect.left
+          + transformedAnchor.x
+          - fittedGeometry.viewportRect.left
+          - fittedGeometry.viewportRect.width * location.alignment.xPercent / 100;
+        const verticalCorrection = fittedGeometry.pageRect.top
+          + transformedAnchor.y
+          - fittedGeometry.viewportRect.top
+          - fittedGeometry.viewportRect.height * location.alignment.yPercent / 100;
+        if (
+          Math.abs(horizontalCorrection) > coordinateTolerance
+          || Math.abs(verticalCorrection) > coordinateTolerance
+        ) {
+          const correctedScroll = {
+            left: fittedGeometry.viewportElement.scrollLeft + horizontalCorrection,
+            top: fittedGeometry.viewportElement.scrollTop + verticalCorrection,
+          };
+          operation.mutated = true;
+          viewer.viewport.scrollTo({
+            x: correctedScroll.left,
+            y: correctedScroll.top,
+            behavior: 'instant',
+          });
+          fittedGeometry.viewportElement.scrollTo({
+            ...correctedScroll,
+            behavior: 'instant',
+          });
+        }
+        return true;
+      };
       const fitDeadline = Date.now() + timeoutMs;
+      const pageElement = options.root()?.querySelector<HTMLElement>(pageSelector(visible.pageIndex));
+      if (pageElement && typeof ResizeObserver !== 'undefined') {
+        fitLayoutObserver = new ResizeObserver(() => {
+          let currentZoom: number;
+          try {
+            currentZoom = viewer.zoom.getState().currentZoomLevel;
+          } catch {
+            return;
+          }
+          if (Math.abs(currentZoom - requestedZoom) > zoomTolerance) return;
+          observerPositionedPage = positionFittedPage();
+          if (observerPositionedPage) fitLayoutObserver?.disconnect();
+        });
+        fitLayoutObserver.observe(pageElement);
+      }
       let zoomed = false;
       try {
         const currentZoom = viewer.zoom.getState().currentZoomLevel;
@@ -950,6 +1020,24 @@ export function createViewerNavigation(
         zoomed = false;
       }
       if (!zoomed) {
+        // Establish the tray-aware anchor before requesting the new scale.
+        // Both mutations occur in one task, so the viewer never paints this
+        // preparatory position as a separate state.
+        positionFittedPage(false);
+        const transformedAnchor = transformPosition(
+          page.size,
+          location.anchor,
+          rotation,
+          geometry.scale,
+        );
+        const currentAnchorPosition = {
+          x: geometry.pageRect.left + transformedAnchor.x - geometry.viewportRect.left,
+          y: geometry.pageRect.top + transformedAnchor.y - geometry.viewportRect.top,
+        };
+        const targetAnchorPosition = {
+          x: geometry.viewportRect.width * location.alignment.xPercent / 100,
+          y: geometry.viewportRect.height * location.alignment.yPercent / 100,
+        };
         operation.mutated = true;
         zoomed = await waitForZoom(
           viewer.zoom,
@@ -957,44 +1045,45 @@ export function createViewerNavigation(
           zoomTolerance,
           operation.signal,
           fitDeadline - Date.now(),
+          (event) => {
+            const appliedRatio = event.newZoom / event.oldZoom;
+            const zoomedAnchorPosition = {
+              x: event.center.vx
+                + appliedRatio * (currentAnchorPosition.x - event.center.vx),
+              y: event.center.vy
+                + appliedRatio * (currentAnchorPosition.y - event.center.vy),
+            };
+            viewer.viewport.scrollTo({
+              x: Math.max(
+                0,
+                event.desiredScrollLeft
+                  + zoomedAnchorPosition.x - targetAnchorPosition.x,
+              ),
+              y: Math.max(
+                0,
+                event.desiredScrollTop
+                  + zoomedAnchorPosition.y - targetAnchorPosition.y,
+              ),
+              behavior: 'instant',
+            });
+          },
         );
       }
-      if (zoomed && operationIsCurrent(operation)) {
-        await waitForFrames(operation, 2, fitDeadline);
+      if (!zoomed || !operationIsCurrent(operation)) {
+        if (!operation.signal.aborted && operation.mutated) await rollbackOperation(operation);
+        return false;
       }
-      if (zoomed && operationIsCurrent(operation)) {
-        operation.mutated = true;
-        const alignment = scrollAlignment(location);
-        viewer.scroll.scrollToPage({
-          pageNumber: location.pageIndex + 1,
-          pageCoordinates: location.anchor,
-          behavior: 'instant',
-          alignX: alignment.xPercent,
-          alignY: alignment.yPercent,
-        });
-        await waitForFrames(operation, 2, fitDeadline);
+      if (!await waitForFrames(operation, 2, fitDeadline)) {
+        if (!operation.signal.aborted && operation.mutated) await rollbackOperation(operation);
+        return false;
       }
-
-      // Scroll-to-page can stop once the page is wholly visible in the full
-      // viewport, even when a right overlay narrows the effective interval.
-      // Correct that fit-specific residual through the public viewport scope
-      // without changing the vertical position established above.
-      const fittedGeometry = operationIsCurrent(operation)
-        ? pageGeometry(viewer, visible.pageIndex)
-        : null;
-      if (fittedGeometry !== null) {
-        const targetLeft = fittedGeometry.viewportRect.left + viewer.viewportGap;
-        const horizontalCorrection = fittedGeometry.pageRect.left - targetLeft;
-        if (Math.abs(horizontalCorrection) > coordinateTolerance) {
-          const metrics = viewer.viewport.getMetrics();
-          operation.mutated = true;
-          viewer.viewport.scrollTo({
-            x: metrics.scrollLeft + horizontalCorrection,
-            y: metrics.scrollTop,
-            behavior: 'instant',
-          });
-          await waitForFrames(operation, 2, Date.now() + timeoutMs);
-        }
+      // ResizeObserver runs after zoom layout but before paint, so it applies
+      // the tray-aware offsets without exposing EmbedPDF's full-width frame.
+      // Keep this fallback for unchanged zooms and non-DOM test adapters.
+      if (!observerPositionedPage) positionFittedPage();
+      if (!await waitForFrames(operation, 2, Date.now() + timeoutMs)) {
+        if (!operation.signal.aborted && operation.mutated) await rollbackOperation(operation);
+        return false;
       }
 
       const settledGeometry = operationIsCurrent(operation)
@@ -1033,6 +1122,7 @@ export function createViewerNavigation(
       }
       return false;
     } finally {
+      fitLayoutObserver?.disconnect();
       if (activeOperation?.operation === operation) activeOperation = null;
     }
   };

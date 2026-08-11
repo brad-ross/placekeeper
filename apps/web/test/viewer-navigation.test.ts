@@ -2,7 +2,7 @@ import type { PluginRegistry } from '@embedpdf/core';
 import { PdfZoomMode, Rotation, transformPosition, transformSize } from '@embedpdf/models';
 import { ScrollPlugin, type ScrollToPageOptions } from '@embedpdf/plugin-scroll';
 import { ViewportPlugin } from '@embedpdf/plugin-viewport';
-import { ZoomPlugin } from '@embedpdf/plugin-zoom';
+import { ZoomPlugin, type ZoomChangeEvent } from '@embedpdf/plugin-zoom';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { PdfNavigationTarget } from '../src/pdf/pdf-navigation-target.js';
@@ -147,7 +147,6 @@ function domRect(rect: RectState): DOMRect {
 function navigationHarness(options: {
   activeDocumentId?: string;
   constrainedHorizontal?: boolean;
-  ignoreEffectiveHorizontalAlignment?: boolean;
   artificialHorizontalRunway?: boolean;
   constrainedVertical?: 'start' | 'end';
   initiallyUnreadyPage?: boolean;
@@ -166,7 +165,6 @@ function navigationHarness(options: {
   documentRotation?: Rotation;
   updateGeometry?: boolean;
   viewportWidth?: number;
-  throwScrollToPage?: boolean;
   throwViewportScroll?: boolean;
   timeoutMs?: number;
 } = {}) {
@@ -216,6 +214,20 @@ function navigationHarness(options: {
     get clientHeight() { return viewportRect.height; },
     get scrollLeft() { return viewportScrollLeft; },
     get scrollTop() { return viewportScrollTop; },
+    scrollTo(position: ScrollToOptions) {
+      if (options.throwViewportScroll) throw new Error('viewport command failed');
+      const nextLeft = position.left ?? viewportScrollLeft;
+      const nextTop = position.top ?? viewportScrollTop;
+      const horizontalDelta = nextLeft - viewportScrollLeft;
+      const verticalDelta = nextTop - viewportScrollTop;
+      pageRect.left -= horizontalDelta;
+      pageRect.top -= verticalDelta;
+      thirdPageRect.left -= horizontalDelta;
+      thirdPageRect.top -= verticalDelta;
+      viewportScrollLeft = nextLeft;
+      viewportScrollTop = nextTop;
+      if (options.staleCurrentPageWithThirdVisible) currentPage = 3;
+    },
     get scrollWidth() {
       return options.artificialHorizontalRunway
         ? 1_000
@@ -256,13 +268,41 @@ function navigationHarness(options: {
   let viewportScrollTop = options.constrainedVertical === 'end' ? 1_600 : 0;
   let staleViewportMetricsReads = options.staleViewportMetricsReads ?? 0;
   const storeListeners = new Set<() => void>();
-  const zoomListeners = new Set<(event: { newZoom: number }) => void>();
+  type HarnessZoomEvent = Pick<
+    ZoomChangeEvent,
+    'oldZoom' | 'newZoom' | 'center' | 'desiredScrollLeft' | 'desiredScrollTop'
+  >;
+  const zoomListeners = new Set<(event: HarnessZoomEvent) => void>();
   const layoutListeners = new Set<() => void>();
   const activityListeners = new Set<(activity: { isScrolling: boolean; isSmoothScrolling: boolean }) => void>();
 
   const emitZoom = (zoom: number) => {
+    const oldZoom = currentZoom;
+    const oldPageRect = { ...pageRect };
+    const oldThirdPageRect = { ...thirdPageRect };
     currentZoom = zoom;
-    for (const listener of zoomListeners) listener({ newZoom: zoom });
+    if (options.updateGeometry !== false) {
+      const ratio = zoom / oldZoom;
+      const focus = {
+        x: viewportRect.left + viewportRect.width / 2,
+        y: viewportRect.top + viewportRect.height / 2,
+      };
+      pageRect.width = initialRotatedPage.width * zoom;
+      pageRect.height = initialRotatedPage.height * zoom;
+      thirdPageRect.width = initialRotatedPage.width * zoom;
+      thirdPageRect.height = initialRotatedPage.height * zoom;
+      pageRect.left = focus.x + ratio * (oldPageRect.left - focus.x);
+      pageRect.top = focus.y + ratio * (oldPageRect.top - focus.y);
+      thirdPageRect.left = focus.x + ratio * (oldThirdPageRect.left - focus.x);
+      thirdPageRect.top = focus.y + ratio * (oldThirdPageRect.top - focus.y);
+    }
+    for (const listener of zoomListeners) listener({
+      oldZoom,
+      newZoom: zoom,
+      center: { vx: viewportRect.width / 2, vy: viewportRect.height / 2 },
+      desiredScrollLeft: viewportScrollLeft,
+      desiredScrollTop: viewportScrollTop,
+    });
     if (!options.omitZoomLayoutEvent) {
       for (const listener of layoutListeners) listener();
     }
@@ -276,7 +316,7 @@ function navigationHarness(options: {
         else emitZoom(level);
       }
     },
-    onZoomChange: (listener: (event: { newZoom: number }) => void) => {
+    onZoomChange: (listener: (event: HarnessZoomEvent) => void) => {
       zoomListeners.add(listener);
       return () => zoomListeners.delete(listener);
     },
@@ -285,7 +325,6 @@ function navigationHarness(options: {
     getCurrentPage: () => currentPage,
     scrollToPage: (request: ScrollToPageOptions) => {
       log.push('scroll');
-      if (options.throwScrollToPage) throw new Error('scroll command failed');
       currentPage = request.pageNumber;
       if (request.pageNumber === 3) farPageMounted = true;
       const anchor = request.pageCoordinates ?? { x: 0, y: 0 };
@@ -304,8 +343,6 @@ function navigationHarness(options: {
         );
         targetRect.left = options.constrainedHorizontal
           ? viewportRect.left + (viewportRect.width - targetRect.width) / 2
-          : options.ignoreEffectiveHorizontalAlignment
-            ? viewportRect.left + (viewportRect.width - targetRect.width) / 2
           : viewportRect.left
             + viewportRect.width * ((request.alignX ?? 0) / 100)
             - transformedAnchor.x;
@@ -351,10 +388,14 @@ function navigationHarness(options: {
       log.push('viewport-scroll');
       if (options.throwViewportScroll) throw new Error('viewport command failed');
       const horizontalDelta = position.x - viewportScrollLeft;
+      const verticalDelta = position.y - viewportScrollTop;
       pageRect.left -= horizontalDelta;
+      pageRect.top -= verticalDelta;
       thirdPageRect.left -= horizontalDelta;
+      thirdPageRect.top -= verticalDelta;
       viewportScrollLeft = position.x;
       viewportScrollTop = position.y;
+      if (options.staleCurrentPageWithThirdVisible) currentPage = 3;
     },
     isScrolling: () => scrolling,
     isSmoothScrolling: () => false,
@@ -439,8 +480,7 @@ describe('viewer navigation adapter', () => {
     const harness = navigationHarness({ viewportGap: 10 });
 
     expect(await harness.navigation.fitToWidth()).toBe(true);
-    expect(harness.log[0]).toBe(`zoom:${580 / 600}`);
-    expect(harness.log.at(-1)).toBe('scroll');
+    expect(harness.log).toContain(`zoom:${580 / 600}`);
   });
 
   it('excludes a non-overlay vertical scrollbar gutter from fit width', async () => {
@@ -451,7 +491,7 @@ describe('viewer navigation adapter', () => {
     });
 
     expect(await harness.navigation.fitToWidth()).toBe(true);
-    expect(harness.log[0]).toBe(`zoom:${585 / 600}`);
+    expect(harness.log).toContain(`zoom:${585 / 600}`);
     expect(harness.pageRect.left).toBeCloseTo(10);
     expect(harness.pageRect.left + harness.pageRect.width).toBeCloseTo(595);
   });
@@ -466,7 +506,7 @@ describe('viewer navigation adapter', () => {
     });
 
     expect(await harness.navigation.fitToWidth()).toBe(true);
-    expect(harness.log[0]).toBe(`zoom:${380 / 600}`);
+    expect(harness.log).toContain(`zoom:${380 / 600}`);
     expect(harness.navigation.captureLocation()?.zoom).toBeCloseTo(380 / 600);
   });
 
@@ -475,22 +515,21 @@ describe('viewer navigation adapter', () => {
     const bottom = navigationHarness({ viewportGap: 10, runway: { right: 0, bottom: 180 } });
 
     expect(await right.navigation.fitToWidth()).toBe(true);
-    expect(right.log[0]).toBe(`zoom:${380 / 600}`);
+    expect(right.log).toContain(`zoom:${380 / 600}`);
     expect(right.pageRect.left).toBeCloseTo(10);
     expect(right.pageRect.left + right.pageRect.width).toBeCloseTo(390);
     expect(await bottom.navigation.fitToWidth()).toBe(true);
-    expect(bottom.log[0]).toBe(`zoom:${580 / 600}`);
+    expect(bottom.log).toContain(`zoom:${580 / 600}`);
   });
 
-  it('finishes right-runway alignment through the public viewport when scroll-to-page stops at full-viewport visibility', async () => {
+  it('atomically positions the fitted page in a right-runway viewport', async () => {
     const harness = navigationHarness({
       viewportGap: 10,
       runway: { right: 200, bottom: 0 },
-      ignoreEffectiveHorizontalAlignment: true,
     });
 
     expect(await harness.navigation.fitToWidth()).toBe(true);
-    expect(harness.log).toContain('viewport-scroll');
+    expect(harness.log).not.toContain('scroll');
     expect(harness.pageRect.left).toBeCloseTo(10);
     expect(harness.pageRect.left + harness.pageRect.width).toBeCloseTo(390);
   });
@@ -504,7 +543,7 @@ describe('viewer navigation adapter', () => {
     harness.pageRect.top = -900;
 
     expect(await harness.navigation.fitToWidth()).toBe(true);
-    expect(harness.log[0]).toBe(`zoom:${580 / 800}`);
+    expect(harness.log).toContain(`zoom:${580 / 800}`);
     expect(harness.thirdPageRect.left).toBeCloseTo(10);
     expect(harness.thirdPageRect.left + harness.thirdPageRect.width).toBeCloseTo(590);
     expect(harness.navigation.captureLocation()?.pageIndex).toBe(2);
@@ -518,7 +557,7 @@ describe('viewer navigation adapter', () => {
     });
 
     expect(await harness.navigation.fitToWidth()).toBe(true);
-    expect(harness.log[0]).toBe(`zoom:${580 / 600}`);
+    expect(harness.log).toContain(`zoom:${580 / 600}`);
   });
 
   it('waits for settled workspace geometry and rejects a stale geometry revision', async () => {
@@ -535,7 +574,7 @@ describe('viewer navigation adapter', () => {
 
     expect(await harness.navigation.fitToWidth(waitForSettledGeometry)).toBe(true);
     expect(waitForSettledGeometry).toHaveBeenCalledOnce();
-    expect(harness.log[0]).toBe(`zoom:${380 / 600}`);
+    expect(harness.log).toContain(`zoom:${380 / 600}`);
 
     current = false;
     harness.log.length = 0;
@@ -571,15 +610,12 @@ describe('viewer navigation adapter', () => {
     expect(harness.navigation.captureLocation()?.zoom).toBe(1.25);
   });
 
-  it.each([
-    ['scroll-to-page', { throwScrollToPage: true }],
-    ['viewport correction', {
-      ignoreEffectiveHorizontalAlignment: true,
+  it('contains viewport positioning failures and restores the prior zoom', async () => {
+    const options = {
       runway: { right: 200, bottom: 0 },
       throwViewportScroll: true,
       viewportGap: 10,
-    }],
-  ] as const)('contains %s failures and restores the prior zoom', async (_name, options) => {
+    } as const;
     const harness = navigationHarness(options);
 
     await expect(harness.navigation.fitToWidth()).resolves.toBe(false);
@@ -593,7 +629,7 @@ describe('viewer navigation adapter', () => {
     const harness = navigationHarness({ viewportWidth });
 
     expect(await harness.navigation.fitToWidth()).toBe(true);
-    expect(harness.log[0]).toBe(`zoom:${zoom}`);
+    expect(harness.log).toContain(`zoom:${zoom}`);
     expect(harness.navigation.captureLocation()?.pageIndex).toBe(0);
   });
 

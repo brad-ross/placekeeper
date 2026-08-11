@@ -1406,7 +1406,43 @@ test('fits a real PDF to closed, bottom, and resizable right reading widths as a
   const toolsBounds = await toolsWorkspace.boundingBox();
   if (!toolsBounds) throw new Error('Right annotation workspace has no bounds.');
 
+  await zoomTrigger().click();
+  const zoomInput = page.getByRole('spinbutton', { name: 'Zoom percentage' });
+  await zoomInput.fill('100');
+  await zoomInput.press('Enter');
+  await expect(zoomTrigger()).toHaveText('100%');
+  const preFitRightGap = (await horizontalGeometry(toolsBounds.x)).rightGap;
+  const fitTransition = mainPage.evaluate(async (pageElement) => {
+    const rightGaps: number[] = [];
+    await new Promise<void>((resolve) => {
+      let frame = 0;
+      const sample = () => {
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            const tray = document.querySelector<HTMLElement>('#review-tools-workspace');
+            if (tray) {
+              rightGaps.push(tray.getBoundingClientRect().left - pageElement.getBoundingClientRect().right);
+            }
+            frame += 1;
+            if (frame >= 30) resolve();
+            else sample();
+          }, 0);
+        });
+      };
+      sample();
+      document.documentElement.dataset.fitTransitionSampler = 'ready';
+    });
+    delete document.documentElement.dataset.fitTransitionSampler;
+    return rightGaps;
+  });
+  await expect.poll(() => page.evaluate(
+    () => document.documentElement.dataset.fitTransitionSampler,
+  )).toBe('ready');
   await fitAndWait();
+  const paintedRightGaps = await fitTransition;
+  expect(paintedRightGaps.length).toBeGreaterThan(0);
+  expect(Math.min(...paintedRightGaps))
+    .toBeGreaterThanOrEqual(Math.min(preFitRightGap, standardGap) - 3);
   await expectFitted(standardGap, toolsBounds.x);
   await expect(zoomTrigger()).not.toHaveText('100%');
 });
