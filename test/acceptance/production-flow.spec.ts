@@ -107,7 +107,7 @@ async function followLinkInSameReference(
       await expect(firstAction).toBeFocused({ timeout: 1_500 });
       await expect(menu.getByRole("menuitem")).toHaveCount(3);
       await expect(action).toHaveAttribute("title", "Follow in this Reference Tab");
-      await page.keyboard.press("End");
+      await page.keyboard.press("ArrowDown");
       await expect(action).toBeFocused({ timeout: 1_500 });
       await page.keyboard.press("Enter");
       return;
@@ -116,7 +116,7 @@ async function followLinkInSameReference(
     }
   }
   await expect(firstAction).toBeFocused();
-  await page.keyboard.press("End");
+  await page.keyboard.press("ArrowDown");
   await expect(action).toBeFocused();
   await page.keyboard.press("Enter");
 }

@@ -156,19 +156,9 @@ export function LinkActionMenuContent({
       >
         <ReviewIcon name="references" />
       </button>
-      <button
-        ref={secondItemRef}
-        type="button"
-        role="menuitem"
-        aria-label="Open in main"
-        title="Open in main"
-        onClick={() => onChoose('main')}
-      >
-        <ReviewIcon name="main" />
-      </button>
       {sourceScope === 'reference' ? (
         <button
-          ref={thirdItemRef}
+          ref={secondItemRef}
           type="button"
           role="menuitem"
           aria-label="Follow in this Reference Tab"
@@ -178,6 +168,16 @@ export function LinkActionMenuContent({
           <ReviewIcon name="arrow-right" />
         </button>
       ) : null}
+      <button
+        ref={sourceScope === 'reference' ? thirdItemRef : secondItemRef}
+        type="button"
+        role="menuitem"
+        aria-label="Open in main"
+        title="Open in main"
+        onClick={() => onChoose('main')}
+      >
+        <ReviewIcon name={sourceScope === 'main' ? 'arrow-right' : 'main'} />
+      </button>
     </div>
   );
 }

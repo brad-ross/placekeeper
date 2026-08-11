@@ -59,6 +59,7 @@ describe('link action chooser', () => {
     expect(html).toContain(`id="${PDF_LINK_ACTION_MENU_ID}"`);
     expect(html).toMatch(/aria-label="Open in References"[\s\S]*aria-label="Open in main"/u);
     expect(html).toMatch(/title="Open in References"[\s\S]*title="Open in main"/u);
+    expect(html).toMatch(/aria-label="Open in main"[^>]*>[\s\S]*?lucide-arrow-right/u);
     expect(html.match(/role="menuitem"/g)).toHaveLength(2);
     expect(html.match(/<svg/g)).toHaveLength(2);
     expect(html).not.toContain('<small>');
@@ -68,7 +69,7 @@ describe('link action chooser', () => {
     expect(html).toContain('Page 18');
   });
 
-  it('adds Follow in this Reference Tab as the third reference-origin action', () => {
+  it('puts Follow in this Reference Tab before the right-most main action', () => {
     const html = renderToStaticMarkup(
       <LinkActionMenuContent
         label="Target-to-target detail link"
@@ -83,11 +84,15 @@ describe('link action chooser', () => {
     );
 
     expect(html).toMatch(
-      /aria-label="Open in References"[\s\S]*aria-label="Open in main"[\s\S]*aria-label="Follow in this Reference Tab"/u,
+      /aria-label="Open in References"[\s\S]*aria-label="Follow in this Reference Tab"[\s\S]*aria-label="Open in main"/u,
     );
     expect(html).toMatch(
-      /title="Open in References"[\s\S]*title="Open in main"[\s\S]*title="Follow in this Reference Tab"/u,
+      /title="Open in References"[\s\S]*title="Follow in this Reference Tab"[\s\S]*title="Open in main"/u,
     );
+    expect(html).toMatch(
+      /aria-label="Follow in this Reference Tab"[^>]*>[\s\S]*?lucide-arrow-right/u,
+    );
+    expect(html).toMatch(/aria-label="Open in main"[^>]*>[\s\S]*?lucide-maximize-2/u);
     expect(html.match(/role="menuitem"/g)).toHaveLength(3);
     expect(html.match(/<svg/g)).toHaveLength(3);
   });
