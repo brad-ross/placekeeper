@@ -23,9 +23,13 @@ export interface ViewerControls {
   goToPage(pageNumber: number): void;
   zoomOut(): void;
   zoomIn(): void;
+  zoomToPercent(zoomPercent: number): void;
   subscribe(listener: ViewerInteractionListener): () => void;
   dispose(): void;
 }
+
+export const VIEWER_ZOOM_MIN_PERCENT = 20;
+export const VIEWER_ZOOM_MAX_PERCENT = 6000;
 
 const UNAVAILABLE = 'Viewer controls become available when the PDF is ready.';
 const PAGE_UNAVAILABLE = 'Page controls become available when PDF navigation is ready.';
@@ -117,6 +121,15 @@ export function createViewerControls(registry: PluginRegistry): ViewerControls {
     },
     zoomOut: () => zoom?.zoomOut(),
     zoomIn: () => zoom?.zoomIn(),
+    zoomToPercent: (zoomPercent) => {
+      if (
+        !zoom
+        || !Number.isSafeInteger(zoomPercent)
+        || zoomPercent < VIEWER_ZOOM_MIN_PERCENT
+        || zoomPercent > VIEWER_ZOOM_MAX_PERCENT
+      ) return;
+      zoom.requestZoom(zoomPercent / 100);
+    },
     subscribe(listener) {
       listeners.add(listener);
       listener(state.ready

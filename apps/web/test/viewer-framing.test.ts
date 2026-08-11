@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   FramingSessionAuthority,
   LatestFrameRequest,
+  ViewerGeometrySettlementAuthority,
   chooseAnnotationPresentation,
   frameUserOwnedPosition,
   occupiedRunway,
@@ -70,6 +71,39 @@ describe('viewer framing', () => {
     callbacks.shift()!();
     expect(commits).toEqual(['right:360']);
     expect(cancelled).toEqual([1]);
+  });
+
+  it('publishes a settled geometry revision that becomes stale after layout changes', async () => {
+    const authority = new ViewerGeometrySettlementAuthority();
+    authority.markChanged();
+    const settlement = await authority.waitForSettled(
+      new AbortController().signal,
+      async () => true,
+    );
+
+    expect(settlement?.revision).toBe(1);
+    expect(settlement?.isCurrent()).toBe(true);
+    authority.markChanged();
+    expect(settlement?.isCurrent()).toBe(false);
+  });
+
+  it('does not settle geometry until an active transition ends', async () => {
+    const authority = new ViewerGeometrySettlementAuthority();
+    const owner = {};
+    let frames = 0;
+    authority.beginTransition(owner);
+
+    const settlement = await authority.waitForSettled(
+      new AbortController().signal,
+      async () => {
+        frames += 1;
+        if (frames === 2) authority.settleTransition(owner);
+        return true;
+      },
+    );
+
+    expect(frames).toBe(3);
+    expect(settlement?.isCurrent()).toBe(true);
   });
 
   it('uses existing margin and moves only by the remaining overlap', () => {

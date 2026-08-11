@@ -52,6 +52,8 @@ function navigation(initial = location(0)) {
         current = value;
         return true;
       }),
+      fitToWidth: vi.fn(async () => true),
+      fitToWidthReady: vi.fn(() => true),
       cancelPendingNavigation: vi.fn(),
       replaceDocument: vi.fn(),
       focusAtDestination: vi.fn(() => true),

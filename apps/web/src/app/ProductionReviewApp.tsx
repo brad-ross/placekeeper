@@ -132,6 +132,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [viewerFraming, setViewerFraming] = useState<ViewerFramingControls>();
   const productionRootRef = useRef<HTMLElement | null>(null);
   const mainNavigationRef = useRef<PdfViewerNavigation | null>(null);
+  const [mainNavigation, setMainNavigation] = useState<PdfViewerNavigation | null>(null);
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
   const referenceNavigationWaiters = useRef<Array<{
@@ -393,6 +394,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   ) => {
     if (scope === 'main') {
       mainNavigationRef.current = navigation;
+      setMainNavigation(navigation);
       navigation?.replaceDocument(documentGenerationRef.current);
       navigationCoordinator.refreshMainLocation();
       return;
@@ -509,6 +511,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         savedLabel={`Saved · revision ${state.revision}`}
         {...(viewerControlsRef.current === undefined ? {} : { viewerControls: viewerControlsRef.current })}
         {...(viewerFraming === undefined ? {} : { viewerFraming })}
+        {...(mainNavigation === null ? {} : { viewerNavigation: mainNavigation })}
         viewerState={viewerState}
         workspaceOpen={anyTrayOpen}
         referenceLayoutState={referenceLayoutState}

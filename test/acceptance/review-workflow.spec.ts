@@ -357,6 +357,192 @@ test.describe('canonical review workflow', () => {
     );
   });
 
+  test('edits viewer-published zoom through Enter and ordinary blur', async ({ page }) => {
+    const zoomLevel = page.getByRole('button', {
+      name: 'Current zoom 110 percent. Enter a zoom percentage',
+    });
+    await zoomLevel.click();
+
+    const zoomPercentage = page.getByRole('spinbutton', { name: 'Zoom percentage' });
+    await expect(zoomPercentage).toBeFocused();
+    await expect(zoomPercentage).toHaveValue('110');
+    await page.keyboard.type('125');
+    await expect(zoomPercentage).toHaveValue('125');
+    await zoomPercentage.press('Enter');
+
+    await expect(page.getByRole('button', {
+      name: 'Current zoom 125 percent. Enter a zoom percentage',
+    })).toBeFocused();
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:125;commands:go:125;fit:',
+    );
+
+    await page.getByRole('button', {
+      name: 'Current zoom 125 percent. Enter a zoom percentage',
+    }).click();
+    await zoomPercentage.fill('140');
+    const nativeInput = page.getByRole('textbox', { name: 'Native input' });
+    await nativeInput.focus();
+
+    await expect(nativeInput).toBeFocused();
+    await expect(page.getByRole('button', {
+      name: 'Current zoom 140 percent. Enter a zoom percentage',
+    })).toBeVisible();
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:125|140;commands:go:125|go:140;fit:',
+    );
+  });
+
+  test('keeps an exact fitted scale when an unchanged zoom edit closes', async ({ page }) => {
+    await page.getByRole('button', { name: 'Fit PDF to available width' }).click();
+    const fitResult = page.getByRole('button', {
+      name: 'Current zoom 88 percent. Enter a zoom percentage',
+    });
+    await fitResult.click();
+    const zoomPercentage = page.getByRole('spinbutton', { name: 'Zoom percentage' });
+    await zoomPercentage.press('Enter');
+    await expect(fitResult).toBeFocused();
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:;commands:fit:88;fit:fit',
+    );
+
+    await fitResult.click();
+    await page.getByRole('textbox', { name: 'Native input' }).focus();
+    await expect(page.getByRole('spinbutton', { name: 'Zoom percentage' })).toHaveCount(0);
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:;commands:fit:88;fit:fit',
+    );
+  });
+
+  test('announces invalid zoom ranges and cancels invalid blur', async ({ page }) => {
+    const zoomLevel = page.getByRole('button', {
+      name: 'Current zoom 110 percent. Enter a zoom percentage',
+    });
+    await zoomLevel.click();
+    const zoomPercentage = page.getByRole('spinbutton', { name: 'Zoom percentage' });
+    await zoomPercentage.fill('6001');
+    await zoomPercentage.press('Enter');
+
+    const rangeError = page.getByRole('alert');
+    await expect(zoomPercentage).toBeFocused();
+    await expect(zoomPercentage).toHaveAttribute('aria-invalid', 'true');
+    const rangeErrorId = await rangeError.getAttribute('id');
+    expect(rangeErrorId).toBeTruthy();
+    await expect(zoomPercentage).toHaveAttribute('aria-describedby', rangeErrorId!);
+    await expect(zoomPercentage).toHaveAttribute('aria-errormessage', rangeErrorId!);
+    await expect(rangeError).toHaveText('Enter a whole zoom percentage from 20 to 6000');
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:;commands:;fit:',
+    );
+
+    await zoomPercentage.fill('1.5');
+    await expect(zoomPercentage).toHaveAttribute('aria-invalid', 'false');
+    await expect(rangeError).toHaveCount(0);
+    await zoomPercentage.press('Enter');
+    await expect(zoomPercentage).toHaveAttribute('aria-invalid', 'true');
+
+    await zoomPercentage.fill('');
+    await page.getByRole('textbox', { name: 'Native input' }).focus();
+    await expect(zoomPercentage).toHaveCount(0);
+    await expect(zoomLevel).toBeVisible();
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:;commands:;fit:',
+    );
+  });
+
+  test('cancels zoom editing with Escape without closing workspace or Finish', async ({ page }) => {
+    const { annotations, workspace } = await openAnnotationsWorkspace(page);
+    const zoomLevel = page.getByRole('button', {
+      name: 'Current zoom 110 percent. Enter a zoom percentage',
+    });
+    await zoomLevel.click();
+    const zoomPercentage = page.getByRole('spinbutton', { name: 'Zoom percentage' });
+    await zoomPercentage.fill('125');
+
+    await zoomPercentage.dispatchEvent('keydown', {
+      key: 'Enter',
+      code: 'Enter',
+      bubbles: true,
+      isComposing: true,
+    });
+    await expect(zoomPercentage).toBeFocused();
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:;commands:;fit:',
+    );
+
+    await zoomPercentage.press('Escape');
+    await expect(zoomLevel).toBeFocused();
+    await expect(workspace).toHaveAttribute('aria-expanded', 'true');
+    await expect(annotations).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#review-tools-workspace')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Finish review' })).toHaveCount(0);
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:;commands:;fit:',
+    );
+  });
+
+  test('lets Zoom Out, Zoom In, and Fit Width win over dirty zoom drafts exactly once', async ({ page }) => {
+    const zoomPercentage = page.getByRole('spinbutton', { name: 'Zoom percentage' });
+    await page.getByRole('button', {
+      name: 'Current zoom 110 percent. Enter a zoom percentage',
+    }).click();
+    await zoomPercentage.fill('125');
+    const zoomOut = page.getByRole('button', { name: 'Zoom out' });
+    await zoomOut.dispatchEvent('pointerdown', { button: 0, pointerId: 1 });
+    await zoomPercentage.evaluate((input: HTMLInputElement) => input.blur());
+    await zoomOut.click();
+    await expect(zoomOut).toBeFocused();
+    await expect(page.getByRole('button', {
+      name: 'Current zoom 100 percent. Enter a zoom percentage',
+    })).toBeVisible();
+
+    await page.getByRole('button', {
+      name: 'Current zoom 100 percent. Enter a zoom percentage',
+    }).click();
+    await zoomPercentage.fill('130');
+    const zoomIn = page.getByRole('button', { name: 'Zoom in' });
+    await zoomIn.evaluate((button: HTMLButtonElement) => button.click());
+    await expect(zoomIn).toBeFocused();
+    await expect(page.getByRole('button', {
+      name: 'Current zoom 110 percent. Enter a zoom percentage',
+    })).toBeVisible();
+
+    await page.getByRole('button', {
+      name: 'Current zoom 110 percent. Enter a zoom percentage',
+    }).click();
+    await zoomPercentage.fill('150');
+    const fitWidth = page.getByRole('button', { name: 'Fit PDF to available width' });
+    await fitWidth.click();
+    await expect(fitWidth).toBeFocused();
+    await expect(page.getByRole('button', {
+      name: 'Current zoom 88 percent. Enter a zoom percentage',
+    })).toBeVisible();
+
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:;commands:out:100|in:110|fit:88;fit:fit',
+    );
+  });
+
+  test('does not offer zoom editing or Fit Width while zoom is unavailable', async ({ page }) => {
+    await page.getByRole('button', { name: 'Make zoom controls unavailable' }).click();
+
+    await expect(page.getByLabel('Zoom level')).toHaveText('—%');
+    await expect(page.getByRole('spinbutton', { name: 'Zoom percentage' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Enter a zoom percentage/u })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Zoom out' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Zoom in' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Fit PDF to available width' })).toBeDisabled();
+  });
+
   test('keeps selection actions after rejection and for a newer selection', async ({ page }) => {
     const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
 
