@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 import { ProofreaderHost } from "../../apps/service/src/host/proofreader-host.js";
+import { addPageNote } from "../../packages/core/src/review-commands.js";
 
 let root = "";
 let host: ProofreaderHost;
@@ -20,18 +21,36 @@ async function installSelectionCaptureGate(page: Page): Promise<void> {
   await page.addInitScript(() => {
     let holding = true;
     const releases = new Set<() => void>();
-    globalThis.__pdfProofreaderSelectionCaptureTestGate = {
+    const captureGate = {
       wait() {
         if (!holding) return Promise.resolve();
         return new Promise<void>((resolve) => releases.add(resolve));
       },
+      isWaiting() {
+        return releases.size > 0;
+      },
     };
-    (globalThis as typeof globalThis & { __releasePdfSelectionCapture(): void })
-      .__releasePdfSelectionCapture = () => {
-        holding = false;
-        for (const release of releases) release();
-        releases.clear();
-      };
+    const testState = globalThis as unknown as {
+      __pdfProofreaderSelectionCaptureTestGate: typeof captureGate;
+      __releasePdfSelectionCapture(): void;
+    };
+    testState.__pdfProofreaderSelectionCaptureTestGate = captureGate;
+    testState.__releasePdfSelectionCapture = () => {
+      holding = false;
+      for (const release of releases) release();
+      releases.clear();
+    };
+  });
+}
+
+async function waitForSelectionCapture(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const captureGate = globalThis.__pdfProofreaderSelectionCaptureTestGate as
+      | (NonNullable<typeof globalThis.__pdfProofreaderSelectionCaptureTestGate> & {
+        isWaiting(): boolean;
+      })
+      | undefined;
+    return captureGate?.isWaiting() === true;
   });
 }
 
@@ -1075,7 +1094,8 @@ test("one installed-style browser tree preserves review state across responsive 
   );
   await expect(pageCanvas).toBeFocused();
   await expect(pageCanvas).toHaveCSS("outline-style", "none");
-  await expect(page.getByRole("alert")).toContainText("Reading the selected text");
+  await waitForSelectionCapture(page);
+  await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
   await expect.poll(async () => (await pageCanvas.boundingBox())?.y)
     .toBe(canvasBoxBeforeSelection.y);
   await page.keyboard.press("b");
@@ -1801,7 +1821,8 @@ for (const key of ["Delete", "Backspace"] as const) {
     await waitForRenderedPageImage(pageCanvas);
     await dragPdfPhrase(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
     await expect(pageCanvas).toBeFocused();
-    await expect(page.getByRole("alert")).toContainText("Reading the selected text");
+    await waitForSelectionCapture(page);
+    await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
     const urlBeforeKey = page.url();
     await page.keyboard.press(key);
     await releaseSelectionCapture(page);
@@ -1835,6 +1856,44 @@ for (const key of ["Delete", "Backspace"] as const) {
   });
 }
 
+test("shows command conflicts until a retry succeeds", async ({ page }) => {
+  const launched = await openFreshProductionFixture(
+    page,
+    pdf,
+    "Fresh command-conflict production launch failed",
+  );
+
+  const pageCanvas = page.locator("[data-page-index='0']").first();
+  await expect(pageCanvas).toBeVisible();
+  await waitForRenderedPageImage(pageCanvas);
+  await dragPdfPhrase(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
+  const selectionActions = page.getByRole("toolbar", { name: "Selection review actions" });
+  await expect(selectionActions).toBeVisible();
+
+  const externalState = host.broker.state(launched.sessionId);
+  if (!externalState) throw new Error("Command-conflict review state is missing");
+  await host.broker.acceptMutation(
+    launched.sessionId,
+    addPageNote(
+      externalState,
+      0,
+      { x: 80, y: 160, width: 18, height: 18 },
+      "External review window note.",
+    ),
+  );
+
+  await selectionActions.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page.locator("[data-viewer-status]")).toContainText(
+    "Another review window changed this draft",
+  );
+  await expect(selectionActions).toBeVisible();
+
+  await selectionActions.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
+  await expect(page.locator("[data-review-item]")).toHaveCount(2);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(2);
+});
+
 test("discards queued typing when a pending selection is cleared", async ({ page }) => {
   const launched = await host.open({
     pdfPath: pdf,
@@ -1851,7 +1910,8 @@ test("discards queued typing when a pending selection is cleared", async ({ page
   await expect(pageCanvas).toBeVisible();
   await waitForRenderedPageImage(pageCanvas);
   await dragPdfPhrase(page, pageCanvas, { x: 76, y: 98 }, { x: 245, y: 98 });
-  await expect(page.getByRole("alert")).toContainText("Reading the selected text");
+  await waitForSelectionCapture(page);
+  await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
   await page.keyboard.type("discard me");
 
   await pageCanvas.click({ position: { x: 500, y: 300 } });
@@ -1878,7 +1938,8 @@ test("keeps only typing for the newest pending selection", async ({ page }) => {
   await expect(pageCanvas).toBeVisible();
   await waitForRenderedPageImage(pageCanvas);
   await dragPdfPhrase(page, pageCanvas, { x: 76, y: 98 }, { x: 245, y: 98 });
-  await expect(page.getByRole("alert")).toContainText("Reading the selected text");
+  await waitForSelectionCapture(page);
+  await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
   await page.keyboard.type("obsolete");
 
   await dragPdfPhrase(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
