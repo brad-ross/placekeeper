@@ -395,12 +395,32 @@ describe('document-scoped navigation coordinator', () => {
 
     expect(await run.coordinator.sendToMain(target(2).identity)).toBe(true);
     expect(run.main.controls.applyLocation).toHaveBeenCalledWith(scrolled);
+    expect(run.main.controls.applyLocation).toHaveBeenCalledTimes(2);
     expect(run.state().tabs).toEqual([]);
     expect(run.state().mainHistory.entries).toEqual([location(1, 45, 1.1), scrolled]);
     expect(run.referencesOpen()).toBe(false);
     expect(run.dependencies.layout.hideReferences).toHaveBeenCalled();
+    expect(vi.mocked(run.dependencies.layout.settle).mock.invocationCallOrder.at(-1))
+      .toBeLessThan(vi.mocked(run.main.controls.applyLocation).mock.invocationCallOrder.at(-1)!);
     expect(run.controller.close).toHaveBeenCalledOnce();
+    expect(vi.mocked(run.controller.close).mock.invocationCallOrder.at(-1))
+      .toBeLessThan(vi.mocked(run.main.controls.applyLocation).mock.invocationCallOrder.at(-1)!);
     expect(run.dependencies.layout.focusReferenceRail).not.toHaveBeenCalled();
+  });
+
+  it('restores the final Reference tray when Send cannot settle in the revealed main layout', async () => {
+    const run = harness();
+    await run.coordinator.openReference(target(2), { label: 'A', pageContext: 'Page 3' });
+    vi.mocked(run.main.controls.applyLocation).mockResolvedValueOnce(false);
+
+    expect(await run.coordinator.sendToMain(target(2).identity)).toBe(false);
+
+    expect(run.state().tabs).toHaveLength(1);
+    expect(run.referencesOpen()).toBe(true);
+    expect(run.dependencies.layout.hideReferences).toHaveBeenCalledOnce();
+    expect(run.dependencies.layout.revealReferences).toHaveBeenCalled();
+    expect(run.controller.close).not.toHaveBeenCalled();
+    expect(run.announcement()).toBe('Destination unavailable. The current location was preserved.');
   });
 
   it('keeps References open and restores the surviving active tab after Send', async () => {

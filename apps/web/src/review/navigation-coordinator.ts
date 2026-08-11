@@ -442,6 +442,12 @@ export class NavigationCoordinator {
       token: operation.token,
       currentMainLocation: mainLocation,
     });
+    const finalReference = state.tabs.length === 1;
+    if (finalReference) {
+      this.dependencies.layout.hideReferences();
+      await this.dependencies.layout.settle();
+      if (!this.isCurrent(operation)) return false;
+    }
     const applied = await main.applyLocation(referenceLocation);
     if (!this.isCurrent(operation)) return false;
     const settledLocation = applied ? main.captureLocation() : null;
@@ -452,6 +458,11 @@ export class NavigationCoordinator {
         documentGeneration: operation.documentGeneration,
         success: false,
       });
+      if (finalReference) {
+        this.dependencies.layout.revealReferences();
+        await this.dependencies.layout.settle();
+        if (!this.isCurrent(operation)) return false;
+      }
       this.dependencies.setAnnouncement(MAIN_FAILURE);
       return false;
     }
@@ -481,12 +492,22 @@ export class NavigationCoordinator {
       return true;
     }
 
-    this.dependencies.layout.hideReferences();
     await Promise.all([
       this.dependencies.layout.settle(),
       this.dependencies.getReferenceController()?.close() ?? Promise.resolve(),
     ]);
-    if (this.isCurrent(operation)) main.focusAtDestination(settledLocation.pageIndex);
+    if (!this.isCurrent(operation)) return true;
+    const reapplied = await main.applyLocation(settledLocation);
+    if (!this.isCurrent(operation)) return true;
+    const finalLocation = reapplied ? main.captureLocation() : null;
+    if (finalLocation === null) {
+      this.dependencies.setAnnouncement(
+        'Reference sent to the main document, but its view could not be restored after closing References.',
+      );
+      return true;
+    }
+    this.dependencies.dispatch({ type: 'refresh-main-location', location: finalLocation });
+    main.focusAtDestination(finalLocation.pageIndex);
     return true;
   }
 

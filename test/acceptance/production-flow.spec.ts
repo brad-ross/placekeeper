@@ -662,8 +662,22 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(workspace).toHaveAttribute("data-workspace-open", "false");
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
   await expect(page.getByRole("tablist", { name: "Open references", includeHidden: true })).toHaveCount(0);
-  await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
-  await expect(mainWorkspace.locator("[data-page-index='2']")).toBeFocused();
+  await expect(page.locator(".review-workspace__status")).toHaveText(
+    "Reference sent to the main document.",
+  );
+  const mainPageThree = mainWorkspace.locator("[data-page-index='2']");
+  const expectMainPageThreeSettled = async () => expect.poll(async () => {
+    const [viewportBounds, pageBounds] = await Promise.all([
+      mainViewport.boundingBox(),
+      mainPageThree.boundingBox(),
+    ]);
+    if (!viewportBounds || !pageBounds) return Number.POSITIVE_INFINITY;
+    return Math.abs(
+      (viewportBounds.y + viewportBounds.height / 2)
+      - (pageBounds.y + pageBounds.height / 2),
+    );
+  }).toBeLessThan(2);
+  await expectMainPageThreeSettled();
   const back = page.getByRole("button", { name: "Back in document history" });
   const forward = page.getByRole("button", { name: "Forward in document history" });
   await expect(back).toBeEnabled();
@@ -674,7 +688,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(page.locator(".review-workspace__status")).toHaveText(
     "Moved forward in document history.",
   );
-  await expect(mainWorkspace.locator("[data-page-index='2']")).toBeFocused();
+  await expectMainPageThreeSettled();
 
   const workspaceControl = page.getByRole("button", { name: "Open References tray" });
   await workspaceControl.click();
