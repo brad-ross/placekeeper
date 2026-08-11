@@ -430,11 +430,13 @@
 }
 
 .reference-tab-segment {
+  box-sizing: border-box;
   display: flex;
   min-width: 0;
   max-width: 13rem;
   flex: none;
-  align-items: stretch;
+  align-items: center;
+  padding: 4px;
   border: 1px solid transparent;
   border-radius: var(--review-radius-control);
 }
@@ -442,10 +444,17 @@
 .reference-tab-segment--compound {
   width: min(17rem, 100%);
   max-width: calc(13rem + (2 * var(--review-control-compact)));
+  gap: 4px;
   overflow: hidden;
   border-color: var(--review-border);
   background: var(--review-surface-panel);
   box-shadow: 0 1px 2px rgb(24 26 23 / 8%);
+}
+
+.review-workspace[data-workspace-presentation="right"] .reference-tab-segment {
+  width: 11.5rem;
+  max-width: 11.5rem;
+  flex-basis: 11.5rem;
 }
 
 .reference-tab-segment__selector {
@@ -475,20 +484,43 @@
   box-shadow: none;
 }
 
-.reference-tabs .reference-tab-segment__action {
+.reference-tabs .reference-tab-segment__action,
+.annotation-item__action,
+.outline-navigator__reference {
   display: grid;
+  align-self: center;
   width: var(--review-control-compact);
   min-width: var(--review-control-compact);
+  min-height: var(--review-control-compact);
   flex: 0 0 var(--review-control-compact);
   padding: 0;
   place-items: center;
-  border-left-color: var(--review-border-subtle);
-  border-radius: 0;
+  border: 1px solid transparent;
+  border-radius: var(--review-radius-control);
+  color: var(--review-ink-muted);
+  background: transparent;
 }
 
-.reference-tabs .reference-tab-segment__action:hover {
+.reference-tabs .reference-tab-segment__action:hover,
+.annotation-item__action:hover,
+.outline-navigator__reference:hover {
+  border-color: var(--review-border-strong);
   color: var(--review-ink-primary);
-  background: var(--review-surface-subtle);
+  background: var(--review-surface-interactive);
+}
+
+.reference-tabs .reference-tab-segment__action:active,
+.annotation-item__action:active,
+.outline-navigator__reference:active {
+  box-shadow: inset 0 1px 2px rgb(24 26 23 / 16%);
+}
+
+.reference-tabs [data-reference-tab-action="close"] {
+  color: var(--review-danger);
+}
+
+.reference-tabs [data-reference-tab-action="close"]:hover {
+  color: var(--review-danger);
 }
 
 .review-shell .reference-tab-segment--compound > button:focus-visible {
@@ -503,9 +535,19 @@
   grid-template-rows: minmax(0, 1fr);
 }
 
+.review-workspace[data-workspace-presentation="right"]
+  .review-workspace__panel--references[data-reference-tabs-orientation="vertical"] {
+  grid-template-columns: 12.5rem minmax(0, 1fr);
+}
+
 .review-workspace__panel--references[data-reference-tabs-orientation="vertical"][data-reference-panel-layout="full"]
   > .reference-panel {
   grid-column: 1 / -1;
+}
+
+.review-workspace__panel--references[data-reference-tabs-orientation="vertical"][data-reference-panel-layout="split"]
+  > .reference-panel {
+  grid-column: 2;
 }
 
 .reference-tabs[data-reference-tabs-orientation="vertical"] {
@@ -933,16 +975,6 @@
 
 .annotation-item__action,
 .outline-navigator__reference {
-  display: grid;
-  align-self: center;
-  width: var(--review-control-compact);
-  min-height: var(--review-control-compact);
-  padding: 0;
-  place-items: center;
-  border: 1px solid transparent;
-  border-radius: var(--review-radius-control);
-  color: var(--review-ink-muted);
-  background: transparent;
   opacity: 0;
   transition: color var(--review-motion-fast) ease, border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, opacity var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
 }
@@ -960,16 +992,6 @@
 :is(.review-workspace, .review-tools-workspace) li:hover .annotation-item__action,
 :is(.review-workspace, .review-tools-workspace) li:focus-within .annotation-item__action {
   opacity: 1;
-}
-
-.annotation-item__action:hover {
-  border-color: var(--review-border-strong);
-  color: var(--review-ink-primary);
-  background: var(--review-surface-interactive);
-}
-
-.annotation-item__action:active {
-  box-shadow: inset 0 1px 2px rgb(24 26 23 / 16%);
 }
 
 .annotation-item__delete {
