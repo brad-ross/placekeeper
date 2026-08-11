@@ -719,30 +719,47 @@ test("switches and sends references from the right-docked workspace", async ({ p
     .toBeGreaterThan(0);
   if (await retryReference.isVisible()) await retryReference.click();
   await expect(detailTab).toHaveAttribute("aria-selected", "true");
-  const activateReferenceTab = async (tab: ReturnType<Page["locator"]>) => {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      await tab.click();
-      await page.evaluate(() => new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      }));
-      try {
-        await expect(tab).toHaveAttribute("aria-selected", "true", { timeout: 3_000 });
-        return;
-      } catch {
-        // A quiet navigation failure is explicitly retryable; click once more.
-      }
-    }
-    await expect(tab).toHaveAttribute("aria-selected", "true");
-  };
-
   await page.getByRole("button", { name: "Move References to right" }).click();
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "right");
   await expect.poll(() => workspace.evaluate((element) => getComputedStyle(element).transform))
     .toBe("none");
-  await activateReferenceTab(primaryTab);
+  const rightTabGeometry = await page.getByRole("tablist", { name: "Open references" })
+    .evaluate((tablist) => [...tablist.querySelectorAll<HTMLElement>(
+      '[data-reference-tab-segment]',
+    )].map((segment) => {
+      const selector = segment.querySelector<HTMLElement>('[data-reference-tab]');
+      const actions = [...segment.querySelectorAll<HTMLElement>('[data-reference-tab-action]')];
+      const bounds = segment.getBoundingClientRect();
+      return {
+        width: bounds.width,
+        selectorWidth: selector?.getBoundingClientRect().width ?? 0,
+        actionSizes: actions.map((action) => {
+          const actionBounds = action.getBoundingClientRect();
+          return {
+            width: actionBounds.width,
+            height: actionBounds.height,
+            verticalInset: (bounds.height - actionBounds.height) / 2,
+            borderRadius: getComputedStyle(action).borderRadius,
+          };
+        }),
+      };
+    }));
+  expect(rightTabGeometry).toHaveLength(2);
+  expect(rightTabGeometry[0]!.width).toBeCloseTo(208, 0);
+  expect(rightTabGeometry[1]!.width).toBeCloseTo(rightTabGeometry[0]!.width, 0);
+  expect(rightTabGeometry[1]!.selectorWidth).toBeLessThan(rightTabGeometry[1]!.width - 50);
+  expect(rightTabGeometry[1]!.actionSizes).toHaveLength(2);
+  for (const action of rightTabGeometry[1]!.actionSizes) {
+    expect(action.width).toBeCloseTo(31, 0);
+    expect(action.height).toBeCloseTo(31, 0);
+    expect(action.verticalInset).toBeGreaterThan(3);
+    expect(action.borderRadius).not.toBe('0px');
+  }
+
+  await primaryTab.click();
   await expect(page.locator(".review-workspace__status")).toHaveText("Reference active.");
   await expect(primaryTab).toHaveAttribute("aria-selected", "true");
-  await activateReferenceTab(detailTab);
+  await detailTab.click();
   await expect(page.locator(".review-workspace__status")).toHaveText("Reference active.");
   await expect(detailTab).toHaveAttribute("aria-selected", "true");
   const detailPage = referenceWorkspace.locator("[data-page-index='2']");

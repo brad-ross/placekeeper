@@ -641,10 +641,12 @@ export class NavigationCoordinator {
     }
     if (state.activeTabIdentity === identity) {
       if (this.referenceRestoreIdentity === identity) {
-        const applied = await navigation.applyLocation(incoming.settledLocation);
-        if (!this.isCurrent(operation)) return false;
-        const settledLocation = applied ? navigation.captureLocation() : null;
-        if (!applied || settledLocation === null) {
+        const settledLocation = await this.restoreReferenceLocation(
+          operation,
+          navigation,
+          incoming,
+        );
+        if (settledLocation === null) {
           if (announce) this.dependencies.setAnnouncement(REFERENCE_FAILURE);
           return false;
         }
@@ -668,10 +670,12 @@ export class NavigationCoordinator {
           ?? outgoingLocation
         : outgoingLocation,
     });
-    const applied = await navigation.applyLocation(incoming.settledLocation);
-    if (!this.isCurrent(operation)) return false;
-    const settledLocation = applied ? navigation.captureLocation() : null;
-    if (!applied || settledLocation === null) {
+    const settledLocation = await this.restoreReferenceLocation(
+      operation,
+      navigation,
+      incoming,
+    );
+    if (settledLocation === null) {
       this.dependencies.dispatch({
         type: 'complete-reference-switch',
         token: operation.token,
@@ -694,6 +698,20 @@ export class NavigationCoordinator {
       this.dependencies.setAnnouncement('Reference active.');
     }
     return true;
+  }
+
+  private async restoreReferenceLocation(
+    operation: Operation,
+    navigation: PdfViewerNavigation,
+    tab: ReferenceNavigationState['tabs'][number],
+  ): Promise<PdfViewerLocation | null> {
+    let applied = await navigation.applyLocation(tab.settledLocation);
+    if (!this.isCurrent(operation)) return null;
+    if (!applied) {
+      applied = await navigation.applyTarget(tab.originalTarget, 'reference-fit-width');
+      if (!this.isCurrent(operation)) return null;
+    }
+    return applied ? navigation.captureLocation() : null;
   }
 
   private async traverseHistory(kind: 'back' | 'forward'): Promise<boolean> {

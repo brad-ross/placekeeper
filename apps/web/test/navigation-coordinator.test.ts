@@ -314,6 +314,22 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.state().activeTabIdentity).toBe(target(2).identity);
   });
 
+  it('falls back to the canonical target when a saved tab view cannot be restored after reflow', async () => {
+    const run = harness();
+    await run.coordinator.openReference(target(2), { label: 'A', pageContext: 'Page 3' });
+    await run.coordinator.openReference(target(5), { label: 'B', pageContext: 'Page 6' });
+    vi.mocked(run.reference.controls.applyLocation).mockResolvedValueOnce(false);
+    vi.mocked(run.reference.controls.applyTarget).mockClear();
+
+    expect(await run.coordinator.switchReference(target(2).identity)).toBe(true);
+
+    expect(run.reference.controls.applyLocation).toHaveBeenLastCalledWith(location(2));
+    expect(run.reference.controls.applyTarget)
+      .toHaveBeenCalledWith(target(2), 'reference-fit-width');
+    expect(run.state().activeTabIdentity).toBe(target(2).identity);
+    expect(run.announcement()).toBe('Reference active.');
+  });
+
   it('lets only the newest rapid reference operation commit', async () => {
     const run = harness();
     const first = deferred<boolean>();
