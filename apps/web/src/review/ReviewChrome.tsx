@@ -17,6 +17,8 @@ export interface ReviewChromeProps {
   readonly savedLabel?: string;
   readonly controls?: ViewerControls;
   readonly viewerState: ViewerControlsSnapshot;
+  readonly fitWidthReady?: boolean;
+  readonly onFitWidth?: () => void;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
   readonly canNavigateBack?: boolean;

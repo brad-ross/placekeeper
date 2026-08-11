@@ -30,6 +30,7 @@ import { reliableSelection, type SelectionUpdate } from '../pdf/selection-state.
 import type { ViewerControls, ViewerControlsSnapshot } from '../pdf/viewer-controls.js';
 import { unavailableViewerControls } from '../pdf/viewer-controls.js';
 import type { ViewerFramingControls, ViewerPosition } from '../pdf/viewer-framing.js';
+import type { PdfViewerNavigation } from '../pdf/viewer-navigation-adapter.js';
 import type { ViewerPdfLinkInvocation } from '../pdf/viewer-interaction-events.js';
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
 import { AnnotationList } from '../review/AnnotationList.js';
@@ -143,6 +144,7 @@ export interface ReviewShellProps {
   viewerControls?: ViewerControls;
   viewerState?: ViewerControlsSnapshot;
   viewerFraming?: ViewerFramingControls;
+  viewerNavigation?: PdfViewerNavigation;
   finishSlot?: ReactNode;
   finishConfirmationActive?: boolean;
   onFinishReview?(): void | Promise<void>;
@@ -861,6 +863,10 @@ export function ReviewShell(props: ReviewShellProps) {
         {...(props.savedLabel === undefined ? {} : { savedLabel: props.savedLabel })}
         {...(props.viewerControls === undefined ? {} : { controls: props.viewerControls })}
         viewerState={props.viewerState ?? unavailableViewerControls()}
+        fitWidthReady={props.viewerNavigation?.fitToWidthReady() ?? false}
+        onFitWidth={() => {
+          void props.viewerNavigation?.fitToWidth(workspaceFraming.waitForSettledGeometry);
+        }}
         canUndo={canUndo}
         canRedo={canRedo}
         canNavigateBack={props.canNavigateBack ?? false}

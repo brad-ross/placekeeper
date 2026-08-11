@@ -13,7 +13,15 @@ import { ZoomPlugin, type ZoomScope } from '@embedpdf/plugin-zoom';
 
 import type { PdfNavigationTarget } from './pdf-navigation-target.js';
 import { combinePageRotation } from './owned-overlay.js';
-import { intersectViewerRects, type ViewerRunway } from './viewer-framing.js';
+import {
+  intersectViewerRects,
+  type ViewerRunway,
+  type WaitForSettledViewerGeometry,
+} from './viewer-framing.js';
+import {
+  VIEWER_ZOOM_MAX_PERCENT,
+  VIEWER_ZOOM_MIN_PERCENT,
+} from './viewer-controls.js';
 import {
   isPdfViewerLocation,
   pdfBottomOriginPointToNaturalAnchor,
@@ -75,6 +83,7 @@ interface NavigationOperation {
   readonly document: object;
   readonly signal: AbortSignal;
   readonly origin: PdfViewerLocation | null;
+  geometryIsCurrent?: () => boolean;
   mutated: boolean;
 }
 
@@ -101,6 +110,25 @@ function clamp(value: number, minimum: number, maximum: number): number {
 
 function validDimension(value: number): boolean {
   return Number.isFinite(value) && value > 0;
+}
+
+export function fitViewerWidthZoom(input: {
+  readonly viewportWidth: number;
+  readonly pageWidth: number;
+  readonly viewportGap: number;
+}): number | null {
+  const availableWidth = input.viewportWidth - 2 * input.viewportGap;
+  if (
+    !validDimension(availableWidth)
+    || !validDimension(input.pageWidth)
+    || !Number.isFinite(input.viewportGap)
+    || input.viewportGap < 0
+  ) return null;
+  return clamp(
+    availableWidth / input.pageWidth,
+    VIEWER_ZOOM_MIN_PERCENT / 100,
+    VIEWER_ZOOM_MAX_PERCENT / 100,
+  );
 }
 
 function numericParams(target: PdfNavigationTarget, count: number): readonly number[] | null {
@@ -370,9 +398,16 @@ export function createViewerNavigation(
   };
 
   const operationIsCurrent = (operation: NavigationOperation): boolean => {
+    let geometryIsCurrent = true;
+    try {
+      geometryIsCurrent = operation.geometryIsCurrent?.() ?? true;
+    } catch {
+      geometryIsCurrent = false;
+    }
     if (
       disposed
       || operation.signal.aborted
+      || !geometryIsCurrent
       || operation.generation !== operationGeneration
       || operation.documentGeneration !== documentGeneration
       || activeOperation?.operation !== operation
@@ -822,6 +857,72 @@ export function createViewerNavigation(
     }
   };
 
+  const fitToWidth = async (
+    waitForSettledGeometry?: WaitForSettledViewerGeometry,
+  ): Promise<boolean> => {
+    const viewer = activeViewer();
+    if (!viewer) return false;
+    const operation = await beginOperation(viewer);
+    if (operation === null) return false;
+    try {
+      const deadline = Date.now() + timeoutMs;
+      if (waitForSettledGeometry) {
+        const settlementPromise = waitForSettledGeometry(operation.signal);
+        const settledInTime = await waitForPromise(
+          settlementPromise,
+          operation.signal,
+          deadline - Date.now(),
+        );
+        if (!settledInTime) {
+          if (activeOperation?.operation === operation) activeOperation.abort.abort();
+          return false;
+        }
+        const settlement = await settlementPromise;
+        if (settlement === null || !settlement.isCurrent()) return false;
+        operation.geometryIsCurrent = settlement.isCurrent;
+      }
+      if (!operationIsCurrent(operation)) return false;
+
+      const visible = mostVisibleMountedPageIndex(viewer);
+      if (visible === null) return false;
+      const geometry = pageGeometry(viewer, visible.pageIndex, visible);
+      if (geometry === null) return false;
+      const { page, viewportRect, rotation } = geometry;
+      const rotatedPage = transformSize(page.size, rotation, 1);
+      const requestedZoom = fitViewerWidthZoom({
+        viewportWidth: viewportRect.width,
+        pageWidth: rotatedPage.width,
+        viewportGap: viewer.viewportGap,
+      });
+      if (requestedZoom === null || !operationIsCurrent(operation)) return false;
+
+      const origin = operation.origin?.pageIndex === visible.pageIndex
+        ? operation.origin
+        : null;
+      const originAnchor = origin?.anchor ?? {
+        x: page.size.width / 2,
+        y: page.size.height / 2,
+      };
+      const anchor = rotation === Rotation.Degree90 || rotation === Rotation.Degree270
+        ? { x: originAnchor.x, y: page.size.height / 2 }
+        : { x: page.size.width / 2, y: originAnchor.y };
+      const location: PdfViewerLocation = {
+        pageIndex: visible.pageIndex,
+        anchor,
+        alignment: {
+          xPercent: 50,
+          yPercent: origin?.alignment.yPercent ?? 50,
+        },
+        zoom: requestedZoom,
+      };
+      const applied = await applyResolvedLocation(viewer, location, operation);
+      if (!applied && operation.mutated) await rollbackOperation(operation);
+      return applied;
+    } finally {
+      if (activeOperation?.operation === operation) activeOperation = null;
+    }
+  };
+
   const resolveTarget = (
     viewer: ActiveViewer,
     target: PdfNavigationTarget,
@@ -933,6 +1034,11 @@ export function createViewerNavigation(
       return viewer ? resolveTarget(viewer, target) : null;
     },
     applyLocation,
+    fitToWidth,
+    fitToWidthReady() {
+      const viewer = activeViewer();
+      return viewer !== null && hasUsablePageTree(viewer);
+    },
     applyTarget,
     cancelPendingNavigation,
     replaceDocument(nextDocumentGeneration) {
