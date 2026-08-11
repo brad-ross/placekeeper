@@ -407,6 +407,7 @@ describe('shared reference workspace', () => {
     const empty = renderToStaticMarkup(<ReferenceWorkspace {...base} />);
     const loading = renderToStaticMarkup(<ReferenceWorkspace
       {...base}
+      headerVariant="references"
       pendingReference={{ status: 'loading', label: 'Equation (4)', pageContext: 'Page 6' }}
     />);
     const failed = renderToStaticMarkup(<ReferenceWorkspace
@@ -419,7 +420,8 @@ describe('shared reference workspace', () => {
     expect(empty).toContain('An internal PDF link can open a reference here.');
     expect(empty).toContain('tabindex="-1"');
     expect(loading).toContain('aria-busy="true"');
-    expect(loading).toContain('data-reference-panel-layout="full"');
+    expect(loading).toContain('data-reference-panel-layout="split"');
+    expect(loading).not.toContain('aria-label="Open references"');
     expect(loading).toContain('Equation (4)');
     expect(failed).toContain('Reference unavailable.');
     expect(failed).toContain('data-reference-panel-layout="full"');

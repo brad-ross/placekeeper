@@ -508,6 +508,11 @@
   grid-column: 1 / -1;
 }
 
+.review-workspace__panel--references[data-reference-tabs-orientation="vertical"][data-reference-panel-layout="split"]
+  > .reference-panel {
+  grid-column: 2;
+}
+
 .reference-tabs[data-reference-tabs-orientation="vertical"] {
   min-height: 0;
   padding: 10px 8px;

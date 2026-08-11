@@ -256,7 +256,39 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
 
   const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
   const referenceViewport = referenceWorkspace.locator("[data-viewer-framing-viewport]");
-  await expect(referenceWorkspace.locator("[data-page-index='1']")).toBeVisible();
+  const primaryReferencePage = referenceWorkspace.locator("[data-page-index='1']");
+  await expect(primaryReferencePage).toBeVisible();
+  await expect.poll(async () => {
+    const [viewportBounds, pageBounds] = await Promise.all([
+      referenceViewport.boundingBox(),
+      primaryReferencePage.boundingBox(),
+    ]);
+    return viewportBounds !== null
+      && pageBounds !== null
+      && viewportBounds.width > 0
+      && pageBounds.width > 0;
+  }).toBe(true);
+  const [initialReferenceViewportBounds, initialReferencePageBounds] = await Promise.all([
+    referenceViewport.boundingBox(),
+    primaryReferencePage.boundingBox(),
+  ]);
+  if (!initialReferenceViewportBounds || !initialReferencePageBounds) {
+    throw new Error("Initial Reference viewer geometry is unavailable.");
+  }
+  const initialReferenceLeftGap = initialReferencePageBounds.x - initialReferenceViewportBounds.x;
+  const initialReferenceRightGap = initialReferenceViewportBounds.x
+    + initialReferenceViewportBounds.width
+    - initialReferencePageBounds.x
+    - initialReferencePageBounds.width;
+  const initialReferenceHorizontalInset = initialReferenceViewportBounds.width
+    - initialReferencePageBounds.width;
+  expect(initialReferenceHorizontalInset).toBeGreaterThan(0);
+  expect(initialReferenceHorizontalInset).toBeLessThan(64);
+  expect(initialReferenceLeftGap).toBeGreaterThan(0);
+  expect(initialReferenceRightGap).toBeGreaterThan(0);
+  expect(Math.max(initialReferenceLeftGap, initialReferenceRightGap)).toBeLessThan(32);
+  expect(Math.abs(initialReferenceLeftGap - initialReferenceRightGap)).toBeLessThan(4);
+  expect(initialReferencePageBounds.height).toBeGreaterThan(initialReferenceViewportBounds.height * 2);
   await referenceWorkspace.evaluate((element) => element.setAttribute("data-reference-mount", "stable"));
   const mainScrollBefore = await mainViewport.evaluate((element) => ({
     left: element.scrollLeft,
@@ -296,7 +328,6 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(primaryTab).toHaveAttribute("aria-selected", "true");
   await expect(primaryTab).toBeFocused();
   await expect(page.getByRole("tablist", { name: "Open references" }).getByRole("tab")).toHaveCount(2);
-  const primaryReferencePage = referenceWorkspace.locator("[data-page-index='1']");
   const referencePositionBeforeReflow = await Promise.all([
     referenceViewport.boundingBox(),
     primaryReferencePage.boundingBox(),

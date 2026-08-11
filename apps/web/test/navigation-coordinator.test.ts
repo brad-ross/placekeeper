@@ -193,10 +193,30 @@ describe('document-scoped navigation coordinator', () => {
 
     opened.resolve(true);
     expect(await operation).toBe(true);
+    expect(run.dependencies.layout.settle).toHaveBeenCalledOnce();
+    expect(run.reference.controls.applyTarget)
+      .toHaveBeenCalledWith(target(3), 'reference-fit-width');
     expect(run.state().tabs.map(({ identity }) => identity)).toEqual([target(3).identity]);
     expect(run.pending()).toBeNull();
     expect(run.dependencies.focusReferenceTab).toHaveBeenCalledWith(target(3).identity);
     expect(run.announcement()).toContain('Equation (4)');
+  });
+
+  it('does not apply a stale reference target after layout settlement is superseded', async () => {
+    const run = harness();
+    const settled = deferred<void>();
+    vi.mocked(run.dependencies.layout.settle).mockReturnValueOnce(settled.promise);
+
+    const stale = run.coordinator.openReference(target(3), {
+      label: 'Pending proof', pageContext: 'Page 4',
+    });
+    await vi.waitFor(() => expect(run.dependencies.layout.settle).toHaveBeenCalledOnce());
+    run.coordinator.unavailableDestination();
+    settled.resolve();
+
+    expect(await stale).toBe(false);
+    expect(run.reference.controls.applyTarget).not.toHaveBeenCalled();
+    expect(run.state().tabs).toEqual([]);
   });
 
   it('routes the newest main/reference viewer link through the chooser and real reducer', async () => {
@@ -245,9 +265,20 @@ describe('document-scoped navigation coordinator', () => {
     expect(await run.coordinator.openReference(target(4), {
       label: 'Proof', pageContext: 'Page 5',
     })).toBe(false);
-    expect(await run.coordinator.retryReference()).toBe(true);
+    const settled = deferred<void>();
+    vi.mocked(run.dependencies.layout.settle).mockReturnValueOnce(settled.promise);
+    const retry = run.coordinator.retryReference();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(run.reference.controls.applyTarget).toHaveBeenCalledTimes(1);
+    settled.resolve();
+    expect(await retry).toBe(true);
     expect(run.controller.retry).not.toHaveBeenCalled();
     expect(run.reference.controls.applyTarget).toHaveBeenCalledTimes(2);
+    expect(run.reference.controls.applyTarget)
+      .toHaveBeenNthCalledWith(1, target(4), 'reference-fit-width');
+    expect(run.reference.controls.applyTarget)
+      .toHaveBeenNthCalledWith(2, target(4), 'reference-fit-width');
   });
 
   it('deduplicates a canonical target and restores an existing tab snapshot', async () => {
@@ -263,6 +294,7 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.state().tabs).toHaveLength(2);
     expect(run.state().activeTabIdentity).toBe(target(2).identity);
     expect(run.reference.controls.applyLocation).toHaveBeenLastCalledWith(location(6, 80, 1.4));
+    expect(run.reference.controls.applyTarget).toHaveBeenCalledTimes(2);
   });
 
   it('waits for dock layout settlement before restoring another reference tab', async () => {
@@ -416,6 +448,8 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.state().mainHistory.entries.map(({ pageIndex }) => pageIndex)).toEqual([0, 3, 7]);
     expect(run.state().mainHistory.index).toBe(2);
     expect(await run.coordinator.historyForward()).toBe(false);
+    expect(run.main.controls.applyTarget).toHaveBeenCalledWith(target(2));
+    expect(run.main.controls.applyTarget).toHaveBeenCalledWith(target(5));
   });
 
   it('treats semantic no-op direct and outline targets as successful without history', async () => {

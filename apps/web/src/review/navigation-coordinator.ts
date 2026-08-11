@@ -266,11 +266,13 @@ export class NavigationCoordinator {
     const navigation = this.dependencies.getReferenceNavigation()
       ?? await this.dependencies.waitForReferenceNavigation();
     if (!this.isCurrent(operation)) return false;
-    if (!navigation || !await navigation.applyTarget(target) || !this.isCurrent(operation)) {
-      return this.failReference(operation);
-    }
-    const settledLocation = navigation.captureLocation();
-    if (settledLocation === null || !this.isCurrent(operation)) return this.failReference(operation);
+    if (!navigation) return this.failReference(operation);
+    const settledLocation = await this.applyReferenceTargetAfterLayout(
+      operation,
+      navigation,
+      target,
+    );
+    if (settledLocation === null) return this.failReference(operation);
 
     this.dependencies.dispatch({
       type: 'open-reference',
@@ -308,11 +310,13 @@ export class NavigationCoordinator {
     const navigation = this.dependencies.getReferenceNavigation()
       ?? await this.dependencies.waitForReferenceNavigation();
     if (!this.isCurrent(operation)) return false;
-    if (!navigation || !await navigation.applyTarget(pending.target) || !this.isCurrent(operation)) {
-      return this.failReference(operation);
-    }
-    const settledLocation = navigation.captureLocation();
-    if (settledLocation === null || !this.isCurrent(operation)) return this.failReference(operation);
+    if (!navigation) return this.failReference(operation);
+    const settledLocation = await this.applyReferenceTargetAfterLayout(
+      operation,
+      navigation,
+      pending.target,
+    );
+    if (settledLocation === null) return this.failReference(operation);
     this.dependencies.dispatch({
       type: 'open-reference',
       target: pending.target,
@@ -608,6 +612,18 @@ export class NavigationCoordinator {
     this.linkRequest = null;
     this.referenceRestoreIdentity = null;
     void this.dependencies.getReferenceController()?.close();
+  }
+
+  private async applyReferenceTargetAfterLayout(
+    operation: Operation,
+    navigation: PdfViewerNavigation,
+    target: PdfNavigationTarget,
+  ): Promise<PdfViewerLocation | null> {
+    await this.dependencies.layout.settle();
+    if (!this.isCurrent(operation)) return null;
+    if (!await navigation.applyTarget(target, 'reference-fit-width')) return null;
+    if (!this.isCurrent(operation)) return null;
+    return navigation.captureLocation();
   }
 
   private async restoreReferenceTab(
