@@ -985,7 +985,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
 
   const mainViewport = mainWorkspace.locator("[data-viewer-framing-viewport]");
   await mainViewport.evaluate((element) => { element.scrollTop += 32; });
-  const mainStateBeforeReference = {
+  const captureMainState = async () => ({
     page: await page.getByLabel("Current page").textContent(),
     scroll: await mainViewport.evaluate((element) => ({
       left: element.scrollLeft,
@@ -998,33 +998,48 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     forwardDisabled: await page.getByRole("button", {
       name: "Forward in document history",
     }).isDisabled(),
+  });
+  const mainStateBeforeReference = await captureMainState();
+  const expectMainStateUnchanged = async (expectedState = mainStateBeforeReference) => {
+    await expect(mainWorkspace).toHaveAttribute("data-safety-main-mount", "stable");
+    expect(await captureMainState()).toEqual(expectedState);
   };
   await detailsReference.click();
   const detailsTab = page.getByRole("tab", { name: /Details, Page 3/u });
+  const referenceWorkspace = page.locator("[data-review-workspace]");
+  await expect(referenceWorkspace).toHaveAttribute("data-workspace-presentation", "bottom");
   await expect(detailsTab).toHaveAttribute("aria-selected", "true");
   await expect(detailsTab).toBeFocused();
   await expect(page.locator("[data-reference-pdf-viewport] [data-page-index='2']")).toBeVisible();
-  await expect(mainWorkspace).toHaveAttribute("data-safety-main-mount", "stable");
-  expect({
-    page: await page.getByLabel("Current page").textContent(),
-    scroll: await mainViewport.evaluate((element) => ({
-      left: element.scrollLeft,
-      top: element.scrollTop,
-    })),
-    zoom: await page.getByLabel("Zoom level").textContent(),
-    backDisabled: await page.getByRole("button", {
-      name: "Back in document history",
-    }).isDisabled(),
-    forwardDisabled: await page.getByRole("button", {
-      name: "Forward in document history",
-    }).isDisabled(),
-  }).toEqual(mainStateBeforeReference);
+  await expectMainStateUnchanged();
   await detailsReference.click();
   await expect(page.getByRole("tablist", { name: "Open references" }).getByRole("tab"))
     .toHaveCount(1);
   await expect(detailsTab).toBeFocused();
+
   await page.getByRole("button", { name: "Close active reference" }).click();
   await expect(page.locator("[data-reference-tab]")).toHaveCount(0);
+
+  const stage = page.locator("[data-review-stage]");
+  await page.setViewportSize({ width: 760, height: 900 });
+  await expect(stage).toHaveAttribute("data-reference-layout", "narrow-unified");
+  await page.getByRole("tab", { name: "Outline", exact: true }).click();
+  await expect(detailsReference).toBeVisible();
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  const mainStateBeforeNarrowReference = await captureMainState();
+  await detailsReference.click();
+  await expect(stage).toHaveAttribute("data-reference-layout", "narrow-unified");
+  await expect(detailsTab).toHaveAttribute("aria-selected", "true");
+  await expect(detailsTab).toBeFocused();
+  await expect(page.locator("[data-reference-pdf-viewport] [data-page-index='2']")).toBeVisible();
+  await expectMainStateUnchanged(mainStateBeforeNarrowReference);
+  await page.getByRole("button", { name: "Close active reference" }).click();
+  await expect(page.locator("[data-reference-tab]")).toHaveCount(0);
+  await page.getByRole("tab", { name: "Outline", exact: true }).click();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(stage).toHaveAttribute("data-reference-layout", "wide-right");
 
   await details.focus();
   await page.keyboard.press("Enter");
