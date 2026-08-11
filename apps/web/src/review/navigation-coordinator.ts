@@ -473,6 +473,7 @@ export class NavigationCoordinator {
         );
       }
       main.focusAtDestination(settledLocation.pageIndex);
+      this.dependencies.focusReferenceTab(survivingIdentity);
       return true;
     }
 
