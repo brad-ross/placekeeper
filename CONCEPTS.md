@@ -53,6 +53,13 @@ A temporary, independently scrollable and zoomable view of one author-encoded de
 
 One live Reference Tab exists per target. Hiding the workspace preserves its tabs, while promotion to the Main Reading Thread consumes the promoted tab.
 
+A Reference Tab retains both its durable author-encoded destination and its last settled view. Activation prefers the settled view, but may reconstruct the destination when changed viewer geometry makes that view unusable.
+
+### Reference Fit Width
+The framing policy for an author-encoded Reference destination that scales its page to the usable Reference viewer width instead of fitting the whole page vertically.
+
+Reference Fit Width is used for a destination's initial opening and to reconstruct a Reference Tab when its saved settled view cannot survive a layout change. Author-provided vertical positioning is preserved only when it carries meaningful destination intent.
+
 ### Meaningful Jump
 An explicit destination change in the Main Reading Thread that enters PDF Back and Forward history, such as embedded-outline navigation or promotion from a Reference Tab.
 
