@@ -170,6 +170,7 @@ export interface ReviewShellProps {
   onReferenceSendToMain?(identity: string): void;
   onReferenceRetry?(): void;
   onOutlineActivate?(item: PdfOutlineItem): void;
+  onOutlineReference?(item: PdfOutlineItem): void;
   onReferenceViewportHost?(element: HTMLDivElement | null): void;
   onWorkspaceModeFocusTokenChange?(mode: WorkspaceMode, token: string): void;
   referenceLayoutState?: ReferenceWorkspaceLayoutState;
@@ -1104,6 +1105,7 @@ export function ReviewShell(props: ReviewShellProps) {
             currentOutlineItemId={props.currentOutlineItemId ?? null}
             onModeChange={selectWorkspaceMode}
             onOutlineActivate={(item) => props.onOutlineActivate?.(item)}
+            onOutlineReference={(item) => props.onOutlineReference?.(item)}
             onModeFocusTokenChange={rememberWorkspaceModeFocus}
             annotations={<div id="review-annotation-list" aria-label="All annotations">
             <AnnotationList

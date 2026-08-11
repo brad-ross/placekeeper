@@ -32,6 +32,7 @@ export interface OutlineAnnotationsWorkspaceProps {
   readonly search?: ReactNode;
   readonly onModeChange: (mode: RightWorkspaceMode) => void;
   readonly onOutlineActivate: (item: PdfOutlineItem) => void;
+  readonly onOutlineReference: (item: PdfOutlineItem) => void;
   readonly onModeFocusTokenChange?: (mode: RightWorkspaceMode, token: string) => void;
 }
 
@@ -51,6 +52,7 @@ export function OutlineAnnotationsWorkspace({
   search,
   onModeChange,
   onOutlineActivate,
+  onOutlineReference,
   onModeFocusTokenChange,
 }: OutlineAnnotationsWorkspaceProps) {
   const tabRefs = useRef(new Map<RightWorkspaceMode, HTMLButtonElement>());
@@ -164,6 +166,8 @@ export function OutlineAnnotationsWorkspace({
           discovery={outline}
           currentItemId={currentOutlineItemId}
           onActivate={onOutlineActivate}
+          onOpenReference={onOutlineReference}
+          onFocusTokenChange={(token) => onModeFocusTokenChange?.('outline', token)}
         />
       </section>
 

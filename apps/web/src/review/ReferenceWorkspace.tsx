@@ -137,6 +137,8 @@ export function ReferenceWorkspace({
     ? 'vertical'
     : 'horizontal';
   const showReferenceTabs = tabs.length > 0;
+  const reserveReferenceTabRail = referenceTabOrientation === 'vertical'
+    && pendingReference?.status === 'loading';
 
   const modeFallback = (targetMode: WorkspaceMode): HTMLElement | null => (
     chooseWorkspaceModeFocusTarget({
@@ -330,7 +332,7 @@ export function ReferenceWorkspace({
         id="workspace-panel-references"
         className="review-workspace__panel review-workspace__panel--references"
         data-reference-tabs-orientation={referenceTabOrientation}
-        data-reference-panel-layout={showReferenceTabs ? 'split' : 'full'}
+        data-reference-panel-layout={showReferenceTabs || reserveReferenceTabRail ? 'split' : 'full'}
         role="tabpanel"
         aria-labelledby={headerVariant === 'references'
           ? 'references-workspace-title'

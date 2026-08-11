@@ -612,6 +612,10 @@ test.describe('canonical review workflow', () => {
     await expect(announcement).toContainText('Select reliable text');
     await page.keyboard.press('Alt+Shift+D');
     await expect(announcement).toContainText('Select reliable text');
+    await page.keyboard.press('Alt+Shift+I');
+    await expect(announcement).toContainText('Choose a reliable text position');
+    await page.keyboard.press('Alt+Shift+H');
+    await expect(announcement).toContainText('Select reliable text');
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
 
