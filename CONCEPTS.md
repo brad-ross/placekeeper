@@ -24,6 +24,11 @@ Its presentation may change with available reading space, but disclosure changes
 
 ## Viewer framing
 
+### Committed Zoom
+The provider-owned numeric PDF scale used to publish the viewer's zoom state.
+
+For acceptance testing, transient gesture presentation is treated as non-authoritative; coordinate-based actions wait for Committed Zoom and its rendered layout before treating new geometry as settled.
+
 ### Viewer Runway
 Temporary scroll extent added beyond viewer content so an overlaid review surface does not make covered document regions unreachable.
 
