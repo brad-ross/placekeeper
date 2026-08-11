@@ -57,6 +57,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('keeps focus and References coherent when a live outline disappears and returns', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole('button', { name: 'Set outline tree' }).click();
     await page.getByRole('button', { name: 'Open right workspace' }).click();
     const outlineDestination = page.getByRole('button', {
@@ -84,6 +85,13 @@ test.describe('canonical review workflow', () => {
 
     await page.getByRole('button', { name: 'Open References tray' }).click();
     await page.getByRole('button', { name: 'Move References to right' }).click();
+    await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+      'data-reference-layout',
+      'wide-right',
+    );
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
     const references = page.getByRole('tab', { name: 'References', exact: true });
     await expect(references).toHaveAttribute('aria-selected', 'true');
     const outlineTab = page.getByRole('tab', { name: 'Outline', exact: true });

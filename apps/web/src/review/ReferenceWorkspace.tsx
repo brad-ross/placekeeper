@@ -300,7 +300,14 @@ export function ReferenceWorkspace({
                   focusedModeTab.current = { mode: workspaceMode, element: event.currentTarget };
                 }}
                 onBlur={(event) => {
-                  if (event.currentTarget.isConnected) focusedModeTab.current = null;
+                  const nextTarget = event.relatedTarget;
+                  if (
+                    nextTarget instanceof HTMLElement
+                    && nextTarget !== event.currentTarget.ownerDocument.body
+                    && nextTarget.isConnected
+                  ) {
+                    focusedModeTab.current = null;
+                  }
                 }}
                 onClick={() => onModeChange(workspaceMode)}
               >
