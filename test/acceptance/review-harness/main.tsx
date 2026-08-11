@@ -8,7 +8,12 @@ import {
 import { projectReviewItems } from '../../../apps/web/src/review/annotation-projection.js';
 import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
 import type { CaretAnchor, SelectionAnchor } from '../../../apps/web/src/pdf/selection-anchor.js';
-import type { ViewerControls, ViewerControlsSnapshot } from '../../../apps/web/src/pdf/viewer-controls.js';
+import {
+  VIEWER_ZOOM_MAX_PERCENT,
+  VIEWER_ZOOM_MIN_PERCENT,
+  type ViewerControls,
+  type ViewerControlsSnapshot,
+} from '../../../apps/web/src/pdf/viewer-controls.js';
 import type { ViewerInteractionListener } from '../../../apps/web/src/pdf/viewer-interaction-events.js';
 import type { PdfViewerNavigation } from '../../../apps/web/src/pdf/viewer-navigation-adapter.js';
 import { createReviewState, type ReviewCommand, type ReviewState } from '../../../packages/core/src/review-model.js';
@@ -156,8 +161,8 @@ function createHarnessViewerControls(): HarnessViewerControls {
       if (
         !state.zoomReady
         || !Number.isSafeInteger(zoomPercent)
-        || zoomPercent < 20
-        || zoomPercent > 6000
+        || zoomPercent < VIEWER_ZOOM_MIN_PERCENT
+        || zoomPercent > VIEWER_ZOOM_MAX_PERCENT
       ) return;
       zoomCommands.push(`go:${zoomPercent}`);
       publishZoom(zoomPercent);
@@ -229,7 +234,7 @@ function createHarnessViewerNavigation(
     fitToWidthReady: () => true,
     resolveTarget: () => null,
     applyTarget: async () => false,
-    cancelPendingNavigation: () => undefined,
+    cancelPendingNavigation: async () => undefined,
     replaceDocument: () => undefined,
     focusAtDestination: () => false,
     dispose: () => undefined,

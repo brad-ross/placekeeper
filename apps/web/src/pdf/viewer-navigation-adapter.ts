@@ -60,8 +60,8 @@ export interface PdfViewerNavigation extends ViewerNavigationControls {
   /** Resolves a semantic target without moving the viewer. */
   resolveTarget(target: PdfNavigationTarget): PdfViewerLocation | null;
   applyTarget(target: PdfNavigationTarget): Promise<boolean>;
-  /** Aborts any in-flight movement without disposing the document scope. */
-  cancelPendingNavigation(): void;
+  /** Aborts in-flight movement and resolves after any required restoration. */
+  cancelPendingNavigation(): Promise<void>;
 }
 
 interface ActiveViewer {
@@ -330,7 +330,7 @@ export function createViewerNavigation(
   let rollbackBarrier: Promise<void> | null = null;
   let disposed = false;
 
-  const cancelPendingNavigation = () => {
+  const cancelPendingOperation = (): Promise<void> | null => {
     const cancelled = activeOperation;
     cancelled?.abort.abort();
     activeOperation = null;
@@ -341,7 +341,16 @@ export function createViewerNavigation(
         () => rollbackOperation(cancelled.operation),
       );
     }
+    const pendingRollback = rollbackBarrier;
+    if (pendingRollback === null) return null;
+    return pendingRollback.then(() => {
+      if (rollbackBarrier === pendingRollback) rollbackBarrier = null;
+    });
   };
+
+  const cancelPendingNavigation = (): Promise<void> => (
+    cancelPendingOperation() ?? Promise.resolve()
+  );
 
   const activeViewer = (): ActiveViewer | null => {
     if (disposed) return null;
@@ -376,12 +385,8 @@ export function createViewerNavigation(
   };
 
   const beginOperation = async (viewer: ActiveViewer): Promise<NavigationOperation | null> => {
-    cancelPendingNavigation();
-    const precedingRollback = rollbackBarrier;
-    if (precedingRollback !== null) {
-      await precedingRollback;
-      if (rollbackBarrier === precedingRollback) rollbackBarrier = null;
-    }
+    const pendingRollback = cancelPendingOperation();
+    if (pendingRollback !== null) await pendingRollback;
     if (!viewerStillOwnsDocument(viewer)) return null;
     const abort = new AbortController();
     const operation = {
@@ -997,8 +1002,15 @@ export function createViewerNavigation(
         && edgesFit
         && currentPageMatches
         && locationMatchesView(viewer, location, true);
-      if (!applied && operation.mutated) await rollbackOperation(operation);
+      if (!applied && !operation.signal.aborted && operation.mutated) {
+        await rollbackOperation(operation);
+      }
       return applied;
+    } catch {
+      if (!operation.signal.aborted && operation.mutated) {
+        await rollbackOperation(operation);
+      }
+      return false;
     } finally {
       if (activeOperation?.operation === operation) activeOperation = null;
     }
@@ -1123,7 +1135,7 @@ export function createViewerNavigation(
     applyTarget,
     cancelPendingNavigation,
     replaceDocument(nextDocumentGeneration) {
-      cancelPendingNavigation();
+      void cancelPendingNavigation();
       documentGeneration = nextDocumentGeneration;
     },
     focusAtDestination(pageIndex) {
@@ -1132,7 +1144,7 @@ export function createViewerNavigation(
     dispose() {
       if (disposed) return;
       disposed = true;
-      cancelPendingNavigation();
+      void cancelPendingNavigation();
       unsubscribeStore();
     },
   };

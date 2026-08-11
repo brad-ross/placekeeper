@@ -57,6 +57,7 @@ export interface ReviewChromeProps {
   readonly viewerState: ViewerControlsSnapshot;
   readonly fitWidthReady?: boolean;
   readonly onFitWidth?: () => void;
+  readonly beforeViewerAction?: () => Promise<void>;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
   readonly canNavigateBack?: boolean;
@@ -76,6 +77,7 @@ export function ReviewChrome({
   viewerState,
   fitWidthReady = false,
   onFitWidth = () => undefined,
+  beforeViewerAction,
   canUndo,
   canRedo,
   canNavigateBack = false,
@@ -108,6 +110,13 @@ export function ReviewChrome({
   const fitWidthUnavailableId = 'viewer-fit-width-readiness';
   const pageUnavailable = viewerState.pageReady ? undefined : pageUnavailableId;
   const zoomUnavailable = viewerState.zoomReady ? undefined : zoomUnavailableId;
+  const runViewerAction = (action: () => void) => {
+    if (!beforeViewerAction) {
+      action();
+      return;
+    }
+    void beforeViewerAction().then(action);
+  };
 
   useLayoutEffect(() => {
     if (editingPage) {
@@ -144,7 +153,7 @@ export function ReviewChrome({
   const goToDraftPage = () => {
     const pageNumber = validPageNumber(pageDraft, viewerState.totalPages);
     if (pageNumber === undefined) return false;
-    controls?.goToPage(pageNumber);
+    runViewerAction(() => controls?.goToPage(pageNumber));
     return true;
   };
   const submitPageEditOnEnter = () => {
@@ -168,7 +177,7 @@ export function ReviewChrome({
     clearPageStepIntent();
     button.focus({ preventScroll: true });
     if (editingPage) closePageEdit(false);
-    step();
+    runViewerAction(step);
   };
   const startZoomEdit = () => {
     setZoomDraft(String(viewerState.zoomPercent));
@@ -183,7 +192,10 @@ export function ReviewChrome({
   const zoomToDraftPercent = () => {
     const resolved = resolveZoomDraft(zoomDraft, viewerState.zoomPercent);
     if (!resolved.valid) return false;
-    if (resolved.request !== undefined) controls?.zoomToPercent(resolved.request);
+    const requestedZoom = resolved.request;
+    if (requestedZoom !== undefined) {
+      runViewerAction(() => controls?.zoomToPercent(requestedZoom));
+    }
     return true;
   };
   const submitZoomEditOnEnter = () => {
@@ -207,7 +219,7 @@ export function ReviewChrome({
     clearZoomActionIntent();
     button.focus({ preventScroll: true });
     if (editingZoom) closeZoomEdit(false);
-    action();
+    runViewerAction(action);
   };
 
   return (

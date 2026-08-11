@@ -162,6 +162,9 @@ function navigationHarness(options: {
   pageRotation?: Rotation;
   documentRotation?: Rotation;
   updateGeometry?: boolean;
+  viewportWidth?: number;
+  throwScrollToPage?: boolean;
+  throwViewportScroll?: boolean;
   timeoutMs?: number;
 } = {}) {
   const combinedRotation = combinePageRotation(
@@ -173,7 +176,9 @@ function navigationHarness(options: {
   const viewportRect: RectState = {
     left: 0,
     top: 0,
-    width: options.initiallyUnready ? 0 : options.constrainedHorizontal ? 620 : 600,
+    width: options.initiallyUnready
+      ? 0
+      : options.viewportWidth ?? (options.constrainedHorizontal ? 620 : 600),
     height: options.initiallyUnready ? 0 : 400,
   };
   const pageRect: RectState = {
@@ -264,6 +269,7 @@ function navigationHarness(options: {
     getCurrentPage: () => currentPage,
     scrollToPage: (request: ScrollToPageOptions) => {
       log.push('scroll');
+      if (options.throwScrollToPage) throw new Error('scroll command failed');
       currentPage = request.pageNumber;
       if (request.pageNumber === 3) farPageMounted = true;
       const anchor = request.pageCoordinates ?? { x: 0, y: 0 };
@@ -323,6 +329,7 @@ function navigationHarness(options: {
     }),
     scrollTo: (position: { x: number; y: number }) => {
       log.push('viewport-scroll');
+      if (options.throwViewportScroll) throw new Error('viewport command failed');
       const horizontalDelta = position.x - viewportScrollLeft;
       pageRect.left -= horizontalDelta;
       thirdPageRect.left -= horizontalDelta;
@@ -502,6 +509,45 @@ describe('viewer navigation adapter', () => {
 
     expect(await fitting).toBe(false);
     expect(harness.log).toContain('zoom:1');
+  });
+
+  it('settles one rollback before a later direct viewer action runs', async () => {
+    const harness = navigationHarness({ manualZoom: true, viewportGap: 10, timeoutMs: 250 });
+    const fitting = harness.navigation.fitToWidth();
+    await vi.waitFor(() => expect(harness.log).toContain(`zoom:${580 / 600}`));
+
+    await harness.navigation.cancelPendingNavigation();
+    harness.setCurrentZoom(1.25);
+
+    expect(await fitting).toBe(false);
+    expect(harness.log.filter((entry) => entry === 'zoom:1')).toHaveLength(1);
+    expect(harness.navigation.captureLocation()?.zoom).toBe(1.25);
+  });
+
+  it.each([
+    ['scroll-to-page', { throwScrollToPage: true }],
+    ['viewport correction', {
+      ignoreEffectiveHorizontalAlignment: true,
+      runway: { right: 200, bottom: 0 },
+      throwViewportScroll: true,
+      viewportGap: 10,
+    }],
+  ] as const)('contains %s failures and restores the prior zoom', async (_name, options) => {
+    const harness = navigationHarness(options);
+
+    await expect(harness.navigation.fitToWidth()).resolves.toBe(false);
+    expect(harness.navigation.captureLocation()?.zoom).toBe(1);
+  });
+
+  it.each([
+    ['minimum', 120, 0.2],
+    ['maximum', 36_000, 60],
+  ] as const)('completes a %s-bound fit without rollback', async (_name, viewportWidth, zoom) => {
+    const harness = navigationHarness({ viewportWidth });
+
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    expect(harness.log[0]).toBe(`zoom:${zoom}`);
+    expect(harness.navigation.captureLocation()?.pageIndex).toBe(0);
   });
 
   it('does not abort a newer navigation when a pending geometry settlement is superseded', async () => {

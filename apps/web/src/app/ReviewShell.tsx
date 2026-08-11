@@ -864,6 +864,11 @@ export function ReviewShell(props: ReviewShellProps) {
         {...(props.viewerControls === undefined ? {} : { controls: props.viewerControls })}
         viewerState={props.viewerState ?? unavailableViewerControls()}
         fitWidthReady={props.viewerNavigation?.fitToWidthReady() ?? false}
+        {...(props.viewerNavigation === undefined ? {} : {
+          beforeViewerAction: async () => {
+            await props.viewerNavigation?.cancelPendingNavigation();
+          },
+        })}
         onFitWidth={() => {
           void props.viewerNavigation?.fitToWidth(workspaceFraming.waitForSettledGeometry);
         }}
