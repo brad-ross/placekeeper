@@ -147,6 +147,7 @@ function domRect(rect: RectState): DOMRect {
 function navigationHarness(options: {
   activeDocumentId?: string;
   constrainedHorizontal?: boolean;
+  ignoreEffectiveHorizontalAlignment?: boolean;
   artificialHorizontalRunway?: boolean;
   constrainedVertical?: 'start' | 'end';
   initiallyUnreadyPage?: boolean;
@@ -231,6 +232,8 @@ function navigationHarness(options: {
   let currentZoom = 1;
   let currentPage = 1;
   let scrolling = false;
+  let viewportScrollLeft = 0;
+  let viewportScrollTop = options.constrainedVertical === 'end' ? 1_600 : 0;
   const storeListeners = new Set<() => void>();
   const zoomListeners = new Set<(event: { newZoom: number }) => void>();
   const layoutListeners = new Set<() => void>();
@@ -279,6 +282,8 @@ function navigationHarness(options: {
         );
         targetRect.left = options.constrainedHorizontal
           ? viewportRect.left + (viewportRect.width - targetRect.width) / 2
+          : options.ignoreEffectiveHorizontalAlignment
+            ? viewportRect.left + (viewportRect.width - targetRect.width) / 2
           : viewportRect.left
             + viewportRect.width * ((request.alignX ?? 0) / 100)
             - transformedAnchor.x;
@@ -306,8 +311,8 @@ function navigationHarness(options: {
       height: viewportRect.height,
       clientWidth: viewportRect.width,
       clientHeight: viewportRect.height,
-      scrollTop: options.constrainedVertical === 'end' ? 1_600 : 0,
-      scrollLeft: 0,
+      scrollTop: viewportScrollTop,
+      scrollLeft: viewportScrollLeft,
       scrollWidth: options.artificialHorizontalRunway
         ? 1_000
         : options.constrainedHorizontal ? pageRect.width : 2_000,
@@ -316,6 +321,14 @@ function navigationHarness(options: {
       clientTop: 0,
       relativePosition: { x: 0, y: 0 },
     }),
+    scrollTo: (position: { x: number; y: number }) => {
+      log.push('viewport-scroll');
+      const horizontalDelta = position.x - viewportScrollLeft;
+      pageRect.left -= horizontalDelta;
+      thirdPageRect.left -= horizontalDelta;
+      viewportScrollLeft = position.x;
+      viewportScrollTop = position.y;
+    },
     isScrolling: () => scrolling,
     isSmoothScrolling: () => false,
     onScrollActivity: (listener: (activity: { isScrolling: boolean; isSmoothScrolling: boolean }) => void) => {
@@ -413,6 +426,19 @@ describe('viewer navigation adapter', () => {
     expect(right.pageRect.left + right.pageRect.width).toBeCloseTo(390);
     expect(await bottom.navigation.fitToWidth()).toBe(true);
     expect(bottom.log[0]).toBe(`zoom:${580 / 600}`);
+  });
+
+  it('finishes right-runway alignment through the public viewport when scroll-to-page stops at full-viewport visibility', async () => {
+    const harness = navigationHarness({
+      viewportGap: 10,
+      runway: { right: 200, bottom: 0 },
+      ignoreEffectiveHorizontalAlignment: true,
+    });
+
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    expect(harness.log).toContain('viewport-scroll');
+    expect(harness.pageRect.left).toBeCloseTo(10);
+    expect(harness.pageRect.left + harness.pageRect.width).toBeCloseTo(390);
   });
 
   it('uses combined rotation and the most-visible mounted page for fit width', async () => {

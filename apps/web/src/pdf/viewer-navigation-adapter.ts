@@ -915,7 +915,88 @@ export function createViewerNavigation(
         },
         zoom: requestedZoom,
       };
-      const applied = await applyResolvedLocation(viewer, location, operation);
+      const fitDeadline = Date.now() + timeoutMs;
+      let zoomed = false;
+      try {
+        const currentZoom = viewer.zoom.getState().currentZoomLevel;
+        zoomed = Math.abs(currentZoom - requestedZoom) <= zoomTolerance;
+      } catch {
+        zoomed = false;
+      }
+      if (!zoomed) {
+        operation.mutated = true;
+        zoomed = await waitForZoom(
+          viewer.zoom,
+          requestedZoom,
+          zoomTolerance,
+          operation.signal,
+          fitDeadline - Date.now(),
+        );
+      }
+      if (zoomed && operationIsCurrent(operation)) {
+        await waitForFrames(operation, 2, fitDeadline);
+      }
+      if (zoomed && operationIsCurrent(operation)) {
+        operation.mutated = true;
+        const alignment = scrollAlignment(location);
+        viewer.scroll.scrollToPage({
+          pageNumber: location.pageIndex + 1,
+          pageCoordinates: location.anchor,
+          behavior: 'instant',
+          alignX: alignment.xPercent,
+          alignY: alignment.yPercent,
+        });
+        await waitForFrames(operation, 2, fitDeadline);
+      }
+
+      // Scroll-to-page can stop once the page is wholly visible in the full
+      // viewport, even when a right overlay narrows the effective interval.
+      // Correct that fit-specific residual through the public viewport scope
+      // without changing the vertical position established above.
+      const fittedGeometry = operationIsCurrent(operation)
+        ? pageGeometry(viewer, visible.pageIndex)
+        : null;
+      if (fittedGeometry !== null) {
+        const targetLeft = fittedGeometry.viewportRect.left + viewer.viewportGap;
+        const horizontalCorrection = fittedGeometry.pageRect.left - targetLeft;
+        if (Math.abs(horizontalCorrection) > coordinateTolerance) {
+          const metrics = viewer.viewport.getMetrics();
+          operation.mutated = true;
+          viewer.viewport.scrollTo({
+            x: metrics.scrollLeft + horizontalCorrection,
+            y: metrics.scrollTop,
+            behavior: 'instant',
+          });
+          await waitForFrames(operation, 2, Date.now() + timeoutMs);
+        }
+      }
+
+      const settledGeometry = operationIsCurrent(operation)
+        ? pageGeometry(viewer, visible.pageIndex)
+        : null;
+      const boundedFit = requestedZoom <= VIEWER_ZOOM_MIN_PERCENT / 100 + zoomTolerance
+        || requestedZoom >= VIEWER_ZOOM_MAX_PERCENT / 100 - zoomTolerance;
+      const widthTarget = visible.viewportRect.width - 2 * viewer.viewportGap;
+      const widthMatches = settledGeometry !== null
+        && (boundedFit || Math.abs(settledGeometry.pageRect.width - widthTarget) <= coordinateTolerance);
+      const edgesFit = settledGeometry !== null
+        && (boundedFit || (
+          settledGeometry.pageRect.left
+            >= settledGeometry.viewportRect.left + viewer.viewportGap - coordinateTolerance
+          && settledGeometry.pageRect.right
+            <= settledGeometry.viewportRect.right - viewer.viewportGap + coordinateTolerance
+        ));
+      let currentPageMatches = false;
+      try {
+        currentPageMatches = viewer.scroll.getCurrentPage() - 1 === visible.pageIndex;
+      } catch {
+        currentPageMatches = false;
+      }
+      const applied = zoomed
+        && widthMatches
+        && edgesFit
+        && currentPageMatches
+        && locationMatchesView(viewer, location, true);
       if (!applied && operation.mutated) await rollbackOperation(operation);
       return applied;
     } finally {
