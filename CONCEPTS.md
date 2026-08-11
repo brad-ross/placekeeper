@@ -22,6 +22,11 @@ The nonmodal review surface that lists Review Items and Existing PDF Annotations
 
 Its presentation may change with available reading space, but disclosure changes do not replace the underlying viewer or discard review state.
 
+### Outline Discovery
+The document-scoped capability result that distinguishes confirmed absence of a PDF outline from an outline still loading, available outline structure, or discovery failure.
+
+Only confirmed absence removes outline-dependent modes and metadata; stale results from a previously mounted document are treated as unknown until the current document resolves.
+
 ## Viewer framing
 
 ### Committed Zoom
