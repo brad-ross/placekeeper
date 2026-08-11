@@ -35,6 +35,18 @@ const target = (pageIndex: number, generation = 1): PdfNavigationTarget => ({
   identity: JSON.stringify([generation, pageIndex, PdfZoomMode.XYZ, 12, 700 - pageIndex * 10, 1]),
 });
 
+const linkRequest = (
+  pageIndex: number,
+  sourceScope: 'main' | 'reference' = 'reference',
+): ViewerPdfLinkInvocation => ({
+  sourceScope,
+  sourcePageIndex: 0,
+  target: target(pageIndex),
+  metadata: createPdfNavigationMetadata({ contents: `Target ${pageIndex}`, pageIndex }),
+  opener: { isConnected: true, focus: vi.fn() } as unknown as HTMLButtonElement,
+  clientRect: { left: 1, top: 1, right: 2, bottom: 2, width: 1, height: 1 },
+});
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => { resolve = done; });
@@ -45,7 +57,7 @@ function navigation(initial = location(0)) {
   let current = initial;
   return {
     controls: {
-      captureLocation: vi.fn(() => current),
+      captureLocation: vi.fn<() => PdfViewerLocation | null>(() => current),
       captureDocumentOrderPages: vi.fn(() => []),
       resolveTarget: vi.fn((value: PdfNavigationTarget) => location(value.pageIndex)),
       applyTarget: vi.fn(async (value: PdfNavigationTarget) => {
@@ -132,7 +144,7 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.state().pendingMainNavigation).not.toBeNull();
 
     const newest: ViewerPdfLinkInvocation = {
-      sourceScope: 'reference',
+      sourceScope: 'main',
       sourcePageIndex: 2,
       target: target(5),
       metadata: createPdfNavigationMetadata({ contents: 'Newest', pageIndex: 5 }),
@@ -227,23 +239,174 @@ describe('document-scoped navigation coordinator', () => {
 
   it('routes the newest main/reference viewer link through the chooser and real reducer', async () => {
     const run = harness();
-    const request = (pageIndex: number, sourceScope: 'main' | 'reference'): ViewerPdfLinkInvocation => ({
-      sourceScope,
-      sourcePageIndex: 0,
-      target: target(pageIndex),
-      metadata: createPdfNavigationMetadata({ contents: `Target ${pageIndex}`, pageIndex }),
-      opener: {} as HTMLButtonElement,
-      clientRect: { left: 1, top: 1, right: 2, bottom: 2, width: 1, height: 1 },
+    await run.coordinator.openReference(target(2), {
+      label: 'Source reference', pageContext: 'Page 3',
     });
-    const first = request(2, 'main');
-    const newest = request(5, 'reference');
+    const first = linkRequest(2, 'main');
+    const newest = linkRequest(5, 'reference');
     expect(run.coordinator.requestLink(first)).toBe(true);
     expect(run.coordinator.requestLink(newest)).toBe(true);
     expect(run.dependencies.setLinkActionRequest).toHaveBeenLastCalledWith(newest);
     expect(await run.coordinator.chooseLink('references', first)).toBe(false);
     expect(await run.coordinator.chooseLink('references', newest)).toBe(true);
-    expect(run.state().tabs.map(({ identity }) => identity)).toEqual([target(5).identity]);
+    expect(run.state().tabs.map(({ identity }) => identity)).toEqual([
+      target(2).identity,
+      target(5).identity,
+    ]);
     expect(run.referencesOpen()).toBe(true);
+  });
+
+  it('rejects a reference link while the first durable tab is still loading', async () => {
+    const run = harness();
+    const opened = deferred<boolean>();
+    vi.mocked(run.controller.open).mockReturnValueOnce(opened.promise);
+    const opening = run.coordinator.openReference(target(2), {
+      label: 'Pending source', pageContext: 'Page 3',
+    });
+    expect(run.pending()).toMatchObject({ status: 'loading' });
+
+    expect(run.coordinator.requestLink(linkRequest(5))).toBe(false);
+    expect(run.dependencies.setLinkActionRequest).toHaveBeenLastCalledWith(null);
+    expect(run.announcement()).toBe('This PDF link cannot be opened safely.');
+
+    opened.resolve(true);
+    expect(await opening).toBe(false);
+    expect(run.state().tabs).toEqual([]);
+  });
+
+  it('rejects a reference link while the shared viewer is opening another tab', async () => {
+    const run = harness();
+    await run.coordinator.openReference(target(2), {
+      label: 'Stable source', pageContext: 'Page 3',
+    });
+    const opened = deferred<boolean>();
+    vi.mocked(run.controller.open).mockReturnValueOnce(opened.promise);
+    const opening = run.coordinator.openReference(target(4), {
+      label: 'Incoming reference', pageContext: 'Page 5',
+    });
+    expect(run.pending()).toMatchObject({ status: 'loading' });
+
+    expect(run.coordinator.requestLink(linkRequest(6))).toBe(false);
+    expect(run.dependencies.setLinkActionRequest).toHaveBeenLastCalledWith(null);
+    expect(run.state().activeTabIdentity).toBe(target(2).identity);
+
+    opened.resolve(true);
+    expect(await opening).toBe(false);
+    expect(run.state().tabs.map(({ identity }) => identity)).toEqual([target(2).identity]);
+  });
+
+  it('follows a reference link in the active tab without changing main state or tab identity', async () => {
+    const run = harness();
+    await run.coordinator.openReference(target(2), {
+      label: 'Primary result', pageContext: 'Page 2',
+    });
+    const before = run.state();
+    const sourceTab = before.tabs[0]!;
+    const mainLocation = run.main.controls.captureLocation();
+    const request = linkRequest(5);
+    vi.mocked(run.main.controls.applyTarget).mockClear();
+    vi.mocked(run.main.controls.applyLocation).mockClear();
+
+    expect(run.coordinator.requestLink(request)).toBe(true);
+    expect(await run.coordinator.chooseLink('same-reference', request)).toBe(true);
+
+    const after = run.state();
+    expect(after.tabs).toHaveLength(1);
+    expect(after.activeTabIdentity).toBe(sourceTab.identity);
+    expect(after.tabs[0]).toMatchObject({
+      identity: sourceTab.identity,
+      originalTarget: sourceTab.originalTarget,
+      label: sourceTab.label,
+      pageContext: sourceTab.pageContext,
+      settledLocation: location(5),
+    });
+    expect(after.mainHistory).toEqual(before.mainHistory);
+    expect(run.main.controls.captureLocation()).toEqual(mainLocation);
+    expect(run.main.controls.applyTarget).not.toHaveBeenCalled();
+    expect(run.main.controls.applyLocation).not.toHaveBeenCalled();
+    expect(run.reference.controls.applyTarget).toHaveBeenCalledWith(request.target);
+    expect(run.reference.controls.focusAtDestination).toHaveBeenCalledWith(5);
+  });
+
+  it('rejects same-reference choices from main or after the active tab changes', async () => {
+    const run = harness();
+    await run.coordinator.openReference(target(2), { label: 'A', pageContext: 'Page 3' });
+    const mainRequest = linkRequest(4, 'main');
+    expect(run.coordinator.requestLink(mainRequest)).toBe(true);
+    expect(await run.coordinator.chooseLink('same-reference', mainRequest)).toBe(false);
+
+    await run.coordinator.openReference(target(4), { label: 'B', pageContext: 'Page 5' });
+    const referenceRequest = linkRequest(6);
+    expect(run.coordinator.requestLink(referenceRequest)).toBe(true);
+    await run.coordinator.switchReference(target(2).identity);
+    vi.mocked(run.reference.controls.applyTarget).mockClear();
+
+    expect(await run.coordinator.chooseLink('same-reference', referenceRequest)).toBe(false);
+    expect(run.state().activeTabIdentity).toBe(target(2).identity);
+    expect(run.reference.controls.applyTarget).not.toHaveBeenCalled();
+  });
+
+  it('restores the reference origin when post-apply settlement capture fails', async () => {
+    const run = harness();
+    await run.coordinator.openReference(target(2), {
+      label: 'Primary result', pageContext: 'Page 2',
+    });
+    const origin = location(2);
+    const before = run.state();
+    const request = linkRequest(5);
+    vi.mocked(run.reference.controls.captureLocation)
+      .mockReturnValueOnce(origin)
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(origin);
+
+    expect(run.coordinator.requestLink(request)).toBe(true);
+    expect(await run.coordinator.chooseLink('same-reference', request)).toBe(false);
+
+    expect(run.reference.controls.applyLocation).toHaveBeenCalledWith(origin);
+    expect(run.state()).toEqual(before);
+    expect(run.announcement()).toBe('Reference unavailable. Retry when ready.');
+  });
+
+  it('leaves tab state untouched when the post-apply origin restore fails', async () => {
+    const run = harness();
+    await run.coordinator.openReference(target(2), {
+      label: 'Primary result', pageContext: 'Page 2',
+    });
+    const origin = location(2);
+    const before = run.state();
+    const request = linkRequest(5);
+    vi.mocked(run.reference.controls.captureLocation)
+      .mockReturnValueOnce(origin)
+      .mockReturnValueOnce(null);
+    vi.mocked(run.reference.controls.applyLocation).mockResolvedValueOnce(false);
+
+    expect(run.coordinator.requestLink(request)).toBe(true);
+    expect(await run.coordinator.chooseLink('same-reference', request)).toBe(false);
+
+    expect(run.reference.controls.applyLocation).toHaveBeenCalledWith(origin);
+    expect(run.state()).toEqual(before);
+    expect(run.announcement()).toBe('Reference unavailable. Retry when ready.');
+  });
+
+  it('does not commit deferred same-reference work after a newer operation supersedes it', async () => {
+    const run = harness();
+    await run.coordinator.openReference(target(2), {
+      label: 'Primary result', pageContext: 'Page 2',
+    });
+    const before = run.state();
+    const applied = deferred<boolean>();
+    vi.mocked(run.reference.controls.applyTarget).mockReturnValueOnce(applied.promise);
+    const request = linkRequest(5);
+
+    expect(run.coordinator.requestLink(request)).toBe(true);
+    const following = run.coordinator.chooseLink('same-reference', request);
+    await Promise.resolve();
+    run.coordinator.unavailableDestination();
+    applied.resolve(true);
+
+    expect(await following).toBe(false);
+    expect(run.state()).toEqual(before);
+    expect(run.reference.controls.focusAtDestination).not.toHaveBeenCalledWith(5);
   });
 
   it('keeps durable state on failure and retries only a stable failed reference', async () => {

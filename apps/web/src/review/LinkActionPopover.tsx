@@ -17,7 +17,7 @@ import type {
 import { PDF_LINK_ACTION_MENU_ID } from '../pdf/viewer-interaction-events.js';
 import { ReviewIcon } from './ReviewIcon.js';
 
-export type LinkActionChoice = 'references' | 'main';
+export type LinkActionChoice = 'references' | 'main' | 'same-reference';
 export type LinkActionDismissReason = 'escape' | 'outside' | 'tab' | 'anchor-invalidated';
 
 export function linkActionDismissRestoresFocus(reason: LinkActionDismissReason): boolean {
@@ -122,15 +122,19 @@ export function setLinkActionOpenerExpanded(
 export function LinkActionMenuContent({
   label,
   pageContext,
+  sourceScope,
   firstItemRef,
   secondItemRef,
+  thirdItemRef,
   onChoose,
   onKeyDown,
 }: {
   readonly label: string;
   readonly pageContext: string;
+  readonly sourceScope: ViewerPdfLinkSourceScope;
   readonly firstItemRef: Ref<HTMLButtonElement>;
   readonly secondItemRef: Ref<HTMLButtonElement>;
+  readonly thirdItemRef: Ref<HTMLButtonElement>;
   readonly onChoose: (choice: LinkActionChoice) => void;
   readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
 }) {
@@ -152,15 +156,27 @@ export function LinkActionMenuContent({
       >
         <ReviewIcon name="references" />
       </button>
+      {sourceScope === 'reference' ? (
+        <button
+          ref={secondItemRef}
+          type="button"
+          role="menuitem"
+          aria-label="Follow in this Reference Tab"
+          title="Follow in this Reference Tab"
+          onClick={() => onChoose('same-reference')}
+        >
+          <ReviewIcon name="arrow-right" />
+        </button>
+      ) : null}
       <button
-        ref={secondItemRef}
+        ref={sourceScope === 'reference' ? thirdItemRef : secondItemRef}
         type="button"
         role="menuitem"
         aria-label="Open in main"
         title="Open in main"
         onClick={() => onChoose('main')}
       >
-        <ReviewIcon name="main" />
+        <ReviewIcon name={sourceScope === 'main' ? 'arrow-right' : 'main'} />
       </button>
     </div>
   );
@@ -203,6 +219,7 @@ export function LinkActionPopover({
   const popoverRef = useRef<HTMLDivElement>(null);
   const firstItemRef = useRef<HTMLButtonElement>(null);
   const secondItemRef = useRef<HTMLButtonElement>(null);
+  const thirdItemRef = useRef<HTMLButtonElement>(null);
   const dismissingRef = useRef(false);
   const onChooseRef = useRef(onChoose);
   const onDismissRef = useRef(onDismiss);
@@ -287,7 +304,9 @@ export function LinkActionPopover({
   }, [dismiss, request]);
 
   if (!request || typeof document === 'undefined') return null;
-  const items = [firstItemRef, secondItemRef] as const;
+  const items = request.sourceScope === 'reference'
+    ? [firstItemRef, secondItemRef, thirdItemRef]
+    : [firstItemRef, secondItemRef];
   const choose = (choice: LinkActionChoice) => {
     if (dismissingRef.current) return;
     dismissingRef.current = true;
@@ -328,8 +347,10 @@ export function LinkActionPopover({
       <LinkActionMenuContent
         label={request.metadata.label}
         pageContext={request.metadata.pageContext}
+        sourceScope={request.sourceScope}
         firstItemRef={firstItemRef}
         secondItemRef={secondItemRef}
+        thirdItemRef={thirdItemRef}
         onChoose={choose}
         onKeyDown={keyDown}
       />
