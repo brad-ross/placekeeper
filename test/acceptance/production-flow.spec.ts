@@ -90,6 +90,37 @@ async function openLinkInReferences(
   await page.keyboard.press("Enter");
 }
 
+async function followLinkInSameReference(
+  page: Page,
+  link: ReturnType<Page["locator"]>,
+): Promise<void> {
+  const menu = page.getByRole("menu", {
+    name: "Open Target-to-target detail link, Page 3",
+  });
+  const firstAction = menu.getByRole("menuitem", { name: /Open in References/u });
+  const action = menu.getByRole("menuitem", { name: "Follow in this Reference Tab" });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await link.evaluate((element) => element.focus({ preventScroll: true }));
+    await expect(link).toBeFocused();
+    await page.keyboard.press("Enter");
+    try {
+      await expect(firstAction).toBeFocused({ timeout: 1_500 });
+      await expect(menu.getByRole("menuitem")).toHaveCount(3);
+      await expect(action).toHaveAttribute("title", "Follow in this Reference Tab");
+      await page.keyboard.press("End");
+      await expect(action).toBeFocused({ timeout: 1_500 });
+      await page.keyboard.press("Enter");
+      return;
+    } catch {
+      // The portaled link can settle between focus and activation; retry once.
+    }
+  }
+  await expect(firstAction).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(action).toBeFocused();
+  await page.keyboard.press("Enter");
+}
+
 function collectBrowserErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on("console", (message) => {
@@ -656,6 +687,70 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(emptyReference).toBeVisible();
   await expect(emptyReference).toBeFocused();
   expect(contactedOrigins).toEqual(new Set([new URL(documentRequests[0]!.url).origin]));
+});
+
+test("follows a PDF link in the same reference tab without moving main", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFreshProductionFixture(page, referencePdf, "Same-reference navigation launch failed");
+  const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
+  const mainViewport = mainWorkspace.locator("[data-viewer-framing-viewport]");
+  await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
+
+  await mainWorkspace.getByRole("button", {
+    name: "Open PDF link to Primary result, Page 2",
+  }).click();
+  await page.getByRole("menuitem", { name: /Open in References/u }).click();
+  const primaryTab = page.getByRole("tab", { name: /Primary result/u });
+  const retryReference = page.getByRole("button", { name: "Retry reference" });
+  await expect.poll(async () => (await primaryTab.count()) + (await retryReference.count()))
+    .toBeGreaterThan(0);
+  if (await retryReference.isVisible()) await retryReference.click();
+  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+
+  const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
+  const referenceViewport = referenceWorkspace.locator("[data-viewer-framing-viewport]");
+  await expect(referenceWorkspace.locator("[data-page-index='1']")).toBeVisible();
+  const mainBefore = {
+    page: await page.getByLabel("Current page").textContent(),
+    zoom: await page.getByLabel("Zoom level").textContent(),
+    scroll: await mainViewport.evaluate((element) => ({
+      left: element.scrollLeft,
+      top: element.scrollTop,
+    })),
+    backDisabled: await page.getByRole("button", { name: "Back in document history" }).isDisabled(),
+    forwardDisabled: await page.getByRole("button", { name: "Forward in document history" }).isDisabled(),
+  };
+
+  const detailLink = referenceWorkspace.getByRole("button", {
+    name: "Open PDF link to Target-to-target detail link, Page 3",
+  });
+  await detailLink.evaluate((element) => element.scrollIntoView({ block: "center" }));
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  await followLinkInSameReference(page, detailLink);
+
+  await expect(page.locator(".review-workspace__status"))
+    .toHaveText("Reference destination opened.");
+  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tablist", { name: "Open references" }).getByRole("tab"))
+    .toHaveCount(1);
+  const destinationPage = referenceWorkspace.locator("[data-page-index='2']");
+  await expect(destinationPage).toBeVisible();
+  await expect(destinationPage).toBeFocused();
+  await expect.poll(() => referenceViewport.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+
+  expect(await page.getByLabel("Current page").textContent()).toBe(mainBefore.page);
+  expect(await page.getByLabel("Zoom level").textContent()).toBe(mainBefore.zoom);
+  expect(await mainViewport.evaluate((element) => ({
+    left: element.scrollLeft,
+    top: element.scrollTop,
+  }))).toEqual(mainBefore.scroll);
+  expect(await page.getByRole("button", { name: "Back in document history" }).isDisabled())
+    .toBe(mainBefore.backDisabled);
+  expect(await page.getByRole("button", { name: "Forward in document history" }).isDisabled())
+    .toBe(mainBefore.forwardDisabled);
 });
 
 test("switches and sends references from the right-docked workspace", async ({ page }) => {

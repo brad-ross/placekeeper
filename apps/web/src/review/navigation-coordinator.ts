@@ -152,6 +152,7 @@ export class NavigationCoordinator {
   private documentGeneration: number;
   private pendingReference: PendingReferenceRequest | null = null;
   private linkRequest: ViewerPdfLinkInvocation | null = null;
+  private linkRequestSourceTabIdentity: string | null = null;
   /** A Send-selected successor whose saved view is not currently rendered. */
   private referenceRestoreIdentity: string | null = null;
   private disposed = false;
@@ -164,6 +165,7 @@ export class NavigationCoordinator {
     this.supersede();
     if (!this.generationMatches(request.target.documentGeneration)) {
       this.linkRequest = null;
+      this.linkRequestSourceTabIdentity = null;
       this.dependencies.setLinkActionRequest(null);
       this.dependencies.setAnnouncement(LINK_UNAVAILABLE);
       return false;
@@ -171,15 +173,19 @@ export class NavigationCoordinator {
     this.pendingReference = null;
     this.dependencies.setPendingReference(null);
     this.linkRequest = request;
+    const state = this.dependencies.getState();
+    this.linkRequestSourceTabIdentity = request.sourceScope === 'reference'
+      && state.activeTabIdentity !== null
+      && state.tabs.some((tab) => tab.identity === state.activeTabIdentity)
+      ? state.activeTabIdentity
+      : null;
     this.dependencies.setLinkActionRequest(request);
     return true;
   }
 
   unavailableLink(_unavailable?: ViewerPdfLinkUnavailable): void {
     this.supersede();
-    this.linkRequest = null;
     this.pendingReference = null;
-    this.dependencies.setLinkActionRequest(null);
     this.dependencies.setPendingReference(null);
     this.dependencies.setAnnouncement(LINK_UNAVAILABLE);
   }
@@ -191,24 +197,37 @@ export class NavigationCoordinator {
 
   dismissLink(request: ViewerPdfLinkInvocation): void {
     if (this.linkRequest !== request) return;
-    this.linkRequest = null;
-    this.dependencies.setLinkActionRequest(null);
+    this.clearLinkRequest();
   }
 
   async chooseLink(choice: LinkActionChoice, request: ViewerPdfLinkInvocation): Promise<boolean> {
     if (this.linkRequest !== request || !this.generationMatches(request.target.documentGeneration)) {
       return false;
     }
-    this.linkRequest = null;
-    this.dependencies.setLinkActionRequest(null);
-    const choiceOperation = choice === 'references'
-      ? this.openReference(request.target, metadataFromLink(request.metadata))
-      : this.navigateMainTarget(request.target, 'direct');
+    const sourceTabIdentity = this.linkRequestSourceTabIdentity;
+    this.clearLinkRequest();
+    let choiceOperation: Promise<boolean>;
+    switch (choice) {
+      case 'references':
+        choiceOperation = this.openReference(
+          request.target,
+          metadataFromLink(request.metadata),
+        );
+        break;
+      case 'main':
+        choiceOperation = this.navigateMainTarget(request.target, 'direct');
+        break;
+      case 'same-reference':
+        choiceOperation = request.sourceScope === 'reference' && sourceTabIdentity !== null
+          ? this.navigateReferenceTarget(request.target, sourceTabIdentity)
+          : Promise.resolve(false);
+        break;
+    }
     const choiceOperationToken = this.operationToken;
     const succeeded = await choiceOperation;
     if (
       !succeeded
-      && choice === 'main'
+      && choice !== 'references'
       && this.operationToken === choiceOperationToken
       && this.generationMatches(request.target.documentGeneration)
       && request.opener.isConnected
@@ -216,6 +235,60 @@ export class NavigationCoordinator {
       request.opener.focus({ preventScroll: true });
     }
     return succeeded;
+  }
+
+  private async navigateReferenceTarget(
+    target: PdfNavigationTarget,
+    sourceTabIdentity: string,
+  ): Promise<boolean> {
+    const operation = this.begin(target.documentGeneration);
+    if (operation === null) return false;
+    const state = this.dependencies.getState();
+    if (
+      state.activeTabIdentity !== sourceTabIdentity
+      || !state.tabs.some((tab) => tab.identity === sourceTabIdentity)
+    ) return false;
+
+    const navigation = this.dependencies.getReferenceNavigation();
+    const origin = navigation?.captureLocation() ?? null;
+    if (!navigation || origin === null) {
+      this.dependencies.setAnnouncement(REFERENCE_FAILURE);
+      return false;
+    }
+    const applied = await navigation.applyTarget(target);
+    if (!this.isCurrent(operation)) return false;
+    if (!applied) {
+      this.dependencies.setAnnouncement(REFERENCE_FAILURE);
+      return false;
+    }
+    const settledLocation = navigation.captureLocation();
+    if (settledLocation === null) {
+      const restored = await navigation.applyLocation(origin);
+      if (!this.isCurrent(operation)) return false;
+      const restoredLocation = restored ? navigation.captureLocation() : null;
+      if (
+        restoredLocation === null
+        || !samePdfViewerLocation(origin, restoredLocation, {
+          anchor: 0,
+          alignment: 0,
+          zoom: 0,
+        })
+      ) {
+        this.dependencies.setAnnouncement(REFERENCE_FAILURE);
+        return false;
+      }
+      this.dependencies.setAnnouncement(REFERENCE_FAILURE);
+      return false;
+    }
+    const currentState = this.dependencies.getState();
+    if (
+      currentState.activeTabIdentity !== sourceTabIdentity
+      || !currentState.tabs.some((tab) => tab.identity === sourceTabIdentity)
+    ) return false;
+    this.dependencies.dispatch({ type: 'refresh-active-reference', settledLocation });
+    navigation.focusAtDestination(settledLocation.pageIndex);
+    this.dependencies.setAnnouncement('Reference destination opened.');
+    return true;
   }
 
   async openReference(
@@ -588,6 +661,7 @@ export class NavigationCoordinator {
     this.documentGeneration = documentGeneration;
     this.pendingReference = null;
     this.linkRequest = null;
+    this.linkRequestSourceTabIdentity = null;
     this.referenceRestoreIdentity = null;
     this.dependencies.getMainNavigation()?.replaceDocument(documentGeneration);
     this.dependencies.getReferenceNavigation()?.replaceDocument(documentGeneration);
@@ -606,6 +680,7 @@ export class NavigationCoordinator {
     this.operationToken += 1;
     this.pendingReference = null;
     this.linkRequest = null;
+    this.linkRequestSourceTabIdentity = null;
     this.referenceRestoreIdentity = null;
     void this.dependencies.getReferenceController()?.close();
   }
@@ -735,6 +810,7 @@ export class NavigationCoordinator {
     preservePendingReference = false,
   ): Operation | null {
     if (!this.generationMatches(documentGeneration)) return null;
+    this.clearLinkRequest();
     this.cancelPendingTransactions(preservePendingReference);
     return {
       token: ++this.operationToken,
@@ -743,6 +819,7 @@ export class NavigationCoordinator {
   }
 
   private supersede(): void {
+    this.clearLinkRequest();
     this.cancelPendingTransactions();
     this.operationToken += 1;
   }
@@ -755,6 +832,13 @@ export class NavigationCoordinator {
       this.pendingReference = null;
       this.dependencies.setPendingReference(null);
     }
+  }
+
+  private clearLinkRequest(): void {
+    if (this.linkRequest === null && this.linkRequestSourceTabIdentity === null) return;
+    this.linkRequest = null;
+    this.linkRequestSourceTabIdentity = null;
+    this.dependencies.setLinkActionRequest(null);
   }
 
   private generationMatches(documentGeneration: number): boolean {
