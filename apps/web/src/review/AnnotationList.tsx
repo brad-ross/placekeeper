@@ -98,10 +98,7 @@ export function AnnotationList({
   return (
     <section className="annotation-drawer__owned" data-annotation-origin="owned" aria-label="Owned annotations">
       <header className="annotation-drawer__header">
-        <div>
-          <p className="annotation-drawer__eyebrow">Review comments</p>
-          <h2>Annotations <span className="annotation-drawer__count">{ordered.length}</span></h2>
-        </div>
+        <h2>Annotations <span className="annotation-drawer__count">{ordered.length}</span></h2>
       </header>
       {direction ? (
         <p className="annotation-direction-cue" data-correspondence-direction={direction}>

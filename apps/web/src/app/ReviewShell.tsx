@@ -1,6 +1,7 @@
 import {
   useLayoutEffect,
   useEffect,
+  useMemo,
   useReducer,
   useRef,
   useState,
@@ -280,17 +281,32 @@ export function ReviewShell(props: ReviewShellProps) {
     token: 0,
   });
   const navigation = props.navigationState ?? surface.navigation;
+  const outlineDiscovery = props.outlineDiscovery;
+  const visibleOutlineDiscovery = useMemo<PdfOutlineDiscovery>(() => (
+    outlineDiscovery?.documentGeneration === navigation.documentGeneration
+      ? outlineDiscovery
+      : { status: 'loading', documentGeneration: navigation.documentGeneration }
+  ), [navigation.documentGeneration, outlineDiscovery]);
+  const outlineAbsent = visibleOutlineDiscovery.status === 'loaded-empty';
+  const showAnnotationOutlineLabels = visibleOutlineDiscovery.status === 'loaded-tree';
   const workspaceRequestedOpen = props.workspaceOpen ?? surface.baseSurface === 'workspace';
   const workspaceOpen = workspaceIsVisible(workspaceRequestedOpen, surface.baseSurface);
   const workspaceMode = navigation.workspace.lastMode;
-  const rightWorkspaceMode: RightWorkspaceMode = props.rightWorkspaceMode
+  const visibleWorkspaceMode: WorkspaceMode = outlineAbsent && workspaceMode === 'outline'
+    ? 'annotations'
+    : workspaceMode;
+  const requestedRightWorkspaceMode: RightWorkspaceMode = props.rightWorkspaceMode
     ?? (workspaceMode === 'references' ? 'outline' : workspaceMode);
+  const rightWorkspaceMode: RightWorkspaceMode = outlineAbsent
+    && requestedRightWorkspaceMode === 'outline'
+    ? 'annotations'
+    : requestedRightWorkspaceMode;
   const referenceLayout = props.referenceLayoutState ?? localReferenceLayout;
   const referenceLayoutControlled = props.referenceLayoutState !== undefined;
   const effectiveReferenceLayout = deriveReferenceWorkspaceLayout(
     referenceLayout,
     rightWorkspaceMode,
-    workspaceMode,
+    visibleWorkspaceMode,
   );
   const dispatchReferenceLayout = (action: ReferenceWorkspaceLayoutAction) => {
     if (props.referenceLayoutState === undefined) dispatchLocalReferenceLayout(action);
@@ -311,9 +327,13 @@ export function ReviewShell(props: ReviewShellProps) {
     : effectiveReferenceLayout.referenceDock === 'bottom'
       ? rightSurfaceOpen
       : referenceSurfaceOpen);
-  const effectiveWorkspaceMode = effectiveReferenceLayout.kind === 'narrow-unified'
+  const requestedEffectiveWorkspaceMode = effectiveReferenceLayout.kind === 'narrow-unified'
     ? effectiveReferenceLayout.activeMode
-    : effectiveReferenceLayout.referenceDock === 'bottom' ? rightWorkspaceMode : workspaceMode;
+    : effectiveReferenceLayout.referenceDock === 'bottom' ? rightWorkspaceMode : visibleWorkspaceMode;
+  const effectiveWorkspaceMode: WorkspaceMode = outlineAbsent
+    && requestedEffectiveWorkspaceMode === 'outline'
+    ? 'annotations'
+    : requestedEffectiveWorkspaceMode;
   const anyWorkspaceOpen = workspaceOpen || referenceSurfaceOpen || toolsSurfaceOpen;
   const annotationsVisible = anyWorkspaceOpen && effectiveWorkspaceMode === 'annotations';
   const selectionAnchor = reliableSelection(props.selectionUpdate);
@@ -326,10 +346,6 @@ export function ReviewShell(props: ReviewShellProps) {
     label: `Page ${tab.originalTarget.pageIndex + 1}`,
     pageContext: `Page ${tab.originalTarget.pageIndex + 1}`,
   }));
-  const outlineDiscovery = props.outlineDiscovery ?? {
-    status: 'loading' as const,
-    documentGeneration: navigation.documentGeneration,
-  };
   const workspaceFraming = useWorkspaceFraming({
     workspaceOpen: anyWorkspaceOpen,
     ...(props.viewerFraming === undefined ? {} : { controls: props.viewerFraming }),
@@ -1001,15 +1017,18 @@ export function ReviewShell(props: ReviewShellProps) {
           <ReferenceWorkspace
             workspaceRef={workspaceFraming.referenceSurfaceRef}
             open={referenceSurfaceOpen}
-            mode={effectiveReferenceLayout.kind === 'narrow-unified'
-              ? effectiveReferenceLayout.activeMode
-              : effectiveReferenceLayout.referenceDock === 'bottom' ? 'references' : workspaceMode}
+            mode={effectiveReferenceLayout.kind !== 'narrow-unified'
+              && effectiveReferenceLayout.referenceDock === 'bottom'
+              ? 'references' : effectiveWorkspaceMode}
             presentation={effectiveReferenceLayout.kind === 'narrow-unified'
               || effectiveReferenceLayout.referenceDock === 'bottom'
               ? 'bottom' : 'right'}
             modes={effectiveReferenceLayout.kind === 'narrow-unified'
               || effectiveReferenceLayout.referenceDock === 'right'
-              ? ['outline', 'annotations', 'references'] : ['references']}
+              ? outlineAbsent
+                ? ['annotations', 'references']
+                : ['outline', 'annotations', 'references']
+              : ['references']}
             headerVariant={effectiveReferenceLayout.kind !== 'narrow-unified'
               && effectiveReferenceLayout.referenceDock === 'bottom' ? 'references' : 'tabs'}
             onMoveReferencesRight={() => {
@@ -1055,7 +1074,7 @@ export function ReviewShell(props: ReviewShellProps) {
             mode={effectiveWorkspaceMode}
             presentation={effectiveReferenceLayout.kind === 'narrow-unified' ? 'bottom' : 'right'}
             headerVariant={sharedWorkspace ? 'shared' : 'tools'}
-            outline={outlineDiscovery}
+            outline={visibleOutlineDiscovery}
             currentOutlineItemId={props.currentOutlineItemId ?? null}
             onModeChange={selectWorkspaceMode}
             onOutlineActivate={(item) => props.onOutlineActivate?.(item)}
@@ -1064,7 +1083,7 @@ export function ReviewShell(props: ReviewShellProps) {
             annotations={<div id="review-annotation-list" aria-label="All annotations">
             <AnnotationList
               items={props.state.items}
-              {...(props.annotationOutlineLabels === undefined
+              {...(!showAnnotationOutlineLabels || props.annotationOutlineLabels === undefined
                 ? {}
                 : { sectionLabels: props.annotationOutlineLabels.owned })}
               {...(activeItemId === undefined ? {} : { activeId: activeItemId })}
@@ -1095,13 +1114,9 @@ export function ReviewShell(props: ReviewShellProps) {
                 }
               }}
             />
-            <section className="existing-annotations" data-existing-annotations-state={existingAnnotations.status} aria-label="Existing PDF annotations">
+            <section className="existing-annotations" data-existing-annotations-state={existingAnnotations.status} aria-label="Existing PDF annotations (read only)">
               <header className="existing-annotations__header">
-                <div>
-                  <p className="existing-annotations__eyebrow">Source PDF</p>
-                  <h2>Existing PDF annotations</h2>
-                </div>
-                <span className="existing-annotations__readonly">Read only</span>
+                <h2>Existing PDF annotations (read only)</h2>
               </header>
               {existingAnnotations.status === 'loading' ? (
                 <p className="annotation-status" data-annotation-status="loading" role="status">
@@ -1120,9 +1135,9 @@ export function ReviewShell(props: ReviewShellProps) {
               {existingAnnotations.status === 'ready' ? (
                 <ol className="existing-annotations__list">
                   {existingAnnotations.items.map((annotation) => {
-                    const sectionLabel = props.annotationOutlineLabels?.source.get(
-                      existingAnnotationKey(annotation),
-                    );
+                    const sectionLabel = showAnnotationOutlineLabels
+                      ? props.annotationOutlineLabels?.source.get(existingAnnotationKey(annotation))
+                      : undefined;
                     return <li
                       key={existingAnnotationKey(annotation)}
                       data-existing-annotation={annotation.id}

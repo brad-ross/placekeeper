@@ -303,7 +303,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('aria-label="Close workspace"');
     expect(html).toContain('class="annotation-drawer__header"');
     expect(html).toContain('aria-label="Owned annotations"');
-    expect(html).toContain('aria-label="Existing PDF annotations"');
+    expect(html).toContain('aria-label="Existing PDF annotations (read only)"');
     expect(html).toContain('data-existing-annotations-state="loading"');
     expect(html).toContain('data-annotation-status="loading"');
     for (const tool of ['Replace', 'Delete', 'Highlight']) {
@@ -369,6 +369,16 @@ describe('review shell layout and accessibility contract', () => {
     );
   });
 
+  it('shares annotation heading typography and couples the direction cue to header height', () => {
+    expect(annotationStyles).toMatch(
+      /\.annotation-drawer__header h2,\s*\.existing-annotations__header h2\s*\{[^}]*font-size:\s*15px;[^}]*font-weight:\s*760;/u,
+    );
+    expect(annotationStyles).toContain(
+      '.annotation-direction-cue[data-correspondence-direction="above"] { top: var(--annotation-drawer-header-height); }',
+    );
+    expect(annotationStyles).not.toContain('.existing-annotations__readonly');
+  });
+
   it('uses only the right rail and controls the combined surface when References is right-docked', () => {
     let layout = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
     layout = reduceReferenceWorkspaceLayout(layout, { type: 'show-references' });
@@ -413,6 +423,17 @@ describe('review shell layout and accessibility contract', () => {
           owned: new Map(),
           source: new Map([['1:source-highlight', 'Methods and data']]),
         }}
+        outlineDiscovery={{
+          status: 'loaded-tree',
+          documentGeneration: 0,
+          items: [{
+            id: 'outline-0',
+            label: 'Methods and data',
+            pageContext: null,
+            target: null,
+            children: [],
+          }],
+        }}
         onCommand={async () => state}
       >
         <div>Document canvas</div>
@@ -429,6 +450,72 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('>Page 2<');
     expect(html).not.toContain('aria-label="Edit Highlight on page 2"');
     expect(html).not.toContain('aria-label="Delete Highlight on page 2"');
+  });
+
+  it('shows an annotation-only workspace and suppresses injected outline context for an empty outline', () => {
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={{ ...state, items: [ownedAnnotation] }}
+        workspaceOpen
+        outlineDiscovery={{ status: 'loaded-empty', documentGeneration: 0 }}
+        rightWorkspaceMode="outline"
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        existingAnnotations={{
+          status: 'ready',
+          generation: 1,
+          items: [{
+            id: 'source-highlight',
+            subtype: 'Highlight',
+            pageIndex: 1,
+            rect: { x: 1, y: 2, width: 3, height: 4 },
+            contents: 'Source-only comment',
+            author: 'Reviewer',
+            flags: [],
+            appearanceModes: ['normal'],
+            supportedAppearance: true,
+          }],
+        }}
+        annotationOutlineLabels={{
+          owned: new Map([['owned-highlight', 'Methods and data']]),
+          source: new Map([['1:source-highlight', 'Methods and data']]),
+        }}
+        onCommand={async () => state}
+      >
+        <div>Document canvas</div>
+      </ReviewShell>,
+    );
+
+    expect(html).not.toContain('id="workspace-mode-outline"');
+    expect(html).not.toContain('id="workspace-panel-outline"');
+    expect(html).toMatch(/id="workspace-mode-annotations"[^>]*aria-selected="true"/u);
+    expect(html).not.toContain('Methods and data');
+    expect(html).toContain('<h2>Annotations ');
+    expect(html).toContain('<h2>Existing PDF annotations (read only)</h2>');
+    expect(html).not.toContain('Review comments');
+    expect(html).not.toContain('Source PDF');
+    expect(html).not.toContain('existing-annotations__readonly');
+  });
+
+  it('does not hide Outline for a stale empty result from another document generation', () => {
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        workspaceOpen
+        outlineDiscovery={{ status: 'loaded-empty', documentGeneration: -1 }}
+        annotationOutlineLabels={{
+          owned: new Map([['owned-highlight', 'Stale section']]),
+          source: new Map(),
+        }}
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        onCommand={async () => state}
+      >
+        <div>Document canvas</div>
+      </ReviewShell>,
+    );
+
+    expect(html).toContain('id="workspace-mode-outline"');
+    expect(html).toContain('id="workspace-panel-outline"');
+    expect(html).not.toContain('Stale section');
   });
 
   it('fails viewer controls safely when capabilities are absent', () => {

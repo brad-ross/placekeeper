@@ -1248,16 +1248,30 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   expect(contactedOrigins).toEqual(new Set([sessionOrigin]));
 });
 
-test("reports an honest empty outline and restores workspace focus", async ({ page }) => {
+test("collapses an outline-free PDF to Annotations and restores workspace focus", async ({ page }) => {
   await openFreshProductionFixture(page, pdf, "No-outline launch failed");
   const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
   await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
   await mainWorkspace.evaluate((element) => element.setAttribute("data-empty-outline-main-mount", "stable"));
   const workspaceControl = await currentWorkspaceRail(page);
   await workspaceControl.click();
-  await expect(page.locator("[data-outline-state='empty']")).toHaveText(
-    "This PDF has no embedded outline.",
+  const workspace = page.locator('#review-tools-workspace');
+  const modes = page.getByRole('tablist', { name: 'Workspace modes' });
+  await expect(modes.getByRole('tab', { name: 'Outline' })).toHaveCount(0);
+  await expect(workspace.locator('#workspace-panel-outline')).toHaveCount(0);
+  await expect(modes.getByRole('tab', { name: 'Annotations', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
   );
+  await expect(workspace.getByRole('heading', { name: /^Annotations \d+$/u })).toBeVisible();
+  await expect(workspace.getByRole('heading', {
+    name: 'Existing PDF annotations (read only)',
+    exact: true,
+  })).toBeVisible();
+  await expect(workspace).not.toContainText('Review comments');
+  await expect(workspace).not.toContainText('Source PDF');
+  await expect(workspace.locator('.existing-annotations__readonly')).toHaveCount(0);
+  await expect(workspace.locator('.annotation-item__section')).toHaveCount(0);
   await workspaceControl.click();
   await expect(workspaceControl).toBeFocused();
   await expect(mainWorkspace).toHaveAttribute("data-empty-outline-main-mount", "stable");

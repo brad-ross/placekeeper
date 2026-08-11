@@ -56,6 +56,61 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('button', { name: 'Proofread mode' })).toHaveCount(0);
   });
 
+  test('keeps focus and References coherent when a live outline disappears and returns', async ({ page }) => {
+    await page.getByRole('button', { name: 'Set outline tree' }).click();
+    await page.getByRole('button', { name: 'Open right workspace' }).click();
+    const outlineDestination = page.getByRole('button', {
+      name: 'Harness section, Page 1',
+      exact: true,
+    });
+    await outlineDestination.focus();
+
+    await page.getByRole('button', { name: 'Set outline empty' }).evaluate((button) => (
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    ));
+    const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
+    await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toHaveCount(0);
+    await expect(annotations).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#workspace-panel-annotations')).toBeFocused();
+
+    await page.getByRole('button', { name: 'Set outline tree' }).evaluate((button) => (
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    ));
+    await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(page.locator('#workspace-panel-outline')).toBeFocused();
+
+    await page.getByRole('button', { name: 'Open References tray' }).click();
+    await page.getByRole('button', { name: 'Move References to right' }).click();
+    const references = page.getByRole('tab', { name: 'References', exact: true });
+    await expect(references).toHaveAttribute('aria-selected', 'true');
+    const outlineTab = page.getByRole('tab', { name: 'Outline', exact: true });
+    await references.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(outlineTab).toBeFocused();
+    await page.getByRole('button', { name: 'Set outline empty' }).evaluate((button) => (
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    ));
+    await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toHaveCount(0);
+    await expect(references).toHaveAttribute('aria-selected', 'true');
+    await expect(references).toBeFocused();
+
+    await page.keyboard.press('ArrowLeft');
+    await expect(annotations).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect(references).toBeFocused();
+
+    await page.setViewportSize({ width: 760, height: 900 });
+    await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+      'data-reference-layout',
+      'narrow-unified',
+    );
+    await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toHaveCount(0);
+    await expect(references).toHaveAttribute('aria-selected', 'true');
+  });
+
   test('commits all five tools once through keyboard and toolbar paths', async ({ page }) => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.focus();
@@ -690,7 +745,7 @@ test.describe('canonical review workflow', () => {
     await expect(row.getByRole('button', { name: /highlight · Page 1/ })).toBeFocused();
     expect(await canvas.boundingBox()).toEqual(beforeActivation);
 
-    const existing = page.getByRole('region', { name: 'Existing PDF annotations' });
+    const existing = page.getByRole('region', { name: 'Existing PDF annotations (read only)' });
     await expect(existing.getByRole('button', { name: /Highlight · Page 1 · Source comment/ })).toBeVisible();
     await expect(existing.getByRole('button', { name: /^Edit/ })).toHaveCount(0);
     await expect(existing.getByRole('button', { name: /^Delete/ })).toHaveCount(0);

@@ -4,6 +4,7 @@ import { PdfZoomMode } from '@embedpdf/models';
 import { CodexDelivery } from '../../../apps/web/src/export/CodexDelivery.js';
 import { HumanDelivery } from '../../../apps/web/src/export/HumanDelivery.js';
 import type { ExistingAnnotationsDiscovery } from '../../../apps/web/src/pdf/existing-annotations.js';
+import type { PdfOutlineDiscovery } from '../../../apps/web/src/pdf/pdf-outline.js';
 import type { AnnotationOutlineLabels } from '../../../apps/web/src/review/annotation-outline-context.js';
 import {
   unavailableViewerControls,
@@ -37,6 +38,7 @@ export interface VisualScenario {
   readonly pageMenuOpen: boolean;
   readonly existingAnnotations: ExistingAnnotationsDiscovery;
   readonly annotationOutlineLabels?: AnnotationOutlineLabels;
+  readonly outlineDiscovery?: PdfOutlineDiscovery;
   readonly finishSlot?: ReactNode;
   readonly viewerState: ViewerControlsSnapshot;
   readonly referenceNavigation?: ReferenceNavigationState;
@@ -248,7 +250,20 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
     listOpen: name === 'tray' || name === 'exceptional',
     pageMenuOpen: name === 'page-note',
     existingAnnotations: name === 'exceptional' ? exceptionalAnnotations : readyAnnotations,
-    ...(name === 'tray' ? { annotationOutlineLabels } : {}),
+    ...(name === 'tray' ? {
+      annotationOutlineLabels,
+      outlineDiscovery: {
+        status: 'loaded-tree' as const,
+        documentGeneration: 0,
+        items: [{
+          id: 'outline-0',
+          label: 'Identification strategy',
+          pageContext: null,
+          target: null,
+          children: [],
+        }],
+      },
+    } : {}),
     viewerState: name === 'unavailable-controls' ? unavailableViewerControls() : viewerState,
     ...(name === 'reference-layout' ? {
       referenceNavigation: visualReferenceNavigation,
