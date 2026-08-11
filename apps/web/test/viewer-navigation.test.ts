@@ -163,6 +163,54 @@ describe('viewer navigation math', () => {
       cropOrigin: { x: 100, y: 200 },
     })).toBeNull();
   });
+
+  it.each([
+    ['page-only', target(PdfZoomMode.Unknown), { x: 300, y: 0 }, { xPercent: 50, yPercent: 0 }],
+    ['full-page', target(PdfZoomMode.FitPage), { x: 300, y: 0 }, { xPercent: 50, yPercent: 0 }],
+    ['vertical-fit', target(PdfZoomMode.FitVertical, [20]), { x: 300, y: 0 }, { xPercent: 50, yPercent: 0 }],
+    ['XYZ', target(PdfZoomMode.XYZ, [20, 700, 2]), { x: 300, y: 100 }, { xPercent: 50, yPercent: 0 }],
+    ['horizontal-fit', target(PdfZoomMode.FitHorizontal, [700]), { x: 300, y: 100 }, { xPercent: 50, yPercent: 0 }],
+    ['bounding-box-horizontal-fit', target(PdfZoomMode.FitBoundingBoxHorizontal, [700]), { x: 300, y: 100 }, { xPercent: 50, yPercent: 0 }],
+    ['rectangle', target(PdfZoomMode.FitRectangle, [100, 200, 500, 700]), { x: 300, y: 350 }, { xPercent: 50, yPercent: 50 }],
+  ] as const)('fits a reference %s target to width with the appropriate vertical anchor', (
+    _name,
+    destination,
+    anchor,
+    alignment,
+  ) => {
+    expect(createPdfTargetLocation(destination, {
+      page,
+      viewport: { width: 620, height: 300, gap: 10 },
+      currentZoom: 1.25,
+    }, 'reference-fit-width')).toEqual({
+      pageIndex: 0,
+      anchor,
+      alignment,
+      zoom: 1,
+    });
+  });
+
+  it('fits a cropped, rotated reference page using its rotated full-page width and crop anchor', () => {
+    expect(createPdfTargetLocation(target(PdfZoomMode.XYZ, [172, 740, 2]), {
+      page: { ...page, cropOrigin: { x: 100, y: 200 } },
+      viewport: { width: 820, height: 300, gap: 10 },
+      currentZoom: 1.25,
+      rotation: Rotation.Degree90,
+    }, 'reference-fit-width')).toEqual({
+      pageIndex: 0,
+      anchor: { x: 300, y: 260 },
+      alignment: { xPercent: 50, yPercent: 0 },
+      zoom: 1,
+    });
+  });
+
+  it('fails closed for unusable reference fit metrics', () => {
+    expect(createPdfTargetLocation(target(PdfZoomMode.FitPage), {
+      page,
+      viewport: { width: 20, height: 300, gap: 10 },
+      currentZoom: 1,
+    }, 'reference-fit-width')).toBeNull();
+  });
 });
 
 interface RectState {
@@ -188,14 +236,19 @@ function domRect(rect: RectState): DOMRect {
 
 function navigationHarness(options: {
   activeDocumentId?: string;
+  classicScrollbarWidth?: number;
   constrainedHorizontal?: boolean;
   artificialHorizontalRunway?: boolean;
   constrainedVertical?: 'start' | 'end';
   initiallyUnreadyPage?: boolean;
   farTargetInitiallyUnmounted?: boolean;
   initiallyUnready?: boolean;
+  initialViewportWidth?: number;
   manualZoom?: boolean;
+  metricWidth?: number;
+  omitViewportElement?: boolean;
   omitZoomLayoutEvent?: boolean;
+  resizeViewportAfterFirstZoom?: number;
   stickyScrollActivity?: boolean;
   staleCurrentPageWithThirdVisible?: boolean;
   runway?: ViewerRunway;
@@ -206,7 +259,9 @@ function navigationHarness(options: {
   const viewportRect: RectState = {
     left: 0,
     top: 0,
-    width: options.initiallyUnready ? 0 : options.constrainedHorizontal ? 620 : 600,
+    width: options.initiallyUnready
+      ? 0
+      : options.initialViewportWidth ?? (options.constrainedHorizontal ? 620 : 600),
     height: options.initiallyUnready ? 0 : 400,
   };
   const pageRect: RectState = {
@@ -232,10 +287,18 @@ function navigationHarness(options: {
   });
   const viewportElement = {
     getBoundingClientRect: () => domRect(viewportRect),
+    get clientWidth() {
+      return viewportRect.width - (options.classicScrollbarWidth ?? 0);
+    },
+    get clientHeight() {
+      return viewportRect.height;
+    },
   } as unknown as HTMLElement;
   const root = {
     querySelector: (selector: string) => {
-      if (selector === '[data-viewer-framing-viewport]') return viewportElement;
+      if (selector === '[data-viewer-framing-viewport]') {
+        return options.omitViewportElement ? null : viewportElement;
+      }
       if (selector === '[data-page-index]') {
         return pageMounted || (options.farTargetInitiallyUnmounted && farPageMounted)
           ? pageElement
@@ -260,6 +323,7 @@ function navigationHarness(options: {
   let currentZoom = 1;
   let currentPage = 1;
   let scrolling = false;
+  let viewportResized = false;
   const storeListeners = new Set<() => void>();
   const zoomListeners = new Set<(event: { newZoom: number }) => void>();
   const layoutListeners = new Set<() => void>();
@@ -279,6 +343,10 @@ function navigationHarness(options: {
       if (typeof level === 'number') {
         if (options.manualZoom) currentZoom = level;
         else emitZoom(level);
+        if (!viewportResized && options.resizeViewportAfterFirstZoom !== undefined) {
+          viewportResized = true;
+          viewportRect.width = options.resizeViewportAfterFirstZoom;
+        }
       }
     },
     onZoomChange: (listener: (event: { newZoom: number }) => void) => {
@@ -321,9 +389,9 @@ function navigationHarness(options: {
   };
   const viewportScope = {
     getMetrics: () => ({
-      width: viewportRect.width,
+      width: options.metricWidth ?? viewportRect.width,
       height: viewportRect.height,
-      clientWidth: viewportRect.width,
+      clientWidth: options.metricWidth ?? viewportRect.width,
       clientHeight: viewportRect.height,
       scrollTop: options.constrainedVertical === 'end' ? 1_600 : 0,
       scrollLeft: 0,
@@ -561,6 +629,53 @@ describe('viewer navigation adapter', () => {
     expect(await harness.navigation.applyTarget(target(PdfZoomMode.XYZ, [72, 640, 0]))).toBe(true);
     expect(harness.log).toEqual(['scroll']);
     expect(harness.navigation.captureLocation()).not.toBeNull();
+  });
+
+  it('fits a reference target from the committed DOM viewport when plugin metrics are stale', async () => {
+    const harness = navigationHarness({ metricWidth: 820 });
+
+    expect(await harness.navigation.applyTarget(
+      target(PdfZoomMode.FitPage),
+      'reference-fit-width',
+    )).toBe(true);
+    expect(harness.pageRect.width).toBe(600);
+  });
+
+  it('fits a reference target to the live client box when classic scrollbars reduce usable width', async () => {
+    const harness = navigationHarness({
+      initialViewportWidth: 620,
+      classicScrollbarWidth: 20,
+    });
+
+    expect(await harness.navigation.applyTarget(
+      target(PdfZoomMode.FitPage),
+      'reference-fit-width',
+    )).toBe(true);
+    expect(harness.pageRect.width).toBe(600);
+  });
+
+  it('reapplies a reference fit once when the committed width changes during navigation', async () => {
+    const harness = navigationHarness({
+      initialViewportWidth: 900,
+      resizeViewportAfterFirstZoom: 600,
+    });
+
+    expect(await harness.navigation.applyTarget(
+      target(PdfZoomMode.FitPage),
+      'reference-fit-width',
+    )).toBe(true);
+    expect(harness.log).toEqual(['zoom:1.5', 'scroll', 'zoom:1', 'scroll']);
+    expect(harness.pageRect.width).toBe(600);
+  });
+
+  it('fails boundedly without mutation when the committed reference viewport is absent', async () => {
+    const harness = navigationHarness({ omitViewportElement: true, timeoutMs: 1 });
+
+    expect(await harness.navigation.applyTarget(
+      target(PdfZoomMode.FitPage),
+      'reference-fit-width',
+    )).toBe(false);
+    expect(harness.log).toEqual([]);
   });
 
   it('scrolls before waiting for a distant virtualized target page to mount', async () => {

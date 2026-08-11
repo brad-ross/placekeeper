@@ -164,6 +164,7 @@
   .reference-tabs .reference-tab-segment__action {
     width: var(--review-control-touch);
     min-width: var(--review-control-touch);
+    min-height: var(--review-control-touch);
     flex-basis: var(--review-control-touch);
   }
 }

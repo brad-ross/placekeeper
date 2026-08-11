@@ -35,6 +35,8 @@ export interface PdfTargetLocationContext {
   readonly rotation?: Rotation;
 }
 
+export type PdfTargetApplicationPolicy = 'author' | 'reference-fit-width';
+
 export interface ViewerNavigationAdapterOptions {
   readonly registry: PluginRegistry;
   readonly root: () => HTMLElement | null;
@@ -54,7 +56,10 @@ export interface PdfViewerNavigation extends ViewerNavigationControls {
   resolveTarget(target: PdfNavigationTarget): PdfViewerLocation | null;
   /** Captures neutral page geometry without exposing viewer-library state. */
   captureDocumentOrderPages(): readonly PdfDocumentOrderPage[] | null;
-  applyTarget(target: PdfNavigationTarget): Promise<boolean>;
+  applyTarget(
+    target: PdfNavigationTarget,
+    policy?: PdfTargetApplicationPolicy,
+  ): Promise<boolean>;
   /** Aborts any in-flight movement without disposing the document scope. */
   cancelPendingNavigation(): void;
 }
@@ -115,6 +120,7 @@ function numericParams(target: PdfNavigationTarget, count: number): readonly num
 export function createPdfTargetLocation(
   target: PdfNavigationTarget,
   context: PdfTargetLocationContext,
+  policy: PdfTargetApplicationPolicy = 'author',
 ): PdfViewerLocation | null {
   const { page, viewport, currentZoom } = context;
   const gap = viewport.gap ?? 0;
@@ -137,6 +143,27 @@ export function createPdfTargetLocation(
   const fitHeight = availableHeight / rotatedPage.height;
   const center = { x: page.width / 2, y: page.height / 2 };
   const cropOrigin = page.cropOrigin ?? { x: 0, y: 0 };
+
+  if (policy === 'reference-fit-width') {
+    const authorLocation = createPdfTargetLocation(target, context);
+    if (authorLocation === null) return null;
+    const preservesVerticalAnchor = target.zoom.mode === PdfZoomMode.XYZ
+      || target.zoom.mode === PdfZoomMode.FitHorizontal
+      || target.zoom.mode === PdfZoomMode.FitBoundingBoxHorizontal
+      || target.zoom.mode === PdfZoomMode.FitRectangle;
+    return {
+      ...authorLocation,
+      anchor: {
+        x: center.x,
+        y: preservesVerticalAnchor ? authorLocation.anchor.y : 0,
+      },
+      alignment: {
+        xPercent: 50,
+        yPercent: preservesVerticalAnchor ? authorLocation.alignment.yPercent : 0,
+      },
+      zoom: fitWidth,
+    };
+  }
 
   switch (target.zoom.mode) {
     case PdfZoomMode.Unknown:
@@ -828,6 +855,7 @@ export function createViewerNavigation(
   const resolveTarget = (
     viewer: ActiveViewer,
     target: PdfNavigationTarget,
+    policy: PdfTargetApplicationPolicy = 'author',
   ): PdfViewerLocation | null => {
     if (target.documentGeneration !== viewer.documentGeneration) return null;
     const page = viewer.pages[target.pageIndex];
@@ -840,6 +868,20 @@ export function createViewerNavigation(
     } catch {
       return null;
     }
+    const viewport = policy === 'reference-fit-width'
+      ? (() => {
+          const element = options.root()
+            ?.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
+          if (!element) return null;
+          const runway = currentRunway();
+          const width = element.clientWidth - runway.right;
+          const height = element.clientHeight - runway.bottom;
+          return validDimension(width) && validDimension(height)
+            ? { width, height }
+            : null;
+        })()
+      : { width: metrics.clientWidth, height: metrics.clientHeight };
+    if (viewport === null) return null;
     const rotation = combinePageRotation(page.rotation, viewer.documentRotation);
     return createPdfTargetLocation(target, {
       page: {
@@ -850,30 +892,33 @@ export function createViewerNavigation(
         },
       },
       viewport: {
-        width: metrics.clientWidth,
-        height: metrics.clientHeight,
+        ...viewport,
         gap: viewer.viewportGap,
       },
       currentZoom,
       rotation,
-    });
+    }, policy);
   };
 
   const waitForTargetLocation = async (
     viewer: ActiveViewer,
     target: PdfNavigationTarget,
     operation: NavigationOperation,
+    policy: PdfTargetApplicationPolicy,
   ): Promise<PdfViewerLocation | null> => {
     const deadline = Date.now() + timeoutMs;
     while (operationIsCurrent(operation) && Date.now() < deadline) {
-      const location = resolveTarget(viewer, target);
+      const location = resolveTarget(viewer, target, policy);
       if (location !== null) return location;
       if (!await waitForPromise(nextFrame(), operation.signal, deadline - Date.now())) return null;
     }
     return null;
   };
 
-  const applyTarget = async (target: PdfNavigationTarget): Promise<boolean> => {
+  const applyTarget = async (
+    target: PdfNavigationTarget,
+    policy: PdfTargetApplicationPolicy = 'author',
+  ): Promise<boolean> => {
     const viewer = activeViewer();
     if (!viewer) return false;
     const operation = await beginOperation(viewer);
@@ -883,7 +928,7 @@ export function createViewerNavigation(
       // A newly opened inactive document can notify before its portaled viewport
       // has committed usable metrics. Let that bounded render settle rather than
       // treating the target as malformed.
-      const initialLocation = await waitForTargetLocation(viewer, target, operation);
+      const initialLocation = await waitForTargetLocation(viewer, target, operation, policy);
       if (initialLocation === null) return false;
       let currentPageIndex = -1;
       try {
@@ -909,10 +954,18 @@ export function createViewerNavigation(
       ) return false;
       // Viewport metrics can change while the portaled page tree settles. Resolve
       // again so fitted zoom/alignment use the committed viewport dimensions.
-      const settledLocation = resolveTarget(viewer, target);
-      const applied = settledLocation
+      const settledLocation = resolveTarget(viewer, target, policy);
+      let applied = settledLocation
         ? await applyResolvedLocation(viewer, settledLocation, operation)
         : false;
+      if (applied && settledLocation && policy === 'reference-fit-width') {
+        const refreshedLocation = resolveTarget(viewer, target, policy);
+        if (refreshedLocation === null) {
+          applied = false;
+        } else if (Math.abs(refreshedLocation.zoom - settledLocation.zoom) > zoomTolerance) {
+          applied = await applyResolvedLocation(viewer, refreshedLocation, operation);
+        }
+      }
       if (!applied && !operation.signal.aborted && operation.mutated) {
         await rollbackOperation(operation);
       }
