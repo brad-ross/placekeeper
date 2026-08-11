@@ -588,6 +588,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           if (item.target === null) navigationCoordinator.unavailableDestination();
           else void navigationCoordinator.navigateMainTarget(item.target, 'outline');
         }}
+        onOutlineReference={(item) => {
+          if (item.target === null) return;
+          void navigationCoordinator.openReference(item.target, {
+            label: item.label,
+            pageContext: item.pageContext ?? `Page ${item.target.pageIndex + 1}`,
+          });
+        }}
         onReferenceViewportHost={setReferenceViewportHost}
         onWorkspaceModeFocusTokenChange={(mode, token) => {
           const current = navigationStateRef.current.workspace.modes[mode];
