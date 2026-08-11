@@ -1119,6 +1119,11 @@ test("keeps compound reference actions touch sized for coarse pointers", async (
       const bounds = button.getBoundingClientRect();
       return { width: bounds.width, height: bounds.height };
     })).toEqual({ width: 44, height: 44 });
+    const disclosure = outline.getByRole("button", { name: "Collapse Details" });
+    expect(await disclosure.evaluate((button) => {
+      const bounds = button.getBoundingClientRect();
+      return { width: bounds.width, height: bounds.height };
+    })).toEqual({ width: 44, height: 44 });
     await outlineReference.click();
 
     const actions = page.locator("[data-reference-tab-action]");
@@ -1198,7 +1203,27 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await expect(detailsReference).toHaveCSS("opacity", "0");
   await expect(nestedReference).toHaveCSS("opacity", "0");
 
+  const compactPageGap = await details.evaluate((destination) => {
+    const label = destination.querySelector<HTMLElement>(".outline-navigator__title");
+    const pageNumber = destination.querySelector<HTMLElement>(".outline-navigator__page");
+    if (!label || !pageNumber) throw new Error("Outline page metadata is incomplete.");
+    const labelText = document.createRange();
+    labelText.selectNodeContents(label);
+    return pageNumber.getBoundingClientRect().left - labelText.getBoundingClientRect().right;
+  });
+  expect(compactPageGap).toBeCloseTo(4, 0);
+
   const nestedRow = nestedReference.locator("..");
+  expect(await nestedRow.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderColor: style.borderColor,
+    };
+  })).toEqual({
+    backgroundColor: "rgba(0, 0, 0, 0)",
+    borderColor: "rgba(0, 0, 0, 0)",
+  });
   await nestedRow.hover();
   await expect(nestedReference).toHaveCSS("opacity", "1");
   await expect(detailsReference).toHaveCSS("opacity", "0");
@@ -1217,19 +1242,37 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   const nestedLongLabelGeometry = await hostileReference.evaluate((button) => {
     const row = button.parentElement;
     const destination = row?.querySelector<HTMLElement>(".outline-navigator__destination");
-    const label = destination?.querySelector<HTMLElement>("span");
-    if (!row || !destination || !label) throw new Error("Outline row geometry is incomplete.");
+    const label = destination?.querySelector<HTMLElement>(".outline-navigator__title");
+    const pageNumber = destination?.querySelector<HTMLElement>(".outline-navigator__page");
+    if (!row || !destination || !label || !pageNumber) {
+      throw new Error("Outline row geometry is incomplete.");
+    }
     const rowBounds = row.getBoundingClientRect();
     const destinationBounds = destination.getBoundingClientRect();
     const actionBounds = button.getBoundingClientRect();
+    const labelBounds = label.getBoundingClientRect();
+    const pageBounds = pageNumber.getBoundingClientRect();
     const rowStyle = getComputedStyle(row);
+    const destinationStyle = getComputedStyle(destination);
     const labelStyle = getComputedStyle(label);
     return {
       actionRightInset: rowBounds.right - actionBounds.right,
       actionWidth: actionBounds.width,
+      rowBorderStyle: rowStyle.borderStyle,
+      rowPaddingRight: rowStyle.paddingRight,
+      destinationLeftInset: destinationBounds.left - rowBounds.left,
       destinationRight: destinationBounds.right,
       actionLeft: actionBounds.left,
       gridColumns: rowStyle.gridTemplateColumns,
+      destinationDisplay: destinationStyle.display,
+      destinationText: destination.textContent,
+      pageText: pageNumber.textContent,
+      pageLeft: pageBounds.left,
+      pageRight: pageBounds.right,
+      labelRight: labelBounds.right,
+      pageCenterY: pageBounds.top + (pageBounds.height / 2),
+      labelCenterY: labelBounds.top + (labelBounds.height / 2),
+      labelFontSize: labelStyle.fontSize,
       labelClientWidth: label.clientWidth,
       labelScrollWidth: label.scrollWidth,
       labelOverflow: labelStyle.overflow,
@@ -1237,11 +1280,30 @@ test("keeps outline and rejected link metadata inert inside the installed local 
       labelWhiteSpace: labelStyle.whiteSpace,
     };
   });
-  expect(nestedLongLabelGeometry.actionRightInset).toBeCloseTo(0, 0);
+  expect(nestedLongLabelGeometry.actionRightInset).toBeCloseTo(5, 0);
   expect(nestedLongLabelGeometry.actionWidth).toBe(31);
+  expect(nestedLongLabelGeometry).toMatchObject({
+    rowBorderStyle: "solid",
+    rowPaddingRight: "4px",
+  });
   expect(nestedLongLabelGeometry.destinationRight)
     .toBeLessThanOrEqual(nestedLongLabelGeometry.actionLeft);
-  expect(nestedLongLabelGeometry.gridColumns.split(" ")).toHaveLength(3);
+  const outlineColumns = nestedLongLabelGeometry.gridColumns.split(" ");
+  expect(outlineColumns).toHaveLength(3);
+  expect(Number.parseFloat(outlineColumns[0]!)).toBeLessThan(20);
+  expect(nestedLongLabelGeometry.destinationLeftInset).toBeLessThan(27);
+  expect(nestedLongLabelGeometry).toMatchObject({
+    destinationDisplay: "flex",
+    destinationText: "scriptalert(1)/script hostile outline· 2",
+    pageText: "· 2",
+    labelFontSize: "13px",
+  });
+  expect(nestedLongLabelGeometry.pageRight)
+    .toBeLessThanOrEqual(nestedLongLabelGeometry.actionLeft);
+  expect(nestedLongLabelGeometry.pageLeft - nestedLongLabelGeometry.labelRight)
+    .toBeCloseTo(4, 0);
+  expect(nestedLongLabelGeometry.pageCenterY)
+    .toBeCloseTo(nestedLongLabelGeometry.labelCenterY, 0);
   expect(nestedLongLabelGeometry.labelScrollWidth)
     .toBeGreaterThan(nestedLongLabelGeometry.labelClientWidth);
   expect(nestedLongLabelGeometry).toMatchObject({
@@ -1250,6 +1312,27 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     labelWhiteSpace: "nowrap",
   });
   await outline.evaluate((element) => { element.style.removeProperty("width"); });
+
+  await page.getByRole("tab", { name: "Annotations", exact: true }).click();
+  const sourceRows = workspace.locator('[data-annotation-origin="source"]');
+  const unsectionedPageOne = sourceRows.filter({
+    has: page.locator('.annotation-item__page', { hasText: /^1$/u }),
+  }).first();
+  await expect(unsectionedPageOne).toBeVisible();
+  await expect(unsectionedPageOne.locator('.annotation-item__section')).toHaveCount(0);
+  await expect(unsectionedPageOne.locator('.annotation-item__separator')).toHaveCount(1);
+
+  const nestedAnnotation = sourceRows.filter({
+    has: page.locator('.annotation-item__section', { hasText: /^Nested result$/u }),
+  }).first();
+  await expect(nestedAnnotation).toBeVisible();
+  await expect(nestedAnnotation.locator('.annotation-item__page')).toHaveText('3');
+  await expect(nestedAnnotation.locator('.annotation-item__separator')).toHaveCount(2);
+  await expect(nestedAnnotation.getByRole('button')).toHaveAccessibleName(
+    /Page 3 · Nested result/u,
+  );
+  await page.getByRole("tab", { name: "Outline", exact: true }).click();
+  await expect(nestedReference).toBeVisible();
 
   const mainViewport = mainWorkspace.locator("[data-viewer-framing-viewport]");
   await mainViewport.evaluate((element) => { element.scrollTop += 32; });
@@ -1367,16 +1450,42 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   expect(contactedOrigins).toEqual(new Set([sessionOrigin]));
 });
 
-test("reports an honest empty outline and restores workspace focus", async ({ page }) => {
+test("collapses an outline-free PDF to Annotations and restores workspace focus", async ({ page }) => {
   await openFreshProductionFixture(page, pdf, "No-outline launch failed");
   const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
   await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
   await mainWorkspace.evaluate((element) => element.setAttribute("data-empty-outline-main-mount", "stable"));
   const workspaceControl = await currentWorkspaceRail(page);
   await workspaceControl.click();
-  await expect(page.locator("[data-outline-state='empty']")).toHaveText(
-    "This PDF has no embedded outline.",
+  const workspace = page.locator('#review-tools-workspace');
+  const modes = page.getByRole('tablist', { name: 'Workspace modes' });
+  await expect(modes.getByRole('tab', { name: 'Outline' })).toHaveCount(0);
+  await expect(workspace.locator('#workspace-panel-outline')).toHaveCount(0);
+  const annotationsMode = modes.getByRole('tab', { name: 'Annotations', exact: true });
+  await expect(annotationsMode).toHaveAttribute(
+    'aria-selected',
+    'true',
   );
+  const [modeBarBounds, annotationsModeBounds] = await Promise.all([
+    modes.boundingBox(),
+    annotationsMode.boundingBox(),
+  ]);
+  expect(modeBarBounds).not.toBeNull();
+  expect(annotationsModeBounds).not.toBeNull();
+  const visibleModeCount = await modes.getByRole('tab').count();
+  expect([1, 2]).toContain(visibleModeCount);
+  expect(Math.abs(
+    annotationsModeBounds!.width - modeBarBounds!.width / visibleModeCount,
+  )).toBeLessThan(10);
+  await expect(workspace.getByRole('heading', { name: /^Annotations \d+$/u })).toBeVisible();
+  await expect(workspace.getByRole('heading', {
+    name: 'External Annotations (read only)',
+    exact: true,
+  })).toBeVisible();
+  await expect(workspace).not.toContainText('Review comments');
+  await expect(workspace).not.toContainText('Source PDF');
+  await expect(workspace.locator('.existing-annotations__readonly')).toHaveCount(0);
+  await expect(workspace.locator('.annotation-item__section')).toHaveCount(0);
   await workspaceControl.click();
   await expect(workspaceControl).toBeFocused();
   await expect(mainWorkspace).toHaveAttribute("data-empty-outline-main-mount", "stable");

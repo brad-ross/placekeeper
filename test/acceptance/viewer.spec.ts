@@ -92,20 +92,22 @@ test.describe('shared viewer foundation', () => {
       .toBeGreaterThan(1);
     await expect.poll(async () => (await pdfPage.boundingBox())?.width ?? 0).toBeGreaterThan(box.width);
 
-    await pdfPage.evaluate((element) => element.scrollIntoView({ block: 'start' }));
     const zoomedBox = await pdfPage.boundingBox();
     if (!zoomedBox) throw new Error('Zoomed PDF page has no bounds.');
     const zoomScale = zoomedBox.width / box.width;
+    await pdfPage.hover({ position: { x: 76 * zoomScale, y: 98 * zoomScale } });
+    const stableZoomedBox = await pdfPage.boundingBox();
+    if (!stableZoomedBox) throw new Error('Stable zoomed PDF page has no bounds.');
+    const stableZoomScale = stableZoomedBox.width / box.width;
     await pdfPage.evaluate((element) => {
       element.dataset.nativeDragstarts = '0';
       element.dataset.pointerdowns = '0';
       element.dataset.pointerups = '0';
     });
-    await page.mouse.move(zoomedBox.x + 76 * zoomScale, zoomedBox.y + 98 * zoomScale);
     await page.mouse.down();
     await page.mouse.move(
-      zoomedBox.x + Math.min(455, box.width - 30) * zoomScale,
-      zoomedBox.y + 105 * zoomScale,
+      stableZoomedBox.x + Math.min(455, box.width - 30) * stableZoomScale,
+      stableZoomedBox.y + 105 * stableZoomScale,
       { steps: 12 },
     );
     await page.mouse.up();

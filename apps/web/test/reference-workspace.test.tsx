@@ -23,7 +23,10 @@ import {
   referenceResizePointerValue,
 } from '../src/review/ReferenceResizeHandle.js';
 import { WorkspaceEdgeRail } from '../src/review/WorkspaceEdgeRail.js';
-import { OutlineAnnotationsWorkspace } from '../src/review/OutlineAnnotationsWorkspace.js';
+import {
+  chooseToolModeFocusTarget,
+  OutlineAnnotationsWorkspace,
+} from '../src/review/OutlineAnnotationsWorkspace.js';
 import type { PdfOutlineItem } from '../src/pdf/pdf-outline.js';
 
 const target = (identity: string, pageIndex: number) => ({
@@ -142,7 +145,7 @@ describe('link action chooser', () => {
 });
 
 describe('shared reference workspace', () => {
-  it('keeps Outline and Annotations under one tools-surface owner', () => {
+  it('collapses a confirmed empty outline to one selected Annotations surface', () => {
     const html = renderToStaticMarkup(
       <OutlineAnnotationsWorkspace
         open
@@ -159,9 +162,47 @@ describe('shared reference workspace', () => {
     );
 
     expect(html).toContain('id="review-tools-workspace"');
-    expect(html.match(/id="workspace-panel-outline"/g)).toHaveLength(1);
+    expect(html).not.toContain('id="workspace-mode-outline"');
+    expect(html).not.toContain('id="workspace-panel-outline"');
+    expect(html).not.toContain('This PDF has no embedded outline.');
     expect(html.match(/id="workspace-panel-annotations"/g)).toHaveLength(1);
+    expect(html).toMatch(/id="workspace-mode-annotations"[^>]*aria-selected="true"/u);
+    expect(html).toMatch(/id="workspace-panel-annotations"[^>]*aria-labelledby="workspace-mode-annotations"/u);
+    expect(html).not.toMatch(/id="workspace-panel-annotations"[^>]*hidden/u);
+    expect(html).toContain('aria-label="Annotations"');
+    expect(html).toContain('data-workspace-mode-count="1"');
+    expect(html).toContain('grid-template-columns:repeat(1, minmax(0, 1fr))');
+  });
+
+  it('keeps Outline available while discovery is unavailable', () => {
+    const html = renderToStaticMarkup(
+      <OutlineAnnotationsWorkspace
+        open
+        mode="outline"
+        presentation="right"
+        headerVariant="tools"
+        outline={{ status: 'unavailable', documentGeneration: 1 }}
+        currentOutlineItemId={null}
+        annotations={<div>Owned annotation rows</div>}
+        onModeChange={() => undefined}
+        onOutlineActivate={() => undefined}
+        onOutlineReference={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('id="workspace-mode-outline"');
+    expect(html).toContain('id="workspace-panel-outline"');
+    expect(html).toContain('Outline unavailable.');
     expect(html).toContain('aria-label="Outline and annotations"');
+  });
+
+  it('discards disconnected mode focus memory before a panel is restored', () => {
+    const disconnected = { isConnected: false } as HTMLElement;
+    const connected = { isConnected: true } as HTMLElement;
+    const panel = {} as HTMLElement;
+
+    expect(chooseToolModeFocusTarget(disconnected, panel)).toBe(panel);
+    expect(chooseToolModeFocusTarget(connected, panel)).toBe(connected);
   });
   it('prioritizes a newly available retry control over remembered loading-panel focus', () => {
     const remembered = { isConnected: true } as HTMLElement;
@@ -213,6 +254,8 @@ describe('shared reference workspace', () => {
     );
 
     expect(html).toContain('aria-label="Workspace modes"');
+    expect(html).toContain('data-workspace-mode-count="3"');
+    expect(html).toContain('grid-template-columns:repeat(3, minmax(0, 1fr))');
     expect(html).not.toContain('aria-label="Close workspace"');
     expect(html.match(/role="tab"/g)).toHaveLength(5);
     expect(html.match(/aria-selected="true"/g)).toHaveLength(2);
@@ -524,7 +567,7 @@ describe('outline navigator', () => {
         onOpenReference={() => undefined}
       />,
     );
-    const rows = html.match(/<div class="outline-navigator__row">[\s\S]*?<\/div>/gu) ?? [];
+    const rows = html.match(/<div class="outline-navigator__row"[^>]*>[\s\S]*?<\/div>/gu) ?? [];
     const groupingRow = rows.find((row) => row.includes('Appendices')) ?? '';
     const introductionRow = rows.find((row) => row.includes('Introduction')) ?? '';
     const resultsRow = rows.find((row) => row.includes('Results')) ?? '';
@@ -539,6 +582,11 @@ describe('outline navigator', () => {
     expect(introductionRow).toContain('title="Open in References"');
     expect(introductionRow).toContain('lucide-panels-top-left');
     expect(resultsRow).toContain('aria-current="location"');
+    expect(resultsRow).toContain('data-current="true"');
+    expect(resultsRow).toContain(
+      '<span class="outline-navigator__summary"><span class="outline-navigator__title">Results</span><small class="outline-navigator__page" aria-hidden="true">· 8</small></span>',
+    );
+    expect(resultsRow).not.toContain('>Page 8</small>');
     expect(html.match(/class="outline-navigator__reference"/g)).toHaveLength(3);
   });
 

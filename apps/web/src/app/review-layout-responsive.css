@@ -84,7 +84,14 @@
   }
 
   .outline-navigator__row {
-    grid-template-columns: var(--review-control-compact) minmax(0, 1fr) var(--review-control-touch);
+    grid-template-columns: var(--review-control-touch) minmax(0, 1fr) var(--review-control-touch);
+  }
+
+  .outline-navigator__disclosure,
+  .outline-navigator__disclosure-spacer {
+    width: var(--review-control-touch);
+    height: var(--review-control-touch);
+    margin-left: 0;
   }
 
   .outline-navigator__reference {

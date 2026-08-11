@@ -14,6 +14,7 @@ import type { WorkspaceMode } from './reference-navigation-state.js';
 import type { RightWorkspaceMode } from './reference-workspace-layout.js';
 
 const TOOL_MODES: readonly RightWorkspaceMode[] = ['outline', 'annotations'];
+const ANNOTATION_ONLY_MODES: readonly RightWorkspaceMode[] = ['annotations'];
 const TOOL_LABELS: Readonly<Record<RightWorkspaceMode, string>> = {
   outline: 'Outline',
   annotations: 'Annotations',
@@ -38,6 +39,13 @@ function focusWithoutScroll(element: HTMLElement | null | undefined): void {
   element?.focus({ preventScroll: true });
 }
 
+export function chooseToolModeFocusTarget(
+  remembered: HTMLElement | null | undefined,
+  panel: HTMLElement | null | undefined,
+): HTMLElement | null | undefined {
+  return remembered?.isConnected ? remembered : panel;
+}
+
 export function OutlineAnnotationsWorkspace({
   workspaceRef,
   open,
@@ -52,33 +60,41 @@ export function OutlineAnnotationsWorkspace({
   onOutlineReference,
   onModeFocusTokenChange,
 }: OutlineAnnotationsWorkspaceProps) {
+  const outlineAvailable = outline.status !== 'loaded-empty';
+  const toolModes = outlineAvailable ? TOOL_MODES : ANNOTATION_ONLY_MODES;
+  const effectiveMode: WorkspaceMode = mode === 'outline' && !outlineAvailable
+    ? 'annotations'
+    : mode;
   const tabRefs = useRef(new Map<RightWorkspaceMode, HTMLButtonElement>());
   const panelRefs = useRef(new Map<RightWorkspaceMode, HTMLElement>());
   const focusMemory = useRef(new Map<RightWorkspaceMode, HTMLElement>());
-  const previous = useRef({ open: false, mode });
+  const previous = useRef({ open: false, mode: effectiveMode });
 
   useLayoutEffect(() => {
     const was = previous.current;
-    previous.current = { open, mode };
-    if (!open || mode === 'references' || (was.open && was.mode === mode)) return;
-    const target = focusMemory.current.get(mode) ?? panelRefs.current.get(mode);
+    previous.current = { open, mode: effectiveMode };
+    if (!open || effectiveMode === 'references' || (was.open && was.mode === effectiveMode)) return;
+    const target = chooseToolModeFocusTarget(
+      focusMemory.current.get(effectiveMode),
+      panelRefs.current.get(effectiveMode),
+    );
     const timeout = setTimeout(() => focusWithoutScroll(target), 0);
     return () => clearTimeout(timeout);
-  }, [mode, open]);
+  }, [effectiveMode, open]);
 
   const moveModeFocus = (event: KeyboardEvent<HTMLButtonElement>) => {
-    const currentIndex = TOOL_MODES.indexOf(
+    const currentIndex = toolModes.indexOf(
       event.currentTarget.dataset.workspaceMode as RightWorkspaceMode,
     );
-    const nextIndex = horizontalTabFocusIndex(currentIndex, TOOL_MODES.length, event.key);
+    const nextIndex = horizontalTabFocusIndex(currentIndex, toolModes.length, event.key);
     if (nextIndex !== null) {
       event.preventDefault();
-      focusWithoutScroll(tabRefs.current.get(TOOL_MODES[nextIndex]!));
+      focusWithoutScroll(tabRefs.current.get(toolModes[nextIndex]!));
       return;
     }
     if ((event.key === 'Enter' || event.key === ' ') && currentIndex >= 0) {
       event.preventDefault();
-      onModeChange(TOOL_MODES[currentIndex]!);
+      onModeChange(toolModes[currentIndex]!);
     }
   };
 
@@ -97,14 +113,20 @@ export function OutlineAnnotationsWorkspace({
       data-tools-workspace-open={open ? 'true' : 'false'}
       data-tools-workspace-shared={headerVariant === 'shared' ? 'true' : 'false'}
       data-workspace-presentation={presentation}
-      aria-label="Outline and annotations"
+      aria-label={outlineAvailable ? 'Outline and annotations' : 'Annotations'}
       aria-hidden={!open}
       inert={!open}
     >
       {headerVariant === 'tools' ? (
         <header className="review-workspace__header">
-          <div className="review-workspace__tabs" role="tablist" aria-label="Workspace modes">
-            {TOOL_MODES.map((toolMode) => (
+          <div
+            className="review-workspace__tabs"
+            role="tablist"
+            aria-label="Workspace modes"
+            data-workspace-mode-count={toolModes.length}
+            style={{ gridTemplateColumns: `repeat(${toolModes.length}, minmax(0, 1fr))` }}
+          >
+            {toolModes.map((toolMode) => (
               <button
                 key={toolMode}
                 ref={(element) => {
@@ -115,9 +137,9 @@ export function OutlineAnnotationsWorkspace({
                 type="button"
                 role="tab"
                 data-workspace-mode={toolMode}
-                aria-selected={mode === toolMode}
+                aria-selected={effectiveMode === toolMode}
                 aria-controls={`workspace-panel-${toolMode}`}
-                tabIndex={mode === toolMode ? 0 : -1}
+                tabIndex={effectiveMode === toolMode ? 0 : -1}
                 onKeyDown={moveModeFocus}
                 onClick={() => onModeChange(toolMode)}
               >
@@ -128,7 +150,7 @@ export function OutlineAnnotationsWorkspace({
         </header>
       ) : null}
 
-      <section
+      {outlineAvailable ? <section
         ref={(element) => {
           if (element) panelRefs.current.set('outline', element);
           else panelRefs.current.delete('outline');
@@ -138,8 +160,8 @@ export function OutlineAnnotationsWorkspace({
         role="tabpanel"
         aria-labelledby="workspace-mode-outline"
         tabIndex={-1}
-        hidden={mode !== 'outline'}
-        inert={mode !== 'outline'}
+        hidden={effectiveMode !== 'outline'}
+        inert={effectiveMode !== 'outline'}
         onFocusCapture={(event) => rememberFocus('outline', event.target)}
       >
         <OutlineNavigator
@@ -149,7 +171,7 @@ export function OutlineAnnotationsWorkspace({
           onOpenReference={onOutlineReference}
           onFocusTokenChange={(token) => onModeFocusTokenChange?.('outline', token)}
         />
-      </section>
+      </section> : null}
 
       <section
         ref={(element) => {
@@ -162,8 +184,8 @@ export function OutlineAnnotationsWorkspace({
         role="tabpanel"
         aria-labelledby="workspace-mode-annotations"
         tabIndex={-1}
-        hidden={mode !== 'annotations'}
-        inert={mode !== 'annotations'}
+        hidden={effectiveMode !== 'annotations'}
+        inert={effectiveMode !== 'annotations'}
         onFocusCapture={(event) => rememberFocus('annotations', event.target)}
       >
         {annotations}

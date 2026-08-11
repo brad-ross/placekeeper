@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import { useRef, useState, useSyncExternalStore } from 'react';
+import { PdfZoomMode } from '@embedpdf/models';
 
 import {
   ReviewShell,
@@ -15,6 +16,7 @@ import {
   type ViewerControlsSnapshot,
 } from '../../../apps/web/src/pdf/viewer-controls.js';
 import type { ViewerInteractionListener } from '../../../apps/web/src/pdf/viewer-interaction-events.js';
+import type { PdfOutlineDiscovery } from '../../../apps/web/src/pdf/pdf-outline.js';
 import type { PdfViewerNavigation } from '../../../apps/web/src/pdf/viewer-navigation-adapter.js';
 import { createReviewState, type ReviewCommand, type ReviewState } from '../../../packages/core/src/review-model.js';
 import { reduceReview } from '../../../packages/core/src/review-reducer.js';
@@ -233,6 +235,7 @@ function createHarnessViewerNavigation(
     },
     fitToWidthReady: () => true,
     resolveTarget: () => null,
+    captureDocumentOrderPages: () => [],
     applyTarget: async () => false,
     cancelPendingNavigation: async () => undefined,
     replaceDocument: () => undefined,
@@ -264,6 +267,10 @@ function Harness() {
   const [correspondingItemId, setCorrespondingItemId] = useState<string | undefined>(visualScenario?.correspondingItemId);
   const [activeItemId, setActiveItemId] = useState<string>();
   const [activationRequest, setActivationRequest] = useState<{ id: string; token: number }>();
+  const [outlineDiscovery, setOutlineDiscovery] = useState<PdfOutlineDiscovery>({
+    status: 'loading',
+    documentGeneration: 0,
+  });
   const viewerControlsRef = useRef<HarnessViewerControls | undefined>(undefined);
   if (viewerControlsRef.current === undefined) {
     viewerControlsRef.current = createHarnessViewerControls();
@@ -308,14 +315,13 @@ function Harness() {
         listOpen: visualScenario.listOpen,
         viewerState: visualScenario.viewerState,
         existingAnnotations: visualScenario.existingAnnotations,
+        annotationOutlineLabels: visualScenario.annotationOutlineLabels,
+        outlineDiscovery: visualScenario.outlineDiscovery,
         finishSlot: visualScenario.finishSlot,
         navigationState: visualScenario.referenceNavigation,
         referenceTabs: visualScenario.referenceTabs,
       } : {})}
-      {...(visualScenario ? {} : {
-        viewerControls,
-        viewerState,
-      })}
+      {...(visualScenario ? {} : { viewerControls, viewerState, outlineDiscovery })}
       viewerNavigation={viewerNavigationRef.current}
       selectionUpdate={anchorKind === 'selection'
         ? { kind: 'reliable', generation: selectionGeneration, anchor: selection }
@@ -374,6 +380,26 @@ function Harness() {
         <button type="button" onClick={() => setHoldNextCommand(true)}>Hold next command</button>
         <button type="button" onClick={() => commandReleaseRef.current?.()}>Release command</button>
         <button type="button" onClick={() => setPageMenuOpen(true)}>Open page actions</button>
+        <button type="button" onClick={() => setOutlineDiscovery({
+          status: 'loaded-tree',
+          documentGeneration: 0,
+          items: [{
+            id: 'harness-outline',
+            label: 'Harness section',
+            pageContext: 'Page 1',
+            target: {
+              documentGeneration: 0,
+              pageIndex: 0,
+              zoom: { mode: PdfZoomMode.FitPage, params: [] },
+              identity: 'harness-outline-target',
+            },
+            children: [],
+          }],
+        })}>Set outline tree</button>
+        <button type="button" onClick={() => setOutlineDiscovery({
+          status: 'loaded-empty',
+          documentGeneration: 0,
+        })}>Set outline empty</button>
         <button type="button" onClick={() => viewerControls.makePageControlsUnavailable()}>
           Make page controls unavailable
         </button>
