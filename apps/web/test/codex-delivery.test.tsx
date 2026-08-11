@@ -35,7 +35,7 @@ describe("Codex delivery UI", () => {
     expect(html).toContain('class="review-delivery__phase-panel" data-phase-panel="setup"');
     expect(html).toContain('class="lucide lucide-clipboard review-icon"');
     expect(html).toContain("Prepare Codex handoff");
-    expect(html).toContain("local-only Human delivery");
+    expect(html).toContain("automatically saved PDF remains separate");
     expect(html).toContain("read containment depends on the external Codex sandbox");
     expect(html).not.toContain("Submit task");
   });

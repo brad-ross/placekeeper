@@ -172,26 +172,16 @@ test('Page Note composer', async ({ page }) => {
   await expectScene(product, 'page-note-composer.png');
 });
 
-test('Finish and delivery', async ({ page }) => {
+test('Codex handoff', async ({ page }) => {
   const product = await openScene(page, 'finish');
-  await page.getByRole('button', { name: 'Finish' }).click();
-  await expect(page.getByRole('heading', { name: 'Human delivery' })).toBeVisible();
-  await expectScene(product, 'finish-and-delivery.png');
+  await page.getByRole('button', { name: 'Codex' }).click();
+  await expect(page.getByRole('heading', { name: 'Work with Codex' })).toBeVisible();
+  await expectScene(product, 'codex-handoff.png');
 });
 
 for (const state of ['loading', 'empty', 'error'] as const) {
   test(`exceptional annotation ${state}`, async ({ page }) => {
     const product = await openScene(page, `exceptional&exception=${state}`);
     await expectScene(product, `exceptional-annotation-${state}.png`);
-  });
-}
-
-for (const state of ['success', 'warning', 'error'] as const) {
-  test(`exceptional delivery ${state}`, async ({ page }) => {
-    const product = await openScene(page, `exceptional&exception=${state}`);
-    await page.getByRole('button', { name: 'Finish' }).click();
-    await page.getByRole('button', { name: 'Save reviewed copy' }).click();
-    await expect(page.locator(`[data-review-status="${state}"]`)).toBeVisible();
-    await expectScene(product, `exceptional-delivery-${state}.png`);
   });
 }

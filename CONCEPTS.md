@@ -17,6 +17,21 @@ One Owned Annotation can appear as several visual segments; interactions treat t
 ### Existing PDF Annotation
 A display-only annotation discovered in the source PDF, kept separate from Review Items so source-document viewer state cannot become editable review state.
 
+### Portable Annotation Identity
+App-authored identity and semantics stored inside a standards-visible PDF annotation so the application can reconstruct its Review Item after the PDF is closed, renamed, moved, or transferred to another device.
+
+Portable Annotation Identity makes app-created annotations editable across sessions without making private recovery data part of the shared document contract.
+
+### Save Destination
+The PDF selected to receive automatic annotation changes, either the safely validated opened document or a distinct copy.
+
+Changing the Save Destination leaves the former PDF at its last successfully saved state and sends the complete current state plus subsequent changes to the new target.
+
+### Protected Recovery
+Private local state that safeguards accepted annotation changes until the Save Destination contains the same current state.
+
+Protected Recovery supports crash and write-failure recovery, but it is not the long-term source of portable annotation editability.
+
 ### Annotation Tray
 The nonmodal review surface that lists Review Items and Existing PDF Annotations while leaving the PDF available for reading and navigation.
 
@@ -60,4 +75,4 @@ Ordinary scrolling, sequential page turns, and zoom changes are not Meaningful J
 
 ## Relationships
 
-A Review Item projects to an Owned Annotation. Existing PDF Annotations remain a separate read-only population. The Annotation Tray presents both populations, while a Framing Session may use Viewer Runway to keep the relevant PDF content reachable.
+A Review Item projects to an Owned Annotation and may carry Portable Annotation Identity in the saved PDF. Existing PDF Annotations remain a separate read-only population. The Annotation Tray presents both populations, while a Framing Session may use Viewer Runway to keep the relevant PDF content reachable. Protected Recovery covers accepted changes until the Save Destination catches up.

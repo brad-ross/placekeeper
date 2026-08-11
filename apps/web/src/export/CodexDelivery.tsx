@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent } from "react";
 
 import type { ReviewState } from "../../../../packages/core/src/review-model.js";
-import { deliveryUnavailableReason } from "./HumanDelivery.js";
+import { deliveryUnavailableReason } from "./delivery-availability.js";
 import {
   focusDeliveryConfirmation,
   handleDeliveryConfirmationKey,
@@ -228,7 +228,7 @@ export function CodexDelivery(props: CodexDeliveryProps) {
       <p className="review-delivery__body">
         The reviewed PDF and handoff stay local until you deliberately use them. Writes are limited to the approved source root and fresh result directory; read containment depends on the external Codex sandbox.
       </p>
-      <p className="review-delivery__body">The local-only Human delivery remains available if you only want to share the reviewed PDF.</p>
+      <p className="review-delivery__body">Your automatically saved PDF remains separate from this optional Codex handoff.</p>
 
       {phase === "Setup" ? (
         <div className="review-delivery__phase-panel" data-phase-panel="setup">

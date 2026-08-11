@@ -4,6 +4,8 @@ import type {
   ProductionSession,
   ProductionSessionApi,
   ProductionScope,
+  ProductionSaveStatus,
+  SaveCopyProposal,
 } from "./ProductionReviewApp.js";
 import type { RejectedReviewCommand } from "./ReviewShell.js";
 
@@ -32,15 +34,18 @@ export async function loadProductionSession(session: ProductionSession): Promise
   readonly state: ReviewState;
   readonly scope: ProductionScope;
   readonly api: ProductionSessionApi;
+  readonly saveStatus: ProductionSaveStatus;
 }> {
   const { request, post } = client(session);
-  const [state, scope] = await Promise.all([
+  const [state, scope, saveStatus] = await Promise.all([
     request<ReviewState>("/state"),
     request<ProductionScope>("/scope"),
+    request<ProductionSaveStatus>("/save/status"),
   ]);
   return {
     state,
     scope,
+    saveStatus,
     api: {
       command: async (command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> => {
         const response = await fetch(`/s/${session.sessionId}/commands`, {
@@ -61,13 +66,22 @@ export async function loadProductionSession(session: ProductionSession): Promise
         if (!response.ok) throw new Error(`The local review action failed safely (${response.status}).`);
         return response.json() as Promise<ReviewState>;
       },
-      saveReviewedCopy: () => post("/delivery/human/save"),
-      replaceOriginal: () => post("/delivery/human/replace"),
+      saveStatus: () => request<ProductionSaveStatus>("/save/status"),
+      saveProposal: () => request<SaveCopyProposal>("/save/proposal"),
+      chooseCopy: (filename, folderSelectionId) => post<ProductionSaveStatus>(
+        "/save/copy",
+        {
+          ...(filename === undefined ? {} : { filename }),
+          ...(folderSelectionId === undefined ? {} : { folderSelectionId }),
+        },
+      ),
+      chooseFolder: () => post("/save/folder"),
+      chooseOriginal: () => post<ProductionSaveStatus>("/save/original"),
+      retrySave: () => post<ProductionSaveStatus>("/save/retry"),
+      locateSave: () => post<ProductionSaveStatus>("/save/locate"),
       prepareCodex: () => post<PreparedProductionHandoff>("/delivery/codex/prepare"),
       saveInstruction: (receiptId) => post("/delivery/codex/instruction", { receiptId }),
       checkCodex: (input) => post("/delivery/codex/result", input),
-      finish: async () => { await post("/finish"); },
-      discard: async () => { await post("/discard"); },
     },
   };
 }

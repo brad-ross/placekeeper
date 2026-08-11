@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { access, copyFile, mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -124,6 +124,25 @@ async function openFreshProductionFixture(
     });
   }
   return { sessionId: launched.sessionId, url: launched.url };
+}
+
+async function chooseFreshCopyDestination(page: Page): Promise<void> {
+  await page.getByRole("button", { name: /^Save options for /u }).click();
+  await page.getByRole("menuitem", { name: "Save to a copy" }).click();
+  const dialog = page.getByRole("dialog", { name: "Save annotations automatically" });
+  const filename = `acceptance-annotations-${randomUUID()}.pdf`;
+  const name = dialog.getByRole("textbox", { name: "Copy name" });
+  await name.fill(filename);
+  await expect(name).toHaveValue(filename);
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+  try {
+    await expect(dialog).toHaveCount(0);
+  } catch (error) {
+    const message = await dialog.getByRole("alert").textContent().catch(() => null);
+    throw new Error(`Copy destination ${filename} was not established: ${message ?? "no error was shown"}`, {
+      cause: error,
+    });
+  }
 }
 
 async function openAnnotationsWorkspace(page: Page) {
@@ -601,12 +620,12 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(mainWorkspace).toHaveAttribute("data-reference-main-mount", "stable");
   await expect(referenceWorkspace).toHaveAttribute("data-reference-mount", "stable");
 
-  const finish = page.getByRole('button', { name: 'Finish' });
-  await finish.click();
+  const codex = page.getByRole('button', { name: 'Codex' });
+  await codex.click();
   await expect(workspace).toHaveAttribute('data-workspace-open', 'false');
-  await expect(page.getByRole('heading', { name: 'Finish review' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Work with Codex' })).toBeVisible();
   await expect(page.locator('[data-workspace-edge-rail]')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Close finish options' }).click();
+  await page.getByRole('button', { name: 'Close Codex options' }).click();
   await expect(workspace).toHaveAttribute('data-workspace-open', 'true');
   await expect(primaryTab).toHaveAttribute('aria-selected', 'true');
   await expect(primaryTab).toBeFocused();
@@ -1037,10 +1056,11 @@ test("one installed-style browser tree preserves review state across responsive 
   const browserErrors = collectBrowserErrors(page);
   await installSelectionCaptureGate(page);
   await page.goto(launchUrl);
-  await expect(page.getByRole("heading", { name: "paper.pdf" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Review views" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Human delivery", includeHidden: true })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Save options for paper.pdf" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Actions" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Codex delivery", includeHidden: true })).toBeHidden();
+  await expect(page.getByText(/Revision \d+/u)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Finish" })).toHaveCount(0);
   await expect.poll(() => assetResponses.some((url) => url.endsWith("/app.css"))).toBe(true);
   await expect.poll(() => assetResponses.some((url) => url.endsWith("/pdfium.wasm"))).toBe(true);
 
@@ -1087,11 +1107,22 @@ test("one installed-style browser tree preserves review state across responsive 
   await expect(replacementTextbox).toHaveValue("b");
   await page.keyboard.type("la");
   await expect(replacementTextbox).toHaveValue("bla");
+  const originalDigest = await sha256(pdf);
   await replacementDialog.getByRole("button", { name: "Apply" }).click();
   await expect(replacementDialog).toHaveCount(0);
+  const destinationDialog = page.getByRole("dialog", { name: "Save annotations automatically" });
+  await expect(destinationDialog).toBeVisible();
+  await expect(destinationDialog.getByRole("radio", { name: /Save to a copy/u })).toBeChecked();
+  await expect(destinationDialog.getByRole("textbox", { name: "Copy name" })).toHaveValue(
+    "paper-annotated.pdf",
+  );
+  expect(host.broker.state(initialSessionId)?.revision).toBe(0);
+  await destinationDialog.getByRole("button", { name: "Confirm" }).click();
+  await expect(destinationDialog).toHaveCount(0);
   await expect(pageCanvas.locator(':scope > div[style*="mix-blend-mode"]')).toHaveCount(0);
   await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toHaveCount(0);
   await expect(page.locator("[data-review-item]")).toHaveCount(1);
+  await expect.poll(() => host.broker.saveStatus(initialSessionId)?.sync.phase).toBe("clean");
   const replacementState = host.broker.state(initialSessionId);
   expect(replacementState?.revision).toBe(1);
   expect(replacementState?.items).toHaveLength(1);
@@ -1115,35 +1146,31 @@ test("one installed-style browser tree preserves review state across responsive 
     width: 334,
     height: 16,
   });
+  const savedTarget = host.broker.saveStatus(initialSessionId)?.destination;
+  expect(savedTarget?.phase).toBe("active");
+  if (savedTarget?.phase !== "active") throw new Error("Save destination was not established");
+  expect(savedTarget.kind).toBe("copy");
+  await access(savedTarget.targetPath);
+  expect(await sha256(pdf)).toBe(originalDigest);
+  await expect(page.getByRole("button", { name: /saving to paper-annotated\.pdf/iu })).toBeVisible();
 
   await page.setViewportSize({ width: 760, height: 900 });
   await expect(page.locator("[data-owned-mark='replace']")).toHaveCount(1);
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(page.locator("[data-owned-mark='replace']")).toHaveCount(1);
-  const canvasBoxBeforeFinish = await pageCanvas.boundingBox();
+  const canvasBoxBeforeCodex = await pageCanvas.boundingBox();
 
-  await page.getByRole("button", { name: "Finish" }).click();
-  await expect(page.getByRole("heading", { name: "Finish review" })).toBeVisible();
+  await page.getByRole("button", { name: "Codex" }).click();
+  await expect(page.getByRole("heading", { name: "Work with Codex" })).toBeVisible();
   await expect.poll(async () => {
-    const box = await page.locator('[data-review-finish-slot]').boundingBox();
+    const box = await page.locator('#review-finish-drawer').boundingBox();
     return box === null ? Number.POSITIVE_INFINITY : Math.abs(box.x + box.width - 1280);
   }).toBeLessThanOrEqual(1);
-  await expect(page.getByText("1 review item")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Human delivery" })).toBeVisible();
+  await expect(page.getByText("1 annotation", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Codex delivery" })).toBeVisible();
   await expect(pageCanvas).toHaveCount(1);
   await expect(workspace).toHaveAttribute('data-mount-probe', 'stable');
-  expect(await pageCanvas.boundingBox()).toEqual(canvasBoxBeforeFinish);
-
-  const originalDigest = await sha256(pdf);
-  await page.getByRole("button", { name: "Save reviewed copy" }).click();
-  const savedStatus = page.getByRole("status").filter({ hasText: "Reviewed copy saved to" });
-  await expect(savedStatus).toBeVisible();
-  const savedText = await savedStatus.textContent();
-  const reviewedPath = savedText?.match(/^Reviewed copy saved to (.+?)(?: The reviewed copy|$)/u)?.[1];
-  expect(reviewedPath).toBeTruthy();
-  await access(reviewedPath!);
-  expect(await sha256(pdf)).toBe(originalDigest);
+  expect(await pageCanvas.boundingBox()).toEqual(canvasBoxBeforeCodex);
 
   await page.getByRole("button", { name: "Prepare Codex handoff" }).click();
   const confirm = page.getByRole("alertdialog", { name: "Confirm this external data flow" });
@@ -1154,13 +1181,13 @@ test("one installed-style browser tree preserves review state across responsive 
   await expect(pageCanvas).toHaveCount(1);
   await page.keyboard.press("Escape");
   await expect(confirm).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Finish review" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Work with Codex" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Prepare Codex handoff" })).toBeFocused();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("heading", { name: "Finish review", includeHidden: true })).toBeHidden();
-  await expect(page.getByRole("button", { name: "Finish" })).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Work with Codex", includeHidden: true })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Codex" })).toBeFocused();
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByRole("button", { name: "Finish" }).click();
+  await page.getByRole("button", { name: "Codex" }).click();
   await page.getByRole("button", { name: "Prepare Codex handoff" }).click();
   await expect(confirm).toBeVisible();
   await expect(page.getByRole("definition").filter({ hasText: sourceRoot })).toBeVisible();
@@ -1174,9 +1201,9 @@ test("one installed-style browser tree preserves review state across responsive 
   await access(codexReviewedPath!);
   expect((await realpath(handoffPath!)).startsWith(`${await realpath(sourceRoot)}/`)).toBe(true);
   await expect(page.locator("#codex-instruction")).toContainText(handoffPath!);
-  await page.getByRole("button", { name: "Close finish options" }).click();
+  await page.getByRole("button", { name: "Close Codex options" }).click();
   await expect(page.getByText(/^Handoff JSON:/u)).toBeHidden();
-  await page.getByRole("button", { name: "Finish" }).click();
+  await page.getByRole("button", { name: "Codex" }).click();
   await expect(page.getByText(/^Handoff JSON:/u)).toHaveText(`Handoff JSON: ${handoffPath}`);
   expect(contactedOrigins).toEqual(new Set([new URL(launchUrl).origin]));
   expect(browserErrors).toEqual([]);
@@ -1193,6 +1220,7 @@ test('edits the current page in a real multi-page viewer without losing adjacent
   }
   const browserErrors = collectBrowserErrors(page);
   await page.goto(launched.url);
+  await chooseFreshCopyDestination(page);
 
   const firstPage = page.locator("[data-page-index='0']").first();
   const secondPage = page.locator("[data-page-index='1']").first();
@@ -1215,6 +1243,7 @@ test('edits the current page in a real multi-page viewer without losing adjacent
   await composer.getByRole('textbox', { name: 'Comment' }).fill('Keep this surrounding review state.');
   await composer.getByRole('button', { name: 'Save comment' }).click();
   await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+  await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe('clean');
 
   const { annotations, workspace: workspaceRail } = await openAnnotationsWorkspace(page);
   const noteRow = page.getByRole('button', {
@@ -1262,6 +1291,7 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
   }
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(launched.url);
+  await chooseFreshCopyDestination(page);
 
   const stage = page.locator('[data-review-stage]');
   const drawer = page.locator('#review-tools-workspace');
@@ -1401,6 +1431,7 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
   await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
   await page.getByRole('textbox', { name: 'Comment' }).fill('Reveal this note above the sheet.');
   await page.getByRole('button', { name: 'Save comment' }).click();
+  await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe('clean');
 
   const noteMark = page.locator('[data-owned-mark="pageNote"]').last();
   const noteFocus = page.locator('[data-owned-focus-id]').last();
@@ -1620,6 +1651,30 @@ test('keeps PDF drag selection available while the Annotation Tray is open', asy
   await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
 });
 
+test("cancels the pending first annotation without choosing or creating a destination", async ({ page }) => {
+  const cancelPdf = join(root, `cancel-${randomUUID()}.pdf`);
+  await copyFile(pdf, cancelPdf);
+  const launched = await host.open({ pdfPath: cancelPdf, sourceRootPath: sourceRoot, fork: true });
+  if (!launched.ok || launched.kind === "recovery-offered") throw new Error("Cancel launch failed");
+  await page.goto(launched.url);
+  const pageCanvas = page.locator("[data-page-index='0']").first();
+  await expect(pageCanvas).toBeVisible();
+  await waitForRenderedPageImage(pageCanvas);
+  await pageCanvas.click({ button: "right", position: { x: 320, y: 420 } });
+  await page.getByRole("menuitem", { name: "Add Page Note" }).click();
+  const composer = page.getByRole("dialog", { name: "Page Note" });
+  await composer.getByRole("textbox", { name: "Comment" }).fill("Do not keep this note.");
+  await composer.getByRole("button", { name: "Save comment" }).click();
+  const destination = page.getByRole("dialog", { name: "Save annotations automatically" });
+  await expect(destination).toBeVisible();
+  await destination.getByRole("button", { name: "Cancel" }).click();
+  await expect(destination).toHaveCount(0);
+  expect(host.broker.state(launched.sessionId)).toMatchObject({ revision: 0, items: [] });
+  expect(host.broker.saveStatus(launched.sessionId)?.destination).toMatchObject({ phase: "none" });
+  await expect(access(cancelPdf.replace(/\.pdf$/u, "-annotated.pdf"))).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(page.locator("[data-owned-mark]")).toHaveCount(0);
+});
+
 test("creates a canonical Page Note from a real PDF context gesture without secondary-activating its mark", async ({ page }) => {
   const launched = await host.open({
     pdfPath: pdf,
@@ -1631,6 +1686,7 @@ test("creates a canonical Page Note from a real PDF context gesture without seco
   }
   const browserErrors = collectBrowserErrors(page);
   await page.goto(launched.url);
+  await chooseFreshCopyDestination(page);
 
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -1653,6 +1709,7 @@ test("creates a canonical Page Note from a real PDF context gesture without seco
   await composer.getByRole("button", { name: "Save comment" }).click();
 
   await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+  await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
   const state = host.broker.state(launched.sessionId);
   expect(state?.revision).toBe(1);
   expect(state?.items).toHaveLength(1);
@@ -1695,6 +1752,7 @@ test("places a canonical Page Note through the real PDF keyboard cursor", async 
   }
   const browserErrors = collectBrowserErrors(page);
   await page.goto(launched.url);
+  await chooseFreshCopyDestination(page);
 
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -1715,6 +1773,7 @@ test("places a canonical Page Note through the real PDF keyboard cursor", async 
   await composer.getByRole("button", { name: "Save comment" }).click();
 
   await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+  await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
   const state = host.broker.state(launched.sessionId);
   expect(state?.revision).toBe(1);
   expect(state?.items).toHaveLength(1);
@@ -1745,6 +1804,7 @@ test("normalizes a real context gesture on a rotated cropped PDF into canonical 
   }
   const browserErrors = collectBrowserErrors(page);
   await page.goto(launched.url);
+  await chooseFreshCopyDestination(page);
 
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -1764,6 +1824,7 @@ test("normalizes a real context gesture on a rotated cropped PDF into canonical 
   await composer.getByRole("button", { name: "Save comment" }).click();
 
   await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+  await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
   const state = host.broker.state(launched.sessionId);
   expect(state?.items).toHaveLength(1);
   const note = state?.items[0];
@@ -1795,6 +1856,7 @@ for (const key of ["Delete", "Backspace"] as const) {
     const browserErrors = collectBrowserErrors(page);
     await installSelectionCaptureGate(page);
     await page.goto(launched.url);
+    await chooseFreshCopyDestination(page);
 
     const pageCanvas = page.locator("[data-page-index='0']").first();
     await expect(pageCanvas).toBeVisible();
@@ -1811,6 +1873,7 @@ for (const key of ["Delete", "Backspace"] as const) {
     expect(page.url()).toBe(urlBeforeKey);
     const state = host.broker.state(launched.sessionId);
     expect(state?.revision).toBe(1);
+    await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
     expect(state?.items).toHaveLength(1);
     expect(state?.items[0]).toMatchObject({
       kind: "delete",
@@ -1846,6 +1909,7 @@ test("discards queued typing when a pending selection is cleared", async ({ page
   }
   await installSelectionCaptureGate(page);
   await page.goto(launched.url);
+  await chooseFreshCopyDestination(page);
 
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -1873,6 +1937,7 @@ test("keeps only typing for the newest pending selection", async ({ page }) => {
   }
   await installSelectionCaptureGate(page);
   await page.goto(launched.url);
+  await chooseFreshCopyDestination(page);
 
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -1893,6 +1958,7 @@ test("keeps only typing for the newest pending selection", async ({ page }) => {
   await expect(page.locator("[data-review-item]")).toHaveCount(1);
   const state = host.broker.state(launched.sessionId);
   expect(state?.revision).toBe(1);
+  await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
   expect(state?.items).toHaveLength(1);
   expect(state?.items[0]).toMatchObject({
     kind: "replace",

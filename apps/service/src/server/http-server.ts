@@ -10,6 +10,7 @@ import {
 import type { ReviewCommand } from "../../../../packages/core/src/review-model.js";
 import { isContained } from "../files/file-capabilities.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
+import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_RESULT_BODY_BYTES = 16 * 1024 * 1024;
@@ -47,6 +48,28 @@ function send(
 
 function sendJson(response: ServerResponse, status: number, value: unknown): void {
   send(response, status, JSON.stringify(value), "application/json; charset=utf-8");
+}
+
+function publicSaveStatus(status: ReturnType<SessionBroker["saveStatus"]>): unknown {
+  if (status === undefined) return undefined;
+  const destination = status.destination.phase === "active"
+    ? {
+        phase: status.destination.phase,
+        generation: status.destination.generation,
+        kind: status.destination.kind,
+        targetPath: status.destination.targetPath,
+      }
+    : status.destination;
+  return {
+    destination,
+    rewriteEligibility: status.rewriteEligibility,
+    sync: {
+      phase: status.sync.phase,
+      desiredRevision: status.sync.desiredRevision,
+      savedRevision: status.sync.savedRevision,
+      ...(status.sync.failure === undefined ? {} : { failure: status.sync.failure }),
+    },
+  };
 }
 
 async function readJson(
@@ -125,11 +148,13 @@ export interface WebAssetOptions {
 export interface LocalHttpServerOptions {
   readonly webAssets?: WebAssetOptions;
   readonly delivery?: SessionDeliveryActions;
+  readonly saving?: Pick<
+    PdfSaveCoordinator,
+    "proposal" | "chooseCopyFilename" | "chooseFolder" | "chooseOriginal" | "requestSave" | "retry" | "locate"
+  >;
 }
 
 export interface SessionDeliveryActions {
-  saveReviewedCopy(sessionId: string): Promise<{ readonly path: string; readonly warning?: string }>;
-  replaceOriginal(sessionId: string): Promise<{ readonly path: string; readonly warning?: string }>;
   prepareCodex(sessionId: string): Promise<{
     readonly receiptId: string;
     readonly prompt: string;
@@ -169,13 +194,17 @@ export async function startHttpServer(
       const pathname = requestUrl.pathname;
       const exchangeMatch = new RegExp(`^/s/(${UUID})/exchange$`, "u").exec(pathname);
       const commandMatch = new RegExp(`^/s/(${UUID})/commands$`, "u").exec(pathname);
-      const finishMatch = new RegExp(`^/s/(${UUID})/(finish|discard)$`, "u").exec(pathname);
+      const saveMatch = new RegExp(
+        `^/s/(${UUID})/save/(status|proposal|copy|folder|original|retry|locate)$`,
+        "u",
+      ).exec(pathname);
       const deliveryMatch = new RegExp(
-        `^/s/(${UUID})/delivery/(human/save|human/replace|codex/prepare|codex/instruction|codex/result)$`,
+        `^/s/(${UUID})/delivery/(codex/prepare|codex/instruction|codex/result)$`,
         "u",
       ).exec(pathname);
       const mutates = exchangeMatch !== null || commandMatch !== null ||
-        finishMatch !== null || deliveryMatch !== null;
+        (saveMatch !== null && saveMatch[2] !== "status" && saveMatch[2] !== "proposal") ||
+        deliveryMatch !== null;
       const expectsJson = mutates;
       const contentLength = Number(request.headers["content-length"] ?? 0);
       const bodyLimit = deliveryMatch?.[2] === "codex/result"
@@ -303,7 +332,7 @@ export async function startHttpServer(
       const documentMatch = new RegExp(`^/s/(${UUID})/document/(${UUID})$`, "u").exec(pathname);
       const authenticatedSessionId =
         stateMatch?.[1] ?? scopeMatch?.[1] ?? documentMatch?.[1] ?? commandMatch?.[1] ??
-        finishMatch?.[1] ?? deliveryMatch?.[1];
+        saveMatch?.[1] ?? deliveryMatch?.[1];
       if (authenticatedSessionId !== undefined) {
         const credential = bearerCredential(request);
         if (
@@ -321,6 +350,50 @@ export async function startHttpServer(
       }
       if (scopeMatch !== null && request.method === "GET") {
         sendJson(response, 200, broker.sessionScope(scopeMatch[1]!));
+        return;
+      }
+      if (saveMatch !== null) {
+        if (options.saving === undefined) {
+          send(response, 503, "Saving service is unavailable");
+          return;
+        }
+        const sessionId = saveMatch[1]!;
+        const action = saveMatch[2]!;
+        if ((action === "status" || action === "proposal") && request.method === "GET") {
+          sendJson(
+            response,
+            200,
+            action === "status"
+              ? publicSaveStatus(broker.saveStatus(sessionId))
+              : options.saving.proposal(sessionId),
+          );
+          return;
+        }
+        if (request.method !== "POST") {
+          send(response, 405, "Method not allowed");
+          return;
+        }
+        const body = await readJson(request) as { filename?: unknown; folderSelectionId?: unknown };
+        if (action === "copy") {
+          await options.saving.chooseCopyFilename(
+            sessionId,
+            typeof body.filename === "string" ? body.filename : undefined,
+            typeof body.folderSelectionId === "string" ? body.folderSelectionId : undefined,
+          );
+        } else if (action === "folder") {
+          sendJson(response, 200, await options.saving.chooseFolder(sessionId));
+          return;
+        } else if (action === "original") {
+          await options.saving.chooseOriginal(sessionId);
+        } else if (action === "retry") {
+          await options.saving.retry(sessionId);
+        } else if (action === "locate") {
+          await options.saving.locate(sessionId);
+        } else {
+          send(response, 405, "Method not allowed");
+          return;
+        }
+        sendJson(response, 200, publicSaveStatus(broker.saveStatus(sessionId)));
         return;
       }
       if (documentMatch !== null && request.method === "GET") {
@@ -351,6 +424,9 @@ export async function startHttpServer(
           commandMatch[1]!,
           (await readJson(request)) as ReviewCommand,
         );
+        if (broker.saveStatus(commandMatch[1]!)?.destination.phase === "active") {
+          void options.saving?.requestSave(commandMatch[1]!);
+        }
         sendJson(response, 200, next);
         return;
       }
@@ -366,16 +442,6 @@ export async function startHttpServer(
         const sessionId = deliveryMatch[1]!;
         const action = deliveryMatch[2]!;
         const body = await readJson(request, bodyLimit) as Record<string, unknown>;
-        if (action === "human/save" || action === "human/replace") {
-          const result = action === "human/save"
-            ? await options.delivery.saveReviewedCopy(sessionId)
-            : await options.delivery.replaceOriginal(sessionId);
-          sendJson(response, 200, {
-            path: result.path,
-            ...(result.warning === undefined ? {} : { warning: result.warning }),
-          });
-          return;
-        }
         if (action === "codex/prepare") {
           sendJson(response, 200, await options.delivery.prepareCodex(sessionId));
           return;
@@ -397,21 +463,6 @@ export async function startHttpServer(
           dispositionText: body.dispositionText,
           revisedPdfSelected: body.revisedPdfSelected,
         }));
-        return;
-      }
-      if (finishMatch !== null) {
-        if (request.method !== "POST") {
-          send(response, 405, "Method not allowed");
-          return;
-        }
-        await readJson(request);
-        if (finishMatch[2] === "finish") {
-          await broker.finish(finishMatch[1]!);
-        } else {
-          await broker.discard(finishMatch[1]!);
-        }
-        assetCapabilities.delete(finishMatch[1]!);
-        sendJson(response, 200, { ended: true });
         return;
       }
       send(response, 404, "Not found");

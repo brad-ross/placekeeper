@@ -12,6 +12,7 @@ export async function start(session: ProductionSession): Promise<void> {
     <ProductionReviewApp
       session={session}
       initialState={loaded.state}
+      initialSaveStatus={loaded.saveStatus}
       scope={loaded.scope}
       api={loaded.api}
     />,

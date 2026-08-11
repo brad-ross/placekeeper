@@ -15,6 +15,8 @@ export function validPageNumber(draft: string, totalPages: number): number | und
 export interface ReviewChromeProps {
   readonly documentTitle: string;
   readonly savedLabel?: string;
+  readonly destinationTitle?: string;
+  readonly savePhase?: 'clean' | 'saving' | 'not-saved';
   readonly controls?: ViewerControls;
   readonly viewerState: ViewerControlsSnapshot;
   readonly canUndo: boolean;
@@ -27,11 +29,14 @@ export interface ReviewChromeProps {
   readonly onNavigateBack?: () => void;
   readonly onNavigateForward?: () => void;
   readonly onFinish: () => void;
+  readonly onSaveOptions?: () => void;
 }
 
 export function ReviewChrome({
   documentTitle,
   savedLabel = 'Saved',
+  destinationTitle,
+  savePhase = 'clean',
   controls,
   viewerState,
   canUndo,
@@ -44,6 +49,7 @@ export function ReviewChrome({
   onNavigateBack = () => undefined,
   onNavigateForward = () => undefined,
   onFinish,
+  onSaveOptions = () => undefined,
 }: ReviewChromeProps) {
   const [editingPage, setEditingPage] = useState(false);
   const [pageDraft, setPageDraft] = useState('');
@@ -112,11 +118,21 @@ export function ReviewChrome({
   return (
     <header className="review-chrome" data-review-chrome>
       <div className="review-chrome__identity">
-        <span className="review-chrome__file-badge" data-review-file-badge aria-hidden="true">
-          <ReviewIcon name="file" size={14} />
-        </span>
-        <h1>{documentTitle}</h1>
-        <span className="review-chrome__saved" data-review-saved-status>{savedLabel}</span>
+        <button
+          type="button"
+          className="review-chrome__save-identity"
+          aria-label={`Save options for ${documentTitle}${destinationTitle ? `, saving to ${destinationTitle}` : ''}${savePhase === 'not-saved' ? ', not saved' : savePhase === 'saving' ? ', saving' : ''}`}
+          onClick={onSaveOptions}
+        >
+          <ReviewIcon name="download" size={17} />
+          <span className="review-chrome__identity-copy">
+            <strong title={documentTitle}>{documentTitle}</strong>
+            {destinationTitle ? <small title={destinationTitle}>{destinationTitle}</small> : null}
+          </span>
+          {savePhase === 'saving' ? <span className="review-chrome__saved" data-review-saved-status>Saving…</span> : null}
+          {savePhase === 'not-saved' ? <span className="review-chrome__not-saved" data-review-saved-status>Not saved</span> : null}
+          {savePhase === 'clean' ? <span className="sr-only" data-review-saved-status>{savedLabel}</span> : null}
+        </button>
       </div>
       <div className="review-chrome__viewer-controls" role="group" aria-label="PDF navigation, zoom, and history">
         <button type="button" className="review-chrome__icon-control" data-review-page-step="previous" aria-label="Previous page" aria-describedby={pageUnavailable} disabled={!viewerState.pageReady || viewerState.currentPage <= 1} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.previousPage())}><ReviewIcon name="chevron-left" /></button>
@@ -199,8 +215,8 @@ export function ReviewChrome({
           <button type="button" className="review-chrome__icon-control review-chrome__history-control" aria-label="Redo" disabled={!canRedo} onClick={onRedo}><ReviewIcon name="redo" /></button>
         </span>
       </div>
-      <nav className="review-chrome__actions" aria-label="Review views">
-        <button type="button" className="review-chrome__finish" aria-expanded={finishOpen} aria-controls="review-finish-drawer" onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); onFinish(); }}>Finish</button>
+      <nav className="review-chrome__actions" aria-label="Actions">
+        <button type="button" className="review-chrome__finish" aria-expanded={finishOpen} aria-controls="review-finish-drawer" onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); onFinish(); }}>Codex</button>
       </nav>
       {!viewerState.pageReady ? <p id={pageUnavailableId} className="sr-only">{viewerState.pageUnavailableReason}</p> : null}
       {!viewerState.zoomReady ? <p id={zoomUnavailableId} className="sr-only">{viewerState.zoomUnavailableReason}</p> : null}

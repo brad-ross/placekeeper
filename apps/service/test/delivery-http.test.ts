@@ -36,8 +36,6 @@ async function authenticatedFixture(delivery: SessionDeliveryActions) {
 
 function actions(): SessionDeliveryActions {
   return {
-    saveReviewedCopy: vi.fn(async () => ({ path: "/tmp/reviewed.pdf" })),
-    replaceOriginal: vi.fn(async () => ({ path: "/tmp/paper.pdf", warning: "Reopen" })),
     prepareCodex: vi.fn(async () => ({
       receiptId: "receipt-a", prompt: "Prompt", handoffPath: "/tmp/handoff.json",
       handoffSha256: "a".repeat(64), reviewedPdfPath: "/tmp/reviewed.pdf",
@@ -49,7 +47,7 @@ function actions(): SessionDeliveryActions {
 }
 
 describe("authenticated production delivery routes", () => {
-  it("reaches Human and Codex projections through the same scoped session", async () => {
+  it("exposes only the separate Codex projection through the scoped session", async () => {
     const delivery = actions();
     const { server, sessionId, credential } = await authenticatedFixture(delivery);
     const post = (suffix: string, body: unknown, auth = true) => fetch(
@@ -66,9 +64,8 @@ describe("authenticated production delivery routes", () => {
       },
     );
 
-    expect((await post("human/save", {}, false)).status).toBe(401);
-    expect(await (await post("human/save", {})).json()).toEqual({ path: "/tmp/reviewed.pdf" });
-    expect(await (await post("human/replace", {})).json()).toEqual({ path: "/tmp/paper.pdf", warning: "Reopen" });
+    expect((await post("human/save", {}, false)).status).toBe(404);
+    expect((await post("human/replace", {})).status).toBe(404);
     const prepared = await (await post("codex/prepare", {})).json() as { receiptId: string };
     expect(prepared.receiptId).toBe("receipt-a");
     expect(await (await post("codex/instruction", { receiptId: "receipt-a" })).json())

@@ -2,3 +2,79 @@
 @import './review-layout-annotations.css';
 @import './review-layout-delivery.css';
 @import './review-layout-responsive.css';
+/* Autosave identity and destination surfaces */
+.review-chrome__save-identity {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+  max-width: min(32rem, 42vw);
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  border-radius: 0.5rem;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+.review-chrome__save-identity:hover,
+.review-chrome__save-identity:focus-visible { background: color-mix(in srgb, currentColor 8%, transparent); }
+.review-chrome__identity-copy { display: flex; min-width: 0; flex-direction: column; }
+.review-chrome__identity-copy strong,
+.review-chrome__identity-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-chrome__identity-copy small { opacity: 0.68; }
+.review-chrome__not-saved { color: #b42318; font-weight: 700; white-space: nowrap; }
+
+.save-destination-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(15 23 42 / 42%);
+}
+.save-destination-dialog {
+  width: min(31rem, 100%);
+  padding: 1.25rem;
+  border: 1px solid rgb(15 23 42 / 16%);
+  border-radius: 0.85rem;
+  background: #fff;
+  box-shadow: 0 24px 70px rgb(15 23 42 / 24%);
+}
+.save-destination-dialog h2 { margin: 0 0 0.35rem; }
+.save-destination-dialog > p { margin: 0 0 1rem; color: #475467; }
+.save-destination-choice { display: flex; gap: 0.7rem; padding: 0.75rem; border: 1px solid #d0d5dd; border-radius: 0.6rem; }
+.save-destination-choice + .save-destination-choice { margin-top: 0.65rem; }
+.save-destination-choice span { display: flex; flex-direction: column; }
+.save-destination-choice small, .save-destination-filename small { color: #667085; }
+.save-destination-filename { display: grid; gap: 0.35rem; margin: 0.65rem 0 0.8rem 2.1rem; font-weight: 600; }
+.save-destination-filename input { min-width: 0; padding: 0.55rem 0.65rem; border: 1px solid #98a2b3; border-radius: 0.45rem; font: inherit; }
+.save-destination-error { color: #b42318 !important; }
+.save-destination-dialog footer { display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 1rem; }
+.save-destination-dialog footer button { min-height: 2.5rem; padding: 0 0.9rem; }
+
+.save-destination-menu {
+  position: fixed;
+  z-index: 110;
+  top: 3.7rem;
+  left: 0.8rem;
+  display: grid;
+  width: min(22rem, calc(100vw - 1.6rem));
+  overflow: hidden;
+  border: 1px solid rgb(15 23 42 / 16%);
+  border-radius: 0.7rem;
+  background: #fff;
+  box-shadow: 0 16px 50px rgb(15 23 42 / 20%);
+}
+.save-destination-menu header { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.85rem; border-bottom: 1px solid #eaecf0; }
+.save-destination-menu header small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #667085; }
+.save-destination-menu button { min-height: 2.75rem; padding: 0 0.85rem; border: 0; border-bottom: 1px solid #f2f4f7; background: #fff; text-align: left; }
+.save-destination-menu button:hover,
+.save-destination-menu button:focus-visible { background: #f2f4f7; }
+.save-destination-menu__warning { color: #b42318; font-weight: 700; }
+
+@media (max-width: 760px) {
+  .review-chrome__save-identity { max-width: 48vw; }
+  .review-chrome__saved, .review-chrome__not-saved { grid-column: 2 / 4; }
+}

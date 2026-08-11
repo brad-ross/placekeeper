@@ -4,6 +4,7 @@ import { ScrollPlugin } from "@embedpdf/plugin-scroll";
 import { SelectionPlugin } from "@embedpdf/plugin-selection";
 
 import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
+import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { CaretAnchor } from "../pdf/selection-anchor.js";
 import type { ExistingAnnotation, ExistingAnnotationsDiscovery } from "../pdf/existing-annotations.js";
 import {
@@ -13,7 +14,7 @@ import {
   type SelectionUpdate,
 } from "../pdf/selection-state.js";
 import { CodexDelivery, type CheckedCodexResult, type PreparedCodexHandoff } from "../export/CodexDelivery.js";
-import { HumanDelivery, type DeliveryArtifact } from "../export/HumanDelivery.js";
+import type { DeliveryArtifact } from "../export/delivery-availability.js";
 import { App } from "./App.js";
 import { ReviewShell, type RejectedReviewCommand } from "./ReviewShell.js";
 import { projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
@@ -52,6 +53,12 @@ import {
   type ReferenceWorkspaceLayoutAction,
   type RightWorkspaceMode,
 } from "../review/reference-workspace-layout.js";
+import { SaveDestinationDialog } from "../save/SaveDestinationDialog.js";
+import { SaveDestinationMenu } from "../save/SaveDestinationMenu.js";
+import {
+  gateReviewCommand,
+  pollSaveStatusUntilSettled,
+} from "../save/save-state-controller.js";
 
 function itemCoordinates(item: ReviewState["items"][number]): { x: number; y: number } | undefined {
   const value = item.payload[item.kind === "insert" || item.kind === "pageNote" ? "position" : "rect"];
@@ -76,10 +83,22 @@ export interface PreparedProductionHandoff extends PreparedCodexHandoff {
   readonly resultDirectory: string;
 }
 
+export type ProductionSaveStatus = SaveStatus;
+
+export interface SaveCopyProposal {
+  readonly filename: string;
+  readonly folder: string;
+}
+
 export interface ProductionSessionApi {
   command(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
-  saveReviewedCopy(): Promise<DeliveryArtifact>;
-  replaceOriginal(): Promise<DeliveryArtifact>;
+  saveStatus(): Promise<ProductionSaveStatus>;
+  saveProposal(): Promise<SaveCopyProposal>;
+  chooseCopy(filename?: string, folderSelectionId?: string): Promise<ProductionSaveStatus>;
+  chooseFolder(): Promise<{ readonly cancelled: boolean; readonly selectionId?: string; readonly folder?: string }>;
+  chooseOriginal(): Promise<ProductionSaveStatus>;
+  retrySave(): Promise<ProductionSaveStatus>;
+  locateSave(): Promise<ProductionSaveStatus>;
   prepareCodex(): Promise<PreparedProductionHandoff>;
   saveInstruction(receiptId: string): Promise<DeliveryArtifact>;
   checkCodex(input: {
@@ -87,13 +106,12 @@ export interface ProductionSessionApi {
     readonly dispositionText: string;
     readonly revisedPdfSelected: boolean;
   }): Promise<CheckedCodexResult>;
-  finish(): Promise<void>;
-  discard(): Promise<void>;
 }
 
 export interface ProductionReviewAppProps {
   readonly session: ProductionSession;
   readonly initialState: ReviewState;
+  readonly initialSaveStatus?: ProductionSaveStatus;
   readonly scope: ProductionScope;
   readonly api: ProductionSessionApi;
   readonly viewer?: ReactNode;
@@ -101,12 +119,32 @@ export interface ProductionReviewAppProps {
 
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [state, setState] = useState(props.initialState);
+  const [saveStatus, setSaveStatus] = useState<ProductionSaveStatus>(
+    props.initialSaveStatus ?? {
+      destination: { phase: "none", generation: 0 },
+      sync: {
+        phase: props.initialState.items.length === 0 ? "clean" : "not-saved",
+        desiredRevision: props.initialState.revision,
+        savedRevision: props.initialState.items.length === 0 ? props.initialState.revision : -1,
+      },
+    },
+  );
+  const [saveMenuOpen, setSaveMenuOpen] = useState(false);
+  const [destinationDialog, setDestinationDialog] = useState<{
+    readonly reason: "first-annotation" | "menu";
+    readonly pending?: ReviewCommand;
+  } | null>(null);
+  const [copyProposal, setCopyProposal] = useState<SaveCopyProposal>();
+  const [folderSelectionId, setFolderSelectionId] = useState<string>();
+  const [destinationEstablishing, setDestinationEstablishing] = useState(false);
+  const [destinationError, setDestinationError] = useState<string>();
+  const destinationAttemptRef = useRef(0);
+  const [cancelPendingCommandToken, setCancelPendingCommandToken] = useState(0);
   const [selectionUpdate, setSelectionUpdate] = useState<SelectionUpdate>(INITIAL_SELECTION_UPDATE);
   const selectionUpdateRef = useRef(selectionUpdate);
   selectionUpdateRef.current = selectionUpdate;
   const [toolError, setToolError] = useState<string | null>(null);
   const [confirmedScope, setConfirmedScope] = useState<string | null>(null);
-  const [humanConfirmationActive, setHumanConfirmationActive] = useState(false);
   const [codexConfirmationActive, setCodexConfirmationActive] = useState(false);
   const [selectionPlacement, setSelectionPlacement] = useState<ViewerClientPlacement | null>(null);
   const [caret, setCaret] = useState<CaretAnchor | null>(null);
@@ -182,6 +220,50 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     [state.items],
   );
   const sourceRoot = props.scope.sourceRootPath ?? "No source root selected";
+  useEffect(() => {
+    if (saveStatus.sync.phase !== "saving") return;
+    const controller = new AbortController();
+    void pollSaveStatusUntilSettled(
+      props.api.saveStatus,
+      setSaveStatus,
+      controller.signal,
+    );
+    return () => controller.abort();
+  }, [props.api, saveStatus.sync.phase, saveStatus.sync.desiredRevision, saveStatus.sync.savedRevision]);
+  useEffect(() => {
+    if (destinationDialog === null) return;
+    let cancelled = false;
+    setDestinationError(undefined);
+    setFolderSelectionId(undefined);
+    void props.api.saveProposal()
+      .then((proposal) => {
+        if (!cancelled) setCopyProposal(proposal);
+      })
+      .catch(() => {
+        if (!cancelled) setDestinationError("Save options could not be prepared safely.");
+      });
+    return () => { cancelled = true; };
+  }, [destinationDialog, props.api]);
+
+  const openCopyDialog = (reason: "first-annotation" | "menu", pending?: ReviewCommand) => {
+    destinationAttemptRef.current += 1;
+    setSaveMenuOpen(false);
+    setDestinationError(undefined);
+    setCopyProposal(undefined);
+    setDestinationDialog({ reason, ...(pending === undefined ? {} : { pending }) });
+  };
+  const chooseOriginal = async () => {
+    setDestinationError(undefined);
+    try {
+      setSaveStatus(await props.api.chooseOriginal());
+      setSaveMenuOpen(false);
+    } catch {
+      setSaveMenuOpen(false);
+      setCopyProposal(undefined);
+      setDestinationDialog({ reason: "menu" });
+      setDestinationError("The original cannot be modified safely. Save to a copy instead.");
+    }
+  };
   const dispatchNavigation = (action: ReferenceNavigationAction) => {
     const next = reduceReferenceNavigation(navigationStateRef.current, action);
     navigationStateRef.current = next;
@@ -464,17 +546,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     />
   );
 
-  const delivery = (
+  const codexDelivery = (
     <div className="review-delivery-content">
-      <HumanDelivery
-        state={state}
-        showLifecycleActions={false}
-        onConfirmationActiveChange={setHumanConfirmationActive}
-        onSave={() => props.api.saveReviewedCopy()}
-        onReplaceOriginal={() => props.api.replaceOriginal()}
-        onFinish={() => props.api.finish()}
-        onDiscard={() => props.api.discard()}
-      />
       <CodexDelivery
         state={state}
         onConfirmationActiveChange={setCodexConfirmationActive}
@@ -518,7 +591,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       <ReviewShell
         state={state}
         documentTitle={props.scope.documentTitle}
-        savedLabel={`Saved · revision ${state.revision}`}
+        savedLabel="Saved"
+        {...(saveStatus.destination.phase === "active" && saveStatus.destination.kind === "copy"
+          ? { destinationTitle: saveStatus.destination.targetPath.split(/[\\/]/u).at(-1)! }
+          : {})}
+        savePhase={saveStatus.sync.phase}
+        onSaveOptions={() => setSaveMenuOpen((open) => !open)}
         {...(viewerControlsRef.current === undefined ? {} : { viewerControls: viewerControlsRef.current })}
         {...(viewerFraming === undefined ? {} : { viewerFraming })}
         viewerState={viewerState}
@@ -542,10 +620,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         canNavigateForward={navigationState.pendingMainNavigation === null
           && navigationState.mainHistory.index >= 0
           && navigationState.mainHistory.index < navigationState.mainHistory.entries.length - 1}
-        finishSlot={delivery}
-        finishConfirmationActive={humanConfirmationActive || codexConfirmationActive}
-        onFinishReview={() => props.api.finish()}
-        onDiscardReview={() => props.api.discard()}
+        codexSlot={codexDelivery}
+        codexConfirmationActive={codexConfirmationActive}
         onLinkActionChoose={(choice, request) => {
           void navigationCoordinator.chooseLink(choice, request);
         }}
@@ -645,6 +721,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         onPlacedPageNoteConsumed={(token) => {
           setPlacedPageNote((current) => current?.token === token ? null : current);
         }}
+        cancelPendingCommandToken={cancelPendingCommandToken}
         onPageNoteComposerComplete={() => {
           placementAuthority.current.clear();
           setPageMenu(null);
@@ -659,9 +736,21 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           registry.getPlugin<SelectionPlugin>(SelectionPlugin.id)?.provides()?.clear(documentId);
         }}
         onCommand={async (command) => {
+          const gated = gateReviewCommand(state, saveStatus, command);
+          if (gated.kind === "choose-destination") {
+            openCopyDialog("first-annotation", command);
+            return {
+              accepted: false,
+              state,
+              message: "Choose where annotations should be saved.",
+            };
+          }
           const result = await props.api.command(command);
           const next = "accepted" in result ? result.state : result;
           setState(next);
+          if (!("accepted" in result)) {
+            setSaveStatus(await props.api.saveStatus());
+          }
           if ("accepted" in result) setToolError(result.message);
           return result;
         }}
@@ -703,6 +792,98 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       >
         {viewer}
       </ReviewShell>
+      <SaveDestinationMenu
+        open={saveMenuOpen}
+        documentTitle={props.scope.documentTitle}
+        status={saveStatus}
+        {...(destinationError === undefined ? {} : { error: destinationError })}
+        onClose={() => setSaveMenuOpen(false)}
+        onCopy={() => openCopyDialog("menu")}
+        onOriginal={() => { void chooseOriginal(); }}
+        onRetry={() => {
+          setDestinationError(undefined);
+          void props.api.retrySave()
+            .then((next) => {
+              setSaveStatus(next);
+              setSaveMenuOpen(false);
+            })
+            .catch(() => setDestinationError("Saving could not be retried safely."));
+        }}
+        onLocate={() => {
+          setDestinationError(undefined);
+          void props.api.locateSave()
+            .then((next) => {
+              setSaveStatus(next);
+              setSaveMenuOpen(false);
+            })
+            .catch(() => setDestinationError("The selected PDF did not match the saved file."));
+        }}
+      />
+      <SaveDestinationDialog
+        open={destinationDialog !== null}
+        {...(copyProposal === undefined ? {} : { proposal: copyProposal })}
+        establishing={destinationEstablishing}
+        {...(saveStatus.rewriteEligibility === undefined
+          ? {}
+          : { rewriteEligibility: saveStatus.rewriteEligibility })}
+        {...(destinationError === undefined ? {} : { error: destinationError })}
+        onChooseLocation={async () => {
+          try {
+            const selected = await props.api.chooseFolder();
+            if (!selected.cancelled && selected.selectionId && selected.folder) {
+              setFolderSelectionId(selected.selectionId);
+              setCopyProposal((current) => ({
+                filename: current?.filename ?? "annotated.pdf",
+                folder: selected.folder!,
+              }));
+            }
+          } catch {
+            setDestinationError("A new location could not be authorized.");
+          }
+        }}
+        onCancel={() => {
+          if (destinationEstablishing) return;
+          destinationAttemptRef.current += 1;
+          if (destinationDialog?.reason === "first-annotation") {
+            setCancelPendingCommandToken((token) => token + 1);
+          }
+          setDestinationDialog(null);
+          setDestinationError(undefined);
+        }}
+        onConfirm={async (choice, filename) => {
+          const dialog = destinationDialog;
+          if (dialog === null || destinationEstablishing) return;
+          const attempt = destinationAttemptRef.current;
+          setDestinationEstablishing(true);
+          setDestinationError(undefined);
+          try {
+            const established = choice === "copy"
+              ? await props.api.chooseCopy(filename, folderSelectionId)
+              : await props.api.chooseOriginal();
+            if (destinationAttemptRef.current !== attempt) return;
+            setSaveStatus(established);
+            if (dialog.pending !== undefined) {
+              const result = await props.api.command(dialog.pending);
+              if (destinationAttemptRef.current !== attempt) return;
+              const next = "accepted" in result ? result.state : result;
+              setState(next);
+              if ("accepted" in result) throw new Error(result.message);
+              setCancelPendingCommandToken((token) => token + 1);
+              setSaveStatus(await props.api.saveStatus());
+              if (destinationAttemptRef.current !== attempt) return;
+            }
+            setDestinationDialog(null);
+          } catch (error) {
+            setDestinationError(
+              error instanceof Error
+                ? error.message
+                : "That destination could not be established safely.",
+            );
+          } finally {
+            setDestinationEstablishing(false);
+          }
+        }}
+      />
     </main>
   );
 }
