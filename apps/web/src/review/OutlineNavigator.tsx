@@ -17,6 +17,7 @@ export interface OutlineNavigatorProps {
   readonly discovery: PdfOutlineDiscovery;
   readonly currentItemId: string | null;
   readonly onActivate: (item: PdfOutlineItem) => void;
+  readonly onOpenReference: (item: PdfOutlineItem) => void;
   readonly onFocusTokenChange?: (token: string) => void;
 }
 
@@ -24,6 +25,7 @@ export function OutlineNavigator({
   discovery,
   currentItemId,
   onActivate,
+  onOpenReference,
   onFocusTokenChange,
 }: OutlineNavigatorProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(
@@ -106,6 +108,18 @@ export function OutlineNavigator({
                   ? <small>{item.pageContext}</small>
                   : null}
               </button>
+              {item.target === null ? null : (
+                <button
+                  type="button"
+                  className="outline-navigator__reference"
+                  aria-label={`Open ${destinationLabel} in References`}
+                  title="Open in References"
+                  onFocus={() => onFocusTokenChange?.(`outline-reference:${item.id}`)}
+                  onClick={() => onOpenReference(item)}
+                >
+                  <ReviewIcon name="references" />
+                </button>
+              )}
             </div>
             {hasChildren ? (
               <div id={childrenId} hidden={!isExpanded} inert={!isExpanded}>
