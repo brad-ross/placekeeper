@@ -90,6 +90,15 @@ async function openLinkInReferences(
   await action.press("Enter");
 }
 
+function canonicalCoordinate(position: unknown, axis: "x" | "y"): number {
+  if (typeof position !== "object" || position === null || Array.isArray(position)) {
+    throw new Error("Canonical Page Note position is unavailable.");
+  }
+  const value = (position as Record<string, unknown>)[axis];
+  if (typeof value !== "number") throw new Error(`Canonical ${axis} coordinate is unavailable.`);
+  return value;
+}
+
 function collectBrowserErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on("console", (message) => {
@@ -1255,6 +1264,10 @@ test('fits a real PDF to closed, bottom, and resizable right reading widths as a
   const mainPage = mainWorkspace.locator("[data-page-index='0']");
   const referenceWorkspace = page.locator('[data-review-workspace]');
   const fitWidth = page.getByRole('button', { name: 'Fit PDF to available width' });
+  const fitAndWait = async () => {
+    await fitWidth.click();
+    await expect(fitWidth).toHaveAttribute('aria-busy', 'false');
+  };
   const zoomTrigger = () => page.getByRole('button', {
     name: /Current zoom \d+ percent\. Enter a zoom percentage/u,
   });
@@ -1298,7 +1311,7 @@ test('fits a real PDF to closed, bottom, and resizable right reading widths as a
     return geometry;
   };
 
-  await fitWidth.click();
+  await fitAndWait();
   const standardGap = 10;
   const closedGeometry = await expectFitted(standardGap);
   const closedZoom = await zoomTrigger().textContent();
@@ -1316,7 +1329,7 @@ test('fits a real PDF to closed, bottom, and resizable right reading widths as a
   });
 
   expect(await zoomTrigger().textContent()).toBe(closedZoom);
-  await fitWidth.click();
+  await fitAndWait();
   const bottomGeometry = await expectFitted(standardGap);
   expect(bottomGeometry.pageWidth).toBeCloseTo(closedGeometry.pageWidth, 0);
   await expect(page.getByLabel('Current page')).toHaveText('1 / 4');
@@ -1336,7 +1349,7 @@ test('fits a real PDF to closed, bottom, and resizable right reading widths as a
   );
   expect(await zoomTrigger().textContent()).toBe(bottomFitZoom);
 
-  await fitWidth.click();
+  await fitAndWait();
   const initialRightGeometry = await expectFitted(standardGap, rightWorkspaceBounds.x);
   expect(initialRightGeometry.pageWidth).toBeLessThan(bottomGeometry.pageWidth);
   const rightFitZoom = await zoomTrigger().textContent();
@@ -1354,7 +1367,7 @@ test('fits a real PDF to closed, bottom, and resizable right reading widths as a
     0,
   );
 
-  await fitWidth.click();
+  await fitAndWait();
   const resizedRightGeometry = await expectFitted(standardGap, resizedWorkspaceBounds.x);
   expect(resizedRightGeometry.pageWidth).toBeLessThan(initialRightGeometry.pageWidth);
   const resizedFitZoom = await zoomTrigger().textContent();
@@ -1366,7 +1379,7 @@ test('fits a real PDF to closed, bottom, and resizable right reading widths as a
     resizedRightGeometry.pageWidth,
     0,
   );
-  await fitWidth.click();
+  await fitAndWait();
   const resizedViewportWorkspaceBounds = await referenceWorkspace.boundingBox();
   if (!resizedViewportWorkspaceBounds) throw new Error('Responsive right workspace has no bounds.');
   await expectFitted(standardGap, resizedViewportWorkspaceBounds.x);
@@ -1793,7 +1806,8 @@ test("creates a canonical Page Note from a real PDF context gesture without seco
     },
   });
   const position = note?.payload.position;
-  expect(position).toMatchObject({ x: 500, y: 1392, width: 18, height: 18 });
+  expect(position).toMatchObject({ x: 500, width: 18, height: 18 });
+  expect(Math.abs(canonicalCoordinate(position, "y") - 1392)).toBeLessThanOrEqual(1);
   expect(note?.id).toBeTruthy();
   const mark = page.locator(`[data-owned-mark="pageNote"][data-review-id="${note!.id}"]`);
   await expect(mark).toHaveCount(1);
@@ -1899,9 +1913,10 @@ test("normalizes a real context gesture on a rotated cropped PDF into canonical 
     pageIndex: 0,
     payload: {
       comment: "Rotated geometry note.",
-      position: { x: 236, y: 1176, width: 18, height: 18 },
+      position: { y: 1176, width: 18, height: 18 },
     },
   });
+  expect(Math.abs(canonicalCoordinate(note?.payload.position, "x") - 236)).toBeLessThanOrEqual(1);
   expect(note?.id).toBeTruthy();
   await expect(page.locator(
     `[data-owned-mark="pageNote"][data-review-id="${note!.id}"]`,

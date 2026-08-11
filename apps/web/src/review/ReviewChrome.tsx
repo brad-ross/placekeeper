@@ -56,7 +56,7 @@ export interface ReviewChromeProps {
   readonly controls?: ViewerControls;
   readonly viewerState: ViewerControlsSnapshot;
   readonly fitWidthReady?: boolean;
-  readonly onFitWidth?: () => void;
+  readonly onFitWidth?: () => void | Promise<void>;
   readonly beforeViewerAction?: () => Promise<void>;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
@@ -100,6 +100,8 @@ export function ReviewChrome({
   const [editingZoom, setEditingZoom] = useState(false);
   const [zoomDraft, setZoomDraft] = useState('');
   const [zoomInvalid, setZoomInvalid] = useState(false);
+  const [fitWidthPending, setFitWidthPending] = useState(false);
+  const fitWidthRequestRef = useRef(0);
   const zoomTriggerRef = useRef<HTMLButtonElement>(null);
   const zoomInputRef = useRef<HTMLInputElement>(null);
   const restoreZoomTriggerFocus = useRef(false);
@@ -110,12 +112,12 @@ export function ReviewChrome({
   const fitWidthUnavailableId = 'viewer-fit-width-readiness';
   const pageUnavailable = viewerState.pageReady ? undefined : pageUnavailableId;
   const zoomUnavailable = viewerState.zoomReady ? undefined : zoomUnavailableId;
+  const runViewerActionAsync = async (action: () => void | Promise<void>) => {
+    await beforeViewerAction?.();
+    await action();
+  };
   const runViewerAction = (action: () => void) => {
-    if (!beforeViewerAction) {
-      action();
-      return;
-    }
-    void beforeViewerAction().then(action);
+    void runViewerActionAsync(action);
   };
 
   useLayoutEffect(() => {
@@ -220,6 +222,16 @@ export function ReviewChrome({
     button.focus({ preventScroll: true });
     if (editingZoom) closeZoomEdit(false);
     runViewerAction(action);
+  };
+  const runFitWidth = (button: HTMLButtonElement) => {
+    clearZoomActionIntent();
+    button.focus({ preventScroll: true });
+    if (editingZoom) closeZoomEdit(false);
+    const request = ++fitWidthRequestRef.current;
+    setFitWidthPending(true);
+    void runViewerActionAsync(onFitWidth).finally(() => {
+      if (fitWidthRequestRef.current === request) setFitWidthPending(false);
+    });
   };
 
   return (
@@ -376,7 +388,7 @@ export function ReviewChrome({
           <span className="review-chrome__stat" data-review-stat aria-label="Zoom level">—%</span>
         )}
         <button type="button" className="review-chrome__icon-control" data-review-zoom-action="in" aria-label="Zoom in" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomIn())}><ReviewIcon name="plus" /></button>
-        <button type="button" className="review-chrome__icon-control review-chrome__fit-width" data-review-zoom-action="fit-width" aria-label="Fit PDF to available width" aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)} disabled={!viewerState.zoomReady || !fitWidthReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, onFitWidth)}><ReviewIcon name="fit-width" /></button>
+        <button type="button" className="review-chrome__icon-control review-chrome__fit-width" data-review-zoom-action="fit-width" aria-label="Fit PDF to available width" aria-busy={fitWidthPending ? 'true' : 'false'} aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)} disabled={!viewerState.zoomReady || !fitWidthReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runFitWidth(event.currentTarget)}><ReviewIcon name="fit-width" /></button>
         <span className="review-chrome__history-cluster" role="group" aria-label="Document and edit history">
           <button type="button" className="review-chrome__icon-control review-chrome__main-history-control" data-main-history="back" aria-label="Back in document history" disabled={!canNavigateBack} onClick={onNavigateBack}><ReviewIcon name="arrow-left" /></button>
           <button type="button" className="review-chrome__icon-control review-chrome__main-history-control" data-main-history="forward" aria-label="Forward in document history" disabled={!canNavigateForward} onClick={onNavigateForward}><ReviewIcon name="arrow-right" /></button>

@@ -869,9 +869,9 @@ export function ReviewShell(props: ReviewShellProps) {
             await props.viewerNavigation?.cancelPendingNavigation();
           },
         })}
-        onFitWidth={() => {
-          void props.viewerNavigation?.fitToWidth(workspaceFraming.waitForSettledGeometry);
-        }}
+        onFitWidth={() => props.viewerNavigation
+          ?.fitToWidth(workspaceFraming.waitForSettledGeometry)
+          .then(() => undefined)}
         canUndo={canUndo}
         canRedo={canRedo}
         canNavigateBack={props.canNavigateBack ?? false}
