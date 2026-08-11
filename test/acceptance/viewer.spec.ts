@@ -87,7 +87,8 @@ test.describe('shared viewer foundation', () => {
     await page.keyboard.down('Control');
     await page.mouse.wheel(0, -10);
     await page.keyboard.up('Control');
-    await expect.poll(async () => (await pdfPage.boundingBox())?.width ?? 0).toBeGreaterThan(box.width);
+    await expect.poll(() => pdfPage.evaluate((element) => element.clientWidth))
+      .toBeGreaterThan(box.width);
 
     await pdfPage.evaluate((element) => element.scrollIntoView({ block: 'start' }));
     const zoomedBox = await pdfPage.boundingBox();
