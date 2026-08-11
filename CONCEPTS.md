@@ -58,6 +58,13 @@ An explicit destination change in the Main Reading Thread that enters PDF Back a
 
 Ordinary scrolling, sequential page turns, and zoom changes are not Meaningful Jumps.
 
+## PDF search
+
+### Search Result
+A page-positioned occurrence derived from reliable searchable text in the current source PDF.
+
+Activating its primary row creates a Meaningful Jump in the Main Reading Thread, while its References action opens the same destination without moving the Main Reading Thread.
+
 ## Relationships
 
 A Review Item projects to an Owned Annotation. Existing PDF Annotations remain a separate read-only population. The Annotation Tray presents both populations, while a Framing Session may use Viewer Runway to keep the relevant PDF content reachable.
