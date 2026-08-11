@@ -353,7 +353,6 @@
 .reference-tabs button,
 .review-workspace__move,
 .review-workspace__close,
-.reference-panel__actions button,
 .outline-navigator button,
 .workspace-state button {
   min-height: var(--review-control-compact);
@@ -537,37 +536,12 @@
   min-width: 0;
   min-height: 0;
   flex: 1;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
-
-.reference-panel__actions {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--review-border-subtle);
-}
-
-.reference-panel__actions > div {
-  display: grid;
-  min-width: 0;
-  flex: 1;
-}
-
-.reference-panel__actions strong,
-.reference-panel__actions span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.reference-panel__actions strong { font-size: 12px; }
-.reference-panel__actions span { color: var(--review-ink-muted); font-size: 10px; }
-.reference-panel__actions button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; font-size: 10px; }
 
 .reference-panel__viewport {
-  grid-area: 2 / 1;
+  grid-area: 1 / 1;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -580,7 +554,7 @@
 
 .reference-panel__pending,
 .reference-panel__empty {
-  grid-area: 2 / 1;
+  grid-area: 1 / 1;
   align-self: start;
   margin: 14px;
 }

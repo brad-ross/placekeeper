@@ -56,7 +56,9 @@ async function expectCompoundReferenceTabs(
   const tablist = page.getByRole('tablist', { name: 'Open references' });
   await expect(tablist).toHaveAttribute('aria-orientation', orientation);
   await expect(tablist.getByRole('tab')).toHaveCount(3);
-  await expect(tablist.locator('[data-reference-tab-selected="true"]')).toHaveCount(1);
+  await expect(tablist.locator(
+    '.reference-tab-segment:has(> [role="tab"][aria-selected="true"])',
+  )).toHaveCount(1);
   await expect(tablist.getByRole('button', { name: 'Send to main' })).toBeVisible();
   await expect(tablist.getByRole('button', { name: 'Close active reference' })).toBeVisible();
   await expect(page.locator('.reference-panel__actions')).toHaveCount(0);

@@ -114,44 +114,58 @@ const viewerState: ViewerControlsSnapshot = {
   zoomPercent: 112,
 };
 
-const visualReferenceTabs: readonly ReferenceWorkspaceTab[] = [
+const visualReferences = [
   {
     identity: 'visual-reference-lemma',
     label: 'Lemma 2: Local identification under conditional independence',
-    pageContext: 'Page 18',
+    pageIndex: 17,
   },
   {
     identity: 'visual-reference-equation',
     label: 'Equation (14): Equilibrium response mapping',
-    pageContext: 'Page 27',
+    pageIndex: 26,
   },
   {
     identity: 'visual-reference-appendix',
     label: 'Appendix Figure A.12: Leave-one-market-out estimates',
-    pageContext: 'Page 64',
+    pageIndex: 63,
   },
-];
+] as const;
 
-function createVisualReferenceNavigation(): ReferenceNavigationState {
-  const location = (pageIndex: number) => ({
-    pageIndex,
-    anchor: { x: 72, y: 120 },
-    alignment: { xPercent: 50, yPercent: 20 },
-    zoom: 1.12,
-  });
-  const state = visualReferenceTabs.reduce((current, tab, index) => reduceReferenceNavigation(current, {
+const visualReferenceTabs: readonly ReferenceWorkspaceTab[] = visualReferences.map((reference) => ({
+  identity: reference.identity,
+  label: reference.label,
+  pageContext: `Page ${reference.pageIndex + 1}`,
+}));
+
+const visualReferenceLocation = (pageIndex: number) => ({
+  pageIndex,
+  anchor: { x: 72, y: 120 },
+  alignment: { xPercent: 50, yPercent: 20 },
+  zoom: 1.12,
+});
+
+function openVisualReference(
+  state: ReferenceNavigationState,
+  reference: (typeof visualReferences)[number],
+): ReferenceNavigationState {
+  return reduceReferenceNavigation(state, {
     type: 'open-reference',
     target: {
       documentGeneration: 0,
-      pageIndex: [17, 26, 63][index]!,
+      pageIndex: reference.pageIndex,
       zoom: { mode: PdfZoomMode.XYZ, params: [72, 120, 1.12] },
-      identity: tab.identity,
+      identity: reference.identity,
     },
-    settledLocation: location([17, 26, 63][index]!),
-    label: tab.label,
-    pageContext: tab.pageContext,
-  }), createReferenceNavigationState(0));
-  return { ...state, activeTabIdentity: visualReferenceTabs[0]!.identity };
+    settledLocation: visualReferenceLocation(reference.pageIndex),
+    label: reference.label,
+    pageContext: `Page ${reference.pageIndex + 1}`,
+  });
+}
+
+function createVisualReferenceNavigation(): ReferenceNavigationState {
+  const state = visualReferences.reduce(openVisualReference, createReferenceNavigationState(0));
+  return openVisualReference(state, visualReferences[0]);
 }
 
 const visualReferenceNavigation = createVisualReferenceNavigation();

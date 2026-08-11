@@ -226,10 +226,10 @@ describe('shared reference workspace', () => {
     const referenceSemanticTabs = semanticTabs.filter((tab) => tab.includes('data-reference-tab='));
 
     expect(lemmaActive.match(/data-reference-tab-segment=/g)).toHaveLength(2);
-    expect(lemmaActive.match(/data-reference-tab-selected="true"/g)).toHaveLength(1);
+    expect(lemmaActive.match(/data-reference-tab[^>]*aria-selected="true"/g)).toHaveLength(1);
     expect(lemmaActive.match(/data-reference-tab-action=/g)).toHaveLength(2);
     expect(lemmaActive).toMatch(
-      /data-reference-tab-segment="lemma"[^>]*data-reference-tab-selected="true"[\s\S]*role="tab"[\s\S]*data-reference-tab-action="send"[\s\S]*data-reference-tab-action="close"/u,
+      /data-reference-tab-segment="lemma"[\s\S]*role="tab"[\s\S]*aria-selected="true"[\s\S]*data-reference-tab-action="send"[\s\S]*data-reference-tab-action="close"/u,
     );
     expect(lemmaActive).toContain('aria-label="Send to main"');
     expect(lemmaActive).toContain('title="Send to main"');
@@ -245,7 +245,7 @@ describe('shared reference workspace', () => {
     expect(lemmaActive.match(/>Page 18</g)).toHaveLength(1);
 
     expect(proofActive).toMatch(
-      /data-reference-tab-segment="proof"[^>]*data-reference-tab-selected="true"[\s\S]*data-workspace-focus-token="reference-send:proof"[\s\S]*data-workspace-focus-token="reference-close:proof"/u,
+      /data-reference-tab-segment="proof"[\s\S]*aria-selected="true"[\s\S]*data-workspace-focus-token="reference-send:proof"[\s\S]*data-workspace-focus-token="reference-close:proof"/u,
     );
     expect(proofActive).not.toContain('data-workspace-focus-token="reference-send:lemma"');
     expect(proofActive).not.toContain('data-workspace-focus-token="reference-close:lemma"');

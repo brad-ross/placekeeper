@@ -360,7 +360,6 @@ export function ReferenceWorkspace({
                     showActions ? ' reference-tab-segment--compound' : ''
                   }`}
                   data-reference-tab-segment={tab.identity}
-                  data-reference-tab-selected={selected ? 'true' : 'false'}
                   role="presentation"
                 >
                   <button

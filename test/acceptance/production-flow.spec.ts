@@ -293,7 +293,9 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   if (!bottomPrimaryTabBox || !bottomDetailTabBox) throw new Error("Bottom reference tabs have no bounds.");
   expect(bottomDetailTabBox.y).toBeGreaterThan(bottomPrimaryTabBox.y + bottomPrimaryTabBox.height - 1);
   expect(bottomDetailTabBox.x).toBeCloseTo(bottomPrimaryTabBox.x, 0);
-  const bottomCompound = referenceTabsList.locator('[data-reference-tab-selected="true"]');
+  const bottomCompound = referenceTabsList.locator(
+    '.reference-tab-segment:has(> [role="tab"][aria-selected="true"])',
+  );
   await expect(bottomCompound.locator('button')).toHaveCount(3);
   const bottomPanelGeometry = await page.locator('.reference-panel').evaluate((panel) => {
     const viewport = panel.querySelector<HTMLElement>('[data-reference-viewport-host]');
@@ -478,7 +480,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   const referenceRightBounds = await workspace.boundingBox();
   expect(referenceRightBounds?.width).toBeCloseTo(rememberedRightValue, 0);
   const rightCompoundGeometry = await referenceTabsList.locator(
-    '[data-reference-tab-selected="true"]',
+    '.reference-tab-segment:has(> [role="tab"][aria-selected="true"])',
   ).evaluate((segment) => {
     const selector = segment.querySelector<HTMLElement>('[role="tab"]');
     const title = selector?.querySelector<HTMLElement>('span');
