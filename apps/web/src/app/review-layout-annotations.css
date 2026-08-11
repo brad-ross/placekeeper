@@ -274,8 +274,6 @@
   display: grid;
   min-width: 0;
   flex: 1;
-  grid-auto-columns: minmax(0, 1fr);
-  grid-auto-flow: column;
   gap: 3px;
   padding: 3px;
   border-radius: var(--review-radius-control);

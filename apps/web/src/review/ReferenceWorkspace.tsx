@@ -274,6 +274,7 @@ export function ReferenceWorkspace({
           role="tablist"
           aria-label="Workspace modes"
           data-workspace-mode-count={modes.length}
+          style={{ gridTemplateColumns: `repeat(${modes.length}, minmax(0, 1fr))` }}
         >
           {modes.map((workspaceMode) => {
             const selected = workspaceMode === mode;

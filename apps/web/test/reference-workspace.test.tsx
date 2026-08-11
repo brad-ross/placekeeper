@@ -171,6 +171,7 @@ describe('shared reference workspace', () => {
     expect(html).not.toMatch(/id="workspace-panel-annotations"[^>]*hidden/u);
     expect(html).toContain('aria-label="Annotations"');
     expect(html).toContain('data-workspace-mode-count="1"');
+    expect(html).toContain('grid-template-columns:repeat(1, minmax(0, 1fr))');
   });
 
   it('keeps Outline available while discovery is unavailable', () => {
@@ -254,6 +255,7 @@ describe('shared reference workspace', () => {
 
     expect(html).toContain('aria-label="Workspace modes"');
     expect(html).toContain('data-workspace-mode-count="3"');
+    expect(html).toContain('grid-template-columns:repeat(3, minmax(0, 1fr))');
     expect(html).not.toContain('aria-label="Close workspace"');
     expect(html.match(/role="tab"/g)).toHaveLength(5);
     expect(html.match(/aria-selected="true"/g)).toHaveLength(2);

@@ -403,9 +403,8 @@ describe('review shell layout and accessibility contract', () => {
     );
     expect(annotationStyles).not.toContain('--annotation-drawer-header-height');
     expect(annotationStyles).not.toMatch(/\.annotation-drawer__header\s*\{[^}]*position:\s*sticky;/u);
-    expect(annotationStyles).toMatch(
-      /\.review-workspace__tabs\s*\{[^}]*grid-auto-columns:\s*minmax\(0, 1fr\);[^}]*grid-auto-flow:\s*column;/u,
-    );
+    expect(annotationStyles).not.toContain('grid-auto-columns');
+    expect(annotationStyles).not.toContain('grid-auto-flow');
     expect(annotationStyles).not.toContain('.review-tools-workspace .review-workspace__tabs');
     expect(annotationStyles).not.toContain('.existing-annotations__readonly');
   });

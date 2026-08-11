@@ -124,6 +124,7 @@ export function OutlineAnnotationsWorkspace({
             role="tablist"
             aria-label="Workspace modes"
             data-workspace-mode-count={toolModes.length}
+            style={{ gridTemplateColumns: `repeat(${toolModes.length}, minmax(0, 1fr))` }}
           >
             {toolModes.map((toolMode) => (
               <button

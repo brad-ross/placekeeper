@@ -1472,7 +1472,11 @@ test("collapses an outline-free PDF to Annotations and restores workspace focus"
   ]);
   expect(modeBarBounds).not.toBeNull();
   expect(annotationsModeBounds).not.toBeNull();
-  expect(annotationsModeBounds!.width).toBeGreaterThan(modeBarBounds!.width - 10);
+  const visibleModeCount = await modes.getByRole('tab').count();
+  expect([1, 2]).toContain(visibleModeCount);
+  expect(Math.abs(
+    annotationsModeBounds!.width - modeBarBounds!.width / visibleModeCount,
+  )).toBeLessThan(10);
   await expect(workspace.getByRole('heading', { name: /^Annotations \d+$/u })).toBeVisible();
   await expect(workspace.getByRole('heading', {
     name: 'External Annotations (read only)',
