@@ -430,23 +430,73 @@
   scrollbar-width: thin;
 }
 
-.reference-tabs button {
+.reference-tab-segment {
+  display: flex;
+  min-width: 0;
+  max-width: 13rem;
+  flex: none;
+  align-items: stretch;
+  border: 1px solid transparent;
+  border-radius: var(--review-radius-control);
+}
+
+.reference-tab-segment--compound {
+  width: min(17rem, 100%);
+  max-width: calc(13rem + (2 * var(--review-control-compact)));
+  overflow: hidden;
+  border-color: var(--review-border);
+  background: var(--review-surface-panel);
+  box-shadow: 0 1px 2px rgb(24 26 23 / 8%);
+}
+
+.reference-tab-segment__selector {
   display: grid;
   min-width: 8rem;
   max-width: 13rem;
+  flex: 1 1 auto;
   padding: 6px 9px;
   text-align: left;
 }
 
-.reference-tabs button span,
-.reference-tabs button small {
+.reference-tab-segment__selector span,
+.reference-tab-segment__selector small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.reference-tabs button span { color: var(--review-ink-primary); font-size: 11px; font-weight: 720; }
-.reference-tabs button small { color: var(--review-ink-muted); font-size: 10px; }
+.reference-tab-segment__selector span { color: var(--review-ink-primary); font-size: 11px; font-weight: 720; }
+.reference-tab-segment__selector small { color: var(--review-ink-muted); font-size: 10px; }
+
+.reference-tabs .reference-tab-segment--compound > .reference-tab-segment__selector {
+  min-width: 0;
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.reference-tabs .reference-tab-segment__action {
+  display: grid;
+  width: var(--review-control-compact);
+  min-width: var(--review-control-compact);
+  flex: 0 0 var(--review-control-compact);
+  padding: 0;
+  place-items: center;
+  border-left-color: var(--review-border-subtle);
+  border-radius: 0;
+}
+
+.reference-tabs .reference-tab-segment__action:hover {
+  color: var(--review-ink-primary);
+  background: var(--review-surface-subtle);
+}
+
+.review-shell .reference-tab-segment--compound > button:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline-offset: -3px;
+}
 
 .review-workspace__panel--references[data-reference-tabs-orientation="vertical"] {
   display: grid;
@@ -469,11 +519,17 @@
   border-bottom: 0;
 }
 
-.reference-tabs[data-reference-tabs-orientation="vertical"] button {
+.reference-tabs[data-reference-tabs-orientation="vertical"] .reference-tab-segment {
   width: 100%;
   min-width: 0;
   max-width: none;
   flex: none;
+}
+
+.reference-tabs[data-reference-tabs-orientation="vertical"] .reference-tab-segment__selector {
+  width: auto;
+  min-width: 0;
+  max-width: none;
 }
 
 .reference-panel {

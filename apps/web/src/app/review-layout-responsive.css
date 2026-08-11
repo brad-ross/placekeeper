@@ -137,6 +137,16 @@
     min-width: var(--review-control-touch);
     min-height: var(--review-control-touch);
   }
+
+  .reference-tab-segment--compound {
+    max-width: calc(13rem + (2 * var(--review-control-touch)));
+  }
+
+  .reference-tabs .reference-tab-segment__action {
+    width: var(--review-control-touch);
+    min-width: var(--review-control-touch);
+    flex-basis: var(--review-control-touch);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -49,6 +49,19 @@ async function expectScene(locator: Locator, name: string): Promise<void> {
   });
 }
 
+async function expectCompoundReferenceTabs(
+  page: Page,
+  orientation: 'horizontal' | 'vertical',
+): Promise<void> {
+  const tablist = page.getByRole('tablist', { name: 'Open references' });
+  await expect(tablist).toHaveAttribute('aria-orientation', orientation);
+  await expect(tablist.getByRole('tab')).toHaveCount(3);
+  await expect(tablist.locator('[data-reference-tab-selected="true"]')).toHaveCount(1);
+  await expect(tablist.getByRole('button', { name: 'Send to main' })).toBeVisible();
+  await expect(tablist.getByRole('button', { name: 'Close active reference' })).toBeVisible();
+  await expect(page.locator('.reference-panel__actions')).toHaveCount(0);
+}
+
 test('wide contextual review', async ({ page }) => {
   const product = await openScene(page, 'contextual');
   await page.getByRole('button', { name: 'Highlight', exact: true }).hover();
@@ -109,7 +122,7 @@ test('wide bottom References tray', async ({ page }) => {
   const product = await openScene(page, 'reference-layout');
   await page.getByRole('button', { name: 'Open References tray' }).click();
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'wide-bottom');
-  await expect(page.locator('[data-reference-empty]')).toBeVisible();
+  await expectCompoundReferenceTabs(page, 'vertical');
   await expectScene(product, 'wide-bottom-references.png');
 });
 
@@ -119,6 +132,7 @@ test('wide coordinated References and tools trays', async ({ page }) => {
   await page.getByRole('button', { name: 'Open right workspace' }).click();
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'wide-split');
   await expect(page.locator('#review-tools-workspace')).toBeVisible();
+  await expectCompoundReferenceTabs(page, 'vertical');
   await expectScene(product, 'wide-split-reference-tools.png');
 });
 
@@ -128,6 +142,7 @@ test('wide right-docked References tray', async ({ page }) => {
   await page.getByRole('button', { name: 'Move References to right' }).click();
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'wide-right');
   await expect(page.getByRole('tab', { name: 'References', exact: true })).toBeVisible();
+  await expectCompoundReferenceTabs(page, 'horizontal');
   await expectScene(product, 'wide-right-references.png');
 });
 
@@ -137,6 +152,7 @@ test('narrow unified References tray', async ({ page }) => {
   await page.getByRole('tab', { name: 'References', exact: true }).click();
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'narrow-unified');
   await expect(page.getByRole('tab', { name: 'References', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expectCompoundReferenceTabs(page, 'horizontal');
   await expectScene(product, 'narrow-unified-references.png');
 });
 

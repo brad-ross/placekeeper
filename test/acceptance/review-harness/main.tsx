@@ -205,6 +205,8 @@ function Harness() {
         viewerState: visualScenario.viewerState,
         existingAnnotations: visualScenario.existingAnnotations,
         finishSlot: visualScenario.finishSlot,
+        navigationState: visualScenario.referenceNavigation,
+        referenceTabs: visualScenario.referenceTabs,
       } : {})}
       {...(visualScenario ? {} : { viewerControls, viewerState })}
       selectionUpdate={anchorKind === 'selection'

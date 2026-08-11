@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react';
+import { PdfZoomMode } from '@embedpdf/models';
 
 import { CodexDelivery } from '../../../apps/web/src/export/CodexDelivery.js';
 import { HumanDelivery } from '../../../apps/web/src/export/HumanDelivery.js';
@@ -8,6 +9,12 @@ import {
   type ViewerControlsSnapshot,
 } from '../../../apps/web/src/pdf/viewer-controls.js';
 import type { ReviewItem, ReviewState } from '../../../packages/core/src/review-model.js';
+import type { ReferenceWorkspaceTab } from '../../../apps/web/src/review/ReferenceWorkspace.js';
+import {
+  createReferenceNavigationState,
+  reduceReferenceNavigation,
+  type ReferenceNavigationState,
+} from '../../../apps/web/src/review/reference-navigation-state.js';
 
 export type VisualSceneName =
   | 'reading'
@@ -30,6 +37,8 @@ export interface VisualScenario {
   readonly existingAnnotations: ExistingAnnotationsDiscovery;
   readonly finishSlot?: ReactNode;
   readonly viewerState: ViewerControlsSnapshot;
+  readonly referenceNavigation?: ReferenceNavigationState;
+  readonly referenceTabs?: readonly ReferenceWorkspaceTab[];
 }
 
 const timestamp = '2026-08-09T12:00:00.000Z';
@@ -105,6 +114,48 @@ const viewerState: ViewerControlsSnapshot = {
   zoomPercent: 112,
 };
 
+const visualReferenceTabs: readonly ReferenceWorkspaceTab[] = [
+  {
+    identity: 'visual-reference-lemma',
+    label: 'Lemma 2: Local identification under conditional independence',
+    pageContext: 'Page 18',
+  },
+  {
+    identity: 'visual-reference-equation',
+    label: 'Equation (14): Equilibrium response mapping',
+    pageContext: 'Page 27',
+  },
+  {
+    identity: 'visual-reference-appendix',
+    label: 'Appendix Figure A.12: Leave-one-market-out estimates',
+    pageContext: 'Page 64',
+  },
+];
+
+function createVisualReferenceNavigation(): ReferenceNavigationState {
+  const location = (pageIndex: number) => ({
+    pageIndex,
+    anchor: { x: 72, y: 120 },
+    alignment: { xPercent: 50, yPercent: 20 },
+    zoom: 1.12,
+  });
+  const state = visualReferenceTabs.reduce((current, tab, index) => reduceReferenceNavigation(current, {
+    type: 'open-reference',
+    target: {
+      documentGeneration: 0,
+      pageIndex: [17, 26, 63][index]!,
+      zoom: { mode: PdfZoomMode.XYZ, params: [72, 120, 1.12] },
+      identity: tab.identity,
+    },
+    settledLocation: location([17, 26, 63][index]!),
+    label: tab.label,
+    pageContext: tab.pageContext,
+  }), createReferenceNavigationState(0));
+  return { ...state, activeTabIdentity: visualReferenceTabs[0]!.identity };
+}
+
+const visualReferenceNavigation = createVisualReferenceNavigation();
+
 function DeliveryFixture({
   state,
   outcome = 'warning',
@@ -173,6 +224,10 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
     pageMenuOpen: name === 'page-note',
     existingAnnotations: name === 'exceptional' ? exceptionalAnnotations : readyAnnotations,
     viewerState: name === 'unavailable-controls' ? unavailableViewerControls() : viewerState,
+    ...(name === 'reference-layout' ? {
+      referenceNavigation: visualReferenceNavigation,
+      referenceTabs: visualReferenceTabs,
+    } : {}),
   };
   if (name === 'finish' || name === 'exceptional') {
     const outcome = exception === 'success' || exception === 'error' ? exception : 'warning';
