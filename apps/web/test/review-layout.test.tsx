@@ -529,16 +529,10 @@ describe('review shell layout and accessibility contract', () => {
     )?.[1];
 
     expect(coarsePointerRules).toMatch(
-      /\.review-chrome__page-editor \{\s*min-height: var\(--review-control-touch\);\s*\}/u,
+      /\.review-chrome__page-editor,\s*\.review-chrome__zoom-editor \{\s*min-height: var\(--review-control-touch\);\s*\}/u,
     );
     expect(coarsePointerRules).toMatch(
-      /\.review-chrome__page-input \{\s*height: var\(--review-control-touch\);\s*\}/u,
-    );
-    expect(coarsePointerRules).toMatch(
-      /\.review-chrome__zoom-editor \{\s*min-height: var\(--review-control-touch\);\s*\}/u,
-    );
-    expect(coarsePointerRules).toMatch(
-      /\.review-chrome__zoom-input \{\s*height: var\(--review-control-touch\);\s*\}/u,
+      /\.review-chrome__page-input,\s*\.review-chrome__zoom-input \{\s*height: var\(--review-control-touch\);\s*\}/u,
     );
   });
 });
