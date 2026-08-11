@@ -150,6 +150,7 @@ const LINK_UNAVAILABLE = 'This PDF link cannot be opened safely.';
 export class NavigationCoordinator {
   private operationToken = 0;
   private documentGeneration: number;
+  private lastSearchTargetIdentity: string | null = null;
   private pendingReference: PendingReferenceRequest | null = null;
   private linkRequest: ViewerPdfLinkInvocation | null = null;
   /** A Send-selected successor whose saved view is not currently rendered. */
@@ -488,7 +489,7 @@ export class NavigationCoordinator {
 
   async navigateMainTarget(
     target: PdfNavigationTarget,
-    kind: 'direct' | 'outline',
+    kind: 'direct' | 'outline' | 'search',
   ): Promise<boolean> {
     const operation = this.begin(target.documentGeneration);
     if (operation === null) return false;
@@ -499,8 +500,9 @@ export class NavigationCoordinator {
       this.dependencies.setAnnouncement(MAIN_FAILURE);
       return false;
     }
-    if (samePdfViewerLocation(currentLocation, destination)) {
-      if (kind === 'direct') {
+    const sameLocation = samePdfViewerLocation(currentLocation, destination);
+    if (sameLocation && (kind !== 'search' || this.lastSearchTargetIdentity === target.identity)) {
+      if (kind === 'direct' || kind === 'search') {
         this.dependencies.layout.hideReferences();
         await this.dependencies.layout.settle();
         if (this.isCurrent(operation)) main.focusAtDestination(destination.pageIndex);
@@ -518,6 +520,7 @@ export class NavigationCoordinator {
       token: operation.token,
       currentLocation,
       destination,
+      ...(sameLocation && kind === 'search' ? { force: true } : {}),
     });
     const applied = await main.applyTarget(target);
     if (!this.isCurrent(operation)) return false;
@@ -542,8 +545,9 @@ export class NavigationCoordinator {
     this.dependencies.setAnnouncement(
       kind === 'outline' ? 'Outline destination opened.' : 'Main document destination opened.',
     );
+    if (kind === 'search') this.lastSearchTargetIdentity = target.identity;
     this.refreshCurrentOutline(settledLocation);
-    if (kind === 'direct') {
+    if (kind === 'direct' || kind === 'search') {
       this.dependencies.layout.hideReferences();
       await this.dependencies.layout.settle();
       if (this.isCurrent(operation)) main.focusAtDestination(settledLocation.pageIndex);
@@ -586,6 +590,7 @@ export class NavigationCoordinator {
     if (!Number.isSafeInteger(documentGeneration) || documentGeneration < 0) return;
     this.operationToken += 1;
     this.documentGeneration = documentGeneration;
+    this.lastSearchTargetIdentity = null;
     this.pendingReference = null;
     this.linkRequest = null;
     this.referenceRestoreIdentity = null;

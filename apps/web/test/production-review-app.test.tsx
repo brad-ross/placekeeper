@@ -56,6 +56,8 @@ describe("one production review tree", () => {
     expect(html).toContain('data-reference-layout="wide-closed"');
     expect(html).toContain('data-workspace-edge-rail="right"');
     expect(html).toContain('data-workspace-edge-rail="bottom"');
+    expect(html).toContain('data-workspace-mode="search"');
+    expect(html).toContain('aria-label="Search this PDF"');
     expect(html).not.toContain('>Workspace</button>');
     expect(html).not.toContain("delivery-layout");
     expect(html.match(/Real shared PDF viewer/g)).toHaveLength(1);

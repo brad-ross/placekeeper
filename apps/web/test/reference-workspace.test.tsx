@@ -126,7 +126,8 @@ describe('shared reference workspace', () => {
     expect(html).toContain('id="review-tools-workspace"');
     expect(html.match(/id="workspace-panel-outline"/g)).toHaveLength(1);
     expect(html.match(/id="workspace-panel-annotations"/g)).toHaveLength(1);
-    expect(html).toContain('aria-label="Outline and annotations"');
+    expect(html).toContain('aria-label="Outline, search, and annotations"');
+    expect(html.match(/id="workspace-panel-search"/g)).toHaveLength(1);
   });
   it('prioritizes a newly available retry control over remembered loading-panel focus', () => {
     const remembered = { isConnected: true } as HTMLElement;
@@ -179,7 +180,7 @@ describe('shared reference workspace', () => {
 
     expect(html).toContain('aria-label="Workspace modes"');
     expect(html).not.toContain('aria-label="Close workspace"');
-    expect(html.match(/role="tab"/g)).toHaveLength(5);
+    expect(html.match(/role="tab"/g)).toHaveLength(6);
     expect(html.match(/aria-selected="true"/g)).toHaveLength(2);
     expect(html.match(/tabindex="0"/g)).toHaveLength(2);
     expect(html).toMatch(/id="workspace-mode-references"[^>]*aria-controls="workspace-panel-references"/u);

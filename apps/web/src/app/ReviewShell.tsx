@@ -174,6 +174,7 @@ export interface ReviewShellProps {
   referenceLayoutState?: ReferenceWorkspaceLayoutState;
   onReferenceLayoutAction?(action: ReferenceWorkspaceLayoutAction): void;
   rightWorkspaceMode?: RightWorkspaceMode;
+  search?: ReactNode;
   children?: ReactNode;
 }
 
@@ -563,6 +564,24 @@ export function ReviewShell(props: ReviewShellProps) {
       && event.target.closest('[data-link-action-popover]') !== null
     ) return;
     const editable = isEditableTarget(event.target);
+    if (
+      (event.metaKey || event.ctrlKey)
+      && !event.altKey
+      && !event.shiftKey
+      && event.key.toLowerCase() === 'f'
+      && !event.nativeEvent.isComposing
+      && surface.nestedLayer === 'none'
+      && surface.baseSurface !== 'finish'
+    ) {
+      event.preventDefault();
+      selectWorkspaceMode('search');
+      dispatchReferenceLayout({ type: 'show-right-workspace' });
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        shellRef.current?.querySelector<HTMLInputElement>('[data-workspace-focus-token="search:query"]')
+          ?.focus({ preventScroll: true });
+      }));
+      return;
+    }
     if (workspaceOpen && !editable && !isWorkspaceOrChrome(event.target)) {
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
         markFramingUserIntent({ left: true });
@@ -1001,7 +1020,7 @@ export function ReviewShell(props: ReviewShellProps) {
               ? 'bottom' : 'right'}
             modes={effectiveReferenceLayout.kind === 'narrow-unified'
               || effectiveReferenceLayout.referenceDock === 'right'
-              ? ['outline', 'annotations', 'references'] : ['references']}
+              ? ['outline', 'annotations', 'references', 'search'] : ['references']}
             headerVariant={effectiveReferenceLayout.kind !== 'narrow-unified'
               && effectiveReferenceLayout.referenceDock === 'bottom' ? 'references' : 'tabs'}
             onMoveReferencesRight={() => {
@@ -1126,6 +1145,11 @@ export function ReviewShell(props: ReviewShellProps) {
               ) : null}
             </section>
             </div>}
+            search={props.search ?? (
+              <div className="workspace-state" data-workspace-focus-token="search:unavailable" tabIndex={-1}>
+                Search becomes available after the PDF loads.
+              </div>
+            )}
           />
           {referenceSurfaceOpen && effectiveReferenceLayout.referenceResizable ? (
             <ReferenceResizeHandle

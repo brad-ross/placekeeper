@@ -27,6 +27,17 @@ import type { ViewerFramingControls } from "../pdf/viewer-framing.js";
 import type { PdfViewerNavigation } from "../pdf/viewer-navigation-adapter.js";
 import type { ReferenceDocumentController } from "../pdf/reference-document.js";
 import type { PdfOutlineDiscovery } from "../pdf/pdf-outline.js";
+import {
+  createEnginePdfSearchPageReader,
+  createPdfSearchController,
+  type PdfSearchController,
+} from '../pdf/pdf-search-controller.js';
+import {
+  initialPdfSearchState,
+  type PdfSearchResult,
+} from '../pdf/pdf-search-model.js';
+import { pdfSearchResultTarget } from '../pdf/pdf-search-navigation.js';
+import { MAIN_PDF_DOCUMENT_ID } from '../pdf/viewer-document-ids.js';
 import type {
   ViewerClientPlacement,
   ViewerInteractionEvent,
@@ -42,6 +53,7 @@ import {
   type ReferenceNavigationAction,
 } from "../review/reference-navigation-state.js";
 import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
+import { PdfSearchWorkspace } from '../review/PdfSearchWorkspace.js';
 import { createTrailingTaskScheduler } from "../review/main-location-refresh.js";
 import {
   BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN,
@@ -130,6 +142,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const lastCaretDiagnostic = useRef<string | null>(null);
   const latestReceipt = useRef<string | null>(null);
   const viewerRegistry = useRef<PluginRegistry | null>(null);
+  const searchControllerRef = useRef<PdfSearchController | null>(null);
+  const [searchState, setSearchState] = useState(() => initialPdfSearchState());
   const viewerControlsRef = useRef<ViewerControls | undefined>(undefined);
   const [viewerFraming, setViewerFraming] = useState<ViewerFramingControls>();
   const productionRootRef = useRef<HTMLElement | null>(null);
@@ -302,6 +316,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     mainLocationRefresh.cancel();
     viewerControlsRef.current?.dispose();
     placementAuthority.current.clear();
+    searchControllerRef.current?.dispose();
   }, [mainLocationRefresh, navigationCoordinator]);
   const sourceIdentity = `${state.source.fileId}:${state.source.digest}`;
   const sourceIdentityRef = useRef(sourceIdentity);
@@ -327,6 +342,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     outlineDiscoveryRef.current = { status: 'loading', documentGeneration: nextGeneration };
     setOutlineDiscovery(outlineDiscoveryRef.current);
     navigationCoordinator.replaceDocument(nextGeneration);
+    searchControllerRef.current?.dispose();
+    searchControllerRef.current = null;
+    setSearchState(initialPdfSearchState());
     dispatchLayout({ type: 'replace-document' });
     setRightWorkspaceMode('outline');
   }, [mainLocationRefresh, navigationCoordinator, sourceIdentity]);
@@ -436,6 +454,18 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       setViewerState(controls.snapshot());
       mainLocationRefresh.schedule();
     });
+    searchControllerRef.current?.dispose();
+    const document = registry.getStore().getState().core
+      .documents[MAIN_PDF_DOCUMENT_ID]?.document;
+    if (document) {
+      const search = createPdfSearchController({
+        documentGeneration: documentGenerationRef.current,
+        reader: createEnginePdfSearchPageReader(registry.getEngine(), document),
+      });
+      searchControllerRef.current = search;
+      setSearchState(search.getState());
+      search.subscribe(setSearchState);
+    }
   }, [mainLocationRefresh]);
   const onViewerFramingInitialized = useCallback((controls: ViewerFramingControls) => {
     setViewerFraming(controls);
@@ -461,6 +491,35 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       onOutlineDiscovery={onOutlineDiscovery}
       onViewerInitialized={onViewerInitialized}
       onViewerFramingInitialized={onViewerFramingInitialized}
+      activeSearchResult={searchState.groups
+        .flatMap((group) => group.results)
+        .find(({ id }) => id === searchState.selectedResultId) ?? null}
+    />
+  );
+
+  const activateSearchResult = (result: PdfSearchResult) => {
+    const target = pdfSearchResultTarget(result, navigationState.documentGeneration);
+    if (target === null) return;
+    searchControllerRef.current?.selectResult(result.id);
+    void navigationCoordinator.navigateMainTarget(target, 'search');
+  };
+  const openSearchResultReference = (result: PdfSearchResult) => {
+    const target = pdfSearchResultTarget(result, navigationState.documentGeneration);
+    if (target === null) return;
+    void navigationCoordinator.openReference(target, {
+      label: result.matchedForm || `Search result on page ${result.pageIndex + 1}`,
+      pageContext: `Page ${result.pageIndex + 1}`,
+    });
+  };
+  const searchWorkspace = (
+    <PdfSearchWorkspace
+      state={searchState}
+      onQueryChange={(query) => { void searchControllerRef.current?.search(query); }}
+      onResultActivate={activateSearchResult}
+      onResultOpenReference={openSearchResultReference}
+      onAlternativeActivate={(alternative) => {
+        void searchControllerRef.current?.search(alternative.query);
+      }}
     />
   );
 
@@ -525,6 +584,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         workspaceOpen={anyTrayOpen}
         referenceLayoutState={referenceLayoutState}
         rightWorkspaceMode={rightWorkspaceMode}
+        search={searchWorkspace}
         onReferenceLayoutAction={dispatchLayout}
         navigationState={navigationState}
         referenceTabs={navigationState.tabs.map((tab) => ({
@@ -557,6 +617,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             void navigationCoordinator.openReferencesWorkspace();
             return;
           }
+          if (mode === 'search') void searchControllerRef.current?.prepare();
           setRightWorkspaceMode(mode);
           dispatchNavigation({ type: 'select-workspace-mode', mode });
           if (referenceLayoutState.regime !== 'narrow' || !referenceLayoutState.narrowOpen) {

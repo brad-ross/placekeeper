@@ -13,9 +13,10 @@ import { OutlineNavigator } from './OutlineNavigator.js';
 import type { WorkspaceMode } from './reference-navigation-state.js';
 import type { RightWorkspaceMode } from './reference-workspace-layout.js';
 
-const TOOL_MODES: readonly RightWorkspaceMode[] = ['outline', 'annotations'];
+const TOOL_MODES: readonly RightWorkspaceMode[] = ['outline', 'annotations', 'search'];
 const TOOL_LABELS: Readonly<Record<RightWorkspaceMode, string>> = {
   outline: 'Outline',
+  search: 'Search',
   annotations: 'Annotations',
 };
 
@@ -28,6 +29,7 @@ export interface OutlineAnnotationsWorkspaceProps {
   readonly outline: PdfOutlineDiscovery;
   readonly currentOutlineItemId: string | null;
   readonly annotations: ReactNode;
+  readonly search?: ReactNode;
   readonly onModeChange: (mode: RightWorkspaceMode) => void;
   readonly onOutlineActivate: (item: PdfOutlineItem) => void;
   readonly onModeFocusTokenChange?: (mode: RightWorkspaceMode, token: string) => void;
@@ -46,6 +48,7 @@ export function OutlineAnnotationsWorkspace({
   outline,
   currentOutlineItemId,
   annotations,
+  search,
   onModeChange,
   onOutlineActivate,
   onModeFocusTokenChange,
@@ -95,7 +98,7 @@ export function OutlineAnnotationsWorkspace({
       data-tools-workspace-open={open ? 'true' : 'false'}
       data-tools-workspace-shared={headerVariant === 'shared' ? 'true' : 'false'}
       data-workspace-presentation={presentation}
-      aria-label="Outline and annotations"
+      aria-label="Outline, search, and annotations"
       aria-hidden={!open}
       inert={!open}
     >
@@ -125,6 +128,23 @@ export function OutlineAnnotationsWorkspace({
           </div>
         </header>
       ) : null}
+
+      <section
+        ref={(element) => {
+          if (element) panelRefs.current.set('search', element);
+          else panelRefs.current.delete('search');
+        }}
+        id="workspace-panel-search"
+        className="review-workspace__panel review-workspace__panel--search"
+        role="tabpanel"
+        aria-labelledby="workspace-mode-search"
+        tabIndex={-1}
+        hidden={mode !== 'search'}
+        inert={mode !== 'search'}
+        onFocusCapture={(event) => rememberFocus('search', event.target)}
+      >
+        {search}
+      </section>
 
       <section
         ref={(element) => {

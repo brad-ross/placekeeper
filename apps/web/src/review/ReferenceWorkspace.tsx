@@ -13,9 +13,10 @@ import {
 import { compositeFocusIndex, horizontalTabFocusIndex } from './LinkActionPopover.js';
 import { ReviewIcon } from './ReviewIcon.js';
 
-const WORKSPACE_MODES: readonly WorkspaceMode[] = ['outline', 'annotations', 'references'];
+const WORKSPACE_MODES: readonly WorkspaceMode[] = ['outline', 'annotations', 'references', 'search'];
 const MODE_LABELS: Readonly<Record<WorkspaceMode, string>> = {
   outline: 'Outline',
+  search: 'Search',
   references: 'References',
   annotations: 'Annotations',
 };

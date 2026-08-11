@@ -64,6 +64,7 @@ import {
 } from '../pdf/viewer-document-ids.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
+import type { PdfSearchResult } from '../pdf/pdf-search-model.js';
 
 type ViewerCaretResult = Awaited<ReturnType<typeof captureViewerCaret>>;
 
@@ -150,6 +151,7 @@ export interface AppProps {
     navigation: PdfViewerNavigation | null,
   ) => void;
   onOutlineDiscovery?: (result: PdfOutlineDiscovery) => void;
+  activeSearchResult?: PdfSearchResult | null;
 }
 
 export class ViewerInitializationAuthority {
@@ -194,6 +196,7 @@ export function App({
   onReferenceDocumentControls,
   onViewerNavigationInitialized,
   onOutlineDiscovery,
+  activeSearchResult = null,
 }: AppProps) {
   const [sourceAnnotations, setSourceAnnotations] = useState<readonly ExistingAnnotation[]>([]);
   const [inventoryState, setInventoryState] = useState<ExistingAnnotationsDiscovery>({
@@ -813,6 +816,7 @@ export function App({
       plugins={viewer.plugins}
       documentLabel={documentTitle}
       onInitialized={initializeViewer}
+      activeSearchResult={activeSearchResult}
       ownedAnnotations={ownedAnnotations}
       keyboardPageNoteCursor={keyboardCursor}
       onKeyboardPageNoteKey={keyboardCursorKey}

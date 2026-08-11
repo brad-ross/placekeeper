@@ -434,6 +434,18 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.main.controls.focusAtDestination).not.toHaveBeenCalled();
   });
 
+  it('records distinct search occurrences even when viewer tolerances resolve them alike', async () => {
+    const run = harness();
+    const first = { ...target(0), identity: 'search:first' };
+    const second = { ...target(0), identity: 'search:second' };
+
+    expect(await run.coordinator.navigateMainTarget(first, 'search')).toBe(true);
+    expect(await run.coordinator.navigateMainTarget(second, 'search')).toBe(true);
+
+    expect(run.state().mainHistory.entries).toHaveLength(3);
+    expect(run.state().mainHistory.index).toBe(2);
+  });
+
   it('invalidates clone, viewer, focus, status, and late callbacks on document replacement', async () => {
     const run = harness();
     const opened = deferred<boolean>();

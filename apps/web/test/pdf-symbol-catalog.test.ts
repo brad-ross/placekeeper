@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   detectedSymbolSuggestions,
+  isSymbolAliasQuery,
   resolveDetectedSymbolQuery,
 } from '../src/pdf/pdf-symbol-catalog.js';
 
@@ -20,5 +21,10 @@ describe('PDF symbol catalog', () => {
 
   it('does not treat a literal name as a symbol without explicit resolution', () => {
     expect(resolveDetectedSymbolQuery('lambda', new Set())).toBeNull();
+  });
+
+  it('recognizes known names even before checking this document inventory', () => {
+    expect(isSymbolAliasQuery('theta')).toBe(true);
+    expect(isSymbolAliasQuery('stability')).toBe(false);
   });
 });

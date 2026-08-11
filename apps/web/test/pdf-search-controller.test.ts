@@ -76,6 +76,43 @@ describe('PDF search controller', () => {
     expect(controller.getState().groups[0]?.results[0]?.matchedForm).toBe('beta');
   });
 
+  it('publishes stable actionable hits before remaining pages finish', async () => {
+    let releaseFirst: (() => void) | undefined;
+    let releaseSecond: (() => void) | undefined;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve; });
+    const progressiveReader: PdfSearchPageReader = {
+      pageCount: 2,
+      async read(pageIndex) {
+        await (pageIndex === 0 ? firstGate : secondGate);
+        const text = pageIndex === 0 ? 'stable first' : 'stable second';
+        return {
+          text,
+          glyphs: glyphs(text),
+          textRects: [{ content: text, rect: { origin: { x: 0, y: 10 }, size: { width: 60, height: 8 } } }],
+        };
+      },
+    };
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: progressiveReader,
+      maxPageReads: 1,
+    });
+
+    const completed = controller.search('stable');
+    releaseFirst?.();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(controller.getState().status).toBe('searching');
+    expect(controller.getState().groups[0]?.results).toHaveLength(1);
+    expect(controller.getState().message).toContain('1 of 2 checked');
+
+    releaseSecond?.();
+    const final = await completed;
+    expect(final.status).toBe('results');
+    expect(final.groups[0]?.results).toHaveLength(2);
+  });
+
   it('offers detected symbol alternatives without promoting them to matches', async () => {
     const controller = createPdfSearchController({
       documentGeneration: 1,
@@ -86,6 +123,31 @@ describe('PDF search controller', () => {
     expect(state.groups).toEqual([]);
     expect(state.alternatives.map(({ query }) => query)).toEqual(['β', 'λ']);
     expect(state.message).toContain('could not be matched confidently');
+  });
+
+  it('resolves a typed symbol name through the detected document inventory', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['Let λ be positive.']),
+    });
+
+    const state = await controller.search('lambda');
+
+    expect(state.groups[0]?.results[0]).toMatchObject({
+      kind: 'symbol', matchedForm: 'λ',
+    });
+  });
+
+  it('prepares a detected-symbol catalog before a query is entered', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['Let λ be positive and β be fixed.']),
+    });
+
+    const state = await controller.prepare();
+
+    expect(state.status).toBe('idle');
+    expect(state.symbolCatalog.map(({ query }) => query)).toEqual(['β', 'λ']);
   });
 
   it('rejects oversized queries without starting document work', async () => {

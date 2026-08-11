@@ -52,6 +52,7 @@ export interface PdfSearchState {
   readonly selectedResultId: string | null;
   readonly coverage: PdfSearchCoverage;
   readonly alternatives: readonly PdfSearchAlternative[];
+  readonly symbolCatalog: readonly PdfSearchAlternative[];
   readonly message: string;
 }
 
@@ -103,6 +104,7 @@ export function initialPdfSearchState(totalPages = 0): PdfSearchState {
       limitedPages: [],
     },
     alternatives: [],
+    symbolCatalog: [],
     message: '',
   };
 }

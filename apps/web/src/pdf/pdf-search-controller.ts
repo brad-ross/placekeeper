@@ -25,6 +25,7 @@ import {
 import { relatedPhraseQueries } from './pdf-search-morphology.js';
 import {
   detectedSymbolSuggestions,
+  isSymbolAliasQuery,
   resolveDetectedSymbolQuery,
 } from './pdf-symbol-catalog.js';
 
@@ -47,6 +48,7 @@ interface IndexedPage extends PdfSearchPageSnapshot {
 export interface PdfSearchController {
   getState(): PdfSearchState;
   subscribe(listener: (state: PdfSearchState) => void): () => void;
+  prepare(): Promise<PdfSearchState>;
   search(query: string): Promise<PdfSearchState>;
   selectResult(resultId: string | null): void;
   clear(): void;
@@ -244,6 +246,14 @@ function alternativesFor(
     .map((symbol) => ({ label: `${symbol.glyph} ${symbol.name}`, query: symbol.glyph, kind: 'symbol' }));
 }
 
+function catalogFor(glyphs: ReadonlySet<string>): PdfSearchAlternative[] {
+  return detectedSymbolSuggestions(glyphs).map((symbol) => ({
+    label: `${symbol.glyph} ${symbol.name}`,
+    query: symbol.glyph,
+    kind: 'symbol',
+  }));
+}
+
 export function createPdfSearchController(
   options: CreatePdfSearchControllerOptions,
 ): PdfSearchController {
@@ -258,6 +268,7 @@ export function createPdfSearchController(
   let indexPromise: Promise<void> | null = null;
   let indexedBytes = 0;
   let queryToken = 0;
+  let activeSearch: { readonly token: number; readonly query: string } | null = null;
   let disposed = false;
 
   const publish = (next: PdfSearchState) => {
@@ -304,7 +315,10 @@ export function createPdfSearchController(
           } catch {
             if (!abort.signal.aborted) unsearchablePages.push(pageIndex);
           }
-          if (!disposed) publish({ ...state, status: 'indexing', coverage: coverage() });
+          if (!disposed) {
+            if (activeSearch) publishQueryResults(activeSearch.token, activeSearch.query, false);
+            else publish({ ...state, status: 'indexing', coverage: coverage() });
+          }
         }
       };
       await Promise.all(Array.from(
@@ -316,31 +330,13 @@ export function createPdfSearchController(
     return indexPromise;
   };
 
-  const search = async (rawQuery: string): Promise<PdfSearchState> => {
-    const token = ++queryToken;
-    const query = rawQuery.trim();
-    publish({
-      ...state,
-      status: query.length === 0 ? 'idle' : 'indexing',
-      query,
-      groups: [],
-      selectedResultId: null,
-      alternatives: [],
-      message: '',
-    });
-    if (query.length === 0) return state;
-    if (Array.from(query).length > PDF_SEARCH_MAX_QUERY_CODE_POINTS) {
-      publish({ ...state, status: 'unavailable', message: 'Search queries are limited to 512 characters.' });
-      return state;
-    }
-
-    await ensureIndex();
-    if (disposed || token !== queryToken) return state;
+  function publishQueryResults(token: number, query: string, complete: boolean): void {
+    if (disposed || token !== queryToken || activeSearch?.token !== token) return;
     const glyphInventory = detectedGlyphs(pages);
+    const symbolCatalog = catalogFor(glyphInventory);
     const queryKind = classifyPdfSearchQuery(query);
-    const symbol = queryKind === 'symbol-command'
-      ? resolveDetectedSymbolQuery(query, glyphInventory)
-      : null;
+    const symbolAlias = isSymbolAliasQuery(query);
+    const symbol = resolveDetectedSymbolQuery(query, glyphInventory);
     const effectiveQuery = symbol?.glyph ?? query;
     const matchKind: PdfSearchMatchKind = symbol
       ? 'symbol'
@@ -353,7 +349,7 @@ export function createPdfSearchController(
       formula: Boolean(symbol) || queryKind === 'formula',
     })));
 
-    const relatedQueries = queryKind === 'prose'
+    const relatedQueries = queryKind === 'prose' && !symbolAlias
       ? relatedPhraseQueries(query, documentWords(pages))
       : [];
     const exactIds = new Set(exact.map(({ id }) => id));
@@ -372,22 +368,52 @@ export function createPdfSearchController(
       ...(exact.length > 0 ? [{ id: 'exact' as const, label: 'Exact matches', results: exact }] : []),
       ...(related.length > 0 ? [{ id: 'related' as const, label: 'Related word forms', results: related }] : []),
     ];
-    const mathUncertain = !hasResults && queryKind !== 'prose';
+    const mathUncertain = complete && !hasResults && (queryKind !== 'prose' || symbolAlias);
+    const processedPages = pages.length + unsearchablePages.length + limitedPages.length;
     publish({
       ...state,
-      status: pages.length === 0
-        ? 'unavailable'
-        : hasCoverageGap ? 'partial'
-          : hasResults ? 'results' : 'no-results',
+      status: !complete
+        ? 'searching'
+        : pages.length === 0
+          ? 'unavailable'
+          : hasCoverageGap ? 'partial'
+            : hasResults ? 'results' : 'no-results',
       groups,
       coverage: coverage(),
       alternatives: mathUncertain ? alternativesFor(query, glyphInventory) : [],
-      message: mathUncertain
-        ? 'This mathematical query could not be matched confidently. Try a detected symbol or a shorter exact fragment.'
-        : hasCoverageGap
-          ? `Searched ${pages.length} of ${options.reader.pageCount} pages with reliable text.`
-          : hasResults ? '' : 'No matches found.',
+      symbolCatalog,
+      message: !complete
+        ? `Searching remaining pages… ${processedPages} of ${options.reader.pageCount} checked.`
+        : mathUncertain
+          ? 'This mathematical query could not be matched confidently. Try a detected symbol or a shorter exact fragment.'
+          : hasCoverageGap
+            ? `Searched ${pages.length} of ${options.reader.pageCount} pages with reliable text.`
+            : hasResults ? '' : 'No matches found.',
     });
+  }
+
+  const search = async (rawQuery: string): Promise<PdfSearchState> => {
+    const token = ++queryToken;
+    const query = rawQuery.trim();
+    activeSearch = query.length === 0 ? null : { token, query };
+    publish({
+      ...state,
+      status: query.length === 0 ? 'idle' : 'indexing',
+      query,
+      groups: [],
+      selectedResultId: null,
+      alternatives: [],
+      message: '',
+    });
+    if (query.length === 0) return state;
+    if (Array.from(query).length > PDF_SEARCH_MAX_QUERY_CODE_POINTS) {
+      publish({ ...state, status: 'unavailable', message: 'Search queries are limited to 512 characters.' });
+      return state;
+    }
+
+    await ensureIndex();
+    if (disposed || token !== queryToken) return state;
+    publishQueryResults(token, query, true);
     return state;
   };
 
@@ -397,6 +423,24 @@ export function createPdfSearchController(
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    async prepare() {
+      if (state.status === 'idle') publish({ ...state, status: 'indexing' });
+      await ensureIndex();
+      if (disposed) return state;
+      const symbolCatalog = catalogFor(detectedGlyphs(pages));
+      publish({
+        ...state,
+        status: state.query.length === 0
+          ? (pages.length === 0 ? 'unavailable' : 'idle')
+          : state.status,
+        coverage: coverage(),
+        symbolCatalog,
+        message: pages.length === 0
+          ? 'No reliable extracted text is available to search in this PDF.'
+          : state.message,
+      });
+      return state;
+    },
     search,
     selectResult(resultId) {
       const exists = state.groups.some((group) => group.results.some(({ id }) => id === resultId));
@@ -404,6 +448,7 @@ export function createPdfSearchController(
     },
     clear() {
       queryToken += 1;
+      activeSearch = null;
       publish({ ...initialPdfSearchState(options.reader.pageCount), coverage: coverage() });
     },
     dispose() {

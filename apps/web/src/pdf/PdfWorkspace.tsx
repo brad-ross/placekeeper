@@ -11,6 +11,7 @@ import { Viewport } from '@embedpdf/plugin-viewport/react';
 import { ZoomGestureWrapper } from '@embedpdf/plugin-zoom/react';
 import { useMemo, useRef } from 'react';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+import type { PdfSearchResult } from './pdf-search-model.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
 import { combinePageRotation, positionOwnedRect } from './owned-overlay.js';
 import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
@@ -63,6 +64,7 @@ export interface PdfWorkspaceProps {
   onViewerInteraction?: (event: ViewerInteractionEvent) => void;
   referenceViewportHost?: HTMLElement | null;
   onReferenceViewportElement?: (element: HTMLDivElement | null) => void;
+  activeSearchResult?: PdfSearchResult | null;
 }
 
 const PDF_TEXT_SELECTION_STYLE = {
@@ -96,6 +98,7 @@ export function PdfWorkspace({
   onViewerInteraction,
   referenceViewportHost = null,
   onReferenceViewportElement,
+  activeSearchResult = null,
 }: PdfWorkspaceProps) {
   const pressedPrimaryPointers = useRef(new Map<number, HTMLDivElement>());
   const contextPointers = useRef(new Set<number>());
@@ -285,6 +288,39 @@ export function PdfWorkspace({
                         pageIndex={layout.pageIndex}
                         textStyle={PDF_TEXT_SELECTION_STYLE}
                       />
+                      <div
+                        inert
+                        aria-hidden="true"
+                        data-pdf-search-highlight-layer
+                        style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+                      >
+                        {activeSearchResult?.pageIndex === layout.pageIndex
+                          ? activeSearchResult.rects.map((rect, index) => {
+                              const positioned = positionOwnedRect(
+                                activePdf.pages[layout.pageIndex]!,
+                                layout,
+                                mainDocument.rotation,
+                                {
+                                  x: rect.origin.x,
+                                  y: rect.origin.y,
+                                  width: rect.size.width,
+                                  height: rect.size.height,
+                                },
+                              );
+                              return <span
+                                key={`${activeSearchResult.id}:${index}`}
+                                data-pdf-search-highlight={activeSearchResult.id}
+                                style={{
+                                  position: 'absolute',
+                                  left: positioned.origin.x,
+                                  top: positioned.origin.y,
+                                  width: positioned.size.width,
+                                  height: positioned.size.height,
+                                }}
+                              />;
+                            })
+                          : null}
+                      </div>
                       <div
                         inert
                         aria-hidden="true"

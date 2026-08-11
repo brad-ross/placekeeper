@@ -57,3 +57,13 @@ export function resolveDetectedSymbolQuery(
     || symbol.aliases.some((alias) => normalizedAlias(alias) === normalized)
   )) ?? null;
 }
+
+export function isSymbolAliasQuery(query: string): boolean {
+  const normalized = normalizedAlias(query);
+  return SYMBOLS.some((symbol) => (
+    symbol.glyph === query
+    || normalizedAlias(symbol.name) === normalized
+    || normalizedAlias(symbol.latex) === normalized
+    || symbol.aliases.some((alias) => normalizedAlias(alias) === normalized)
+  ));
+}
