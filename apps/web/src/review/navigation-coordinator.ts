@@ -222,32 +222,69 @@ export class NavigationCoordinator {
   async openReference(
     target: PdfNavigationTarget,
     metadata: NavigationDestinationMetadata,
+    preservedMainTarget?: PdfNavigationTarget | null,
   ): Promise<boolean> {
     const operation = this.begin(target.documentGeneration);
     if (operation === null) return false;
     const state = this.dependencies.getState();
     const existing = state.tabs.find((tab) => tab.identity === target.identity);
+    const preserveMain = preservedMainTarget !== undefined;
+    const main = preserveMain ? this.dependencies.getMainNavigation() : undefined;
+    const mainLocation = main?.captureLocation() ?? null;
+    const restoreMainLocation = async () => {
+      if (!preserveMain) return true;
+      if (main && preservedMainTarget !== null) return main.applyTarget(preservedMainTarget);
+      const shifted = main?.captureLocation() ?? null;
+      return !main
+        || !mainLocation
+        || samePdfViewerLocation(mainLocation, shifted)
+        || main.applyLocation(mainLocation);
+    };
+    if (!existing && preserveMain) {
+      this.pendingReference = {
+        target,
+        metadata,
+        documentGeneration: operation.documentGeneration,
+      };
+      this.dependencies.setPendingReference({ status: 'loading', ...metadata });
+    }
 
     this.dependencies.dispatch({ type: 'select-workspace-mode', mode: 'references' });
     this.dependencies.layout.revealReferences();
+    if (preserveMain) {
+      await this.dependencies.layout.settle();
+      if (!this.isCurrent(operation)) return false;
+      if (!await restoreMainLocation()) return false;
+      if (!this.isCurrent(operation)) return false;
+    }
     if (existing) {
       this.pendingReference = null;
       this.dependencies.setPendingReference(null);
-      await this.dependencies.layout.settle();
-      if (!this.isCurrent(operation)) return false;
+      if (!preserveMain) {
+        await this.dependencies.layout.settle();
+        if (!this.isCurrent(operation)) return false;
+      }
       if (!await this.restoreReferenceTab(operation, existing.identity, false)) return false;
       if (!this.isCurrent(operation)) return false;
+      if (preserveMain) {
+        await this.dependencies.layout.settle();
+        if (!this.isCurrent(operation)) return false;
+        if (!await restoreMainLocation() || !this.isCurrent(operation)) return false;
+      }
       this.dependencies.focusReferenceTab(existing.identity);
       this.dependencies.setAnnouncement(`Reference active: ${metadata.label}.`);
       return true;
     }
 
-    this.pendingReference = {
-      target,
-      metadata,
-      documentGeneration: operation.documentGeneration,
-    };
-    this.dependencies.setPendingReference({ status: 'loading', ...metadata });
+    if (!preserveMain) {
+      this.pendingReference = {
+        target,
+        metadata,
+        documentGeneration: operation.documentGeneration,
+      };
+      this.dependencies.setPendingReference({ status: 'loading', ...metadata });
+    }
+
     if (
       state.activeTabIdentity !== null
       && this.referenceRestoreIdentity !== state.activeTabIdentity
@@ -272,6 +309,11 @@ export class NavigationCoordinator {
     }
     const settledLocation = navigation.captureLocation();
     if (settledLocation === null || !this.isCurrent(operation)) return this.failReference(operation);
+    if (preserveMain) {
+      await this.dependencies.layout.settle();
+      if (!this.isCurrent(operation)) return false;
+      if (!await restoreMainLocation() || !this.isCurrent(operation)) return false;
+    }
 
     this.dependencies.dispatch({
       type: 'open-reference',
@@ -280,6 +322,11 @@ export class NavigationCoordinator {
       label: metadata.label,
       pageContext: metadata.pageContext,
     });
+    if (preserveMain) {
+      await this.dependencies.layout.settle();
+      if (!this.isCurrent(operation)) return false;
+      if (!await restoreMainLocation() || !this.isCurrent(operation)) return false;
+    }
     this.pendingReference = null;
     this.referenceRestoreIdentity = null;
     this.dependencies.setPendingReference(null);

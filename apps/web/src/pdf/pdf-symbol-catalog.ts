@@ -25,6 +25,7 @@ const SYMBOLS: readonly PdfSymbolSuggestion[] = [
   { glyph: '∂', name: 'partial', latex: '\\partial', aliases: ['partial derivative'] },
   { glyph: '∇', name: 'nabla', latex: '\\nabla', aliases: ['gradient', 'del'] },
   { glyph: '∞', name: 'infinity', latex: '\\infty', aliases: [] },
+  { glyph: '°', name: 'degree', latex: '\\degree', aliases: ['degrees'] },
   { glyph: '≤', name: 'less than or equal', latex: '\\leq', aliases: ['le', 'leq'] },
   { glyph: '≥', name: 'greater than or equal', latex: '\\geq', aliases: ['ge', 'geq'] },
   { glyph: '≠', name: 'not equal', latex: '\\neq', aliases: [] },

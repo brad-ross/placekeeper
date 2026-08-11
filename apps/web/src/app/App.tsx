@@ -4,7 +4,14 @@ import { DocumentManagerPlugin } from '@embedpdf/plugin-document-manager';
 import { InteractionManagerPlugin } from '@embedpdf/plugin-interaction-manager';
 import { ScrollPlugin } from '@embedpdf/plugin-scroll';
 import { SelectionPlugin } from '@embedpdf/plugin-selection';
-import { transformRect, transformSize, type PdfPageObject, type Position } from '@embedpdf/models';
+import {
+  transformRect,
+  transformSize,
+  type PdfDocumentObject,
+  type PdfEngine,
+  type PdfPageObject,
+  type Position,
+} from '@embedpdf/models';
 
 import {
   ExistingAnnotationDiscoveryAuthority,
@@ -151,6 +158,7 @@ export interface AppProps {
     navigation: PdfViewerNavigation | null,
   ) => void;
   onOutlineDiscovery?: (result: PdfOutlineDiscovery) => void;
+  onMainDocumentReady?: (engine: PdfEngine, document: PdfDocumentObject) => void;
   activeSearchResult?: PdfSearchResult | null;
 }
 
@@ -196,6 +204,7 @@ export function App({
   onReferenceDocumentControls,
   onViewerNavigationInitialized,
   onOutlineDiscovery,
+  onMainDocumentReady,
   activeSearchResult = null,
 }: AppProps) {
   const [sourceAnnotations, setSourceAnnotations] = useState<readonly ExistingAnnotation[]>([]);
@@ -468,6 +477,7 @@ export function App({
       activeDocumentIdRef.current = MAIN_PDF_DOCUMENT_ID;
       const document = registry.getStore().getState().core.documents[documentId]?.document;
       if (!document) return;
+      onMainDocumentReady?.(registry.getEngine(), document);
       mainNavigationRef.current?.dispose();
       const mainNavigation = createViewerNavigation({
         registry,
@@ -735,7 +745,7 @@ export function App({
     if (!initializationIsCurrent()) return;
     const inventoryDocument = currentInventoryDocument.current;
     if (inventoryDocument) discoverExistingAnnotations(inventoryDocument.id, inventoryDocument.document);
-  }, [assets, clearReferenceSubscriptions, clearSubscriptions, discoverExistingAnnotations, discoverOutline, documentGeneration, emit, initializeKeyboardCursor, onReferenceDocumentControls, onSelectionUpdate, onViewerFramingInitialized, onViewerInitialized, onViewerNavigationInitialized, publishKeyboardCursor, updateViewerRunway]);
+  }, [assets, clearReferenceSubscriptions, clearSubscriptions, discoverExistingAnnotations, discoverOutline, documentGeneration, emit, initializeKeyboardCursor, onMainDocumentReady, onReferenceDocumentControls, onSelectionUpdate, onViewerFramingInitialized, onViewerInitialized, onViewerNavigationInitialized, publishKeyboardCursor, updateViewerRunway]);
 
   const effectivePageReliability = pageSemanticReliable ?? detectedPageReliable;
   const effectiveSelectionReliability =

@@ -10,7 +10,7 @@ import {
 import { assessPageTextReliability, type TextRect } from './text-reliability.js';
 import {
   PDF_SEARCH_MAX_INDEX_BYTES,
-  PDF_SEARCH_MAX_PAGE_READS,
+  PDF_SEARCH_MAX_CONCURRENT_PAGE_READS,
   PDF_SEARCH_MAX_QUERY_CODE_POINTS,
   buildSearchResultId,
   canonicalizeFormula,
@@ -33,6 +33,15 @@ export interface PdfSearchPageSnapshot {
   readonly text: string;
   readonly glyphs: readonly PdfGlyphObject[];
   readonly textRects: readonly TextRect[];
+  readonly geometry: PdfSearchPageGeometry;
+}
+
+export interface PdfSearchPageGeometry {
+  readonly width: number;
+  readonly height: number;
+  readonly cropLeft: number;
+  readonly cropTop: number;
+  readonly cropBottom: number;
 }
 
 export interface PdfSearchPageReader {
@@ -41,8 +50,18 @@ export interface PdfSearchPageReader {
   dispose?(): void;
 }
 
-interface IndexedPage extends PdfSearchPageSnapshot {
+interface CanonicalPageText {
+  readonly text: string;
+  readonly sourceIndexes: readonly number[];
+}
+
+interface IndexedPage {
   readonly pageIndex: number;
+  readonly text: string;
+  readonly glyphs: readonly PdfGlyphObject[];
+  readonly geometry: PdfSearchPageGeometry;
+  readonly prose: CanonicalPageText;
+  readonly formula: CanonicalPageText;
 }
 
 export interface PdfSearchController {
@@ -59,7 +78,7 @@ export interface CreatePdfSearchControllerOptions {
   readonly documentGeneration: number;
   readonly reader: PdfSearchPageReader;
   readonly maxIndexBytes?: number;
-  readonly maxPageReads?: number;
+  readonly maxConcurrentPageReads?: number;
 }
 
 function abortableTask<T>(task: PdfTask<T, unknown> | PdfTask<T>, signal: AbortSignal): Promise<T> {
@@ -87,15 +106,32 @@ export function createEnginePdfSearchPageReader(
       const abort = () => controller.abort();
       parentSignal.addEventListener('abort', abort, { once: true });
       try {
-        const [text, glyphs, textRects] = await Promise.all([
+        const tasks = [
           abortableTask(engine.extractText(document, [pageIndex]), controller.signal),
           abortableTask(engine.getPageGlyphs(document, page), controller.signal),
           abortableTask(engine.getPageTextRects(document, page), controller.signal),
-        ]);
+        ] as const;
+        let text: string;
+        let glyphs: readonly PdfGlyphObject[];
+        let textRects: readonly { readonly content: string; readonly rect: Rect }[];
+        try {
+          [text, glyphs, textRects] = await Promise.all(tasks);
+        } catch (error) {
+          controller.abort();
+          await Promise.allSettled(tasks);
+          throw error;
+        }
         return {
           text,
           glyphs,
           textRects: textRects.map(({ content, rect }) => ({ content, rect })),
+          geometry: {
+            width: page.size.width,
+            height: page.size.height,
+            cropLeft: page.boxes?.crop.left ?? 0,
+            cropTop: page.boxes?.crop.top ?? 0,
+            cropBottom: page.boxes?.crop.bottom ?? 0,
+          },
         };
       } finally {
         parentSignal.removeEventListener('abort', abort);
@@ -110,24 +146,22 @@ export function createEnginePdfSearchPageReader(
 }
 
 function estimatedPageBytes(page: PdfSearchPageSnapshot): number {
-  return page.text.length * 2 + page.glyphs.length * 48 + page.textRects.length * 64;
+  // The reliability rectangles are transient. Retained text includes the source,
+  // two canonical strings, and their source-index maps.
+  return page.text.length * 18 + page.glyphs.length * 48;
 }
 
 function documentWords(pages: readonly IndexedPage[]): string[] {
   return pages.flatMap(({ text }) => text.match(/\p{L}[\p{L}\p{M}'’-]*/gu) ?? []);
 }
 
-function detectedGlyphs(pages: readonly IndexedPage[]): ReadonlySet<string> {
-  const result = new Set<string>();
-  for (const { text } of pages) {
-    for (const character of Array.from(text)) {
-      if (/[^\p{L}\p{N}\p{M}\p{P}\p{Z}\p{C}]/u.test(character)
-        || /[\u0370-\u03ff\u2190-\u22ff\u27c0-\u27ef\u2980-\u2aff]/u.test(character)) {
-        result.add(character);
-      }
+function addDetectedGlyphs(text: string, result: Set<string>): void {
+  for (const character of text) {
+    if (/[^\p{L}\p{N}\p{M}\p{P}\p{Z}\p{C}]/u.test(character)
+      || /[\u0370-\u03ff\u2190-\u22ff\u27c0-\u27ef\u2980-\u2aff]/u.test(character)) {
+      result.add(character);
     }
   }
-  return result;
 }
 
 function canonicalTextWithMap(
@@ -136,24 +170,28 @@ function canonicalTextWithMap(
 ): { readonly text: string; readonly sourceIndexes: readonly number[] } {
   const canonical: string[] = [];
   const sourceIndexes: number[] = [];
-  const source = Array.from(text.normalize('NFC'));
   let previousWhitespace = false;
-  source.forEach((character, sourceIndex) => {
+  let sourceIndex = 0;
+  for (const character of text.normalize('NFC')) {
     if (/\s/u.test(character)) {
-      if (kind === 'formula') return;
-      if (previousWhitespace) return;
-      canonical.push(' ');
-      sourceIndexes.push(sourceIndex);
-      previousWhitespace = true;
-      return;
+      if (kind !== 'formula' && !previousWhitespace) {
+        canonical.push(' ');
+        sourceIndexes.push(sourceIndex);
+        previousWhitespace = true;
+      }
+      sourceIndex += 1;
+      continue;
     }
     previousWhitespace = false;
     const normalized = kind === 'prose' ? character.toLocaleLowerCase() : character;
-    for (const output of Array.from(normalized)) {
+    for (const output of normalized) {
       canonical.push(output);
-      sourceIndexes.push(sourceIndex);
+      for (let unitIndex = 0; unitIndex < output.length; unitIndex += 1) {
+        sourceIndexes.push(sourceIndex);
+      }
     }
-  });
+    sourceIndex += 1;
+  }
   return { text: canonical.join(''), sourceIndexes };
 }
 
@@ -161,11 +199,42 @@ function glyphRects(
   glyphs: readonly PdfGlyphObject[],
   start: number,
   end: number,
+  geometry: PdfSearchPageGeometry,
 ): Rect[] {
   return glyphs.slice(start, end).flatMap((glyph) => {
-    if (glyph.isEmpty || glyph.isSpace || glyph.size.width <= 0 || glyph.size.height <= 0) return [];
-    return [{ origin: { ...glyph.origin }, size: { ...glyph.size } }];
+    if (
+      glyph.isEmpty
+      || glyph.isSpace
+      || !Number.isFinite(glyph.origin.x)
+      || !Number.isFinite(glyph.origin.y)
+      || !Number.isFinite(glyph.size.width)
+      || !Number.isFinite(glyph.size.height)
+      || glyph.size.width <= 0
+      || glyph.size.height <= 0
+    ) return [];
+    return [{
+      origin: {
+        x: glyph.origin.x + geometry.cropLeft,
+        y: glyph.origin.y + geometry.cropTop,
+      },
+      size: { ...glyph.size },
+    }];
   });
+}
+
+function hasReliableGlyphGeometry(glyphs: readonly PdfGlyphObject[]): boolean {
+  return glyphs.every((glyph) => (
+    glyph.isEmpty
+    || glyph.isSpace
+    || (
+      Number.isFinite(glyph.origin.x)
+      && Number.isFinite(glyph.origin.y)
+      && Number.isFinite(glyph.size.width)
+      && Number.isFinite(glyph.size.height)
+      && glyph.size.width > 0
+      && glyph.size.height > 0
+    )
+  ));
 }
 
 function excerpt(text: string, start: number, count: number): string {
@@ -181,8 +250,9 @@ function findPageMatches(input: {
   readonly query: string;
   readonly kind: PdfSearchMatchKind;
   readonly formula: boolean;
+  readonly wholeWords?: boolean;
 }): PdfSearchResult[] {
-  const indexed = canonicalTextWithMap(input.page.text, input.formula ? 'formula' : 'prose');
+  const indexed = input.formula ? input.page.formula : input.page.prose;
   const query = input.formula
     ? canonicalizeFormula(input.query)
     : canonicalizeProse(input.query).trim();
@@ -192,13 +262,31 @@ function findPageMatches(input: {
   while (from <= indexed.text.length - query.length) {
     const matchIndex = indexed.text.indexOf(query, from);
     if (matchIndex < 0) break;
+    if (input.wholeWords) {
+      const before = indexed.text[matchIndex - 1] ?? '';
+      const after = indexed.text[matchIndex + query.length] ?? '';
+      if (/\p{L}|\p{M}/u.test(before) || /\p{L}|\p{M}/u.test(after)) {
+        from = matchIndex + Math.max(query.length, 1);
+        continue;
+      }
+    }
     const sourceStart = indexed.sourceIndexes[matchIndex];
     const sourceEnd = indexed.sourceIndexes[matchIndex + query.length - 1];
     if (sourceStart !== undefined && sourceEnd !== undefined) {
       const charCount = sourceEnd - sourceStart + 1;
-      const rects = glyphRects(input.page.glyphs, sourceStart, sourceEnd + 1);
+      const rects = glyphRects(
+        input.page.glyphs,
+        sourceStart,
+        sourceEnd + 1,
+        input.page.geometry,
+      );
       const firstOrigin = rects[0]?.origin;
       if (rects.length > 0 && firstOrigin) {
+        const firstGlyph = input.page.glyphs[sourceStart];
+        if (!firstGlyph) {
+          from = matchIndex + Math.max(query.length, 1);
+          continue;
+        }
         results.push({
           id: buildSearchResultId(
             input.documentGeneration,
@@ -210,6 +298,12 @@ function findPageMatches(input: {
           pageIndex: input.page.pageIndex,
           charIndex: sourceStart,
           charCount,
+          navigationPoint: {
+            x: firstGlyph.origin.x + input.page.geometry.cropLeft,
+            y: input.page.geometry.cropBottom
+              + input.page.geometry.height
+              - firstGlyph.origin.y,
+          },
           rects,
           excerpt: excerpt(input.page.text, sourceStart, charCount),
           kind: input.kind,
@@ -237,20 +331,24 @@ function alternativesFor(
   const normalized = query.trim().toLocaleLowerCase();
   return detectedSymbolSuggestions(glyphs)
     .filter((symbol) => (
-      normalized.startsWith('\\')
+      query.includes(symbol.glyph)
+      || normalized === symbol.glyph
+      || normalized.startsWith('\\')
       || symbol.name.includes(normalized)
       || symbol.latex.includes(normalized)
       || normalized.length === 0
     ))
     .slice(0, 8)
-    .map((symbol) => ({ label: `${symbol.glyph} ${symbol.name}`, query: symbol.glyph, kind: 'symbol' }));
+    .map((symbol) => ({
+      label: `${symbol.glyph} ${symbol.name} (${symbol.latex})`,
+      query: symbol.glyph,
+    }));
 }
 
 function catalogFor(glyphs: ReadonlySet<string>): PdfSearchAlternative[] {
   return detectedSymbolSuggestions(glyphs).map((symbol) => ({
-    label: `${symbol.glyph} ${symbol.name}`,
+    label: `${symbol.glyph} ${symbol.name} (${symbol.latex})`,
     query: symbol.glyph,
-    kind: 'symbol',
   }));
 }
 
@@ -262,13 +360,27 @@ export function createPdfSearchController(
   const pages: IndexedPage[] = [];
   const unsearchablePages: number[] = [];
   const limitedPages: number[] = [];
-  const maxPageReads = Math.max(1, options.maxPageReads ?? PDF_SEARCH_MAX_PAGE_READS);
+  const maxConcurrentPageReads = Math.max(
+    1,
+    options.maxConcurrentPageReads ?? PDF_SEARCH_MAX_CONCURRENT_PAGE_READS,
+  );
   const maxIndexBytes = options.maxIndexBytes ?? PDF_SEARCH_MAX_INDEX_BYTES;
+  const glyphInventory = new Set<string>();
   let state = initialPdfSearchState(options.reader.pageCount);
   let indexPromise: Promise<void> | null = null;
+  let indexComplete = false;
+  let symbolCatalog: readonly PdfSearchAlternative[] = [];
   let indexedBytes = 0;
   let queryToken = 0;
   let activeSearch: { readonly token: number; readonly query: string } | null = null;
+  let progressiveExact: {
+    readonly token: number;
+    readonly effectiveQuery: string;
+    readonly matchKind: PdfSearchMatchKind;
+    readonly formula: boolean;
+    readonly pageIndexes: Set<number>;
+    readonly results: PdfSearchResult[];
+  } | null = null;
   let disposed = false;
 
   const publish = (next: PdfSearchState) => {
@@ -302,14 +414,27 @@ export function createPdfSearchController(
               extractedText: page.text,
               textRects: page.textRects,
             });
-            if (!reliable.reliable || page.glyphs.length === 0) {
+            if (
+              !reliable.reliable
+              || page.glyphs.length === 0
+              || !hasReliableGlyphGeometry(page.glyphs)
+            ) {
               unsearchablePages.push(pageIndex);
             } else {
               const pageBytes = estimatedPageBytes(page);
               if (indexedBytes + pageBytes > maxIndexBytes) limitedPages.push(pageIndex);
               else {
                 indexedBytes += pageBytes;
-                pages.push({ ...page, pageIndex });
+                pages.push({
+                  pageIndex,
+                  text: page.text,
+                  glyphs: page.glyphs,
+                  geometry: page.geometry,
+                  prose: canonicalTextWithMap(page.text, 'prose'),
+                  formula: canonicalTextWithMap(page.text, 'formula'),
+                });
+                addDetectedGlyphs(page.text, glyphInventory);
+                symbolCatalog = catalogFor(glyphInventory);
               }
             }
           } catch {
@@ -317,23 +442,22 @@ export function createPdfSearchController(
           }
           if (!disposed) {
             if (activeSearch) publishQueryResults(activeSearch.token, activeSearch.query, false);
-            else publish({ ...state, status: 'indexing', coverage: coverage() });
+            else publish({ ...state, coverage: coverage() });
           }
         }
       };
       await Promise.all(Array.from(
-        { length: Math.min(maxPageReads, options.reader.pageCount) },
+        { length: Math.min(maxConcurrentPageReads, options.reader.pageCount) },
         () => worker(),
       ));
       pages.sort((left, right) => left.pageIndex - right.pageIndex);
+      indexComplete = true;
     })();
     return indexPromise;
   };
 
   function publishQueryResults(token: number, query: string, complete: boolean): void {
     if (disposed || token !== queryToken || activeSearch?.token !== token) return;
-    const glyphInventory = detectedGlyphs(pages);
-    const symbolCatalog = catalogFor(glyphInventory);
     const queryKind = classifyPdfSearchQuery(query);
     const symbolAlias = isSymbolAliasQuery(query);
     const symbol = resolveDetectedSymbolQuery(query, glyphInventory);
@@ -341,27 +465,58 @@ export function createPdfSearchController(
     const matchKind: PdfSearchMatchKind = symbol
       ? 'symbol'
       : queryKind === 'formula' ? 'formula' : 'exact';
-    const exact = ordered(pages.flatMap((page) => findPageMatches({
-      page,
-      documentGeneration: options.documentGeneration,
-      query: effectiveQuery,
-      kind: matchKind,
-      formula: Boolean(symbol) || queryKind === 'formula',
-    })));
+    const formula = Boolean(symbol) || queryKind === 'formula';
+    if (
+      progressiveExact?.token !== token
+      || progressiveExact.effectiveQuery !== effectiveQuery
+      || progressiveExact.matchKind !== matchKind
+      || progressiveExact.formula !== formula
+    ) {
+      progressiveExact = {
+        token,
+        effectiveQuery,
+        matchKind,
+        formula,
+        pageIndexes: new Set(),
+        results: [],
+      };
+    }
+    for (const page of pages) {
+      if (progressiveExact.pageIndexes.has(page.pageIndex)) continue;
+      progressiveExact.pageIndexes.add(page.pageIndex);
+      progressiveExact.results.push(...findPageMatches({
+        page,
+        documentGeneration: options.documentGeneration,
+        query: effectiveQuery,
+        kind: matchKind,
+        formula,
+      }));
+    }
+    const exact = ordered(progressiveExact.results);
 
-    const relatedQueries = queryKind === 'prose' && !symbolAlias
+    const relatedQueries = complete && queryKind === 'prose' && !symbolAlias
       ? relatedPhraseQueries(query, documentWords(pages))
       : [];
     const exactIds = new Set(exact.map(({ id }) => id));
-    const related = ordered(relatedQueries.flatMap((variant) => pages.flatMap((page) => (
+    const relatedById = new Map<string, PdfSearchResult>();
+    for (const result of relatedQueries.flatMap((variant) => pages.flatMap((page) => (
       findPageMatches({
         page,
         documentGeneration: options.documentGeneration,
         query: variant,
         kind: 'variant',
         formula: false,
+        wholeWords: true,
       }).filter(({ id }) => !exactIds.has(id))
-    ))));
+    )))) {
+      const overlapsExact = exact.some((exactResult) => (
+        exactResult.pageIndex === result.pageIndex
+        && exactResult.charIndex < result.charIndex + result.charCount
+        && result.charIndex < exactResult.charIndex + exactResult.charCount
+      ));
+      if (!overlapsExact) relatedById.set(result.id, result);
+    }
+    const related = ordered([...relatedById.values()]);
     const hasCoverageGap = unsearchablePages.length > 0 || limitedPages.length > 0;
     const hasResults = exact.length > 0 || related.length > 0;
     const groups = [
@@ -395,21 +550,19 @@ export function createPdfSearchController(
   const search = async (rawQuery: string): Promise<PdfSearchState> => {
     const token = ++queryToken;
     const query = rawQuery.trim();
-    activeSearch = query.length === 0 ? null : { token, query };
+    const oversized = Array.from(query).length > PDF_SEARCH_MAX_QUERY_CODE_POINTS;
+    activeSearch = query.length === 0 || oversized ? null : { token, query };
+    progressiveExact = null;
     publish({
       ...state,
-      status: query.length === 0 ? 'idle' : 'indexing',
-      query,
+      status: oversized ? 'unavailable' : query.length === 0 ? 'idle' : 'indexing',
+      query: rawQuery,
       groups: [],
       selectedResultId: null,
       alternatives: [],
-      message: '',
+      message: oversized ? 'Search queries are limited to 512 characters.' : '',
     });
-    if (query.length === 0) return state;
-    if (Array.from(query).length > PDF_SEARCH_MAX_QUERY_CODE_POINTS) {
-      publish({ ...state, status: 'unavailable', message: 'Search queries are limited to 512 characters.' });
-      return state;
-    }
+    if (query.length === 0 || oversized) return state;
 
     await ensureIndex();
     if (disposed || token !== queryToken) return state;
@@ -424,10 +577,10 @@ export function createPdfSearchController(
       return () => listeners.delete(listener);
     },
     async prepare() {
+      if (indexComplete && state.status !== 'indexing') return state;
       if (state.status === 'idle') publish({ ...state, status: 'indexing' });
       await ensureIndex();
       if (disposed) return state;
-      const symbolCatalog = catalogFor(detectedGlyphs(pages));
       publish({
         ...state,
         status: state.query.length === 0
@@ -449,6 +602,7 @@ export function createPdfSearchController(
     clear() {
       queryToken += 1;
       activeSearch = null;
+      progressiveExact = null;
       publish({ ...initialPdfSearchState(options.reader.pageCount), coverage: coverage() });
     },
     dispose() {

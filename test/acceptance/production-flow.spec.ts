@@ -14,6 +14,7 @@ let pdf = "";
 let multiPagePdf = "";
 let rotatedPdf = "";
 let referencePdf = "";
+let searchPdf = "";
 let initialSessionId = "";
 
 async function installSelectionCaptureGate(page: Page): Promise<void> {
@@ -161,10 +162,12 @@ test.beforeAll(async () => {
   multiPagePdf = join(root, "multi-page.pdf");
   rotatedPdf = join(root, "rotated.pdf");
   referencePdf = join(root, "reference-navigation.pdf");
+  searchPdf = join(root, "pdf-search.pdf");
   await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
   await copyFile(resolve("test/fixtures/pdfs/mixed-text-image.pdf"), multiPagePdf);
   await copyFile(resolve("test/fixtures/pdfs/rotation-90-crop.pdf"), rotatedPdf);
   await copyFile(resolve("test/fixtures/pdfs/reference-navigation.pdf"), referencePdf);
+  await copyFile(resolve("test/fixtures/pdfs/pdf-search.pdf"), searchPdf);
   await copyFile(resolve("test/fixtures/latex/paper.tex"), join(sourceRoot, "paper.tex"));
   host = await ProofreaderHost.start({
     recoveryRoot: join(root, "recovery"),
@@ -179,6 +182,93 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await host?.close();
   if (root) await rm(root, { recursive: true, force: true });
+});
+
+test("searches extracted PDF text with variants, history, references, and retained responsive state", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const errors = collectBrowserErrors(page);
+  await openFreshProductionFixture(page, searchPdf, "PDF search launch failed");
+  const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
+  const firstPage = mainWorkspace.locator("[data-page-index='0']");
+  await expect(firstPage).toBeVisible();
+  await firstPage.focus();
+
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+f" : "Control+f");
+  const query = page.getByRole("searchbox", { name: "Search this PDF" });
+  await expect(page.getByRole("tab", { name: "Search", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.getByRole("button", { name: "Close right workspace" })).toBeVisible();
+  await expect(query).toBeFocused();
+  await query.fill("stable");
+
+  const searchPanel = page.locator("#workspace-panel-search");
+  await expect(searchPanel).toBeVisible();
+  await expect(searchPanel.locator(".pdf-search")).toHaveAttribute("data-pdf-search-state", "partial");
+  await expect(searchPanel).toContainText("Searched 2 of 3 pages with reliable text.");
+  const exact = searchPanel.locator(".pdf-search__group").filter({ hasText: "Exact matches" });
+  const related = searchPanel.locator(".pdf-search__group").filter({ hasText: "Related word forms" });
+  await expect(exact.locator("[data-search-result]")).toHaveCount(2);
+  await expect(related.locator("[data-search-result]")).toHaveCount(2);
+  await expect(exact.locator("[data-search-result]").first()).toContainText("First occurrence");
+  await expect(related).toContainText("stabilizes");
+  await expect(related).toContainText("Stability");
+
+  await query.fill("degree");
+  await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
+  await expect(searchPanel).toContainText("Exact symbol");
+  await query.fill("\\degree");
+  await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
+  await query.fill("90°");
+  await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
+  await expect(searchPanel).toContainText("Exact formula");
+  await query.fill("90°+");
+  await expect(searchPanel.locator("[data-search-result]")).toHaveCount(0);
+  await expect(searchPanel).toContainText("could not be matched confidently");
+  await expect(searchPanel.locator(".pdf-search__alternatives")
+    .getByRole("button", { name: "° degree (\\degree)", exact: true })).toBeVisible();
+  await query.fill("stable");
+  await expect(exact.locator("[data-search-result]")).toHaveCount(2);
+
+  await exact.locator(".pdf-search__result").nth(1).click();
+  await expect(page.getByLabel("Current page")).toHaveText("2 / 3");
+  await expect(mainWorkspace.locator("[data-page-index='1'] [data-pdf-search-highlight]").first())
+    .toBeVisible();
+  await expect(page.getByRole("button", { name: "Back in document history" })).toBeEnabled();
+  const mainViewport = mainWorkspace.locator("[data-viewer-framing-viewport]");
+  const mainPositionBeforeReference = await mainViewport.evaluate((element) => ({
+    left: element.scrollLeft,
+    top: element.scrollTop,
+  }));
+
+  await exact.locator("[data-search-result]").first()
+    .getByRole("button", { name: "Open result on page 1 in References" }).click();
+  await expect(page.getByRole("tab", { name: /stable, Page 1/u })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect.poll(() => mainViewport.evaluate((element) => ({
+    left: element.scrollLeft,
+    top: element.scrollTop,
+  }))).toEqual(mainPositionBeforeReference);
+  await expect(query).toHaveValue("stable");
+
+  await page.setViewportSize({ width: 700, height: 900 });
+  await expect(page.locator("[data-review-stage]")).toHaveAttribute(
+    "data-workspace-presentation",
+    "bottom",
+  );
+  await page.getByRole("tab", { name: "Search", exact: true }).click();
+  await expect(query).toBeVisible();
+  await expect(query).toHaveValue("stable");
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.locator("[data-review-stage]")).toHaveAttribute(
+    "data-workspace-presentation",
+    "right",
+  );
+  await expect(query).toHaveValue("stable");
+  expect(errors).toEqual([]);
 });
 
 test("keeps a real reference chain beside the anchored main PDF through reflow and history", async ({ page }) => {
@@ -422,7 +512,12 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     "aria-expanded", "true",
   );
   const workspaceModes = page.getByRole("tablist", { name: "Workspace modes" });
-  await expect(workspaceModes.getByRole("tab")).toHaveText(["Outline", "Annotations", "References"]);
+  await expect(workspaceModes.getByRole("tab")).toHaveText([
+    "Outline",
+    "Annotations",
+    "References",
+    "Search",
+  ]);
   await expect(workspaceModes.getByRole("tab", { name: "References", exact: true })).toHaveAttribute(
     "aria-selected",
     "true",

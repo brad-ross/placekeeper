@@ -1,5 +1,7 @@
+import { canonicalizeProse } from './pdf-search-model.js';
+
 function normalizedWord(word: string): string {
-  return word.normalize('NFC').toLocaleLowerCase();
+  return canonicalizeProse(word);
 }
 
 function morphologyKeys(word: string): ReadonlySet<string> {

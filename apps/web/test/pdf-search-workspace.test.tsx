@@ -9,6 +9,7 @@ const result: PdfSearchResult = {
   pageIndex: 3,
   charIndex: 10,
   charCount: 6,
+  navigationPoint: { x: 1, y: 6 },
   rects: [{ origin: { x: 1, y: 2 }, size: { width: 3, height: 4 } }],
   excerpt: 'Let λ denote the arrival rate.',
   kind: 'symbol',
@@ -42,7 +43,7 @@ describe('PDF search workspace', () => {
     const html = renderToStaticMarkup(<PdfSearchWorkspace
       state={{
         ...initialPdfSearchState(2),
-        symbolCatalog: [{ label: 'λ lambda', query: 'λ', kind: 'symbol' }],
+        symbolCatalog: [{ label: 'λ lambda (\\lambda)', query: 'λ' }],
       }}
       onQueryChange={vi.fn()}
       onResultActivate={vi.fn()}
@@ -51,7 +52,7 @@ describe('PDF search workspace', () => {
     />);
 
     expect(html).toContain('Symbols in this PDF');
-    expect(html).toContain('title="Search for λ lambda"');
+    expect(html).toContain('title="Search for λ lambda (\\lambda)"');
     expect(html).not.toContain('theta');
   });
 });

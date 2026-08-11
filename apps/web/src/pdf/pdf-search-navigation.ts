@@ -9,8 +9,7 @@ export function pdfSearchResultTarget(
 ): PdfNavigationTarget | null {
   const rect = result.rects[0];
   if (!rect || rect.size.width <= 0 || rect.size.height <= 0) return null;
-  const x = rect.origin.x;
-  const y = rect.origin.y + rect.size.height;
+  const { x, y } = result.navigationPoint;
   if (![x, y].every(Number.isFinite)) return null;
   return {
     documentGeneration,

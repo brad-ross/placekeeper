@@ -40,6 +40,7 @@ import { PageActionMenu } from '../review/PageActionMenu.js';
 import { LinkActionPopover, type LinkActionChoice, type LinkActionDismissReason } from '../review/LinkActionPopover.js';
 import {
   ReferenceWorkspace,
+  WORKSPACE_MODES,
   type PendingReferencePanel,
   type ReferenceWorkspaceTab,
 } from '../review/ReferenceWorkspace.js';
@@ -175,6 +176,7 @@ export interface ReviewShellProps {
   onReferenceLayoutAction?(action: ReferenceWorkspaceLayoutAction): void;
   rightWorkspaceMode?: RightWorkspaceMode;
   search?: ReactNode;
+  viewerNavigationIntentToken?: number;
   children?: ReactNode;
 }
 
@@ -253,6 +255,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const [consumedSelectionGeneration, setConsumedSelectionGeneration] = useState<number>();
   const [listActivation, setListActivation] = useState<{ readonly id: string; readonly token: number }>();
   const [peekItemId, setPeekItemId] = useState<string>();
+  const [searchFocusRequest, setSearchFocusRequest] = useState(0);
   const peekHeldRef = useRef(false);
   const peekTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [announcement, setAnnouncement] = useState(`Review revision ${props.state.revision}.`);
@@ -370,6 +373,33 @@ export function ReviewShell(props: ReviewShellProps) {
     });
     if (action !== null) dispatchSurface(action);
   }, [props.workspaceOpen, surface.baseSurface, surface.transientSurface, workspaceMode]);
+
+  useLayoutEffect(() => {
+    if (searchFocusRequest === 0 || !toolsSurfaceOpen || effectiveWorkspaceMode !== 'search') return;
+    let cancelled = false;
+    let frame = 0;
+    let attempts = 0;
+    const focusQuery = () => {
+      if (cancelled) return;
+      const query = shellRef.current
+        ?.querySelector<HTMLInputElement>('[data-workspace-focus-token="search:query"]');
+      if (
+        query
+        && query.closest('[inert]') === null
+        && getComputedStyle(query).visibility !== 'hidden'
+      ) {
+        query.focus({ preventScroll: true });
+        if (document.activeElement === query) return;
+      }
+      attempts += 1;
+      if (attempts < 30) frame = requestAnimationFrame(focusQuery);
+    };
+    frame = requestAnimationFrame(focusQuery);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [effectiveWorkspaceMode, searchFocusRequest, toolsSurfaceOpen]);
 
   useEffect(() => {
     if (props.selectionUpdate.kind !== 'reliable') setConsumedSelectionGeneration(undefined);
@@ -574,12 +604,9 @@ export function ReviewShell(props: ReviewShellProps) {
       && surface.baseSurface !== 'finish'
     ) {
       event.preventDefault();
+      setSearchFocusRequest((request) => request + 1);
       selectWorkspaceMode('search');
       dispatchReferenceLayout({ type: 'show-right-workspace' });
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        shellRef.current?.querySelector<HTMLInputElement>('[data-workspace-focus-token="search:query"]')
-          ?.focus({ preventScroll: true });
-      }));
       return;
     }
     if (workspaceOpen && !editable && !isWorkspaceOrChrome(event.target)) {
@@ -791,6 +818,8 @@ export function ReviewShell(props: ReviewShellProps) {
       const target = mode === 'references'
         ? shell?.querySelector<HTMLElement>('[data-reference-tab][aria-selected="true"]')
           ?? shell?.querySelector<HTMLElement>('[data-reference-empty]')
+        : mode === 'search'
+          ? shell?.querySelector<HTMLElement>('[data-workspace-focus-token="search:query"]')
         : shell?.querySelector<HTMLElement>(`#workspace-panel-${mode}`);
       target?.focus({ preventScroll: true });
     }));
@@ -810,6 +839,11 @@ export function ReviewShell(props: ReviewShellProps) {
     props.onWorkspaceModeFocusTokenChange?.(mode, token);
   };
   const markFramingUserIntent = workspaceFraming.markUserIntent;
+  useLayoutEffect(() => {
+    if ((props.viewerNavigationIntentToken ?? 0) > 0) {
+      markFramingUserIntent(undefined, { captureSettledPosition: false });
+    }
+  }, [markFramingUserIntent, props.viewerNavigationIntentToken]);
   const isWorkspaceOrChrome = (target: EventTarget | null) => (
     (target instanceof Node && (
       workspaceFraming.referenceSurfaceRef.current?.contains(target) === true
@@ -1020,7 +1054,7 @@ export function ReviewShell(props: ReviewShellProps) {
               ? 'bottom' : 'right'}
             modes={effectiveReferenceLayout.kind === 'narrow-unified'
               || effectiveReferenceLayout.referenceDock === 'right'
-              ? ['outline', 'annotations', 'references', 'search'] : ['references']}
+              ? WORKSPACE_MODES : ['references']}
             headerVariant={effectiveReferenceLayout.kind !== 'narrow-unified'
               && effectiveReferenceLayout.referenceDock === 'bottom' ? 'references' : 'tabs'}
             onMoveReferencesRight={() => {

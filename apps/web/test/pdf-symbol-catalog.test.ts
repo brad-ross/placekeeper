@@ -25,6 +25,7 @@ describe('PDF symbol catalog', () => {
 
   it('recognizes known names even before checking this document inventory', () => {
     expect(isSymbolAliasQuery('theta')).toBe(true);
+    expect(resolveDetectedSymbolQuery('\\degree', new Set(['°']))?.glyph).toBe('°');
     expect(isSymbolAliasQuery('stability')).toBe(false);
   });
 });

@@ -2,7 +2,7 @@ import type { Rect } from '@embedpdf/models';
 
 export const PDF_SEARCH_MAX_QUERY_CODE_POINTS = 512;
 export const PDF_SEARCH_MAX_INDEX_BYTES = 64 * 1024 * 1024;
-export const PDF_SEARCH_MAX_PAGE_READS = 4;
+export const PDF_SEARCH_MAX_CONCURRENT_PAGE_READS = 4;
 
 export type PdfSearchQueryKind = 'prose' | 'symbol-command' | 'formula';
 export type PdfSearchMatchKind = 'exact' | 'variant' | 'symbol' | 'formula';
@@ -27,6 +27,9 @@ export interface PdfSearchResult {
   readonly pageIndex: number;
   readonly charIndex: number;
   readonly charCount: number;
+  /** First match point in canonical bottom-origin PDF coordinates. */
+  readonly navigationPoint: { readonly x: number; readonly y: number };
+  /** Match bounds in the review overlay's canonical top-origin coordinates. */
   readonly rects: readonly Rect[];
   readonly excerpt: string;
   readonly kind: PdfSearchMatchKind;
@@ -42,7 +45,6 @@ export interface PdfSearchResultGroup {
 export interface PdfSearchAlternative {
   readonly label: string;
   readonly query: string;
-  readonly kind: 'symbol' | 'name' | 'latex' | 'fragment';
 }
 
 export interface PdfSearchState {
@@ -68,7 +70,7 @@ export function classifyPdfSearchQuery(value: string): PdfSearchQueryKind {
   const query = value.trim();
   if (/^\\[A-Za-z]+$/u.test(query)) return 'symbol-command';
   if (
-    /[\u0370-\u03ff\u2190-\u22ff\u27c0-\u27ef\u2980-\u2aff]/u.test(query)
+    /[°\u0370-\u03ff\u2190-\u22ff\u27c0-\u27ef\u2980-\u2aff]/u.test(query)
     || /[=<>+*/^_|{}[\]]/u.test(query)
   ) return 'formula';
   return 'prose';

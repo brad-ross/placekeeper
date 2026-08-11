@@ -1,4 +1,4 @@
-import { useRef, type ChangeEvent } from 'react';
+import type { ChangeEvent } from 'react';
 
 import type {
   PdfSearchAlternative,
@@ -35,12 +35,12 @@ export function PdfSearchWorkspace({
   onResultOpenReference,
   onAlternativeActivate,
 }: PdfSearchWorkspaceProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
   const resultCount = state.groups.reduce((count, group) => count + group.results.length, 0);
   const indexing = state.status === 'indexing' || state.status === 'searching';
+  const hasEffectiveQuery = state.query.trim().length > 0;
   const statusAnnouncement = indexing
     ? state.message || 'Searching this PDF.'
-    : state.query.length === 0
+    : !hasEffectiveQuery
       ? 'PDF search ready.'
       : resultCount === 1 ? '1 PDF search result.' : `${resultCount} PDF search results.`;
   const updateQuery = (event: ChangeEvent<HTMLInputElement>) => onQueryChange(event.target.value);
@@ -53,7 +53,6 @@ export function PdfSearchWorkspace({
       <div className="pdf-search__query">
         <ReviewIcon name="search" />
         <input
-          ref={inputRef}
           type="search"
           role="searchbox"
           aria-label="Search this PDF"
@@ -117,7 +116,7 @@ export function PdfSearchWorkspace({
         </section>
       ) : null}
 
-      {state.query.length > 0 && !indexing ? (
+      {hasEffectiveQuery && !indexing ? (
         <p className="pdf-search__summary">
           {resultCount === 1 ? '1 result' : `${resultCount} results`}
           {state.coverage.searchedPages < state.coverage.totalPages
