@@ -11,6 +11,10 @@ import {
   samePdfViewerLocation,
 } from '../src/pdf/viewer-navigation.js';
 import {
+  createPdfAnnotationOrderLocation,
+  createPdfOutlineTargetOrderLocation,
+} from '../src/pdf/document-order-location.js';
+import {
   createPdfTargetLocation,
   createViewerNavigation,
   focusViewerDestination,
@@ -112,6 +116,52 @@ describe('viewer navigation math', () => {
       alignment: { xPercent: 50, yPercent: 50 },
       zoom: 1.5,
     });
+  });
+
+  it('keeps authored outline coordinates distinct from page-level navigation defaults', () => {
+    expect(createPdfOutlineTargetOrderLocation(target(PdfZoomMode.XYZ, [172, 740, 1]), {
+      page: { ...page, cropOrigin: { x: 100, y: 200 } },
+      documentGeneration: 4,
+    })).toEqual({
+      pageIndex: 0,
+      anchor: { x: 72, y: 260 },
+      precision: 'exact',
+    });
+    expect(createPdfOutlineTargetOrderLocation(target(PdfZoomMode.FitPage), {
+      page,
+      documentGeneration: 4,
+    })).toEqual({
+      pageIndex: 0,
+      anchor: { x: 0, y: 0 },
+      precision: 'page',
+    });
+    expect(createPdfOutlineTargetOrderLocation(target(PdfZoomMode.FitVertical, [20]), {
+      page,
+      documentGeneration: 4,
+    })).toEqual({
+      pageIndex: 0,
+      anchor: { x: 0, y: 0 },
+      precision: 'page',
+    });
+    expect(createPdfOutlineTargetOrderLocation(target(PdfZoomMode.FitHorizontal, [700]), {
+      page,
+      documentGeneration: 4,
+    })).toEqual({
+      pageIndex: 0,
+      anchor: { x: 0, y: 100 },
+      precision: 'exact',
+    });
+  });
+
+  it('normalizes canonical annotation points with top-origin crop evidence', () => {
+    expect(createPdfAnnotationOrderLocation({ pageIndex: 2, point: { x: 172, y: 260 } }, {
+      page,
+      cropOrigin: { x: 100, y: 200 },
+    })).toEqual({ pageIndex: 2, anchor: { x: 72, y: 60 } });
+    expect(createPdfAnnotationOrderLocation({ pageIndex: 2, point: { x: Number.NaN, y: 260 } }, {
+      page,
+      cropOrigin: { x: 100, y: 200 },
+    })).toBeNull();
   });
 });
 
@@ -483,6 +533,15 @@ describe('viewer navigation adapter', () => {
 
     expect(await harness.navigation.applyLocation(captured!)).toBe(true);
     expect(harness.log.at(-1)).toBe('scroll');
+  });
+
+  it('captures neutral document-order page geometry through the adapter', () => {
+    const harness = navigationHarness();
+
+    expect(harness.navigation.captureDocumentOrderPages()).toEqual([{
+      size: page,
+      crop: { left: 0, top: 0, bottom: 0 },
+    }]);
   });
 
   it('waits for a newly portaled inactive-document viewport before applying its target', async () => {

@@ -44,6 +44,11 @@ import {
 import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
 import { createTrailingTaskScheduler } from "../review/main-location-refresh.js";
 import {
+  canDeriveAnnotationOutlineLabels,
+  deriveAnnotationOutlineLabels,
+  reviewItemPoint,
+} from "../review/annotation-outline-context.js";
+import {
   BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN,
   RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
   createReferenceWorkspaceLayout,
@@ -52,14 +57,6 @@ import {
   type ReferenceWorkspaceLayoutAction,
   type RightWorkspaceMode,
 } from "../review/reference-workspace-layout.js";
-
-function itemCoordinates(item: ReviewState["items"][number]): { x: number; y: number } | undefined {
-  const value = item.payload[item.kind === "insert" || item.kind === "pageNote" ? "position" : "rect"];
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const x = value.x;
-  const y = value.y;
-  return typeof x === "number" && typeof y === "number" ? { x, y } : undefined;
-}
 
 export interface ProductionSession {
   readonly sessionId: string;
@@ -116,6 +113,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [existingAnnotations, setExistingAnnotations] = useState<ExistingAnnotationsDiscovery>({
     status: 'loading', generation: 0,
   });
+  const [existingAnnotationsSourceIdentity, setExistingAnnotationsSourceIdentity] = useState(
+    `${props.initialState.source.fileId}:${props.initialState.source.digest}`,
+  );
   const [inventoryRetryGeneration, setInventoryRetryGeneration] = useState(0);
   const [correspondingItemId, setCorrespondingItemId] = useState<string>();
   const [activeItemId, setActiveItemId] = useState<string>();
@@ -134,6 +134,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [viewerFraming, setViewerFraming] = useState<ViewerFramingControls>();
   const productionRootRef = useRef<HTMLElement | null>(null);
   const mainNavigationRef = useRef<PdfViewerNavigation | null>(null);
+  const [mainNavigationReadyGeneration, setMainNavigationReadyGeneration] = useState<number | null>(null);
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
   const referenceNavigationWaiters = useRef<Array<{
@@ -326,6 +327,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     }
     outlineDiscoveryRef.current = { status: 'loading', documentGeneration: nextGeneration };
     setOutlineDiscovery(outlineDiscoveryRef.current);
+    setExistingAnnotations({ status: 'loading', generation: 0 });
+    setExistingAnnotationsSourceIdentity(sourceIdentity);
+    setMainNavigationReadyGeneration(null);
     navigationCoordinator.replaceDocument(nextGeneration);
     dispatchLayout({ type: 'replace-document' });
     setRightWorkspaceMode('outline');
@@ -406,6 +410,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     if (scope === 'main') {
       mainNavigationRef.current = navigation;
       navigation?.replaceDocument(documentGenerationRef.current);
+      setMainNavigationReadyGeneration(navigation === null ? null : documentGenerationRef.current);
       navigationCoordinator.refreshMainLocation();
       return;
     }
@@ -420,6 +425,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       }
     }
   }, [navigationCoordinator]);
+  const onExistingAnnotationsDiscovery = useCallback((result: ExistingAnnotationsDiscovery) => {
+    setExistingAnnotations(result);
+    setExistingAnnotationsSourceIdentity(sourceIdentity);
+  }, [sourceIdentity]);
   const onOutlineDiscovery = useCallback((discovery: PdfOutlineDiscovery) => {
     if (discovery.documentGeneration !== documentGenerationRef.current) return;
     outlineDiscoveryRef.current = discovery;
@@ -452,7 +461,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       onViewerInteraction={onViewerInteraction}
       {...(activeItemId === undefined ? {} : { activeOwnedAnnotationId: activeItemId })}
       {...(correspondingItemId === undefined ? {} : { correspondingOwnedAnnotationId: correspondingItemId })}
-      onExistingAnnotationsDiscovery={setExistingAnnotations}
+      onExistingAnnotationsDiscovery={onExistingAnnotationsDiscovery}
       inventoryRetryGeneration={inventoryRetryGeneration}
       documentGeneration={navigationState.documentGeneration}
       referenceViewportHost={referenceViewportHost}
@@ -463,6 +472,37 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       onViewerFramingInitialized={onViewerFramingInitialized}
     />
   );
+
+  const annotationOutlineLabels = useMemo(() => {
+    const pages = mainNavigationRef.current?.captureDocumentOrderPages() ?? [];
+    const source = existingAnnotationsSourceIdentity === sourceIdentity
+      && existingAnnotations.status === 'ready'
+      ? existingAnnotations.items
+      : [];
+    const derivationContext = {
+      sourceIdentity,
+      activeSourceIdentity: sourceIdentityRef.current,
+      navigationGeneration: mainNavigationReadyGeneration,
+      outlineGeneration: outlineDiscovery.documentGeneration,
+    };
+    if (!canDeriveAnnotationOutlineLabels(derivationContext)) {
+      return { owned: new Map<string, string>(), source: new Map<string, string>() };
+    }
+    return deriveAnnotationOutlineLabels({
+      documentGeneration: derivationContext.navigationGeneration,
+      outline: outlineDiscovery,
+      pages,
+      owned: state.items,
+      source,
+    });
+  }, [
+    existingAnnotations,
+    existingAnnotationsSourceIdentity,
+    mainNavigationReadyGeneration,
+    outlineDiscovery,
+    sourceIdentity,
+    state.items,
+  ]);
 
   const delivery = (
     <div className="review-delivery-content">
@@ -534,6 +574,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         }))}
         pendingReference={pendingReference}
         outlineDiscovery={outlineDiscovery}
+        annotationOutlineLabels={annotationOutlineLabels}
         currentOutlineItemId={currentOutlineItemId}
         linkActionRequest={linkActionRequest}
         navigationAnnouncement={navigationAnnouncement}
@@ -679,7 +720,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           const scroll = registry?.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides();
           if (documentId && scroll) {
             const page = core?.documents[documentId]?.document?.pages[item.pageIndex];
-            const coordinates = itemCoordinates(item);
+            const coordinates = reviewItemPoint(item) ?? undefined;
             scroll.forDocument(documentId).scrollToPage({
               pageNumber: item.pageIndex + 1,
               ...(coordinates === undefined ? {} : {

@@ -1045,6 +1045,27 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   });
   await outline.evaluate((element) => { element.style.removeProperty("width"); });
 
+  await page.getByRole("tab", { name: "Annotations", exact: true }).click();
+  const sourceRows = workspace.locator('[data-annotation-origin="source"]');
+  const unsectionedPageOne = sourceRows.filter({
+    has: page.locator('.annotation-item__page', { hasText: /^1$/u }),
+  }).first();
+  await expect(unsectionedPageOne).toBeVisible();
+  await expect(unsectionedPageOne.locator('.annotation-item__section')).toHaveCount(0);
+  await expect(unsectionedPageOne.locator('.annotation-item__separator')).toHaveCount(1);
+
+  const nestedAnnotation = sourceRows.filter({
+    has: page.locator('.annotation-item__section', { hasText: /^Nested result$/u }),
+  }).first();
+  await expect(nestedAnnotation).toBeVisible();
+  await expect(nestedAnnotation.locator('.annotation-item__page')).toHaveText('3');
+  await expect(nestedAnnotation.locator('.annotation-item__separator')).toHaveCount(2);
+  await expect(nestedAnnotation.getByRole('button')).toHaveAccessibleName(
+    /Page 3 · Nested result/u,
+  );
+  await page.getByRole("tab", { name: "Outline", exact: true }).click();
+  await expect(nestedReference).toBeVisible();
+
   const mainViewport = mainWorkspace.locator("[data-viewer-framing-viewport]");
   await mainViewport.evaluate((element) => { element.scrollTop += 32; });
   const captureMainState = async () => ({

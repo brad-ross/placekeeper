@@ -444,11 +444,19 @@ test.describe('canonical review workflow', () => {
     await expect(row).toHaveCSS('outline-style', 'solid');
 
     const kind = row.locator('.annotation-item__meta strong');
+    const separator = row.locator('.annotation-item__separator');
     const pageNumber = row.locator('.annotation-item__page');
-    const [kindBounds, pageBounds] = await Promise.all([kind.boundingBox(), pageNumber.boundingBox()]);
+    const [kindBounds, separatorBounds, pageBounds] = await Promise.all([
+      kind.boundingBox(),
+      separator.boundingBox(),
+      pageNumber.boundingBox(),
+    ]);
     expect(kindBounds).not.toBeNull();
+    expect(separatorBounds).not.toBeNull();
     expect(pageBounds).not.toBeNull();
-    expect(pageBounds!.x - (kindBounds!.x + kindBounds!.width)).toBeLessThanOrEqual(12);
+    expect(separatorBounds!.x - (kindBounds!.x + kindBounds!.width)).toBeLessThanOrEqual(5);
+    expect(pageBounds!.x - (separatorBounds!.x + separatorBounds!.width)).toBeLessThanOrEqual(5);
+    await expect(pageNumber).toHaveText('1');
   });
 
   test('keeps the complete annotation header fixed while the tray scrolls', async ({ page }) => {

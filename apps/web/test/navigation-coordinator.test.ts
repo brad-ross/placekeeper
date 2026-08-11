@@ -8,8 +8,11 @@ import type { ReferenceDocumentController } from '../src/pdf/reference-document.
 import type { PdfViewerNavigation } from '../src/pdf/viewer-navigation-adapter.js';
 import type { PdfViewerLocation } from '../src/pdf/viewer-navigation.js';
 import {
+  createOutlineContainmentResolver,
   NavigationCoordinator,
+  resolveContainingOutlineItem,
   resolveCurrentOutlineItemId,
+  type OutlineTargetOrderLocation,
   type NavigationCoordinatorDependencies,
 } from '../src/review/navigation-coordinator.js';
 import {
@@ -43,6 +46,7 @@ function navigation(initial = location(0)) {
   return {
     controls: {
       captureLocation: vi.fn(() => current),
+      captureDocumentOrderPages: vi.fn(() => []),
       resolveTarget: vi.fn((value: PdfNavigationTarget) => location(value.pageIndex)),
       applyTarget: vi.fn(async (value: PdfNavigationTarget) => {
         current = location(value.pageIndex);
@@ -455,6 +459,31 @@ describe('document-scoped navigation coordinator', () => {
 });
 
 describe('current outline destination', () => {
+  it('prepares target ordering once for repeated containment lookups', () => {
+    const first = target(1);
+    const second = target(2);
+    const resolveTarget = vi.fn((candidate: PdfNavigationTarget): OutlineTargetOrderLocation => ({
+      pageIndex: candidate.pageIndex,
+      anchor: { x: 0, y: 0 },
+      precision: 'exact',
+    }));
+    const resolve = createOutlineContainmentResolver({
+      discovery: {
+        status: 'loaded-tree',
+        documentGeneration: 1,
+        items: [
+          { id: 'first', label: 'First', pageContext: 'Page 2', target: first, children: [] },
+          { id: 'second', label: 'Second', pageContext: 'Page 3', target: second, children: [] },
+        ],
+      },
+      resolveTarget,
+    });
+
+    expect(resolve({ pageIndex: 1, anchor: { x: 10, y: 20 } })?.id).toBe('first');
+    expect(resolve({ pageIndex: 2, anchor: { x: 10, y: 20 } })?.id).toBe('second');
+    expect(resolveTarget).toHaveBeenCalledTimes(2);
+  });
+
   it('fails closed when any targeted bookmark cannot be safely ordered', () => {
     const safe = target(1);
     const unsafe = target(2);
@@ -495,5 +524,93 @@ describe('current outline destination', () => {
       currentLocation: location(5),
       resolveTarget: () => shared,
     })).toBe('deep-later');
+  });
+
+  it('uses exact children after their authored position and page-level ancestors before it', () => {
+    const parent = target(2);
+    const child = target(2);
+    const discovery = {
+      status: 'loaded-tree' as const,
+      documentGeneration: 1,
+      items: [{
+        id: 'parent', label: 'Parent', pageContext: 'Page 3', target: parent, children: [
+          { id: 'child', label: 'Child', pageContext: 'Page 3', target: child, children: [] },
+        ],
+      }],
+    };
+    const resolveTarget = (candidate: PdfNavigationTarget): OutlineTargetOrderLocation => (
+      candidate === parent
+        ? { pageIndex: 2, anchor: { x: 0, y: 0 }, precision: 'page' }
+        : { pageIndex: 2, anchor: { x: 72, y: 400 }, precision: 'exact' }
+    );
+
+    expect(resolveContainingOutlineItem({
+      discovery,
+      currentLocation: { pageIndex: 2, anchor: { x: 72, y: 300 } },
+      resolveTarget,
+    })?.id).toBe('parent');
+    expect(resolveContainingOutlineItem({
+      discovery,
+      currentLocation: { pageIndex: 2, anchor: { x: 72, y: 500 } },
+      resolveTarget,
+    })?.id).toBe('child');
+  });
+
+  it('accepts a page-level ancestor chain but fails closed on same-page siblings', () => {
+    const root = target(1);
+    const branch = target(1);
+    const sibling = target(1);
+    const location: OutlineTargetOrderLocation = {
+      pageIndex: 1,
+      anchor: { x: 0, y: 0 },
+      precision: 'page',
+    };
+    const chain = {
+      status: 'loaded-tree' as const,
+      documentGeneration: 1,
+      items: [{
+        id: 'root', label: 'Root', pageContext: 'Page 2', target: root, children: [
+          { id: 'branch', label: 'Branch', pageContext: 'Page 2', target: branch, children: [] },
+        ],
+      }],
+    };
+    expect(resolveContainingOutlineItem({
+      discovery: chain,
+      currentLocation: { pageIndex: 1, anchor: { x: 10, y: 10 } },
+      resolveTarget: () => location,
+    })?.id).toBe('branch');
+
+    expect(resolveContainingOutlineItem({
+      discovery: {
+        ...chain,
+        items: [...chain.items, {
+          id: 'sibling', label: 'Sibling', pageContext: 'Page 2', target: sibling, children: [],
+        }],
+      },
+      currentLocation: { pageIndex: 1, anchor: { x: 10, y: 10 } },
+      resolveTarget: () => location,
+    })).toBeNull();
+  });
+
+  it('fails the whole derivation when page-level siblings precede an exact target', () => {
+    const first = target(1);
+    const second = target(1);
+    const exact = target(1);
+    const resolve = createOutlineContainmentResolver({
+      discovery: {
+        status: 'loaded-tree',
+        documentGeneration: 1,
+        items: [
+          { id: 'first', label: 'First', pageContext: 'Page 2', target: first, children: [] },
+          { id: 'second', label: 'Second', pageContext: 'Page 2', target: second, children: [] },
+          { id: 'exact', label: 'Exact', pageContext: 'Page 2', target: exact, children: [] },
+        ],
+      },
+      resolveTarget: (candidate): OutlineTargetOrderLocation => candidate === exact
+        ? { pageIndex: 1, anchor: { x: 10, y: 100 }, precision: 'exact' }
+        : { pageIndex: 1, anchor: { x: 0, y: 0 }, precision: 'page' },
+    });
+
+    expect(resolve({ pageIndex: 1, anchor: { x: 10, y: 200 } })).toBeNull();
   });
 });

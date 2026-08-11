@@ -204,6 +204,7 @@ function Harness() {
         listOpen: visualScenario.listOpen,
         viewerState: visualScenario.viewerState,
         existingAnnotations: visualScenario.existingAnnotations,
+        annotationOutlineLabels: visualScenario.annotationOutlineLabels,
         finishSlot: visualScenario.finishSlot,
         navigationState: visualScenario.referenceNavigation,
         referenceTabs: visualScenario.referenceTabs,

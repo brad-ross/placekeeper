@@ -201,8 +201,17 @@ describe('review shell layout and accessibility contract', () => {
     const listHtml = renderToStaticMarkup(
       <AnnotationList
         items={[ownedAnnotation]}
+        sectionLabels={new Map([[ownedAnnotation.id, 'Methods and data']])}
         activeId={ownedAnnotation.id}
         correspondingId={ownedAnnotation.id}
+        onNavigate={() => undefined}
+        onEdit={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
+    const unsectionedListHtml = renderToStaticMarkup(
+      <AnnotationList
+        items={[ownedAnnotation]}
         onNavigate={() => undefined}
         onEdit={() => undefined}
         onDelete={() => undefined}
@@ -218,6 +227,12 @@ describe('review shell layout and accessibility contract', () => {
     expect(listHtml).toContain('data-annotation-origin="owned"');
     expect(listHtml).toContain('data-annotation-kind="highlight"');
     expect(listHtml).toContain('data-annotation-state="active-corresponding"');
+    expect(listHtml).toContain('<span class="annotation-item__separator">·</span><span class="annotation-item__page">4</span>');
+    expect(listHtml).toContain('class="annotation-item__section" title="Methods and data">Methods and data</span>');
+    expect(listHtml).toContain('aria-label="highlight · Page 4 · Methods and data · Clarify the identifying variation behind this claim."');
+    expect(listHtml).not.toContain('>Page 4<');
+    expect(unsectionedListHtml).not.toContain('annotation-item__section');
+    expect(unsectionedListHtml.match(/annotation-item__separator/gu)).toHaveLength(1);
     expect(peekHtml).toContain('data-annotation-origin="owned"');
     expect(peekHtml).toContain('data-annotation-kind="highlight"');
     expect(peekHtml).toContain('Clarify the identifying variation behind this claim.');
@@ -394,6 +409,10 @@ describe('review shell layout and accessibility contract', () => {
             supportedAppearance: true,
           }],
         }}
+        annotationOutlineLabels={{
+          owned: new Map(),
+          source: new Map([['1:source-highlight', 'Methods and data']]),
+        }}
         onCommand={async () => state}
       >
         <div>Document canvas</div>
@@ -405,6 +424,9 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('data-annotation-kind="Highlight"');
     expect(html).toContain('data-annotation-state="readonly"');
     expect(html).toContain('data-readonly="true"');
+    expect(html).toContain('class="annotation-item__section" title="Methods and data">Methods and data</span>');
+    expect(html).toContain('aria-label="Highlight · Page 2 · Methods and data · Source-only comment"');
+    expect(html).not.toContain('>Page 2<');
     expect(html).not.toContain('aria-label="Edit Highlight on page 2"');
     expect(html).not.toContain('aria-label="Delete Highlight on page 2"');
   });

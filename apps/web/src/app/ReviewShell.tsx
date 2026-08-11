@@ -25,7 +25,11 @@ import {
 } from '../../../../packages/core/src/review-commands.js';
 import type { ReviewCommand, ReviewItem, ReviewState } from '../../../../packages/core/src/review-model.js';
 import type { CaretAnchor, SelectionAnchor } from '../pdf/selection-anchor.js';
-import type { ExistingAnnotation, ExistingAnnotationsDiscovery } from '../pdf/existing-annotations.js';
+import {
+  existingAnnotationKey,
+  type ExistingAnnotation,
+  type ExistingAnnotationsDiscovery,
+} from '../pdf/existing-annotations.js';
 import { reliableSelection, type SelectionUpdate } from '../pdf/selection-state.js';
 import type { ViewerControls, ViewerControlsSnapshot } from '../pdf/viewer-controls.js';
 import { unavailableViewerControls } from '../pdf/viewer-controls.js';
@@ -33,6 +37,8 @@ import type { ViewerFramingControls, ViewerPosition } from '../pdf/viewer-framin
 import type { ViewerPdfLinkInvocation } from '../pdf/viewer-interaction-events.js';
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
 import { AnnotationList } from '../review/AnnotationList.js';
+import { AnnotationMetadata, annotationAccessibleLabel } from '../review/AnnotationMetadata.js';
+import type { AnnotationOutlineLabels } from '../review/annotation-outline-context.js';
 import { AnnotationPeek } from '../review/AnnotationPeek.js';
 import { CommentComposer } from '../review/CommentComposer.js';
 import { ContextActionPalette, type ContextPlacement } from '../review/ContextActionPalette.js';
@@ -153,6 +159,7 @@ export interface ReviewShellProps {
   referenceTabs?: readonly ReferenceWorkspaceTab[];
   pendingReference?: PendingReferencePanel | null;
   outlineDiscovery?: PdfOutlineDiscovery;
+  annotationOutlineLabels?: AnnotationOutlineLabels;
   currentOutlineItemId?: string | null;
   linkActionRequest?: ViewerPdfLinkInvocation | null;
   navigationAnnouncement?: string;
@@ -1057,6 +1064,9 @@ export function ReviewShell(props: ReviewShellProps) {
             annotations={<div id="review-annotation-list" aria-label="All annotations">
             <AnnotationList
               items={props.state.items}
+              {...(props.annotationOutlineLabels === undefined
+                ? {}
+                : { sectionLabels: props.annotationOutlineLabels.owned })}
               {...(activeItemId === undefined ? {} : { activeId: activeItemId })}
               {...(!annotationsVisible || props.correspondingItemId === undefined
                 ? {}
@@ -1109,21 +1119,33 @@ export function ReviewShell(props: ReviewShellProps) {
               ) : null}
               {existingAnnotations.status === 'ready' ? (
                 <ol className="existing-annotations__list">
-                  {existingAnnotations.items.map((annotation) => (
-                    <li
-                      key={`${annotation.pageIndex}:${annotation.id}`}
+                  {existingAnnotations.items.map((annotation) => {
+                    const sectionLabel = props.annotationOutlineLabels?.source.get(
+                      existingAnnotationKey(annotation),
+                    );
+                    return <li
+                      key={existingAnnotationKey(annotation)}
                       data-existing-annotation={annotation.id}
                       data-annotation-origin="source"
                       data-annotation-kind={annotation.subtype}
                       data-annotation-state="readonly"
                       data-readonly="true"
                     >
-                      <button className="existing-annotation__content" type="button" aria-label={`${annotation.subtype} · Page ${annotation.pageIndex + 1}${annotation.contents ? ` · ${annotation.contents}` : ''}`} onClick={() => { markFramingUserIntent(); props.onNavigateExisting?.(annotation); }}>
-                        <span className="annotation-item__meta"><strong>{annotation.subtype}</strong><span className="annotation-item__page">Page {annotation.pageIndex + 1}</span></span>
+                      <button className="existing-annotation__content" type="button" aria-label={annotationAccessibleLabel({
+                        kind: annotation.subtype,
+                        pageNumber: annotation.pageIndex + 1,
+                        ...(sectionLabel === undefined ? {} : { sectionLabel }),
+                        ...(annotation.contents ? { excerpt: annotation.contents } : {}),
+                      })} onClick={() => { markFramingUserIntent(); props.onNavigateExisting?.(annotation); }}>
+                        <AnnotationMetadata
+                          kind={annotation.subtype}
+                          pageNumber={annotation.pageIndex + 1}
+                          {...(sectionLabel === undefined ? {} : { sectionLabel })}
+                        />
                         {annotation.contents ? <span className="annotation-item__excerpt">{annotation.contents}</span> : null}
                       </button>
-                    </li>
-                  ))}
+                    </li>;
+                  })}
                 </ol>
               ) : null}
             </section>

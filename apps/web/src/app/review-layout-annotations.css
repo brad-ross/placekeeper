@@ -927,7 +927,7 @@
   display: flex;
   align-items: baseline;
   justify-content: flex-start;
-  gap: .6rem;
+  gap: .3rem;
   color: var(--review-ink-muted);
   font-size: 11px;
   line-height: 1.25;
@@ -951,10 +951,22 @@
   font-variant-numeric: tabular-nums;
 }
 
-.annotation-item__page::before {
-  margin-right: .35rem;
+.annotation-item__separator {
   color: var(--review-ink-quiet);
-  content: "·";
+}
+
+.annotation-item__page {
+  white-space: nowrap;
+}
+
+.annotation-item__meta > .annotation-item__section {
+  flex: 0 1 8rem;
+  width: 8rem;
+  min-width: 0;
+  overflow: hidden;
+  font-variant-numeric: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .annotation-item__excerpt {

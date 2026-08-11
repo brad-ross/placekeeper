@@ -12,6 +12,7 @@ import { ViewportPlugin, type ViewportScope } from '@embedpdf/plugin-viewport';
 import { ZoomPlugin, type ZoomScope } from '@embedpdf/plugin-zoom';
 
 import type { PdfNavigationTarget } from './pdf-navigation-target.js';
+import type { PdfDocumentOrderPage } from './document-order-location.js';
 import { combinePageRotation } from './owned-overlay.js';
 import { intersectViewerRects, type ViewerRunway } from './viewer-framing.js';
 import {
@@ -51,6 +52,8 @@ export interface ViewerNavigationAdapterOptions {
 export interface PdfViewerNavigation extends ViewerNavigationControls {
   /** Resolves a semantic target without moving the viewer. */
   resolveTarget(target: PdfNavigationTarget): PdfViewerLocation | null;
+  /** Captures neutral page geometry without exposing viewer-library state. */
+  captureDocumentOrderPages(): readonly PdfDocumentOrderPage[] | null;
   applyTarget(target: PdfNavigationTarget): Promise<boolean>;
   /** Aborts any in-flight movement without disposing the document scope. */
   cancelPendingNavigation(): void;
@@ -928,6 +931,17 @@ export function createViewerNavigation(
 
   return {
     captureLocation,
+    captureDocumentOrderPages() {
+      const viewer = activeViewer();
+      return viewer?.pages.map((page) => ({
+        size: page.size,
+        crop: {
+          left: page.boxes?.crop.left ?? 0,
+          top: page.boxes?.crop.top ?? 0,
+          bottom: page.boxes?.crop.bottom ?? 0,
+        },
+      })) ?? null;
+    },
     resolveTarget(target) {
       const viewer = activeViewer();
       return viewer ? resolveTarget(viewer, target) : null;

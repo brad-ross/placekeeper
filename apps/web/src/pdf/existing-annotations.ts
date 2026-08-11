@@ -58,7 +58,9 @@ export function inventoryExistingAnnotations(
   }));
 }
 
-function inventoryKey(annotation: ExistingAnnotation): string {
+export function existingAnnotationKey(
+  annotation: Pick<ExistingAnnotation, 'id' | 'pageIndex'>,
+): string {
   return `${annotation.pageIndex}:${annotation.id}`;
 }
 
@@ -67,9 +69,9 @@ export function mergeExistingAnnotations(
   explicit: readonly ExistingAnnotation[],
 ): readonly ExistingAnnotation[] {
   const merged = new Map<string, ExistingAnnotation>();
-  for (const annotation of discovered) merged.set(inventoryKey(annotation), annotation);
+  for (const annotation of discovered) merged.set(existingAnnotationKey(annotation), annotation);
   for (const annotation of explicit) {
-    const key = inventoryKey(annotation);
+    const key = existingAnnotationKey(annotation);
     if (!merged.has(key)) merged.set(key, annotation);
   }
   return [...merged.values()];
