@@ -576,7 +576,7 @@ export function ReviewShell(props: ReviewShellProps) {
     if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
       if (
         event.target instanceof Element
-        && event.target.closest('[data-review-page-editor]') !== null
+        && event.target.closest('[data-review-page-editor], [data-review-zoom-editor]') !== null
       ) {
         return;
       }

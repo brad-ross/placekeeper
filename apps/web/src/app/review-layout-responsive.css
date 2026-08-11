@@ -66,7 +66,8 @@
   }
 
   .review-chrome__stat,
-  .review-chrome__page-control {
+  .review-chrome__page-control,
+  .review-chrome__zoom-control {
     min-width: 52px;
   }
 
@@ -97,7 +98,15 @@
     min-height: var(--review-control-touch);
   }
 
+  .review-chrome__zoom-editor {
+    min-height: var(--review-control-touch);
+  }
+
   .review-chrome__page-input {
+    height: var(--review-control-touch);
+  }
+
+  .review-chrome__zoom-input {
     height: var(--review-control-touch);
   }
 
