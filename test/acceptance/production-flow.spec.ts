@@ -365,11 +365,19 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   );
   await expect(openBottomRail).toHaveAttribute("aria-label", "Close References tray");
   await expect(openBottomRail).toBeVisible();
-  const [bottomSplitterBox, initialBottomBounds, openBottomRailBox] = await Promise.all([
-    bottomSplitter.boundingBox(),
-    workspace.boundingBox(),
-    openBottomRail.boundingBox(),
-  ]);
+  let bottomSplitterBox = await bottomSplitter.boundingBox();
+  let initialBottomBounds = await workspace.boundingBox();
+  let openBottomRailBox = await openBottomRail.boundingBox();
+  await expect.poll(async () => {
+    [bottomSplitterBox, initialBottomBounds, openBottomRailBox] = await Promise.all([
+      bottomSplitter.boundingBox(),
+      workspace.boundingBox(),
+      openBottomRail.boundingBox(),
+    ]);
+    return bottomSplitterBox !== null
+      && initialBottomBounds !== null
+      && openBottomRailBox !== null;
+  }).toBe(true);
   if (!bottomSplitterBox || !initialBottomBounds || !openBottomRailBox) {
     throw new Error("Bottom References edge controls have no bounds.");
   }
@@ -632,7 +640,10 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(page.getByLabel("Current page")).toHaveText("1 / 4");
   await expect(forward).toBeEnabled();
   await forward.click();
-  await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
+  await expect(page.locator(".review-workspace__status")).toHaveText(
+    "Moved forward in document history.",
+  );
+  await expect(mainWorkspace.locator("[data-page-index='2']")).toBeFocused();
 
   const workspaceControl = page.getByRole("button", { name: "Open References tray" });
   await workspaceControl.click();
