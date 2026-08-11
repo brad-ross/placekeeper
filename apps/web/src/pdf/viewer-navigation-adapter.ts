@@ -255,9 +255,17 @@ function pageSelector(pageIndex: number): string {
 
 export function focusViewerDestination(root: HTMLElement | null, pageIndex: number): boolean {
   if (!root || !Number.isSafeInteger(pageIndex) || pageIndex < 0) return false;
-  const page = root.querySelector<HTMLElement>(pageSelector(pageIndex));
+  const selector = pageSelector(pageIndex);
+  const page = root.querySelector<HTMLElement>(selector);
   if (!page) return false;
   page.focus({ preventScroll: true });
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const activeElement = page.ownerDocument?.activeElement;
+      if (activeElement !== page && activeElement !== page.ownerDocument?.body) return;
+      root.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true });
+    }));
+  }
   return true;
 }
 

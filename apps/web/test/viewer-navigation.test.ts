@@ -877,4 +877,36 @@ describe('viewer navigation adapter', () => {
     expect(harness.focus).toHaveBeenCalledWith({ preventScroll: true });
     expect(focusViewerDestination(null, 0)).toBe(false);
   });
+
+  it('restores destination focus when WebKit replaces the page after navigation settles', () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const body = {} as HTMLElement;
+    const document = { activeElement: body, body } as unknown as Document;
+    const firstPage = {
+      ownerDocument: document,
+      focus: vi.fn(() => { (document as { activeElement: unknown }).activeElement = firstPage; }),
+    } as unknown as HTMLElement;
+    const replacementPage = {
+      ownerDocument: document,
+      focus: vi.fn(() => { (document as { activeElement: unknown }).activeElement = replacementPage; }),
+    } as unknown as HTMLElement;
+    let mountedPage = firstPage;
+    const root = {
+      querySelector: () => mountedPage,
+    } as unknown as HTMLElement;
+
+    expect(focusViewerDestination(root, 2)).toBe(true);
+    mountedPage = replacementPage;
+    (document as { activeElement: unknown }).activeElement = body;
+    frames.shift()?.(0);
+    frames.shift()?.(16);
+
+    expect(firstPage.focus).toHaveBeenCalledOnce();
+    expect(replacementPage.focus).toHaveBeenCalledWith({ preventScroll: true });
+    vi.unstubAllGlobals();
+  });
 });
