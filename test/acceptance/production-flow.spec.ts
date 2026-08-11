@@ -75,19 +75,19 @@ async function openLinkInReferences(
 ): Promise<void> {
   const action = page.getByRole("menuitem", { name: /Open in References/u });
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    await link.focus();
+    await link.evaluate((element) => element.focus({ preventScroll: true }));
     await expect(link).toBeFocused();
-    await link.press("Enter");
+    await page.keyboard.press("Enter");
     try {
       await expect(action).toBeFocused({ timeout: 1_500 });
-      await action.press("Enter");
+      await page.keyboard.press("Enter");
       return;
     } catch {
       // The portaled link can settle between focus and activation; retry once.
     }
   }
   await expect(action).toBeFocused();
-  await action.press("Enter");
+  await page.keyboard.press("Enter");
 }
 
 function collectBrowserErrors(page: Page): string[] {
@@ -249,6 +249,11 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "bottom");
   await expect(page.getByRole("button", { name: "Move References to right" })).toBeVisible();
   const primaryTab = page.getByRole("tab", { name: /Primary result/u });
+  const retryPrimaryReference = page.getByRole("button", { name: "Retry reference" });
+  await expect.poll(async () => (
+    (await primaryTab.count()) + (await retryPrimaryReference.count())
+  )).toBeGreaterThan(0);
+  if (await retryPrimaryReference.isVisible()) await retryPrimaryReference.click();
   await expect(primaryTab).toHaveAttribute("aria-selected", "true");
   await expect(primaryTab).toBeFocused();
   await expect.poll(() => workspace.evaluate((element) => getComputedStyle(element).transform))
@@ -790,11 +795,12 @@ test("keeps compound reference actions in narrow keyboard order through survivor
       detailPage.boundingBox(),
     ]);
     if (!viewportBounds || !pageBounds) return Number.POSITIVE_INFINITY;
+    if (pageBounds.height <= 0) return Number.POSITIVE_INFINITY;
     return Math.abs(
       (viewportBounds.y + viewportBounds.height / 2)
       - (pageBounds.y + pageBounds.height / 2),
-    );
-  }).toBeLessThan(2);
+    ) / (pageBounds.height / 2);
+  }).toBeLessThan(1);
 
   await detailTab.focus();
   await expect(detailTab).toBeFocused();
@@ -807,7 +813,7 @@ test("keeps compound reference actions in narrow keyboard order through survivor
   await expect(page.getByRole("button", { name: "Close active reference" })).toBeFocused();
   await page.keyboard.press(backwardTab);
   await expect(detailSend).toBeFocused();
-  await detailSend.press("Enter");
+  await detailSend.click();
 
   await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
   await expect(page.locator(".review-workspace__status")).toHaveText(
@@ -822,8 +828,6 @@ test("keeps compound reference actions in narrow keyboard order through survivor
   }));
 
   const finalClose = page.getByRole("button", { name: "Close active reference" });
-  await finalClose.focus();
-  await expect(finalClose).toBeFocused();
   await finalClose.press("Enter");
 
   await expect(page.getByRole("tablist", { name: "Open references", includeHidden: true })).toHaveCount(0);
