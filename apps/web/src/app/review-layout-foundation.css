@@ -338,6 +338,7 @@
 
 .review-document {
   position: absolute;
+  z-index: 0;
   inset: 0;
   min-width: 0;
   min-height: 0;

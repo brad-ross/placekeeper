@@ -753,6 +753,71 @@ test("follows a PDF link in the same reference tab without moving main", async (
     .toBe(mainBefore.forwardDisabled);
 });
 
+test("keeps main PDF link hit targets below an open References viewer", async ({ page }) => {
+  await page.setViewportSize({ width: 1367, height: 1324 });
+  await openFreshProductionFixture(page, referencePdf, "Reference layering launch failed");
+  const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
+  await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
+
+  const primaryLink = mainWorkspace.getByRole("button", {
+    name: "Open PDF link to Primary result, Page 2",
+  });
+  await openLinkInReferences(page, primaryLink);
+
+  const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
+  await expect(referenceWorkspace).toBeVisible();
+  const referenceSurface = page.locator("[data-review-workspace]");
+  const moveReferencesBottom = page.getByRole("button", { name: "Move References to bottom" });
+  if (await moveReferencesBottom.isVisible()) await moveReferencesBottom.click();
+  await expect(referenceSurface).toHaveAttribute("data-workspace-presentation", "bottom");
+  await expect.poll(() => referenceSurface.evaluate((element) => getComputedStyle(element).transform))
+    .toBe("none");
+  const mainDetailLink = mainWorkspace.getByRole("button", {
+    name: "Open PDF link to Target-to-target detail link, Page 3",
+  });
+  await expect(mainDetailLink).toBeAttached();
+  await mainDetailLink.evaluate((element) => {
+    const reference = document.querySelector<HTMLElement>("[data-reference-pdf-viewport]");
+    const viewport = element.closest(".pdf-workspace")
+      ?.querySelector<HTMLElement>("[data-viewer-framing-viewport]");
+    if (!reference || !viewport) throw new Error("PDF viewer layers are unavailable.");
+    const referenceBounds = reference.getBoundingClientRect();
+    const linkBounds = element.getBoundingClientRect();
+    const linkCenterY = linkBounds.top + linkBounds.height / 2;
+    const referenceCenterY = referenceBounds.top + referenceBounds.height / 2;
+    viewport.scrollTop += linkCenterY - referenceCenterY;
+  });
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+
+  const hitState = await mainDetailLink.evaluate((element) => {
+    const reference = document.querySelector<HTMLElement>("[data-reference-pdf-viewport]");
+    if (!reference) throw new Error("Reference PDF viewer is unavailable.");
+    const referenceBounds = reference.getBoundingClientRect();
+    const linkBounds = element.getBoundingClientRect();
+    const intersection = {
+      left: Math.max(referenceBounds.left, linkBounds.left),
+      right: Math.min(referenceBounds.right, linkBounds.right),
+      top: Math.max(referenceBounds.top, linkBounds.top),
+      bottom: Math.min(referenceBounds.bottom, linkBounds.bottom),
+    };
+    const overlap = intersection.right > intersection.left && intersection.bottom > intersection.top;
+    if (!overlap) return { topmost: "no-overlap", referenceBounds, linkBounds };
+    const hit = document.elementFromPoint(
+      (intersection.left + intersection.right) / 2,
+      (intersection.top + intersection.bottom) / 2,
+    );
+    const topmost = hit?.closest("[data-reference-pdf-viewport]")
+      ? "reference"
+      : hit?.closest(".pdf-workspace:not(.pdf-workspace--reference)") ? "main" : "workspace";
+    return { topmost, referenceBounds, linkBounds };
+  });
+
+  expect(hitState).not.toEqual(expect.objectContaining({ topmost: "no-overlap" }));
+  expect(hitState.topmost).not.toBe("main");
+});
+
 test("switches and sends references from the right-docked workspace", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, "Right-docked reference launch failed");
