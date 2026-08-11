@@ -9,7 +9,6 @@ import type { ExistingAnnotation, ExistingAnnotationsDiscovery } from "../pdf/ex
 import {
   acceptSelectionUpdate,
   INITIAL_SELECTION_UPDATE,
-  selectionReadinessMessage,
   type SelectionUpdate,
 } from "../pdf/selection-state.js";
 import { CodexDelivery, type CheckedCodexResult, type PreparedCodexHandoff } from "../export/CodexDelivery.js";
@@ -104,7 +103,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [selectionUpdate, setSelectionUpdate] = useState<SelectionUpdate>(INITIAL_SELECTION_UPDATE);
   const selectionUpdateRef = useRef(selectionUpdate);
   selectionUpdateRef.current = selectionUpdate;
-  const [toolError, setToolError] = useState<string | null>(null);
+  const [commandError, setCommandError] = useState<string | null>(null);
   const [confirmedScope, setConfirmedScope] = useState<string | null>(null);
   const [humanConfirmationActive, setHumanConfirmationActive] = useState(false);
   const [codexConfirmationActive, setCodexConfirmationActive] = useState(false);
@@ -127,7 +126,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   } | null>(null);
   const placementAuthority = useRef(new PageNotePlacementAuthority());
   const placedToken = useRef(0);
-  const lastCaretDiagnostic = useRef<string | null>(null);
   const latestReceipt = useRef<string | null>(null);
   const viewerRegistry = useRef<PluginRegistry | null>(null);
   const viewerControlsRef = useRef<ViewerControls | undefined>(undefined);
@@ -291,9 +289,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
 
   const onSelectionUpdate = useCallback((update: SelectionUpdate) => {
     setSelectionUpdate((current) => acceptSelectionUpdate(current, update));
-    if (update.kind === "reliable") setToolError(null);
   }, []);
-  const readinessMessage = selectionReadinessMessage(selectionUpdate);
   const publishCorrespondence = () => setCorrespondingItemId(
     rowCorrespondenceRef.current ?? markFocusRef.current ?? markHoverRef.current,
   );
@@ -350,14 +346,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     if (event.type === "caret") {
       setCaret(event.value.anchor);
       setCaretPlacement(event.value.placement);
-      if (event.value.diagnostic && lastCaretDiagnostic.current !== event.value.diagnostic) {
-        lastCaretDiagnostic.current = event.value.diagnostic;
-        setToolError("This selection cannot be anchored reliably. Adjust the selection or use Page Note.");
-      }
-      if (event.value.anchor) {
-        lastCaretDiagnostic.current = null;
-        setToolError(null);
-      }
       return;
     }
     if (event.type === "page-menu") {
@@ -445,7 +433,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       embeddedInReviewShell
       assets={viewerAssets}
       documentTitle={props.scope.documentTitle}
-      toolError={readinessMessage ?? toolError}
+      toolError={commandError}
       onSelectionUpdate={onSelectionUpdate}
       ownedAnnotations={ownedAnnotations}
       keyboardPageNoteActive={keyboardPageNoteActive}
@@ -669,7 +657,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           const result = await props.api.command(command);
           const next = "accepted" in result ? result.state : result;
           setState(next);
-          if ("accepted" in result) setToolError(result.message);
+          setCommandError("accepted" in result ? result.message : null);
           return result;
         }}
         onNavigate={(item) => {
