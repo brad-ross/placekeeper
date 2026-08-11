@@ -17,6 +17,70 @@ export interface ViewerRunway {
   bottom: number;
 }
 
+export interface SettledViewerGeometry {
+  readonly revision: number;
+  isCurrent(): boolean;
+}
+
+export type WaitForSettledViewerGeometry = (
+  signal: AbortSignal,
+) => Promise<SettledViewerGeometry | null>;
+
+/**
+ * Publishes layout revisions and resolves only after two quiet animation
+ * frames. Returned tokens let consumers reject geometry that changed after
+ * settlement but before their guarded viewer mutation completed.
+ */
+export class ViewerGeometrySettlementAuthority {
+  private revision = 0;
+  private readonly transitions = new Map<object, Set<string>>();
+
+  markChanged(): void {
+    this.revision += 1;
+  }
+
+  beginTransition(owner: object, property = ''): void {
+    const properties = this.transitions.get(owner) ?? new Set<string>();
+    properties.add(property);
+    this.transitions.set(owner, properties);
+    this.markChanged();
+  }
+
+  settleTransition(owner: object, property = ''): void {
+    const properties = this.transitions.get(owner);
+    properties?.delete(property);
+    if (properties?.size === 0) this.transitions.delete(owner);
+    this.markChanged();
+  }
+
+  async waitForSettled(
+    signal: AbortSignal,
+    nextFrame: () => Promise<boolean>,
+  ): Promise<SettledViewerGeometry | null> {
+    let quietRevision: number | null = null;
+    while (!signal.aborted) {
+      if (!await nextFrame() || signal.aborted) return null;
+      if (this.transitions.size > 0) {
+        quietRevision = null;
+        continue;
+      }
+      if (quietRevision === this.revision) {
+        const settledRevision = this.revision;
+        return {
+          revision: settledRevision,
+          isCurrent: () => (
+            !signal.aborted
+            && this.transitions.size === 0
+            && this.revision === settledRevision
+          ),
+        };
+      }
+      quietRevision = this.revision;
+    }
+    return null;
+  }
+}
+
 export interface OccupiedViewerSurface {
   readonly presentation: AnnotationPresentation;
   readonly bounds: ViewerRect | null;

@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 import { ProofreaderHost } from "../../apps/service/src/host/proofreader-host.js";
+import { addPageNote } from "../../packages/core/src/review-commands.js";
 
 let root = "";
 let host: ProofreaderHost;
@@ -20,18 +21,36 @@ async function installSelectionCaptureGate(page: Page): Promise<void> {
   await page.addInitScript(() => {
     let holding = true;
     const releases = new Set<() => void>();
-    globalThis.__pdfProofreaderSelectionCaptureTestGate = {
+    const captureGate = {
       wait() {
         if (!holding) return Promise.resolve();
         return new Promise<void>((resolve) => releases.add(resolve));
       },
+      isWaiting() {
+        return releases.size > 0;
+      },
     };
-    (globalThis as typeof globalThis & { __releasePdfSelectionCapture(): void })
-      .__releasePdfSelectionCapture = () => {
-        holding = false;
-        for (const release of releases) release();
-        releases.clear();
-      };
+    const testState = globalThis as unknown as {
+      __pdfProofreaderSelectionCaptureTestGate: typeof captureGate;
+      __releasePdfSelectionCapture(): void;
+    };
+    testState.__pdfProofreaderSelectionCaptureTestGate = captureGate;
+    testState.__releasePdfSelectionCapture = () => {
+      holding = false;
+      for (const release of releases) release();
+      releases.clear();
+    };
+  });
+}
+
+async function waitForSelectionCapture(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const captureGate = globalThis.__pdfProofreaderSelectionCaptureTestGate as
+      | (NonNullable<typeof globalThis.__pdfProofreaderSelectionCaptureTestGate> & {
+        isWaiting(): boolean;
+      })
+      | undefined;
+    return captureGate?.isWaiting() === true;
   });
 }
 
@@ -119,6 +138,15 @@ async function followLinkInSameReference(
   await page.keyboard.press("ArrowDown");
   await expect(action).toBeFocused();
   await page.keyboard.press("Enter");
+}
+
+function canonicalCoordinate(position: unknown, axis: "x" | "y"): number {
+  if (typeof position !== "object" || position === null || Array.isArray(position)) {
+    throw new Error("Canonical Page Note position is unavailable.");
+  }
+  const value = (position as Record<string, unknown>)[axis];
+  if (typeof value !== "number") throw new Error(`Canonical ${axis} coordinate is unavailable.`);
+  return value;
 }
 
 function collectBrowserErrors(page: Page): string[] {
@@ -292,7 +320,50 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
 
   const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
   const referenceViewport = referenceWorkspace.locator("[data-viewer-framing-viewport]");
-  await expect(referenceWorkspace.locator("[data-page-index='1']")).toBeVisible();
+  const primaryReferencePage = referenceWorkspace.locator("[data-page-index='1']");
+  await expect(primaryReferencePage).toBeVisible();
+  await expect.poll(async () => {
+    const [viewportBounds, pageBounds] = await Promise.all([
+      referenceViewport.boundingBox(),
+      primaryReferencePage.boundingBox(),
+    ]);
+    return viewportBounds !== null
+      && pageBounds !== null
+      && viewportBounds.width > 0
+      && pageBounds.width > 0;
+  }).toBe(true);
+  const [
+    initialReferenceViewportBounds,
+    initialReferenceClientBox,
+    initialReferencePageBounds,
+  ] = await Promise.all([
+    referenceViewport.boundingBox(),
+    referenceViewport.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return {
+        left: bounds.left + element.clientLeft,
+        width: element.clientWidth,
+      };
+    }),
+    primaryReferencePage.boundingBox(),
+  ]);
+  if (!initialReferenceViewportBounds || !initialReferencePageBounds) {
+    throw new Error("Initial Reference viewer geometry is unavailable.");
+  }
+  const initialReferenceLeftGap = initialReferencePageBounds.x - initialReferenceClientBox.left;
+  const initialReferenceRightGap = initialReferenceClientBox.left
+    + initialReferenceClientBox.width
+    - initialReferencePageBounds.x
+    - initialReferencePageBounds.width;
+  const initialReferenceHorizontalInset = initialReferenceClientBox.width
+    - initialReferencePageBounds.width;
+  expect(initialReferenceHorizontalInset).toBeGreaterThan(0);
+  expect(initialReferenceHorizontalInset).toBeLessThan(64);
+  expect(initialReferenceLeftGap).toBeGreaterThan(0);
+  expect(initialReferenceRightGap).toBeGreaterThan(0);
+  expect(Math.max(initialReferenceLeftGap, initialReferenceRightGap)).toBeLessThan(32);
+  expect(Math.abs(initialReferenceLeftGap - initialReferenceRightGap)).toBeLessThan(4);
+  expect(initialReferencePageBounds.height).toBeGreaterThan(initialReferenceViewportBounds.height * 2);
   await referenceWorkspace.evaluate((element) => element.setAttribute("data-reference-mount", "stable"));
   const mainScrollBefore = await mainViewport.evaluate((element) => ({
     left: element.scrollLeft,
@@ -332,7 +403,6 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(primaryTab).toHaveAttribute("aria-selected", "true");
   await expect(primaryTab).toBeFocused();
   await expect(page.getByRole("tablist", { name: "Open references" }).getByRole("tab")).toHaveCount(2);
-  const primaryReferencePage = referenceWorkspace.locator("[data-page-index='1']");
   const referencePositionBeforeReflow = await Promise.all([
     referenceViewport.boundingBox(),
     primaryReferencePage.boundingBox(),
@@ -666,9 +736,26 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await page.getByRole("button", { name: "Send to main" }).click();
   await expect(workspace).toHaveAttribute("data-workspace-open", "false");
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
-  await expect(page.getByRole("tablist", { name: "Open references", includeHidden: true })).toHaveCount(0);
-  await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
-  await expect(mainWorkspace.locator("[data-page-index='2']")).toBeFocused();
+  await expect(page.locator(".review-workspace__status")).toHaveText(
+    "Reference sent to the main document.",
+  );
+  await expect(page.getByRole("tablist", {
+    name: "Open references",
+    includeHidden: true,
+  }).getByRole("tab", { includeHidden: true })).toHaveCount(0);
+  const mainPageThree = mainWorkspace.locator("[data-page-index='2']");
+  const expectMainPageThreeSettled = async () => expect.poll(async () => {
+    const [viewportBounds, pageBounds] = await Promise.all([
+      mainViewport.boundingBox(),
+      mainPageThree.boundingBox(),
+    ]);
+    if (!viewportBounds || !pageBounds) return Number.POSITIVE_INFINITY;
+    return Math.abs(
+      (viewportBounds.y + viewportBounds.height / 2)
+      - (pageBounds.y + pageBounds.height / 2),
+    );
+  }).toBeLessThan(2);
+  await expectMainPageThreeSettled();
   const back = page.getByRole("button", { name: "Back in document history" });
   const forward = page.getByRole("button", { name: "Forward in document history" });
   await expect(back).toBeEnabled();
@@ -679,7 +766,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(page.locator(".review-workspace__status")).toHaveText(
     "Moved forward in document history.",
   );
-  await expect(mainWorkspace.locator("[data-page-index='2']")).toBeFocused();
+  await expectMainPageThreeSettled();
 
   const workspaceControl = page.getByRole("button", { name: "Open References tray" });
   await workspaceControl.click();
@@ -853,30 +940,47 @@ test("switches and sends references from the right-docked workspace", async ({ p
     .toBeGreaterThan(0);
   if (await retryReference.isVisible()) await retryReference.click();
   await expect(detailTab).toHaveAttribute("aria-selected", "true");
-  const activateReferenceTab = async (tab: ReturnType<Page["locator"]>) => {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      await tab.click();
-      await page.evaluate(() => new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      }));
-      try {
-        await expect(tab).toHaveAttribute("aria-selected", "true", { timeout: 3_000 });
-        return;
-      } catch {
-        // A quiet navigation failure is explicitly retryable; click once more.
-      }
-    }
-    await expect(tab).toHaveAttribute("aria-selected", "true");
-  };
-
   await page.getByRole("button", { name: "Move References to right" }).click();
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "right");
   await expect.poll(() => workspace.evaluate((element) => getComputedStyle(element).transform))
     .toBe("none");
-  await activateReferenceTab(primaryTab);
+  const rightTabGeometry = await page.getByRole("tablist", { name: "Open references" })
+    .evaluate((tablist) => [...tablist.querySelectorAll<HTMLElement>(
+      '[data-reference-tab-segment]',
+    )].map((segment) => {
+      const selector = segment.querySelector<HTMLElement>('[data-reference-tab]');
+      const actions = [...segment.querySelectorAll<HTMLElement>('[data-reference-tab-action]')];
+      const bounds = segment.getBoundingClientRect();
+      return {
+        width: bounds.width,
+        selectorWidth: selector?.getBoundingClientRect().width ?? 0,
+        actionSizes: actions.map((action) => {
+          const actionBounds = action.getBoundingClientRect();
+          return {
+            width: actionBounds.width,
+            height: actionBounds.height,
+            verticalInset: (bounds.height - actionBounds.height) / 2,
+            borderRadius: getComputedStyle(action).borderRadius,
+          };
+        }),
+      };
+    }));
+  expect(rightTabGeometry).toHaveLength(2);
+  expect(rightTabGeometry[0]!.width).toBeCloseTo(184, 0);
+  expect(rightTabGeometry[1]!.width).toBeCloseTo(rightTabGeometry[0]!.width, 0);
+  expect(rightTabGeometry[1]!.selectorWidth).toBeLessThan(rightTabGeometry[1]!.width - 50);
+  expect(rightTabGeometry[1]!.actionSizes).toHaveLength(2);
+  for (const action of rightTabGeometry[1]!.actionSizes) {
+    expect(action.width).toBeCloseTo(31, 0);
+    expect(action.height).toBeCloseTo(31, 0);
+    expect(action.verticalInset).toBeGreaterThan(3);
+    expect(action.borderRadius).not.toBe('0px');
+  }
+
+  await primaryTab.click();
   await expect(page.locator(".review-workspace__status")).toHaveText("Reference active.");
   await expect(primaryTab).toHaveAttribute("aria-selected", "true");
-  await activateReferenceTab(detailTab);
+  await detailTab.click();
   await expect(page.locator(".review-workspace__status")).toHaveText("Reference active.");
   await expect(detailTab).toHaveAttribute("aria-selected", "true");
   const detailPage = referenceWorkspace.locator("[data-page-index='2']");
@@ -998,17 +1102,24 @@ test("keeps compound reference actions in narrow keyboard order through survivor
 test("keeps compound reference actions touch sized for coarse pointers", async ({ browser }) => {
   const context = await browser.newContext({
     hasTouch: true,
-    viewport: { width: 760, height: 900 },
+    viewport: { width: 1280, height: 900 },
   });
   const page = await context.newPage();
   try {
     await openFreshProductionFixture(page, referencePdf, "Coarse-pointer reference launch failed");
     const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
     await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
-    await mainWorkspace.getByRole("button", {
-      name: "Open PDF link to Primary result, Page 2",
-    }).click();
-    await page.getByRole("menuitem", { name: /Open in References/u }).click();
+    await (await currentWorkspaceRail(page)).click();
+    const outline = page.getByRole("navigation", { name: "Document outline" });
+    const outlineReference = outline.getByRole("button", {
+      name: "Open Details, Page 3 in References",
+    });
+    await expect(outlineReference).toHaveCSS("opacity", "1");
+    expect(await outlineReference.evaluate((button) => {
+      const bounds = button.getBoundingClientRect();
+      return { width: bounds.width, height: bounds.height };
+    })).toEqual({ width: 44, height: 44 });
+    await outlineReference.click();
 
     const actions = page.locator("[data-reference-tab-action]");
     await expect(actions).toHaveCount(2);
@@ -1025,7 +1136,10 @@ test("keeps compound reference actions touch sized for coarse pointers", async (
   }
 });
 
-test("keeps outline and rejected link metadata inert inside the installed local session", async ({ page }) => {
+test("keeps outline and rejected link metadata inert inside the installed local session", async ({
+  page,
+  browserName,
+}) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const contactedOrigins = new Set<string>();
   page.on("request", (request) => contactedOrigins.add(new URL(request.url()).origin));
@@ -1058,15 +1172,143 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     "aria-expanded",
     "true",
   );
-  await expect(outline.getByRole("button", { name: "Nested result, Page 3" })).toBeVisible();
+  await expect(outline.getByRole("button", {
+    name: "Nested result, Page 3",
+    exact: true,
+  })).toBeVisible();
   const hostileOutline = outline.getByRole("button", {
     name: "scriptalert(1)/script hostile outline, Page 2",
+    exact: true,
   });
   await expect(hostileOutline).toBeVisible();
   await expect(outline.locator("script,img")).toHaveCount(0);
   expect(await hostileOutline.textContent()).not.toMatch(/[<>\u202e\u0000]/u);
 
   const details = outline.getByRole("button", { name: "Details, Page 3", exact: true });
+  const detailsReference = outline.getByRole("button", {
+    name: "Open Details, Page 3 in References",
+  });
+  const nestedReference = outline.getByRole("button", {
+    name: "Open Nested result, Page 3 in References",
+  });
+  const hostileReference = outline.getByRole("button", {
+    name: "Open scriptalert(1)/script hostile outline, Page 2 in References",
+  });
+  await page.mouse.move(0, 0);
+  await expect(detailsReference).toHaveCSS("opacity", "0");
+  await expect(nestedReference).toHaveCSS("opacity", "0");
+
+  const nestedRow = nestedReference.locator("..");
+  await nestedRow.hover();
+  await expect(nestedReference).toHaveCSS("opacity", "1");
+  await expect(detailsReference).toHaveCSS("opacity", "0");
+
+  const nestedDestination = outline.getByRole("button", {
+    name: "Nested result, Page 3",
+    exact: true,
+  });
+  await nestedDestination.focus();
+  await page.keyboard.press(browserName === "webkit" ? "Alt+Tab" : "Tab");
+  await expect(nestedReference).toBeFocused();
+  await expect(nestedReference).toHaveCSS("opacity", "1");
+  await expect(nestedReference).toHaveCSS("outline-style", "solid");
+
+  await outline.evaluate((element) => { element.style.width = "190px"; });
+  const nestedLongLabelGeometry = await hostileReference.evaluate((button) => {
+    const row = button.parentElement;
+    const destination = row?.querySelector<HTMLElement>(".outline-navigator__destination");
+    const label = destination?.querySelector<HTMLElement>("span");
+    if (!row || !destination || !label) throw new Error("Outline row geometry is incomplete.");
+    const rowBounds = row.getBoundingClientRect();
+    const destinationBounds = destination.getBoundingClientRect();
+    const actionBounds = button.getBoundingClientRect();
+    const rowStyle = getComputedStyle(row);
+    const labelStyle = getComputedStyle(label);
+    return {
+      actionRightInset: rowBounds.right - actionBounds.right,
+      actionWidth: actionBounds.width,
+      destinationRight: destinationBounds.right,
+      actionLeft: actionBounds.left,
+      gridColumns: rowStyle.gridTemplateColumns,
+      labelClientWidth: label.clientWidth,
+      labelScrollWidth: label.scrollWidth,
+      labelOverflow: labelStyle.overflow,
+      labelTextOverflow: labelStyle.textOverflow,
+      labelWhiteSpace: labelStyle.whiteSpace,
+    };
+  });
+  expect(nestedLongLabelGeometry.actionRightInset).toBeCloseTo(0, 0);
+  expect(nestedLongLabelGeometry.actionWidth).toBe(31);
+  expect(nestedLongLabelGeometry.destinationRight)
+    .toBeLessThanOrEqual(nestedLongLabelGeometry.actionLeft);
+  expect(nestedLongLabelGeometry.gridColumns.split(" ")).toHaveLength(3);
+  expect(nestedLongLabelGeometry.labelScrollWidth)
+    .toBeGreaterThan(nestedLongLabelGeometry.labelClientWidth);
+  expect(nestedLongLabelGeometry).toMatchObject({
+    labelOverflow: "hidden",
+    labelTextOverflow: "ellipsis",
+    labelWhiteSpace: "nowrap",
+  });
+  await outline.evaluate((element) => { element.style.removeProperty("width"); });
+
+  const mainViewport = mainWorkspace.locator("[data-viewer-framing-viewport]");
+  await mainViewport.evaluate((element) => { element.scrollTop += 32; });
+  const captureMainState = async () => ({
+    page: await page.getByLabel("Current page").textContent(),
+    scroll: await mainViewport.evaluate((element) => ({
+      left: element.scrollLeft,
+      top: element.scrollTop,
+    })),
+    zoom: await page.getByLabel("Zoom level").textContent(),
+    backDisabled: await page.getByRole("button", {
+      name: "Back in document history",
+    }).isDisabled(),
+    forwardDisabled: await page.getByRole("button", {
+      name: "Forward in document history",
+    }).isDisabled(),
+  });
+  const mainStateBeforeReference = await captureMainState();
+  const expectMainStateUnchanged = async (expectedState = mainStateBeforeReference) => {
+    await expect(mainWorkspace).toHaveAttribute("data-safety-main-mount", "stable");
+    expect(await captureMainState()).toEqual(expectedState);
+  };
+  await detailsReference.click();
+  const detailsTab = page.getByRole("tab", { name: /Details, Page 3/u });
+  const referenceWorkspace = page.locator("[data-review-workspace]");
+  await expect(referenceWorkspace).toHaveAttribute("data-workspace-presentation", "bottom");
+  await expect(detailsTab).toHaveAttribute("aria-selected", "true");
+  await expect(detailsTab).toBeFocused();
+  await expect(page.locator("[data-reference-pdf-viewport] [data-page-index='2']")).toBeVisible();
+  await expectMainStateUnchanged();
+  await detailsReference.click();
+  await expect(page.getByRole("tablist", { name: "Open references" }).getByRole("tab"))
+    .toHaveCount(1);
+  await expect(detailsTab).toBeFocused();
+
+  await page.getByRole("button", { name: "Close active reference" }).click();
+  await expect(page.locator("[data-reference-tab]")).toHaveCount(0);
+
+  const stage = page.locator("[data-review-stage]");
+  await page.setViewportSize({ width: 760, height: 900 });
+  await expect(stage).toHaveAttribute("data-reference-layout", "narrow-unified");
+  await page.getByRole("tab", { name: "Outline", exact: true }).click();
+  await expect(detailsReference).toBeVisible();
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  const mainStateBeforeNarrowReference = await captureMainState();
+  await detailsReference.click();
+  await expect(stage).toHaveAttribute("data-reference-layout", "narrow-unified");
+  await expect(detailsTab).toHaveAttribute("aria-selected", "true");
+  await expect(detailsTab).toBeFocused();
+  await expect(page.locator("[data-reference-pdf-viewport] [data-page-index='2']")).toBeVisible();
+  await expectMainStateUnchanged(mainStateBeforeNarrowReference);
+  await page.getByRole("button", { name: "Close active reference" }).click();
+  await expect(page.locator("[data-reference-tab]")).toHaveCount(0);
+  await page.getByRole("tab", { name: "Outline", exact: true }).click();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(stage).toHaveAttribute("data-reference-layout", "wide-right");
+
   await details.focus();
   await page.keyboard.press("Enter");
   await expect(details).toBeFocused();
@@ -1235,7 +1477,8 @@ test("one installed-style browser tree preserves review state across responsive 
   );
   await expect(pageCanvas).toBeFocused();
   await expect(pageCanvas).toHaveCSS("outline-style", "none");
-  await expect(page.getByRole("alert")).toContainText("Reading the selected text");
+  await waitForSelectionCapture(page);
+  await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
   await expect.poll(async () => (await pageCanvas.boundingBox())?.y)
     .toBe(canvasBoxBeforeSelection.y);
   await page.keyboard.press("b");
@@ -1410,6 +1653,198 @@ test('edits the current page in a real multi-page viewer without losing adjacent
   expect(browserErrors).toEqual([]);
 });
 
+test('fits a real PDF to closed, bottom, and resizable right reading widths as a one-shot zoom', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFreshProductionFixture(page, referencePdf, 'Fit Width production launch failed');
+
+  const mainWorkspace = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
+  const mainViewport = mainWorkspace.locator('[data-viewer-framing-viewport]');
+  const mainPage = mainWorkspace.locator("[data-page-index='0']");
+  const referenceWorkspace = page.locator('[data-review-workspace]');
+  const fitWidth = page.getByRole('button', { name: 'Fit PDF to available width' });
+  const fitAndWait = async () => {
+    await fitWidth.click();
+    await expect(fitWidth).toHaveAttribute('aria-busy', 'false');
+  };
+  const zoomTrigger = () => page.getByRole('button', {
+    name: /Current zoom \d+ percent\. Enter a zoom percentage/u,
+  });
+  await expect(mainPage).toBeVisible();
+  await waitForRenderedPageImage(mainPage);
+  await expect(fitWidth).toBeEnabled();
+  await expect(mainViewport).toHaveCSS('scrollbar-gutter', 'stable');
+  await mainWorkspace.evaluate((element) => element.setAttribute('data-fit-width-main-mount', 'stable'));
+  await expect(page.getByLabel('Current page')).toHaveText('1 / 4');
+
+  const horizontalGeometry = async (rightEdge?: number) => {
+    const [viewportBounds, pageBounds, clientBox] = await Promise.all([
+      mainViewport.boundingBox(),
+      mainPage.boundingBox(),
+      mainViewport.evaluate((element) => ({
+        left: element.clientLeft,
+        width: element.clientWidth,
+      })),
+    ]);
+    if (!viewportBounds || !pageBounds) throw new Error('Fit Width geometry is unavailable.');
+    const intervalLeft = viewportBounds.x + clientBox.left;
+    const clientRight = intervalLeft + clientBox.width;
+    const intervalRight = Math.min(rightEdge ?? clientRight, clientRight);
+    return {
+      pageWidth: pageBounds.width,
+      intervalWidth: intervalRight - intervalLeft,
+      leftGap: pageBounds.x - intervalLeft,
+      rightGap: intervalRight - (pageBounds.x + pageBounds.width),
+      pageLeft: pageBounds.x,
+      pageRight: pageBounds.x + pageBounds.width,
+      intervalLeft,
+      intervalRight,
+    };
+  };
+  const expectFitted = async (standardGap: number, rightEdge?: number) => {
+    await expect.poll(async () => {
+      const geometry = await horizontalGeometry(rightEdge);
+      return Math.max(
+        Math.abs(geometry.pageWidth - (geometry.intervalWidth - 2 * standardGap)),
+        Math.abs(geometry.leftGap - standardGap),
+        Math.abs(geometry.rightGap - standardGap),
+      );
+    }).toBeLessThan(3);
+    const geometry = await horizontalGeometry(rightEdge);
+    expect(geometry.pageLeft).toBeGreaterThanOrEqual(geometry.intervalLeft + standardGap - 3);
+    expect(geometry.pageRight).toBeLessThanOrEqual(geometry.intervalRight - standardGap + 3);
+    return geometry;
+  };
+
+  await fitAndWait();
+  const standardGap = 10;
+  const closedGeometry = await expectFitted(standardGap);
+  const closedZoom = await zoomTrigger().textContent();
+
+  const primaryLink = mainWorkspace.getByRole('button', {
+    name: 'Open PDF link to Primary result, Page 2',
+  });
+  await openLinkInReferences(page, primaryLink);
+  await expect(referenceWorkspace).toHaveAttribute('data-workspace-open', 'true');
+  await expect(referenceWorkspace).toHaveAttribute('data-workspace-presentation', 'bottom');
+  const primaryTab = page.getByRole('tab', { name: /Primary result/u });
+  await expect(primaryTab).toHaveAttribute('aria-selected', 'true');
+  await referenceWorkspace.evaluate((element) => {
+    element.setAttribute('data-fit-width-workspace-mount', 'stable');
+  });
+
+  expect(await zoomTrigger().textContent()).toBe(closedZoom);
+  await fitAndWait();
+  const bottomGeometry = await expectFitted(standardGap);
+  expect(bottomGeometry.pageWidth).toBeCloseTo(closedGeometry.pageWidth, 0);
+  await expect(page.getByLabel('Current page')).toHaveText('1 / 4');
+
+  await page.getByRole('button', { name: 'Move References to right' }).click();
+  await expect(referenceWorkspace).toHaveAttribute('data-workspace-presentation', 'right');
+  await expect.poll(() => referenceWorkspace.evaluate((element) => getComputedStyle(element).transform))
+    .toBe('none');
+  await expect.poll(async () => (await referenceWorkspace.boundingBox())?.x ?? 0)
+    .toBeGreaterThan(0);
+  const rightWorkspaceBounds = await referenceWorkspace.boundingBox();
+  if (!rightWorkspaceBounds) throw new Error('Right workspace has no bounds.');
+  const bottomFitZoom = await zoomTrigger().textContent();
+  expect(await mainPage.boundingBox().then((bounds) => bounds?.width)).toBeCloseTo(
+    bottomGeometry.pageWidth,
+    0,
+  );
+  expect(await zoomTrigger().textContent()).toBe(bottomFitZoom);
+
+  await fitAndWait();
+  const initialRightGeometry = await expectFitted(standardGap, rightWorkspaceBounds.x);
+  expect(initialRightGeometry.pageWidth).toBeLessThan(bottomGeometry.pageWidth);
+  const rightFitZoom = await zoomTrigger().textContent();
+
+  const rightSplitter = page.getByRole('separator', { name: 'Resize References' });
+  await expect(rightSplitter).toHaveAttribute('aria-orientation', 'vertical');
+  await rightSplitter.press('ArrowLeft');
+  await expect.poll(async () => (await referenceWorkspace.boundingBox())?.width ?? 0)
+    .toBeGreaterThan(rightWorkspaceBounds.width);
+  const resizedWorkspaceBounds = await referenceWorkspace.boundingBox();
+  if (!resizedWorkspaceBounds) throw new Error('Resized right workspace has no bounds.');
+  expect(await zoomTrigger().textContent()).toBe(rightFitZoom);
+  expect(await mainPage.boundingBox().then((bounds) => bounds?.width)).toBeCloseTo(
+    initialRightGeometry.pageWidth,
+    0,
+  );
+
+  await fitAndWait();
+  const resizedRightGeometry = await expectFitted(standardGap, resizedWorkspaceBounds.x);
+  expect(resizedRightGeometry.pageWidth).toBeLessThan(initialRightGeometry.pageWidth);
+  const resizedFitZoom = await zoomTrigger().textContent();
+
+  await page.setViewportSize({ width: 1240, height: 900 });
+  await expect(referenceWorkspace).toHaveAttribute('data-workspace-presentation', 'right');
+  expect(await zoomTrigger().textContent()).toBe(resizedFitZoom);
+  expect(await mainPage.boundingBox().then((bounds) => bounds?.width)).toBeCloseTo(
+    resizedRightGeometry.pageWidth,
+    0,
+  );
+  await fitAndWait();
+  const resizedViewportWorkspaceBounds = await referenceWorkspace.boundingBox();
+  if (!resizedViewportWorkspaceBounds) throw new Error('Responsive right workspace has no bounds.');
+  await expectFitted(standardGap, resizedViewportWorkspaceBounds.x);
+
+  await expect(mainWorkspace).toHaveAttribute('data-fit-width-main-mount', 'stable');
+  await expect(referenceWorkspace).toHaveAttribute('data-fit-width-workspace-mount', 'stable');
+  await expect(primaryTab).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByLabel('Current page')).toHaveText('1 / 4');
+
+  await openFreshProductionFixture(page, pdf, 'Annotation tray Fit Width launch failed');
+  await expect(mainPage).toBeVisible();
+  await waitForRenderedPageImage(mainPage);
+  await page.getByRole('button', { name: 'Open right workspace' }).click();
+  const toolsWorkspace = page.locator('#review-tools-workspace');
+  await expect(toolsWorkspace).toHaveAttribute('data-tools-workspace-open', 'true');
+  await expect.poll(() => toolsWorkspace.evaluate((element) => getComputedStyle(element).transform))
+    .toBe('none');
+  const toolsBounds = await toolsWorkspace.boundingBox();
+  if (!toolsBounds) throw new Error('Right annotation workspace has no bounds.');
+
+  await zoomTrigger().click();
+  const zoomInput = page.getByRole('spinbutton', { name: 'Zoom percentage' });
+  await zoomInput.fill('100');
+  await zoomInput.press('Enter');
+  await expect(zoomTrigger()).toHaveText('100%');
+  const preFitRightGap = (await horizontalGeometry(toolsBounds.x)).rightGap;
+  const fitTransition = mainPage.evaluate(async (pageElement) => {
+    const rightGaps: number[] = [];
+    await new Promise<void>((resolve) => {
+      let frame = 0;
+      const sample = () => {
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            const tray = document.querySelector<HTMLElement>('#review-tools-workspace');
+            if (tray) {
+              rightGaps.push(tray.getBoundingClientRect().left - pageElement.getBoundingClientRect().right);
+            }
+            frame += 1;
+            if (frame >= 30) resolve();
+            else sample();
+          }, 0);
+        });
+      };
+      sample();
+      document.documentElement.dataset.fitTransitionSampler = 'ready';
+    });
+    delete document.documentElement.dataset.fitTransitionSampler;
+    return rightGaps;
+  });
+  await expect.poll(() => page.evaluate(
+    () => document.documentElement.dataset.fitTransitionSampler,
+  )).toBe('ready');
+  await fitAndWait();
+  const paintedRightGaps = await fitTransition;
+  expect(paintedRightGaps.length).toBeGreaterThan(0);
+  expect(Math.min(...paintedRightGaps))
+    .toBeGreaterThanOrEqual(Math.min(preFitRightGap, standardGap) - 3);
+  await expectFitted(standardGap, toolsBounds.x);
+  await expect(zoomTrigger()).not.toHaveText('100%');
+});
+
 test('minimally reveals the PDF beside the adaptive annotations surface and restores untouched movement', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const launched = await host.open({
@@ -1526,11 +1961,13 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
 
   await page.setViewportSize({ width: 760, height: 900 });
   await expect(stage).toHaveAttribute('data-annotation-presentation', 'bottom');
-  const narrowHorizontalMaximum = await viewport.evaluate((element) => (
-    Math.max(0, element.scrollWidth - element.clientWidth)
-  ));
-  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
-    .toBeCloseTo(Math.min(deliberateLeft, narrowHorizontalMaximum), 0);
+  await expect.poll(() => viewport.evaluate((element, desiredLeft) => {
+    const maximum = Math.max(
+      0,
+      element.scrollWidth - Math.max(element.clientWidth, element.getBoundingClientRect().width),
+    );
+    return Math.abs(element.scrollLeft - Math.min(desiredLeft, maximum));
+  }, deliberateLeft)).toBeLessThan(1);
   const narrowScrollBefore = await viewport.evaluate((element) => ({
     left: element.scrollLeft,
     top: element.scrollTop,
@@ -1826,7 +2263,9 @@ test("creates a canonical Page Note from a real PDF context gesture without seco
     },
   });
   const position = note?.payload.position;
-  expect(position).toMatchObject({ x: 500, y: 1392, width: 18, height: 18 });
+  expect(position).toMatchObject({ width: 18, height: 18 });
+  expect(Math.abs(canonicalCoordinate(position, "x") - 500)).toBeLessThanOrEqual(1);
+  expect(Math.abs(canonicalCoordinate(position, "y") - 1392)).toBeLessThanOrEqual(1);
   expect(note?.id).toBeTruthy();
   const mark = page.locator(`[data-owned-mark="pageNote"][data-review-id="${note!.id}"]`);
   await expect(mark).toHaveCount(1);
@@ -1932,9 +2371,11 @@ test("normalizes a real context gesture on a rotated cropped PDF into canonical 
     pageIndex: 0,
     payload: {
       comment: "Rotated geometry note.",
-      position: { x: 236, y: 1176, width: 18, height: 18 },
+      position: { width: 18, height: 18 },
     },
   });
+  expect(Math.abs(canonicalCoordinate(note?.payload.position, "x") - 236)).toBeLessThanOrEqual(1);
+  expect(Math.abs(canonicalCoordinate(note?.payload.position, "y") - 1176)).toBeLessThanOrEqual(1);
   expect(note?.id).toBeTruthy();
   await expect(page.locator(
     `[data-owned-mark="pageNote"][data-review-id="${note!.id}"]`,
@@ -1961,7 +2402,8 @@ for (const key of ["Delete", "Backspace"] as const) {
     await waitForRenderedPageImage(pageCanvas);
     await dragPdfPhrase(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
     await expect(pageCanvas).toBeFocused();
-    await expect(page.getByRole("alert")).toContainText("Reading the selected text");
+    await waitForSelectionCapture(page);
+    await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
     const urlBeforeKey = page.url();
     await page.keyboard.press(key);
     await releaseSelectionCapture(page);
@@ -1995,6 +2437,44 @@ for (const key of ["Delete", "Backspace"] as const) {
   });
 }
 
+test("shows command conflicts until a retry succeeds", async ({ page }) => {
+  const launched = await openFreshProductionFixture(
+    page,
+    pdf,
+    "Fresh command-conflict production launch failed",
+  );
+
+  const pageCanvas = page.locator("[data-page-index='0']").first();
+  await expect(pageCanvas).toBeVisible();
+  await waitForRenderedPageImage(pageCanvas);
+  await dragPdfPhrase(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
+  const selectionActions = page.getByRole("toolbar", { name: "Selection review actions" });
+  await expect(selectionActions).toBeVisible();
+
+  const externalState = host.broker.state(launched.sessionId);
+  if (!externalState) throw new Error("Command-conflict review state is missing");
+  await host.broker.acceptMutation(
+    launched.sessionId,
+    addPageNote(
+      externalState,
+      0,
+      { x: 80, y: 160, width: 18, height: 18 },
+      "External review window note.",
+    ),
+  );
+
+  await selectionActions.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page.locator("[data-viewer-status]")).toContainText(
+    "Another review window changed this draft",
+  );
+  await expect(selectionActions).toBeVisible();
+
+  await selectionActions.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
+  await expect(page.locator("[data-review-item]")).toHaveCount(2);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(2);
+});
+
 test("discards queued typing when a pending selection is cleared", async ({ page }) => {
   const launched = await host.open({
     pdfPath: pdf,
@@ -2011,7 +2491,8 @@ test("discards queued typing when a pending selection is cleared", async ({ page
   await expect(pageCanvas).toBeVisible();
   await waitForRenderedPageImage(pageCanvas);
   await dragPdfPhrase(page, pageCanvas, { x: 76, y: 98 }, { x: 245, y: 98 });
-  await expect(page.getByRole("alert")).toContainText("Reading the selected text");
+  await waitForSelectionCapture(page);
+  await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
   await page.keyboard.type("discard me");
 
   await pageCanvas.click({ position: { x: 500, y: 300 } });
@@ -2038,7 +2519,8 @@ test("keeps only typing for the newest pending selection", async ({ page }) => {
   await expect(pageCanvas).toBeVisible();
   await waitForRenderedPageImage(pageCanvas);
   await dragPdfPhrase(page, pageCanvas, { x: 76, y: 98 }, { x: 245, y: 98 });
-  await expect(page.getByRole("alert")).toContainText("Reading the selected text");
+  await waitForSelectionCapture(page);
+  await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
   await page.keyboard.type("obsolete");
 
   await dragPdfPhrase(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });

@@ -8,8 +8,14 @@ import {
 import { projectReviewItems } from '../../../apps/web/src/review/annotation-projection.js';
 import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
 import type { CaretAnchor, SelectionAnchor } from '../../../apps/web/src/pdf/selection-anchor.js';
-import type { ViewerControls, ViewerControlsSnapshot } from '../../../apps/web/src/pdf/viewer-controls.js';
+import {
+  VIEWER_ZOOM_MAX_PERCENT,
+  VIEWER_ZOOM_MIN_PERCENT,
+  type ViewerControls,
+  type ViewerControlsSnapshot,
+} from '../../../apps/web/src/pdf/viewer-controls.js';
 import type { ViewerInteractionListener } from '../../../apps/web/src/pdf/viewer-interaction-events.js';
+import type { PdfViewerNavigation } from '../../../apps/web/src/pdf/viewer-navigation-adapter.js';
 import { createReviewState, type ReviewCommand, type ReviewState } from '../../../packages/core/src/review-model.js';
 import { reduceReview } from '../../../packages/core/src/review-reducer.js';
 import { resolveVisualScenario, VisualDocument } from './visual-scenarios.js';
@@ -39,16 +45,27 @@ const caret: CaretAnchor = {
 interface HarnessViewerControls extends ViewerControls {
   readonly pageCommands: string[];
   readonly directPageRequests: number[];
+  readonly zoomCommands: string[];
+  readonly directZoomRequests: number[];
+  readonly fitWidthRequests: string[];
   pageRequestsSnapshot(): string;
+  zoomRequestsSnapshot(): string;
   subscribePageRequests(listener: () => void): () => void;
+  subscribeZoomRequests(listener: () => void): () => void;
+  fitToWidth(): void;
   makePageControlsUnavailable(): void;
+  makeZoomControlsUnavailable(): void;
 }
 
 function createHarnessViewerControls(): HarnessViewerControls {
   const listeners = new Set<ViewerInteractionListener>();
   const pageRequestListeners = new Set<() => void>();
+  const zoomRequestListeners = new Set<() => void>();
   const pageCommands: string[] = [];
   const directPageRequests: number[] = [];
+  const zoomCommands: string[] = [];
+  const directZoomRequests: number[] = [];
+  const fitWidthRequests: string[] = [];
   let state: ViewerControlsSnapshot = {
     ready: true,
     pageReady: true,
@@ -78,11 +95,25 @@ function createHarnessViewerControls(): HarnessViewerControls {
   return {
     pageCommands,
     directPageRequests,
+    zoomCommands,
+    directZoomRequests,
+    fitWidthRequests,
     pageRequestsSnapshot: () => directPageRequests.join(','),
+    zoomRequestsSnapshot: () => [
+      `direct:${directZoomRequests.join('|')}`,
+      `commands:${zoomCommands.join('|')}`,
+      `fit:${fitWidthRequests.join('|')}`,
+    ].join(';'),
     subscribePageRequests(listener) {
       pageRequestListeners.add(listener);
       return () => {
         pageRequestListeners.delete(listener);
+      };
+    },
+    subscribeZoomRequests(listener) {
+      zoomRequestListeners.add(listener);
+      return () => {
+        zoomRequestListeners.delete(listener);
       };
     },
     snapshot: () => state,
@@ -111,10 +142,37 @@ function createHarnessViewerControls(): HarnessViewerControls {
       publishPage(pageNumber);
     },
     zoomOut() {
-      if (state.zoomReady) publishZoom(state.zoomPercent - 10);
+      if (!state.zoomReady) return;
+      const destination = state.zoomPercent - 10;
+      zoomCommands.push(`out:${destination}`);
+      for (const listener of zoomRequestListeners) listener();
+      publishZoom(destination);
     },
     zoomIn() {
-      if (state.zoomReady) publishZoom(state.zoomPercent + 10);
+      if (!state.zoomReady) return;
+      const destination = state.zoomPercent + 10;
+      zoomCommands.push(`in:${destination}`);
+      for (const listener of zoomRequestListeners) listener();
+      publishZoom(destination);
+    },
+    zoomToPercent(zoomPercent) {
+      directZoomRequests.push(zoomPercent);
+      for (const listener of zoomRequestListeners) listener();
+      if (
+        !state.zoomReady
+        || !Number.isSafeInteger(zoomPercent)
+        || zoomPercent < VIEWER_ZOOM_MIN_PERCENT
+        || zoomPercent > VIEWER_ZOOM_MAX_PERCENT
+      ) return;
+      zoomCommands.push(`go:${zoomPercent}`);
+      publishZoom(zoomPercent);
+    },
+    fitToWidth() {
+      if (!state.zoomReady) return;
+      fitWidthRequests.push('fit');
+      zoomCommands.push('fit:88');
+      for (const listener of zoomRequestListeners) listener();
+      publishZoom(88);
     },
     subscribe(listener) {
       listeners.add(listener);
@@ -138,10 +196,48 @@ function createHarnessViewerControls(): HarnessViewerControls {
         listener({ type: 'readiness', ready: false, reason: unavailableReason });
       }
     },
+    makeZoomControlsUnavailable() {
+      const unavailableReason = 'Some viewer controls are unavailable in this harness state.';
+      state = {
+        ...state,
+        ready: false,
+        zoomReady: false,
+        zoomPercent: 0,
+        zoomUnavailableReason: 'Zoom controls are unavailable in this harness state.',
+        unavailableReason,
+      };
+      for (const listener of listeners) {
+        listener({ type: 'readiness', ready: false, reason: unavailableReason });
+      }
+    },
     dispose() {
       listeners.clear();
       pageRequestListeners.clear();
+      zoomRequestListeners.clear();
     },
+  };
+}
+
+function createHarnessViewerNavigation(
+  controls: HarnessViewerControls,
+): PdfViewerNavigation {
+  return {
+    captureLocation: () => null,
+    applyLocation: async () => false,
+    fitToWidth: async (waitForSettledGeometry) => {
+      if (waitForSettledGeometry) {
+        await waitForSettledGeometry(new AbortController().signal);
+      }
+      controls.fitToWidth();
+      return true;
+    },
+    fitToWidthReady: () => true,
+    resolveTarget: () => null,
+    applyTarget: async () => false,
+    cancelPendingNavigation: async () => undefined,
+    replaceDocument: () => undefined,
+    focusAtDestination: () => false,
+    dispose: () => undefined,
   };
 }
 
@@ -173,10 +269,18 @@ function Harness() {
     viewerControlsRef.current = createHarnessViewerControls();
   }
   const viewerControls = viewerControlsRef.current;
+  const viewerNavigationRef = useRef<PdfViewerNavigation | undefined>(undefined);
+  if (viewerNavigationRef.current === undefined) {
+    viewerNavigationRef.current = createHarnessViewerNavigation(viewerControls);
+  }
   const viewerState = useSyncExternalStore(viewerControls.subscribe, viewerControls.snapshot);
   const directPageRequests = useSyncExternalStore(
     viewerControls.subscribePageRequests,
     viewerControls.pageRequestsSnapshot,
+  );
+  const zoomRequests = useSyncExternalStore(
+    viewerControls.subscribeZoomRequests,
+    viewerControls.zoomRequestsSnapshot,
   );
 
   const accept = async (command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> => {
@@ -208,7 +312,11 @@ function Harness() {
         navigationState: visualScenario.referenceNavigation,
         referenceTabs: visualScenario.referenceTabs,
       } : {})}
-      {...(visualScenario ? {} : { viewerControls, viewerState })}
+      {...(visualScenario ? {} : {
+        viewerControls,
+        viewerState,
+      })}
+      viewerNavigation={viewerNavigationRef.current}
       selectionUpdate={anchorKind === 'selection'
         ? { kind: 'reliable', generation: selectionGeneration, anchor: selection }
         : { kind: 'cleared', generation: selectionGeneration }}
@@ -269,6 +377,9 @@ function Harness() {
         <button type="button" onClick={() => viewerControls.makePageControlsUnavailable()}>
           Make page controls unavailable
         </button>
+        <button type="button" onClick={() => viewerControls.makeZoomControlsUnavailable()}>
+          Make zoom controls unavailable
+        </button>
         {keyboardPageNoteActive ? (
           <button type="button" onClick={() => {
             setKeyboardPageNoteActive(false);
@@ -328,6 +439,7 @@ function Harness() {
           data-anchor-kind={anchorKind}
           data-viewer-page-commands={viewerControls.pageCommands.join(',')}
           data-viewer-page-requests={directPageRequests}
+          data-viewer-zoom-requests={zoomRequests}
         >
           Revision {state.revision}
         </output>

@@ -346,11 +346,13 @@ export class NavigationCoordinator {
     const navigation = this.dependencies.getReferenceNavigation()
       ?? await this.dependencies.waitForReferenceNavigation();
     if (!this.isCurrent(operation)) return false;
-    if (!navigation || !await navigation.applyTarget(target) || !this.isCurrent(operation)) {
-      return this.failReference(operation);
-    }
-    const settledLocation = navigation.captureLocation();
-    if (settledLocation === null || !this.isCurrent(operation)) return this.failReference(operation);
+    if (!navigation) return this.failReference(operation);
+    const settledLocation = await this.applyReferenceTargetAfterLayout(
+      operation,
+      navigation,
+      target,
+    );
+    if (settledLocation === null) return this.failReference(operation);
 
     this.dependencies.dispatch({
       type: 'open-reference',
@@ -388,11 +390,13 @@ export class NavigationCoordinator {
     const navigation = this.dependencies.getReferenceNavigation()
       ?? await this.dependencies.waitForReferenceNavigation();
     if (!this.isCurrent(operation)) return false;
-    if (!navigation || !await navigation.applyTarget(pending.target) || !this.isCurrent(operation)) {
-      return this.failReference(operation);
-    }
-    const settledLocation = navigation.captureLocation();
-    if (settledLocation === null || !this.isCurrent(operation)) return this.failReference(operation);
+    if (!navigation) return this.failReference(operation);
+    const settledLocation = await this.applyReferenceTargetAfterLayout(
+      operation,
+      navigation,
+      pending.target,
+    );
+    if (settledLocation === null) return this.failReference(operation);
     this.dependencies.dispatch({
       type: 'open-reference',
       target: pending.target,
@@ -518,6 +522,12 @@ export class NavigationCoordinator {
       token: operation.token,
       currentMainLocation: mainLocation,
     });
+    const finalReference = state.tabs.length === 1;
+    if (finalReference) {
+      this.dependencies.layout.hideReferences();
+      await this.dependencies.layout.settle();
+      if (!this.isCurrent(operation)) return false;
+    }
     const applied = await main.applyLocation(referenceLocation);
     if (!this.isCurrent(operation)) return false;
     const settledLocation = applied ? main.captureLocation() : null;
@@ -528,6 +538,11 @@ export class NavigationCoordinator {
         documentGeneration: operation.documentGeneration,
         success: false,
       });
+      if (finalReference) {
+        this.dependencies.layout.revealReferences();
+        await this.dependencies.layout.settle();
+        if (!this.isCurrent(operation)) return false;
+      }
       this.dependencies.setAnnouncement(MAIN_FAILURE);
       return false;
     }
@@ -557,12 +572,22 @@ export class NavigationCoordinator {
       return true;
     }
 
-    this.dependencies.layout.hideReferences();
     await Promise.all([
       this.dependencies.layout.settle(),
       this.dependencies.getReferenceController()?.close() ?? Promise.resolve(),
     ]);
-    if (this.isCurrent(operation)) main.focusAtDestination(settledLocation.pageIndex);
+    if (!this.isCurrent(operation)) return true;
+    const reapplied = await main.applyLocation(settledLocation);
+    if (!this.isCurrent(operation)) return true;
+    const finalLocation = reapplied ? main.captureLocation() : null;
+    if (finalLocation === null) {
+      this.dependencies.setAnnouncement(
+        'Reference sent to the main document, but its view could not be restored after closing References.',
+      );
+      return true;
+    }
+    this.dependencies.dispatch({ type: 'refresh-main-location', location: finalLocation });
+    main.focusAtDestination(finalLocation.pageIndex);
     return true;
   }
 
@@ -692,6 +717,18 @@ export class NavigationCoordinator {
     void this.dependencies.getReferenceController()?.close();
   }
 
+  private async applyReferenceTargetAfterLayout(
+    operation: Operation,
+    navigation: PdfViewerNavigation,
+    target: PdfNavigationTarget,
+  ): Promise<PdfViewerLocation | null> {
+    await this.dependencies.layout.settle();
+    if (!this.isCurrent(operation)) return null;
+    if (!await navigation.applyTarget(target, 'reference-fit-width')) return null;
+    if (!this.isCurrent(operation)) return null;
+    return navigation.captureLocation();
+  }
+
   private async restoreReferenceTab(
     operation: Operation,
     identity: string,
@@ -707,10 +744,12 @@ export class NavigationCoordinator {
     }
     if (state.activeTabIdentity === identity) {
       if (this.referenceRestoreIdentity === identity) {
-        const applied = await navigation.applyLocation(incoming.settledLocation);
-        if (!this.isCurrent(operation)) return false;
-        const settledLocation = applied ? navigation.captureLocation() : null;
-        if (!applied || settledLocation === null) {
+        const settledLocation = await this.restoreReferenceLocation(
+          operation,
+          navigation,
+          incoming,
+        );
+        if (settledLocation === null) {
           if (announce) this.dependencies.setAnnouncement(REFERENCE_FAILURE);
           return false;
         }
@@ -734,10 +773,12 @@ export class NavigationCoordinator {
           ?? outgoingLocation
         : outgoingLocation,
     });
-    const applied = await navigation.applyLocation(incoming.settledLocation);
-    if (!this.isCurrent(operation)) return false;
-    const settledLocation = applied ? navigation.captureLocation() : null;
-    if (!applied || settledLocation === null) {
+    const settledLocation = await this.restoreReferenceLocation(
+      operation,
+      navigation,
+      incoming,
+    );
+    if (settledLocation === null) {
       this.dependencies.dispatch({
         type: 'complete-reference-switch',
         token: operation.token,
@@ -760,6 +801,20 @@ export class NavigationCoordinator {
       this.dependencies.setAnnouncement('Reference active.');
     }
     return true;
+  }
+
+  private async restoreReferenceLocation(
+    operation: Operation,
+    navigation: PdfViewerNavigation,
+    tab: ReferenceNavigationState['tabs'][number],
+  ): Promise<PdfViewerLocation | null> {
+    let applied = await navigation.applyLocation(tab.settledLocation);
+    if (!this.isCurrent(operation)) return null;
+    if (!applied) {
+      applied = await navigation.applyTarget(tab.originalTarget, 'reference-fit-width');
+      if (!this.isCurrent(operation)) return null;
+    }
+    return applied ? navigation.captureLocation() : null;
   }
 
   private async traverseHistory(kind: 'back' | 'forward'): Promise<boolean> {
