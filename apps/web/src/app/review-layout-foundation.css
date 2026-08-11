@@ -156,6 +156,16 @@
   gap: .2rem;
 }
 
+.review-chrome__history-cluster {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: .2rem;
+  margin-left: .2rem;
+  padding-left: .4rem;
+  border-left: 1px solid var(--review-border);
+}
+
 .review-chrome__actions {
   justify-self: end;
   min-width: 0;
@@ -286,7 +296,7 @@
   color: var(--review-ink-muted);
 }
 
-.review-chrome__annotations {
+.review-chrome__workspace {
   white-space: nowrap;
 }
 
@@ -405,6 +415,10 @@
   inset: 0;
   overflow: hidden;
   pointer-events: none;
+}
+
+.review-contextual-host {
+  z-index: 3;
 }
 
 .review-drawer-host {

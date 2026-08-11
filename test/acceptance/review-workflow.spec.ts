@@ -1,4 +1,54 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+async function openAnnotationsWorkspace(page: Page) {
+  const rightRail = page.getByRole('button', { name: /^(?:Open|Close) right workspace$/u });
+  const bottomRail = page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
+  const stage = page.locator('[data-review-stage]');
+  const expectedPresentation = (page.viewportSize()?.width ?? 1280) < 900 ? 'bottom' : 'right';
+  await expect(stage).toHaveAttribute('data-workspace-presentation', expectedPresentation);
+  const workspace = expectedPresentation === 'right'
+    ? rightRail
+    : bottomRail;
+  if (await workspace.getAttribute('aria-expanded') !== 'true') await workspace.click();
+  await expect(workspace).toHaveAttribute('aria-expanded', 'true');
+  const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
+  await expect(annotations).toBeVisible();
+  if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
+  await expect(annotations).toHaveAttribute('aria-selected', 'true');
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  await expect(page.locator('#workspace-panel-outline')).toBeHidden();
+  await expect(page.locator('#workspace-panel-references')).toBeHidden();
+  return { annotations, workspace };
+}
+
+async function closeWorkspace(page: Page) {
+  const rightRail = page.getByRole('button', { name: /^(?:Open|Close) right workspace$/u });
+  const bottomRail = page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
+  const expectedPresentation = (page.viewportSize()?.width ?? 1280) < 900 ? 'bottom' : 'right';
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+    'data-workspace-presentation',
+    expectedPresentation,
+  );
+  const workspace = expectedPresentation === 'right'
+    ? rightRail
+    : bottomRail;
+  if (await workspace.getAttribute('aria-expanded') === 'true') await workspace.click();
+  await expect(workspace).toHaveAttribute('aria-expanded', 'false');
+  return workspace;
+}
+
+async function currentWorkspaceRail(page: Page) {
+  const expectedPresentation = (page.viewportSize()?.width ?? 1280) < 900 ? 'bottom' : 'right';
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+    'data-workspace-presentation',
+    expectedPresentation,
+  );
+  return expectedPresentation === 'right'
+    ? page.getByRole('button', { name: /^(?:Open|Close) right workspace$/u })
+    : page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
+}
 
 test.describe('canonical review workflow', () => {
   test.beforeEach(async ({ page }) => {
@@ -85,17 +135,21 @@ test.describe('canonical review workflow', () => {
     await expect(selectionActions).toHaveCount(0);
   });
 
-  test('keeps selection actions visible while the Annotation Tray is toggled', async ({ page }) => {
+  test('keeps selection actions visible while Workspace Annotations is toggled', async ({ page }) => {
     const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
-    const annotations = page.getByRole('button', { name: 'Annotations' });
 
     await expect(selectionActions).toBeVisible();
-    await annotations.click();
-    await expect(annotations).toHaveAttribute('aria-expanded', 'true');
+    await openAnnotationsWorkspace(page);
+    await expect(page.locator('[data-anchor-kind]')).toHaveAttribute('data-anchor-kind', 'selection');
     await expect(selectionActions).toBeVisible();
 
-    await annotations.click();
-    await expect(annotations).toHaveAttribute('aria-expanded', 'false');
+    await closeWorkspace(page);
+    await expect(selectionActions).toBeVisible();
+
+    await openAnnotationsWorkspace(page);
+    await expect(page.locator('[data-anchor-kind]')).toHaveAttribute('data-anchor-kind', 'selection');
+    await expect(selectionActions).toBeVisible();
+    await closeWorkspace(page);
     await expect(selectionActions).toBeVisible();
 
     await page.getByRole('button', { name: 'Clear anchors' }).click();
@@ -149,8 +203,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('cancels page editing with Escape without closing the Annotation Tray', async ({ page }) => {
-    const annotations = page.getByRole('button', { name: 'Annotations' });
-    await annotations.click();
+    const { annotations, workspace } = await openAnnotationsWorkspace(page);
     const currentPage = page.getByRole('button', {
       name: 'Current page 3 of 12. Enter a page number',
     });
@@ -160,8 +213,9 @@ test.describe('canonical review workflow', () => {
     await pageNumber.press('Escape');
 
     await expect(currentPage).toBeFocused();
-    await expect(annotations).toHaveAttribute('aria-expanded', 'true');
-    await expect(page.locator('[data-annotation-drawer]')).toBeVisible();
+    await expect(workspace).toHaveAttribute('aria-expanded', 'true');
+    await expect(annotations).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#review-tools-workspace')).toBeVisible();
     await expect(page.locator('[data-viewer-page-commands]')).toHaveAttribute(
       'data-viewer-page-commands',
       '',
@@ -353,16 +407,19 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Redo' }).click();
     await expect(page.locator('[data-owned-mark="replace"]')).toHaveCount(1);
 
-    await page.getByRole('button', { name: 'Annotations' }).click();
-    await expect(page.locator('[data-annotation-drawer]')).toBeVisible();
+    await openAnnotationsWorkspace(page);
+    await expect(page.locator('#review-tools-workspace')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Close annotations' })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Annotations' }).click();
-    await expect(page.getByRole('button', { name: 'Annotations' })).toHaveAttribute('aria-expanded', 'false');
-    await page.getByRole('button', { name: 'Annotations' }).click();
+    await closeWorkspace(page);
+    await openAnnotationsWorkspace(page);
     const entry = page.getByRole('button', { name: /replace · Page 1/ });
-    await entry.click();
+    await entry.focus();
+    await expect(entry).toBeFocused();
+    await page.keyboard.press('Enter');
     await expect(page.locator('[data-navigated]')).not.toHaveAttribute('data-navigated', 'none');
-    await page.getByRole('button', { name: 'Delete replace on page 1' }).click();
+    const deleteEntry = page.getByRole('button', { name: 'Delete replace on page 1' });
+    await deleteEntry.focus();
+    await page.keyboard.press('Enter');
     await expect(page.getByLabel('Annotations in document order')).toBeFocused();
   });
 
@@ -370,10 +427,10 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
     await page.locator('#root').evaluate((element) => element.setAttribute('data-production-root', 'true'));
     await page.setViewportSize({ width: 320, height: 720 });
-    await page.getByRole('button', { name: 'Annotations' }).click();
+    await openAnnotationsWorkspace(page);
 
-    const drawer = page.locator('[data-annotation-drawer]');
-    await expect(drawer).toHaveAttribute('data-annotation-presentation', 'bottom');
+    const drawer = page.locator('#review-tools-workspace');
+    await expect(drawer).toHaveAttribute('data-workspace-presentation', 'bottom');
 
     const row = drawer.locator('[data-annotation-origin="owned"][data-annotation-kind="delete"]');
     const content = row.getByRole('button', { name: /delete · Page 1/u });
@@ -400,11 +457,13 @@ test.describe('canonical review workflow', () => {
       await page.getByRole('button', { name: 'Highlight', exact: true }).click();
       await page.getByRole('button', { name: 'Keep without comment' }).click();
     }
-    await page.getByRole('button', { name: 'Annotations' }).click();
+    await openAnnotationsWorkspace(page);
 
-    const drawer = page.locator('[data-annotation-drawer]');
+    const drawer = page.locator('[data-annotation-scroll-viewport]');
     await drawer.evaluate((element) => {
-      Object.assign((element as HTMLElement).style, { height: '8rem', bottom: 'auto' });
+      Object.assign((element as HTMLElement).style, {
+        flex: 'none', height: '8rem', bottom: 'auto',
+      });
     });
     const header = drawer.locator('.annotation-drawer__header');
     const before = await header.boundingBox();
@@ -421,8 +480,7 @@ test.describe('canonical review workflow', () => {
   test('keeps the annotations tray open while editing an owned annotation', async ({ page }) => {
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     await page.getByRole('button', { name: 'Keep without comment' }).click();
-    const annotations = page.getByRole('button', { name: 'Annotations' });
-    await annotations.click();
+    const { annotations, workspace } = await openAnnotationsWorkspace(page);
 
     const edit = page.getByRole('button', { name: 'Edit highlight on page 1' });
     await expect(edit).toHaveAttribute('title', 'Edit annotation');
@@ -435,14 +493,15 @@ test.describe('canonical review workflow', () => {
     await editor.getByRole('button', { name: 'Save comment' }).click();
 
     await expect(editor).toHaveCount(0);
-    await expect(annotations).toHaveAttribute('aria-expanded', 'true');
+    await expect(workspace).toHaveAttribute('aria-expanded', 'true');
+    await expect(annotations).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByRole('button', { name: /highlight · Page 1 · Edited in the open tray\./u })).toBeVisible();
   });
 
   test('removes spatial disclosure motion when reduced motion is requested', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.getByRole('button', { name: 'Annotations' }).click();
-    const drawer = page.locator('[data-annotation-drawer]');
+    await openAnnotationsWorkspace(page);
+    const drawer = page.locator('#review-tools-workspace');
     await expect(drawer).toBeVisible();
     await expect(drawer).toHaveCSS('transition-duration', '0s');
     await expect(drawer).toHaveCSS('animation-duration', '0s');
@@ -506,10 +565,10 @@ test.describe('canonical review workflow', () => {
     await replacementDialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(canvas).toBeFocused();
 
-    const annotations = page.getByRole('button', { name: /^Annotations/u });
-    await annotations.press('Space');
+    const workspace = await currentWorkspaceRail(page);
+    await workspace.press('Space');
 
-    await expect(annotations).toHaveAttribute('aria-expanded', 'true');
+    await expect(workspace).toHaveAttribute('aria-expanded', 'true');
     await expect(page.getByRole('dialog', { name: 'Replacement text' })).toHaveCount(0);
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
@@ -545,7 +604,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('announces anchor recovery and creates no mutation when selection authority is absent', async ({ page }) => {
-    const announcement = page.locator('.review-shell > [role="status"]');
+    const announcement = page.locator('.review-workspace__status');
     await page.getByRole('button', { name: 'Clear anchors' }).click();
     await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toHaveCount(0);
     await page.getByRole('application', { name: 'PDF review canvas' }).focus();
@@ -569,18 +628,17 @@ test.describe('canonical review workflow', () => {
 
   test('supersedes Page Note placement when opening a review drawer', async ({ page }) => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
-    const annotations = page.getByRole('button', { name: /^Annotations/u });
     const finish = page.getByRole('button', { name: 'Finish' });
 
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+N');
     await expect(page.getByRole('button', { name: 'Place Page Note' })).toBeVisible();
-    await annotations.click();
+    const { workspace } = await openAnnotationsWorkspace(page);
 
     await expect(page.getByRole('button', { name: 'Place Page Note' })).toHaveCount(0);
-    await expect(page.locator('[data-annotation-drawer]')).toHaveAttribute('data-list-open', 'true');
+    await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
     await page.keyboard.press('Escape');
-    await expect(annotations).toBeFocused();
+    await expect(workspace).toBeFocused();
 
     await page.getByRole('button', { name: 'Open page actions' }).click();
     await expect(page.getByRole('menu', { name: 'Page actions' })).toBeVisible();
@@ -617,8 +675,8 @@ test.describe('canonical review workflow', () => {
 
     const beforeActivation = await canvas.boundingBox();
     await markTarget.click();
-    const drawer = page.locator('[data-annotation-drawer]');
-    await expect(drawer).toHaveAttribute('data-list-open', 'true');
+    const drawer = page.locator('#review-tools-workspace');
+    await expect(drawer).toHaveAttribute('data-tools-workspace-open', 'true');
     const row = page.locator('[data-review-item]').first();
     await expect(row).toHaveAttribute('data-active', 'true');
     await expect(row.getByRole('button', { name: /highlight · Page 1/ })).toBeFocused();
@@ -629,9 +687,9 @@ test.describe('canonical review workflow', () => {
     await expect(existing.getByRole('button', { name: /^Edit/ })).toHaveCount(0);
     await expect(existing.getByRole('button', { name: /^Delete/ })).toHaveCount(0);
     await page.keyboard.press('Escape');
-    await expect(markTarget).toBeFocused();
-    await expect(page.locator('[data-owned-mark]').first()).toHaveAttribute('data-active', 'false');
-    await expect(row).toHaveAttribute('data-active', 'false');
+    await expect(await currentWorkspaceRail(page)).toBeFocused();
+    await expect(page.locator('[data-owned-mark]').first()).toHaveAttribute('data-active', 'true');
+    await expect(row).toHaveAttribute('data-active', 'true');
   });
 
   test('shows an offscreen direction cue without scrolling until explicit mark activation', async ({ page }) => {
@@ -643,10 +701,12 @@ test.describe('canonical review workflow', () => {
       await page.getByRole('button', { name: 'Highlight', exact: true }).click();
       await page.getByRole('button', { name: 'Keep without comment' }).click();
     }
-    await page.getByRole('button', { name: 'Annotations' }).click();
-    const drawer = page.locator('[data-annotation-drawer]');
+    await openAnnotationsWorkspace(page);
+    const drawer = page.locator('[data-annotation-scroll-viewport]');
     await drawer.evaluate((element) => {
-      Object.assign((element as HTMLElement).style, { height: '7rem', bottom: 'auto' });
+      Object.assign((element as HTMLElement).style, {
+        flex: 'none', height: '7rem', bottom: 'auto',
+      });
     });
     const lastMark = page.locator('[data-owned-focus-id]').last();
     const scrollBefore = await drawer.evaluate((element) => element.scrollTop);

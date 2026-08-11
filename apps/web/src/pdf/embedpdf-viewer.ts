@@ -9,6 +9,8 @@ import { SelectionPluginPackage } from '@embedpdf/plugin-selection/react';
 import { ViewportPluginPackage } from '@embedpdf/plugin-viewport/react';
 import { ZoomPluginPackage } from '@embedpdf/plugin-zoom/react';
 import type { LoadDocumentUrlOptions } from '@embedpdf/plugin-document-manager';
+import { PDF_LINK_INTERACTION_ATTRIBUTE } from './viewer-interaction-events.js';
+import { MAIN_PDF_DOCUMENT_ID } from './viewer-document-ids.js';
 
 export interface ViewerAssetUrls {
   pdfiumWasm: string;
@@ -25,14 +27,27 @@ function sameOriginUrl(rawUrl: string, origin: string): string {
 
 export function createLocalPdfiumViewer(assetUrls: ViewerAssetUrls, origin = globalThis.location.origin) {
   const pdfiumWasm = sameOriginUrl(assetUrls.pdfiumWasm, origin);
-  const document = buildViewerDocumentOptions(assetUrls, origin);
   const engine = createPdfiumEngine(pdfiumWasm, { encoderPoolSize: 1, fontFallback: null });
+  return { engine, plugins: createLocalPdfiumViewerPlugins(assetUrls, origin) };
+}
+
+export function createLocalPdfiumViewerPlugins(
+  assetUrls: ViewerAssetUrls,
+  origin: string,
+): PluginBatchRegistrations {
+  const document = {
+    ...buildViewerDocumentOptions(assetUrls, origin),
+    documentId: MAIN_PDF_DOCUMENT_ID,
+    autoActivate: true,
+  };
   const plugins: PluginBatchRegistrations = [
     createPluginRegistration(DocumentManagerPluginPackage, {
-      maxDocuments: 1,
+      maxDocuments: 2,
       initialDocuments: [document],
     }),
-    createPluginRegistration(InteractionManagerPluginPackage),
+    createPluginRegistration(InteractionManagerPluginPackage, {
+      exclusionRules: { dataAttributes: [PDF_LINK_INTERACTION_ATTRIBUTE] },
+    }),
     createPluginRegistration(ViewportPluginPackage),
     createPluginRegistration(ScrollPluginPackage),
     createPluginRegistration(ZoomPluginPackage),
@@ -47,8 +62,7 @@ export function createLocalPdfiumViewer(assetUrls: ViewerAssetUrls, origin = glo
       locked: { type: LockModeType.All },
     }),
   ];
-
-  return { engine, plugins };
+  return plugins;
 }
 
 export function buildViewerDocumentOptions(

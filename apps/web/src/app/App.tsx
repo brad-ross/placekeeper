@@ -15,6 +15,15 @@ import {
 } from '../pdf/existing-annotations.js';
 import { createLocalPdfiumViewer, type ViewerAssetUrls } from '../pdf/embedpdf-viewer.js';
 import { PdfWorkspace, type PageContextMenuRequest } from '../pdf/PdfWorkspace.js';
+import {
+  PdfOutlineDiscoveryAuthority,
+  readPdfOutline,
+  type PdfOutlineDiscovery,
+} from '../pdf/pdf-outline.js';
+import {
+  createReferenceDocumentController,
+  type ReferenceDocumentController,
+} from '../pdf/reference-document.js';
 import { createViewerFramingControls } from '../pdf/viewer-framing-adapter.js';
 import type { ViewerFramingControls, ViewerRunway } from '../pdf/viewer-framing.js';
 import { combinePageRotation } from '../pdf/owned-overlay.js';
@@ -44,12 +53,35 @@ import {
   type ViewerInteractionEvent,
   type ViewerPagePoint,
 } from '../pdf/viewer-interaction-events.js';
+import {
+  createViewerNavigation,
+  type PdfViewerNavigation,
+} from '../pdf/viewer-navigation-adapter.js';
+import {
+  MAIN_PDF_DOCUMENT_ID,
+  REFERENCE_PDF_DOCUMENT_ID,
+  type PdfViewerScope,
+} from '../pdf/viewer-document-ids.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
 
 type ViewerCaretResult = Awaited<ReturnType<typeof captureViewerCaret>>;
 
 const FALLBACK_PAGE_NOTE_CURSOR_RADIUS_PX = 18;
+
+export interface MainDocumentOpenedSource {
+  onDocumentOpened(listener: (event: { document: { id: string } | null }) => void): () => void;
+}
+
+/** Keeps every review-owned service on the fixed main document lifecycle. */
+export function subscribeToMainDocumentOpened(
+  source: MainDocumentOpenedSource,
+  initializeMain: (documentId: string) => void,
+): () => void {
+  return source.onDocumentOpened(({ document }) => {
+    if (document?.id === MAIN_PDF_DOCUMENT_ID) initializeMain(document.id);
+  });
+}
 
 export function clampPageNotePoint(
   point: Position,
@@ -110,6 +142,33 @@ export interface AppProps {
   correspondingOwnedAnnotationId?: string;
   onExistingAnnotationsDiscovery?: (result: ExistingAnnotationsDiscovery) => void;
   inventoryRetryGeneration?: number;
+  documentGeneration?: number;
+  referenceViewportHost?: HTMLElement | null;
+  onReferenceDocumentControls?: (controls: ReferenceDocumentController | null) => void;
+  onViewerNavigationInitialized?: (
+    scope: PdfViewerScope,
+    navigation: PdfViewerNavigation | null,
+  ) => void;
+  onOutlineDiscovery?: (result: PdfOutlineDiscovery) => void;
+}
+
+export class ViewerInitializationAuthority {
+  private generation = 0;
+  private registry: object | null = null;
+
+  begin(registry: object): number {
+    this.registry = registry;
+    return ++this.generation;
+  }
+
+  isCurrent(generation: number, registry: object): boolean {
+    return this.generation === generation && this.registry === registry;
+  }
+
+  invalidate(): void {
+    this.generation += 1;
+    this.registry = null;
+  }
 }
 
 export function App({
@@ -130,6 +189,11 @@ export function App({
   correspondingOwnedAnnotationId,
   onExistingAnnotationsDiscovery,
   inventoryRetryGeneration = 0,
+  documentGeneration = 0,
+  referenceViewportHost = null,
+  onReferenceDocumentControls,
+  onViewerNavigationInitialized,
+  onOutlineDiscovery,
 }: AppProps) {
   const [sourceAnnotations, setSourceAnnotations] = useState<readonly ExistingAnnotation[]>([]);
   const [inventoryState, setInventoryState] = useState<ExistingAnnotationsDiscovery>({
@@ -139,12 +203,19 @@ export function App({
   const [detectedPageReliable, setDetectedPageReliable] = useState(true);
   const [detectedSelectionReliable, setDetectedSelectionReliable] = useState(true);
   const subscriptions = useRef<Array<() => void>>([]);
+  const referenceSubscriptions = useRef<Array<() => void>>([]);
   const pageReadGeneration = useRef(0);
+  const viewerInitialization = useRef(new ViewerInitializationAuthority());
   const selectionReads = useRef(new SelectionReadAuthority());
   const registryRef = useRef<PluginRegistry | null>(null);
   const framingControlsRef = useRef<ViewerFramingControls | null>(null);
   const workspaceElementRef = useRef<HTMLDivElement | null>(null);
+  const referenceWorkspaceElementRef = useRef<HTMLDivElement | null>(null);
+  const mainNavigationRef = useRef<PdfViewerNavigation | null>(null);
+  const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
+  const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
   const [viewerRunway, setViewerRunway] = useState<ViewerRunway>({ right: 0, bottom: 0 });
+  const viewerRunwayRef = useRef<ViewerRunway>(viewerRunway);
   const activeDocumentIdRef = useRef<string | null>(null);
   const viewportGenerationRef = useRef(0);
   const caretReadGeneration = useRef(0);
@@ -153,6 +224,11 @@ export function App({
   const keyboardCursorRef = useRef<ViewerPagePoint | null>(null);
   const [keyboardCursor, setKeyboardCursor] = useState<ViewerPagePoint | null>(null);
   const inventoryAuthority = useRef(new ExistingAnnotationDiscoveryAuthority());
+  const outlineAuthority = useRef(new PdfOutlineDiscoveryAuthority());
+  const currentOutlineDocument = useRef<{
+    readonly engine: object;
+    readonly documentGeneration: number;
+  } | null>(null);
   const currentInventoryDocument = useRef<{
     readonly id: string;
     readonly document: Parameters<typeof inventoryDocumentAnnotations>[1];
@@ -197,6 +273,46 @@ export function App({
       },
     );
   }, [publishInventory, viewer.engine]);
+  const discoverOutline = useCallback((
+    document: Parameters<typeof readPdfOutline>[0]['document'],
+  ) => {
+    if (
+      currentOutlineDocument.current?.engine === viewer.engine
+      && currentOutlineDocument.current.documentGeneration === documentGeneration
+    ) return;
+    currentOutlineDocument.current = { engine: viewer.engine, documentGeneration };
+    const token = outlineAuthority.current.begin(documentGeneration);
+    const loading = outlineAuthority.current.loading(token);
+    if (loading) onOutlineDiscovery?.(loading);
+    void readPdfOutline({
+      engine: viewer.engine,
+      document,
+      documentGeneration,
+      pageCount: document.pages.length,
+    }).then(
+      (result) => {
+        const current = result.status === 'loaded-tree'
+          ? outlineAuthority.current.loaded(token, result.items)
+          : outlineAuthority.current.loaded(token, []);
+        if (current) onOutlineDiscovery?.(current);
+      },
+      () => {
+        const unavailable = outlineAuthority.current.unavailable(token);
+        if (unavailable) onOutlineDiscovery?.(unavailable);
+      },
+    );
+  }, [documentGeneration, onOutlineDiscovery, viewer.engine]);
+
+  useEffect(() => {
+    const registry = registryRef.current;
+    const mainDocument = registry?.getStore().getState().core
+      .documents[MAIN_PDF_DOCUMENT_ID]?.document;
+    if (mainDocument) discoverOutline(mainDocument);
+    const controller = referenceControllerRef.current;
+    if (controller && controller.snapshot().documentGeneration !== documentGeneration) {
+      void controller.replaceDocument(documentGeneration);
+    }
+  }, [discoverOutline, documentGeneration]);
 
   useEffect(() => {
     const current = currentInventoryDocument.current;
@@ -208,20 +324,44 @@ export function App({
   const clearSubscriptions = useCallback(() => {
     for (const unsubscribe of subscriptions.current.splice(0)) unsubscribe();
   }, []);
+  const clearReferenceSubscriptions = useCallback(() => {
+    for (const unsubscribe of referenceSubscriptions.current.splice(0)) unsubscribe();
+    referenceNavigationRef.current?.dispose();
+    referenceNavigationRef.current = null;
+    onViewerNavigationInitialized?.('reference', null);
+  }, [onViewerNavigationInitialized]);
   useEffect(() => () => {
+    viewerInitialization.current.invalidate();
+    registryRef.current = null;
     clearSubscriptions();
+    clearReferenceSubscriptions();
+    mainNavigationRef.current?.dispose();
+    mainNavigationRef.current = null;
+    onViewerNavigationInitialized?.('main', null);
+    void referenceControllerRef.current?.close();
+    referenceControllerRef.current = null;
+    onReferenceDocumentControls?.(null);
+    outlineAuthority.current.invalidate();
     framingControlsRef.current?.dispose();
     framingControlsRef.current = null;
     selectionReads.current.invalidate();
     caretReadGeneration.current += 1;
-  }, [clearSubscriptions, viewer]);
+  }, [clearReferenceSubscriptions, clearSubscriptions, onReferenceDocumentControls, onViewerNavigationInitialized, viewer]);
   const updateViewerRunway = useCallback((runway: ViewerRunway) => {
-    setViewerRunway((current) => current.right === runway.right && current.bottom === runway.bottom
+    const next = {
+      right: Math.max(0, runway.right),
+      bottom: Math.max(0, runway.bottom),
+    };
+    viewerRunwayRef.current = next;
+    setViewerRunway((current) => current.right === next.right && current.bottom === next.bottom
       ? current
-      : runway);
+      : next);
   }, []);
   const setWorkspaceElement = useCallback((element: HTMLDivElement | null) => {
     workspaceElementRef.current = element;
+  }, []);
+  const setReferenceWorkspaceElement = useCallback((element: HTMLDivElement | null) => {
+    referenceWorkspaceElementRef.current = element;
   }, []);
 
   const publishKeyboardCursor = useCallback((point: ViewerPagePoint | null) => {
@@ -257,9 +397,19 @@ export function App({
   }, [initializeKeyboardCursor, keyboardPageNoteActive, publishKeyboardCursor]);
 
   const initializeViewer = useCallback(async (registry: PluginRegistry) => {
+    const initializationGeneration = viewerInitialization.current.begin(registry);
+    const initializationIsCurrent = () => (
+      viewerInitialization.current.isCurrent(initializationGeneration, registry)
+      && registryRef.current === registry
+    );
     caretReadGeneration.current += 1;
     registryRef.current = registry;
     clearSubscriptions();
+    clearReferenceSubscriptions();
+    mainNavigationRef.current?.dispose();
+    mainNavigationRef.current = null;
+    currentOutlineDocument.current = null;
+    outlineAuthority.current.invalidate();
     onSelectionUpdate?.(selectionReads.current.invalidate());
     const installViewerFraming = () => {
       framingControlsRef.current?.dispose();
@@ -304,18 +454,30 @@ export function App({
       const document = registry.getStore().getState().core.documents[documentId]?.document;
       if (!document) return;
       const page = await pageReaderFor(documentId, document).read(pageIndex);
-      if (generation === pageReadGeneration.current) {
+      if (generation === pageReadGeneration.current && initializationIsCurrent()) {
         setDetectedPageReliable(assessPageTextReliability(page).reliable);
         setDetectedSelectionReliable(true);
       }
     };
     const loadDocument = async (documentId: string) => {
+      if (documentId !== MAIN_PDF_DOCUMENT_ID || !initializationIsCurrent()) return;
       caretReadGeneration.current += 1;
-      activeDocumentIdRef.current = documentId;
+      activeDocumentIdRef.current = MAIN_PDF_DOCUMENT_ID;
       const document = registry.getStore().getState().core.documents[documentId]?.document;
       if (!document) return;
+      mainNavigationRef.current?.dispose();
+      const mainNavigation = createViewerNavigation({
+        registry,
+        root: () => workspaceElementRef.current,
+        documentId: MAIN_PDF_DOCUMENT_ID,
+        documentGeneration,
+        runway: () => viewerRunwayRef.current,
+      });
+      mainNavigationRef.current = mainNavigation;
+      onViewerNavigationInitialized?.('main', mainNavigation);
       installViewerFraming();
       currentInventoryDocument.current = { id: documentId, document };
+      discoverOutline(document);
       if (interaction) {
         for (const page of document.pages) {
           const pointerId = page.index + 1;
@@ -400,37 +562,74 @@ export function App({
         }
       }
       await readPage(documentId, 0);
+      if (!initializationIsCurrent()) return;
     };
 
     const documentManager = registry
       .getPlugin<DocumentManagerPlugin>(DocumentManagerPlugin.id)
       ?.provides();
     if (documentManager) {
-      subscriptions.current.push(
-        documentManager.onDocumentOpened(({ document }) => {
-          if (document) {
-            void loadDocument(document.id).then(() => {
-              const current = currentInventoryDocument.current;
-              if (current?.id === document.id) discoverExistingAnnotations(current.id, current.document);
-            });
+      const initializeMain = (documentId: string) => {
+        if (!initializationIsCurrent()) return;
+        void loadDocument(documentId).then(() => {
+          if (!initializationIsCurrent()) return;
+          const current = currentInventoryDocument.current;
+          if (current?.id === documentId) {
+            discoverExistingAnnotations(current.id, current.document);
           }
+        });
+      };
+      subscriptions.current.push(
+        subscribeToMainDocumentOpened(documentManager, initializeMain),
+      );
+      const disposeReferenceNavigation = () => {
+        referenceNavigationRef.current?.dispose();
+        referenceNavigationRef.current = null;
+        onViewerNavigationInitialized?.('reference', null);
+      };
+      referenceSubscriptions.current.push(
+        documentManager.onDocumentOpened(({ document }) => {
+          if (document?.id !== REFERENCE_PDF_DOCUMENT_ID) return;
+          disposeReferenceNavigation();
+          const referenceNavigation = createViewerNavigation({
+            registry,
+            root: () => referenceWorkspaceElementRef.current,
+            documentId: REFERENCE_PDF_DOCUMENT_ID,
+            documentGeneration,
+          });
+          referenceNavigationRef.current = referenceNavigation;
+          onViewerNavigationInitialized?.('reference', referenceNavigation);
+        }),
+        documentManager.onDocumentClosed((closedDocumentId) => {
+          if (closedDocumentId === REFERENCE_PDF_DOCUMENT_ID) disposeReferenceNavigation();
         }),
       );
+      const referenceController = createReferenceDocumentController({
+        documentManager,
+        assetUrls: assets,
+        origin: globalThis.location.origin,
+        documentGeneration,
+      });
+      referenceControllerRef.current = referenceController;
+      onReferenceDocumentControls?.(referenceController);
     }
 
     const scroll = registry.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides();
     if (scroll) {
       subscriptions.current.push(
         scroll.onPageChange(({ documentId, pageNumber }) => {
+          if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
           viewportGenerationRef.current += 1;
           initializeKeyboardCursor();
           void readPage(documentId, pageNumber - 1);
         }),
-        scroll.onScroll(() => {
+        scroll.onScroll(({ documentId }) => {
+          if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
           viewportGenerationRef.current += 1;
           initializeKeyboardCursor();
         }),
-        scroll.onLayoutChange(() => {
+        scroll.onLayoutChange(({ documentId }) => {
+          if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
           viewportGenerationRef.current += 1;
           initializeKeyboardCursor();
         }),
@@ -464,6 +663,7 @@ export function App({
       };
       subscriptions.current.push(
         selection.onSelectionChange(({ documentId, selection: selectedRange }) => {
+          if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
           if (selectedRange === null) {
             setDetectedSelectionReliable(true);
             onSelectionUpdate?.(selectionReads.current.invalidate());
@@ -474,21 +674,25 @@ export function App({
           }
         }),
         selection.onEndSelection(({ documentId }) => {
+          if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
           const generation = selectionReads.current.finish(documentId);
           if (generation === null) return;
           void captureSelection(documentId, generation);
         }),
       );
-      const activeId = registry.getStore().getState().core.activeDocumentId;
-      if (selectionPlugin && activeId) {
-        subscriptions.current.push(selectionPlugin.onMenuPlacement(activeId, (placement) => {
+      const mainId = registry.getStore().getState().core.documents[MAIN_PDF_DOCUMENT_ID]
+        ? MAIN_PDF_DOCUMENT_ID
+        : null;
+      if (selectionPlugin && mainId) {
+        subscriptions.current.push(selectionPlugin.onMenuPlacement(mainId, (placement) => {
           if (!placement?.isVisible) {
             emit({ type: 'selection-placement', value: null });
             return;
           }
-          const active = registry.getStore().getState().core.documents[activeId];
+          const active = registry.getStore().getState().core.documents[mainId];
           const page = active?.document?.pages[placement.pageIndex];
-          const element = document.querySelector<HTMLElement>(`[data-page-index="${placement.pageIndex}"]`);
+          const element = workspaceElementRef.current
+            ?.querySelector<HTMLElement>(`[data-page-index="${placement.pageIndex}"]`);
           if (!page || !element) return;
           const bounds = element.getBoundingClientRect();
           const rotation = combinePageRotation(page.rotation, active.rotation);
@@ -518,16 +722,17 @@ export function App({
       }
     }
 
-    const activeDocumentId = registry.getStore().getState().core.activeDocumentId;
-    if (activeDocumentId) {
-      const activeDocument = registry.getStore().getState().core.documents[activeDocumentId]?.document;
-      if (activeDocument) currentInventoryDocument.current = { id: activeDocumentId, document: activeDocument };
-      await loadDocument(activeDocumentId);
+    const mainDocument = registry.getStore().getState().core.documents[MAIN_PDF_DOCUMENT_ID]?.document;
+    if (mainDocument) {
+      currentInventoryDocument.current = { id: MAIN_PDF_DOCUMENT_ID, document: mainDocument };
+      await loadDocument(MAIN_PDF_DOCUMENT_ID);
     }
+    if (!initializationIsCurrent()) return;
     await onViewerInitialized?.(registry);
+    if (!initializationIsCurrent()) return;
     const inventoryDocument = currentInventoryDocument.current;
     if (inventoryDocument) discoverExistingAnnotations(inventoryDocument.id, inventoryDocument.document);
-  }, [clearSubscriptions, discoverExistingAnnotations, emit, initializeKeyboardCursor, onSelectionUpdate, onViewerFramingInitialized, onViewerInitialized, publishKeyboardCursor, updateViewerRunway]);
+  }, [assets, clearReferenceSubscriptions, clearSubscriptions, discoverExistingAnnotations, discoverOutline, documentGeneration, emit, initializeKeyboardCursor, onReferenceDocumentControls, onSelectionUpdate, onViewerFramingInitialized, onViewerInitialized, onViewerNavigationInitialized, publishKeyboardCursor, updateViewerRunway]);
 
   const effectivePageReliability = pageSemanticReliable ?? detectedPageReliable;
   const effectiveSelectionReliability =
@@ -564,10 +769,11 @@ export function App({
     const active = registry?.getStore().getState().core.documents[cursor.documentId];
     const page = active?.document?.pages[cursor.pageIndex];
     if (!page) return cursor;
-    const pageElement = globalThis.document?.querySelector<HTMLElement>(
+    const pageElement = workspaceElementRef.current?.querySelector<HTMLElement>(
       `[data-page-index="${cursor.pageIndex}"]`,
     );
-    const cursorElement = globalThis.document?.querySelector<HTMLElement>('.page-note-placement-cursor');
+    const cursorElement = workspaceElementRef.current
+      ?.querySelector<HTMLElement>('.page-note-placement-cursor');
     const pageBounds = pageElement?.getBoundingClientRect();
     const cursorBounds = cursorElement?.getBoundingClientRect();
     const rotation = combinePageRotation(page.rotation, active.rotation);
@@ -617,6 +823,10 @@ export function App({
       onOwnedMarkInteraction={(value) => emit({ type: 'owned-mark', value })}
       runway={viewerRunway}
       onWorkspaceElement={setWorkspaceElement}
+      documentGeneration={documentGeneration}
+      onViewerInteraction={emit}
+      referenceViewportHost={referenceViewportHost}
+      onReferenceViewportElement={setReferenceWorkspaceElement}
     />
   );
   const workspaceWithStatus = (

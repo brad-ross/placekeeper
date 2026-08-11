@@ -10,6 +10,10 @@
   border: 0;
 }
 
+.review-workspace__status {
+  position: fixed;
+}
+
 @media (max-width: 720px) {
   .review-chrome {
     height: auto;
@@ -22,7 +26,9 @@
   .review-chrome__viewer-controls {
     grid-column: 1 / -1;
     grid-row: 2;
+    flex-wrap: wrap;
     justify-self: center;
+    justify-content: center;
   }
 
   .review-chrome__saved {
@@ -76,7 +82,9 @@
 
   .review-chrome button,
   .review-context-palette button,
-  .review-page-menu button {
+  .review-page-menu button,
+  .review-workspace button,
+  .link-action-popover button {
     min-height: var(--review-control-touch);
   }
 
@@ -98,20 +106,59 @@
     min-width: var(--review-control-touch);
   }
 
+  .link-action-popover [role="menuitem"] {
+    width: var(--review-control-touch, 44px);
+    min-width: var(--review-control-touch, 44px);
+  }
+
   .page-note-placement-cursor {
     width: var(--review-control-touch);
     height: var(--review-control-touch);
   }
+
+  .workspace-edge-rail {
+    width: var(--review-control-touch);
+    min-width: var(--review-control-touch);
+    height: var(--review-control-touch);
+  }
+
+  .reference-resize-handle[data-reference-resize-handle="right"] {
+    right: calc(var(--reference-right-width) - 22px);
+    width: 44px;
+  }
+
+  .reference-resize-handle[data-reference-resize-handle="bottom"] {
+    bottom: calc(var(--reference-bottom-height) - 22px);
+    height: 44px;
+  }
+
+  .review-workspace__move {
+    width: var(--review-control-touch);
+    min-width: var(--review-control-touch);
+    min-height: var(--review-control-touch);
+  }
+
+  .reference-tab-segment--compound {
+    max-width: calc(13rem + (2 * var(--review-control-touch)));
+  }
+
+  .reference-tabs .reference-tab-segment__action {
+    width: var(--review-control-touch);
+    min-width: var(--review-control-touch);
+    flex-basis: var(--review-control-touch);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .review-list,
+  .review-workspace,
+  .review-tools-workspace,
   .review-finish-drawer,
   .review-context-palette,
   .review-page-menu,
   .page-note-placement-cursor,
   .annotation-peek,
   .annotation-status__icon,
+  .workspace-state .review-icon,
   .pdf-workspace__loading .review-icon,
   .review-delivery .lucide-loader-circle,
   .finish-review-drawer__lifecycle .lucide-loader-circle {

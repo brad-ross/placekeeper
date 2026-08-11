@@ -1,6 +1,34 @@
 /// <reference types="vite/client" />
 
 import { createPdfiumEngine } from '@embedpdf/engines/pdfium-worker-engine';
+import {
+  PdfActionType,
+  PdfAnnotationSubtype,
+  PdfZoomMode,
+  type PdfBookmarkObject,
+  type PdfDestinationObject,
+  type PdfLinkTarget,
+} from '@embedpdf/models';
+
+type NavigationTargetInspection = {
+  kind: 'destination' | 'goto' | 'remote-goto' | 'uri' | 'launch' | 'unsupported' | 'missing';
+  pageIndex?: number;
+  zoomMode?: number;
+  params?: number[];
+};
+
+type NavigationLinkInspection = {
+  pageIndex: number;
+  contents: string;
+  subject: string;
+  target: NavigationTargetInspection;
+};
+
+type BookmarkInspection = {
+  title: string;
+  depth: number;
+  target: NavigationTargetInspection;
+};
 
 type ViewerInspection = {
   pageCount: number;
@@ -10,6 +38,8 @@ type ViewerInspection = {
   renderedWidth: number;
   activeContentExecuted: boolean;
   remoteRequests: string[];
+  navigationLinks: NavigationLinkInspection[];
+  bookmarks: BookmarkInspection[];
 };
 
 const remoteRequests: string[] = [];
@@ -43,12 +73,58 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 function subtypeName(type: number): string {
   const names: Record<number, string> = {
     1: 'text',
+    2: 'link',
     9: 'highlight',
     12: 'strikeOut',
     13: 'stamp',
     14: 'caret',
   };
   return names[type] ?? `unsupported-${type}`;
+}
+
+function destinationInspection(
+  kind: 'destination' | 'goto' | 'remote-goto',
+  destination: PdfDestinationObject,
+): NavigationTargetInspection {
+  const params = destination.zoom.mode === PdfZoomMode.XYZ
+    ? [destination.zoom.params.x, destination.zoom.params.y, destination.zoom.params.zoom]
+    : [...destination.view];
+  return {
+    kind,
+    pageIndex: destination.pageIndex,
+    zoomMode: destination.zoom.mode,
+    params,
+  };
+}
+
+function targetInspection(target: PdfLinkTarget | undefined): NavigationTargetInspection {
+  if (!target) return { kind: 'missing' };
+  if (target.type === 'destination') {
+    return destinationInspection('destination', target.destination);
+  }
+  switch (target.action.type) {
+    case PdfActionType.Goto:
+      return destinationInspection('goto', target.action.destination);
+    case PdfActionType.RemoteGoto:
+      return destinationInspection('remote-goto', target.action.destination);
+    case PdfActionType.URI:
+      return { kind: 'uri' };
+    case PdfActionType.LaunchAppOrOpenFile:
+      return { kind: 'launch' };
+    case PdfActionType.Unsupported:
+    default:
+      return { kind: 'unsupported' };
+  }
+}
+
+function flattenBookmarks(
+  bookmarks: readonly PdfBookmarkObject[],
+  depth = 0,
+): BookmarkInspection[] {
+  return bookmarks.flatMap((bookmark) => [
+    { title: bookmark.title, depth, target: targetInspection(bookmark.target) },
+    ...flattenBookmarks(bookmark.children ?? [], depth + 1),
+  ]);
 }
 
 async function inspect(url: string, timeoutMs = 10_000): Promise<ViewerInspection> {
@@ -73,7 +149,7 @@ async function inspect(url: string, timeoutMs = 10_000): Promise<ViewerInspectio
   try {
     const pageIndexes = document.pages.map(({ index }) => index);
     const text = await withTimeout(engine.extractText(document, pageIndexes).toPromise(), timeoutMs);
-    const [textRects, annotations, rendered] = await Promise.all([
+    const [textRects, annotations, rendered, bookmarks] = await Promise.all([
       Promise.all(
         document.pages.map((page) => engine.getPageTextRects(document, page).toPromise()),
       ),
@@ -81,6 +157,7 @@ async function inspect(url: string, timeoutMs = 10_000): Promise<ViewerInspectio
         document.pages.map((page) => engine.getPageAnnotations(document, page).toPromise()),
       ),
       withTimeout(engine.renderPage(document, document.pages[0]!).toPromise(), timeoutMs),
+      withTimeout(engine.getBookmarks(document).toPromise(), timeoutMs),
     ]);
 
     const normalizedText = text.trim();
@@ -97,6 +174,17 @@ async function inspect(url: string, timeoutMs = 10_000): Promise<ViewerInspectio
         (globalThis as typeof globalThis & { __pdfActionExecuted?: boolean })
           .__pdfActionExecuted === true,
       remoteRequests: [...remoteRequests],
+      navigationLinks: annotations.flat().flatMap((annotation) =>
+        annotation.type === PdfAnnotationSubtype.LINK
+          ? [{
+              pageIndex: annotation.pageIndex,
+              contents: annotation.contents ?? '',
+              subject: annotation.subject ?? '',
+              target: targetInspection(annotation.target),
+            }]
+          : []
+      ),
+      bookmarks: flattenBookmarks(bookmarks.bookmarks),
     };
   } finally {
     await engine.closeDocument(document).toPromise();

@@ -32,6 +32,10 @@ describe("one production review tree", () => {
     />);
     expect(html).toContain("Real shared PDF viewer");
     expect(html).toContain("aria-label=\"Review views\"");
+    expect(html).toContain('aria-label="Back in document history"');
+    expect(html).toContain('aria-label="Forward in document history"');
+    expect(html).toContain('aria-label="Undo"');
+    expect(html).toContain('aria-label="Redo"');
     expect(html).toContain("Human delivery");
     expect(html).toContain("Codex delivery");
     expect(html).toContain('data-delivery-kind="human"');
@@ -49,6 +53,10 @@ describe("one production review tree", () => {
     expect(html).toContain('data-annotation-drawer');
     expect(html).toContain('Existing annotations are loading');
     expect(html).toContain("data-surface-open=\"false\"");
+    expect(html).toContain('data-reference-layout="wide-closed"');
+    expect(html).toContain('data-workspace-edge-rail="right"');
+    expect(html).toContain('data-workspace-edge-rail="bottom"');
+    expect(html).not.toContain('>Workspace</button>');
     expect(html).not.toContain("delivery-layout");
     expect(html.match(/Real shared PDF viewer/g)).toHaveLength(1);
     expect(html).not.toContain("Submit task");

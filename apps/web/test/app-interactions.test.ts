@@ -3,8 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   clampPageNotePoint,
+  subscribeToMainDocumentOpened,
   publishViewerCaretRead,
+  ViewerInitializationAuthority,
 } from '../src/app/App.js';
+import { MAIN_PDF_DOCUMENT_ID } from '../src/pdf/viewer-document-ids.js';
+import type { PdfOutlineDiscovery } from '../src/pdf/pdf-outline.js';
 import { combinePageRotation } from '../src/pdf/owned-overlay.js';
 import type { ViewerInteractionEvent } from '../src/pdf/viewer-interaction-events.js';
 
@@ -15,6 +19,52 @@ const unavailableCaret = {
 };
 
 describe('App interaction boundaries', () => {
+  it('invalidates an older async viewer initialization when a replacement begins', () => {
+    const authority = new ViewerInitializationAuthority();
+    const oldRegistry = {};
+    const newRegistry = {};
+    const oldGeneration = authority.begin(oldRegistry);
+    const newGeneration = authority.begin(newRegistry);
+
+    expect(authority.isCurrent(oldGeneration, oldRegistry)).toBe(false);
+    expect(authority.isCurrent(newGeneration, newRegistry)).toBe(true);
+    authority.invalidate();
+    expect(authority.isCurrent(newGeneration, newRegistry)).toBe(false);
+  });
+
+  it('initializes main-only services only for the fixed main document', () => {
+    let opened: ((event: { document: { id: string } | null }) => void) | undefined;
+    const initializeMain = vi.fn();
+    const unsubscribe = vi.fn();
+    const stop = subscribeToMainDocumentOpened({
+      onDocumentOpened: (listener) => {
+        opened = listener;
+        return unsubscribe;
+      },
+    }, initializeMain);
+
+    opened?.({ document: { id: 'reference' } });
+    expect(initializeMain).not.toHaveBeenCalled();
+    opened?.({ document: { id: MAIN_PDF_DOCUMENT_ID } });
+    expect(initializeMain).toHaveBeenCalledOnce();
+    stop();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('keeps outline result variants honest and request-policy-free', () => {
+    const results: PdfOutlineDiscovery[] = [
+      { status: 'loading', documentGeneration: 2 },
+      { status: 'loaded-empty', documentGeneration: 2 },
+      { status: 'loaded-tree', documentGeneration: 2, items: [] },
+      { status: 'unavailable', documentGeneration: 2 },
+    ];
+
+    expect(results.map(({ status }) => status)).toEqual([
+      'loading', 'loaded-empty', 'loaded-tree', 'unavailable',
+    ]);
+    expect(JSON.stringify(results)).not.toMatch(/credentials|authorization|requestOptions|secret/iu);
+  });
+
   it('combines intrinsic page rotation with document rotation for contextual geometry', () => {
     expect(combinePageRotation(Rotation.Degree90, Rotation.Degree180))
       .toBe(Rotation.Degree270);

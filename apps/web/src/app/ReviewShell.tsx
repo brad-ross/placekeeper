@@ -30,14 +30,38 @@ import { reliableSelection, type SelectionUpdate } from '../pdf/selection-state.
 import type { ViewerControls, ViewerControlsSnapshot } from '../pdf/viewer-controls.js';
 import { unavailableViewerControls } from '../pdf/viewer-controls.js';
 import type { ViewerFramingControls, ViewerPosition } from '../pdf/viewer-framing.js';
-import { dispatchNeutralViewerPointerUp } from '../pdf/viewer-interaction-events.js';
+import type { ViewerPdfLinkInvocation } from '../pdf/viewer-interaction-events.js';
+import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
 import { AnnotationList } from '../review/AnnotationList.js';
 import { AnnotationPeek } from '../review/AnnotationPeek.js';
 import { CommentComposer } from '../review/CommentComposer.js';
 import { ContextActionPalette, type ContextPlacement } from '../review/ContextActionPalette.js';
 import { PageActionMenu } from '../review/PageActionMenu.js';
+import { LinkActionPopover, type LinkActionChoice, type LinkActionDismissReason } from '../review/LinkActionPopover.js';
+import {
+  ReferenceWorkspace,
+  type PendingReferencePanel,
+  type ReferenceWorkspaceTab,
+} from '../review/ReferenceWorkspace.js';
 import { ReviewChrome } from '../review/ReviewChrome.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
+import { OutlineAnnotationsWorkspace } from '../review/OutlineAnnotationsWorkspace.js';
+import { ReferenceResizeHandle } from '../review/ReferenceResizeHandle.js';
+import { WorkspaceEdgeRail } from '../review/WorkspaceEdgeRail.js';
+import {
+  BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN,
+  MIN_BOTTOM_REFERENCE_HEIGHT,
+  MIN_RIGHT_REFERENCE_WIDTH,
+  RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
+  clampBottomReferenceHeight,
+  clampRightReferenceWidth,
+  createReferenceWorkspaceLayout,
+  deriveReferenceWorkspaceLayout,
+  reduceReferenceWorkspaceLayout,
+  type ReferenceWorkspaceLayoutAction,
+  type ReferenceWorkspaceLayoutState,
+  type RightWorkspaceMode,
+} from '../review/reference-workspace-layout.js';
 import { FinishReviewDrawer } from './FinishReviewDrawer.js';
 import {
   createProofreadInputController,
@@ -46,14 +70,19 @@ import {
 } from '../review/input-controller.js';
 import { reviewActionForKey } from '../review/review-actions.js';
 import {
-  useAnnotationTrayFraming,
-  type AnnotationOpenRequest,
+  useWorkspaceFraming,
+  type WorkspaceOpenRequest,
 } from '../review/use-annotation-tray-framing.js';
 import {
   INITIAL_REVIEW_SURFACE_STATE,
   reduceReviewSurface,
   type ReviewBaseSurface,
+  type ReviewSurfaceAction,
 } from '../review/review-surface-state.js';
+import type {
+  ReferenceNavigationState,
+  WorkspaceMode,
+} from '../review/reference-navigation-state.js';
 import './review-layout.css';
 
 type TextDraft =
@@ -69,6 +98,8 @@ type Composer =
   | { kind: 'highlight'; itemId: string }
   | { kind: 'pageNote'; pageIndex: number; position: ReviewRect; nearbyText?: string }
   | { kind: 'edit'; item: ReviewItem };
+
+function ignoreReferenceViewportHost(_element: HTMLDivElement | null): void {}
 
 export interface ReviewShellProps {
   state: ReviewState;
@@ -116,6 +147,33 @@ export interface ReviewShellProps {
   finishConfirmationActive?: boolean;
   onFinishReview?(): void | Promise<void>;
   onDiscardReview?(): void | Promise<void>;
+  /** The production shell may control workspace visibility and retained navigation state. */
+  workspaceOpen?: boolean;
+  navigationState?: ReferenceNavigationState;
+  referenceTabs?: readonly ReferenceWorkspaceTab[];
+  pendingReference?: PendingReferencePanel | null;
+  outlineDiscovery?: PdfOutlineDiscovery;
+  currentOutlineItemId?: string | null;
+  linkActionRequest?: ViewerPdfLinkInvocation | null;
+  navigationAnnouncement?: string;
+  canNavigateBack?: boolean;
+  canNavigateForward?: boolean;
+  onLinkActionChoose?(choice: LinkActionChoice, request: ViewerPdfLinkInvocation): void;
+  onLinkActionDismiss?(request: ViewerPdfLinkInvocation, reason: LinkActionDismissReason): void;
+  onNavigateBack?(): void;
+  onNavigateForward?(): void;
+  onWorkspaceModeChange?(mode: WorkspaceMode): void;
+  onWorkspaceDismiss?(): void;
+  onReferenceTabActivate?(identity: string): void;
+  onReferenceTabClose?(identity: string): void;
+  onReferenceSendToMain?(identity: string): void;
+  onReferenceRetry?(): void;
+  onOutlineActivate?(item: PdfOutlineItem): void;
+  onReferenceViewportHost?(element: HTMLDivElement | null): void;
+  onWorkspaceModeFocusTokenChange?(mode: WorkspaceMode, token: string): void;
+  referenceLayoutState?: ReferenceWorkspaceLayoutState;
+  onReferenceLayoutAction?(action: ReferenceWorkspaceLayoutAction): void;
+  rightWorkspaceMode?: RightWorkspaceMode;
   children?: ReactNode;
 }
 
@@ -125,19 +183,31 @@ export interface RejectedReviewCommand {
   readonly message: string;
 }
 
-const OUTSIDE_TAP_SLOP_PX = 6;
+export function controlledWorkspaceSurfaceAction(input: {
+  readonly open: boolean;
+  readonly baseSurface: ReviewBaseSurface;
+  readonly transientSurface: 'none' | 'selection-actions' | 'insert-action' | 'page-menu' | 'page-note-cursor';
+  readonly mode: WorkspaceMode;
+}): ReviewSurfaceAction | null {
+  if (input.baseSurface === 'finish') return null;
+  if (input.open) {
+    return input.baseSurface !== 'workspace' || input.transientSurface !== 'none'
+      ? { type: 'open-workspace', mode: input.mode }
+      : null;
+  }
+  return input.baseSurface === 'workspace'
+    ? { type: 'hide-workspace', focusReturnToken: BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN }
+    : null;
+}
 
-type OutsidePointerGesture =
-  | {
-      readonly phase: 'tracking';
-      readonly id: number;
-      readonly x: number;
-      readonly y: number;
-      readonly target: EventTarget;
-      readonly scroll: ViewerPosition | null;
-      movedBeyondSlop: boolean;
-    }
-  | { readonly phase: 'settled'; readonly dismiss: boolean };
+export function workspaceIsVisible(requestedOpen: boolean, baseSurface: ReviewBaseSurface): boolean {
+  return requestedOpen && baseSurface !== 'finish';
+}
+
+interface PointerScrollGesture {
+  readonly id: number;
+  readonly scroll: ViewerPosition | null;
+}
 
 function mutableField(item: ReviewItem): 'proposedText' | 'comment' | undefined {
   if (item.kind === 'replace' || item.kind === 'insert') return 'proposedText';
@@ -146,10 +216,34 @@ function mutableField(item: ReviewItem): 'proposedText' | 'comment' | undefined 
 }
 
 export function ReviewShell(props: ReviewShellProps) {
+  const [localReferenceLayout, dispatchLocalReferenceLayout] = useReducer(
+    reduceReferenceWorkspaceLayout,
+    undefined,
+    () => {
+      let initial = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
+      if (props.workspaceOpen === true || props.listOpen === true) {
+        const initialMode = props.listOpen === true
+          ? 'annotations'
+          : props.navigationState?.workspace.lastMode ?? 'outline';
+        initial = reduceReferenceWorkspaceLayout(initial, initialMode === 'references'
+          ? { type: 'show-references' }
+          : { type: 'show-right-workspace' });
+      }
+      return initial;
+    },
+  );
   const [surface, dispatchSurface] = useReducer(
     reduceReviewSurface,
-    props.listOpen === true
-      ? { baseSurface: 'annotations', nestedLayer: 'none', transientSurface: 'none' }
+    props.workspaceOpen === true
+      ? reduceReviewSurface(INITIAL_REVIEW_SURFACE_STATE, {
+          type: 'open-workspace',
+          mode: props.navigationState?.workspace.lastMode ?? 'outline',
+        })
+      : props.listOpen === true
+      ? reduceReviewSurface(INITIAL_REVIEW_SURFACE_STATE, {
+          type: 'open-workspace',
+          mode: 'annotations',
+        })
       : INITIAL_REVIEW_SURFACE_STATE,
   );
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
@@ -168,23 +262,113 @@ export function ReviewShell(props: ReviewShellProps) {
   const draftTriggerRef = useRef<HTMLElement>(null);
   const editTriggerRef = useRef<HTMLButtonElement>(null);
   const surfaceTriggersRef = useRef(new Map<ReviewBaseSurface, HTMLElement>());
-  const outsidePointerRef = useRef<OutsidePointerGesture | undefined>(undefined);
+  const rightWorkspaceRailRef = useRef<HTMLButtonElement>(null);
+  const bottomWorkspaceRailRef = useRef<HTMLButtonElement>(null);
+  const shellRef = useRef<HTMLElement>(null);
+  const pointerScrollRef = useRef<PointerScrollGesture | undefined>(undefined);
   const annotationRequestTokenRef = useRef(0);
-  const [annotationRequest, setAnnotationRequest] = useState<AnnotationOpenRequest>({
+  const [workspaceRequest, setWorkspaceRequest] = useState<WorkspaceOpenRequest>({
     kind: 'reading',
     token: 0,
   });
-  const listOpen = surface.baseSurface === 'annotations';
+  const navigation = props.navigationState ?? surface.navigation;
+  const workspaceRequestedOpen = props.workspaceOpen ?? surface.baseSurface === 'workspace';
+  const workspaceOpen = workspaceIsVisible(workspaceRequestedOpen, surface.baseSurface);
+  const workspaceMode = navigation.workspace.lastMode;
+  const rightWorkspaceMode: RightWorkspaceMode = props.rightWorkspaceMode
+    ?? (workspaceMode === 'references' ? 'outline' : workspaceMode);
+  const referenceLayout = props.referenceLayoutState ?? localReferenceLayout;
+  const referenceLayoutControlled = props.referenceLayoutState !== undefined;
+  const effectiveReferenceLayout = deriveReferenceWorkspaceLayout(
+    referenceLayout,
+    rightWorkspaceMode,
+    workspaceMode,
+  );
+  const dispatchReferenceLayout = (action: ReferenceWorkspaceLayoutAction) => {
+    if (props.referenceLayoutState === undefined) dispatchLocalReferenceLayout(action);
+    props.onReferenceLayoutAction?.(action);
+  };
+  const finishOpen = surface.baseSurface === 'finish';
+  const referenceSurfaceOpen = !finishOpen && (effectiveReferenceLayout.kind === 'narrow-unified'
+    ? effectiveReferenceLayout.open
+    : effectiveReferenceLayout.referenceDock === 'right'
+      ? effectiveReferenceLayout.rightWorkspaceOpen
+      : effectiveReferenceLayout.bottomReferencesOpen);
+  const rightSurfaceOpen = !finishOpen && effectiveReferenceLayout.kind !== 'narrow-unified'
+    && effectiveReferenceLayout.rightWorkspaceOpen;
+  const sharedWorkspace = effectiveReferenceLayout.kind === 'narrow-unified'
+    || effectiveReferenceLayout.referenceDock === 'right';
+  const toolsSurfaceOpen = !finishOpen && (effectiveReferenceLayout.kind === 'narrow-unified'
+    ? effectiveReferenceLayout.open
+    : effectiveReferenceLayout.referenceDock === 'bottom'
+      ? rightSurfaceOpen
+      : referenceSurfaceOpen);
+  const effectiveWorkspaceMode = effectiveReferenceLayout.kind === 'narrow-unified'
+    ? effectiveReferenceLayout.activeMode
+    : effectiveReferenceLayout.referenceDock === 'bottom' ? rightWorkspaceMode : workspaceMode;
+  const anyWorkspaceOpen = workspaceOpen || referenceSurfaceOpen || toolsSurfaceOpen;
+  const annotationsVisible = anyWorkspaceOpen && effectiveWorkspaceMode === 'annotations';
   const selectionAnchor = reliableSelection(props.selectionUpdate);
   const selectionActionsAvailable = selectionAnchor !== null
     && props.selectionUpdate.generation !== consumedSelectionGeneration;
   const lastPlacedPageNoteToken = useRef<number | undefined>(undefined);
   const existingAnnotations = props.existingAnnotations ?? { status: 'loading', generation: 0 };
-  const trayFraming = useAnnotationTrayFraming({
-    listOpen,
+  const referenceTabs = props.referenceTabs ?? navigation.tabs.map((tab) => ({
+    identity: tab.identity,
+    label: `Page ${tab.originalTarget.pageIndex + 1}`,
+    pageContext: `Page ${tab.originalTarget.pageIndex + 1}`,
+  }));
+  const outlineDiscovery = props.outlineDiscovery ?? {
+    status: 'loading' as const,
+    documentGeneration: navigation.documentGeneration,
+  };
+  const workspaceFraming = useWorkspaceFraming({
+    workspaceOpen: anyWorkspaceOpen,
     ...(props.viewerFraming === undefined ? {} : { controls: props.viewerFraming }),
-    request: annotationRequest,
+    request: workspaceRequest,
+    documentGeneration: navigation.documentGeneration,
+    layoutGeneration: [
+      effectiveReferenceLayout.kind,
+      referenceSurfaceOpen,
+      toolsSurfaceOpen,
+      referenceLayout.referenceDock,
+      referenceLayout.rightReferenceWidth,
+      referenceLayout.bottomReferenceHeight,
+    ].join(':'),
   });
+
+  useLayoutEffect(() => {
+    const action: ReferenceWorkspaceLayoutAction = {
+      type: 'set-stage-size',
+      width: workspaceFraming.stageSize.width,
+      height: workspaceFraming.stageSize.height,
+    };
+    if (!referenceLayoutControlled) dispatchLocalReferenceLayout(action);
+    props.onReferenceLayoutAction?.(action);
+  }, [
+    props.onReferenceLayoutAction,
+    referenceLayoutControlled,
+    workspaceFraming.stageSize.height,
+    workspaceFraming.stageSize.width,
+  ]);
+
+  useLayoutEffect(() => {
+    dispatchReferenceLayout({
+      type: 'set-regime',
+      regime: workspaceFraming.presentation === 'right' ? 'wide' : 'narrow',
+    });
+  }, [workspaceFraming.presentation]);
+
+  useLayoutEffect(() => {
+    if (props.workspaceOpen === undefined) return;
+    const action = controlledWorkspaceSurfaceAction({
+      open: props.workspaceOpen,
+      baseSurface: surface.baseSurface,
+      transientSurface: surface.transientSurface,
+      mode: workspaceMode,
+    });
+    if (action !== null) dispatchSurface(action);
+  }, [props.workspaceOpen, surface.baseSurface, surface.transientSurface, workspaceMode]);
 
   useEffect(() => {
     if (props.selectionUpdate.kind !== 'reliable') setConsumedSelectionGeneration(undefined);
@@ -201,7 +385,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const transitionBaseSurface = (surfaceName: ReviewBaseSurface) => {
     dismissPageNoteAuthority();
-    if (surface.baseSurface === 'annotations' && surfaceName !== 'annotations') {
+    if (surface.baseSurface === 'workspace' && surfaceName === 'finish') {
       clearActiveAnnotation();
     }
     dispatchSurface({ type: 'open-base', surface: surfaceName });
@@ -213,7 +397,7 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   useEffect(() => {
     clearPeekTimer();
-    if (listOpen) {
+    if (anyWorkspaceOpen) {
       setPeekItemId(undefined);
       return;
     }
@@ -224,7 +408,7 @@ export function ReviewShell(props: ReviewShellProps) {
       peekTimerRef.current = setTimeout(() => setPeekItemId(undefined), 180);
     }
     return clearPeekTimer;
-  }, [listOpen, props.correspondingItemId]);
+  }, [anyWorkspaceOpen, props.correspondingItemId]);
 
   useEffect(() => {
     const request = props.activationRequest;
@@ -234,7 +418,7 @@ export function ReviewShell(props: ReviewShellProps) {
     props.onActiveItemChange?.(request.id);
     setPeekItemId(undefined);
     const item = props.state.items.find(({ id }) => id === request.id);
-    setAnnotationRequest(item
+    setWorkspaceRequest(item
       ? {
           kind: 'mark',
           reviewId: item.id,
@@ -242,7 +426,11 @@ export function ReviewShell(props: ReviewShellProps) {
           token: ++annotationRequestTokenRef.current,
         }
       : { kind: 'reading', token: ++annotationRequestTokenRef.current });
-    transitionBaseSurface('annotations');
+    dismissPageNoteAuthority();
+    dispatchSurface({ type: 'open-workspace', mode: 'annotations' });
+    dispatchReferenceLayout({ type: 'show-right-workspace' });
+    dispatchReferenceLayout({ type: 'focus-surface', surface: 'right' });
+    props.onWorkspaceModeChange?.('annotations');
   }, [props.activationRequest?.id, props.activationRequest?.token]);
 
   const rememberSurfaceTrigger = (surfaceName: ReviewBaseSurface) => {
@@ -252,10 +440,21 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const openBase = (surfaceName: ReviewBaseSurface) => {
     rememberSurfaceTrigger(surfaceName);
-    if (surfaceName === 'annotations' && surface.baseSurface !== 'annotations') {
-      setAnnotationRequest({ kind: 'reading', token: ++annotationRequestTokenRef.current });
-    }
     transitionBaseSurface(surface.baseSurface === surfaceName ? 'reading' : surfaceName);
+  };
+  const selectWorkspaceMode = (mode: WorkspaceMode) => {
+    if (mode === 'annotations' && (!workspaceOpen || workspaceMode !== 'annotations')) {
+      setWorkspaceRequest({ kind: 'reading', token: ++annotationRequestTokenRef.current });
+    }
+    dispatchSurface({
+      type: 'reference-navigation',
+      action: { type: 'select-workspace-mode', mode },
+    });
+    dispatchReferenceLayout({
+      type: 'focus-surface',
+      surface: mode === 'references' ? 'references' : 'right',
+    });
+    props.onWorkspaceModeChange?.(mode);
   };
   const restoreSurfaceTrigger = (surfaceName: ReviewBaseSurface) => {
     const trigger = surfaceTriggersRef.current.get(surfaceName);
@@ -358,8 +557,13 @@ export function ReviewShell(props: ReviewShellProps) {
     });
   };
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (
+      props.linkActionRequest
+      && event.target instanceof Element
+      && event.target.closest('[data-link-action-popover]') !== null
+    ) return;
     const editable = isEditableTarget(event.target);
-    if (listOpen && !editable && !isAnnotationDrawerOrChrome(event.target)) {
+    if (workspaceOpen && !editable && !isWorkspaceOrChrome(event.target)) {
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
         markFramingUserIntent({ left: true });
       }
@@ -406,9 +610,9 @@ export function ReviewShell(props: ReviewShellProps) {
         dispatchSurface({ type: 'close-transient' });
         return;
       }
-      if (surface.baseSurface !== 'reading') {
+      if (anyWorkspaceOpen || surface.baseSurface !== 'reading') {
         event.preventDefault();
-        if (surface.baseSurface === 'annotations') closeAnnotations();
+        if (anyWorkspaceOpen) closeWorkspace();
         else closeFinish();
         return;
       }
@@ -544,16 +748,58 @@ export function ReviewShell(props: ReviewShellProps) {
     transitionBaseSurface('reading');
     restoreSurfaceTrigger('finish');
   };
-  const closeAnnotations = () => {
-    transitionBaseSurface('reading');
-    restoreSurfaceTrigger('annotations');
+  const closeWorkspace = () => {
+    dismissPageNoteAuthority();
+    const closingReferences = effectiveWorkspaceMode === 'references';
+    const bottomRail = effectiveReferenceLayout.kind === 'narrow-unified'
+      || (closingReferences && effectiveReferenceLayout.referenceDock === 'bottom');
+    const focusReturnToken = bottomRail
+      ? BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN
+      : RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN;
+    dispatchSurface({ type: 'hide-workspace', focusReturnToken });
+    dispatchReferenceLayout(effectiveReferenceLayout.kind === 'narrow-unified'
+      ? { type: 'toggle-narrow-workspace' }
+      : closingReferences
+        ? { type: 'hide-references' }
+        : { type: 'hide-right-workspace' });
+    if (closingReferences) props.onWorkspaceDismiss?.();
+    requestAnimationFrame(() => (bottomRail ? bottomWorkspaceRailRef : rightWorkspaceRailRef)
+      .current?.focus({ preventScroll: true }));
   };
-  const markFramingUserIntent = trayFraming.markUserIntent;
-  const isAnnotationDrawerOrChrome = (target: EventTarget | null) => (
-    (target instanceof Node && trayFraming.drawerRef.current?.contains(target) === true)
-    || (target instanceof Element && target.closest('[data-review-chrome], [data-review-nested-host]') !== null)
+  const focusWorkspaceModeAfterLayout = (mode: WorkspaceMode) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const shell = shellRef.current;
+      const target = mode === 'references'
+        ? shell?.querySelector<HTMLElement>('[data-reference-tab][aria-selected="true"]')
+          ?? shell?.querySelector<HTMLElement>('[data-reference-empty]')
+        : shell?.querySelector<HTMLElement>(`#workspace-panel-${mode}`);
+      target?.focus({ preventScroll: true });
+    }));
+  };
+  const rememberWorkspaceModeFocus = (mode: WorkspaceMode, token: string) => {
+    if (props.navigationState === undefined) {
+      dispatchSurface({
+        type: 'reference-navigation',
+        action: {
+          type: 'remember-workspace-view',
+          mode,
+          logicalScrollToken: surface.navigation.workspace.modes[mode].logicalScrollToken,
+          logicalFocusToken: token,
+        },
+      });
+    }
+    props.onWorkspaceModeFocusTokenChange?.(mode, token);
+  };
+  const markFramingUserIntent = workspaceFraming.markUserIntent;
+  const isWorkspaceOrChrome = (target: EventTarget | null) => (
+    (target instanceof Node && (
+      workspaceFraming.referenceSurfaceRef.current?.contains(target) === true
+      || workspaceFraming.toolsSurfaceRef.current?.contains(target) === true
+    ))
+    || (target instanceof Element && target.closest(
+      '[data-review-chrome], [data-review-nested-host], [data-link-action-popover]',
+    ) !== null)
   );
-
   return (
     <section
       className="review-shell"
@@ -562,103 +808,51 @@ export function ReviewShell(props: ReviewShellProps) {
       onFocusCapture={(event) => inputController.focusChanged(isEditableTarget(event.target))}
       onCompositionStartCapture={(event) => inputController.compositionStart(event.target)}
       onCompositionEndCapture={compositionEnd}
+      ref={shellRef}
       onWheelCapture={(event) => {
-        if (!listOpen || isAnnotationDrawerOrChrome(event.target)) return;
+        if (!workspaceOpen || isWorkspaceOrChrome(event.target)) return;
         markFramingUserIntent({
           left: event.deltaX !== 0 || (event.shiftKey && event.deltaY !== 0),
           top: event.deltaY !== 0 && !event.shiftKey,
-        });
+        }, { stopAutomaticScroll: false });
       }}
       onPointerDownCapture={(event) => {
-        const tracksOutsideDismiss = listOpen
-          && event.isPrimary
-          && event.button === 0
-          && !isAnnotationDrawerOrChrome(event.target);
-        outsidePointerRef.current = tracksOutsideDismiss
-          ? {
-              phase: 'tracking',
-              id: event.pointerId,
-              x: event.clientX,
-              y: event.clientY,
-              target: event.target,
-              scroll: trayFraming.currentScroll(),
-              movedBeyondSlop: false,
-            }
-          : undefined;
-      }}
-      onPointerMoveCapture={(event) => {
-        const start = outsidePointerRef.current;
-        if (start?.phase !== 'tracking' || start.id !== event.pointerId) return;
-        const deltaX = event.clientX - start.x;
-        const deltaY = event.clientY - start.y;
-        if (Math.hypot(deltaX, deltaY) <= OUTSIDE_TAP_SLOP_PX) return;
-        start.movedBeyondSlop = true;
+        if (!workspaceOpen || isWorkspaceOrChrome(event.target)) {
+          pointerScrollRef.current = undefined;
+          return;
+        }
+        if (!event.isPrimary || event.button !== 0) return;
+        pointerScrollRef.current = {
+          id: event.pointerId,
+          scroll: workspaceFraming.currentScroll(),
+        };
       }}
       onPointerUpCapture={(event) => {
-        const start = outsidePointerRef.current;
-        if (
-          !listOpen
-          || start?.phase !== 'tracking'
-          || start?.id !== event.pointerId
-        ) {
-          outsidePointerRef.current = undefined;
-          return;
-        }
-        const currentScroll = trayFraming.currentScroll();
-        const scrollAxes = start.scroll && currentScroll ? {
-          left: Math.abs(currentScroll.left - start.scroll.left) > 1,
-          top: Math.abs(currentScroll.top - start.scroll.top) > 1,
-        } : { left: false, top: false };
-        const scrollChanged = scrollAxes.left || scrollAxes.top;
-        const dismiss = !start.movedBeyondSlop
-          && !scrollChanged
-          && Math.hypot(event.clientX - start.x, event.clientY - start.y) <= OUTSIDE_TAP_SLOP_PX;
-        if (!dismiss) {
-          if (scrollChanged) markFramingUserIntent(scrollAxes);
-          outsidePointerRef.current = { phase: 'settled', dismiss: false };
-          return;
-        }
-        outsidePointerRef.current = undefined;
-        dispatchNeutralViewerPointerUp(start.target, event);
-        start.target.dispatchEvent(new PointerEvent('pointercancel', {
-          bubbles: true,
-          composed: true,
-          pointerId: event.pointerId,
-          pointerType: event.pointerType,
-          isPrimary: event.isPrimary,
-          clientX: event.clientX,
-          clientY: event.clientY,
-        }));
-        outsidePointerRef.current = { phase: 'settled', dismiss: true };
-        event.stopPropagation();
-        closeAnnotations();
+        const start = pointerScrollRef.current;
+        if (!workspaceOpen || !start || start.id !== event.pointerId) return;
+        pointerScrollRef.current = undefined;
+        const current = workspaceFraming.currentScroll();
+        if (!start.scroll || !current) return;
+        markFramingUserIntent({
+          left: Math.abs(current.left - start.scroll.left) > 1,
+          top: Math.abs(current.top - start.scroll.top) > 1,
+        });
       }}
-      onPointerCancelCapture={() => { outsidePointerRef.current = undefined; }}
+      onPointerCancelCapture={(event) => {
+        if (pointerScrollRef.current?.id === event.pointerId) pointerScrollRef.current = undefined;
+      }}
       onClickCapture={(event) => {
+        if (props.linkActionRequest) return;
         if (event.target instanceof Element) {
           const markTrigger = event.target.closest<HTMLElement>('[data-owned-focus-id]');
-          if (markTrigger) surfaceTriggersRef.current.set('annotations', markTrigger);
+          if (markTrigger) surfaceTriggersRef.current.set('workspace', markTrigger);
         }
         if (
-          listOpen
+          workspaceOpen
           && event.target instanceof Element
           && event.target.closest('.review-chrome__viewer-controls') !== null
         ) {
           markFramingUserIntent();
-        }
-        const keyboardMarkActivation = event.detail === 0
-          && event.target instanceof Element
-          && event.target.closest('[data-owned-focus-id]') !== null;
-        if (keyboardMarkActivation) return;
-        const pointerGesture = outsidePointerRef.current;
-        if (event.detail > 0 && pointerGesture?.phase === 'settled') {
-          outsidePointerRef.current = undefined;
-          if (pointerGesture.dismiss) event.stopPropagation();
-          return;
-        }
-        if (listOpen && !isAnnotationDrawerOrChrome(event.target)) {
-          event.stopPropagation();
-          closeAnnotations();
         }
       }}
     >
@@ -669,22 +863,33 @@ export function ReviewShell(props: ReviewShellProps) {
         viewerState={props.viewerState ?? unavailableViewerControls()}
         canUndo={canUndo}
         canRedo={canRedo}
-        annotationCount={props.state.items.length}
-        annotationsOpen={listOpen}
-        finishOpen={surface.baseSurface === 'finish'}
+        canNavigateBack={props.canNavigateBack ?? false}
+        canNavigateForward={props.canNavigateForward ?? false}
+        finishOpen={finishOpen}
         onUndo={() => void submit(undoReview)}
         onRedo={() => void submit(redoReview)}
-        onAnnotations={() => openBase('annotations')}
+        onNavigateBack={() => props.onNavigateBack?.()}
+        onNavigateForward={() => props.onNavigateForward?.()}
         onFinish={() => openBase('finish')}
       />
-      <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
       <div
-        ref={trayFraming.stageRef}
+        ref={workspaceFraming.stageRef}
         className="review-layout"
         data-review-stage
-        data-annotation-presentation={trayFraming.presentation}
+        data-reference-layout={effectiveReferenceLayout.kind}
+        data-workspace-presentation={workspaceFraming.presentation}
+        data-annotation-presentation={workspaceFraming.presentation}
         style={{
-          '--annotation-side-width': `${trayFraming.sideWidth}px`,
+          '--workspace-side-width': `${workspaceFraming.sideWidth}px`,
+          '--reference-right-width': `${effectiveReferenceLayout.kind === 'narrow-unified'
+            ? referenceLayout.rightReferenceWidth : effectiveReferenceLayout.rightWidth}px`,
+          '--reference-bottom-height': `${effectiveReferenceLayout.bottomHeight}px`,
+          '--tools-right-width': `${effectiveReferenceLayout.kind === 'narrow-unified'
+            ? referenceLayout.rightReferenceWidth : effectiveReferenceLayout.rightWidth}px`,
+          '--tools-bottom-offset': `${effectiveReferenceLayout.kind === 'wide-split'
+            ? effectiveReferenceLayout.bottomHeight : 0}px`,
+          '--tools-bottom-height': `${effectiveReferenceLayout.kind === 'narrow-unified'
+            ? effectiveReferenceLayout.bottomHeight : referenceLayout.bottomReferenceHeight}px`,
         } as CSSProperties}
       >
         <div className="review-document">{props.children}</div>
@@ -725,7 +930,7 @@ export function ReviewShell(props: ReviewShellProps) {
               }}
             />
           ) : null}
-          {!listOpen && peekItemId ? (() => {
+          {!workspaceOpen && peekItemId ? (() => {
             const item = props.state.items.find(({ id }) => id === peekItemId);
             return item ? (
               <AnnotationPeek
@@ -742,24 +947,119 @@ export function ReviewShell(props: ReviewShellProps) {
           })() : null}
         </div>
         <div className="review-drawer-host" data-review-drawer-host>
-          <aside
-            ref={trayFraming.drawerRef}
-            id="review-annotation-list"
-            className="review-list"
-            data-annotation-drawer
-            data-annotation-presentation={trayFraming.presentation}
-            data-list-open={listOpen ? 'true' : 'false'}
-            aria-label="All annotations"
-            aria-hidden={!listOpen}
-            inert={!listOpen}
-          >
+          {finishOpen ? null : effectiveReferenceLayout.kind === 'narrow-unified' ? (
+            <WorkspaceEdgeRail
+              buttonRef={bottomWorkspaceRailRef}
+              surface="bottom"
+              open={referenceSurfaceOpen}
+              controls="review-workspace"
+              onToggle={() => {
+                dismissPageNoteAuthority();
+                const opening = !effectiveReferenceLayout.open;
+                dispatchReferenceLayout({ type: 'toggle-narrow-workspace' });
+                if (opening) focusWorkspaceModeAfterLayout(effectiveWorkspaceMode);
+              }}
+            />
+          ) : (
+            <>
+              <WorkspaceEdgeRail
+                buttonRef={rightWorkspaceRailRef}
+                surface="right"
+                open={rightSurfaceOpen}
+                controls={effectiveReferenceLayout.referenceDock === 'right'
+                  ? 'review-workspace review-tools-workspace'
+                  : 'review-tools-workspace'}
+                onToggle={() => {
+                  dismissPageNoteAuthority();
+                  const opening = !rightSurfaceOpen;
+                  dispatchReferenceLayout({ type: 'toggle-right-workspace' });
+                  if (opening) focusWorkspaceModeAfterLayout(effectiveWorkspaceMode);
+                }}
+              />
+              {effectiveReferenceLayout.referenceDock === 'bottom' ? <WorkspaceEdgeRail
+                buttonRef={bottomWorkspaceRailRef}
+                surface="bottom"
+                open={effectiveReferenceLayout.bottomReferencesOpen}
+                controls="review-workspace"
+                onToggle={() => {
+                  dismissPageNoteAuthority();
+                  const opening = !effectiveReferenceLayout.bottomReferencesOpen;
+                  dispatchReferenceLayout({ type: 'toggle-references' });
+                  if (opening) focusWorkspaceModeAfterLayout('references');
+                }}
+              /> : null}
+            </>
+          )}
+          <ReferenceWorkspace
+            workspaceRef={workspaceFraming.referenceSurfaceRef}
+            open={referenceSurfaceOpen}
+            mode={effectiveReferenceLayout.kind === 'narrow-unified'
+              ? effectiveReferenceLayout.activeMode
+              : effectiveReferenceLayout.referenceDock === 'bottom' ? 'references' : workspaceMode}
+            presentation={effectiveReferenceLayout.kind === 'narrow-unified'
+              || effectiveReferenceLayout.referenceDock === 'bottom'
+              ? 'bottom' : 'right'}
+            modes={effectiveReferenceLayout.kind === 'narrow-unified'
+              || effectiveReferenceLayout.referenceDock === 'right'
+              ? ['outline', 'annotations', 'references'] : ['references']}
+            headerVariant={effectiveReferenceLayout.kind !== 'narrow-unified'
+              && effectiveReferenceLayout.referenceDock === 'bottom' ? 'references' : 'tabs'}
+            onMoveReferencesRight={() => {
+              dispatchReferenceLayout({ type: 'move-references-right' });
+              selectWorkspaceMode('references');
+              focusWorkspaceModeAfterLayout('references');
+            }}
+            onMoveReferencesBottom={() => {
+              dispatchReferenceLayout({ type: 'move-references-bottom' });
+              selectWorkspaceMode('references');
+              focusWorkspaceModeAfterLayout('references');
+            }}
+            tabs={referenceTabs}
+            activeTabIdentity={navigation.activeTabIdentity}
+            {...(props.pendingReference === undefined ? {} : { pendingReference: props.pendingReference })}
+            announcement={props.navigationAnnouncement ?? announcement}
+            onModeChange={selectWorkspaceMode}
+            onReferenceTabActivate={(identity) => props.onReferenceTabActivate?.(identity)}
+            onReferenceTabClose={(identity) => {
+              props.onReferenceTabClose?.(identity);
+              if (props.navigationState === undefined) {
+                dispatchSurface({
+                  type: 'reference-navigation',
+                  action: {
+                    type: 'close-reference',
+                    targetIdentity: identity,
+                    focusReturnToken: effectiveReferenceLayout.kind === 'narrow-unified'
+                      || effectiveReferenceLayout.referenceDock === 'bottom'
+                      ? BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN
+                      : RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
+                  },
+                });
+              }
+            }}
+            onSendToMain={(identity) => props.onReferenceSendToMain?.(identity)}
+            onRetryReference={() => props.onReferenceRetry?.()}
+            onReferenceViewportHost={props.onReferenceViewportHost ?? ignoreReferenceViewportHost}
+            onModeFocusTokenChange={rememberWorkspaceModeFocus}
+          />
+          <OutlineAnnotationsWorkspace
+            workspaceRef={workspaceFraming.toolsSurfaceRef}
+            open={toolsSurfaceOpen}
+            mode={effectiveWorkspaceMode}
+            presentation={effectiveReferenceLayout.kind === 'narrow-unified' ? 'bottom' : 'right'}
+            headerVariant={sharedWorkspace ? 'shared' : 'tools'}
+            outline={outlineDiscovery}
+            currentOutlineItemId={props.currentOutlineItemId ?? null}
+            onModeChange={selectWorkspaceMode}
+            onOutlineActivate={(item) => props.onOutlineActivate?.(item)}
+            onModeFocusTokenChange={rememberWorkspaceModeFocus}
+            annotations={<div id="review-annotation-list" aria-label="All annotations">
             <AnnotationList
               items={props.state.items}
               {...(activeItemId === undefined ? {} : { activeId: activeItemId })}
-              {...(!listOpen || props.correspondingItemId === undefined
+              {...(!annotationsVisible || props.correspondingItemId === undefined
                 ? {}
                 : { correspondingId: props.correspondingItemId })}
-              {...(!listOpen || listActivation === undefined ? {} : { activationRequest: listActivation })}
+              {...(!annotationsVisible || listActivation === undefined ? {} : { activationRequest: listActivation })}
               {...(props.onItemCorrespondenceChange === undefined
                 ? {}
                 : { onCorrespondenceChange: props.onItemCorrespondenceChange })}
@@ -825,7 +1125,30 @@ export function ReviewShell(props: ReviewShellProps) {
                 </ol>
               ) : null}
             </section>
-          </aside>
+            </div>}
+          />
+          {referenceSurfaceOpen && effectiveReferenceLayout.referenceResizable ? (
+            <ReferenceResizeHandle
+              dock={effectiveReferenceLayout.kind !== 'narrow-unified'
+                ? effectiveReferenceLayout.referenceDock : 'bottom'}
+              controls="workspace-panel-references"
+              value={effectiveReferenceLayout.kind !== 'narrow-unified'
+                && effectiveReferenceLayout.referenceDock === 'right'
+                ? referenceLayout.rightReferenceWidth : referenceLayout.bottomReferenceHeight}
+              min={effectiveReferenceLayout.kind !== 'narrow-unified'
+                && effectiveReferenceLayout.referenceDock === 'right'
+                ? MIN_RIGHT_REFERENCE_WIDTH : MIN_BOTTOM_REFERENCE_HEIGHT}
+              max={effectiveReferenceLayout.kind !== 'narrow-unified'
+                && effectiveReferenceLayout.referenceDock === 'right'
+                ? clampRightReferenceWidth(Number.MAX_SAFE_INTEGER, referenceLayout.stageWidth)
+                : clampBottomReferenceHeight(Number.MAX_SAFE_INTEGER, referenceLayout.stageHeight)}
+              onChange={(size) => dispatchReferenceLayout(effectiveReferenceLayout.kind !== 'narrow-unified'
+                && effectiveReferenceLayout.referenceDock === 'right'
+                ? { type: 'resize-right-references', size }
+                : { type: 'resize-bottom-references', size })}
+              onCommit={workspaceFraming.requestSettledReframe}
+            />
+          ) : null}
           <FinishReviewDrawer
             state={props.state}
             open={surface.baseSurface === 'finish'}
@@ -928,6 +1251,27 @@ export function ReviewShell(props: ReviewShellProps) {
           />
         ) : null}
       </div>
+      <LinkActionPopover
+        request={props.linkActionRequest ?? null}
+        onChoose={(choice, request) => props.onLinkActionChoose?.(choice, request)}
+        onDismiss={(request, reason) => props.onLinkActionDismiss?.(request, reason)}
+        sourceFocusFallback={(source) => {
+          const shell = shellRef.current;
+          if (!shell) return null;
+          if (source === 'reference') {
+            const activeTab = navigation.activeTabIdentity;
+            const activeTabElement = activeTab
+              ? [...shell.querySelectorAll<HTMLElement>('[data-reference-tab]')]
+                .find((element) => element.dataset.referenceTab === activeTab)
+              : null;
+            return activeTabElement
+              ?? shell.querySelector<HTMLElement>('[data-reference-pdf-viewport] [data-page-index]');
+          }
+          return shell.querySelector<HTMLElement>(
+            `.pdf-workspace:not(.pdf-workspace--reference) [data-page-index="${props.linkActionRequest?.sourcePageIndex ?? 0}"]`,
+          ) ?? shell.querySelector<HTMLElement>('.pdf-workspace:not(.pdf-workspace--reference) [data-page-index]');
+        }}
+      />
     </section>
   );
 }

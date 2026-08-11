@@ -129,6 +129,17 @@ export function createViewerFramingControls(
     scrollTo(position, behavior = 'auto') {
       if (disposed) return;
       viewport?.scrollTo({ x: position.left, y: position.top, behavior });
+      if (behavior !== 'auto') return;
+      const viewportElement = options.root()
+        ?.querySelector<HTMLElement>('[data-viewer-framing-viewport]') ?? null;
+      if (viewportElement) {
+        // The EmbedPDF viewport request can remain a no-op for an inactive
+        // WebKit layout turn, and a same-position native write is required to
+        // cancel an earlier smooth scroll before user-owned movement begins.
+        // The DOM viewport is the same authority observed by the plugin.
+        viewportElement.scrollLeft = position.left;
+        viewportElement.scrollTop = position.top;
+      }
     },
     subscribe(listener) {
       listeners.add(listener);

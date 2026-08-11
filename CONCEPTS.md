@@ -41,6 +41,23 @@ The review session's light-theme visual language: warm gray and ivory environmen
 
 Warm Neutral changes presentation only; reading-first behavior and adaptive Annotation Tray framing remain governed by their product contracts.
 
+## Reference navigation
+
+### Main Reading Thread
+The primary PDF view and its current reading location.
+
+In-body reference lookups do not move the Main Reading Thread; embedded-outline navigation, explicit promotion from a Reference Tab, and ordinary direct reading actions may move it.
+
+### Reference Tab
+A temporary, independently scrollable and zoomable view of one author-encoded destination in the current PDF.
+
+One live Reference Tab exists per target. Hiding the workspace preserves its tabs, while promotion to the Main Reading Thread consumes the promoted tab.
+
+### Meaningful Jump
+An explicit destination change in the Main Reading Thread that enters PDF Back and Forward history, such as embedded-outline navigation or promotion from a Reference Tab.
+
+Ordinary scrolling, sequential page turns, and zoom changes are not Meaningful Jumps.
+
 ## Relationships
 
 A Review Item projects to an Owned Annotation. Existing PDF Annotations remain a separate read-only population. The Annotation Tray presents both populations, while a Framing Session may use Viewer Runway to keep the relevant PDF content reachable.

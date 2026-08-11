@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import type { PluginRegistry } from "@embedpdf/core";
 import { ScrollPlugin } from "@embedpdf/plugin-scroll";
 import { SelectionPlugin } from "@embedpdf/plugin-selection";
@@ -24,12 +24,34 @@ import {
   type ViewerControlsSnapshot,
 } from "../pdf/viewer-controls.js";
 import type { ViewerFramingControls } from "../pdf/viewer-framing.js";
+import type { PdfViewerNavigation } from "../pdf/viewer-navigation-adapter.js";
+import type { ReferenceDocumentController } from "../pdf/reference-document.js";
+import type { PdfOutlineDiscovery } from "../pdf/pdf-outline.js";
 import type {
   ViewerClientPlacement,
   ViewerInteractionEvent,
   ViewerPageMenuInvocation,
 } from "../pdf/viewer-interaction-events.js";
 import { PageNotePlacementAuthority } from "../review/review-surface-state.js";
+import {
+  NavigationCoordinator,
+} from "../review/navigation-coordinator.js";
+import {
+  createReferenceNavigationState,
+  reduceReferenceNavigation,
+  type ReferenceNavigationAction,
+} from "../review/reference-navigation-state.js";
+import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
+import { createTrailingTaskScheduler } from "../review/main-location-refresh.js";
+import {
+  BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN,
+  RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
+  createReferenceWorkspaceLayout,
+  deriveReferenceWorkspaceLayout,
+  reduceReferenceWorkspaceLayout,
+  type ReferenceWorkspaceLayoutAction,
+  type RightWorkspaceMode,
+} from "../review/reference-workspace-layout.js";
 
 function itemCoordinates(item: ReviewState["items"][number]): { x: number; y: number } | undefined {
   const value = item.payload[item.kind === "insert" || item.kind === "pageNote" ? "position" : "rect"];
@@ -110,6 +132,41 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const viewerRegistry = useRef<PluginRegistry | null>(null);
   const viewerControlsRef = useRef<ViewerControls | undefined>(undefined);
   const [viewerFraming, setViewerFraming] = useState<ViewerFramingControls>();
+  const productionRootRef = useRef<HTMLElement | null>(null);
+  const mainNavigationRef = useRef<PdfViewerNavigation | null>(null);
+  const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
+  const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
+  const referenceNavigationWaiters = useRef<Array<{
+    readonly documentGeneration: number;
+    readonly resolve: (navigation: PdfViewerNavigation | null) => void;
+    timeout: ReturnType<typeof setTimeout> | null;
+  }>>([]);
+  const documentGenerationRef = useRef(0);
+  const navigationStateRef = useRef(createReferenceNavigationState(0));
+  const [navigationState, setNavigationState] = useState(navigationStateRef.current);
+  const [referenceLayoutState, dispatchReferenceLayout] = useReducer(
+    reduceReferenceWorkspaceLayout,
+    undefined,
+    () => createReferenceWorkspaceLayout({ width: 1440, height: 900 }),
+  );
+  const referenceLayoutStateRef = useRef(referenceLayoutState);
+  referenceLayoutStateRef.current = referenceLayoutState;
+  const layoutGenerationRef = useRef(0);
+  const [rightWorkspaceMode, setRightWorkspaceMode] = useState<RightWorkspaceMode>('outline');
+  const [pendingReference, setPendingReference] = useState<PendingReferencePanel | null>(null);
+  const [linkActionRequest, setLinkActionRequest] = useState<
+    Extract<ViewerInteractionEvent, { readonly type: 'pdf-link' }>['value'] | null
+  >(null);
+  const [navigationAnnouncement, setNavigationAnnouncement] = useState('');
+  const outlineDiscoveryRef = useRef<PdfOutlineDiscovery>({
+    status: 'loading',
+    documentGeneration: 0,
+  });
+  const [outlineDiscovery, setOutlineDiscovery] = useState<PdfOutlineDiscovery>(
+    outlineDiscoveryRef.current,
+  );
+  const [currentOutlineItemId, setCurrentOutlineItemId] = useState<string | null>(null);
+  const [referenceViewportHost, setReferenceViewportHost] = useState<HTMLDivElement | null>(null);
   const markHoverRef = useRef<string | undefined>(undefined);
   const markFocusRef = useRef<string | undefined>(undefined);
   const rowCorrespondenceRef = useRef<string | undefined>(undefined);
@@ -125,20 +182,167 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     [state.items],
   );
   const sourceRoot = props.scope.sourceRootPath ?? "No source root selected";
+  const dispatchNavigation = (action: ReferenceNavigationAction) => {
+    const next = reduceReferenceNavigation(navigationStateRef.current, action);
+    navigationStateRef.current = next;
+    setNavigationState(next);
+  };
+  const dispatchLayout = useCallback((action: ReferenceWorkspaceLayoutAction) => {
+    if (action.type !== 'set-stage-size' && action.type !== 'resize-right-references'
+      && action.type !== 'resize-bottom-references' && action.type !== 'focus-surface') {
+      layoutGenerationRef.current += 1;
+    }
+    dispatchReferenceLayout(action);
+  }, []);
+  const coordinatorRef = useRef<NavigationCoordinator | null>(null);
+  if (coordinatorRef.current === null) {
+    coordinatorRef.current = new NavigationCoordinator({
+      getState: () => navigationStateRef.current,
+      dispatch: dispatchNavigation,
+      getMainNavigation: () => mainNavigationRef.current,
+      getReferenceNavigation: () => referenceNavigationRef.current,
+      waitForReferenceNavigation: () => {
+        const current = referenceNavigationRef.current;
+        if (current) return Promise.resolve(current);
+        const generation = documentGenerationRef.current;
+        return new Promise((resolve) => {
+          const waiter: (typeof referenceNavigationWaiters.current)[number] = {
+            documentGeneration: generation,
+            resolve,
+            timeout: null,
+          };
+          referenceNavigationWaiters.current.push(waiter);
+          waiter.timeout = setTimeout(() => {
+            const index = referenceNavigationWaiters.current.indexOf(waiter);
+            if (index < 0) return;
+            referenceNavigationWaiters.current.splice(index, 1);
+            resolve(null);
+          }, 1_600);
+        });
+      },
+      getReferenceController: () => referenceControllerRef.current,
+      layout: {
+        revealReferences: () => {
+          const layout = referenceLayoutStateRef.current;
+          if (layout.regime !== 'narrow' || !layout.narrowOpen) {
+            dispatchLayout({ type: 'show-references' });
+          }
+          dispatchLayout({ type: 'focus-surface', surface: 'references' });
+        },
+        hideReferences: () => dispatchLayout({ type: 'hide-references' }),
+        settle: async () => {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          const animations = [
+            ...productionRootRef.current?.querySelectorAll<HTMLElement>(
+              '[data-review-workspace], [data-tools-workspace]',
+            ) ?? [],
+          ].flatMap((surface) => surface.getAnimations())
+            .filter((animation) => animation.playState === 'running');
+          if (animations.length > 0) {
+            await Promise.allSettled(animations.map((animation) => animation.finished));
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          }
+        },
+        focusReferenceRail: () => {
+          const layoutGeneration = layoutGenerationRef.current;
+          const documentGeneration = documentGenerationRef.current;
+          requestAnimationFrame(() => {
+            if (layoutGeneration !== layoutGenerationRef.current
+              || documentGeneration !== documentGenerationRef.current) return;
+            const surface = referenceLayoutStateRef.current.regime === 'narrow'
+              || referenceLayoutStateRef.current.referenceDock === 'bottom' ? 'bottom' : 'right';
+            productionRootRef.current
+              ?.querySelector<HTMLButtonElement>(`[data-workspace-edge-rail="${surface}"]`)
+              ?.focus({ preventScroll: true });
+          });
+          return true;
+        },
+        referenceRailFocusToken: () => referenceLayoutStateRef.current.regime === 'narrow'
+          || referenceLayoutStateRef.current.referenceDock === 'bottom'
+          ? BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN
+          : RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
+      },
+      setPendingReference,
+      setLinkActionRequest,
+      setAnnouncement: setNavigationAnnouncement,
+      focusReferenceTab: (identity) => {
+        const layoutGeneration = layoutGenerationRef.current;
+        const documentGeneration = documentGenerationRef.current;
+        requestAnimationFrame(() => {
+          if (layoutGeneration !== layoutGenerationRef.current
+            || documentGeneration !== documentGenerationRef.current) return;
+          const target = [...(productionRootRef.current?.querySelectorAll<HTMLElement>(
+            '[data-reference-tab]',
+          ) ?? [])].find((element) => element.dataset.referenceTab === identity);
+          target?.focus({ preventScroll: true });
+        });
+        return true;
+      },
+      getOutlineDiscovery: () => outlineDiscoveryRef.current,
+      setCurrentOutlineItemId,
+    });
+  }
+  const navigationCoordinator = coordinatorRef.current;
+  const mainLocationRefresh = useMemo(
+    () => createTrailingTaskScheduler(() => navigationCoordinator.refreshMainLocation()),
+    [navigationCoordinator],
+  );
 
-  const onSelectionUpdate = (update: SelectionUpdate) => {
+  const onSelectionUpdate = useCallback((update: SelectionUpdate) => {
     setSelectionUpdate((current) => acceptSelectionUpdate(current, update));
     if (update.kind === "reliable") setToolError(null);
-  };
+  }, []);
   const readinessMessage = selectionReadinessMessage(selectionUpdate);
   const publishCorrespondence = () => setCorrespondingItemId(
     rowCorrespondenceRef.current ?? markFocusRef.current ?? markHoverRef.current,
   );
   useEffect(() => () => {
+    navigationCoordinator.dispose();
+    mainLocationRefresh.cancel();
     viewerControlsRef.current?.dispose();
     placementAuthority.current.clear();
-  }, []);
-  const onViewerInteraction = (event: ViewerInteractionEvent) => {
+  }, [mainLocationRefresh, navigationCoordinator]);
+  const sourceIdentity = `${state.source.fileId}:${state.source.digest}`;
+  const sourceIdentityRef = useRef(sourceIdentity);
+  const initialSourceIdentityRef = useRef(
+    `${props.initialState.source.fileId}:${props.initialState.source.digest}`,
+  );
+  useEffect(() => {
+    const next = `${props.initialState.source.fileId}:${props.initialState.source.digest}`;
+    if (next === initialSourceIdentityRef.current) return;
+    initialSourceIdentityRef.current = next;
+    setState(props.initialState);
+  }, [props.initialState]);
+  useEffect(() => {
+    if (sourceIdentity === sourceIdentityRef.current) return;
+    mainLocationRefresh.cancel();
+    sourceIdentityRef.current = sourceIdentity;
+    const nextGeneration = documentGenerationRef.current + 1;
+    documentGenerationRef.current = nextGeneration;
+    for (const waiter of referenceNavigationWaiters.current.splice(0)) {
+      if (waiter.timeout !== null) clearTimeout(waiter.timeout);
+      waiter.resolve(null);
+    }
+    outlineDiscoveryRef.current = { status: 'loading', documentGeneration: nextGeneration };
+    setOutlineDiscovery(outlineDiscoveryRef.current);
+    navigationCoordinator.replaceDocument(nextGeneration);
+    dispatchLayout({ type: 'replace-document' });
+    setRightWorkspaceMode('outline');
+  }, [mainLocationRefresh, navigationCoordinator, sourceIdentity]);
+  const onViewerInteraction = useCallback((event: ViewerInteractionEvent) => {
+    if (event.type === 'pdf-link') {
+      navigationCoordinator.requestLink(event.value);
+      return;
+    }
+    if (event.type === 'pdf-link-unavailable') {
+      navigationCoordinator.unavailableLink(event.value);
+      return;
+    }
+    if (event.type === 'scroll') {
+      mainLocationRefresh.schedule();
+      return;
+    }
     if (event.type === "selection-placement") {
       setSelectionPlacement(event.value?.placement ?? null);
       return;
@@ -191,7 +395,51 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       }
       publishCorrespondence();
     }
-  };
+  }, [mainLocationRefresh, navigationCoordinator]);
+  const onReferenceDocumentControls = useCallback((controls: ReferenceDocumentController | null) => {
+    referenceControllerRef.current = controls;
+  }, []);
+  const onViewerNavigationInitialized = useCallback((
+    scope: 'main' | 'reference',
+    navigation: PdfViewerNavigation | null,
+  ) => {
+    if (scope === 'main') {
+      mainNavigationRef.current = navigation;
+      navigation?.replaceDocument(documentGenerationRef.current);
+      navigationCoordinator.refreshMainLocation();
+      return;
+    }
+    referenceNavigationRef.current = navigation;
+    navigation?.replaceDocument(documentGenerationRef.current);
+    if (navigation) {
+      const generation = documentGenerationRef.current;
+      const current = referenceNavigationWaiters.current.splice(0);
+      for (const waiter of current) {
+        if (waiter.timeout !== null) clearTimeout(waiter.timeout);
+        waiter.resolve(waiter.documentGeneration === generation ? navigation : null);
+      }
+    }
+  }, [navigationCoordinator]);
+  const onOutlineDiscovery = useCallback((discovery: PdfOutlineDiscovery) => {
+    if (discovery.documentGeneration !== documentGenerationRef.current) return;
+    outlineDiscoveryRef.current = discovery;
+    setOutlineDiscovery(discovery);
+    navigationCoordinator.refreshCurrentOutline();
+  }, [navigationCoordinator]);
+  const onViewerInitialized = useCallback(async (registry: PluginRegistry) => {
+    viewerRegistry.current = registry;
+    viewerControlsRef.current?.dispose();
+    const controls = createViewerControls(registry);
+    viewerControlsRef.current = controls;
+    setViewerState(controls.snapshot());
+    controls.subscribe(() => {
+      setViewerState(controls.snapshot());
+      mainLocationRefresh.schedule();
+    });
+  }, [mainLocationRefresh]);
+  const onViewerFramingInitialized = useCallback((controls: ViewerFramingControls) => {
+    setViewerFraming(controls);
+  }, []);
   const viewer = props.viewer ?? (
     <App
       embeddedInReviewShell
@@ -206,17 +454,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       {...(correspondingItemId === undefined ? {} : { correspondingOwnedAnnotationId: correspondingItemId })}
       onExistingAnnotationsDiscovery={setExistingAnnotations}
       inventoryRetryGeneration={inventoryRetryGeneration}
-      onViewerInitialized={async (registry) => {
-        viewerRegistry.current = registry;
-        viewerControlsRef.current?.dispose();
-        const controls = createViewerControls(registry);
-        viewerControlsRef.current = controls;
-        setViewerState(controls.snapshot());
-        controls.subscribe(() => setViewerState(controls.snapshot()));
-      }}
-      onViewerFramingInitialized={(controls) => {
-        setViewerFraming(controls);
-      }}
+      documentGeneration={navigationState.documentGeneration}
+      referenceViewportHost={referenceViewportHost}
+      onReferenceDocumentControls={onReferenceDocumentControls}
+      onViewerNavigationInitialized={onViewerNavigationInitialized}
+      onOutlineDiscovery={onOutlineDiscovery}
+      onViewerInitialized={onViewerInitialized}
+      onViewerFramingInitialized={onViewerFramingInitialized}
     />
   );
 
@@ -260,9 +504,17 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       />
     </div>
   );
+  const effectiveReferenceLayout = deriveReferenceWorkspaceLayout(
+    referenceLayoutState,
+    rightWorkspaceMode,
+    navigationState.workspace.lastMode,
+  );
+  const anyTrayOpen = effectiveReferenceLayout.kind === 'narrow-unified'
+    ? effectiveReferenceLayout.open
+    : effectiveReferenceLayout.rightWorkspaceOpen || effectiveReferenceLayout.bottomReferencesOpen;
 
   return (
-    <main data-production-review>
+    <main data-production-review ref={productionRootRef}>
       <ReviewShell
         state={state}
         documentTitle={props.scope.documentTitle}
@@ -270,10 +522,86 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         {...(viewerControlsRef.current === undefined ? {} : { viewerControls: viewerControlsRef.current })}
         {...(viewerFraming === undefined ? {} : { viewerFraming })}
         viewerState={viewerState}
+        workspaceOpen={anyTrayOpen}
+        referenceLayoutState={referenceLayoutState}
+        rightWorkspaceMode={rightWorkspaceMode}
+        onReferenceLayoutAction={dispatchLayout}
+        navigationState={navigationState}
+        referenceTabs={navigationState.tabs.map((tab) => ({
+          identity: tab.identity,
+          label: tab.label ?? `Page ${tab.originalTarget.pageIndex + 1}`,
+          pageContext: tab.pageContext ?? `Page ${tab.originalTarget.pageIndex + 1}`,
+        }))}
+        pendingReference={pendingReference}
+        outlineDiscovery={outlineDiscovery}
+        currentOutlineItemId={currentOutlineItemId}
+        linkActionRequest={linkActionRequest}
+        navigationAnnouncement={navigationAnnouncement}
+        canNavigateBack={navigationState.pendingMainNavigation === null
+          && navigationState.mainHistory.index > 0}
+        canNavigateForward={navigationState.pendingMainNavigation === null
+          && navigationState.mainHistory.index >= 0
+          && navigationState.mainHistory.index < navigationState.mainHistory.entries.length - 1}
         finishSlot={delivery}
         finishConfirmationActive={humanConfirmationActive || codexConfirmationActive}
         onFinishReview={() => props.api.finish()}
         onDiscardReview={() => props.api.discard()}
+        onLinkActionChoose={(choice, request) => {
+          void navigationCoordinator.chooseLink(choice, request);
+        }}
+        onLinkActionDismiss={(request) => navigationCoordinator.dismissLink(request)}
+        onNavigateBack={() => { void navigationCoordinator.historyBack(); }}
+        onNavigateForward={() => { void navigationCoordinator.historyForward(); }}
+        onWorkspaceModeChange={(mode) => {
+          if (mode === 'references') {
+            void navigationCoordinator.openReferencesWorkspace();
+            return;
+          }
+          setRightWorkspaceMode(mode);
+          dispatchNavigation({ type: 'select-workspace-mode', mode });
+          if (referenceLayoutState.regime !== 'narrow' || !referenceLayoutState.narrowOpen) {
+            dispatchLayout({ type: 'show-right-workspace' });
+          }
+          dispatchLayout({ type: 'focus-surface', surface: 'right' });
+        }}
+        onWorkspaceDismiss={() => {
+          dispatchLayout({ type: 'hide-references' });
+          dispatchNavigation({
+            type: 'hide-workspace',
+            focusReturnToken: referenceLayoutState.regime === 'narrow'
+              || referenceLayoutState.referenceDock === 'bottom'
+              ? BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN
+              : RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
+          });
+        }}
+        onReferenceTabActivate={(identity) => {
+          void navigationCoordinator.switchReference(identity);
+        }}
+        onReferenceTabClose={(identity) => {
+          void navigationCoordinator.closeReference(identity);
+        }}
+        onReferenceSendToMain={(identity) => {
+          void navigationCoordinator.sendToMain(identity);
+        }}
+        onReferenceRetry={() => { void navigationCoordinator.retryReference(); }}
+        onOutlineActivate={(item) => {
+          if (item.target === null) navigationCoordinator.unavailableDestination();
+          else void navigationCoordinator.navigateMainTarget(item.target, 'outline');
+        }}
+        onReferenceViewportHost={setReferenceViewportHost}
+        onWorkspaceModeFocusTokenChange={(mode, token) => {
+          const current = navigationStateRef.current.workspace.modes[mode];
+          dispatchNavigation({
+            type: 'remember-workspace-view',
+            mode,
+            logicalScrollToken: current.logicalScrollToken,
+            logicalFocusToken: token,
+          });
+          dispatchLayout({
+            type: 'focus-surface',
+            surface: mode === 'references' ? 'references' : 'right',
+          });
+        }}
         selectionUpdate={selectionUpdate}
         selectionPlacement={selectionPlacement}
         caretAnchor={caret}

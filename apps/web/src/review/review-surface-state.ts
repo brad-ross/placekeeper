@@ -1,4 +1,12 @@
-export type ReviewBaseSurface = 'reading' | 'annotations' | 'finish';
+import {
+  createReferenceNavigationState,
+  reduceReferenceNavigation,
+  type ReferenceNavigationAction,
+  type ReferenceNavigationState,
+  type WorkspaceMode,
+} from './reference-navigation-state.js';
+
+export type ReviewBaseSurface = 'reading' | 'workspace' | 'finish';
 export type ReviewNestedLayer = 'none' | 'composer';
 export type ReviewTransientSurface = 'none' | 'selection-actions' | 'insert-action' | 'page-menu' | 'page-note-cursor';
 
@@ -6,21 +14,33 @@ export interface ReviewSurfaceState {
   readonly baseSurface: ReviewBaseSurface;
   readonly nestedLayer: ReviewNestedLayer;
   readonly transientSurface: ReviewTransientSurface;
+  readonly navigation: ReferenceNavigationState;
 }
 
 export type ReviewSurfaceAction =
   | { readonly type: 'open-base'; readonly surface: ReviewBaseSurface }
+  | { readonly type: 'open-workspace'; readonly mode?: WorkspaceMode }
+  | { readonly type: 'hide-workspace'; readonly focusReturnToken: string }
+  | { readonly type: 'reference-navigation'; readonly action: ReferenceNavigationAction }
+  | { readonly type: 'replace-document'; readonly documentGeneration: number }
   | { readonly type: 'open-nested' }
   | { readonly type: 'close-nested' }
   | { readonly type: 'open-transient'; readonly surface: Exclude<ReviewTransientSurface, 'none'> }
   | { readonly type: 'close-transient' }
   | { readonly type: 'escape' };
 
-export const INITIAL_REVIEW_SURFACE_STATE: ReviewSurfaceState = Object.freeze({
-  baseSurface: 'reading',
-  nestedLayer: 'none',
-  transientSurface: 'none',
-});
+export function createReviewSurfaceState(documentGeneration: number): ReviewSurfaceState {
+  return {
+    baseSurface: 'reading',
+    nestedLayer: 'none',
+    transientSurface: 'none',
+    navigation: createReferenceNavigationState(documentGeneration),
+  };
+}
+
+export const INITIAL_REVIEW_SURFACE_STATE: ReviewSurfaceState = Object.freeze(
+  createReviewSurfaceState(0),
+);
 
 export function reduceReviewSurface(
   state: ReviewSurfaceState,
@@ -31,6 +51,60 @@ export function reduceReviewSurface(
       return state.baseSurface === action.surface
         ? state
         : { ...state, baseSurface: action.surface, transientSurface: 'none' };
+    case 'open-workspace': {
+      const navigation = action.mode === undefined
+        ? state.navigation
+        : reduceReferenceNavigation(state.navigation, {
+            type: 'select-workspace-mode',
+            mode: action.mode,
+          });
+      if (
+        state.baseSurface === 'workspace'
+        && state.transientSurface === 'none'
+        && navigation === state.navigation
+      ) return state;
+      return {
+        ...state,
+        baseSurface: 'workspace',
+        transientSurface: 'none',
+        navigation,
+      };
+    }
+    case 'hide-workspace': {
+      const navigation = reduceReferenceNavigation(state.navigation, {
+        type: 'hide-workspace',
+        focusReturnToken: action.focusReturnToken,
+      });
+      if (state.baseSurface === 'reading' && navigation === state.navigation) return state;
+      return { ...state, baseSurface: 'reading', transientSurface: 'none', navigation };
+    }
+    case 'reference-navigation': {
+      const previousTabCount = state.navigation.tabs.length;
+      const navigation = reduceReferenceNavigation(state.navigation, action.action);
+      if (navigation === state.navigation) return state;
+
+      let baseSurface = state.baseSurface;
+      if (action.action.type === 'open-reference') baseSurface = 'workspace';
+      if (
+        action.action.type === 'complete-send-to-main'
+        && action.action.success
+      ) baseSurface = 'reading';
+      if (action.action.type === 'replace-document') baseSurface = 'reading';
+      if (
+        action.action.type === 'close-reference'
+        && previousTabCount > 0
+        && navigation.tabs.length === 0
+      ) baseSurface = 'reading';
+
+      return { ...state, baseSurface, navigation };
+    }
+    case 'replace-document':
+      return {
+        ...state,
+        baseSurface: 'reading',
+        transientSurface: 'none',
+        navigation: reduceReferenceNavigation(state.navigation, action),
+      };
     case 'open-nested':
       return state.nestedLayer === 'composer'
         ? state
@@ -50,7 +124,7 @@ export function reduceReviewSurface(
     case 'escape':
       if (state.nestedLayer !== 'none') return { ...state, nestedLayer: 'none' };
       if (state.transientSurface !== 'none') return { ...state, transientSurface: 'none' };
-      if (state.baseSurface !== 'reading') return INITIAL_REVIEW_SURFACE_STATE;
+      if (state.baseSurface !== 'reading') return { ...state, baseSurface: 'reading' };
       return state;
   }
 }

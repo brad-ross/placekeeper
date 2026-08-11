@@ -17,6 +17,57 @@ export interface ViewerRunway {
   bottom: number;
 }
 
+export interface OccupiedViewerSurface {
+  readonly presentation: AnnotationPresentation;
+  readonly bounds: ViewerRect | null;
+}
+
+export function occupiedRunway(input: {
+  readonly stage: ViewerRect;
+  readonly surfaces: readonly OccupiedViewerSurface[];
+}): ViewerRunway {
+  const runway: ViewerRunway = { right: 0, bottom: 0 };
+  for (const surface of input.surfaces) {
+    if (!surface.bounds) continue;
+    const intersection = intersectViewerRects(input.stage, surface.bounds);
+    if (!intersection) continue;
+    if (surface.presentation === 'right') {
+      runway.right = Math.max(runway.right, intersection.right - intersection.left);
+    } else {
+      runway.bottom = Math.max(runway.bottom, intersection.bottom - intersection.top);
+    }
+  }
+  return runway;
+}
+
+export class LatestFrameRequest<T> {
+  private handle: number | null = null;
+  private latest: T | undefined;
+
+  constructor(private readonly options: {
+    readonly schedule: (callback: () => void) => number;
+    readonly cancel: (handle: number) => void;
+    readonly commit: (value: T) => void;
+  }) {}
+
+  publish(value: T): void {
+    this.latest = value;
+    if (this.handle !== null) return;
+    this.handle = this.options.schedule(() => {
+      this.handle = null;
+      const latest = this.latest;
+      this.latest = undefined;
+      if (latest !== undefined) this.options.commit(latest);
+    });
+  }
+
+  cancel(): void {
+    if (this.handle !== null) this.options.cancel(this.handle);
+    this.handle = null;
+    this.latest = undefined;
+  }
+}
+
 export interface ViewerFramingTarget {
   pageIndex?: number;
   reviewId?: string;
@@ -155,6 +206,29 @@ export function restoreViewportPosition(input: {
   return {
     left: clamp(candidate.left, 0, Math.max(0, input.maximum.left)),
     top: clamp(candidate.top, 0, Math.max(0, input.maximum.top)),
+  };
+}
+
+export function frameUserOwnedPosition(input: {
+  readonly baseline: ViewerPosition;
+  readonly restored: ViewerPosition;
+  readonly maximum: ViewerPosition;
+  readonly userAxes: { readonly left: boolean; readonly top: boolean };
+}): { readonly position: ViewerPosition; readonly baseline: ViewerPosition } {
+  const position = {
+    left: input.userAxes.left
+      ? clamp(input.baseline.left, 0, Math.max(0, input.maximum.left))
+      : input.restored.left,
+    top: input.userAxes.top
+      ? clamp(input.baseline.top, 0, Math.max(0, input.maximum.top))
+      : input.restored.top,
+  };
+  return {
+    position,
+    baseline: {
+      left: input.userAxes.left ? input.baseline.left : position.left,
+      top: input.userAxes.top ? input.baseline.top : position.top,
+    },
   };
 }
 

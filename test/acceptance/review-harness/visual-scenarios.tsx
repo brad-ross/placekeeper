@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react';
+import { PdfZoomMode } from '@embedpdf/models';
 
 import { CodexDelivery } from '../../../apps/web/src/export/CodexDelivery.js';
 import { HumanDelivery } from '../../../apps/web/src/export/HumanDelivery.js';
@@ -8,12 +9,19 @@ import {
   type ViewerControlsSnapshot,
 } from '../../../apps/web/src/pdf/viewer-controls.js';
 import type { ReviewItem, ReviewState } from '../../../packages/core/src/review-model.js';
+import type { ReferenceWorkspaceTab } from '../../../apps/web/src/review/ReferenceWorkspace.js';
+import {
+  createReferenceNavigationState,
+  reduceReferenceNavigation,
+  type ReferenceNavigationState,
+} from '../../../apps/web/src/review/reference-navigation-state.js';
 
 export type VisualSceneName =
   | 'reading'
   | 'unavailable-controls'
   | 'contextual'
   | 'tray'
+  | 'reference-layout'
   | 'peek'
   | 'page-note'
   | 'finish'
@@ -29,6 +37,8 @@ export interface VisualScenario {
   readonly existingAnnotations: ExistingAnnotationsDiscovery;
   readonly finishSlot?: ReactNode;
   readonly viewerState: ViewerControlsSnapshot;
+  readonly referenceNavigation?: ReferenceNavigationState;
+  readonly referenceTabs?: readonly ReferenceWorkspaceTab[];
 }
 
 const timestamp = '2026-08-09T12:00:00.000Z';
@@ -104,6 +114,62 @@ const viewerState: ViewerControlsSnapshot = {
   zoomPercent: 112,
 };
 
+const visualReferences = [
+  {
+    identity: 'visual-reference-lemma',
+    label: 'Lemma 2: Local identification under conditional independence',
+    pageIndex: 17,
+  },
+  {
+    identity: 'visual-reference-equation',
+    label: 'Equation (14): Equilibrium response mapping',
+    pageIndex: 26,
+  },
+  {
+    identity: 'visual-reference-appendix',
+    label: 'Appendix Figure A.12: Leave-one-market-out estimates',
+    pageIndex: 63,
+  },
+] as const;
+
+const visualReferenceTabs: readonly ReferenceWorkspaceTab[] = visualReferences.map((reference) => ({
+  identity: reference.identity,
+  label: reference.label,
+  pageContext: `Page ${reference.pageIndex + 1}`,
+}));
+
+const visualReferenceLocation = (pageIndex: number) => ({
+  pageIndex,
+  anchor: { x: 72, y: 120 },
+  alignment: { xPercent: 50, yPercent: 20 },
+  zoom: 1.12,
+});
+
+function openVisualReference(
+  state: ReferenceNavigationState,
+  reference: (typeof visualReferences)[number],
+): ReferenceNavigationState {
+  return reduceReferenceNavigation(state, {
+    type: 'open-reference',
+    target: {
+      documentGeneration: 0,
+      pageIndex: reference.pageIndex,
+      zoom: { mode: PdfZoomMode.XYZ, params: [72, 120, 1.12] },
+      identity: reference.identity,
+    },
+    settledLocation: visualReferenceLocation(reference.pageIndex),
+    label: reference.label,
+    pageContext: `Page ${reference.pageIndex + 1}`,
+  });
+}
+
+function createVisualReferenceNavigation(): ReferenceNavigationState {
+  const state = visualReferences.reduce(openVisualReference, createReferenceNavigationState(0));
+  return openVisualReference(state, visualReferences[0]);
+}
+
+const visualReferenceNavigation = createVisualReferenceNavigation();
+
 function DeliveryFixture({
   state,
   outcome = 'warning',
@@ -156,7 +222,7 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
   const requested = parameters.get('visual');
   if (!requested) return null;
   const name = requested as VisualSceneName;
-  if (!['reading', 'unavailable-controls', 'contextual', 'tray', 'peek', 'page-note', 'finish', 'exceptional'].includes(name)) return null;
+  if (!['reading', 'unavailable-controls', 'contextual', 'tray', 'reference-layout', 'peek', 'page-note', 'finish', 'exceptional'].includes(name)) return null;
   const state = stateFor(name === 'contextual' || name === 'page-note' ? [] : seededItems);
   const exception = parameters.get('exception');
   const exceptionalAnnotations: ExistingAnnotationsDiscovery = exception === 'loading'
@@ -172,6 +238,10 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
     pageMenuOpen: name === 'page-note',
     existingAnnotations: name === 'exceptional' ? exceptionalAnnotations : readyAnnotations,
     viewerState: name === 'unavailable-controls' ? unavailableViewerControls() : viewerState,
+    ...(name === 'reference-layout' ? {
+      referenceNavigation: visualReferenceNavigation,
+      referenceTabs: visualReferenceTabs,
+    } : {}),
   };
   if (name === 'finish' || name === 'exceptional') {
     const outcome = exception === 'success' || exception === 'error' ? exception : 'warning';

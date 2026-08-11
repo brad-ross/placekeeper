@@ -14,7 +14,16 @@ import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.
 import { ReviewIcon } from '../review/ReviewIcon.js';
 import { combinePageRotation, positionOwnedRect } from './owned-overlay.js';
 import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
+import {
+  sourceAnnotationLinkRenderers,
+  sourceAnnotationVisualRenderers,
+} from './PdfLinkControl.js';
+import { ReferencePdfViewport } from './ReferencePdfViewport.js';
 import type { ViewerRunway } from './viewer-framing.js';
+import {
+  MAIN_PDF_DOCUMENT_ID,
+  REFERENCE_PDF_DOCUMENT_ID,
+} from './viewer-document-ids.js';
 import {
   dispatchNeutralViewerPointerUp,
   isUnsafePageContextTarget,
@@ -23,6 +32,7 @@ import {
   VIEWER_POINTER_BUTTON_NONE,
   type ViewerOwnedMarkInteraction,
   type ViewerPagePoint,
+  type ViewerInteractionEvent,
 } from './viewer-interaction-events.js';
 
 export interface PageContextMenuRequest {
@@ -49,6 +59,10 @@ export interface PdfWorkspaceProps {
   onOwnedMarkInteraction?: (interaction: ViewerOwnedMarkInteraction) => void;
   runway?: ViewerRunway;
   onWorkspaceElement?: (element: HTMLDivElement | null) => void;
+  documentGeneration?: number;
+  onViewerInteraction?: (event: ViewerInteractionEvent) => void;
+  referenceViewportHost?: HTMLElement | null;
+  onReferenceViewportElement?: (element: HTMLDivElement | null) => void;
 }
 
 const PDF_TEXT_SELECTION_STYLE = {
@@ -78,6 +92,10 @@ export function PdfWorkspace({
   onOwnedMarkInteraction,
   runway = { right: 0, bottom: 0 },
   onWorkspaceElement,
+  documentGeneration = 0,
+  onViewerInteraction,
+  referenceViewportHost = null,
+  onReferenceViewportElement,
 }: PdfWorkspaceProps) {
   const pressedPrimaryPointers = useRef(new Map<number, HTMLDivElement>());
   const contextPointers = useRef(new Set<number>());
@@ -109,28 +127,37 @@ export function PdfWorkspace({
         plugins={plugins}
         {...(onInitialized === undefined ? {} : { onInitialized })}
       >
-        {({ activeDocumentId, activeDocument, pluginsReady }) => {
-          if (!pluginsReady || !activeDocumentId || !activeDocument?.document) {
+        {({ documents, pluginsReady }) => {
+          const mainDocument = documents[MAIN_PDF_DOCUMENT_ID];
+          if (!pluginsReady || !mainDocument?.document) {
             return <div className="pdf-workspace__loading" role="status"><ReviewIcon name="loading" />Loading local PDF…</div>;
           }
-          const activePdf = activeDocument.document;
+          const activePdf = mainDocument.document;
+          const linkRenderers = sourceAnnotationLinkRenderers({
+            sourceScope: 'main',
+            documentGeneration,
+            pageCount: activePdf.pages.length,
+            ...(onViewerInteraction === undefined ? {} : { onInteraction: onViewerInteraction }),
+          });
+          const referenceDocument = documents[REFERENCE_PDF_DOCUMENT_ID];
 
           return (
+            <>
             <Viewport
-              documentId={activeDocumentId}
+              documentId={MAIN_PDF_DOCUMENT_ID}
               className="pdf-workspace__viewport"
               data-viewer-framing-viewport
             >
               <ZoomGestureWrapper
-                documentId={activeDocumentId}
+                documentId={MAIN_PDF_DOCUMENT_ID}
                 data-viewer-framing-content
                 style={{ minHeight: '100%', minWidth: '100%', position: 'relative' }}
               >
                 <Scroller
-                  documentId={activeDocumentId}
+                  documentId={MAIN_PDF_DOCUMENT_ID}
                   renderPage={(layout) => (
                     <PagePointerProvider
-                      documentId={activeDocumentId}
+                      documentId={MAIN_PDF_DOCUMENT_ID}
                       pageIndex={layout.pageIndex}
                       aria-label={`Page ${layout.pageNumber}`}
                       className="pdf-workspace__page"
@@ -193,7 +220,7 @@ export function PdfWorkspace({
                         const page = activePdf.pages[layout.pageIndex];
                         if (!page) return;
                         const bounds = event.currentTarget.getBoundingClientRect();
-                        const rotation = combinePageRotation(page.rotation, activeDocument.rotation);
+                        const rotation = combinePageRotation(page.rotation, mainDocument.rotation);
                         const rotatedSize = transformSize(page.size, rotation, 1);
                         const point = normalizePageClientPoint(
                           { x: event.clientX, y: event.clientY },
@@ -249,16 +276,17 @@ export function PdfWorkspace({
                       }}
                     >
                       <RenderLayer
-                        documentId={activeDocumentId}
+                        documentId={MAIN_PDF_DOCUMENT_ID}
                         pageIndex={layout.pageIndex}
                         style={{ pointerEvents: 'none' }}
                       />
                       <SelectionLayer
-                        documentId={activeDocumentId}
+                        documentId={MAIN_PDF_DOCUMENT_ID}
                         pageIndex={layout.pageIndex}
                         textStyle={PDF_TEXT_SELECTION_STYLE}
                       />
                       <div
+                        inert
                         aria-hidden="true"
                         data-owned-annotation-layer
                         style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
@@ -271,7 +299,7 @@ export function PdfWorkspace({
                               const transformed = positionOwnedRect(
                                 page,
                                 layout,
-                                activeDocument.rotation,
+                                mainDocument.rotation,
                                 rect,
                               );
                               return (
@@ -300,7 +328,7 @@ export function PdfWorkspace({
                           const page = activePdf.pages[layout.pageIndex];
                           const rect = group.rects[0];
                           if (!annotation || !page || !rect) return null;
-                          const transformed = positionOwnedRect(page, layout, activeDocument.rotation, rect);
+                          const transformed = positionOwnedRect(page, layout, mainDocument.rotation, rect);
                           return (
                             <button
                               key={group.id}
@@ -329,7 +357,7 @@ export function PdfWorkspace({
                         const transformed = positionOwnedRect(
                           page,
                           layout,
-                          activeDocument.rotation,
+                          mainDocument.rotation,
                           {
                             x: keyboardPageNoteCursor.x,
                             y: keyboardPageNoteCursor.y,
@@ -362,8 +390,16 @@ export function PdfWorkspace({
                         style={{ pointerEvents: 'none' }}
                       >
                         <AnnotationLayer
-                          documentId={activeDocumentId}
+                          documentId={MAIN_PDF_DOCUMENT_ID}
                           pageIndex={layout.pageIndex}
+                          annotationRenderers={[...sourceAnnotationVisualRenderers()]}
+                        />
+                      </div>
+                      <div data-source-link-layer>
+                        <AnnotationLayer
+                          documentId={MAIN_PDF_DOCUMENT_ID}
+                          pageIndex={layout.pageIndex}
+                          annotationRenderers={[...linkRenderers]}
                         />
                       </div>
                     </PagePointerProvider>
@@ -384,6 +420,17 @@ export function PdfWorkspace({
                 />
               </ZoomGestureWrapper>
             </Viewport>
+            {referenceViewportHost && referenceDocument ? (
+              <ReferencePdfViewport
+                documentId={REFERENCE_PDF_DOCUMENT_ID}
+                documentState={referenceDocument}
+                documentGeneration={documentGeneration}
+                host={referenceViewportHost}
+                {...(onViewerInteraction === undefined ? {} : { onInteraction: onViewerInteraction })}
+                {...(onReferenceViewportElement === undefined ? {} : { onViewportElement: onReferenceViewportElement })}
+              />
+            ) : null}
+            </>
           );
         }}
       </EmbedPDF>

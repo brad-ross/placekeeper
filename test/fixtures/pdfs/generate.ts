@@ -6,6 +6,8 @@ import {
   PDFDocument,
   PDFHexString,
   PDFName,
+  type PDFObject,
+  type PDFPage,
   PDFString,
   StandardFonts,
   degrees,
@@ -140,8 +142,236 @@ async function hostileActionsPdf() {
   );
   await document.attach(new TextEncoder().encode('Untrusted embedded fixture payload.'), 'payload.txt', {
     mimeType: 'text/plain',
-    description: 'U1 inert embedded-file fixture',
+    description: 'Inert embedded-file fixture',
   });
+  return document.save({ useObjectStreams: false });
+}
+
+async function referenceNavigationPdf() {
+  const document = await PDFDocument.create();
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  const pages = Array.from({ length: 4 }, (_, index) => {
+    const page = document.addPage([612, 792]);
+    page.drawText(`Reference navigation fixture — page ${index + 1}`, {
+      x: 72,
+      y: 730,
+      size: 16,
+      font,
+    });
+    return page;
+  });
+  const [tocPage, primaryPage, detailPage, hostilePage] = pages;
+  if (!tocPage || !primaryPage || !detailPage || !hostilePage) {
+    throw new Error('reference navigation fixture requires four pages');
+  }
+  tocPage.drawText('Body TOC: repeated, aliased, page-only, and distinct-coordinate links', {
+    x: 72,
+    y: 690,
+    size: 11,
+    font,
+  });
+  primaryPage.drawText('Primary target. Follow the target-to-target link for details.', {
+    x: 72,
+    y: 640,
+    size: 11,
+    font,
+  });
+  detailPage.drawText('Detail target with a footnote return to the body TOC.', {
+    x: 72,
+    y: 430,
+    size: 11,
+    font,
+  });
+  hostilePage.drawText('Rejected URI, RemoteGoto, Launch, malformed, missing, and out-of-bounds links.', {
+    x: 72,
+    y: 690,
+    size: 10,
+    font,
+  });
+
+  const context = document.context;
+  const primaryDestination = context.obj([
+    primaryPage.ref,
+    PDFName.of('XYZ'),
+    72,
+    640,
+    0,
+  ]);
+  const detailDestination = context.obj([
+    detailPage.ref,
+    PDFName.of('XYZ'),
+    72,
+    430,
+    0,
+  ]);
+  const distinctPrimaryDestination = context.obj([
+    primaryPage.ref,
+    PDFName.of('XYZ'),
+    72,
+    320,
+    0,
+  ]);
+  document.catalog.set(
+    PDFName.of('Dests'),
+    context.obj({
+      PrimaryTarget: primaryDestination,
+      PrimaryAlias: primaryDestination,
+      DetailTarget: detailDestination,
+    }),
+  );
+
+  type LinkOptions = {
+    readonly rect: readonly [number, number, number, number];
+    readonly contents?: string;
+    readonly subject?: string;
+    readonly destination?: PDFObject;
+    readonly action?: PDFObject;
+  };
+  function addLink(page: PDFPage, options: LinkOptions): void {
+    const annotation = context.obj({
+      Type: 'Annot',
+      Subtype: 'Link',
+      Rect: [...options.rect],
+      Border: [0, 0, 1],
+      ...(options.contents === undefined
+        ? {}
+        : { Contents: PDFHexString.fromText(options.contents) }),
+      ...(options.subject === undefined
+        ? {}
+        : { Subj: PDFHexString.fromText(options.subject) }),
+    });
+    if (options.destination !== undefined) {
+      annotation.set(PDFName.of('Dest'), options.destination);
+    }
+    if (options.action !== undefined) {
+      annotation.set(PDFName.of('A'), options.action);
+    }
+    let annotations = page.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
+    if (!annotations) {
+      annotations = PDFArray.withContext(context);
+      page.node.set(PDFName.of('Annots'), annotations);
+    }
+    annotations.push(context.register(annotation));
+  }
+
+  addLink(tocPage, {
+    rect: [72, 650, 230, 670],
+    contents: 'Primary result',
+    destination: primaryDestination,
+  });
+  addLink(tocPage, {
+    rect: [72, 620, 230, 640],
+    subject: 'Repeated primary result',
+    destination: primaryDestination,
+  });
+  addLink(tocPage, {
+    rect: [72, 590, 230, 610],
+    contents: 'Named alias for primary result',
+    action: context.obj({ S: 'GoTo', D: PDFName.of('PrimaryAlias') }),
+  });
+  addLink(tocPage, {
+    rect: [72, 560, 230, 580],
+    contents: 'Page-only detail destination',
+    destination: context.obj([detailPage.ref, PDFName.of('Fit')]),
+  });
+  addLink(tocPage, {
+    rect: [72, 530, 230, 550],
+    contents: 'Distinct coordinate on primary page',
+    destination: distinctPrimaryDestination,
+  });
+  addLink(tocPage, {
+    rect: [72, 500, 360, 520],
+    contents: '\u202e<img src=x onerror=alert(1)>\u0000\n hostile\tlabel',
+    destination: detailDestination,
+  });
+  addLink(primaryPage, {
+    rect: [72, 600, 300, 620],
+    contents: 'Target-to-target detail link',
+    action: context.obj({ S: 'GoTo', D: PDFName.of('DetailTarget') }),
+  });
+  addLink(detailPage, {
+    rect: [72, 390, 250, 410],
+    contents: 'Footnote return to body TOC',
+    destination: context.obj([tocPage.ref, PDFName.of('XYZ'), 72, 690, 0]),
+  });
+
+  addLink(hostilePage, {
+    rect: [72, 650, 200, 668],
+    contents: 'Rejected external URI',
+    action: context.obj({ S: 'URI', URI: PDFString.of('https://example.invalid/reference') }),
+  });
+  addLink(hostilePage, {
+    rect: [72, 620, 200, 638],
+    contents: 'Rejected cross-document destination',
+    action: context.obj({
+      S: 'GoToR',
+      F: PDFString.of('other-document.pdf'),
+      D: PDFString.of('ExternalTarget'),
+    }),
+  });
+  addLink(hostilePage, {
+    rect: [72, 590, 200, 608],
+    contents: 'Rejected launch action',
+    action: context.obj({ S: 'Launch', F: PDFString.of('/Applications/Calculator.app') }),
+  });
+  addLink(hostilePage, {
+    rect: [72, 560, 200, 578],
+    contents: 'Malformed local destination',
+    destination: context.obj([PDFString.of('not-a-page'), PDFName.of('XYZ'), 0, 0, 0]),
+  });
+  addLink(hostilePage, {
+    rect: [72, 530, 200, 548],
+    contents: 'Missing destination',
+  });
+  addLink(hostilePage, {
+    rect: [72, 500, 200, 518],
+    contents: 'Out-of-bounds destination',
+    destination: context.obj([99, PDFName.of('Fit')]),
+  });
+
+  const outlines = context.obj({ Type: 'Outlines', Count: 4 });
+  const outlinesRef = context.register(outlines);
+  const overview = context.obj({
+    Title: PDFHexString.fromText('Overview'),
+    Parent: outlinesRef,
+    Dest: PDFName.of('PrimaryTarget'),
+  });
+  const details = context.obj({
+    Title: PDFHexString.fromText('Details'),
+    Parent: outlinesRef,
+    Dest: [detailPage.ref, PDFName.of('Fit')],
+    Count: 2,
+  });
+  const overviewRef = context.register(overview);
+  const detailsRef = context.register(details);
+  const nested = context.obj({
+    Title: PDFHexString.fromText('Nested result'),
+    Parent: detailsRef,
+    A: { S: 'GoTo', D: PDFName.of('DetailTarget') },
+  });
+  const hostileOutline = context.obj({
+    Title: PDFHexString.fromText('\u202e<script>alert(1)</script>\u0000 hostile outline'),
+    Parent: detailsRef,
+    Dest: primaryDestination,
+  });
+  const nestedRef = context.register(nested);
+  const hostileOutlineRef = context.register(hostileOutline);
+  overview.set(PDFName.of('Next'), detailsRef);
+  details.set(PDFName.of('Prev'), overviewRef);
+  details.set(PDFName.of('First'), nestedRef);
+  details.set(PDFName.of('Last'), hostileOutlineRef);
+  nested.set(PDFName.of('Next'), hostileOutlineRef);
+  hostileOutline.set(PDFName.of('Prev'), nestedRef);
+  outlines.set(PDFName.of('First'), overviewRef);
+  outlines.set(PDFName.of('Last'), detailsRef);
+  document.catalog.set(PDFName.of('Outlines'), outlinesRef);
+  document.catalog.set(PDFName.of('PageMode'), PDFName.of('UseOutlines'));
+
+  await document.attach(
+    new TextEncoder().encode('Embedded content must remain local and inert.'),
+    'reference-payload.txt',
+    { mimeType: 'text/plain', description: 'Rejected embedded-content fixture' },
+  );
   return document.save({ useObjectStreams: false });
 }
 
@@ -262,6 +492,7 @@ await Promise.all([
   writeFixture('rotation-180-crop.pdf', await textPdf({ rotation: 180, crop: true })),
   writeFixture('rotation-270-crop.pdf', await textPdf({ rotation: 270, crop: true })),
   writeFixture('hostile-actions.pdf', await hostileActionsPdf()),
+  writeFixture('reference-navigation.pdf', await referenceNavigationPdf()),
   writeFixture('preservation-corpus.pdf', await preservationCorpusPdf()),
   writeFixture(
     'encrypted-no-annotation.pdf',
