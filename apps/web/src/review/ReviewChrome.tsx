@@ -292,7 +292,7 @@ export function ReviewChrome({
         <button type="button" className="review-chrome__icon-control" data-review-page-step="next" aria-label="Next page" aria-describedby={pageUnavailable} disabled={!viewerState.pageReady || viewerState.currentPage >= viewerState.totalPages} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.nextPage())}><ReviewIcon name="chevron-right" /></button>
         <button type="button" className="review-chrome__icon-control" data-review-zoom-action="out" aria-label="Zoom out" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomOut())}><ReviewIcon name="minus" /></button>
         {viewerState.zoomReady ? (
-          <span className="review-chrome__zoom-control" data-review-stat>
+          <span className="review-chrome__zoom-control" data-review-stat aria-label="Zoom level">
             {editingZoom ? (
               <>
                 <span className="review-chrome__zoom-editor" data-review-zoom-editor>

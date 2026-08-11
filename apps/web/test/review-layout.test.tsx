@@ -472,6 +472,7 @@ describe('review shell layout and accessibility contract', () => {
     const html = renderChrome(true, true);
 
     expect(html).toContain('class="review-chrome__zoom-trigger review-chrome__stat"');
+    expect(html).toContain('class="review-chrome__zoom-control" data-review-stat="true" aria-label="Zoom level"');
     expect(html).toContain('aria-label="Current zoom 100 percent. Enter a zoom percentage"');
     expect(html).toContain('>100<span aria-hidden="true">%</span></button>');
     expect(html).not.toContain('aria-label="Zoom percentage"');
