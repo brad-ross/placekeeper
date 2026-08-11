@@ -373,6 +373,7 @@
 .pdf-workspace__viewport {
   height: 100%;
   overflow: auto;
+  scrollbar-gutter: stable;
   background: var(--review-surface-canvas);
 }
 

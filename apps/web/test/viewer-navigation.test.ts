@@ -156,9 +156,12 @@ function navigationHarness(options: {
   manualZoom?: boolean;
   omitZoomLayoutEvent?: boolean;
   stickyScrollActivity?: boolean;
+  staleViewportMetricsReads?: number;
   staleCurrentPageWithThirdVisible?: boolean;
   runway?: ViewerRunway;
   viewportGap?: number;
+  viewportClientWidth?: number;
+  initialPageTop?: number;
   pageRotation?: Rotation;
   documentRotation?: Rotation;
   updateGeometry?: boolean;
@@ -183,7 +186,7 @@ function navigationHarness(options: {
   };
   const pageRect: RectState = {
     left: options.constrainedHorizontal ? 10 : -100,
-    top: -200,
+    top: options.initialPageTop ?? -200,
     width: 600,
     height: 800,
   };
@@ -209,6 +212,18 @@ function navigationHarness(options: {
   });
   const viewportElement = {
     getBoundingClientRect: () => domRect(viewportRect),
+    get clientWidth() { return options.viewportClientWidth ?? viewportRect.width; },
+    get clientHeight() { return viewportRect.height; },
+    get scrollLeft() { return viewportScrollLeft; },
+    get scrollTop() { return viewportScrollTop; },
+    get scrollWidth() {
+      return options.artificialHorizontalRunway
+        ? 1_000
+        : options.constrainedHorizontal ? pageRect.width : 2_000;
+    },
+    get scrollHeight() { return 2_000; },
+    clientLeft: 0,
+    clientTop: 0,
   } as unknown as HTMLElement;
   const root = {
     querySelector: (selector: string) => {
@@ -239,6 +254,7 @@ function navigationHarness(options: {
   let scrolling = false;
   let viewportScrollLeft = 0;
   let viewportScrollTop = options.constrainedVertical === 'end' ? 1_600 : 0;
+  let staleViewportMetricsReads = options.staleViewportMetricsReads ?? 0;
   const storeListeners = new Set<() => void>();
   const zoomListeners = new Set<(event: { newZoom: number }) => void>();
   const layoutListeners = new Set<() => void>();
@@ -312,21 +328,25 @@ function navigationHarness(options: {
     },
   };
   const viewportScope = {
-    getMetrics: () => ({
-      width: viewportRect.width,
-      height: viewportRect.height,
-      clientWidth: viewportRect.width,
-      clientHeight: viewportRect.height,
-      scrollTop: viewportScrollTop,
-      scrollLeft: viewportScrollLeft,
-      scrollWidth: options.artificialHorizontalRunway
-        ? 1_000
-        : options.constrainedHorizontal ? pageRect.width : 2_000,
-      scrollHeight: 2_000,
-      clientLeft: 0,
-      clientTop: 0,
-      relativePosition: { x: 0, y: 0 },
-    }),
+    getMetrics: () => {
+      const scrollHeight = staleViewportMetricsReads > 0 ? 2_400 : 2_000;
+      staleViewportMetricsReads = Math.max(0, staleViewportMetricsReads - 1);
+      return {
+        width: viewportRect.width,
+        height: viewportRect.height,
+        clientWidth: options.viewportClientWidth ?? viewportRect.width,
+        clientHeight: viewportRect.height,
+        scrollTop: viewportScrollTop,
+        scrollLeft: viewportScrollLeft,
+        scrollWidth: options.artificialHorizontalRunway
+          ? 1_000
+          : options.constrainedHorizontal ? pageRect.width : 2_000,
+        scrollHeight,
+        clientLeft: 0,
+        clientTop: 0,
+        relativePosition: { x: 0, y: 0 },
+      };
+    },
     scrollTo: (position: { x: number; y: number }) => {
       log.push('viewport-scroll');
       if (options.throwViewportScroll) throw new Error('viewport command failed');
@@ -421,6 +441,33 @@ describe('viewer navigation adapter', () => {
     expect(await harness.navigation.fitToWidth()).toBe(true);
     expect(harness.log[0]).toBe(`zoom:${580 / 600}`);
     expect(harness.log.at(-1)).toBe('scroll');
+  });
+
+  it('excludes a non-overlay vertical scrollbar gutter from fit width', async () => {
+    const harness = navigationHarness({
+      constrainedHorizontal: true,
+      viewportClientWidth: 605,
+      viewportGap: 10,
+    });
+
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    expect(harness.log[0]).toBe(`zoom:${585 / 600}`);
+    expect(harness.pageRect.left).toBeCloseTo(10);
+    expect(harness.pageRect.left + harness.pageRect.width).toBeCloseTo(595);
+  });
+
+  it('uses live scrollport boundary metrics when plugin metrics remain stale', async () => {
+    const harness = navigationHarness({
+      constrainedVertical: 'end',
+      initialPageTop: -400,
+      staleViewportMetricsReads: Number.POSITIVE_INFINITY,
+      viewportGap: 10,
+      viewportWidth: 400,
+    });
+
+    expect(await harness.navigation.fitToWidth()).toBe(true);
+    expect(harness.log[0]).toBe(`zoom:${380 / 600}`);
+    expect(harness.navigation.captureLocation()?.zoom).toBeCloseTo(380 / 600);
   });
 
   it('subtracts right runway but not bottom runway from fit width', async () => {

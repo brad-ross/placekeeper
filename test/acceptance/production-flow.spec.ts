@@ -1274,17 +1274,23 @@ test('fits a real PDF to closed, bottom, and resizable right reading widths as a
   await expect(mainPage).toBeVisible();
   await waitForRenderedPageImage(mainPage);
   await expect(fitWidth).toBeEnabled();
+  await expect(mainViewport).toHaveCSS('scrollbar-gutter', 'stable');
   await mainWorkspace.evaluate((element) => element.setAttribute('data-fit-width-main-mount', 'stable'));
   await expect(page.getByLabel('Current page')).toHaveText('1 / 4');
 
   const horizontalGeometry = async (rightEdge?: number) => {
-    const [viewportBounds, pageBounds] = await Promise.all([
+    const [viewportBounds, pageBounds, clientBox] = await Promise.all([
       mainViewport.boundingBox(),
       mainPage.boundingBox(),
+      mainViewport.evaluate((element) => ({
+        left: element.clientLeft,
+        width: element.clientWidth,
+      })),
     ]);
     if (!viewportBounds || !pageBounds) throw new Error('Fit Width geometry is unavailable.');
-    const intervalLeft = viewportBounds.x;
-    const intervalRight = rightEdge ?? viewportBounds.x + viewportBounds.width;
+    const intervalLeft = viewportBounds.x + clientBox.left;
+    const clientRight = intervalLeft + clientBox.width;
+    const intervalRight = Math.min(rightEdge ?? clientRight, clientRight);
     return {
       pageWidth: pageBounds.width,
       intervalWidth: intervalRight - intervalLeft,
@@ -1388,6 +1394,21 @@ test('fits a real PDF to closed, bottom, and resizable right reading widths as a
   await expect(referenceWorkspace).toHaveAttribute('data-fit-width-workspace-mount', 'stable');
   await expect(primaryTab).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByLabel('Current page')).toHaveText('1 / 4');
+
+  await openFreshProductionFixture(page, pdf, 'Annotation tray Fit Width launch failed');
+  await expect(mainPage).toBeVisible();
+  await waitForRenderedPageImage(mainPage);
+  await page.getByRole('button', { name: 'Open right workspace' }).click();
+  const toolsWorkspace = page.locator('#review-tools-workspace');
+  await expect(toolsWorkspace).toHaveAttribute('data-tools-workspace-open', 'true');
+  await expect.poll(() => toolsWorkspace.evaluate((element) => getComputedStyle(element).transform))
+    .toBe('none');
+  const toolsBounds = await toolsWorkspace.boundingBox();
+  if (!toolsBounds) throw new Error('Right annotation workspace has no bounds.');
+
+  await fitAndWait();
+  await expectFitted(standardGap, toolsBounds.x);
+  await expect(zoomTrigger()).not.toHaveText('100%');
 });
 
 test('minimally reveals the PDF beside the adaptive annotations surface and restores untouched movement', async ({ page }) => {

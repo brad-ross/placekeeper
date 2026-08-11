@@ -447,15 +447,20 @@ export function createViewerNavigation(
     }
   };
 
-  const effectiveViewportRect = (viewportRect: DOMRect): EffectiveViewportRect => {
+  const effectiveViewportRect = (viewportElement: HTMLElement): EffectiveViewportRect => {
+    const bounds = viewportElement.getBoundingClientRect();
+    const left = bounds.left + viewportElement.clientLeft;
+    const top = bounds.top + viewportElement.clientTop;
+    const scrollportRight = Math.min(bounds.right, left + viewportElement.clientWidth);
+    const scrollportBottom = Math.min(bounds.bottom, top + viewportElement.clientHeight);
     const runway = currentRunway();
-    const right = Math.max(viewportRect.left, viewportRect.right - runway.right);
-    const bottom = Math.max(viewportRect.top, viewportRect.bottom - runway.bottom);
-    const width = right - viewportRect.left;
-    const height = bottom - viewportRect.top;
+    const right = Math.max(left, Math.min(scrollportRight, bounds.right - runway.right));
+    const bottom = Math.max(top, Math.min(scrollportBottom, bounds.bottom - runway.bottom));
+    const width = right - left;
+    const height = bottom - top;
     return {
-      left: viewportRect.left,
-      top: viewportRect.top,
+      left,
+      top,
       right,
       bottom,
       width,
@@ -467,14 +472,13 @@ export function createViewerNavigation(
     const root = options.root();
     const viewportElement = root?.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
     if (!viewportElement) return location.alignment;
-    const fullViewport = viewportElement.getBoundingClientRect();
-    const effectiveViewport = effectiveViewportRect(fullViewport);
-    if (!validDimension(fullViewport.width) || !validDimension(fullViewport.height)) {
+    const effectiveViewport = effectiveViewportRect(viewportElement);
+    if (!validDimension(viewportElement.clientWidth) || !validDimension(viewportElement.clientHeight)) {
       return location.alignment;
     }
     return {
-      xPercent: effectiveViewport.width / fullViewport.width * location.alignment.xPercent,
-      yPercent: effectiveViewport.height / fullViewport.height * location.alignment.yPercent,
+      xPercent: effectiveViewport.width / viewportElement.clientWidth * location.alignment.xPercent,
+      yPercent: effectiveViewport.height / viewportElement.clientHeight * location.alignment.yPercent,
     };
   };
 
@@ -489,7 +493,7 @@ export function createViewerNavigation(
     const pageElement = root?.querySelector<HTMLElement>(pageSelector(pageIndex)) ?? null;
     if (!page || !viewportElement || !pageElement) return null;
     const viewportRect = measured?.viewportRect
-      ?? effectiveViewportRect(viewportElement.getBoundingClientRect());
+      ?? effectiveViewportRect(viewportElement);
     const pageRect = measured?.pageRect ?? pageElement.getBoundingClientRect();
     const rotation = combinePageRotation(page.rotation, viewer.documentRotation);
     const rotatedPage = transformSize(page.size, rotation, 1);
@@ -510,7 +514,7 @@ export function createViewerNavigation(
     const viewport = root?.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
     const page = root?.querySelector<HTMLElement>('[data-page-index]');
     if (!viewport || !page) return false;
-    const viewportRect = effectiveViewportRect(viewport.getBoundingClientRect());
+    const viewportRect = effectiveViewportRect(viewport);
     const pageRect = page.getBoundingClientRect();
     return validDimension(viewportRect.width)
       && validDimension(viewportRect.height)
@@ -526,7 +530,7 @@ export function createViewerNavigation(
     const root = options.root();
     const viewportElement = root?.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
     if (!root || !viewportElement) return null;
-    const viewportRect = effectiveViewportRect(viewportElement.getBoundingClientRect());
+    const viewportRect = effectiveViewportRect(viewportElement);
     let best: { readonly pageIndex: number; readonly pageRect: DOMRect } | null = null;
     let bestVisibleArea = 0;
     for (const pageElement of root.querySelectorAll<HTMLElement>('[data-page-index]')) {
@@ -655,7 +659,16 @@ export function createViewerNavigation(
       x: viewportRect.left + viewportRect.width * location.alignment.xPercent / 100,
       y: viewportRect.top + viewportRect.height * location.alignment.yPercent / 100,
     };
-    const metrics = viewer.viewport.getMetrics();
+    const viewportElement = options.root()
+      ?.querySelector<HTMLElement>('[data-viewer-framing-viewport]') ?? null;
+    const metrics = viewportElement === null ? viewer.viewport.getMetrics() : {
+      scrollLeft: viewportElement.scrollLeft,
+      scrollTop: viewportElement.scrollTop,
+      scrollWidth: viewportElement.scrollWidth,
+      scrollHeight: viewportElement.scrollHeight,
+      clientWidth: viewportElement.clientWidth,
+      clientHeight: viewportElement.clientHeight,
+    };
     // A fitted page can be smaller than the readable viewport while the
     // document stack or an interface runway still reports scroll range. When
     // the entire page is visible on an axis, that axis is already a stronger
