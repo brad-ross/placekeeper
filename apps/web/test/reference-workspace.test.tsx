@@ -488,7 +488,7 @@ describe('outline navigator', () => {
         onOpenReference={() => undefined}
       />,
     );
-    const rows = html.match(/<div class="outline-navigator__row">[\s\S]*?<\/div>/gu) ?? [];
+    const rows = html.match(/<div class="outline-navigator__row"[^>]*>[\s\S]*?<\/div>/gu) ?? [];
     const groupingRow = rows.find((row) => row.includes('Appendices')) ?? '';
     const introductionRow = rows.find((row) => row.includes('Introduction')) ?? '';
     const resultsRow = rows.find((row) => row.includes('Results')) ?? '';
@@ -503,6 +503,11 @@ describe('outline navigator', () => {
     expect(introductionRow).toContain('title="Open in References"');
     expect(introductionRow).toContain('lucide-panels-top-left');
     expect(resultsRow).toContain('aria-current="location"');
+    expect(resultsRow).toContain('data-current="true"');
+    expect(resultsRow).toContain(
+      '<span class="outline-navigator__summary"><span class="outline-navigator__title">Results</span><small class="outline-navigator__page" aria-hidden="true">· 8</small></span>',
+    );
+    expect(resultsRow).not.toContain('>Page 8</small>');
     expect(html.match(/class="outline-navigator__reference"/g)).toHaveLength(3);
   });
 
