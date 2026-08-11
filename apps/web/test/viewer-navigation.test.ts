@@ -889,6 +889,33 @@ describe('viewer navigation adapter', () => {
       'reference-fit-width',
     )).toBe(true);
     expect(harness.pageRect.width).toBe(600);
+    expect(harness.pageRect.left).toBeCloseTo(0);
+  });
+
+  it('keeps ordinary navigation aligned to the live client box when a classic scrollbar is present', async () => {
+    const harness = navigationHarness({
+      initialViewportWidth: 620,
+      classicScrollbarWidth: 20,
+    });
+
+    expect(await harness.navigation.applyLocation({
+      pageIndex: 0,
+      anchor: { x: 300, y: 400 },
+      alignment: { xPercent: 50, yPercent: 50 },
+      zoom: 1,
+    })).toBe(true);
+    expect(harness.log).toEqual(['scroll']);
+  });
+
+  it('accepts an unobscured destination anchor when a right runway covers only the page edge', async () => {
+    const harness = navigationHarness({
+      artificialHorizontalRunway: true,
+      constrainedHorizontal: true,
+      runway: { right: 200, bottom: 0 },
+    });
+
+    expect(await harness.navigation.applyTarget(target(PdfZoomMode.FitPage))).toBe(true);
+    expect(harness.log).not.toContain('viewport-scroll');
   });
 
   it('reapplies a reference fit once when the committed width changes during navigation', async () => {

@@ -493,15 +493,13 @@ export function createViewerNavigation(
     const runway = currentRunway();
     const right = Math.max(left, Math.min(scrollportRight, bounds.right - runway.right));
     const bottom = Math.max(top, Math.min(scrollportBottom, bounds.bottom - runway.bottom));
-    const width = right - left;
-    const height = bottom - top;
     return {
       left,
       top,
       right,
       bottom,
-      width,
-      height,
+      width: right - left,
+      height: bottom - top,
     };
   };
 
@@ -737,7 +735,14 @@ export function createViewerNavigation(
       && pageRect.right <= viewportRect.right + coordinateTolerance;
     const verticalPageFullyVisible = pageRect.top >= viewportRect.top - coordinateTolerance
       && pageRect.bottom <= viewportRect.bottom + coordinateTolerance;
-    const horizontalMatches = horizontalPageFullyVisible || axisMatchesOrIsConstrained(
+    // With an overlay runway, EmbedPDF can center a page in its full layout
+    // while the semantic destination anchor is already unobscured. Requiring
+    // exact centering in that case turns a successful page jump into rollback.
+    const horizontalAnchorVisible = actual.x >= viewportRect.left - coordinateTolerance
+      && actual.x <= viewportRect.right + coordinateTolerance;
+    const horizontalMatches = horizontalPageFullyVisible
+      || (currentRunway().right > coordinateTolerance && horizontalAnchorVisible)
+      || axisMatchesOrIsConstrained(
       actual.x,
       expected.x,
       metrics.scrollLeft,
@@ -746,7 +751,7 @@ export function createViewerNavigation(
       pageRect.left >= viewportRect.left - coordinateTolerance,
       pageRect.right <= viewportRect.right + coordinateTolerance,
       true,
-    );
+      );
     const verticalMatches = verticalPageFullyVisible || axisMatchesOrIsConstrained(
       actual.y,
       expected.y,
@@ -898,6 +903,11 @@ export function createViewerNavigation(
     if (!await scrollAndWait(viewer, location, operation, deadline)) return false;
     if (!operationIsCurrent(operation)) return false;
     try {
+      const rightRunwayActive = currentRunway().right > coordinateTolerance;
+      if (rightRunwayActive && !locationMatchesView(viewer, location, true)) {
+        if (!positionLocationInClientViewport(viewer, location, operation)) return false;
+        if (!await waitForFrames(operation, 2, deadline)) return false;
+      }
       return locationMatchesView(viewer, location, true);
     } catch {
       return false;
@@ -919,6 +929,55 @@ export function createViewerNavigation(
       if (activeOperation?.operation === operation) activeOperation = null;
     }
   };
+
+  function positionLocationInClientViewport(
+    viewer: ActiveViewer,
+    location: PdfViewerLocation,
+    operation: NavigationOperation,
+    requireTargetScale = true,
+  ): boolean {
+    if (!operationIsCurrent(operation)) return false;
+    const geometry = pageGeometry(viewer, location.pageIndex);
+    if (geometry === null) return false;
+    if (
+      requireTargetScale
+      && Math.abs(geometry.scale - location.zoom) > zoomTolerance
+    ) return false;
+    const transformedAnchor = transformPosition(
+      geometry.page.size,
+      location.anchor,
+      geometry.rotation,
+      geometry.scale,
+    );
+    const horizontalCorrection = geometry.pageRect.left
+      + transformedAnchor.x
+      - geometry.viewportRect.left
+      - geometry.viewportRect.width * location.alignment.xPercent / 100;
+    const verticalCorrection = geometry.pageRect.top
+      + transformedAnchor.y
+      - geometry.viewportRect.top
+      - geometry.viewportRect.height * location.alignment.yPercent / 100;
+    if (
+      Math.abs(horizontalCorrection) > coordinateTolerance
+      || Math.abs(verticalCorrection) > coordinateTolerance
+    ) {
+      const correctedScroll = {
+        left: geometry.viewportElement.scrollLeft + horizontalCorrection,
+        top: geometry.viewportElement.scrollTop + verticalCorrection,
+      };
+      operation.mutated = true;
+      viewer.viewport.scrollTo({
+        x: correctedScroll.left,
+        y: correctedScroll.top,
+        behavior: 'instant',
+      });
+      geometry.viewportElement.scrollTo({
+        ...correctedScroll,
+        behavior: 'instant',
+      });
+    }
+    return true;
+  }
 
   const fitToWidth = async (
     waitForSettledGeometry?: WaitForSettledViewerGeometry,
@@ -980,49 +1039,9 @@ export function createViewerNavigation(
         zoom: requestedZoom,
       };
       let observerPositionedPage = false;
-      const positionFittedPage = (requireTargetScale = true): boolean => {
-        if (!operationIsCurrent(operation)) return false;
-        const fittedGeometry = pageGeometry(viewer, visible.pageIndex);
-        if (fittedGeometry === null) return false;
-        if (
-          requireTargetScale
-          && Math.abs(fittedGeometry.scale - requestedZoom) > zoomTolerance
-        ) return false;
-        const transformedAnchor = transformPosition(
-          fittedGeometry.page.size,
-          location.anchor,
-          fittedGeometry.rotation,
-          fittedGeometry.scale,
-        );
-        const horizontalCorrection = fittedGeometry.pageRect.left
-          + transformedAnchor.x
-          - fittedGeometry.viewportRect.left
-          - fittedGeometry.viewportRect.width * location.alignment.xPercent / 100;
-        const verticalCorrection = fittedGeometry.pageRect.top
-          + transformedAnchor.y
-          - fittedGeometry.viewportRect.top
-          - fittedGeometry.viewportRect.height * location.alignment.yPercent / 100;
-        if (
-          Math.abs(horizontalCorrection) > coordinateTolerance
-          || Math.abs(verticalCorrection) > coordinateTolerance
-        ) {
-          const correctedScroll = {
-            left: fittedGeometry.viewportElement.scrollLeft + horizontalCorrection,
-            top: fittedGeometry.viewportElement.scrollTop + verticalCorrection,
-          };
-          operation.mutated = true;
-          viewer.viewport.scrollTo({
-            x: correctedScroll.left,
-            y: correctedScroll.top,
-            behavior: 'instant',
-          });
-          fittedGeometry.viewportElement.scrollTo({
-            ...correctedScroll,
-            behavior: 'instant',
-          });
-        }
-        return true;
-      };
+      const positionFittedPage = (requireTargetScale = true): boolean => (
+        positionLocationInClientViewport(viewer, location, operation, requireTargetScale)
+      );
       const fitDeadline = Date.now() + timeoutMs;
       const pageElement = options.root()?.querySelector<HTMLElement>(pageSelector(visible.pageIndex));
       if (pageElement && typeof ResizeObserver !== 'undefined') {
@@ -1257,6 +1276,7 @@ export function createViewerNavigation(
       // Viewport metrics can change while the portaled page tree settles. Resolve
       // again so fitted zoom/alignment use the committed viewport dimensions.
       const settledLocation = resolveTarget(viewer, target, policy);
+      let finalLocation = settledLocation;
       let applied = settledLocation
         ? await applyResolvedLocation(viewer, settledLocation, operation)
         : false;
@@ -1264,8 +1284,24 @@ export function createViewerNavigation(
         const refreshedLocation = resolveTarget(viewer, target, policy);
         if (refreshedLocation === null) {
           applied = false;
-        } else if (Math.abs(refreshedLocation.zoom - settledLocation.zoom) > zoomTolerance) {
-          applied = await applyResolvedLocation(viewer, refreshedLocation, operation);
+        } else {
+          finalLocation = refreshedLocation;
+          if (Math.abs(refreshedLocation.zoom - settledLocation.zoom) > zoomTolerance) {
+            applied = await applyResolvedLocation(viewer, refreshedLocation, operation);
+          }
+        }
+      }
+      if (applied && finalLocation && policy === 'reference-fit-width') {
+        applied = positionLocationInClientViewport(viewer, finalLocation, operation)
+          && await waitForFrames(operation, 2, Date.now() + timeoutMs)
+          && locationMatchesView(viewer, finalLocation, true);
+        if (applied) {
+          const currentGeometry = pageGeometry(viewer, finalLocation.pageIndex);
+          const expectedWidth = currentGeometry === null
+            ? Number.NaN
+            : currentGeometry.viewportRect.width - 2 * viewer.viewportGap;
+          applied = currentGeometry !== null
+            && Math.abs(currentGeometry.pageRect.width - expectedWidth) <= coordinateTolerance;
         }
       }
       if (!applied && !operation.signal.aborted && operation.mutated) {

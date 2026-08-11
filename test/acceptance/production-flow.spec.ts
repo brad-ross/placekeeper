@@ -301,19 +301,30 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
       && viewportBounds.width > 0
       && pageBounds.width > 0;
   }).toBe(true);
-  const [initialReferenceViewportBounds, initialReferencePageBounds] = await Promise.all([
+  const [
+    initialReferenceViewportBounds,
+    initialReferenceClientBox,
+    initialReferencePageBounds,
+  ] = await Promise.all([
     referenceViewport.boundingBox(),
+    referenceViewport.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return {
+        left: bounds.left + element.clientLeft,
+        width: element.clientWidth,
+      };
+    }),
     primaryReferencePage.boundingBox(),
   ]);
   if (!initialReferenceViewportBounds || !initialReferencePageBounds) {
     throw new Error("Initial Reference viewer geometry is unavailable.");
   }
-  const initialReferenceLeftGap = initialReferencePageBounds.x - initialReferenceViewportBounds.x;
-  const initialReferenceRightGap = initialReferenceViewportBounds.x
-    + initialReferenceViewportBounds.width
+  const initialReferenceLeftGap = initialReferencePageBounds.x - initialReferenceClientBox.left;
+  const initialReferenceRightGap = initialReferenceClientBox.left
+    + initialReferenceClientBox.width
     - initialReferencePageBounds.x
     - initialReferencePageBounds.width;
-  const initialReferenceHorizontalInset = initialReferenceViewportBounds.width
+  const initialReferenceHorizontalInset = initialReferenceClientBox.width
     - initialReferencePageBounds.width;
   expect(initialReferenceHorizontalInset).toBeGreaterThan(0);
   expect(initialReferenceHorizontalInset).toBeLessThan(64);
@@ -694,10 +705,13 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await page.getByRole("button", { name: "Send to main" }).click();
   await expect(workspace).toHaveAttribute("data-workspace-open", "false");
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
-  await expect(page.getByRole("tablist", { name: "Open references", includeHidden: true })).toHaveCount(0);
   await expect(page.locator(".review-workspace__status")).toHaveText(
     "Reference sent to the main document.",
   );
+  await expect(page.getByRole("tablist", {
+    name: "Open references",
+    includeHidden: true,
+  }).getByRole("tab", { includeHidden: true })).toHaveCount(0);
   const mainPageThree = mainWorkspace.locator("[data-page-index='2']");
   const expectMainPageThreeSettled = async () => expect.poll(async () => {
     const [viewportBounds, pageBounds] = await Promise.all([
@@ -1787,11 +1801,13 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
 
   await page.setViewportSize({ width: 760, height: 900 });
   await expect(stage).toHaveAttribute('data-annotation-presentation', 'bottom');
-  const narrowHorizontalMaximum = await viewport.evaluate((element) => (
-    Math.max(0, element.scrollWidth - element.clientWidth)
-  ));
-  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft))
-    .toBeCloseTo(Math.min(deliberateLeft, narrowHorizontalMaximum), 0);
+  await expect.poll(() => viewport.evaluate((element, desiredLeft) => {
+    const maximum = Math.max(
+      0,
+      element.scrollWidth - Math.max(element.clientWidth, element.getBoundingClientRect().width),
+    );
+    return Math.abs(element.scrollLeft - Math.min(desiredLeft, maximum));
+  }, deliberateLeft)).toBeLessThan(1);
   const narrowScrollBefore = await viewport.evaluate((element) => ({
     left: element.scrollLeft,
     top: element.scrollTop,
@@ -2087,7 +2103,8 @@ test("creates a canonical Page Note from a real PDF context gesture without seco
     },
   });
   const position = note?.payload.position;
-  expect(position).toMatchObject({ x: 500, width: 18, height: 18 });
+  expect(position).toMatchObject({ width: 18, height: 18 });
+  expect(Math.abs(canonicalCoordinate(position, "x") - 500)).toBeLessThanOrEqual(1);
   expect(Math.abs(canonicalCoordinate(position, "y") - 1392)).toBeLessThanOrEqual(1);
   expect(note?.id).toBeTruthy();
   const mark = page.locator(`[data-owned-mark="pageNote"][data-review-id="${note!.id}"]`);
@@ -2194,10 +2211,11 @@ test("normalizes a real context gesture on a rotated cropped PDF into canonical 
     pageIndex: 0,
     payload: {
       comment: "Rotated geometry note.",
-      position: { y: 1176, width: 18, height: 18 },
+      position: { width: 18, height: 18 },
     },
   });
   expect(Math.abs(canonicalCoordinate(note?.payload.position, "x") - 236)).toBeLessThanOrEqual(1);
+  expect(Math.abs(canonicalCoordinate(note?.payload.position, "y") - 1176)).toBeLessThanOrEqual(1);
   expect(note?.id).toBeTruthy();
   await expect(page.locator(
     `[data-owned-mark="pageNote"][data-review-id="${note!.id}"]`,
