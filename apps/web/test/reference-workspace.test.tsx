@@ -46,8 +46,10 @@ describe('link action chooser', () => {
       <LinkActionMenuContent
         label="Lemma A.7"
         pageContext="Page 18"
+        sourceScope="main"
         firstItemRef={() => undefined}
         secondItemRef={() => undefined}
+        thirdItemRef={() => undefined}
         onChoose={() => undefined}
         onKeyDown={() => undefined}
       />,
@@ -57,6 +59,7 @@ describe('link action chooser', () => {
     expect(html).toContain(`id="${PDF_LINK_ACTION_MENU_ID}"`);
     expect(html).toMatch(/aria-label="Open in References"[\s\S]*aria-label="Open in main"/u);
     expect(html).toMatch(/title="Open in References"[\s\S]*title="Open in main"/u);
+    expect(html).toMatch(/aria-label="Open in main"[^>]*>[\s\S]*?lucide-arrow-right/u);
     expect(html.match(/role="menuitem"/g)).toHaveLength(2);
     expect(html.match(/<svg/g)).toHaveLength(2);
     expect(html).not.toContain('<small>');
@@ -64,6 +67,34 @@ describe('link action chooser', () => {
     expect(html).not.toContain('role="dialog"');
     expect(html).toContain('Lemma A.7');
     expect(html).toContain('Page 18');
+  });
+
+  it('puts Follow in this Reference Tab before the right-most main action', () => {
+    const html = renderToStaticMarkup(
+      <LinkActionMenuContent
+        label="Target-to-target detail link"
+        pageContext="Page 3"
+        sourceScope="reference"
+        firstItemRef={() => undefined}
+        secondItemRef={() => undefined}
+        thirdItemRef={() => undefined}
+        onChoose={() => undefined}
+        onKeyDown={() => undefined}
+      />,
+    );
+
+    expect(html).toMatch(
+      /aria-label="Open in References"[\s\S]*aria-label="Follow in this Reference Tab"[\s\S]*aria-label="Open in main"/u,
+    );
+    expect(html).toMatch(
+      /title="Open in References"[\s\S]*title="Follow in this Reference Tab"[\s\S]*title="Open in main"/u,
+    );
+    expect(html).toMatch(
+      /aria-label="Follow in this Reference Tab"[^>]*>[\s\S]*?lucide-arrow-right/u,
+    );
+    expect(html).toMatch(/aria-label="Open in main"[^>]*>[\s\S]*?lucide-maximize-2/u);
+    expect(html.match(/role="menuitem"/g)).toHaveLength(3);
+    expect(html.match(/<svg/g)).toHaveLength(3);
   });
 
   it('wraps menu focus for arrows and supports Home and End', () => {
@@ -74,6 +105,9 @@ describe('link action chooser', () => {
     expect(compositeFocusIndex(0, 2, 'End')).toBe(1);
     expect(compositeFocusIndex(0, 2, 'PageDown')).toBeNull();
     expect(compositeFocusIndex(0, 2, 'ArrowLeft')).toBeNull();
+    expect(compositeFocusIndex(2, 3, 'ArrowDown')).toBe(0);
+    expect(compositeFocusIndex(0, 3, 'ArrowUp')).toBe(2);
+    expect(compositeFocusIndex(0, 3, 'End')).toBe(2);
   });
 
   it('keeps horizontal tab navigation to Left, Right, Home, and End', () => {
