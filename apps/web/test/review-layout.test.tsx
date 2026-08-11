@@ -328,7 +328,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('aria-label="Close workspace"');
     expect(html).toContain('class="annotation-drawer__header"');
     expect(html).toContain('aria-label="Owned annotations"');
-    expect(html).toContain('aria-label="Existing PDF annotations (read only)"');
+    expect(html).toContain('aria-label="External Annotations (read only)"');
     expect(html).toContain('data-existing-annotations-state="loading"');
     expect(html).toContain('data-annotation-status="loading"');
     for (const tool of ['Replace', 'Delete', 'Highlight']) {
@@ -394,13 +394,19 @@ describe('review shell layout and accessibility contract', () => {
     );
   });
 
-  it('shares annotation heading typography and couples the direction cue to header height', () => {
+  it('shares simple annotation section headers and lets each mode fill the tab bar', () => {
     expect(annotationStyles).toMatch(
       /\.annotation-drawer__header h2,\s*\.existing-annotations__header h2\s*\{[^}]*font-size:\s*15px;[^}]*font-weight:\s*760;/u,
     );
-    expect(annotationStyles).toContain(
-      '.annotation-direction-cue[data-correspondence-direction="above"] { top: var(--annotation-drawer-header-height); }',
+    expect(annotationStyles).toMatch(
+      /\.annotation-drawer__header,\s*\.existing-annotations__header\s*\{[^}]*margin-bottom:\s*10px;/u,
     );
+    expect(annotationStyles).not.toContain('--annotation-drawer-header-height');
+    expect(annotationStyles).not.toMatch(/\.annotation-drawer__header\s*\{[^}]*position:\s*sticky;/u);
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__tabs\s*\{[^}]*grid-auto-columns:\s*minmax\(0, 1fr\);[^}]*grid-auto-flow:\s*column;/u,
+    );
+    expect(annotationStyles).not.toContain('.review-tools-workspace .review-workspace__tabs');
     expect(annotationStyles).not.toContain('.existing-annotations__readonly');
   });
 
@@ -515,7 +521,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toMatch(/id="workspace-mode-annotations"[^>]*aria-selected="true"/u);
     expect(html).not.toContain('Methods and data');
     expect(html).toContain('<h2>Annotations ');
-    expect(html).toContain('<h2>Existing PDF annotations (read only)</h2>');
+    expect(html).toContain('<h2>External Annotations (read only)</h2>');
     expect(html).not.toContain('Review comments');
     expect(html).not.toContain('Source PDF');
     expect(html).not.toContain('existing-annotations__readonly');

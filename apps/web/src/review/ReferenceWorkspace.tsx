@@ -269,7 +269,12 @@ export function ReferenceWorkspace({
           <strong id="references-workspace-title" className="review-workspace__title">References</strong>
         ) : null}
         {headerVariant === 'tabs' ? (
-        <div className="review-workspace__tabs" role="tablist" aria-label="Workspace modes">
+        <div
+          className="review-workspace__tabs"
+          role="tablist"
+          aria-label="Workspace modes"
+          data-workspace-mode-count={modes.length}
+        >
           {modes.map((workspaceMode) => {
             const selected = workspaceMode === mode;
             const hasMoveControl = workspaceMode === 'references' && Boolean(onMoveReferencesBottom);

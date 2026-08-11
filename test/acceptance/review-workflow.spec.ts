@@ -708,30 +708,25 @@ test.describe('canonical review workflow', () => {
     await expect(pageNumber).toHaveText('1');
   });
 
-  test('keeps the complete annotation header fixed while the tray scrolls', async ({ page }) => {
-    for (let index = 0; index < 5; index += 1) {
-      if (index > 0) await page.getByRole('button', { name: 'Use selection' }).click();
-      await page.getByRole('button', { name: 'Highlight', exact: true }).click();
-      await page.getByRole('button', { name: 'Keep without comment' }).click();
-    }
+  test('uses matching simple section headers for owned and existing annotations', async ({ page }) => {
     await openAnnotationsWorkspace(page);
 
-    const drawer = page.locator('[data-annotation-scroll-viewport]');
-    await drawer.evaluate((element) => {
-      Object.assign((element as HTMLElement).style, {
-        flex: 'none', height: '8rem', bottom: 'auto',
-      });
-    });
-    const header = drawer.locator('.annotation-drawer__header');
-    const before = await header.boundingBox();
-    expect(before).not.toBeNull();
-
-    await drawer.evaluate((element) => { element.scrollTop = 10; });
-    await expect.poll(() => drawer.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-    const after = await header.boundingBox();
-    expect(after).not.toBeNull();
-    expect(after!.y).toBeCloseTo(before!.y, 0);
-    expect(after!.height).toBeCloseTo(before!.height, 0);
+    const headers = page.locator('.annotation-drawer__header, .existing-annotations__header');
+    await expect(headers).toHaveCount(2);
+    const styles = await headers.evaluateAll((elements) => elements.map((element) => {
+      const heading = element.querySelector('h2');
+      const headerStyle = getComputedStyle(element);
+      const headingStyle = heading ? getComputedStyle(heading) : null;
+      return {
+        position: headerStyle.position,
+        marginBottom: headerStyle.marginBottom,
+        fontFamily: headingStyle?.fontFamily,
+        fontSize: headingStyle?.fontSize,
+        fontWeight: headingStyle?.fontWeight,
+      };
+    }));
+    expect(styles[0]).toEqual(styles[1]);
+    expect(styles[0]).toMatchObject({ position: 'static', marginBottom: '10px' });
   });
 
   test('keeps the annotations tray open while editing an owned annotation', async ({ page }) => {
@@ -943,7 +938,7 @@ test.describe('canonical review workflow', () => {
     await expect(row.getByRole('button', { name: /highlight · Page 1/ })).toBeFocused();
     expect(await canvas.boundingBox()).toEqual(beforeActivation);
 
-    const existing = page.getByRole('region', { name: 'Existing PDF annotations (read only)' });
+    const existing = page.getByRole('region', { name: 'External Annotations (read only)' });
     await expect(existing.getByRole('button', { name: /Highlight · Page 1 · Source comment/ })).toBeVisible();
     await expect(existing.getByRole('button', { name: /^Edit/ })).toHaveCount(0);
     await expect(existing.getByRole('button', { name: /^Delete/ })).toHaveCount(0);

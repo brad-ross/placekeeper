@@ -1301,13 +1301,21 @@ test("collapses an outline-free PDF to Annotations and restores workspace focus"
   const modes = page.getByRole('tablist', { name: 'Workspace modes' });
   await expect(modes.getByRole('tab', { name: 'Outline' })).toHaveCount(0);
   await expect(workspace.locator('#workspace-panel-outline')).toHaveCount(0);
-  await expect(modes.getByRole('tab', { name: 'Annotations', exact: true })).toHaveAttribute(
+  const annotationsMode = modes.getByRole('tab', { name: 'Annotations', exact: true });
+  await expect(annotationsMode).toHaveAttribute(
     'aria-selected',
     'true',
   );
+  const [modeBarBounds, annotationsModeBounds] = await Promise.all([
+    modes.boundingBox(),
+    annotationsMode.boundingBox(),
+  ]);
+  expect(modeBarBounds).not.toBeNull();
+  expect(annotationsModeBounds).not.toBeNull();
+  expect(annotationsModeBounds!.width).toBeGreaterThan(modeBarBounds!.width - 10);
   await expect(workspace.getByRole('heading', { name: /^Annotations \d+$/u })).toBeVisible();
   await expect(workspace.getByRole('heading', {
-    name: 'Existing PDF annotations (read only)',
+    name: 'External Annotations (read only)',
     exact: true,
   })).toBeVisible();
   await expect(workspace).not.toContainText('Review comments');

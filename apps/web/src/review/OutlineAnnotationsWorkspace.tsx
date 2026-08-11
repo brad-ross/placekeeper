@@ -119,7 +119,12 @@ export function OutlineAnnotationsWorkspace({
     >
       {headerVariant === 'tools' ? (
         <header className="review-workspace__header">
-          <div className="review-workspace__tabs" role="tablist" aria-label="Workspace modes">
+          <div
+            className="review-workspace__tabs"
+            role="tablist"
+            aria-label="Workspace modes"
+            data-workspace-mode-count={toolModes.length}
+          >
             {toolModes.map((toolMode) => (
               <button
                 key={toolMode}

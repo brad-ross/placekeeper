@@ -1125,9 +1125,9 @@ export function ReviewShell(props: ReviewShellProps) {
                 }
               }}
             />
-            <section className="existing-annotations" data-existing-annotations-state={existingAnnotations.status} aria-label="Existing PDF annotations (read only)">
+            <section className="existing-annotations" data-existing-annotations-state={existingAnnotations.status} aria-label="External Annotations (read only)">
               <header className="existing-annotations__header">
-                <h2>Existing PDF annotations (read only)</h2>
+                <h2>External Annotations (read only)</h2>
               </header>
               {existingAnnotations.status === 'loading' ? (
                 <p className="annotation-status" data-annotation-status="loading" role="status">
