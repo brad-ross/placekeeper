@@ -13,6 +13,7 @@ import { createSelectedPdfWriter } from "../../../../packages/pdf-backends/src/s
 import { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import { MacOsDestinationPicker } from "./destination-picker.js";
 import { LiveContextService } from "../context/live-context-service.js";
+import { SourceReconciliationService } from "../context/source-reconciliation-service.js";
 
 export type LaunchSurface = BrokerLaunchSurface;
 
@@ -95,15 +96,18 @@ export class ProofreaderHost {
   readonly broker: SessionBroker;
   readonly server: LocalHttpServer;
   readonly context: LiveContextService;
+  readonly reconciliation: SourceReconciliationService;
 
   private constructor(
     broker: SessionBroker,
     server: LocalHttpServer,
     context: LiveContextService,
+    reconciliation: SourceReconciliationService,
   ) {
     this.broker = broker;
     this.server = server;
     this.context = context;
+    this.reconciliation = reconciliation;
   }
 
   static async start(options: ProofreaderHostOptions): Promise<ProofreaderHost> {
@@ -120,7 +124,12 @@ export class ProofreaderHost {
       delivery,
       saving,
     });
-    return new ProofreaderHost(broker, server, new LiveContextService({ broker }));
+    return new ProofreaderHost(
+      broker,
+      server,
+      new LiveContextService({ broker }),
+      new SourceReconciliationService({ broker }),
+    );
   }
 
   async open(request: LaunchRequest): Promise<LaunchResponse> {

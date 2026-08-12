@@ -2,12 +2,20 @@ import { chmod, mkdir, unlink } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname } from "node:path";
 
-import type { LiveContextRefreshResult } from "../../../../packages/core/src/live-context.js";
+import type {
+  LiveContextRefreshResult,
+  LiveExecutionBaselineV1,
+} from "../../../../packages/core/src/live-context.js";
 import type {
   PdfEvidenceRequest,
   PdfEvidenceUnavailableReason,
 } from "../context/pdf-evidence-service.js";
 import type { TaskBindingClaimResult } from "../context/task-binding-registry.js";
+import type {
+  AcceptedSourceProposal,
+  SourceReconciliationReportV1,
+  SourceReplacementProposalV1,
+} from "../context/source-reconciliation-service.js";
 import type { LaunchRequest, LaunchResponse, ProofreaderHost } from "./proofreader-host.js";
 
 // Both directions are explicitly bounded. Evidence requests use a stricter
@@ -27,6 +35,23 @@ export type ProofreaderControlRequest =
     }
   | { readonly kind: "refresh-context"; readonly taskSessionId: string }
   | { readonly kind: "revoke-task"; readonly taskSessionId: string }
+  | {
+      readonly kind: "capture-source-baseline";
+      readonly taskSessionId: string;
+      readonly sourcePaths?: readonly string[];
+    }
+  | {
+      readonly kind: "accept-source-proposal";
+      readonly taskSessionId: string;
+      readonly executionId: string;
+      readonly proposal: SourceReplacementProposalV1;
+    }
+  | {
+      readonly kind: "reconcile-source-work";
+      readonly taskSessionId: string;
+      readonly executionId: string;
+      readonly expectedSourceSha256ByProposal?: Readonly<Record<string, string>>;
+    }
   | {
       readonly kind: "retrieve-evidence";
       readonly taskSessionId: string;
@@ -52,6 +77,9 @@ export type ProofreaderControlResponse =
   | { readonly kind: "binding"; readonly result: TaskBindingClaimResult }
   | { readonly kind: "context"; readonly result: LiveContextRefreshResult }
   | { readonly kind: "revoked" }
+  | { readonly kind: "source-baseline"; readonly baseline: LiveExecutionBaselineV1 }
+  | { readonly kind: "source-proposal"; readonly result: AcceptedSourceProposal }
+  | { readonly kind: "source-reconciliation"; readonly report: SourceReconciliationReportV1 }
   | {
       readonly kind: "evidence";
       readonly result:
@@ -79,6 +107,19 @@ function isControlRequest(value: unknown): value is ProofreaderControlRequest {
   if (value.kind === "launch") return isObject(value.request);
   if (value.kind === "refresh-context" || value.kind === "revoke-task") {
     return typeof value.taskSessionId === "string";
+  }
+  if (value.kind === "capture-source-baseline") {
+    return typeof value.taskSessionId === "string" &&
+      (value.sourcePaths === undefined ||
+        (Array.isArray(value.sourcePaths) && value.sourcePaths.every((path) => typeof path === "string")));
+  }
+  if (value.kind === "accept-source-proposal") {
+    return typeof value.taskSessionId === "string" && typeof value.executionId === "string" &&
+      isObject(value.proposal);
+  }
+  if (value.kind === "reconcile-source-work") {
+    return typeof value.taskSessionId === "string" && typeof value.executionId === "string" &&
+      (value.expectedSourceSha256ByProposal === undefined || isObject(value.expectedSourceSha256ByProposal));
   }
   if (value.kind === "claim-binding") {
     return typeof value.taskSessionId === "string" &&
@@ -116,7 +157,26 @@ async function dispatch(
   }
   if (request.kind === "revoke-task") {
     host.broker.taskBindings.revokeTask(request.taskSessionId);
+    host.reconciliation.discardTask(request.taskSessionId);
     return { kind: "revoked" };
+  }
+  if (request.kind === "capture-source-baseline") {
+    return {
+      kind: "source-baseline",
+      baseline: await host.reconciliation.captureBaseline(request),
+    };
+  }
+  if (request.kind === "accept-source-proposal") {
+    return {
+      kind: "source-proposal",
+      result: await host.reconciliation.acceptProposal(request),
+    };
+  }
+  if (request.kind === "reconcile-source-work") {
+    return {
+      kind: "source-reconciliation",
+      report: await host.reconciliation.reconcile(request),
+    };
   }
   if (request.kind === "retrieve-review-items-by-handle") {
     const result = host.context.evidence.retrieveReviewItemsWithHandle(request);
