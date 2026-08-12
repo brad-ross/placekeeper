@@ -118,6 +118,7 @@ export interface ExistingPdfAnnotationInventory {
 }
 
 export const PDF_EVIDENCE_KINDS = [
+  "document",
   "page-text",
   "page-layout",
   "page-render",
@@ -437,8 +438,15 @@ export function createPdfEvidenceCatalog(input: PdfEvidenceCatalog): PdfEvidence
     )) {
       throw new InvalidLiveContextContractError("Evidence page range is malformed");
     }
-    if (descriptor.kind !== "raw-annotations" && descriptor.pages === undefined) {
+    if (
+      descriptor.kind !== "raw-annotations" &&
+      descriptor.kind !== "document" &&
+      descriptor.pages === undefined
+    ) {
       throw new InvalidLiveContextContractError("Page evidence requires a page range");
+    }
+    if (descriptor.kind === "document" && descriptor.pages !== undefined) {
+      throw new InvalidLiveContextContractError("Document evidence cannot select pages");
     }
     const selector = descriptorSelector(descriptor);
     if (selectors.has(selector)) {

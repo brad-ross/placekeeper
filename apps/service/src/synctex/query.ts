@@ -145,13 +145,27 @@ export async function querySyncTexHints(input: {
   readonly pdfPath: string;
   readonly run?: SyncTexRunner;
 }): Promise<ReadonlyMap<string, SourceHint>> {
+  if (input.delivery.sourceRootPath === undefined) return new Map();
+  return querySyncTexHintsForItems({
+    items: input.delivery.items,
+    sourceRoot: input.delivery.sourceRootPath,
+    pdfPath: input.pdfPath,
+    ...(input.run === undefined ? {} : { run: input.run }),
+  });
+}
+
+export async function querySyncTexHintsForItems(input: {
+  readonly items: readonly ReviewItem[];
+  readonly sourceRoot: string;
+  readonly pdfPath: string;
+  readonly run?: SyncTexRunner;
+}): Promise<ReadonlyMap<string, SourceHint>> {
   const hints = new Map<string, SourceHint>();
-  if (input.delivery.sourceRootPath === undefined) return hints;
-  for (const item of input.delivery.items) {
+  for (const item of input.items) {
     const point = geometryPoint(item);
     if (point === undefined) continue;
     const hint = await querySyncTex({
-      sourceRoot: input.delivery.sourceRootPath,
+      sourceRoot: input.sourceRoot,
       pdfPath: input.pdfPath,
       pageIndex: item.pageIndex,
       point,

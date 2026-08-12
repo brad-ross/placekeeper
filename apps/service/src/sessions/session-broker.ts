@@ -106,6 +106,23 @@ export interface SessionBrokerOptions {
   readonly taskBindings?: TaskBindingRegistry;
 }
 
+/**
+ * Internal-only material used to build one atomic model-facing observation.
+ * Paths and destination capabilities must be consumed inside the service and
+ * never copied into a live-context response.
+ */
+export interface AtomicSessionProjection {
+  readonly sessionId: string;
+  readonly documentGeneration: number;
+  readonly state: ReviewState;
+  readonly destination: DurableSaveDestination;
+  readonly sync: DurableSaveSync;
+  readonly sourceBytes: Buffer;
+  readonly sourceSnapshotPath: string;
+  readonly sourcePdfPath: string;
+  readonly sourceRootPath?: string;
+}
+
 function activeKey(path: string, digest: string): string {
   return `${path}\0${digest}`;
 }
@@ -750,6 +767,37 @@ export class SessionBroker {
     const session = this.#activeById.get(sessionId);
     if (session === undefined) return undefined;
     return readFile(session.sourceSnapshotPath);
+  }
+
+  /**
+   * Runs a read projection behind the same per-session tail as accepted
+   * mutations and Save Sync transitions. Expensive PDF inspection is allowed
+   * here intentionally: a context observation must never combine a new review
+   * revision with an older save state or source identity.
+   */
+  async projectAtomicSession<T>(
+    sessionId: string,
+    project: (snapshot: AtomicSessionProjection) => Promise<T>,
+  ): Promise<T | undefined> {
+    const session = this.#activeById.get(sessionId);
+    if (session === undefined || session.ending) return undefined;
+    return this.#withSessionTail(session, async () => {
+      if (session.ending || this.#activeById.get(sessionId) !== session) return undefined;
+      const sourceRootPath = session.rootId === undefined
+        ? undefined
+        : this.capabilities.getRootPath(session.rootId);
+      return project({
+        sessionId: session.id,
+        documentGeneration: session.documentGeneration,
+        state: structuredClone(session.state),
+        destination: structuredClone(session.destination),
+        sync: structuredClone(session.sync),
+        sourceBytes: await readFile(session.sourceSnapshotPath),
+        sourceSnapshotPath: session.sourceSnapshotPath,
+        sourcePdfPath: session.canonicalSourcePath,
+        ...(sourceRootPath === undefined ? {} : { sourceRootPath }),
+      });
+    });
   }
 
   async freezeDelivery(sessionId: string): Promise<FrozenReviewDelivery> {

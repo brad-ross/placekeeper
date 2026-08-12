@@ -12,6 +12,7 @@ import {
 import { createSelectedPdfWriter } from "../../../../packages/pdf-backends/src/selected-writer.js";
 import { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import { MacOsDestinationPicker } from "./destination-picker.js";
+import { LiveContextService } from "../context/live-context-service.js";
 
 export type LaunchSurface = BrokerLaunchSurface;
 
@@ -93,10 +94,16 @@ function trustedSurface(value: LaunchRequest["surface"]): LaunchSurface {
 export class ProofreaderHost {
   readonly broker: SessionBroker;
   readonly server: LocalHttpServer;
+  readonly context: LiveContextService;
 
-  private constructor(broker: SessionBroker, server: LocalHttpServer) {
+  private constructor(
+    broker: SessionBroker,
+    server: LocalHttpServer,
+    context: LiveContextService,
+  ) {
     this.broker = broker;
     this.server = server;
+    this.context = context;
   }
 
   static async start(options: ProofreaderHostOptions): Promise<ProofreaderHost> {
@@ -113,7 +120,7 @@ export class ProofreaderHost {
       delivery,
       saving,
     });
-    return new ProofreaderHost(broker, server);
+    return new ProofreaderHost(broker, server, new LiveContextService({ broker }));
   }
 
   async open(request: LaunchRequest): Promise<LaunchResponse> {
