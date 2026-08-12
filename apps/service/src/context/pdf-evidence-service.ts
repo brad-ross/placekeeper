@@ -64,6 +64,10 @@ interface EvidenceRecord {
   readonly reviewItems: readonly StructuredReviewItem[];
 }
 
+export type EvidenceHandleAuthorization =
+  | { readonly status: "ok"; readonly taskSessionId: string }
+  | { readonly status: "unavailable"; readonly reason: PdfEvidenceUnavailableReason };
+
 export interface PdfEvidenceServiceOptions {
   readonly bindings: TaskBindingRegistry;
   readonly loadSource: (reviewSessionId: string) => Promise<PdfEvidenceSource | undefined>;
@@ -184,6 +188,27 @@ export class PdfEvidenceService {
     this.#records.delete(digest(handle));
   }
 
+  /** Resolve the bound task behind a prompt-scoped handle without exposing the
+   * task id in model context. Source-work commands use this as their bearer
+   * boundary, then perform their own fresh observation before doing any work. */
+  authorizeHandle(handle: string): EvidenceHandleAuthorization {
+    const key = digest(handle);
+    const record = this.#records.get(key);
+    if (record === undefined) return { status: "unavailable", reason: "unauthorized" };
+    if (record.expiresAtMs <= this.#now().getTime()) {
+      this.#records.delete(key);
+      return { status: "unavailable", reason: "expired" };
+    }
+    const binding = this.#bindings.bindingForTask(record.taskSessionId);
+    if (
+      binding === undefined ||
+      binding.reviewSessionId !== record.identity.proofreaderSessionId ||
+      binding.documentGeneration !== record.identity.documentGeneration ||
+      binding.lastVerified?.stateDigest !== record.identity.stateDigest
+    ) return { status: "unavailable", reason: "unauthorized" };
+    return { status: "ok", taskSessionId: record.taskSessionId };
+  }
+
   /** The opaque handle is delivered only inside the bound task's trusted
    * prompt context. This installed-CLI entry point resolves its task scope
    * without exposing the Codex task id to the model. All normal lease,
@@ -192,10 +217,10 @@ export class PdfEvidenceService {
     readonly handle: string;
     readonly request: PdfEvidenceRequest;
   }): Promise<PdfEvidenceRetrievalResult> {
-    const record = this.#records.get(digest(input.handle));
-    if (record === undefined) return Promise.resolve(unavailable("unauthorized"));
+    const authorization = this.authorizeHandle(input.handle);
+    if (authorization.status === "unavailable") return Promise.resolve(authorization);
     return this.retrieve({
-      taskSessionId: record.taskSessionId,
+      taskSessionId: authorization.taskSessionId,
       handle: input.handle,
       request: input.request,
     });
@@ -208,19 +233,9 @@ export class PdfEvidenceService {
     readonly pageIndex?: number;
     readonly maxBytes?: number;
   }): PdfEvidenceRetrievalResult {
-    const record = this.#records.get(digest(input.handle));
-    if (record === undefined) return unavailable("unauthorized");
-    if (record.expiresAtMs <= this.#now().getTime()) {
-      this.#records.delete(digest(input.handle));
-      return unavailable("expired");
-    }
-    const binding = this.#bindings.bindingForTask(record.taskSessionId);
-    if (
-      binding === undefined ||
-      binding.reviewSessionId !== record.identity.proofreaderSessionId ||
-      binding.documentGeneration !== record.identity.documentGeneration ||
-      binding.lastVerified?.stateDigest !== record.identity.stateDigest
-    ) return unavailable("unauthorized");
+    const authorization = this.authorizeHandle(input.handle);
+    if (authorization.status === "unavailable") return authorization;
+    const record = this.#records.get(digest(input.handle))!;
     const offset = input.offset ?? 0;
     const limit = input.limit ?? 100;
     const maxBytes = input.maxBytes ?? Math.min(record.maxBytes, 1024 * 1024);

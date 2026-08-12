@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   parseContextEvidenceArguments,
   parseContextItemsArguments,
+  parseContextSourceArguments,
   runContextCommand,
 } from "../src/cli/context-command.js";
 import type { ProofreaderControlResponse } from "../src/host/launch-control.js";
@@ -17,6 +18,110 @@ afterEach(async () => {
 });
 
 describe("context evidence command", () => {
+  it("keeps discussion read-only and addresses source work only through the current opaque handle", async () => {
+    const handle = "evidence_abcdefghijklmnop";
+    expect(parseContextSourceArguments([
+      "context", "source", "begin", "--handle", handle, "--path", "paper.tex",
+    ])).toEqual({ kind: "source-begin", handle, sourcePaths: ["paper.tex"] });
+    expect(parseContextSourceArguments([
+      "context", "source", "reconcile", "--handle", handle,
+      "--execution", "execution-a", "--guards-json", '{"proposal-a":"abc"}',
+    ])).toEqual({
+      kind: "source-reconcile",
+      handle,
+      executionId: "execution-a",
+      expectedSourceSha256ByProposal: { "proposal-a": "abc" },
+    });
+
+    const discussionControl = vi.fn(async (): Promise<ProofreaderControlResponse> => ({
+      kind: "evidence",
+      result: {
+        status: "ok", evidenceKind: "review-items", mediaType: "application/json",
+        dataBase64: Buffer.from('{"items":[]}').toString("base64"),
+      },
+    }));
+    await runContextCommand(["context", "items", "--handle", handle], discussionControl, vi.fn());
+    expect(discussionControl).toHaveBeenCalledExactlyOnceWith({
+      kind: "retrieve-review-items-by-handle", handle,
+    });
+    expect(discussionControl).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "source-begin" }));
+
+    const sourceControl = vi.fn(async (): Promise<ProofreaderControlResponse> => ({
+      kind: "source-workflow",
+      operation: "begin",
+      response: {
+        freshness: {
+          identity: {
+            proofreaderSessionId: "review-a", documentGeneration: 1,
+            source: { fileId: "file-a", digest: "a".repeat(64), byteLength: 1 },
+            reviewRevision: 2, stateDigest: "b".repeat(64),
+          },
+          evidenceHandle: "evidence_freshabcdefghijkl",
+        },
+        result: {
+          schemaVersion: 1, executionId: "execution-a", capturedAt: "2026-08-12T12:00:00.000Z",
+          identity: {
+            proofreaderSessionId: "review-a", documentGeneration: 1,
+            source: { fileId: "file-a", digest: "a".repeat(64), byteLength: 1 },
+            reviewRevision: 2, stateDigest: "b".repeat(64),
+          },
+          items: [], sourceFingerprints: [], baselineDigest: "c".repeat(64),
+        },
+      },
+    }));
+    const write = vi.fn();
+    expect(await runContextCommand([
+      "context", "source", "begin", "--handle", handle, "--path", "paper.tex",
+    ], sourceControl, write)).toBe(0);
+    expect(JSON.parse(write.mock.calls[0]![0] as string)).toMatchObject({
+      ok: true, operation: "begin", freshness: { evidenceHandle: "evidence_freshabcdefghijkl" },
+    });
+  });
+
+  it("loads proposal JSON from a bounded absolute file instead of requiring shell-quoted source text", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-source-payload-"));
+    roots.push(root);
+    const path = join(root, "proposal.json");
+    await import("node:fs/promises").then(({ writeFile }) => writeFile(path, JSON.stringify({
+      schemaVersion: 1,
+      idempotencyKey: "proposal-1",
+      baselineItemId: "item-1",
+      path: "paper.tex",
+      expectedText: "value with 'quotes' and $symbols",
+      replacementText: "safe replacement",
+    })));
+    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({
+      kind: "source-workflow",
+      operation: "propose",
+      response: {
+        freshness: {
+          identity: {
+            proofreaderSessionId: "review-a", documentGeneration: 1,
+            source: { fileId: "file-a", digest: "a".repeat(64), byteLength: 1 },
+            reviewRevision: 2, stateDigest: "b".repeat(64),
+          },
+          evidenceHandle: "evidence_freshabcdefghijkl",
+        },
+        result: {
+          status: "accepted",
+          proposal: {
+            schemaVersion: 1, idempotencyKey: "proposal-1", baselineItemId: "item-1",
+            path: "paper.tex", expectedText: "value with 'quotes' and $symbols",
+            replacementText: "safe replacement",
+          },
+        },
+      },
+    }));
+    expect(await runContextCommand([
+      "context", "source", "propose", "--handle", "evidence_abcdefghijklmnop",
+      "--execution", "execution-a", "--proposal-file", path,
+    ], control, vi.fn())).toBe(0);
+    expect(control).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "source-propose",
+      proposal: expect.objectContaining({ expectedText: "value with 'quotes' and $symbols" }),
+    }));
+  });
+
   it("parses bounded evidence operations without accepting a task id or browser URL", () => {
     expect(parseContextEvidenceArguments([
       "context", "evidence", "--handle", "evidence_abcdefghijklmnop",

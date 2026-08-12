@@ -1,11 +1,15 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
+import type { LiveDispositionItemV1 } from "../../../../packages/core/src/disposition.js";
 import type { PdfEvidenceRequest } from "../context/pdf-evidence-service.js";
+import type { SourceReplacementProposalV1 } from "../context/source-reconciliation-service.js";
 import type { ProofreaderControlRequest, ProofreaderControlResponse } from "../host/launch-control.js";
 import { controlThroughDaemon } from "../host/service-daemon.js";
 
 type ControlClient = (request: ProofreaderControlRequest) => Promise<ProofreaderControlResponse>;
+
+const HANDLE = /^[A-Za-z0-9._~-]{16,512}$/u;
 
 export interface ParsedContextEvidenceRequest {
   readonly handle: string;
@@ -34,6 +38,129 @@ function integer(value: string): number {
   return parsed;
 }
 
+function parsedJson<T>(value: string, label: string): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    throw new Error(`${label} must be valid JSON`);
+  }
+}
+
+async function requestPayload(args: readonly string[], flag: string, label: string): Promise<unknown> {
+  const index = args.indexOf(flag);
+  if (index === -1) return undefined;
+  const path = valueAfter(args, index);
+  if (!isAbsolute(path)) throw new Error(`${label} input path must be absolute`);
+  const bytes = await readFile(path);
+  if (bytes.byteLength > 2 * 1024 * 1024) throw new Error(`${label} input exceeds the 2 MiB limit`);
+  return parsedJson(bytes.toString("utf8"), label);
+}
+
+function withoutFilePayloadFlags(args: readonly string[]): string[] {
+  const filtered: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (["--proposal-file", "--guards-file", "--items-file"].includes(args[index]!)) {
+      index += 1;
+      continue;
+    }
+    filtered.push(args[index]!);
+  }
+  return filtered;
+}
+
+export function parseContextSourceArguments(args: readonly string[]): ProofreaderControlRequest {
+  if (args[0] !== "context" || args[1] !== "source" || args[2] === undefined) {
+    throw new Error("Use: pdf-proofreader context source <begin|propose|reconcile|rebuild-plan|rebuild-verify|complete>");
+  }
+  const operation = args[2];
+  let handle: string | undefined;
+  let executionId: string | undefined;
+  let planId: string | undefined;
+  let command: string | undefined;
+  let outputPath: string | undefined;
+  let proposal: SourceReplacementProposalV1 | undefined;
+  let guards: Readonly<Record<string, string>> | undefined;
+  let items: readonly LiveDispositionItemV1[] | undefined;
+  let rebuildVerificationId: string | undefined;
+  const sourcePaths: string[] = [];
+  for (let index = 3; index < args.length; index += 1) {
+    const flag = args[index]!;
+    const raw = valueAfter(args, index);
+    index += 1;
+    if (flag === "--handle" && handle === undefined) handle = raw;
+    else if (flag === "--execution" && executionId === undefined) executionId = raw;
+    else if (flag === "--path" && operation === "begin") sourcePaths.push(raw);
+    else if (flag === "--proposal-json" && proposal === undefined) {
+      proposal = parsedJson<SourceReplacementProposalV1>(raw, "Proposal");
+    } else if (flag === "--guards-json" && guards === undefined) {
+      guards = parsedJson<Readonly<Record<string, string>>>(raw, "Guard map");
+    } else if (flag === "--command" && command === undefined) command = raw;
+    else if (flag === "--output" && outputPath === undefined) outputPath = raw;
+    else if (flag === "--plan" && planId === undefined) planId = raw;
+    else if (flag === "--items-json" && items === undefined) {
+      items = parsedJson<readonly LiveDispositionItemV1[]>(raw, "Disposition items");
+    } else if (flag === "--rebuild-verification" && rebuildVerificationId === undefined) {
+      rebuildVerificationId = raw;
+    } else throw new Error("The context source request is invalid or contains a duplicate option");
+  }
+  if (handle === undefined || !HANDLE.test(handle)) throw new Error("A current opaque evidence handle is required");
+  if (
+    operation === "begin" && executionId === undefined && proposal === undefined && guards === undefined &&
+    command === undefined && outputPath === undefined && planId === undefined && items === undefined &&
+    rebuildVerificationId === undefined
+  ) {
+    return { kind: "source-begin", handle, ...(sourcePaths.length === 0 ? {} : { sourcePaths }) };
+  }
+  if (executionId === undefined || executionId.trim().length === 0) {
+    throw new Error("A source-work execution id is required");
+  }
+  if (
+    operation === "propose" && proposal !== undefined && sourcePaths.length === 0 && guards === undefined &&
+    command === undefined && outputPath === undefined && planId === undefined && items === undefined &&
+    rebuildVerificationId === undefined
+  ) {
+    return { kind: "source-propose", handle, executionId, proposal };
+  }
+  if (
+    operation === "reconcile" && sourcePaths.length === 0 && proposal === undefined && command === undefined &&
+    outputPath === undefined && planId === undefined && items === undefined && rebuildVerificationId === undefined
+  ) {
+    return {
+      kind: "source-reconcile",
+      handle,
+      executionId,
+      ...(guards === undefined ? {} : { expectedSourceSha256ByProposal: guards }),
+    };
+  }
+  if (
+    operation === "rebuild-plan" && command !== undefined && outputPath !== undefined && sourcePaths.length === 0 &&
+    proposal === undefined && guards === undefined && planId === undefined && items === undefined &&
+    rebuildVerificationId === undefined
+  ) {
+    return { kind: "source-rebuild-plan", handle, executionId, command, outputPath };
+  }
+  if (
+    operation === "rebuild-verify" && planId !== undefined && sourcePaths.length === 0 && proposal === undefined &&
+    guards === undefined && command === undefined && outputPath === undefined && items === undefined &&
+    rebuildVerificationId === undefined
+  ) {
+    return { kind: "source-rebuild-verify", handle, executionId, planId };
+  }
+  if (
+    operation === "complete" && Array.isArray(items) && sourcePaths.length === 0 && proposal === undefined &&
+    guards === undefined && command === undefined && outputPath === undefined && planId === undefined
+  ) {
+    return {
+      kind: "source-complete",
+      handle,
+      executionId,
+      items,
+      ...(rebuildVerificationId === undefined ? {} : { rebuildVerificationId }),
+    };
+  }
+  throw new Error(`The context source ${operation} request is incomplete`);
+}
+
 export function parseContextEvidenceArguments(args: readonly string[]): ParsedContextEvidenceRequest {
   if (args[0] !== "context" || args[1] !== "evidence") {
     throw new Error("Use: pdf-proofreader context evidence --handle <opaque-handle> --kind <evidence-kind>");
@@ -59,7 +186,7 @@ export function parseContextEvidenceArguments(args: readonly string[]): ParsedCo
     else if (flag === "--output" && outputPath === undefined && isAbsolute(raw)) outputPath = raw;
     else throw new Error("The context evidence request is invalid or contains a duplicate option");
   }
-  if (handle === undefined || !/^[A-Za-z0-9._~-]{16,512}$/u.test(handle) || kind === undefined) {
+  if (handle === undefined || !HANDLE.test(handle) || kind === undefined) {
     throw new Error("An opaque evidence handle and supported kind are required");
   }
   const request: PdfEvidenceRequest = kind === "document"
@@ -105,7 +232,7 @@ export function parseContextItemsArguments(args: readonly string[]): ParsedConte
     else if (flag === "--max-bytes" && maxBytes === undefined) maxBytes = integer(raw);
     else throw new Error("The context items request is invalid or contains a duplicate option");
   }
-  if (handle === undefined || !/^[A-Za-z0-9._~-]{16,512}$/u.test(handle)) {
+  if (handle === undefined || !HANDLE.test(handle)) {
     throw new Error("An opaque evidence handle is required");
   }
   return {
@@ -122,6 +249,36 @@ export async function runContextCommand(
   control: ControlClient = controlThroughDaemon,
   write: (text: string) => void = (text) => process.stdout.write(text),
 ): Promise<number> {
+  if (args[1] === "source") {
+    let request: ProofreaderControlRequest;
+    try {
+      const payloads = await Promise.all([
+        requestPayload(args, "--proposal-file", "Proposal"),
+        requestPayload(args, "--guards-file", "Guard map"),
+        requestPayload(args, "--items-file", "Disposition items"),
+      ]);
+      const normalized = withoutFilePayloadFlags(args);
+      if (payloads[0] !== undefined) normalized.push("--proposal-json", JSON.stringify(payloads[0]));
+      if (payloads[1] !== undefined) normalized.push("--guards-json", JSON.stringify(payloads[1]));
+      if (payloads[2] !== undefined) normalized.push("--items-json", JSON.stringify(payloads[2]));
+      request = parseContextSourceArguments(normalized);
+    } catch (error) {
+      write(`${JSON.stringify({ ok: false, error: error instanceof Error ? error.message : "Invalid context source request" })}\n`);
+      return 2;
+    }
+    try {
+      const response = await control(request);
+      if (response.kind !== "source-workflow") {
+        write(`${JSON.stringify({ ok: false, reason: "unavailable" })}\n`);
+        return 2;
+      }
+      write(`${JSON.stringify({ ok: true, operation: response.operation, ...response.response })}\n`);
+      return 0;
+    } catch {
+      write(`${JSON.stringify({ ok: false, reason: "unavailable" })}\n`);
+      return 2;
+    }
+  }
   if (args[1] === "items") {
     let items: ParsedContextItemsRequest;
     try { items = parseContextItemsArguments(args); } catch (error) {

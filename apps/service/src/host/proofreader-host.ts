@@ -3,7 +3,6 @@ import type {
   RecoveryDecision,
 } from "../sessions/session-broker.js";
 import { SessionBroker } from "../sessions/session-broker.js";
-import { ReviewDeliveryService } from "../delivery/review-delivery-service.js";
 import {
   startHttpServer,
   type LocalHttpServer,
@@ -14,6 +13,7 @@ import { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import { MacOsDestinationPicker } from "./destination-picker.js";
 import { LiveContextService } from "../context/live-context-service.js";
 import { SourceReconciliationService } from "../context/source-reconciliation-service.js";
+import { LiveSourceWorkflowService } from "../context/live-source-workflow-service.js";
 
 export type LaunchSurface = BrokerLaunchSurface;
 
@@ -97,23 +97,25 @@ export class ProofreaderHost {
   readonly server: LocalHttpServer;
   readonly context: LiveContextService;
   readonly reconciliation: SourceReconciliationService;
+  readonly sourceWorkflow: LiveSourceWorkflowService;
 
   private constructor(
     broker: SessionBroker,
     server: LocalHttpServer,
     context: LiveContextService,
     reconciliation: SourceReconciliationService,
+    sourceWorkflow: LiveSourceWorkflowService,
   ) {
     this.broker = broker;
     this.server = server;
     this.context = context;
     this.reconciliation = reconciliation;
+    this.sourceWorkflow = sourceWorkflow;
   }
 
   static async start(options: ProofreaderHostOptions): Promise<ProofreaderHost> {
     const broker = new SessionBroker({ recoveryRoot: options.recoveryRoot });
     await broker.initialize();
-    const delivery = await ReviewDeliveryService.create(broker);
     const saving = new PdfSaveCoordinator({
       broker,
       writer: await createSelectedPdfWriter(),
@@ -121,14 +123,16 @@ export class ProofreaderHost {
     });
     const server = await startHttpServer(broker, {
       ...(options.webAssets === undefined ? {} : { webAssets: options.webAssets }),
-      delivery,
       saving,
     });
+    const context = new LiveContextService({ broker });
+    const reconciliation = new SourceReconciliationService({ broker });
     return new ProofreaderHost(
       broker,
       server,
-      new LiveContextService({ broker }),
-      new SourceReconciliationService({ broker }),
+      context,
+      reconciliation,
+      new LiveSourceWorkflowService({ broker, context, reconciliation }),
     );
   }
 

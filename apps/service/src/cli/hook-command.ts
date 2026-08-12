@@ -238,6 +238,7 @@ export function formatPromptContext(result: LiveContextRefreshResult): string {
       descriptors: result.evidence.descriptors,
       reviewItemsInstruction: "Run pdf-proofreader context items --handle <handle> [--page <zero-based-page>] [--offset <n>] [--limit <1..256>] to retrieve the complete current canonical Review Items with type, location, payload, anchor/context, and source hints. Follow nextOffset until absent.",
       pdfInstruction: "Use pdf-proofreader context evidence with this handle, not the browser URL, to retrieve bounded PDF text, layout, render, document, or raw-annotation evidence. The generic PDF skill should inspect retrieved PDF/page evidence when layout matters.",
+      sourceWorkInstruction: "Discussion is read-only. Only when the user requests source changes, use pdf-proofreader context source begin with this handle, then follow the installed skill's guarded reconcile, ordinary Codex edit, optional clean-rebuild verification, and complete-disposition protocol in this task. Never create a handoff bundle or fresh task.",
     },
   };
   const serialized = JSON.stringify(envelope);
@@ -266,6 +267,7 @@ export function formatPromptContext(result: LiveContextRefreshResult): string {
       handle: result.evidence.handle.value,
       expiresAt: result.evidence.handle.expiresAt,
       instruction: "Run pdf-proofreader context items with this handle for paginated canonical Review Items; use context evidence for bounded PDF evidence.",
+      sourceWorkInstruction: "For user-requested source work only, begin the installed same-task source protocol with this handle; ordinary Codex tools remain the only writer.",
     },
   });
 }

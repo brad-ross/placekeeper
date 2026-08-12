@@ -5,6 +5,7 @@ import {
   createReconciliationOutcome,
   reviewSemanticDigest,
   type LiveExecutionBaselineV1,
+  type LiveObservationIdentity,
   type ReconciliationOutcomeV1,
   type SourceFingerprint,
 } from "../../../../packages/core/src/live-context.js";
@@ -53,6 +54,7 @@ export interface SourceReconciliationReportV1 {
   readonly executionId: string;
   readonly baselineDigest: string;
   readonly checkedAt: string;
+  readonly identity: LiveObservationIdentity;
   readonly outcomes: readonly SourceReconciliationDecision[];
   readonly laterItems: readonly StructuredReviewItem[];
 }
@@ -446,7 +448,17 @@ export class SourceReconciliationService {
         const laterItems = snapshot.state.items
           .filter(({ id }) => !baselineIds.has(id))
           .map((item) => projectStructuredReviewItem(item));
-        return { outcomes, laterItems };
+        return {
+          identity: {
+            proofreaderSessionId: snapshot.sessionId,
+            documentGeneration: snapshot.documentGeneration,
+            source: { ...snapshot.state.source },
+            reviewRevision: snapshot.state.revision,
+            stateDigest: reviewSemanticDigest(snapshot.state.items),
+          },
+          outcomes,
+          laterItems,
+        };
       });
       if (report === undefined) throw new Error("The bound PDF session ended during reconciliation");
       return {
@@ -454,6 +466,7 @@ export class SourceReconciliationService {
         executionId: record.baseline.executionId,
         baselineDigest: record.baseline.baselineDigest,
         checkedAt,
+        identity: report.identity,
         outcomes: report.outcomes,
         laterItems: report.laterItems,
       };

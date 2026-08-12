@@ -7,6 +7,10 @@ import type {
   LiveExecutionBaselineV1,
 } from "../../../../packages/core/src/live-context.js";
 import type {
+  CompleteDispositionV1,
+  LiveDispositionItemV1,
+} from "../../../../packages/core/src/disposition.js";
+import type {
   PdfEvidenceRequest,
   PdfEvidenceUnavailableReason,
 } from "../context/pdf-evidence-service.js";
@@ -16,6 +20,11 @@ import type {
   SourceReconciliationReportV1,
   SourceReplacementProposalV1,
 } from "../context/source-reconciliation-service.js";
+import type {
+  CleanRebuildPlanV1,
+  CleanRebuildVerificationV1,
+  SourceWorkflowResult,
+} from "../context/live-source-workflow-service.js";
 import type { LaunchRequest, LaunchResponse, ProofreaderHost } from "./proofreader-host.js";
 
 // Both directions are explicitly bounded. Evidence requests use a stricter
@@ -53,6 +62,43 @@ export type ProofreaderControlRequest =
       readonly expectedSourceSha256ByProposal?: Readonly<Record<string, string>>;
     }
   | {
+      readonly kind: "source-begin";
+      readonly handle: string;
+      readonly sourcePaths?: readonly string[];
+    }
+  | {
+      readonly kind: "source-propose";
+      readonly handle: string;
+      readonly executionId: string;
+      readonly proposal: SourceReplacementProposalV1;
+    }
+  | {
+      readonly kind: "source-reconcile";
+      readonly handle: string;
+      readonly executionId: string;
+      readonly expectedSourceSha256ByProposal?: Readonly<Record<string, string>>;
+    }
+  | {
+      readonly kind: "source-rebuild-plan";
+      readonly handle: string;
+      readonly executionId: string;
+      readonly command: string;
+      readonly outputPath: string;
+    }
+  | {
+      readonly kind: "source-rebuild-verify";
+      readonly handle: string;
+      readonly executionId: string;
+      readonly planId: string;
+    }
+  | {
+      readonly kind: "source-complete";
+      readonly handle: string;
+      readonly executionId: string;
+      readonly items: readonly LiveDispositionItemV1[];
+      readonly rebuildVerificationId?: string;
+    }
+  | {
       readonly kind: "retrieve-evidence";
       readonly taskSessionId: string;
       readonly handle: string;
@@ -80,6 +126,36 @@ export type ProofreaderControlResponse =
   | { readonly kind: "source-baseline"; readonly baseline: LiveExecutionBaselineV1 }
   | { readonly kind: "source-proposal"; readonly result: AcceptedSourceProposal }
   | { readonly kind: "source-reconciliation"; readonly report: SourceReconciliationReportV1 }
+  | {
+      readonly kind: "source-workflow";
+      readonly operation: "begin";
+      readonly response: SourceWorkflowResult<LiveExecutionBaselineV1>;
+    }
+  | {
+      readonly kind: "source-workflow";
+      readonly operation: "propose";
+      readonly response: SourceWorkflowResult<AcceptedSourceProposal>;
+    }
+  | {
+      readonly kind: "source-workflow";
+      readonly operation: "reconcile";
+      readonly response: SourceWorkflowResult<SourceReconciliationReportV1>;
+    }
+  | {
+      readonly kind: "source-workflow";
+      readonly operation: "rebuild-plan";
+      readonly response: SourceWorkflowResult<CleanRebuildPlanV1>;
+    }
+  | {
+      readonly kind: "source-workflow";
+      readonly operation: "rebuild-verify";
+      readonly response: SourceWorkflowResult<CleanRebuildVerificationV1>;
+    }
+  | {
+      readonly kind: "source-workflow";
+      readonly operation: "complete";
+      readonly response: SourceWorkflowResult<CompleteDispositionV1>;
+    }
   | {
       readonly kind: "evidence";
       readonly result:
@@ -121,6 +197,32 @@ function isControlRequest(value: unknown): value is ProofreaderControlRequest {
     return typeof value.taskSessionId === "string" && typeof value.executionId === "string" &&
       (value.expectedSourceSha256ByProposal === undefined || isObject(value.expectedSourceSha256ByProposal));
   }
+  if (value.kind === "source-begin") {
+    return typeof value.handle === "string" &&
+      (value.sourcePaths === undefined ||
+        (Array.isArray(value.sourcePaths) && value.sourcePaths.every((path) => typeof path === "string")));
+  }
+  if (value.kind === "source-propose") {
+    return typeof value.handle === "string" && typeof value.executionId === "string" &&
+      isObject(value.proposal);
+  }
+  if (value.kind === "source-reconcile") {
+    return typeof value.handle === "string" && typeof value.executionId === "string" &&
+      (value.expectedSourceSha256ByProposal === undefined || isObject(value.expectedSourceSha256ByProposal));
+  }
+  if (value.kind === "source-rebuild-plan") {
+    return typeof value.handle === "string" && typeof value.executionId === "string" &&
+      typeof value.command === "string" && typeof value.outputPath === "string";
+  }
+  if (value.kind === "source-rebuild-verify") {
+    return typeof value.handle === "string" && typeof value.executionId === "string" &&
+      typeof value.planId === "string";
+  }
+  if (value.kind === "source-complete") {
+    return typeof value.handle === "string" && typeof value.executionId === "string" &&
+      Array.isArray(value.items) &&
+      (value.rebuildVerificationId === undefined || typeof value.rebuildVerificationId === "string");
+  }
   if (value.kind === "claim-binding") {
     return typeof value.taskSessionId === "string" &&
       typeof value.reviewSessionId === "string" &&
@@ -158,6 +260,7 @@ async function dispatch(
   if (request.kind === "revoke-task") {
     host.broker.taskBindings.revokeTask(request.taskSessionId);
     host.reconciliation.discardTask(request.taskSessionId);
+    host.sourceWorkflow.discardTask(request.taskSessionId);
     return { kind: "revoked" };
   }
   if (request.kind === "capture-source-baseline") {
@@ -176,6 +279,48 @@ async function dispatch(
     return {
       kind: "source-reconciliation",
       report: await host.reconciliation.reconcile(request),
+    };
+  }
+  if (request.kind === "source-begin") {
+    return {
+      kind: "source-workflow",
+      operation: "begin",
+      response: await host.sourceWorkflow.begin(request),
+    };
+  }
+  if (request.kind === "source-propose") {
+    return {
+      kind: "source-workflow",
+      operation: "propose",
+      response: await host.sourceWorkflow.propose(request),
+    };
+  }
+  if (request.kind === "source-reconcile") {
+    return {
+      kind: "source-workflow",
+      operation: "reconcile",
+      response: await host.sourceWorkflow.reconcile(request),
+    };
+  }
+  if (request.kind === "source-rebuild-plan") {
+    return {
+      kind: "source-workflow",
+      operation: "rebuild-plan",
+      response: await host.sourceWorkflow.prepareCleanRebuild(request),
+    };
+  }
+  if (request.kind === "source-rebuild-verify") {
+    return {
+      kind: "source-workflow",
+      operation: "rebuild-verify",
+      response: await host.sourceWorkflow.verifyCleanRebuild(request),
+    };
+  }
+  if (request.kind === "source-complete") {
+    return {
+      kind: "source-workflow",
+      operation: "complete",
+      response: await host.sourceWorkflow.complete(request),
     };
   }
   if (request.kind === "retrieve-review-items-by-handle") {

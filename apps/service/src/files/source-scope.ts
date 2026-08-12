@@ -40,6 +40,38 @@ async function rejectSymlinkAncestors(root: string, target: string): Promise<voi
   }
 }
 
+/** Resolves a prospective regular-file output without creating it. The leaf
+ * may not exist, but every existing ancestor must remain inside the canonical
+ * source root and must not be a symbolic link. */
+export async function resolveScopedOutputPath(
+  canonicalRoot: string,
+  requestedPath: string,
+): Promise<{ readonly path: string; readonly relativePath: string }> {
+  assertRelativeSourcePath(requestedPath);
+  const lexical = resolve(canonicalRoot, requestedPath);
+  if (lexical === canonicalRoot || !isContained(canonicalRoot, lexical)) {
+    throw new UnsafeSourcePathError("The output path escapes the approved source root");
+  }
+  await rejectSymlinkAncestors(canonicalRoot, lexical);
+  const info = await lstat(lexical).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (info?.isSymbolicLink() === true || (info !== undefined && !info.isFile())) {
+    throw new UnsafeSourcePathError("The scoped output must be a regular file, not a symbolic link");
+  }
+  if (info !== undefined) {
+    const physical = await realpath(lexical);
+    if (physical !== lexical || !isContained(canonicalRoot, physical)) {
+      throw new UnsafeSourcePathError("The output path does not resolve canonically inside the approved root");
+    }
+  }
+  return {
+    path: lexical,
+    relativePath: relative(canonicalRoot, lexical).split(sep).join("/"),
+  };
+}
+
 export async function canonicalSourceRoot(root: string): Promise<string> {
   const canonical = await realpath(root);
   const info = await lstat(canonical);
