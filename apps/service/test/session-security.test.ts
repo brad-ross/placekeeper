@@ -56,6 +56,43 @@ function secureRequest(
 }
 
 describe("one-use document-scoped session credentials", () => {
+  it("keeps the Codex bootstrap valid after the same PDF is focused from another surface", async () => {
+    const root = await temporaryDirectory();
+    const pdf = join(root, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\n%%EOF");
+    const broker = new SessionBroker({
+      recoveryRoot: join(root, "recovery"),
+      portableReader: async () => [],
+      rewriteAssessor: async () => ({ eligible: true }),
+    });
+    const codex = await broker.openReview({ pdfPath: pdf, surface: "codex" });
+    const finder = await broker.openReview({ pdfPath: pdf, surface: "finder" });
+    if (codex.kind !== "opened" || finder.kind !== "focused") throw new Error("Expected dual launch");
+    const codexCapability = new URLSearchParams(codex.launch.fragment.slice(1)).get("cap");
+    const finderCapability = new URLSearchParams(finder.launch.fragment.slice(1)).get("cap");
+    expect(codexCapability).not.toBeNull();
+    expect(finderCapability).not.toBeNull();
+    expect(broker.credentials.exchangeBootstrap(codex.launch.sessionId, codexCapability!)).toHaveLength(43);
+    expect(broker.credentials.exchangeBootstrap(finder.launch.sessionId, finderCapability!)).toHaveLength(43);
+  });
+
+  it("keeps earlier same-session launches valid while bounding pending capabilities", () => {
+    const credentials = new SessionCredentialStore();
+    const first = credentials.issueBootstrap("session-a");
+    const second = credentials.issueBootstrap("session-a");
+    expect(credentials.pendingBootstrapCount()).toBe(2);
+    expect(credentials.exchangeBootstrap("session-a", first)).toHaveLength(43);
+    expect(credentials.exchangeBootstrap("session-a", second)).toHaveLength(43);
+    expect(credentials.pendingBootstrapCount()).toBe(0);
+
+    const launches = Array.from({ length: 10 }, () => credentials.issueBootstrap("session-b"));
+    expect(credentials.pendingBootstrapCount()).toBe(8);
+    expect(credentials.exchangeBootstrap("session-b", launches[0]!)).toBeUndefined();
+    expect(credentials.exchangeBootstrap("session-b", launches.at(-1)!)).toHaveLength(43);
+    credentials.revokeSession("session-b");
+    expect(credentials.pendingBootstrapCount()).toBe(0);
+  });
+
   it("rejects expiry, replay, cross-session theft, and revoked credentials", () => {
     let now = 1_000;
     const credentials = new SessionCredentialStore(() => now);
@@ -124,10 +161,8 @@ describe("authenticated review presence", () => {
   it("counts accepted durable work separately from review presence", () => {
     const controls = new SessionControlRegistry({ heartbeat: false });
     const write = controls.beginWrite("review-a");
-    const picker = controls.beginTransient();
-    expect(controls.activity()).toEqual({ reviewPresence: 0, transientWork: 2 });
+    expect(controls.activity()).toEqual({ reviewPresence: 0, transientWork: 1 });
     write.complete();
-    picker.complete();
     expect(controls.activity()).toEqual({ reviewPresence: 0, transientWork: 0 });
   });
 

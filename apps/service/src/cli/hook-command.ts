@@ -237,6 +237,7 @@ function compactReviewChanges(result: Extract<LiveContextRefreshResult, { status
     editedCount: changes.edited.length,
     removedCount: changes.removed.length,
     completeChanges: "retrieve",
+    retrievalCommand: `${CODEX_INSTALLED_LAUNCHER_COMMAND} context changes --handle <handle> --offset <n> --limit <1..256>`,
   };
 }
 
@@ -269,6 +270,11 @@ export function formatPromptContext(
   hookFailure?: HookFailureContext,
 ): string {
   if (result.status === "unavailable") {
+    const recovery = result.reason === "pending"
+      ? "The task claim is pending browser authentication. Finish opening the already launched PDF Proofreader tab, then ask again."
+      : result.reason === "expired"
+        ? `The task binding expired. Reopen the PDF with ${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf <absolute-pdf-path>, then ask again.`
+        : "No current task binding is available. Reopen the PDF in PDF Proofreader from this task if live context is needed.";
     return JSON.stringify({
       kind: "pdf-proofreader-live-context",
       schemaVersion: 1,
@@ -277,7 +283,7 @@ export function formatPromptContext(
       checkedAt: result.checkedAt,
       untrustedDataPolicy: UNTRUSTED_DATA_POLICY,
       ...(hookFailure === undefined ? {} : { hookFailure }),
-      instruction: "Do not present cached PDF or annotation state as current. Ask the user to reopen the PDF in PDF Proofreader if live context is needed.",
+      instruction: `Do not present cached PDF or annotation state as current. ${recovery}`,
     });
   }
   const envelope: JsonObject = {
@@ -309,9 +315,9 @@ export function formatPromptContext(
       maxBytes: result.evidence.handle.maxBytes,
       descriptors: result.evidence.descriptors,
       retrievedDataClassification: "untrusted-data",
-      reviewItemsInstruction: "Run pdf-proofreader context items --handle <handle> [--page <zero-based-page>] [--offset <n>] [--limit <1..256>] to retrieve the complete current canonical Review Items with type, location, payload, anchor/context, and source hints. Follow nextOffset until absent.",
-      pdfInstruction: "Use pdf-proofreader context evidence with this handle, not the browser URL, to retrieve bounded PDF text, layout, render, document, or raw-annotation evidence. The generic PDF skill should inspect retrieved PDF/page evidence when layout matters.",
-      sourceWorkInstruction: "Discussion is read-only. Only when the user requests source changes, use pdf-proofreader context source begin with this handle, then follow the installed skill's guarded reconcile, ordinary Codex edit, optional clean-rebuild verification, and complete-disposition protocol in this task. Never create a handoff bundle or fresh task.",
+      reviewItemsInstruction: `Run ${CODEX_INSTALLED_LAUNCHER_COMMAND} context items --handle <handle> [--page <zero-based-page>] [--offset <n>] [--limit <1..256>] to retrieve the complete current canonical Review Items. For a compacted delta, run ${CODEX_INSTALLED_LAUNCHER_COMMAND} context changes --handle <handle> and follow nextOffset until absent so removals remain recoverable.`,
+      pdfInstruction: `Use ${CODEX_INSTALLED_LAUNCHER_COMMAND} context evidence with this handle, not the browser URL, to retrieve bounded PDF text, layout, render, document, or raw-annotation evidence. The generic PDF skill should inspect retrieved PDF/page evidence when layout matters.`,
+      sourceWorkInstruction: `Discussion is read-only. Only when the user requests source changes, use ${CODEX_INSTALLED_LAUNCHER_COMMAND} context source begin with this handle, then follow the installed skill's guarded reconcile, ordinary Codex edit, optional clean-rebuild verification, and complete-disposition protocol in this task. Never create a handoff bundle or fresh task.`,
     },
   };
   const serialized = JSON.stringify(envelope);
@@ -344,7 +350,7 @@ export function formatPromptContext(
       handle: result.evidence.handle.value,
       expiresAt: result.evidence.handle.expiresAt,
       retrievedDataClassification: "untrusted-data",
-      instruction: "Run pdf-proofreader context items with this handle for paginated canonical Review Items; use context evidence for bounded PDF evidence.",
+      instruction: `Run ${CODEX_INSTALLED_LAUNCHER_COMMAND} context items with this handle for paginated canonical Review Items; use ${CODEX_INSTALLED_LAUNCHER_COMMAND} context changes for a compacted delta and context evidence for bounded PDF evidence.`,
       sourceWorkInstruction: "For user-requested source work only, begin the installed same-task source protocol with this handle; ordinary Codex tools remain the only writer.",
     },
   });
@@ -372,7 +378,9 @@ export async function runHookCommand(
   args: readonly string[],
   serializedInput: string,
   control: ControlClient = controlThroughDaemon,
-  write: (text: string) => void = (text) => process.stdout.write(text),
+  write: (text: string) => void | Promise<void> = (text) => new Promise<void>((resolve, reject) => {
+    process.stdout.write(text, (error) => error === null || error === undefined ? resolve() : reject(error));
+  }),
 ): Promise<number> {
   if (
     args.length !== 2 || args[0] !== "hook" || args[1] !== "--event" ||
@@ -391,7 +399,7 @@ export async function runHookCommand(
         bindProof: event.bindProof,
       });
       if (response.kind === "binding" && response.result.status !== "denied") {
-        write(`${JSON.stringify(hookOutput(
+        await write(`${JSON.stringify(hookOutput(
           "PostToolUse",
           "PDF Proofreader associated this launch with the current task. Live context will become current after the in-app browser completes its authenticated bootstrap.",
         ))}\n`);
@@ -406,21 +414,33 @@ export async function runHookCommand(
             checkedAt: new Date().toISOString(),
             reason: "unavailable",
           });
-      write(`${JSON.stringify(hookOutput("UserPromptSubmit", context))}\n`);
+      await write(`${JSON.stringify(hookOutput("UserPromptSubmit", context))}\n`);
+      if (response.kind === "context" && response.result.status === "current") {
+        try {
+          await control({
+            kind: "ack-context",
+            taskSessionId: event.taskSessionId,
+            cursor: response.result.reviewItems.cursor,
+          });
+        } catch {
+          // The context was delivered, but an unacknowledged cursor is safer:
+          // the next prompt will replay state rather than silently skip it.
+        }
+      }
     } else if (event.kind === "revoke") {
       await control({ kind: "revoke-task", taskSessionId: event.taskSessionId });
     }
   } catch (error) {
     const timedOut = error instanceof ProofreaderControlTimeoutError;
     if (event.kind === "claim" && timedOut) {
-      write(`${JSON.stringify(hookOutput(
+      await write(`${JSON.stringify(hookOutput(
         "PostToolUse",
         "PDF Proofreader could not associate this launch because the local service timed out. Rerun the exact installed launch command to retry; do not infer a binding from the open browser.",
         "PDF Proofreader binding timed out; rerun the installed launch command to restore live context.",
       ))}\n`);
     }
     if (event.kind === "refresh") {
-      write(`${JSON.stringify(hookOutput(
+      await write(`${JSON.stringify(hookOutput(
         "UserPromptSubmit",
         formatPromptContext({
           schemaVersion: 1,

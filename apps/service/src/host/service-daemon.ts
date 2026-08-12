@@ -1,5 +1,6 @@
-import { spawn } from "node:child_process";
-import { lstat, unlink } from "node:fs/promises";
+import { spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { lstat, unlink, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -30,6 +31,14 @@ export const DAEMON_IDENTITY_ENV = "PDF_PROOFREADER_DAEMON_IDENTITY";
 export const INSTALL_ARTIFACT_IDENTITY_ENV = "PDF_PROOFREADER_INSTALL_ARTIFACT_IDENTITY";
 export const LIFECYCLE_LOCK_TOKEN_ENV = "PDF_PROOFREADER_LIFECYCLE_LOCK_TOKEN";
 export const LIFECYCLE_LOCK_PATH_ENV = "PDF_PROOFREADER_LIFECYCLE_LOCK_PATH";
+export const READINESS_TOKEN_ENV = "PDF_PROOFREADER_READINESS_TOKEN";
+
+export interface CandidateDaemonReceipt {
+  readonly version: 1;
+  readonly pid: number;
+  readonly daemonIdentity: string;
+  readonly readinessToken: string;
+}
 
 function currentDaemonIdentity(): string {
   return process.env[DAEMON_IDENTITY_ENV] ?? "development";
@@ -47,9 +56,11 @@ export function defaultDaemonPaths(): DaemonPaths {
     recoveryRoot: join(appSupportRoot, "recovery"),
     socketPath: join(appSupportRoot, "control.sock"),
     lifecycleLockPath: process.env[LIFECYCLE_LOCK_PATH_ENV] ?? join(appSupportRoot, "lifecycle.lock"),
-    webAssetsRoot:
-      process.env.PDF_PROOFREADER_WEB_ASSETS ??
-      resolve(dirname(process.argv[1] ?? "."), "../web"),
+    // Packaged service identity hashes this exact sibling tree. Development
+    // and tests can still inject a different root through an explicit paths
+    // object, but an inherited environment cannot make packaged code serve
+    // caller-selected browser assets under a trusted build identity.
+    webAssetsRoot: resolve(dirname(process.argv[1] ?? "."), "../web"),
   };
 }
 
@@ -92,6 +103,9 @@ export async function startServiceDaemon(paths = defaultDaemonPaths()): Promise<
     const startedHost = host;
     const control = await startLaunchControlServer(startedHost, paths.socketPath, {
       daemonIdentity: currentDaemonIdentity(),
+      ...(process.env[READINESS_TOKEN_ENV] === undefined
+        ? {}
+        : { readinessToken: process.env[READINESS_TOKEN_ENV] }),
     });
     await lifecycleLock.release();
     return {
@@ -109,9 +123,30 @@ export async function startServiceDaemon(paths = defaultDaemonPaths()): Promise<
   }
 }
 
-function daemonUnavailable(error: unknown): boolean {
+export function daemonUnavailable(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException).code;
   return code === "ENOENT" || code === "ECONNREFUSED" || code === "ECONNRESET";
+}
+
+function spawnServiceDaemon(
+  entry: string,
+  paths: DaemonPaths,
+  lifecycleToken: string,
+  readinessToken?: string,
+): ChildProcess {
+  const child = spawn(process.execPath, [entry, "daemon"], {
+    detached: true,
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      PDF_PROOFREADER_WEB_ASSETS: paths.webAssetsRoot,
+      [LIFECYCLE_LOCK_TOKEN_ENV]: lifecycleToken,
+      [LIFECYCLE_LOCK_PATH_ENV]: paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
+      ...(readinessToken === undefined ? {} : { [READINESS_TOKEN_ENV]: readinessToken }),
+    },
+  });
+  child.unref();
+  return child;
 }
 
 export async function launchThroughDaemon(
@@ -140,33 +175,39 @@ export async function launchThroughDaemon(
 export async function ensureServiceDaemonReady(
   paths = defaultDaemonPaths(),
   lifecycleToken = process.env[LIFECYCLE_LOCK_TOKEN_ENV],
-): Promise<void> {
+  receiptPath?: string,
+): Promise<CandidateDaemonReceipt> {
   if (lifecycleToken === undefined) {
     throw new Error("Candidate readiness requires the inherited lifecycle lock");
   }
   const entry = process.argv[1];
   if (entry === undefined) throw new Error("The proofreader launcher entry point is unavailable");
-  const child = spawn(process.execPath, [entry, "daemon"], {
-    detached: true,
-    stdio: "ignore",
-    env: {
-      ...process.env,
-      PDF_PROOFREADER_WEB_ASSETS: paths.webAssetsRoot,
-      [LIFECYCLE_LOCK_TOKEN_ENV]: lifecycleToken,
-      [LIFECYCLE_LOCK_PATH_ENV]: paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
-    },
-  });
-  child.unref();
+  const readinessToken = randomBytes(24).toString("base64url");
+  const child = spawnServiceDaemon(entry, paths, lifecycleToken, readinessToken);
+  if (child.pid === undefined) throw new Error("Candidate daemon did not expose its process identity");
+  const receipt: CandidateDaemonReceipt = {
+    version: 1,
+    pid: child.pid,
+    daemonIdentity: currentDaemonIdentity(),
+    readinessToken,
+  };
   let spawnError: Error | undefined;
   child.once("error", (error) => { spawnError = error; });
   const deadline = Date.now() + 5_000;
   try {
+    if (receiptPath !== undefined) {
+      await writeFile(receiptPath, `${JSON.stringify(receipt)}\n`, { flag: "wx", mode: 0o600 });
+    }
     while (true) {
       if (spawnError !== undefined) throw spawnError;
       if (child.exitCode !== null) throw new Error(`Candidate daemon exited ${child.exitCode}`);
       try {
         const compatibility = await inspectDaemonCompatibility(paths.socketPath, currentDaemonIdentity());
-        if (compatibility.kind === "exact" && compatibility.status.lifecycle === "accepting") return;
+        if (
+          compatibility.kind === "exact" &&
+          compatibility.status.lifecycle === "accepting" &&
+          compatibility.status.readinessToken === readinessToken
+        ) return receipt;
         if (compatibility.kind !== "exact") {
           throw new Error("Candidate daemon did not expose its exact build identity");
         }
@@ -180,6 +221,15 @@ export async function ensureServiceDaemonReady(
     if (child.pid !== undefined) {
       try { process.kill(-child.pid, "SIGTERM"); } catch { /* already stopped */ }
     }
+    await Promise.race([
+      child.exitCode !== null
+        ? Promise.resolve()
+        : new Promise<void>((resolveExit) => child.once("exit", () => resolveExit())),
+      new Promise<void>((_, rejectTimeout) => setTimeout(
+        () => rejectTimeout(new Error("Candidate daemon did not stop after readiness failure")),
+        5_000,
+      )),
+    ]);
     throw error;
   }
 }
@@ -204,17 +254,7 @@ async function launchWhileLocked(
   }
   const entry = process.argv[1];
   if (entry === undefined) throw new Error("The proofreader launcher entry point is unavailable");
-  const child = spawn(process.execPath, [entry, "daemon"], {
-    detached: true,
-    stdio: "ignore",
-    env: {
-      ...process.env,
-      PDF_PROOFREADER_WEB_ASSETS: paths.webAssetsRoot,
-      [LIFECYCLE_LOCK_TOKEN_ENV]: lifecycleToken,
-      [LIFECYCLE_LOCK_PATH_ENV]: paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
-    },
-  });
-  child.unref();
+  spawnServiceDaemon(entry, paths, lifecycleToken);
   for (let attempt = 0; attempt < 60; attempt += 1) {
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
     try {

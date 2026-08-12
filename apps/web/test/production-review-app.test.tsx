@@ -3,7 +3,10 @@ import { PdfZoomMode } from "@embedpdf/models";
 import { describe, expect, it, vi } from "vitest";
 
 import { createReviewState } from "../../../packages/core/src/review-model.js";
-import { ProductionReviewApp } from "../src/app/ProductionReviewApp.js";
+import {
+  ProductionReviewApp,
+  visibleCodexContext,
+} from "../src/app/ProductionReviewApp.js";
 import { SaveDestinationDialog } from "../src/save/SaveDestinationDialog.js";
 import {
   canDeriveAnnotationOutlineLabels,
@@ -307,6 +310,43 @@ describe("one production review tree", () => {
     expect(codex).not.toContain("button>Codex");
     expect(finder).not.toContain('data-codex-context');
     expect(finder).not.toContain("Codex");
+  });
+
+  it("renders a previously current Codex identity as refreshing as soon as local review state advances", () => {
+    const initial = createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000021",
+      source: { fileId: "00000000-0000-4000-8000-000000000022", digest: "a".repeat(64), byteLength: 12 },
+    });
+    const advanced = { ...initial, revision: 1 };
+    const current = {
+      status: "current" as const,
+      identity: {
+        proofreaderSessionId: initial.sessionId,
+        documentGeneration: 1,
+        source: initial.source,
+        reviewRevision: 0,
+        stateDigest: "b".repeat(64),
+      },
+      leaseExpiresAt: "2026-08-12T13:00:00.000Z",
+    };
+    expect(visibleCodexContext(current, advanced)).toMatchObject({
+      status: "refreshing",
+      lastVerified: { reviewRevision: 0 },
+    });
+
+    const html = renderToStaticMarkup(<ProductionReviewApp
+      session={{ sessionId: advanced.sessionId, credential: "secret" }}
+      initialState={advanced}
+      scope={{ documentTitle: "paper.pdf", launchSurface: "codex", codexContext: current }}
+      api={{
+        command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+        chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
+        scope: vi.fn(),
+      }}
+      viewer={<div>Viewer</div>}
+    />);
+    expect(html).toContain('data-codex-context="connecting"');
+    expect(html).not.toContain('data-codex-context="current"');
   });
 
   it("uses one clear automatic-save choice surface with the original first", () => {

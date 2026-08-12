@@ -10,6 +10,7 @@ import { controlThroughDaemon } from "../host/service-daemon.js";
 type ControlClient = (request: ProofreaderControlRequest) => Promise<ProofreaderControlResponse>;
 
 const HANDLE = /^[A-Za-z0-9._~-]{16,512}$/u;
+const INSTALLED = '"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader"';
 
 export interface ParsedContextEvidenceRequest {
   readonly handle: string;
@@ -70,7 +71,7 @@ function withoutFilePayloadFlags(args: readonly string[]): string[] {
 
 export function parseContextSourceArguments(args: readonly string[]): ProofreaderControlRequest {
   if (args[0] !== "context" || args[1] !== "source" || args[2] === undefined) {
-    throw new Error("Use: pdf-proofreader context source <begin|propose|reconcile|rebuild-plan|rebuild-verify|complete>");
+    throw new Error(`Use: ${INSTALLED} context source <begin|propose|reconcile|rebuild-plan|rebuild-verify|complete>`);
   }
   const operation = args[2];
   let handle: string | undefined;
@@ -163,7 +164,7 @@ export function parseContextSourceArguments(args: readonly string[]): Proofreade
 
 export function parseContextEvidenceArguments(args: readonly string[]): ParsedContextEvidenceRequest {
   if (args[0] !== "context" || args[1] !== "evidence") {
-    throw new Error("Use: pdf-proofreader context evidence --handle <opaque-handle> --kind <evidence-kind>");
+    throw new Error(`Use: ${INSTALLED} context evidence --handle <opaque-handle> --kind <evidence-kind>`);
   }
   let handle: string | undefined;
   let kind: PdfEvidenceRequest["kind"] | undefined;
@@ -213,8 +214,8 @@ export function parseContextEvidenceArguments(args: readonly string[]): ParsedCo
 }
 
 export function parseContextItemsArguments(args: readonly string[]): ParsedContextItemsRequest {
-  if (args[0] !== "context" || args[1] !== "items") {
-    throw new Error("Use: pdf-proofreader context items --handle <opaque-handle>");
+  if (args[0] !== "context" || (args[1] !== "items" && args[1] !== "changes")) {
+    throw new Error(`Use: ${INSTALLED} context <items|changes> --handle <opaque-handle>`);
   }
   let handle: string | undefined;
   let offset: number | undefined;
@@ -228,9 +229,9 @@ export function parseContextItemsArguments(args: readonly string[]): ParsedConte
     if (flag === "--handle" && handle === undefined) handle = raw;
     else if (flag === "--offset" && offset === undefined) offset = integer(raw);
     else if (flag === "--limit" && limit === undefined) limit = integer(raw);
-    else if (flag === "--page" && pageIndex === undefined) pageIndex = integer(raw);
+    else if (flag === "--page" && args[1] === "items" && pageIndex === undefined) pageIndex = integer(raw);
     else if (flag === "--max-bytes" && maxBytes === undefined) maxBytes = integer(raw);
-    else throw new Error("The context items request is invalid or contains a duplicate option");
+    else throw new Error("The context retrieval request is invalid or contains a duplicate option");
   }
   if (handle === undefined || !HANDLE.test(handle)) {
     throw new Error("An opaque evidence handle is required");
@@ -268,6 +269,10 @@ export async function runContextCommand(
     }
     try {
       const response = await control(request);
+      if (response.kind === "source-workflow-unavailable") {
+        write(`${JSON.stringify({ ok: false, reason: response.reason })}\n`);
+        return 2;
+      }
       if (response.kind !== "source-workflow") {
         write(`${JSON.stringify({ ok: false, reason: "unavailable" })}\n`);
         return 2;
@@ -279,21 +284,30 @@ export async function runContextCommand(
       return 2;
     }
   }
-  if (args[1] === "items") {
+  if (args[1] === "items" || args[1] === "changes") {
     let items: ParsedContextItemsRequest;
     try { items = parseContextItemsArguments(args); } catch (error) {
       write(`${JSON.stringify({ ok: false, error: error instanceof Error ? error.message : "Invalid context items request" })}\n`);
       return 2;
     }
     try {
-      const response = await control({ kind: "retrieve-review-items-by-handle", ...items });
+      const response = await control({
+        kind: args[1] === "changes"
+          ? "retrieve-review-changes-by-handle"
+          : "retrieve-review-items-by-handle",
+        handle: items.handle,
+        ...(items.offset === undefined ? {} : { offset: items.offset }),
+        ...(items.limit === undefined ? {} : { limit: items.limit }),
+        ...(items.maxBytes === undefined ? {} : { maxBytes: items.maxBytes }),
+        ...(args[1] === "items" && items.pageIndex !== undefined ? { pageIndex: items.pageIndex } : {}),
+      });
       if (response.kind !== "evidence" || response.result.status !== "ok") {
         write(`${JSON.stringify({ ok: false, reason: response.kind === "evidence" && response.result.status === "unavailable" ? response.result.reason : "unavailable" })}\n`);
         return 2;
       }
       write(`${JSON.stringify({
         ok: true,
-        kind: "review-items",
+        kind: args[1] === "changes" ? "review-changes" : "review-items",
         mediaType: response.result.mediaType,
         byteLength: Buffer.byteLength(response.result.dataBase64, "base64"),
         content: Buffer.from(response.result.dataBase64, "base64").toString("utf8"),

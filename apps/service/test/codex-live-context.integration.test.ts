@@ -123,6 +123,13 @@ describe("packaged Codex live-context lifecycle", () => {
     });
     expect(JSON.stringify(first)).not.toMatch(/127\.0\.0\.1|cap=|bindProof|\/private\/|codex-task/u);
 
+    const unchangedWrite = vi.fn();
+    await runHookCommand(["hook", "--event"], hookInput("UserPromptSubmit"), control, unchangedWrite);
+    expect(injectedContext(unchangedWrite)).toMatchObject({
+      currentness: "current",
+      reviewItems: { mode: "unchanged", itemCount: 0 },
+    });
+
     const state = host.broker.state(launch.sessionId);
     if (state === undefined) throw new Error("Expected current review state");
     const command = addPageNote(
@@ -155,19 +162,30 @@ describe("packaged Codex live-context lifecycle", () => {
       currentness: "current",
       document: { reviewRevision: 1 },
       reviewItems: {
-        mode: "full",
-        reason: "unknown-cursor",
+        mode: "delta",
         itemCount: 1,
-        completeItems: "retrieve",
+        added: [{ intent: "pageNote", pageIndex: 0 }],
       },
     });
     const handle = delta.evidence.handle as string;
+    expect(await requestControl(socketPath, {
+      kind: "source-begin",
+      handle: "evidence_not_authorized_abcdefghijklmnop",
+    })).toEqual({ kind: "source-workflow-unavailable", reason: "unauthorized" });
     const itemsWrite = vi.fn();
     expect(await runContextCommand(["context", "items", "--handle", handle], control, itemsWrite)).toBe(0);
     const itemsOutput = JSON.parse(itemsWrite.mock.calls[0]![0] as string) as { content: string };
     expect(JSON.parse(itemsOutput.content)).toMatchObject({
       total: 1,
       items: [{ intent: "pageNote", pageIndex: 0, anchor: { nearbyText: "Nearby PDF text." } }],
+    });
+    const changesWrite = vi.fn();
+    expect(await runContextCommand(["context", "changes", "--handle", handle], control, changesWrite)).toBe(0);
+    const changesOutput = JSON.parse(changesWrite.mock.calls[0]![0] as string) as { content: string };
+    expect(JSON.parse(changesOutput.content)).toMatchObject({
+      mode: "delta",
+      total: 1,
+      changes: [{ change: "added", item: { intent: "pageNote" } }],
     });
 
     const evidenceWrite = vi.fn();

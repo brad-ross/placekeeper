@@ -52,6 +52,7 @@ export interface LiveReviewIdentity {
   readonly documentGeneration: number;
   readonly reviewRevision: number;
   readonly sourceDigest: string;
+  readonly stateDigest: string;
 }
 
 export type TaskBindingClaimResult =
@@ -91,6 +92,7 @@ export class TaskBindingRegistry {
   readonly #pendingByReview = new Map<string, PendingBinding>();
   readonly #activeByTask = new Map<string, ActiveBinding>();
   readonly #activeByReview = new Map<string, ActiveBinding>();
+  readonly #expiredTasks = new Map<string, number>();
 
   constructor(options: TaskBindingRegistryOptions = {}) {
     this.#now = options.now ?? (() => new Date());
@@ -151,6 +153,7 @@ export class TaskBindingRegistry {
     ) return { status: "denied" };
 
     const proofHash = digestSecretHex(input.bindProof);
+    this.#expiredTasks.delete(input.taskSessionId);
     const proof = this.#proofsByHash.get(proofHash);
     if (proof === undefined) return { status: "denied" };
     this.#consumeProof(proof);
@@ -306,6 +309,12 @@ export class TaskBindingRegistry {
         };
   }
 
+  unavailableReasonForTask(taskSessionId: string): "pending" | "expired" | "unbound" {
+    this.#sweep();
+    if (this.#pendingByTask.has(taskSessionId)) return "pending";
+    return this.#expiredTasks.has(taskSessionId) ? "expired" : "unbound";
+  }
+
   statusForReview(
     reviewSessionId: string,
     live: LiveReviewIdentity,
@@ -319,7 +328,8 @@ export class TaskBindingRegistry {
         verified.proofreaderSessionId === reviewSessionId &&
         verified.documentGeneration === live.documentGeneration &&
         verified.reviewRevision === live.reviewRevision &&
-        verified.source.digest === live.sourceDigest;
+        verified.source.digest === live.sourceDigest &&
+        verified.stateDigest === live.stateDigest;
       return !verifiedCurrent
         ? {
             status: "refreshing",
@@ -363,6 +373,7 @@ export class TaskBindingRegistry {
     if (pending !== undefined) this.#removePending(pending);
     const active = this.#activeByTask.get(taskSessionId);
     if (active !== undefined) this.#removeActive(active);
+    this.#expiredTasks.delete(taskSessionId);
   }
 
   revokeSession(reviewSessionId: string): void {
@@ -399,6 +410,7 @@ export class TaskBindingRegistry {
     this.#pendingByReview.clear();
     this.#activeByTask.clear();
     this.#activeByReview.clear();
+    this.#expiredTasks.clear();
   }
 
   activityCount(): number {
@@ -439,10 +451,21 @@ export class TaskBindingRegistry {
       if (proof.expiresAtMs <= now) this.#consumeProof(proof);
     }
     for (const pending of [...this.#pendingByTask.values()]) {
-      if (pending.expiresAtMs <= now) this.#removePending(pending);
+      if (pending.expiresAtMs <= now) {
+        this.#expiredTasks.set(pending.taskSessionId, now);
+        this.#removePending(pending);
+      }
     }
     for (const active of [...this.#activeByTask.values()]) {
-      if (active.leaseExpiresAtMs <= now) this.#removeActive(active);
+      if (active.leaseExpiresAtMs <= now) {
+        this.#expiredTasks.set(active.taskSessionId, now);
+        this.#removeActive(active);
+      }
+    }
+    while (this.#expiredTasks.size > 256) {
+      const oldest = this.#expiredTasks.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.#expiredTasks.delete(oldest);
     }
   }
 }

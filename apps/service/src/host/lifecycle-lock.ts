@@ -1,11 +1,20 @@
 import { randomBytes } from "node:crypto";
-import { lstat, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { lstat, mkdir, readFile, readdir, rmdir, unlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 interface LifecycleLockRecord {
   readonly version: 1;
   readonly pid: number;
   readonly token: string;
+}
+
+interface StoredLifecycleLockRecord extends LifecycleLockRecord {
+  readonly markerPath: string;
+}
+
+interface LifecycleLockObservation {
+  readonly record?: StoredLifecycleLockRecord;
+  readonly markerPath?: string;
 }
 
 export interface LifecycleLockLease {
@@ -19,6 +28,8 @@ export interface LifecycleLockOptions {
   readonly pollMs?: number;
   readonly inheritedToken?: string;
   readonly now?: () => number;
+  /** Deterministic race hook used only by lifecycle-lock tests. */
+  readonly afterStaleMarkerRemoved?: () => Promise<void> | void;
 }
 
 export class LifecycleLockTimeoutError extends Error {
@@ -28,14 +39,21 @@ export class LifecycleLockTimeoutError extends Error {
   }
 }
 
-function parseRecord(raw: string): LifecycleLockRecord | undefined {
+const OWNER_PREFIX = "owner-";
+const OWNER_SUFFIX = ".json";
+
+function ownerFilename(token: string): string {
+  return `${OWNER_PREFIX}${token}${OWNER_SUFFIX}`;
+}
+
+function parseRecord(raw: string, expectedToken: string): LifecycleLockRecord | undefined {
   try {
     const value = JSON.parse(raw) as Partial<LifecycleLockRecord>;
     if (
       value.version !== 1 ||
       !Number.isSafeInteger(value.pid) ||
       (value.pid ?? 0) <= 0 ||
-      typeof value.token !== "string" ||
+      value.token !== expectedToken ||
       !/^[A-Za-z0-9_-]{32}$/u.test(value.token)
     ) return undefined;
     return { version: 1, pid: value.pid!, token: value.token };
@@ -44,8 +62,19 @@ function parseRecord(raw: string): LifecycleLockRecord | undefined {
   }
 }
 
-async function readRecord(lockPath: string): Promise<LifecycleLockRecord | undefined> {
-  return parseRecord(await readFile(lockPath, "utf8").catch(() => ""));
+async function inspectLock(lockPath: string): Promise<LifecycleLockObservation> {
+  const entries = await readdir(lockPath, { withFileTypes: true }).catch(() => []);
+  const markers = entries.filter((entry) =>
+    entry.isFile() && entry.name.startsWith(OWNER_PREFIX) && entry.name.endsWith(OWNER_SUFFIX));
+  if (markers.length !== 1) return {};
+  const marker = markers[0]!;
+  const token = marker.name.slice(OWNER_PREFIX.length, -OWNER_SUFFIX.length);
+  const markerPath = join(lockPath, marker.name);
+  if (!/^[A-Za-z0-9_-]{32}$/u.test(token)) return { markerPath };
+  const record = parseRecord(await readFile(markerPath, "utf8").catch(() => ""), token);
+  return record === undefined
+    ? { markerPath }
+    : { markerPath, record: { ...record, markerPath } };
 }
 
 function processExists(pid: number): boolean {
@@ -57,17 +86,36 @@ function processExists(pid: number): boolean {
   }
 }
 
-async function removeStaleRecord(lockPath: string, record: LifecycleLockRecord | undefined): Promise<void> {
+/** Remove only the marker that was proven stale. The final rmdir is atomic and
+ * fails with ENOTEMPTY if another contender has already published a new token,
+ * so an earlier reclaimer can never delete a later owner's lease. */
+async function removeStaleRecord(
+  lockPath: string,
+  observation: LifecycleLockObservation,
+  now: () => number,
+  afterStaleMarkerRemoved?: () => Promise<void> | void,
+): Promise<void> {
+  const record = observation.record;
   if (record !== undefined && processExists(record.pid)) return;
   if (record === undefined) {
-    const info = await lstat(lockPath).catch(() => undefined);
-    if (info === undefined || Date.now() - info.mtimeMs < 1_000) return;
+    const inspectedPath = observation.markerPath ?? lockPath;
+    const info = await lstat(inspectedPath).catch(() => undefined);
+    if (info === undefined || now() - info.mtimeMs < 1_000) return;
+    if (observation.markerPath !== undefined) {
+      await unlink(observation.markerPath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+      });
+      await afterStaleMarkerRemoved?.();
+    }
+  } else {
+    await unlink(record.markerPath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+    await afterStaleMarkerRemoved?.();
   }
-  const current = await readRecord(lockPath);
-  if (
-    (record === undefined && current === undefined) ||
-    (record !== undefined && current?.token === record.token && !processExists(record.pid))
-  ) await unlink(lockPath).catch(() => undefined);
+  await rmdir(lockPath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY") throw error;
+  });
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -89,15 +137,22 @@ export async function acquireLifecycleLock(
   while (true) {
     const inherited = options.inheritedToken;
     if (inherited !== undefined) {
-      const record = await readRecord(lockPath);
-      if (record?.token === inherited) {
+      const observation = await inspectLock(lockPath);
+      if (observation.record?.token === inherited) {
         return { token: inherited, borrowed: true, release: async () => {} };
       }
     } else {
       const token = randomBytes(24).toString("base64url");
       const record: LifecycleLockRecord = { version: 1, pid: process.pid, token };
       try {
-        await writeFile(lockPath, `${JSON.stringify(record)}\n`, { flag: "wx", mode: 0o600 });
+        await mkdir(lockPath, { mode: 0o700 });
+        const markerPath = join(lockPath, ownerFilename(token));
+        try {
+          await writeFile(markerPath, `${JSON.stringify(record)}\n`, { flag: "wx", mode: 0o600 });
+        } catch (error) {
+          await rmdir(lockPath).catch(() => undefined);
+          throw error;
+        }
         let released = false;
         return {
           token,
@@ -105,8 +160,12 @@ export async function acquireLifecycleLock(
           release: async () => {
             if (released) return;
             released = true;
-            const current = await readRecord(lockPath);
-            if (current?.token === token) await unlink(lockPath).catch(() => undefined);
+            await unlink(markerPath).catch((error: NodeJS.ErrnoException) => {
+              if (error.code !== "ENOENT") throw error;
+            });
+            await rmdir(lockPath).catch((error: NodeJS.ErrnoException) => {
+              if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY") throw error;
+            });
           },
         };
       } catch (error) {
@@ -114,8 +173,13 @@ export async function acquireLifecycleLock(
       }
     }
 
-    const record = await readRecord(lockPath);
-    await removeStaleRecord(lockPath, record);
+    const observation = await inspectLock(lockPath);
+    await removeStaleRecord(
+      lockPath,
+      observation,
+      now,
+      options.afterStaleMarkerRemoved,
+    );
     if (now() >= deadline) throw new LifecycleLockTimeoutError();
     await delay(pollMs);
   }

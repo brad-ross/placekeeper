@@ -14,6 +14,7 @@ import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-wr
 import { createReviewState } from "../../../../packages/core/src/review-model.js";
 import { createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
 import { reduceReview } from "../../../../packages/core/src/review-reducer.js";
+import { reviewSemanticDigest } from "../../../../packages/core/src/live-context.js";
 import {
   digestSecretHex,
   SessionCredentialStore,
@@ -857,6 +858,7 @@ export class SessionBroker {
                 documentGeneration: session.documentGeneration,
                 reviewRevision: session.state.revision,
                 sourceDigest: session.state.source.digest,
+                stateDigest: reviewSemanticDigest(session.state.items),
               },
             ),
           }
@@ -1133,12 +1135,17 @@ export class SessionBroker {
   async quiesceForShutdown(): Promise<void> {
     const sessions = [...this.#activeById.values()];
     await this.drainWrites();
-    for (const session of sessions) {
-      session.ending = true;
+    for (const session of sessions) session.ending = true;
+    // Recovery cleanup is garbage collection, not a shutdown precondition.
+    // A verified-clean directory that cannot be removed may be retried later;
+    // it must never prevent capability revocation and control-socket teardown.
+    await Promise.allSettled(sessions.map(async (session) => {
       const clean = session.sync.phase === "clean" &&
         session.sync.savedRevision === session.sync.desiredRevision &&
         session.sync.savedDigest === session.sync.desiredDigest;
       if (clean) await session.store.remove();
+    }));
+    for (const session of sessions) {
       this.capabilities.revokeFile(session.fileId);
       if (session.rootId !== undefined) this.capabilities.revokeRoot(session.rootId);
       this.credentials.revokeSession(session.id);

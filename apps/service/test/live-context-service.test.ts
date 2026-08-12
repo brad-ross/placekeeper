@@ -54,6 +54,7 @@ async function fixture(options: {
   inspect?: ConstructorParameters<typeof LiveContextService>[0]["inspectPdf"];
   querySourceHints?: ConstructorParameters<typeof LiveContextService>[0]["querySourceHints"];
   sourceRoot?: boolean;
+  sourceHintBudgetMs?: number;
 } = {}): Promise<{
   broker: SessionBroker;
   launch: SessionLaunch;
@@ -101,6 +102,7 @@ async function fixture(options: {
       ]),
     })),
     ...(options.querySourceHints === undefined ? {} : { querySourceHints: options.querySourceHints }),
+    ...(options.sourceHintBudgetMs === undefined ? {} : { sourceHintBudgetMs: options.sourceHintBudgetMs }),
   });
   return { broker, launch: opened.launch, service };
 }
@@ -201,7 +203,7 @@ describe("atomic live-context service", () => {
       status: "current",
       reviewItems: {
         mode: "full",
-        reason: "unknown-cursor",
+        reason: "initial",
         itemCount: 1,
         items: [{ id: id(1) }],
       },
@@ -283,6 +285,26 @@ describe("atomic live-context service", () => {
     await service.refresh({ taskSessionId: "task-a" });
 
     expect(queriedIds).toEqual([id(1), id(2)]);
+  });
+
+  it("publishes within the prompt budget when uncached SyncTeX enrichment stalls", async () => {
+    const { broker, launch, service } = await fixture({
+      sourceRoot: true,
+      sourceHintBudgetMs: 20,
+      querySourceHints: async () => new Promise<ReadonlyMap<string, never>>(() => {}),
+    });
+    await broker.acceptMutation(launch.sessionId, {
+      type: "add",
+      expectedRevision: 0,
+      item: item(1),
+    });
+    const started = Date.now();
+    const result = await service.refresh({ taskSessionId: "task-a" });
+    expect(Date.now() - started).toBeLessThan(250);
+    expect(result).toMatchObject({
+      status: "current",
+      reviewItems: { mode: "full", items: [{ id: id(1) }] },
+    });
   });
 
   it("keeps accepted Review Items current when PDF persistence reports a write failure", async () => {

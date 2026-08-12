@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 import { ProofreaderHost } from "../../apps/service/src/host/proofreader-host.js";
+import { TaskBindingRegistry } from "../../apps/service/src/context/task-binding-registry.js";
 import { addPageNote } from "../../packages/core/src/review-commands.js";
 
 let root = "";
@@ -259,6 +260,77 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await host?.close();
   if (root) await rm(root, { recursive: true, force: true });
+});
+
+test("fails mounted Codex status closed on lease expiry and aborts a hung scope poll", async ({ page }) => {
+  const clientNow = Date.now();
+  const taskBindings = new TaskBindingRegistry({
+    now: () => new Date(clientNow),
+    pendingTtlMs: 1_000,
+    activeLeaseTtlMs: 2_000,
+  });
+  const clockedHost = await ProofreaderHost.start({
+    recoveryRoot: join(root, "clocked-codex-recovery"),
+    webAssets: { root: resolve("dist/web") },
+    taskBindings,
+  });
+  try {
+    const launched = await clockedHost.open({
+      pdfPath: pdf,
+      sourceRootPath: sourceRoot,
+      surface: "codex",
+      fork: true,
+    });
+    if (!launched.ok || launched.kind === "recovery-offered" || launched.bindProof === undefined) {
+      throw new Error("Expected bindable Codex production launch");
+    }
+    const url = new URL(launched.url);
+    const capability = new URLSearchParams(url.hash.slice(1)).get("cap")!;
+    expect(taskBindings.claim({
+      bindProof: launched.bindProof,
+      taskSessionId: "mounted-clock-task",
+      reviewSessionId: launched.sessionId,
+      documentGeneration: launched.documentGeneration,
+    })).toMatchObject({ status: "pending" });
+    expect(taskBindings.activateBrowser({
+      reviewSessionId: launched.sessionId,
+      documentGeneration: launched.documentGeneration,
+      browserCapability: capability,
+    })).toMatchObject({ status: "active" });
+    expect((await clockedHost.context.refresh({ taskSessionId: "mounted-clock-task" })).status)
+      .toBe("current");
+
+    await page.clock.install({ time: clientNow });
+    await page.addInitScript(() => {
+      const nativeFetch = window.fetch.bind(window);
+      let scopeRequests = 0;
+      window.fetch = (input, init) => {
+        const requestUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (new URL(requestUrl, window.location.href).pathname.endsWith("/scope")) {
+          scopeRequests += 1;
+          if (scopeRequests > 1) {
+            return new Promise((_resolve, reject) => {
+              init?.signal?.addEventListener("abort", () => {
+                reject(new DOMException("Scope request aborted", "AbortError"));
+              }, { once: true });
+            });
+          }
+        }
+        return nativeFetch(input, init);
+      };
+    });
+    await page.goto(launched.url);
+    const status = page.locator("[data-codex-context]");
+    await expect(status).toHaveAttribute("data-codex-context", "current");
+
+    await page.clock.fastForward(2_100);
+    await expect(status).toHaveAttribute("data-codex-context", "connecting");
+
+    await page.clock.fastForward(3_500);
+    await expect(status).toHaveAttribute("data-codex-context", "unavailable");
+  } finally {
+    await clockedHost.close();
+  }
 });
 
 test("searches extracted PDF text with variants, history, references, and retained responsive state", async ({ page }) => {

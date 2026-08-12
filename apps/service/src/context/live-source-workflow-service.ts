@@ -101,8 +101,15 @@ function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+export class SourceWorkflowUnavailableError extends Error {
+  constructor(readonly reason: PdfEvidenceUnavailableReason) {
+    super(`The prompt-scoped PDF context handle is ${reason.replaceAll("_", " ")}`);
+    this.name = "SourceWorkflowUnavailableError";
+  }
+}
+
 function unavailable(reason: PdfEvidenceUnavailableReason): Error {
-  return new Error(`The prompt-scoped PDF context handle is ${reason.replaceAll("_", " ")}`);
+  return new SourceWorkflowUnavailableError(reason);
 }
 
 function freshness(observation: AtomicLiveContextObservationV1): SourceWorkflowFreshness {

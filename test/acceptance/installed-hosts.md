@@ -30,7 +30,7 @@ The required v1 distribution is a source-first Apple-silicon install for a perso
 | Distinct candidate, two active PDFs | Replacement exits before touching the installed identity; both authenticated review state endpoints remain usable. | Close PDF Proofreader tabs/windows, wait for the five-second grace lease, and retry. |
 | Active Codex binding | Deferred install retains current prompt context; `SessionEnd` revokes it without stopping unrelated reviews. | End the bound Codex task or wait for its lease, then retry. |
 | Accepted save or lifecycle work | Coordinator retries for at most five seconds, then preserves the app if work is still active. | Wait a moment, then retry. |
-| Legacy, malformed, or timed-out daemon | Socket-level acceptance classifies it as uninspectable and the transaction helper is never invoked. | Close reviews. For a legacy daemon only, explicitly run `pdf-proofreader daemon stop-legacy`, then retry. |
+| Legacy, malformed, or timed-out daemon | Socket-level acceptance classifies it as uninspectable and the transaction helper is never invoked. | Close reviews. For a legacy daemon only, explicitly run `"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy`, then retry. |
 | Closed pages plus ended task | Presence grace expires, conditional shutdown completes, candidate replacement/readiness succeeds, and the new launcher opens the fixture. | Retry the install. |
 
 All upgrade acceptance uses temporary app-support roots and process groups. It records only aggregate outcome categories and build digests—never PDF paths, capabilities, task identifiers, bind proofs, credentials, or evidence handles—and does not address the user's real daemon.

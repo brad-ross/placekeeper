@@ -18,6 +18,18 @@ afterEach(async () => {
 });
 
 describe("context evidence command", () => {
+  it("preserves a typed source-work handle failure through the CLI", async () => {
+    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({
+      kind: "source-workflow-unavailable",
+      reason: "expired",
+    }));
+    const write = vi.fn();
+    expect(await runContextCommand([
+      "context", "source", "begin", "--handle", "evidence_abcdefghijklmnop",
+    ], control, write)).toBe(2);
+    expect(JSON.parse(write.mock.calls[0]![0] as string)).toEqual({ ok: false, reason: "expired" });
+  });
+
   it("keeps discussion read-only and addresses source work only through the current opaque handle", async () => {
     const handle = "evidence_abcdefghijklmnop";
     expect(parseContextSourceArguments([

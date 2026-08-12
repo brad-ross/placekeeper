@@ -28,10 +28,10 @@ To update, pull or download newer source and run `./install.sh` again. PDF Proof
 The first update from a version that predates the safe management handshake cannot prove whether reviews are active. Close all PDF Proofreader tabs/windows and end bound Codex tasks, then explicitly run:
 
 ```sh
-~/Applications/PDF\ Proofreader.app/Contents/MacOS/pdf-proofreader daemon stop-legacy
+"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy
 ```
 
-Then rerun `./install.sh`. `pdf-proofreader daemon stop-legacy` is never run automatically: it validates that the private socket belongs to the current user and that its listener is a PDF Proofreader daemon before requesting termination. Do not use `kill`, `pkill`, or `killall` as an upgrade workaround.
+Then rerun `./install.sh`. `"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy` is never run automatically: it validates that the private socket belongs to the current user and that its listener is a PDF Proofreader daemon before requesting termination. Do not use `kill`, `pkill`, or `killall` as an upgrade workaround.
 
 The installer replaces only its installed app; if replacement or candidate readiness fails, it restores the previous app. It leaves recovery data and user-owned exports alone.
 

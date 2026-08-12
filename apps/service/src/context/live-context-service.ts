@@ -36,6 +36,7 @@ export interface LiveContextServiceOptions {
   readonly now?: () => Date;
   readonly cursor?: () => string;
   readonly querySourceHints?: typeof querySyncTexHintsForItems;
+  readonly sourceHintBudgetMs?: number;
 }
 
 type AtomicRefreshProjection =
@@ -67,6 +68,8 @@ const MAX_TASK_OBSERVATIONS = 128;
 const MAX_PDF_INSPECTIONS = 32;
 const MAX_SOURCE_HINTS = 2_048;
 const SOURCE_HINT_CONCURRENCY = 2;
+const SOURCE_HINT_BUDGET_MS = 1_000;
+const MAX_PENDING_DELIVERIES_PER_TASK = 8;
 
 async function forEachConcurrent<T>(
   values: readonly T[],
@@ -83,6 +86,20 @@ async function forEachConcurrent<T>(
       }
     },
   ));
+}
+
+async function within<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 function toRect(rect: {
@@ -189,7 +206,9 @@ export class LiveContextService {
   readonly #now: () => Date;
   readonly #cursor: () => string;
   readonly #querySourceHints: typeof querySyncTexHintsForItems;
+  readonly #sourceHintBudgetMs: number;
   readonly #observedByTask = new Map<string, TaskObservationCursor>();
+  readonly #pendingDeliveriesByTask = new Map<string, Map<string, TaskObservationCursor>>();
   readonly #pdfInspectionBySession = new Map<string, CachedPdfInspection>();
   readonly #sourceHints = new Map<string, CachedSourceHint>();
   readonly #taskTails = new Map<string, Promise<void>>();
@@ -200,6 +219,7 @@ export class LiveContextService {
     this.#now = options.now ?? (() => new Date());
     this.#cursor = options.cursor ?? randomUUID;
     this.#querySourceHints = options.querySourceHints ?? querySyncTexHintsForItems;
+    this.#sourceHintBudgetMs = options.sourceHintBudgetMs ?? SOURCE_HINT_BUDGET_MS;
     this.evidence = options.evidence ?? new PdfEvidenceService({
       bindings: options.broker.taskBindings,
       now: this.#now,
@@ -211,9 +231,13 @@ export class LiveContextService {
 
   discardTask(taskSessionId: string, reviewSessionId?: string): void {
     const observed = this.#observedByTask.get(taskSessionId);
+    const pending = this.#pendingDeliveriesByTask.get(taskSessionId)?.values().next().value as
+      | TaskObservationCursor
+      | undefined;
     this.#observedByTask.delete(taskSessionId);
+    this.#pendingDeliveriesByTask.delete(taskSessionId);
     this.evidence.revokeTask(taskSessionId);
-    const sessionId = observed?.reviewSessionId ?? reviewSessionId;
+    const sessionId = observed?.reviewSessionId ?? pending?.reviewSessionId ?? reviewSessionId;
     if (sessionId !== undefined) this.#discardSessionCaches(sessionId);
   }
 
@@ -221,6 +245,12 @@ export class LiveContextService {
     for (const [taskSessionId, observed] of this.#observedByTask) {
       if (observed.reviewSessionId === reviewSessionId) {
         this.#observedByTask.delete(taskSessionId);
+        this.#pendingDeliveriesByTask.delete(taskSessionId);
+      }
+    }
+    for (const [taskSessionId, deliveries] of this.#pendingDeliveriesByTask) {
+      if ([...deliveries.values()].some((delivery) => delivery.reviewSessionId === reviewSessionId)) {
+        this.#pendingDeliveriesByTask.delete(taskSessionId);
       }
     }
     this.evidence.revokeSession(reviewSessionId);
@@ -229,6 +259,7 @@ export class LiveContextService {
 
   discardAll(): void {
     this.#observedByTask.clear();
+    this.#pendingDeliveriesByTask.clear();
     this.#pdfInspectionBySession.clear();
     this.#sourceHints.clear();
     this.evidence.revokeAll();
@@ -241,16 +272,41 @@ export class LiveContextService {
     return this.#serializeTask(input.taskSessionId, () => this.#refresh(input));
   }
 
+  acknowledge(input: { readonly taskSessionId: string; readonly cursor: string }): boolean {
+    const deliveries = this.#pendingDeliveriesByTask.get(input.taskSessionId);
+    const delivered = deliveries?.get(input.cursor);
+    if (delivered === undefined) return false;
+    const binding = this.#broker.taskBindings.bindingForTask(input.taskSessionId);
+    if (
+      binding === undefined ||
+      binding.reviewSessionId !== delivered.reviewSessionId ||
+      binding.documentGeneration !== delivered.documentGeneration
+    ) return false;
+    this.#observedByTask.set(input.taskSessionId, delivered);
+    this.#pendingDeliveriesByTask.delete(input.taskSessionId);
+    this.#trim(this.#observedByTask, MAX_TASK_OBSERVATIONS, (taskSessionId) => {
+      this.evidence.revokeTask(taskSessionId);
+    });
+    return true;
+  }
+
   async #refresh(input: {
     readonly taskSessionId: string;
     readonly cursor?: string;
   }): Promise<LiveContextRefreshResult> {
     const checkedAt = this.#now().toISOString();
+    if (input.cursor !== undefined) {
+      // Non-hook clients may explicitly acknowledge the prior cursor in their
+      // next refresh request. Packaged prompt hooks use ack-context after the
+      // stdout delivery succeeds.
+      this.acknowledge({ taskSessionId: input.taskSessionId, cursor: input.cursor });
+    }
     const previousRecord = this.#touch(this.#observedByTask, input.taskSessionId);
     const binding = this.#broker.taskBindings.bindingForTask(input.taskSessionId);
     if (binding === undefined) {
+      const reason = this.#broker.taskBindings.unavailableReasonForTask(input.taskSessionId);
       this.discardTask(input.taskSessionId);
-      return createUnavailableLiveContextObservation({ checkedAt, reason: "unbound" });
+      return createUnavailableLiveContextObservation({ checkedAt, reason });
     }
     const previous = previousRecord?.reviewSessionId === binding.reviewSessionId &&
       previousRecord.documentGeneration === binding.documentGeneration
@@ -283,6 +339,18 @@ export class LiveContextService {
           reviewRevision: current.revision,
           stateDigest: current.semanticDigest,
         };
+        const cursorStatus = previous !== undefined &&
+          (input.cursor === undefined || input.cursor === previous.cursor)
+          ? "known"
+          : "unknown";
+        const diffPrevious = previous ?? (input.cursor === undefined
+          ? undefined
+          : { ...current, cursor: input.cursor });
+        const reviewItems = diffReviewSnapshots({
+          current,
+          ...(diffPrevious === undefined ? {} : { previous: diffPrevious }),
+          cursorStatus,
+        });
         const catalog = this.evidence.mint({
           taskSessionId: input.taskSessionId,
           identity,
@@ -290,20 +358,13 @@ export class LiveContextService {
           sourceByteLength: snapshot.sourceByteLength,
           existingAnnotations: inspection.existingAnnotations,
           reviewItems: current.items,
+          reviewChanges: reviewItems,
         });
-        const cursorStatus = previous !== undefined &&
-          (input.cursor === undefined || input.cursor !== previous.cursor)
-          ? "unknown"
-          : "known";
         const observation = createAtomicLiveContextObservation({
           observedAt: checkedAt,
           identity,
           saveStatus: liveSaveStatus(snapshot),
-          reviewItems: diffReviewSnapshots({
-            current,
-            ...(previous === undefined ? {} : { previous }),
-            cursorStatus,
-          }),
+          reviewItems,
           existingPdfAnnotations: {
             items: inspection.existingAnnotations,
             warnings: inspection.warnings,
@@ -345,14 +406,19 @@ export class LiveContextService {
         ...(binding.lastVerified === undefined ? {} : { lastVerified: binding.lastVerified }),
       });
     }
-    this.#observedByTask.set(input.taskSessionId, {
+    const delivery = {
       reviewSessionId: projected.observation.identity.proofreaderSessionId,
       documentGeneration: projected.observation.identity.documentGeneration,
       snapshot: projected.snapshot,
-    });
-    this.#trim(this.#observedByTask, MAX_TASK_OBSERVATIONS, (taskSessionId) => {
-      this.evidence.revokeTask(taskSessionId);
-    });
+    };
+    const deliveries = this.#pendingDeliveriesByTask.get(input.taskSessionId) ?? new Map();
+    deliveries.set(projected.snapshot.cursor, delivery);
+    while (deliveries.size > MAX_PENDING_DELIVERIES_PER_TASK) {
+      const oldest = deliveries.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      deliveries.delete(oldest);
+    }
+    this.#pendingDeliveriesByTask.set(input.taskSessionId, deliveries);
     return projected.observation;
   }
 
@@ -389,12 +455,16 @@ export class LiveContextService {
       if (cached === undefined) missing.push({ item, key });
       else if (cached.hint !== undefined) hints.set(item.id, cached.hint);
     }
+    const deadlineMs = Date.now() + this.#sourceHintBudgetMs;
     await forEachConcurrent(missing, SOURCE_HINT_CONCURRENCY, async ({ item, key }) => {
-      const queried = await this.#querySourceHints({
+      const timeoutMs = deadlineMs - Date.now();
+      if (timeoutMs <= 0) return;
+      const queried = await within(this.#querySourceHints({
         items: [item],
         sourceRoot: snapshot.sourceRootPath!,
         pdfPath: snapshot.sourcePdfPath,
-      });
+        timeoutMs,
+      }), timeoutMs, new Map<string, SourceHint>());
       const hint = queried.get(item.id);
       this.#sourceHints.set(key, { reviewSessionId: snapshot.sessionId, hint });
       if (hint !== undefined) hints.set(item.id, hint);

@@ -33,6 +33,7 @@ function maintainPresence(session: ProductionSession): () => void {
   let stopped = false;
   let socket: WebSocket | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
+  let retryDelayMs = 1_000;
   const connect = (): void => {
     if (stopped) return;
     const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -40,8 +41,14 @@ function maintainPresence(session: ProductionSession): () => void {
       `${scheme}//${window.location.host}/s/${session.sessionId}/control`,
       ["proofreader", `proofreader-auth.${session.credential}`],
     );
+    socket.addEventListener("open", () => {
+      retryDelayMs = 1_000;
+    });
     socket.addEventListener("close", () => {
-      if (!stopped) retry = setTimeout(connect, 1_000);
+      if (stopped) return;
+      const delay = retryDelayMs;
+      retryDelayMs = Math.min(retryDelayMs * 2, 30_000);
+      retry = setTimeout(connect, delay);
     });
   };
   connect();
@@ -102,7 +109,10 @@ export async function loadProductionSession(session: ProductionSession): Promise
       chooseOriginal: () => post<ProductionSaveStatus>("/save/original"),
       retrySave: () => post<ProductionSaveStatus>("/save/retry"),
       locateSave: () => post<ProductionSaveStatus>("/save/locate"),
-      scope: () => request<ProductionScope>("/scope"),
+      scope: (signal) => request<ProductionScope>(
+        "/scope",
+        signal === undefined ? {} : { signal },
+      ),
     },
   };
 }

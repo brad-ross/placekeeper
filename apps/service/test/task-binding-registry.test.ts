@@ -227,21 +227,31 @@ describe("task-scoped PDF binding registry", () => {
       documentGeneration: 1,
       reviewRevision: 4,
       sourceDigest: "a".repeat(64),
+      stateDigest: verified.stateDigest,
     })).toMatchObject({ status: "current", identity: verified });
+    expect(registry.statusForReview("review-a", {
+      documentGeneration: 1,
+      reviewRevision: 4,
+      sourceDigest: "a".repeat(64),
+      stateDigest: "d".repeat(64),
+    })).toMatchObject({ status: "refreshing", lastVerified: verified });
     expect(registry.statusForReview("review-a", {
       documentGeneration: 1,
       reviewRevision: 5,
       sourceDigest: "a".repeat(64),
+      stateDigest: verified.stateDigest,
     })).toMatchObject({ status: "refreshing", lastVerified: verified });
     expect(registry.statusForReview("review-a", {
       documentGeneration: 1,
       reviewRevision: 4,
       sourceDigest: "c".repeat(64),
+      stateDigest: verified.stateDigest,
     })).toMatchObject({ status: "refreshing", lastVerified: verified });
     expect(registry.statusForReview("review-a", {
       documentGeneration: 2,
       reviewRevision: 4,
       sourceDigest: "a".repeat(64),
+      stateDigest: verified.stateDigest,
     })).toEqual({ status: "unbound" });
   });
 
@@ -254,8 +264,10 @@ describe("task-scoped PDF binding registry", () => {
       reviewSessionId: "review-a",
       documentGeneration: 1,
     });
+    expect(registry.unavailableReasonForTask("task-pending")).toBe("pending");
     advance(101);
     expect(registry.bindingForTask("task-pending")).toBeUndefined();
+    expect(registry.unavailableReasonForTask("task-pending")).toBe("expired");
 
     const activeCapability = `${BROWSER_CAPABILITY}-active`;
     const activeProof = issue(registry, { browserCapability: activeCapability });
@@ -272,6 +284,7 @@ describe("task-scoped PDF binding registry", () => {
     });
     advance(1_001);
     expect(registry.bindingForTask("task-active")).toBeUndefined();
+    expect(registry.unavailableReasonForTask("task-active")).toBe("expired");
 
     const revokeCapability = `${BROWSER_CAPABILITY}-revoke`;
     const revokeProof = issue(registry, { browserCapability: revokeCapability });
@@ -288,6 +301,7 @@ describe("task-scoped PDF binding registry", () => {
     });
     registry.revokeTask("task-revoke");
     expect(registry.bindingForTask("task-revoke")).toBeUndefined();
+    expect(registry.unavailableReasonForTask("task-revoke")).toBe("unbound");
 
     const generationCapability = `${BROWSER_CAPABILITY}-generation`;
     const generationProof = issue(registry, { browserCapability: generationCapability });

@@ -182,7 +182,9 @@ describe("Codex lifecycle hook", () => {
   });
 
   it("injects current delta, save health, location/context, and opaque evidence instructions", async () => {
-    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({ kind: "context", result: current }));
+    const control = vi.fn(async (request): Promise<ProofreaderControlResponse> => request.kind === "ack-context"
+      ? { kind: "context-acknowledged", accepted: true }
+      : { kind: "context", result: current });
     const write = vi.fn();
     await runHookCommand(["hook", "--event"], JSON.stringify(prompt()), control, write);
     const outer = JSON.parse(write.mock.calls[0]![0] as string);
@@ -203,6 +205,19 @@ describe("Codex lifecycle hook", () => {
     });
     const serialized = JSON.stringify(context);
     expect(serialized).not.toMatch(/review-session|never-expose-file-capability|127\.0\.0\.1|cap=|\/private\//u);
+    expect(control).toHaveBeenLastCalledWith({
+      kind: "ack-context",
+      taskSessionId: "thr_codex_task_123",
+      cursor: "cursor-4",
+    });
+  });
+
+  it("does not acknowledge a cursor when prompt delivery fails", async () => {
+    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({ kind: "context", result: current }));
+    const write = vi.fn(() => { throw new Error("stdout closed"); });
+    await expect(runHookCommand(["hook", "--event"], JSON.stringify(prompt()), control, write)).rejects.toThrow("stdout closed");
+    expect(control).toHaveBeenCalledTimes(1);
+    expect(control).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "ack-context" }));
   });
 
   it("keeps hostile annotation and source-hint text labeled as untrusted data", () => {

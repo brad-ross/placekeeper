@@ -63,6 +63,18 @@ export interface SourceReconciliationReportV1 {
 
 interface BaselineSource extends ScopedSourceRead {}
 
+interface BaselineTargetAnchor {
+  readonly index: number;
+  readonly prefix: string;
+  readonly suffix: string;
+}
+
+interface RegisteredProposal {
+  readonly digest: string;
+  readonly proposal: SourceReplacementProposalV1;
+  readonly baselineAnchor?: BaselineTargetAnchor;
+}
+
 interface ExecutionRecord {
   readonly taskSessionId: string;
   readonly reviewSessionId: string;
@@ -70,7 +82,7 @@ interface ExecutionRecord {
   readonly sourceRoot: string;
   readonly baseline: LiveExecutionBaselineV1;
   readonly sources: ReadonlyMap<string, BaselineSource>;
-  readonly proposalsByKey: Map<string, { readonly digest: string; readonly proposal: SourceReplacementProposalV1 }>;
+  readonly proposalsByKey: Map<string, RegisteredProposal>;
   readonly proposalKeyByItem: Map<string, string>;
 }
 
@@ -100,6 +112,51 @@ function occurrences(value: string, search: string): readonly number[] {
     offset = index + Math.max(1, search.length);
   }
   return indexes;
+}
+
+const BASELINE_ANCHOR_CONTEXT_LENGTH = 256;
+
+function baselineTargetAnchor(
+  baselineText: string,
+  expectedText: string,
+): BaselineTargetAnchor | undefined {
+  const matches = occurrences(baselineText, expectedText);
+  if (matches.length !== 1) return undefined;
+  const index = matches[0]!;
+  return {
+    index,
+    prefix: baselineText.slice(Math.max(0, index - BASELINE_ANCHOR_CONTEXT_LENGTH), index),
+    suffix: baselineText.slice(
+      index + expectedText.length,
+      index + expectedText.length + BASELINE_ANCHOR_CONTEXT_LENGTH,
+    ),
+  };
+}
+
+function suffixMatches(value: string, expectedSuffix: string): boolean {
+  return expectedSuffix.length > 0 && value.endsWith(expectedSuffix);
+}
+
+function prefixMatches(value: string, expectedPrefix: string): boolean {
+  return expectedPrefix.length > 0 && value.startsWith(expectedPrefix);
+}
+
+function mapsBaselineTarget(
+  currentText: string,
+  currentIndex: number,
+  expectedText: string,
+  anchor: BaselineTargetAnchor,
+): boolean {
+  if (currentIndex === anchor.index) return true;
+  const before = currentText.slice(Math.max(0, currentIndex - anchor.prefix.length), currentIndex);
+  const after = currentText.slice(
+    currentIndex + expectedText.length,
+    currentIndex + expectedText.length + anchor.suffix.length,
+  );
+  // One intact bounded side is enough to survive an unrelated insertion on
+  // the other side, while a lone occurrence moved to unrelated context does
+  // not inherit the baseline target's authority.
+  return suffixMatches(before, anchor.prefix) || prefixMatches(after, anchor.suffix);
 }
 
 function anchoredRegion(
@@ -140,6 +197,7 @@ function proposalClassification(input: {
   readonly baseline: BaselineSource;
   readonly current: ScopedSourceRead;
   readonly proposal: SourceReplacementProposalV1;
+  readonly baselineAnchor?: BaselineTargetAnchor;
   readonly guardedSha256?: string;
 }): { readonly classification: "equivalent" | "independent" | "conflict" | "ambiguous"; readonly explanation: string } {
   const { baseline, current, proposal } = input;
@@ -166,7 +224,10 @@ function proposalClassification(input: {
       explanation: "The source changed after the prior reconciliation check; the later manual state takes precedence.",
     };
   }
-  if (currentTargets.length === 1) {
+  if (
+    currentTargets.length === 1 && input.baselineAnchor !== undefined &&
+    mapsBaselineTarget(current.text, currentTargets[0]!, proposal.expectedText, input.baselineAnchor)
+  ) {
     return {
       classification: "independent",
       explanation: current.fingerprint.sha256 === baseline.fingerprint.sha256
@@ -178,6 +239,12 @@ function proposalClassification(input: {
     return {
       classification: "ambiguous",
       explanation: "The current manual source has more than one plausible target; it is preserved without guessing.",
+    };
+  }
+  if (currentTargets.length === 1) {
+    return {
+      classification: region.status === "unique" ? "conflict" : "ambiguous",
+      explanation: "The baseline target was moved or removed and the remaining text does not map to its captured location; manual source state is preserved.",
     };
   }
   if (region.status === "unique") {
@@ -380,9 +447,11 @@ export class SourceReconciliationService {
         throw new Error("Each baseline Review Item accepts one idempotent proposal per execution");
       }
       const canonicalProposal = { ...input.proposal, path: source.fingerprint.path };
+      const baselineAnchor = baselineTargetAnchor(source.text, canonicalProposal.expectedText);
       record.proposalsByKey.set(input.proposal.idempotencyKey, {
         digest: proposalDigest,
         proposal: canonicalProposal,
+        ...(baselineAnchor === undefined ? {} : { baselineAnchor }),
       });
       record.proposalKeyByItem.set(input.proposal.baselineItemId, input.proposal.idempotencyKey);
       return { status: "accepted", proposal: canonicalProposal };
@@ -416,6 +485,7 @@ export class SourceReconciliationService {
               readonly baselineItemId: string;
               readonly proposalKey: string;
               readonly proposal: SourceReplacementProposalV1;
+              readonly baselineAnchor?: BaselineTargetAnchor;
             } => {
           const currentItem = currentById.get(baselineItem.id);
           if (currentItem === undefined) {
@@ -443,7 +513,8 @@ export class SourceReconciliationService {
               },
             };
           }
-          const proposal = record.proposalsByKey.get(proposalKey)!.proposal;
+          const registered = record.proposalsByKey.get(proposalKey)!;
+          const proposal = registered.proposal;
           const currentStructured = projectStructuredReviewItem(currentItem, baselineItem.sourceHint);
           if (canonicalSha256(currentStructured) !== canonicalSha256(baselineItem)) {
             return {
@@ -458,7 +529,15 @@ export class SourceReconciliationService {
               },
             };
           }
-          return { status: "needs-source", baselineItemId: baselineItem.id, proposalKey, proposal };
+          return {
+            status: "needs-source",
+            baselineItemId: baselineItem.id,
+            proposalKey,
+            proposal,
+            ...(registered.baselineAnchor === undefined
+              ? {}
+              : { baselineAnchor: registered.baselineAnchor }),
+          };
         });
         const currentSources = await readUniqueSources(
           record.sourceRoot,
@@ -466,13 +545,14 @@ export class SourceReconciliationService {
         );
         const outcomes = classified.map((entry): SourceReconciliationDecision => {
           if (entry.status === "complete") return entry.decision;
-          const { baselineItemId, proposalKey, proposal } = entry;
+          const { baselineItemId, proposalKey, proposal, baselineAnchor } = entry;
           const baselineSource = record.sources.get(proposal.path)!;
           const currentSource = currentSources.get(proposal.path)!;
           const sourceClassification = proposalClassification({
             baseline: baselineSource,
             current: currentSource,
             proposal,
+            ...(baselineAnchor === undefined ? {} : { baselineAnchor }),
             ...(input.expectedSourceSha256ByProposal?.[proposalKey] === undefined
               ? {}
               : { guardedSha256: input.expectedSourceSha256ByProposal[proposalKey] }),

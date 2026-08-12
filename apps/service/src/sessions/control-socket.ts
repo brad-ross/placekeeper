@@ -32,7 +32,6 @@ export class SessionControlRegistry {
   readonly #now: () => number;
   readonly #presenceGraceMs: number;
   readonly #heartbeat: boolean;
-  #transientWork = 0;
 
   constructor(options: SessionControlRegistryOptions = {}) {
     this.#now = options.now ?? Date.now;
@@ -162,18 +161,6 @@ export class SessionControlRegistry {
     };
   }
 
-  beginTransient(): { complete: () => void } {
-    this.#transientWork += 1;
-    let active = true;
-    return {
-      complete: () => {
-        if (!active) return;
-        active = false;
-        this.#transientWork -= 1;
-      },
-    };
-  }
-
   activity(): { readonly reviewPresence: number; readonly transientWork: number } {
     const now = this.#now();
     for (const [sessionId, expiresAt] of this.#graceExpiresAt) {
@@ -185,7 +172,7 @@ export class SessionControlRegistry {
     for (const pending of this.#writes.values()) writes += pending.size;
     return {
       reviewPresence: connected + this.#graceExpiresAt.size,
-      transientWork: writes + this.#transientWork,
+      transientWork: writes,
     };
   }
 

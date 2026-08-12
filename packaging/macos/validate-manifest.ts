@@ -224,6 +224,9 @@ export async function validateDistributionManifests(repoRoot = process.cwd()): P
   ) {
     throw new Error("The packaged PDF Proofreader skill must use the canonical installed launcher");
   }
+  if (/(^|[^/A-Za-z0-9_-])pdf-proofreader\s+(context|daemon)\b/mu.test(skill)) {
+    throw new Error("The packaged PDF Proofreader skill must not publish bare context or daemon commands");
+  }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

@@ -12,6 +12,7 @@ import {
   DaemonUpgradeRequiredError,
   inspectDaemonCompatibility,
   MANAGEMENT_PROTOCOL_VERSION,
+  managementShutdownResult,
   requestLaunch,
   requestControl,
   startLaunchControlServer,
@@ -21,7 +22,9 @@ import { DaemonLifecycleCoordinator } from "../src/host/daemon-lifecycle.js";
 import { acquireLifecycleLock } from "../src/host/lifecycle-lock.js";
 import { ProofreaderHost } from "../src/host/proofreader-host.js";
 import { coordinateUpgrade } from "../src/host/upgrade-coordinator.js";
-import { parseOwnedLegacyProcess } from "../src/cli/daemon-command.js";
+import { initialDaemonIsAbsent, parseOwnedLegacyProcess } from "../src/cli/daemon-command.js";
+import { defaultDaemonPaths } from "../src/host/service-daemon.js";
+import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 
 const roots: string[] = [];
 const hosts: ProofreaderHost[] = [];
@@ -136,7 +139,7 @@ describe("open command", () => {
       error: {
         kind: "upgrade-required",
         message: "An older PDF Proofreader service is running and cannot prove that reviews are idle. Existing work was preserved.",
-        recoveryAction: 'Close reviews, run "pdf-proofreader daemon stop-legacy", then retry',
+        recoveryAction: 'Close reviews, run "$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy, then retry',
       },
     });
   });
@@ -145,7 +148,7 @@ describe("open command", () => {
     ["review-presence", "Close PDF Proofreader tabs or windows, then retry"],
     ["codex-task", "End the bound Codex task or wait for its lease, then retry"],
     ["transient-busy", "Wait a moment, then retry"],
-    ["legacy", 'Close reviews, run "pdf-proofreader daemon stop-legacy", then retry'],
+    ["legacy", 'Close reviews, run "$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy, then retry'],
   ] as const)("presents bounded state-specific upgrade guidance for %s", async (reason, recoveryAction) => {
     const write = vi.fn();
     await runOpenCommand(
@@ -158,7 +161,7 @@ describe("open command", () => {
     };
     expect(response.error).toMatchObject({ kind: "upgrade-required", recoveryAction });
     expect(response.error.message.length).toBeLessThanOrEqual(240);
-    expect(response.error.recoveryAction.length).toBeLessThanOrEqual(80);
+    expect(response.error.recoveryAction.length).toBeLessThanOrEqual(160);
     expect(JSON.stringify(response)).not.toMatch(/(?:cap=|taskSessionId|pdfPath|bindProof)/u);
   });
 
@@ -183,6 +186,85 @@ describe("open command", () => {
     const second = await waiting;
     expect(second.borrowed).toBe(false);
     await second.release();
+  });
+
+  it("does not let a paused stale reclaimer remove a later lifecycle owner", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-lock-race-"));
+    roots.push(root);
+    const lockPath = join(root, "lifecycle.lock");
+    const staleToken = "stale_owner_token_00000000000000";
+    await mkdir(lockPath);
+    await writeFile(
+      join(lockPath, `owner-${staleToken}.json`),
+      `${JSON.stringify({ version: 1, pid: 2_147_483_647, token: staleToken })}\n`,
+    );
+    const staleMarkerRemoved = Promise.withResolvers<void>();
+    const resumeFirstReclaimer = Promise.withResolvers<void>();
+    const artificialNow = () => Date.now() + 2_000;
+    const firstContender = acquireLifecycleLock(lockPath, {
+      timeoutMs: 2_000,
+      pollMs: 5,
+      now: artificialNow,
+      afterStaleMarkerRemoved: async () => {
+        staleMarkerRemoved.resolve();
+        await resumeFirstReclaimer.promise;
+      },
+    });
+    await staleMarkerRemoved.promise;
+
+    const laterOwner = await acquireLifecycleLock(lockPath, {
+      timeoutMs: 1_000,
+      pollMs: 5,
+      now: artificialNow,
+    });
+    let firstSettled = false;
+    void firstContender.then(() => { firstSettled = true; });
+    resumeFirstReclaimer.resolve();
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
+    expect(firstSettled).toBe(false);
+
+    await laterOwner.release();
+    const firstOwner = await firstContender;
+    await firstOwner.release();
+  });
+
+  it("fails closed on an initial reset and validates the complete shutdown response", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-management-parse-"));
+    roots.push(root);
+    const reset = Object.assign(new Error("reset"), { code: "ECONNRESET" });
+    const absent = Object.assign(new Error("absent"), { code: "ENOENT" });
+    await expect(initialDaemonIsAbsent(reset, join(root, "control.sock"))).resolves.toBe(false);
+    await expect(initialDaemonIsAbsent(absent, join(root, "control.sock"))).resolves.toBe(true);
+
+    expect(managementShutdownResult({
+      kind: "management",
+      protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+      operation: "shutdown-if-idle",
+      result: { status: "accepted" },
+    })).toEqual({ status: "accepted" });
+    expect(managementShutdownResult({
+      kind: "management",
+      protocolVersion: MANAGEMENT_PROTOCOL_VERSION + 1,
+      operation: "shutdown-if-idle",
+      result: { status: "accepted" },
+    })).toBeUndefined();
+    expect(managementShutdownResult({
+      kind: "management",
+      protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+      operation: "shutdown-if-idle",
+      result: { status: "refused", activity: { reviewPresence: -1, codexTasks: 0, transientWork: 0 } },
+    })).toBeUndefined();
+  });
+
+  it("does not accept an inherited web-assets override in default packaged paths", () => {
+    const previous = process.env.PDF_PROOFREADER_WEB_ASSETS;
+    process.env.PDF_PROOFREADER_WEB_ASSETS = "/tmp/untrusted-proofreader-assets";
+    try {
+      expect(defaultDaemonPaths().webAssetsRoot).not.toBe("/tmp/untrusted-proofreader-assets");
+    } finally {
+      if (previous === undefined) delete process.env.PDF_PROOFREADER_WEB_ASSETS;
+      else process.env.PDF_PROOFREADER_WEB_ASSETS = previous;
+    }
   });
 
   it("makes an identical complete artifact with an exact daemon a no-op without stopping it", async () => {
@@ -360,12 +442,6 @@ describe("open command", () => {
       kind: "incompatible",
       status: { daemonIdentity },
     });
-    await expect(requestControl(socketPath, {
-      kind: "management",
-      protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
-      operation: "shutdown-if-idle",
-      candidateDaemonIdentity: daemonIdentity,
-    })).resolves.toMatchObject({ result: { status: "refused" } });
     await expect(lstat(socketPath)).resolves.toMatchObject({ mode: expect.any(Number) });
   });
 
@@ -384,7 +460,6 @@ describe("open command", () => {
       kind: "management",
       protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
       operation: "shutdown-if-idle",
-      candidateDaemonIdentity: "b".repeat(64),
     })).resolves.toEqual({
       kind: "management",
       protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
@@ -394,6 +469,32 @@ describe("open command", () => {
     await expect(lstat(socketPath)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(fetch(host.server.origin)).rejects.toThrow();
     await control.close();
+  });
+
+  it("retires the control socket even when clean recovery garbage collection fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pfs-cleanup-"));
+    roots.push(root);
+    const assets = join(root, "assets");
+    const pdf = join(root, "clean.pdf");
+    await mkdir(assets);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    await writeFile(pdf, "%PDF-1.7\nclean\n%%EOF");
+    const host = await ProofreaderHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
+    const opened = await host.broker.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected a new review");
+    host.broker.credentials.revokeSession(opened.launch.sessionId);
+    const remove = vi.spyOn(DraftSnapshotStore.prototype, "remove").mockRejectedValueOnce(new Error("disk unavailable"));
+    const socketPath = join(root, "c.sock");
+    const control = await startLaunchControlServer(host, socketPath, { daemonIdentity: "a".repeat(64) });
+
+    await expect(requestControl(socketPath, {
+      kind: "management",
+      protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+      operation: "shutdown-if-idle",
+    })).resolves.toMatchObject({ result: { status: "accepted" } });
+    await control.closed;
+    await expect(lstat(socketPath)).rejects.toMatchObject({ code: "ENOENT" });
+    remove.mockRestore();
   });
 
   it("keeps the management socket until host shutdown has completed", async () => {
@@ -413,7 +514,6 @@ describe("open command", () => {
       kind: "management",
       protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
       operation: "shutdown-if-idle",
-      candidateDaemonIdentity: "b".repeat(64),
     })).resolves.toMatchObject({ result: { status: "accepted" } });
     await expect(lstat(socketPath)).resolves.toMatchObject({ mode: expect.any(Number) });
     releaseClose.resolve();
@@ -449,7 +549,6 @@ describe("open command", () => {
       kind: "management",
       protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
       operation: "shutdown-if-idle",
-      candidateDaemonIdentity: "b".repeat(64),
     })).resolves.toMatchObject({
       kind: "management",
       operation: "shutdown-if-idle",

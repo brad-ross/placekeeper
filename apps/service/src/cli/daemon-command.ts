@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { lstat, readFile } from "node:fs/promises";
+import { lstat, readFile, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -7,13 +7,16 @@ import {
   DaemonUpgradeRequiredError,
   inspectDaemonCompatibility,
   MANAGEMENT_PROTOCOL_VERSION,
+  managementShutdownResult,
   ProofreaderControlProtocolError,
   ProofreaderControlTimeoutError,
   requestControl,
 } from "../host/launch-control.js";
 import {
   DAEMON_IDENTITY_ENV,
+  type CandidateDaemonReceipt,
   defaultDaemonPaths,
+  daemonUnavailable,
   ensureServiceDaemonReady,
   INSTALL_ARTIFACT_IDENTITY_ENV,
   LIFECYCLE_LOCK_PATH_ENV,
@@ -24,6 +27,7 @@ import { LifecycleLockTimeoutError } from "../host/lifecycle-lock.js";
 import {
   coordinateUpgrade,
   type PackagedBuildIdentity,
+  upgradeReason,
 } from "../host/upgrade-coordinator.js";
 
 const execFileAsync = promisify(execFile);
@@ -51,10 +55,6 @@ async function readIdentity(appPath: string): Promise<PackagedBuildIdentity | un
   }
 }
 
-function unavailable(error: unknown): boolean {
-  return ["ENOENT", "ECONNREFUSED", "ECONNRESET"].includes((error as NodeJS.ErrnoException).code ?? "");
-}
-
 async function waitForSocketRetirement(socketPath: string): Promise<void> {
   const deadline = Date.now() + 5_000;
   while (true) {
@@ -62,6 +62,122 @@ async function waitForSocketRetirement(socketPath: string): Promise<void> {
     if (!exists) return;
     if (Date.now() >= deadline) throw new DaemonUpgradeRequiredError("timeout");
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+  }
+}
+
+export async function initialDaemonIsAbsent(error: unknown, socketPath: string): Promise<boolean> {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === "ENOENT") return true;
+  if (code !== "ECONNREFUSED") return false;
+  return await lstat(socketPath).then(() => false, (failure: NodeJS.ErrnoException) => {
+    if (failure.code === "ENOENT") return true;
+    throw failure;
+  });
+}
+
+function parseCandidateReceipt(raw: string): CandidateDaemonReceipt | undefined {
+  try {
+    const value = JSON.parse(raw) as Partial<CandidateDaemonReceipt>;
+    if (
+      value.version !== 1 ||
+      !Number.isSafeInteger(value.pid) ||
+      (value.pid ?? 0) <= 0 ||
+      !/^[a-f0-9]{64}$/u.test(value.daemonIdentity ?? "") ||
+      !/^[A-Za-z0-9_-]{32}$/u.test(value.readinessToken ?? "")
+    ) return undefined;
+    return value as CandidateDaemonReceipt;
+  } catch {
+    return undefined;
+  }
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+async function waitForProcessRetirement(pid: number): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (processExists(pid)) {
+    if (Date.now() >= deadline) throw new DaemonUpgradeRequiredError("timeout");
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+  }
+}
+
+async function terminateCandidateProcess(pid: number): Promise<void> {
+  if (processExists(pid)) {
+    try {
+      process.kill(-pid, "SIGTERM");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+  }
+  await waitForProcessRetirement(pid);
+}
+
+async function requestIdleShutdown(socketPath: string) {
+  const response = await requestControl(socketPath, {
+    kind: "management",
+    protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+    operation: "shutdown-if-idle",
+  });
+  const result = managementShutdownResult(response);
+  if (result === undefined) throw new DaemonUpgradeRequiredError("malformed");
+  return result;
+}
+
+async function stopReadyCandidate(receiptPath: string): Promise<void> {
+  const paths = defaultDaemonPaths();
+  const inheritedToken = process.env[LIFECYCLE_LOCK_TOKEN_ENV];
+  if (inheritedToken === undefined) throw new Error("Candidate retirement requires the inherited lifecycle lock");
+  const raw = await readFile(receiptPath, "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (raw === undefined) {
+    const socketExists = await lstat(paths.socketPath).then(() => true, () => false);
+    if (socketExists) throw new Error("Candidate readiness receipt is missing");
+    return;
+  }
+  const receipt = parseCandidateReceipt(raw);
+  if (
+    receipt === undefined ||
+    receipt.daemonIdentity !== process.env[DAEMON_IDENTITY_ENV]
+  ) throw new Error("Candidate readiness receipt is invalid");
+
+  const lock = await acquireLifecycleLock(
+    paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
+    { timeoutMs: 5_000, inheritedToken },
+  );
+  try {
+    let compatibility;
+    try {
+      compatibility = await inspectDaemonCompatibility(paths.socketPath, receipt.daemonIdentity);
+    } catch (error) {
+      if (await initialDaemonIsAbsent(error, paths.socketPath)) {
+        await terminateCandidateProcess(receipt.pid);
+        await unlink(receiptPath).catch(() => undefined);
+        return;
+      }
+      throw new DaemonUpgradeRequiredError("early-close");
+    }
+    if (
+      compatibility.kind !== "exact" ||
+      compatibility.status.readinessToken !== receipt.readinessToken
+    ) throw new Error("The running daemon does not match the candidate readiness receipt");
+    const shutdown = await requestIdleShutdown(paths.socketPath);
+    if (shutdown.status !== "accepted") {
+      throw new DaemonUpgradeRequiredError(upgradeReason(shutdown.activity) ?? "transient-busy");
+    }
+    await waitForSocketRetirement(paths.socketPath);
+    await waitForProcessRetirement(receipt.pid);
+    await unlink(receiptPath).catch(() => undefined);
+  } finally {
+    await lock.release();
   }
 }
 
@@ -83,7 +199,6 @@ async function coordinateInstall(args: readonly string[]): Promise<"noop" | "ins
     { timeoutMs: 5_000 },
   );
   try {
-    let runningDaemonIdentity: string | undefined;
     const installed = await readIdentity(installedApp);
     const result = await coordinateUpgrade({
       candidate,
@@ -91,28 +206,18 @@ async function coordinateInstall(args: readonly string[]): Promise<"noop" | "ins
       inspect: async () => {
         try {
           const result = await inspectDaemonCompatibility(paths.socketPath, candidate.daemonIdentity);
-          if (result.kind === "exact" || result.kind === "incompatible") {
-            runningDaemonIdentity = result.status.daemonIdentity;
-          }
           return result;
         } catch (error) {
-          if (unavailable(error)) return { kind: "absent" };
+          if (await initialDaemonIsAbsent(error, paths.socketPath)) return { kind: "absent" };
+          if (daemonUnavailable(error)) return { kind: "uninspectable", reason: "early-close" };
           throw error;
         }
       },
       shutdown: async () => {
-        let response;
         try {
-          response = await requestControl(paths.socketPath, {
-            kind: "management",
-            protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
-            operation: "shutdown-if-idle",
-            candidateDaemonIdentity: runningDaemonIdentity === candidate.daemonIdentity
-              ? `${candidate.daemonIdentity[0] === "0" ? "1" : "0"}${candidate.daemonIdentity.slice(1)}`
-              : candidate.daemonIdentity,
-          });
+          return await requestIdleShutdown(paths.socketPath);
         } catch (error) {
-          if (unavailable(error)) return { status: "accepted" };
+          if (daemonUnavailable(error)) return { status: "accepted" };
           if (error instanceof ProofreaderControlTimeoutError) {
             throw new DaemonUpgradeRequiredError("timeout");
           }
@@ -121,10 +226,6 @@ async function coordinateInstall(args: readonly string[]): Promise<"noop" | "ins
           }
           throw error;
         }
-        if (response.kind !== "management" || response.operation !== "shutdown-if-idle") {
-          throw new DaemonUpgradeRequiredError("malformed");
-        }
-        return response.result;
       },
       waitForRetirement: () => waitForSocketRetirement(paths.socketPath),
       replaceAndReady: async () => {
@@ -204,8 +305,14 @@ export async function runDaemonCommand(
   write: (text: string) => void = (text) => process.stdout.write(text),
 ): Promise<number> {
   if (args[0] === "ensure-ready") {
-    await ensureServiceDaemonReady();
+    const receiptPath = takeFlag(args, "--receipt");
+    await ensureServiceDaemonReady(defaultDaemonPaths(), process.env[LIFECYCLE_LOCK_TOKEN_ENV], receiptPath);
     write(`${JSON.stringify({ ok: true, status: "ready" })}\n`);
+    return 0;
+  }
+  if (args[0] === "stop-ready") {
+    await stopReadyCandidate(takeFlag(args, "--receipt"));
+    write(`${JSON.stringify({ ok: true, status: "stopped" })}\n`);
     return 0;
   }
   if (args[0] === "stop-legacy") {

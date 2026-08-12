@@ -65,13 +65,13 @@ describe("persistent launch host", () => {
       throw new Error("Expected Codex launch");
     }
     expect(host.broker.activity()).toEqual({
-      reviewPresence: 1,
+      reviewPresence: 2,
       codexTasks: 1,
       transientWork: 0,
     });
     now += 1_001;
     expect(host.broker.activity()).toEqual({
-      reviewPresence: 1,
+      reviewPresence: 2,
       codexTasks: 0,
       transientWork: 0,
     });

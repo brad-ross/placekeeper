@@ -16,10 +16,15 @@ const existing = (suffix: number): ExistingPdfAnnotation => ({
   contents: `note ${suffix}`,
 });
 
-function fixture() {
+function fixture(options: {
+  readonly maxRetainedPayloadBytes?: number;
+  readonly maxInspectionCacheBytes?: number;
+} = {}) {
   let now = 1_000;
   let generation = 1;
   let sourceLoads = 0;
+  let pageInspections = 0;
+  let handleSequence = 0;
   const bytes = Buffer.from("%PDF-1.7\nprivate evidence\n%%EOF");
   const bindings = new TaskBindingRegistry({
     now: () => new Date(now),
@@ -47,15 +52,19 @@ function fixture() {
     now: () => new Date(now),
     handleTtlMs: 500,
     maxResponseBytes: 2_048,
-    randomHandle: () => "evidence_handle_1234567890",
+    ...options,
+    randomHandle: () => `evidence_handle_${String(++handleSequence).padStart(10, "0")}`,
     loadSource: async () => {
       sourceLoads += 1;
       return { documentGeneration: generation, bytes };
     },
-    inspectPage: async (_bytes, request) => ({
-      mediaType: request.kind === "page-text" ? "text/plain" : "application/json",
-      bytes: Buffer.from(JSON.stringify(request)),
-    }),
+    inspectPage: async (_bytes, request) => {
+      pageInspections += 1;
+      return {
+        mediaType: request.kind === "page-text" ? "text/plain" : "application/json",
+        bytes: Buffer.from(JSON.stringify(request)),
+      };
+    },
   });
   return {
     service,
@@ -65,12 +74,13 @@ function fixture() {
     advance(milliseconds: number) { now += milliseconds; },
     setGeneration(value: number) { generation = value; },
     sourceLoads() { return sourceLoads; },
+    pageInspections() { return pageInspections; },
   };
 }
 
 describe("task-scoped PDF evidence service", () => {
   it("retrieves the immutable document and bounded page evidence without source paths", async () => {
-    const { service, identity, bytes } = fixture();
+    const { service, identity, bytes, sourceLoads, pageInspections } = fixture();
     const catalog = service.mint({
       reviewItems: [],
       taskSessionId: "task-a",
@@ -101,6 +111,84 @@ describe("task-scoped PDF evidence service", () => {
     expect(text).toMatchObject({ status: "ok", mediaType: "text/plain" });
     if (text.status !== "ok") throw new Error("Expected text evidence");
     expect(text.bytes.toString()).toContain('"pageIndex":1');
+    const repeated = await Promise.all([
+      service.retrieve({
+        taskSessionId: "task-a",
+        handle: catalog.handle.value,
+        request: { kind: "page-text", pageIndex: 1 },
+      }),
+      service.retrieve({
+        taskSessionId: "task-a",
+        handle: catalog.handle.value,
+        request: { kind: "page-text", pageIndex: 1 },
+      }),
+    ]);
+    expect(repeated.every(({ status }) => status === "ok")).toBe(true);
+    expect(sourceLoads()).toBe(1);
+    expect(pageInspections()).toBe(1);
+  });
+
+  it("prunes stale payload handles as soon as a task mints a new observation identity", async () => {
+    const { service, bindings, identity, bytes } = fixture();
+    const stale = service.mint({
+      reviewItems: [], taskSessionId: "task-a", identity, pageCount: 1,
+      sourceByteLength: bytes.byteLength, existingAnnotations: [existing(1)],
+    });
+    const nextIdentity = { ...identity, reviewRevision: 3, stateDigest: "c".repeat(64) };
+    bindings.markVerified("task-a", nextIdentity);
+    const current = service.mint({
+      reviewItems: [], taskSessionId: "task-a", identity: nextIdentity, pageCount: 1,
+      sourceByteLength: bytes.byteLength, existingAnnotations: [existing(2)],
+    });
+
+    expect(service.authorizeHandle(stale.handle.value)).toEqual({
+      status: "unavailable", reason: "unauthorized",
+    });
+    expect(service.authorizeHandle(current.handle.value)).toMatchObject({ status: "ok" });
+  });
+
+  it("deduplicates concurrent cold source loads and page inspections", async () => {
+    const { service, identity, bytes, sourceLoads, pageInspections } = fixture();
+    const catalog = service.mint({
+      reviewItems: [], taskSessionId: "task-a", identity, pageCount: 1,
+      sourceByteLength: bytes.byteLength, existingAnnotations: [],
+    });
+    const request = () => service.retrieve({
+      taskSessionId: "task-a",
+      handle: catalog.handle.value,
+      request: { kind: "page-layout" as const, pageIndex: 0 },
+    });
+
+    const results = await Promise.all([request(), request(), request()]);
+    expect(results.every(({ status }) => status === "ok")).toBe(true);
+    expect(sourceLoads()).toBe(1);
+    expect(pageInspections()).toBe(1);
+  });
+
+  it("evicts completed PDF inspection data that exceeds the cache byte budget", async () => {
+    const { service, identity, bytes, sourceLoads } = fixture({ maxInspectionCacheBytes: 1 });
+    const catalog = service.mint({
+      reviewItems: [], taskSessionId: "task-a", identity, pageCount: 1,
+      sourceByteLength: bytes.byteLength, existingAnnotations: [],
+    });
+    const request = () => service.retrieve({
+      taskSessionId: "task-a",
+      handle: catalog.handle.value,
+      request: { kind: "document" as const },
+    });
+
+    expect((await request()).status).toBe("ok");
+    expect((await request()).status).toBe("ok");
+    expect(sourceLoads()).toBe(2);
+  });
+
+  it("rejects a single retained annotation payload that exceeds its byte budget", () => {
+    const { service, identity, bytes } = fixture({ maxRetainedPayloadBytes: 64 });
+    expect(() => service.mint({
+      reviewItems: [], taskSessionId: "task-a", identity, pageCount: 1,
+      sourceByteLength: bytes.byteLength,
+      existingAnnotations: [{ ...existing(1), contents: "x".repeat(256) }],
+    })).toThrow(/retained evidence byte limit/i);
   });
 
   it("paginates raw annotations and enforces item, page, and byte bounds", async () => {

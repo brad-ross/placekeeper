@@ -190,6 +190,41 @@ describe("manual-precedence source reconciliation", () => {
     });
   });
 
+  it("does not treat a lone target moved away from its baseline anchor as independent", async () => {
+    const value = await fixture("prefix old suffix\nkeep\n");
+    const { baseline } = await baselineAndProposal(value);
+    await writeFile(value.sourcePath, "prefix manual suffix\nkeep old\n");
+
+    const report = await value.service.reconcile({ taskSessionId: "task-a", executionId: baseline.executionId });
+    expect(report.outcomes[0]).toMatchObject({
+      outcome: { classification: "conflict", action: "skip", authority: "manual" },
+    });
+    expect(report.outcomes[0]).not.toHaveProperty("applyGuardSha256");
+  });
+
+  it("preserves a copied target as ambiguous instead of guessing which occurrence to edit", async () => {
+    const value = await fixture();
+    const { baseline } = await baselineAndProposal(value);
+    await writeFile(value.sourcePath, "prefix old suffix\ncopy old here\n");
+
+    const report = await value.service.reconcile({ taskSessionId: "task-a", executionId: baseline.executionId });
+    expect(report.outcomes[0]).toMatchObject({
+      outcome: { classification: "ambiguous", action: "skip", authority: "manual" },
+    });
+  });
+
+  it("keeps the anchored target independent when unrelated baseline text is deleted", async () => {
+    const value = await fixture("prefix old suffix\nremove this unrelated paragraph\n");
+    const { baseline } = await baselineAndProposal(value);
+    await writeFile(value.sourcePath, "prefix old suffix\n");
+
+    const report = await value.service.reconcile({ taskSessionId: "task-a", executionId: baseline.executionId });
+    expect(report.outcomes[0]).toMatchObject({
+      outcome: { classification: "independent", action: "apply", authority: "codex" },
+      applyGuardSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+    });
+  });
+
   it("preserves edited and removed baseline items and reports later annotations separately and exhaustively", async () => {
     const value = await fixture("prefix old suffix\n", [item(1), item(2), item(3)]);
     const baseline = await value.service.captureBaseline({ taskSessionId: "task-a", sourcePaths: ["paper.tex"] });

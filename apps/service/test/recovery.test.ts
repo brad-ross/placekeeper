@@ -13,7 +13,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createReviewState,
   type ReviewCommand,
@@ -30,6 +30,7 @@ import { hashFile } from "../src/files/file-capabilities.js";
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     temporaryDirectories.splice(0).map((path) =>
       rm(path, { recursive: true, force: true }),
@@ -166,6 +167,30 @@ describe("broker acknowledgement and restart recovery", () => {
       join(recoveryRoot, dirty.launch.sessionId),
     ).recover();
     expect(recovered).toMatchObject({ state: { revision: 1 }, sync: { phase: "not-saved" } });
+  });
+
+  it("finishes shutdown when clean recovery deletion fails and preserves dirty recovery", async () => {
+    const directory = await temporaryDirectory();
+    const cleanPdf = join(directory, "clean-remove-failure.pdf");
+    const dirtyPdf = join(directory, "dirty-remove-failure.pdf");
+    await writeFile(cleanPdf, "%PDF-1.7\nclean\n%%EOF");
+    await writeFile(dirtyPdf, "%PDF-1.7\ndirty\n%%EOF");
+    const recoveryRoot = join(directory, "recovery");
+    const broker = new SessionBroker({ recoveryRoot });
+    const clean = await broker.openReview({ pdfPath: cleanPdf });
+    const dirty = await broker.openReview({ pdfPath: dirtyPdf });
+    if (clean.kind !== "opened" || dirty.kind !== "opened") throw new Error("Expected new reviews");
+    await broker.acceptMutation(dirty.launch.sessionId, addCommand(0));
+    vi.spyOn(DraftSnapshotStore.prototype, "remove").mockRejectedValueOnce(new Error("disk unavailable"));
+
+    await expect(broker.quiesceForShutdown()).resolves.toBeUndefined();
+
+    expect(broker.activity()).toEqual({ reviewPresence: 0, codexTasks: 0, transientWork: 0 });
+    await expect(access(join(recoveryRoot, clean.launch.sessionId))).resolves.toBeUndefined();
+    await expect(access(join(recoveryRoot, dirty.launch.sessionId))).resolves.toBeUndefined();
+    await expect(new DraftSnapshotStore(
+      join(recoveryRoot, dirty.launch.sessionId),
+    ).recover()).resolves.toMatchObject({ state: { revision: 1 }, sync: { phase: "not-saved" } });
   });
   it("recovers exactly the last acknowledged revision while leaving original bytes unchanged", async () => {
     const directory = await temporaryDirectory();

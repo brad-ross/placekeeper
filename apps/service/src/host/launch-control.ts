@@ -25,7 +25,9 @@ import type {
   CleanRebuildVerificationV1,
   SourceWorkflowResult,
 } from "../context/live-source-workflow-service.js";
+import { SourceWorkflowUnavailableError } from "../context/live-source-workflow-service.js";
 import type { LaunchRequest, LaunchResponse, ProofreaderHost } from "./proofreader-host.js";
+import type { ConditionalShutdownResult } from "./daemon-lifecycle.js";
 
 // Both directions are explicitly bounded. Evidence requests use a stricter
 // byte budget before base64 expansion, so a document can never turn this
@@ -46,6 +48,7 @@ export interface DaemonAggregateActivity {
 export interface DaemonManagementStatus {
   readonly protocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
   readonly daemonIdentity: string;
+  readonly readinessToken?: string;
   readonly lifecycle: DaemonLifecycleState;
   readonly activity: DaemonAggregateActivity;
 }
@@ -108,7 +111,7 @@ function upgradePresentation(reason: DaemonUpgradeReason): {
   };
   if (reason === "legacy") return {
     message: "An older PDF Proofreader service is running and cannot prove that reviews are idle. Existing work was preserved.",
-    recoveryAction: 'Close reviews, run "pdf-proofreader daemon stop-legacy", then retry',
+    recoveryAction: 'Close reviews, run "$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy, then retry',
   };
   if (["timeout", "malformed", "oversized", "early-close"].includes(reason)) return {
     message: "PDF Proofreader could not safely inspect the running service. The upgrade was deferred and existing work was preserved.",
@@ -130,7 +133,6 @@ export type ProofreaderControlRequest =
       readonly kind: "management";
       readonly protocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
       readonly operation: "shutdown-if-idle";
-      readonly candidateDaemonIdentity: string;
     }
   | { readonly kind: "launch"; readonly request: LaunchRequest }
   | {
@@ -140,7 +142,8 @@ export type ProofreaderControlRequest =
       readonly documentGeneration: number;
       readonly bindProof: string;
     }
-  | { readonly kind: "refresh-context"; readonly taskSessionId: string }
+  | { readonly kind: "refresh-context"; readonly taskSessionId: string; readonly cursor?: string }
+  | { readonly kind: "ack-context"; readonly taskSessionId: string; readonly cursor: string }
   | { readonly kind: "revoke-task"; readonly taskSessionId: string }
   | {
       readonly kind: "source-begin";
@@ -197,6 +200,13 @@ export type ProofreaderControlRequest =
       readonly limit?: number;
       readonly pageIndex?: number;
       readonly maxBytes?: number;
+    }
+  | {
+      readonly kind: "retrieve-review-changes-by-handle";
+      readonly handle: string;
+      readonly offset?: number;
+      readonly limit?: number;
+      readonly maxBytes?: number;
     };
 
 export type ProofreaderControlResponse =
@@ -221,6 +231,11 @@ export type ProofreaderControlResponse =
   | { readonly kind: "binding"; readonly result: TaskBindingClaimResult }
   | { readonly kind: "context"; readonly result: LiveContextRefreshResult }
   | { readonly kind: "revoked" }
+  | { readonly kind: "context-acknowledged"; readonly accepted: boolean }
+  | {
+      readonly kind: "source-workflow-unavailable";
+      readonly reason: PdfEvidenceUnavailableReason;
+    }
   | {
       readonly kind: "source-workflow";
       readonly operation: "begin";
@@ -256,7 +271,7 @@ export type ProofreaderControlResponse =
       readonly result:
         | {
             readonly status: "ok";
-            readonly evidenceKind: PdfEvidenceRequest["kind"] | "review-items";
+            readonly evidenceKind: PdfEvidenceRequest["kind"] | "review-items" | "review-changes";
             readonly mediaType: string;
             readonly dataBase64: string;
           }
@@ -279,13 +294,15 @@ function isControlRequest(value: unknown): value is ProofreaderControlRequest {
   if (value.kind === "management") {
     return value.protocolVersion === MANAGEMENT_PROTOCOL_VERSION &&
       (value.operation === "status" ||
-        (value.operation === "shutdown-if-idle" &&
-          typeof value.candidateDaemonIdentity === "string" &&
-          /^(?:development|[a-f0-9]{64})$/u.test(value.candidateDaemonIdentity)));
+        value.operation === "shutdown-if-idle");
   }
   if (value.kind === "launch") return isObject(value.request);
   if (value.kind === "refresh-context" || value.kind === "revoke-task") {
-    return typeof value.taskSessionId === "string";
+    return typeof value.taskSessionId === "string" &&
+      (value.kind !== "refresh-context" || value.cursor === undefined || typeof value.cursor === "string");
+  }
+  if (value.kind === "ack-context") {
+    return typeof value.taskSessionId === "string" && typeof value.cursor === "string";
   }
   if (value.kind === "source-begin") {
     return typeof value.handle === "string" &&
@@ -319,7 +336,9 @@ function isControlRequest(value: unknown): value is ProofreaderControlRequest {
       typeof value.documentGeneration === "number" &&
       typeof value.bindProof === "string";
   }
-  if (value.kind === "retrieve-review-items-by-handle") return typeof value.handle === "string";
+  if (value.kind === "retrieve-review-items-by-handle" || value.kind === "retrieve-review-changes-by-handle") {
+    return typeof value.handle === "string";
+  }
   if (value.kind === "retrieve-evidence" || value.kind === "retrieve-evidence-by-handle") {
     return (value.kind !== "retrieve-evidence" || typeof value.taskSessionId === "string") &&
       typeof value.handle === "string" && isObject(value.request) &&
@@ -331,18 +350,10 @@ function isControlRequest(value: unknown): value is ProofreaderControlRequest {
 async function dispatch(
   host: ProofreaderHost,
   request: ProofreaderControlRequest,
-  daemonIdentity: string,
+  management: { readonly daemonIdentity: string; readonly readinessToken?: string },
 ): Promise<ProofreaderControlResponse> {
   if (request.kind === "management") {
     if (request.operation === "shutdown-if-idle") {
-      if (request.candidateDaemonIdentity === daemonIdentity) {
-        return {
-          kind: "management",
-          protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
-          operation: "shutdown-if-idle",
-          result: { status: "refused", activity: host.lifecycle.status().activity },
-        };
-      }
       return {
         kind: "management",
         protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
@@ -357,16 +368,21 @@ async function dispatch(
       operation: "status",
       status: {
         protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
-        daemonIdentity,
+        daemonIdentity: management.daemonIdentity,
+        ...(management.readinessToken === undefined
+          ? {}
+          : { readinessToken: management.readinessToken }),
         lifecycle: live.lifecycle,
         activity: live.activity,
       },
     };
   }
-  const response = await host.lifecycle.runActivity<ProofreaderControlResponse>(async () => {
-    if (request.kind === "launch") {
-      return { kind: "launch", response: await host.open(request.request) };
-    }
+  if (request.kind === "launch") {
+    return { kind: "launch", response: await host.open(request.request) };
+  }
+  let response: ProofreaderControlResponse | undefined;
+  try {
+    response = await host.lifecycle.runActivity<ProofreaderControlResponse>(async () => {
     if (request.kind === "claim-binding") {
       return {
         kind: "binding",
@@ -376,7 +392,16 @@ async function dispatch(
     if (request.kind === "refresh-context") {
       return {
         kind: "context",
-        result: await host.context.refresh({ taskSessionId: request.taskSessionId }),
+        result: await host.context.refresh({
+          taskSessionId: request.taskSessionId,
+          ...(request.cursor === undefined ? {} : { cursor: request.cursor }),
+        }),
+      };
+    }
+    if (request.kind === "ack-context") {
+      return {
+        kind: "context-acknowledged",
+        accepted: host.context.acknowledge(request),
       };
     }
     if (request.kind === "revoke-task") {
@@ -442,6 +467,20 @@ async function dispatch(
           }
         : { kind: "evidence", result };
     }
+    if (request.kind === "retrieve-review-changes-by-handle") {
+      const result = host.context.evidence.retrieveReviewChangesWithHandle(request);
+      return result.status === "ok"
+        ? {
+            kind: "evidence",
+            result: {
+              status: "ok",
+              evidenceKind: result.kind,
+              mediaType: result.mediaType,
+              dataBase64: result.bytes.toString("base64"),
+            },
+          }
+        : { kind: "evidence", result };
+    }
     const maxBytes = request.request.maxBytes ?? MAX_CONTROL_EVIDENCE_BYTES;
     if (
       !Number.isSafeInteger(maxBytes) ||
@@ -468,7 +507,13 @@ async function dispatch(
           },
         }
       : { kind: "evidence", result };
-  });
+    });
+  } catch (error) {
+    if (error instanceof SourceWorkflowUnavailableError) {
+      return { kind: "source-workflow-unavailable", reason: error.reason };
+    }
+    throw error;
+  }
   return response ?? { kind: "error", reason: "unavailable" };
 }
 
@@ -483,11 +528,10 @@ function writeResponse(socket: Socket, response: ProofreaderControlResponse): Pr
 export async function startLaunchControlServer(
   host: ProofreaderHost,
   socketPath: string,
-  management: { readonly daemonIdentity: string } | DaemonManagementStatus = {
+  management: { readonly daemonIdentity: string; readonly readinessToken?: string } | DaemonManagementStatus = {
     daemonIdentity: "development",
   },
 ): Promise<LaunchControlServer> {
-  const daemonIdentity = management.daemonIdentity;
   await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 });
   const closed = Promise.withResolvers<void>();
   let closePromise: Promise<void> | undefined;
@@ -514,7 +558,7 @@ export async function startLaunchControlServer(
         void writeResponse(socket, { kind: "error", reason: "invalid-request" });
         return;
       }
-      void dispatch(host, parsed, daemonIdentity).then(
+      void dispatch(host, parsed, management).then(
         async (response) => {
           await writeResponse(socket, response);
           if (
@@ -623,14 +667,43 @@ function managementStatus(response: ProofreaderControlResponse): DaemonManagemen
     !isAggregateActivity(response.status.activity)
   ) return undefined;
   if (!/^(?:development|[a-f0-9]{64})$/u.test(response.status.daemonIdentity)) return undefined;
+  if (
+    response.status.readinessToken !== undefined &&
+    !/^[A-Za-z0-9_-]{32}$/u.test(response.status.readinessToken)
+  ) return undefined;
   return {
     protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
     daemonIdentity: response.status.daemonIdentity,
+    ...(response.status.readinessToken === undefined
+      ? {}
+      : { readinessToken: response.status.readinessToken }),
     lifecycle: response.status.lifecycle as DaemonLifecycleState,
     activity: {
       reviewPresence: response.status.activity.reviewPresence,
       codexTasks: response.status.activity.codexTasks,
       transientWork: response.status.activity.transientWork,
+    },
+  };
+}
+
+export function managementShutdownResult(response: unknown): ConditionalShutdownResult | undefined {
+  if (
+    !isObject(response) ||
+    response.kind !== "management" ||
+    response.protocolVersion !== MANAGEMENT_PROTOCOL_VERSION ||
+    response.operation !== "shutdown-if-idle" ||
+    !isObject(response.result)
+  ) return undefined;
+  if (response.result.status === "accepted") return { status: "accepted" };
+  if (response.result.status !== "refused" || !isAggregateActivity(response.result.activity)) {
+    return undefined;
+  }
+  return {
+    status: "refused",
+    activity: {
+      reviewPresence: response.result.activity.reviewPresence,
+      codexTasks: response.result.activity.codexTasks,
+      transientWork: response.result.activity.transientWork,
     },
   };
 }

@@ -5,6 +5,7 @@ import {
   type ExistingPdfAnnotation,
   type LiveObservationIdentity,
   type PdfEvidenceCatalog,
+  type ReviewItemChanges,
 } from "../../../../packages/core/src/live-context.js";
 import type { StructuredReviewItem } from "../../../../packages/core/src/structured-review-item.js";
 import type { TaskBindingRegistry } from "./task-binding-registry.js";
@@ -19,6 +20,8 @@ const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_ANNOTATION_PAGE_SIZE = 1_000;
 const MAX_REVIEW_ITEM_PAGE_SIZE = 256;
 const MAX_EVIDENCE_RECORDS = 256;
+const DEFAULT_MAX_RETAINED_PAYLOAD_BYTES = 32 * 1024 * 1024;
+const DEFAULT_MAX_INSPECTION_CACHE_BYTES = 64 * 1024 * 1024;
 
 export type PdfEvidenceRequest =
   | { readonly kind: "document"; readonly maxBytes?: number }
@@ -61,6 +64,15 @@ export type ReviewItemRetrievalResult =
     }
   | EvidenceUnavailable;
 
+export type ReviewChangeRetrievalResult =
+  | {
+      readonly status: "ok";
+      readonly kind: "review-changes";
+      readonly mediaType: "application/json";
+      readonly bytes: Buffer;
+    }
+  | EvidenceUnavailable;
+
 export interface PdfEvidenceSource {
   readonly documentGeneration: number;
   readonly bytes: Buffer;
@@ -77,8 +89,15 @@ interface EvidenceRecord {
 
 interface EvidencePayload {
   references: number;
+  readonly byteLength: number;
   readonly existingAnnotations: readonly ExistingPdfAnnotation[];
   readonly reviewItems: readonly StructuredReviewItem[];
+  readonly reviewChanges: ReviewItemChanges;
+}
+
+interface EvidenceCacheEntry {
+  promise: Promise<unknown>;
+  byteLength: number;
 }
 
 export type EvidenceHandleAuthorization =
@@ -98,6 +117,8 @@ export interface PdfEvidenceServiceOptions {
   readonly now?: () => Date;
   readonly handleTtlMs?: number;
   readonly maxResponseBytes?: number;
+  readonly maxRetainedPayloadBytes?: number;
+  readonly maxInspectionCacheBytes?: number;
   readonly randomHandle?: () => string;
 }
 
@@ -120,9 +141,14 @@ export class PdfEvidenceService {
   readonly #now: () => Date;
   readonly #handleTtlMs: number;
   readonly #maxResponseBytes: number;
+  readonly #maxRetainedPayloadBytes: number;
+  readonly #maxInspectionCacheBytes: number;
   readonly #randomHandle: () => string;
   readonly #records = new Map<string, EvidenceRecord>();
   readonly #payloads = new Map<string, EvidencePayload>();
+  readonly #inspectionCache = new Map<string, EvidenceCacheEntry>();
+  #retainedPayloadBytes = 0;
+  #inspectionCacheBytes = 0;
 
   constructor(options: PdfEvidenceServiceOptions) {
     this.#bindings = options.bindings;
@@ -131,6 +157,8 @@ export class PdfEvidenceService {
     this.#now = options.now ?? (() => new Date());
     this.#handleTtlMs = options.handleTtlMs ?? DEFAULT_HANDLE_TTL_MS;
     this.#maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+    this.#maxRetainedPayloadBytes = options.maxRetainedPayloadBytes ?? DEFAULT_MAX_RETAINED_PAYLOAD_BYTES;
+    this.#maxInspectionCacheBytes = options.maxInspectionCacheBytes ?? DEFAULT_MAX_INSPECTION_CACHE_BYTES;
     this.#randomHandle = options.randomHandle ??
       (() => `evidence_${randomBytes(32).toString("base64url")}`);
     if (!validPositiveInteger(this.#handleTtlMs)) {
@@ -138,6 +166,12 @@ export class PdfEvidenceService {
     }
     if (!validPositiveInteger(this.#maxResponseBytes)) {
       throw new RangeError("maxResponseBytes must be a positive safe integer");
+    }
+    if (!validPositiveInteger(this.#maxRetainedPayloadBytes)) {
+      throw new RangeError("maxRetainedPayloadBytes must be a positive safe integer");
+    }
+    if (!validPositiveInteger(this.#maxInspectionCacheBytes)) {
+      throw new RangeError("maxInspectionCacheBytes must be a positive safe integer");
     }
   }
 
@@ -148,6 +182,7 @@ export class PdfEvidenceService {
     readonly sourceByteLength: number;
     readonly existingAnnotations: readonly ExistingPdfAnnotation[];
     readonly reviewItems: readonly StructuredReviewItem[];
+    readonly reviewChanges?: ReviewItemChanges;
   }): PdfEvidenceCatalog {
     this.#sweep();
     const binding = this.#bindings.bindingForTask(input.taskSessionId);
@@ -164,24 +199,45 @@ export class PdfEvidenceService {
     if (!Number.isSafeInteger(input.sourceByteLength) || input.sourceByteLength < 0) {
       throw new RangeError("sourceByteLength must be a non-negative safe integer");
     }
+    this.#pruneTaskIdentity(input.taskSessionId, input.identity);
     const value = this.#randomHandle();
     const recordKey = digest(value);
     const expiresAtMs = this.#now().getTime() + this.#handleTtlMs;
+    const reviewChanges: ReviewItemChanges = input.reviewChanges ?? {
+      mode: "full",
+      reason: "initial",
+      cursor: "evidence-only",
+      revision: input.identity.reviewRevision,
+      semanticDigest: input.identity.stateDigest,
+      itemCount: input.reviewItems.length,
+      items: input.reviewItems,
+    };
     const payloadKey = [
       input.taskSessionId,
       input.identity.proofreaderSessionId,
       input.identity.documentGeneration,
       input.identity.stateDigest,
-      digest(JSON.stringify([input.existingAnnotations, input.reviewItems])),
+      digest(JSON.stringify([input.existingAnnotations, input.reviewItems, reviewChanges])),
     ].join("\0");
     let payload = this.#payloads.get(payloadKey);
     if (payload === undefined) {
+      const byteLength = Buffer.byteLength(JSON.stringify([
+        input.existingAnnotations,
+        input.reviewItems,
+        reviewChanges,
+      ]));
+      if (byteLength > this.#maxRetainedPayloadBytes) {
+        throw new RangeError("PDF evidence payload exceeds the retained evidence byte limit");
+      }
       payload = {
         references: 0,
+        byteLength,
         existingAnnotations: structuredClone(input.existingAnnotations),
         reviewItems: structuredClone(input.reviewItems),
+        reviewChanges: structuredClone(reviewChanges),
       };
       this.#payloads.set(payloadKey, payload);
+      this.#retainedPayloadBytes += byteLength;
     }
     payload.references += 1;
     const record: EvidenceRecord = {
@@ -261,7 +317,10 @@ export class PdfEvidenceService {
       binding.reviewSessionId !== record.identity.proofreaderSessionId ||
       binding.documentGeneration !== record.identity.documentGeneration ||
       binding.lastVerified?.stateDigest !== record.identity.stateDigest
-    ) return { status: "unavailable", reason: "unauthorized" };
+    ) {
+      this.#deleteRecord(key);
+      return { status: "unavailable", reason: "unauthorized" };
+    }
     return { status: "ok", taskSessionId: record.taskSessionId };
   }
 
@@ -319,17 +378,60 @@ export class PdfEvidenceService {
     return { status: "ok", kind: "review-items", mediaType: "application/json", bytes };
   }
 
+  retrieveReviewChangesWithHandle(input: {
+    readonly handle: string;
+    readonly offset?: number;
+    readonly limit?: number;
+    readonly maxBytes?: number;
+  }): ReviewChangeRetrievalResult {
+    const authorization = this.authorizeHandle(input.handle);
+    if (authorization.status === "unavailable") return authorization;
+    const record = this.#records.get(digest(input.handle))!;
+    const offset = input.offset ?? 0;
+    const limit = input.limit ?? 100;
+    const maxBytes = input.maxBytes ?? Math.min(record.maxBytes, 1024 * 1024);
+    if (
+      !Number.isSafeInteger(offset) || offset < 0 ||
+      !validPositiveInteger(limit) || limit > MAX_REVIEW_ITEM_PAGE_SIZE ||
+      !validPositiveInteger(maxBytes) || maxBytes > record.maxBytes
+    ) return unavailable("invalid_request");
+    const changes = this.#payload(record).reviewChanges;
+    const entries = changes.mode === "delta"
+      ? [
+          ...changes.added.map((item) => ({ change: "added" as const, item })),
+          ...changes.edited.map((item) => ({ change: "edited" as const, item })),
+          ...changes.removed.map((id) => ({ change: "removed" as const, id })),
+        ]
+      : changes.mode === "full"
+        ? changes.items.map((item) => ({ change: "current" as const, item }))
+        : [];
+    const page = entries.slice(offset, offset + limit);
+    const nextOffset = offset + page.length < entries.length ? offset + page.length : undefined;
+    const bytes = Buffer.from(JSON.stringify({
+      mode: changes.mode,
+      cursor: changes.cursor,
+      offset,
+      limit,
+      total: entries.length,
+      ...(nextOffset === undefined ? {} : { nextOffset }),
+      changes: page,
+    }));
+    if (bytes.byteLength > maxBytes) return unavailable("too_large");
+    return { status: "ok", kind: "review-changes", mediaType: "application/json", bytes };
+  }
+
   async retrieve(input: {
     readonly taskSessionId: string;
     readonly handle: string;
     readonly request: PdfEvidenceRequest;
   }): Promise<PdfEvidenceRetrievalResult> {
-    const record = this.#record(digest(input.handle));
+    const recordKey = digest(input.handle);
+    const record = this.#record(recordKey);
     if (record === undefined || record.taskSessionId !== input.taskSessionId) {
       return unavailable("unauthorized");
     }
     if (record.expiresAtMs <= this.#now().getTime()) {
-      this.#deleteRecord(digest(input.handle));
+      this.#deleteRecord(recordKey);
       return unavailable("expired");
     }
     const binding = this.#bindings.bindingForTask(input.taskSessionId);
@@ -338,7 +440,10 @@ export class PdfEvidenceService {
       binding.reviewSessionId !== record.identity.proofreaderSessionId ||
       binding.documentGeneration !== record.identity.documentGeneration ||
       binding.lastVerified?.stateDigest !== record.identity.stateDigest
-    ) return unavailable("unauthorized");
+    ) {
+      this.#deleteRecord(recordKey);
+      return unavailable("unauthorized");
+    }
 
     const maxBytes = input.request.maxBytes ?? record.maxBytes;
     if (!validPositiveInteger(maxBytes) || maxBytes > record.maxBytes) {
@@ -355,11 +460,21 @@ export class PdfEvidenceService {
     }
 
     let source: PdfEvidenceSource | undefined;
+    const sourceCacheKey = [
+      "source",
+      record.identity.proofreaderSessionId,
+      record.identity.documentGeneration,
+      record.identity.source.digest,
+    ].join("\0");
     try {
-      source = await this.#loadSource(record.identity.proofreaderSessionId, {
-        documentGeneration: record.identity.documentGeneration,
-        sourceDigest: record.identity.source.digest,
-      });
+      source = await this.#cached(
+        sourceCacheKey,
+        () => this.#loadSource(record.identity.proofreaderSessionId, {
+          documentGeneration: record.identity.documentGeneration,
+          sourceDigest: record.identity.source.digest,
+        }),
+        (value) => value?.bytes.byteLength ?? 0,
+      );
     } catch {
       return unavailable("unavailable");
     }
@@ -381,12 +496,17 @@ export class PdfEvidenceService {
         bytes: Buffer.from(source.bytes),
       };
     }
+    const pageRequest = input.request;
     try {
-      const evidence = await this.#inspectPage(source.bytes, input.request);
+      const evidence = await this.#cached(
+        [sourceCacheKey, pageRequest.kind, pageRequest.pageIndex].join("\0"),
+        () => this.#inspectPage(source.bytes, pageRequest),
+        (value) => value.bytes.byteLength,
+      );
       if (evidence.bytes.byteLength > maxBytes) return unavailable("too_large");
       return {
         status: "ok",
-        kind: input.request.kind,
+        kind: pageRequest.kind,
         mediaType: evidence.mediaType,
         bytes: evidence.bytes,
       };
@@ -440,7 +560,10 @@ export class PdfEvidenceService {
   }
 
   #trimRecords(): void {
-    while (this.#records.size > MAX_EVIDENCE_RECORDS) {
+    while (
+      this.#records.size > MAX_EVIDENCE_RECORDS ||
+      this.#retainedPayloadBytes > this.#maxRetainedPayloadBytes
+    ) {
       const oldest = this.#records.keys().next().value as string | undefined;
       if (oldest === undefined) return;
       this.#deleteRecord(oldest);
@@ -460,6 +583,61 @@ export class PdfEvidenceService {
     const payload = this.#payloads.get(record.payloadKey);
     if (payload === undefined) return;
     payload.references -= 1;
-    if (payload.references === 0) this.#payloads.delete(record.payloadKey);
+    if (payload.references === 0) {
+      this.#payloads.delete(record.payloadKey);
+      this.#retainedPayloadBytes -= payload.byteLength;
+    }
+  }
+
+  #pruneTaskIdentity(taskSessionId: string, identity: LiveObservationIdentity): void {
+    for (const [key, record] of this.#records) {
+      if (
+        record.taskSessionId === taskSessionId &&
+        (
+          record.identity.proofreaderSessionId !== identity.proofreaderSessionId ||
+          record.identity.documentGeneration !== identity.documentGeneration ||
+          record.identity.source.digest !== identity.source.digest ||
+          record.identity.reviewRevision !== identity.reviewRevision ||
+          record.identity.stateDigest !== identity.stateDigest
+        )
+      ) this.#deleteRecord(key);
+    }
+  }
+
+  #cached<T>(
+    key: string,
+    load: () => Promise<T>,
+    byteLength: (value: T) => number,
+  ): Promise<T> {
+    const existing = this.#inspectionCache.get(key);
+    if (existing !== undefined) {
+      this.#inspectionCache.delete(key);
+      this.#inspectionCache.set(key, existing);
+      return existing.promise as Promise<T>;
+    }
+    const entry: EvidenceCacheEntry = { promise: Promise.resolve(undefined), byteLength: 0 };
+    entry.promise = load().then((value) => {
+      if (this.#inspectionCache.get(key) === entry) {
+        entry.byteLength = byteLength(value);
+        this.#inspectionCacheBytes += entry.byteLength;
+        this.#trimInspectionCache();
+      }
+      return value;
+    }, (error: unknown) => {
+      if (this.#inspectionCache.get(key) === entry) this.#inspectionCache.delete(key);
+      throw error;
+    });
+    this.#inspectionCache.set(key, entry);
+    return entry.promise as Promise<T>;
+  }
+
+  #trimInspectionCache(): void {
+    while (this.#inspectionCacheBytes > this.#maxInspectionCacheBytes) {
+      const oldestKey = this.#inspectionCache.keys().next().value as string | undefined;
+      if (oldestKey === undefined) return;
+      const oldest = this.#inspectionCache.get(oldestKey);
+      this.#inspectionCache.delete(oldestKey);
+      this.#inspectionCacheBytes -= oldest?.byteLength ?? 0;
+    }
   }
 }

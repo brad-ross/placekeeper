@@ -94,6 +94,7 @@ export async function main(args = process.argv.slice(2)) {
     PDF_PROOFREADER_PDFIUM_WASM: resolve(resources, "pdfium/pdfium.wasm"),
     PDF_PROOFREADER_DAEMON_IDENTITY: buildIdentity.daemonIdentity,
     PDF_PROOFREADER_INSTALL_ARTIFACT_IDENTITY: buildIdentity.installArtifactIdentity,
+    PDF_PROOFREADER_WEB_ASSETS: resolve(resources, "web"),
   };
   if (args.length === 1 && resolve(args[0]) === args[0] && args[0].toLowerCase().endsWith(".pdf")) {
     await openFinderPdf(nodePath, serviceEntry, args[0], serviceEnvironment);

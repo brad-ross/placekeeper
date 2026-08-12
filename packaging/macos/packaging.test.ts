@@ -98,7 +98,11 @@ describe("macOS distribution manifests", () => {
     const readiness = resolve(app, "Contents/MacOS/pdf-proofreader");
     try {
       await mkdir(resolve(built, "Contents/MacOS"), { recursive: true });
-      await writeFile(resolve(built, "Contents/MacOS/pdf-proofreader"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+      await writeFile(
+        resolve(built, "Contents/MacOS/pdf-proofreader"),
+        "#!/bin/sh\nif [ \"${2:-}\" = \"stop-ready\" ]; then exit 0; fi\nexit 1\n",
+        { mode: 0o755 },
+      );
       await writeFile(resolve(built, "Contents/MacOS/droplet"), "candidate bridge", { mode: 0o755 });
       await writeFile(resolve(built, "candidate-marker"), "candidate");
       await mkdir(app, { recursive: true });
@@ -113,6 +117,55 @@ describe("macOS distribution manifests", () => {
     }
   });
 
+  it.each(["during-readiness", "at-readiness-exit"] as const)(
+    "retires the exact candidate before rollback when interrupted %s",
+    async (timing) => {
+      const root = await mkdtemp(resolve(tmpdir(), "pdf-proofreader-readiness-signal-"));
+      const built = resolve(root, "built/PDF Proofreader.app");
+      const app = resolve(root, "home/Applications/PDF Proofreader.app");
+      const action = resolve(root, "home/Library/Services/PDF Proofreader.workflow");
+      const helper = resolve("packaging/macos/install-built-app.sh");
+      const readiness = resolve(app, "Contents/MacOS/pdf-proofreader");
+      const candidateMarker = resolve(root, "candidate-running");
+      const signalLine = timing === "during-readiness"
+        ? '  kill -TERM "$PPID"\n'
+        : '  trap \'kill -TERM "$PPID"\' EXIT\n';
+      const launcher = [
+        "#!/bin/sh",
+        'if [ "${2:-}" = "ensure-ready" ]; then',
+        '  : > "$PDF_TEST_CANDIDATE_MARKER"',
+        '  : > "$4"',
+        signalLine.trimEnd(),
+        "  exit 0",
+        "fi",
+        'if [ "${2:-}" = "stop-ready" ]; then',
+        '  /bin/rm -f "$PDF_TEST_CANDIDATE_MARKER"',
+        "  exit 0",
+        "fi",
+        "exit 1",
+        "",
+      ].join("\n");
+      try {
+        await mkdir(resolve(built, "Contents/MacOS"), { recursive: true });
+        await writeFile(resolve(built, "Contents/MacOS/pdf-proofreader"), launcher, { mode: 0o755 });
+        await writeFile(resolve(built, "Contents/MacOS/droplet"), "candidate bridge", { mode: 0o755 });
+        await writeFile(resolve(built, "candidate-marker"), "candidate");
+        await mkdir(app, { recursive: true });
+        await writeFile(resolve(app, "previous-marker"), "previous");
+
+        await expect(execFileAsync("/bin/sh", [helper, built, app, action, readiness], {
+          env: { ...process.env, PDF_TEST_CANDIDATE_MARKER: candidateMarker },
+        })).rejects.toThrow();
+
+        expect(await readFile(resolve(app, "previous-marker"), "utf8")).toBe("previous");
+        await expect(readFile(resolve(app, "candidate-marker"), "utf8")).rejects.toThrow();
+        await expect(readFile(candidateMarker, "utf8")).rejects.toThrow();
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("coordinates the daemon before the transactional replacement helper", async () => {
     const installer = await readFile(resolve("install.sh"), "utf8");
     expect(installer).toContain("daemon coordinate-install");
@@ -120,7 +173,8 @@ describe("macOS distribution manifests", () => {
     expect(installer.indexOf("daemon coordinate-install")).toBeLessThan(installer.indexOf("install-built-app.sh"));
     expect(installer).not.toMatch(/(?:kill|pkill|killall).*daemon/u);
     const helper = await readFile(resolve("packaging/macos/install-built-app.sh"), "utf8");
-    expect(helper.indexOf('"$readiness_executable" daemon ensure-ready')).toBeLessThan(helper.lastIndexOf("committed=1"));
+    expect(helper.indexOf('"$readiness_executable" daemon ensure-ready --receipt')).toBeLessThan(helper.lastIndexOf("committed=1"));
+    expect(helper.indexOf('"$readiness_executable" daemon stop-ready --receipt')).toBeLessThan(helper.indexOf('if [ "$app_touched" -eq 1 ]'));
   });
 
   it("uses current notarytool submission followed by staple and validation", () => {
@@ -139,6 +193,8 @@ describe("macOS distribution manifests", () => {
     expect(launcher).toContain("build-identity.json");
     expect(launcher).toContain("PDF_PROOFREADER_DAEMON_IDENTITY");
     expect(launcher).toContain("PDF_PROOFREADER_INSTALL_ARTIFACT_IDENTITY");
+    expect(launcher).toContain('PDF_PROOFREADER_WEB_ASSETS: resolve(resources, "web")');
+    expect(launcher.indexOf("...process.env")).toBeLessThan(launcher.indexOf("PDF_PROOFREADER_WEB_ASSETS:"));
     expect(launcher).toContain('choose file of type {"com.adobe.pdf"}');
     expect(launcher).toContain('result.error?.kind === "input-unavailable"');
     expect(launcher).toContain("realpathSync");
@@ -224,6 +280,8 @@ describe("macOS distribution manifests", () => {
     expect(hooks.hooks?.UserPromptSubmit?.[0]?.hooks?.[0]?.additionalContextLimit).toBe(131072);
     const skill = await readFile(resolve("integrations/codex-plugin/skills/pdf-proofreader/SKILL.md"), "utf8");
     expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf`);
+    expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} context changes --handle`);
+    expect(skill).not.toMatch(/(^|[^/A-Za-z0-9_-])pdf-proofreader\s+(context|daemon)\b/mu);
     expect(inspectHookEvent({
       session_id: "packaged-contract-task",
       hook_event_name: "PostToolUse",

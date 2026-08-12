@@ -78,11 +78,12 @@ export interface QuerySyncTexInput {
   readonly pageIndex: number;
   readonly point: { readonly x: number; readonly y: number };
   readonly run?: SyncTexRunner;
+  readonly timeoutMs?: number;
 }
 
 export async function querySyncTex(input: QuerySyncTexInput): Promise<SourceHint | undefined> {
   const sourceRoot = await realpath(input.sourceRoot);
-  const timeoutMs = 2_000;
+  const timeoutMs = Math.max(1, Math.min(input.timeoutMs ?? 2_000, 2_000));
   const maxOutputBytes = 64 * 1024;
   const result = await (input.run ?? runSyncTex)({
     executable: "synctex",
@@ -159,6 +160,7 @@ export async function querySyncTexHintsForItems(input: {
   readonly sourceRoot: string;
   readonly pdfPath: string;
   readonly run?: SyncTexRunner;
+  readonly timeoutMs?: number;
 }): Promise<ReadonlyMap<string, SourceHint>> {
   const hints = new Map<string, SourceHint>();
   for (const item of input.items) {
@@ -169,6 +171,7 @@ export async function querySyncTexHintsForItems(input: {
       pdfPath: input.pdfPath,
       pageIndex: item.pageIndex,
       point,
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
       ...(input.run === undefined ? {} : { run: input.run }),
     });
     if (hint !== undefined) hints.set(item.id, hint);
