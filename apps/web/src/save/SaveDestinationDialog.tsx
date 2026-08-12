@@ -1,5 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState } from "react";
 
+import { trapDialogFocus } from "../app/dialog-focus.js";
 import type { SaveCopyProposal } from "../app/ProductionReviewApp.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import type { SaveFailureReason } from "../../../../packages/core/src/save-status.js";
@@ -57,8 +58,11 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault();
+            event.stopPropagation();
             if (!props.establishing) props.onCancel();
+            return;
           }
+          trapDialogFocus(event);
         }}
       >
         <h2 id={titleId}>Choose where to save annotations</h2>

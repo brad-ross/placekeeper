@@ -539,6 +539,11 @@
   pointer-events: auto;
 }
 
+.review-context-palette[hidden],
+.review-page-menu[hidden] {
+  display: none;
+}
+
 .review-context-palette button,
 .review-page-menu button {
   display: inline-flex;

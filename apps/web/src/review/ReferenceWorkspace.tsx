@@ -427,8 +427,8 @@ export function ReferenceWorkspace({
                       className="reference-tab-segment__action"
                       data-reference-tab-action="send"
                       data-workspace-focus-token={`reference-send:${tab.identity}`}
-                      aria-label="Send to main"
-                      title="Send to main"
+                      aria-label="Send to main document"
+                      title="Send to main document"
                       onClick={() => onSendToMain(tab.identity)}
                     >
                       <ReviewIcon name="main" />

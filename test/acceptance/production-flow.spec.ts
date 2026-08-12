@@ -134,7 +134,7 @@ async function followLinkInSameReference(
     name: "Open Target-to-target detail link, Page 3",
   });
   const firstAction = menu.getByRole("menuitem", { name: /Open in References/u });
-  const action = menu.getByRole("menuitem", { name: "Follow in this Reference Tab" });
+  const action = menu.getByRole("menuitem", { name: "Follow in this tab" });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await link.evaluate((element) => element.focus({ preventScroll: true }));
     await expect(link).toBeFocused();
@@ -142,7 +142,8 @@ async function followLinkInSameReference(
     try {
       await expect(firstAction).toBeFocused({ timeout: 1_500 });
       await expect(menu.getByRole("menuitem")).toHaveCount(3);
-      await expect(action).toHaveAttribute("title", "Follow in this Reference Tab");
+      await expect(action).toHaveAttribute("title", "Follow in this tab");
+      await expect(action).toHaveText("");
       await page.keyboard.press("ArrowDown");
       await expect(action).toBeFocused({ timeout: 1_500 });
       await page.keyboard.press("Enter");
@@ -524,7 +525,7 @@ test("searches extracted PDF text with variants, history, references, and retain
     }, 2_000);
     return { state, finish };
   });
-  await page.getByRole("button", { name: "Send to main" }).click();
+  await page.getByRole("button", { name: "Send to main document" }).click();
   await expect(page.getByRole("tab", { name: /stable, Page 1/u })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Open References tray" })).toBeVisible();
   await expect(page.getByLabel("Current page")).toHaveText("1 / 3");
@@ -604,6 +605,8 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(primaryMenu.getByRole("menuitem", { name: /Open in References/u })).toBeFocused();
   await expect(primaryMenu.getByRole("menuitem")).toHaveCount(2);
   await expect(primaryMenu.locator("svg")).toHaveCount(2);
+  await expect(primaryMenu.getByRole("menuitem").first()).toHaveAttribute("title", "Open in References");
+  await expect(primaryMenu.getByRole("menuitem").last()).toHaveAttribute("title", "Open in main document");
   await expect(primaryMenu.getByRole("menuitem").first()).toHaveText("");
   await expect(primaryMenu.getByRole("menuitem").last()).toHaveText("");
   const firstMenuItemBounds = await primaryMenu.getByRole("menuitem").first().boundingBox();
@@ -1054,7 +1057,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
       - (pageBounds.y + pageBounds.height / 2),
     );
   }).toBeLessThan(2);
-  await page.getByRole("button", { name: "Send to main" }).click();
+  await page.getByRole("button", { name: "Send to main document" }).click();
   await expect(workspace).toHaveAttribute("data-workspace-open", "false");
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
   await expect(page.locator(".review-workspace__status")).toHaveText(
@@ -1307,7 +1310,7 @@ test("switches and sends references from the right-docked workspace", async ({ p
     );
   }).toBeLessThan(2);
 
-  await page.getByRole("button", { name: "Send to main" }).click();
+  await page.getByRole("button", { name: "Send to main document" }).click();
   await expect(page.locator(".review-workspace__status")).toHaveText(
     "Reference sent to the main document.",
   );
@@ -1377,7 +1380,7 @@ test("keeps compound reference actions in narrow keyboard order through survivor
   const forwardTab = browserName === 'webkit' ? 'Alt+Tab' : 'Tab';
   const backwardTab = browserName === 'webkit' ? 'Shift+Alt+Tab' : 'Shift+Tab';
   await page.keyboard.press(forwardTab);
-  const detailSend = page.getByRole("button", { name: "Send to main" });
+  const detailSend = page.getByRole("button", { name: "Send to main document" });
   await expect(detailSend).toBeFocused();
   await page.keyboard.press(forwardTab);
   await expect(page.getByRole("button", { name: "Close active reference" })).toBeFocused();
