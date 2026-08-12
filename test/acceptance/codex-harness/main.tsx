@@ -2,7 +2,7 @@ import { createRoot } from "react-dom/client";
 import { useState } from "react";
 
 import { CodexDelivery } from "../../../apps/web/src/export/CodexDelivery.js";
-import { FinishReviewDrawer } from "../../../apps/web/src/app/FinishReviewDrawer.js";
+import { CodexDrawer } from "../../../apps/web/src/app/CodexDrawer.js";
 import { createReviewState, type ReviewState } from "../../../packages/core/src/review-model.js";
 
 declare global {
@@ -52,13 +52,11 @@ function Harness() {
   changeRetention = () => { setRetention("Delete after check"); setKey((value) => value + 1); };
   makeEmpty = () => { setState(empty); setKey((value) => value + 1); };
   return <>
-    {!drawerOpen ? <button type="button" onClick={() => setOpen(true)}>Open Finish</button> : null}
-    <FinishReviewDrawer
+    {!drawerOpen ? <button type="button" onClick={() => setOpen(true)}>Open Codex</button> : null}
+    <CodexDrawer
       state={state}
       open={drawerOpen}
       onClose={() => setOpen(false)}
-      onFinish={() => undefined}
-      onDiscard={() => undefined}
     >
       <CodexDelivery
         key={key}
@@ -81,7 +79,7 @@ function Harness() {
         onSaveInstruction={() => { saveCount += 1; }}
         onCheckResult={async () => ({ status: "Complete", message: "Exact IDs, digests, changed paths, and clean output verified." })}
       />
-    </FinishReviewDrawer>
+    </CodexDrawer>
   </>;
 }
 

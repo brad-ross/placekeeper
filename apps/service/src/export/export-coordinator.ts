@@ -27,6 +27,7 @@ import {
   FileCapabilityRegistry,
   hashFile,
 } from "../files/file-capabilities.js";
+import { syncDirectory } from "../files/durability.js";
 import { SessionControlRegistry } from "../sessions/control-socket.js";
 import { reviewedPdfFilename } from "./output-names.js";
 import {
@@ -101,15 +102,6 @@ export class ExportCoordinatorError extends Error {
     super(message);
     this.name = "ExportCoordinatorError";
     this.code = code;
-  }
-}
-
-async function syncDirectory(path: string): Promise<void> {
-  const handle = await open(path, "r");
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
   }
 }
 

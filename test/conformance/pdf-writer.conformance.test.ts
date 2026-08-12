@@ -5,9 +5,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { PdfWriteRequest, ReviewAnnotation } from '../../packages/core/src/pdf-writer.js';
 import { PdfWriterError } from '../../packages/core/src/pdf-writer.js';
+import { documentOrderedItems, projectReviewItem } from '../../packages/core/src/annotation-projection.js';
+import type { ReviewItem } from '../../packages/core/src/review-model.js';
 import {
   createEmbedPdfWriter,
   inspectPdfWithEmbedPdf,
+  readPortableReviewItems,
 } from '../../packages/pdf-backends/src/embedpdf-adapter.js';
 import { runPdfBackend } from '../../packages/pdf-backends/src/backend-host.js';
 
@@ -100,6 +103,117 @@ async function requestFor(name: string, items = annotations): Promise<PdfWriteRe
 }
 
 describe('EmbedPDF writer gate', () => {
+  it('round-trips editable metadata for every app annotation kind', async () => {
+    const timestamp = '2026-08-11T12:00:00.000Z';
+    const semanticItems: ReviewItem[] = [
+      {
+        id: '71111111-1111-4111-8111-111111111111', kind: 'replace', pageIndex: 0,
+        createdAt: timestamp, updatedAt: timestamp,
+        payload: { quote: 'unique', prefix: '', suffix: '', proposedText: 'locally unique', rect: { x: 72, y: 92, width: 90, height: 16 }, segmentRects: [{ x: 72, y: 92, width: 90, height: 16 }], reliable: true },
+      },
+      {
+        id: '72222222-2222-4222-8222-222222222222', kind: 'delete', pageIndex: 0,
+        createdAt: timestamp, updatedAt: timestamp,
+        payload: { quote: 'clearly', prefix: '', suffix: '', rect: { x: 170, y: 92, width: 55, height: 16 }, segmentRects: [{ x: 170, y: 92, width: 55, height: 16 }], reliable: true },
+      },
+      {
+        id: '73333333-3333-4333-8333-333333333333', kind: 'insert', pageIndex: 0,
+        createdAt: timestamp, updatedAt: timestamp,
+        payload: { proposedText: 'however', position: { x: 232, y: 88, width: 14, height: 20 }, leftContext: '', rightContext: '', reliable: true },
+      },
+      {
+        id: '74444444-4444-4444-8444-444444444444', kind: 'highlight', pageIndex: 0,
+        createdAt: timestamp, updatedAt: timestamp,
+        payload: { quote: 'argument', prefix: '', suffix: '', comment: 'Check this.', rect: { x: 72, y: 120, width: 220, height: 16 }, segmentRects: [{ x: 72, y: 120, width: 220, height: 16 }], reliable: true },
+      },
+      {
+        id: '75555555-5555-4555-8555-555555555555', kind: 'pageNote', pageIndex: 0,
+        createdAt: timestamp, updatedAt: timestamp,
+        payload: { position: { x: 500, y: 700, width: 18, height: 18 }, comment: 'Page-level comment.' },
+      },
+    ];
+    const result = await runPdfBackend(
+      await createEmbedPdfWriter(),
+      await requestFor(
+        'text-native-with-annotations.pdf',
+        documentOrderedItems(semanticItems).map((item) => projectReviewItem(item)),
+      ),
+    );
+
+    expect(await readPortableReviewItems(result.pdfBytes)).toEqual(documentOrderedItems(semanticItems));
+  });
+
+  it('round-trips editable Page Note metadata on a rotated cropped page', async () => {
+    const note: ReviewItem = {
+      id: '76666666-6666-4666-8666-666666666666',
+      kind: 'pageNote',
+      pageIndex: 0,
+      createdAt: '2026-08-11T12:00:00.000Z',
+      updatedAt: '2026-08-11T12:00:00.000Z',
+      payload: {
+        position: { x: 236, y: 1176, width: 18, height: 18 },
+        comment: 'Rotated geometry note.',
+      },
+    };
+    const result = await runPdfBackend(
+      await createEmbedPdfWriter(),
+      await requestFor('rotation-90-crop.pdf', [projectReviewItem(note)]),
+    );
+
+    expect(await readPortableReviewItems(result.pdfBytes)).toEqual([note]);
+  });
+
+  it('reopens, edits, and deletes app annotations using portable PDF metadata', async () => {
+    const originalItem: ReviewItem = {
+      id: '77777777-7777-4777-8777-777777777777',
+      kind: 'highlight',
+      pageIndex: 0,
+      createdAt: '2026-08-11T12:00:00.000Z',
+      updatedAt: '2026-08-11T12:00:00.000Z',
+      payload: {
+        quote: 'unique equilibrium',
+        prefix: 'text: ',
+        suffix: ' clearly',
+        rect: { x: 72, y: 92, width: 150, height: 16 },
+        segmentRects: [{ x: 72, y: 92, width: 150, height: 16 }],
+        reliable: true,
+        comment: 'First comment',
+      },
+    };
+    const first = await runPdfBackend(
+      await createEmbedPdfWriter(),
+      await requestFor('text-native-with-annotations.pdf', [projectReviewItem(originalItem)]),
+    );
+    expect(await readPortableReviewItems(first.pdfBytes)).toEqual([originalItem]);
+
+    const editedItem: ReviewItem = {
+      ...originalItem,
+      updatedAt: '2026-08-11T12:01:00.000Z',
+      payload: { ...originalItem.payload, comment: 'Edited after reopen' },
+    };
+    const edited = await runPdfBackend(await createEmbedPdfWriter(), {
+      sourcePdf: first.pdfBytes,
+      sourceSha256: sha256(first.pdfBytes),
+      revision: 2,
+      annotations: [projectReviewItem(editedItem)],
+    });
+    expect(await readPortableReviewItems(edited.pdfBytes)).toEqual([editedItem]);
+    expect(edited.evidence.preexistingAnnotationIds).toEqual(
+      expect.arrayContaining(['existing-highlight', 'existing-stamp']),
+    );
+
+    const deleted = await runPdfBackend(await createEmbedPdfWriter(), {
+      sourcePdf: edited.pdfBytes,
+      sourceSha256: sha256(edited.pdfBytes),
+      revision: 3,
+      annotations: [],
+    });
+    expect(await readPortableReviewItems(deleted.pdfBytes)).toEqual([]);
+    expect((await inspectPdfWithEmbedPdf(deleted.pdfBytes)).annotations.map(({ id }) => id)).toEqual(
+      expect.arrayContaining(['existing-highlight', 'existing-stamp']),
+    );
+  });
+
   it('writes all five standard mappings, reopens, and preserves the source and existing annotations', async () => {
     const request = await requestFor('text-native-with-annotations.pdf');
     const original = request.sourcePdf.slice();

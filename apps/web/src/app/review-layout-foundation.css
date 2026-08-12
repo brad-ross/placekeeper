@@ -132,23 +132,6 @@
   white-space: nowrap;
 }
 
-.review-chrome__saved {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 5px;
-  color: var(--review-ink-muted);
-  font-size: 11px;
-}
-
-.review-chrome__saved::before {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--review-radius-round);
-  background: var(--review-success);
-  content: "";
-}
-
 .review-chrome__viewer-controls,
 .review-chrome__actions {
   display: flex;

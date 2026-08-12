@@ -27,7 +27,7 @@ function assertMutable(state: ReviewState, command: ReviewCommand): void {
   }
 }
 
-function assertItem(item: ReviewItem): void {
+export function assertReviewItem(item: ReviewItem): void {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(item.id)) {
     throw new InvalidReviewCommandError("Review item IDs must be UUIDs");
   }
@@ -127,7 +127,7 @@ export function reduceReview(
   let items: readonly ReviewItem[];
   switch (command.type) {
     case "add": {
-      assertItem(command.item);
+      assertReviewItem(command.item);
       if (state.items.some((item) => item.id === command.item.id)) {
         throw new InvalidReviewCommandError("Review item ID already exists");
       }
@@ -153,7 +153,7 @@ export function reduceReview(
         payload: { ...existing.payload, ...command.payload },
         updatedAt: command.updatedAt,
       };
-      assertItem(edited);
+      assertReviewItem(edited);
       items = state.items.map((item, itemIndex) => itemIndex === index ? edited : item);
       break;
     }

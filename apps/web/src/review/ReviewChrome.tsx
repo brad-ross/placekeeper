@@ -53,6 +53,8 @@ export function zoomEditorKeyAction(
 export interface ReviewChromeProps {
   readonly documentTitle: string;
   readonly savedLabel?: string;
+  readonly savePhase?: 'clean' | 'saving' | 'not-saved';
+  readonly saveOptionsOpen?: boolean;
   readonly controls?: ViewerControls;
   readonly viewerState: ViewerControlsSnapshot;
   readonly fitWidthReady?: boolean;
@@ -68,11 +70,14 @@ export interface ReviewChromeProps {
   readonly onNavigateBack?: () => void;
   readonly onNavigateForward?: () => void;
   readonly onFinish: () => void;
+  readonly onSaveOptions?: () => void;
 }
 
 export function ReviewChrome({
   documentTitle,
   savedLabel = 'Saved',
+  savePhase = 'clean',
+  saveOptionsOpen = false,
   controls,
   viewerState,
   fitWidthReady = false,
@@ -88,6 +93,7 @@ export function ReviewChrome({
   onNavigateBack = () => undefined,
   onNavigateForward = () => undefined,
   onFinish,
+  onSaveOptions = () => undefined,
 }: ReviewChromeProps) {
   const [editingPage, setEditingPage] = useState(false);
   const [pageDraft, setPageDraft] = useState('');
@@ -237,11 +243,21 @@ export function ReviewChrome({
   return (
     <header className="review-chrome" data-review-chrome>
       <div className="review-chrome__identity">
-        <span className="review-chrome__file-badge" data-review-file-badge aria-hidden="true">
-          <ReviewIcon name="file" size={14} />
-        </span>
-        <h1>{documentTitle}</h1>
-        <span className="review-chrome__saved" data-review-saved-status>{savedLabel}</span>
+        <button
+          type="button"
+          className="review-chrome__save-identity"
+          aria-label={`${documentTitle}, ${savePhase === 'not-saved' ? 'not saved' : savePhase === 'saving' ? 'saving changes' : savedLabel}. Open automatic save options`}
+          aria-haspopup="dialog"
+          aria-expanded={saveOptionsOpen}
+          title={`${documentTitle} · ${savePhase === 'not-saved' ? 'Not saved' : savePhase === 'saving' ? 'Saving changes' : savedLabel}`}
+          onClick={onSaveOptions}
+        >
+          <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />
+          <strong>{documentTitle}</strong>
+          <span className="sr-only" data-review-saved-status>
+            {savePhase === 'not-saved' ? 'Not saved' : savePhase === 'saving' ? 'Saving changes' : savedLabel}
+          </span>
+        </button>
       </div>
       <div className="review-chrome__viewer-controls" role="group" aria-label="PDF editing, navigation, and zoom">
         <span className="review-chrome__control-cluster review-chrome__edit-cluster" role="group" aria-label="Edit history">
@@ -400,8 +416,8 @@ export function ReviewChrome({
           <button type="button" className="review-chrome__icon-control review-chrome__fit-width" data-review-zoom-action="fit-width" aria-label="Fit PDF to available width" aria-busy={fitWidthPending ? 'true' : 'false'} aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)} disabled={!viewerState.zoomReady || !fitWidthReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runFitWidth(event.currentTarget)}><ReviewIcon name="fit-width" /></button>
         </span>
       </div>
-      <nav className="review-chrome__actions" aria-label="Review views">
-        <button type="button" className="review-chrome__finish" aria-expanded={finishOpen} aria-controls="review-finish-drawer" onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); onFinish(); }}>Finish</button>
+      <nav className="review-chrome__actions" aria-label="Actions">
+        <button type="button" className="review-chrome__finish" aria-expanded={finishOpen} aria-controls="review-finish-drawer" onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); onFinish(); }}>Codex</button>
       </nav>
       {!viewerState.pageReady ? <p id={pageUnavailableId} className="sr-only">{viewerState.pageUnavailableReason}</p> : null}
       {!viewerState.zoomReady ? <p id={zoomUnavailableId} className="sr-only">{viewerState.zoomUnavailableReason}</p> : null}

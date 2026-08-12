@@ -159,7 +159,7 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('textbox', { name: 'Comment' }).fill('Rewrite this paragraph.');
     await page.getByRole('button', { name: 'Save comment' }).click();
 
-    await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '7');
+    await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '6');
     await expect(page.locator('[data-revision]')).toHaveAttribute(
       'data-kinds',
       'replace,delete,insert,highlight,highlight,pageNote',
@@ -882,9 +882,9 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
 
-  test('supersedes Page Note placement when opening a review drawer', async ({ page }) => {
+  test('supersedes Page Note placement when opening the Codex drawer', async ({ page }) => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
-    const finish = page.getByRole('button', { name: 'Finish' });
+    const codex = page.getByRole('button', { name: 'Codex' });
 
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+N');
@@ -898,12 +898,12 @@ test.describe('canonical review workflow', () => {
 
     await page.getByRole('button', { name: 'Open page actions' }).click();
     await expect(page.getByRole('menu', { name: 'Page actions' })).toBeVisible();
-    await finish.click();
+    await codex.click();
 
     await expect(page.getByRole('menu', { name: 'Page actions' })).toHaveCount(0);
-    await expect(page.getByRole('heading', { name: 'Finish review' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Work with Codex' })).toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(finish).toBeFocused();
+    await expect(codex).toBeFocused();
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
 

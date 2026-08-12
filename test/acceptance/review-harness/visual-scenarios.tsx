@@ -2,7 +2,6 @@ import type { CSSProperties, ReactNode } from 'react';
 import { PdfZoomMode } from '@embedpdf/models';
 
 import { CodexDelivery } from '../../../apps/web/src/export/CodexDelivery.js';
-import { HumanDelivery } from '../../../apps/web/src/export/HumanDelivery.js';
 import type { ExistingAnnotationsDiscovery } from '../../../apps/web/src/pdf/existing-annotations.js';
 import type { PdfOutlineDiscovery } from '../../../apps/web/src/pdf/pdf-outline.js';
 import type { AnnotationOutlineLabels } from '../../../apps/web/src/review/annotation-outline-context.js';
@@ -39,7 +38,7 @@ export interface VisualScenario {
   readonly existingAnnotations: ExistingAnnotationsDiscovery;
   readonly annotationOutlineLabels?: AnnotationOutlineLabels;
   readonly outlineDiscovery?: PdfOutlineDiscovery;
-  readonly finishSlot?: ReactNode;
+  readonly codexSlot?: ReactNode;
   readonly viewerState: ViewerControlsSnapshot;
   readonly referenceNavigation?: ReferenceNavigationState;
   readonly referenceTabs?: readonly ReferenceWorkspaceTab[];
@@ -183,31 +182,9 @@ function createVisualReferenceNavigation(): ReferenceNavigationState {
 
 const visualReferenceNavigation = createVisualReferenceNavigation();
 
-function DeliveryFixture({
-  state,
-  outcome = 'warning',
-}: {
-  readonly state: ReviewState;
-  readonly outcome?: 'success' | 'warning' | 'error';
-}) {
+function DeliveryFixture({ state }: { readonly state: ReviewState }) {
   return (
     <div className="review-delivery-content">
-      <HumanDelivery
-        state={state}
-        showLifecycleActions={false}
-        onSave={async () => {
-          if (outcome === 'error') throw new Error('The reviewed copy could not be written. The original PDF is unchanged.');
-          return {
-            path: '/Users/reviewer/Documents/Results/identification-strategy-reviewed-final-with-annotations.pdf',
-            ...(outcome === 'warning' ? {
-              warning: 'The destination already contained an older reviewed copy; the new file uses a numbered suffix.',
-            } : {}),
-          };
-        }}
-        onReplaceOriginal={async () => ({ path: '/Users/reviewer/Documents/Papers/identification-strategy.pdf' })}
-        onFinish={async () => undefined}
-        onDiscard={async () => undefined}
-      />
       <CodexDelivery
         state={state}
         sourceRoot="/Users/reviewer/Documents/Research/Identification Strategy and Robustness Appendix"
@@ -271,8 +248,7 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
     } : {}),
   };
   if (name === 'finish' || name === 'exceptional') {
-    const outcome = exception === 'success' || exception === 'error' ? exception : 'warning';
-    return { ...common, finishSlot: <DeliveryFixture state={state} outcome={outcome} /> };
+    return { ...common, codexSlot: <DeliveryFixture state={state} /> };
   }
   return {
     ...common,

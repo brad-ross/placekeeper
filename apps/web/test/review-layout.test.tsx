@@ -193,7 +193,7 @@ describe('review shell layout and accessibility contract', () => {
     const editGroup = html.indexOf('aria-label="Edit history"');
     const navigationGroup = html.indexOf('aria-label="Document navigation"');
     const zoomGroup = html.indexOf('aria-label="PDF zoom"');
-    const actionsStart = html.indexOf('aria-label="Review views"');
+    const actionsStart = html.indexOf('aria-label="Actions"');
 
     expect(centerStart).toBeGreaterThanOrEqual(0);
     const orderedControls = [
@@ -297,7 +297,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-live="polite"');
     expect(html).toContain('data-workspace-open="false"');
     expect(html).toContain('data-review-chrome');
-    expect(html).toContain('data-review-file-badge');
+    expect(html).toContain('review-chrome__save-identity');
     expect(html).toContain('data-review-saved-status');
     expect(html).toContain('data-review-stat');
     expect(html).not.toContain('data-review-count');
@@ -308,7 +308,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('--workspace-side-width:0px');
     expect(html).toContain('data-review-nested-host');
     expect(html.match(/Document canvas/g)).toHaveLength(1);
-    expect(html).toContain('Finish');
+    expect(html).toContain('Codex');
     expect(html).toContain('aria-label="Undo"');
     expect(html).toContain('aria-label="Redo"');
     expect(html).toMatch(/data-main-history="back"[^>]*aria-label="Back in document history"[^>]*disabled=""/u);

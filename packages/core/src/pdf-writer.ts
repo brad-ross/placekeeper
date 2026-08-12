@@ -31,6 +31,7 @@ interface ReviewAnnotationBase {
   createdAt: string;
   modifiedAt: string;
   textAnchorReliable?: boolean;
+  custom?: unknown;
 }
 
 export type ReviewAnnotation = ReviewAnnotationBase & {
@@ -67,10 +68,20 @@ export interface PdfStructuralEvidence {
 export interface PdfWriteResult {
   pdfBytes: Uint8Array;
   evidence: PdfStructuralEvidence;
+  inspection?: unknown;
 }
+
+export type PdfRewriteEligibility =
+  | { readonly eligible: true }
+  | {
+      readonly eligible: false;
+      readonly code: "encrypted" | "permission-denied" | "signature-restricted" | "invalid-pdf";
+      readonly message: string;
+    };
 
 export interface PdfWriter {
   write(request: PdfWriteRequest): Promise<PdfWriteResult>;
+  assess?(sourcePdf: Uint8Array): Promise<PdfRewriteEligibility>;
 }
 
 export class PdfWriterError extends Error {

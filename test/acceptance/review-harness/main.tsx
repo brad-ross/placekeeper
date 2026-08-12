@@ -311,13 +311,13 @@ function Harness() {
       state={state}
       {...(visualScenario ? {
         documentTitle: visualScenario.documentTitle,
-        savedLabel: `Saved · revision ${state.revision}`,
+        savedLabel: "Saved",
         listOpen: visualScenario.listOpen,
         viewerState: visualScenario.viewerState,
         existingAnnotations: visualScenario.existingAnnotations,
         annotationOutlineLabels: visualScenario.annotationOutlineLabels,
         outlineDiscovery: visualScenario.outlineDiscovery,
-        finishSlot: visualScenario.finishSlot,
+        codexSlot: visualScenario.codexSlot,
         navigationState: visualScenario.referenceNavigation,
         referenceTabs: visualScenario.referenceTabs,
       } : {})}

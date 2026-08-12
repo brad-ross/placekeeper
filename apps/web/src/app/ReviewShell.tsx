@@ -70,7 +70,7 @@ import {
   type ReferenceWorkspaceLayoutState,
   type RightWorkspaceMode,
 } from '../review/reference-workspace-layout.js';
-import { FinishReviewDrawer } from './FinishReviewDrawer.js';
+import { CodexDrawer } from './CodexDrawer.js';
 import {
   createProofreadInputController,
   isEditableTarget,
@@ -103,7 +103,7 @@ type TextDraft =
   | { kind: 'insert'; anchor: CaretAnchor; initialText: string };
 
 type Composer =
-  | { kind: 'highlight'; itemId: string }
+  | { kind: 'highlight'; anchor: SelectionAnchor; selectionGeneration: number }
   | { kind: 'pageNote'; pageIndex: number; position: ReviewRect; nearbyText?: string }
   | { kind: 'edit'; item: ReviewItem };
 
@@ -113,6 +113,9 @@ export interface ReviewShellProps {
   state: ReviewState;
   documentTitle?: string;
   savedLabel?: string;
+  savePhase?: 'clean' | 'saving' | 'not-saved';
+  saveOptionsOpen?: boolean;
+  onSaveOptions?(): void;
   listOpen?: boolean;
   selectionUpdate: SelectionUpdate;
   selectionPlacement?: ContextPlacement | null;
@@ -140,6 +143,7 @@ export interface ReviewShellProps {
   onPageNoteComposerComplete?(): void;
   onSelectionConsumed?(generation: number): void;
   onCommand(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
+  cancelPendingCommandToken?: number;
   onNavigate?(item: ReviewItem): void;
   onNavigateExisting?(item: ExistingAnnotation): void;
   existingAnnotations?: ExistingAnnotationsDiscovery;
@@ -152,10 +156,8 @@ export interface ReviewShellProps {
   viewerState?: ViewerControlsSnapshot;
   viewerFraming?: ViewerFramingControls;
   viewerNavigation?: PdfViewerNavigation;
-  finishSlot?: ReactNode;
-  finishConfirmationActive?: boolean;
-  onFinishReview?(): void | Promise<void>;
-  onDiscardReview?(): void | Promise<void>;
+  codexSlot?: ReactNode;
+  codexConfirmationActive?: boolean;
   /** The production shell may control workspace visibility and retained navigation state. */
   workspaceOpen?: boolean;
   navigationState?: ReferenceNavigationState;
@@ -282,6 +284,17 @@ export function ReviewShell(props: ReviewShellProps) {
     kind: 'reading',
     token: 0,
   });
+  useEffect(() => {
+    if (props.cancelPendingCommandToken === undefined) return;
+    setTextDraft(null);
+    setComposer(null);
+    if (props.selectionUpdate.kind === 'reliable') {
+      setConsumedSelectionGeneration(props.selectionUpdate.generation);
+      props.onSelectionConsumed?.(props.selectionUpdate.generation);
+    }
+    dispatchSurface({ type: 'close-nested' });
+    dispatchSurface({ type: 'close-transient' });
+  }, [props.cancelPendingCommandToken]);
   const navigation = props.navigationState ?? surface.navigation;
   const outlineDiscovery = props.outlineDiscovery;
   const visibleOutlineDiscovery = useMemo<PdfOutlineDiscovery>(() => (
@@ -620,7 +633,7 @@ export function ReviewShell(props: ReviewShellProps) {
         surface.baseSurface === 'finish' &&
         (event.currentTarget.querySelector('[role="alertdialog"]') !== null ||
           (event.target instanceof Element && event.target.closest('[role="alertdialog"]')) ||
-          props.finishConfirmationActive)
+          props.codexConfirmationActive)
       ) {
         return;
       }
@@ -690,19 +703,20 @@ export function ReviewShell(props: ReviewShellProps) {
       return;
     }
     modalTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    let addedId: string | undefined;
-    void submit((state) => {
-      const command = addHighlight(state, anchor);
-      if (command.type !== 'add') throw new Error('Highlight command must add an item');
-      addedId = command.item.id;
-      return command;
-    }).then((next) => {
-      if (addedId && next.items.some(({ id }) => id === addedId)) {
-        consumeSelectionActions(selectionGeneration);
-        setComposer({ kind: 'highlight', itemId: addedId });
-        dispatchSurface({ type: 'open-nested' });
-      }
-    });
+    setComposer({ kind: 'highlight', anchor, selectionGeneration });
+    dispatchSurface({ type: 'open-nested' });
+  };
+
+  const saveHighlight = async (
+    pending: Extract<Composer, { kind: 'highlight' }>,
+    comment: string,
+  ) => {
+    await submit(
+      (state) => addHighlight(state, pending.anchor, comment),
+      { onAccepted: () => consumeSelectionActions(pending.selectionGeneration) },
+    );
+    setComposer(null);
+    dispatchSurface({ type: 'close-nested' });
   };
 
   const startTextTool = (kind: 'replace' | 'insert') => {
@@ -885,6 +899,9 @@ export function ReviewShell(props: ReviewShellProps) {
       <ReviewChrome
         documentTitle={props.documentTitle ?? 'Local PDF'}
         {...(props.savedLabel === undefined ? {} : { savedLabel: props.savedLabel })}
+        {...(props.savePhase === undefined ? {} : { savePhase: props.savePhase })}
+        saveOptionsOpen={props.saveOptionsOpen ?? false}
+        onSaveOptions={() => props.onSaveOptions?.()}
         {...(props.viewerControls === undefined ? {} : { controls: props.viewerControls })}
         viewerState={props.viewerState ?? unavailableViewerControls()}
         fitWidthReady={props.viewerNavigation?.fitToWidthReady() ?? false}
@@ -1199,15 +1216,13 @@ export function ReviewShell(props: ReviewShellProps) {
               onCommit={workspaceFraming.requestSettledReframe}
             />
           ) : null}
-          <FinishReviewDrawer
+          <CodexDrawer
             state={props.state}
             open={surface.baseSurface === 'finish'}
             onClose={closeFinish}
-            onFinish={props.onFinishReview ?? (() => undefined)}
-            onDiscard={props.onDiscardReview ?? (() => undefined)}
           >
-            {props.finishSlot}
-          </FinishReviewDrawer>
+            {props.codexSlot}
+          </CodexDrawer>
         </div>
       </div>
       <div className="review-nested-host" data-review-nested-host>
@@ -1243,10 +1258,9 @@ export function ReviewShell(props: ReviewShellProps) {
               setComposer(null);
               dispatchSurface({ type: 'close-nested' });
             }}
+            onSkip={() => saveHighlight(composer, '')}
             onSave={async (value) => {
-              if (value) await submit((state) => editReviewItem(state, composer.itemId, { comment: value }));
-              setComposer(null);
-              dispatchSurface({ type: 'close-nested' });
+              await saveHighlight(composer, value);
             }}
           />
         ) : null}
