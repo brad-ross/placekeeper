@@ -18,9 +18,29 @@ test("Finder Open With passes exactly one explicit path through the native docum
 });
 
 test("Codex plugin packages launch plus task-scoped live-context hooks", async () => {
+  const marketplace = JSON.parse(await readFile(resolve(".agents/plugins/marketplace.json"), "utf8")) as {
+    name: string;
+    interface: { displayName: string };
+    plugins: Array<{
+      name: string;
+      source: { source: string; path: string };
+      policy: { installation: string; authentication: string };
+      category: string;
+    }>;
+  };
   const plugin = JSON.parse(await readFile(resolve("integrations/codex-plugin/.codex-plugin/plugin.json"), "utf8")) as { name: string; skills: string; interface: { longDescription: string } };
   const hooks = JSON.parse(await readFile(resolve("integrations/codex-plugin/hooks/hooks.json"), "utf8")) as { hooks: Record<string, Array<{ hooks: Array<{ command: string; timeout: number }> }>> };
   const skill = await readFile(resolve("integrations/codex-plugin/skills/pdf-proofreader/SKILL.md"), "utf8");
+  expect(marketplace).toMatchObject({
+    name: "pdf-proofreader-local",
+    interface: { displayName: "PDF Proofreader Local" },
+    plugins: [{
+      name: "codex-plugin",
+      source: { source: "local", path: "./integrations/codex-plugin" },
+      policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" },
+      category: "Productivity",
+    }],
+  });
   expect(plugin).toMatchObject({ name: "codex-plugin", skills: "./skills/" });
   expect(plugin.interface.longDescription).toContain("every prompt");
   expect(Object.keys(hooks.hooks).sort()).toEqual(["PostToolUse", "SessionEnd", "UserPromptSubmit"]);
@@ -34,6 +54,9 @@ test("Codex plugin packages launch plus task-scoped live-context hooks", async (
   expect(skill).toContain("desktop built-in browser");
   expect(skill).toContain("pdf-proofreader-live-context");
   expect(skill).toContain("context evidence --handle");
+  expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} context items --handle`);
+  expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} context changes --handle`);
+  expect(skill).not.toMatch(/(^|[^/A-Za-z0-9_-])pdf-proofreader\s+(context|daemon)\b/mu);
   expect(skill).toContain("Do not submit");
   expect(skill).not.toContain("[TODO:");
 });
