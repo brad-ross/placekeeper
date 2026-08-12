@@ -27,6 +27,13 @@ The PDF selected to receive automatic annotation changes, either the safely vali
 
 Changing the Save Destination leaves the former PDF at its last successfully saved state and sends the complete current state plus subsequent changes to the new target.
 
+Each establishment or relocation advances the destination's generation, so work completed for an older destination cannot update the new target or its save status.
+
+### Save Sync
+The durable comparison between the latest desired Review Items and the state last verified in the Save Destination.
+
+Save Sync is clean only when the saved revision and semantic digest match the desired state; an older successful write remains saving, while a failed current-generation write becomes not saved without discarding Protected Recovery.
+
 ### Protected Recovery
 Private local state that safeguards accepted annotation changes until the Save Destination contains the same current state.
 
@@ -92,4 +99,4 @@ Ordinary scrolling, sequential page turns, and zoom changes are not Meaningful J
 
 ## Relationships
 
-A Review Item projects to an Owned Annotation and may carry Portable Annotation Identity in the saved PDF. Existing PDF Annotations remain a separate read-only population. The Annotation Tray presents both populations, while a Framing Session may use Viewer Runway to keep the relevant PDF content reachable. Protected Recovery covers accepted changes until the Save Destination catches up.
+A Review Item projects to an Owned Annotation and may carry Portable Annotation Identity in the saved PDF. Existing PDF Annotations remain a separate read-only population. The Annotation Tray presents both populations, while a Framing Session may use Viewer Runway to keep the relevant PDF content reachable. Protected Recovery covers accepted changes until Save Sync proves that the Save Destination has caught up.
