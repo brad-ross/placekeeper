@@ -16,6 +16,7 @@ import {
   chooseWorkspaceModeFocusTarget,
   referenceTabFocusIndex,
   ReferenceWorkspace,
+  WORKSPACE_MODES,
 } from '../src/review/ReferenceWorkspace.js';
 import {
   ReferenceResizeHandle,
@@ -145,6 +146,10 @@ describe('link action chooser', () => {
 });
 
 describe('shared reference workspace', () => {
+  it('keeps Search between Outline and Annotations with References right-most', () => {
+    expect(WORKSPACE_MODES).toEqual(['outline', 'search', 'annotations', 'references']);
+  });
+
   it('collapses a confirmed empty outline to one selected Annotations surface', () => {
     const html = renderToStaticMarkup(
       <OutlineAnnotationsWorkspace
@@ -155,6 +160,7 @@ describe('shared reference workspace', () => {
         outline={{ status: 'loaded-empty', documentGeneration: 1 }}
         currentOutlineItemId={null}
         annotations={<div>Owned annotation rows</div>}
+        search={<div>PDF search</div>}
         onModeChange={() => undefined}
         onOutlineActivate={() => undefined}
         onOutlineReference={() => undefined}
@@ -166,12 +172,13 @@ describe('shared reference workspace', () => {
     expect(html).not.toContain('id="workspace-panel-outline"');
     expect(html).not.toContain('This PDF has no embedded outline.');
     expect(html.match(/id="workspace-panel-annotations"/g)).toHaveLength(1);
+    expect(html.match(/id="workspace-panel-search"/g)).toHaveLength(1);
     expect(html).toMatch(/id="workspace-mode-annotations"[^>]*aria-selected="true"/u);
     expect(html).toMatch(/id="workspace-panel-annotations"[^>]*aria-labelledby="workspace-mode-annotations"/u);
     expect(html).not.toMatch(/id="workspace-panel-annotations"[^>]*hidden/u);
-    expect(html).toContain('aria-label="Annotations"');
-    expect(html).toContain('data-workspace-mode-count="1"');
-    expect(html).toContain('grid-template-columns:repeat(1, minmax(0, 1fr))');
+    expect(html).toContain('aria-label="Search and annotations"');
+    expect(html).toContain('data-workspace-mode-count="2"');
+    expect(html).toContain('grid-template-columns:repeat(2, minmax(0, 1fr))');
   });
 
   it('keeps Outline available while discovery is unavailable', () => {
@@ -191,9 +198,11 @@ describe('shared reference workspace', () => {
     );
 
     expect(html).toContain('id="workspace-mode-outline"');
+    expect(html).toContain('id="workspace-mode-search"');
     expect(html).toContain('id="workspace-panel-outline"');
     expect(html).toContain('Outline unavailable.');
-    expect(html).toContain('aria-label="Outline and annotations"');
+    expect(html).toContain('aria-label="Outline, search, and annotations"');
+    expect(html).toContain('data-workspace-mode-count="3"');
   });
 
   it('discards disconnected mode focus memory before a panel is restored', () => {
@@ -254,10 +263,10 @@ describe('shared reference workspace', () => {
     );
 
     expect(html).toContain('aria-label="Workspace modes"');
-    expect(html).toContain('data-workspace-mode-count="3"');
-    expect(html).toContain('grid-template-columns:repeat(3, minmax(0, 1fr))');
+    expect(html).toContain('data-workspace-mode-count="4"');
+    expect(html).toContain('grid-template-columns:repeat(4, minmax(0, 1fr))');
     expect(html).not.toContain('aria-label="Close workspace"');
-    expect(html.match(/role="tab"/g)).toHaveLength(5);
+    expect(html.match(/role="tab"/g)).toHaveLength(6);
     expect(html.match(/aria-selected="true"/g)).toHaveLength(2);
     expect(html.match(/tabindex="0"/g)).toHaveLength(2);
     expect(html).toMatch(/id="workspace-mode-references"[^>]*aria-controls="workspace-panel-references"/u);

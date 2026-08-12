@@ -289,6 +289,7 @@ describe('retained workspace memory', () => {
       modes: {
         outline: { logicalScrollToken: 'outline:section-3', logicalFocusToken: 'outline:row-3' },
         references: { logicalScrollToken: null, logicalFocusToken: null },
+        search: { logicalScrollToken: null, logicalFocusToken: null },
         annotations: { logicalScrollToken: 'annotation:item-7', logicalFocusToken: 'annotation:edit-7' },
       },
     });
@@ -308,6 +309,28 @@ describe('retained workspace memory', () => {
 });
 
 describe('main viewer history', () => {
+  it('can retain distinct semantic occurrences that resolve to the same viewer location', () => {
+    const current = location(0);
+    let state = reduceReferenceNavigation(createReferenceNavigationState(4), {
+      type: 'refresh-main-location',
+      location: current,
+    });
+    state = reduceReferenceNavigation(state, {
+      type: 'request-main-jump',
+      token: 1,
+      currentLocation: current,
+      destination: current,
+      force: true,
+    });
+    state = reduceReferenceNavigation(state, {
+      type: 'complete-main-jump', token: 1, documentGeneration: 4, success: true,
+      settledLocation: current,
+    });
+
+    expect(state.mainHistory.entries).toHaveLength(2);
+    expect(state.mainHistory.index).toBe(1);
+  });
+
   it('initializes and refreshes the live current entry without pushing', () => {
     const initial = createReferenceNavigationState(4);
     const initialized = reduceReferenceNavigation(initial, {

@@ -15,6 +15,7 @@ let pdf = "";
 let multiPagePdf = "";
 let rotatedPdf = "";
 let referencePdf = "";
+let searchPdf = "";
 let initialSessionId = "";
 
 async function installSelectionCaptureGate(page: Page): Promise<void> {
@@ -238,10 +239,12 @@ test.beforeAll(async () => {
   multiPagePdf = join(root, "multi-page.pdf");
   rotatedPdf = join(root, "rotated.pdf");
   referencePdf = join(root, "reference-navigation.pdf");
+  searchPdf = join(root, "pdf-search.pdf");
   await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
   await copyFile(resolve("test/fixtures/pdfs/mixed-text-image.pdf"), multiPagePdf);
   await copyFile(resolve("test/fixtures/pdfs/rotation-90-crop.pdf"), rotatedPdf);
   await copyFile(resolve("test/fixtures/pdfs/reference-navigation.pdf"), referencePdf);
+  await copyFile(resolve("test/fixtures/pdfs/pdf-search.pdf"), searchPdf);
   await copyFile(resolve("test/fixtures/latex/paper.tex"), join(sourceRoot, "paper.tex"));
   host = await ProofreaderHost.start({
     recoveryRoot: join(root, "recovery"),
@@ -256,6 +259,223 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await host?.close();
   if (root) await rm(root, { recursive: true, force: true });
+});
+
+test("searches extracted PDF text with variants, history, references, and retained responsive state", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const errors = collectBrowserErrors(page);
+  await openFreshProductionFixture(page, searchPdf, "PDF search launch failed");
+  const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
+  const firstPage = mainWorkspace.locator("[data-page-index='0']");
+  await expect(firstPage).toBeVisible();
+  await firstPage.focus();
+
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+f" : "Control+f");
+  const query = page.getByRole("searchbox", { name: "Search this PDF" });
+  await expect(page.getByRole("tab", { name: "Search", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.getByRole("button", { name: "Close right workspace" })).toBeVisible();
+  await expect(query).toBeFocused();
+  await expect.poll(() => query.evaluate((element) => getComputedStyle(element).backgroundColor))
+    .toBe("rgb(229, 230, 225)");
+  await firstPage.focus();
+  await expect.poll(() => query.evaluate((element) => getComputedStyle(element).backgroundColor))
+    .toBe("rgb(255, 254, 250)");
+  await query.focus();
+  await query.fill("stable");
+
+  const searchPanel = page.locator("#workspace-panel-search");
+  await expect(searchPanel).toBeVisible();
+  await expect(searchPanel.locator(".pdf-search")).toHaveAttribute("data-pdf-search-state", "partial");
+  await expect(searchPanel).toContainText("2 of 3 pages searchable");
+  await expect(searchPanel).not.toContainText("Searched 2 of 3 pages with reliable text.");
+  await expect(searchPanel).not.toContainText("Try a symbol name or LaTeX command");
+  await expect(searchPanel).not.toContainText("Symbols in this PDF");
+  await expect(searchPanel.locator(".pdf-search__search-icon")).toBeVisible();
+  const clearSearch = searchPanel.getByRole("button", { name: "Clear search" });
+  await expect(clearSearch).toBeVisible();
+  await clearSearch.click();
+  await expect(query).toHaveValue("");
+  await query.fill("stable");
+  const exact = searchPanel.locator(".pdf-search__group").filter({ hasText: "Exact matches" });
+  const related = searchPanel.locator(".pdf-search__group").filter({ hasText: "Related matches" });
+  await expect(exact.locator("[data-search-result]")).toHaveCount(2);
+  await expect(related.locator("[data-search-result]")).toHaveCount(2);
+  await expect(searchPanel).not.toContainText("First occurrence");
+  await expect(searchPanel).not.toContainText("Exact text");
+  await expect(exact.locator(".pdf-search__result-match").first()).toHaveText("stable");
+  const firstResultExcerpt = exact.locator(".pdf-search__excerpt").first();
+  const [pageNumberBox, separatorBox, snippetBox] = await Promise.all([
+    firstResultExcerpt.locator(".pdf-search__result-page").boundingBox(),
+    firstResultExcerpt.locator(".pdf-search__result-separator").boundingBox(),
+    firstResultExcerpt.locator(".pdf-search__result-context").boundingBox(),
+  ]);
+  if (!pageNumberBox || !separatorBox || !snippetBox) {
+    throw new Error("Search result excerpt did not render all inline parts.");
+  }
+  const pageToSeparatorGap = separatorBox.x - (pageNumberBox.x + pageNumberBox.width);
+  const separatorToSnippetGap = snippetBox.x - (separatorBox.x + separatorBox.width);
+  expect(Math.abs(pageToSeparatorGap - separatorToSnippetGap)).toBeLessThanOrEqual(1);
+  expect(Math.abs(pageNumberBox.y - snippetBox.y)).toBeLessThanOrEqual(3);
+  await expect(related).toContainText("stabilizes");
+  await expect(related).toContainText("Stability");
+
+  await query.fill("");
+  await query.focus();
+  const symbolSuggestions = page.getByRole("listbox", { name: "Suggested symbols" });
+  await expect(symbolSuggestions).toBeVisible();
+  await expect(symbolSuggestions.getByRole("option", { name: /degree/u })).toBeVisible();
+  await query.fill("deg");
+  const degreeSuggestion = symbolSuggestions.getByRole("option", { name: /degree/u });
+  await expect(degreeSuggestion).toBeVisible();
+  await degreeSuggestion.click();
+  await expect(query).toHaveValue("°");
+  await expect(symbolSuggestions).toBeHidden();
+  await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
+  await expect(searchPanel).not.toContainText("Exact symbol");
+  await query.focus();
+  await query.fill("lambda");
+  await expect(symbolSuggestions.getByRole("option")).toHaveCount(0);
+
+  await query.fill("degree");
+  await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
+  await query.fill("\\degree");
+  await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
+  await query.fill("90°");
+  await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
+  await expect(searchPanel).not.toContainText("Exact formula");
+  await query.fill("90°+");
+  await expect(searchPanel.locator("[data-search-result]")).toHaveCount(0);
+  await expect(searchPanel).toContainText("could not be matched confidently");
+  await expect(searchPanel.locator(".pdf-search__alternatives")
+    .getByRole("button", { name: "° degree (\\degree)", exact: true })).toBeVisible();
+  await query.fill("stable");
+  await expect(exact.locator("[data-search-result]")).toHaveCount(2);
+
+  await exact.locator(".pdf-search__result").nth(1).click();
+  await expect(page.getByLabel("Current page")).toHaveText("2 / 3");
+  const activeSearchHighlights = mainWorkspace.locator(
+    "[data-page-index='1'] [data-pdf-search-highlight]",
+  );
+  await expect(activeSearchHighlights).toHaveCount(2);
+  const exactVisibleHighlight = mainWorkspace.locator(
+    "[data-page-index='1'] [data-pdf-search-highlight][data-pdf-search-match-kind='exact']",
+  );
+  const relatedVisibleHighlight = mainWorkspace.locator(
+    "[data-page-index='1'] [data-pdf-search-highlight][data-pdf-search-match-kind='related']",
+  );
+  await expect(exactVisibleHighlight).toHaveCount(1);
+  await expect(relatedVisibleHighlight).toHaveCount(1);
+  const [exactHighlightColor, relatedHighlightColor] = await Promise.all([
+    exactVisibleHighlight.evaluate((element) => getComputedStyle(element).backgroundColor),
+    relatedVisibleHighlight.evaluate((element) => getComputedStyle(element).backgroundColor),
+  ]);
+  expect(exactHighlightColor).not.toBe("transparent");
+  expect(relatedHighlightColor).not.toBe("transparent");
+  expect(exactHighlightColor).not.toBe(relatedHighlightColor);
+  await expect(activeSearchHighlights.first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back in document history" })).toBeEnabled();
+  const mainViewport = mainWorkspace.locator("[data-viewer-framing-viewport]");
+  const mainPositionBeforeReference = await mainViewport.evaluate((element) => ({
+    left: element.scrollLeft,
+    top: element.scrollTop,
+  }));
+
+  await exact.locator("[data-search-result]").first()
+    .getByRole("button", { name: "Open result on page 1 in References" }).click();
+  await expect(page.getByRole("tab", { name: /stable, Page 1/u })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  const referenceWorkspace = page.locator(".pdf-workspace--reference");
+  await expect(referenceWorkspace.locator(
+    "[data-page-index='0'] [data-pdf-search-highlight][data-pdf-search-match-kind='exact']",
+  )).toHaveCount(1);
+  await expect(referenceWorkspace.locator(
+    "[data-page-index='0'] [data-pdf-search-highlight][data-pdf-search-match-kind='related']",
+  )).toHaveCount(1);
+  await expect.poll(() => mainViewport.evaluate((element) => ({
+    left: element.scrollLeft,
+    top: element.scrollTop,
+  }))).toEqual(mainPositionBeforeReference);
+  await expect(query).toHaveValue("stable");
+
+  const sendMotion = await mainViewport.evaluateHandle((element) => {
+    type SendMotionState = {
+      samples: Array<{ left: number; top: number }>;
+      done: boolean;
+      timedOut: boolean;
+      fallbackTimer: number;
+    };
+    const state: SendMotionState = {
+      samples: [{ left: element.scrollLeft, top: element.scrollTop }],
+      done: false,
+      timedOut: false,
+      fallbackTimer: 0,
+    };
+    const finish = () => {
+      if (state.done) return;
+      state.done = true;
+      element.removeEventListener("scroll", record);
+      window.clearTimeout(state.fallbackTimer);
+    };
+    const record = () => {
+      state.samples.push({ left: element.scrollLeft, top: element.scrollTop });
+    };
+    element.addEventListener("scroll", record, { passive: true });
+    state.fallbackTimer = window.setTimeout(() => {
+      state.timedOut = true;
+      finish();
+    }, 2_000);
+    return { state, finish };
+  });
+  await page.getByRole("button", { name: "Send to main" }).click();
+  await expect(page.getByRole("tab", { name: /stable, Page 1/u })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Open References tray" })).toBeVisible();
+  await expect(page.getByLabel("Current page")).toHaveText("1 / 3");
+  await expect(page.locator("[data-reference-pdf-viewport]")).toHaveCount(0);
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => window.setTimeout(resolve, 250)));
+  }));
+  await sendMotion.evaluate(({ finish }) => finish());
+  await expect.poll(() => sendMotion.evaluate(({ state }) => state.done)).toBe(true);
+  expect(await sendMotion.evaluate(({ state }) => state.timedOut)).toBe(false);
+  const sendMotionSamples = await sendMotion.evaluate(({ state }) => state.samples);
+  await sendMotion.dispose();
+  const rebounds = (axis: "left" | "top") => {
+    let minimum = sendMotionSamples[0]?.[axis] ?? 0;
+    return sendMotionSamples.slice(1).some((sample) => {
+      minimum = Math.min(minimum, sample[axis]);
+      return sample[axis] - minimum > 8;
+    });
+  };
+  expect(rebounds("left")).toBe(false);
+  expect(rebounds("top")).toBe(false);
+
+  const workspaceTabs = page.getByRole("tablist", { name: "Workspace modes" }).getByRole("tab");
+  await expect(workspaceTabs).toHaveText(["Search", "Annotations"]);
+  await page.getByRole("tab", { name: "Search", exact: true }).click();
+  await expect(query).toHaveValue("stable");
+
+  await page.setViewportSize({ width: 700, height: 900 });
+  await expect(page.locator("[data-review-stage]")).toHaveAttribute(
+    "data-workspace-presentation",
+    "bottom",
+  );
+  await expect(page.getByRole("tablist", { name: "Workspace modes" }).getByRole("tab"))
+    .toHaveText(["Search", "Annotations", "References"]);
+  await page.getByRole("tab", { name: "Search", exact: true }).click();
+  await expect(query).toBeVisible();
+  await expect(query).toHaveValue("stable");
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.locator("[data-review-stage]")).toHaveAttribute(
+    "data-workspace-presentation",
+    "right",
+  );
+  await expect(query).toHaveValue("stable");
+  expect(errors).toEqual([]);
 });
 
 test("keeps a real reference chain beside the anchored main PDF through reflow and history", async ({ page }) => {
@@ -546,7 +766,12 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     "aria-expanded", "true",
   );
   const workspaceModes = page.getByRole("tablist", { name: "Workspace modes" });
-  await expect(workspaceModes.getByRole("tab")).toHaveText(["Outline", "Annotations", "References"]);
+  await expect(workspaceModes.getByRole("tab")).toHaveText([
+    "Outline",
+    "Search",
+    "Annotations",
+    "References",
+  ]);
   await expect(workspaceModes.getByRole("tab", { name: "References", exact: true })).toHaveAttribute(
     "aria-selected",
     "true",

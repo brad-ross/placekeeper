@@ -79,7 +79,7 @@ function navigation(initial = location(0)) {
   };
 }
 
-function harness() {
+function harness(options: { readonly sharedReferenceSurface?: boolean } = {}) {
   let state: ReferenceNavigationState = createReferenceNavigationState(1);
   let referencesOpen = false;
   let pending: Parameters<NavigationCoordinatorDependencies['setPendingReference']>[0] = null;
@@ -100,9 +100,15 @@ function harness() {
     getReferenceNavigation: () => reference.controls,
     waitForReferenceNavigation: async () => reference.controls,
     getReferenceController: () => controller,
+    commitMainFramingPosition: vi.fn(),
     layout: {
       revealReferences: vi.fn(() => { referencesOpen = true; }),
       hideReferences: vi.fn(() => { referencesOpen = false; }),
+      hideReferencesAfterSend: vi.fn(() => {
+        if (!options.sharedReferenceSurface || state.workspace.lastMode === 'references') {
+          referencesOpen = false;
+        }
+      }),
       settle: vi.fn(async () => undefined),
       focusReferenceRail: vi.fn(() => true),
       referenceRailFocusToken: vi.fn(() => 'rail:bottom-references'),
@@ -122,6 +128,7 @@ function harness() {
     controller,
     state: () => state,
     referencesOpen: () => referencesOpen,
+    reopenReferences: () => { referencesOpen = true; },
     pending: () => pending,
     announcement: () => announcement,
   };
@@ -466,6 +473,38 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.reference.controls.applyTarget).toHaveBeenCalledTimes(2);
   });
 
+  it('restores the selected Main search result once while opening a reference', async () => {
+    const run = harness();
+    const selectedMainTarget = target(5);
+
+    expect(await run.coordinator.openReference(
+      target(2),
+      { label: 'Search result', pageContext: 'Page 3' },
+      selectedMainTarget,
+    )).toBe(true);
+
+    expect(run.main.controls.applyTarget).toHaveBeenCalledOnce();
+    expect(run.main.controls.applyTarget).toHaveBeenCalledWith(selectedMainTarget);
+    expect(vi.mocked(run.controller.open).mock.invocationCallOrder.at(-1))
+      .toBeLessThan(vi.mocked(run.main.controls.applyTarget).mock.invocationCallOrder.at(-1)!);
+  });
+
+  it('restores the selected Main search result once when reference opening fails', async () => {
+    const run = harness();
+    const selectedMainTarget = target(5);
+    vi.mocked(run.controller.open).mockResolvedValueOnce(false);
+
+    expect(await run.coordinator.openReference(
+      target(2),
+      { label: 'Search result', pageContext: 'Page 3' },
+      selectedMainTarget,
+    )).toBe(false);
+
+    expect(run.main.controls.applyTarget).toHaveBeenCalledOnce();
+    expect(run.main.controls.applyTarget).toHaveBeenCalledWith(selectedMainTarget);
+    expect(run.pending()).toMatchObject({ status: 'error', label: 'Search result' });
+  });
+
   it('waits for dock layout settlement before restoring another reference tab', async () => {
     const run = harness();
     await run.coordinator.openReference(target(2), { label: 'A', pageContext: 'Page 3' });
@@ -564,17 +603,56 @@ describe('document-scoped navigation coordinator', () => {
 
     expect(await run.coordinator.sendToMain(target(2).identity)).toBe(true);
     expect(run.main.controls.applyLocation).toHaveBeenCalledWith(scrolled);
-    expect(run.main.controls.applyLocation).toHaveBeenCalledTimes(2);
+    expect(run.main.controls.applyLocation).toHaveBeenCalledOnce();
+    expect(run.dependencies.commitMainFramingPosition).toHaveBeenCalledOnce();
     expect(run.state().tabs).toEqual([]);
     expect(run.state().mainHistory.entries).toEqual([location(1, 45, 1.1), scrolled]);
     expect(run.referencesOpen()).toBe(false);
-    expect(run.dependencies.layout.hideReferences).toHaveBeenCalled();
-    expect(vi.mocked(run.dependencies.layout.settle).mock.invocationCallOrder.at(-1))
+    expect(run.dependencies.layout.hideReferences).toHaveBeenCalledOnce();
+    expect(run.dependencies.layout.hideReferencesAfterSend).toHaveBeenCalledOnce();
+    expect(vi.mocked(run.dependencies.commitMainFramingPosition).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(run.dependencies.layout.hideReferencesAfterSend).mock.invocationCallOrder[0]!);
+    expect(vi.mocked(run.dependencies.layout.settle).mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(run.main.controls.applyLocation).mock.invocationCallOrder.at(-1)!);
     expect(run.controller.close).toHaveBeenCalledOnce();
-    expect(vi.mocked(run.controller.close).mock.invocationCallOrder.at(-1))
-      .toBeLessThan(vi.mocked(run.main.controls.applyLocation).mock.invocationCallOrder.at(-1)!);
+    expect(vi.mocked(run.main.controls.applyLocation).mock.invocationCallOrder.at(-1))
+      .toBeLessThan(vi.mocked(run.controller.close).mock.invocationCallOrder.at(-1)!);
     expect(run.dependencies.layout.focusReferenceRail).not.toHaveBeenCalled();
+  });
+
+  it('consumes the sent tab when Main applies before its layout can be recaptured', async () => {
+    const run = harness();
+    await run.coordinator.openReference(target(2), { label: 'A', pageContext: 'Page 3' });
+    const destination = location(7, 180, 1.6);
+    const origin = location(1, 45, 1.1);
+    run.reference.set(destination);
+    run.main.set(origin);
+    vi.mocked(run.main.controls.captureLocation)
+      .mockReturnValueOnce(origin)
+      .mockReturnValueOnce(null);
+
+    expect(await run.coordinator.sendToMain(target(2).identity)).toBe(true);
+    expect(run.state().tabs).toEqual([]);
+    expect(run.state().mainHistory.entries).toEqual([origin, destination]);
+    expect(run.referencesOpen()).toBe(false);
+  });
+
+  it('preserves Search reopened while a final Send settles on the shared surface', async () => {
+    const run = harness({ sharedReferenceSurface: true });
+    await run.coordinator.openReference(target(2), { label: 'A', pageContext: 'Page 3' });
+    const applied = deferred<boolean>();
+    vi.mocked(run.main.controls.applyLocation).mockImplementationOnce(async () => applied.promise);
+
+    const sending = run.coordinator.sendToMain(target(2).identity);
+    expect(run.referencesOpen()).toBe(false);
+    run.dependencies.dispatch({ type: 'select-workspace-mode', mode: 'search' });
+    run.reopenReferences();
+    run.main.set(location(2));
+    applied.resolve(true);
+
+    expect(await sending).toBe(true);
+    expect(run.referencesOpen()).toBe(true);
+    expect(run.dependencies.layout.hideReferencesAfterSend).toHaveBeenCalledOnce();
   });
 
   it('restores the final Reference tray when Send cannot settle in the revealed main layout', async () => {
@@ -589,6 +667,7 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.dependencies.layout.hideReferences).toHaveBeenCalledOnce();
     expect(run.dependencies.layout.revealReferences).toHaveBeenCalled();
     expect(run.controller.close).not.toHaveBeenCalled();
+    expect(run.dependencies.commitMainFramingPosition).not.toHaveBeenCalled();
     expect(run.announcement()).toBe('Destination unavailable. The current location was preserved.');
   });
 
@@ -671,6 +750,18 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.state().mainHistory.entries).toEqual([]);
     expect(run.referencesOpen()).toBe(true);
     expect(run.main.controls.focusAtDestination).not.toHaveBeenCalled();
+  });
+
+  it('records distinct search occurrences even when viewer tolerances resolve them alike', async () => {
+    const run = harness();
+    const first = { ...target(0), identity: 'search:first' };
+    const second = { ...target(0), identity: 'search:second' };
+
+    expect(await run.coordinator.navigateMainTarget(first, 'search')).toBe(true);
+    expect(await run.coordinator.navigateMainTarget(second, 'search')).toBe(true);
+
+    expect(run.state().mainHistory.entries).toHaveLength(3);
+    expect(run.state().mainHistory.index).toBe(2);
   });
 
   it('invalidates clone, viewer, focus, status, and late callbacks on document replacement', async () => {

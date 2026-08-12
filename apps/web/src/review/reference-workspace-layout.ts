@@ -38,6 +38,7 @@ export type ReferenceWorkspaceLayoutAction =
   | { readonly type: 'toggle-right-workspace' }
   | { readonly type: 'show-references' }
   | { readonly type: 'hide-references' }
+  | { readonly type: 'hide-references-after-send'; readonly activeMode: WorkspaceMode }
   | { readonly type: 'toggle-references' }
   | { readonly type: 'toggle-narrow-workspace' }
   | { readonly type: 'move-references-right' }
@@ -181,7 +182,7 @@ export function reduceReferenceWorkspaceLayout(
     case 'hide-references':
       if (state.regime === 'narrow') {
         const showRememberedRight = state.referenceDock === 'bottom' && state.rightWorkspaceOpen;
-        return {
+        const nextState = {
           ...state,
           rightWorkspaceOpen: state.referenceDock === 'right'
             ? false
@@ -192,14 +193,29 @@ export function reduceReferenceWorkspaceLayout(
           narrowOpen: showRememberedRight,
           narrowSurface: showRememberedRight ? 'right' : state.narrowSurface,
         };
+        if (
+          nextState.rightWorkspaceOpen === state.rightWorkspaceOpen
+          && nextState.bottomReferencesOpen === state.bottomReferencesOpen
+          && nextState.narrowOpen === state.narrowOpen
+          && nextState.narrowSurface === state.narrowSurface
+        ) return state;
+        return nextState;
       }
       if (state.referenceDock === 'right') {
+        if (!state.rightWorkspaceOpen) return state;
         return { ...state, rightWorkspaceOpen: false };
       }
+      if (!state.bottomReferencesOpen) return state;
       return {
         ...state,
         bottomReferencesOpen: false,
       };
+    case 'hide-references-after-send':
+      if (
+        (state.regime === 'narrow' || state.referenceDock === 'right')
+        && action.activeMode !== 'references'
+      ) return state;
+      return reduceReferenceWorkspaceLayout(state, { type: 'hide-references' });
     case 'toggle-references':
       if (state.regime === 'narrow') {
         return state.narrowOpen && state.narrowSurface === 'references'
