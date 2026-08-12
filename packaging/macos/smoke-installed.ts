@@ -1,9 +1,10 @@
 import { execFile, spawn } from "node:child_process";
-import { copyFile, lstat, mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { copyFile, cp, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { validateBackendRuntimeManifest } from "./validate-manifest.js";
+import { BUILD_IDENTITY_FILENAME, computePackagedBuildIdentity } from "./build-app.js";
 
 const execFileAsync = promisify(execFile);
 const MAX_HOOK_OUTPUT_BYTES = 128 * 1024;
@@ -81,6 +82,45 @@ function parseObject(serialized: string, label: string): Record<string, unknown>
     throw new Error(`${label} must be a JSON object`);
   }
   return parsed as Record<string, unknown>;
+}
+
+async function distinctCandidate(appPath: string, root: string): Promise<string> {
+  const candidate = join(root, "candidate/PDF Proofreader.app");
+  await mkdir(dirname(candidate), { recursive: true });
+  await cp(resolve(appPath), candidate, { recursive: true });
+  const contents = join(candidate, "Contents");
+  const resources = join(contents, "Resources");
+  await writeFile(join(resources, "web/upgrade-smoke.txt"), "distinct packaged candidate\n");
+  const identity = await computePackagedBuildIdentity({
+    contentsRoot: contents,
+    serviceRoot: join(resources, "service"),
+    webRoot: join(resources, "web"),
+  });
+  await writeFile(join(resources, BUILD_IDENTITY_FILENAME), `${JSON.stringify(identity)}\n`);
+  return candidate;
+}
+
+async function coordinateInstalled(
+  executable: string,
+  candidate: string,
+  installed: string,
+  environment: NodeJS.ProcessEnv,
+  repoRoot: string,
+): Promise<{ readonly code: number; readonly response: Record<string, unknown> }> {
+  return new Promise((resolvePromise, reject) => {
+    const child = execFile(executable, [
+      "daemon", "coordinate-install",
+      "--candidate-app", candidate,
+      "--installed-app", installed,
+      "--obsolete-action", join(dirname(dirname(installed)), "Library/Services/PDF Proofreader.workflow"),
+      "--replace-helper", resolve(repoRoot, "packaging/macos/install-built-app.sh"),
+    ], { encoding: "utf8", env: environment, timeout: 30_000, maxBuffer: MAX_HOOK_OUTPUT_BYTES }, (error, stdout) => {
+      const code = (error as NodeJS.ErrnoException & { code?: number } | null)?.code;
+      if (error !== null && typeof code !== "number") reject(error);
+      else resolvePromise({ code: typeof code === "number" ? code : 0, response: parseObject(stdout, "upgrade coordination") });
+    });
+    child.stdin?.end();
+  });
 }
 
 type HookEvent = "PostToolUse" | "UserPromptSubmit" | "SessionEnd";
@@ -162,7 +202,7 @@ function parseAdditionalContext(serialized: string, expectedEvent: string): Reco
 
 /** Exercise the copied plugin contract through the installed app executable,
  * with an isolated home and a real daemon so no user review state is touched. */
-export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: string): Promise<void> {
+export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: string, repoRoot = process.cwd()): Promise<void> {
   // Darwin limits AF_UNIX paths to roughly 104 bytes. The system TMPDIR is
   // already long enough that the app-support suffix can cross that limit.
   const smokeHome = await mkdtemp(join("/tmp", "pp-hook-smoke-"));
@@ -172,7 +212,9 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
   await mkdir(dirname(installedApp), { recursive: true });
   await symlink(resolve(appPath), installedApp);
   const pdfPath = join(smokeHome, "fixture.pdf");
+  const secondPdfPath = join(smokeHome, "second-fixture.pdf");
   await copyFile(resolve(fixturePath), pdfPath);
+  await copyFile(resolve(fixturePath), secondPdfPath);
   const environment = {
     ...process.env,
     HOME: smokeHome,
@@ -207,6 +249,11 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
       throw new Error("Installed Codex launch did not return a bindable review");
     }
 
+    const exact = await coordinateInstalled(executable, resolve(appPath), installedApp, environment, repoRoot);
+    if (exact.code !== 0 || exact.response.status !== "noop") {
+      throw new Error("An exact installed bundle did not reuse its running daemon");
+    }
+
     const claimOutput = await executeInstalled(
       executable,
       ["hook", "--event"],
@@ -228,6 +275,25 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
       body: JSON.stringify({ capability }),
     });
     if (!exchange.ok) throw new Error("Installed browser capability exchange failed");
+    const firstSession = parseObject(await exchange.text(), "first browser exchange");
+
+    const secondLaunch = parseObject(await executeInstalled(
+      executable,
+      ["open", "--json", "--surface", "finder", "--pdf", secondPdfPath],
+      environment,
+    ), "second installed launch");
+    if (secondLaunch.ok !== true || typeof secondLaunch.url !== "string") {
+      throw new Error("Installed multi-PDF launch failed");
+    }
+    const secondUrl = new URL(secondLaunch.url);
+    const secondCapability = new URLSearchParams(secondUrl.hash.slice(1)).get("cap");
+    const secondExchange = await fetch(`${secondUrl.origin}${secondUrl.pathname.replace(/\/bootstrap$/u, "/exchange")}`, {
+      method: "POST",
+      headers: { origin: secondUrl.origin, "content-type": "application/json", "sec-fetch-site": "same-origin" },
+      body: JSON.stringify({ capability: secondCapability }),
+    });
+    if (!secondExchange.ok) throw new Error("Second installed browser capability exchange failed");
+    const secondSession = parseObject(await secondExchange.text(), "second browser exchange");
 
     const current = parseAdditionalContext(await executeInstalled(
       executable,
@@ -238,6 +304,45 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     ), "UserPromptSubmit");
     if (current.currentness !== "current") {
       throw new Error("Installed UserPromptSubmit hook did not receive current PDF context");
+    }
+
+    const candidate = await distinctCandidate(appPath, smokeHome);
+    const deferred = await coordinateInstalled(
+      join(candidate, "Contents/MacOS/pdf-proofreader"),
+      candidate,
+      installedApp,
+      environment,
+      repoRoot,
+    );
+    if (deferred.code === 0 || (deferred.response.error as { kind?: unknown } | undefined)?.kind !== "upgrade-required") {
+      throw new Error(`An active installed multi-PDF review did not defer replacement: ${JSON.stringify(deferred)}`);
+    }
+    const oldIdentity = parseObject(
+      await readFile(join(resolve(appPath), `Contents/Resources/${BUILD_IDENTITY_FILENAME}`), "utf8"),
+      "old installed identity",
+    );
+    const stillInstalled = parseObject(
+      await readFile(join(installedApp, `Contents/Resources/${BUILD_IDENTITY_FILENAME}`), "utf8"),
+      "preserved installed identity",
+    );
+    if (stillInstalled.installArtifactIdentity !== oldIdentity.installArtifactIdentity) {
+      throw new Error("Deferred upgrade changed the installed app");
+    }
+    for (const [url, session] of [[launchUrl, firstSession], [secondUrl, secondSession]] as const) {
+      const state = await fetch(`${url.origin}${url.pathname.replace(/\/bootstrap$/u, "/state")}`, {
+        headers: { authorization: `Bearer ${String(session.credential)}` },
+      });
+      if (!state.ok) throw new Error("Deferred upgrade interrupted an existing PDF review");
+    }
+    const afterDeferral = parseAdditionalContext(await executeInstalled(
+      executable,
+      ["hook", "--event"],
+      environment,
+      hookInput("UserPromptSubmit"),
+      hookTimeouts.UserPromptSubmit,
+    ), "UserPromptSubmit");
+    if (afterDeferral.currentness !== "current") {
+      throw new Error("Deferred upgrade interrupted installed Codex context");
     }
 
     await executeInstalled(
@@ -257,6 +362,29 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     if (revoked.currentness !== "unavailable") {
       throw new Error("Installed SessionEnd hook did not revoke task context");
     }
+
+    // Capability exchange records browser activity with a bounded close grace.
+    // With no live WebSocket in this headless smoke, lease expiry represents
+    // closed pages; SessionEnd above separately releases the task blocker.
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 5_100));
+    const upgraded = await coordinateInstalled(
+      join(candidate, "Contents/MacOS/pdf-proofreader"),
+      candidate,
+      installedApp,
+      environment,
+      repoRoot,
+    );
+    if (upgraded.code !== 0 || upgraded.response.status !== "installed") {
+      throw new Error("Closed reviews did not converge to a successful installed upgrade");
+    }
+    const postUpgrade = parseObject(await executeInstalled(
+      executable,
+      ["open", "--json", "--surface", "finder", "--pdf", pdfPath],
+      environment,
+    ), "post-upgrade launch");
+    if (postUpgrade.ok !== true || typeof postUpgrade.url !== "string") {
+      throw new Error("The ready candidate could not launch a PDF after upgrade");
+    }
   } finally {
     if (daemon.pid !== undefined) {
       try { process.kill(-daemon.pid, "SIGTERM"); } catch { /* already stopped */ }
@@ -265,6 +393,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
       new Promise<void>((resolveExit) => daemon.once("exit", () => resolveExit())),
       new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 1_000)),
     ]);
+    await executeInstalled(executable, ["daemon", "stop-legacy"], environment, undefined, 2_000).catch(() => undefined);
     await rm(smokeHome, { recursive: true, force: true });
   }
 }
@@ -289,7 +418,7 @@ export async function smokeInstalledBundle(appPath: string, fixturePath: string,
     },
   });
   const evidence = validateDoctorEvidence(JSON.parse(result.stdout) as unknown, manifest.nodeVersion, pdfium.sha256);
-  await smokeInstalledHookLifecycle(appPath, fixturePath);
+  await smokeInstalledHookLifecycle(appPath, fixturePath, repoRoot);
   return evidence;
 }
 

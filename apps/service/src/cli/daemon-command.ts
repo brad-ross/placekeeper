@@ -14,7 +14,10 @@ import {
 import {
   DAEMON_IDENTITY_ENV,
   defaultDaemonPaths,
+  ensureServiceDaemonReady,
   INSTALL_ARTIFACT_IDENTITY_ENV,
+  LIFECYCLE_LOCK_PATH_ENV,
+  LIFECYCLE_LOCK_TOKEN_ENV,
 } from "../host/service-daemon.js";
 import { acquireLifecycleLock } from "../host/lifecycle-lock.js";
 import { LifecycleLockTimeoutError } from "../host/lifecycle-lock.js";
@@ -125,9 +128,20 @@ async function coordinateInstall(args: readonly string[]): Promise<"noop" | "ins
       },
       waitForRetirement: () => waitForSocketRetirement(paths.socketPath),
       replaceAndReady: async () => {
-        await execFileAsync("/bin/sh", [replaceHelper, candidateApp, installedApp, obsoleteAction], {
+        await execFileAsync("/bin/sh", [
+          replaceHelper,
+          candidateApp,
+          installedApp,
+          obsoleteAction,
+          join(installedApp, "Contents/MacOS/pdf-proofreader"),
+        ], {
           timeout: 30_000,
           maxBuffer: 65_536,
+          env: {
+            ...process.env,
+            [LIFECYCLE_LOCK_TOKEN_ENV]: lifecycleLock.token,
+            [LIFECYCLE_LOCK_PATH_ENV]: paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
+          },
         });
       },
     });
@@ -189,6 +203,11 @@ export async function runDaemonCommand(
   args: readonly string[],
   write: (text: string) => void = (text) => process.stdout.write(text),
 ): Promise<number> {
+  if (args[0] === "ensure-ready") {
+    await ensureServiceDaemonReady();
+    write(`${JSON.stringify({ ok: true, status: "ready" })}\n`);
+    return 0;
+  }
   if (args[0] === "stop-legacy") {
     await stopLegacyDaemon();
     write(`${JSON.stringify({ ok: true, status: "stopped" })}\n`);

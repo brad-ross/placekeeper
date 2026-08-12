@@ -135,6 +135,55 @@ export async function launchThroughDaemon(
   }
 }
 
+/** Starts the exact packaged daemon while an installer holds the lifecycle
+ * lock, then proves its management endpoint is accepting before commit. */
+export async function ensureServiceDaemonReady(
+  paths = defaultDaemonPaths(),
+  lifecycleToken = process.env[LIFECYCLE_LOCK_TOKEN_ENV],
+): Promise<void> {
+  if (lifecycleToken === undefined) {
+    throw new Error("Candidate readiness requires the inherited lifecycle lock");
+  }
+  const entry = process.argv[1];
+  if (entry === undefined) throw new Error("The proofreader launcher entry point is unavailable");
+  const child = spawn(process.execPath, [entry, "daemon"], {
+    detached: true,
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      PDF_PROOFREADER_WEB_ASSETS: paths.webAssetsRoot,
+      [LIFECYCLE_LOCK_TOKEN_ENV]: lifecycleToken,
+      [LIFECYCLE_LOCK_PATH_ENV]: paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
+    },
+  });
+  child.unref();
+  let spawnError: Error | undefined;
+  child.once("error", (error) => { spawnError = error; });
+  const deadline = Date.now() + 5_000;
+  try {
+    while (true) {
+      if (spawnError !== undefined) throw spawnError;
+      if (child.exitCode !== null) throw new Error(`Candidate daemon exited ${child.exitCode}`);
+      try {
+        const compatibility = await inspectDaemonCompatibility(paths.socketPath, currentDaemonIdentity());
+        if (compatibility.kind === "exact" && compatibility.status.lifecycle === "accepting") return;
+        if (compatibility.kind !== "exact") {
+          throw new Error("Candidate daemon did not expose its exact build identity");
+        }
+      } catch (error) {
+        if (!daemonUnavailable(error)) throw error;
+      }
+      if (Date.now() >= deadline) throw new Error("Candidate daemon did not become ready");
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+    }
+  } catch (error) {
+    if (child.pid !== undefined) {
+      try { process.kill(-child.pid, "SIGTERM"); } catch { /* already stopped */ }
+    }
+    throw error;
+  }
+}
+
 async function launchWhileLocked(
   request: LaunchRequest,
   paths: DaemonPaths,

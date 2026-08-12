@@ -89,12 +89,38 @@ describe("macOS distribution manifests", () => {
     }
   });
 
+  it("keeps the previous app available until candidate daemon readiness succeeds", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "pdf-proofreader-readiness-test-"));
+    const built = resolve(root, "built/PDF Proofreader.app");
+    const app = resolve(root, "home/Applications/PDF Proofreader.app");
+    const action = resolve(root, "home/Library/Services/PDF Proofreader.workflow");
+    const helper = resolve("packaging/macos/install-built-app.sh");
+    const readiness = resolve(app, "Contents/MacOS/pdf-proofreader");
+    try {
+      await mkdir(resolve(built, "Contents/MacOS"), { recursive: true });
+      await writeFile(resolve(built, "Contents/MacOS/pdf-proofreader"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+      await writeFile(resolve(built, "Contents/MacOS/droplet"), "candidate bridge", { mode: 0o755 });
+      await writeFile(resolve(built, "candidate-marker"), "candidate");
+      await mkdir(app, { recursive: true });
+      await writeFile(resolve(app, "previous-marker"), "previous");
+
+      await expect(execFileAsync("/bin/sh", [helper, built, app, action, readiness])).rejects.toThrow();
+
+      expect(await readFile(resolve(app, "previous-marker"), "utf8")).toBe("previous");
+      await expect(readFile(resolve(app, "candidate-marker"), "utf8")).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("coordinates the daemon before the transactional replacement helper", async () => {
     const installer = await readFile(resolve("install.sh"), "utf8");
     expect(installer).toContain("daemon coordinate-install");
     expect(installer.indexOf("smoke:installed")).toBeLessThan(installer.indexOf("daemon coordinate-install"));
     expect(installer.indexOf("daemon coordinate-install")).toBeLessThan(installer.indexOf("install-built-app.sh"));
     expect(installer).not.toMatch(/(?:kill|pkill|killall).*daemon/u);
+    const helper = await readFile(resolve("packaging/macos/install-built-app.sh"), "utf8");
+    expect(helper.indexOf('"$readiness_executable" daemon ensure-ready')).toBeLessThan(helper.lastIndexOf("committed=1"));
   });
 
   it("uses current notarytool submission followed by staple and validation", () => {

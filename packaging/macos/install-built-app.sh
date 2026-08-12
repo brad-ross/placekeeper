@@ -3,14 +3,15 @@ set -eu
 PATH=/usr/bin:/bin
 export PATH
 
-if [ "$#" -ne 3 ]; then
-  printf 'Usage: %s <built-app> <app-destination> <obsolete-quick-action>\n' "$0" >&2
+if [ "$#" -ne 3 ] && [ "$#" -ne 4 ]; then
+  printf 'Usage: %s <built-app> <app-destination> <obsolete-quick-action> [readiness-executable]\n' "$0" >&2
   exit 2
 fi
 
 built_app=$1
 app_path=$2
 obsolete_action=$3
+readiness_executable=${4:-}
 
 if [ ! -x "$built_app/Contents/MacOS/pdf-proofreader" ] || [ ! -x "$built_app/Contents/MacOS/droplet" ]; then
   printf '%s\n' "The built app is incomplete; live destinations were not changed." >&2
@@ -69,6 +70,17 @@ app_touched=1
 if [ -e "$obsolete_action" ]; then
   action_removed=1
   /bin/mv "$obsolete_action" "$transaction_dir/previous.workflow"
+fi
+
+# Keep the previous bundle inside the transaction until the newly installed
+# launcher has started and handshaken with its exact daemon build. A readiness
+# failure therefore follows the same rollback path as any other partial install.
+if [ -n "$readiness_executable" ]; then
+  case "$readiness_executable" in
+    "$app_path"/Contents/MacOS/pdf-proofreader) ;;
+    *) printf 'Refusing unexpected readiness executable: %s\n' "$readiness_executable" >&2; exit 1 ;;
+  esac
+  "$readiness_executable" daemon ensure-ready
 fi
 
 committed=1
