@@ -184,6 +184,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const searchRequestedRef = useRef(false);
   const [searchState, setSearchState] = useState(() => initialPdfSearchState());
   const [searchNavigationIntentToken, setSearchNavigationIntentToken] = useState(0);
+  const commitMainFramingPositionRef = useRef<() => void>(() => undefined);
   const viewerControlsRef = useRef<ViewerControls | undefined>(undefined);
   const [viewerFraming, setViewerFraming] = useState<ViewerFramingControls>();
   const productionRootRef = useRef<HTMLElement | null>(null);
@@ -312,6 +313,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         });
       },
       getReferenceController: () => referenceControllerRef.current,
+      commitMainFramingPosition: () => commitMainFramingPositionRef.current(),
       layout: {
         revealReferences: () => {
           const layout = referenceLayoutStateRef.current;
@@ -727,6 +729,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const anyTrayOpen = effectiveReferenceLayout.kind === 'narrow-unified'
     ? effectiveReferenceLayout.open
     : effectiveReferenceLayout.rightWorkspaceOpen || effectiveReferenceLayout.bottomReferencesOpen;
+  const onCommitMainFramingPositionChange = useCallback((commit: (() => void) | null) => {
+    commitMainFramingPositionRef.current = commit ?? (() => undefined);
+  }, []);
 
   return (
     <main data-production-review ref={productionRootRef}>
@@ -746,6 +751,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         rightWorkspaceMode={rightWorkspaceMode}
         search={searchWorkspace}
         viewerNavigationIntentToken={searchNavigationIntentToken}
+        onCommitMainFramingPositionChange={onCommitMainFramingPositionChange}
         onReferenceLayoutAction={dispatchLayout}
         navigationState={navigationState}
         referenceTabs={navigationState.tabs.map((tab) => ({

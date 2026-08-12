@@ -402,10 +402,57 @@ test("searches extracted PDF text with variants, history, references, and retain
   }))).toEqual(mainPositionBeforeReference);
   await expect(query).toHaveValue("stable");
 
+  const sendMotion = await mainViewport.evaluateHandle((element) => {
+    type SendMotionState = {
+      samples: Array<{ left: number; top: number }>;
+      done: boolean;
+      timedOut: boolean;
+      fallbackTimer: number;
+    };
+    const state: SendMotionState = {
+      samples: [{ left: element.scrollLeft, top: element.scrollTop }],
+      done: false,
+      timedOut: false,
+      fallbackTimer: 0,
+    };
+    const finish = () => {
+      if (state.done) return;
+      state.done = true;
+      element.removeEventListener("scroll", record);
+      window.clearTimeout(state.fallbackTimer);
+    };
+    const record = () => {
+      state.samples.push({ left: element.scrollLeft, top: element.scrollTop });
+    };
+    element.addEventListener("scroll", record, { passive: true });
+    state.fallbackTimer = window.setTimeout(() => {
+      state.timedOut = true;
+      finish();
+    }, 2_000);
+    return { state, finish };
+  });
   await page.getByRole("button", { name: "Send to main" }).click();
   await expect(page.getByRole("tab", { name: /stable, Page 1/u })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Open References tray" })).toBeVisible();
   await expect(page.getByLabel("Current page")).toHaveText("1 / 3");
+  await expect(page.locator("[data-reference-pdf-viewport]")).toHaveCount(0);
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => window.setTimeout(resolve, 250)));
+  }));
+  await sendMotion.evaluate(({ finish }) => finish());
+  await expect.poll(() => sendMotion.evaluate(({ state }) => state.done)).toBe(true);
+  expect(await sendMotion.evaluate(({ state }) => state.timedOut)).toBe(false);
+  const sendMotionSamples = await sendMotion.evaluate(({ state }) => state.samples);
+  await sendMotion.dispose();
+  const rebounds = (axis: "left" | "top") => {
+    let minimum = sendMotionSamples[0]?.[axis] ?? 0;
+    return sendMotionSamples.slice(1).some((sample) => {
+      minimum = Math.min(minimum, sample[axis]);
+      return sample[axis] - minimum > 8;
+    });
+  };
+  expect(rebounds("left")).toBe(false);
+  expect(rebounds("top")).toBe(false);
 
   const workspaceTabs = page.getByRole("tablist", { name: "Workspace modes" }).getByRole("tab");
   await expect(workspaceTabs).toHaveText(["Search", "Annotations"]);

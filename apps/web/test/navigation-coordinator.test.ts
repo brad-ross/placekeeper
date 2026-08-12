@@ -100,6 +100,7 @@ function harness(options: { readonly sharedReferenceSurface?: boolean } = {}) {
     getReferenceNavigation: () => reference.controls,
     waitForReferenceNavigation: async () => reference.controls,
     getReferenceController: () => controller,
+    commitMainFramingPosition: vi.fn(),
     layout: {
       revealReferences: vi.fn(() => { referencesOpen = true; }),
       hideReferences: vi.fn(() => { referencesOpen = false; }),
@@ -602,17 +603,20 @@ describe('document-scoped navigation coordinator', () => {
 
     expect(await run.coordinator.sendToMain(target(2).identity)).toBe(true);
     expect(run.main.controls.applyLocation).toHaveBeenCalledWith(scrolled);
-    expect(run.main.controls.applyLocation).toHaveBeenCalledTimes(2);
+    expect(run.main.controls.applyLocation).toHaveBeenCalledOnce();
+    expect(run.dependencies.commitMainFramingPosition).toHaveBeenCalledOnce();
     expect(run.state().tabs).toEqual([]);
     expect(run.state().mainHistory.entries).toEqual([location(1, 45, 1.1), scrolled]);
     expect(run.referencesOpen()).toBe(false);
     expect(run.dependencies.layout.hideReferences).toHaveBeenCalledOnce();
     expect(run.dependencies.layout.hideReferencesAfterSend).toHaveBeenCalledOnce();
-    expect(vi.mocked(run.dependencies.layout.settle).mock.invocationCallOrder.at(-1))
+    expect(vi.mocked(run.dependencies.commitMainFramingPosition).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(run.dependencies.layout.hideReferencesAfterSend).mock.invocationCallOrder[0]!);
+    expect(vi.mocked(run.dependencies.layout.settle).mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(run.main.controls.applyLocation).mock.invocationCallOrder.at(-1)!);
     expect(run.controller.close).toHaveBeenCalledOnce();
-    expect(vi.mocked(run.controller.close).mock.invocationCallOrder.at(-1))
-      .toBeLessThan(vi.mocked(run.main.controls.applyLocation).mock.invocationCallOrder.at(-1)!);
+    expect(vi.mocked(run.main.controls.applyLocation).mock.invocationCallOrder.at(-1))
+      .toBeLessThan(vi.mocked(run.controller.close).mock.invocationCallOrder.at(-1)!);
     expect(run.dependencies.layout.focusReferenceRail).not.toHaveBeenCalled();
   });
 
@@ -663,6 +667,7 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.dependencies.layout.hideReferences).toHaveBeenCalledOnce();
     expect(run.dependencies.layout.revealReferences).toHaveBeenCalled();
     expect(run.controller.close).not.toHaveBeenCalled();
+    expect(run.dependencies.commitMainFramingPosition).not.toHaveBeenCalled();
     expect(run.announcement()).toBe('Destination unavailable. The current location was preserved.');
   });
 

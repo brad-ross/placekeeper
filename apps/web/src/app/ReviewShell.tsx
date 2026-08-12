@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useLayoutEffect,
   useEffect,
   useMemo,
@@ -190,6 +191,7 @@ export interface ReviewShellProps {
   rightWorkspaceMode?: RightWorkspaceMode;
   search?: ReactNode;
   viewerNavigationIntentToken?: number;
+  onCommitMainFramingPositionChange?(commit: (() => void) | null): void;
   children?: ReactNode;
 }
 
@@ -879,11 +881,18 @@ export function ReviewShell(props: ReviewShellProps) {
     props.onWorkspaceModeFocusTokenChange?.(mode, token);
   };
   const markFramingUserIntent = workspaceFraming.markUserIntent;
+  const commitMainFramingPosition = useCallback(() => {
+    markFramingUserIntent(undefined, { captureSettledPosition: false });
+  }, [markFramingUserIntent]);
+  useLayoutEffect(() => {
+    props.onCommitMainFramingPositionChange?.(commitMainFramingPosition);
+    return () => props.onCommitMainFramingPositionChange?.(null);
+  }, [commitMainFramingPosition, props.onCommitMainFramingPositionChange]);
   useLayoutEffect(() => {
     if ((props.viewerNavigationIntentToken ?? 0) > 0) {
-      markFramingUserIntent(undefined, { captureSettledPosition: false });
+      commitMainFramingPosition();
     }
-  }, [markFramingUserIntent, props.viewerNavigationIntentToken]);
+  }, [commitMainFramingPosition, props.viewerNavigationIntentToken]);
   const isWorkspaceOrChrome = (target: EventTarget | null) => (
     (target instanceof Node && (
       workspaceFraming.referenceSurfaceRef.current?.contains(target) === true

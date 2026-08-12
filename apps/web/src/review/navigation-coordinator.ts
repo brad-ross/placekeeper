@@ -46,6 +46,7 @@ export interface NavigationCoordinatorDependencies {
   readonly getReferenceNavigation: () => PdfViewerNavigation | null;
   readonly waitForReferenceNavigation: () => Promise<PdfViewerNavigation | null>;
   readonly getReferenceController: () => ReferenceDocumentController | null;
+  readonly commitMainFramingPosition: () => void;
   readonly layout: {
     readonly revealReferences: () => void;
     readonly hideReferences: () => void;
@@ -660,6 +661,10 @@ export class NavigationCoordinator {
       return false;
     }
 
+    // Adopt the verified semantic destination as the workspace framing
+    // baseline before consuming the source tab. This prevents an open Search
+    // workspace from restoring its pre-send position during the ensuing reflow.
+    this.dependencies.commitMainFramingPosition();
     this.dependencies.dispatch({
       type: 'complete-send-to-main',
       token: operation.token,
@@ -667,9 +672,6 @@ export class NavigationCoordinator {
       success: true,
       settledLocation,
     });
-    // Applying the destination can recompose the workspace. Reassert the
-    // final-reference postcondition after Main settles so the consumed
-    // References surface cannot remain visible as an empty tray.
     if (finalReference) this.dependencies.layout.hideReferencesAfterSend();
     const survivingIdentity = this.dependencies.getState().activeTabIdentity;
     this.referenceRestoreIdentity = survivingIdentity;
@@ -694,17 +696,7 @@ export class NavigationCoordinator {
       this.dependencies.getReferenceController()?.close() ?? Promise.resolve(),
     ]);
     if (!this.isCurrent(operation)) return true;
-    const reapplied = await main.applyLocation(settledLocation);
-    if (!this.isCurrent(operation)) return true;
-    const finalLocation = reapplied ? main.captureLocation() : null;
-    if (finalLocation === null) {
-      this.dependencies.setAnnouncement(
-        'Reference sent to the main document, but its view could not be restored after closing References.',
-      );
-      return true;
-    }
-    this.dependencies.dispatch({ type: 'refresh-main-location', location: finalLocation });
-    main.focusAtDestination(finalLocation.pageIndex);
+    main.focusAtDestination(settledLocation.pageIndex);
     return true;
   }
 
