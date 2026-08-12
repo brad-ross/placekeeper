@@ -10,7 +10,6 @@ import type { ExistingAnnotation, ExistingAnnotationsDiscovery } from "../pdf/ex
 import {
   acceptSelectionUpdate,
   INITIAL_SELECTION_UPDATE,
-  selectionReadinessMessage,
   type SelectionUpdate,
 } from "../pdf/selection-state.js";
 import { CodexDelivery, type CheckedCodexResult, type PreparedCodexHandoff } from "../export/CodexDelivery.js";
@@ -45,6 +44,11 @@ import {
 import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
 import { createTrailingTaskScheduler } from "../review/main-location-refresh.js";
 import {
+  canDeriveAnnotationOutlineLabels,
+  deriveAnnotationOutlineLabels,
+  reviewItemPoint,
+} from "../review/annotation-outline-context.js";
+import {
   BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN,
   RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
   createReferenceWorkspaceLayout,
@@ -58,14 +62,6 @@ import {
   gateReviewCommand,
   pollSaveStatusUntilSettled,
 } from "../save/save-state-controller.js";
-
-function itemCoordinates(item: ReviewState["items"][number]): { x: number; y: number } | undefined {
-  const value = item.payload[item.kind === "insert" || item.kind === "pageNote" ? "position" : "rect"];
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const x = value.x;
-  const y = value.y;
-  return typeof x === "number" && typeof y === "number" ? { x, y } : undefined;
-}
 
 export interface ProductionSession {
   readonly sessionId: string;
@@ -141,7 +137,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [selectionUpdate, setSelectionUpdate] = useState<SelectionUpdate>(INITIAL_SELECTION_UPDATE);
   const selectionUpdateRef = useRef(selectionUpdate);
   selectionUpdateRef.current = selectionUpdate;
-  const [toolError, setToolError] = useState<string | null>(null);
+  const [commandError, setCommandError] = useState<string | null>(null);
   const [confirmedScope, setConfirmedScope] = useState<string | null>(null);
   const [codexConfirmationActive, setCodexConfirmationActive] = useState(false);
   const [selectionPlacement, setSelectionPlacement] = useState<ViewerClientPlacement | null>(null);
@@ -152,6 +148,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [existingAnnotations, setExistingAnnotations] = useState<ExistingAnnotationsDiscovery>({
     status: 'loading', generation: 0,
   });
+  const [existingAnnotationsSourceIdentity, setExistingAnnotationsSourceIdentity] = useState(
+    `${props.initialState.source.fileId}:${props.initialState.source.digest}`,
+  );
   const [inventoryRetryGeneration, setInventoryRetryGeneration] = useState(0);
   const [correspondingItemId, setCorrespondingItemId] = useState<string>();
   const [activeItemId, setActiveItemId] = useState<string>();
@@ -163,13 +162,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   } | null>(null);
   const placementAuthority = useRef(new PageNotePlacementAuthority());
   const placedToken = useRef(0);
-  const lastCaretDiagnostic = useRef<string | null>(null);
   const latestReceipt = useRef<string | null>(null);
   const viewerRegistry = useRef<PluginRegistry | null>(null);
   const viewerControlsRef = useRef<ViewerControls | undefined>(undefined);
   const [viewerFraming, setViewerFraming] = useState<ViewerFramingControls>();
   const productionRootRef = useRef<HTMLElement | null>(null);
   const mainNavigationRef = useRef<PdfViewerNavigation | null>(null);
+  const [mainNavigationReadyGeneration, setMainNavigationReadyGeneration] = useState<number | null>(null);
+  const [mainNavigation, setMainNavigation] = useState<PdfViewerNavigation | null>(null);
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
   const referenceNavigationWaiters = useRef<Array<{
@@ -358,9 +358,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
 
   const onSelectionUpdate = useCallback((update: SelectionUpdate) => {
     setSelectionUpdate((current) => acceptSelectionUpdate(current, update));
-    if (update.kind === "reliable") setToolError(null);
   }, []);
-  const readinessMessage = selectionReadinessMessage(selectionUpdate);
   const publishCorrespondence = () => setCorrespondingItemId(
     rowCorrespondenceRef.current ?? markFocusRef.current ?? markHoverRef.current,
   );
@@ -393,6 +391,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     }
     outlineDiscoveryRef.current = { status: 'loading', documentGeneration: nextGeneration };
     setOutlineDiscovery(outlineDiscoveryRef.current);
+    setExistingAnnotations({ status: 'loading', generation: 0 });
+    setExistingAnnotationsSourceIdentity(sourceIdentity);
+    setMainNavigationReadyGeneration(null);
     navigationCoordinator.replaceDocument(nextGeneration);
     dispatchLayout({ type: 'replace-document' });
     setRightWorkspaceMode('outline');
@@ -417,14 +418,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     if (event.type === "caret") {
       setCaret(event.value.anchor);
       setCaretPlacement(event.value.placement);
-      if (event.value.diagnostic && lastCaretDiagnostic.current !== event.value.diagnostic) {
-        lastCaretDiagnostic.current = event.value.diagnostic;
-        setToolError("This selection cannot be anchored reliably. Adjust the selection or use Page Note.");
-      }
-      if (event.value.anchor) {
-        lastCaretDiagnostic.current = null;
-        setToolError(null);
-      }
       return;
     }
     if (event.type === "page-menu") {
@@ -472,7 +465,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   ) => {
     if (scope === 'main') {
       mainNavigationRef.current = navigation;
+      setMainNavigation(navigation);
       navigation?.replaceDocument(documentGenerationRef.current);
+      setMainNavigationReadyGeneration(navigation === null ? null : documentGenerationRef.current);
       navigationCoordinator.refreshMainLocation();
       return;
     }
@@ -487,6 +482,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       }
     }
   }, [navigationCoordinator]);
+  const onExistingAnnotationsDiscovery = useCallback((result: ExistingAnnotationsDiscovery) => {
+    setExistingAnnotations(result);
+    setExistingAnnotationsSourceIdentity(sourceIdentity);
+  }, [sourceIdentity]);
   const onOutlineDiscovery = useCallback((discovery: PdfOutlineDiscovery) => {
     if (discovery.documentGeneration !== documentGenerationRef.current) return;
     outlineDiscoveryRef.current = discovery;
@@ -512,14 +511,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       embeddedInReviewShell
       assets={viewerAssets}
       documentTitle={props.scope.documentTitle}
-      toolError={readinessMessage ?? toolError}
+      toolError={commandError}
       onSelectionUpdate={onSelectionUpdate}
       ownedAnnotations={ownedAnnotations}
       keyboardPageNoteActive={keyboardPageNoteActive}
       onViewerInteraction={onViewerInteraction}
       {...(activeItemId === undefined ? {} : { activeOwnedAnnotationId: activeItemId })}
       {...(correspondingItemId === undefined ? {} : { correspondingOwnedAnnotationId: correspondingItemId })}
-      onExistingAnnotationsDiscovery={setExistingAnnotations}
+      onExistingAnnotationsDiscovery={onExistingAnnotationsDiscovery}
       inventoryRetryGeneration={inventoryRetryGeneration}
       documentGeneration={navigationState.documentGeneration}
       referenceViewportHost={referenceViewportHost}
@@ -530,6 +529,37 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       onViewerFramingInitialized={onViewerFramingInitialized}
     />
   );
+
+  const annotationOutlineLabels = useMemo(() => {
+    const pages = mainNavigationRef.current?.captureDocumentOrderPages() ?? [];
+    const source = existingAnnotationsSourceIdentity === sourceIdentity
+      && existingAnnotations.status === 'ready'
+      ? existingAnnotations.items
+      : [];
+    const derivationContext = {
+      sourceIdentity,
+      activeSourceIdentity: sourceIdentityRef.current,
+      navigationGeneration: mainNavigationReadyGeneration,
+      outlineGeneration: outlineDiscovery.documentGeneration,
+    };
+    if (!canDeriveAnnotationOutlineLabels(derivationContext)) {
+      return { owned: new Map<string, string>(), source: new Map<string, string>() };
+    }
+    return deriveAnnotationOutlineLabels({
+      documentGeneration: derivationContext.navigationGeneration,
+      outline: outlineDiscovery,
+      pages,
+      owned: state.items,
+      source,
+    });
+  }, [
+    existingAnnotations,
+    existingAnnotationsSourceIdentity,
+    mainNavigationReadyGeneration,
+    outlineDiscovery,
+    sourceIdentity,
+    state.items,
+  ]);
 
   const codexDelivery = (
     <div className="review-delivery-content">
@@ -582,6 +612,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         onSaveOptions={() => openCopyDialog("menu")}
         {...(viewerControlsRef.current === undefined ? {} : { viewerControls: viewerControlsRef.current })}
         {...(viewerFraming === undefined ? {} : { viewerFraming })}
+        {...(mainNavigation === null ? {} : { viewerNavigation: mainNavigation })}
         viewerState={viewerState}
         workspaceOpen={anyTrayOpen}
         referenceLayoutState={referenceLayoutState}
@@ -595,6 +626,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         }))}
         pendingReference={pendingReference}
         outlineDiscovery={outlineDiscovery}
+        annotationOutlineLabels={annotationOutlineLabels}
         currentOutlineItemId={currentOutlineItemId}
         linkActionRequest={linkActionRequest}
         navigationAnnouncement={navigationAnnouncement}
@@ -646,6 +678,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         onOutlineActivate={(item) => {
           if (item.target === null) navigationCoordinator.unavailableDestination();
           else void navigationCoordinator.navigateMainTarget(item.target, 'outline');
+        }}
+        onOutlineReference={(item) => {
+          if (item.target === null) return;
+          void navigationCoordinator.openReference(item.target, {
+            label: item.label,
+            pageContext: item.pageContext ?? `Page ${item.target.pageIndex + 1}`,
+          });
         }}
         onReferenceViewportHost={setReferenceViewportHost}
         onWorkspaceModeFocusTokenChange={(mode, token) => {
@@ -734,7 +773,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           if (!("accepted" in result)) {
             setSaveStatus(await props.api.saveStatus());
           }
-          if ("accepted" in result) setToolError(result.message);
+          setCommandError("accepted" in result ? result.message : null);
           return result;
         }}
         onNavigate={(item) => {
@@ -744,7 +783,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           const scroll = registry?.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides();
           if (documentId && scroll) {
             const page = core?.documents[documentId]?.document?.pages[item.pageIndex];
-            const coordinates = itemCoordinates(item);
+            const coordinates = reviewItemPoint(item) ?? undefined;
             scroll.forDocument(documentId).scrollToPage({
               pageNumber: item.pageIndex + 1,
               ...(coordinates === undefined ? {} : {

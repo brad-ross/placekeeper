@@ -37,7 +37,17 @@ The nonmodal review surface that lists Review Items and Existing PDF Annotations
 
 Its presentation may change with available reading space, but disclosure changes do not replace the underlying viewer or discard review state.
 
+### Outline Discovery
+The document-scoped capability result that distinguishes confirmed absence of a PDF outline from an outline still loading, available outline structure, or discovery failure.
+
+Only confirmed absence removes outline-dependent modes and metadata; stale results from a previously mounted document are treated as unknown until the current document resolves.
+
 ## Viewer framing
+
+### Committed Zoom
+The provider-owned numeric PDF scale used to publish the viewer's zoom state.
+
+For acceptance testing, transient gesture presentation is treated as non-authoritative; coordinate-based actions wait for Committed Zoom and its rendered layout before treating new geometry as settled.
 
 ### Viewer Runway
 Temporary scroll extent added beyond viewer content so an overlaid review surface does not make covered document regions unreachable.
@@ -67,6 +77,13 @@ In-body reference lookups do not move the Main Reading Thread; embedded-outline 
 A temporary, independently scrollable and zoomable view of one author-encoded destination in the current PDF.
 
 One live Reference Tab exists per target. Hiding the workspace preserves its tabs, while promotion to the Main Reading Thread consumes the promoted tab.
+
+A Reference Tab retains both its durable author-encoded destination and its last settled view. Activation prefers the settled view, but may reconstruct the destination when changed viewer geometry makes that view unusable.
+
+### Reference Fit Width
+The framing policy for an author-encoded Reference destination that scales its page to the usable Reference viewer width instead of fitting the whole page vertically.
+
+Reference Fit Width is used for a destination's initial opening and to reconstruct a Reference Tab when its saved settled view cannot survive a layout change. Author-provided vertical positioning is preserved only when it carries meaningful destination intent.
 
 ### Meaningful Jump
 An explicit destination change in the Main Reading Thread that enters PDF Back and Forward history, such as embedded-outline navigation or promotion from a Reference Tab.

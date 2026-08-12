@@ -56,6 +56,69 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('button', { name: 'Proofread mode' })).toHaveCount(0);
   });
 
+  test('keeps focus and References coherent when a live outline disappears and returns', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.getByRole('button', { name: 'Set outline tree' }).click();
+    await page.getByRole('button', { name: 'Open right workspace' }).click();
+    const outlineDestination = page.getByRole('button', {
+      name: 'Harness section, Page 1',
+      exact: true,
+    });
+    await outlineDestination.focus();
+
+    await page.getByRole('button', { name: 'Set outline empty' }).evaluate((button) => (
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    ));
+    const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
+    await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toHaveCount(0);
+    await expect(annotations).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#workspace-panel-annotations')).toBeFocused();
+
+    await page.getByRole('button', { name: 'Set outline tree' }).evaluate((button) => (
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    ));
+    await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(page.locator('#workspace-panel-outline')).toBeFocused();
+
+    await page.getByRole('button', { name: 'Open References tray' }).click();
+    await page.getByRole('button', { name: 'Move References to right' }).click();
+    await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+      'data-reference-layout',
+      'wide-right',
+    );
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
+    const references = page.getByRole('tab', { name: 'References', exact: true });
+    await expect(references).toHaveAttribute('aria-selected', 'true');
+    const outlineTab = page.getByRole('tab', { name: 'Outline', exact: true });
+    await references.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(outlineTab).toBeFocused();
+    await page.getByRole('button', { name: 'Set outline empty' }).evaluate((button) => (
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    ));
+    await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toHaveCount(0);
+    await expect(references).toHaveAttribute('aria-selected', 'true');
+    await expect(references).toBeFocused();
+
+    await page.keyboard.press('ArrowLeft');
+    await expect(annotations).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect(references).toBeFocused();
+
+    await page.setViewportSize({ width: 760, height: 900 });
+    await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+      'data-reference-layout',
+      'narrow-unified',
+    );
+    await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toHaveCount(0);
+    await expect(references).toHaveAttribute('aria-selected', 'true');
+  });
+
   test('commits all five tools once through keyboard and toolbar paths', async ({ page }) => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.focus();
@@ -357,6 +420,192 @@ test.describe('canonical review workflow', () => {
     );
   });
 
+  test('edits viewer-published zoom through Enter and ordinary blur', async ({ page }) => {
+    const zoomLevel = page.getByRole('button', {
+      name: 'Current zoom 110 percent. Enter a zoom percentage',
+    });
+    await zoomLevel.click();
+
+    const zoomPercentage = page.getByRole('spinbutton', { name: 'Zoom percentage' });
+    await expect(zoomPercentage).toBeFocused();
+    await expect(zoomPercentage).toHaveValue('110');
+    await page.keyboard.type('125');
+    await expect(zoomPercentage).toHaveValue('125');
+    await zoomPercentage.press('Enter');
+
+    await expect(page.getByRole('button', {
+      name: 'Current zoom 125 percent. Enter a zoom percentage',
+    })).toBeFocused();
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:125;commands:go:125;fit:',
+    );
+
+    await page.getByRole('button', {
+      name: 'Current zoom 125 percent. Enter a zoom percentage',
+    }).click();
+    await zoomPercentage.fill('140');
+    const nativeInput = page.getByRole('textbox', { name: 'Native input' });
+    await nativeInput.focus();
+
+    await expect(nativeInput).toBeFocused();
+    await expect(page.getByRole('button', {
+      name: 'Current zoom 140 percent. Enter a zoom percentage',
+    })).toBeVisible();
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:125|140;commands:go:125|go:140;fit:',
+    );
+  });
+
+  test('keeps an exact fitted scale when an unchanged zoom edit closes', async ({ page }) => {
+    await page.getByRole('button', { name: 'Fit PDF to available width' }).click();
+    const fitResult = page.getByRole('button', {
+      name: 'Current zoom 88 percent. Enter a zoom percentage',
+    });
+    await fitResult.click();
+    const zoomPercentage = page.getByRole('spinbutton', { name: 'Zoom percentage' });
+    await zoomPercentage.press('Enter');
+    await expect(fitResult).toBeFocused();
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:;commands:fit:88;fit:fit',
+    );
+
+    await fitResult.click();
+    await page.getByRole('textbox', { name: 'Native input' }).focus();
+    await expect(page.getByRole('spinbutton', { name: 'Zoom percentage' })).toHaveCount(0);
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:;commands:fit:88;fit:fit',
+    );
+  });
+
+  test('announces invalid zoom ranges and cancels invalid blur', async ({ page }) => {
+    const zoomLevel = page.getByRole('button', {
+      name: 'Current zoom 110 percent. Enter a zoom percentage',
+    });
+    await zoomLevel.click();
+    const zoomPercentage = page.getByRole('spinbutton', { name: 'Zoom percentage' });
+    await zoomPercentage.fill('6001');
+    await zoomPercentage.press('Enter');
+
+    const rangeError = page.getByRole('alert');
+    await expect(zoomPercentage).toBeFocused();
+    await expect(zoomPercentage).toHaveAttribute('aria-invalid', 'true');
+    const rangeErrorId = await rangeError.getAttribute('id');
+    expect(rangeErrorId).toBeTruthy();
+    await expect(zoomPercentage).toHaveAttribute('aria-describedby', rangeErrorId!);
+    await expect(zoomPercentage).toHaveAttribute('aria-errormessage', rangeErrorId!);
+    await expect(rangeError).toHaveText('Enter a whole zoom percentage from 20 to 6000');
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:;commands:;fit:',
+    );
+
+    await zoomPercentage.fill('1.5');
+    await expect(zoomPercentage).toHaveAttribute('aria-invalid', 'false');
+    await expect(rangeError).toHaveCount(0);
+    await zoomPercentage.press('Enter');
+    await expect(zoomPercentage).toHaveAttribute('aria-invalid', 'true');
+
+    await zoomPercentage.fill('');
+    await page.getByRole('textbox', { name: 'Native input' }).focus();
+    await expect(zoomPercentage).toHaveCount(0);
+    await expect(zoomLevel).toBeVisible();
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:;commands:;fit:',
+    );
+  });
+
+  test('cancels zoom editing with Escape without closing workspace or Finish', async ({ page }) => {
+    const { annotations, workspace } = await openAnnotationsWorkspace(page);
+    const zoomLevel = page.getByRole('button', {
+      name: 'Current zoom 110 percent. Enter a zoom percentage',
+    });
+    await zoomLevel.click();
+    const zoomPercentage = page.getByRole('spinbutton', { name: 'Zoom percentage' });
+    await zoomPercentage.fill('125');
+
+    await zoomPercentage.dispatchEvent('keydown', {
+      key: 'Enter',
+      code: 'Enter',
+      bubbles: true,
+      isComposing: true,
+    });
+    await expect(zoomPercentage).toBeFocused();
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:;commands:;fit:',
+    );
+
+    await zoomPercentage.press('Escape');
+    await expect(zoomLevel).toBeFocused();
+    await expect(workspace).toHaveAttribute('aria-expanded', 'true');
+    await expect(annotations).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#review-tools-workspace')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Finish review' })).toHaveCount(0);
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:;commands:;fit:',
+    );
+  });
+
+  test('lets Zoom Out, Zoom In, and Fit Width win over dirty zoom drafts exactly once', async ({ page }) => {
+    const zoomPercentage = page.getByRole('spinbutton', { name: 'Zoom percentage' });
+    await page.getByRole('button', {
+      name: 'Current zoom 110 percent. Enter a zoom percentage',
+    }).click();
+    await zoomPercentage.fill('125');
+    const zoomOut = page.getByRole('button', { name: 'Zoom out' });
+    await zoomOut.dispatchEvent('pointerdown', { button: 0, pointerId: 1 });
+    await zoomPercentage.evaluate((input: HTMLInputElement) => input.blur());
+    await zoomOut.click();
+    await expect(zoomOut).toBeFocused();
+    await expect(page.getByRole('button', {
+      name: 'Current zoom 100 percent. Enter a zoom percentage',
+    })).toBeVisible();
+
+    await page.getByRole('button', {
+      name: 'Current zoom 100 percent. Enter a zoom percentage',
+    }).click();
+    await zoomPercentage.fill('130');
+    const zoomIn = page.getByRole('button', { name: 'Zoom in' });
+    await zoomIn.evaluate((button: HTMLButtonElement) => button.click());
+    await expect(zoomIn).toBeFocused();
+    await expect(page.getByRole('button', {
+      name: 'Current zoom 110 percent. Enter a zoom percentage',
+    })).toBeVisible();
+
+    await page.getByRole('button', {
+      name: 'Current zoom 110 percent. Enter a zoom percentage',
+    }).click();
+    await zoomPercentage.fill('150');
+    const fitWidth = page.getByRole('button', { name: 'Fit PDF to available width' });
+    await fitWidth.click();
+    await expect(fitWidth).toBeFocused();
+    await expect(page.getByRole('button', {
+      name: 'Current zoom 88 percent. Enter a zoom percentage',
+    })).toBeVisible();
+
+    await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
+      'data-viewer-zoom-requests',
+      'direct:;commands:out:100|in:110|fit:88;fit:fit',
+    );
+  });
+
+  test('does not offer zoom editing or Fit Width while zoom is unavailable', async ({ page }) => {
+    await page.getByRole('button', { name: 'Make zoom controls unavailable' }).click();
+
+    await expect(page.getByLabel('Zoom level')).toHaveText('—%');
+    await expect(page.getByRole('spinbutton', { name: 'Zoom percentage' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Enter a zoom percentage/u })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Zoom out' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Zoom in' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Fit PDF to available width' })).toBeDisabled();
+  });
+
   test('keeps selection actions after rejection and for a newer selection', async ({ page }) => {
     const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
 
@@ -444,37 +693,40 @@ test.describe('canonical review workflow', () => {
     await expect(row).toHaveCSS('outline-style', 'solid');
 
     const kind = row.locator('.annotation-item__meta strong');
+    const separator = row.locator('.annotation-item__separator');
     const pageNumber = row.locator('.annotation-item__page');
-    const [kindBounds, pageBounds] = await Promise.all([kind.boundingBox(), pageNumber.boundingBox()]);
+    const [kindBounds, separatorBounds, pageBounds] = await Promise.all([
+      kind.boundingBox(),
+      separator.boundingBox(),
+      pageNumber.boundingBox(),
+    ]);
     expect(kindBounds).not.toBeNull();
+    expect(separatorBounds).not.toBeNull();
     expect(pageBounds).not.toBeNull();
-    expect(pageBounds!.x - (kindBounds!.x + kindBounds!.width)).toBeLessThanOrEqual(12);
+    expect(separatorBounds!.x - (kindBounds!.x + kindBounds!.width)).toBeLessThanOrEqual(5);
+    expect(pageBounds!.x - (separatorBounds!.x + separatorBounds!.width)).toBeLessThanOrEqual(5);
+    await expect(pageNumber).toHaveText('1');
   });
 
-  test('keeps the complete annotation header fixed while the tray scrolls', async ({ page }) => {
-    for (let index = 0; index < 5; index += 1) {
-      if (index > 0) await page.getByRole('button', { name: 'Use selection' }).click();
-      await page.getByRole('button', { name: 'Highlight', exact: true }).click();
-      await page.getByRole('button', { name: 'Keep without comment' }).click();
-    }
+  test('uses matching simple section headers for owned and existing annotations', async ({ page }) => {
     await openAnnotationsWorkspace(page);
 
-    const drawer = page.locator('[data-annotation-scroll-viewport]');
-    await drawer.evaluate((element) => {
-      Object.assign((element as HTMLElement).style, {
-        flex: 'none', height: '8rem', bottom: 'auto',
-      });
-    });
-    const header = drawer.locator('.annotation-drawer__header');
-    const before = await header.boundingBox();
-    expect(before).not.toBeNull();
-
-    await drawer.evaluate((element) => { element.scrollTop = 10; });
-    await expect.poll(() => drawer.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-    const after = await header.boundingBox();
-    expect(after).not.toBeNull();
-    expect(after!.y).toBeCloseTo(before!.y, 0);
-    expect(after!.height).toBeCloseTo(before!.height, 0);
+    const headers = page.locator('.annotation-drawer__header, .existing-annotations__header');
+    await expect(headers).toHaveCount(2);
+    const styles = await headers.evaluateAll((elements) => elements.map((element) => {
+      const heading = element.querySelector('h2');
+      const headerStyle = getComputedStyle(element);
+      const headingStyle = heading ? getComputedStyle(heading) : null;
+      return {
+        position: headerStyle.position,
+        marginBottom: headerStyle.marginBottom,
+        fontFamily: headingStyle?.fontFamily,
+        fontSize: headingStyle?.fontSize,
+        fontWeight: headingStyle?.fontWeight,
+      };
+    }));
+    expect(styles[0]).toEqual(styles[1]);
+    expect(styles[0]).toMatchObject({ position: 'static', marginBottom: '10px' });
   });
 
   test('keeps the annotations tray open while editing an owned annotation', async ({ page }) => {
@@ -612,6 +864,10 @@ test.describe('canonical review workflow', () => {
     await expect(announcement).toContainText('Select reliable text');
     await page.keyboard.press('Alt+Shift+D');
     await expect(announcement).toContainText('Select reliable text');
+    await page.keyboard.press('Alt+Shift+I');
+    await expect(announcement).toContainText('Choose a reliable text position');
+    await page.keyboard.press('Alt+Shift+H');
+    await expect(announcement).toContainText('Select reliable text');
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
 
@@ -682,7 +938,7 @@ test.describe('canonical review workflow', () => {
     await expect(row.getByRole('button', { name: /highlight · Page 1/ })).toBeFocused();
     expect(await canvas.boundingBox()).toEqual(beforeActivation);
 
-    const existing = page.getByRole('region', { name: 'Existing PDF annotations' });
+    const existing = page.getByRole('region', { name: 'External Annotations (read only)' });
     await expect(existing.getByRole('button', { name: /Highlight · Page 1 · Source comment/ })).toBeVisible();
     await expect(existing.getByRole('button', { name: /^Edit/ })).toHaveCount(0);
     await expect(existing.getByRole('button', { name: /^Delete/ })).toHaveCount(0);

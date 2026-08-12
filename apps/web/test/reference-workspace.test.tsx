@@ -23,7 +23,10 @@ import {
   referenceResizePointerValue,
 } from '../src/review/ReferenceResizeHandle.js';
 import { WorkspaceEdgeRail } from '../src/review/WorkspaceEdgeRail.js';
-import { OutlineAnnotationsWorkspace } from '../src/review/OutlineAnnotationsWorkspace.js';
+import {
+  chooseToolModeFocusTarget,
+  OutlineAnnotationsWorkspace,
+} from '../src/review/OutlineAnnotationsWorkspace.js';
 import type { PdfOutlineItem } from '../src/pdf/pdf-outline.js';
 
 const target = (identity: string, pageIndex: number) => ({
@@ -46,8 +49,10 @@ describe('link action chooser', () => {
       <LinkActionMenuContent
         label="Lemma A.7"
         pageContext="Page 18"
+        sourceScope="main"
         firstItemRef={() => undefined}
         secondItemRef={() => undefined}
+        thirdItemRef={() => undefined}
         onChoose={() => undefined}
         onKeyDown={() => undefined}
       />,
@@ -57,6 +62,7 @@ describe('link action chooser', () => {
     expect(html).toContain(`id="${PDF_LINK_ACTION_MENU_ID}"`);
     expect(html).toMatch(/aria-label="Open in References"[\s\S]*aria-label="Open in main"/u);
     expect(html).toMatch(/title="Open in References"[\s\S]*title="Open in main"/u);
+    expect(html).toMatch(/aria-label="Open in main"[^>]*>[\s\S]*?lucide-arrow-right/u);
     expect(html.match(/role="menuitem"/g)).toHaveLength(2);
     expect(html.match(/<svg/g)).toHaveLength(2);
     expect(html).not.toContain('<small>');
@@ -64,6 +70,34 @@ describe('link action chooser', () => {
     expect(html).not.toContain('role="dialog"');
     expect(html).toContain('Lemma A.7');
     expect(html).toContain('Page 18');
+  });
+
+  it('puts Follow in this Reference Tab before the right-most main action', () => {
+    const html = renderToStaticMarkup(
+      <LinkActionMenuContent
+        label="Target-to-target detail link"
+        pageContext="Page 3"
+        sourceScope="reference"
+        firstItemRef={() => undefined}
+        secondItemRef={() => undefined}
+        thirdItemRef={() => undefined}
+        onChoose={() => undefined}
+        onKeyDown={() => undefined}
+      />,
+    );
+
+    expect(html).toMatch(
+      /aria-label="Open in References"[\s\S]*aria-label="Follow in this Reference Tab"[\s\S]*aria-label="Open in main"/u,
+    );
+    expect(html).toMatch(
+      /title="Open in References"[\s\S]*title="Follow in this Reference Tab"[\s\S]*title="Open in main"/u,
+    );
+    expect(html).toMatch(
+      /aria-label="Follow in this Reference Tab"[^>]*>[\s\S]*?lucide-arrow-right/u,
+    );
+    expect(html).toMatch(/aria-label="Open in main"[^>]*>[\s\S]*?lucide-maximize-2/u);
+    expect(html.match(/role="menuitem"/g)).toHaveLength(3);
+    expect(html.match(/<svg/g)).toHaveLength(3);
   });
 
   it('wraps menu focus for arrows and supports Home and End', () => {
@@ -74,6 +108,9 @@ describe('link action chooser', () => {
     expect(compositeFocusIndex(0, 2, 'End')).toBe(1);
     expect(compositeFocusIndex(0, 2, 'PageDown')).toBeNull();
     expect(compositeFocusIndex(0, 2, 'ArrowLeft')).toBeNull();
+    expect(compositeFocusIndex(2, 3, 'ArrowDown')).toBe(0);
+    expect(compositeFocusIndex(0, 3, 'ArrowUp')).toBe(2);
+    expect(compositeFocusIndex(0, 3, 'End')).toBe(2);
   });
 
   it('keeps horizontal tab navigation to Left, Right, Home, and End', () => {
@@ -108,7 +145,7 @@ describe('link action chooser', () => {
 });
 
 describe('shared reference workspace', () => {
-  it('keeps Outline and Annotations under one tools-surface owner', () => {
+  it('collapses a confirmed empty outline to one selected Annotations surface', () => {
     const html = renderToStaticMarkup(
       <OutlineAnnotationsWorkspace
         open
@@ -120,13 +157,52 @@ describe('shared reference workspace', () => {
         annotations={<div>Owned annotation rows</div>}
         onModeChange={() => undefined}
         onOutlineActivate={() => undefined}
+        onOutlineReference={() => undefined}
       />,
     );
 
     expect(html).toContain('id="review-tools-workspace"');
-    expect(html.match(/id="workspace-panel-outline"/g)).toHaveLength(1);
+    expect(html).not.toContain('id="workspace-mode-outline"');
+    expect(html).not.toContain('id="workspace-panel-outline"');
+    expect(html).not.toContain('This PDF has no embedded outline.');
     expect(html.match(/id="workspace-panel-annotations"/g)).toHaveLength(1);
+    expect(html).toMatch(/id="workspace-mode-annotations"[^>]*aria-selected="true"/u);
+    expect(html).toMatch(/id="workspace-panel-annotations"[^>]*aria-labelledby="workspace-mode-annotations"/u);
+    expect(html).not.toMatch(/id="workspace-panel-annotations"[^>]*hidden/u);
+    expect(html).toContain('aria-label="Annotations"');
+    expect(html).toContain('data-workspace-mode-count="1"');
+    expect(html).toContain('grid-template-columns:repeat(1, minmax(0, 1fr))');
+  });
+
+  it('keeps Outline available while discovery is unavailable', () => {
+    const html = renderToStaticMarkup(
+      <OutlineAnnotationsWorkspace
+        open
+        mode="outline"
+        presentation="right"
+        headerVariant="tools"
+        outline={{ status: 'unavailable', documentGeneration: 1 }}
+        currentOutlineItemId={null}
+        annotations={<div>Owned annotation rows</div>}
+        onModeChange={() => undefined}
+        onOutlineActivate={() => undefined}
+        onOutlineReference={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('id="workspace-mode-outline"');
+    expect(html).toContain('id="workspace-panel-outline"');
+    expect(html).toContain('Outline unavailable.');
     expect(html).toContain('aria-label="Outline and annotations"');
+  });
+
+  it('discards disconnected mode focus memory before a panel is restored', () => {
+    const disconnected = { isConnected: false } as HTMLElement;
+    const connected = { isConnected: true } as HTMLElement;
+    const panel = {} as HTMLElement;
+
+    expect(chooseToolModeFocusTarget(disconnected, panel)).toBe(panel);
+    expect(chooseToolModeFocusTarget(connected, panel)).toBe(connected);
   });
   it('prioritizes a newly available retry control over remembered loading-panel focus', () => {
     const remembered = { isConnected: true } as HTMLElement;
@@ -178,6 +254,8 @@ describe('shared reference workspace', () => {
     );
 
     expect(html).toContain('aria-label="Workspace modes"');
+    expect(html).toContain('data-workspace-mode-count="3"');
+    expect(html).toContain('grid-template-columns:repeat(3, minmax(0, 1fr))');
     expect(html).not.toContain('aria-label="Close workspace"');
     expect(html.match(/role="tab"/g)).toHaveLength(5);
     expect(html.match(/aria-selected="true"/g)).toHaveLength(2);
@@ -407,6 +485,7 @@ describe('shared reference workspace', () => {
     const empty = renderToStaticMarkup(<ReferenceWorkspace {...base} />);
     const loading = renderToStaticMarkup(<ReferenceWorkspace
       {...base}
+      headerVariant="references"
       pendingReference={{ status: 'loading', label: 'Equation (4)', pageContext: 'Page 6' }}
     />);
     const failed = renderToStaticMarkup(<ReferenceWorkspace
@@ -419,7 +498,8 @@ describe('shared reference workspace', () => {
     expect(empty).toContain('An internal PDF link can open a reference here.');
     expect(empty).toContain('tabindex="-1"');
     expect(loading).toContain('aria-busy="true"');
-    expect(loading).toContain('data-reference-panel-layout="full"');
+    expect(loading).toContain('data-reference-panel-layout="split"');
+    expect(loading).not.toContain('aria-label="Open references"');
     expect(loading).toContain('Equation (4)');
     expect(failed).toContain('Reference unavailable.');
     expect(failed).toContain('data-reference-panel-layout="full"');
@@ -455,6 +535,7 @@ describe('outline navigator', () => {
         discovery={{ status: 'loaded-tree', documentGeneration: 3, items }}
         currentItemId="setup"
         onActivate={() => undefined}
+        onOpenReference={() => undefined}
       />,
     );
 
@@ -466,12 +547,56 @@ describe('outline navigator', () => {
     expect(html).toContain('Setup');
   });
 
+  it('renders target-only References actions as sibling controls with the shared icon', () => {
+    const groupingItem: PdfOutlineItem = {
+      id: 'group',
+      label: 'Appendices',
+      pageContext: null,
+      target: null,
+      children: [items[0]!],
+    };
+    const html = renderToStaticMarkup(
+      <OutlineNavigator
+        discovery={{
+          status: 'loaded-tree',
+          documentGeneration: 3,
+          items: [groupingItem, items[1]!],
+        }}
+        currentItemId="results"
+        onActivate={() => undefined}
+        onOpenReference={() => undefined}
+      />,
+    );
+    const rows = html.match(/<div class="outline-navigator__row"[^>]*>[\s\S]*?<\/div>/gu) ?? [];
+    const groupingRow = rows.find((row) => row.includes('Appendices')) ?? '';
+    const introductionRow = rows.find((row) => row.includes('Introduction')) ?? '';
+    const resultsRow = rows.find((row) => row.includes('Results')) ?? '';
+
+    expect(groupingRow).toContain('outline-navigator__disclosure');
+    expect(groupingRow).toContain('outline-navigator__destination');
+    expect(groupingRow).not.toContain('outline-navigator__reference');
+    expect(introductionRow).toMatch(
+      /class="outline-navigator__destination"[\s\S]*?<\/button><button[^>]*class="outline-navigator__reference"/u,
+    );
+    expect(introductionRow).toContain('aria-label="Open Introduction, Page 1 in References"');
+    expect(introductionRow).toContain('title="Open in References"');
+    expect(introductionRow).toContain('lucide-panels-top-left');
+    expect(resultsRow).toContain('aria-current="location"');
+    expect(resultsRow).toContain('data-current="true"');
+    expect(resultsRow).toContain(
+      '<span class="outline-navigator__summary"><span class="outline-navigator__title">Results</span><small class="outline-navigator__page" aria-hidden="true">· 8</small></span>',
+    );
+    expect(resultsRow).not.toContain('>Page 8</small>');
+    expect(html.match(/class="outline-navigator__reference"/g)).toHaveLength(3);
+  });
+
   it('distinguishes loading, loaded-empty, and unavailable states', () => {
     const render = (status: 'loading' | 'loaded-empty' | 'unavailable') => renderToStaticMarkup(
       <OutlineNavigator
         discovery={{ status, documentGeneration: 3 }}
         currentItemId={null}
         onActivate={() => undefined}
+        onOpenReference={() => undefined}
       />,
     );
     expect(render('loading')).toContain('Outline is loading');

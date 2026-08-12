@@ -1,11 +1,223 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { PdfZoomMode } from "@embedpdf/models";
 import { describe, expect, it, vi } from "vitest";
 
 import { createReviewState } from "../../../packages/core/src/review-model.js";
 import { ProductionReviewApp } from "../src/app/ProductionReviewApp.js";
 import { SaveDestinationDialog } from "../src/save/SaveDestinationDialog.js";
+import {
+  canDeriveAnnotationOutlineLabels,
+  deriveAnnotationOutlineLabels,
+} from "../src/review/annotation-outline-context.js";
 
 describe("one production review tree", () => {
+  it("derives owned and source subsection labels from safe document geometry", () => {
+    const outlineTarget = {
+      documentGeneration: 4,
+      pageIndex: 0,
+      zoom: { mode: PdfZoomMode.XYZ, params: [172, 1500, 1] },
+      identity: JSON.stringify([4, 0, PdfZoomMode.XYZ, 172, 1500, 1]),
+    };
+    const labels = deriveAnnotationOutlineLabels({
+      documentGeneration: 4,
+      outline: {
+        status: "loaded-tree",
+        documentGeneration: 4,
+        items: [{
+          id: "outline-methods",
+          label: "Methods and data",
+          pageContext: "Page 1",
+          target: outlineTarget,
+          children: [],
+        }],
+      },
+      pages: [{
+        size: { width: 600, height: 800 },
+        crop: { left: 100, top: 200, bottom: 1000 },
+      }],
+      owned: [{
+        id: "owned-note",
+        kind: "pageNote",
+        pageIndex: 0,
+        createdAt: "2026-08-11T00:00:00.000Z",
+        updatedAt: "2026-08-11T00:00:00.000Z",
+        payload: { position: { x: 172, y: 600, width: 10, height: 10 }, comment: "Check" },
+      }],
+      source: [{
+        id: "source-note",
+        subtype: "Highlight",
+        pageIndex: 0,
+        rect: { x: 172, y: 320, width: 10, height: 10 },
+        contents: "Source",
+        author: "Reviewer",
+        flags: [],
+        appearanceModes: [],
+        supportedAppearance: true,
+      }],
+    });
+
+    expect(labels.owned.get("owned-note")).toBe("Methods and data");
+    expect(labels.source.get("0:source-note")).toBe("Methods and data");
+  });
+
+  it.each([
+    [{ status: "loading" as const, documentGeneration: 4 }, 4],
+    [{ status: "loaded-empty" as const, documentGeneration: 4 }, 4],
+    [{ status: "unavailable" as const, documentGeneration: 4 }, 4],
+    [{
+      status: "loaded-tree" as const,
+      documentGeneration: 3,
+      items: [{
+        id: "stale-outline",
+        label: "Stale outline",
+        pageContext: "Page 1",
+        target: {
+          documentGeneration: 4,
+          pageIndex: 0,
+          zoom: { mode: PdfZoomMode.FitPage, params: [] },
+          identity: "otherwise-safe-target",
+        },
+        children: [],
+      }],
+    }, 4],
+  ])("omits subsection labels for incomplete or stale outline discovery", (outline, generation) => {
+    const labels = deriveAnnotationOutlineLabels({
+      documentGeneration: generation,
+      outline,
+      pages: [{ size: { width: 600, height: 800 }, crop: { left: 0, top: 0, bottom: 0 } }],
+      owned: [{
+        id: "valid-owned",
+        kind: "pageNote",
+        pageIndex: 0,
+        createdAt: "2026-08-11T00:00:00.000Z",
+        updatedAt: "2026-08-11T00:00:00.000Z",
+        payload: { position: { x: 10, y: 100, width: 1, height: 1 }, comment: "Check" },
+      }],
+      source: [{
+        id: "valid-source",
+        subtype: "Highlight",
+        pageIndex: 0,
+        rect: { x: 10, y: 100, width: 1, height: 1 },
+        contents: "Source",
+        author: "Reviewer",
+        flags: [],
+        appearanceModes: [],
+        supportedAppearance: true,
+      }],
+    });
+
+    expect(labels.owned.size).toBe(0);
+    expect(labels.source.size).toBe(0);
+  });
+
+  it("fails closed for unsafe outline evidence with otherwise valid annotations", () => {
+    const labels = deriveAnnotationOutlineLabels({
+      documentGeneration: 4,
+      outline: {
+        status: "loaded-tree",
+        documentGeneration: 4,
+        items: [{
+          id: "unsafe",
+          label: "Unsafe",
+          pageContext: "Page 1",
+          target: {
+            documentGeneration: 3,
+            pageIndex: 0,
+            zoom: { mode: PdfZoomMode.FitPage, params: [] },
+            identity: "stale-target",
+          },
+          children: [],
+        }],
+      },
+      pages: [{ size: { width: 600, height: 800 }, crop: { left: 0, top: 0, bottom: 0 } }],
+      owned: [{
+        id: "valid-owned",
+        kind: "pageNote",
+        pageIndex: 0,
+        createdAt: "2026-08-11T00:00:00.000Z",
+        updatedAt: "2026-08-11T00:00:00.000Z",
+        payload: { position: { x: 10, y: 100, width: 1, height: 1 }, comment: "Check" },
+      }],
+      source: [{
+        id: "valid-source",
+        subtype: "Highlight",
+        pageIndex: 0,
+        rect: { x: 10, y: 100, width: 1, height: 1 },
+        contents: "Source",
+        author: "Reviewer",
+        flags: [],
+        appearanceModes: [],
+        supportedAppearance: true,
+      }],
+    });
+
+    expect(labels.owned.size).toBe(0);
+    expect(labels.source.size).toBe(0);
+  });
+
+  it("omits labels for invalid annotation geometry with a safe outline", () => {
+    const labels = deriveAnnotationOutlineLabels({
+      documentGeneration: 4,
+      outline: {
+        status: "loaded-tree",
+        documentGeneration: 4,
+        items: [{
+          id: "safe",
+          label: "Safe",
+          pageContext: "Page 1",
+          target: {
+            documentGeneration: 4,
+            pageIndex: 0,
+            zoom: { mode: PdfZoomMode.FitPage, params: [] },
+            identity: "safe-target",
+          },
+          children: [],
+        }],
+      },
+      pages: [{ size: { width: 600, height: 800 }, crop: { left: 0, top: 0, bottom: 0 } }],
+      owned: [{
+        id: "invalid-owned",
+        kind: "pageNote",
+        pageIndex: 0,
+        createdAt: "2026-08-11T00:00:00.000Z",
+        updatedAt: "2026-08-11T00:00:00.000Z",
+        payload: { position: { x: Number.NaN, y: 1, width: 1, height: 1 }, comment: "Check" },
+      }],
+      source: [{
+        id: "invalid-source",
+        subtype: "Highlight",
+        pageIndex: 0,
+        rect: { x: Number.NaN, y: 1, width: 1, height: 1 },
+        contents: "Source",
+        author: "Reviewer",
+        flags: [],
+        appearanceModes: [],
+        supportedAppearance: true,
+      }],
+    });
+
+    expect(labels.owned.size).toBe(0);
+    expect(labels.source.size).toBe(0);
+  });
+
+  it("suppresses labels until source identity and navigation generation are current", () => {
+    const current = {
+      sourceIdentity: "new-source",
+      activeSourceIdentity: "new-source",
+      navigationGeneration: 5,
+      outlineGeneration: 5,
+    };
+    expect(canDeriveAnnotationOutlineLabels(current)).toBe(true);
+    expect(canDeriveAnnotationOutlineLabels({
+      ...current,
+      activeSourceIdentity: "old-source",
+    })).toBe(false);
+    expect(canDeriveAnnotationOutlineLabels({
+      ...current,
+      navigationGeneration: 4,
+    })).toBe(false);
+  });
+
   it("makes viewer, automatic save identity, review commands, and Codex reachable together", () => {
     const state = {
       ...createReviewState({

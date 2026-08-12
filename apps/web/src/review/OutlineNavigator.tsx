@@ -17,6 +17,7 @@ export interface OutlineNavigatorProps {
   readonly discovery: PdfOutlineDiscovery;
   readonly currentItemId: string | null;
   readonly onActivate: (item: PdfOutlineItem) => void;
+  readonly onOpenReference: (item: PdfOutlineItem) => void;
   readonly onFocusTokenChange?: (token: string) => void;
 }
 
@@ -24,6 +25,7 @@ export function OutlineNavigator({
   discovery,
   currentItemId,
   onActivate,
+  onOpenReference,
   onFocusTokenChange,
 }: OutlineNavigatorProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(
@@ -73,9 +75,15 @@ export function OutlineNavigator({
         const destinationLabel = item.pageContext && item.label !== item.pageContext
           ? `${item.label}, ${item.pageContext}`
           : item.label;
+        const pageNumber = item.target && item.pageContext && item.label !== item.pageContext
+          ? item.target.pageIndex + 1
+          : null;
         return (
           <li key={item.id} data-outline-item={item.id}>
-            <div className="outline-navigator__row">
+            <div
+              className="outline-navigator__row"
+              data-current={currentItemId === item.id ? 'true' : undefined}
+            >
               {hasChildren ? (
                 <button
                   type="button"
@@ -101,11 +109,29 @@ export function OutlineNavigator({
                   if (item.target) onActivate(item);
                 }}
               >
-                <span>{item.label}</span>
-                {item.pageContext && item.label !== item.pageContext
-                  ? <small>{item.pageContext}</small>
-                  : null}
+                <span className="outline-navigator__summary">
+                  <span className="outline-navigator__title">{item.label}</span>
+                  {pageNumber === null
+                    ? null
+                    : (
+                      <small className="outline-navigator__page" aria-hidden="true">
+                        · {pageNumber}
+                      </small>
+                    )}
+                </span>
               </button>
+              {item.target === null ? null : (
+                <button
+                  type="button"
+                  className="outline-navigator__reference"
+                  aria-label={`Open ${destinationLabel} in References`}
+                  title="Open in References"
+                  onFocus={() => onFocusTokenChange?.(`outline-reference:${item.id}`)}
+                  onClick={() => onOpenReference(item)}
+                >
+                  <ReviewIcon name="references" />
+                </button>
+              )}
             </div>
             {hasChildren ? (
               <div id={childrenId} hidden={!isExpanded} inert={!isExpanded}>

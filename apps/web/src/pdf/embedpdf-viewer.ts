@@ -9,6 +9,10 @@ import { SelectionPluginPackage } from '@embedpdf/plugin-selection/react';
 import { ViewportPluginPackage } from '@embedpdf/plugin-viewport/react';
 import { ZoomPluginPackage } from '@embedpdf/plugin-zoom/react';
 import type { LoadDocumentUrlOptions } from '@embedpdf/plugin-document-manager';
+import {
+  VIEWER_ZOOM_MAX_PERCENT,
+  VIEWER_ZOOM_MIN_PERCENT,
+} from './viewer-controls.js';
 import { PDF_LINK_INTERACTION_ATTRIBUTE } from './viewer-interaction-events.js';
 import { MAIN_PDF_DOCUMENT_ID } from './viewer-document-ids.js';
 
@@ -50,7 +54,10 @@ export function createLocalPdfiumViewerPlugins(
     }),
     createPluginRegistration(ViewportPluginPackage),
     createPluginRegistration(ScrollPluginPackage),
-    createPluginRegistration(ZoomPluginPackage),
+    createPluginRegistration(ZoomPluginPackage, {
+      minZoom: VIEWER_ZOOM_MIN_PERCENT / 100,
+      maxZoom: VIEWER_ZOOM_MAX_PERCENT / 100,
+    }),
     createPluginRegistration(RenderPluginPackage),
     createPluginRegistration(SelectionPluginPackage, {
       marquee: { enabled: false },

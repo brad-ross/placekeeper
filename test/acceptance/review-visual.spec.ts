@@ -102,7 +102,14 @@ test('installed real PDF reading', async ({ page }) => {
 test('wide Annotation Tray', async ({ page }) => {
   const product = await openScene(page, 'tray');
   await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-workspace-presentation', 'right');
-  await page.getByRole('button', { name: /highlight · Page 1/u }).focus();
+  const annotation = page.getByRole('button', { name: /highlight · Page 1/u });
+  await annotation.focus();
+  await expect(annotation.locator('.annotation-item__page')).toHaveText('1');
+  await expect(annotation.locator('.annotation-item__separator')).toHaveCount(2);
+  await expect(annotation.locator('.annotation-item__section')).toHaveAttribute(
+    'title',
+    'Identification strategy and conditional comparison groups',
+  );
   await expectScene(product, 'wide-annotation-tray.png');
 });
 
@@ -116,7 +123,26 @@ test('narrow Annotation Tray', async ({ page }) => {
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
-  await page.getByRole('button', { name: /highlight · Page 1/u }).focus();
+  const annotation = page.getByRole('button', { name: /highlight · Page 1/u });
+  await annotation.focus();
+  const section = annotation.locator('.annotation-item__section');
+  const sectionGeometry = await section.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      overflow: style.overflow,
+      textOverflow: style.textOverflow,
+      whiteSpace: style.whiteSpace,
+    };
+  });
+  expect(sectionGeometry.clientWidth).toBeLessThanOrEqual(128);
+  expect(sectionGeometry.scrollWidth).toBeGreaterThan(sectionGeometry.clientWidth);
+  expect(sectionGeometry).toMatchObject({
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  });
   await expectScene(product, 'narrow-annotation-tray.png');
 });
 

@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
 import { documentOrderedItems } from './annotation-projection.js';
+import { AnnotationMetadata, annotationAccessibleLabel } from './AnnotationMetadata.js';
 import { ReviewIcon } from './ReviewIcon.js';
 
 export interface AnnotationListProps {
@@ -8,6 +9,7 @@ export interface AnnotationListProps {
   activeId?: string;
   correspondingId?: string;
   activationRequest?: { readonly id: string; readonly token: number };
+  sectionLabels?: ReadonlyMap<string, string>;
   onNavigate(item: ReviewItem): void;
   onCorrespondenceChange?(id: string | undefined): void;
   onEdit(item: ReviewItem, trigger: HTMLButtonElement): void;
@@ -31,6 +33,7 @@ export function AnnotationList({
   activeId,
   correspondingId,
   activationRequest,
+  sectionLabels,
   onNavigate,
   onCorrespondenceChange,
   onEdit,
@@ -95,10 +98,7 @@ export function AnnotationList({
   return (
     <section className="annotation-drawer__owned" data-annotation-origin="owned" aria-label="Owned annotations">
       <header className="annotation-drawer__header">
-        <div>
-          <p className="annotation-drawer__eyebrow">Review comments</p>
-          <h2>Annotations <span className="annotation-drawer__count">{ordered.length}</span></h2>
-        </div>
+        <h2>Annotations <span className="annotation-drawer__count">{ordered.length}</span></h2>
       </header>
       {direction ? (
         <p className="annotation-direction-cue" data-correspondence-direction={direction}>
@@ -111,6 +111,7 @@ export function AnnotationList({
           const text = payloadText(item);
           const active = activeId === item.id;
           const corresponding = correspondingId === item.id;
+          const sectionLabel = sectionLabels?.get(item.id);
           return (
             <li
               key={item.id}
@@ -138,12 +139,19 @@ export function AnnotationList({
                 }}
                 type="button"
                 className="annotation-item__content"
-                aria-label={`${item.kind} · Page ${item.pageIndex + 1}${text ? ` · ${text}` : ''}`}
+                aria-label={annotationAccessibleLabel({
+                  kind: item.kind,
+                  pageNumber: item.pageIndex + 1,
+                  ...(sectionLabel === undefined ? {} : { sectionLabel }),
+                  ...(text ? { excerpt: text } : {}),
+                })}
                 onClick={() => onNavigate(item)}
               >
-                <span className="annotation-item__meta">
-                  <strong>{item.kind}</strong><span className="annotation-item__page">Page {item.pageIndex + 1}</span>
-                </span>
+                <AnnotationMetadata
+                  kind={item.kind}
+                  pageNumber={item.pageIndex + 1}
+                  {...(sectionLabel === undefined ? {} : { sectionLabel })}
+                />
                 {text ? <span className="annotation-item__excerpt">{text}</span> : null}
               </button>
               {item.kind === 'delete' ? null : (
