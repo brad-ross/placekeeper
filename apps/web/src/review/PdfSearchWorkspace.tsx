@@ -72,7 +72,7 @@ export function PdfSearchWorkspace({
     () => filterPdfSearchSymbolSuggestions(state.symbolCatalog, state.query),
     [state.query, state.symbolCatalog],
   );
-  const showSymbolSuggestions = symbolSuggestionsOpen && state.symbolCatalog.length > 0;
+  const showSymbolSuggestions = symbolSuggestionsOpen && symbolSuggestions.length > 0;
   const statusAnnouncement = indexing
     ? state.message || 'Searching this PDF.'
     : !hasEffectiveQuery
@@ -165,9 +165,6 @@ export function PdfSearchWorkspace({
                 <span>{symbol.label}</span>
               </button>
             ))}
-            {symbolSuggestions.length === 0 ? (
-              <span className="pdf-search__symbol-empty">No matching symbols in this PDF.</span>
-            ) : null}
           </div>
         ) : null}
       </div>

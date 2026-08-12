@@ -664,12 +664,12 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('button', { name: 'Close annotations' })).toHaveCount(0);
     await closeWorkspace(page);
     await openAnnotationsWorkspace(page);
-    const entry = page.getByRole('button', { name: /replace · Page 1/ });
+    const entry = page.getByRole('button', { name: /Replace · Page 1/ });
     await entry.focus();
     await expect(entry).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(page.locator('[data-navigated]')).not.toHaveAttribute('data-navigated', 'none');
-    const deleteEntry = page.getByRole('button', { name: 'Delete replace on page 1' });
+    const deleteEntry = page.getByRole('button', { name: 'Remove Replace annotation on page 1' });
     await deleteEntry.focus();
     await page.keyboard.press('Enter');
     await expect(page.getByLabel('Annotations in document order')).toBeFocused();
@@ -685,8 +685,8 @@ test.describe('canonical review workflow', () => {
     await expect(drawer).toHaveAttribute('data-workspace-presentation', 'bottom');
 
     const row = drawer.locator('[data-annotation-origin="owned"][data-annotation-kind="delete"]');
-    const content = row.getByRole('button', { name: /delete · Page 1/u });
-    const action = row.getByRole('button', { name: 'Delete delete on page 1' });
+    const content = row.getByRole('button', { name: /Delete · Page 1/u });
+    const action = row.getByRole('button', { name: 'Remove Delete annotation on page 1' });
     await content.focus();
 
     await expect(action).toHaveAttribute('title', 'Delete annotation');
@@ -737,12 +737,12 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Keep without comment' }).click();
     const { annotations, workspace } = await openAnnotationsWorkspace(page);
 
-    const edit = page.getByRole('button', { name: 'Edit highlight on page 1' });
+    const edit = page.getByRole('button', { name: 'Edit Highlight annotation on page 1' });
     await expect(edit).toHaveAttribute('title', 'Edit annotation');
     await expect(edit.locator('svg')).toHaveCount(1);
     await expect(edit).toHaveText('');
     await edit.click();
-    const editor = page.getByRole('dialog', { name: 'Edit highlight' });
+    const editor = page.getByRole('dialog', { name: 'Edit Highlight' });
     await expect(editor).toBeVisible();
     await editor.getByRole('textbox', { name: 'Comment (optional)' }).fill('Edited in the open tray.');
     await editor.getByRole('button', { name: 'Save comment' }).click();
@@ -750,7 +750,7 @@ test.describe('canonical review workflow', () => {
     await expect(editor).toHaveCount(0);
     await expect(workspace).toHaveAttribute('aria-expanded', 'true');
     await expect(annotations).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByRole('button', { name: /highlight · Page 1 · Edited in the open tray\./u })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Highlight · Page 1 · Edited in the open tray\./u })).toBeVisible();
   });
 
   test('removes spatial disclosure motion when reduced motion is requested', async ({ page }) => {
@@ -901,7 +901,7 @@ test.describe('canonical review workflow', () => {
     await markTarget.focus();
     const peek = page.locator('[data-annotation-peek]');
     await expect(peek).toBeVisible();
-    await expect(peek).toContainText('highlight');
+    await expect(peek).toContainText('Highlight');
     await expect(peek).not.toContainText('Page 1');
     await expect(peek.getByRole('button')).toHaveCount(0);
     await canvas.click();
@@ -913,7 +913,7 @@ test.describe('canonical review workflow', () => {
     await expect(drawer).toHaveAttribute('data-tools-workspace-open', 'true');
     const row = page.locator('[data-review-item]').first();
     await expect(row).toHaveAttribute('data-active', 'true');
-    await expect(row.getByRole('button', { name: /highlight · Page 1/ })).toBeFocused();
+    await expect(row.getByRole('button', { name: /Highlight · Page 1/ })).toBeFocused();
     expect(await canvas.boundingBox()).toEqual(beforeActivation);
 
     const existing = page.getByRole('region', { name: 'External Annotations (read only)' });
@@ -952,7 +952,7 @@ test.describe('canonical review workflow', () => {
     await page.keyboard.press('Enter');
     const selected = page.locator('[data-review-item][data-active="true"]');
     await expect(selected).toHaveCount(1);
-    await expect(selected.getByRole('button', { name: /highlight · Page 1/ })).toBeFocused();
+    await expect(selected.getByRole('button', { name: /Highlight · Page 1/ })).toBeFocused();
     expect(await drawer.evaluate((element) => element.scrollTop)).toBeGreaterThan(scrollBefore);
   });
 });

@@ -4,11 +4,23 @@ export interface AnnotationMetadataProps {
   readonly sectionLabel?: string;
 }
 
+const ANNOTATION_KIND_LABELS: Readonly<Record<string, string>> = {
+  delete: 'Delete',
+  highlight: 'Highlight',
+  insert: 'Insert',
+  pageNote: 'Page Note',
+  replace: 'Replace',
+};
+
+export function annotationKindLabel(kind: string): string {
+  return ANNOTATION_KIND_LABELS[kind] ?? kind;
+}
+
 export function annotationAccessibleLabel(input: AnnotationMetadataProps & {
   readonly excerpt?: string;
 }): string {
   return [
-    input.kind,
+    annotationKindLabel(input.kind),
     `Page ${input.pageNumber}`,
     input.sectionLabel,
     input.excerpt,
@@ -18,7 +30,7 @@ export function annotationAccessibleLabel(input: AnnotationMetadataProps & {
 export function AnnotationMetadata({ kind, pageNumber, sectionLabel }: AnnotationMetadataProps) {
   return (
     <span className="annotation-item__meta" aria-hidden="true">
-      <strong>{kind}</strong>
+      <strong>{annotationKindLabel(kind)}</strong>
       <span className="annotation-item__separator">·</span>
       <span className="annotation-item__page">{pageNumber}</span>
       {sectionLabel ? (

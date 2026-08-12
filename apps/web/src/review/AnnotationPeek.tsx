@@ -1,4 +1,5 @@
 import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
+import { annotationKindLabel } from './AnnotationMetadata.js';
 
 function meaningfulPayload(item: ReviewItem): string {
   for (const field of ['proposedText', 'comment', 'quote', 'nearbyText']) {
@@ -14,6 +15,7 @@ export interface AnnotationPeekProps {
 }
 
 export function AnnotationPeek({ item, onHoldChange }: AnnotationPeekProps) {
+  const kindLabel = annotationKindLabel(item.kind);
   return (
     <aside
       className="annotation-peek"
@@ -21,11 +23,11 @@ export function AnnotationPeek({ item, onHoldChange }: AnnotationPeekProps) {
       data-annotation-origin="owned"
       data-annotation-kind={item.kind}
       data-annotation-state="preview"
-      aria-label={`${item.kind} annotation preview`}
+      aria-label={`${kindLabel} annotation preview`}
       onPointerEnter={() => onHoldChange(true)}
       onPointerLeave={() => onHoldChange(false)}
     >
-      <p className="annotation-peek__meta"><strong>{item.kind}</strong></p>
+      <p className="annotation-peek__meta"><strong>{kindLabel}</strong></p>
       <p className="annotation-peek__excerpt">{meaningfulPayload(item)}</p>
     </aside>
   );

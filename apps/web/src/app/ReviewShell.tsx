@@ -40,7 +40,11 @@ import type { PdfViewerNavigation } from '../pdf/viewer-navigation-adapter.js';
 import type { ViewerPdfLinkInvocation } from '../pdf/viewer-interaction-events.js';
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
 import { AnnotationList } from '../review/AnnotationList.js';
-import { AnnotationMetadata, annotationAccessibleLabel } from '../review/AnnotationMetadata.js';
+import {
+  AnnotationMetadata,
+  annotationAccessibleLabel,
+  annotationKindLabel,
+} from '../review/AnnotationMetadata.js';
 import type { AnnotationOutlineLabels } from '../review/annotation-outline-context.js';
 import { AnnotationPeek } from '../review/AnnotationPeek.js';
 import { CommentComposer } from '../review/CommentComposer.js';
@@ -1241,7 +1245,12 @@ export function ReviewShell(props: ReviewShellProps) {
           ) : null}
         </div>
       </div>
-      <div className="review-nested-host" data-review-nested-host>
+      <div
+        className="review-nested-host"
+        data-review-nested-host
+        hidden={props.saveOptionsOpen ?? false}
+        inert={props.saveOptionsOpen ?? false}
+      >
         {textDraft ? (
           <CommentComposer
             title={textDraft.kind === 'replace' ? 'Replacement text' : 'Insertion text'}
@@ -1307,7 +1316,7 @@ export function ReviewShell(props: ReviewShellProps) {
         ) : null}
         {composer?.kind === 'edit' && mutableField(composer.item) ? (
           <CommentComposer
-            title={`Edit ${composer.item.kind}`}
+            title={`Edit ${annotationKindLabel(composer.item.kind)}`}
             {...(composer.item.kind === 'replace' || composer.item.kind === 'insert'
               ? {
                   allowWhitespace: true,

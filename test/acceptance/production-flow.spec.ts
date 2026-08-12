@@ -432,7 +432,7 @@ test("searches extracted PDF text with variants, history, references, and retain
   await expect(searchPanel).not.toContainText("Exact symbol");
   await query.focus();
   await query.fill("lambda");
-  await expect(symbolSuggestions.getByRole("option")).toHaveCount(0);
+  await expect(symbolSuggestions).toBeHidden();
 
   await query.fill("degree");
   await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
@@ -2018,7 +2018,7 @@ test('edits the current page in a real multi-page viewer without losing adjacent
 
   const { annotations, workspace: workspaceRail } = await openAnnotationsWorkspace(page);
   const noteRow = page.getByRole('button', {
-    name: /pageNote · Page 1 · Keep this surrounding review state\./u,
+    name: /Page Note · Page 1 · Keep this surrounding review state\./u,
   });
   await expect(noteRow).toBeVisible();
   await page.getByRole('button', { name: 'Zoom in' }).click();
@@ -2476,7 +2476,7 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
     const box = await page.locator('#review-tools-workspace').boundingBox();
     return box === null ? Number.POSITIVE_INFINITY : Math.abs(box.x + box.width - 320);
   }).toBeLessThanOrEqual(1);
-  await page.getByRole('button', { name: /highlight · Page 1 · Existing supported highlight/iu }).click();
+  await page.getByRole('button', { name: /Highlight · Page 1 · Existing supported highlight/iu }).click();
   await expect.poll(async () => {
     const box = await page.locator('#review-tools-workspace').boundingBox();
     return box === null ? Number.POSITIVE_INFINITY : Math.abs(box.x + box.width - 320);

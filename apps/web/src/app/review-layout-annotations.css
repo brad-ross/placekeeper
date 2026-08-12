@@ -563,15 +563,9 @@
   text-align: center;
 }
 
-.pdf-search__symbol-suggestions button > span:last-child,
-.pdf-search__symbol-empty {
+.pdf-search__symbol-suggestions button > span:last-child {
   color: var(--review-ink-muted);
   font-size: 11px;
-}
-
-.pdf-search__symbol-empty {
-  display: block;
-  padding: 7px 8px;
 }
 
 .pdf-search__message {

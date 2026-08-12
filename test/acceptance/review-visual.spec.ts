@@ -102,7 +102,7 @@ test('installed real PDF reading', async ({ page }) => {
 test('wide Annotation Tray', async ({ page }) => {
   const product = await openScene(page, 'tray');
   await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-workspace-presentation', 'right');
-  const annotation = page.getByRole('button', { name: /highlight · Page 1/u });
+  const annotation = page.getByRole('button', { name: /Highlight · Page 1/u });
   await annotation.focus();
   await expect(annotation.locator('.annotation-item__page')).toHaveText('1');
   await expect(annotation.locator('.annotation-item__separator')).toHaveCount(2);
@@ -123,7 +123,7 @@ test('narrow Annotation Tray', async ({ page }) => {
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
-  const annotation = page.getByRole('button', { name: /highlight · Page 1/u });
+  const annotation = page.getByRole('button', { name: /Highlight · Page 1/u });
   await annotation.focus();
   const section = annotation.locator('.annotation-item__section');
   const sectionGeometry = await section.evaluate((element) => {
