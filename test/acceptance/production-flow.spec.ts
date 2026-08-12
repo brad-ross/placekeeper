@@ -1783,7 +1783,8 @@ test("collapses an outline-free PDF to Annotations and restores workspace focus"
   expect(modeBarBounds).not.toBeNull();
   expect(annotationsModeBounds).not.toBeNull();
   const visibleModeCount = await modes.getByRole('tab').count();
-  expect([1, 2]).toContain(visibleModeCount);
+  await expect(modes.getByRole('tab')).toHaveText(['Search', 'Annotations', 'References']);
+  expect(visibleModeCount).toBe(3);
   expect(Math.abs(
     annotationsModeBounds!.width - modeBarBounds!.width / visibleModeCount,
   )).toBeLessThan(10);

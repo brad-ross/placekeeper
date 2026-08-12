@@ -305,10 +305,16 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     if (current.currentness !== "current") {
       throw new Error("Installed UserPromptSubmit hook did not receive current PDF context");
     }
-    const promptContext = JSON.stringify(current);
     const installedCommand = '"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader"';
-    if (!promptContext.includes(`${installedCommand} context items`) ||
-      /(^|[^/A-Za-z0-9_-])pdf-proofreader\s+(context|daemon)\b/mu.test(promptContext)) {
+    const evidence = current.evidence;
+    if (typeof evidence !== "object" || evidence === null || Array.isArray(evidence)) {
+      throw new Error("Installed prompt context omitted evidence retrieval instructions");
+    }
+    const publishedInstructions = Object.values(evidence)
+      .filter((value): value is string => typeof value === "string")
+      .join("\n");
+    if (!publishedInstructions.includes(`${installedCommand} context items`) ||
+      /(^|[^/A-Za-z0-9_-])pdf-proofreader\s+(context|daemon)\b/mu.test(publishedInstructions)) {
       throw new Error("Installed prompt context did not publish only canonical retriever commands");
     }
 
