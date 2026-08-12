@@ -1,6 +1,6 @@
 # PDF Proofreader
 
-PDF Proofreader is a personal, local-only macOS app for marking up text-native PDFs with Replace, Delete, Insert, Highlight, and Page Note feedback. It produces a portable reviewed PDF and an optional source-aware Codex handoff from one recoverable review session.
+PDF Proofreader is a personal, local-only macOS app for marking up text-native PDFs with Replace, Delete, Insert, Highlight, and Page Note feedback. It produces a portable reviewed PDF from a recoverable review session and, when opened by its Codex plugin, supplies task-scoped live PDF and annotation context automatically.
 
 ## Install
 

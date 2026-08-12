@@ -1,6 +1,5 @@
 import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
 import type {
-  PreparedProductionHandoff,
   ProductionSession,
   ProductionSessionApi,
   ProductionScope,
@@ -79,9 +78,7 @@ export async function loadProductionSession(session: ProductionSession): Promise
       chooseOriginal: () => post<ProductionSaveStatus>("/save/original"),
       retrySave: () => post<ProductionSaveStatus>("/save/retry"),
       locateSave: () => post<ProductionSaveStatus>("/save/locate"),
-      prepareCodex: () => post<PreparedProductionHandoff>("/delivery/codex/prepare"),
-      saveInstruction: (receiptId) => post("/delivery/codex/instruction", { receiptId }),
-      checkCodex: (input) => post("/delivery/codex/result", input),
+      scope: () => request<ProductionScope>("/scope"),
     },
   };
 }

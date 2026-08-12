@@ -70,7 +70,7 @@ import {
   type ReferenceWorkspaceLayoutState,
   type RightWorkspaceMode,
 } from '../review/reference-workspace-layout.js';
-import { CodexDrawer } from './CodexDrawer.js';
+import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import {
   createProofreadInputController,
   isEditableTarget,
@@ -156,8 +156,7 @@ export interface ReviewShellProps {
   viewerState?: ViewerControlsSnapshot;
   viewerFraming?: ViewerFramingControls;
   viewerNavigation?: PdfViewerNavigation;
-  codexSlot?: ReactNode;
-  codexConfirmationActive?: boolean;
+  codexContext?: LiveContextBindingStatus;
   /** The production shell may control workspace visibility and retained navigation state. */
   workspaceOpen?: boolean;
   navigationState?: ReferenceNavigationState;
@@ -202,7 +201,6 @@ export function controlledWorkspaceSurfaceAction(input: {
   readonly transientSurface: 'none' | 'selection-actions' | 'insert-action' | 'page-menu' | 'page-note-cursor';
   readonly mode: WorkspaceMode;
 }): ReviewSurfaceAction | null {
-  if (input.baseSurface === 'finish') return null;
   if (input.open) {
     return input.baseSurface !== 'workspace' || input.transientSurface !== 'none'
       ? { type: 'open-workspace', mode: input.mode }
@@ -213,8 +211,8 @@ export function controlledWorkspaceSurfaceAction(input: {
     : null;
 }
 
-export function workspaceIsVisible(requestedOpen: boolean, baseSurface: ReviewBaseSurface): boolean {
-  return requestedOpen && baseSurface !== 'finish';
+export function workspaceIsVisible(requestedOpen: boolean, _baseSurface: ReviewBaseSurface): boolean {
+  return requestedOpen;
 }
 
 interface PointerScrollGesture {
@@ -327,21 +325,20 @@ export function ReviewShell(props: ReviewShellProps) {
     if (props.referenceLayoutState === undefined) dispatchLocalReferenceLayout(action);
     props.onReferenceLayoutAction?.(action);
   };
-  const finishOpen = surface.baseSurface === 'finish';
-  const referenceSurfaceOpen = !finishOpen && (effectiveReferenceLayout.kind === 'narrow-unified'
+  const referenceSurfaceOpen = effectiveReferenceLayout.kind === 'narrow-unified'
     ? effectiveReferenceLayout.open
     : effectiveReferenceLayout.referenceDock === 'right'
       ? effectiveReferenceLayout.rightWorkspaceOpen
-      : effectiveReferenceLayout.bottomReferencesOpen);
-  const rightSurfaceOpen = !finishOpen && effectiveReferenceLayout.kind !== 'narrow-unified'
+      : effectiveReferenceLayout.bottomReferencesOpen;
+  const rightSurfaceOpen = effectiveReferenceLayout.kind !== 'narrow-unified'
     && effectiveReferenceLayout.rightWorkspaceOpen;
   const sharedWorkspace = effectiveReferenceLayout.kind === 'narrow-unified'
     || effectiveReferenceLayout.referenceDock === 'right';
-  const toolsSurfaceOpen = !finishOpen && (effectiveReferenceLayout.kind === 'narrow-unified'
+  const toolsSurfaceOpen = effectiveReferenceLayout.kind === 'narrow-unified'
     ? effectiveReferenceLayout.open
     : effectiveReferenceLayout.referenceDock === 'bottom'
       ? rightSurfaceOpen
-      : referenceSurfaceOpen);
+      : referenceSurfaceOpen;
   const requestedEffectiveWorkspaceMode = effectiveReferenceLayout.kind === 'narrow-unified'
     ? effectiveReferenceLayout.activeMode
     : effectiveReferenceLayout.referenceDock === 'bottom' ? rightWorkspaceMode : visibleWorkspaceMode;
@@ -417,19 +414,6 @@ export function ReviewShell(props: ReviewShellProps) {
     if (props.keyboardPageNoteActive) props.onCancelKeyboardPageNote?.();
     if (props.pageMenu) props.onPageMenuDismiss?.(props.pageMenu.invocationId);
   };
-  const clearActiveAnnotation = () => {
-    if (activeItemId === undefined) return;
-    setActiveItemId(undefined);
-    props.onActiveItemChange?.(undefined);
-  };
-  const transitionBaseSurface = (surfaceName: ReviewBaseSurface) => {
-    dismissPageNoteAuthority();
-    if (surface.baseSurface === 'workspace' && surfaceName === 'finish') {
-      clearActiveAnnotation();
-    }
-    dispatchSurface({ type: 'open-base', surface: surfaceName });
-  };
-
   const clearPeekTimer = () => {
     if (peekTimerRef.current !== undefined) clearTimeout(peekTimerRef.current);
     peekTimerRef.current = undefined;
@@ -472,15 +456,6 @@ export function ReviewShell(props: ReviewShellProps) {
     props.onWorkspaceModeChange?.('annotations');
   }, [props.activationRequest?.id, props.activationRequest?.token]);
 
-  const rememberSurfaceTrigger = (surfaceName: ReviewBaseSurface) => {
-    if (document.activeElement instanceof HTMLElement) {
-      surfaceTriggersRef.current.set(surfaceName, document.activeElement);
-    }
-  };
-  const openBase = (surfaceName: ReviewBaseSurface) => {
-    rememberSurfaceTrigger(surfaceName);
-    transitionBaseSurface(surface.baseSurface === surfaceName ? 'reading' : surfaceName);
-  };
   const selectWorkspaceMode = (mode: WorkspaceMode) => {
     if (mode === 'annotations' && (!workspaceOpen || workspaceMode !== 'annotations')) {
       setWorkspaceRequest({ kind: 'reading', token: ++annotationRequestTokenRef.current });
@@ -495,11 +470,6 @@ export function ReviewShell(props: ReviewShellProps) {
     });
     props.onWorkspaceModeChange?.(mode);
   };
-  const restoreSurfaceTrigger = (surfaceName: ReviewBaseSurface) => {
-    const trigger = surfaceTriggersRef.current.get(surfaceName);
-    requestAnimationFrame(() => trigger?.focus({ preventScroll: true }));
-  };
-
   if (props.state.revision >= acknowledgedRef.current.revision) acknowledgedRef.current = props.state;
 
   const submit = (
@@ -629,14 +599,6 @@ export function ReviewShell(props: ReviewShellProps) {
         closeNested();
         return;
       }
-      if (
-        surface.baseSurface === 'finish' &&
-        (event.currentTarget.querySelector('[role="alertdialog"]') !== null ||
-          (event.target instanceof Element && event.target.closest('[role="alertdialog"]')) ||
-          props.codexConfirmationActive)
-      ) {
-        return;
-      }
       if (props.keyboardPageNoteActive) {
         event.preventDefault();
         props.onCancelKeyboardPageNote?.();
@@ -651,8 +613,7 @@ export function ReviewShell(props: ReviewShellProps) {
       }
       if (anyWorkspaceOpen || surface.baseSurface !== 'reading') {
         event.preventDefault();
-        if (anyWorkspaceOpen) closeWorkspace();
-        else closeFinish();
+        closeWorkspace();
         return;
       }
     }
@@ -784,10 +745,6 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const canUndo = props.state.historyCursor > 0;
   const canRedo = props.state.historyCursor < props.state.history.length;
-  const closeFinish = () => {
-    transitionBaseSurface('reading');
-    restoreSurfaceTrigger('finish');
-  };
   const closeWorkspace = () => {
     dismissPageNoteAuthority();
     const closingReferences = effectiveWorkspaceMode === 'references';
@@ -917,12 +874,11 @@ export function ReviewShell(props: ReviewShellProps) {
         canRedo={canRedo}
         canNavigateBack={props.canNavigateBack ?? false}
         canNavigateForward={props.canNavigateForward ?? false}
-        finishOpen={finishOpen}
+        {...(props.codexContext === undefined ? {} : { codexContext: props.codexContext })}
         onUndo={() => void submit(undoReview)}
         onRedo={() => void submit(redoReview)}
         onNavigateBack={() => props.onNavigateBack?.()}
         onNavigateForward={() => props.onNavigateForward?.()}
-        onFinish={() => openBase('finish')}
       />
       <div
         ref={workspaceFraming.stageRef}
@@ -946,7 +902,7 @@ export function ReviewShell(props: ReviewShellProps) {
       >
         <div className="review-document">{props.children}</div>
         <div className="review-contextual-host" data-review-contextual-host>
-          {surface.baseSurface !== 'finish' && selectionActionsAvailable && props.selectionPlacement ? (
+          {selectionActionsAvailable && props.selectionPlacement ? (
             <ContextActionPalette
               kind="selection"
               placement={props.selectionPlacement}
@@ -999,7 +955,7 @@ export function ReviewShell(props: ReviewShellProps) {
           })() : null}
         </div>
         <div className="review-drawer-host" data-review-drawer-host>
-          {finishOpen ? null : effectiveReferenceLayout.kind === 'narrow-unified' ? (
+          {effectiveReferenceLayout.kind === 'narrow-unified' ? (
             <WorkspaceEdgeRail
               buttonRef={bottomWorkspaceRailRef}
               surface="bottom"
@@ -1216,13 +1172,6 @@ export function ReviewShell(props: ReviewShellProps) {
               onCommit={workspaceFraming.requestSettledReframe}
             />
           ) : null}
-          <CodexDrawer
-            state={props.state}
-            open={surface.baseSurface === 'finish'}
-            onClose={closeFinish}
-          >
-            {props.codexSlot}
-          </CodexDrawer>
         </div>
       </div>
       <div className="review-nested-host" data-review-nested-host>

@@ -882,31 +882,6 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
 
-  test('supersedes Page Note placement when opening the Codex drawer', async ({ page }) => {
-    const canvas = page.getByRole('application', { name: 'PDF review canvas' });
-    const codex = page.getByRole('button', { name: 'Codex' });
-
-    await canvas.focus();
-    await page.keyboard.press('Alt+Shift+N');
-    await expect(page.getByRole('button', { name: 'Place Page Note' })).toBeVisible();
-    const { workspace } = await openAnnotationsWorkspace(page);
-
-    await expect(page.getByRole('button', { name: 'Place Page Note' })).toHaveCount(0);
-    await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
-    await page.keyboard.press('Escape');
-    await expect(workspace).toBeFocused();
-
-    await page.getByRole('button', { name: 'Open page actions' }).click();
-    await expect(page.getByRole('menu', { name: 'Page actions' })).toBeVisible();
-    await codex.click();
-
-    await expect(page.getByRole('menu', { name: 'Page actions' })).toHaveCount(0);
-    await expect(page.getByRole('heading', { name: 'Work with Codex' })).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(codex).toBeFocused();
-    await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
-  });
-
   test('delays a hoverable mark peek and opens one selected owned row without shifting the document', async ({ page }) => {
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     await page.getByRole('button', { name: 'Keep without comment' }).click();

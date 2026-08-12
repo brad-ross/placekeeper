@@ -31,10 +31,6 @@
     justify-content: center;
   }
 
-  .review-finish-drawer {
-    width: min(22rem, calc(100vw - 2.25rem));
-  }
-
   .annotation-peek {
     top: auto;
     right: .4rem;
@@ -172,16 +168,13 @@
 @media (prefers-reduced-motion: reduce) {
   .review-workspace,
   .review-tools-workspace,
-  .review-finish-drawer,
   .review-context-palette,
   .review-page-menu,
   .page-note-placement-cursor,
   .annotation-peek,
   .annotation-status__icon,
   .workspace-state .review-icon,
-  .pdf-workspace__loading .review-icon,
-  .review-delivery .lucide-loader-circle,
-  .finish-review-drawer__lifecycle .lucide-loader-circle {
+  .pdf-workspace__loading .review-icon {
     transition: none;
     animation: none;
   }

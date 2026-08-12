@@ -7,6 +7,8 @@ import {
   type ViewerControlsSnapshot,
 } from '../pdf/viewer-controls.js';
 import { ReviewIcon } from './ReviewIcon.js';
+import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
+import { CodexContextStatus } from './CodexContextStatus.js';
 
 export function validPageNumber(draft: string, totalPages: number): number | undefined {
   const normalized = draft.trim();
@@ -64,12 +66,11 @@ export interface ReviewChromeProps {
   readonly canRedo: boolean;
   readonly canNavigateBack?: boolean;
   readonly canNavigateForward?: boolean;
-  readonly finishOpen: boolean;
+  readonly codexContext?: LiveContextBindingStatus;
   readonly onUndo: () => void;
   readonly onRedo: () => void;
   readonly onNavigateBack?: () => void;
   readonly onNavigateForward?: () => void;
-  readonly onFinish: () => void;
   readonly onSaveOptions?: () => void;
 }
 
@@ -87,12 +88,11 @@ export function ReviewChrome({
   canRedo,
   canNavigateBack = false,
   canNavigateForward = false,
-  finishOpen,
+  codexContext,
   onUndo,
   onRedo,
   onNavigateBack = () => undefined,
   onNavigateForward = () => undefined,
-  onFinish,
   onSaveOptions = () => undefined,
 }: ReviewChromeProps) {
   const [editingPage, setEditingPage] = useState(false);
@@ -416,9 +416,11 @@ export function ReviewChrome({
           <button type="button" className="review-chrome__icon-control review-chrome__fit-width" data-review-zoom-action="fit-width" aria-label="Fit PDF to available width" aria-busy={fitWidthPending ? 'true' : 'false'} aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)} disabled={!viewerState.zoomReady || !fitWidthReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runFitWidth(event.currentTarget)}><ReviewIcon name="fit-width" /></button>
         </span>
       </div>
-      <nav className="review-chrome__actions" aria-label="Actions">
-        <button type="button" className="review-chrome__finish" aria-expanded={finishOpen} aria-controls="review-finish-drawer" onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); onFinish(); }}>Codex</button>
-      </nav>
+      {codexContext === undefined ? null : (
+        <div className="review-chrome__context" data-review-context-status>
+          <CodexContextStatus status={codexContext} />
+        </div>
+      )}
       {!viewerState.pageReady ? <p id={pageUnavailableId} className="sr-only">{viewerState.pageUnavailableReason}</p> : null}
       {!viewerState.zoomReady ? <p id={zoomUnavailableId} className="sr-only">{viewerState.zoomUnavailableReason}</p> : null}
       {viewerState.zoomReady && !fitWidthReady ? <p id={fitWidthUnavailableId} className="sr-only">Fit Width becomes available when PDF navigation is ready.</p> : null}

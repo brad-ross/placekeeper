@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { access, copyFile, mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
@@ -720,15 +720,10 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(mainWorkspace).toHaveAttribute("data-reference-main-mount", "stable");
   await expect(referenceWorkspace).toHaveAttribute("data-reference-mount", "stable");
 
-  const codex = page.getByRole('button', { name: 'Codex' });
-  await codex.click();
-  await expect(workspace).toHaveAttribute('data-workspace-open', 'false');
-  await expect(page.getByRole('heading', { name: 'Work with Codex' })).toBeVisible();
-  await expect(page.locator('[data-workspace-edge-rail]')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Close Codex options' }).click();
+  await expect(page.getByRole('button', { name: 'Codex' })).toHaveCount(0);
+  await expect(page.locator('[data-codex-context]')).toHaveCount(0);
   await expect(workspace).toHaveAttribute('data-workspace-open', 'true');
   await expect(primaryTab).toHaveAttribute('aria-selected', 'true');
-  await expect(primaryTab).toBeFocused();
 
   await detailTab.click();
   await expect(detailTab).toHaveAttribute("aria-selected", "true");
@@ -1567,8 +1562,9 @@ test("one installed-style browser tree preserves review state across responsive 
   await installSelectionCaptureGate(page);
   await page.goto(launchUrl);
   await expect(page.getByRole("button", { name: /paper\.pdf.*Open automatic save options/u })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Actions" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Codex delivery", includeHidden: true })).toBeHidden();
+  await expect(page.getByRole("navigation", { name: "Actions" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Codex" })).toHaveCount(0);
+  await expect(page.locator("[data-codex-context]")).toHaveCount(0);
   await expect(page.getByText(/Revision \d+/u)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Finish" })).toHaveCount(0);
   await expect.poll(() => assetResponses.some((url) => url.endsWith("/app.css"))).toBe(true);
@@ -1669,53 +1665,10 @@ test("one installed-style browser tree preserves review state across responsive 
   await expect(page.locator("[data-owned-mark='replace']")).toHaveCount(1);
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(page.locator("[data-owned-mark='replace']")).toHaveCount(1);
-  const canvasBoxBeforeCodex = await pageCanvas.boundingBox();
-
-  await page.getByRole("button", { name: "Codex" }).click();
-  await expect(page.getByRole("heading", { name: "Work with Codex" })).toBeVisible();
-  await expect.poll(async () => {
-    const box = await page.locator('#review-finish-drawer').boundingBox();
-    return box === null ? Number.POSITIVE_INFINITY : Math.abs(box.x + box.width - 1280);
-  }).toBeLessThanOrEqual(1);
-  await expect(page.getByText("1 annotation", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Codex delivery" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Codex" })).toHaveCount(0);
+  await expect(page.locator("[data-codex-context]")).toHaveCount(0);
   await expect(pageCanvas).toHaveCount(1);
   await expect(workspace).toHaveAttribute('data-mount-probe', 'stable');
-  expect(await pageCanvas.boundingBox()).toEqual(canvasBoxBeforeCodex);
-
-  await page.getByRole("button", { name: "Prepare Codex handoff" }).click();
-  const confirm = page.getByRole("alertdialog", { name: "Confirm this external data flow" });
-  await expect(confirm).toBeVisible();
-  await expect(confirm.getByRole("button", { name: "Confirm and prepare" })).toBeFocused();
-  await page.setViewportSize({ width: 320, height: 720 });
-  await expect(confirm).toBeVisible();
-  await expect(pageCanvas).toHaveCount(1);
-  await page.keyboard.press("Escape");
-  await expect(confirm).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Work with Codex" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Prepare Codex handoff" })).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("heading", { name: "Work with Codex", includeHidden: true })).toBeHidden();
-  await expect(page.getByRole("button", { name: "Codex" })).toBeFocused();
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByRole("button", { name: "Codex" }).click();
-  await page.getByRole("button", { name: "Prepare Codex handoff" }).click();
-  await expect(confirm).toBeVisible();
-  await expect(page.getByRole("definition").filter({ hasText: sourceRoot })).toBeVisible();
-  await confirm.getByRole("button", { name: "Confirm and prepare" }).click();
-  await expect(page.getByText(/^Handoff JSON:/u)).toBeVisible();
-  const handoffPath = (await page.getByText(/^Handoff JSON:/u).textContent())?.replace("Handoff JSON: ", "");
-  const codexReviewedPath = (await page.getByText(/^Reviewed PDF:/u).textContent())?.replace("Reviewed PDF: ", "");
-  expect(handoffPath).toBeTruthy();
-  expect(codexReviewedPath).toBeTruthy();
-  await access(handoffPath!);
-  await access(codexReviewedPath!);
-  expect((await realpath(handoffPath!)).startsWith(`${await realpath(sourceRoot)}/`)).toBe(true);
-  await expect(page.locator("#codex-instruction")).toContainText(handoffPath!);
-  await page.getByRole("button", { name: "Close Codex options" }).click();
-  await expect(page.getByText(/^Handoff JSON:/u)).toBeHidden();
-  await page.getByRole("button", { name: "Codex" }).click();
-  await expect(page.getByText(/^Handoff JSON:/u)).toHaveText(`Handoff JSON: ${handoffPath}`);
   expect(contactedOrigins).toEqual(new Set([new URL(launchUrl).origin]));
   expect(browserErrors).toEqual([]);
 });

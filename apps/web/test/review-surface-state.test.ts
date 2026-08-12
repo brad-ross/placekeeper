@@ -15,24 +15,22 @@ describe('review presentation state', () => {
       mode: 'annotations',
     });
     const nested = reduceReviewSurface(annotations, { type: 'open-nested' });
-    const finish = reduceReviewSurface(nested, { type: 'open-base', surface: 'finish' });
 
     expect(annotations).toMatchObject({ baseSurface: 'workspace', nestedLayer: 'none', transientSurface: 'none' });
     expect(annotations.navigation.workspace.lastMode).toBe('annotations');
     expect(nested).toMatchObject({ baseSurface: 'workspace', nestedLayer: 'composer', transientSurface: 'none' });
-    expect(finish).toMatchObject({ baseSurface: 'finish', nestedLayer: 'composer', transientSurface: 'none' });
   });
 
-  it('unwinds Escape from nested layer to base surface to reading', () => {
+  it('unwinds Escape from nested layer to reading', () => {
     const open = {
       ...createReviewSurfaceState(0),
-      baseSurface: 'finish',
+      baseSurface: 'workspace',
       nestedLayer: 'composer',
     } as const;
     const withoutNested = reduceReviewSurface(open, { type: 'escape' });
     const reading = reduceReviewSurface(withoutNested, { type: 'escape' });
 
-    expect(withoutNested).toMatchObject({ baseSurface: 'finish', nestedLayer: 'none', transientSurface: 'none' });
+    expect(withoutNested).toMatchObject({ baseSurface: 'workspace', nestedLayer: 'none', transientSurface: 'none' });
     expect(reading).toEqual(INITIAL_REVIEW_SURFACE_STATE);
     expect(reduceReviewSurface(reading, { type: 'escape' })).toBe(reading);
   });

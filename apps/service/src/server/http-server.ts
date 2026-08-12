@@ -13,7 +13,6 @@ import type { SessionBroker } from "../sessions/session-broker.js";
 import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
-const MAX_RESULT_BODY_BYTES = 16 * 1024 * 1024;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 
 function setBaseHeaders(
@@ -147,29 +146,10 @@ export interface WebAssetOptions {
 
 export interface LocalHttpServerOptions {
   readonly webAssets?: WebAssetOptions;
-  readonly delivery?: SessionDeliveryActions;
   readonly saving?: Pick<
     PdfSaveCoordinator,
     "proposal" | "chooseCopyFilename" | "chooseFolder" | "chooseOriginal" | "requestSave" | "retry" | "locate"
   >;
-}
-
-export interface SessionDeliveryActions {
-  prepareCodex(sessionId: string): Promise<{
-    readonly receiptId: string;
-    readonly prompt: string;
-    readonly handoffPath: string;
-    readonly handoffSha256: string;
-    readonly reviewedPdfPath: string;
-    readonly reviewedPdfSha256: string;
-    readonly resultDirectory: string;
-  }>;
-  saveInstruction(sessionId: string, receiptId: string): Promise<string>;
-  checkCodex(sessionId: string, input: {
-    readonly receiptId: string;
-    readonly dispositionText: string;
-    readonly revisedPdfSelected: boolean;
-  }): Promise<{ readonly status: "Complete" | "Partial" | "Invalid"; readonly message: string }>;
 }
 
 export interface LocalHttpServer {
@@ -198,18 +178,11 @@ export async function startHttpServer(
         `^/s/(${UUID})/save/(status|proposal|copy|folder|original|retry|locate)$`,
         "u",
       ).exec(pathname);
-      const deliveryMatch = new RegExp(
-        `^/s/(${UUID})/delivery/(codex/prepare|codex/instruction|codex/result)$`,
-        "u",
-      ).exec(pathname);
       const mutates = exchangeMatch !== null || commandMatch !== null ||
-        (saveMatch !== null && saveMatch[2] !== "status" && saveMatch[2] !== "proposal") ||
-        deliveryMatch !== null;
+        (saveMatch !== null && saveMatch[2] !== "status" && saveMatch[2] !== "proposal");
       const expectsJson = mutates;
       const contentLength = Number(request.headers["content-length"] ?? 0);
-      const bodyLimit = deliveryMatch?.[2] === "codex/result"
-        ? MAX_RESULT_BODY_BYTES
-        : MAX_BODY_BYTES;
+      const bodyLimit = MAX_BODY_BYTES;
       const failure = validateRequestSecurity(
         {
           method: request.method ?? "",
@@ -332,7 +305,7 @@ export async function startHttpServer(
       const documentMatch = new RegExp(`^/s/(${UUID})/document/(${UUID})$`, "u").exec(pathname);
       const authenticatedSessionId =
         stateMatch?.[1] ?? scopeMatch?.[1] ?? documentMatch?.[1] ?? commandMatch?.[1] ??
-        saveMatch?.[1] ?? deliveryMatch?.[1];
+        saveMatch?.[1];
       if (authenticatedSessionId !== undefined) {
         const credential = bearerCredential(request);
         if (
@@ -432,41 +405,6 @@ export async function startHttpServer(
           void options.saving?.requestSave(commandMatch[1]!);
         }
         sendJson(response, 200, next);
-        return;
-      }
-      if (deliveryMatch !== null) {
-        if (request.method !== "POST") {
-          send(response, 405, "Method not allowed");
-          return;
-        }
-        if (options.delivery === undefined) {
-          send(response, 503, "Delivery service is unavailable");
-          return;
-        }
-        const sessionId = deliveryMatch[1]!;
-        const action = deliveryMatch[2]!;
-        const body = await readJson(request, bodyLimit) as Record<string, unknown>;
-        if (action === "codex/prepare") {
-          sendJson(response, 200, await options.delivery.prepareCodex(sessionId));
-          return;
-        }
-        if (action === "codex/instruction") {
-          if (typeof body.receiptId !== "string") throw new SyntaxError("Invalid receipt");
-          sendJson(response, 200, {
-            path: await options.delivery.saveInstruction(sessionId, body.receiptId),
-          });
-          return;
-        }
-        if (
-          typeof body.receiptId !== "string" ||
-          typeof body.dispositionText !== "string" ||
-          typeof body.revisedPdfSelected !== "boolean"
-        ) throw new SyntaxError("Invalid selected result");
-        sendJson(response, 200, await options.delivery.checkCodex(sessionId, {
-          receiptId: body.receiptId,
-          dispositionText: body.dispositionText,
-          revisedPdfSelected: body.revisedPdfSelected,
-        }));
         return;
       }
       send(response, 404, "Not found");

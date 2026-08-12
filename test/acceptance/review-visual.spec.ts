@@ -198,13 +198,6 @@ test('Page Note composer', async ({ page }) => {
   await expectScene(product, 'page-note-composer.png');
 });
 
-test('Codex handoff', async ({ page }) => {
-  const product = await openScene(page, 'finish');
-  await page.getByRole('button', { name: 'Codex' }).click();
-  await expect(page.getByRole('heading', { name: 'Work with Codex' })).toBeVisible();
-  await expectScene(product, 'codex-handoff.png');
-});
-
 for (const state of ['loading', 'empty', 'error'] as const) {
   test(`exceptional annotation ${state}`, async ({ page }) => {
     const product = await openScene(page, `exceptional&exception=${state}`);

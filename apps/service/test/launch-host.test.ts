@@ -124,30 +124,43 @@ describe("persistent launch host", () => {
     expect(host.broker.taskBindings.bindingForTask("codex-task-a")).toBeUndefined();
   });
 
-  it("never exposes ambient Codex binding status to an ordinary browser launch", async () => {
-    const { pdf, host } = await fixture();
-    const launched = await host.open({ pdfPath: pdf, surface: "browser" });
-    if (!launched.ok || launched.kind === "recovery-offered") throw new Error("Expected launch");
-    const launch = new URL(launched.url);
-    const capability = new URLSearchParams(launch.hash.slice(1)).get("cap")!;
-    const exchanged = await fetch(`${launch.origin}/s/${launched.sessionId}/exchange`, {
-      method: "POST",
-      headers: {
-        origin: launch.origin,
-        "content-type": "application/json",
-        "sec-fetch-site": "same-origin",
-      },
-      body: JSON.stringify({ capability }),
-    });
-    const { credential } = await exchanged.json() as { credential: string };
-    const scope = await fetch(`${launch.origin}/s/${launched.sessionId}/scope`, {
-      headers: { authorization: `Bearer ${credential}` },
-    });
-    expect(await scope.json()).toMatchObject({ launchSurface: "browser" });
-    expect(await (await fetch(`${launch.origin}/s/${launched.sessionId}/scope`, {
-      headers: { authorization: `Bearer ${credential}` },
-    })).text()).not.toContain("codexContext");
-  });
+  it.each(["browser", "finder", "vscode"] as const)(
+    "never exposes ambient Codex binding status to a %s launch",
+    async (surface) => {
+      const { pdf, host } = await fixture();
+      const launched = await host.open({ pdfPath: pdf, surface });
+      if (!launched.ok || launched.kind === "recovery-offered") throw new Error("Expected launch");
+      const launch = new URL(launched.url);
+      const capability = new URLSearchParams(launch.hash.slice(1)).get("cap")!;
+      const exchanged = await fetch(`${launch.origin}/s/${launched.sessionId}/exchange`, {
+        method: "POST",
+        headers: {
+          origin: launch.origin,
+          "content-type": "application/json",
+          "sec-fetch-site": "same-origin",
+        },
+        body: JSON.stringify({ capability }),
+      });
+      const { credential } = await exchanged.json() as { credential: string };
+      const scope = await fetch(`${launch.origin}/s/${launched.sessionId}/scope`, {
+        headers: { authorization: `Bearer ${credential}` },
+      });
+      expect(await scope.json()).toMatchObject({ launchSurface: surface });
+      expect(await (await fetch(`${launch.origin}/s/${launched.sessionId}/scope`, {
+        headers: { authorization: `Bearer ${credential}` },
+      })).text()).not.toContain("codexContext");
+      expect((await fetch(`${launch.origin}/s/${launched.sessionId}/delivery/codex/prepare`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${credential}`,
+          origin: launch.origin,
+          "content-type": "application/json",
+          "sec-fetch-site": "same-origin",
+        },
+        body: "{}",
+      })).status).toBe(404);
+    },
+  );
 
   it("maps invalid input and unsupported roots to the two shared failures", async () => {
     const { root, pdf, host } = await fixture();

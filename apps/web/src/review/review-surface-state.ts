@@ -6,7 +6,7 @@ import {
   type WorkspaceMode,
 } from './reference-navigation-state.js';
 
-export type ReviewBaseSurface = 'reading' | 'workspace' | 'finish';
+export type ReviewBaseSurface = 'reading' | 'workspace';
 export type ReviewNestedLayer = 'none' | 'composer';
 export type ReviewTransientSurface = 'none' | 'selection-actions' | 'insert-action' | 'page-menu' | 'page-note-cursor';
 
