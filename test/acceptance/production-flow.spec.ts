@@ -18,6 +18,9 @@ let referencePdf = "";
 let searchPdf = "";
 let initialSessionId = "";
 
+const PRODUCTION_VIEWER_READY_TIMEOUT_MS = 15_000;
+const REFERENCE_READY_TIMEOUT_MS = 15_000;
+
 async function installSelectionCaptureGate(page: Page): Promise<void> {
   await page.addInitScript(() => {
     let holding = true;
@@ -110,6 +113,20 @@ async function openLinkInReferences(
   await page.keyboard.press("Enter");
 }
 
+async function expectReferenceReady(
+  page: Page,
+  tab: ReturnType<Page["locator"]>,
+): Promise<void> {
+  const retry = page.getByRole("button", { name: "Retry reference" });
+  await expect.poll(async () => (await tab.count()) + (await retry.count()), {
+    timeout: REFERENCE_READY_TIMEOUT_MS,
+  }).toBeGreaterThan(0);
+  if (await retry.isVisible()) await retry.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true", {
+    timeout: REFERENCE_READY_TIMEOUT_MS,
+  });
+}
+
 async function followLinkInSameReference(
   page: Page,
   link: ReturnType<Page["locator"]>,
@@ -178,8 +195,10 @@ async function openFreshProductionFixture(
   await page.goto(launched.url);
   try {
     await expect(page.locator("[data-production-review]")).toBeVisible();
+    await expect(page.locator(".pdf-workspace:not(.pdf-workspace--reference) [data-page-index='0']"))
+      .toBeVisible({ timeout: PRODUCTION_VIEWER_READY_TIMEOUT_MS });
   } catch (error) {
-    throw new Error(`${failureMessage}: ${startupErrors.join("; ") || "production root did not mount"}`, {
+    throw new Error(`${failureMessage}: ${startupErrors.join("; ") || "production viewer did not become ready"}`, {
       cause: error,
     });
   }
@@ -385,10 +404,8 @@ test("searches extracted PDF text with variants, history, references, and retain
 
   await exact.locator("[data-search-result]").first()
     .getByRole("button", { name: "Open result on page 1 in References" }).click();
-  await expect(page.getByRole("tab", { name: /stable, Page 1/u })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
+  const searchReferenceTab = page.getByRole("tab", { name: /stable, Page 1/u });
+  await expectReferenceReady(page, searchReferenceTab);
   const referenceWorkspace = page.locator(".pdf-workspace--reference");
   await expect(referenceWorkspace.locator(
     "[data-page-index='0'] [data-pdf-search-highlight][data-pdf-search-match-kind='exact']",
@@ -539,19 +556,13 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(primaryMenu).toHaveCount(0);
   await expect(primaryLink).not.toBeFocused();
 
-  await primaryLink.click();
-  await page.getByRole("menuitem", { name: /Open in References/u }).click();
+  await openLinkInReferences(page, primaryLink);
   const workspace = page.locator("[data-review-workspace]");
   await expect(workspace).toHaveAttribute("data-workspace-open", "true");
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "bottom");
   await expect(page.getByRole("button", { name: "Move References to right" })).toBeVisible();
   const primaryTab = page.getByRole("tab", { name: /Primary result/u });
-  const retryPrimaryReference = page.getByRole("button", { name: "Retry reference" });
-  await expect.poll(async () => (
-    (await primaryTab.count()) + (await retryPrimaryReference.count())
-  )).toBeGreaterThan(0);
-  if (await retryPrimaryReference.isVisible()) await retryPrimaryReference.click();
-  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+  await expectReferenceReady(page, primaryTab);
   await expect(primaryTab).toBeFocused();
   await expect.poll(() => workspace.evaluate((element) => getComputedStyle(element).transform))
     .toBe('none');
@@ -624,11 +635,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   }));
   await openLinkInReferences(page, detailLink);
   const detailTab = page.getByRole("tab", { name: /Target-to-target detail link/u });
-  const retryDetailReference = page.getByRole("button", { name: "Retry reference" });
-  await expect.poll(async () => (await detailTab.count()) + (await retryDetailReference.count()))
-    .toBeGreaterThan(0);
-  if (await retryDetailReference.isVisible()) await retryDetailReference.click();
-  await expect(detailTab).toHaveAttribute("aria-selected", "true");
+  await expectReferenceReady(page, detailTab);
   await expect(detailTab).toBeFocused();
   await expect(page.getByRole("tablist", { name: "Open references" }).getByRole("tab")).toHaveCount(2);
 
@@ -1026,16 +1033,12 @@ test("follows a PDF link in the same reference tab without moving main", async (
   const mainViewport = mainWorkspace.locator("[data-viewer-framing-viewport]");
   await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
 
-  await mainWorkspace.getByRole("button", {
+  const primaryLink = mainWorkspace.getByRole("button", {
     name: "Open PDF link to Primary result, Page 2",
-  }).click();
-  await page.getByRole("menuitem", { name: /Open in References/u }).click();
+  });
+  await openLinkInReferences(page, primaryLink);
   const primaryTab = page.getByRole("tab", { name: /Primary result/u });
-  const retryReference = page.getByRole("button", { name: "Retry reference" });
-  await expect.poll(async () => (await primaryTab.count()) + (await retryReference.count()))
-    .toBeGreaterThan(0);
-  if (await retryReference.isVisible()) await retryReference.click();
-  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+  await expectReferenceReady(page, primaryTab);
 
   const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
   const referenceViewport = referenceWorkspace.locator("[data-viewer-framing-viewport]");
@@ -1154,17 +1157,13 @@ test("switches and sends references from the right-docked workspace", async ({ p
   const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
   await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
 
-  await mainWorkspace.getByRole("button", {
+  const primaryLink = mainWorkspace.getByRole("button", {
     name: "Open PDF link to Primary result, Page 2",
-  }).click();
-  await page.getByRole("menuitem", { name: /Open in References/u }).click();
+  });
+  await openLinkInReferences(page, primaryLink);
   const workspace = page.locator("[data-review-workspace]");
   const primaryTab = page.getByRole("tab", { name: /Primary result/u });
-  const retryReference = page.getByRole("button", { name: "Retry reference" });
-  await expect.poll(async () => (await primaryTab.count()) + (await retryReference.count()))
-    .toBeGreaterThan(0);
-  if (await retryReference.isVisible()) await retryReference.click();
-  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+  await expectReferenceReady(page, primaryTab);
 
   const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
   const referenceViewport = referenceWorkspace.locator("[data-viewer-framing-viewport]");
@@ -1179,10 +1178,7 @@ test("switches and sends references from the right-docked workspace", async ({ p
   }));
   await openLinkInReferences(page, detailLink);
   const detailTab = page.getByRole("tab", { name: /Target-to-target detail link/u });
-  await expect.poll(async () => (await detailTab.count()) + (await retryReference.count()))
-    .toBeGreaterThan(0);
-  if (await retryReference.isVisible()) await retryReference.click();
-  await expect(detailTab).toHaveAttribute("aria-selected", "true");
+  await expectReferenceReady(page, detailTab);
   await page.getByRole("button", { name: "Move References to right" }).click();
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "right");
   await expect.poll(() => workspace.evaluate((element) => getComputedStyle(element).transform))
@@ -1258,14 +1254,14 @@ test("keeps compound reference actions in narrow keyboard order through survivor
   const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
   await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
 
-  await mainWorkspace.getByRole("button", {
+  const primaryLink = mainWorkspace.getByRole("button", {
     name: "Open PDF link to Primary result, Page 2",
-  }).click();
-  await page.getByRole("menuitem", { name: /Open in References/u }).click();
+  });
+  await openLinkInReferences(page, primaryLink);
 
   const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
   const primaryTab = page.getByRole("tab", { name: /Primary result/u });
-  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+  await expectReferenceReady(page, primaryTab);
   await expect(primaryTab).toBeFocused();
   const referenceViewport = referenceWorkspace.locator("[data-viewer-framing-viewport]");
   await referenceViewport.evaluate((element) => { element.scrollTop += 96; });
@@ -1284,12 +1280,8 @@ test("keeps compound reference actions in narrow keyboard order through survivor
   const stage = page.locator("[data-review-stage]");
   const workspace = page.locator("[data-review-workspace]");
   const detailTab = page.getByRole("tab", { name: /Target-to-target detail link/u });
-  const retryReference = page.getByRole("button", { name: "Retry reference" });
-  await expect.poll(async () => (await detailTab.count()) + (await retryReference.count()))
-    .toBeGreaterThan(0);
-  if (await retryReference.isVisible()) await retryReference.click();
+  await expectReferenceReady(page, detailTab);
   await expect(stage).toHaveAttribute("data-reference-layout", "narrow-unified");
-  await expect(detailTab).toHaveAttribute("aria-selected", "true");
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
@@ -1715,10 +1707,13 @@ test("collapses an outline-free PDF to Annotations and restores workspace focus"
   ]);
   expect(modeBarBounds).not.toBeNull();
   expect(annotationsModeBounds).not.toBeNull();
-  const visibleModeCount = await modes.getByRole('tab').count();
-  expect([1, 2]).toContain(visibleModeCount);
+  const visibleModes = modes.getByRole('tab');
+  const expectedModes = (page.viewportSize()?.width ?? 1280) < 900
+    ? ['Search', 'Annotations', 'References']
+    : ['Search', 'Annotations'];
+  await expect(visibleModes).toHaveText(expectedModes);
   expect(Math.abs(
-    annotationsModeBounds!.width - modeBarBounds!.width / visibleModeCount,
+    annotationsModeBounds!.width - modeBarBounds!.width / expectedModes.length,
   )).toBeLessThan(10);
   await expect(workspace.getByRole('heading', { name: /^Annotations \d+$/u })).toBeVisible();
   await expect(workspace.getByRole('heading', {
@@ -1791,6 +1786,7 @@ test("one installed-style browser tree preserves review state across responsive 
   const browserErrors = collectBrowserErrors(page);
   await installSelectionCaptureGate(page);
   await page.goto(launchUrl);
+  await expect(page.locator("[data-production-review]")).toBeVisible();
   await expect(page.getByRole("button", { name: /paper\.pdf.*Open automatic save options/u })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Actions" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Codex delivery", includeHidden: true })).toBeHidden();
@@ -2839,6 +2835,7 @@ test("shows command conflicts until a retry succeeds", async ({ page }) => {
     pdf,
     "Fresh command-conflict production launch failed",
   );
+  await chooseFreshCopyDestination(page);
 
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();

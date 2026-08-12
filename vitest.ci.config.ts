@@ -1,0 +1,38 @@
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    include: [
+      'test/conformance/pdf-writer.conformance.test.ts',
+      'test/conformance/reviewed-pdf.test.ts',
+      'apps/service/test/session-security.test.ts',
+      'apps/service/test/recovery.test.ts',
+      'apps/service/test/pdf-save-coordinator.test.ts',
+      'apps/service/test/export-transaction.test.ts',
+      'apps/service/test/replace-original.test.ts',
+      'apps/service/test/synctex.test.ts',
+      'apps/service/test/handoff-export.test.ts',
+      'apps/service/test/review-delivery-service.test.ts',
+      'apps/service/test/delivery-http.test.ts',
+      'apps/service/test/launch-host.test.ts',
+      'apps/service/test/open-command.test.ts',
+      'apps/service/test/doctor-command.test.ts',
+      'packages/core/test/review-commands.test.ts',
+      'apps/web/test/save-state-controller.test.ts',
+      'apps/web/test/proofread-gestures.test.tsx',
+      'apps/web/test/selection-anchor.test.ts',
+      'apps/web/test/selection-state.test.ts',
+      'apps/web/test/review-surface-state.test.ts',
+      'apps/web/test/viewer-controls.test.ts',
+      'apps/web/test/viewer-framing.test.ts',
+      'apps/web/test/review-layout.test.tsx',
+      'apps/web/test/annotation-projection.test.ts',
+      'apps/web/test/production-review-app.test.tsx',
+      'apps/web/test/existing-annotations.test.ts',
+      'packages/core/test/handoff-schema.test.ts',
+      'apps/web/test/codex-delivery.test.tsx',
+      'apps/vscode/test/extension.test.ts',
+      'packaging/macos/packaging.test.ts',
+    ],
+  },
+});

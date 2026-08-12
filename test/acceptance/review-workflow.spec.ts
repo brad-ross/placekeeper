@@ -11,6 +11,9 @@ async function openAnnotationsWorkspace(page: Page) {
     : bottomRail;
   if (await workspace.getAttribute('aria-expanded') !== 'true') await workspace.click();
   await expect(workspace).toHaveAttribute('aria-expanded', 'true');
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
   await expect(annotations).toBeVisible();
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
