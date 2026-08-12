@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createReviewState } from "../../../packages/core/src/review-model.js";
 import { ProductionReviewApp } from "../src/app/ProductionReviewApp.js";
+import { SaveDestinationDialog } from "../src/save/SaveDestinationDialog.js";
 
 describe("one production review tree", () => {
   it("makes viewer, automatic save identity, review commands, and Codex reachable together", () => {
@@ -37,7 +38,8 @@ describe("one production review tree", () => {
     expect(html).toContain('aria-label="Forward in document history"');
     expect(html).toContain('aria-label="Undo"');
     expect(html).toContain('aria-label="Redo"');
-    expect(html).toContain("Save options for paper.pdf");
+    expect(html).toContain("paper.pdf, not saved. Open automatic save options");
+    expect(html).toContain('data-save-phase="not-saved"');
     expect(html).toContain("Not saved");
     expect(html).toContain("Codex delivery");
     expect(html).toContain('data-delivery-kind="codex"');
@@ -61,5 +63,38 @@ describe("one production review tree", () => {
     expect(html.match(/Real shared PDF viewer/g)).toHaveLength(1);
     expect(html).not.toContain("Submit task");
     expect(html).not.toContain('aria-modal="true" aria-labelledby="finish-review-heading"');
+  });
+
+  it("uses one clear automatic-save choice surface with the original first", () => {
+    const html = renderToStaticMarkup(<SaveDestinationDialog
+      open
+      proposal={{ filename: "paper-annotated.pdf", folder: "/tmp" }}
+      onConfirm={vi.fn()}
+      onCancel={vi.fn()}
+    />);
+
+    expect(html).toContain("Choose where to save annotations");
+    expect(html.indexOf("Modify the original PDF")).toBeLessThan(html.indexOf("Save to a new copy"));
+    expect(html).toContain("Confirm");
+    expect(html).toContain("You can change this later by clicking the filename.");
+    expect(html).not.toContain("Keep annotations in the file you opened.");
+    expect(html).not.toContain("Keep the original unchanged.");
+  });
+
+  it("keeps recovery actions in the same automatic-save surface", () => {
+    const html = renderToStaticMarkup(<SaveDestinationDialog
+      open
+      proposal={{ filename: "paper-annotated.pdf", folder: "/tmp" }}
+      recoveryTarget="paper-annotated.pdf"
+      onRetry={vi.fn()}
+      onLocate={vi.fn()}
+      onConfirm={vi.fn()}
+      onCancel={vi.fn()}
+    />);
+
+    expect(html).toContain("This PDF isn’t up to date");
+    expect(html).toContain("Your latest annotations are protected.");
+    expect(html).toContain(">Retry</button>");
+    expect(html).toContain("Locate PDF…");
   });
 });

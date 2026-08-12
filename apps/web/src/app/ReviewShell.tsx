@@ -105,8 +105,8 @@ export interface ReviewShellProps {
   state: ReviewState;
   documentTitle?: string;
   savedLabel?: string;
-  destinationTitle?: string;
   savePhase?: 'clean' | 'saving' | 'not-saved';
+  saveOptionsOpen?: boolean;
   onSaveOptions?(): void;
   listOpen?: boolean;
   selectionUpdate: SelectionUpdate;
@@ -873,8 +873,8 @@ export function ReviewShell(props: ReviewShellProps) {
       <ReviewChrome
         documentTitle={props.documentTitle ?? 'Local PDF'}
         {...(props.savedLabel === undefined ? {} : { savedLabel: props.savedLabel })}
-        {...(props.destinationTitle === undefined ? {} : { destinationTitle: props.destinationTitle })}
         {...(props.savePhase === undefined ? {} : { savePhase: props.savePhase })}
+        saveOptionsOpen={props.saveOptionsOpen ?? false}
         onSaveOptions={() => props.onSaveOptions?.()}
         {...(props.viewerControls === undefined ? {} : { controls: props.viewerControls })}
         viewerState={props.viewerState ?? unavailableViewerControls()}

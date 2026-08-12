@@ -15,8 +15,8 @@ export function validPageNumber(draft: string, totalPages: number): number | und
 export interface ReviewChromeProps {
   readonly documentTitle: string;
   readonly savedLabel?: string;
-  readonly destinationTitle?: string;
   readonly savePhase?: 'clean' | 'saving' | 'not-saved';
+  readonly saveOptionsOpen?: boolean;
   readonly controls?: ViewerControls;
   readonly viewerState: ViewerControlsSnapshot;
   readonly canUndo: boolean;
@@ -35,8 +35,8 @@ export interface ReviewChromeProps {
 export function ReviewChrome({
   documentTitle,
   savedLabel = 'Saved',
-  destinationTitle,
   savePhase = 'clean',
+  saveOptionsOpen = false,
   controls,
   viewerState,
   canUndo,
@@ -121,17 +121,17 @@ export function ReviewChrome({
         <button
           type="button"
           className="review-chrome__save-identity"
-          aria-label={`Save options for ${documentTitle}${destinationTitle ? `, saving to ${destinationTitle}` : ''}${savePhase === 'not-saved' ? ', not saved' : savePhase === 'saving' ? ', saving' : ''}`}
+          aria-label={`${documentTitle}, ${savePhase === 'not-saved' ? 'not saved' : savePhase === 'saving' ? 'saving changes' : savedLabel}. Open automatic save options`}
+          aria-haspopup="dialog"
+          aria-expanded={saveOptionsOpen}
+          title={`${documentTitle} · ${savePhase === 'not-saved' ? 'Not saved' : savePhase === 'saving' ? 'Saving changes' : savedLabel}`}
           onClick={onSaveOptions}
         >
-          <ReviewIcon name="download" size={17} />
-          <span className="review-chrome__identity-copy">
-            <strong title={documentTitle}>{documentTitle}</strong>
-            {destinationTitle ? <small title={destinationTitle}>{destinationTitle}</small> : null}
+          <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />
+          <strong>{documentTitle}</strong>
+          <span className="sr-only" data-review-saved-status>
+            {savePhase === 'not-saved' ? 'Not saved' : savePhase === 'saving' ? 'Saving changes' : savedLabel}
           </span>
-          {savePhase === 'saving' ? <span className="review-chrome__saved" data-review-saved-status>Saving…</span> : null}
-          {savePhase === 'not-saved' ? <span className="review-chrome__not-saved" data-review-saved-status>Not saved</span> : null}
-          {savePhase === 'clean' ? <span className="sr-only" data-review-saved-status>{savedLabel}</span> : null}
         </button>
       </div>
       <div className="review-chrome__viewer-controls" role="group" aria-label="PDF navigation, zoom, and history">

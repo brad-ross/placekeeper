@@ -54,7 +54,6 @@ import {
   type RightWorkspaceMode,
 } from "../review/reference-workspace-layout.js";
 import { SaveDestinationDialog } from "../save/SaveDestinationDialog.js";
-import { SaveDestinationMenu } from "../save/SaveDestinationMenu.js";
 import {
   gateReviewCommand,
   pollSaveStatusUntilSettled,
@@ -129,7 +128,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       },
     },
   );
-  const [saveMenuOpen, setSaveMenuOpen] = useState(false);
   const [destinationDialog, setDestinationDialog] = useState<{
     readonly reason: "first-annotation" | "menu";
     readonly pending?: ReviewCommand;
@@ -247,22 +245,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
 
   const openCopyDialog = (reason: "first-annotation" | "menu", pending?: ReviewCommand) => {
     destinationAttemptRef.current += 1;
-    setSaveMenuOpen(false);
     setDestinationError(undefined);
     setCopyProposal(undefined);
     setDestinationDialog({ reason, ...(pending === undefined ? {} : { pending }) });
-  };
-  const chooseOriginal = async () => {
-    setDestinationError(undefined);
-    try {
-      setSaveStatus(await props.api.chooseOriginal());
-      setSaveMenuOpen(false);
-    } catch {
-      setSaveMenuOpen(false);
-      setCopyProposal(undefined);
-      setDestinationDialog({ reason: "menu" });
-      setDestinationError("The original cannot be modified safely. Save to a copy instead.");
-    }
   };
   const dispatchNavigation = (action: ReferenceNavigationAction) => {
     const next = reduceReferenceNavigation(navigationStateRef.current, action);
@@ -592,11 +577,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         state={state}
         documentTitle={props.scope.documentTitle}
         savedLabel="Saved"
-        {...(saveStatus.destination.phase === "active" && saveStatus.destination.kind === "copy"
-          ? { destinationTitle: saveStatus.destination.targetPath.split(/[\\/]/u).at(-1)! }
-          : {})}
         savePhase={saveStatus.sync.phase}
-        onSaveOptions={() => setSaveMenuOpen((open) => !open)}
+        saveOptionsOpen={destinationDialog !== null}
+        onSaveOptions={() => openCopyDialog("menu")}
         {...(viewerControlsRef.current === undefined ? {} : { viewerControls: viewerControlsRef.current })}
         {...(viewerFraming === undefined ? {} : { viewerFraming })}
         viewerState={viewerState}
@@ -792,33 +775,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       >
         {viewer}
       </ReviewShell>
-      <SaveDestinationMenu
-        open={saveMenuOpen}
-        documentTitle={props.scope.documentTitle}
-        status={saveStatus}
-        {...(destinationError === undefined ? {} : { error: destinationError })}
-        onClose={() => setSaveMenuOpen(false)}
-        onCopy={() => openCopyDialog("menu")}
-        onOriginal={() => { void chooseOriginal(); }}
-        onRetry={() => {
-          setDestinationError(undefined);
-          void props.api.retrySave()
-            .then((next) => {
-              setSaveStatus(next);
-              setSaveMenuOpen(false);
-            })
-            .catch(() => setDestinationError("Saving could not be retried safely."));
-        }}
-        onLocate={() => {
-          setDestinationError(undefined);
-          void props.api.locateSave()
-            .then((next) => {
-              setSaveStatus(next);
-              setSaveMenuOpen(false);
-            })
-            .catch(() => setDestinationError("The selected PDF did not match the saved file."));
-        }}
-      />
       <SaveDestinationDialog
         open={destinationDialog !== null}
         {...(copyProposal === undefined ? {} : { proposal: copyProposal })}
@@ -827,6 +783,35 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           ? {}
           : { rewriteEligibility: saveStatus.rewriteEligibility })}
         {...(destinationError === undefined ? {} : { error: destinationError })}
+        {...(saveStatus.sync.phase === "not-saved" && saveStatus.destination.phase === "active"
+          ? { recoveryTarget: saveStatus.destination.targetPath.split(/[\\/]/u).at(-1)! }
+          : {})}
+        onRetry={async () => {
+          if (destinationEstablishing) return;
+          setDestinationEstablishing(true);
+          setDestinationError(undefined);
+          try {
+            setSaveStatus(await props.api.retrySave());
+            setDestinationDialog(null);
+          } catch {
+            setDestinationError("Saving could not be retried safely.");
+          } finally {
+            setDestinationEstablishing(false);
+          }
+        }}
+        onLocate={async () => {
+          if (destinationEstablishing) return;
+          setDestinationEstablishing(true);
+          setDestinationError(undefined);
+          try {
+            setSaveStatus(await props.api.locateSave());
+            setDestinationDialog(null);
+          } catch {
+            setDestinationError("The selected PDF did not match the saved file.");
+          } finally {
+            setDestinationEstablishing(false);
+          }
+        }}
         onChooseLocation={async () => {
           try {
             const selected = await props.api.chooseFolder();

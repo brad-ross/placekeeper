@@ -127,9 +127,8 @@ async function openFreshProductionFixture(
 }
 
 async function chooseFreshCopyDestination(page: Page): Promise<void> {
-  await page.getByRole("button", { name: /^Save options for /u }).click();
-  await page.getByRole("menuitem", { name: "Save to a copy" }).click();
-  const dialog = page.getByRole("dialog", { name: "Save annotations automatically" });
+  await page.getByRole("button", { name: /Open automatic save options$/u }).click();
+  const dialog = page.getByRole("dialog", { name: "Choose where to save annotations" });
   const filename = `acceptance-annotations-${randomUUID()}.pdf`;
   const name = dialog.getByRole("textbox", { name: "Copy name" });
   await name.fill(filename);
@@ -1056,7 +1055,7 @@ test("one installed-style browser tree preserves review state across responsive 
   const browserErrors = collectBrowserErrors(page);
   await installSelectionCaptureGate(page);
   await page.goto(launchUrl);
-  await expect(page.getByRole("button", { name: "Save options for paper.pdf" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /paper\.pdf.*Open automatic save options/u })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Actions" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Codex delivery", includeHidden: true })).toBeHidden();
   await expect(page.getByText(/Revision \d+/u)).toHaveCount(0);
@@ -1110,9 +1109,9 @@ test("one installed-style browser tree preserves review state across responsive 
   const originalDigest = await sha256(pdf);
   await replacementDialog.getByRole("button", { name: "Apply" }).click();
   await expect(replacementDialog).toHaveCount(0);
-  const destinationDialog = page.getByRole("dialog", { name: "Save annotations automatically" });
+  const destinationDialog = page.getByRole("dialog", { name: "Choose where to save annotations" });
   await expect(destinationDialog).toBeVisible();
-  await expect(destinationDialog.getByRole("radio", { name: /Save to a copy/u })).toBeChecked();
+  await expect(destinationDialog.getByRole("radio", { name: /Save to a new copy/u })).toBeChecked();
   await expect(destinationDialog.getByRole("textbox", { name: "Copy name" })).toHaveValue(
     "paper-annotated.pdf",
   );
@@ -1152,7 +1151,7 @@ test("one installed-style browser tree preserves review state across responsive 
   expect(savedTarget.kind).toBe("copy");
   await access(savedTarget.targetPath);
   expect(await sha256(pdf)).toBe(originalDigest);
-  await expect(page.getByRole("button", { name: /saving to paper-annotated\.pdf/iu })).toBeVisible();
+  await expect(page.getByRole("button", { name: /paper\.pdf, Saved\. Open automatic save options/u })).toBeVisible();
 
   await page.setViewportSize({ width: 760, height: 900 });
   await expect(page.locator("[data-owned-mark='replace']")).toHaveCount(1);
@@ -1665,7 +1664,7 @@ test("cancels the pending first annotation without choosing or creating a destin
   const composer = page.getByRole("dialog", { name: "Page Note" });
   await composer.getByRole("textbox", { name: "Comment" }).fill("Do not keep this note.");
   await composer.getByRole("button", { name: "Save comment" }).click();
-  const destination = page.getByRole("dialog", { name: "Save annotations automatically" });
+  const destination = page.getByRole("dialog", { name: "Choose where to save annotations" });
   await expect(destination).toBeVisible();
   await destination.getByRole("button", { name: "Cancel" }).click();
   await expect(destination).toHaveCount(0);

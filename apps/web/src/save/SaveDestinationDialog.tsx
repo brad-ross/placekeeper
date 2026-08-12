@@ -9,9 +9,12 @@ export interface SaveDestinationDialogProps {
   readonly establishing?: boolean;
   readonly error?: string;
   readonly rewriteEligibility?: PdfRewriteEligibility;
+  readonly recoveryTarget?: string;
   readonly onConfirm: (choice: "copy" | "original", filename: string) => void | Promise<void>;
   readonly onCancel: () => void;
   readonly onChooseLocation?: () => void | Promise<void>;
+  readonly onRetry?: () => void | Promise<void>;
+  readonly onLocate?: () => void | Promise<void>;
 }
 
 export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
@@ -20,7 +23,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
   const titleId = useId();
   const descriptionId = useId();
   const firstRef = useRef<HTMLInputElement>(null);
-  const lastProposalFilename = useRef<string>();
+  const lastProposalFilename = useRef<string | undefined>(undefined);
 
   useLayoutEffect(() => {
     if (!props.open) return;
@@ -56,61 +59,81 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
           }
         }}
       >
-        <h2 id={titleId}>Save annotations automatically</h2>
+        <h2 id={titleId}>Choose where to save annotations</h2>
         <p id={descriptionId}>
-          Choose where this PDF should stay up to date. Your annotations remain editable when you reopen it.
+          You can change this later by clicking the filename.
         </p>
-        <label className="save-destination-choice">
-          <input
-            ref={firstRef}
-            type="radio"
-            name="save-destination"
-            checked={choice === "copy"}
-            disabled={restricted}
-            onChange={() => setChoice("copy")}
-          />
-          <span><strong>Save to a copy</strong><small>Keeps the original unchanged</small></span>
-        </label>
-        {choice === "copy" ? (
-          <label className="save-destination-filename">
-            Copy name
-            <input
-              value={filename}
-              disabled={props.establishing || restricted || props.proposal === undefined}
-              onChange={(event) => setFilename(event.currentTarget.value)}
-              aria-invalid={props.error !== undefined}
-            />
-            <small>{props.proposal?.folder}</small>
-            {props.onChooseLocation ? (
-              <button
-                type="button"
-                className="save-destination-location"
-                disabled={props.establishing || restricted || props.proposal === undefined}
-                onClick={() => void props.onChooseLocation?.()}
-              >
-                Change location…
-              </button>
-            ) : null}
-          </label>
+        {props.recoveryTarget && props.onRetry && props.onLocate ? (
+          <aside className="save-destination-recovery" aria-label="Save recovery">
+            <div>
+              <strong>This PDF isn’t up to date</strong>
+              <p>Your latest annotations are protected. Retry saving to {props.recoveryTarget}, or locate the PDF if it moved.</p>
+            </div>
+            <div className="save-destination-recovery__actions">
+              <button className="review-button review-button--primary" type="button" disabled={props.establishing} onClick={() => void props.onRetry?.()}>Retry</button>
+              <button className="review-button" type="button" disabled={props.establishing} onClick={() => void props.onLocate?.()}>Locate PDF…</button>
+            </div>
+          </aside>
         ) : null}
-        <label className="save-destination-choice">
-          <input
-            type="radio"
-            name="save-destination"
-            checked={choice === "original"}
-            disabled={restricted}
-            onChange={() => setChoice("original")}
-          />
-          <span><strong>Modify the original PDF</strong><small>Annotations are written into the file you opened</small></span>
-        </label>
+        <fieldset className="save-destination-options">
+          <legend className="sr-only">Automatic save location</legend>
+          <label className="save-destination-choice" data-selected={choice === "original"}>
+            <input
+              type="radio"
+              name="save-destination"
+              checked={choice === "original"}
+              disabled={restricted}
+              onChange={() => setChoice("original")}
+            />
+            <strong>Modify the original PDF</strong>
+          </label>
+          <label className="save-destination-choice" data-selected={choice === "copy"}>
+            <input
+              ref={firstRef}
+              type="radio"
+              name="save-destination"
+              checked={choice === "copy"}
+              disabled={restricted}
+              onChange={() => setChoice("copy")}
+            />
+            <strong>Save to a new copy</strong>
+          </label>
+          {choice === "copy" ? (
+            <div className="save-destination-copy-details">
+              <label className="save-destination-filename">
+                <span>Copy name</span>
+                <input
+                  value={filename}
+                  disabled={props.establishing || restricted || props.proposal === undefined}
+                  onChange={(event) => setFilename(event.currentTarget.value)}
+                  aria-invalid={props.error !== undefined}
+                />
+              </label>
+              <div className="save-destination-location-row">
+                <small title={props.proposal?.folder}>{props.proposal?.folder ?? "Preparing location…"}</small>
+                {props.onChooseLocation ? (
+                  <button
+                    type="button"
+                    className="save-destination-location"
+                    disabled={props.establishing || restricted || props.proposal === undefined}
+                    onClick={() => void props.onChooseLocation?.()}
+                  >
+                    Change location…
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+        </fieldset>
         {restricted ? (
           <p className="save-destination-error" role="alert">{props.rewriteEligibility?.message}</p>
         ) : null}
         {props.error ? <p className="save-destination-error" role="alert">{props.error}</p> : null}
         <footer>
-          <button type="button" disabled={props.establishing} onClick={props.onCancel}>Cancel</button>
+          <button className="review-button" type="button" disabled={props.establishing} onClick={props.onCancel}>Cancel</button>
           <button
             type="button"
+            className="review-button review-button--primary"
             disabled={
               restricted ||
               props.establishing ||
