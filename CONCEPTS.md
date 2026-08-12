@@ -49,6 +49,11 @@ The task-scoped, prompt-refreshed view of the PDF, Review Items, Existing PDF An
 
 Live PDF Context provides lossless access to the whole document without requiring every page to be injected into every prompt, and it ends when the bound task or proofreader session ends.
 
+### Quiescent Review Session
+A review session whose last authenticated page has disconnected and whose bounded reconnect grace lease has expired.
+
+A Quiescent Review Session may retire only after its accepted recovery, PDF saving, picker, and Codex work has drained; unsynchronized Protected Recovery remains available after retirement.
+
 ### Manual Precedence
 The reconciliation rule that preserves a person's source edit or annotation over conflicting Codex work while collapsing semantically equivalent changes into one result.
 
