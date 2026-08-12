@@ -26,7 +26,7 @@ describe("macOS distribution manifests", () => {
     expect(runtime.releaseGate.adobeAcrobatReader).toBe("pass");
   });
 
-  it("offers a non-mutating dry run for the one-command source installer", async () => {
+  it.runIf(process.platform === "darwin")("offers a non-mutating dry run for the one-command source installer", async () => {
     const installer = await readFile(resolve("install.sh"), "utf8");
     const { stdout } = await execFileAsync("/bin/sh", [resolve("install.sh"), "--dry-run"], {
       cwd: resolve("."),
@@ -44,7 +44,7 @@ describe("macOS distribution manifests", () => {
     expect(installer).not.toContain("spctl --master-disable");
   });
 
-  it("replaces the app transactionally and restores the app plus obsolete action after a partial failure", async () => {
+  it.runIf(process.platform === "darwin")("replaces the app transactionally and restores the app plus obsolete action after a partial failure", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "pdf-proofreader-install-test-"));
     const built = resolve(root, "built/PDF Proofreader.app");
     const app = resolve(root, "home/Applications/PDF Proofreader.app");
