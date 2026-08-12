@@ -13,7 +13,7 @@ import {
   projectStructuredReviewItem,
   type SourceHint,
   type StructuredReviewItem,
-} from "../../../../packages/core/src/handoff.js";
+} from "../../../../packages/core/src/structured-review-item.js";
 import type { ReviewItem } from "../../../../packages/core/src/review-model.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
 import { querySyncTexHintsForItems } from "../synctex/query.js";

@@ -6,7 +6,7 @@ import {
   type LiveObservationIdentity,
   type PdfEvidenceCatalog,
 } from "../../../../packages/core/src/live-context.js";
-import type { StructuredReviewItem } from "../../../../packages/core/src/handoff.js";
+import type { StructuredReviewItem } from "../../../../packages/core/src/structured-review-item.js";
 import type { TaskBindingRegistry } from "./task-binding-registry.js";
 import {
   inspectPdfPageEvidence,

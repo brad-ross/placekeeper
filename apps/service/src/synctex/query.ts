@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 
-import type { SourceHint } from "../../../../packages/core/src/handoff.js";
+import type { SourceHint } from "../../../../packages/core/src/structured-review-item.js";
 import type { ReviewItem } from "../../../../packages/core/src/review-model.js";
 import type { FrozenReviewDelivery } from "../export/export-coordinator.js";
 import { isContained } from "../files/file-capabilities.js";

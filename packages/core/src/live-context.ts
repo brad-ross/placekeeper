@@ -5,7 +5,7 @@ import {
   projectStructuredReviewItem,
   type SourceHint,
   type StructuredReviewItem,
-} from "./handoff.js";
+} from "./structured-review-item.js";
 import type { PdfRect } from "./pdf-writer.js";
 import type { JsonValue, ReviewItem, ReviewSourceIdentity } from "./review-model.js";
 import { assertReviewItem } from "./review-reducer.js";

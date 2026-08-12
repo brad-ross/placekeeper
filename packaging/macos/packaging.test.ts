@@ -117,6 +117,15 @@ describe("macOS distribution manifests", () => {
   });
 
   it("packages task-correlated Codex hooks through the installed executable", async () => {
+    const plugin = JSON.parse(await readFile(resolve("integrations/codex-plugin/.codex-plugin/plugin.json"), "utf8")) as {
+      description?: string;
+      skills?: string;
+      interface?: { longDescription?: string };
+    };
+    expect(plugin).toMatchObject({
+      skills: "./skills/",
+      interface: { longDescription: expect.stringContaining("every prompt") },
+    });
     const hooks = JSON.parse(await readFile(resolve("integrations/codex-plugin/hooks/hooks.json"), "utf8")) as {
       hooks?: Record<string, Array<{ hooks?: Array<{ command?: string; additionalContextLimit?: number }> }>>;
     };
@@ -131,5 +140,11 @@ describe("macOS distribution manifests", () => {
     const build = await readFile(resolve("packaging/macos/build-app.ts"), "utf8");
     expect(build).toContain("appManifest.embeddedArtifacts.codexPlugin");
     expect(build).toContain('resolve(resources, "integrations/codex-plugin")');
+    expect(build).toContain('resolve(codexPlugin, "hooks/hooks.json")');
+    const appManifest = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8"));
+    expect(() => validateAppBundleManifest({
+      ...appManifest,
+      embeddedArtifacts: { vscodeExtension: "apps/vscode" },
+    })).toThrow(/Codex plugin/u);
   });
 });

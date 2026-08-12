@@ -31,10 +31,10 @@ The app bundles two optional technical-user integrations:
 - Codex plugin: `~/Applications/PDF Proofreader.app/Contents/Resources/integrations/codex-plugin`
 - VS Code extension: `~/Applications/PDF Proofreader.app/Contents/Resources/integrations/vscode`
 
-Install either directory through that application's local extension/plugin workflow. These adapters open the same local service; they do not upload PDFs or submit Codex tasks automatically. VS Code remains desktop-local and refuses Remote SSH, containers, Codespaces, web, virtual, and non-file workspaces.
+Install either directory through that application's local extension/plugin workflow. These adapters open the same local service; they do not upload PDFs or submit Codex tasks automatically. The Codex plugin includes `PostToolUse`, `UserPromptSubmit`, and `SessionEnd` hooks that resolve the installed app executable at `~/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader`. After Codex opens an explicit PDF and its in-app browser authenticates, the same task receives fresh annotation and PDF context on each prompt. If the plugin is disabled, untrusted, installed elsewhere, or its hook cannot run, context remains explicitly unavailable; reopen after restoring the installed plugin rather than copying a browser URL or guessing the active document. VS Code remains desktop-local and refuses Remote SSH, containers, Codespaces, web, virtual, and non-file workspaces.
 
 ## Uninstall
 
 Quit PDF Proofreader, move `~/Applications/PDF Proofreader.app` and `~/Library/Services/PDF Proofreader.workflow` to the Trash, and uninstall any optional Codex or VS Code integration. Then optionally remove the local toolchain cache in the source checkout at `.local/`.
 
-Removing the app does not remove recoverable drafts under `~/Library/Application Support/PDF Proofreader` or user-owned reviewed PDFs, handoffs, dispositions, and revised PDFs. See [Privacy and recovery](privacy-and-recovery.md) before deleting recovery data.
+Removing the app does not remove recoverable drafts under `~/Library/Application Support/PDF Proofreader` or user-owned reviewed and revised PDFs. See [Privacy and recovery](privacy-and-recovery.md) before deleting recovery data.

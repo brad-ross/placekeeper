@@ -109,8 +109,17 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   if (!appManifest.architectures.includes(options.arch)) throw new Error(`Unsupported architecture: ${options.arch}`);
   if (appManifest.nodeVersion !== backendManifest.nodeVersion) throw new Error("Runtime manifest Node versions differ");
   const serviceEntry = resolve(options.serviceDist, "main.js");
-  const vscodeDist = resolve(repoRoot, appManifest.embeddedArtifacts.vscodeExtension!, "dist");
-  for (const required of [options.nodeRuntime, serviceEntry, options.webDist, resolve(vscodeDist, "extension.js")]) await access(required);
+  const vscodeDist = resolve(repoRoot, appManifest.embeddedArtifacts.vscodeExtension, "dist");
+  const codexPlugin = resolve(repoRoot, appManifest.embeddedArtifacts.codexPlugin);
+  for (const required of [
+    options.nodeRuntime,
+    serviceEntry,
+    options.webDist,
+    resolve(vscodeDist, "extension.js"),
+    resolve(codexPlugin, ".codex-plugin/plugin.json"),
+    resolve(codexPlugin, "hooks/hooks.json"),
+    resolve(codexPlugin, "skills/pdf-proofreader/SKILL.md"),
+  ]) await access(required);
   await assertSelfContainedService(serviceEntry);
   const version = (await run(options.nodeRuntime, ["--version"])).replace(/^v/u, "");
   if (version !== appManifest.nodeVersion) throw new Error(`Expected Node ${appManifest.nodeVersion}, received ${version}`);
@@ -135,10 +144,10 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   await mkdir(resolve(resources, "service"), { recursive: true, mode: 0o755 });
   await copyFile(serviceEntry, resolve(resources, "service/main.js"));
   await cp(options.webDist, resolve(resources, "web"), { recursive: true, errorOnExist: true });
-  await cp(resolve(repoRoot, appManifest.embeddedArtifacts.codexPlugin!), resolve(resources, "integrations/codex-plugin"), { recursive: true, errorOnExist: true });
+  await cp(codexPlugin, resolve(resources, "integrations/codex-plugin"), { recursive: true, errorOnExist: true });
   const vscodeInstall = resolve(resources, "integrations/vscode");
   await mkdir(vscodeInstall, { recursive: true, mode: 0o755 });
-  await copyFile(resolve(repoRoot, appManifest.embeddedArtifacts.vscodeExtension!, "package.json"), resolve(vscodeInstall, "package.json"));
+  await copyFile(resolve(repoRoot, appManifest.embeddedArtifacts.vscodeExtension, "package.json"), resolve(vscodeInstall, "package.json"));
   await cp(vscodeDist, resolve(vscodeInstall, "dist"), { recursive: true, errorOnExist: true });
   for (const asset of backendManifest.assets) {
     const destination = resolve(contents, asset.installPath);

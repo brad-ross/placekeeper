@@ -10,7 +10,7 @@ import {
   type LiveSaveStatus,
   type ReviewSnapshot,
 } from "../../../../packages/core/src/live-context.js";
-import type { SourceHint } from "../../../../packages/core/src/handoff.js";
+import type { SourceHint } from "../../../../packages/core/src/structured-review-item.js";
 import type { JsonValue } from "../../../../packages/core/src/review-model.js";
 import { inspectPdfAnnotationCatalogWithEmbedPdf } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import {
