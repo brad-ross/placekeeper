@@ -44,6 +44,16 @@ The nonmodal review surface that lists Review Items and Existing PDF Annotations
 
 Its presentation may change with available reading space, but disclosure changes do not replace the underlying viewer or discard review state.
 
+### Live PDF Context
+The task-scoped, prompt-refreshed view of the PDF, Review Items, Existing PDF Annotations, and Save Sync made available to the Codex task hosting the document's in-app browser.
+
+Live PDF Context provides lossless access to the whole document without requiring every page to be injected into every prompt, and it ends when the bound task or proofreader session ends.
+
+### Manual Precedence
+The reconciliation rule that preserves a person's source edit or annotation over conflicting Codex work while collapsing semantically equivalent changes into one result.
+
+Manual Precedence applies to work created after Codex captures an execution baseline as well as work that existed before the request.
+
 ### Outline Discovery
 The document-scoped capability result that distinguishes confirmed absence of a PDF outline from an outline still loading, available outline structure, or discovery failure.
 

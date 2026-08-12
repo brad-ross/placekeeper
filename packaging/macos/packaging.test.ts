@@ -115,4 +115,21 @@ describe("macOS distribution manifests", () => {
     }, "24.14.0", "a".repeat(64))).toMatchObject({ offline: true, pages: 1 });
     expect(() => validateDoctorEvidence({ ok: true, offline: true, writer: "embedpdf-node-pdfium", nodeVersion: "24.14.0", pdfiumSha256: "a".repeat(64), pages: 0, structurallyValid: true }, "24.14.0", "a".repeat(64))).toThrow(/evidence/u);
   });
+
+  it("packages task-correlated Codex hooks through the installed executable", async () => {
+    const hooks = JSON.parse(await readFile(resolve("integrations/codex-plugin/hooks/hooks.json"), "utf8")) as {
+      hooks?: Record<string, Array<{ hooks?: Array<{ command?: string; additionalContextLimit?: number }> }>>;
+    };
+    expect(Object.keys(hooks.hooks ?? {}).sort()).toEqual(["PostToolUse", "UserPromptSubmit"]);
+    for (const event of Object.values(hooks.hooks ?? {})) {
+      expect(event).toHaveLength(1);
+      expect(event[0]?.hooks).toEqual([expect.objectContaining({
+        command: '"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" hook --contract-probe',
+        additionalContextLimit: 256,
+      })]);
+    }
+    const build = await readFile(resolve("packaging/macos/build-app.ts"), "utf8");
+    expect(build).toContain("appManifest.embeddedArtifacts.codexPlugin");
+    expect(build).toContain('resolve(resources, "integrations/codex-plugin")');
+  });
 });
