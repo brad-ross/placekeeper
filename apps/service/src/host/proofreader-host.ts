@@ -183,8 +183,9 @@ export class ProofreaderHost {
     }
   }
 
-  close(): Promise<void> {
+  async close(): Promise<void> {
     this.context.discardAll();
-    return this.server.close();
+    await this.server.close();
+    await this.broker.quiesceForShutdown();
   }
 }

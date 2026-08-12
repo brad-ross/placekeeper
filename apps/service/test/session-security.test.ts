@@ -4,6 +4,7 @@ import { request as httpRequest } from "node:http";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   SessionCredentialStore,
@@ -14,6 +15,7 @@ import { FileCapabilityRegistry } from "../src/files/file-capabilities.js";
 import { startHttpServer, type LocalHttpServer } from "../src/server/http-server.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
 import type { SessionLaunch } from "../src/sessions/session-broker.js";
+import { SessionControlRegistry } from "../src/sessions/control-socket.js";
 
 const temporaryDirectories: string[] = [];
 const servers: LocalHttpServer[] = [];
@@ -58,7 +60,9 @@ describe("one-use document-scoped session credentials", () => {
     let now = 1_000;
     const credentials = new SessionCredentialStore(() => now);
     const expired = credentials.issueBootstrap("session-a", 10);
+    expect(credentials.pendingBootstrapCount()).toBe(1);
     now += 11;
+    expect(credentials.pendingBootstrapCount()).toBe(0);
     expect(credentials.exchangeBootstrap("session-a", expired)).toBeUndefined();
 
     const boundary = credentials.issueBootstrap("session-a", 10);
@@ -66,7 +70,9 @@ describe("one-use document-scoped session credentials", () => {
     expect(credentials.exchangeBootstrap("session-a", boundary)).toBeUndefined();
 
     const capability = credentials.issueBootstrap("session-a");
+    expect(credentials.pendingBootstrapCount()).toBe(1);
     const credential = credentials.exchangeBootstrap("session-a", capability);
+    expect(credentials.pendingBootstrapCount()).toBe(0);
     expect(credential).toHaveLength(43);
     expect(credentials.exchangeBootstrap("session-a", capability)).toBeUndefined();
     expect(credentials.authenticate("session-a", credential!)).toBe(true);
@@ -74,6 +80,71 @@ describe("one-use document-scoped session credentials", () => {
     expect(credentials.authenticate("session-a", `${credential!.slice(0, -1)}x`)).toBe(false);
     credentials.revokeSession("session-a");
     expect(credentials.authenticate("session-a", credential!)).toBe(false);
+  });
+});
+
+describe("authenticated review presence", () => {
+  function maskedFrame(payload: string, options: { final?: boolean; opcode?: number } = {}): Buffer {
+    const bytes = Buffer.from(payload);
+    const mask = Buffer.from([1, 2, 3, 4]);
+    const encoded = Buffer.from(bytes.map((value, index) => value ^ mask[index % 4]!));
+    return Buffer.concat([
+      Buffer.from([(options.final ?? true ? 0x80 : 0) | (options.opcode ?? 1), 0x80 | bytes.length]),
+      mask,
+      encoded,
+    ]);
+  }
+
+  it("keeps multiple clients active, leases the last disconnect, and cancels grace on reconnect", () => {
+    let now = 1_000;
+    const controls = new SessionControlRegistry({
+      now: () => now,
+      presenceGraceMs: 500,
+      heartbeat: false,
+    });
+    const disconnectFirst = controls.registerSocket("review-a", new PassThrough());
+    const disconnectSecond = controls.registerSocket("review-a", new PassThrough());
+
+    expect(controls.activity()).toEqual({ reviewPresence: 2, transientWork: 0 });
+    disconnectFirst();
+    expect(controls.activity()).toEqual({ reviewPresence: 1, transientWork: 0 });
+    disconnectSecond();
+    expect(controls.activity()).toEqual({ reviewPresence: 1, transientWork: 0 });
+
+    now += 250;
+    const reconnect = controls.registerSocket("review-a", new PassThrough());
+    expect(controls.activity()).toEqual({ reviewPresence: 1, transientWork: 0 });
+    reconnect();
+    now += 499;
+    expect(controls.activity()).toEqual({ reviewPresence: 1, transientWork: 0 });
+    now += 1;
+    expect(controls.activity()).toEqual({ reviewPresence: 0, transientWork: 0 });
+  });
+
+  it("counts accepted durable work separately from review presence", () => {
+    const controls = new SessionControlRegistry({ heartbeat: false });
+    const write = controls.beginWrite("review-a");
+    const picker = controls.beginTransient();
+    expect(controls.activity()).toEqual({ reviewPresence: 0, transientWork: 2 });
+    write.complete();
+    picker.complete();
+    expect(controls.activity()).toEqual({ reviewPresence: 0, transientWork: 0 });
+  });
+
+  it.each([
+    ["malformed", maskedFrame("not-json")],
+    ["fragmented", maskedFrame('{"kind":"presence"}', { final: false })],
+    ["oversized", Buffer.from([0x81, 0xfe, 0x04, 0x01])],
+    ["flooded", Buffer.concat([
+      maskedFrame('{"kind":"presence"}'),
+      maskedFrame('{"kind":"presence"}'),
+    ])],
+  ])("rejects %s application frames without prolonging presence", (_label, frame) => {
+    const controls = new SessionControlRegistry({ heartbeat: false, presenceGraceMs: 100 });
+    const socket = new PassThrough();
+    controls.registerSocket("review-a", socket);
+    socket.write(frame);
+    expect(socket.destroyed).toBe(true);
   });
 });
 

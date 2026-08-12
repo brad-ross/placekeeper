@@ -29,6 +29,29 @@ function client(session: ProductionSession) {
   return { request, post };
 }
 
+function maintainPresence(session: ProductionSession): () => void {
+  let stopped = false;
+  let socket: WebSocket | undefined;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  const connect = (): void => {
+    if (stopped) return;
+    const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+    socket = new WebSocket(
+      `${scheme}//${window.location.host}/s/${session.sessionId}/control`,
+      ["proofreader", `proofreader-auth.${session.credential}`],
+    );
+    socket.addEventListener("close", () => {
+      if (!stopped) retry = setTimeout(connect, 1_000);
+    });
+  };
+  connect();
+  return () => {
+    stopped = true;
+    if (retry !== undefined) clearTimeout(retry);
+    socket?.close();
+  };
+}
+
 export async function loadProductionSession(session: ProductionSession): Promise<{
   readonly state: ReviewState;
   readonly scope: ProductionScope;
@@ -46,6 +69,7 @@ export async function loadProductionSession(session: ProductionSession): Promise
     scope,
     saveStatus,
     api: {
+      presence: () => maintainPresence(session),
       command: async (command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> => {
         const response = await fetch(`/s/${session.sessionId}/commands`, {
           method: "POST",

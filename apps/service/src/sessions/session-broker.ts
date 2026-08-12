@@ -96,7 +96,10 @@ interface BrowserLaunchScope {
   readonly sessionId: string;
   readonly documentGeneration: number;
   readonly surface: LaunchSurface;
+  readonly expiresAtMs: number;
 }
+
+const BOOTSTRAP_TTL_MS = 60_000;
 
 export interface SessionBrokerOptions {
   readonly recoveryRoot: string;
@@ -210,11 +213,12 @@ export class SessionBroker {
   }
 
   #launch(session: ActiveSession, surface: LaunchSurface): SessionLaunch {
-    const capability = this.credentials.issueBootstrap(session.id);
+    const capability = this.credentials.issueBootstrap(session.id, BOOTSTRAP_TTL_MS);
     const launchScope: BrowserLaunchScope = {
       sessionId: session.id,
       documentGeneration: session.documentGeneration,
       surface,
+      expiresAtMs: this.#now().getTime() + BOOTSTRAP_TTL_MS,
     };
     this.#bootstrapScopes.set(digestSecretHex(capability), launchScope);
     const bindProof = surface === "codex"
@@ -534,11 +538,13 @@ export class SessionBroker {
   }
 
   exchangeBootstrap(sessionId: string, capability: string): string | undefined {
+    this.#sweepBootstrapScopes();
     if (!this.#activeById.has(sessionId)) return undefined;
     const scopeKey = digestSecretHex(capability);
     const scope = this.#bootstrapScopes.get(scopeKey);
     const credential = this.credentials.exchangeBootstrap(sessionId, capability);
     if (credential === undefined) return undefined;
+    this.controls.noteAuthenticatedPage(sessionId);
     this.#bootstrapScopes.delete(scopeKey);
     if (scope !== undefined && scope.sessionId === sessionId) {
       this.#credentialScopes.set(digestSecretHex(credential), scope);
@@ -558,6 +564,27 @@ export class SessionBroker {
       this.#activeById.has(sessionId) &&
       this.credentials.authenticate(sessionId, credential)
     );
+  }
+
+  activity(): {
+    readonly reviewPresence: number;
+    readonly codexTasks: number;
+    readonly transientWork: number;
+  } {
+    this.#sweepBootstrapScopes();
+    const controls = this.controls.activity();
+    return {
+      reviewPresence: controls.reviewPresence + this.credentials.pendingBootstrapCount(),
+      codexTasks: this.taskBindings.activityCount(),
+      transientWork: controls.transientWork,
+    };
+  }
+
+  #sweepBootstrapScopes(): void {
+    const now = this.#now().getTime();
+    for (const [key, scope] of this.#bootstrapScopes) {
+      if (scope.expiresAtMs <= now) this.#bootstrapScopes.delete(key);
+    }
   }
 
   state(sessionId: string): ReviewState | undefined {
@@ -1101,6 +1128,28 @@ export class SessionBroker {
 
   async discard(sessionId: string): Promise<void> {
     await this.#end(sessionId);
+  }
+
+  async quiesceForShutdown(): Promise<void> {
+    const sessions = [...this.#activeById.values()];
+    await Promise.all(sessions.map((session) => session.writeTail));
+    for (const session of sessions) {
+      session.ending = true;
+      const clean = session.sync.phase === "clean" &&
+        session.sync.savedRevision === session.sync.desiredRevision &&
+        session.sync.savedDigest === session.sync.desiredDigest;
+      if (clean) await session.store.remove();
+      this.capabilities.revokeFile(session.fileId);
+      if (session.rootId !== undefined) this.capabilities.revokeRoot(session.rootId);
+      this.credentials.revokeSession(session.id);
+      this.taskBindings.revokeSession(session.id);
+      this.controls.cancel(session.id);
+      for (const listener of this.#sessionEndListeners) listener(session.id);
+    }
+    this.#activeById.clear();
+    this.#activeBySource.clear();
+    this.#bootstrapScopes.clear();
+    this.#credentialScopes.clear();
   }
 
   async #end(sessionId: string): Promise<void> {

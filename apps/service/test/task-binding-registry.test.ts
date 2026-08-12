@@ -48,6 +48,7 @@ describe("task-scoped PDF binding registry", () => {
   it("requires a one-time hook claim followed by the matching browser activation", () => {
     const { registry } = registryFixture();
     const bindProof = issue(registry);
+    expect(registry.activityCount()).toBe(1);
 
     expect(registry.claim({
       bindProof,
@@ -55,6 +56,7 @@ describe("task-scoped PDF binding registry", () => {
       reviewSessionId: "review-a",
       documentGeneration: 1,
     })).toMatchObject({ status: "pending" });
+    expect(registry.activityCount()).toBe(1);
     expect(registry.claim({
       bindProof,
       taskSessionId: "task-a",
@@ -72,10 +74,13 @@ describe("task-scoped PDF binding registry", () => {
       documentGeneration: 1,
       browserCapability: BROWSER_CAPABILITY,
     })).toMatchObject({ status: "active" });
+    expect(registry.activityCount()).toBe(1);
     expect(registry.bindingForTask("task-a")).toMatchObject({
       reviewSessionId: "review-a",
       documentGeneration: 1,
     });
+    registry.revokeTask("task-a");
+    expect(registry.activityCount()).toBe(0);
   });
 
   it("fails closed for wrong review and generation and for browser-first launch", () => {

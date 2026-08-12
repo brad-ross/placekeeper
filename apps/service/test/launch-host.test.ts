@@ -44,6 +44,38 @@ async function fixture(options: {
 }
 
 describe("persistent launch host", () => {
+  it("reports only aggregate bootstrap, bind-proof, and task activity", async () => {
+    let now = Date.parse("2026-08-12T12:00:00.000Z");
+    const taskBindings = new TaskBindingRegistry({
+      now: () => new Date(now),
+      pendingTtlMs: 1_000,
+      activeLeaseTtlMs: 1_000,
+    });
+    const { pdf, host } = await fixture({ taskBindings, validPdf: true });
+    const browser = await host.open({ pdfPath: pdf, surface: "browser" });
+    if (!browser.ok || browser.kind === "recovery-offered") throw new Error("Expected browser launch");
+    expect(host.broker.activity()).toEqual({
+      reviewPresence: 1,
+      codexTasks: 0,
+      transientWork: 0,
+    });
+
+    const codex = await host.open({ pdfPath: pdf, surface: "codex" });
+    if (!codex.ok || codex.kind === "recovery-offered" || codex.bindProof === undefined) {
+      throw new Error("Expected Codex launch");
+    }
+    expect(host.broker.activity()).toEqual({
+      reviewPresence: 1,
+      codexTasks: 1,
+      transientWork: 0,
+    });
+    now += 1_001;
+    expect(host.broker.activity()).toEqual({
+      reviewPresence: 1,
+      codexTasks: 0,
+      transientWork: 0,
+    });
+  });
   it("opens, focuses, and explicitly forks through one broker", async () => {
     const { pdf, sourceRoot, host } = await fixture();
     const opened = await host.open({ pdfPath: pdf, sourceRootPath: sourceRoot });

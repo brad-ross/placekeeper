@@ -419,7 +419,7 @@ export async function startHttpServer(
     }
   });
 
-  server.on("upgrade", (request, socket: Socket) => {
+  server.on("upgrade", (request, socket: Socket, head) => {
     const reject = (): void => {
       socket.destroy();
     };
@@ -474,7 +474,7 @@ export async function startHttpServer(
       socket.write(
         `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: proofreader\r\n\r\n`,
       );
-      broker.controls.registerSocket(match[1]!, socket);
+      broker.controls.registerSocket(match[1]!, socket, head);
     } catch {
       reject();
     }

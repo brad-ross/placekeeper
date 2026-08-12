@@ -401,6 +401,11 @@ export class TaskBindingRegistry {
     this.#activeByReview.clear();
   }
 
+  activityCount(): number {
+    this.#sweep();
+    return this.#proofsByHash.size + this.#pendingByTask.size + this.#activeByTask.size;
+  }
+
   #nowMs(): number {
     return this.#now().getTime();
   }

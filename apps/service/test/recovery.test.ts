@@ -145,6 +145,28 @@ describe("atomic recovery generations", () => {
 });
 
 describe("broker acknowledgement and restart recovery", () => {
+  it("removes verified-clean recovery at shutdown but retains dirty protected recovery", async () => {
+    const directory = await temporaryDirectory();
+    const cleanPdf = join(directory, "clean.pdf");
+    const dirtyPdf = join(directory, "dirty.pdf");
+    await writeFile(cleanPdf, "%PDF-1.7\nclean\n%%EOF");
+    await writeFile(dirtyPdf, "%PDF-1.7\ndirty\n%%EOF");
+    const recoveryRoot = join(directory, "recovery");
+    const broker = new SessionBroker({ recoveryRoot });
+    const clean = await broker.openReview({ pdfPath: cleanPdf });
+    const dirty = await broker.openReview({ pdfPath: dirtyPdf });
+    if (clean.kind !== "opened" || dirty.kind !== "opened") throw new Error("Expected new reviews");
+    await broker.acceptMutation(dirty.launch.sessionId, addCommand(0));
+
+    await broker.quiesceForShutdown();
+
+    await expect(access(join(recoveryRoot, clean.launch.sessionId))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(join(recoveryRoot, dirty.launch.sessionId))).resolves.toBeUndefined();
+    const recovered = await new DraftSnapshotStore(
+      join(recoveryRoot, dirty.launch.sessionId),
+    ).recover();
+    expect(recovered).toMatchObject({ state: { revision: 1 }, sync: { phase: "not-saved" } });
+  });
   it("recovers exactly the last acknowledged revision while leaving original bytes unchanged", async () => {
     const directory = await temporaryDirectory();
     const pdf = join(directory, "paper.pdf");

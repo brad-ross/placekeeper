@@ -178,6 +178,15 @@ export class SessionCredentialStore {
     );
   }
 
+  pendingBootstrapCount(): number {
+    const now = this.#now();
+    let count = 0;
+    for (const record of this.#bootstraps.values()) {
+      if (!record.used && record.expiresAt > now) count += 1;
+    }
+    return count;
+  }
+
   revokeSession(sessionId: string): void {
     this.#bootstraps.delete(sessionId);
     for (const record of this.#credentials.values()) {

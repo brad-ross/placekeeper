@@ -94,6 +94,7 @@ export interface SaveCopyProposal {
 }
 
 export interface ProductionSessionApi {
+  presence?(): () => void;
   command(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
   saveStatus(): Promise<ProductionSaveStatus>;
   saveProposal(): Promise<SaveCopyProposal>;
@@ -234,6 +235,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     documentUrl: `/s/${props.session.sessionId}/document/${state.source.fileId}`,
     requestHeaders: { authorization: `Bearer ${props.session.credential}` },
   }), [props.session.credential, props.session.sessionId, state.source.fileId]);
+  useEffect(() => props.api.presence?.(), [props.api]);
   const ownedAnnotations = useMemo(
     () => projectReviewItems(state.items),
     [state.items],
