@@ -247,17 +247,13 @@ export function PdfWorkspace({
                           },
                         );
                         if (!point) return;
-                        const canonicalPoint = {
-                          x: point.x + (page.boxes?.crop.left ?? 0),
-                          y: point.y + (page.boxes?.crop.top ?? 0),
-                        };
                         if (hitTestOwnedMark(
                           geometryByPage.get(layout.pageIndex) ?? [],
-                          canonicalPoint,
+                          point,
                         )) return;
                         const accepted = onPageContextMenu({
                           pageIndex: layout.pageIndex,
-                          ...canonicalPoint,
+                          ...point,
                           clientX: event.clientX,
                           clientY: event.clientY,
                           keyboard: false,
@@ -272,8 +268,8 @@ export function PdfWorkspace({
                         const bounds = event.currentTarget.getBoundingClientRect();
                         const accepted = onPageContextMenu({
                           pageIndex: layout.pageIndex,
-                          x: page.size.width / 2 + (page.boxes?.crop.left ?? 0),
-                          y: page.size.height / 2 + (page.boxes?.crop.top ?? 0),
+                          x: page.size.width / 2,
+                          y: page.size.height / 2,
                           clientX: bounds.left + bounds.width / 2,
                           clientY: bounds.top + bounds.height / 2,
                           keyboard: true,

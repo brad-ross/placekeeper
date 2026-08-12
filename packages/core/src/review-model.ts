@@ -24,7 +24,8 @@ export interface ReviewSourceIdentity {
 }
 
 export interface ReviewState {
-  readonly schemaVersion: 1;
+  /** v1 stored page geometry with an erroneous CropBox offset; v2 is crop-relative. */
+  readonly schemaVersion: 1 | 2;
   readonly sessionId: string;
   readonly source: ReviewSourceIdentity;
   readonly sourceRootId?: string;
@@ -74,7 +75,7 @@ export function createReviewState(input: {
   sourceRootId?: string;
 }): ReviewState {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     sessionId: input.sessionId,
     source: input.source,
     ...(input.sourceRootId === undefined

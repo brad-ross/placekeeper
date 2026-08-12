@@ -41,8 +41,6 @@ function annotationLabel(input: {
   readonly point: { readonly x: number; readonly y: number };
   readonly pages: readonly PdfDocumentOrderPage[];
   readonly resolveOutlineItem: OutlineContainmentResolver;
-  /** Owned review geometry includes crop offsets; engine inventory geometry is already page-relative. */
-  readonly geometry: 'canonical' | 'page-relative';
 }): string | null {
   const page = input.pages[input.pageIndex];
   if (!page) return null;
@@ -51,9 +49,6 @@ function annotationLabel(input: {
     point: input.point,
   }, {
     page: page.size,
-    ...(input.geometry === 'canonical'
-      ? { cropOrigin: { x: page.crop.left, y: page.crop.top } }
-      : {}),
   });
   if (currentLocation === null) return null;
   return input.resolveOutlineItem(currentLocation)?.label ?? null;
@@ -101,7 +96,6 @@ export function deriveAnnotationOutlineLabels(input: {
       point,
       pages: input.pages,
       resolveOutlineItem,
-      geometry: 'canonical',
     });
     if (label) owned.set(item.id, label);
   }
@@ -111,7 +105,6 @@ export function deriveAnnotationOutlineLabels(input: {
       point: { x: annotation.rect.x, y: annotation.rect.y },
       pages: input.pages,
       resolveOutlineItem,
-      geometry: 'page-relative',
     });
     if (label) source.set(existingAnnotationKey(annotation), label);
   }

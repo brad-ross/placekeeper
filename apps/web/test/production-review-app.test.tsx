@@ -311,4 +311,21 @@ describe("one production review tree", () => {
     expect(html).toContain(">Retry</button>");
     expect(html).toContain("Locate PDF…");
   });
+
+  it("routes invalid geometry back to annotation correction instead of generic retry", () => {
+    const html = renderToStaticMarkup(<SaveDestinationDialog
+      open
+      proposal={{ filename: "paper-annotated.pdf", folder: "/tmp" }}
+      recoveryTarget="paper-annotated.pdf"
+      recoveryFailure="invalid-annotation-geometry"
+      onRetry={vi.fn()}
+      onLocate={vi.fn()}
+      onConfirm={vi.fn()}
+      onCancel={vi.fn()}
+    />);
+
+    expect(html).toContain("An annotation is outside the page");
+    expect(html).toContain("Return to annotations");
+    expect(html).not.toContain(">Retry</button>");
+  });
 });

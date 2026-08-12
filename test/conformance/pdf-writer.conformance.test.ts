@@ -6,10 +6,11 @@ import { describe, expect, it } from 'vitest';
 import type { PdfWriteRequest, ReviewAnnotation } from '../../packages/core/src/pdf-writer.js';
 import { PdfWriterError } from '../../packages/core/src/pdf-writer.js';
 import { documentOrderedItems, projectReviewItem } from '../../packages/core/src/annotation-projection.js';
-import type { ReviewItem } from '../../packages/core/src/review-model.js';
+import type { ReviewItem, ReviewState } from '../../packages/core/src/review-model.js';
 import {
   createEmbedPdfWriter,
   inspectPdfWithEmbedPdf,
+  migrateLegacyReviewStateGeometry,
   readPortableReviewItems,
 } from '../../packages/pdf-backends/src/embedpdf-adapter.js';
 import { runPdfBackend } from '../../packages/pdf-backends/src/backend-host.js';
@@ -151,7 +152,7 @@ describe('EmbedPDF writer gate', () => {
       createdAt: '2026-08-11T12:00:00.000Z',
       updatedAt: '2026-08-11T12:00:00.000Z',
       payload: {
-        position: { x: 236, y: 1176, width: 18, height: 18 },
+        position: { x: 200, y: 300, width: 18, height: 18 },
         comment: 'Rotated geometry note.',
       },
     };
@@ -281,6 +282,83 @@ describe('EmbedPDF writer gate', () => {
       expect(written?.hasNormalAppearance).toBe(true);
     },
   );
+
+  it('rejects annotation geometry outside the crop-relative page canvas', async () => {
+    const offPage = {
+      ...annotations[1]!,
+      rect: { x: 391, y: 881, width: 5, height: 16 },
+      quadPoints: [{ x: 391, y: 89, width: 5, height: 16 }],
+    };
+
+    await expect(
+      runPdfBackend(
+        await createEmbedPdfWriter(),
+        await requestFor('text-native.pdf', [offPage]),
+      ),
+    ).rejects.toMatchObject({
+      code: 'invalid-annotation-geometry',
+      message: expect.stringMatching(/outside page 0/iu),
+    });
+  });
+
+  it('rejects an off-page quad even when the enclosing annotation rect is valid', async () => {
+    const invalidQuad = {
+      ...annotations[1]!,
+      rect: { x: 391, y: 89, width: 5, height: 16 },
+      quadPoints: [{ x: 391, y: 881, width: 5, height: 16 }],
+    };
+
+    await expect(
+      runPdfBackend(
+        await createEmbedPdfWriter(),
+        await requestFor('text-native.pdf', [invalidQuad]),
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-annotation-geometry' });
+  });
+
+  it('migrates legacy draft items and undo history from CropBox-offset geometry', async () => {
+    const sourcePdf = new Uint8Array(await readFile(resolve(fixtures, 'text-native.pdf')));
+    const legacyItem: ReviewItem = {
+      id: '78888888-8888-4888-8888-888888888888',
+      kind: 'highlight',
+      pageIndex: 0,
+      createdAt: '2026-08-11T12:00:00.000Z',
+      updatedAt: '2026-08-11T12:00:00.000Z',
+      payload: {
+        quote: 'unique',
+        prefix: '',
+        suffix: '',
+        rect: { x: 72, y: 884, width: 90, height: 16 },
+        segmentRects: [{ x: 72, y: 884, width: 90, height: 16 }],
+        reliable: true,
+        comment: '',
+      },
+    };
+    const legacyState: ReviewState = {
+      schemaVersion: 1,
+      sessionId: 'legacy-session',
+      source: { fileId: 'source', digest: sha256(sourcePdf), byteLength: sourcePdf.byteLength },
+      revision: 1,
+      lifecycle: 'active',
+      items: [legacyItem],
+      history: [{ beforeItems: [], afterItems: [legacyItem] }],
+      historyCursor: 1,
+    };
+
+    const migrated = await migrateLegacyReviewStateGeometry(sourcePdf, legacyState);
+
+    expect(migrated.schemaVersion).toBe(2);
+    expect(migrated.items[0]?.payload.rect).toEqual({ x: 72, y: 92, width: 90, height: 16 });
+    expect(migrated.items[0]?.payload.segmentRects).toEqual([
+      { x: 72, y: 92, width: 90, height: 16 },
+    ]);
+    expect(migrated.history[0]?.afterItems[0]?.payload.rect).toEqual({
+      x: 72,
+      y: 92,
+      width: 90,
+      height: 16,
+    });
+  });
 
   it('round-trips Unicode review content without inventing source text', async () => {
     const contents = '日本語; العربية; ﬁ; soft\u00adhyphen; e\u0301';

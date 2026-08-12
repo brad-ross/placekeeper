@@ -40,22 +40,33 @@ const visible = {
 };
 
 describe("portable annotation codec", () => {
-  it("round-trips the full semantic item through the namespaced v1 envelope", () => {
+  it("round-trips the full semantic item through the crop-relative v2 envelope", () => {
     const custom = createPortableAnnotationCustom(item, projectReviewItem(item));
     const result = inspectPortableAnnotation(custom, visible);
 
-    expect(result).toEqual({ status: "owned", item });
+    expect(result).toEqual({ status: "owned", item, geometryVersion: 2 });
     expect(JSON.stringify(custom)).toContain('"pdfMarkup"');
     expect(JSON.stringify(custom)).not.toContain("sourceRootId");
   });
 
   it.each([
     ["missing", undefined, "foreign"],
-    ["future", { pdfMarkup: { schemaVersion: 2 } }, "invalid"],
+    ["future", { pdfMarkup: { schemaVersion: 3 } }, "invalid"],
     ["mismatched id", { pdfMarkup: { ...createPortableAnnotationCustom(item, projectReviewItem(item)).pdfMarkup, item: { ...item, id: "other" } } }, "invalid"],
     ["prototype key", JSON.parse('{"pdfMarkup":{"schemaVersion":1,"__proto__":{}}}'), "invalid"],
   ] as const)("classifies %s metadata without claiming the visible mark", (_name, custom, status) => {
     expect(inspectPortableAnnotation(custom, visible).status).toBe(status);
+  });
+
+  it("recognizes legacy v1 geometry so the PDF backend can migrate it", () => {
+    const current = createPortableAnnotationCustom(item, projectReviewItem(item));
+    const legacy = { pdfMarkup: { ...current.pdfMarkup, schemaVersion: 1 as const } };
+
+    expect(inspectPortableAnnotation(legacy, visible)).toEqual({
+      status: "owned",
+      item,
+      geometryVersion: 1,
+    });
   });
 
   it("rejects mismatched visible projection and duplicate visible IDs", () => {
@@ -132,5 +143,6 @@ describe("portable annotation codec", () => {
     expect(state.revision).toBe(0);
     expect(state.history).toEqual([]);
     expect(state.historyCursor).toBe(0);
+    expect(state.schemaVersion).toBe(2);
   });
 });

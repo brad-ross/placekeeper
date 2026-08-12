@@ -70,7 +70,7 @@ describe('App interaction boundaries', () => {
       .toBe(Rotation.Degree270);
   });
 
-  it('clamps Page Note placement inside the crop box with room for the marker', () => {
+  it('clamps crop-relative Page Note placement inside the page with room for the marker', () => {
     const page = {
       size: { width: 600, height: 800 },
       boxes: {
@@ -79,8 +79,8 @@ describe('App interaction boundaries', () => {
       },
     };
     expect(clampPageNotePoint({ x: 50, y: 1_100 }, page, 18)).toEqual({
-      x: 118,
-      y: 982,
+      x: 50,
+      y: 782,
     });
   });
 
@@ -92,7 +92,7 @@ describe('App interaction boundaries', () => {
         crop: { left: 2, top: 1, right: 6, bottom: 3 },
       },
     };
-    expect(clampPageNotePoint({ x: -10, y: 50 }, page, 18)).toEqual({ x: 4, y: 2 });
+    expect(clampPageNotePoint({ x: -10, y: 50 }, page, 18)).toEqual({ x: 2, y: 1 });
   });
 
   it('drops a deferred caret read after its viewer generation becomes stale', async () => {

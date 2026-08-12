@@ -30,8 +30,8 @@ interface PortableProjection {
   readonly segmentRects?: readonly EngineRect[];
 }
 
-interface PortableAnnotationV1 {
-  readonly schemaVersion: 1;
+interface PortableAnnotationEnvelope {
+  readonly schemaVersion: 1 | 2;
   readonly owner: "pdf-markup";
   readonly itemId: string;
   readonly item: ReviewItem;
@@ -39,7 +39,7 @@ interface PortableAnnotationV1 {
 }
 
 export interface PortableAnnotationCustom {
-  readonly pdfMarkup: PortableAnnotationV1;
+  readonly pdfMarkup: PortableAnnotationEnvelope;
 }
 
 interface EngineRect {
@@ -60,7 +60,12 @@ export interface VisiblePortableAnnotation {
 export type PortableAnnotationInspection =
   | { readonly status: "foreign" }
   | { readonly status: "invalid"; readonly reason: string }
-  | { readonly status: "owned"; readonly item: ReviewItem };
+  | {
+      readonly status: "owned";
+      readonly item: ReviewItem;
+      /** v1 geometry includes the historical CropBox offset; v2 is crop-relative. */
+      readonly geometryVersion: 1 | 2;
+    };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -255,7 +260,7 @@ export function createPortableAnnotationCustom(
 ): PortableAnnotationCustom {
   return {
     pdfMarkup: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       owner: "pdf-markup",
       itemId: item.id,
       item,
@@ -273,7 +278,10 @@ export function inspectPortableAnnotation(
   if (!hasSafeShape(custom)) return { status: "invalid", reason: "unsafe-shape" };
   const envelope = custom.pdfMarkup;
   if (!isRecord(envelope)) return { status: "invalid", reason: "invalid-envelope" };
-  if (envelope.schemaVersion !== 1 || envelope.owner !== "pdf-markup") {
+  if (
+    (envelope.schemaVersion !== 1 && envelope.schemaVersion !== 2) ||
+    envelope.owner !== "pdf-markup"
+  ) {
     return { status: "invalid", reason: "unsupported-schema" };
   }
   if (!isReviewItem(envelope.item) || !isProjection(envelope.projection)) {
@@ -291,7 +299,11 @@ export function inspectPortableAnnotation(
   ) {
     return { status: "invalid", reason: "projection-mismatch" };
   }
-  return { status: "owned", item: envelope.item };
+  return {
+    status: "owned",
+    item: envelope.item,
+    geometryVersion: envelope.schemaVersion,
+  };
 }
 
 export function decodePortableAnnotationJson(raw: string): PortableAnnotationInspection {
@@ -316,7 +328,7 @@ export function createImportedReviewState(input: {
   readonly items: readonly ReviewItem[];
 }): ReviewState {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     sessionId: input.sessionId,
     source: input.source,
     ...(input.sourceRootId === undefined ? {} : { sourceRootId: input.sourceRootId }),

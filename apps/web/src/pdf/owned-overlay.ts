@@ -6,22 +6,21 @@ export function combinePageRotation(pageRotation: Rotation, documentRotation: Ro
   return ((pageRotation + documentRotation) % 4) as Rotation;
 }
 
-/** Map canonical PDF user-space evidence into the scaled, rotated crop-relative page canvas. */
+/** Map crop-relative page evidence into the scaled, rotated page canvas. */
 export function positionOwnedRect(
   page: PdfPageObject,
   layout: PageLayout,
   documentRotation: Rotation,
   rect: PdfRect,
 ): Rect {
-  const crop = page.boxes?.crop;
   const scale = layout.width / page.size.width;
   const rotation = combinePageRotation(page.rotation, documentRotation);
   return transformRect(
     page.size,
     {
       origin: {
-        x: rect.x - (crop?.left ?? 0),
-        y: rect.y - (crop?.top ?? 0),
+        x: rect.x,
+        y: rect.y,
       },
       size: { width: rect.width, height: rect.height },
     },

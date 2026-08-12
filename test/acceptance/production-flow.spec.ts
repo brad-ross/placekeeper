@@ -141,12 +141,12 @@ async function followLinkInSameReference(
   await page.keyboard.press("Enter");
 }
 
-function canonicalCoordinate(position: unknown, axis: "x" | "y"): number {
+function pageCoordinate(position: unknown, axis: "x" | "y"): number {
   if (typeof position !== "object" || position === null || Array.isArray(position)) {
-    throw new Error("Canonical Page Note position is unavailable.");
+    throw new Error("Page Note position is unavailable.");
   }
   const value = (position as Record<string, unknown>)[axis];
-  if (typeof value !== "number") throw new Error(`Canonical ${axis} coordinate is unavailable.`);
+  if (typeof value !== "number") throw new Error(`Page-relative ${axis} coordinate is unavailable.`);
   return value;
 }
 
@@ -1878,7 +1878,7 @@ test("one installed-style browser tree preserves review state across responsive 
   );
   expect(replacementState?.items[0]?.payload.rect).toEqual({
     x: 72,
-    y: 881,
+    y: 89,
     width: 334,
     height: 16,
   });
@@ -2605,7 +2605,7 @@ test("cancels the pending first annotation without choosing or creating a destin
   await expect(page.locator("[data-owned-mark]")).toHaveCount(0);
 });
 
-test("creates a canonical Page Note from a real PDF context gesture without secondary-activating its mark", async ({ page }) => {
+test("creates a crop-relative Page Note from a real PDF context gesture without secondary-activating its mark", async ({ page }) => {
   const launched = await host.open({
     pdfPath: pdf,
     sourceRootPath: sourceRoot,
@@ -2625,7 +2625,7 @@ test("creates a canonical Page Note from a real PDF context gesture without seco
   const canvasBox = await pageCanvas.boundingBox();
   if (!canvasBox) throw new Error("Rendered PDF page has no bounds.");
   const scale = canvasBox.width / 612;
-  const point = { x: 500 * scale, y: 600 * scale };
+  const point = { x: 610 * scale, y: 790 * scale };
 
   await pageCanvas.click({ button: "right", position: point });
   const addPageNote = page.getByRole("menuitem", { name: "Add Page Note" });
@@ -2654,8 +2654,8 @@ test("creates a canonical Page Note from a real PDF context gesture without seco
   });
   const position = note?.payload.position;
   expect(position).toMatchObject({ width: 18, height: 18 });
-  expect(Math.abs(canonicalCoordinate(position, "x") - 500)).toBeLessThanOrEqual(1);
-  expect(Math.abs(canonicalCoordinate(position, "y") - 1392)).toBeLessThanOrEqual(1);
+  expect(Math.abs(pageCoordinate(position, "x") - 594)).toBeLessThanOrEqual(1);
+  expect(Math.abs(pageCoordinate(position, "y") - 774)).toBeLessThanOrEqual(1);
   expect(note?.id).toBeTruthy();
   const mark = page.locator(`[data-owned-mark="pageNote"][data-review-id="${note!.id}"]`);
   await expect(mark).toHaveCount(1);
@@ -2673,7 +2673,7 @@ test("creates a canonical Page Note from a real PDF context gesture without seco
   expect(browserErrors).toEqual([]);
 });
 
-test("places a canonical Page Note through the real PDF keyboard cursor", async ({ page }) => {
+test("places a crop-relative Page Note through the real PDF keyboard cursor", async ({ page }) => {
   const launched = await host.open({
     pdfPath: pdf,
     sourceRootPath: sourceRoot,
@@ -2715,7 +2715,7 @@ test("places a canonical Page Note through the real PDF keyboard cursor", async 
     pageIndex: 0,
     payload: {
       comment: "Keyboard-placed note.",
-      position: { x: 310, y: 1192, width: 18, height: 18 },
+      position: { x: 310, y: 400, width: 18, height: 18 },
     },
   });
   expect(note?.id).toBeTruthy();
@@ -2725,7 +2725,7 @@ test("places a canonical Page Note through the real PDF keyboard cursor", async 
   expect(browserErrors).toEqual([]);
 });
 
-test("normalizes a real context gesture on a rotated cropped PDF into canonical page space", async ({ page }) => {
+test("normalizes a real context gesture on a rotated cropped PDF into crop-relative page space", async ({ page }) => {
   const launched = await host.open({
     pdfPath: rotatedPdf,
     sourceRootPath: sourceRoot,
@@ -2768,8 +2768,8 @@ test("normalizes a real context gesture on a rotated cropped PDF into canonical 
       position: { width: 18, height: 18 },
     },
   });
-  expect(Math.abs(canonicalCoordinate(note?.payload.position, "x") - 236)).toBeLessThanOrEqual(1);
-  expect(Math.abs(canonicalCoordinate(note?.payload.position, "y") - 1176)).toBeLessThanOrEqual(1);
+  expect(Math.abs(pageCoordinate(note?.payload.position, "x") - 200)).toBeLessThanOrEqual(1);
+  expect(Math.abs(pageCoordinate(note?.payload.position, "y") - 420)).toBeLessThanOrEqual(1);
   expect(note?.id).toBeTruthy();
   await expect(page.locator(
     `[data-owned-mark="pageNote"][data-review-id="${note!.id}"]`,
@@ -2825,7 +2825,7 @@ for (const key of ["Delete", "Backspace"] as const) {
     );
     expect(state?.items[0]?.payload.rect).toEqual({
       x: 248,
-      y: 881,
+      y: 89,
       width: 158,
       height: 16,
     });
