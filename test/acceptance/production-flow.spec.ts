@@ -322,12 +322,22 @@ test("fails mounted Codex status closed on lease expiry and aborts a hung scope 
     await page.goto(launched.url);
     const status = page.locator("[data-codex-context]");
     await expect(status).toHaveAttribute("data-codex-context", "current");
+    await expect(status).toHaveAttribute("aria-label", /Agent context current at review revision \d+/);
+    await expect(status.locator(".lucide-bot")).toBeVisible();
+    expect((await status.boundingBox())?.width).toBeLessThanOrEqual(26);
+    await status.hover();
+    await expect(status.locator("[role='tooltip']")).toBeVisible();
+    await expect(status.locator("[role='tooltip']")).toContainText("PDF content and annotations are synced with the connected agent");
 
     await page.clock.fastForward(2_100);
     await expect(status).toHaveAttribute("data-codex-context", "connecting");
+    await expect(status.locator(".lucide-bot")).toBeVisible();
+    await expect(status.locator("[role='tooltip']")).toContainText("Agent context updating");
 
     await page.clock.fastForward(3_500);
     await expect(status).toHaveAttribute("data-codex-context", "unavailable");
+    await expect(status.locator(".lucide-bot")).toBeVisible();
+    await expect(status.locator("[role='tooltip']")).toContainText("Reopen this PDF from your agent");
   } finally {
     await clockedHost.close();
   }

@@ -306,7 +306,8 @@ describe("one production review tree", () => {
     />);
 
     expect(codex).toContain('data-codex-context="connecting"');
-    expect(codex).toContain("Context connecting");
+    expect(codex).toContain("lucide-bot");
+    expect(codex).toContain("Agent context updating");
     expect(codex).not.toContain("button>Codex");
     expect(finder).not.toContain('data-codex-context');
     expect(finder).not.toContain("Codex");
