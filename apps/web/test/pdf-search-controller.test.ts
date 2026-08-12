@@ -53,12 +53,14 @@ describe('PDF search controller', () => {
     expect(state.groups[0]?.id).toBe('exact');
     expect(state.groups[0]?.results).toHaveLength(1);
     expect(state.groups[1]?.id).toBe('related');
+    expect(state.groups[1]?.label).toBe('Related matches');
     expect(state.groups[1]?.results.map(({ matchedForm }) => matchedForm)).toEqual([
       'stability',
       'stabilizes',
     ]);
     expect(state.groups[1]?.results.map(({ pageIndex }) => pageIndex)).toEqual([0, 1]);
     expect(state.coverage.unsearchablePages).toEqual([2]);
+    expect(state.message).toBe('');
   });
 
   it('keeps a newer query authoritative while indexing completes', async () => {
@@ -127,8 +129,42 @@ describe('PDF search controller', () => {
 
     const result = (await controller.search('stable')).groups[0]?.results[0];
 
-    expect(result?.rects[0]?.origin).toEqual({ x: 36, y: 766 });
+    expect(result?.rects).toEqual([{
+      origin: { x: 36, y: 766 },
+      size: { width: 30, height: 8 },
+    }]);
     expect(result?.navigationPoint).toEqual({ x: 36, y: 746 });
+  });
+
+  it('keeps wrapped matches as one highlight rectangle per line', async () => {
+    const text = 'stable';
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: {
+        pageCount: 1,
+        async read() {
+          return {
+            text,
+            glyphs: Array.from(text, (_character, index) => ({
+              origin: { x: (index % 3) * 5, y: index < 3 ? 10 : 30 },
+              size: { width: 5, height: 8 },
+            })),
+            geometry: PAGE_GEOMETRY,
+            textRects: [{
+              content: text,
+              rect: { origin: { x: 0, y: 10 }, size: { width: 15, height: 28 } },
+            }],
+          };
+        },
+      },
+    });
+
+    const result = (await controller.search(text)).groups[0]?.results[0];
+
+    expect(result?.rects).toEqual([
+      { origin: { x: 0, y: 10 }, size: { width: 15, height: 8 } },
+      { origin: { x: 0, y: 30 }, size: { width: 15, height: 8 } },
+    ]);
   });
 
   it('matches supplementary-plane symbols without shifting source geometry', async () => {

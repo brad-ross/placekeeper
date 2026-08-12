@@ -201,7 +201,7 @@ function glyphRects(
   end: number,
   geometry: PdfSearchPageGeometry,
 ): Rect[] {
-  return glyphs.slice(start, end).flatMap((glyph) => {
+  const rects = glyphs.slice(start, end).flatMap((glyph) => {
     if (
       glyph.isEmpty
       || glyph.isSpace
@@ -220,6 +220,41 @@ function glyphRects(
       size: { ...glyph.size },
     }];
   });
+  return rects.reduce<Rect[]>((lines, rect) => {
+    const previous = lines.at(-1);
+    if (!previous) return [rect];
+    const previousCenter = previous.origin.y + previous.size.height / 2;
+    const rectCenter = rect.origin.y + rect.size.height / 2;
+    const sameLine = Math.abs(previousCenter - rectCenter)
+      <= Math.max(previous.size.height, rect.size.height);
+    const horizontalGap = Math.max(
+      0,
+      Math.max(previous.origin.x, rect.origin.x)
+        - Math.min(
+          previous.origin.x + previous.size.width,
+          rect.origin.x + rect.size.width,
+        ),
+    );
+    if (!sameLine || horizontalGap > Math.max(previous.size.height, rect.size.height) * 1.5) {
+      lines.push(rect);
+      return lines;
+    }
+    const left = Math.min(previous.origin.x, rect.origin.x);
+    const top = Math.min(previous.origin.y, rect.origin.y);
+    const right = Math.max(
+      previous.origin.x + previous.size.width,
+      rect.origin.x + rect.size.width,
+    );
+    const bottom = Math.max(
+      previous.origin.y + previous.size.height,
+      rect.origin.y + rect.size.height,
+    );
+    lines[lines.length - 1] = {
+      origin: { x: left, y: top },
+      size: { width: right - left, height: bottom - top },
+    };
+    return lines;
+  }, []);
 }
 
 function hasReliableGlyphGeometry(glyphs: readonly PdfGlyphObject[]): boolean {
@@ -521,7 +556,7 @@ export function createPdfSearchController(
     const hasResults = exact.length > 0 || related.length > 0;
     const groups = [
       ...(exact.length > 0 ? [{ id: 'exact' as const, label: 'Exact matches', results: exact }] : []),
-      ...(related.length > 0 ? [{ id: 'related' as const, label: 'Related word forms', results: related }] : []),
+      ...(related.length > 0 ? [{ id: 'related' as const, label: 'Related matches', results: related }] : []),
     ];
     const mathUncertain = complete && !hasResults && (queryKind !== 'prose' || symbolAlias);
     const processedPages = pages.length + unsearchablePages.length + limitedPages.length;
@@ -541,9 +576,7 @@ export function createPdfSearchController(
         ? `Searching remaining pages… ${processedPages} of ${options.reader.pageCount} checked.`
         : mathUncertain
           ? 'This mathematical query could not be matched confidently. Try a detected symbol or a shorter exact fragment.'
-          : hasCoverageGap
-            ? `Searched ${pages.length} of ${options.reader.pageCount} pages with reliable text.`
-            : hasResults ? '' : 'No matches found.',
+          : hasCoverageGap || hasResults ? '' : 'No matches found.',
     });
   }
 

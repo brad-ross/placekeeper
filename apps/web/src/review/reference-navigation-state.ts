@@ -6,6 +6,19 @@ import {
 
 export type WorkspaceMode = 'outline' | 'search' | 'references' | 'annotations';
 
+export const WORKSPACE_MODES: readonly WorkspaceMode[] = [
+  'outline',
+  'search',
+  'annotations',
+  'references',
+];
+
+export const RIGHT_WORKSPACE_MODES: readonly Exclude<WorkspaceMode, 'references'>[] = [
+  'outline',
+  'search',
+  'annotations',
+];
+
 export interface WorkspaceModeMemory {
   readonly logicalScrollToken: string | null;
   readonly logicalFocusToken: string | null;

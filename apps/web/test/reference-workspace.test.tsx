@@ -16,6 +16,7 @@ import {
   chooseWorkspaceModeFocusTarget,
   referenceTabFocusIndex,
   ReferenceWorkspace,
+  WORKSPACE_MODES,
 } from '../src/review/ReferenceWorkspace.js';
 import {
   ReferenceResizeHandle,
@@ -108,6 +109,10 @@ describe('link action chooser', () => {
 });
 
 describe('shared reference workspace', () => {
+  it('keeps Search between Outline and Annotations with References right-most', () => {
+    expect(WORKSPACE_MODES).toEqual(['outline', 'search', 'annotations', 'references']);
+  });
+
   it('keeps Outline and Annotations under one tools-surface owner', () => {
     const html = renderToStaticMarkup(
       <OutlineAnnotationsWorkspace

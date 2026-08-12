@@ -45,6 +45,7 @@ export interface NavigationCoordinatorDependencies {
   readonly layout: {
     readonly revealReferences: () => void;
     readonly hideReferences: () => void;
+    readonly hideReferencesAfterSend: () => void;
     readonly settle: () => Promise<void>;
     readonly focusReferenceRail: () => boolean;
     readonly referenceRailFocusToken: () => string;
@@ -240,6 +241,15 @@ export class NavigationCoordinator {
         || samePdfViewerLocation(mainLocation, shifted)
         || main.applyLocation(mainLocation);
     };
+    const failPreservingMain = async () => {
+      if (preserveMain) {
+        await this.dependencies.layout.settle();
+        if (!this.isCurrent(operation)) return false;
+        await restoreMainLocation();
+        if (!this.isCurrent(operation)) return false;
+      }
+      return this.failReference(operation);
+    };
     if (!existing && preserveMain) {
       this.pendingReference = {
         target,
@@ -251,12 +261,6 @@ export class NavigationCoordinator {
 
     this.dependencies.dispatch({ type: 'select-workspace-mode', mode: 'references' });
     this.dependencies.layout.revealReferences();
-    if (preserveMain) {
-      await this.dependencies.layout.settle();
-      if (!this.isCurrent(operation)) return false;
-      if (!await restoreMainLocation()) return false;
-      if (!this.isCurrent(operation)) return false;
-    }
     if (existing) {
       this.pendingReference = null;
       this.dependencies.setPendingReference(null);
@@ -300,22 +304,17 @@ export class NavigationCoordinator {
 
     const opened = await this.dependencies.getReferenceController()?.open() ?? false;
     if (!this.isCurrent(operation)) return false;
-    if (!opened) return this.failReference(operation);
+    if (!opened) return failPreservingMain();
     const navigation = this.dependencies.getReferenceNavigation()
       ?? await this.dependencies.waitForReferenceNavigation();
     if (!this.isCurrent(operation)) return false;
-    if (!navigation) return this.failReference(operation);
+    if (!navigation) return failPreservingMain();
     const settledLocation = await this.applyReferenceTargetAfterLayout(
       operation,
       navigation,
       target,
     );
-    if (settledLocation === null) return this.failReference(operation);
-    if (preserveMain) {
-      await this.dependencies.layout.settle();
-      if (!this.isCurrent(operation)) return false;
-      if (!await restoreMainLocation() || !this.isCurrent(operation)) return false;
-    }
+    if (settledLocation === null) return failPreservingMain();
 
     this.dependencies.dispatch({
       type: 'open-reference',
@@ -324,6 +323,9 @@ export class NavigationCoordinator {
       label: metadata.label,
       pageContext: metadata.pageContext,
     });
+    // Reference mounting can settle the shared runway more than once. Restore
+    // Main only after the tab and its final layout are committed so the viewer
+    // does not visibly chase the same search target through each intermediate frame.
     if (preserveMain) {
       await this.dependencies.layout.settle();
       if (!this.isCurrent(operation)) return false;
@@ -498,7 +500,11 @@ export class NavigationCoordinator {
     }
     const applied = await main.applyLocation(referenceLocation);
     if (!this.isCurrent(operation)) return false;
-    const settledLocation = applied ? main.captureLocation() : null;
+    // applyLocation only succeeds after the destination is verified. During
+    // the accompanying tray reflow, a fresh geometry capture can still be
+    // transiently unavailable; keep the verified destination authoritative
+    // so a visibly completed Send cannot leave its source tab behind.
+    const settledLocation = applied ? main.captureLocation() ?? referenceLocation : null;
     if (!applied || settledLocation === null) {
       this.dependencies.dispatch({
         type: 'complete-send-to-main',
@@ -522,6 +528,10 @@ export class NavigationCoordinator {
       success: true,
       settledLocation,
     });
+    // Applying the destination can recompose the workspace. Reassert the
+    // final-reference postcondition after Main settles so the consumed
+    // References surface cannot remain visible as an empty tray.
+    if (finalReference) this.dependencies.layout.hideReferencesAfterSend();
     const survivingIdentity = this.dependencies.getState().activeTabIdentity;
     this.referenceRestoreIdentity = survivingIdentity;
     this.dependencies.setAnnouncement('Reference sent to the main document.');

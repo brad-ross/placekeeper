@@ -1,4 +1,11 @@
-import type { ChangeEvent } from 'react';
+import {
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FocusEvent,
+  type KeyboardEvent,
+} from 'react';
 
 import type {
   PdfSearchAlternative,
@@ -28,6 +35,18 @@ function matchKindLabel(result: PdfSearchResult): string {
   }
 }
 
+export function filterPdfSearchSymbolSuggestions(
+  symbols: readonly PdfSearchAlternative[],
+  query: string,
+): readonly PdfSearchAlternative[] {
+  const needle = query.trim().toLocaleLowerCase();
+  if (needle.length === 0) return symbols;
+  return symbols.filter((symbol) => (
+    symbol.query.toLocaleLowerCase().includes(needle)
+    || symbol.label.toLocaleLowerCase().includes(needle)
+  ));
+}
+
 export function PdfSearchWorkspace({
   state,
   onQueryChange,
@@ -35,61 +54,114 @@ export function PdfSearchWorkspace({
   onResultOpenReference,
   onAlternativeActivate,
 }: PdfSearchWorkspaceProps) {
+  const queryInputRef = useRef<HTMLInputElement>(null);
+  const [symbolSuggestionsOpen, setSymbolSuggestionsOpen] = useState(false);
   const resultCount = state.groups.reduce((count, group) => count + group.results.length, 0);
   const indexing = state.status === 'indexing' || state.status === 'searching';
   const hasEffectiveQuery = state.query.trim().length > 0;
+  const symbolSuggestions = useMemo(
+    () => filterPdfSearchSymbolSuggestions(state.symbolCatalog, state.query),
+    [state.query, state.symbolCatalog],
+  );
+  const showSymbolSuggestions = symbolSuggestionsOpen && state.symbolCatalog.length > 0;
   const statusAnnouncement = indexing
     ? state.message || 'Searching this PDF.'
     : !hasEffectiveQuery
       ? 'PDF search ready.'
       : resultCount === 1 ? '1 PDF search result.' : `${resultCount} PDF search results.`;
   const updateQuery = (event: ChangeEvent<HTMLInputElement>) => onQueryChange(event.target.value);
+  const closeSuggestionsOnBlur = (event: FocusEvent<HTMLDivElement>) => {
+    if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
+      setSymbolSuggestionsOpen(false);
+    }
+  };
+  const handleQueryKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape' && symbolSuggestionsOpen) {
+      event.preventDefault();
+      setSymbolSuggestionsOpen(false);
+    }
+  };
+  const chooseSymbol = (symbol: PdfSearchAlternative) => {
+    setSymbolSuggestionsOpen(false);
+    onAlternativeActivate(symbol);
+  };
+  const clearQuery = () => {
+    onQueryChange('');
+    setSymbolSuggestionsOpen(true);
+    queryInputRef.current?.focus();
+  };
 
   return (
     <div className="pdf-search" data-pdf-search-state={state.status}>
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {statusAnnouncement}
       </p>
-      <div className="pdf-search__query">
-        <ReviewIcon name="search" />
+      <div
+        className="pdf-search__query"
+        role="combobox"
+        aria-expanded={showSymbolSuggestions}
+        aria-haspopup="listbox"
+        aria-owns="pdf-search-symbol-suggestions"
+        data-has-query={hasEffectiveQuery}
+        onBlur={closeSuggestionsOnBlur}
+      >
+        <ReviewIcon name="search" className="review-icon pdf-search__search-icon" />
         <input
+          ref={queryInputRef}
+          className="review-chrome__page-input pdf-search__input"
           type="search"
           role="searchbox"
           aria-label="Search this PDF"
+          aria-autocomplete="list"
+          aria-controls="pdf-search-symbol-suggestions"
           placeholder="Words, phrases, symbols, or formulas"
           value={state.query}
           data-workspace-focus-token="search:query"
           onChange={updateQuery}
+          onFocus={() => setSymbolSuggestionsOpen(true)}
+          onClick={() => setSymbolSuggestionsOpen(true)}
+          onKeyDown={handleQueryKeyDown}
         />
+        {hasEffectiveQuery ? (
+          <button
+            type="button"
+            className="pdf-search__clear"
+            aria-label="Clear search"
+            title="Clear search"
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={clearQuery}
+          >
+            <ReviewIcon name="close" size={15} />
+          </button>
+        ) : null}
         {indexing ? <ReviewIcon name="loading" className="review-icon pdf-search__spinner" /> : null}
-      </div>
-
-      <p className="pdf-search__hint">
-        Try a symbol name or LaTeX command, such as <code>lambda</code> or <code>\lambda</code>.
-      </p>
-
-      {state.symbolCatalog.length > 0 ? (
-        <section className="pdf-search__symbols" aria-labelledby="pdf-search-symbols-title">
-          <header>
-            <strong id="pdf-search-symbols-title">Symbols in this PDF</strong>
-            <span>{state.symbolCatalog.length}</span>
-          </header>
-          <div className="pdf-search__chips">
-            {state.symbolCatalog.map((symbol) => (
+        {showSymbolSuggestions ? (
+          <div
+            id="pdf-search-symbol-suggestions"
+            className="pdf-search__symbol-suggestions"
+            role="listbox"
+            aria-label="Suggested symbols"
+          >
+            {symbolSuggestions.map((symbol) => (
               <button
                 key={`${symbol.query}:${symbol.label}`}
                 type="button"
+                role="option"
+                aria-selected="false"
                 data-search-symbol={symbol.query}
-                title={`Search for ${symbol.label}`}
-                onClick={() => onAlternativeActivate(symbol)}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => chooseSymbol(symbol)}
               >
                 <span aria-hidden="true">{symbol.query}</span>
-                <span className="sr-only">Search for {symbol.label}</span>
+                <span>{symbol.label}</span>
               </button>
             ))}
+            {symbolSuggestions.length === 0 ? (
+              <span className="pdf-search__symbol-empty">No matching symbols in this PDF.</span>
+            ) : null}
           </div>
-        </section>
-      ) : null}
+        ) : null}
+      </div>
 
       {state.message ? (
         <div className="pdf-search__message" role="status">
@@ -134,28 +206,37 @@ export function PdfSearchWorkspace({
             </header>
             <ol>
               {group.results.map((result, resultIndex) => (
-                <li key={result.id} data-search-result={result.id} data-selected={state.selectedResultId === result.id ? 'true' : 'false'}>
+                <li
+                  key={result.id}
+                  data-search-result={result.id}
+                  data-active={state.selectedResultId === result.id ? 'true' : 'false'}
+                >
                   <button
                     type="button"
-                    className="pdf-search__result"
+                    className="annotation-item__content pdf-search__result"
                     data-workspace-focus-token={`search:${result.id}`}
                     aria-label={resultLabel(result)}
                     onClick={() => onResultActivate(result)}
                   >
-                    <span className="pdf-search__excerpt">{result.excerpt || result.matchedForm}</span>
-                    <span className="pdf-search__page">
-                      {resultIndex === 0 && group.id === 'exact' ? 'First occurrence · ' : ''}
-                      {matchKindLabel(result)} · Page {result.pageIndex + 1}
+                    <span className="annotation-item__meta pdf-search__meta">
+                      <strong>
+                        {resultIndex === 0 && group.id === 'exact' ? 'First occurrence · ' : ''}
+                        {matchKindLabel(result)}
+                      </strong>
+                      <span className="annotation-item__page">{result.pageIndex + 1}</span>
+                    </span>
+                    <span className="annotation-item__excerpt pdf-search__excerpt">
+                      {result.excerpt || result.matchedForm}
                     </span>
                   </button>
                   <button
                     type="button"
-                    className="pdf-search__reference"
+                    className="annotation-item__action pdf-search__reference"
                     aria-label={`Open result on page ${result.pageIndex + 1} in References`}
                     title="Open in References"
                     onClick={() => onResultOpenReference(result)}
                   >
-                    <ReviewIcon name="references" />
+                    <ReviewIcon name="references" size={15} />
                   </button>
                 </li>
               ))}

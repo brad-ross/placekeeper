@@ -10,10 +10,12 @@ import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js'
 import type { AnnotationPresentation } from '../pdf/viewer-framing.js';
 import { horizontalTabFocusIndex } from './LinkActionPopover.js';
 import { OutlineNavigator } from './OutlineNavigator.js';
-import type { WorkspaceMode } from './reference-navigation-state.js';
+import {
+  RIGHT_WORKSPACE_MODES,
+  type WorkspaceMode,
+} from './reference-navigation-state.js';
 import type { RightWorkspaceMode } from './reference-workspace-layout.js';
 
-const TOOL_MODES: readonly RightWorkspaceMode[] = ['outline', 'annotations', 'search'];
 const TOOL_LABELS: Readonly<Record<RightWorkspaceMode, string>> = {
   outline: 'Outline',
   search: 'Search',
@@ -70,18 +72,18 @@ export function OutlineAnnotationsWorkspace({
   }, [mode, open]);
 
   const moveModeFocus = (event: KeyboardEvent<HTMLButtonElement>) => {
-    const currentIndex = TOOL_MODES.indexOf(
+    const currentIndex = RIGHT_WORKSPACE_MODES.indexOf(
       event.currentTarget.dataset.workspaceMode as RightWorkspaceMode,
     );
-    const nextIndex = horizontalTabFocusIndex(currentIndex, TOOL_MODES.length, event.key);
+    const nextIndex = horizontalTabFocusIndex(currentIndex, RIGHT_WORKSPACE_MODES.length, event.key);
     if (nextIndex !== null) {
       event.preventDefault();
-      focusWithoutScroll(tabRefs.current.get(TOOL_MODES[nextIndex]!));
+      focusWithoutScroll(tabRefs.current.get(RIGHT_WORKSPACE_MODES[nextIndex]!));
       return;
     }
     if ((event.key === 'Enter' || event.key === ' ') && currentIndex >= 0) {
       event.preventDefault();
-      onModeChange(TOOL_MODES[currentIndex]!);
+      onModeChange(RIGHT_WORKSPACE_MODES[currentIndex]!);
     }
   };
 
@@ -107,7 +109,7 @@ export function OutlineAnnotationsWorkspace({
       {headerVariant === 'tools' ? (
         <header className="review-workspace__header">
           <div className="review-workspace__tabs" role="tablist" aria-label="Workspace modes">
-            {TOOL_MODES.map((toolMode) => (
+            {RIGHT_WORKSPACE_MODES.map((toolMode) => (
               <button
                 key={toolMode}
                 ref={(element) => {

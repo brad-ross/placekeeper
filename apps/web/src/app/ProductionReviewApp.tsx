@@ -248,6 +248,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           dispatchLayout({ type: 'focus-surface', surface: 'references' });
         },
         hideReferences: () => dispatchLayout({ type: 'hide-references' }),
+        hideReferencesAfterSend: () => dispatchLayout({
+          type: 'hide-references-after-send',
+          activeMode: navigationStateRef.current.workspace.lastMode,
+        }),
         settle: async () => {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));

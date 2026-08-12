@@ -431,37 +431,63 @@
 }
 
 .pdf-search__query {
-  display: grid;
-  margin: 12px 12px 6px;
-  align-items: center;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--review-border);
-  border-radius: var(--review-radius-control);
-  background: var(--review-surface-panel);
-  box-shadow: 0 1px 2px rgb(24 26 23 / 6%);
+  position: relative;
+  margin: 12px 12px 8px;
 }
 
-.pdf-search__query:focus-within {
-  border-color: var(--review-ink-muted);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--review-focus) 18%, transparent);
-}
-
-.pdf-search__query input {
+.pdf-search__input.review-chrome__page-input {
   width: 100%;
   min-width: 0;
+  height: var(--review-control-compact);
+  padding: 0 32px;
+  text-align: left;
+}
+
+.pdf-search__input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.pdf-search__search-icon {
+  position: absolute;
+  z-index: 1;
+  top: calc(50% - 8px);
+  left: 9px;
+  color: var(--review-ink-muted);
+  pointer-events: none;
+}
+
+.pdf-search__clear {
+  position: absolute;
+  z-index: 2;
+  top: 1px;
+  right: 1px;
+  display: grid;
+  width: 30px;
+  height: calc(100% - 2px);
   padding: 0;
+  place-items: center;
   border: 0;
-  outline: 0;
-  color: inherit;
-  font: inherit;
+  border-radius: 0 4px 4px 0;
+  color: var(--review-ink-muted);
   background: transparent;
 }
 
-.pdf-search__spinner { animation: review-spin 900ms linear infinite; }
+.pdf-search__clear:hover {
+  color: var(--review-ink-primary);
+  background: var(--review-surface-subtle);
+}
 
-.pdf-search__hint,
+.pdf-search__spinner {
+  position: absolute;
+  top: calc(50% - 8px);
+  right: 9px;
+  animation: review-spin 900ms linear infinite;
+}
+
+.pdf-search__query[data-has-query="true"] .pdf-search__spinner {
+  right: 32px;
+}
+
 .pdf-search__summary {
   margin: 0;
   padding: 2px 13px 8px;
@@ -470,17 +496,11 @@
   line-height: 1.4;
 }
 
-.pdf-search__hint code {
-  font-size: 10px;
-}
-
-.pdf-search__symbols,
 .pdf-search__alternatives {
   padding: 8px 12px;
   border-bottom: 1px solid var(--review-border-subtle);
 }
 
-.pdf-search__symbols > header,
 .pdf-search__group > header {
   display: flex;
   align-items: center;
@@ -503,6 +523,60 @@
   border-radius: 999px;
   color: var(--review-ink-primary);
   background: var(--review-surface-subtle);
+}
+
+.pdf-search__symbol-suggestions {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  max-height: 12rem;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--review-border-strong);
+  border-radius: var(--review-radius-control);
+  background: var(--review-surface-panel);
+  box-shadow: 0 8px 20px rgb(24 26 23 / 16%);
+  scrollbar-width: thin;
+}
+
+.pdf-search__symbol-suggestions button {
+  display: grid;
+  width: 100%;
+  min-height: var(--review-control-compact);
+  align-items: center;
+  grid-template-columns: 1.8rem minmax(0, 1fr);
+  gap: 8px;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--review-ink-primary);
+  background: transparent;
+  text-align: left;
+}
+
+.pdf-search__symbol-suggestions button:hover,
+.pdf-search__symbol-suggestions button:focus-visible {
+  outline: 0;
+  background: var(--review-surface-interactive);
+}
+
+.pdf-search__symbol-suggestions button > span:first-child {
+  color: var(--review-selection-ink);
+  font-size: 15px;
+  text-align: center;
+}
+
+.pdf-search__symbol-suggestions button > span:last-child,
+.pdf-search__symbol-empty {
+  color: var(--review-ink-muted);
+  font-size: 11px;
+}
+
+.pdf-search__symbol-empty {
+  display: block;
+  padding: 7px 8px;
 }
 
 .pdf-search__message {
@@ -530,32 +604,10 @@
 
 .pdf-search__group ol {
   display: grid;
-  gap: 5px;
+  gap: 8px;
   margin: 7px 0 12px;
   padding: 0;
   list-style: none;
-}
-
-.pdf-search__group li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
-  border: 1px solid var(--review-border-subtle);
-  border-radius: var(--review-radius-control);
-  background: var(--review-surface-panel);
-}
-
-.pdf-search__group li:hover,
-.pdf-search__group li:focus-within,
-.pdf-search__group li[data-selected="true"] {
-  border-color: var(--review-border);
-  background: var(--review-surface-subtle);
-}
-
-.pdf-search__result,
-.pdf-search__reference {
-  border: 0;
-  color: inherit;
-  background: transparent;
 }
 
 [data-pdf-search-highlight] {
@@ -570,30 +622,15 @@
 }
 
 .pdf-search__result {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
-  padding: 9px 10px;
-  text-align: left;
+  cursor: pointer;
 }
 
-.pdf-search__excerpt {
-  overflow: hidden;
-  font-size: 12px;
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pdf-search__page {
-  color: var(--review-ink-muted);
-  font-size: 10px;
+.pdf-search__meta strong {
+  max-width: 100%;
 }
 
 .pdf-search__reference {
-  display: grid;
-  border-left: 1px solid var(--review-border-subtle);
-  place-items: center;
+  cursor: pointer;
 }
 
 .reference-tabs {
@@ -1041,7 +1078,7 @@
   list-style: none;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin] {
+:is(.review-workspace, .review-tools-workspace) li:is([data-annotation-origin], [data-search-result]) {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -1055,12 +1092,12 @@
   transition: border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:hover,
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:focus-within {
+:is(.review-workspace, .review-tools-workspace) li:is([data-annotation-origin], [data-search-result]):hover,
+:is(.review-workspace, .review-tools-workspace) li:is([data-annotation-origin], [data-search-result]):focus-within {
   border-color: var(--review-border-strong);
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:active {
+:is(.review-workspace, .review-tools-workspace) li:is([data-annotation-origin], [data-search-result]):active {
   background: var(--review-surface-interactive);
   box-shadow: inset 0 1px 2px rgb(24 26 23 / 16%);
 }
@@ -1162,7 +1199,7 @@
   outline: none;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:focus-within {
+:is(.review-workspace, .review-tools-workspace) li:is([data-annotation-origin], [data-search-result]):focus-within {
   outline: 3px solid var(--review-focus);
   outline-offset: 2px;
 }

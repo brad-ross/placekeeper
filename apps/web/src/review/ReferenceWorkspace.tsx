@@ -8,12 +8,13 @@ import {
 import type { AnnotationPresentation } from '../pdf/viewer-framing.js';
 import {
   referenceTabSuccessorIdentity,
+  WORKSPACE_MODES,
   type WorkspaceMode,
 } from './reference-navigation-state.js';
 import { compositeFocusIndex, horizontalTabFocusIndex } from './LinkActionPopover.js';
 import { ReviewIcon } from './ReviewIcon.js';
 
-export const WORKSPACE_MODES: readonly WorkspaceMode[] = ['outline', 'annotations', 'references', 'search'];
+export { WORKSPACE_MODES } from './reference-navigation-state.js';
 const MODE_LABELS: Readonly<Record<WorkspaceMode, string>> = {
   outline: 'Outline',
   search: 'Search',
