@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { LiveContextRefreshResult } from "../../../packages/core/src/live-context.js";
 import {
+  formatPromptContext,
   inspectHookEvent,
   runHookCommand,
 } from "../src/cli/hook-command.js";
+import type { ProofreaderControlResponse } from "../src/host/launch-control.js";
 
-const launchUrl =
-  "http://127.0.0.1:43127/s/review-session/bootstrap#cap=browser-capability-secret";
+const bindProof = "b".repeat(43);
+const launchUrl = "http://127.0.0.1:43127/s/review-session/bootstrap#cap=browser-capability-secret";
 
 function postToolUse(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -15,14 +18,8 @@ function postToolUse(overrides: Record<string, unknown> = {}): Record<string, un
     transcript_path: null,
     cwd: "/workspace",
     hook_event_name: "PostToolUse",
-    model: "gpt-5",
-    permission_mode: "default",
     tool_name: "Bash",
-    tool_use_id: "tool_123",
-    tool_input: {
-      command:
-        "pdf-proofreader open --json --surface codex --pdf '/private/tmp/paper with spaces.pdf'",
-    },
+    tool_input: { command: "pdf-proofreader open --json --surface codex --pdf '/private/tmp/paper with spaces.pdf'" },
     tool_response: {
       exit_code: 0,
       output: `${JSON.stringify({
@@ -30,131 +27,191 @@ function postToolUse(overrides: Record<string, unknown> = {}): Record<string, un
         kind: "opened",
         url: launchUrl,
         sessionId: "review-session",
+        documentGeneration: 1,
+        bindProof,
       })}\n`,
-      wall_time_seconds: 0.2,
     },
     ...overrides,
   };
 }
 
-describe("Codex hook contract probe", () => {
-  it("correlates one successful Codex-surface launch result with the hosting task", () => {
+function prompt(): Record<string, unknown> {
+  return {
+    session_id: "thr_codex_task_123",
+    turn_id: "turn_456",
+    transcript_path: "/private/tmp/never-read.jsonl",
+    hook_event_name: "UserPromptSubmit",
+    prompt: "What did I annotate?",
+  };
+}
+
+const unavailable: LiveContextRefreshResult = {
+  schemaVersion: 1,
+  status: "unavailable",
+  checkedAt: "2026-08-12T12:00:00.000Z",
+  reason: "unbound",
+};
+
+const current: Extract<LiveContextRefreshResult, { status: "current" }> = {
+  schemaVersion: 1,
+  status: "current",
+  observedAt: "2026-08-12T12:00:00.000Z",
+  identity: {
+    proofreaderSessionId: "review-session",
+    documentGeneration: 1,
+    source: { fileId: "never-expose-file-capability", digest: "a".repeat(64), byteLength: 1200 },
+    reviewRevision: 4,
+    stateDigest: "b".repeat(64),
+  },
+  saveStatus: {
+    destination: { phase: "active", generation: 1, kind: "copy" },
+    sync: { phase: "not-saved", desiredRevision: 4, savedRevision: 3, failure: "write-failed" },
+  },
+  reviewItems: {
+    mode: "delta",
+    revision: 4,
+    semanticDigest: "b".repeat(64),
+    itemCount: 1,
+    cursor: "cursor-4",
+    baseCursor: "cursor-3",
+    added: [{
+      id: "00000000-0000-4000-8000-000000000001",
+      intent: "replace",
+      pageIndex: 2,
+      coordinates: { rect: { x: 1, y: 2, width: 3, height: 4 } },
+      anchor: { kind: "selection", quote: "old", prefix: "before", suffix: "after" },
+      payload: { proposedText: "new" },
+      sourceHint: { path: "paper.tex", line: 12, confidence: "high", provenance: "synctex" },
+    }],
+    edited: [],
+    removed: [],
+  },
+  existingPdfAnnotations: { semanticDigest: "c".repeat(64), count: 0, items: [], warnings: [] },
+  evidence: {
+    handle: {
+      schemaVersion: 1,
+      value: "evidence_abcdefghijklmnop",
+      documentGeneration: 1,
+      observationDigest: "b".repeat(64),
+      expiresAt: "2026-08-12T12:05:00.000Z",
+      maxBytes: 4096,
+    },
+    descriptors: [{ id: "page-text", kind: "page-text", mediaType: "text/plain", pages: { start: 0, end: 2 } }],
+  },
+};
+
+describe("Codex lifecycle hook", () => {
+  it("extracts the exact one-time proof and generation only from a successful Codex launch", () => {
     expect(inspectHookEvent(postToolUse())).toEqual({
-      kind: "launch-correlated",
+      kind: "claim",
       taskSessionId: "thr_codex_task_123",
       reviewSessionId: "review-session",
+      documentGeneration: 1,
+      bindProof,
     });
   });
 
   it.each([
-    ["missing task identity", { session_id: undefined }],
+    ["missing task", { session_id: undefined }],
     ["failed command", { tool_response: { exit_code: 2, output: "failure" } }],
-    [
-      "wrong surface",
-      {
-        tool_input: {
-          command:
-            "pdf-proofreader open --json --surface finder --pdf '/private/tmp/paper.pdf'",
-        },
-      },
-    ],
-    [
-      "shell-composed command",
-      {
-        tool_input: {
-          command:
-            "pdf-proofreader open --json --surface codex --pdf /private/tmp/paper.pdf && echo captured",
-        },
-      },
-    ],
-    [
-      "non-loopback result",
-      {
-        tool_response: {
-          exit_code: 0,
-          output: `${JSON.stringify({
-            ok: true,
-            kind: "opened",
-            url: "https://example.com/s/review-session/bootstrap#cap=secret",
-            sessionId: "review-session",
-          })}\n`,
-        },
-      },
-    ],
-  ])("rejects %s without attempting ambient discovery", (_label, overrides) => {
-    const event = postToolUse(overrides);
-    expect(inspectHookEvent(event)).toEqual({ kind: "ignored" });
+    ["missing bind proof", { tool_response: { exit_code: 0, output: JSON.stringify({ ok: true, kind: "opened", url: launchUrl, sessionId: "review-session", documentGeneration: 1 }) } }],
+    ["wrong surface", { tool_input: { command: "pdf-proofreader open --json --surface finder --pdf /private/tmp/paper.pdf" } }],
+    ["shell composition", { tool_input: { command: "pdf-proofreader open --json --surface codex --pdf /private/tmp/paper.pdf && echo captured" } }],
+  ])("rejects %s without a daemon request", async (_label, overrides) => {
+    const control = vi.fn();
     const write = vi.fn();
-    expect(runHookCommand(
-      ["hook", "--contract-probe"],
-      JSON.stringify(event),
-      write,
-    )).toBe(0);
+    expect(await runHookCommand(["hook", "--event"], JSON.stringify(postToolUse(overrides)), control, write)).toBe(0);
+    expect(control).not.toHaveBeenCalled();
     expect(write).not.toHaveBeenCalled();
   });
 
-  it("emits bounded developer context without task ids, paths, URLs, or capabilities", () => {
+  it("claims the proof without ever echoing the proof, task id, URL, or local path", async () => {
+    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({
+      kind: "binding",
+      result: { status: "pending", expiresAt: "2026-08-12T12:01:00.000Z" },
+    }));
     const write = vi.fn();
-    const code = runHookCommand(
-      ["hook", "--contract-probe"],
-      JSON.stringify(postToolUse()),
-      write,
-    );
-
-    expect(code).toBe(0);
-    expect(write).toHaveBeenCalledOnce();
-    const serialized = write.mock.calls[0]![0] as string;
-    expect(JSON.parse(serialized)).toEqual({
-      hookSpecificOutput: {
-        hookEventName: "PostToolUse",
-        additionalContext:
-          "PDF Proofreader correlated this launch with the current Codex task. Live PDF context remains unavailable until the browser activates this exact session.",
-      },
-    });
-    expect(serialized).not.toMatch(/thr_codex|review-session|paper with spaces|cap=|127\.0\.0\.1/u);
-  });
-
-  it("uses the documented UserPromptSubmit additionalContext shape without inspecting the transcript", () => {
-    const event = {
-      session_id: "thr_codex_task_123",
-      turn_id: "turn_456",
-      transcript_path: "/private/tmp/unstable-transcript.jsonl",
-      cwd: "/workspace",
-      hook_event_name: "UserPromptSubmit",
-      model: "gpt-5",
-      permission_mode: "default",
-      prompt: "What did I annotate?",
-    };
-    expect(inspectHookEvent(event)).toEqual({
-      kind: "prompt-context-supported",
+    await runHookCommand(["hook", "--event"], JSON.stringify(postToolUse()), control, write);
+    expect(control).toHaveBeenCalledWith({
+      kind: "claim-binding",
       taskSessionId: "thr_codex_task_123",
+      reviewSessionId: "review-session",
+      documentGeneration: 1,
+      bindProof,
     });
-
-    const write = vi.fn();
-    expect(runHookCommand(
-      ["hook", "--contract-probe"],
-      JSON.stringify(event),
-      write,
-    )).toBe(0);
-    const serialized = write.mock.calls[0]![0] as string;
-    expect(JSON.parse(serialized)).toEqual({
-      hookSpecificOutput: {
-        hookEventName: "UserPromptSubmit",
-        additionalContext:
-          "PDF Proofreader live context is not active for this task. Do not infer a PDF from tabs, recent files, or other sessions.",
-      },
-    });
-    expect(serialized).not.toContain("unstable-transcript");
-    expect(serialized).not.toContain("What did I annotate?");
+    const output = write.mock.calls[0]![0] as string;
+    expect(output).not.toMatch(/thr_codex|review-session|bindProof|paper with spaces|cap=|127\.0\.0\.1/u);
   });
 
-  it("fails closed with content-free output for malformed input", () => {
+  it("refreshes on every prompt and emits explicit task-scoped unavailability", async () => {
+    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({ kind: "context", result: unavailable }));
     const write = vi.fn();
-    expect(runHookCommand(
-      ["hook", "--contract-probe"],
-      "{not-json /private/tmp/private.pdf #cap=secret",
-      write,
-    )).toBe(0);
-    expect(write).not.toHaveBeenCalled();
+    await runHookCommand(["hook", "--event"], JSON.stringify(prompt()), control, write);
+    expect(control).toHaveBeenCalledWith({ kind: "refresh-context", taskSessionId: "thr_codex_task_123" });
+    const parsed = JSON.parse(write.mock.calls[0]![0] as string);
+    const context = JSON.parse(parsed.hookSpecificOutput.additionalContext);
+    expect(context).toMatchObject({ kind: "pdf-proofreader-live-context", currentness: "unavailable", reason: "unbound" });
+    expect(JSON.stringify(parsed)).not.toContain("never-read");
+    expect(JSON.stringify(parsed)).not.toContain("What did I annotate?");
+  });
+
+  it("injects current delta, save health, location/context, and opaque evidence instructions", async () => {
+    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({ kind: "context", result: current }));
+    const write = vi.fn();
+    await runHookCommand(["hook", "--event"], JSON.stringify(prompt()), control, write);
+    const outer = JSON.parse(write.mock.calls[0]![0] as string);
+    const context = JSON.parse(outer.hookSpecificOutput.additionalContext);
+    expect(context).toMatchObject({
+      currentness: "current",
+      document: { generation: 1, reviewRevision: 4, stateDigest: "b".repeat(64) },
+      saveSync: { sync: { phase: "not-saved", failure: "write-failed" } },
+      reviewItems: {
+        mode: "delta",
+        added: [{ intent: "replace", pageIndex: 2, anchor: { quote: "old" }, payload: { proposedText: "new" }, sourceHint: { path: "paper.tex", line: 12 } }],
+      },
+      evidence: { handle: "evidence_abcdefghijklmnop", descriptors: [{ kind: "page-text" }] },
+    });
+    const serialized = JSON.stringify(context);
+    expect(serialized).not.toMatch(/review-session|never-expose-file-capability|127\.0\.0\.1|cap=|\/private\//u);
+  });
+
+  it("keeps an oversized full observation current through paginated item retrieval", () => {
+    const huge = {
+      schemaVersion: 1,
+      status: "current",
+      observedAt: "2026-08-12T12:00:00.000Z",
+      identity: {
+        proofreaderSessionId: "review",
+        documentGeneration: 1,
+        source: { fileId: "opaque", digest: "a".repeat(64), byteLength: 1 },
+        reviewRevision: 1,
+        stateDigest: "b".repeat(64),
+      },
+      saveStatus: { destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: 1, savedRevision: 1 } },
+      reviewItems: {
+        mode: "full",
+        reason: "initial",
+        revision: 1,
+        semanticDigest: "b".repeat(64),
+        itemCount: 1,
+        cursor: "cursor",
+        items: [{ id: "item", intent: "pageNote", pageIndex: 0, coordinates: { rect: { x: 1, y: 1, width: 1, height: 1 } }, anchor: { kind: "page", nearbyText: "x".repeat(140_000) }, payload: { comment: "large" } }],
+      },
+      existingPdfAnnotations: { semanticDigest: "c".repeat(64), count: 0, items: [], warnings: [] },
+      evidence: { handle: { schemaVersion: 1, value: "e".repeat(32), documentGeneration: 1, observationDigest: "b".repeat(64), expiresAt: "2026-08-12T12:05:00.000Z", maxBytes: 1024 }, descriptors: [] },
+    } satisfies Extract<LiveContextRefreshResult, { status: "current" }>;
+    expect(JSON.parse(formatPromptContext(huge))).toMatchObject({
+      currentness: "current",
+      reviewItems: { mode: "full", itemCount: 1, completeItems: "retrieve" },
+      evidence: { handle: "e".repeat(32) },
+    });
+    expect(formatPromptContext(huge)).not.toContain("x".repeat(1_000));
+    expect(Buffer.byteLength(formatPromptContext(huge))).toBeLessThan(8_000);
+  });
+
+  it("treats SessionEnd as advisory task-only cleanup", async () => {
+    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({ kind: "revoked" }));
+    await runHookCommand(["hook", "--event"], JSON.stringify({ session_id: "thr_codex_task_123", hook_event_name: "SessionEnd", reason: "logout" }), control, vi.fn());
+    expect(control).toHaveBeenCalledWith({ kind: "revoke-task", taskSessionId: "thr_codex_task_123" });
   });
 });

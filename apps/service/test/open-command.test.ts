@@ -9,6 +9,7 @@ import {
 } from "../src/cli/open-command.js";
 import {
   requestLaunch,
+  requestControl,
   startLaunchControlServer,
   type LaunchControlServer,
 } from "../src/host/launch-control.js";
@@ -94,5 +95,41 @@ describe("open command", () => {
       opened.ok && opened.kind !== "recovery-offered" &&
       focused.ok && focused.kind !== "recovery-offered"
     ) expect(focused.sessionId).toBe(opened.sessionId);
+  });
+
+  it("carries hook claims, prompt refresh, and task revocation over the same private daemon", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-lifecycle-control-"));
+    roots.push(root);
+    const assets = join(root, "assets");
+    const pdf = join(root, "paper.pdf");
+    await mkdir(assets);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    await writeFile(pdf, "%PDF-1.7\nfixture\n%%EOF");
+    const host = await ProofreaderHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
+    hosts.push(host);
+    const socketPath = join(root, "control.sock");
+    const control = await startLaunchControlServer(host, socketPath);
+    controls.push(control);
+
+    const opened = await requestLaunch(socketPath, { pdfPath: pdf, surface: "codex" });
+    if (!opened.ok || opened.kind === "recovery-offered" || opened.bindProof === undefined) {
+      throw new Error("Expected a bindable launch");
+    }
+    expect(await requestControl(socketPath, {
+      kind: "claim-binding",
+      taskSessionId: "task-a",
+      reviewSessionId: opened.sessionId,
+      documentGeneration: opened.documentGeneration,
+      bindProof: opened.bindProof,
+    })).toMatchObject({ kind: "binding", result: { status: "pending" } });
+    const capability = new URL(opened.url).hash.slice("#cap=".length);
+    expect(host.broker.exchangeBootstrap(opened.sessionId, capability)).toBeTypeOf("string");
+    expect(host.broker.taskBindings.bindingForTask("task-a")).toMatchObject({ reviewSessionId: opened.sessionId });
+
+    expect(await requestControl(socketPath, { kind: "refresh-context", taskSessionId: "task-a" }))
+      .toMatchObject({ kind: "context" });
+    expect(await requestControl(socketPath, { kind: "revoke-task", taskSessionId: "task-a" }))
+      .toEqual({ kind: "revoked" });
+    expect(host.broker.taskBindings.bindingForTask("task-a")).toBeUndefined();
   });
 });

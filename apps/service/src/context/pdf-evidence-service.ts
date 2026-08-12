@@ -6,6 +6,7 @@ import {
   type LiveObservationIdentity,
   type PdfEvidenceCatalog,
 } from "../../../../packages/core/src/live-context.js";
+import type { StructuredReviewItem } from "../../../../packages/core/src/handoff.js";
 import type { TaskBindingRegistry } from "./task-binding-registry.js";
 import {
   inspectPdfPageEvidence,
@@ -14,8 +15,9 @@ import {
 } from "../pdf/inspect-pdf.js";
 
 const DEFAULT_HANDLE_TTL_MS = 5 * 60_000;
-const DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024 * 1024;
+const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_ANNOTATION_PAGE_SIZE = 1_000;
+const MAX_REVIEW_ITEM_PAGE_SIZE = 256;
 
 export type PdfEvidenceRequest =
   | { readonly kind: "document"; readonly maxBytes?: number }
@@ -59,6 +61,7 @@ interface EvidenceRecord {
   readonly expiresAtMs: number;
   readonly maxBytes: number;
   readonly existingAnnotations: readonly ExistingPdfAnnotation[];
+  readonly reviewItems: readonly StructuredReviewItem[];
 }
 
 export interface PdfEvidenceServiceOptions {
@@ -119,6 +122,7 @@ export class PdfEvidenceService {
     readonly pageCount: number;
     readonly sourceByteLength: number;
     readonly existingAnnotations: readonly ExistingPdfAnnotation[];
+    readonly reviewItems: readonly StructuredReviewItem[];
   }): PdfEvidenceCatalog {
     this.#sweep();
     const binding = this.#bindings.bindingForTask(input.taskSessionId);
@@ -144,6 +148,7 @@ export class PdfEvidenceService {
       expiresAtMs,
       maxBytes: this.#maxResponseBytes,
       existingAnnotations: structuredClone(input.existingAnnotations),
+      reviewItems: structuredClone(input.reviewItems),
     };
     this.#records.set(digest(value), record);
     const pages = input.pageCount === 0
@@ -177,6 +182,69 @@ export class PdfEvidenceService {
 
   revoke(handle: string): void {
     this.#records.delete(digest(handle));
+  }
+
+  /** The opaque handle is delivered only inside the bound task's trusted
+   * prompt context. This installed-CLI entry point resolves its task scope
+   * without exposing the Codex task id to the model. All normal lease,
+   * generation, digest, expiry, and byte checks still run in retrieve(). */
+  retrieveWithHandle(input: {
+    readonly handle: string;
+    readonly request: PdfEvidenceRequest;
+  }): Promise<PdfEvidenceRetrievalResult> {
+    const record = this.#records.get(digest(input.handle));
+    if (record === undefined) return Promise.resolve(unavailable("unauthorized"));
+    return this.retrieve({
+      taskSessionId: record.taskSessionId,
+      handle: input.handle,
+      request: input.request,
+    });
+  }
+
+  retrieveReviewItemsWithHandle(input: {
+    readonly handle: string;
+    readonly offset?: number;
+    readonly limit?: number;
+    readonly pageIndex?: number;
+    readonly maxBytes?: number;
+  }): PdfEvidenceRetrievalResult {
+    const record = this.#records.get(digest(input.handle));
+    if (record === undefined) return unavailable("unauthorized");
+    if (record.expiresAtMs <= this.#now().getTime()) {
+      this.#records.delete(digest(input.handle));
+      return unavailable("expired");
+    }
+    const binding = this.#bindings.bindingForTask(record.taskSessionId);
+    if (
+      binding === undefined ||
+      binding.reviewSessionId !== record.identity.proofreaderSessionId ||
+      binding.documentGeneration !== record.identity.documentGeneration ||
+      binding.lastVerified?.stateDigest !== record.identity.stateDigest
+    ) return unavailable("unauthorized");
+    const offset = input.offset ?? 0;
+    const limit = input.limit ?? 100;
+    const maxBytes = input.maxBytes ?? Math.min(record.maxBytes, 1024 * 1024);
+    if (
+      !Number.isSafeInteger(offset) || offset < 0 ||
+      !validPositiveInteger(limit) || limit > MAX_REVIEW_ITEM_PAGE_SIZE ||
+      !validPositiveInteger(maxBytes) || maxBytes > record.maxBytes ||
+      (input.pageIndex !== undefined && (!Number.isSafeInteger(input.pageIndex) || input.pageIndex < 0))
+    ) return unavailable("invalid_request");
+    const filtered = input.pageIndex === undefined
+      ? record.reviewItems
+      : record.reviewItems.filter(({ pageIndex }) => pageIndex === input.pageIndex);
+    const items = filtered.slice(offset, offset + limit);
+    const nextOffset = offset + items.length < filtered.length ? offset + items.length : undefined;
+    const bytes = Buffer.from(JSON.stringify({
+      offset,
+      limit,
+      total: filtered.length,
+      ...(input.pageIndex === undefined ? {} : { pageIndex: input.pageIndex }),
+      ...(nextOffset === undefined ? {} : { nextOffset }),
+      items,
+    }));
+    if (bytes.byteLength > maxBytes) return unavailable("too_large");
+    return { status: "ok", kind: "raw-annotations", mediaType: "application/json", bytes };
   }
 
   async retrieve(input: {

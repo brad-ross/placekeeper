@@ -7,10 +7,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader\" hook --contract-probe",
+            "command": "\"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader\" hook --event",
             "timeout": 3,
             "statusMessage": "Connecting PDF Proofreader context",
-            "additionalContextLimit": 256
+            "additionalContextLimit": 131072
           }
         ]
       }
@@ -20,9 +20,22 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader\" hook --contract-probe",
+            "command": "\"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader\" hook --event",
             "timeout": 3,
             "statusMessage": "Refreshing PDF Proofreader context",
+            "additionalContextLimit": 131072
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader\" hook --event",
+            "timeout": 3,
+            "statusMessage": "Disconnecting PDF Proofreader context",
             "additionalContextLimit": 256
           }
         ]

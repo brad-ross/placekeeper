@@ -67,6 +67,7 @@ describe("task-scoped PDF evidence service", () => {
   it("retrieves the immutable document and bounded page evidence without source paths", async () => {
     const { service, identity, bytes } = fixture();
     const catalog = service.mint({
+      reviewItems: [],
       taskSessionId: "task-a",
       identity,
       pageCount: 2,
@@ -100,6 +101,7 @@ describe("task-scoped PDF evidence service", () => {
   it("paginates raw annotations and enforces item, page, and byte bounds", async () => {
     const { service, identity, bytes } = fixture();
     const catalog = service.mint({
+      reviewItems: [],
       taskSessionId: "task-a",
       identity,
       pageCount: 1,
@@ -138,9 +140,45 @@ describe("task-scoped PDF evidence service", () => {
     })).toMatchObject({ status: "unavailable", reason: "too_large" });
   });
 
+  it("paginates complete canonical Review Items through the current opaque handle", async () => {
+    const { service, identity, bytes } = fixture();
+    const reviewItems = [0, 1, 2].map((pageIndex) => ({
+      id: `item-${pageIndex}`,
+      intent: "pageNote" as const,
+      pageIndex,
+      coordinates: { rect: { x: 1, y: 2, width: 3, height: 4 } },
+      anchor: { kind: "page" as const, nearbyText: `page ${pageIndex}` },
+      payload: { comment: `comment ${pageIndex}` },
+    }));
+    const catalog = service.mint({
+      reviewItems,
+      taskSessionId: "task-a",
+      identity,
+      pageCount: 3,
+      sourceByteLength: bytes.byteLength,
+      existingAnnotations: [],
+    });
+    const result = service.retrieveReviewItemsWithHandle({
+      handle: catalog.handle.value,
+      pageIndex: 1,
+      offset: 0,
+      limit: 1,
+    });
+    expect(result).toMatchObject({ status: "ok", mediaType: "application/json" });
+    if (result.status !== "ok") throw new Error("Expected Review Item evidence");
+    expect(JSON.parse(result.bytes.toString())).toEqual({
+      offset: 0,
+      limit: 1,
+      total: 1,
+      pageIndex: 1,
+      items: [reviewItems[1]],
+    });
+  });
+
   it("rejects wrong-task, expired, revoked, and stale-generation handles", async () => {
     const { service, bindings, identity, bytes, setGeneration } = fixture();
     const catalog = service.mint({
+      reviewItems: [],
       taskSessionId: "task-a",
       identity,
       pageCount: 1,
@@ -178,6 +216,7 @@ describe("task-scoped PDF evidence service", () => {
 
     const fresh = fixture();
     const expiring = fresh.service.mint({
+      reviewItems: [],
       taskSessionId: "task-a",
       identity: fresh.identity,
       pageCount: 1,

@@ -120,14 +120,14 @@ describe("macOS distribution manifests", () => {
     const hooks = JSON.parse(await readFile(resolve("integrations/codex-plugin/hooks/hooks.json"), "utf8")) as {
       hooks?: Record<string, Array<{ hooks?: Array<{ command?: string; additionalContextLimit?: number }> }>>;
     };
-    expect(Object.keys(hooks.hooks ?? {}).sort()).toEqual(["PostToolUse", "UserPromptSubmit"]);
+    expect(Object.keys(hooks.hooks ?? {}).sort()).toEqual(["PostToolUse", "SessionEnd", "UserPromptSubmit"]);
     for (const event of Object.values(hooks.hooks ?? {})) {
       expect(event).toHaveLength(1);
       expect(event[0]?.hooks).toEqual([expect.objectContaining({
-        command: '"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" hook --contract-probe',
-        additionalContextLimit: 256,
+        command: '"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" hook --event',
       })]);
     }
+    expect(hooks.hooks?.UserPromptSubmit?.[0]?.hooks?.[0]?.additionalContextLimit).toBe(131072);
     const build = await readFile(resolve("packaging/macos/build-app.ts"), "utf8");
     expect(build).toContain("appManifest.embeddedArtifacts.codexPlugin");
     expect(build).toContain('resolve(resources, "integrations/codex-plugin")');

@@ -4,7 +4,13 @@ import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import { requestLaunch, startLaunchControlServer } from "./launch-control.js";
+import {
+  requestControl,
+  requestLaunch,
+  startLaunchControlServer,
+  type ProofreaderControlRequest,
+  type ProofreaderControlResponse,
+} from "./launch-control.js";
 import type { LaunchRequest, LaunchResponse } from "./proofreader-host.js";
 import { ProofreaderHost } from "./proofreader-host.js";
 
@@ -104,6 +110,15 @@ export async function launchThroughDaemon(
     }
   }
   throw new Error("The local proofreader service did not become ready");
+}
+
+/** Lifecycle hooks never start or discover a host; they address only the
+ * private daemon created by the exact successful launch they observed. */
+export function controlThroughDaemon(
+  request: ProofreaderControlRequest,
+  paths = defaultDaemonPaths(),
+): Promise<ProofreaderControlResponse> {
+  return requestControl(paths.socketPath, request);
 }
 
 export async function runServiceDaemon(paths = defaultDaemonPaths()): Promise<void> {

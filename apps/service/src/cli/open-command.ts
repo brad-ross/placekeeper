@@ -6,6 +6,7 @@ import type { LaunchRequest, LaunchResponse, LaunchSurface } from "../host/proof
 import { launchThroughDaemon, runServiceDaemon } from "../host/service-daemon.js";
 import { runDoctorCommand } from "./doctor-command.js";
 import { readHookStdin, runHookCommand } from "./hook-command.js";
+import { runContextCommand } from "./context-command.js";
 
 type LaunchClient = (request: LaunchRequest) => Promise<LaunchResponse>;
 
@@ -103,6 +104,9 @@ export async function runOpenCommand(
 async function main(): Promise<number> {
   if (process.argv[2] === "hook") {
     return runHookCommand(process.argv.slice(2), await readHookStdin());
+  }
+  if (process.argv[2] === "context") {
+    return runContextCommand(process.argv.slice(2));
   }
   if (process.argv[2] === "doctor") {
     return runDoctorCommand(process.argv.slice(2));

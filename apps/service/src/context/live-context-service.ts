@@ -228,6 +228,7 @@ export class LiveContextService {
             pageCount: inspection.pageCount,
             sourceByteLength: snapshot.sourceBytes.byteLength,
             existingAnnotations: inspection.existingAnnotations,
+            reviewItems: current.items,
           });
           const cursorStatus = previous !== undefined && input.cursor !== undefined &&
             input.cursor !== previous.cursor

@@ -1,43 +1,46 @@
 import { isAbsolute } from "node:path";
 
+import type { LiveContextRefreshResult } from "../../../../packages/core/src/live-context.js";
+import type { ProofreaderControlRequest, ProofreaderControlResponse } from "../host/launch-control.js";
+import { controlThroughDaemon } from "../host/service-daemon.js";
 import { parseOpenArguments } from "./open-command.js";
 
 const MAX_HOOK_INPUT_BYTES = 128 * 1024;
+const MAX_PROMPT_CONTEXT_BYTES = 128 * 1024;
+const MAX_INLINE_DELTA_BYTES = 48 * 1024;
 const IDENTIFIER = /^[A-Za-z0-9._:-]{1,256}$/u;
 const REVIEW_IDENTIFIER = /^[A-Za-z0-9_-]{1,256}$/u;
+const SECRET = /^[A-Za-z0-9_-]{43}$/u;
 
 interface JsonObject {
   readonly [key: string]: unknown;
 }
 
-export type HookContractEvent =
+export type HookLifecycleEvent =
   | {
-      readonly kind: "launch-correlated";
+      readonly kind: "claim";
       readonly taskSessionId: string;
       readonly reviewSessionId: string;
+      readonly documentGeneration: number;
+      readonly bindProof: string;
     }
-  | {
-      readonly kind: "prompt-context-supported";
-      readonly taskSessionId: string;
-    }
+  | { readonly kind: "refresh"; readonly taskSessionId: string }
+  | { readonly kind: "revoke"; readonly taskSessionId: string }
   | { readonly kind: "ignored" };
+
+type ControlClient = (request: ProofreaderControlRequest) => Promise<ProofreaderControlResponse>;
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function taskIdentity(event: JsonObject): string | undefined {
-  return typeof event.session_id === "string" && IDENTIFIER.test(event.session_id) &&
-    typeof event.turn_id === "string" && IDENTIFIER.test(event.turn_id)
+  return typeof event.session_id === "string" && IDENTIFIER.test(event.session_id)
     ? event.session_id
     : undefined;
 }
 
-/**
- * Tokenizes one deliberately narrow shell command. Control operators,
- * substitutions, newlines, and unterminated quotes fail closed instead of
- * trying to reproduce shell parsing inside a lifecycle hook.
- */
+/** Fail-closed tokenizer for the one supported launcher command shape. */
 function tokenizeSimpleCommand(command: string): readonly string[] | undefined {
   if (command.length === 0 || command.length > 16_384) return undefined;
   const tokens: string[] = [];
@@ -45,7 +48,6 @@ function tokenizeSimpleCommand(command: string): readonly string[] | undefined {
   let quote: "single" | "double" | undefined;
   let escaped = false;
   let tokenStarted = false;
-
   for (const character of command) {
     if (escaped) {
       token += character;
@@ -69,23 +71,11 @@ function tokenizeSimpleCommand(command: string): readonly string[] | undefined {
       else token += character;
       continue;
     }
-    if (character === "'") {
-      quote = "single";
-      tokenStarted = true;
-      continue;
-    }
-    if (character === '"') {
-      quote = "double";
-      tokenStarted = true;
-      continue;
-    }
+    if (character === "'") { quote = "single"; tokenStarted = true; continue; }
+    if (character === '"') { quote = "double"; tokenStarted = true; continue; }
     if (";&|<>$`()".includes(character) || character === "\n" || character === "\r") return undefined;
     if (/\s/u.test(character)) {
-      if (tokenStarted) {
-        tokens.push(token);
-        token = "";
-        tokenStarted = false;
-      }
+      if (tokenStarted) { tokens.push(token); token = ""; tokenStarted = false; }
       continue;
     }
     token += character;
@@ -108,112 +98,238 @@ function isCodexOpenCommand(value: unknown): boolean {
   }
 }
 
-function launchResponse(value: unknown): { readonly reviewSessionId: string } | undefined {
+function launchResponse(value: unknown): Omit<Extract<HookLifecycleEvent, { kind: "claim" }>, "kind" | "taskSessionId"> | undefined {
   if (!isObject(value) || value.exit_code !== 0 || typeof value.output !== "string") return undefined;
   const serialized = value.output.trim();
   if (serialized.length === 0 || serialized.length > 65_536) return undefined;
-
   let parsed: unknown;
-  try {
-    parsed = JSON.parse(serialized) as unknown;
-  } catch {
-    return undefined;
-  }
+  try { parsed = JSON.parse(serialized) as unknown; } catch { return undefined; }
   if (
     !isObject(parsed) || parsed.ok !== true ||
     (parsed.kind !== "opened" && parsed.kind !== "focused") ||
     typeof parsed.sessionId !== "string" || !REVIEW_IDENTIFIER.test(parsed.sessionId) ||
+    typeof parsed.documentGeneration !== "number" ||
+    !Number.isSafeInteger(parsed.documentGeneration) || parsed.documentGeneration < 0 ||
+    typeof parsed.bindProof !== "string" || !SECRET.test(parsed.bindProof) ||
     typeof parsed.url !== "string"
   ) return undefined;
-
   try {
     const url = new URL(parsed.url);
     if (
       url.protocol !== "http:" || url.hostname !== "127.0.0.1" ||
       url.port.length === 0 || url.username.length > 0 || url.password.length > 0 ||
-      url.search.length > 0 ||
-      url.pathname !== `/s/${parsed.sessionId}/bootstrap` ||
+      url.search.length > 0 || url.pathname !== `/s/${parsed.sessionId}/bootstrap` ||
       !/^#cap=[A-Za-z0-9_-]+$/u.test(url.hash)
     ) return undefined;
-  } catch {
-    return undefined;
-  }
-  return { reviewSessionId: parsed.sessionId };
+  } catch { return undefined; }
+  return {
+    reviewSessionId: parsed.sessionId,
+    documentGeneration: parsed.documentGeneration,
+    bindProof: parsed.bindProof,
+  };
 }
 
-/** Inspects documented hook fields only; transcripts and ambient UI state are never read. */
-export function inspectHookEvent(value: unknown): HookContractEvent {
+/** Reads documented hook fields only. Transcript and ambient browser state are ignored. */
+export function inspectHookEvent(value: unknown): HookLifecycleEvent {
   if (!isObject(value)) return { kind: "ignored" };
   const taskSessionId = taskIdentity(value);
   if (taskSessionId === undefined) return { kind: "ignored" };
-
   if (value.hook_event_name === "PostToolUse") {
-    if (value.tool_name !== "Bash" || !isCodexOpenCommand(value.tool_input)) {
-      return { kind: "ignored" };
-    }
+    if (value.tool_name !== "Bash" || !isCodexOpenCommand(value.tool_input)) return { kind: "ignored" };
     const response = launchResponse(value.tool_response);
-    return response === undefined
-      ? { kind: "ignored" }
-      : {
-          kind: "launch-correlated",
-          taskSessionId,
-          reviewSessionId: response.reviewSessionId,
-        };
+    return response === undefined ? { kind: "ignored" } : { kind: "claim", taskSessionId, ...response };
   }
-
   if (value.hook_event_name === "UserPromptSubmit" && typeof value.prompt === "string") {
-    return { kind: "prompt-context-supported", taskSessionId };
+    return { kind: "refresh", taskSessionId };
   }
+  if (value.hook_event_name === "SessionEnd") return { kind: "revoke", taskSessionId };
   return { kind: "ignored" };
 }
 
-function safeHookOutput(event: HookContractEvent): JsonObject | undefined {
-  if (event.kind === "launch-correlated") {
+function compactReviewChanges(result: Extract<LiveContextRefreshResult, { status: "current" }>): JsonObject {
+  const changes = result.reviewItems;
+  if (changes.mode === "full") {
+    const intentCounts: Record<string, number> = {};
+    const pageCounts: Record<string, number> = {};
+    for (const item of changes.items) {
+      intentCounts[item.intent] = (intentCounts[item.intent] ?? 0) + 1;
+      pageCounts[String(item.pageIndex)] = (pageCounts[String(item.pageIndex)] ?? 0) + 1;
+    }
     return {
-      hookSpecificOutput: {
-        hookEventName: "PostToolUse",
-        additionalContext:
-          "PDF Proofreader correlated this launch with the current Codex task. Live PDF context remains unavailable until the browser activates this exact session.",
-      },
+      mode: changes.mode,
+      reason: changes.reason,
+      revision: changes.revision,
+      semanticDigest: changes.semanticDigest,
+      itemCount: changes.itemCount,
+      cursor: changes.cursor,
+      intentCounts,
+      pageCounts,
+      completeItems: "retrieve",
     };
   }
-  if (event.kind === "prompt-context-supported") {
-    return {
-      hookSpecificOutput: {
-        hookEventName: "UserPromptSubmit",
-        additionalContext:
-          "PDF Proofreader live context is not active for this task. Do not infer a PDF from tabs, recent files, or other sessions.",
-      },
-    };
-  }
-  return undefined;
+  if (changes.mode === "unchanged") return {
+    mode: changes.mode,
+    revision: changes.revision,
+    semanticDigest: changes.semanticDigest,
+    itemCount: changes.itemCount,
+    cursor: changes.cursor,
+  };
+  const detailed = {
+    mode: changes.mode,
+    revision: changes.revision,
+    semanticDigest: changes.semanticDigest,
+    itemCount: changes.itemCount,
+    cursor: changes.cursor,
+    added: changes.added,
+    edited: changes.edited,
+    removed: changes.removed,
+  };
+  if (Buffer.byteLength(JSON.stringify(detailed)) <= MAX_INLINE_DELTA_BYTES) return detailed;
+  return {
+    mode: changes.mode,
+    revision: changes.revision,
+    semanticDigest: changes.semanticDigest,
+    itemCount: changes.itemCount,
+    cursor: changes.cursor,
+    addedCount: changes.added.length,
+    editedCount: changes.edited.length,
+    removedCount: changes.removed.length,
+    completeChanges: "retrieve",
+  };
 }
 
-/** Read-only installed-boundary probe; it never discovers or mutates a session. */
-export function runHookCommand(
+/** Produces only prompt-safe semantic state; it never includes a loopback URL,
+ * browser credential, bind proof, absolute PDF path, or binary page content. */
+export function formatPromptContext(result: LiveContextRefreshResult): string {
+  if (result.status === "unavailable") {
+    return JSON.stringify({
+      kind: "pdf-proofreader-live-context",
+      schemaVersion: 1,
+      currentness: "unavailable",
+      reason: result.reason,
+      checkedAt: result.checkedAt,
+      instruction: "Do not present cached PDF or annotation state as current. Ask the user to reopen the PDF in PDF Proofreader if live context is needed.",
+    });
+  }
+  const envelope: JsonObject = {
+    kind: "pdf-proofreader-live-context",
+    schemaVersion: 1,
+    currentness: "current",
+    observedAt: result.observedAt,
+    document: {
+      generation: result.identity.documentGeneration,
+      sourceDigest: result.identity.source.digest,
+      byteLength: result.identity.source.byteLength,
+      reviewRevision: result.identity.reviewRevision,
+      stateDigest: result.identity.stateDigest,
+    },
+    saveSync: result.saveStatus,
+    reviewItems: compactReviewChanges(result),
+    existingPdfAnnotations: {
+      count: result.existingPdfAnnotations.count,
+      semanticDigest: result.existingPdfAnnotations.semanticDigest,
+      warnings: result.existingPdfAnnotations.warnings.slice(0, 10).map((warning) => warning.slice(0, 512)),
+      completeAnnotations: "retrieve-raw-annotations",
+    },
+    evidence: {
+      handle: result.evidence.handle.value,
+      expiresAt: result.evidence.handle.expiresAt,
+      maxBytes: result.evidence.handle.maxBytes,
+      descriptors: result.evidence.descriptors,
+      reviewItemsInstruction: "Run pdf-proofreader context items --handle <handle> [--page <zero-based-page>] [--offset <n>] [--limit <1..256>] to retrieve the complete current canonical Review Items with type, location, payload, anchor/context, and source hints. Follow nextOffset until absent.",
+      pdfInstruction: "Use pdf-proofreader context evidence with this handle, not the browser URL, to retrieve bounded PDF text, layout, render, document, or raw-annotation evidence. The generic PDF skill should inspect retrieved PDF/page evidence when layout matters.",
+    },
+  };
+  const serialized = JSON.stringify(envelope);
+  if (Buffer.byteLength(serialized) <= MAX_PROMPT_CONTEXT_BYTES) return serialized;
+  // Defensive final compaction should be unreachable with bounded summaries,
+  // but currentness remains truthful and the complete state stays retrievable.
+  return JSON.stringify({
+    kind: "pdf-proofreader-live-context",
+    schemaVersion: 1,
+    currentness: "current",
+    observedAt: result.observedAt,
+    document: {
+      generation: result.identity.documentGeneration,
+      reviewRevision: result.identity.reviewRevision,
+      stateDigest: result.identity.stateDigest,
+    },
+    saveSync: result.saveStatus,
+    reviewItems: {
+      mode: result.reviewItems.mode,
+      revision: result.reviewItems.revision,
+      semanticDigest: result.reviewItems.semanticDigest,
+      itemCount: result.reviewItems.itemCount,
+      completeItems: "retrieve",
+    },
+    evidence: {
+      handle: result.evidence.handle.value,
+      expiresAt: result.evidence.handle.expiresAt,
+      instruction: "Run pdf-proofreader context items with this handle for paginated canonical Review Items; use context evidence for bounded PDF evidence.",
+    },
+  });
+}
+
+function hookOutput(hookEventName: "PostToolUse" | "UserPromptSubmit", additionalContext: string): JsonObject {
+  return { hookSpecificOutput: { hookEventName, additionalContext } };
+}
+
+export async function runHookCommand(
   args: readonly string[],
   serializedInput: string,
+  control: ControlClient = controlThroughDaemon,
   write: (text: string) => void = (text) => process.stdout.write(text),
-): number {
+): Promise<number> {
   if (
-    args.length !== 2 || args[0] !== "hook" || args[1] !== "--contract-probe" ||
+    args.length !== 2 || args[0] !== "hook" || args[1] !== "--event" ||
     Buffer.byteLength(serializedInput) > MAX_HOOK_INPUT_BYTES
   ) return 0;
-
   let input: unknown;
+  try { input = JSON.parse(serializedInput) as unknown; } catch { return 0; }
+  const event = inspectHookEvent(input);
   try {
-    input = JSON.parse(serializedInput) as unknown;
+    if (event.kind === "claim") {
+      const response = await control({
+        kind: "claim-binding",
+        taskSessionId: event.taskSessionId,
+        reviewSessionId: event.reviewSessionId,
+        documentGeneration: event.documentGeneration,
+        bindProof: event.bindProof,
+      });
+      if (response.kind === "binding" && response.result.status !== "denied") {
+        write(`${JSON.stringify(hookOutput(
+          "PostToolUse",
+          "PDF Proofreader associated this launch with the current task. Live context will become current after the in-app browser completes its authenticated bootstrap.",
+        ))}\n`);
+      }
+    } else if (event.kind === "refresh") {
+      const response = await control({ kind: "refresh-context", taskSessionId: event.taskSessionId });
+      const context = response.kind === "context"
+        ? formatPromptContext(response.result)
+        : formatPromptContext({
+            schemaVersion: 1,
+            status: "unavailable",
+            checkedAt: new Date().toISOString(),
+            reason: "unavailable",
+          });
+      write(`${JSON.stringify(hookOutput("UserPromptSubmit", context))}\n`);
+    } else if (event.kind === "revoke") {
+      await control({ kind: "revoke-task", taskSessionId: event.taskSessionId });
+    }
   } catch {
-    return 0;
+    if (event.kind === "refresh") {
+      write(`${JSON.stringify(hookOutput("UserPromptSubmit", formatPromptContext({
+        schemaVersion: 1,
+        status: "unavailable",
+        checkedAt: new Date().toISOString(),
+        reason: "unavailable",
+      })))}\n`);
+    }
   }
-  const output = safeHookOutput(inspectHookEvent(input));
-  if (output !== undefined) write(`${JSON.stringify(output)}\n`);
   return 0;
 }
 
-export async function readHookStdin(
-  input: NodeJS.ReadableStream = process.stdin,
-): Promise<string> {
+export async function readHookStdin(input: NodeJS.ReadableStream = process.stdin): Promise<string> {
   let serialized = "";
   for await (const chunk of input) {
     serialized += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
