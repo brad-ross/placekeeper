@@ -3,8 +3,12 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 const BOOTSTRAP_BYTES = 32;
 const CREDENTIAL_BYTES = 32;
 
-function digestSecret(secret: string): Buffer {
+export function digestSecret(secret: string): Buffer {
   return createHash("sha256").update(secret).digest();
+}
+
+export function digestSecretHex(secret: string): string {
+  return digestSecret(secret).toString("hex");
 }
 
 function secretEquals(candidate: string, digest: Buffer): boolean {
@@ -126,7 +130,7 @@ interface CredentialRecord {
 }
 
 export class SessionCredentialStore {
-  readonly #bootstraps = new Map<string, BootstrapRecord>();
+  readonly #bootstraps = new Map<string, BootstrapRecord[]>();
   readonly #credentials = new Map<string, CredentialRecord>();
   readonly #now: () => number;
 
@@ -136,16 +140,22 @@ export class SessionCredentialStore {
 
   issueBootstrap(sessionId: string, ttlMs = 60_000): string {
     const capability = randomBytes(BOOTSTRAP_BYTES).toString("base64url");
-    this.#bootstraps.set(sessionId, {
+    const records = (this.#bootstraps.get(sessionId) ?? [])
+      .filter(({ used, expiresAt }) => !used && expiresAt > this.#now());
+    records.push({
       digest: digestSecret(capability),
       expiresAt: this.#now() + ttlMs,
       used: false,
     });
+    // A focus storm must not invalidate an earlier tab, but the per-session
+    // bearer set remains bounded.
+    this.#bootstraps.set(sessionId, records.slice(-8));
     return capability;
   }
 
   exchangeBootstrap(sessionId: string, capability: string): string | undefined {
-    const record = this.#bootstraps.get(sessionId);
+    const records = this.#bootstraps.get(sessionId);
+    const record = records?.find(({ digest }) => secretEquals(capability, digest));
     if (
       record === undefined ||
       record.used ||
@@ -155,6 +165,9 @@ export class SessionCredentialStore {
       return undefined;
     }
     record.used = true;
+    const remaining = records!.filter(({ used, expiresAt }) => !used && expiresAt > this.#now());
+    if (remaining.length === 0) this.#bootstraps.delete(sessionId);
+    else this.#bootstraps.set(sessionId, remaining);
     const credential = randomBytes(CREDENTIAL_BYTES).toString("base64url");
     this.#credentials.set(credential.slice(0, 12), {
       digest: digestSecret(credential),
@@ -172,6 +185,17 @@ export class SessionCredentialStore {
       record.sessionId === sessionId &&
       secretEquals(credential, record.digest)
     );
+  }
+
+  pendingBootstrapCount(): number {
+    const now = this.#now();
+    let count = 0;
+    for (const records of this.#bootstraps.values()) {
+      for (const record of records) {
+        if (!record.used && record.expiresAt > now) count += 1;
+      }
+    }
+    return count;
   }
 
   revokeSession(sessionId: string): void {

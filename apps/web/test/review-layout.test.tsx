@@ -57,7 +57,7 @@ const ownedAnnotation: ReviewItem = {
 };
 
 describe('review shell layout and accessibility contract', () => {
-  it('synchronizes externally controlled workspace open and hide without disturbing Finish', () => {
+  it('synchronizes externally controlled workspace open and hide', () => {
     const openedAction = controlledWorkspaceSurfaceAction({
       open: true,
       baseSurface: 'reading',
@@ -78,13 +78,6 @@ describe('review shell layout and accessibility contract', () => {
       baseSurface: 'reading',
       transientSurface: 'none',
     });
-    expect(controlledWorkspaceSurfaceAction({
-      open: true,
-      baseSurface: 'finish',
-      transientSurface: 'none',
-      mode: 'references',
-    })).toBeNull();
-    expect(workspaceIsVisible(true, 'finish')).toBe(false);
     expect(workspaceIsVisible(true, 'workspace')).toBe(true);
   });
 
@@ -151,10 +144,8 @@ describe('review shell layout and accessibility contract', () => {
       fitWidthReady={fitWidthReady}
       canUndo={false}
       canRedo={false}
-      finishOpen={false}
       onUndo={vi.fn()}
       onRedo={vi.fn()}
-      onFinish={vi.fn()}
     />,
   );
 
@@ -181,19 +172,16 @@ describe('review shell layout and accessibility contract', () => {
         canRedo
         canNavigateBack
         canNavigateForward
-        finishOpen={false}
         onUndo={vi.fn()}
         onRedo={vi.fn()}
         onNavigateBack={vi.fn()}
         onNavigateForward={vi.fn()}
-        onFinish={vi.fn()}
       />,
     );
     const centerStart = html.indexOf('aria-label="PDF editing, navigation, and zoom"');
     const editGroup = html.indexOf('aria-label="Edit history"');
     const navigationGroup = html.indexOf('aria-label="Document navigation"');
     const zoomGroup = html.indexOf('aria-label="PDF zoom"');
-    const actionsStart = html.indexOf('aria-label="Actions"');
 
     expect(centerStart).toBeGreaterThanOrEqual(0);
     const orderedControls = [
@@ -214,8 +202,8 @@ describe('review shell layout and accessibility contract', () => {
     ];
     for (const [index, control] of orderedControls.entries()) {
       expect(control).toBeGreaterThan(index === 0 ? centerStart : orderedControls[index - 1]!);
-      expect(control).toBeLessThan(actionsStart);
     }
+    expect(html).not.toContain('aria-label="Actions"');
     expect(html).toMatch(/aria-label="Previous page"[^>]*>.*lucide-chevron-left/u);
     expect(html).toMatch(/data-main-history="back"[^>]*>.*lucide-arrow-left/u);
     expect(html).toMatch(/aria-label="Next page"[^>]*>.*lucide-chevron-right/u);
@@ -308,7 +296,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('--workspace-side-width:0px');
     expect(html).toContain('data-review-nested-host');
     expect(html.match(/Document canvas/g)).toHaveLength(1);
-    expect(html).toContain('Codex');
+    expect(html).not.toContain('Codex');
     expect(html).toContain('aria-label="Undo"');
     expect(html).toContain('aria-label="Redo"');
     expect(html).toMatch(/data-main-history="back"[^>]*aria-label="Back in document history"[^>]*disabled=""/u);

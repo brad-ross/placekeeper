@@ -1,15 +1,15 @@
 {
   "name": "codex-plugin",
   "version": "0.1.0",
-  "description": "Open a referenced local PDF in the installed PDF Proofreader.",
+  "description": "Open a local PDF and keep its content and annotations current in the hosting Codex task.",
   "author": {
     "name": "PDF Proofreader"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "PDF Proofreader",
-    "shortDescription": "Open a local PDF for private review.",
-    "longDescription": "Launches the installed local PDF Proofreader for one explicitly referenced PDF and opens its scoped loopback session in the desktop built-in browser.",
+    "shortDescription": "Review a local PDF with live task context.",
+    "longDescription": "Launches one explicitly referenced local PDF in the desktop built-in browser, then uses packaged lifecycle hooks to provide task-scoped PDF and annotation context on every prompt.",
     "developerName": "PDF Proofreader",
     "category": "Productivity",
     "capabilities": [],

@@ -3,8 +3,12 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import type { LaunchRequest, LaunchResponse, LaunchSurface } from "../host/proofreader-host.js";
+import { DaemonUpgradeRequiredError } from "../host/launch-control.js";
 import { launchThroughDaemon, runServiceDaemon } from "../host/service-daemon.js";
 import { runDoctorCommand } from "./doctor-command.js";
+import { readHookStdin, runHookCommand } from "./hook-command.js";
+import { runContextCommand } from "./context-command.js";
+import { runDaemonCommand } from "./daemon-command.js";
 
 type LaunchClient = (request: LaunchRequest) => Promise<LaunchResponse>;
 
@@ -86,24 +90,40 @@ export async function runOpenCommand(
   try {
     response = await launch(parseOpenArguments(args));
   } catch (error) {
-    response = {
-      ok: false,
-      error: {
-        kind: "input-unavailable",
-        message: error instanceof Error ? error.message : "The launch request was invalid.",
-        recoveryAction: "Choose one readable local PDF",
-      },
-    };
+    response = error instanceof DaemonUpgradeRequiredError
+      ? {
+          ok: false,
+          error: {
+            kind: "upgrade-required",
+            message: error.message,
+            recoveryAction: error.recoveryAction,
+          },
+        }
+      : {
+          ok: false,
+          error: {
+            kind: "input-unavailable",
+            message: error instanceof Error ? error.message : "The launch request was invalid.",
+            recoveryAction: "Choose one readable local PDF",
+          },
+        };
   }
   write(`${JSON.stringify(response)}\n`);
   return response.ok ? 0 : 2;
 }
 
 async function main(): Promise<number> {
+  if (process.argv[2] === "hook") {
+    return runHookCommand(process.argv.slice(2), await readHookStdin());
+  }
+  if (process.argv[2] === "context") {
+    return runContextCommand(process.argv.slice(2));
+  }
   if (process.argv[2] === "doctor") {
     return runDoctorCommand(process.argv.slice(2));
   }
   if (process.argv[2] === "daemon") {
+    if (process.argv[3] !== undefined) return runDaemonCommand(process.argv.slice(3));
     await runServiceDaemon();
     return 0;
   }

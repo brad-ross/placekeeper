@@ -1,0 +1,45 @@
+{
+  "description": "Task-scoped PDF Proofreader lifecycle hooks.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader\" hook --event",
+            "timeout": 8,
+            "statusMessage": "Connecting PDF Proofreader context",
+            "additionalContextLimit": 131072
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader\" hook --event",
+            "timeout": 8,
+            "statusMessage": "Refreshing PDF Proofreader context",
+            "additionalContextLimit": 131072
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader\" hook --event",
+            "timeout": 3,
+            "statusMessage": "Disconnecting PDF Proofreader context",
+            "additionalContextLimit": 256
+          }
+        ]
+      }
+    ]
+  }
+}

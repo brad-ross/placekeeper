@@ -3,6 +3,10 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+const CODEX_INSTALLED_LAUNCHER_COMMAND =
+  '"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader"';
+const CONTROL_REQUEST_TIMEOUT_SECONDS = 5;
+
 interface RuntimeAsset {
   readonly id: string;
   readonly source: string;
@@ -39,7 +43,10 @@ export interface AppBundleManifest {
   readonly finderExecutable: "droplet";
   readonly runtimeDataDirectory: string;
   readonly documentTypes: readonly [{ readonly contentType: "com.adobe.pdf"; readonly role: "Viewer"; readonly rank: "Alternate" }];
-  readonly embeddedArtifacts: Readonly<Record<string, string>>;
+  readonly embeddedArtifacts: {
+    readonly codexPlugin: string;
+    readonly vscodeExtension: string;
+  };
   readonly distribution: { readonly mode: "source-first"; readonly signingRequired: false };
   readonly signing: { readonly hardenedRuntime: true; readonly secureTimestamp: true; readonly entitlements: string };
 }
@@ -133,7 +140,14 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   if (runtimeDataDirectory.startsWith("/") || runtimeDataDirectory.startsWith("Contents/") || runtimeDataDirectory.split("/").includes("..")) {
     throw new Error("Mutable runtime data must be a user-relative path outside the signed bundle");
   }
-  const embeddedArtifacts = Object.fromEntries(Object.entries(record(root.embeddedArtifacts, "embedded artifacts")).map(([name, path]) => [name, boundedString(path, `artifact ${name}`)]));
+  const rawEmbeddedArtifacts = record(root.embeddedArtifacts, "embedded artifacts");
+  const embeddedArtifacts = {
+    codexPlugin: boundedString(rawEmbeddedArtifacts.codexPlugin, "Codex plugin artifact"),
+    vscodeExtension: boundedString(rawEmbeddedArtifacts.vscodeExtension, "VS Code extension artifact"),
+  };
+  if (Object.keys(rawEmbeddedArtifacts).some((name) => !["codexPlugin", "vscodeExtension"].includes(name))) {
+    throw new Error("Only the Codex plugin and VS Code extension may be embedded integrations");
+  }
   if (root.finderExecutable !== "droplet") throw new Error("Finder executable must be the native document bridge");
   if (Object.values(embeddedArtifacts).some((path) => path.startsWith("/") || path.split("/").includes(".."))) {
     throw new Error("Embedded artifact sources must stay inside the repository");
@@ -168,6 +182,50 @@ export async function validateDistributionManifests(repoRoot = process.cwd()): P
     const bytes = await readFile(resolve(repoRoot, asset.source));
     const digest = createHash("sha256").update(bytes).digest("hex");
     if (digest !== asset.sha256) throw new Error(`Runtime asset digest mismatch: ${asset.id}`);
+  }
+  const pluginRoot = resolve(repoRoot, app.embeddedArtifacts.codexPlugin);
+  const plugin = JSON.parse(await readFile(resolve(pluginRoot, ".codex-plugin/plugin.json"), "utf8")) as unknown;
+  const pluginManifest = record(plugin, "Codex plugin manifest");
+  if (pluginManifest.skills !== "./skills/") throw new Error("The Codex plugin must expose its installed skill directory");
+  const hooks = JSON.parse(await readFile(resolve(pluginRoot, "hooks/hooks.json"), "utf8")) as unknown;
+  const hooksRoot = record(record(hooks, "Codex hook manifest").hooks, "Codex hook events");
+  for (const event of ["PostToolUse", "UserPromptSubmit", "SessionEnd"] as const) {
+    if (!Array.isArray(hooksRoot[event]) || hooksRoot[event].length !== 1) {
+      throw new Error(`The packaged Codex plugin must declare exactly one ${event} hook`);
+    }
+
+    const declaration = record(hooksRoot[event][0], `${event} hook declaration`);
+    if (!Array.isArray(declaration.hooks) || declaration.hooks.length !== 1) {
+      throw new Error(`The packaged Codex plugin must declare exactly one ${event} handler`);
+    }
+    const handler = record(declaration.hooks[0], `${event} hook handler`);
+    const expectedCommand = `${CODEX_INSTALLED_LAUNCHER_COMMAND} hook --event`;
+    if (handler.command !== expectedCommand) {
+      throw new Error(`The packaged ${event} hook must use the canonical installed launcher`);
+    }
+    if (event === "SessionEnd") {
+      if (handler.timeout !== 3) {
+        throw new Error("The packaged SessionEnd hook must remain within Codex's 3-second limit");
+      }
+    } else if (
+      typeof handler.timeout !== "number" ||
+      handler.timeout <= CONTROL_REQUEST_TIMEOUT_SECONDS
+    ) {
+      throw new Error(
+        `The packaged ${event} hook timeout must exceed the ${CONTROL_REQUEST_TIMEOUT_SECONDS}-second control client timeout`,
+      );
+    }
+  }
+  const skill = await readFile(resolve(pluginRoot, "skills/pdf-proofreader/SKILL.md"), "utf8");
+  if (
+    !skill.includes(
+      `${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf <absolute-local-pdf-path>`,
+    )
+  ) {
+    throw new Error("The packaged PDF Proofreader skill must use the canonical installed launcher");
+  }
+  if (/(^|[^/A-Za-z0-9_-])pdf-proofreader\s+(context|daemon)\b/mu.test(skill)) {
+    throw new Error("The packaged PDF Proofreader skill must not publish bare context or daemon commands");
   }
 }
 

@@ -123,7 +123,15 @@ fi
 printf 'Checking the packaged writer offline before installation...\n'
 run_pnpm smoke:installed -- "$built_app" "$repo_root/test/fixtures/pdfs/text-native.pdf"
 
-"$repo_root/packaging/macos/install-built-app.sh" "$built_app" "$app_path" "$obsolete_quick_action"
+printf 'Coordinating the shared PDF Proofreader service before replacement...\n'
+if ! "$built_app/Contents/MacOS/pdf-proofreader" daemon coordinate-install \
+  --candidate-app "$built_app" \
+  --installed-app "$app_path" \
+  --obsolete-action "$obsolete_quick_action" \
+  --replace-helper "$repo_root/packaging/macos/install-built-app.sh"; then
+  printf '%s\n' "Installation was deferred; the installed app was not changed." >&2
+  exit 1
+fi
 
 launch_services="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 if [ -x "$launch_services" ]; then

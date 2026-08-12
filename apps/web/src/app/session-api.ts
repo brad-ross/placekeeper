@@ -1,6 +1,5 @@
 import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
 import type {
-  PreparedProductionHandoff,
   ProductionSession,
   ProductionSessionApi,
   ProductionScope,
@@ -30,6 +29,36 @@ function client(session: ProductionSession) {
   return { request, post };
 }
 
+function maintainPresence(session: ProductionSession): () => void {
+  let stopped = false;
+  let socket: WebSocket | undefined;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  let retryDelayMs = 1_000;
+  const connect = (): void => {
+    if (stopped) return;
+    const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+    socket = new WebSocket(
+      `${scheme}//${window.location.host}/s/${session.sessionId}/control`,
+      ["proofreader", `proofreader-auth.${session.credential}`],
+    );
+    socket.addEventListener("open", () => {
+      retryDelayMs = 1_000;
+    });
+    socket.addEventListener("close", () => {
+      if (stopped) return;
+      const delay = retryDelayMs;
+      retryDelayMs = Math.min(retryDelayMs * 2, 30_000);
+      retry = setTimeout(connect, delay);
+    });
+  };
+  connect();
+  return () => {
+    stopped = true;
+    if (retry !== undefined) clearTimeout(retry);
+    socket?.close();
+  };
+}
+
 export async function loadProductionSession(session: ProductionSession): Promise<{
   readonly state: ReviewState;
   readonly scope: ProductionScope;
@@ -47,6 +76,7 @@ export async function loadProductionSession(session: ProductionSession): Promise
     scope,
     saveStatus,
     api: {
+      presence: () => maintainPresence(session),
       command: async (command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> => {
         const response = await fetch(`/s/${session.sessionId}/commands`, {
           method: "POST",
@@ -79,9 +109,10 @@ export async function loadProductionSession(session: ProductionSession): Promise
       chooseOriginal: () => post<ProductionSaveStatus>("/save/original"),
       retrySave: () => post<ProductionSaveStatus>("/save/retry"),
       locateSave: () => post<ProductionSaveStatus>("/save/locate"),
-      prepareCodex: () => post<PreparedProductionHandoff>("/delivery/codex/prepare"),
-      saveInstruction: (receiptId) => post("/delivery/codex/instruction", { receiptId }),
-      checkCodex: (input) => post("/delivery/codex/result", input),
+      scope: (signal) => request<ProductionScope>(
+        "/scope",
+        signal === undefined ? {} : { signal },
+      ),
     },
   };
 }

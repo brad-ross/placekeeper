@@ -317,7 +317,6 @@ function Harness() {
         existingAnnotations: visualScenario.existingAnnotations,
         annotationOutlineLabels: visualScenario.annotationOutlineLabels,
         outlineDiscovery: visualScenario.outlineDiscovery,
-        codexSlot: visualScenario.codexSlot,
         navigationState: visualScenario.referenceNavigation,
         referenceTabs: visualScenario.referenceTabs,
       } : {})}

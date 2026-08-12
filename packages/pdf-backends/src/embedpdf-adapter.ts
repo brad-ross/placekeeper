@@ -60,6 +60,12 @@ export interface InspectedPdf {
   portableItems: ReviewItem[];
 }
 
+export interface InspectedPdfAnnotationCatalog {
+  pageCount: number;
+  annotations: InspectedPdfAnnotation[];
+  portableItems: ReviewItem[];
+}
+
 type SupportedOutputAnnotation =
   | PdfStrikeOutAnnoObject
   | PdfHighlightAnnoObject
@@ -486,6 +492,41 @@ export async function inspectPdfWithEmbedPdf(bytes: Uint8Array): Promise<Inspect
   } catch (error) {
     throw new PdfWriterError('invalid-pdf', 'EmbedPDF could not reopen the PDF.', { cause: error });
   } finally {
+    await engine.destroy().toPromise();
+  }
+}
+
+/**
+ * Reads the source annotation catalog without rendering every page. Live
+ * context uses this bounded structural pass; conformance inspection keeps the
+ * heavier page fingerprints above.
+ */
+export async function inspectPdfAnnotationCatalogWithEmbedPdf(
+  bytes: Uint8Array,
+): Promise<InspectedPdfAnnotationCatalog> {
+  const engine = await newEngine();
+  let document: PdfDocumentObject | undefined;
+  try {
+    document = await engine
+      .openDocumentBuffer({ id: randomUUID(), content: toArrayBuffer(bytes) })
+      .toPromise();
+    const pages = await Promise.all(
+      document.pages.map((page) => engine.getPageAnnotations(document!, page).toPromise()),
+    );
+    return {
+      pageCount: document.pageCount,
+      annotations: pages.flatMap((annotations, pageIndex) =>
+        inspectAnnotations(annotations, pageIndex)),
+      portableItems: portableItemsFromPages(pages, document.pages).items,
+    };
+  } catch (error) {
+    throw new PdfWriterError('invalid-pdf', 'EmbedPDF could not inspect PDF annotations.', {
+      cause: error,
+    });
+  } finally {
+    if (document !== undefined) {
+      await engine.closeDocument(document).toPromise().catch(() => false);
+    }
     await engine.destroy().toPromise();
   }
 }

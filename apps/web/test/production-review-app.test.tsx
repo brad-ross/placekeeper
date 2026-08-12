@@ -3,7 +3,10 @@ import { PdfZoomMode } from "@embedpdf/models";
 import { describe, expect, it, vi } from "vitest";
 
 import { createReviewState } from "../../../packages/core/src/review-model.js";
-import { ProductionReviewApp } from "../src/app/ProductionReviewApp.js";
+import {
+  ProductionReviewApp,
+  visibleCodexContext,
+} from "../src/app/ProductionReviewApp.js";
 import { SaveDestinationDialog } from "../src/save/SaveDestinationDialog.js";
 import {
   canDeriveAnnotationOutlineLabels,
@@ -218,7 +221,7 @@ describe("one production review tree", () => {
     })).toBe(false);
   });
 
-  it("makes viewer, automatic save identity, review commands, and Codex reachable together", () => {
+  it("keeps the ordinary-browser review free of Codex controls or ambient status", () => {
     const state = {
       ...createReviewState({
         sessionId: "00000000-0000-4000-8000-000000000001",
@@ -240,12 +243,12 @@ describe("one production review tree", () => {
         command: vi.fn(),
         saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
         chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
-        prepareCodex: vi.fn(), saveInstruction: vi.fn(), checkCodex: vi.fn(),
+        scope: vi.fn(),
       }}
       viewer={<div role="application">Real shared PDF viewer</div>}
     />);
     expect(html).toContain("Real shared PDF viewer");
-    expect(html).toContain("aria-label=\"Actions\"");
+    expect(html).not.toContain("aria-label=\"Actions\"");
     expect(html).toContain('aria-label="Back in document history"');
     expect(html).toContain('aria-label="Forward in document history"');
     expect(html).toContain('aria-label="Undo"');
@@ -253,20 +256,14 @@ describe("one production review tree", () => {
     expect(html).toContain("paper.pdf, not saved. Open automatic save options");
     expect(html).toContain('data-save-phase="not-saved"');
     expect(html).toContain("Not saved");
-    expect(html).toContain("Codex delivery");
-    expect(html).toContain('data-delivery-kind="codex"');
-    expect(html).toContain('data-review-status="phase"');
-    expect(html).toContain("Optional handoff");
-    expect(html).toContain("1 annotation");
-    expect(html).toContain("Codex handoff");
-    expect(html).toContain("Close Codex options");
-    expect(html).toContain("Work with Codex");
+    expect(html).not.toContain("Codex");
+    expect(html).not.toContain('data-codex-context');
+    expect(html).toContain('data-review-item="00000000-0000-4000-8000-000000000004"');
     expect(html).not.toContain("Finish review");
     expect(html).not.toContain("Discard review");
     expect(html).not.toContain("Human delivery");
     expect(html).toContain('data-annotation-drawer');
     expect(html).toContain('Existing annotations are loading');
-    expect(html).toContain("data-surface-open=\"false\"");
     expect(html).toContain('data-reference-layout="wide-closed"');
     expect(html).toContain('data-workspace-edge-rail="right"');
     expect(html).toContain('data-workspace-edge-rail="bottom"');
@@ -277,6 +274,80 @@ describe("one production review tree", () => {
     expect(html.match(/Real shared PDF viewer/g)).toHaveLength(1);
     expect(html).not.toContain("Submit task");
     expect(html).not.toContain('aria-modal="true" aria-labelledby="finish-review-heading"');
+  });
+
+  it("shows passive status only for a trusted Codex launch scope", () => {
+    const state = createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000011",
+      source: { fileId: "00000000-0000-4000-8000-000000000012", digest: "a".repeat(64), byteLength: 12 },
+    });
+    const api = {
+      command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+      chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
+      scope: vi.fn(),
+    };
+    const codex = renderToStaticMarkup(<ProductionReviewApp
+      session={{ sessionId: state.sessionId, credential: "secret" }}
+      initialState={state}
+      scope={{
+        documentTitle: "paper.pdf",
+        launchSurface: "codex",
+        codexContext: { status: "refreshing", proofreaderSessionId: state.sessionId, documentGeneration: 1 },
+      }}
+      api={api}
+      viewer={<div>Viewer</div>}
+    />);
+    const finder = renderToStaticMarkup(<ProductionReviewApp
+      session={{ sessionId: state.sessionId, credential: "secret" }}
+      initialState={state}
+      scope={{ documentTitle: "paper.pdf", launchSurface: "finder" }}
+      api={api}
+      viewer={<div>Viewer</div>}
+    />);
+
+    expect(codex).toContain('data-codex-context="connecting"');
+    expect(codex).toContain("lucide-bot");
+    expect(codex).toContain("Agent context updating");
+    expect(codex).not.toContain("button>Codex");
+    expect(finder).not.toContain('data-codex-context');
+    expect(finder).not.toContain("Codex");
+  });
+
+  it("renders a previously current Codex identity as refreshing as soon as local review state advances", () => {
+    const initial = createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000021",
+      source: { fileId: "00000000-0000-4000-8000-000000000022", digest: "a".repeat(64), byteLength: 12 },
+    });
+    const advanced = { ...initial, revision: 1 };
+    const current = {
+      status: "current" as const,
+      identity: {
+        proofreaderSessionId: initial.sessionId,
+        documentGeneration: 1,
+        source: initial.source,
+        reviewRevision: 0,
+        stateDigest: "b".repeat(64),
+      },
+      leaseExpiresAt: "2026-08-12T13:00:00.000Z",
+    };
+    expect(visibleCodexContext(current, advanced)).toMatchObject({
+      status: "refreshing",
+      lastVerified: { reviewRevision: 0 },
+    });
+
+    const html = renderToStaticMarkup(<ProductionReviewApp
+      session={{ sessionId: advanced.sessionId, credential: "secret" }}
+      initialState={advanced}
+      scope={{ documentTitle: "paper.pdf", launchSurface: "codex", codexContext: current }}
+      api={{
+        command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+        chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
+        scope: vi.fn(),
+      }}
+      viewer={<div>Viewer</div>}
+    />);
+    expect(html).toContain('data-codex-context="connecting"');
+    expect(html).not.toContain('data-codex-context="current"');
   });
 
   it("uses one clear automatic-save choice surface with the original first", () => {

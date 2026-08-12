@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 
-import type { SourceHint } from "../../../../packages/core/src/handoff.js";
+import type { SourceHint } from "../../../../packages/core/src/structured-review-item.js";
 import type { ReviewItem } from "../../../../packages/core/src/review-model.js";
 import type { FrozenReviewDelivery } from "../export/export-coordinator.js";
 import { isContained } from "../files/file-capabilities.js";
@@ -78,11 +78,12 @@ export interface QuerySyncTexInput {
   readonly pageIndex: number;
   readonly point: { readonly x: number; readonly y: number };
   readonly run?: SyncTexRunner;
+  readonly timeoutMs?: number;
 }
 
 export async function querySyncTex(input: QuerySyncTexInput): Promise<SourceHint | undefined> {
   const sourceRoot = await realpath(input.sourceRoot);
-  const timeoutMs = 2_000;
+  const timeoutMs = Math.max(1, Math.min(input.timeoutMs ?? 2_000, 2_000));
   const maxOutputBytes = 64 * 1024;
   const result = await (input.run ?? runSyncTex)({
     executable: "synctex",
@@ -145,16 +146,32 @@ export async function querySyncTexHints(input: {
   readonly pdfPath: string;
   readonly run?: SyncTexRunner;
 }): Promise<ReadonlyMap<string, SourceHint>> {
+  if (input.delivery.sourceRootPath === undefined) return new Map();
+  return querySyncTexHintsForItems({
+    items: input.delivery.items,
+    sourceRoot: input.delivery.sourceRootPath,
+    pdfPath: input.pdfPath,
+    ...(input.run === undefined ? {} : { run: input.run }),
+  });
+}
+
+export async function querySyncTexHintsForItems(input: {
+  readonly items: readonly ReviewItem[];
+  readonly sourceRoot: string;
+  readonly pdfPath: string;
+  readonly run?: SyncTexRunner;
+  readonly timeoutMs?: number;
+}): Promise<ReadonlyMap<string, SourceHint>> {
   const hints = new Map<string, SourceHint>();
-  if (input.delivery.sourceRootPath === undefined) return hints;
-  for (const item of input.delivery.items) {
+  for (const item of input.items) {
     const point = geometryPoint(item);
     if (point === undefined) continue;
     const hint = await querySyncTex({
-      sourceRoot: input.delivery.sourceRootPath,
+      sourceRoot: input.sourceRoot,
       pdfPath: input.pdfPath,
       pageIndex: item.pageIndex,
       point,
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
       ...(input.run === undefined ? {} : { run: input.run }),
     });
     if (hint !== undefined) hints.set(item.id, hint);

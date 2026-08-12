@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
@@ -14,7 +14,11 @@ import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-wr
 import { createReviewState } from "../../../../packages/core/src/review-model.js";
 import { createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
 import { reduceReview } from "../../../../packages/core/src/review-reducer.js";
-import { SessionCredentialStore } from "../../../../packages/core/src/session-security.js";
+import { reviewSemanticDigest } from "../../../../packages/core/src/live-context.js";
+import {
+  digestSecretHex,
+  SessionCredentialStore,
+} from "../../../../packages/core/src/session-security.js";
 import {
   FileCapabilityRegistry,
   hashFile,
@@ -39,13 +43,16 @@ import {
   readPortableReviewItems,
 } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { SessionControlRegistry } from "./control-socket.js";
+import { TaskBindingRegistry } from "../context/task-binding-registry.js";
 
 export type RecoveryDecision = "resume" | "discard" | "fork";
+export type LaunchSurface = "browser" | "finder" | "codex" | "vscode";
 
 export interface OpenReviewRequest {
   readonly pdfPath: string;
   readonly sourceRootPath?: string;
   readonly recoveryDecision?: RecoveryDecision;
+  readonly surface?: LaunchSurface;
 }
 
 export interface SessionLaunch {
@@ -54,6 +61,9 @@ export interface SessionLaunch {
   readonly rootId?: string;
   readonly launchPath: string;
   readonly fragment: string;
+  readonly surface: LaunchSurface;
+  readonly documentGeneration: number;
+  readonly bindProof?: string;
 }
 
 export type OpenReviewResult =
@@ -70,7 +80,7 @@ interface ActiveSession {
   readonly sourceSnapshotPath: string;
   readonly store: DraftSnapshotStore;
   readonly fileId: string;
-  readonly rootId?: string;
+  rootId?: string;
   state: ReviewState;
   lastExportAt?: string;
   currentOriginalDigest: string;
@@ -80,7 +90,17 @@ interface ActiveSession {
   destination: DurableSaveDestination;
   sync: DurableSaveSync;
   rewriteEligibility: PdfRewriteEligibility;
+  readonly documentGeneration: number;
 }
+
+interface BrowserLaunchScope {
+  readonly sessionId: string;
+  readonly documentGeneration: number;
+  readonly surface: LaunchSurface;
+  readonly expiresAtMs: number;
+}
+
+const BOOTSTRAP_TTL_MS = 60_000;
 
 export interface SessionBrokerOptions {
   readonly recoveryRoot: string;
@@ -91,6 +111,30 @@ export interface SessionBrokerOptions {
   readonly snapshotHooks?: SnapshotHooks;
   readonly portableReader?: (bytes: Uint8Array) => Promise<readonly ReviewItem[]>;
   readonly rewriteAssessor?: (bytes: Uint8Array) => Promise<PdfRewriteEligibility>;
+  readonly taskBindings?: TaskBindingRegistry;
+}
+
+/**
+ * Internal-only material used to build one atomic model-facing observation.
+ * Paths and destination capabilities must be consumed inside the service and
+ * never copied into a live-context response.
+ */
+export interface AtomicSessionProjection {
+  readonly sessionId: string;
+  readonly documentGeneration: number;
+  readonly state: ReviewState;
+  readonly destination: DurableSaveDestination;
+  readonly sync: DurableSaveSync;
+  readonly sourceByteLength: number;
+  readonly sourceSnapshotPath: string;
+  readonly sourcePdfPath: string;
+  readonly sourceRootPath?: string;
+}
+
+export interface VerifiedSourceSnapshot {
+  readonly documentGeneration: number;
+  readonly sourceDigest: string;
+  readonly bytes: Buffer;
 }
 
 function activeKey(path: string, digest: string): string {
@@ -102,18 +146,25 @@ export class SessionBroker {
   readonly capabilities: FileCapabilityRegistry;
   readonly credentials: SessionCredentialStore;
   readonly controls: SessionControlRegistry;
+  readonly taskBindings: TaskBindingRegistry;
   readonly #now: () => Date;
   readonly #snapshotHooks: SnapshotHooks;
   readonly #portableReader: (bytes: Uint8Array) => Promise<readonly ReviewItem[]>;
   readonly #rewriteAssessor: (bytes: Uint8Array) => Promise<PdfRewriteEligibility>;
   readonly #activeById = new Map<string, ActiveSession>();
   readonly #activeBySource = new Map<string, string>();
+  readonly #bootstrapScopes = new Map<string, BrowserLaunchScope>();
+  readonly #credentialScopes = new Map<string, BrowserLaunchScope>();
+  readonly #sessionEndListeners = new Set<(sessionId: string) => void>();
 
   constructor(options: SessionBrokerOptions) {
     this.recoveryRoot = options.recoveryRoot;
     this.capabilities = options.capabilities ?? new FileCapabilityRegistry();
     this.credentials = options.credentials ?? new SessionCredentialStore();
     this.controls = options.controls ?? new SessionControlRegistry();
+    this.taskBindings = options.taskBindings ?? new TaskBindingRegistry(
+      options.now === undefined ? {} : { now: options.now },
+    );
     this.#now = options.now ?? (() => new Date());
     this.#snapshotHooks = options.snapshotHooks ?? {};
     this.#portableReader = options.portableReader ?? readPortableReviewItems;
@@ -121,6 +172,11 @@ export class SessionBroker {
       (options.portableReader === undefined
         ? assessPdfRewriteEligibility
         : async () => ({ eligible: true }));
+  }
+
+  onSessionEnd(listener: (sessionId: string) => void): () => void {
+    this.#sessionEndListeners.add(listener);
+    return () => this.#sessionEndListeners.delete(listener);
   }
 
   #store(sessionId: string): DraftSnapshotStore {
@@ -157,14 +213,31 @@ export class SessionBroker {
     );
   }
 
-  #launch(session: ActiveSession): SessionLaunch {
-    const capability = this.credentials.issueBootstrap(session.id);
+  #launch(session: ActiveSession, surface: LaunchSurface): SessionLaunch {
+    const capability = this.credentials.issueBootstrap(session.id, BOOTSTRAP_TTL_MS);
+    const launchScope: BrowserLaunchScope = {
+      sessionId: session.id,
+      documentGeneration: session.documentGeneration,
+      surface,
+      expiresAtMs: this.#now().getTime() + BOOTSTRAP_TTL_MS,
+    };
+    this.#bootstrapScopes.set(digestSecretHex(capability), launchScope);
+    const bindProof = surface === "codex"
+      ? this.taskBindings.issueBindProof({
+          reviewSessionId: session.id,
+          documentGeneration: session.documentGeneration,
+          browserCapability: capability,
+        })
+      : undefined;
     return {
       sessionId: session.id,
       fileId: session.fileId,
       ...(session.rootId === undefined ? {} : { rootId: session.rootId }),
       launchPath: `/s/${session.id}/bootstrap`,
       fragment: `#cap=${capability}`,
+      surface,
+      documentGeneration: session.documentGeneration,
+      ...(bindProof === undefined ? {} : { bindProof }),
     };
   }
 
@@ -181,7 +254,13 @@ export class SessionBroker {
       this.capabilities.revokeFile(approvedFile.id);
       const session = this.#activeById.get(existingSessionId);
       if (session === undefined) throw new Error("Active session index is inconsistent");
-      return { kind: "focused", launch: this.#launch(session) };
+      if (request.sourceRootPath !== undefined) {
+        await this.#attachSourceRoot(session, request.sourceRootPath);
+      }
+      return {
+        kind: "focused",
+        launch: this.#launch(session, request.surface ?? "browser"),
+      };
     }
 
     const drafts = await this.#recoverableDrafts();
@@ -316,10 +395,14 @@ export class SessionBroker {
         destination,
         sync,
         rewriteEligibility,
+        documentGeneration: 1,
       };
       await session.store.persist(this.#draft(session));
       this.#activate(session);
-      return { kind: "opened", launch: this.#launch(session) };
+      return {
+        kind: "opened",
+        launch: this.#launch(session, request.surface ?? "browser"),
+      };
     }
 
     const sessionId = randomUUID();
@@ -386,10 +469,43 @@ export class SessionBroker {
       destination,
       sync,
       rewriteEligibility,
+      documentGeneration: 1,
     };
     await session.store.persist(this.#draft(session));
     this.#activate(session);
-    return { kind: "opened", launch: this.#launch(session) };
+    return {
+      kind: "opened",
+      launch: this.#launch(session, request.surface ?? "browser"),
+    };
+  }
+
+  async #attachSourceRoot(session: ActiveSession, sourceRootPath: string): Promise<void> {
+    const approvedRoot = await this.capabilities.approveRoot(sourceRootPath);
+    const predecessor = session.writeTail;
+    const { promise, resolve: release } = Promise.withResolvers<void>();
+    session.writeTail = promise;
+    await predecessor;
+    try {
+      if (session.ending) throw new Error("Review session is ending");
+      const previousRootId = session.rootId;
+      const nextState: ReviewState = {
+        ...session.state,
+        sourceRootId: approvedRoot.id,
+      };
+      const nextDraft: RecoverableDraftV2 = {
+        ...this.#draft(session),
+        state: nextState,
+      };
+      await session.store.persist(nextDraft);
+      session.rootId = approvedRoot.id;
+      session.state = nextState;
+      if (previousRootId !== undefined) this.capabilities.revokeRoot(previousRootId);
+    } catch (error) {
+      this.capabilities.revokeRoot(approvedRoot.id);
+      throw error;
+    } finally {
+      release();
+    }
   }
 
   #activate(session: ActiveSession): void {
@@ -423,8 +539,25 @@ export class SessionBroker {
   }
 
   exchangeBootstrap(sessionId: string, capability: string): string | undefined {
+    this.#sweepBootstrapScopes();
     if (!this.#activeById.has(sessionId)) return undefined;
-    return this.credentials.exchangeBootstrap(sessionId, capability);
+    const scopeKey = digestSecretHex(capability);
+    const scope = this.#bootstrapScopes.get(scopeKey);
+    const credential = this.credentials.exchangeBootstrap(sessionId, capability);
+    if (credential === undefined) return undefined;
+    this.controls.noteAuthenticatedPage(sessionId);
+    this.#bootstrapScopes.delete(scopeKey);
+    if (scope !== undefined && scope.sessionId === sessionId) {
+      this.#credentialScopes.set(digestSecretHex(credential), scope);
+      if (scope.surface === "codex") {
+        this.taskBindings.activateBrowser({
+          reviewSessionId: sessionId,
+          documentGeneration: scope.documentGeneration,
+          browserCapability: capability,
+        });
+      }
+    }
+    return credential;
   }
 
   authenticate(sessionId: string, credential: string): boolean {
@@ -432,6 +565,27 @@ export class SessionBroker {
       this.#activeById.has(sessionId) &&
       this.credentials.authenticate(sessionId, credential)
     );
+  }
+
+  activity(): {
+    readonly reviewPresence: number;
+    readonly codexTasks: number;
+    readonly transientWork: number;
+  } {
+    this.#sweepBootstrapScopes();
+    const controls = this.controls.activity();
+    return {
+      reviewPresence: controls.reviewPresence + this.credentials.pendingBootstrapCount(),
+      codexTasks: this.taskBindings.activityCount(),
+      transientWork: controls.transientWork,
+    };
+  }
+
+  #sweepBootstrapScopes(): void {
+    const now = this.#now().getTime();
+    for (const [key, scope] of this.#bootstrapScopes) {
+      if (scope.expiresAtMs <= now) this.#bootstrapScopes.delete(key);
+    }
   }
 
   state(sessionId: string): ReviewState | undefined {
@@ -660,17 +814,55 @@ export class SessionBroker {
     });
   }
 
-  sessionScope(sessionId: string):
-    | { readonly documentTitle: string; readonly sourceRootPath?: string }
+  sessionScope(sessionId: string, credential?: string):
+    | {
+        readonly documentTitle: string;
+        readonly sourceRootPath?: string;
+        readonly launchSurface?: LaunchSurface;
+        readonly codexContext?: ReturnType<TaskBindingRegistry["statusForReview"]>;
+      }
     | undefined {
     const session = this.#activeById.get(sessionId);
     if (session === undefined) return undefined;
     const sourceRootPath = session.rootId === undefined
       ? undefined
       : this.capabilities.getRootPath(session.rootId);
+    const launchScope = credential === undefined || !this.authenticate(sessionId, credential)
+      ? undefined
+      : this.#credentialScopes.get(digestSecretHex(credential));
+    const trustedLaunchScope = launchScope?.sessionId === sessionId
+      ? launchScope
+      : undefined;
+    const trustedCodexScope =
+      trustedLaunchScope?.surface === "codex" &&
+      trustedLaunchScope.documentGeneration === session.documentGeneration
+        ? trustedLaunchScope
+        : undefined;
+    if (trustedCodexScope !== undefined) {
+      this.taskBindings.renewBrowserHeartbeat({
+        reviewSessionId: sessionId,
+        documentGeneration: session.documentGeneration,
+      });
+    }
     return {
       documentTitle: basename(session.canonicalSourcePath),
       ...(sourceRootPath === undefined ? {} : { sourceRootPath }),
+      ...(trustedLaunchScope === undefined
+        ? {}
+        : { launchSurface: trustedLaunchScope.surface }),
+      ...(trustedLaunchScope?.surface === "codex"
+        ? {
+            codexContext: this.taskBindings.statusForReview(
+              sessionId,
+              {
+                documentGeneration: session.documentGeneration,
+                reviewRevision: session.state.revision,
+                sourceDigest: session.state.source.digest,
+                stateDigest: reviewSemanticDigest(session.state.items),
+              },
+            ),
+          }
+        : {}),
     };
   }
 
@@ -678,6 +870,71 @@ export class SessionBroker {
     const session = this.#activeById.get(sessionId);
     if (session === undefined) return undefined;
     return readFile(session.sourceSnapshotPath);
+  }
+
+  /** Capture a lightweight, internally consistent session snapshot. The write
+   * tail is held only while in-memory metadata is cloned. */
+  async snapshotAtomicSession(sessionId: string): Promise<AtomicSessionProjection | undefined> {
+    const session = this.#activeById.get(sessionId);
+    if (session === undefined || session.ending) return undefined;
+    return this.#withSessionTail(session, async () => {
+      if (session.ending || this.#activeById.get(sessionId) !== session) return undefined;
+      const sourceRootPath = session.rootId === undefined
+        ? undefined
+        : this.capabilities.getRootPath(session.rootId);
+      return {
+        sessionId: session.id,
+        documentGeneration: session.documentGeneration,
+        state: structuredClone(session.state),
+        destination: structuredClone(session.destination),
+        sync: structuredClone(session.sync),
+        sourceByteLength: session.state.source.byteLength,
+        sourceSnapshotPath: session.sourceSnapshotPath,
+        sourcePdfPath: session.canonicalSourcePath,
+        ...(sourceRootPath === undefined ? {} : { sourceRootPath }),
+      };
+    });
+  }
+
+  /** Compatibility projection over a lightweight atomic snapshot. The
+   * callback deliberately runs outside the session write tail. */
+  async projectAtomicSession<T>(
+    sessionId: string,
+    project: (snapshot: AtomicSessionProjection) => Promise<T>,
+  ): Promise<T | undefined> {
+    const snapshot = await this.snapshotAtomicSession(sessionId);
+    return snapshot === undefined ? undefined : project(snapshot);
+  }
+
+  /** Read immutable source bytes without holding the mutation tail, then prove
+   * the active session still has the expected generation and source identity. */
+  async loadVerifiedSourceSnapshot(
+    sessionId: string,
+    expected: { readonly documentGeneration: number; readonly sourceDigest: string },
+  ): Promise<VerifiedSourceSnapshot | undefined> {
+    const before = await this.snapshotAtomicSession(sessionId);
+    if (
+      before === undefined ||
+      before.documentGeneration !== expected.documentGeneration ||
+      before.state.source.digest !== expected.sourceDigest
+    ) return undefined;
+    const bytes = await readFile(before.sourceSnapshotPath);
+    if (
+      bytes.byteLength !== before.sourceByteLength ||
+      createHash("sha256").update(bytes).digest("hex") !== expected.sourceDigest
+    ) return undefined;
+    const after = await this.snapshotAtomicSession(sessionId);
+    if (
+      after === undefined ||
+      after.documentGeneration !== expected.documentGeneration ||
+      after.state.source.digest !== expected.sourceDigest ||
+      after.sourceSnapshotPath !== before.sourceSnapshotPath
+    ) return undefined;
+    return {
+      documentGeneration: after.documentGeneration,
+      sourceDigest: after.state.source.digest,
+      bytes,
+    };
   }
 
   async freezeDelivery(sessionId: string): Promise<FrozenReviewDelivery> {
@@ -875,6 +1132,42 @@ export class SessionBroker {
     await this.#end(sessionId);
   }
 
+  async quiesceForShutdown(): Promise<void> {
+    const sessions = [...this.#activeById.values()];
+    await this.drainWrites();
+    for (const session of sessions) session.ending = true;
+    // Recovery cleanup is garbage collection, not a shutdown precondition.
+    // A verified-clean directory that cannot be removed may be retried later;
+    // it must never prevent capability revocation and control-socket teardown.
+    await Promise.allSettled(sessions.map(async (session) => {
+      const clean = session.sync.phase === "clean" &&
+        session.sync.savedRevision === session.sync.desiredRevision &&
+        session.sync.savedDigest === session.sync.desiredDigest;
+      if (clean) await session.store.remove();
+    }));
+    for (const session of sessions) {
+      this.capabilities.revokeFile(session.fileId);
+      if (session.rootId !== undefined) this.capabilities.revokeRoot(session.rootId);
+      this.credentials.revokeSession(session.id);
+      this.taskBindings.revokeSession(session.id);
+      this.controls.cancel(session.id);
+      for (const listener of this.#sessionEndListeners) listener(session.id);
+    }
+    this.#activeById.clear();
+    this.#activeBySource.clear();
+    this.#bootstrapScopes.clear();
+    this.#credentialScopes.clear();
+  }
+
+  async drainWrites(): Promise<void> {
+    while (true) {
+      const sessions = [...this.#activeById.values()];
+      const tails = sessions.map((session) => session.writeTail);
+      await Promise.all(tails);
+      if (sessions.every((session, index) => session.writeTail === tails[index])) return;
+    }
+  }
+
   async #end(sessionId: string): Promise<void> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined) return;
@@ -892,10 +1185,18 @@ export class SessionBroker {
       }
     }
     this.controls.cancel(sessionId);
+    this.taskBindings.revokeSession(sessionId);
     await session.writeTail;
     this.credentials.revokeSession(sessionId);
+    for (const [key, scope] of this.#bootstrapScopes) {
+      if (scope.sessionId === sessionId) this.#bootstrapScopes.delete(key);
+    }
+    for (const [key, scope] of this.#credentialScopes) {
+      if (scope.sessionId === sessionId) this.#credentialScopes.delete(key);
+    }
     this.capabilities.revokeFile(session.fileId);
     if (session.rootId !== undefined) this.capabilities.revokeRoot(session.rootId);
     await session.store.remove();
+    for (const listener of this.#sessionEndListeners) listener(sessionId);
   }
 }

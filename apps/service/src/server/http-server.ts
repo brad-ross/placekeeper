@@ -11,9 +11,9 @@ import type { ReviewCommand } from "../../../../packages/core/src/review-model.j
 import { isContained } from "../files/file-capabilities.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
 import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
+import type { DaemonLifecycleCoordinator } from "../host/daemon-lifecycle.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
-const MAX_RESULT_BODY_BYTES = 16 * 1024 * 1024;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 
 function setBaseHeaders(
@@ -147,29 +147,11 @@ export interface WebAssetOptions {
 
 export interface LocalHttpServerOptions {
   readonly webAssets?: WebAssetOptions;
-  readonly delivery?: SessionDeliveryActions;
   readonly saving?: Pick<
     PdfSaveCoordinator,
     "proposal" | "chooseCopyFilename" | "chooseFolder" | "chooseOriginal" | "requestSave" | "retry" | "locate"
   >;
-}
-
-export interface SessionDeliveryActions {
-  prepareCodex(sessionId: string): Promise<{
-    readonly receiptId: string;
-    readonly prompt: string;
-    readonly handoffPath: string;
-    readonly handoffSha256: string;
-    readonly reviewedPdfPath: string;
-    readonly reviewedPdfSha256: string;
-    readonly resultDirectory: string;
-  }>;
-  saveInstruction(sessionId: string, receiptId: string): Promise<string>;
-  checkCodex(sessionId: string, input: {
-    readonly receiptId: string;
-    readonly dispositionText: string;
-    readonly revisedPdfSelected: boolean;
-  }): Promise<{ readonly status: "Complete" | "Partial" | "Invalid"; readonly message: string }>;
+  readonly lifecycle?: Pick<DaemonLifecycleCoordinator, "enterActivity">;
 }
 
 export interface LocalHttpServer {
@@ -189,6 +171,13 @@ export async function startHttpServer(
     : await realpath(options.webAssets.root);
   const assetCapabilities = new Map<string, Set<string>>();
   const server = createServer(async (request, response) => {
+    const activity = options.lifecycle?.enterActivity();
+    if (options.lifecycle !== undefined && activity === undefined) {
+      send(response, 503, "PDF Proofreader is restarting; retry shortly.");
+      return;
+    }
+    response.once("finish", () => activity?.complete());
+    response.once("close", () => activity?.complete());
     try {
       const requestUrl = new URL(request.url ?? "/", origin);
       const pathname = requestUrl.pathname;
@@ -198,18 +187,11 @@ export async function startHttpServer(
         `^/s/(${UUID})/save/(status|proposal|copy|folder|original|retry|locate)$`,
         "u",
       ).exec(pathname);
-      const deliveryMatch = new RegExp(
-        `^/s/(${UUID})/delivery/(codex/prepare|codex/instruction|codex/result)$`,
-        "u",
-      ).exec(pathname);
       const mutates = exchangeMatch !== null || commandMatch !== null ||
-        (saveMatch !== null && saveMatch[2] !== "status" && saveMatch[2] !== "proposal") ||
-        deliveryMatch !== null;
+        (saveMatch !== null && saveMatch[2] !== "status" && saveMatch[2] !== "proposal");
       const expectsJson = mutates;
       const contentLength = Number(request.headers["content-length"] ?? 0);
-      const bodyLimit = deliveryMatch?.[2] === "codex/result"
-        ? MAX_RESULT_BODY_BYTES
-        : MAX_BODY_BYTES;
+      const bodyLimit = MAX_BODY_BYTES;
       const failure = validateRequestSecurity(
         {
           method: request.method ?? "",
@@ -332,7 +314,7 @@ export async function startHttpServer(
       const documentMatch = new RegExp(`^/s/(${UUID})/document/(${UUID})$`, "u").exec(pathname);
       const authenticatedSessionId =
         stateMatch?.[1] ?? scopeMatch?.[1] ?? documentMatch?.[1] ?? commandMatch?.[1] ??
-        saveMatch?.[1] ?? deliveryMatch?.[1];
+        saveMatch?.[1];
       if (authenticatedSessionId !== undefined) {
         const credential = bearerCredential(request);
         if (
@@ -349,7 +331,11 @@ export async function startHttpServer(
         return;
       }
       if (scopeMatch !== null && request.method === "GET") {
-        sendJson(response, 200, broker.sessionScope(scopeMatch[1]!));
+        sendJson(
+          response,
+          200,
+          broker.sessionScope(scopeMatch[1]!, bearerCredential(request)),
+        );
         return;
       }
       if (saveMatch !== null) {
@@ -430,41 +416,6 @@ export async function startHttpServer(
         sendJson(response, 200, next);
         return;
       }
-      if (deliveryMatch !== null) {
-        if (request.method !== "POST") {
-          send(response, 405, "Method not allowed");
-          return;
-        }
-        if (options.delivery === undefined) {
-          send(response, 503, "Delivery service is unavailable");
-          return;
-        }
-        const sessionId = deliveryMatch[1]!;
-        const action = deliveryMatch[2]!;
-        const body = await readJson(request, bodyLimit) as Record<string, unknown>;
-        if (action === "codex/prepare") {
-          sendJson(response, 200, await options.delivery.prepareCodex(sessionId));
-          return;
-        }
-        if (action === "codex/instruction") {
-          if (typeof body.receiptId !== "string") throw new SyntaxError("Invalid receipt");
-          sendJson(response, 200, {
-            path: await options.delivery.saveInstruction(sessionId, body.receiptId),
-          });
-          return;
-        }
-        if (
-          typeof body.receiptId !== "string" ||
-          typeof body.dispositionText !== "string" ||
-          typeof body.revisedPdfSelected !== "boolean"
-        ) throw new SyntaxError("Invalid selected result");
-        sendJson(response, 200, await options.delivery.checkCodex(sessionId, {
-          receiptId: body.receiptId,
-          dispositionText: body.dispositionText,
-          revisedPdfSelected: body.revisedPdfSelected,
-        }));
-        return;
-      }
       send(response, 404, "Not found");
     } catch (error) {
       if (error instanceof RangeError) {
@@ -477,8 +428,14 @@ export async function startHttpServer(
     }
   });
 
-  server.on("upgrade", (request, socket: Socket) => {
+  server.on("upgrade", (request, socket: Socket, head) => {
+    const activity = options.lifecycle?.enterActivity();
+    if (options.lifecycle !== undefined && activity === undefined) {
+      socket.end("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      return;
+    }
     const reject = (): void => {
+      activity?.complete();
       socket.destroy();
     };
     try {
@@ -532,7 +489,8 @@ export async function startHttpServer(
       socket.write(
         `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: proofreader\r\n\r\n`,
       );
-      broker.controls.registerSocket(match[1]!, socket);
+      broker.controls.registerSocket(match[1]!, socket, head);
+      activity?.complete();
     } catch {
       reject();
     }
@@ -554,12 +512,13 @@ export async function startHttpServer(
   return {
     origin,
     port: address.port,
-      close: () =>
+    close: () =>
       new Promise<void>((resolve, reject) => {
         broker.controls.closeAllSockets();
+        broker.taskBindings.revokeAll();
         assetCapabilities.clear();
         server.close((error) => (error === undefined ? resolve() : reject(error)));
-        server.closeAllConnections();
+        server.closeIdleConnections();
       }),
   };
 }

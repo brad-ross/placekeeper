@@ -1,22 +1,21 @@
 import { createHash, randomUUID } from "node:crypto";
-import { access, copyFile, mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 import { ProofreaderHost } from "../../apps/service/src/host/proofreader-host.js";
+import { TaskBindingRegistry } from "../../apps/service/src/context/task-binding-registry.js";
 import { addPageNote } from "../../packages/core/src/review-commands.js";
 
 let root = "";
 let host: ProofreaderHost;
-let launchUrl = "";
 let sourceRoot = "";
 let pdf = "";
 let multiPagePdf = "";
 let rotatedPdf = "";
 let referencePdf = "";
 let searchPdf = "";
-let initialSessionId = "";
 
 const PRODUCTION_VIEWER_READY_TIMEOUT_MS = 15_000;
 const REFERENCE_READY_TIMEOUT_MS = 15_000;
@@ -269,15 +268,92 @@ test.beforeAll(async () => {
     recoveryRoot: join(root, "recovery"),
     webAssets: { root: resolve("dist/web") },
   });
-  const launched = await host.open({ pdfPath: pdf, sourceRootPath: sourceRoot });
-  if (!launched.ok || launched.kind === "recovery-offered") throw new Error("Production launch failed");
-  launchUrl = launched.url;
-  initialSessionId = launched.sessionId;
 });
 
 test.afterAll(async () => {
   await host?.close();
   if (root) await rm(root, { recursive: true, force: true });
+});
+
+test("fails mounted Codex status closed on lease expiry and aborts a hung scope poll", async ({ page }) => {
+  const clientNow = Date.now();
+  const taskBindings = new TaskBindingRegistry({
+    now: () => new Date(clientNow),
+    pendingTtlMs: 1_000,
+    activeLeaseTtlMs: 2_000,
+  });
+  const clockedHost = await ProofreaderHost.start({
+    recoveryRoot: join(root, "clocked-codex-recovery"),
+    webAssets: { root: resolve("dist/web") },
+    taskBindings,
+  });
+  try {
+    const launched = await clockedHost.open({
+      pdfPath: pdf,
+      sourceRootPath: sourceRoot,
+      surface: "codex",
+      fork: true,
+    });
+    if (!launched.ok || launched.kind === "recovery-offered" || launched.bindProof === undefined) {
+      throw new Error("Expected bindable Codex production launch");
+    }
+    const url = new URL(launched.url);
+    const capability = new URLSearchParams(url.hash.slice(1)).get("cap")!;
+    expect(taskBindings.claim({
+      bindProof: launched.bindProof,
+      taskSessionId: "mounted-clock-task",
+      reviewSessionId: launched.sessionId,
+      documentGeneration: launched.documentGeneration,
+    })).toMatchObject({ status: "pending" });
+    expect(taskBindings.activateBrowser({
+      reviewSessionId: launched.sessionId,
+      documentGeneration: launched.documentGeneration,
+      browserCapability: capability,
+    })).toMatchObject({ status: "active" });
+    expect((await clockedHost.context.refresh({ taskSessionId: "mounted-clock-task" })).status)
+      .toBe("current");
+
+    await page.clock.install({ time: clientNow });
+    await page.addInitScript(() => {
+      const nativeFetch = window.fetch.bind(window);
+      let scopeRequests = 0;
+      window.fetch = (input, init) => {
+        const requestUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (new URL(requestUrl, window.location.href).pathname.endsWith("/scope")) {
+          scopeRequests += 1;
+          if (scopeRequests > 1) {
+            return new Promise((_resolve, reject) => {
+              init?.signal?.addEventListener("abort", () => {
+                reject(new DOMException("Scope request aborted", "AbortError"));
+              }, { once: true });
+            });
+          }
+        }
+        return nativeFetch(input, init);
+      };
+    });
+    await page.goto(launched.url);
+    const status = page.locator("[data-codex-context]");
+    await expect(status).toHaveAttribute("data-codex-context", "current");
+    await expect(status).toHaveAttribute("aria-label", /Agent context current at review revision \d+/);
+    await expect(status.locator(".lucide-bot")).toBeVisible();
+    expect((await status.boundingBox())?.width).toBeLessThanOrEqual(26);
+    await status.hover();
+    await expect(status.locator("[role='tooltip']")).toBeVisible();
+    await expect(status.locator("[role='tooltip']")).toContainText("PDF content and annotations are synced with the connected agent");
+
+    await page.clock.fastForward(2_100);
+    await expect(status).toHaveAttribute("data-codex-context", "connecting");
+    await expect(status.locator(".lucide-bot")).toBeVisible();
+    await expect(status.locator("[role='tooltip']")).toContainText("Agent context updating");
+
+    await page.clock.fastForward(3_500);
+    await expect(status).toHaveAttribute("data-codex-context", "unavailable");
+    await expect(status.locator(".lucide-bot")).toBeVisible();
+    await expect(status.locator("[role='tooltip']")).toContainText("Reopen this PDF from your agent");
+  } finally {
+    await clockedHost.close();
+  }
 });
 
 test("searches extracted PDF text with variants, history, references, and retained responsive state", async ({ page }) => {
@@ -952,15 +1028,10 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(mainWorkspace).toHaveAttribute("data-reference-main-mount", "stable");
   await expect(referenceWorkspace).toHaveAttribute("data-reference-mount", "stable");
 
-  const codex = page.getByRole('button', { name: 'Codex' });
-  await codex.click();
-  await expect(workspace).toHaveAttribute('data-workspace-open', 'false');
-  await expect(page.getByRole('heading', { name: 'Work with Codex' })).toBeVisible();
-  await expect(page.locator('[data-workspace-edge-rail]')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Close Codex options' }).click();
+  await expect(page.getByRole('button', { name: 'Codex' })).toHaveCount(0);
+  await expect(page.locator('[data-codex-context]')).toHaveCount(0);
   await expect(workspace).toHaveAttribute('data-workspace-open', 'true');
   await expect(primaryTab).toHaveAttribute('aria-selected', 'true');
-  await expect(primaryTab).toBeFocused();
 
   await detailTab.click();
   await expect(detailTab).toHaveAttribute("aria-selected", "true");
@@ -1777,6 +1848,16 @@ test("retries one failed reference clone without exposing raw load details", asy
 });
 
 test("one installed-style browser tree preserves review state across responsive layout", async ({ page }) => {
+  const launched = await host.open({
+    pdfPath: pdf,
+    sourceRootPath: sourceRoot,
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === "recovery-offered") {
+    throw new Error("Installed-style production launch failed");
+  }
+  const launchUrl = launched.url;
+  const initialSessionId = launched.sessionId;
   const assetResponses: string[] = [];
   const contactedOrigins = new Set<string>();
   page.on("request", (request) => contactedOrigins.add(new URL(request.url()).origin));
@@ -1788,8 +1869,9 @@ test("one installed-style browser tree preserves review state across responsive 
   await page.goto(launchUrl);
   await expect(page.locator("[data-production-review]")).toBeVisible();
   await expect(page.getByRole("button", { name: /paper\.pdf.*Open automatic save options/u })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Actions" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Codex delivery", includeHidden: true })).toBeHidden();
+  await expect(page.getByRole("navigation", { name: "Actions" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Codex" })).toHaveCount(0);
+  await expect(page.locator("[data-codex-context]")).toHaveCount(0);
   await expect(page.getByText(/Revision \d+/u)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Finish" })).toHaveCount(0);
   await expect.poll(() => assetResponses.some((url) => url.endsWith("/app.css"))).toBe(true);
@@ -1890,53 +1972,10 @@ test("one installed-style browser tree preserves review state across responsive 
   await expect(page.locator("[data-owned-mark='replace']")).toHaveCount(1);
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(page.locator("[data-owned-mark='replace']")).toHaveCount(1);
-  const canvasBoxBeforeCodex = await pageCanvas.boundingBox();
-
-  await page.getByRole("button", { name: "Codex" }).click();
-  await expect(page.getByRole("heading", { name: "Work with Codex" })).toBeVisible();
-  await expect.poll(async () => {
-    const box = await page.locator('#review-finish-drawer').boundingBox();
-    return box === null ? Number.POSITIVE_INFINITY : Math.abs(box.x + box.width - 1280);
-  }).toBeLessThanOrEqual(1);
-  await expect(page.getByText("1 annotation", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Codex delivery" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Codex" })).toHaveCount(0);
+  await expect(page.locator("[data-codex-context]")).toHaveCount(0);
   await expect(pageCanvas).toHaveCount(1);
   await expect(workspace).toHaveAttribute('data-mount-probe', 'stable');
-  expect(await pageCanvas.boundingBox()).toEqual(canvasBoxBeforeCodex);
-
-  await page.getByRole("button", { name: "Prepare Codex handoff" }).click();
-  const confirm = page.getByRole("alertdialog", { name: "Confirm this external data flow" });
-  await expect(confirm).toBeVisible();
-  await expect(confirm.getByRole("button", { name: "Confirm and prepare" })).toBeFocused();
-  await page.setViewportSize({ width: 320, height: 720 });
-  await expect(confirm).toBeVisible();
-  await expect(pageCanvas).toHaveCount(1);
-  await page.keyboard.press("Escape");
-  await expect(confirm).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Work with Codex" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Prepare Codex handoff" })).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("heading", { name: "Work with Codex", includeHidden: true })).toBeHidden();
-  await expect(page.getByRole("button", { name: "Codex" })).toBeFocused();
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByRole("button", { name: "Codex" }).click();
-  await page.getByRole("button", { name: "Prepare Codex handoff" }).click();
-  await expect(confirm).toBeVisible();
-  await expect(page.getByRole("definition").filter({ hasText: sourceRoot })).toBeVisible();
-  await confirm.getByRole("button", { name: "Confirm and prepare" }).click();
-  await expect(page.getByText(/^Handoff JSON:/u)).toBeVisible();
-  const handoffPath = (await page.getByText(/^Handoff JSON:/u).textContent())?.replace("Handoff JSON: ", "");
-  const codexReviewedPath = (await page.getByText(/^Reviewed PDF:/u).textContent())?.replace("Reviewed PDF: ", "");
-  expect(handoffPath).toBeTruthy();
-  expect(codexReviewedPath).toBeTruthy();
-  await access(handoffPath!);
-  await access(codexReviewedPath!);
-  expect((await realpath(handoffPath!)).startsWith(`${await realpath(sourceRoot)}/`)).toBe(true);
-  await expect(page.locator("#codex-instruction")).toContainText(handoffPath!);
-  await page.getByRole("button", { name: "Close Codex options" }).click();
-  await expect(page.getByText(/^Handoff JSON:/u)).toBeHidden();
-  await page.getByRole("button", { name: "Codex" }).click();
-  await expect(page.getByText(/^Handoff JSON:/u)).toHaveText(`Handoff JSON: ${handoffPath}`);
   expect(contactedOrigins).toEqual(new Set([new URL(launchUrl).origin]));
   expect(browserErrors).toEqual([]);
 });

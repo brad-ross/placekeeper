@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { CODEX_INSTALLED_LAUNCHER_COMMAND } from "../../apps/service/src/cli/hook-command.js";
 
 test("Finder Open With passes exactly one explicit path through the native document bridge", async () => {
   const bridge = await readFile(resolve("packaging/macos/finder-bridge.applescript"), "utf8");
@@ -16,12 +17,46 @@ test("Finder Open With passes exactly one explicit path through the native docum
   expect(bridge).not.toContain("Terminal.app");
 });
 
-test("Codex plugin contains one validated launch-only skill", async () => {
-  const plugin = JSON.parse(await readFile(resolve("integrations/codex-plugin/.codex-plugin/plugin.json"), "utf8")) as { name: string; skills: string };
+test("Codex plugin packages launch plus task-scoped live-context hooks", async () => {
+  const marketplace = JSON.parse(await readFile(resolve(".agents/plugins/marketplace.json"), "utf8")) as {
+    name: string;
+    interface: { displayName: string };
+    plugins: Array<{
+      name: string;
+      source: { source: string; path: string };
+      policy: { installation: string; authentication: string };
+      category: string;
+    }>;
+  };
+  const plugin = JSON.parse(await readFile(resolve("integrations/codex-plugin/.codex-plugin/plugin.json"), "utf8")) as { name: string; skills: string; interface: { longDescription: string } };
+  const hooks = JSON.parse(await readFile(resolve("integrations/codex-plugin/hooks/hooks.json"), "utf8")) as { hooks: Record<string, Array<{ hooks: Array<{ command: string; timeout: number }> }>> };
   const skill = await readFile(resolve("integrations/codex-plugin/skills/pdf-proofreader/SKILL.md"), "utf8");
+  expect(marketplace).toMatchObject({
+    name: "pdf-proofreader-local",
+    interface: { displayName: "PDF Proofreader Local" },
+    plugins: [{
+      name: "codex-plugin",
+      source: { source: "local", path: "./integrations/codex-plugin" },
+      policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" },
+      category: "Productivity",
+    }],
+  });
   expect(plugin).toMatchObject({ name: "codex-plugin", skills: "./skills/" });
-  expect(skill).toContain("pdf-proofreader open --json --surface codex --pdf");
+  expect(plugin.interface.longDescription).toContain("every prompt");
+  expect(Object.keys(hooks.hooks).sort()).toEqual(["PostToolUse", "SessionEnd", "UserPromptSubmit"]);
+  for (const declarations of Object.values(hooks.hooks)) {
+    expect(declarations[0]?.hooks[0]?.command).toBe(`${CODEX_INSTALLED_LAUNCHER_COMMAND} hook --event`);
+  }
+  expect(hooks.hooks.PostToolUse?.[0]?.hooks[0]?.timeout).toBeGreaterThan(5);
+  expect(hooks.hooks.UserPromptSubmit?.[0]?.hooks[0]?.timeout).toBeGreaterThan(5);
+  expect(hooks.hooks.SessionEnd?.[0]?.hooks[0]?.timeout).toBe(3);
+  expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf`);
   expect(skill).toContain("desktop built-in browser");
+  expect(skill).toContain("pdf-proofreader-live-context");
+  expect(skill).toContain("context evidence --handle");
+  expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} context items --handle`);
+  expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} context changes --handle`);
+  expect(skill).not.toMatch(/(^|[^/A-Za-z0-9_-])pdf-proofreader\s+(context|daemon)\b/mu);
   expect(skill).toContain("Do not submit");
   expect(skill).not.toContain("[TODO:");
 });
@@ -31,4 +66,15 @@ test("VS Code manifest is desktop-local and exposes one PDF command", async () =
   expect(manifest.extensionKind).toEqual(["ui"]);
   expect(manifest.browser).toBeUndefined();
   expect(manifest.contributes.commands).toHaveLength(1);
+});
+
+test("only the Codex adapter requests the Codex launch surface", async () => {
+  const finder = await readFile(resolve("packaging/macos/launcher.mjs"), "utf8");
+  const vscode = await readFile(resolve("apps/vscode/src/launch-client.ts"), "utf8");
+  const skill = await readFile(resolve("integrations/codex-plugin/skills/pdf-proofreader/SKILL.md"), "utf8");
+  expect(finder).toContain('["open", "--json", "--surface", "finder"');
+  expect(finder).not.toContain('"--surface", "codex"');
+  expect(vscode).toContain('["open", "--json", "--surface", "vscode"');
+  expect(vscode).not.toContain('"--surface", "codex"');
+  expect(skill).toContain("--surface codex");
 });

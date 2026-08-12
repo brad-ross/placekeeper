@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { addPageNote } from "../../../packages/core/src/review-commands.js";
+import { TaskBindingRegistry } from "../src/context/task-binding-registry.js";
 import { ProofreaderHost } from "../src/host/proofreader-host.js";
 
 const roots: string[] = [];
@@ -14,7 +16,10 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-async function fixture() {
+async function fixture(options: {
+  readonly taskBindings?: TaskBindingRegistry;
+  readonly validPdf?: boolean;
+} = {}) {
   const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-launch-"));
   roots.push(root);
   const pdf = join(root, "paper.pdf");
@@ -22,18 +27,55 @@ async function fixture() {
   const assets = join(root, "assets");
   await mkdir(sourceRoot);
   await mkdir(assets);
-  await writeFile(pdf, "%PDF-1.7\nfixture\n%%EOF");
+  if (options.validPdf === true) {
+    await copyFile(resolve("test/fixtures/pdfs/text-native.pdf"), pdf);
+  } else {
+    await writeFile(pdf, "%PDF-1.7\nfixture\n%%EOF");
+  }
   await writeFile(join(assets, "app.js"), "export async function start(){ document.body.dataset.productionApp = 'ready' }\n");
   await writeFile(join(assets, "pdfium.wasm"), "offline-wasm");
   const host = await ProofreaderHost.start({
     recoveryRoot: join(root, "recovery"),
     webAssets: { root: assets },
+    ...(options.taskBindings === undefined ? {} : { taskBindings: options.taskBindings }),
   });
   hosts.push(host);
   return { root, pdf, sourceRoot, host };
 }
 
 describe("persistent launch host", () => {
+  it("reports only aggregate bootstrap, bind-proof, and task activity", async () => {
+    let now = Date.parse("2026-08-12T12:00:00.000Z");
+    const taskBindings = new TaskBindingRegistry({
+      now: () => new Date(now),
+      pendingTtlMs: 1_000,
+      activeLeaseTtlMs: 1_000,
+    });
+    const { pdf, host } = await fixture({ taskBindings, validPdf: true });
+    const browser = await host.open({ pdfPath: pdf, surface: "browser" });
+    if (!browser.ok || browser.kind === "recovery-offered") throw new Error("Expected browser launch");
+    expect(host.broker.activity()).toEqual({
+      reviewPresence: 1,
+      codexTasks: 0,
+      transientWork: 0,
+    });
+
+    const codex = await host.open({ pdfPath: pdf, surface: "codex" });
+    if (!codex.ok || codex.kind === "recovery-offered" || codex.bindProof === undefined) {
+      throw new Error("Expected Codex launch");
+    }
+    expect(host.broker.activity()).toEqual({
+      reviewPresence: 2,
+      codexTasks: 1,
+      transientWork: 0,
+    });
+    now += 1_001;
+    expect(host.broker.activity()).toEqual({
+      reviewPresence: 2,
+      codexTasks: 0,
+      transientWork: 0,
+    });
+  });
   it("opens, focuses, and explicitly forks through one broker", async () => {
     const { pdf, sourceRoot, host } = await fixture();
     const opened = await host.open({ pdfPath: pdf, sourceRootPath: sourceRoot });
@@ -52,6 +94,242 @@ describe("persistent launch host", () => {
     expect(focused.sessionId).toBe(opened.sessionId);
     expect(forked.sessionId).not.toBe(opened.sessionId);
   });
+
+  it("attaches a newly approved source root when focusing an open review", async () => {
+    const { pdf, sourceRoot, host } = await fixture();
+    const opened = await host.open({ pdfPath: pdf, surface: "codex" });
+    if (!opened.ok || opened.kind === "recovery-offered") throw new Error("Expected launch");
+
+    const focused = await host.open({
+      pdfPath: pdf,
+      sourceRootPath: sourceRoot,
+      surface: "codex",
+    });
+    expect(focused).toMatchObject({ ok: true, kind: "focused", sessionId: opened.sessionId });
+    const canonicalSourceRoot = await realpath(sourceRoot);
+    await expect(host.broker.snapshotAtomicSession(opened.sessionId)).resolves.toMatchObject({
+      sourceRootPath: canonicalSourceRoot,
+      state: { sourceRootId: expect.any(String) },
+    });
+  });
+
+  it("issues an independent bind proof only for a Codex launch", async () => {
+    const { pdf, host } = await fixture();
+    const browser = await host.open({ pdfPath: pdf, surface: "browser" });
+    const codex = await host.open({ pdfPath: pdf, surface: "codex" });
+    const finder = await host.open({ pdfPath: pdf, surface: "finder", fork: true });
+    if (
+      !browser.ok || browser.kind === "recovery-offered" ||
+      !codex.ok || codex.kind === "recovery-offered" ||
+      !finder.ok || finder.kind === "recovery-offered"
+    ) throw new Error("Expected launches");
+
+    expect(browser).not.toHaveProperty("bindProof");
+    expect(finder).not.toHaveProperty("bindProof");
+    expect(codex.documentGeneration).toBe(1);
+    expect(codex.bindProof).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(codex.url).not.toContain(codex.bindProof!);
+  });
+
+  it("activates a claimed task only after the authenticated Codex browser exchanges", async () => {
+    const { pdf, host } = await fixture();
+    const launched = await host.open({ pdfPath: pdf, surface: "codex" });
+    if (!launched.ok || launched.kind === "recovery-offered" || launched.bindProof === undefined) {
+      throw new Error("Expected Codex launch");
+    }
+    const launch = new URL(launched.url);
+    const capability = new URLSearchParams(launch.hash.slice(1)).get("cap")!;
+    expect(host.broker.taskBindings.claim({
+      bindProof: launched.bindProof,
+      taskSessionId: "codex-task-a",
+      reviewSessionId: launched.sessionId,
+      documentGeneration: 1,
+    })).toMatchObject({ status: "pending" });
+    expect(host.broker.taskBindings.bindingForTask("codex-task-a")).toBeUndefined();
+    expect((await fetch(`${launch.origin}/s/${launched.sessionId}/state`, {
+      headers: { authorization: `Bearer ${launched.bindProof}` },
+    })).status).toBe(401);
+
+    const exchanged = await fetch(`${launch.origin}/s/${launched.sessionId}/exchange`, {
+      method: "POST",
+      headers: {
+        origin: launch.origin,
+        "content-type": "application/json",
+        "sec-fetch-site": "same-origin",
+      },
+      body: JSON.stringify({ capability }),
+    });
+    const { credential } = await exchanged.json() as { credential: string };
+    expect(host.broker.taskBindings.bindingForTask("codex-task-a")).toMatchObject({
+      reviewSessionId: launched.sessionId,
+      documentGeneration: 1,
+    });
+
+    const scope = await fetch(`${launch.origin}/s/${launched.sessionId}/scope`, {
+      headers: { authorization: `Bearer ${credential}` },
+    });
+    const publicScope = await scope.text();
+    expect(JSON.parse(publicScope)).toMatchObject({
+      launchSurface: "codex",
+      codexContext: {
+        status: "refreshing",
+        proofreaderSessionId: launched.sessionId,
+        documentGeneration: 1,
+      },
+    });
+    expect(publicScope).not.toContain(launched.bindProof);
+    expect(publicScope).not.toContain(capability);
+
+    await host.broker.finish(launched.sessionId);
+    expect(host.broker.taskBindings.bindingForTask("codex-task-a")).toBeUndefined();
+  });
+
+  it("renews only authenticated Codex scope heartbeats and never shows stale review state as current", async () => {
+    let now = Date.parse("2026-08-12T12:00:00.000Z");
+    const taskBindings = new TaskBindingRegistry({
+      now: () => new Date(now),
+      pendingTtlMs: 1_000,
+      activeLeaseTtlMs: 1_000,
+    });
+    // This is the production host/server path; only the clocked registry is injected.
+    const { pdf, host: clockedHost } = await fixture({ taskBindings, validPdf: true });
+
+    const launched = await clockedHost.open({ pdfPath: pdf, surface: "codex" });
+    if (!launched.ok || launched.kind === "recovery-offered" || launched.bindProof === undefined) {
+      throw new Error("Expected Codex launch");
+    }
+    const launch = new URL(launched.url);
+    const capability = new URLSearchParams(launch.hash.slice(1)).get("cap")!;
+    expect(taskBindings.claim({
+      bindProof: launched.bindProof,
+      taskSessionId: "codex-task-heartbeat",
+      reviewSessionId: launched.sessionId,
+      documentGeneration: launched.documentGeneration,
+    })).toMatchObject({ status: "pending" });
+    const exchanged = await fetch(`${launch.origin}/s/${launched.sessionId}/exchange`, {
+      method: "POST",
+      headers: {
+        origin: launch.origin,
+        "content-type": "application/json",
+        "sec-fetch-site": "same-origin",
+      },
+      body: JSON.stringify({ capability }),
+    });
+    const { credential } = await exchanged.json() as { credential: string };
+    expect((await clockedHost.context.refresh({ taskSessionId: "codex-task-heartbeat" })).status).toBe("current");
+
+    const currentScope = await fetch(`${launch.origin}/s/${launched.sessionId}/scope`, {
+      headers: { authorization: `Bearer ${credential}` },
+    });
+    const currentScopeText = await currentScope.text();
+    expect(JSON.parse(currentScopeText)).toMatchObject({
+      launchSurface: "codex",
+      codexContext: { status: "current", identity: { reviewRevision: 0 } },
+    });
+    expect(currentScopeText).not.toContain("codex-task-heartbeat");
+    const firstRenewedExpiry = taskBindings.bindingForTask("codex-task-heartbeat")?.leaseExpiresAt;
+
+    now += 250;
+    expect((await fetch(`${launch.origin}/s/${launched.sessionId}/scope`)).status).toBe(401);
+    expect(taskBindings.bindingForTask("codex-task-heartbeat")?.leaseExpiresAt).toBe(firstRenewedExpiry);
+
+    const browserLaunch = await clockedHost.open({ pdfPath: pdf, surface: "browser" });
+    if (!browserLaunch.ok || browserLaunch.kind === "recovery-offered") throw new Error("Expected browser launch");
+    const browserUrl = new URL(browserLaunch.url);
+    const browserCapability = new URLSearchParams(browserUrl.hash.slice(1)).get("cap")!;
+    const browserExchange = await fetch(`${browserUrl.origin}/s/${browserLaunch.sessionId}/exchange`, {
+      method: "POST",
+      headers: {
+        origin: browserUrl.origin,
+        "content-type": "application/json",
+        "sec-fetch-site": "same-origin",
+      },
+      body: JSON.stringify({ capability: browserCapability }),
+    });
+    const { credential: browserCredential } = await browserExchange.json() as { credential: string };
+    expect((await fetch(`${browserUrl.origin}/s/${browserLaunch.sessionId}/scope`, {
+      headers: { authorization: `Bearer ${browserCredential}` },
+    })).status).toBe(200);
+    expect(taskBindings.bindingForTask("codex-task-heartbeat")?.leaseExpiresAt).toBe(firstRenewedExpiry);
+
+    const state = clockedHost.broker.state(launched.sessionId)!;
+    await clockedHost.broker.acceptMutation(
+      launched.sessionId,
+      addPageNote(
+        state,
+        0,
+        { x: 72, y: 80, width: 18, height: 18 },
+        "Refresh this annotation.",
+        {
+          createId: () => "00000000-0000-4000-8000-000000000901",
+          now: () => "2026-08-12T12:00:00.000Z",
+        },
+      ),
+    );
+    now += 250;
+    const staleScope = await fetch(`${launch.origin}/s/${launched.sessionId}/scope`, {
+      headers: { authorization: `Bearer ${credential}` },
+    });
+    expect(await staleScope.json()).toMatchObject({
+      codexContext: { status: "refreshing", lastVerified: { reviewRevision: 0 } },
+    });
+    expect(taskBindings.bindingForTask("codex-task-heartbeat")?.leaseExpiresAt)
+      .not.toBe(firstRenewedExpiry);
+
+    now += 600;
+    expect(taskBindings.bindingForTask("codex-task-heartbeat")).toBeDefined();
+    expect((await clockedHost.context.refresh({ taskSessionId: "codex-task-heartbeat" })).status).toBe("current");
+    const refreshedScope = await fetch(`${launch.origin}/s/${launched.sessionId}/scope`, {
+      headers: { authorization: `Bearer ${credential}` },
+    });
+    expect(await refreshedScope.json()).toMatchObject({
+      codexContext: { status: "current", identity: { reviewRevision: 1 } },
+    });
+
+    now += 1_001;
+    expect(taskBindings.bindingForTask("codex-task-heartbeat")).toBeUndefined();
+    await clockedHost.close();
+    hosts.splice(hosts.indexOf(clockedHost), 1);
+    expect(taskBindings.bindingForTask("codex-task-heartbeat")).toBeUndefined();
+  });
+
+  it.each(["browser", "finder", "vscode"] as const)(
+    "never exposes ambient Codex binding status to a %s launch",
+    async (surface) => {
+      const { pdf, host } = await fixture();
+      const launched = await host.open({ pdfPath: pdf, surface });
+      if (!launched.ok || launched.kind === "recovery-offered") throw new Error("Expected launch");
+      const launch = new URL(launched.url);
+      const capability = new URLSearchParams(launch.hash.slice(1)).get("cap")!;
+      const exchanged = await fetch(`${launch.origin}/s/${launched.sessionId}/exchange`, {
+        method: "POST",
+        headers: {
+          origin: launch.origin,
+          "content-type": "application/json",
+          "sec-fetch-site": "same-origin",
+        },
+        body: JSON.stringify({ capability }),
+      });
+      const { credential } = await exchanged.json() as { credential: string };
+      const scope = await fetch(`${launch.origin}/s/${launched.sessionId}/scope`, {
+        headers: { authorization: `Bearer ${credential}` },
+      });
+      expect(await scope.json()).toMatchObject({ launchSurface: surface });
+      expect(await (await fetch(`${launch.origin}/s/${launched.sessionId}/scope`, {
+        headers: { authorization: `Bearer ${credential}` },
+      })).text()).not.toContain("codexContext");
+      expect((await fetch(`${launch.origin}/s/${launched.sessionId}/delivery/codex/prepare`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${credential}`,
+          origin: launch.origin,
+          "content-type": "application/json",
+          "sec-fetch-site": "same-origin",
+        },
+        body: "{}",
+      })).status).toBe(404);
+    },
+  );
 
   it("maps invalid input and unsupported roots to the two shared failures", async () => {
     const { root, pdf, host } = await fixture();

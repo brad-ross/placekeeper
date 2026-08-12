@@ -1,7 +1,6 @@
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties } from 'react';
 import { PdfZoomMode } from '@embedpdf/models';
 
-import { CodexDelivery } from '../../../apps/web/src/export/CodexDelivery.js';
 import type { ExistingAnnotationsDiscovery } from '../../../apps/web/src/pdf/existing-annotations.js';
 import type { PdfOutlineDiscovery } from '../../../apps/web/src/pdf/pdf-outline.js';
 import type { AnnotationOutlineLabels } from '../../../apps/web/src/review/annotation-outline-context.js';
@@ -25,7 +24,6 @@ export type VisualSceneName =
   | 'reference-layout'
   | 'peek'
   | 'page-note'
-  | 'finish'
   | 'exceptional';
 
 export interface VisualScenario {
@@ -38,7 +36,6 @@ export interface VisualScenario {
   readonly existingAnnotations: ExistingAnnotationsDiscovery;
   readonly annotationOutlineLabels?: AnnotationOutlineLabels;
   readonly outlineDiscovery?: PdfOutlineDiscovery;
-  readonly codexSlot?: ReactNode;
   readonly viewerState: ViewerControlsSnapshot;
   readonly referenceNavigation?: ReferenceNavigationState;
   readonly referenceTabs?: readonly ReferenceWorkspaceTab[];
@@ -182,37 +179,12 @@ function createVisualReferenceNavigation(): ReferenceNavigationState {
 
 const visualReferenceNavigation = createVisualReferenceNavigation();
 
-function DeliveryFixture({ state }: { readonly state: ReviewState }) {
-  return (
-    <div className="review-delivery-content">
-      <CodexDelivery
-        state={state}
-        sourceRoot="/Users/reviewer/Documents/Research/Identification Strategy and Robustness Appendix"
-        provider="Codex desktop"
-        revisedPdfDestination="A fresh result directory inside the approved source root"
-        retention="Artifacts remain local until you delete them"
-        confirmedScopeSignature={null}
-        onConfirmScope={() => undefined}
-        onPrepare={async () => ({
-          handoffPath: '/Users/reviewer/Documents/Research/Identification Strategy and Robustness Appendix/.pdf-proofreader/handoff.json',
-          handoffSha256: 'b'.repeat(64),
-          reviewedPdfPath: '/Users/reviewer/Documents/Research/Identification Strategy and Robustness Appendix/.pdf-proofreader/identification-strategy-reviewed.pdf',
-          reviewedPdfSha256: 'c'.repeat(64),
-          prompt: 'Review the attached handoff and revise the local PDF while preserving every accepted annotation.',
-        })}
-        onSaveInstruction={async () => undefined}
-        onCheckResult={async () => ({ status: 'Partial', message: 'The revised PDF was found, but two requested changes still need review.' })}
-      />
-    </div>
-  );
-}
-
 export function resolveVisualScenario(search: string): VisualScenario | null {
   const parameters = new URLSearchParams(search);
   const requested = parameters.get('visual');
   if (!requested) return null;
   const name = requested as VisualSceneName;
-  if (!['reading', 'unavailable-controls', 'contextual', 'tray', 'reference-layout', 'peek', 'page-note', 'finish', 'exceptional'].includes(name)) return null;
+  if (!['reading', 'unavailable-controls', 'contextual', 'tray', 'reference-layout', 'peek', 'page-note', 'exceptional'].includes(name)) return null;
   const state = stateFor(name === 'contextual' || name === 'page-note' ? [] : seededItems);
   const exception = parameters.get('exception');
   const exceptionalAnnotations: ExistingAnnotationsDiscovery = exception === 'loading'
@@ -247,9 +219,6 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
       referenceTabs: visualReferenceTabs,
     } : {}),
   };
-  if (name === 'finish' || name === 'exceptional') {
-    return { ...common, codexSlot: <DeliveryFixture state={state} /> };
-  }
   return {
     ...common,
     ...(name === 'tray' ? { correspondingItemId: 'owned-highlight' } : {}),

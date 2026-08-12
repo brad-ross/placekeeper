@@ -23,13 +23,22 @@ export type LaunchInvoker = (
 ) => Promise<{ readonly stdout: string; readonly stderr: string }>;
 
 const defaultInvoker: LaunchInvoker = async (executable, args, options) => {
-  const result = await execFileAsync(executable, [...args], {
-    shell: options.shell,
-    timeout: options.timeoutMs,
-    maxBuffer: options.maxOutputBytes,
-    encoding: "utf8",
-  });
-  return { stdout: result.stdout, stderr: result.stderr };
+  try {
+    const result = await execFileAsync(executable, [...args], {
+      shell: options.shell,
+      timeout: options.timeoutMs,
+      maxBuffer: options.maxOutputBytes,
+      encoding: "utf8",
+    });
+    return { stdout: result.stdout, stderr: result.stderr };
+  } catch (error) {
+    const output = error as { stdout?: unknown; stderr?: unknown };
+    if (typeof output.stdout !== "string" || output.stdout.length === 0) throw error;
+    return {
+      stdout: output.stdout,
+      stderr: typeof output.stderr === "string" ? output.stderr : "",
+    };
+  }
 };
 
 export async function runLaunchClient(

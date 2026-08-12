@@ -1,6 +1,6 @@
 @import './review-layout-foundation.css';
 @import './review-layout-annotations.css';
-@import './review-layout-delivery.css';
+@import './review-layout-dialogs.css';
 @import './review-layout-responsive.css';
 /* Automatic-save identity and destination surface */
 .review-chrome__save-identity {

@@ -30,7 +30,7 @@ function isSharedError(value: unknown): value is LaunchErrorPresentation {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Partial<LaunchErrorPresentation>;
   return (
-    (candidate.kind === "input-unavailable" || candidate.kind === "unsupported-context") &&
+    (candidate.kind === "input-unavailable" || candidate.kind === "unsupported-context" || candidate.kind === "upgrade-required") &&
     typeof candidate.message === "string" &&
     candidate.message.length > 0 &&
     candidate.message.length <= 240 &&

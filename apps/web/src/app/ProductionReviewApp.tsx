@@ -13,8 +13,7 @@ import {
   INITIAL_SELECTION_UPDATE,
   type SelectionUpdate,
 } from "../pdf/selection-state.js";
-import { CodexDelivery, type CheckedCodexResult, type PreparedCodexHandoff } from "../export/CodexDelivery.js";
-import type { DeliveryArtifact } from "../export/delivery-availability.js";
+import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import { App } from "./App.js";
 import { ReviewShell, type RejectedReviewCommand } from "./ReviewShell.js";
 import { projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
@@ -83,11 +82,8 @@ export interface ProductionSession {
 export interface ProductionScope {
   readonly documentTitle: string;
   readonly sourceRootPath?: string;
-}
-
-export interface PreparedProductionHandoff extends PreparedCodexHandoff {
-  readonly receiptId: string;
-  readonly resultDirectory: string;
+  readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode';
+  readonly codexContext?: LiveContextBindingStatus;
 }
 
 export type ProductionSaveStatus = SaveStatus;
@@ -98,6 +94,7 @@ export interface SaveCopyProposal {
 }
 
 export interface ProductionSessionApi {
+  presence?(): () => void;
   command(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
   saveStatus(): Promise<ProductionSaveStatus>;
   saveProposal(): Promise<SaveCopyProposal>;
@@ -106,13 +103,7 @@ export interface ProductionSessionApi {
   chooseOriginal(): Promise<ProductionSaveStatus>;
   retrySave(): Promise<ProductionSaveStatus>;
   locateSave(): Promise<ProductionSaveStatus>;
-  prepareCodex(): Promise<PreparedProductionHandoff>;
-  saveInstruction(receiptId: string): Promise<DeliveryArtifact>;
-  checkCodex(input: {
-    readonly receiptId: string;
-    readonly dispositionText: string;
-    readonly revisedPdfSelected: boolean;
-  }): Promise<CheckedCodexResult>;
+  scope(signal?: AbortSignal): Promise<ProductionScope>;
 }
 
 export interface ProductionReviewAppProps {
@@ -122,6 +113,54 @@ export interface ProductionReviewAppProps {
   readonly scope: ProductionScope;
   readonly api: ProductionSessionApi;
   readonly viewer?: ReactNode;
+}
+
+const UNAVAILABLE_CODEX_CONTEXT: LiveContextBindingStatus = {
+  status: 'unavailable',
+  reason: 'unavailable',
+};
+
+const CODEX_SCOPE_POLL_MS = 1_500;
+const CODEX_SCOPE_TIMEOUT_MS = 4_000;
+
+function contextMatchesReviewState(
+  status: Extract<LiveContextBindingStatus, { readonly status: "current" }>,
+  state: ReviewState,
+): boolean {
+  return status.identity.proofreaderSessionId === state.sessionId &&
+    status.identity.reviewRevision === state.revision &&
+    status.identity.source.fileId === state.source.fileId &&
+    status.identity.source.digest === state.source.digest;
+}
+
+export function visibleCodexContext(
+  status: LiveContextBindingStatus | undefined,
+  state: ReviewState,
+): LiveContextBindingStatus | undefined {
+  if (status?.status !== "current" || contextMatchesReviewState(status, state)) return status;
+  return {
+    status: "refreshing",
+    proofreaderSessionId: state.sessionId,
+    documentGeneration: status.identity.documentGeneration,
+    lastVerified: status.identity,
+  };
+}
+
+function reviewStateRequestKey(state: ReviewState): string {
+  return JSON.stringify([
+    state.sessionId,
+    state.source.fileId,
+    state.source.digest,
+    state.revision,
+    state.items,
+  ]);
+}
+
+function updateCodexContext(
+  current: LiveContextBindingStatus | undefined,
+  next: LiveContextBindingStatus,
+): LiveContextBindingStatus {
+  return JSON.stringify(current) === JSON.stringify(next) ? current ?? next : next;
 }
 
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
@@ -150,8 +189,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const selectionUpdateRef = useRef(selectionUpdate);
   selectionUpdateRef.current = selectionUpdate;
   const [commandError, setCommandError] = useState<string | null>(null);
-  const [confirmedScope, setConfirmedScope] = useState<string | null>(null);
-  const [codexConfirmationActive, setCodexConfirmationActive] = useState(false);
+  const [codexContext, setCodexContext] = useState(props.scope.codexContext);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const [selectionPlacement, setSelectionPlacement] = useState<ViewerClientPlacement | null>(null);
   const [caret, setCaret] = useState<CaretAnchor | null>(null);
   const [caretPlacement, setCaretPlacement] = useState<ViewerClientPlacement | null>(null);
@@ -174,7 +214,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   } | null>(null);
   const placementAuthority = useRef(new PageNotePlacementAuthority());
   const placedToken = useRef(0);
-  const latestReceipt = useRef<string | null>(null);
   const viewerRegistry = useRef<PluginRegistry | null>(null);
   const searchControllerRef = useRef<PdfSearchController | null>(null);
   const searchDocumentRef = useRef<PdfDocumentObject | null>(null);
@@ -234,15 +273,79 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     documentUrl: `/s/${props.session.sessionId}/document/${state.source.fileId}`,
     requestHeaders: { authorization: `Bearer ${props.session.credential}` },
   }), [props.session.credential, props.session.sessionId, state.source.fileId]);
+  useEffect(() => props.api.presence?.(), [props.api]);
   const ownedAnnotations = useMemo(
     () => projectReviewItems(state.items),
     [state.items],
   );
+  useEffect(() => {
+    if (props.scope.launchSurface !== 'codex') return;
+    let stopped = false;
+    let timer: number | undefined;
+    let timeout: number | undefined;
+    let controller: AbortController | undefined;
+    const refreshCodexContext = async () => {
+      const requestedStateKey = reviewStateRequestKey(stateRef.current);
+      controller = new AbortController();
+      try {
+        const next = await Promise.race([
+          props.api.scope(controller.signal),
+          new Promise<never>((_resolve, reject) => {
+            timeout = window.setTimeout(() => {
+              controller?.abort();
+              reject(new Error("Codex scope refresh timed out"));
+            }, CODEX_SCOPE_TIMEOUT_MS);
+          }),
+        ]);
+        if (!stopped && requestedStateKey === reviewStateRequestKey(stateRef.current)) {
+          const nextContext = next.launchSurface === 'codex'
+            ? next.codexContext ?? UNAVAILABLE_CODEX_CONTEXT
+            : UNAVAILABLE_CODEX_CONTEXT;
+          const safeContext = visibleCodexContext(nextContext, stateRef.current) ?? UNAVAILABLE_CODEX_CONTEXT;
+          setCodexContext((current) => updateCodexContext(current, safeContext));
+        }
+      } catch {
+        if (!stopped && requestedStateKey === reviewStateRequestKey(stateRef.current)) {
+          setCodexContext((current) => updateCodexContext(current, UNAVAILABLE_CODEX_CONTEXT));
+        }
+      } finally {
+        if (timeout !== undefined) window.clearTimeout(timeout);
+        timeout = undefined;
+        controller = undefined;
+        if (!stopped) {
+          timer = window.setTimeout(() => { void refreshCodexContext(); }, CODEX_SCOPE_POLL_MS);
+        }
+      }
+    };
+    timer = window.setTimeout(() => { void refreshCodexContext(); }, CODEX_SCOPE_POLL_MS);
+    return () => {
+      stopped = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+      if (timeout !== undefined) window.clearTimeout(timeout);
+      controller?.abort();
+    };
+  }, [props.api, props.scope.launchSurface]);
+  useEffect(() => {
+    if (codexContext?.status !== "current") return;
+    const expectedDigest = codexContext.identity.stateDigest;
+    const delay = Math.max(0, Date.parse(codexContext.leaseExpiresAt) - Date.now());
+    const timer = window.setTimeout(() => {
+      setCodexContext((current) => current?.status === "current" &&
+        current.identity.stateDigest === expectedDigest
+        ? {
+            status: "refreshing",
+            proofreaderSessionId: current.identity.proofreaderSessionId,
+            documentGeneration: current.identity.documentGeneration,
+            lastVerified: current.identity,
+          }
+        : current);
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [codexContext]);
   const searchResults = useMemo(
     () => searchState.groups.flatMap((group) => group.results),
     [searchState.groups],
   );
-  const sourceRoot = props.scope.sourceRootPath ?? "No source root selected";
   useEffect(() => {
     if (saveStatus.sync.phase !== "saving") return;
     const controller = new AbortController();
@@ -690,37 +793,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     state.items,
   ]);
 
-  const codexDelivery = (
-    <div className="review-delivery-content">
-      <CodexDelivery
-        state={state}
-        onConfirmationActiveChange={setCodexConfirmationActive}
-        sourceRoot={sourceRoot}
-        provider="Codex desktop"
-        revisedPdfDestination="A fresh result directory inside the approved source root"
-        retention="Artifacts remain local until you delete them"
-        confirmedScopeSignature={confirmedScope}
-        onConfirmScope={setConfirmedScope}
-        onPrepare={async () => {
-          const prepared = await props.api.prepareCodex();
-          latestReceipt.current = prepared.receiptId;
-          return prepared;
-        }}
-        onSaveInstruction={async () => {
-          if (latestReceipt.current === null) throw new Error("Prepare a handoff first");
-          await props.api.saveInstruction(latestReceipt.current);
-        }}
-        onCheckResult={async ({ disposition, revisedPdf }) => {
-          if (latestReceipt.current === null) throw new Error("Prepare a handoff first");
-          return props.api.checkCodex({
-            receiptId: latestReceipt.current,
-            dispositionText: await disposition.text(),
-            revisedPdfSelected: revisedPdf !== undefined,
-          });
-        }}
-      />
-    </div>
-  );
   const effectiveReferenceLayout = deriveReferenceWorkspaceLayout(
     referenceLayoutState,
     rightWorkspaceMode,
@@ -770,8 +842,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         canNavigateForward={navigationState.pendingMainNavigation === null
           && navigationState.mainHistory.index >= 0
           && navigationState.mainHistory.index < navigationState.mainHistory.entries.length - 1}
-        codexSlot={codexDelivery}
-        codexConfirmationActive={codexConfirmationActive}
+        {...(props.scope.launchSurface === 'codex'
+          ? { codexContext: visibleCodexContext(codexContext, state) ?? UNAVAILABLE_CODEX_CONTEXT }
+          : {})}
         onLinkActionChoose={(choice, request) => {
           void navigationCoordinator.chooseLink(choice, request);
         }}

@@ -248,6 +248,24 @@ export class PdfSaveCoordinator {
     return queue.running;
   }
 
+  activityCount(): number {
+    let count = 0;
+    for (const queue of this.#queues.values()) {
+      if (queue.requested || queue.running !== undefined) count += 1;
+    }
+    return count;
+  }
+
+  async drain(): Promise<void> {
+    while (true) {
+      const running = [...this.#queues.values()]
+        .map((queue) => queue.running)
+        .filter((promise): promise is Promise<void> => promise !== undefined);
+      if (running.length === 0) return;
+      await Promise.all(running);
+    }
+  }
+
   async #drain(sessionId: string, queue: QueueState): Promise<void> {
     while (queue.requested) {
       queue.requested = false;
