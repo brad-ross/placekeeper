@@ -89,6 +89,14 @@ describe("macOS distribution manifests", () => {
     }
   });
 
+  it("coordinates the daemon before the transactional replacement helper", async () => {
+    const installer = await readFile(resolve("install.sh"), "utf8");
+    expect(installer).toContain("daemon coordinate-install");
+    expect(installer.indexOf("smoke:installed")).toBeLessThan(installer.indexOf("daemon coordinate-install"));
+    expect(installer.indexOf("daemon coordinate-install")).toBeLessThan(installer.indexOf("install-built-app.sh"));
+    expect(installer).not.toMatch(/(?:kill|pkill|killall).*daemon/u);
+  });
+
   it("uses current notarytool submission followed by staple and validation", () => {
     expect(createNotarizationPlan("/tmp/PDF-Proofreader-arm64.zip", "/tmp/PDF Proofreader.app", "PDF_PROOFREADER_NOTARY")).toEqual([
       { command: "xcrun", args: ["notarytool", "submit", "/tmp/PDF-Proofreader-arm64.zip", "--keychain-profile", "PDF_PROOFREADER_NOTARY", "--wait", "--output-format", "json"] },

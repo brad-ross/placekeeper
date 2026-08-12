@@ -57,6 +57,9 @@ export type DaemonUninspectableReason =
   | "timeout"
   | "early-close";
 
+export type DaemonUpgradeReason = DaemonUninspectableReason | "incompatible" |
+  "review-presence" | "codex-task" | "transient-busy";
+
 export type DaemonCompatibilityResult =
   | { readonly kind: "exact"; readonly status: DaemonManagementStatus }
   | { readonly kind: "incompatible"; readonly status: DaemonManagementStatus }
@@ -77,10 +80,44 @@ export class ProofreaderControlProtocolError extends Error {
 }
 
 export class DaemonUpgradeRequiredError extends Error {
-  constructor(readonly reason: DaemonUninspectableReason | "incompatible") {
-    super("PDF Proofreader is already running an incompatible service build. Existing reviews were preserved.");
+  readonly recoveryAction: string;
+
+  constructor(readonly reason: DaemonUpgradeReason) {
+    const presentation = upgradePresentation(reason);
+    super(presentation.message);
+    this.recoveryAction = presentation.recoveryAction;
     this.name = "DaemonUpgradeRequiredError";
   }
+}
+
+function upgradePresentation(reason: DaemonUpgradeReason): {
+  readonly message: string;
+  readonly recoveryAction: string;
+} {
+  if (reason === "review-presence") return {
+    message: "PDF Proofreader has active reviews. The upgrade was deferred and existing work was preserved.",
+    recoveryAction: "Close PDF Proofreader tabs or windows, then retry",
+  };
+  if (reason === "codex-task") return {
+    message: "PDF Proofreader has an active Codex task. The upgrade was deferred and existing work was preserved.",
+    recoveryAction: "End the bound Codex task or wait for its lease, then retry",
+  };
+  if (reason === "transient-busy") return {
+    message: "PDF Proofreader is finishing saved work or another lifecycle operation. Existing work was preserved.",
+    recoveryAction: "Wait a moment, then retry",
+  };
+  if (reason === "legacy") return {
+    message: "An older PDF Proofreader service is running and cannot prove that reviews are idle. Existing work was preserved.",
+    recoveryAction: 'Close reviews, run "pdf-proofreader daemon stop-legacy", then retry',
+  };
+  if (["timeout", "malformed", "oversized", "early-close"].includes(reason)) return {
+    message: "PDF Proofreader could not safely inspect the running service. The upgrade was deferred and existing work was preserved.",
+    recoveryAction: "Close active work, then retry",
+  };
+  return {
+    message: "PDF Proofreader is already running an incompatible service build. Existing reviews were preserved.",
+    recoveryAction: "Close PDF Proofreader reviews and retry",
+  };
 }
 
 export type ProofreaderControlRequest =

@@ -18,7 +18,10 @@ import {
   type LaunchControlServer,
 } from "../src/host/launch-control.js";
 import { DaemonLifecycleCoordinator } from "../src/host/daemon-lifecycle.js";
+import { acquireLifecycleLock } from "../src/host/lifecycle-lock.js";
 import { ProofreaderHost } from "../src/host/proofreader-host.js";
+import { coordinateUpgrade } from "../src/host/upgrade-coordinator.js";
+import { parseOwnedLegacyProcess } from "../src/cli/daemon-command.js";
 
 const roots: string[] = [];
 const hosts: ProofreaderHost[] = [];
@@ -132,10 +135,199 @@ describe("open command", () => {
       ok: false,
       error: {
         kind: "upgrade-required",
-        message: "PDF Proofreader is already running an incompatible service build. Existing reviews were preserved.",
-        recoveryAction: "Close PDF Proofreader reviews and retry",
+        message: "An older PDF Proofreader service is running and cannot prove that reviews are idle. Existing work was preserved.",
+        recoveryAction: 'Close reviews, run "pdf-proofreader daemon stop-legacy", then retry',
       },
     });
+  });
+
+  it.each([
+    ["review-presence", "Close PDF Proofreader tabs or windows, then retry"],
+    ["codex-task", "End the bound Codex task or wait for its lease, then retry"],
+    ["transient-busy", "Wait a moment, then retry"],
+    ["legacy", 'Close reviews, run "pdf-proofreader daemon stop-legacy", then retry'],
+  ] as const)("presents bounded state-specific upgrade guidance for %s", async (reason, recoveryAction) => {
+    const write = vi.fn();
+    await runOpenCommand(
+      ["open", "--json", "--pdf", "/tmp/paper.pdf"],
+      async () => { throw new DaemonUpgradeRequiredError(reason); },
+      write,
+    );
+    const response = JSON.parse(write.mock.calls[0]![0]) as {
+      error: { kind: string; message: string; recoveryAction: string };
+    };
+    expect(response.error).toMatchObject({ kind: "upgrade-required", recoveryAction });
+    expect(response.error.message.length).toBeLessThanOrEqual(240);
+    expect(response.error.recoveryAction.length).toBeLessThanOrEqual(80);
+    expect(JSON.stringify(response)).not.toMatch(/(?:cap=|taskSessionId|pdfPath|bindProof)/u);
+  });
+
+  it("serializes lifecycle owners and permits an explicit child handoff token", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-lock-"));
+    roots.push(root);
+    const lockPath = join(root, "lifecycle.lock");
+    const first = await acquireLifecycleLock(lockPath, { timeoutMs: 100 });
+    const waiting = acquireLifecycleLock(lockPath, { timeoutMs: 1_000, pollMs: 5 });
+    let settled = false;
+    void waiting.then(() => { settled = true; });
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
+    expect(settled).toBe(false);
+
+    const borrowed = await acquireLifecycleLock(lockPath, {
+      timeoutMs: 100,
+      inheritedToken: first.token,
+    });
+    expect(borrowed.borrowed).toBe(true);
+    await borrowed.release();
+    await first.release();
+    const second = await waiting;
+    expect(second.borrowed).toBe(false);
+    await second.release();
+  });
+
+  it("makes an identical complete artifact with an exact daemon a no-op without stopping it", async () => {
+    const inspect = vi.fn(async () => ({
+      kind: "exact" as const,
+      status: {
+        protocolVersion: 1 as const,
+        daemonIdentity: "a".repeat(64),
+        lifecycle: "accepting" as const,
+        activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
+      },
+    }));
+    const shutdown = vi.fn();
+    const replaceAndReady = vi.fn();
+    await expect(coordinateUpgrade({
+      candidate: { daemonIdentity: "a".repeat(64), installArtifactIdentity: "b".repeat(64) },
+      installed: { daemonIdentity: "a".repeat(64), installArtifactIdentity: "b".repeat(64) },
+      inspect,
+      shutdown,
+      waitForRetirement: vi.fn(),
+      replaceAndReady,
+    })).resolves.toEqual({ status: "noop" });
+    expect(inspect).toHaveBeenCalledOnce();
+    expect(shutdown).not.toHaveBeenCalled();
+    expect(replaceAndReady).not.toHaveBeenCalled();
+  });
+
+  it("retires an idle stale daemon without moving an already identical app", async () => {
+    const shutdown = vi.fn(async () => ({ status: "accepted" as const }));
+    const waitForRetirement = vi.fn(async () => {});
+    const replaceAndReady = vi.fn();
+    await expect(coordinateUpgrade({
+      candidate: { daemonIdentity: "b".repeat(64), installArtifactIdentity: "c".repeat(64) },
+      installed: { daemonIdentity: "b".repeat(64), installArtifactIdentity: "c".repeat(64) },
+      inspect: async () => ({
+        kind: "incompatible",
+        status: {
+          protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+          daemonIdentity: "a".repeat(64),
+          lifecycle: "accepting",
+          activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
+        },
+      }),
+      shutdown,
+      waitForRetirement,
+      replaceAndReady,
+    })).resolves.toEqual({ status: "noop" });
+    expect(shutdown).toHaveBeenCalledOnce();
+    expect(waitForRetirement).toHaveBeenCalledOnce();
+    expect(replaceAndReady).not.toHaveBeenCalled();
+  });
+
+  it("defers active upgrades and drains idle daemons before replacement", async () => {
+    const candidate = { daemonIdentity: "b".repeat(64), installArtifactIdentity: "c".repeat(64) };
+    const replaceAndReady = vi.fn(async () => {});
+    await expect(coordinateUpgrade({
+      candidate,
+      installed: { daemonIdentity: "a".repeat(64), installArtifactIdentity: "a".repeat(64) },
+      inspect: async () => ({
+        kind: "incompatible",
+        status: {
+          protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+          daemonIdentity: "a".repeat(64),
+          lifecycle: "accepting",
+          activity: { reviewPresence: 1, codexTasks: 0, transientWork: 0 },
+        },
+      }),
+      shutdown: vi.fn(),
+      waitForRetirement: vi.fn(),
+      replaceAndReady,
+    })).rejects.toMatchObject({ reason: "review-presence" });
+    expect(replaceAndReady).not.toHaveBeenCalled();
+
+    const order: string[] = [];
+    await expect(coordinateUpgrade({
+      candidate,
+      installed: { daemonIdentity: "a".repeat(64), installArtifactIdentity: "a".repeat(64) },
+      inspect: async () => ({
+        kind: "incompatible",
+        status: {
+          protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+          daemonIdentity: "a".repeat(64),
+          lifecycle: "accepting",
+          activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
+        },
+      }),
+      shutdown: async () => { order.push("shutdown"); return { status: "accepted" }; },
+      waitForRetirement: async () => { order.push("retired"); },
+      replaceAndReady: async () => { order.push("replace-ready"); },
+    })).resolves.toEqual({ status: "installed" });
+    expect(order).toEqual(["shutdown", "retired", "replace-ready"]);
+  });
+
+  it.each(["legacy", "malformed", "timeout"] as const)(
+    "defers a %s daemon before replacement",
+    async (reason) => {
+      const replaceAndReady = vi.fn();
+      await expect(coordinateUpgrade({
+        candidate: { daemonIdentity: "b".repeat(64), installArtifactIdentity: "c".repeat(64) },
+        installed: { daemonIdentity: "a".repeat(64), installArtifactIdentity: "a".repeat(64) },
+        inspect: async () => ({ kind: "uninspectable", reason }),
+        shutdown: vi.fn(),
+        waitForRetirement: vi.fn(),
+        replaceAndReady,
+      })).rejects.toMatchObject({ reason });
+      expect(replaceAndReady).not.toHaveBeenCalled();
+    },
+  );
+
+  it("retries transient durable work before accepting idle shutdown", async () => {
+    let attempts = 0;
+    await expect(coordinateUpgrade({
+      candidate: { daemonIdentity: "b".repeat(64), installArtifactIdentity: "c".repeat(64) },
+      installed: { daemonIdentity: "a".repeat(64), installArtifactIdentity: "a".repeat(64) },
+      inspect: async () => ({
+        kind: "incompatible",
+        status: {
+          protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+          daemonIdentity: "a".repeat(64),
+          lifecycle: "accepting",
+          activity: { reviewPresence: 0, codexTasks: 0, transientWork: 1 },
+        },
+      }),
+      shutdown: async () => ++attempts < 3
+        ? { status: "refused", activity: { reviewPresence: 0, codexTasks: 0, transientWork: 1 } }
+        : { status: "accepted" },
+      retryDelay: async () => {},
+      waitForRetirement: async () => {},
+      replaceAndReady: async () => {},
+    })).resolves.toEqual({ status: "installed" });
+    expect(attempts).toBe(3);
+  });
+
+  it("validates an explicit legacy-stop target from owned socket and process evidence", () => {
+    const uid = process.getuid?.() ?? 501;
+    expect(parseOwnedLegacyProcess(
+      `p8722\nu${uid}\n`,
+      `${uid} /Applications/PDF Proofreader.app/Contents/Resources/node/bin/node /Applications/PDF Proofreader.app/Contents/Resources/service/main.js daemon`,
+      uid,
+    )).toBe(8722);
+    expect(parseOwnedLegacyProcess(
+      `p8722\nu${uid + 1}\n`,
+      `${uid + 1} /tmp/unrelated-service daemon`,
+      uid,
+    )).toBeUndefined();
   });
 
   it("inspects management compatibility independently from launch", async () => {

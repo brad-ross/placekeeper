@@ -15,16 +15,21 @@ import {
 } from "./launch-control.js";
 import type { LaunchRequest, LaunchResponse } from "./proofreader-host.js";
 import { ProofreaderHost } from "./proofreader-host.js";
+import { acquireLifecycleLock, LifecycleLockTimeoutError } from "./lifecycle-lock.js";
+import { upgradeReason } from "./upgrade-coordinator.js";
 
 export interface DaemonPaths {
   readonly appSupportRoot: string;
   readonly recoveryRoot: string;
   readonly socketPath: string;
   readonly webAssetsRoot: string;
+  readonly lifecycleLockPath?: string;
 }
 
 export const DAEMON_IDENTITY_ENV = "PDF_PROOFREADER_DAEMON_IDENTITY";
 export const INSTALL_ARTIFACT_IDENTITY_ENV = "PDF_PROOFREADER_INSTALL_ARTIFACT_IDENTITY";
+export const LIFECYCLE_LOCK_TOKEN_ENV = "PDF_PROOFREADER_LIFECYCLE_LOCK_TOKEN";
+export const LIFECYCLE_LOCK_PATH_ENV = "PDF_PROOFREADER_LIFECYCLE_LOCK_PATH";
 
 function currentDaemonIdentity(): string {
   return process.env[DAEMON_IDENTITY_ENV] ?? "development";
@@ -41,6 +46,7 @@ export function defaultDaemonPaths(): DaemonPaths {
     appSupportRoot,
     recoveryRoot: join(appSupportRoot, "recovery"),
     socketPath: join(appSupportRoot, "control.sock"),
+    lifecycleLockPath: process.env[LIFECYCLE_LOCK_PATH_ENV] ?? join(appSupportRoot, "lifecycle.lock"),
     webAssetsRoot:
       process.env.PDF_PROOFREADER_WEB_ASSETS ??
       resolve(dirname(process.argv[1] ?? "."), "../web"),
@@ -69,25 +75,36 @@ export async function startServiceDaemon(paths = defaultDaemonPaths()): Promise<
   readonly closed: Promise<void>;
   close(): Promise<void>;
 }> {
-  await removeConfirmedStaleSocket(paths.socketPath);
-  const host = await ProofreaderHost.start({
-    recoveryRoot: paths.recoveryRoot,
-    webAssets: { root: paths.webAssetsRoot },
+  const lockPath = paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock");
+  const lifecycleLock = await acquireLifecycleLock(lockPath, {
+    timeoutMs: 5_000,
+    ...(process.env[LIFECYCLE_LOCK_TOKEN_ENV] === undefined
+      ? {}
+      : { inheritedToken: process.env[LIFECYCLE_LOCK_TOKEN_ENV] }),
   });
+  let host: ProofreaderHost | undefined;
   try {
-    const control = await startLaunchControlServer(host, paths.socketPath, {
+    await removeConfirmedStaleSocket(paths.socketPath);
+    host = await ProofreaderHost.start({
+      recoveryRoot: paths.recoveryRoot,
+      webAssets: { root: paths.webAssetsRoot },
+    });
+    const startedHost = host;
+    const control = await startLaunchControlServer(startedHost, paths.socketPath, {
       daemonIdentity: currentDaemonIdentity(),
     });
+    await lifecycleLock.release();
     return {
-      host,
+      host: startedHost,
       closed: control.closed,
       close: async () => {
-        await host.close();
+        await startedHost.close();
         await control.close();
       },
     };
   } catch (error) {
-    await host.close();
+    await host?.close();
+    await lifecycleLock.release();
     throw error;
   }
 }
@@ -101,11 +118,35 @@ export async function launchThroughDaemon(
   request: LaunchRequest,
   paths = defaultDaemonPaths(),
 ): Promise<LaunchResponse> {
+  const lockPath = paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock");
+  let lifecycleLock;
   try {
-    const compatibility = await inspectDaemonCompatibility(paths.socketPath, currentDaemonIdentity());
+    lifecycleLock = await acquireLifecycleLock(lockPath, { timeoutMs: 5_000 });
+  } catch (error) {
+    if (error instanceof LifecycleLockTimeoutError) {
+      throw new DaemonUpgradeRequiredError("transient-busy");
+    }
+    throw error;
+  }
+  try {
+    return await launchWhileLocked(request, paths, lifecycleLock.token);
+  } finally {
+    await lifecycleLock.release();
+  }
+}
+
+async function launchWhileLocked(
+  request: LaunchRequest,
+  paths: DaemonPaths,
+  lifecycleToken: string,
+): Promise<LaunchResponse> {
+  try {
+    const compatibility = await waitForAcceptingCompatibility(paths.socketPath, currentDaemonIdentity());
     if (compatibility.kind !== "exact") {
       throw new DaemonUpgradeRequiredError(
-        compatibility.kind === "incompatible" ? "incompatible" : compatibility.reason,
+        compatibility.kind === "incompatible"
+          ? upgradeReason(compatibility.status.activity) ?? "incompatible"
+          : compatibility.reason,
       );
     }
     return await requestLaunch(paths.socketPath, request);
@@ -117,16 +158,23 @@ export async function launchThroughDaemon(
   const child = spawn(process.execPath, [entry, "daemon"], {
     detached: true,
     stdio: "ignore",
-    env: { ...process.env, PDF_PROOFREADER_WEB_ASSETS: paths.webAssetsRoot },
+    env: {
+      ...process.env,
+      PDF_PROOFREADER_WEB_ASSETS: paths.webAssetsRoot,
+      [LIFECYCLE_LOCK_TOKEN_ENV]: lifecycleToken,
+      [LIFECYCLE_LOCK_PATH_ENV]: paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
+    },
   });
   child.unref();
   for (let attempt = 0; attempt < 60; attempt += 1) {
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
     try {
-      const compatibility = await inspectDaemonCompatibility(paths.socketPath, currentDaemonIdentity());
+      const compatibility = await waitForAcceptingCompatibility(paths.socketPath, currentDaemonIdentity());
       if (compatibility.kind !== "exact") {
         throw new DaemonUpgradeRequiredError(
-          compatibility.kind === "incompatible" ? "incompatible" : compatibility.reason,
+          compatibility.kind === "incompatible"
+            ? upgradeReason(compatibility.status.activity) ?? "incompatible"
+            : compatibility.reason,
         );
       }
       return await requestLaunch(paths.socketPath, request);
@@ -135,6 +183,18 @@ export async function launchThroughDaemon(
     }
   }
   throw new Error("The local proofreader service did not become ready");
+}
+
+async function waitForAcceptingCompatibility(socketPath: string, identity: string) {
+  const deadline = Date.now() + 5_000;
+  while (true) {
+    const compatibility = await inspectDaemonCompatibility(socketPath, identity);
+    if (compatibility.kind !== "exact" || compatibility.status.lifecycle === "accepting") {
+      return compatibility;
+    }
+    if (Date.now() >= deadline) throw new DaemonUpgradeRequiredError("transient-busy");
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+  }
 }
 
 /** Lifecycle hooks never start or discover a host; they address only the

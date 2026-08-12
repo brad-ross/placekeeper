@@ -1,5 +1,5 @@
 export interface LaunchErrorPresentation {
-  readonly kind: "input-unavailable" | "unsupported-context";
+  readonly kind: "input-unavailable" | "unsupported-context" | "upgrade-required";
   readonly message: string;
   readonly recoveryAction: string;
 }

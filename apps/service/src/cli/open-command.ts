@@ -8,6 +8,7 @@ import { launchThroughDaemon, runServiceDaemon } from "../host/service-daemon.js
 import { runDoctorCommand } from "./doctor-command.js";
 import { readHookStdin, runHookCommand } from "./hook-command.js";
 import { runContextCommand } from "./context-command.js";
+import { runDaemonCommand } from "./daemon-command.js";
 
 type LaunchClient = (request: LaunchRequest) => Promise<LaunchResponse>;
 
@@ -95,7 +96,7 @@ export async function runOpenCommand(
           error: {
             kind: "upgrade-required",
             message: error.message,
-            recoveryAction: "Close PDF Proofreader reviews and retry",
+            recoveryAction: error.recoveryAction,
           },
         }
       : {
@@ -122,6 +123,7 @@ async function main(): Promise<number> {
     return runDoctorCommand(process.argv.slice(2));
   }
   if (process.argv[2] === "daemon") {
+    if (process.argv[3] !== undefined) return runDaemonCommand(process.argv.slice(3));
     await runServiceDaemon();
     return 0;
   }

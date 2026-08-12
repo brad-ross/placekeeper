@@ -58,6 +58,17 @@ describe("VS Code local host adapter", () => {
     expect(() => parseLaunchResponse(JSON.stringify({ ok: true, kind: "recovery-offered", choices: ["resume", "fork"], recoverySessionId: "opaque-session" }))).toThrow(/invalid/u);
   });
 
+  it("accepts the bounded shared upgrade-required error without weakening URL checks", () => {
+    expect(parseLaunchResponse(JSON.stringify({
+      ok: false,
+      error: {
+        kind: "upgrade-required",
+        message: "PDF Proofreader has an active Codex task. Existing work was preserved.",
+        recoveryAction: "End the bound Codex task or wait for its lease, then retry",
+      },
+    }))).toMatchObject({ ok: false, error: { kind: "upgrade-required" } });
+  });
+
   it("spawns the launch client without a shell and bounds stdout", async () => {
     const invoke = vi.fn(async () => ({ stdout: JSON.stringify({ ok: true, kind: "opened", url: "http://127.0.0.1:49152/s/id/bootstrap?embed=vscode#cap=secret" }), stderr: "" }));
     const result = await runLaunchClient("/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader", "/tmp/paper.pdf", undefined, invoke);

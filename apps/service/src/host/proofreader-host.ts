@@ -30,10 +30,7 @@ export interface LaunchRequest {
 export interface LaunchFailure {
   readonly kind: "input-unavailable" | "unsupported-context" | "upgrade-required";
   readonly message: string;
-  readonly recoveryAction:
-    | "Choose one readable local PDF"
-    | "Choose a supported local workspace"
-    | "Close PDF Proofreader reviews and retry";
+  readonly recoveryAction: string;
 }
 
 export type LaunchResponse =
