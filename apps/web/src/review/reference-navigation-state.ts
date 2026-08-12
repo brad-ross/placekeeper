@@ -4,7 +4,20 @@ import {
   type PdfViewerLocation,
 } from '../pdf/viewer-navigation.js';
 
-export type WorkspaceMode = 'outline' | 'references' | 'annotations';
+export type WorkspaceMode = 'outline' | 'search' | 'references' | 'annotations';
+
+export const WORKSPACE_MODES: readonly WorkspaceMode[] = [
+  'outline',
+  'search',
+  'annotations',
+  'references',
+];
+
+export const RIGHT_WORKSPACE_MODES: readonly Exclude<WorkspaceMode, 'references'>[] = [
+  'outline',
+  'search',
+  'annotations',
+];
 
 export interface WorkspaceModeMemory {
   readonly logicalScrollToken: string | null;
@@ -125,6 +138,7 @@ export type ReferenceNavigationAction =
       readonly token: number;
       readonly currentLocation: PdfViewerLocation;
       readonly destination: PdfViewerLocation;
+      readonly force?: boolean;
     }
   | ({
       readonly type: 'complete-main-jump';
@@ -168,6 +182,7 @@ function createWorkspaceMemory(): WorkspaceMemory {
     returnFocusToken: null,
     modes: {
       outline: EMPTY_MODE_MEMORY,
+      search: EMPTY_MODE_MEMORY,
       references: EMPTY_MODE_MEMORY,
       annotations: EMPTY_MODE_MEMORY,
     },
@@ -413,7 +428,7 @@ export function reduceReferenceNavigation(
       return mainHistory === state.mainHistory ? state : { ...state, mainHistory };
     }
     case 'request-main-jump':
-      if (samePdfViewerLocation(action.currentLocation, action.destination)) return state;
+      if (!action.force && samePdfViewerLocation(action.currentLocation, action.destination)) return state;
       return {
         ...state,
         pendingMainNavigation: {

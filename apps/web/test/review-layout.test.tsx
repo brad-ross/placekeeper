@@ -346,7 +346,7 @@ describe('review shell layout and accessibility contract', () => {
       ><div>Document canvas</div></ReviewShell>,
     );
     expect(html).toContain('data-reference-layout="wide-split"');
-    expect(html).toContain('aria-label="Outline and annotations"');
+    expect(html).toContain('aria-label="Outline, search, and annotations"');
     expect(html).toContain('aria-label="References"');
     expect(html.match(/data-reference-viewport-host/g)).toHaveLength(1);
     expect(html.match(/id="workspace-panel-references"/g)).toHaveLength(1);

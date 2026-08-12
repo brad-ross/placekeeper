@@ -74,7 +74,7 @@ Runway expands reachability without participating in page layout and is removed 
 ### Framing Session
 The interval during which an open review surface may automatically reveal document content while tracking which movement belongs to the interface and which belongs to the user.
 
-Automatic movement is reversible per axis; deliberate user navigation takes ownership of the affected axis and supersedes stale automatic work.
+Automatic movement is reversible per axis; deliberate user navigation takes ownership of the affected axis and supersedes stale automatic work. When a Reference Tab is promoted to Main during an open session, its verified destination becomes the new baseline before subsequent workspace reflow.
 
 ## Visual language
 
@@ -106,6 +106,13 @@ Reference Fit Width is used for a destination's initial opening and to reconstru
 An explicit destination change in the Main Reading Thread that enters PDF Back and Forward history, such as embedded-outline navigation or promotion from a Reference Tab.
 
 Ordinary scrolling, sequential page turns, and zoom changes are not Meaningful Jumps.
+
+## PDF search
+
+### Search Result
+A page-positioned occurrence derived from reliable searchable text in the current source PDF.
+
+Activating its primary row creates a Meaningful Jump in the Main Reading Thread, while its References action opens the same destination without moving the Main Reading Thread.
 
 ## Relationships
 

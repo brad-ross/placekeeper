@@ -38,6 +38,7 @@ import {
 import type { FrozenReviewDelivery } from "../export/export-coordinator.js";
 import {
   assessPdfRewriteEligibility,
+  migrateLegacyReviewStateGeometry,
   readPortableReviewItems,
 } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { SessionControlRegistry } from "./control-socket.js";
@@ -300,17 +301,22 @@ export class SessionBroker {
     }
 
     if (matchingDraft !== undefined && request.recoveryDecision === "resume") {
+      const sourceSnapshotBytes = new Uint8Array(await readFile(matchingDraft.sourceSnapshotPath));
       if (
         (await hashFile(matchingDraft.sourceSnapshotPath)) !==
           matchingDraft.state.source.digest ||
-        (await readFile(matchingDraft.sourceSnapshotPath)).byteLength !==
-          matchingDraft.state.source.byteLength
+        sourceSnapshotBytes.byteLength !== matchingDraft.state.source.byteLength
       ) {
         throw new Error("Recovery source snapshot failed integrity validation");
       }
+      const geometryMigrated = matchingDraft.state.schemaVersion === 1;
+      const migratedState = await migrateLegacyReviewStateGeometry(
+        sourceSnapshotBytes,
+        matchingDraft.state,
+      );
       const resumedState: ReviewState = {
-        ...matchingDraft.state,
-        source: { ...matchingDraft.state.source, fileId: approvedFile.id },
+        ...migratedState,
+        source: { ...migratedState.source, fileId: approvedFile.id },
         ...(approvedRoot === undefined ? {} : { sourceRootId: approvedRoot.id }),
       };
       if (approvedRoot === undefined) delete (resumedState as { sourceRootId?: string }).sourceRootId;
@@ -318,6 +324,16 @@ export class SessionBroker {
       let sync = matchingDraft.sync.phase === "saving"
         ? { ...matchingDraft.sync, phase: "not-saved" as const, failure: "write-failed" as const }
         : matchingDraft.sync;
+      if (geometryMigrated) {
+        sync = {
+          ...sync,
+          phase: "not-saved",
+          desiredDigest: reviewStateDigest(resumedState),
+          failure: resumedState.items.length === 0
+            ? "destination-unconfigured"
+            : "write-failed",
+        };
+      }
       if (destination.phase === "active" && destination.kind === "original") {
         destination = {
           ...destination,

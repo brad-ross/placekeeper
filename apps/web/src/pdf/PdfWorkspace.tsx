@@ -11,6 +11,7 @@ import { Viewport } from '@embedpdf/plugin-viewport/react';
 import { ZoomGestureWrapper } from '@embedpdf/plugin-zoom/react';
 import { useMemo, useRef } from 'react';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+import type { PdfSearchResult } from './pdf-search-model.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
 import { combinePageRotation, positionOwnedRect } from './owned-overlay.js';
 import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
@@ -63,11 +64,24 @@ export interface PdfWorkspaceProps {
   onViewerInteraction?: (event: ViewerInteractionEvent) => void;
   referenceViewportHost?: HTMLElement | null;
   onReferenceViewportElement?: (element: HTMLDivElement | null) => void;
+  searchResults?: readonly PdfSearchResult[];
 }
 
 const PDF_TEXT_SELECTION_STYLE = {
   background: 'var(--review-selection-bg)',
 } as const;
+
+function groupByPageIndex<T extends { readonly pageIndex: number }>(
+  items: readonly T[],
+): Map<number, T[]> {
+  const result = new Map<number, T[]>();
+  for (const item of items) {
+    const page = result.get(item.pageIndex);
+    if (page === undefined) result.set(item.pageIndex, [item]);
+    else page.push(item);
+  }
+  return result;
+}
 
 function isContextPointerGesture(event: {
   readonly button: number;
@@ -96,22 +110,22 @@ export function PdfWorkspace({
   onViewerInteraction,
   referenceViewportHost = null,
   onReferenceViewportElement,
+  searchResults = [],
 }: PdfWorkspaceProps) {
   const pressedPrimaryPointers = useRef(new Map<number, HTMLDivElement>());
   const contextPointers = useRef(new Set<number>());
   const contextResetTarget = useRef<HTMLDivElement | null>(null);
-  const annotationsByPage = useMemo(() => {
-    const result = new Map<number, ReviewAnnotation[]>();
-    for (const annotation of ownedAnnotations) {
-      const page = result.get(annotation.pageIndex);
-      if (page === undefined) result.set(annotation.pageIndex, [annotation]);
-      else page.push(annotation);
-    }
-    return result;
-  }, [ownedAnnotations]);
+  const annotationsByPage = useMemo(
+    () => groupByPageIndex(ownedAnnotations),
+    [ownedAnnotations],
+  );
   const geometryByPage = useMemo(
     () => groupOwnedMarkGeometryByPage(ownedAnnotations),
     [ownedAnnotations],
+  );
+  const searchResultsByPage = useMemo(
+    () => groupByPageIndex(searchResults),
+    [searchResults],
   );
 
   return (
@@ -233,17 +247,13 @@ export function PdfWorkspace({
                           },
                         );
                         if (!point) return;
-                        const canonicalPoint = {
-                          x: point.x + (page.boxes?.crop.left ?? 0),
-                          y: point.y + (page.boxes?.crop.top ?? 0),
-                        };
                         if (hitTestOwnedMark(
                           geometryByPage.get(layout.pageIndex) ?? [],
-                          canonicalPoint,
+                          point,
                         )) return;
                         const accepted = onPageContextMenu({
                           pageIndex: layout.pageIndex,
-                          ...canonicalPoint,
+                          ...point,
                           clientX: event.clientX,
                           clientY: event.clientY,
                           keyboard: false,
@@ -258,8 +268,8 @@ export function PdfWorkspace({
                         const bounds = event.currentTarget.getBoundingClientRect();
                         const accepted = onPageContextMenu({
                           pageIndex: layout.pageIndex,
-                          x: page.size.width / 2 + (page.boxes?.crop.left ?? 0),
-                          y: page.size.height / 2 + (page.boxes?.crop.top ?? 0),
+                          x: page.size.width / 2,
+                          y: page.size.height / 2,
                           clientX: bounds.left + bounds.width / 2,
                           clientY: bounds.top + bounds.height / 2,
                           keyboard: true,
@@ -285,6 +295,40 @@ export function PdfWorkspace({
                         pageIndex={layout.pageIndex}
                         textStyle={PDF_TEXT_SELECTION_STYLE}
                       />
+                      <div
+                        inert
+                        aria-hidden="true"
+                        data-pdf-search-highlight-layer
+                        style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+                      >
+                        {(searchResultsByPage.get(layout.pageIndex) ?? []).flatMap((searchResult) => (
+                          searchResult.rects.map((rect, index) => {
+                              const positioned = positionOwnedRect(
+                                activePdf.pages[layout.pageIndex]!,
+                                layout,
+                                mainDocument.rotation,
+                                {
+                                  x: rect.origin.x,
+                                  y: rect.origin.y,
+                                  width: rect.size.width,
+                                  height: rect.size.height,
+                                },
+                              );
+                              return <span
+                                key={`${searchResult.id}:${index}`}
+                                data-pdf-search-highlight={searchResult.id}
+                                data-pdf-search-match-kind={searchResult.kind === 'variant' ? 'related' : 'exact'}
+                                style={{
+                                  position: 'absolute',
+                                  left: positioned.origin.x,
+                                  top: positioned.origin.y,
+                                  width: positioned.size.width,
+                                  height: positioned.size.height,
+                                }}
+                              />;
+                            })
+                        ))}
+                      </div>
                       <div
                         inert
                         aria-hidden="true"
@@ -426,6 +470,7 @@ export function PdfWorkspace({
                 documentState={referenceDocument}
                 documentGeneration={documentGeneration}
                 host={referenceViewportHost}
+                searchResultsByPage={searchResultsByPage}
                 {...(onViewerInteraction === undefined ? {} : { onInteraction: onViewerInteraction })}
                 {...(onReferenceViewportElement === undefined ? {} : { onViewportElement: onReferenceViewportElement })}
               />

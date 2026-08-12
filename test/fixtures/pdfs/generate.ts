@@ -114,6 +114,31 @@ async function mixedTextImagePdf() {
   return document.save({ useObjectStreams: false });
 }
 
+async function pdfSearchPdf() {
+  const document = await PDFDocument.create();
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  const first = document.addPage([612, 792]);
+  first.drawText('A stable model is defined here. Stability matters for the proof. A 90° angle is fixed.', {
+    x: 72,
+    y: 690,
+    size: 14,
+    font,
+  });
+  const second = document.addPage([612, 792]);
+  second.drawText('The model stabilizes after iteration. A stable limit follows.', {
+    x: 72,
+    y: 690,
+    size: 14,
+    font,
+  });
+  const imageOnly = document.addPage([612, 792]);
+  const png = await document.embedPng(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  );
+  imageOnly.drawImage(png, { x: 72, y: 600, width: 300, height: 120 });
+  return document.save({ useObjectStreams: false });
+}
+
 async function hostileActionsPdf() {
   const document = await PDFDocument.create();
   const page = document.addPage([612, 792]);
@@ -487,6 +512,7 @@ await Promise.all([
   writeFixture('text-native-with-annotations.pdf', await textPdf({ annotations: true })),
   writeFixture('image-only.pdf', await imageOnlyPdf()),
   writeFixture('mixed-text-image.pdf', await mixedTextImagePdf()),
+  writeFixture('pdf-search.pdf', await pdfSearchPdf()),
   writeFixture('rotation-0-crop.pdf', await textPdf({ rotation: 0, crop: true })),
   writeFixture('rotation-90-crop.pdf', await textPdf({ rotation: 90, crop: true })),
   writeFixture('rotation-180-crop.pdf', await textPdf({ rotation: 180, crop: true })),

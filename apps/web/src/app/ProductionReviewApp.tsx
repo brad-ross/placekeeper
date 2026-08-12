@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import type { PluginRegistry } from "@embedpdf/core";
+import type { PdfDocumentObject, PdfEngine } from '@embedpdf/models';
 import { ScrollPlugin } from "@embedpdf/plugin-scroll";
 import { SelectionPlugin } from "@embedpdf/plugin-selection";
 
@@ -26,6 +27,16 @@ import type { ViewerFramingControls } from "../pdf/viewer-framing.js";
 import type { PdfViewerNavigation } from "../pdf/viewer-navigation-adapter.js";
 import type { ReferenceDocumentController } from "../pdf/reference-document.js";
 import type { PdfOutlineDiscovery } from "../pdf/pdf-outline.js";
+import {
+  createEnginePdfSearchPageReader,
+  createPdfSearchController,
+  type PdfSearchController,
+} from '../pdf/pdf-search-controller.js';
+import {
+  initialPdfSearchState,
+  type PdfSearchResult,
+} from '../pdf/pdf-search-model.js';
+import { pdfSearchResultTarget } from '../pdf/pdf-search-navigation.js';
 import type {
   ViewerClientPlacement,
   ViewerInteractionEvent,
@@ -41,6 +52,7 @@ import {
   type ReferenceNavigationAction,
 } from "../review/reference-navigation-state.js";
 import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
+import { PdfSearchWorkspace } from '../review/PdfSearchWorkspace.js';
 import { createTrailingTaskScheduler } from "../review/main-location-refresh.js";
 import {
   canDeriveAnnotationOutlineLabels,
@@ -164,6 +176,15 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const placementAuthority = useRef(new PageNotePlacementAuthority());
   const placedToken = useRef(0);
   const viewerRegistry = useRef<PluginRegistry | null>(null);
+  const searchControllerRef = useRef<PdfSearchController | null>(null);
+  const searchDocumentRef = useRef<PdfDocumentObject | null>(null);
+  const pendingSearchQueryRef = useRef('');
+  const submittedSearchQueryRef = useRef('');
+  const searchSubmitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchRequestedRef = useRef(false);
+  const [searchState, setSearchState] = useState(() => initialPdfSearchState());
+  const [searchNavigationIntentToken, setSearchNavigationIntentToken] = useState(0);
+  const commitMainFramingPositionRef = useRef<() => void>(() => undefined);
   const viewerControlsRef = useRef<ViewerControls | undefined>(undefined);
   const [viewerFraming, setViewerFraming] = useState<ViewerFramingControls>();
   const productionRootRef = useRef<HTMLElement | null>(null);
@@ -246,6 +267,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [props.api, props.scope.launchSurface]);
+  const searchResults = useMemo(
+    () => searchState.groups.flatMap((group) => group.results),
+    [searchState.groups],
+  );
   useEffect(() => {
     if (saveStatus.sync.phase !== "saving") return;
     const controller = new AbortController();
@@ -316,6 +341,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         });
       },
       getReferenceController: () => referenceControllerRef.current,
+      commitMainFramingPosition: () => commitMainFramingPositionRef.current(),
       layout: {
         revealReferences: () => {
           const layout = referenceLayoutStateRef.current;
@@ -325,6 +351,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           dispatchLayout({ type: 'focus-surface', surface: 'references' });
         },
         hideReferences: () => dispatchLayout({ type: 'hide-references' }),
+        hideReferencesAfterSend: () => dispatchLayout({
+          type: 'hide-references-after-send',
+          activeMode: navigationStateRef.current.workspace.lastMode,
+        }),
         settle: async () => {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -395,6 +425,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     mainLocationRefresh.cancel();
     viewerControlsRef.current?.dispose();
     placementAuthority.current.clear();
+    if (searchSubmitTimerRef.current !== null) clearTimeout(searchSubmitTimerRef.current);
+    searchControllerRef.current?.dispose();
   }, [mainLocationRefresh, navigationCoordinator]);
   const sourceIdentity = `${state.source.fileId}:${state.source.digest}`;
   const sourceIdentityRef = useRef(sourceIdentity);
@@ -423,6 +455,15 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setExistingAnnotationsSourceIdentity(sourceIdentity);
     setMainNavigationReadyGeneration(null);
     navigationCoordinator.replaceDocument(nextGeneration);
+    searchControllerRef.current?.dispose();
+    searchControllerRef.current = null;
+    searchDocumentRef.current = null;
+    if (searchSubmitTimerRef.current !== null) clearTimeout(searchSubmitTimerRef.current);
+    searchSubmitTimerRef.current = null;
+    pendingSearchQueryRef.current = '';
+    submittedSearchQueryRef.current = '';
+    searchRequestedRef.current = false;
+    setSearchState(initialPdfSearchState());
     dispatchLayout({ type: 'replace-document' });
     setRightWorkspaceMode('outline');
   }, [mainLocationRefresh, navigationCoordinator, sourceIdentity]);
@@ -531,6 +572,39 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       mainLocationRefresh.schedule();
     });
   }, [mainLocationRefresh]);
+  const onMainDocumentReady = useCallback((engine: PdfEngine, document: PdfDocumentObject) => {
+    if (searchDocumentRef.current === document && searchControllerRef.current) return;
+    searchControllerRef.current?.dispose();
+    searchDocumentRef.current = document;
+    const search = createPdfSearchController({
+      documentGeneration: documentGenerationRef.current,
+      reader: createEnginePdfSearchPageReader(engine, document),
+    });
+    searchControllerRef.current = search;
+    setSearchState(search.getState());
+    search.subscribe((next) => {
+      const pendingQuery = pendingSearchQueryRef.current;
+      if (pendingQuery === submittedSearchQueryRef.current) {
+        setSearchState(next);
+        return;
+      }
+      setSearchState({
+        ...next,
+        query: pendingQuery,
+        status: pendingQuery.trim().length > 0 ? 'indexing' : 'idle',
+        groups: [],
+        selectedResultId: null,
+        alternatives: [],
+        message: '',
+      });
+    });
+    const pendingQuery = pendingSearchQueryRef.current;
+    if (pendingQuery.trim().length > 0) {
+      submittedSearchQueryRef.current = pendingQuery;
+      void search.search(pendingQuery);
+    }
+    else if (searchRequestedRef.current) void search.prepare();
+  }, []);
   const onViewerFramingInitialized = useCallback((controls: ViewerFramingControls) => {
     setViewerFraming(controls);
   }, []);
@@ -554,7 +628,62 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       onViewerNavigationInitialized={onViewerNavigationInitialized}
       onOutlineDiscovery={onOutlineDiscovery}
       onViewerInitialized={onViewerInitialized}
+      onMainDocumentReady={onMainDocumentReady}
       onViewerFramingInitialized={onViewerFramingInitialized}
+      searchResults={searchResults}
+    />
+  );
+
+  const activateSearchResult = (result: PdfSearchResult) => {
+    const target = pdfSearchResultTarget(result, navigationState.documentGeneration);
+    if (target === null) return;
+    searchControllerRef.current?.selectResult(result.id);
+    void navigationCoordinator.navigateMainTarget(target, 'search');
+  };
+  const openSearchResultReference = (result: PdfSearchResult) => {
+    const target = pdfSearchResultTarget(result, navigationState.documentGeneration);
+    if (target === null) return;
+    const selectedResult = searchResults.find(({ id }) => id === searchState.selectedResultId);
+    const selectedTarget = selectedResult
+      ? pdfSearchResultTarget(selectedResult, navigationState.documentGeneration)
+      : null;
+    setSearchNavigationIntentToken((token) => token + 1);
+    setTimeout(() => {
+      void navigationCoordinator.openReference(target, {
+        label: result.matchedForm || `Search result on page ${result.pageIndex + 1}`,
+        pageContext: `Page ${result.pageIndex + 1}`,
+      }, selectedTarget);
+    }, 0);
+  };
+  const submitSearchQuery = (query: string, immediate = false) => {
+    pendingSearchQueryRef.current = query;
+    const search = searchControllerRef.current;
+    setSearchState((current) => ({
+      ...current,
+      query,
+      status: query.trim().length > 0 ? 'indexing' : 'idle',
+      groups: [],
+      selectedResultId: null,
+      alternatives: [],
+      message: '',
+    }));
+    if (!search) return;
+    if (searchSubmitTimerRef.current !== null) clearTimeout(searchSubmitTimerRef.current);
+    const run = () => {
+      searchSubmitTimerRef.current = null;
+      submittedSearchQueryRef.current = query;
+      void search.search(query);
+    };
+    if (immediate) run();
+    else searchSubmitTimerRef.current = setTimeout(run, 180);
+  };
+  const searchWorkspace = (
+    <PdfSearchWorkspace
+      state={searchState}
+      onQueryChange={submitSearchQuery}
+      onResultActivate={activateSearchResult}
+      onResultOpenReference={openSearchResultReference}
+      onAlternativeActivate={(alternative) => submitSearchQuery(alternative.query, true)}
     />
   );
 
@@ -597,6 +726,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const anyTrayOpen = effectiveReferenceLayout.kind === 'narrow-unified'
     ? effectiveReferenceLayout.open
     : effectiveReferenceLayout.rightWorkspaceOpen || effectiveReferenceLayout.bottomReferencesOpen;
+  const onCommitMainFramingPositionChange = useCallback((commit: (() => void) | null) => {
+    commitMainFramingPositionRef.current = commit ?? (() => undefined);
+  }, []);
 
   return (
     <main data-production-review ref={productionRootRef}>
@@ -614,6 +746,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         workspaceOpen={anyTrayOpen}
         referenceLayoutState={referenceLayoutState}
         rightWorkspaceMode={rightWorkspaceMode}
+        search={searchWorkspace}
+        viewerNavigationIntentToken={searchNavigationIntentToken}
+        onCommitMainFramingPositionChange={onCommitMainFramingPositionChange}
         onReferenceLayoutAction={dispatchLayout}
         navigationState={navigationState}
         referenceTabs={navigationState.tabs.map((tab) => ({
@@ -645,6 +780,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           if (mode === 'references') {
             void navigationCoordinator.openReferencesWorkspace();
             return;
+          }
+          if (mode === 'search') {
+            searchRequestedRef.current = true;
+            void searchControllerRef.current?.prepare();
           }
           setRightWorkspaceMode(mode);
           dispatchNavigation({ type: 'select-workspace-mode', mode });
@@ -780,14 +919,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           const documentId = core?.activeDocumentId;
           const scroll = registry?.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides();
           if (documentId && scroll) {
-            const page = core?.documents[documentId]?.document?.pages[item.pageIndex];
             const coordinates = reviewItemPoint(item) ?? undefined;
             scroll.forDocument(documentId).scrollToPage({
               pageNumber: item.pageIndex + 1,
               ...(coordinates === undefined ? {} : {
                 pageCoordinates: {
-                  x: coordinates.x - (page?.boxes?.crop.left ?? 0),
-                  y: coordinates.y - (page?.boxes?.crop.top ?? 0),
+                  x: coordinates.x,
+                  y: coordinates.y,
                 },
               }),
               behavior: "smooth",
@@ -821,7 +959,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           : { rewriteEligibility: saveStatus.rewriteEligibility })}
         {...(destinationError === undefined ? {} : { error: destinationError })}
         {...(saveStatus.sync.phase === "not-saved" && saveStatus.destination.phase === "active"
-          ? { recoveryTarget: saveStatus.destination.targetPath.split(/[\\/]/u).at(-1)! }
+          ? {
+              recoveryTarget: saveStatus.destination.targetPath.split(/[\\/]/u).at(-1)!,
+              ...(saveStatus.sync.failure === undefined
+                ? {}
+                : { recoveryFailure: saveStatus.sync.failure }),
+            }
           : {})}
         onRetry={async () => {
           if (destinationEstablishing) return;

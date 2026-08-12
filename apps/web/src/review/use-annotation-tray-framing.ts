@@ -74,7 +74,7 @@ export interface WorkspaceFraming {
   waitForSettledGeometry: WaitForSettledViewerGeometry;
   markUserIntent(
     axes?: { left?: boolean; top?: boolean },
-    options?: { stopAutomaticScroll?: boolean },
+    options?: { stopAutomaticScroll?: boolean; captureSettledPosition?: boolean },
   ): void;
   currentScroll(): ViewerPosition | null;
 }
@@ -222,7 +222,7 @@ export function useWorkspaceFraming(input: {
 
   const markUserIntent = useCallback((
     axes: { left?: boolean; top?: boolean } = { left: true, top: true },
-    options: { stopAutomaticScroll?: boolean } = {},
+    options: { stopAutomaticScroll?: boolean; captureSettledPosition?: boolean } = {},
   ) => {
     const session = sessionRef.current;
     if (!session) return;
@@ -247,18 +247,20 @@ export function useWorkspaceFraming(input: {
     if (userPositionFrameRef.current !== null) {
       cancelAnimationFrame(userPositionFrameRef.current);
     }
-    userPositionFrameRef.current = requestAnimationFrame(() => {
+    if (options.captureSettledPosition !== false) {
       userPositionFrameRef.current = requestAnimationFrame(() => {
-        userPositionFrameRef.current = null;
-        if (sessionRef.current !== session) return;
-        const settled = input.controls?.snapshot();
-        if (!settled?.ready || settled.documentId !== session.documentId) return;
-        session.baseline = {
-          left: ownsLeft ? settled.scroll.left : session.baseline.left,
-          top: ownsTop ? settled.scroll.top : session.baseline.top,
-        };
+        userPositionFrameRef.current = requestAnimationFrame(() => {
+          userPositionFrameRef.current = null;
+          if (sessionRef.current !== session) return;
+          const settled = input.controls?.snapshot();
+          if (!settled?.ready || settled.documentId !== session.documentId) return;
+          session.baseline = {
+            left: ownsLeft ? settled.scroll.left : session.baseline.left,
+            top: ownsTop ? settled.scroll.top : session.baseline.top,
+          };
+        });
       });
-    });
+    }
 
     // Programmatic ownership changes stop any in-flight smooth scroll. Native
     // wheel gestures cancel through browser behavior; forcing a same-position

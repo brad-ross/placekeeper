@@ -18,7 +18,6 @@ const naturalRect = {
 const page = (rotation: Rotation): AnchorPage => ({
   pageIndex: 2,
   size: { width: 540, height: 720 },
-  cropBox: { left: 36, top: 48, right: 576, bottom: 768 },
   rotation,
   extractedText: 'before <unique equilibrium> after',
   textRects: [{ content: '<unique equilibrium>', rect: naturalRect }],
@@ -26,7 +25,7 @@ const page = (rotation: Rotation): AnchorPage => ({
 
 describe('selection anchors', () => {
   it.each([Rotation.Degree0, Rotation.Degree90, Rotation.Degree180, Rotation.Degree270])(
-    'normalizes rotation %s exactly once and includes a nonzero CropBox origin',
+    'normalizes rotation %s exactly once in crop-relative page space',
     (rotation) => {
       const rotated = transformRect(page(rotation).size, naturalRect, rotation, 1);
       const result = createSelectionAnchor({
@@ -46,8 +45,8 @@ describe('selection anchors', () => {
           quote: '<unique equilibrium>',
           prefix: 'before ',
           suffix: ' after',
-          rect: { x: 60, y: 84, width: 120, height: 18 },
-          segmentRects: [{ x: 60, y: 84, width: 120, height: 18 }],
+          rect: { x: 24, y: 36, width: 120, height: 18 },
+          segmentRects: [{ x: 24, y: 36, width: 120, height: 18 }],
           reliable: true,
         },
       });
@@ -148,7 +147,7 @@ describe('selection anchors', () => {
           },
         ],
       }),
-    ).toMatchObject({ ok: true, anchor: { segmentRects: [{ x: 60, y: 84 }] } });
+    ).toMatchObject({ ok: true, anchor: { segmentRects: [{ x: 24, y: 36 }] } });
 
     expect(
       createSelectionAnchor({
@@ -178,7 +177,7 @@ describe('selection anchors', () => {
       ok: true,
       anchor: {
         pageIndex: 2,
-        position: { x: 56, y: 68, width: 2, height: 14 },
+        position: { x: 20, y: 20, width: 2, height: 14 },
         leftContext: 'before ',
         rightContext: '<unique',
         reliable: true,
@@ -308,7 +307,7 @@ describe('selection anchors', () => {
         quote: '<unique equilibrium>',
         prefix: 'before ',
         suffix: ' after',
-        segmentRects: [{ x: 60, y: 84 }],
+        segmentRects: [{ x: 24, y: 36 }],
       },
     });
   });

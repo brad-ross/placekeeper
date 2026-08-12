@@ -48,6 +48,9 @@ function classifyFailure(error: unknown): SaveFailureReason {
   if ((error as { code?: unknown })?.code === "OUTPUT_VERIFICATION_FAILED") {
     return "verification-failed";
   }
+  if (error instanceof PdfWriterError && error.code === "invalid-annotation-geometry") {
+    return "invalid-annotation-geometry";
+  }
   return "write-failed";
 }
 

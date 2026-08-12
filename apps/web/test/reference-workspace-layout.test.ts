@@ -217,10 +217,31 @@ describe('reference workspace layout state', () => {
     expect(deriveReferenceWorkspaceLayout(state, 'annotations')).toMatchObject({
       kind: 'narrow-unified', open: true, activeMode: 'annotations',
     });
+    expect(reduceReferenceWorkspaceLayout(state, { type: 'hide-references' })).toBe(state);
     state = reduceReferenceWorkspaceLayout(state, { type: 'set-regime', regime: 'wide' });
     expect(deriveReferenceWorkspaceLayout(state, 'annotations')).toMatchObject({
       kind: 'wide-right', rightWorkspaceOpen: true, bottomReferencesOpen: false,
     });
+  });
+
+  it('does not hide a shared tools surface reopened while Send settles', () => {
+    let right = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
+    right = reduceReferenceWorkspaceLayout(right, { type: 'move-references-right' });
+    expect(reduceReferenceWorkspaceLayout(right, {
+      type: 'hide-references-after-send', activeMode: 'search',
+    })).toBe(right);
+
+    let narrow = reduceReferenceWorkspaceLayout(right, { type: 'set-regime', regime: 'narrow' });
+    narrow = reduceReferenceWorkspaceLayout(narrow, { type: 'focus-surface', surface: 'right' });
+    expect(reduceReferenceWorkspaceLayout(narrow, {
+      type: 'hide-references-after-send', activeMode: 'search',
+    })).toBe(narrow);
+
+    let bottom = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
+    bottom = reduceReferenceWorkspaceLayout(bottom, { type: 'show-references' });
+    expect(reduceReferenceWorkspaceLayout(bottom, {
+      type: 'hide-references-after-send', activeMode: 'search',
+    })).toMatchObject({ bottomReferencesOpen: false });
   });
 
   it('uses reference height only for active narrow References', () => {

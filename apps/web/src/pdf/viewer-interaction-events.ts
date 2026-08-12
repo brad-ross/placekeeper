@@ -157,7 +157,7 @@ export interface PageEventGeometry {
   readonly elementTop: number;
 }
 
-/** Normalizes a DOM page event into natural, unscaled, pre-crop page space. */
+/** Normalizes a DOM page event into natural, unscaled, crop-relative page space. */
 export function normalizePageClientPoint(
   point: Position,
   geometry: PageEventGeometry,

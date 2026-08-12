@@ -264,6 +264,8 @@ describe("one production review tree", () => {
     expect(html).toContain('data-reference-layout="wide-closed"');
     expect(html).toContain('data-workspace-edge-rail="right"');
     expect(html).toContain('data-workspace-edge-rail="bottom"');
+    expect(html).toContain('data-workspace-mode="search"');
+    expect(html).toContain('aria-label="Search this PDF"');
     expect(html).not.toContain('>Workspace</button>');
     expect(html).not.toContain("delivery-layout");
     expect(html.match(/Real shared PDF viewer/g)).toHaveLength(1);
@@ -338,5 +340,22 @@ describe("one production review tree", () => {
     expect(html).toContain("Your latest annotations are protected.");
     expect(html).toContain(">Retry</button>");
     expect(html).toContain("Locate PDF…");
+  });
+
+  it("routes invalid geometry back to annotation correction instead of generic retry", () => {
+    const html = renderToStaticMarkup(<SaveDestinationDialog
+      open
+      proposal={{ filename: "paper-annotated.pdf", folder: "/tmp" }}
+      recoveryTarget="paper-annotated.pdf"
+      recoveryFailure="invalid-annotation-geometry"
+      onRetry={vi.fn()}
+      onLocate={vi.fn()}
+      onConfirm={vi.fn()}
+      onCancel={vi.fn()}
+    />);
+
+    expect(html).toContain("An annotation is outside the page");
+    expect(html).toContain("Return to annotations");
+    expect(html).not.toContain(">Retry</button>");
   });
 });

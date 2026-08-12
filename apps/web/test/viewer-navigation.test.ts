@@ -161,14 +161,12 @@ describe('viewer navigation math', () => {
     });
   });
 
-  it('normalizes canonical annotation points with top-origin crop evidence', () => {
-    expect(createPdfAnnotationOrderLocation({ pageIndex: 2, point: { x: 172, y: 260 } }, {
+  it('validates crop-relative annotation points without reapplying crop boundaries', () => {
+    expect(createPdfAnnotationOrderLocation({ pageIndex: 2, point: { x: 72, y: 60 } }, {
       page,
-      cropOrigin: { x: 100, y: 200 },
     })).toEqual({ pageIndex: 2, anchor: { x: 72, y: 60 } });
     expect(createPdfAnnotationOrderLocation({ pageIndex: 2, point: { x: Number.NaN, y: 260 } }, {
       page,
-      cropOrigin: { x: 100, y: 200 },
     })).toBeNull();
   });
 

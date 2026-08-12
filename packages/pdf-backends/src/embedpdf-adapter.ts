@@ -29,7 +29,7 @@ import {
   inspectPortableAnnotation,
   type VisiblePortableAnnotation,
 } from '../../core/src/portable-annotation.js';
-import type { ReviewItem } from '../../core/src/review-model.js';
+import type { JsonValue, ReviewItem, ReviewState } from '../../core/src/review-model.js';
 import {
   PdfWriterError,
   SEMANTIC_MARKUP_KINDS,
@@ -293,18 +293,77 @@ function visibleAnnotation(
   };
 }
 
+function translateLegacyRect(value: JsonValue | undefined, left: number, top: number): JsonValue | undefined {
+  if (
+    value === null ||
+    Array.isArray(value) ||
+    typeof value !== 'object' ||
+    typeof value.x !== 'number' ||
+    typeof value.y !== 'number'
+  ) {
+    return value;
+  }
+  return { ...value, x: value.x - left, y: value.y - top };
+}
+
+function migrateLegacyItemGeometry(
+  item: ReviewItem,
+  page: PdfDocumentObject['pages'][number] | undefined,
+): ReviewItem {
+  if (!page) {
+    throw new PdfWriterError(
+      'invalid-annotation-geometry',
+      `Annotation ${item.id} targets missing page ${item.pageIndex}.`,
+    );
+  }
+  const left = page.boxes?.crop.left ?? 0;
+  const top = page.boxes?.crop.top ?? 0;
+  const payload: Record<string, JsonValue> = { ...item.payload };
+  if (item.kind === 'insert' || item.kind === 'pageNote') {
+    const position = translateLegacyRect(payload.position, left, top);
+    if (position !== undefined) payload.position = position;
+  } else {
+    const rect = translateLegacyRect(payload.rect, left, top);
+    if (rect !== undefined) payload.rect = rect;
+    if (Array.isArray(payload.segmentRects)) {
+      payload.segmentRects = payload.segmentRects.map(
+        (segment) => translateLegacyRect(segment, left, top) ?? segment,
+      );
+    }
+  }
+  return { ...item, payload };
+}
+
+function migrateLegacyStateWithPages(
+  state: ReviewState,
+  pages: PdfDocumentObject['pages'],
+): ReviewState {
+  if (state.schemaVersion === 2) return state;
+  const migrate = (item: ReviewItem) => migrateLegacyItemGeometry(item, pages[item.pageIndex]);
+  return {
+    ...state,
+    schemaVersion: 2,
+    items: state.items.map(migrate),
+    history: state.history.map((entry) => ({
+      beforeItems: entry.beforeItems.map(migrate),
+      afterItems: entry.afterItems.map(migrate),
+    })),
+  };
+}
+
 function portableItemsFromPages(
-  pages: readonly (readonly PdfAnnotationObject[])[],
+  annotationPages: readonly (readonly PdfAnnotationObject[])[],
+  documentPages: PdfDocumentObject['pages'],
 ): { items: ReviewItem[]; owned: Array<{ pageIndex: number; annotation: PdfAnnotationObject }> } {
   const counts = new Map<string, number>();
-  for (const annotations of pages) {
+  for (const annotations of annotationPages) {
     for (const annotation of annotations) {
       counts.set(annotation.id, (counts.get(annotation.id) ?? 0) + 1);
     }
   }
   const items: ReviewItem[] = [];
   const owned: Array<{ pageIndex: number; annotation: PdfAnnotationObject }> = [];
-  pages.forEach((annotations, pageIndex) => {
+  annotationPages.forEach((annotations, pageIndex) => {
     for (const annotation of annotations) {
       const inspected = inspectPortableAnnotation(
         annotation.custom,
@@ -314,7 +373,11 @@ function portableItemsFromPages(
           : {},
       );
       if (inspected.status === 'owned') {
-        items.push(inspected.item);
+        items.push(
+          inspected.geometryVersion === 1
+            ? migrateLegacyItemGeometry(inspected.item, documentPages[pageIndex])
+            : inspected.item,
+        );
         owned.push({ pageIndex, annotation });
       }
     }
@@ -332,12 +395,38 @@ export async function readPortableReviewItems(bytes: Uint8Array): Promise<Review
       const pages = await Promise.all(
         document.pages.map((page) => engine.getPageAnnotations(document, page).toPromise()),
       );
-      return portableItemsFromPages(pages).items;
+      return portableItemsFromPages(pages, document.pages).items;
     } finally {
       await engine.closeDocument(document).toPromise();
     }
   } catch (error) {
     throw new PdfWriterError('invalid-pdf', 'EmbedPDF could not read portable annotations.', {
+      cause: error,
+    });
+  } finally {
+    await engine.destroy().toPromise();
+  }
+}
+
+/** Upgrades recovery state written by the pre-v2 coordinate contract. */
+export async function migrateLegacyReviewStateGeometry(
+  bytes: Uint8Array,
+  state: ReviewState,
+): Promise<ReviewState> {
+  if (state.schemaVersion === 2) return state;
+  const engine = await newEngine();
+  try {
+    const document = await engine
+      .openDocumentBuffer({ id: randomUUID(), content: toArrayBuffer(bytes) })
+      .toPromise();
+    try {
+      return migrateLegacyStateWithPages(state, document.pages);
+    } finally {
+      await engine.closeDocument(document).toPromise();
+    }
+  } catch (error) {
+    if (error instanceof PdfWriterError) throw error;
+    throw new PdfWriterError('invalid-pdf', 'EmbedPDF could not migrate legacy review geometry.', {
       cause: error,
     });
   } finally {
@@ -383,7 +472,7 @@ async function inspectWithEngine(engine: PdfiumNative, bytes: Uint8Array): Promi
     const annotations = pages.flatMap((pageAnnotations, pageIndex) =>
       inspectAnnotations(pageAnnotations, pageIndex),
     );
-    const portableItems = portableItemsFromPages(pages).items;
+    const portableItems = portableItemsFromPages(pages, document.pages).items;
     return {
       pageCount: document.pageCount,
       pageFingerprints,
@@ -428,7 +517,7 @@ export async function inspectPdfAnnotationCatalogWithEmbedPdf(
       pageCount: document.pageCount,
       annotations: pages.flatMap((annotations, pageIndex) =>
         inspectAnnotations(annotations, pageIndex)),
-      portableItems: portableItemsFromPages(pages).items,
+      portableItems: portableItemsFromPages(pages, document.pages).items,
     };
   } catch (error) {
     throw new PdfWriterError('invalid-pdf', 'EmbedPDF could not inspect PDF annotations.', {
@@ -451,6 +540,32 @@ function assertSemanticGeometry(annotations: readonly ReviewAnnotation[]): void 
     throw new PdfWriterError(
       'unreliable-text-geometry',
       `Annotation ${invalid.id} requires reliable selectable text geometry.`,
+    );
+  }
+}
+
+function assertAnnotationWithinPage(
+  annotation: ReviewAnnotation,
+  page: PdfDocumentObject['pages'][number],
+): void {
+  const epsilon = 0.001;
+  const rects = [annotation.rect, ...(annotation.quadPoints ?? [])];
+  const invalid = rects.find((rect) =>
+    !Number.isFinite(rect.x) ||
+    !Number.isFinite(rect.y) ||
+    !Number.isFinite(rect.width) ||
+    !Number.isFinite(rect.height) ||
+    rect.width <= 0 ||
+    rect.height <= 0 ||
+    rect.x < -epsilon ||
+    rect.y < -epsilon ||
+    rect.x + rect.width > page.size.width + epsilon ||
+    rect.y + rect.height > page.size.height + epsilon,
+  );
+  if (invalid) {
+    throw new PdfWriterError(
+      'invalid-annotation-geometry',
+      `Annotation ${annotation.id} has geometry outside page ${annotation.pageIndex}'s crop-relative canvas.`,
     );
   }
 }
@@ -511,13 +626,24 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
       );
     }
 
+    for (const annotation of request.annotations) {
+      const page = document.pages[annotation.pageIndex];
+      if (!page) {
+        throw new PdfWriterError(
+          'invalid-pdf',
+          `Annotation ${annotation.id} targets missing page ${annotation.pageIndex}.`,
+        );
+      }
+      assertAnnotationWithinPage(annotation, page);
+    }
+
     const beforePages = await Promise.all(
       document.pages.map((page) => engine.getPageAnnotations(document!, page).toPromise()),
     );
     const preexisting = beforePages.flatMap((pageAnnotations, pageIndex) =>
       inspectAnnotations(pageAnnotations, pageIndex),
     );
-    const portable = portableItemsFromPages(beforePages);
+    const portable = portableItemsFromPages(beforePages, document.pages);
     const ownedIds = new Set(portable.owned.map(({ annotation }) => annotation.id));
     const foreignPreexisting = preexisting.filter(({ id }) => !ownedIds.has(id));
 
@@ -532,13 +658,7 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
     }
 
     for (const annotation of request.annotations) {
-      const page = document.pages[annotation.pageIndex];
-      if (!page) {
-        throw new PdfWriterError(
-          'invalid-pdf',
-          `Annotation ${annotation.id} targets missing page ${annotation.pageIndex}.`,
-        );
-      }
+      const page = document.pages[annotation.pageIndex]!;
       await engine.createPageAnnotation(document, page, mapAnnotation(annotation)).toPromise();
     }
 

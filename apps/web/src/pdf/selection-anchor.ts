@@ -8,17 +8,9 @@ import {
   type ReliabilityDiagnostic,
 } from './text-reliability.js';
 
-export interface CropBox {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}
-
 export interface AnchorPage extends PageText {
   pageIndex: number;
   size: Size;
-  cropBox: CropBox;
   rotation: Rotation;
 }
 
@@ -101,10 +93,10 @@ function toNaturalRect(page: AnchorPage, selection: FormattedSelection, rect: Re
   }
 }
 
-function toPdfSpace(page: AnchorPage, rect: Rect): PdfSpaceRect {
+function toPageSpace(rect: Rect): PdfSpaceRect {
   return {
-    x: rect.origin.x + page.cropBox.left,
-    y: rect.origin.y + page.cropBox.top,
+    x: rect.origin.x,
+    y: rect.origin.y,
     width: rect.size.width,
     height: rect.size.height,
   };
@@ -178,7 +170,7 @@ export function createSelectionAnchor(input: CreateSelectionAnchorInput): Select
 
   const quoteIndex = input.quoteStart ?? input.page.extractedText.indexOf(input.quote);
   const contextCharacters = Math.max(0, input.contextCharacters ?? 48);
-  const segmentRects = naturalRects.map((rect) => toPdfSpace(input.page, rect));
+  const segmentRects = naturalRects.map(toPageSpace);
   return {
     ok: true,
     anchor: {
@@ -265,7 +257,7 @@ export function createCaretAnchor(
     ok: true,
     anchor: {
       pageIndex: input.page.pageIndex,
-      position: toPdfSpace(input.page, natural),
+      position: toPageSpace(natural),
       leftContext: input.page.extractedText.slice(
         Math.max(0, input.textOffset - contextCharacters),
         input.textOffset,
