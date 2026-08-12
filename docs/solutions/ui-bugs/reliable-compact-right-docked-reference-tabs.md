@@ -107,10 +107,6 @@ The horizontal right-dock rule gives segments an `11.5rem` basis (`apps/web/src/
 
 The browser contract measures the result rather than inferring it from selector precedence: both rendered tabs must be approximately 184px wide, the selected tab must retain room for its actions, and the two desktop actions must remain approximately 31×31px with visible inset and rounded corners (`test/acceptance/production-flow.spec.ts:947-978`).
 
-### Settle layout before final Reference teardown
-
-The same geometry rule applies when the final tab is sent to main. The coordinator hides References and settles layout before applying the main location. It then awaits layout settlement and Reference controller closure concurrently, reapplies the location, refreshes main history from the actual final capture, and restores destination focus (`apps/web/src/review/navigation-coordinator.ts:570-650`). This prevents Reference-tree removal from invalidating an otherwise successful main navigation.
-
 ## Why This Works
 
 A Reference Tab carries two different forms of position:
@@ -143,3 +139,4 @@ The tests protect user contracts rather than implementation proxies. The coordin
 - [Dockable Reference tray plan](../../plans/2026-08-10-001-feat-dockable-reference-tray-plan.md)
 - [Reference navigation workspace plan](../../plans/2026-08-09-002-feat-reference-navigation-workspace-plan.md)
 - [Adaptive annotation tray framing](../architecture-patterns/adaptive-annotation-tray-framing.md) — complementary guidance for protecting user-owned viewer state while surrounding UI changes.
+- [Prevent Send-to-Main viewport rebound](send-to-main-viewport-rebound.md) — the corrected final-Reference teardown transaction and its viewport-motion proof.

@@ -64,7 +64,7 @@ Runway expands reachability without participating in page layout and is removed 
 ### Framing Session
 The interval during which an open review surface may automatically reveal document content while tracking which movement belongs to the interface and which belongs to the user.
 
-Automatic movement is reversible per axis; deliberate user navigation takes ownership of the affected axis and supersedes stale automatic work.
+Automatic movement is reversible per axis; deliberate user navigation takes ownership of the affected axis and supersedes stale automatic work. When a Reference Tab is promoted to Main during an open session, its verified destination becomes the new baseline before subsequent workspace reflow.
 
 ## Visual language
 
