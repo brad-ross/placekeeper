@@ -22,6 +22,13 @@ App-authored identity and semantics stored inside a standards-visible PDF annota
 
 Portable Annotation Identity makes app-created annotations editable across sessions without making private recovery data part of the shared document contract.
 
+Identity is ownership and editability evidence, not the annotation's visual appearance. External readability comes from the annotation's standard subtype, crop-relative geometry, and normal appearance.
+
+### Crop-relative Geometry
+The coordinate contract for Review Item rectangles: positions are measured from the visible page canvas inside the page crop boundary, before viewer rotation or scale.
+
+Rotation and scale are presentation transforms. Persistent annotations and viewer projections do not add the crop origin; legacy offset coordinates are migrated once before use.
+
 ### Save Destination
 The PDF selected to receive automatic annotation changes, either the safely validated opened document or a distinct copy.
 
@@ -106,4 +113,4 @@ Activating its primary row creates a Meaningful Jump in the Main Reading Thread,
 
 ## Relationships
 
-A Review Item projects to an Owned Annotation and may carry Portable Annotation Identity in the saved PDF. Existing PDF Annotations remain a separate read-only population. The Annotation Tray presents both populations, while a Framing Session may use Viewer Runway to keep the relevant PDF content reachable. Protected Recovery covers accepted changes until Save Sync proves that the Save Destination has caught up.
+A Review Item projects to an Owned Annotation using Crop-relative Geometry and may carry Portable Annotation Identity in the saved PDF. Existing PDF Annotations remain a separate read-only population. The Annotation Tray presents both populations, while a Framing Session may use Viewer Runway to keep the relevant PDF content reachable. Protected Recovery covers accepted changes until Save Sync proves that the Save Destination has caught up.
