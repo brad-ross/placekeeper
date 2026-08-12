@@ -482,6 +482,25 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('aria-label="Delete Highlight on page 2"');
   });
 
+  it('omits the external annotations section when discovery confirms it is empty', () => {
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        documentTitle="paper.pdf"
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        existingAnnotations={{ status: 'empty', generation: 1, items: [] }}
+        onCommand={async () => state}
+      >
+        <div>Document canvas</div>
+      </ReviewShell>,
+    );
+
+    expect(html).toContain('aria-label="Owned annotations"');
+    expect(html).not.toContain('aria-label="External Annotations (read only)"');
+    expect(html).not.toContain('data-existing-annotations-state');
+    expect(html).not.toContain('No existing annotations.');
+  });
+
   it('shows an annotation-only workspace and suppresses injected outline context for an empty outline', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
