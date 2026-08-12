@@ -308,6 +308,15 @@ export function useWorkspaceFraming(input: {
         return;
       }
       const current = controls.snapshot(target);
+      if (!session.closing) {
+        // A wheel gesture claims an axis before the browser applies its native
+        // scroll. Capture the final user-owned position at the close boundary
+        // so a close in the following frame cannot restore the pre-wheel value.
+        session.baseline = {
+          left: session.userAxes.left ? current.scroll.left : session.baseline.left,
+          top: session.userAxes.top ? current.scroll.top : session.baseline.top,
+        };
+      }
       const restored = session.closing ?? restoreViewportPosition({
         baseline: session.baseline,
         current: current.scroll,
