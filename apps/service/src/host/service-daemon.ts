@@ -7,7 +7,6 @@ import { dirname, join, resolve } from "node:path";
 import {
   DaemonUpgradeRequiredError,
   inspectDaemonCompatibility,
-  MANAGEMENT_PROTOCOL_VERSION,
   requestControl,
   requestLaunch,
   startLaunchControlServer,
@@ -67,6 +66,7 @@ async function removeConfirmedStaleSocket(socketPath: string): Promise<void> {
 
 export async function startServiceDaemon(paths = defaultDaemonPaths()): Promise<{
   readonly host: ProofreaderHost;
+  readonly closed: Promise<void>;
   close(): Promise<void>;
 }> {
   await removeConfirmedStaleSocket(paths.socketPath);
@@ -76,16 +76,14 @@ export async function startServiceDaemon(paths = defaultDaemonPaths()): Promise<
   });
   try {
     const control = await startLaunchControlServer(host, paths.socketPath, {
-      protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
       daemonIdentity: currentDaemonIdentity(),
-      lifecycle: "accepting",
-      activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
     });
     return {
       host,
+      closed: control.closed,
       close: async () => {
-        await control.close();
         await host.close();
+        await control.close();
       },
     };
   } catch (error) {
@@ -150,9 +148,15 @@ export function controlThroughDaemon(
 
 export async function runServiceDaemon(paths = defaultDaemonPaths()): Promise<void> {
   const daemon = await startServiceDaemon(paths);
-  await new Promise<void>((resolveSignal) => {
-    process.once("SIGINT", resolveSignal);
-    process.once("SIGTERM", resolveSignal);
-  });
-  await daemon.close();
+  const signal = Promise.withResolvers<void>();
+  const resolveSignal = (): void => signal.resolve();
+  process.once("SIGINT", resolveSignal);
+  process.once("SIGTERM", resolveSignal);
+  try {
+    await Promise.race([signal.promise, daemon.closed]);
+    await daemon.close();
+  } finally {
+    process.off("SIGINT", resolveSignal);
+    process.off("SIGTERM", resolveSignal);
+  }
 }

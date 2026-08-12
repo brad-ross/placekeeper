@@ -1132,7 +1132,7 @@ export class SessionBroker {
 
   async quiesceForShutdown(): Promise<void> {
     const sessions = [...this.#activeById.values()];
-    await Promise.all(sessions.map((session) => session.writeTail));
+    await this.drainWrites();
     for (const session of sessions) {
       session.ending = true;
       const clean = session.sync.phase === "clean" &&
@@ -1150,6 +1150,15 @@ export class SessionBroker {
     this.#activeBySource.clear();
     this.#bootstrapScopes.clear();
     this.#credentialScopes.clear();
+  }
+
+  async drainWrites(): Promise<void> {
+    while (true) {
+      const sessions = [...this.#activeById.values()];
+      const tails = sessions.map((session) => session.writeTail);
+      await Promise.all(tails);
+      if (sessions.every((session, index) => session.writeTail === tails[index])) return;
+    }
   }
 
   async #end(sessionId: string): Promise<void> {

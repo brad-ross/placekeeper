@@ -173,10 +173,13 @@ describe("coalescing PDF autosave", () => {
     await broker.acceptMutation(sessionId, add(0));
     const firstSave = coordinator.requestSave(sessionId);
     await started.promise;
+    expect(coordinator.activityCount()).toBe(1);
+    const drained = coordinator.drain();
     await broker.acceptMutation(sessionId, add(1));
     const latestSave = coordinator.requestSave(sessionId);
     release.resolve();
-    await Promise.all([firstSave, latestSave]);
+    await Promise.all([firstSave, latestSave, drained]);
+    expect(coordinator.activityCount()).toBe(0);
 
     const contents = await readFile(target, "utf8");
     for (const item of broker.state(sessionId)!.items) expect(contents).toContain(item.id);

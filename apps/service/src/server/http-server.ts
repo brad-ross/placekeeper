@@ -11,6 +11,7 @@ import type { ReviewCommand } from "../../../../packages/core/src/review-model.j
 import { isContained } from "../files/file-capabilities.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
 import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
+import type { DaemonLifecycleCoordinator } from "../host/daemon-lifecycle.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
@@ -150,6 +151,7 @@ export interface LocalHttpServerOptions {
     PdfSaveCoordinator,
     "proposal" | "chooseCopyFilename" | "chooseFolder" | "chooseOriginal" | "requestSave" | "retry" | "locate"
   >;
+  readonly lifecycle?: Pick<DaemonLifecycleCoordinator, "enterActivity">;
 }
 
 export interface LocalHttpServer {
@@ -169,6 +171,13 @@ export async function startHttpServer(
     : await realpath(options.webAssets.root);
   const assetCapabilities = new Map<string, Set<string>>();
   const server = createServer(async (request, response) => {
+    const activity = options.lifecycle?.enterActivity();
+    if (options.lifecycle !== undefined && activity === undefined) {
+      send(response, 503, "PDF Proofreader is restarting; retry shortly.");
+      return;
+    }
+    response.once("finish", () => activity?.complete());
+    response.once("close", () => activity?.complete());
     try {
       const requestUrl = new URL(request.url ?? "/", origin);
       const pathname = requestUrl.pathname;
@@ -420,7 +429,13 @@ export async function startHttpServer(
   });
 
   server.on("upgrade", (request, socket: Socket, head) => {
+    const activity = options.lifecycle?.enterActivity();
+    if (options.lifecycle !== undefined && activity === undefined) {
+      socket.end("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      return;
+    }
     const reject = (): void => {
+      activity?.complete();
       socket.destroy();
     };
     try {
@@ -475,6 +490,7 @@ export async function startHttpServer(
         `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: proofreader\r\n\r\n`,
       );
       broker.controls.registerSocket(match[1]!, socket, head);
+      activity?.complete();
     } catch {
       reject();
     }
@@ -496,13 +512,13 @@ export async function startHttpServer(
   return {
     origin,
     port: address.port,
-      close: () =>
+    close: () =>
       new Promise<void>((resolve, reject) => {
         broker.controls.closeAllSockets();
         broker.taskBindings.revokeAll();
         assetCapabilities.clear();
         server.close((error) => (error === undefined ? resolve() : reject(error)));
-        server.closeAllConnections();
+        server.closeIdleConnections();
       }),
   };
 }

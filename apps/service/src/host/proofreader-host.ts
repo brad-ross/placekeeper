@@ -15,6 +15,7 @@ import { LiveContextService } from "../context/live-context-service.js";
 import { SourceReconciliationService } from "../context/source-reconciliation-service.js";
 import { LiveSourceWorkflowService } from "../context/live-source-workflow-service.js";
 import type { TaskBindingRegistry } from "../context/task-binding-registry.js";
+import { DaemonLifecycleCoordinator } from "./daemon-lifecycle.js";
 
 export type LaunchSurface = BrokerLaunchSurface;
 
@@ -101,6 +102,9 @@ export class ProofreaderHost {
   readonly context: LiveContextService;
   readonly reconciliation: SourceReconciliationService;
   readonly sourceWorkflow: LiveSourceWorkflowService;
+  readonly saving: PdfSaveCoordinator;
+  readonly lifecycle: DaemonLifecycleCoordinator;
+  #closePromise?: Promise<void>;
 
   private constructor(
     broker: SessionBroker,
@@ -108,12 +112,16 @@ export class ProofreaderHost {
     context: LiveContextService,
     reconciliation: SourceReconciliationService,
     sourceWorkflow: LiveSourceWorkflowService,
+    saving: PdfSaveCoordinator,
+    lifecycle: DaemonLifecycleCoordinator,
   ) {
     this.broker = broker;
     this.server = server;
     this.context = context;
     this.reconciliation = reconciliation;
     this.sourceWorkflow = sourceWorkflow;
+    this.saving = saving;
+    this.lifecycle = lifecycle;
   }
 
   static async start(options: ProofreaderHostOptions): Promise<ProofreaderHost> {
@@ -127,9 +135,23 @@ export class ProofreaderHost {
       writer: await createSelectedPdfWriter(),
       ...(process.platform === "darwin" ? { picker: new MacOsDestinationPicker() } : {}),
     });
+    const lifecycle = new DaemonLifecycleCoordinator({
+      activity: () => {
+        const activity = broker.activity();
+        return {
+          ...activity,
+          transientWork: activity.transientWork + saving.activityCount(),
+        };
+      },
+      drain: async () => {
+        await saving.drain();
+        await broker.drainWrites();
+      },
+    });
     const server = await startHttpServer(broker, {
       ...(options.webAssets === undefined ? {} : { webAssets: options.webAssets }),
       saving,
+      lifecycle,
     });
     const context = new LiveContextService({ broker });
     const reconciliation = new SourceReconciliationService({ broker });
@@ -139,10 +161,24 @@ export class ProofreaderHost {
       context,
       reconciliation,
       new LiveSourceWorkflowService({ broker, context, reconciliation }),
+      saving,
+      lifecycle,
     );
   }
 
   async open(request: LaunchRequest): Promise<LaunchResponse> {
+    const response = await this.lifecycle.runActivity(() => this.#open(request));
+    return response ?? {
+      ok: false,
+      error: {
+        kind: "upgrade-required",
+        message: "PDF Proofreader is restarting after an upgrade. Retry this launch.",
+        recoveryAction: "Close PDF Proofreader reviews and retry",
+      },
+    };
+  }
+
+  async #open(request: LaunchRequest): Promise<LaunchResponse> {
     if (typeof request.pdfPath !== "string" || request.pdfPath.length === 0) {
       return failure("input-unavailable", "Open exactly one readable local PDF.");
     }
@@ -184,8 +220,12 @@ export class ProofreaderHost {
   }
 
   async close(): Promise<void> {
-    this.context.discardAll();
-    await this.server.close();
-    await this.broker.quiesceForShutdown();
+    this.#closePromise ??= (async () => {
+      this.context.discardAll();
+      await this.server.close();
+      await this.saving.drain();
+      await this.broker.quiesceForShutdown();
+    })();
+    await this.#closePromise;
   }
 }

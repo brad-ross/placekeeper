@@ -89,6 +89,12 @@ export type ProofreaderControlRequest =
       readonly protocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
       readonly operation: "status";
     }
+  | {
+      readonly kind: "management";
+      readonly protocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
+      readonly operation: "shutdown-if-idle";
+      readonly candidateDaemonIdentity: string;
+    }
   | { readonly kind: "launch"; readonly request: LaunchRequest }
   | {
       readonly kind: "claim-binding";
@@ -163,6 +169,17 @@ export type ProofreaderControlResponse =
       readonly operation: "status";
       readonly status: DaemonManagementStatus;
     }
+  | {
+      readonly kind: "management";
+      readonly protocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
+      readonly operation: "shutdown-if-idle";
+      readonly result:
+        | { readonly status: "accepted" }
+        | {
+            readonly status: "refused";
+            readonly activity: DaemonAggregateActivity;
+          };
+    }
   | { readonly kind: "launch"; readonly response: LaunchResponse }
   | { readonly kind: "binding"; readonly result: TaskBindingClaimResult }
   | { readonly kind: "context"; readonly result: LiveContextRefreshResult }
@@ -212,6 +229,7 @@ export type ProofreaderControlResponse =
 
 export interface LaunchControlServer {
   readonly socketPath: string;
+  readonly closed: Promise<void>;
   close(): Promise<void>;
 }
 
@@ -222,7 +240,11 @@ function isObject(value: unknown): value is Record<string, unknown> {
 function isControlRequest(value: unknown): value is ProofreaderControlRequest {
   if (!isObject(value) || typeof value.kind !== "string") return false;
   if (value.kind === "management") {
-    return value.protocolVersion === MANAGEMENT_PROTOCOL_VERSION && value.operation === "status";
+    return value.protocolVersion === MANAGEMENT_PROTOCOL_VERSION &&
+      (value.operation === "status" ||
+        (value.operation === "shutdown-if-idle" &&
+          typeof value.candidateDaemonIdentity === "string" &&
+          /^(?:development|[a-f0-9]{64})$/u.test(value.candidateDaemonIdentity)));
   }
   if (value.kind === "launch") return isObject(value.request);
   if (value.kind === "refresh-context" || value.kind === "revoke-task") {
@@ -272,82 +294,132 @@ function isControlRequest(value: unknown): value is ProofreaderControlRequest {
 async function dispatch(
   host: ProofreaderHost,
   request: ProofreaderControlRequest,
-  managementStatus: DaemonManagementStatus,
+  daemonIdentity: string,
 ): Promise<ProofreaderControlResponse> {
   if (request.kind === "management") {
+    if (request.operation === "shutdown-if-idle") {
+      if (request.candidateDaemonIdentity === daemonIdentity) {
+        return {
+          kind: "management",
+          protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+          operation: "shutdown-if-idle",
+          result: { status: "refused", activity: host.lifecycle.status().activity },
+        };
+      }
+      return {
+        kind: "management",
+        protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+        operation: "shutdown-if-idle",
+        result: await host.lifecycle.shutdownIfIdle(),
+      };
+    }
+    const live = host.lifecycle.status();
     return {
       kind: "management",
       protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
       operation: "status",
-      status: managementStatus,
+      status: {
+        protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+        daemonIdentity,
+        lifecycle: live.lifecycle,
+        activity: live.activity,
+      },
     };
   }
-  if (request.kind === "launch") {
-    return { kind: "launch", response: await host.open(request.request) };
-  }
-  if (request.kind === "claim-binding") {
-    return {
-      kind: "binding",
-      result: host.broker.taskBindings.claim(request),
-    };
-  }
-  if (request.kind === "refresh-context") {
-    return {
-      kind: "context",
-      result: await host.context.refresh({ taskSessionId: request.taskSessionId }),
-    };
-  }
-  if (request.kind === "revoke-task") {
-    host.context.discardTask(request.taskSessionId);
-    host.broker.taskBindings.revokeTask(request.taskSessionId);
-    host.reconciliation.discardTask(request.taskSessionId);
-    host.sourceWorkflow.discardTask(request.taskSessionId);
-    return { kind: "revoked" };
-  }
-  if (request.kind === "source-begin") {
-    return {
-      kind: "source-workflow",
-      operation: "begin",
-      response: await host.sourceWorkflow.begin(request),
-    };
-  }
-  if (request.kind === "source-propose") {
-    return {
-      kind: "source-workflow",
-      operation: "propose",
-      response: await host.sourceWorkflow.propose(request),
-    };
-  }
-  if (request.kind === "source-reconcile") {
-    return {
-      kind: "source-workflow",
-      operation: "reconcile",
-      response: await host.sourceWorkflow.reconcile(request),
-    };
-  }
-  if (request.kind === "source-rebuild-plan") {
-    return {
-      kind: "source-workflow",
-      operation: "rebuild-plan",
-      response: await host.sourceWorkflow.prepareCleanRebuild(request),
-    };
-  }
-  if (request.kind === "source-rebuild-verify") {
-    return {
-      kind: "source-workflow",
-      operation: "rebuild-verify",
-      response: await host.sourceWorkflow.verifyCleanRebuild(request),
-    };
-  }
-  if (request.kind === "source-complete") {
-    return {
-      kind: "source-workflow",
-      operation: "complete",
-      response: await host.sourceWorkflow.complete(request),
-    };
-  }
-  if (request.kind === "retrieve-review-items-by-handle") {
-    const result = host.context.evidence.retrieveReviewItemsWithHandle(request);
+  const response = await host.lifecycle.runActivity<ProofreaderControlResponse>(async () => {
+    if (request.kind === "launch") {
+      return { kind: "launch", response: await host.open(request.request) };
+    }
+    if (request.kind === "claim-binding") {
+      return {
+        kind: "binding",
+        result: host.broker.taskBindings.claim(request),
+      };
+    }
+    if (request.kind === "refresh-context") {
+      return {
+        kind: "context",
+        result: await host.context.refresh({ taskSessionId: request.taskSessionId }),
+      };
+    }
+    if (request.kind === "revoke-task") {
+      host.context.discardTask(request.taskSessionId);
+      host.broker.taskBindings.revokeTask(request.taskSessionId);
+      host.reconciliation.discardTask(request.taskSessionId);
+      host.sourceWorkflow.discardTask(request.taskSessionId);
+      return { kind: "revoked" };
+    }
+    if (request.kind === "source-begin") {
+      return {
+        kind: "source-workflow",
+        operation: "begin",
+        response: await host.sourceWorkflow.begin(request),
+      };
+    }
+    if (request.kind === "source-propose") {
+      return {
+        kind: "source-workflow",
+        operation: "propose",
+        response: await host.sourceWorkflow.propose(request),
+      };
+    }
+    if (request.kind === "source-reconcile") {
+      return {
+        kind: "source-workflow",
+        operation: "reconcile",
+        response: await host.sourceWorkflow.reconcile(request),
+      };
+    }
+    if (request.kind === "source-rebuild-plan") {
+      return {
+        kind: "source-workflow",
+        operation: "rebuild-plan",
+        response: await host.sourceWorkflow.prepareCleanRebuild(request),
+      };
+    }
+    if (request.kind === "source-rebuild-verify") {
+      return {
+        kind: "source-workflow",
+        operation: "rebuild-verify",
+        response: await host.sourceWorkflow.verifyCleanRebuild(request),
+      };
+    }
+    if (request.kind === "source-complete") {
+      return {
+        kind: "source-workflow",
+        operation: "complete",
+        response: await host.sourceWorkflow.complete(request),
+      };
+    }
+    if (request.kind === "retrieve-review-items-by-handle") {
+      const result = host.context.evidence.retrieveReviewItemsWithHandle(request);
+      return result.status === "ok"
+        ? {
+            kind: "evidence",
+            result: {
+              status: "ok",
+              evidenceKind: result.kind,
+              mediaType: result.mediaType,
+              dataBase64: result.bytes.toString("base64"),
+            },
+          }
+        : { kind: "evidence", result };
+    }
+    const maxBytes = request.request.maxBytes ?? MAX_CONTROL_EVIDENCE_BYTES;
+    if (
+      !Number.isSafeInteger(maxBytes) ||
+      maxBytes <= 0 ||
+      maxBytes > MAX_CONTROL_EVIDENCE_BYTES
+    ) {
+      return {
+        kind: "evidence",
+        result: { status: "unavailable", reason: "invalid_request" },
+      };
+    }
+    const evidenceInput = { handle: request.handle, request: { ...request.request, maxBytes } };
+    const result = request.kind === "retrieve-evidence"
+      ? await host.context.evidence.retrieve({ taskSessionId: request.taskSessionId, ...evidenceInput })
+      : await host.context.evidence.retrieveWithHandle(evidenceInput);
     return result.status === "ok"
       ? {
           kind: "evidence",
@@ -359,48 +431,29 @@ async function dispatch(
           },
         }
       : { kind: "evidence", result };
-  }
-  const maxBytes = request.request.maxBytes ?? MAX_CONTROL_EVIDENCE_BYTES;
-  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes > MAX_CONTROL_EVIDENCE_BYTES) {
-    return { kind: "evidence", result: { status: "unavailable", reason: "invalid_request" } };
-  }
-  const evidenceInput = { handle: request.handle, request: { ...request.request, maxBytes } };
-  const result = request.kind === "retrieve-evidence"
-    ? await host.context.evidence.retrieve({ taskSessionId: request.taskSessionId, ...evidenceInput })
-    : await host.context.evidence.retrieveWithHandle(evidenceInput);
-  return result.status === "ok"
-    ? {
-        kind: "evidence",
-        result: {
-          status: "ok",
-          evidenceKind: result.kind,
-          mediaType: result.mediaType,
-          dataBase64: result.bytes.toString("base64"),
-        },
-      }
-    : { kind: "evidence", result };
+  });
+  return response ?? { kind: "error", reason: "unavailable" };
 }
 
-function writeResponse(socket: Socket, response: ProofreaderControlResponse): void {
+function writeResponse(socket: Socket, response: ProofreaderControlResponse): Promise<void> {
   const serialized = `${JSON.stringify(response)}\n`;
-  if (Buffer.byteLength(serialized) > MAX_MESSAGE_BYTES) {
-    socket.end(`${JSON.stringify({ kind: "error", reason: "unavailable" })}\n`);
-    return;
-  }
-  socket.end(serialized);
+  const output = Buffer.byteLength(serialized) > MAX_MESSAGE_BYTES
+    ? `${JSON.stringify({ kind: "error", reason: "unavailable" })}\n`
+    : serialized;
+  return new Promise((resolve) => socket.end(output, resolve));
 }
 
 export async function startLaunchControlServer(
   host: ProofreaderHost,
   socketPath: string,
-  managementStatus: DaemonManagementStatus = {
-    protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+  management: { readonly daemonIdentity: string } | DaemonManagementStatus = {
     daemonIdentity: "development",
-    lifecycle: "accepting",
-    activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
   },
 ): Promise<LaunchControlServer> {
+  const daemonIdentity = management.daemonIdentity;
   await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 });
+  const closed = Promise.withResolvers<void>();
+  let closePromise: Promise<void> | undefined;
   const server = createServer((socket) => {
     let raw = "";
     socket.setEncoding("utf8");
@@ -417,29 +470,50 @@ export async function startLaunchControlServer(
       try {
         parsed = JSON.parse(raw.slice(0, newline)) as unknown;
       } catch {
-        writeResponse(socket, { kind: "error", reason: "invalid-request" });
+        void writeResponse(socket, { kind: "error", reason: "invalid-request" });
         return;
       }
       if (!isControlRequest(parsed)) {
-        writeResponse(socket, { kind: "error", reason: "invalid-request" });
+        void writeResponse(socket, { kind: "error", reason: "invalid-request" });
         return;
       }
-      void dispatch(host, parsed, managementStatus).then(
-        (response) => writeResponse(socket, response),
-        () => writeResponse(socket, { kind: "error", reason: "unavailable" }),
+      void dispatch(host, parsed, daemonIdentity).then(
+        async (response) => {
+          await writeResponse(socket, response);
+          if (
+            response.kind === "management" &&
+            response.operation === "shutdown-if-idle" &&
+            response.result.status === "accepted"
+          ) {
+            await host.close();
+            await closeControl();
+          }
+        },
+        () => void writeResponse(socket, { kind: "error", reason: "unavailable" }),
       );
     });
   });
+  const closeControl = (): Promise<void> => {
+    closePromise ??= (async () => {
+      try {
+        await closeServer(server);
+        await unlink(socketPath).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") throw error;
+        });
+        closed.resolve();
+      } catch (error) {
+        closed.reject(error);
+        throw error;
+      }
+    })();
+    return closePromise;
+  };
   await listen(server, socketPath);
   await chmod(socketPath, 0o600);
   return {
     socketPath,
-    close: async () => {
-      await closeServer(server);
-      await unlink(socketPath).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== "ENOENT") throw error;
-      });
-    },
+    closed: closed.promise,
+    close: closeControl,
   };
 }
 

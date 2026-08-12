@@ -17,6 +17,7 @@ import {
   startLaunchControlServer,
   type LaunchControlServer,
 } from "../src/host/launch-control.js";
+import { DaemonLifecycleCoordinator } from "../src/host/daemon-lifecycle.js";
 import { ProofreaderHost } from "../src/host/proofreader-host.js";
 
 const roots: string[] = [];
@@ -35,6 +36,46 @@ afterEach(async () => {
 });
 
 describe("open command", () => {
+  it("atomically drains accepted work and cancels when new activity wins the final recheck", async () => {
+    const drainStarted = Promise.withResolvers<void>();
+    const releaseDrain = Promise.withResolvers<void>();
+    let reviewPresence = 0;
+    let transientWork = 1;
+    const lifecycle = new DaemonLifecycleCoordinator({
+      activity: () => ({ reviewPresence, codexTasks: 0, transientWork }),
+      drain: async () => {
+        drainStarted.resolve();
+        await releaseDrain.promise;
+        transientWork = 0;
+      },
+    });
+
+    const shutdown = lifecycle.shutdownIfIdle();
+    await drainStarted.promise;
+    expect(lifecycle.status().lifecycle).toBe("draining");
+    const activity = lifecycle.enterActivity();
+    expect(activity).toBeDefined();
+    reviewPresence = 1;
+    activity!.complete();
+    releaseDrain.resolve();
+
+    await expect(shutdown).resolves.toMatchObject({ status: "refused" });
+    expect(lifecycle.status()).toMatchObject({
+      lifecycle: "accepting",
+      activity: { reviewPresence: 1 },
+    });
+  });
+
+  it("rejects activity after shutdown commit", async () => {
+    const lifecycle = new DaemonLifecycleCoordinator({
+      activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }),
+      drain: async () => {},
+    });
+    await expect(lifecycle.shutdownIfIdle()).resolves.toEqual({ status: "accepted" });
+    expect(lifecycle.status().lifecycle).toBe("shutdown-committed");
+    expect(lifecycle.enterActivity()).toBeUndefined();
+  });
+
   it("accepts one explicit absolute PDF plus optional approved scope and fork", () => {
     expect(parseOpenArguments([
       "open", "--json", "--pdf", "/tmp/paper.pdf",
@@ -126,6 +167,108 @@ describe("open command", () => {
     await expect(inspectDaemonCompatibility(socketPath, "b".repeat(64))).resolves.toMatchObject({
       kind: "incompatible",
       status: { daemonIdentity },
+    });
+    await expect(requestControl(socketPath, {
+      kind: "management",
+      protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+      operation: "shutdown-if-idle",
+      candidateDaemonIdentity: daemonIdentity,
+    })).resolves.toMatchObject({ result: { status: "refused" } });
+    await expect(lstat(socketPath)).resolves.toMatchObject({ mode: expect.any(Number) });
+  });
+
+  it("flushes an idle shutdown acknowledgement before closing HTTP and removing the socket", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-shutdown-"));
+    roots.push(root);
+    const assets = join(root, "assets");
+    await mkdir(assets);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    const host = await ProofreaderHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
+    const socketPath = join(root, "control.sock");
+    const daemonIdentity = "a".repeat(64);
+    const control = await startLaunchControlServer(host, socketPath, { daemonIdentity });
+
+    await expect(requestControl(socketPath, {
+      kind: "management",
+      protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+      operation: "shutdown-if-idle",
+      candidateDaemonIdentity: "b".repeat(64),
+    })).resolves.toEqual({
+      kind: "management",
+      protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+      operation: "shutdown-if-idle",
+      result: { status: "accepted" },
+    });
+    await expect(lstat(socketPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(fetch(host.server.origin)).rejects.toThrow();
+    await control.close();
+  });
+
+  it("keeps the management socket until host shutdown has completed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-shutdown-order-"));
+    roots.push(root);
+    const assets = join(root, "assets");
+    await mkdir(assets);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    const host = await ProofreaderHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
+    hosts.push(host);
+    const releaseClose = Promise.withResolvers<void>();
+    const close = vi.spyOn(host, "close").mockImplementation(() => releaseClose.promise);
+    const socketPath = join(root, "control.sock");
+    const control = await startLaunchControlServer(host, socketPath, { daemonIdentity: "a".repeat(64) });
+
+    await expect(requestControl(socketPath, {
+      kind: "management",
+      protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+      operation: "shutdown-if-idle",
+      candidateDaemonIdentity: "b".repeat(64),
+    })).resolves.toMatchObject({ result: { status: "accepted" } });
+    await expect(lstat(socketPath)).resolves.toMatchObject({ mode: expect.any(Number) });
+    releaseClose.resolve();
+    await control.closed;
+    await expect(lstat(socketPath)).rejects.toMatchObject({ code: "ENOENT" });
+    close.mockRestore();
+  });
+
+  it("refuses conditional shutdown with aggregate blockers and remains usable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-shutdown-active-"));
+    roots.push(root);
+    const assets = join(root, "assets");
+    const pdf = join(root, "paper.pdf");
+    await mkdir(assets);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    await writeFile(pdf, "%PDF-1.7\nfixture\n%%EOF");
+    const host = await ProofreaderHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
+    hosts.push(host);
+    const socketPath = join(root, "control.sock");
+    const daemonIdentity = "a".repeat(64);
+    controls.push(await startLaunchControlServer(host, socketPath, { daemonIdentity }));
+    const opened = await requestLaunch(socketPath, { pdfPath: pdf });
+    expect(opened).toMatchObject({ ok: true, kind: "opened" });
+    await expect(inspectDaemonCompatibility(socketPath, daemonIdentity)).resolves.toMatchObject({
+      kind: "exact",
+      status: {
+        lifecycle: "accepting",
+        activity: { reviewPresence: 1, codexTasks: 0, transientWork: 0 },
+      },
+    });
+
+    await expect(requestControl(socketPath, {
+      kind: "management",
+      protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+      operation: "shutdown-if-idle",
+      candidateDaemonIdentity: "b".repeat(64),
+    })).resolves.toMatchObject({
+      kind: "management",
+      operation: "shutdown-if-idle",
+      result: {
+        status: "refused",
+        activity: { reviewPresence: 1, codexTasks: 0 },
+      },
+    });
+    await expect(requestLaunch(socketPath, { pdfPath: pdf })).resolves.toMatchObject({
+      ok: true,
+      kind: "focused",
     });
   });
 
