@@ -220,6 +220,12 @@ test("searches extracted PDF text with variants, history, references, and retain
   );
   await expect(page.getByRole("button", { name: "Close right workspace" })).toBeVisible();
   await expect(query).toBeFocused();
+  await expect.poll(() => query.evaluate((element) => getComputedStyle(element).backgroundColor))
+    .toBe("rgb(229, 230, 225)");
+  await firstPage.focus();
+  await expect.poll(() => query.evaluate((element) => getComputedStyle(element).backgroundColor))
+    .toBe("rgb(255, 254, 250)");
+  await query.focus();
   await query.fill("stable");
 
   const searchPanel = page.locator("#workspace-panel-search");
@@ -239,7 +245,9 @@ test("searches extracted PDF text with variants, history, references, and retain
   const related = searchPanel.locator(".pdf-search__group").filter({ hasText: "Related matches" });
   await expect(exact.locator("[data-search-result]")).toHaveCount(2);
   await expect(related.locator("[data-search-result]")).toHaveCount(2);
-  await expect(exact.locator("[data-search-result]").first()).toContainText("First occurrence");
+  await expect(searchPanel).not.toContainText("First occurrence");
+  await expect(searchPanel).not.toContainText("Exact text");
+  await expect(exact.locator(".pdf-search__result-match").first()).toHaveText("stable");
   await expect(related).toContainText("stabilizes");
   await expect(related).toContainText("Stability");
 
@@ -255,19 +263,18 @@ test("searches extracted PDF text with variants, history, references, and retain
   await expect(query).toHaveValue("°");
   await expect(symbolSuggestions).toBeHidden();
   await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
-  await expect(searchPanel).toContainText("Exact symbol");
+  await expect(searchPanel).not.toContainText("Exact symbol");
   await query.focus();
   await query.fill("lambda");
   await expect(symbolSuggestions.getByRole("option")).toHaveCount(0);
 
   await query.fill("degree");
   await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
-  await expect(searchPanel).toContainText("Exact symbol");
   await query.fill("\\degree");
   await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
   await query.fill("90°");
   await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
-  await expect(searchPanel).toContainText("Exact formula");
+  await expect(searchPanel).not.toContainText("Exact formula");
   await query.fill("90°+");
   await expect(searchPanel.locator("[data-search-result]")).toHaveCount(0);
   await expect(searchPanel).toContainText("could not be matched confidently");
@@ -281,8 +288,23 @@ test("searches extracted PDF text with variants, history, references, and retain
   const activeSearchHighlights = mainWorkspace.locator(
     "[data-page-index='1'] [data-pdf-search-highlight]",
   );
-  await expect(activeSearchHighlights).toHaveCount(1);
-  await expect(activeSearchHighlights).toBeVisible();
+  await expect(activeSearchHighlights).toHaveCount(2);
+  const exactVisibleHighlight = mainWorkspace.locator(
+    "[data-page-index='1'] [data-pdf-search-highlight][data-pdf-search-match-kind='exact']",
+  );
+  const relatedVisibleHighlight = mainWorkspace.locator(
+    "[data-page-index='1'] [data-pdf-search-highlight][data-pdf-search-match-kind='related']",
+  );
+  await expect(exactVisibleHighlight).toHaveCount(1);
+  await expect(relatedVisibleHighlight).toHaveCount(1);
+  const [exactHighlightColor, relatedHighlightColor] = await Promise.all([
+    exactVisibleHighlight.evaluate((element) => getComputedStyle(element).backgroundColor),
+    relatedVisibleHighlight.evaluate((element) => getComputedStyle(element).backgroundColor),
+  ]);
+  expect(exactHighlightColor).not.toBe("transparent");
+  expect(relatedHighlightColor).not.toBe("transparent");
+  expect(exactHighlightColor).not.toBe(relatedHighlightColor);
+  await expect(activeSearchHighlights.first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Back in document history" })).toBeEnabled();
   const mainViewport = mainWorkspace.locator("[data-viewer-framing-viewport]");
   const mainPositionBeforeReference = await mainViewport.evaluate((element) => ({
@@ -296,6 +318,13 @@ test("searches extracted PDF text with variants, history, references, and retain
     "aria-selected",
     "true",
   );
+  const referenceWorkspace = page.locator(".pdf-workspace--reference");
+  await expect(referenceWorkspace.locator(
+    "[data-page-index='0'] [data-pdf-search-highlight][data-pdf-search-match-kind='exact']",
+  )).toHaveCount(1);
+  await expect(referenceWorkspace.locator(
+    "[data-page-index='0'] [data-pdf-search-highlight][data-pdf-search-match-kind='related']",
+  )).toHaveCount(1);
   await expect.poll(() => mainViewport.evaluate((element) => ({
     left: element.scrollLeft,
     top: element.scrollTop,

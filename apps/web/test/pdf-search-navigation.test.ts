@@ -13,6 +13,7 @@ describe('PDF search navigation', () => {
       navigationPoint: { x: 10, y: 42 },
       rects: [{ origin: { x: 10, y: 30 }, size: { width: 8, height: 12 } }],
       excerpt: 'β is fixed',
+      excerptMatch: { start: 0, length: 1 },
       kind: 'symbol',
       matchedForm: 'β',
     }, 7)).toEqual({
@@ -26,7 +27,8 @@ describe('PDF search navigation', () => {
   it('rejects results without reliable geometry', () => {
     expect(pdfSearchResultTarget({
       id: 'missing', pageIndex: 0, charIndex: 0, charCount: 1,
-      navigationPoint: { x: 0, y: 0 }, rects: [], excerpt: '', kind: 'exact', matchedForm: 'x',
+      navigationPoint: { x: 0, y: 0 }, rects: [], excerpt: '',
+      excerptMatch: { start: 0, length: 0 }, kind: 'exact', matchedForm: 'x',
     }, 1)).toBeNull();
   });
 });

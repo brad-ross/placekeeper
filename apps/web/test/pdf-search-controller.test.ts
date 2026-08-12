@@ -59,6 +59,12 @@ describe('PDF search controller', () => {
       'stabilizes',
     ]);
     expect(state.groups[1]?.results.map(({ pageIndex }) => pageIndex)).toEqual([0, 1]);
+    expect(state.groups.flatMap(({ results }) => results).map((result) => (
+      result.excerpt.slice(
+        result.excerptMatch.start,
+        result.excerptMatch.start + result.excerptMatch.length,
+      )
+    ))).toEqual(['stable', 'Stability', 'stabilizes']);
     expect(state.coverage.unsearchablePages).toEqual([2]);
     expect(state.message).toBe('');
   });
@@ -99,6 +105,21 @@ describe('PDF search controller', () => {
 
     expect(state.query).toBe('stable ');
     expect(state.groups[0]?.results[0]?.matchedForm).toBe('stable');
+  });
+
+  it('maps collapsed source whitespace to the displayed match range', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['A stable\n model follows.']),
+    });
+
+    const result = (await controller.search('stable model')).groups[0]?.results[0];
+
+    expect(result?.excerpt).toBe('A stable model follows.');
+    expect(result?.excerpt.slice(
+      result.excerptMatch.start,
+      result.excerptMatch.start + result.excerptMatch.length,
+    )).toBe('stable model');
   });
 
   it('converts engine glyph geometry for overlays and PDF navigation', async () => {
@@ -175,6 +196,11 @@ describe('PDF search controller', () => {
 
     const symbol = await controller.search('𝔼');
     expect(symbol.groups[0]?.results[0]).toMatchObject({ charIndex: 4, charCount: 1 });
+    const symbolResult = symbol.groups[0]?.results[0];
+    expect(symbolResult?.excerpt.slice(
+      symbolResult.excerptMatch.start,
+      symbolResult.excerptMatch.start + symbolResult.excerptMatch.length,
+    )).toBe('𝔼');
 
     const prose = await controller.search('stable');
     expect(prose.groups[0]?.results[0]?.charIndex).toBe(19);

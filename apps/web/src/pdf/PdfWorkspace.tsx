@@ -64,12 +64,24 @@ export interface PdfWorkspaceProps {
   onViewerInteraction?: (event: ViewerInteractionEvent) => void;
   referenceViewportHost?: HTMLElement | null;
   onReferenceViewportElement?: (element: HTMLDivElement | null) => void;
-  activeSearchResult?: PdfSearchResult | null;
+  searchResults?: readonly PdfSearchResult[];
 }
 
 const PDF_TEXT_SELECTION_STYLE = {
   background: 'var(--review-selection-bg)',
 } as const;
+
+function groupByPageIndex<T extends { readonly pageIndex: number }>(
+  items: readonly T[],
+): Map<number, T[]> {
+  const result = new Map<number, T[]>();
+  for (const item of items) {
+    const page = result.get(item.pageIndex);
+    if (page === undefined) result.set(item.pageIndex, [item]);
+    else page.push(item);
+  }
+  return result;
+}
 
 function isContextPointerGesture(event: {
   readonly button: number;
@@ -98,23 +110,22 @@ export function PdfWorkspace({
   onViewerInteraction,
   referenceViewportHost = null,
   onReferenceViewportElement,
-  activeSearchResult = null,
+  searchResults = [],
 }: PdfWorkspaceProps) {
   const pressedPrimaryPointers = useRef(new Map<number, HTMLDivElement>());
   const contextPointers = useRef(new Set<number>());
   const contextResetTarget = useRef<HTMLDivElement | null>(null);
-  const annotationsByPage = useMemo(() => {
-    const result = new Map<number, ReviewAnnotation[]>();
-    for (const annotation of ownedAnnotations) {
-      const page = result.get(annotation.pageIndex);
-      if (page === undefined) result.set(annotation.pageIndex, [annotation]);
-      else page.push(annotation);
-    }
-    return result;
-  }, [ownedAnnotations]);
+  const annotationsByPage = useMemo(
+    () => groupByPageIndex(ownedAnnotations),
+    [ownedAnnotations],
+  );
   const geometryByPage = useMemo(
     () => groupOwnedMarkGeometryByPage(ownedAnnotations),
     [ownedAnnotations],
+  );
+  const searchResultsByPage = useMemo(
+    () => groupByPageIndex(searchResults),
+    [searchResults],
   );
 
   return (
@@ -294,8 +305,8 @@ export function PdfWorkspace({
                         data-pdf-search-highlight-layer
                         style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
                       >
-                        {activeSearchResult?.pageIndex === layout.pageIndex
-                          ? activeSearchResult.rects.map((rect, index) => {
+                        {(searchResultsByPage.get(layout.pageIndex) ?? []).flatMap((searchResult) => (
+                          searchResult.rects.map((rect, index) => {
                               const positioned = positionOwnedRect(
                                 activePdf.pages[layout.pageIndex]!,
                                 layout,
@@ -308,8 +319,9 @@ export function PdfWorkspace({
                                 },
                               );
                               return <span
-                                key={`${activeSearchResult.id}:${index}`}
-                                data-pdf-search-highlight={activeSearchResult.id}
+                                key={`${searchResult.id}:${index}`}
+                                data-pdf-search-highlight={searchResult.id}
+                                data-pdf-search-match-kind={searchResult.kind === 'variant' ? 'related' : 'exact'}
                                 style={{
                                   position: 'absolute',
                                   left: positioned.origin.x,
@@ -319,7 +331,7 @@ export function PdfWorkspace({
                                 }}
                               />;
                             })
-                          : null}
+                        ))}
                       </div>
                       <div
                         inert
@@ -462,6 +474,7 @@ export function PdfWorkspace({
                 documentState={referenceDocument}
                 documentGeneration={documentGeneration}
                 host={referenceViewportHost}
+                searchResultsByPage={searchResultsByPage}
                 {...(onViewerInteraction === undefined ? {} : { onInteraction: onViewerInteraction })}
                 {...(onReferenceViewportElement === undefined ? {} : { onViewportElement: onReferenceViewportElement })}
               />

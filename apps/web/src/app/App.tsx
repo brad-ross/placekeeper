@@ -159,7 +159,7 @@ export interface AppProps {
   ) => void;
   onOutlineDiscovery?: (result: PdfOutlineDiscovery) => void;
   onMainDocumentReady?: (engine: PdfEngine, document: PdfDocumentObject) => void;
-  activeSearchResult?: PdfSearchResult | null;
+  searchResults?: readonly PdfSearchResult[];
 }
 
 export class ViewerInitializationAuthority {
@@ -205,7 +205,7 @@ export function App({
   onViewerNavigationInitialized,
   onOutlineDiscovery,
   onMainDocumentReady,
-  activeSearchResult = null,
+  searchResults = [],
 }: AppProps) {
   const [sourceAnnotations, setSourceAnnotations] = useState<readonly ExistingAnnotation[]>([]);
   const [inventoryState, setInventoryState] = useState<ExistingAnnotationsDiscovery>({
@@ -826,7 +826,7 @@ export function App({
       plugins={viewer.plugins}
       documentLabel={documentTitle}
       onInitialized={initializeViewer}
-      activeSearchResult={activeSearchResult}
+      searchResults={searchResults}
       ownedAnnotations={ownedAnnotations}
       keyboardPageNoteCursor={keyboardCursor}
       onKeyboardPageNoteKey={keyboardCursorKey}

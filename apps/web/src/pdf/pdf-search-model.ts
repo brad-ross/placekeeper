@@ -32,6 +32,8 @@ export interface PdfSearchResult {
   /** Match bounds in the review overlay's canonical top-origin coordinates. */
   readonly rects: readonly Rect[];
   readonly excerpt: string;
+  /** UTF-16 range of the matched source text within `excerpt`. */
+  readonly excerptMatch: { readonly start: number; readonly length: number };
   readonly kind: PdfSearchMatchKind;
   readonly matchedForm: string;
 }

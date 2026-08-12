@@ -15,6 +15,7 @@ const result: PdfSearchResult = {
   navigationPoint: { x: 1, y: 6 },
   rects: [{ origin: { x: 1, y: 2 }, size: { width: 3, height: 4 } }],
   excerpt: 'Let λ denote the arrival rate.',
+  excerptMatch: { start: 4, length: 1 },
   kind: 'symbol',
   matchedForm: 'λ',
 };
@@ -37,14 +38,17 @@ describe('PDF search workspace', () => {
     expect(html).toContain('role="searchbox"');
     expect(html).toContain('aria-label="Search this PDF"');
     expect(html).toContain('Exact matches');
-    expect(html).toContain('Let λ denote the arrival rate.');
-    expect(html).toContain('class="annotation-item__page">4</span>');
+    expect(html).toContain('class="pdf-search__result-page">4</span>');
+    expect(html).toContain('class="pdf-search__result-separator">·</span>');
+    expect(html).toContain('Let <strong class="pdf-search__result-match">λ</strong> denote the arrival rate.');
     expect(html).toContain('aria-label="Open result on page 4 in References"');
     expect(html).toContain('class="review-chrome__page-input pdf-search__input"');
     expect(html).toContain('pdf-search__search-icon');
     expect(html).toContain('aria-label="Clear search"');
     expect(html).toContain('class="annotation-item__content pdf-search__result"');
     expect(html).toContain('class="annotation-item__action pdf-search__reference"');
+    expect(html).not.toContain('Exact symbol');
+    expect(html).not.toContain('First occurrence');
     expect(html).not.toContain('Try a symbol name or LaTeX command');
     expect(html).not.toContain('Symbols in this PDF');
   });

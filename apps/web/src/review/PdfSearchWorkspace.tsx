@@ -26,13 +26,22 @@ function resultLabel(result: PdfSearchResult): string {
   return `${result.excerpt || result.matchedForm}, page ${result.pageIndex + 1}`;
 }
 
-function matchKindLabel(result: PdfSearchResult): string {
-  switch (result.kind) {
-    case 'variant': return `Related form “${result.matchedForm}”`;
-    case 'symbol': return 'Exact symbol';
-    case 'formula': return 'Exact formula';
-    case 'exact': return 'Exact text';
-  }
+function resultExcerptParts(result: PdfSearchResult): {
+  readonly before: string;
+  readonly match: string;
+  readonly after: string;
+} {
+  const text = result.excerpt || result.matchedForm;
+  const range = result.excerpt.length > 0
+    ? result.excerptMatch
+    : { start: 0, length: result.matchedForm.length };
+  const start = Math.max(0, Math.min(range.start, text.length));
+  const end = Math.max(start, Math.min(start + range.length, text.length));
+  return {
+    before: text.slice(0, start),
+    match: text.slice(start, end) || result.matchedForm,
+    after: text.slice(end),
+  };
 }
 
 export function filterPdfSearchSymbolSuggestions(
@@ -205,8 +214,9 @@ export function PdfSearchWorkspace({
               <span>{group.results.length}</span>
             </header>
             <ol>
-              {group.results.map((result, resultIndex) => (
-                <li
+              {group.results.map((result) => {
+                const excerptParts = resultExcerptParts(result);
+                return <li
                   key={result.id}
                   data-search-result={result.id}
                   data-active={state.selectedResultId === result.id ? 'true' : 'false'}
@@ -218,15 +228,14 @@ export function PdfSearchWorkspace({
                     aria-label={resultLabel(result)}
                     onClick={() => onResultActivate(result)}
                   >
-                    <span className="annotation-item__meta pdf-search__meta">
-                      <strong>
-                        {resultIndex === 0 && group.id === 'exact' ? 'First occurrence · ' : ''}
-                        {matchKindLabel(result)}
-                      </strong>
-                      <span className="annotation-item__page">{result.pageIndex + 1}</span>
-                    </span>
                     <span className="annotation-item__excerpt pdf-search__excerpt">
-                      {result.excerpt || result.matchedForm}
+                      <span className="pdf-search__result-page">{result.pageIndex + 1}</span>
+                      <span className="pdf-search__result-separator">·</span>
+                      <span className="pdf-search__result-context">
+                        {excerptParts.before}
+                        <strong className="pdf-search__result-match">{excerptParts.match}</strong>
+                        {excerptParts.after}
+                      </span>
                     </span>
                   </button>
                   <button
@@ -238,8 +247,8 @@ export function PdfSearchWorkspace({
                   >
                     <ReviewIcon name="references" size={15} />
                   </button>
-                </li>
-              ))}
+                </li>;
+              })}
             </ol>
           </section>
         ))}

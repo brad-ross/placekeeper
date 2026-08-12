@@ -272,11 +272,35 @@ function hasReliableGlyphGeometry(glyphs: readonly PdfGlyphObject[]): boolean {
   ));
 }
 
-function excerpt(text: string, start: number, count: number): string {
-  const characters = Array.from(text);
+function excerpt(characters: readonly string[], start: number, count: number): {
+  readonly text: string;
+  readonly match: { readonly start: number; readonly length: number };
+} {
   const from = Math.max(0, start - 48);
   const to = Math.min(characters.length, start + count + 48);
-  return characters.slice(from, to).join('').replace(/\s+/gu, ' ').trim();
+  const source = characters.slice(from, to);
+  const boundaries = [0];
+  let normalized = '';
+  let previousWasWhitespace = false;
+  for (const character of source) {
+    if (/\s/u.test(character)) {
+      if (normalized.length > 0 && !previousWasWhitespace) normalized += ' ';
+      previousWasWhitespace = true;
+    } else {
+      normalized += character;
+      previousWasWhitespace = false;
+    }
+    boundaries.push(normalized.length);
+  }
+  const excerptText = normalized.trimEnd();
+  const localMatchStart = start - from;
+  const localMatchEnd = localMatchStart + count;
+  const matchStart = Math.min(boundaries[localMatchStart] ?? 0, excerptText.length);
+  const matchEnd = Math.min(boundaries[localMatchEnd] ?? matchStart, excerptText.length);
+  return {
+    text: excerptText,
+    match: { start: matchStart, length: Math.max(0, matchEnd - matchStart) },
+  };
 }
 
 function findPageMatches(input: {
@@ -293,6 +317,7 @@ function findPageMatches(input: {
     : canonicalizeProse(input.query).trim();
   if (query.length === 0) return [];
   const results: PdfSearchResult[] = [];
+  const sourceCharacters = Array.from(input.page.text);
   let from = 0;
   while (from <= indexed.text.length - query.length) {
     const matchIndex = indexed.text.indexOf(query, from);
@@ -322,6 +347,7 @@ function findPageMatches(input: {
           from = matchIndex + Math.max(query.length, 1);
           continue;
         }
+        const excerptValue = excerpt(sourceCharacters, sourceStart, charCount);
         results.push({
           id: buildSearchResultId(
             input.documentGeneration,
@@ -340,7 +366,8 @@ function findPageMatches(input: {
               - firstGlyph.origin.y,
           },
           rects,
-          excerpt: excerpt(input.page.text, sourceStart, charCount),
+          excerpt: excerptValue.text,
+          excerptMatch: excerptValue.match,
           kind: input.kind,
           matchedForm: input.query,
         });

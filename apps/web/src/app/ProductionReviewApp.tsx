@@ -199,6 +199,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     () => projectReviewItems(state.items),
     [state.items],
   );
+  const searchResults = useMemo(
+    () => searchState.groups.flatMap((group) => group.results),
+    [searchState.groups],
+  );
   const sourceRoot = props.scope.sourceRootPath ?? "No source root selected";
   const dispatchNavigation = (action: ReferenceNavigationAction) => {
     const next = reduceReferenceNavigation(navigationStateRef.current, action);
@@ -518,9 +522,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       onViewerInitialized={onViewerInitialized}
       onMainDocumentReady={onMainDocumentReady}
       onViewerFramingInitialized={onViewerFramingInitialized}
-      activeSearchResult={searchState.groups
-        .flatMap((group) => group.results)
-        .find(({ id }) => id === searchState.selectedResultId) ?? null}
+      searchResults={searchResults}
     />
   );
 
@@ -533,9 +535,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const openSearchResultReference = (result: PdfSearchResult) => {
     const target = pdfSearchResultTarget(result, navigationState.documentGeneration);
     if (target === null) return;
-    const selectedResult = searchState.groups
-      .flatMap((group) => group.results)
-      .find(({ id }) => id === searchState.selectedResultId);
+    const selectedResult = searchResults.find(({ id }) => id === searchState.selectedResultId);
     const selectedTarget = selectedResult
       ? pdfSearchResultTarget(selectedResult, navigationState.documentGeneration)
       : null;
