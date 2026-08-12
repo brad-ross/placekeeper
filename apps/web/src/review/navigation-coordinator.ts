@@ -6,6 +6,10 @@ import type {
   ViewerPdfLinkInvocation,
   ViewerPdfLinkUnavailable,
 } from '../pdf/viewer-interaction-events.js';
+import type {
+  PdfDocumentOrderLocation,
+  PdfOutlineTargetOrderLocation,
+} from '../pdf/document-order-location.js';
 import type { PdfViewerNavigation } from '../pdf/viewer-navigation-adapter.js';
 import {
   samePdfViewerLocation,
@@ -62,13 +66,108 @@ function metadataFromLink(metadata: PdfNavigationMetadata): NavigationDestinatio
   return { label: metadata.label, pageContext: metadata.pageContext };
 }
 
-function locationOrder(location: PdfViewerLocation): readonly number[] | null {
+function locationOrder(location: PdfDocumentOrderLocation): readonly number[] | null {
   const values = [
     location.pageIndex,
     location.anchor.y,
     location.anchor.x,
   ];
   return values.every(Number.isFinite) ? values : null;
+}
+
+export type OutlineTargetOrderLocation = PdfOutlineTargetOrderLocation;
+
+interface OrderedOutlineItem {
+  readonly item: PdfOutlineItem;
+  readonly location: OutlineTargetOrderLocation;
+  readonly order: readonly number[];
+  readonly depth: number;
+  readonly documentOrder: number;
+}
+
+export type OutlineContainmentResolver = (
+  currentLocation: PdfDocumentOrderLocation,
+) => PdfOutlineItem | null;
+
+function pathContains(ancestor: readonly number[], descendant: readonly number[]): boolean {
+  return ancestor.length <= descendant.length
+    && ancestor.every((entry, index) => descendant[index] === entry);
+}
+
+/** Prepares one fail-closed spatial index for repeated annotation lookups. */
+export function createOutlineContainmentResolver(input: {
+  readonly discovery: PdfOutlineDiscovery;
+  readonly resolveTarget: (target: PdfNavigationTarget) => OutlineTargetOrderLocation | null;
+}): OutlineContainmentResolver {
+  if (input.discovery.status !== 'loaded-tree') return () => null;
+  const orderedItems: OrderedOutlineItem[] = [];
+  const deepestPageLevelPath = new Map<number, readonly number[]>();
+  const ambiguousPageLevels = new Set<number>();
+  let documentOrder = 0;
+  let unsafeTarget = false;
+  const visit = (items: readonly PdfOutlineItem[], depth: number, parentPath: readonly number[]) => {
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index]!;
+      const itemOrder = documentOrder++;
+      const itemPath = [...parentPath, index];
+      if (item.target !== null) {
+        const location = input.resolveTarget(item.target);
+        const order = location === null ? null : locationOrder(location);
+        if (order === null) {
+          unsafeTarget = true;
+        } else if (location !== null) {
+          orderedItems.push({ item, location, order, depth, documentOrder: itemOrder });
+          if (location.precision === 'page' && !ambiguousPageLevels.has(location.pageIndex)) {
+            const deepestPath = deepestPageLevelPath.get(location.pageIndex);
+            if (deepestPath === undefined || pathContains(deepestPath, itemPath)) {
+              deepestPageLevelPath.set(location.pageIndex, itemPath);
+            } else if (!pathContains(itemPath, deepestPath)) {
+              ambiguousPageLevels.add(location.pageIndex);
+            }
+          }
+        }
+      }
+      visit(item.children, depth + 1, itemPath);
+    }
+  };
+  visit(input.discovery.items, 0, []);
+  if (unsafeTarget || ambiguousPageLevels.size > 0) return () => null;
+  orderedItems.sort((left, right) => (
+    compareOrder(left.order, right.order)
+    || left.depth - right.depth
+    || left.documentOrder - right.documentOrder
+  ));
+
+  return (currentLocation) => {
+    const currentOrder = locationOrder(currentLocation);
+    if (currentOrder === null) return null;
+    let low = 0;
+    let high = orderedItems.length;
+    while (low < high) {
+      const middle = low + Math.floor((high - low) / 2);
+      if (compareOrder(orderedItems[middle]!.order, currentOrder) <= 0) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    const best = orderedItems[low - 1];
+    if (best === undefined) return null;
+    return best.item;
+  };
+}
+
+/**
+ * Finds the deepest safely orderable outline item containing a document
+ * location. Page-level targets may tie only when their outline paths form one
+ * ancestor chain; unrelated same-page targets are structurally ambiguous.
+ */
+export function resolveContainingOutlineItem(input: {
+  readonly discovery: PdfOutlineDiscovery;
+  readonly currentLocation: PdfDocumentOrderLocation;
+  readonly resolveTarget: (target: PdfNavigationTarget) => OutlineTargetOrderLocation | null;
+}): PdfOutlineItem | null {
+  return createOutlineContainmentResolver(input)(input.currentLocation);
 }
 
 function compareOrder(first: readonly number[], second: readonly number[]): number {
@@ -88,54 +187,14 @@ export function resolveCurrentOutlineItemId(input: {
   readonly currentLocation: PdfViewerLocation;
   readonly resolveTarget: (target: PdfNavigationTarget) => PdfViewerLocation | null;
 }): string | null {
-  if (input.discovery.status !== 'loaded-tree') return null;
-  const currentOrder = locationOrder(input.currentLocation);
-  if (currentOrder === null) return null;
-  let bestId: string | null = null;
-  let bestOrder: readonly number[] | null = null;
-  let bestDepth = -1;
-  let bestDocumentOrder = -1;
-  let documentOrder = 0;
-  let unsafeTarget = false;
-  const visit = (items: readonly PdfOutlineItem[], depth: number) => {
-    for (const item of items) {
-      const itemOrder = documentOrder++;
-      if (item.target !== null) {
-        const location = input.resolveTarget(item.target);
-        const order = location === null ? null : locationOrder(location);
-        if (order === null) {
-          unsafeTarget = true;
-        } else if (compareOrder(order, currentOrder) <= 0) {
-          if (bestOrder === null) {
-            bestId = item.id;
-            bestOrder = order;
-            bestDepth = depth;
-            bestDocumentOrder = itemOrder;
-          } else {
-            const relative = compareOrder(order, bestOrder);
-            if (
-              relative > 0
-              || (relative === 0 && depth > bestDepth)
-              || (
-                relative === 0
-                && depth === bestDepth
-                && itemOrder > bestDocumentOrder
-              )
-            ) {
-              bestId = item.id;
-              bestOrder = order;
-              bestDepth = depth;
-              bestDocumentOrder = itemOrder;
-            }
-          }
-        }
-      }
-      visit(item.children, depth + 1);
-    }
-  };
-  visit(input.discovery.items, 0);
-  if (unsafeTarget) return null;
-  return bestId;
+  return resolveContainingOutlineItem({
+    discovery: input.discovery,
+    currentLocation: input.currentLocation,
+    resolveTarget: (target) => {
+      const location = input.resolveTarget(target);
+      return location === null ? null : { ...location, precision: 'exact' };
+    },
+  })?.id ?? null;
 }
 
 const REFERENCE_FAILURE = 'Reference unavailable. Retry when ready.';
@@ -154,6 +213,7 @@ export class NavigationCoordinator {
   private lastSearchTargetIdentity: string | null = null;
   private pendingReference: PendingReferenceRequest | null = null;
   private linkRequest: ViewerPdfLinkInvocation | null = null;
+  private linkRequestSourceTabIdentity: string | null = null;
   /** A Send-selected successor whose saved view is not currently rendered. */
   private referenceRestoreIdentity: string | null = null;
   private disposed = false;
@@ -163,9 +223,22 @@ export class NavigationCoordinator {
   }
 
   requestLink(request: ViewerPdfLinkInvocation): boolean {
+    const state = this.dependencies.getState();
+    const sourceTabIdentity = request.sourceScope === 'reference'
+      && this.pendingReference === null
+      && state.pendingReferenceSwitch === null
+      && this.referenceRestoreIdentity === null
+      && state.activeTabIdentity !== null
+      && state.tabs.some((tab) => tab.identity === state.activeTabIdentity)
+      ? state.activeTabIdentity
+      : null;
     this.supersede();
-    if (!this.generationMatches(request.target.documentGeneration)) {
+    if (
+      !this.generationMatches(request.target.documentGeneration)
+      || (request.sourceScope === 'reference' && sourceTabIdentity === null)
+    ) {
       this.linkRequest = null;
+      this.linkRequestSourceTabIdentity = null;
       this.dependencies.setLinkActionRequest(null);
       this.dependencies.setAnnouncement(LINK_UNAVAILABLE);
       return false;
@@ -173,15 +246,14 @@ export class NavigationCoordinator {
     this.pendingReference = null;
     this.dependencies.setPendingReference(null);
     this.linkRequest = request;
+    this.linkRequestSourceTabIdentity = sourceTabIdentity;
     this.dependencies.setLinkActionRequest(request);
     return true;
   }
 
   unavailableLink(_unavailable?: ViewerPdfLinkUnavailable): void {
     this.supersede();
-    this.linkRequest = null;
     this.pendingReference = null;
-    this.dependencies.setLinkActionRequest(null);
     this.dependencies.setPendingReference(null);
     this.dependencies.setAnnouncement(LINK_UNAVAILABLE);
   }
@@ -193,24 +265,37 @@ export class NavigationCoordinator {
 
   dismissLink(request: ViewerPdfLinkInvocation): void {
     if (this.linkRequest !== request) return;
-    this.linkRequest = null;
-    this.dependencies.setLinkActionRequest(null);
+    this.clearLinkRequest();
   }
 
   async chooseLink(choice: LinkActionChoice, request: ViewerPdfLinkInvocation): Promise<boolean> {
     if (this.linkRequest !== request || !this.generationMatches(request.target.documentGeneration)) {
       return false;
     }
-    this.linkRequest = null;
-    this.dependencies.setLinkActionRequest(null);
-    const choiceOperation = choice === 'references'
-      ? this.openReference(request.target, metadataFromLink(request.metadata))
-      : this.navigateMainTarget(request.target, 'direct');
+    const sourceTabIdentity = this.linkRequestSourceTabIdentity;
+    this.clearLinkRequest();
+    let choiceOperation: Promise<boolean>;
+    switch (choice) {
+      case 'references':
+        choiceOperation = this.openReference(
+          request.target,
+          metadataFromLink(request.metadata),
+        );
+        break;
+      case 'main':
+        choiceOperation = this.navigateMainTarget(request.target, 'direct');
+        break;
+      case 'same-reference':
+        choiceOperation = request.sourceScope === 'reference' && sourceTabIdentity !== null
+          ? this.navigateReferenceTarget(request.target, sourceTabIdentity)
+          : Promise.resolve(false);
+        break;
+    }
     const choiceOperationToken = this.operationToken;
     const succeeded = await choiceOperation;
     if (
       !succeeded
-      && choice === 'main'
+      && choice !== 'references'
       && this.operationToken === choiceOperationToken
       && this.generationMatches(request.target.documentGeneration)
       && request.opener.isConnected
@@ -218,6 +303,60 @@ export class NavigationCoordinator {
       request.opener.focus({ preventScroll: true });
     }
     return succeeded;
+  }
+
+  private async navigateReferenceTarget(
+    target: PdfNavigationTarget,
+    sourceTabIdentity: string,
+  ): Promise<boolean> {
+    const operation = this.begin(target.documentGeneration);
+    if (operation === null) return false;
+    const state = this.dependencies.getState();
+    if (
+      state.activeTabIdentity !== sourceTabIdentity
+      || !state.tabs.some((tab) => tab.identity === sourceTabIdentity)
+    ) return false;
+
+    const navigation = this.dependencies.getReferenceNavigation();
+    const origin = navigation?.captureLocation() ?? null;
+    if (!navigation || origin === null) {
+      this.dependencies.setAnnouncement(REFERENCE_FAILURE);
+      return false;
+    }
+    const applied = await navigation.applyTarget(target);
+    if (!this.isCurrent(operation)) return false;
+    if (!applied) {
+      this.dependencies.setAnnouncement(REFERENCE_FAILURE);
+      return false;
+    }
+    const settledLocation = navigation.captureLocation();
+    if (settledLocation === null) {
+      const restored = await navigation.applyLocation(origin);
+      if (!this.isCurrent(operation)) return false;
+      const restoredLocation = restored ? navigation.captureLocation() : null;
+      if (
+        restoredLocation === null
+        || !samePdfViewerLocation(origin, restoredLocation, {
+          anchor: 0,
+          alignment: 0,
+          zoom: 0,
+        })
+      ) {
+        this.dependencies.setAnnouncement(REFERENCE_FAILURE);
+        return false;
+      }
+      this.dependencies.setAnnouncement(REFERENCE_FAILURE);
+      return false;
+    }
+    const currentState = this.dependencies.getState();
+    if (
+      currentState.activeTabIdentity !== sourceTabIdentity
+      || !currentState.tabs.some((tab) => tab.identity === sourceTabIdentity)
+    ) return false;
+    this.dependencies.dispatch({ type: 'refresh-active-reference', settledLocation });
+    navigation.focusAtDestination(settledLocation.pageIndex);
+    this.dependencies.setAnnouncement('Reference destination opened.');
+    return true;
   }
 
   async openReference(
@@ -675,6 +814,7 @@ export class NavigationCoordinator {
     this.lastSearchTargetIdentity = null;
     this.pendingReference = null;
     this.linkRequest = null;
+    this.linkRequestSourceTabIdentity = null;
     this.referenceRestoreIdentity = null;
     this.dependencies.getMainNavigation()?.replaceDocument(documentGeneration);
     this.dependencies.getReferenceNavigation()?.replaceDocument(documentGeneration);
@@ -693,6 +833,7 @@ export class NavigationCoordinator {
     this.operationToken += 1;
     this.pendingReference = null;
     this.linkRequest = null;
+    this.linkRequestSourceTabIdentity = null;
     this.referenceRestoreIdentity = null;
     void this.dependencies.getReferenceController()?.close();
   }
@@ -852,6 +993,7 @@ export class NavigationCoordinator {
     preservePendingReference = false,
   ): Operation | null {
     if (!this.generationMatches(documentGeneration)) return null;
+    this.clearLinkRequest();
     this.cancelPendingTransactions(preservePendingReference);
     return {
       token: ++this.operationToken,
@@ -860,6 +1002,7 @@ export class NavigationCoordinator {
   }
 
   private supersede(): void {
+    this.clearLinkRequest();
     this.cancelPendingTransactions();
     this.operationToken += 1;
   }
@@ -872,6 +1015,13 @@ export class NavigationCoordinator {
       this.pendingReference = null;
       this.dependencies.setPendingReference(null);
     }
+  }
+
+  private clearLinkRequest(): void {
+    if (this.linkRequest === null && this.linkRequestSourceTabIdentity === null) return;
+    this.linkRequest = null;
+    this.linkRequestSourceTabIdentity = null;
+    this.dependencies.setLinkActionRequest(null);
   }
 
   private generationMatches(documentGeneration: number): boolean {

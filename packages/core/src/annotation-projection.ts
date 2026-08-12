@@ -1,5 +1,6 @@
 import type { ReviewAnnotation } from "./pdf-writer.js";
 import type { JsonValue, ReviewItem } from "./review-model.js";
+import { createPortableAnnotationCustom } from "./portable-annotation.js";
 
 function record(
   value: JsonValue | undefined,
@@ -47,7 +48,7 @@ export function projectReviewItem(
     item.kind === "replace" || item.kind === "insert"
       ? text(item.payload, "proposedText")
       : text(item.payload, "comment");
-  return {
+  const annotation: ReviewAnnotation = {
     kind: item.kind,
     id: item.id,
     pageIndex: item.pageIndex,
@@ -62,6 +63,10 @@ export function projectReviewItem(
     ...(item.kind === "pageNote"
       ? {}
       : { textAnchorReliable: item.payload.reliable === true }),
+  };
+  return {
+    ...annotation,
+    custom: createPortableAnnotationCustom(item, annotation),
   };
 }
 

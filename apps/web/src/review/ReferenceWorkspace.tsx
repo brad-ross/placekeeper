@@ -127,6 +127,10 @@ export function ReferenceWorkspace({
   const emptyReferenceRef = useRef<HTMLDivElement>(null);
   const retryReferenceRef = useRef<HTMLButtonElement>(null);
   const closeFocusIdentity = useRef<string | null>(null);
+  const focusedModeTab = useRef<{
+    mode: WorkspaceMode;
+    element: HTMLButtonElement;
+  } | null>(null);
   const previous = useRef<{
     open: boolean;
     mode: WorkspaceMode;
@@ -140,6 +144,7 @@ export function ReferenceWorkspace({
   const showReferenceTabs = tabs.length > 0;
   const reserveReferenceTabRail = referenceTabOrientation === 'vertical'
     && pendingReference?.status === 'loading';
+  const modeListKey = modes.join(':');
 
   const modeFallback = (targetMode: WorkspaceMode): HTMLElement | null => (
     chooseWorkspaceModeFocusTarget({
@@ -154,6 +159,16 @@ export function ReferenceWorkspace({
       emptyReference: emptyReferenceRef.current,
     })
   );
+
+  useLayoutEffect(() => {
+    const removedFocus = focusedModeTab.current;
+    if (!open || removedFocus === null || removedFocus.element.isConnected) return;
+    focusedModeTab.current = null;
+    const frame = requestAnimationFrame(() => {
+      focusWithoutScroll(modeTabRefs.current.get(mode) ?? modeFallback(mode));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [mode, modeListKey, open]);
 
   useLayoutEffect(() => {
     const was = previous.current;
@@ -256,7 +271,13 @@ export function ReferenceWorkspace({
           <strong id="references-workspace-title" className="review-workspace__title">References</strong>
         ) : null}
         {headerVariant === 'tabs' ? (
-        <div className="review-workspace__tabs" role="tablist" aria-label="Workspace modes">
+        <div
+          className="review-workspace__tabs"
+          role="tablist"
+          aria-label="Workspace modes"
+          data-workspace-mode-count={modes.length}
+          style={{ gridTemplateColumns: `repeat(${modes.length}, minmax(0, 1fr))` }}
+        >
           {modes.map((workspaceMode) => {
             const selected = workspaceMode === mode;
             const hasMoveControl = workspaceMode === 'references' && Boolean(onMoveReferencesBottom);
@@ -283,6 +304,19 @@ export function ReferenceWorkspace({
                 aria-controls={`workspace-panel-${workspaceMode}`}
                 tabIndex={selected ? 0 : -1}
                 onKeyDown={moveModeFocus}
+                onFocus={(event) => {
+                  focusedModeTab.current = { mode: workspaceMode, element: event.currentTarget };
+                }}
+                onBlur={(event) => {
+                  const nextTarget = event.relatedTarget;
+                  if (
+                    nextTarget instanceof HTMLElement
+                    && nextTarget !== event.currentTarget.ownerDocument.body
+                    && nextTarget.isConnected
+                  ) {
+                    focusedModeTab.current = null;
+                  }
+                }}
                 onClick={() => onModeChange(workspaceMode)}
               >
                 {hasMoveControl ? (

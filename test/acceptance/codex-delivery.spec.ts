@@ -45,10 +45,10 @@ test.describe("manual Codex delivery phases", () => {
     await expect(page.getByText("Ready —", { exact: false })).toBeVisible();
     await expect(page.getByLabel("Ready-to-paste instruction")).toHaveValue("Full local instruction");
 
-    await page.getByRole("button", { name: "Close finish options" }).click();
-    await expect(page.locator("[data-review-finish-slot]")).toHaveAttribute("aria-hidden", "true");
-    await page.getByRole("button", { name: "Open Finish" }).click();
-    await expect(page.locator("[data-review-finish-slot]")).toHaveAttribute("aria-hidden", "false");
+    await page.getByRole("button", { name: "Close Codex options" }).click();
+    await expect(page.locator("[data-codex-drawer]")).toHaveAttribute("aria-hidden", "true");
+    await page.getByRole("button", { name: "Open Codex" }).click();
+    await expect(page.locator("[data-codex-drawer]")).toHaveAttribute("aria-hidden", "false");
     await expect(page.getByText("Ready —", { exact: false })).toBeVisible();
     await expect(page.getByLabel("Ready-to-paste instruction")).toHaveValue("Full local instruction");
 
@@ -79,12 +79,11 @@ test.describe("manual Codex delivery phases", () => {
     expect(mutationRequests).toEqual([]);
   });
 
-  test("disables Codex delivery for an empty canonical review without removing the Human alternative", async ({ page }) => {
+  test("disables Codex delivery for an empty canonical annotation set", async ({ page }) => {
     await page.goto("/test/acceptance/codex-harness/index.html");
     await page.evaluate(() => window.codexHarness.makeEmpty());
     await expect(page.getByRole("button", { name: "Prepare Codex handoff" })).toBeDisabled();
-    await expect(page.getByText("Human and Codex delivery are unavailable", { exact: false })).toBeVisible();
-    await expect(page.getByText("local-only Human delivery", { exact: false })).toBeVisible();
+    await expect(page.getByText("There are no annotations to hand off", { exact: false })).toBeVisible();
   });
 
   test("contains focus while confirmation controls are disabled during preparation", async ({ page }) => {

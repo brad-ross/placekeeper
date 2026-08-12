@@ -75,9 +75,15 @@ export function OutlineNavigator({
         const destinationLabel = item.pageContext && item.label !== item.pageContext
           ? `${item.label}, ${item.pageContext}`
           : item.label;
+        const pageNumber = item.target && item.pageContext && item.label !== item.pageContext
+          ? item.target.pageIndex + 1
+          : null;
         return (
           <li key={item.id} data-outline-item={item.id}>
-            <div className="outline-navigator__row">
+            <div
+              className="outline-navigator__row"
+              data-current={currentItemId === item.id ? 'true' : undefined}
+            >
               {hasChildren ? (
                 <button
                   type="button"
@@ -103,10 +109,16 @@ export function OutlineNavigator({
                   if (item.target) onActivate(item);
                 }}
               >
-                <span>{item.label}</span>
-                {item.pageContext && item.label !== item.pageContext
-                  ? <small>{item.pageContext}</small>
-                  : null}
+                <span className="outline-navigator__summary">
+                  <span className="outline-navigator__title">{item.label}</span>
+                  {pageNumber === null
+                    ? null
+                    : (
+                      <small className="outline-navigator__page" aria-hidden="true">
+                        · {pageNumber}
+                      </small>
+                    )}
+                </span>
               </button>
               {item.target === null ? null : (
                 <button

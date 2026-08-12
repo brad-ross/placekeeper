@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -71,6 +72,22 @@ describe("persistent launch host", () => {
     const { root, pdf, host } = await fixture();
     const opened = await host.open({ pdfPath: pdf });
     expect(opened).toMatchObject({ ok: true, kind: "opened" });
+    if (!opened.ok || opened.kind === "recovery-offered") throw new Error("Expected launch");
+    await host.broker.acceptMutation(opened.sessionId, {
+      type: "add",
+      expectedRevision: 0,
+      item: {
+        id: randomUUID(),
+        kind: "pageNote",
+        pageIndex: 0,
+        createdAt: "2026-08-11T12:00:00.000Z",
+        updatedAt: "2026-08-11T12:00:00.000Z",
+        payload: {
+          position: { x: 1, y: 1, width: 18, height: 18 },
+          comment: "Recover this annotation.",
+        },
+      },
+    });
     await host.close();
     hosts.splice(hosts.indexOf(host), 1);
 
@@ -120,6 +137,13 @@ describe("persistent launch host", () => {
     });
     expect(app.status).toBe(200);
     expect(await app.text()).toContain("productionApp");
+    const saveStatus = await fetch(`${launch.origin}/s/${launched.sessionId}/save/status`, {
+      headers: { authorization: `Bearer ${credential}` },
+    });
+    const publicStatus = await saveStatus.text();
+    expect(publicStatus).not.toContain("capabilityId");
+    expect(publicStatus).not.toContain("fingerprint");
+    expect(publicStatus).not.toContain("desiredDigest");
     expect((await fetch(`${launch.origin}/s/${launched.sessionId}/state`, {
       headers: { cookie: cookie! },
     })).status).toBe(401);
@@ -149,16 +173,7 @@ describe("persistent launch host", () => {
     expect(embedded.headers.get("x-frame-options")).toBeNull();
     expect(embedded.headers.get("content-security-policy")).toContain("frame-ancestors vscode-webview:");
 
-    await fetch(`${launch.origin}/s/${launched.sessionId}/finish`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${credential}`,
-        origin: launch.origin,
-        "content-type": "application/json",
-        "sec-fetch-site": "same-origin",
-      },
-      body: "{}",
-    });
+    await host.broker.finish(launched.sessionId);
     for (const revokedCookie of [cookie, secondCookie]) {
       expect((await fetch(`${launch.origin}/s/${launched.sessionId}/assets/app.js`, {
         headers: { cookie: revokedCookie! },

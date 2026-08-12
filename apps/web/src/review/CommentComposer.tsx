@@ -11,6 +11,7 @@ export interface CommentComposerProps {
   saveLabel?: string;
   triggerRef?: RefObject<{ focus(): void } | null>;
   onSave(value: string): void | Promise<void>;
+  onSkip?(): void | Promise<void>;
   onDismiss(): void;
 }
 
@@ -23,6 +24,7 @@ export function CommentComposer({
   saveLabel = 'Save comment',
   triggerRef,
   onSave,
+  onSkip,
   onDismiss,
 }: CommentComposerProps) {
   const titleId = useId();
@@ -67,7 +69,14 @@ export function CommentComposer({
         />
       </label>
       <div className="comment-composer__actions">
-        <button className="review-button review-button--secondary" type="button" onClick={onDismiss}>
+        <button
+          className="review-button review-button--secondary"
+          type="button"
+          onClick={() => {
+            if (optional && onSkip) void onSkip();
+            else onDismiss();
+          }}
+        >
           {optional ? 'Keep without comment' : 'Cancel'}
         </button>
         <button

@@ -1,3 +1,5 @@
+import type { WaitForSettledViewerGeometry } from './viewer-framing.js';
+
 export interface PdfNaturalPoint {
   readonly x: number;
   readonly y: number;
@@ -36,6 +38,8 @@ export interface PdfViewerLocationTolerances {
 export interface ViewerNavigationControls {
   captureLocation(): PdfViewerLocation | null;
   applyLocation(location: PdfViewerLocation): Promise<boolean>;
+  fitToWidth(waitForSettledGeometry?: WaitForSettledViewerGeometry): Promise<boolean>;
+  fitToWidthReady(): boolean;
   replaceDocument(documentGeneration: number): void;
   focusAtDestination(pageIndex: number): boolean;
   dispose(): void;

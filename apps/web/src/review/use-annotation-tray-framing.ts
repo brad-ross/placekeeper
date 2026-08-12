@@ -10,6 +10,7 @@ import {
 import {
   FramingSessionAuthority,
   LatestFrameRequest,
+  ViewerGeometrySettlementAuthority,
   chooseAnnotationPresentation,
   frameUserOwnedPosition,
   intersectViewerRects,
@@ -19,6 +20,7 @@ import {
   type AnnotationPresentation,
   type ViewerFramingControls,
   type ViewerPosition,
+  type WaitForSettledViewerGeometry,
 } from '../pdf/viewer-framing.js';
 
 const WORKSPACE_SIDE_MAX_PX = 24 * 16;
@@ -69,6 +71,7 @@ export interface WorkspaceFraming {
   readonly presentation: AnnotationPresentation;
   readonly sideWidth: number;
   requestSettledReframe(): void;
+  waitForSettledGeometry: WaitForSettledViewerGeometry;
   markUserIntent(
     axes?: { left?: boolean; top?: boolean },
     options?: { stopAutomaticScroll?: boolean; captureSettledPosition?: boolean },
@@ -87,6 +90,7 @@ export function useWorkspaceFraming(input: {
   const toolsSurfaceRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const authorityRef = useRef(new FramingSessionAuthority());
+  const geometrySettlementRef = useRef(new ViewerGeometrySettlementAuthority());
   const sessionRef = useRef<ActiveFramingSession | null>(null);
   const [presentation, setPresentation] = useState<AnnotationPresentation>('right');
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
@@ -137,6 +141,7 @@ export function useWorkspaceFraming(input: {
       schedule: (callback) => requestAnimationFrame(callback),
       cancel: (handle) => cancelAnimationFrame(handle),
       commit: () => {
+        geometrySettlementRef.current.markChanged();
         setGeometryRevision((revision) => revision + 1);
         if (transitioning.size > 0) scheduler.publish(++sample);
       },
@@ -171,11 +176,13 @@ export function useWorkspaceFraming(input: {
     const onTransitionRun = (event: TransitionEvent) => {
       if (!(event.currentTarget instanceof HTMLElement) || event.target !== event.currentTarget) return;
       transitioning.add(event.currentTarget);
+      geometrySettlementRef.current.beginTransition(event.currentTarget, event.propertyName);
       publish();
     };
     const onTransitionSettled = (event: TransitionEvent) => {
       if (!(event.currentTarget instanceof HTMLElement) || event.target !== event.currentTarget) return;
       transitioning.delete(event.currentTarget);
+      geometrySettlementRef.current.settleTransition(event.currentTarget, event.propertyName);
       publish();
     };
     for (const surface of [referenceSurfaceRef.current, toolsSurfaceRef.current]) {
@@ -200,6 +207,13 @@ export function useWorkspaceFraming(input: {
   }, []);
 
   const requestSettledReframe = useCallback(() => requestGeometryFrameRef.current(), []);
+  const waitForSettledGeometry = useCallback<WaitForSettledViewerGeometry>(async (signal) => {
+    requestGeometryFrameRef.current();
+    return geometrySettlementRef.current.waitForSettled(
+      signal,
+      () => waitForWorkspaceLayout(signal),
+    );
+  }, []);
 
   const currentScroll = useCallback((): ViewerPosition | null => {
     const snapshot = input.controls?.snapshot();
@@ -483,6 +497,7 @@ export function useWorkspaceFraming(input: {
     presentation,
     sideWidth,
     requestSettledReframe,
+    waitForSettledGeometry,
     markUserIntent,
     currentScroll,
   };

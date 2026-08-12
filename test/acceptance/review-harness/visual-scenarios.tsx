@@ -2,8 +2,9 @@ import type { CSSProperties, ReactNode } from 'react';
 import { PdfZoomMode } from '@embedpdf/models';
 
 import { CodexDelivery } from '../../../apps/web/src/export/CodexDelivery.js';
-import { HumanDelivery } from '../../../apps/web/src/export/HumanDelivery.js';
 import type { ExistingAnnotationsDiscovery } from '../../../apps/web/src/pdf/existing-annotations.js';
+import type { PdfOutlineDiscovery } from '../../../apps/web/src/pdf/pdf-outline.js';
+import type { AnnotationOutlineLabels } from '../../../apps/web/src/review/annotation-outline-context.js';
 import {
   unavailableViewerControls,
   type ViewerControlsSnapshot,
@@ -35,7 +36,9 @@ export interface VisualScenario {
   readonly correspondingItemId?: string;
   readonly pageMenuOpen: boolean;
   readonly existingAnnotations: ExistingAnnotationsDiscovery;
-  readonly finishSlot?: ReactNode;
+  readonly annotationOutlineLabels?: AnnotationOutlineLabels;
+  readonly outlineDiscovery?: PdfOutlineDiscovery;
+  readonly codexSlot?: ReactNode;
   readonly viewerState: ViewerControlsSnapshot;
   readonly referenceNavigation?: ReferenceNavigationState;
   readonly referenceTabs?: readonly ReferenceWorkspaceTab[];
@@ -105,6 +108,15 @@ const readyAnnotations: ExistingAnnotationsDiscovery = {
   }],
 };
 
+const annotationOutlineLabels: AnnotationOutlineLabels = {
+  owned: new Map([
+    ['owned-highlight', 'Identification strategy and conditional comparison groups'],
+    ['owned-replace', 'Local equilibrium'],
+    ['owned-page-note', 'Robustness checks'],
+  ]),
+  source: new Map([['3:source-highlight', 'Mechanism details']]),
+};
+
 const viewerState: ViewerControlsSnapshot = {
   ready: true,
   pageReady: true,
@@ -170,31 +182,9 @@ function createVisualReferenceNavigation(): ReferenceNavigationState {
 
 const visualReferenceNavigation = createVisualReferenceNavigation();
 
-function DeliveryFixture({
-  state,
-  outcome = 'warning',
-}: {
-  readonly state: ReviewState;
-  readonly outcome?: 'success' | 'warning' | 'error';
-}) {
+function DeliveryFixture({ state }: { readonly state: ReviewState }) {
   return (
     <div className="review-delivery-content">
-      <HumanDelivery
-        state={state}
-        showLifecycleActions={false}
-        onSave={async () => {
-          if (outcome === 'error') throw new Error('The reviewed copy could not be written. The original PDF is unchanged.');
-          return {
-            path: '/Users/reviewer/Documents/Results/identification-strategy-reviewed-final-with-annotations.pdf',
-            ...(outcome === 'warning' ? {
-              warning: 'The destination already contained an older reviewed copy; the new file uses a numbered suffix.',
-            } : {}),
-          };
-        }}
-        onReplaceOriginal={async () => ({ path: '/Users/reviewer/Documents/Papers/identification-strategy.pdf' })}
-        onFinish={async () => undefined}
-        onDiscard={async () => undefined}
-      />
       <CodexDelivery
         state={state}
         sourceRoot="/Users/reviewer/Documents/Research/Identification Strategy and Robustness Appendix"
@@ -237,6 +227,20 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
     listOpen: name === 'tray' || name === 'exceptional',
     pageMenuOpen: name === 'page-note',
     existingAnnotations: name === 'exceptional' ? exceptionalAnnotations : readyAnnotations,
+    ...(name === 'tray' ? {
+      annotationOutlineLabels,
+      outlineDiscovery: {
+        status: 'loaded-tree' as const,
+        documentGeneration: 0,
+        items: [{
+          id: 'outline-0',
+          label: 'Identification strategy',
+          pageContext: null,
+          target: null,
+          children: [],
+        }],
+      },
+    } : {}),
     viewerState: name === 'unavailable-controls' ? unavailableViewerControls() : viewerState,
     ...(name === 'reference-layout' ? {
       referenceNavigation: visualReferenceNavigation,
@@ -244,8 +248,7 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
     } : {}),
   };
   if (name === 'finish' || name === 'exceptional') {
-    const outcome = exception === 'success' || exception === 'error' ? exception : 'warning';
-    return { ...common, finishSlot: <DeliveryFixture state={state} outcome={outcome} /> };
+    return { ...common, codexSlot: <DeliveryFixture state={state} /> };
   }
   return {
     ...common,

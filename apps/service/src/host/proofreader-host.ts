@@ -6,6 +6,9 @@ import {
   type LocalHttpServer,
   type WebAssetOptions,
 } from "../server/http-server.js";
+import { createSelectedPdfWriter } from "../../../../packages/pdf-backends/src/selected-writer.js";
+import { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
+import { MacOsDestinationPicker } from "./destination-picker.js";
 
 export type LaunchSurface = "browser" | "finder" | "codex" | "vscode";
 
@@ -87,9 +90,15 @@ export class ProofreaderHost {
     const broker = new SessionBroker({ recoveryRoot: options.recoveryRoot });
     await broker.initialize();
     const delivery = await ReviewDeliveryService.create(broker);
+    const saving = new PdfSaveCoordinator({
+      broker,
+      writer: await createSelectedPdfWriter(),
+      ...(process.platform === "darwin" ? { picker: new MacOsDestinationPicker() } : {}),
+    });
     const server = await startHttpServer(broker, {
       ...(options.webAssets === undefined ? {} : { webAssets: options.webAssets }),
       delivery,
+      saving,
     });
     return new ProofreaderHost(broker, server);
   }

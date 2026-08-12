@@ -32,6 +32,23 @@ export interface DestinationCapability {
   readonly parentDevice: number;
   readonly parentInode: number;
   readonly existingTarget?: ApprovedFile;
+  readonly expectedDigest?: string;
+}
+
+export function validatePdfFilename(filename: string): string {
+  const normalized = filename.normalize("NFC");
+  if (
+    normalized.length === 0 ||
+    normalized === "." ||
+    normalized === ".." ||
+    normalized.includes("/") ||
+    normalized.includes("\\") ||
+    /[\u0000-\u001f\u007f]/u.test(normalized) ||
+    !normalized.toLowerCase().endsWith(".pdf")
+  ) {
+    throw new FileCapabilityError("INVALID_PATH", "Use one PDF filename without folders");
+  }
+  return normalized;
 }
 
 function rejectPathSyntax(value: string): void {
@@ -161,10 +178,11 @@ export class FileCapabilityRegistry {
         throw error;
       }
     }
+    const filename = validatePdfFilename(basename(path));
     const capability: DestinationCapability = {
       id: randomUUID(),
       parentPath,
-      filename: basename(path),
+      filename,
       parentDevice: parentInfo.dev,
       parentInode: parentInfo.ino,
       ...(existingTarget === undefined ? {} : { existingTarget }),
@@ -197,7 +215,9 @@ export class FileCapabilityRegistry {
       if (
         currentPath !== capability.existingTarget.path ||
         currentInfo.dev !== capability.existingTarget.device ||
-        currentInfo.ino !== capability.existingTarget.inode
+        currentInfo.ino !== capability.existingTarget.inode ||
+        (capability.expectedDigest !== undefined &&
+          (await hashFile(currentPath)) !== capability.expectedDigest)
       ) {
         throw new FileCapabilityError("TARGET_CHANGED", "Destination changed after approval");
       }
@@ -213,6 +233,29 @@ export class FileCapabilityRegistry {
       }
     }
     return target;
+  }
+
+  async refreshDestination(id: string, expectedDigest: string): Promise<string> {
+    const capability = this.#destinations.get(id);
+    if (capability === undefined) {
+      throw new FileCapabilityError("INVALID_PATH", "Unknown destination capability");
+    }
+    const target = resolve(capability.parentPath, capability.filename);
+    const canonicalPath = await realpath(target);
+    const info = await stat(canonicalPath);
+    if (!info.isFile() || (await hashFile(canonicalPath)) !== expectedDigest) {
+      throw new FileCapabilityError("TARGET_CHANGED", "Saved target could not be re-approved");
+    }
+    this.#destinations.set(id, {
+      ...capability,
+      existingTarget: { path: canonicalPath, device: info.dev, inode: info.ino },
+      expectedDigest,
+    });
+    return canonicalPath;
+  }
+
+  revokeDestination(id: string): void {
+    this.#destinations.delete(id);
   }
 
   async validateOriginalForReplacement(
@@ -258,6 +301,23 @@ export class FileCapabilityRegistry {
       device: info.dev,
       inode: info.ino,
     });
+    return canonicalPath;
+  }
+
+  async rebindApprovedPdf(fileId: string, path: string, expectedDigest: string): Promise<string> {
+    if (!this.#files.has(fileId)) {
+      throw new FileCapabilityError("INVALID_PATH", "Unknown file capability");
+    }
+    const canonicalPath = await realpath(path);
+    const info = await stat(canonicalPath);
+    if (
+      !info.isFile() ||
+      !canonicalPath.toLowerCase().endsWith(".pdf") ||
+      (await hashFile(canonicalPath)) !== expectedDigest
+    ) {
+      throw new FileCapabilityError("TARGET_CHANGED", "Located PDF does not match the saved target");
+    }
+    this.#files.set(fileId, { path: canonicalPath, device: info.dev, inode: info.ino });
     return canonicalPath;
   }
 

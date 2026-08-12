@@ -102,7 +102,14 @@ test('installed real PDF reading', async ({ page }) => {
 test('wide Annotation Tray', async ({ page }) => {
   const product = await openScene(page, 'tray');
   await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-workspace-presentation', 'right');
-  await page.getByRole('button', { name: /highlight · Page 1/u }).focus();
+  const annotation = page.getByRole('button', { name: /highlight · Page 1/u });
+  await annotation.focus();
+  await expect(annotation.locator('.annotation-item__page')).toHaveText('1');
+  await expect(annotation.locator('.annotation-item__separator')).toHaveCount(2);
+  await expect(annotation.locator('.annotation-item__section')).toHaveAttribute(
+    'title',
+    'Identification strategy and conditional comparison groups',
+  );
   await expectScene(product, 'wide-annotation-tray.png');
 });
 
@@ -116,7 +123,26 @@ test('narrow Annotation Tray', async ({ page }) => {
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
-  await page.getByRole('button', { name: /highlight · Page 1/u }).focus();
+  const annotation = page.getByRole('button', { name: /highlight · Page 1/u });
+  await annotation.focus();
+  const section = annotation.locator('.annotation-item__section');
+  const sectionGeometry = await section.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      overflow: style.overflow,
+      textOverflow: style.textOverflow,
+      whiteSpace: style.whiteSpace,
+    };
+  });
+  expect(sectionGeometry.clientWidth).toBeLessThanOrEqual(128);
+  expect(sectionGeometry.scrollWidth).toBeGreaterThan(sectionGeometry.clientWidth);
+  expect(sectionGeometry).toMatchObject({
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  });
   await expectScene(product, 'narrow-annotation-tray.png');
 });
 
@@ -172,26 +198,16 @@ test('Page Note composer', async ({ page }) => {
   await expectScene(product, 'page-note-composer.png');
 });
 
-test('Finish and delivery', async ({ page }) => {
+test('Codex handoff', async ({ page }) => {
   const product = await openScene(page, 'finish');
-  await page.getByRole('button', { name: 'Finish' }).click();
-  await expect(page.getByRole('heading', { name: 'Human delivery' })).toBeVisible();
-  await expectScene(product, 'finish-and-delivery.png');
+  await page.getByRole('button', { name: 'Codex' }).click();
+  await expect(page.getByRole('heading', { name: 'Work with Codex' })).toBeVisible();
+  await expectScene(product, 'codex-handoff.png');
 });
 
 for (const state of ['loading', 'empty', 'error'] as const) {
   test(`exceptional annotation ${state}`, async ({ page }) => {
     const product = await openScene(page, `exceptional&exception=${state}`);
     await expectScene(product, `exceptional-annotation-${state}.png`);
-  });
-}
-
-for (const state of ['success', 'warning', 'error'] as const) {
-  test(`exceptional delivery ${state}`, async ({ page }) => {
-    const product = await openScene(page, `exceptional&exception=${state}`);
-    await page.getByRole('button', { name: 'Finish' }).click();
-    await page.getByRole('button', { name: 'Save reviewed copy' }).click();
-    await expect(page.locator(`[data-review-status="${state}"]`)).toBeVisible();
-    await expectScene(product, `exceptional-delivery-${state}.png`);
   });
 }

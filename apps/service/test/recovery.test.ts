@@ -5,6 +5,7 @@ import {
   mkdtemp,
   mkdir,
   readFile,
+  rename,
   rm,
   stat,
   utimes,
@@ -24,6 +25,7 @@ import {
 } from "../src/recovery/draft-snapshot.js";
 import { enforceRetention } from "../src/recovery/retention.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
+import { hashFile } from "../src/files/file-capabilities.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -273,6 +275,7 @@ describe("broker acknowledgement and restart recovery", () => {
     const first = new SessionBroker({ recoveryRoot });
     const opened = await first.openReview({ pdfPath: pdf });
     if (opened.kind !== "opened") throw new Error("Expected a new review");
+    await first.acceptMutation(opened.launch.sessionId, addCommand(0));
     await writeFile(
       join(recoveryRoot, opened.launch.sessionId, "source.pdf"),
       "tampered bytes",
@@ -305,6 +308,7 @@ describe("broker acknowledgement and restart recovery", () => {
       kind: "focused",
       launch: { sessionId: first.launch.sessionId },
     });
+    await broker.acceptMutation(first.launch.sessionId, addCommand(0));
 
     const restart = new SessionBroker({ recoveryRoot });
     const offered = await restart.openReview({ pdfPath: pdf });
@@ -358,6 +362,230 @@ describe("broker acknowledgement and restart recovery", () => {
     if (resumed.kind !== "opened") throw new Error("Expected a resumed review");
     expect(restart.state(resumed.launch.sessionId)?.sourceRootId).toBeUndefined();
     expect(resumed.launch.rootId).toBeUndefined();
+  });
+});
+
+describe("save-aware recovery migration", () => {
+  it("offers protected recovery after the original PDF moves", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    const moved = join(directory, "moved-paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\noriginal\n%%EOF");
+    const recoveryRoot = join(directory, "recovery");
+    const first = new SessionBroker({ recoveryRoot, portableReader: async () => [] });
+    const opened = await first.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected opened review");
+    await first.establishSaveDestination(opened.launch.sessionId, {
+      kind: "original",
+      targetPath: pdf,
+      capabilityId: opened.launch.fileId,
+      fingerprint: await hashFile(pdf),
+    });
+    await first.acceptMutation(opened.launch.sessionId, addCommand(0));
+    await rename(pdf, moved);
+
+    const restarted = new SessionBroker({ recoveryRoot, portableReader: async () => [] });
+    const offered = await restarted.openReview({ pdfPath: moved });
+    expect(offered).toMatchObject({
+      kind: "recovery-offered",
+      recoverySessionId: opened.launch.sessionId,
+    });
+    const resumed = await restarted.openReview({ pdfPath: moved, recoveryDecision: "resume" });
+    if (resumed.kind !== "opened") throw new Error("Expected resumed review");
+    expect(restarted.sessionScope(resumed.launch.sessionId)?.documentTitle).toBe("moved-paper.pdf");
+    expect(restarted.saveStatus(resumed.launch.sessionId)).toMatchObject({
+      destination: { phase: "active", kind: "original" },
+      sync: { phase: "not-saved" },
+    });
+    const destination = restarted.saveStatus(resumed.launch.sessionId)?.destination;
+    expect(destination?.phase === "active" ? destination.targetPath : "")
+      .toMatch(/\/moved-paper\.pdf$/u);
+  });
+
+  it("re-authorizes an original save destination when recovery resumes", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\noriginal\n%%EOF");
+    const recoveryRoot = join(directory, "recovery");
+    const first = new SessionBroker({ recoveryRoot, portableReader: async () => [] });
+    const opened = await first.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected opened review");
+    await first.establishSaveDestination(opened.launch.sessionId, {
+      kind: "original",
+      targetPath: pdf,
+      capabilityId: opened.launch.fileId,
+      fingerprint: await hashFile(pdf),
+    });
+    await first.acceptMutation(opened.launch.sessionId, addCommand(0));
+
+    const restarted = new SessionBroker({ recoveryRoot, portableReader: async () => [] });
+    const resumed = await restarted.openReview({
+      pdfPath: pdf,
+      recoveryDecision: "resume",
+    });
+    if (resumed.kind !== "opened") throw new Error("Expected resumed review");
+    const status = restarted.saveStatus(resumed.launch.sessionId);
+    expect(status).toMatchObject({
+      destination: {
+        phase: "active",
+        kind: "original",
+        capabilityId: resumed.launch.fileId,
+      },
+      sync: { phase: "not-saved" },
+    });
+    await expect(
+      restarted.capabilities.validateOriginalForReplacement(
+        resumed.launch.fileId,
+        await hashFile(pdf),
+      ),
+    ).resolves.toBe(status?.destination.phase === "active"
+      ? status.destination.targetPath
+      : undefined);
+  });
+
+  it("re-authorizes an unchanged copy and protects recovery when it is missing", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    const copy = join(directory, "paper-annotated.pdf");
+    await writeFile(pdf, "%PDF-1.7\noriginal\n%%EOF");
+    await writeFile(copy, "%PDF-1.7\nsaved copy\n%%EOF");
+    const recoveryRoot = join(directory, "recovery");
+    const first = new SessionBroker({ recoveryRoot, portableReader: async () => [] });
+    const opened = await first.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected opened review");
+    const oldCapability = await first.capabilities.preauthorizeDestination(copy);
+    const copyDigest = await hashFile(copy);
+    await first.capabilities.refreshDestination(oldCapability.id, copyDigest);
+    await first.establishSaveDestination(opened.launch.sessionId, {
+      kind: "copy",
+      targetPath: copy,
+      capabilityId: oldCapability.id,
+      fingerprint: copyDigest,
+    });
+    await first.acceptMutation(opened.launch.sessionId, addCommand(0));
+
+    const restarted = new SessionBroker({ recoveryRoot, portableReader: async () => [] });
+    const resumed = await restarted.openReview({
+      pdfPath: pdf,
+      recoveryDecision: "resume",
+    });
+    if (resumed.kind !== "opened") throw new Error("Expected resumed review");
+    const active = restarted.saveStatus(resumed.launch.sessionId)?.destination;
+    if (active?.phase !== "active") throw new Error("Expected active destination");
+    expect(active.capabilityId).toBeDefined();
+    expect(active.capabilityId).not.toBe(oldCapability.id);
+    await expect(
+      restarted.capabilities.validateDestination(active.capabilityId!),
+    ).resolves.toBe(active.targetPath);
+
+    await first.discard(opened.launch.sessionId);
+    await restarted.discard(resumed.launch.sessionId);
+
+    const second = new SessionBroker({ recoveryRoot, portableReader: async () => [] });
+    const secondOpened = await second.openReview({ pdfPath: pdf });
+    if (secondOpened.kind !== "opened") throw new Error("Expected second review");
+    const secondCapability = await second.capabilities.preauthorizeDestination(copy);
+    await second.capabilities.refreshDestination(secondCapability.id, copyDigest);
+    await second.establishSaveDestination(secondOpened.launch.sessionId, {
+      kind: "copy",
+      targetPath: copy,
+      capabilityId: secondCapability.id,
+      fingerprint: copyDigest,
+    });
+    await second.acceptMutation(secondOpened.launch.sessionId, addCommand(0));
+    await rm(copy);
+
+    const missingRestart = new SessionBroker({ recoveryRoot, portableReader: async () => [] });
+    const missing = await missingRestart.openReview({
+      pdfPath: pdf,
+      recoveryDecision: "resume",
+    });
+    if (missing.kind !== "opened") throw new Error("Expected missing-copy recovery");
+    expect(missingRestart.saveStatus(missing.launch.sessionId)).toMatchObject({
+      destination: { phase: "active", kind: "copy" },
+      sync: { phase: "not-saved", failure: "missing" },
+    });
+    expect(
+      missingRestart.saveStatus(missing.launch.sessionId)?.destination,
+    ).not.toHaveProperty("capabilityId");
+  });
+
+  it("opens portable app annotations as a clean editable original-backed session", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "portable.pdf");
+    await writeFile(pdf, "%PDF-1.7\nportable\n%%EOF");
+    const command = addCommand(0, "Editable after reopen");
+    if (command.type !== "add") throw new Error("Expected add command");
+    const broker = new SessionBroker({
+      recoveryRoot: join(directory, "recovery"),
+      portableReader: async () => [command.item],
+    });
+
+    const opened = await broker.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected portable PDF to open");
+    expect(broker.state(opened.launch.sessionId)).toMatchObject({
+      revision: 0,
+      history: [],
+      historyCursor: 0,
+      items: [command.item],
+    });
+    expect(broker.saveStatus(opened.launch.sessionId)).toMatchObject({
+      destination: {
+        phase: "active",
+        kind: "original",
+        capabilityId: opened.launch.fileId,
+      },
+      sync: { phase: "clean", savedRevision: 0 },
+    });
+  });
+
+  it("keeps portable marks visible but offers no destination for a restricted PDF", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "restricted.pdf");
+    await writeFile(pdf, "%PDF-1.7\nrestricted\n%%EOF");
+    const command = addCommand(0, "Already embedded");
+    if (command.type !== "add") throw new Error("Expected add command");
+    const broker = new SessionBroker({
+      recoveryRoot: join(directory, "recovery"),
+      portableReader: async () => [command.item],
+      rewriteAssessor: async () => ({
+        eligible: false,
+        code: "permission-denied",
+        message: "This PDF does not permit annotations.",
+      }),
+    });
+    const opened = await broker.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected restricted PDF to open");
+    expect(broker.state(opened.launch.sessionId)?.items).toEqual([command.item]);
+    expect(broker.saveStatus(opened.launch.sessionId)).toMatchObject({
+      destination: { phase: "none" },
+      rewriteEligibility: { eligible: false, code: "permission-denied" },
+      sync: { phase: "clean" },
+    });
+  });
+
+  it("migrates v1 drafts idempotently and suppresses clean viewer-only sessions", async () => {
+    const directory = await temporaryDirectory();
+    const store = new DraftSnapshotStore(join(directory, "legacy"));
+    await store.persist(draft(1));
+    const migrated = await store.recover();
+    expect(migrated).toMatchObject({
+      schemaVersion: 2,
+      destination: { phase: "none", generation: 0 },
+      sync: { phase: "not-saved", desiredRevision: 1, failure: "destination-unconfigured" },
+    });
+    await store.persist(migrated!);
+    await expect(store.recover()).resolves.toEqual(migrated);
+
+    const pdf = join(directory, "viewer.pdf");
+    await writeFile(pdf, "%PDF-1.7\nviewer only\n%%EOF");
+    const recoveryRoot = join(directory, "viewer-recovery");
+    const first = new SessionBroker({ recoveryRoot, portableReader: async () => [] });
+    const opened = await first.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected opened viewer");
+    const restarted = new SessionBroker({ recoveryRoot, portableReader: async () => [] });
+    const reopened = await restarted.openReview({ pdfPath: pdf });
+    expect(reopened.kind).toBe("opened");
   });
 });
 

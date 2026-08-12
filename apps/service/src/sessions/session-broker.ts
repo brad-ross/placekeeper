@@ -7,9 +7,12 @@ import {
 } from "../../../../packages/core/src/annotation-projection.js";
 import type {
   ReviewCommand,
+  ReviewItem,
   ReviewState,
 } from "../../../../packages/core/src/review-model.js";
+import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import { createReviewState } from "../../../../packages/core/src/review-model.js";
+import { createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
 import { reduceReview } from "../../../../packages/core/src/review-reducer.js";
 import { SessionCredentialStore } from "../../../../packages/core/src/session-security.js";
 import {
@@ -18,7 +21,11 @@ import {
 } from "../files/file-capabilities.js";
 import {
   DraftSnapshotStore,
-  type RecoverableDraft,
+  reviewStateDigest,
+  type DurableSaveDestination,
+  type DurableSaveSync,
+  type RecoverableDraftV2,
+  type SaveFailureReason,
   type SnapshotHooks,
 } from "../recovery/draft-snapshot.js";
 import {
@@ -26,6 +33,10 @@ import {
   ensurePrivateDirectory,
 } from "../recovery/source-snapshot.js";
 import type { FrozenReviewDelivery } from "../export/export-coordinator.js";
+import {
+  assessPdfRewriteEligibility,
+  readPortableReviewItems,
+} from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { SessionControlRegistry } from "./control-socket.js";
 
 export type RecoveryDecision = "resume" | "discard" | "fork";
@@ -54,7 +65,7 @@ export type OpenReviewResult =
 
 interface ActiveSession {
   readonly id: string;
-  readonly canonicalSourcePath: string;
+  canonicalSourcePath: string;
   readonly sourceSnapshotPath: string;
   readonly store: DraftSnapshotStore;
   readonly fileId: string;
@@ -65,6 +76,9 @@ interface ActiveSession {
   acceptedOriginalDigests: string[];
   ending: boolean;
   writeTail: Promise<void>;
+  destination: DurableSaveDestination;
+  sync: DurableSaveSync;
+  rewriteEligibility: PdfRewriteEligibility;
 }
 
 export interface SessionBrokerOptions {
@@ -74,6 +88,8 @@ export interface SessionBrokerOptions {
   readonly controls?: SessionControlRegistry;
   readonly now?: () => Date;
   readonly snapshotHooks?: SnapshotHooks;
+  readonly portableReader?: (bytes: Uint8Array) => Promise<readonly ReviewItem[]>;
+  readonly rewriteAssessor?: (bytes: Uint8Array) => Promise<PdfRewriteEligibility>;
 }
 
 function activeKey(path: string, digest: string): string {
@@ -87,6 +103,8 @@ export class SessionBroker {
   readonly controls: SessionControlRegistry;
   readonly #now: () => Date;
   readonly #snapshotHooks: SnapshotHooks;
+  readonly #portableReader: (bytes: Uint8Array) => Promise<readonly ReviewItem[]>;
+  readonly #rewriteAssessor: (bytes: Uint8Array) => Promise<PdfRewriteEligibility>;
   readonly #activeById = new Map<string, ActiveSession>();
   readonly #activeBySource = new Map<string, string>();
 
@@ -97,6 +115,11 @@ export class SessionBroker {
     this.controls = options.controls ?? new SessionControlRegistry();
     this.#now = options.now ?? (() => new Date());
     this.#snapshotHooks = options.snapshotHooks ?? {};
+    this.#portableReader = options.portableReader ?? readPortableReviewItems;
+    this.#rewriteAssessor = options.rewriteAssessor ??
+      (options.portableReader === undefined
+        ? assessPdfRewriteEligibility
+        : async () => ({ eligible: true }));
   }
 
   #store(sessionId: string): DraftSnapshotStore {
@@ -118,7 +141,7 @@ export class SessionBroker {
     );
   }
 
-  async #recoverableDrafts(): Promise<RecoverableDraft[]> {
+  async #recoverableDrafts(): Promise<RecoverableDraftV2[]> {
     await this.initialize();
     const entries = await readdir(this.recoveryRoot, { withFileTypes: true });
     const recovered = await Promise.all(
@@ -129,7 +152,7 @@ export class SessionBroker {
         ),
     );
     return recovered.filter(
-      (draft): draft is RecoverableDraft => draft !== undefined,
+      (draft): draft is RecoverableDraftV2 => draft !== undefined,
     );
   }
 
@@ -148,6 +171,9 @@ export class SessionBroker {
     await this.initialize();
     const approvedFile = await this.capabilities.approvePdf(request.pdfPath);
     const sourceDigest = await hashFile(approvedFile.canonicalPath);
+    const rewriteEligibility = await this.#rewriteAssessor(
+      new Uint8Array(await readFile(approvedFile.canonicalPath)),
+    );
     const key = activeKey(approvedFile.canonicalPath, sourceDigest);
     const existingSessionId = this.#activeBySource.get(key);
     if (existingSessionId !== undefined && request.recoveryDecision !== "fork") {
@@ -158,12 +184,26 @@ export class SessionBroker {
     }
 
     const drafts = await this.#recoverableDrafts();
-    const matchingDraft = drafts.find(
+    const identityMatches = drafts.filter(
       (draft) =>
-        draft.canonicalSourcePath === approvedFile.canonicalPath &&
+        draft.sync.phase !== "clean" &&
         (draft.state.source.digest === sourceDigest ||
-          draft.acceptedOriginalDigests?.includes(sourceDigest) === true),
+          draft.acceptedOriginalDigests?.includes(sourceDigest) === true ||
+          (draft.destination.phase === "active" &&
+            draft.destination.kind === "original" &&
+            draft.destination.fingerprint === sourceDigest)),
     );
+    const pathMatch = identityMatches.find(
+      (draft) => draft.canonicalSourcePath === approvedFile.canonicalPath,
+    );
+    const movedOriginalMatches = identityMatches.filter(
+      (draft) =>
+        draft.destination.phase === "active" &&
+        draft.destination.kind === "original" &&
+        draft.destination.fingerprint === sourceDigest,
+    );
+    const matchingDraft = pathMatch ??
+      (movedOriginalMatches.length === 1 ? movedOriginalMatches[0] : undefined);
 
     if (matchingDraft !== undefined && request.recoveryDecision === undefined) {
       this.capabilities.revokeFile(approvedFile.id);
@@ -200,6 +240,48 @@ export class SessionBroker {
         ...(approvedRoot === undefined ? {} : { sourceRootId: approvedRoot.id }),
       };
       if (approvedRoot === undefined) delete (resumedState as { sourceRootId?: string }).sourceRootId;
+      let destination = matchingDraft.destination;
+      let sync = matchingDraft.sync.phase === "saving"
+        ? { ...matchingDraft.sync, phase: "not-saved" as const, failure: "write-failed" as const }
+        : matchingDraft.sync;
+      if (destination.phase === "active" && destination.kind === "original") {
+        destination = {
+          ...destination,
+          targetPath: approvedFile.canonicalPath,
+          capabilityId: approvedFile.id,
+          fingerprint: sourceDigest,
+        };
+      } else if (destination.phase === "active" && destination.kind === "copy") {
+        try {
+          const capability = await this.capabilities.preauthorizeDestination(
+            destination.targetPath,
+          );
+          if (destination.fingerprint === undefined) {
+            if (capability.existingTarget !== undefined) {
+              throw new Error("Unidentified recovery target already exists");
+            }
+          } else {
+            await this.capabilities.refreshDestination(
+              capability.id,
+              destination.fingerprint,
+            );
+          }
+          destination = {
+            ...destination,
+            targetPath: join(capability.parentPath, capability.filename),
+            capabilityId: capability.id,
+          };
+        } catch (error) {
+          const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
+          const { capabilityId: _staleCapabilityId, ...unboundDestination } = destination;
+          destination = unboundDestination;
+          sync = {
+            ...sync,
+            phase: "not-saved",
+            failure: missing ? "missing" : "target-changed",
+          };
+        }
+      }
       const session: ActiveSession = {
         id: matchingDraft.state.sessionId,
         canonicalSourcePath: approvedFile.canonicalPath,
@@ -215,7 +297,11 @@ export class SessionBroker {
         acceptedOriginalDigests: [...(matchingDraft.acceptedOriginalDigests ?? [])],
         writeTail: Promise.resolve(),
         ending: false,
+        destination,
+        sync,
+        rewriteEligibility,
       };
+      await session.store.persist(this.#draft(session));
       this.#activate(session);
       return { kind: "opened", launch: this.#launch(session) };
     }
@@ -226,15 +312,49 @@ export class SessionBroker {
       approvedFile.canonicalPath,
       sessionDirectory,
     );
-    const state = createReviewState({
-      sessionId,
-      source: {
-        fileId: approvedFile.id,
-        digest: sourceSnapshot.digest,
-        byteLength: sourceSnapshot.byteLength,
-      },
-      ...(approvedRoot === undefined ? {} : { sourceRootId: approvedRoot.id }),
-    });
+    const source = {
+      fileId: approvedFile.id,
+      digest: sourceSnapshot.digest,
+      byteLength: sourceSnapshot.byteLength,
+    };
+    let importedItems: readonly ReviewItem[] = [];
+    try {
+      importedItems = await this.#portableReader(
+        new Uint8Array(await readFile(sourceSnapshot.path)),
+      );
+    } catch {
+      importedItems = [];
+    }
+    const state = importedItems.length === 0
+      ? createReviewState({
+          sessionId,
+          source,
+          ...(approvedRoot === undefined ? {} : { sourceRootId: approvedRoot.id }),
+        })
+      : createImportedReviewState({
+          sessionId,
+          source,
+          ...(approvedRoot === undefined ? {} : { sourceRootId: approvedRoot.id }),
+          items: importedItems,
+        });
+    const digest = reviewStateDigest(state);
+    const destination: DurableSaveDestination = importedItems.length === 0 || !rewriteEligibility.eligible
+      ? { phase: "none", generation: 0 }
+      : {
+          phase: "active",
+          generation: 1,
+          kind: "original",
+          targetPath: approvedFile.canonicalPath,
+          capabilityId: approvedFile.id,
+          fingerprint: sourceSnapshot.digest,
+        };
+    const sync: DurableSaveSync = {
+      phase: "clean",
+      desiredRevision: state.revision,
+      desiredDigest: digest,
+      savedRevision: state.revision,
+      savedDigest: digest,
+    };
     const session: ActiveSession = {
       id: sessionId,
       canonicalSourcePath: approvedFile.canonicalPath,
@@ -247,6 +367,9 @@ export class SessionBroker {
       acceptedOriginalDigests: [],
       ending: false,
       writeTail: Promise.resolve(),
+      destination,
+      sync,
+      rewriteEligibility,
     };
     await session.store.persist(this.#draft(session));
     this.#activate(session);
@@ -265,9 +388,9 @@ export class SessionBroker {
     );
   }
 
-  #draft(session: ActiveSession): RecoverableDraft {
+  #draft(session: ActiveSession): RecoverableDraftV2 {
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       canonicalSourcePath: session.canonicalSourcePath,
       sourceSnapshotPath: session.sourceSnapshotPath,
       state: session.state,
@@ -278,6 +401,8 @@ export class SessionBroker {
       ...(session.acceptedOriginalDigests.length === 0
         ? {}
         : { acceptedOriginalDigests: [...session.acceptedOriginalDigests] }),
+      destination: session.destination,
+      sync: session.sync,
     };
   }
 
@@ -295,6 +420,228 @@ export class SessionBroker {
 
   state(sessionId: string): ReviewState | undefined {
     return this.#activeById.get(sessionId)?.state;
+  }
+
+  saveStatus(sessionId: string):
+    | {
+        readonly destination: DurableSaveDestination;
+        readonly sync: DurableSaveSync;
+        readonly rewriteEligibility: PdfRewriteEligibility;
+      }
+    | undefined {
+    const session = this.#activeById.get(sessionId);
+    return session === undefined
+      ? undefined
+      : {
+          destination: session.destination,
+          sync: session.sync,
+          rewriteEligibility: session.rewriteEligibility,
+        };
+  }
+
+  async #withSessionTail<T>(
+    session: ActiveSession,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const predecessor = session.writeTail;
+    const { promise, resolve: release } = Promise.withResolvers<void>();
+    session.writeTail = promise;
+    await predecessor;
+    try {
+      return await work();
+    } finally {
+      release();
+    }
+  }
+
+  async #recordCommittedSave(
+    session: ActiveSession,
+    input: {
+      readonly revision: number;
+      readonly stateDigest: string;
+      readonly targetDigest: string;
+    },
+  ): Promise<boolean> {
+    if (session.destination.phase !== "active") {
+      throw new Error("Save destination is not active");
+    }
+    const current =
+      session.state.revision === input.revision &&
+      session.sync.desiredDigest === input.stateDigest;
+    const destination: DurableSaveDestination = {
+      ...session.destination,
+      fingerprint: input.targetDigest,
+    };
+    const sync: DurableSaveSync = {
+      phase: current ? "clean" : "saving",
+      desiredRevision: session.state.revision,
+      desiredDigest: session.sync.desiredDigest,
+      savedRevision: input.revision,
+      savedDigest: input.stateDigest,
+    };
+    const acceptedOriginalDigests = destination.kind === "original"
+      ? [...new Set([...session.acceptedOriginalDigests, input.targetDigest])]
+      : session.acceptedOriginalDigests;
+    await session.store.persist({
+      ...this.#draft(session),
+      destination,
+      sync,
+      ...(acceptedOriginalDigests.length === 0 ? {} : { acceptedOriginalDigests }),
+    });
+    session.destination = destination;
+    session.sync = sync;
+    if (destination.kind === "original") {
+      session.currentOriginalDigest = input.targetDigest;
+      session.acceptedOriginalDigests = acceptedOriginalDigests;
+    }
+    return current;
+  }
+
+  async establishSaveDestination(
+    sessionId: string,
+    input: {
+      readonly kind: "original" | "copy";
+      readonly targetPath: string;
+      readonly capabilityId: string;
+      readonly fingerprint?: string;
+    },
+  ): Promise<{ readonly destination: DurableSaveDestination; readonly sync: DurableSaveSync }> {
+    const session = this.#activeById.get(sessionId);
+    if (session === undefined || session.ending) throw new Error("Review session is not active");
+    return this.#withSessionTail(session, async () => {
+      if (session.ending) throw new Error("Review session is ending");
+      const generation = session.destination.generation + 1;
+      const destination: DurableSaveDestination = {
+        phase: "active",
+        generation,
+        kind: input.kind,
+        targetPath: input.targetPath,
+        capabilityId: input.capabilityId,
+        ...(input.fingerprint === undefined ? {} : { fingerprint: input.fingerprint }),
+      };
+      const sync: DurableSaveSync = {
+        phase: "saving",
+        desiredRevision: session.state.revision,
+        desiredDigest: session.sync.desiredDigest,
+        savedRevision: session.sync.savedRevision,
+        ...(session.sync.savedDigest === undefined ? {} : { savedDigest: session.sync.savedDigest }),
+      };
+      await session.store.persist({ ...this.#draft(session), destination, sync });
+      session.destination = destination;
+      session.sync = sync;
+      return { destination, sync };
+    });
+  }
+
+  async relocateOriginalDestination(
+    sessionId: string,
+    input: {
+      readonly targetPath: string;
+      readonly capabilityId: string;
+      readonly fingerprint: string;
+    },
+  ): Promise<{ readonly destination: DurableSaveDestination; readonly sync: DurableSaveSync }> {
+    const session = this.#activeById.get(sessionId);
+    if (session === undefined || session.ending) throw new Error("Review session is not active");
+    return this.#withSessionTail(session, async () => {
+      if (session.ending) throw new Error("Review session is ending");
+      const destination: DurableSaveDestination = {
+        phase: "active",
+        generation: session.destination.generation + 1,
+        kind: "original",
+        targetPath: input.targetPath,
+        capabilityId: input.capabilityId,
+        fingerprint: input.fingerprint,
+      };
+      const sync: DurableSaveSync = {
+        phase: "saving",
+        desiredRevision: session.state.revision,
+        desiredDigest: session.sync.desiredDigest,
+        savedRevision: session.sync.savedRevision,
+        ...(session.sync.savedDigest === undefined ? {} : { savedDigest: session.sync.savedDigest }),
+      };
+      await session.store.persist({
+        ...this.#draft(session),
+        canonicalSourcePath: input.targetPath,
+        destination,
+        sync,
+      });
+      for (const [key, owner] of this.#activeBySource) {
+        if (owner === sessionId) this.#activeBySource.delete(key);
+      }
+      session.canonicalSourcePath = input.targetPath;
+      session.destination = destination;
+      session.sync = sync;
+      this.#activate(session);
+      return { destination, sync };
+    });
+  }
+
+  async markSaveCommitted(input: {
+    readonly sessionId: string;
+    readonly generation: number;
+    readonly revision: number;
+    readonly stateDigest: string;
+    readonly targetDigest: string;
+  }): Promise<boolean> {
+    const session = this.#activeById.get(input.sessionId);
+    if (session === undefined || session.ending) return false;
+    return this.#withSessionTail(session, async () => {
+      if (
+        session.destination.phase !== "active" ||
+        session.destination.generation !== input.generation
+      ) return false;
+      return this.#recordCommittedSave(session, input);
+    });
+  }
+
+  async commitSaveCandidate(input: {
+    readonly sessionId: string;
+    readonly generation: number;
+    readonly revision: number;
+    readonly stateDigest: string;
+    readonly commit: () => Promise<string>;
+  }): Promise<"committed-current" | "committed-stale" | "generation-stale"> {
+    const session = this.#activeById.get(input.sessionId);
+    if (session === undefined || session.ending) return "generation-stale";
+    return this.#withSessionTail(session, async () => {
+      if (
+        session.destination.phase !== "active" ||
+        session.destination.generation !== input.generation
+      ) return "generation-stale";
+      const targetDigest = await input.commit();
+      const current = await this.#recordCommittedSave(session, {
+        revision: input.revision,
+        stateDigest: input.stateDigest,
+        targetDigest,
+      });
+      return current ? "committed-current" : "committed-stale";
+    });
+  }
+
+  async markSaveFailed(
+    sessionId: string,
+    generation: number,
+    failure: SaveFailureReason,
+  ): Promise<void> {
+    const session = this.#activeById.get(sessionId);
+    if (session === undefined || session.ending) return;
+    return this.#withSessionTail(session, async () => {
+      if (
+        session.destination.phase !== "active" ||
+        session.destination.generation !== generation
+      ) return;
+      const sync: DurableSaveSync = {
+        phase: "not-saved",
+        desiredRevision: session.state.revision,
+        desiredDigest: session.sync.desiredDigest,
+        savedRevision: session.sync.savedRevision,
+        ...(session.sync.savedDigest === undefined ? {} : { savedDigest: session.sync.savedDigest }),
+        failure,
+      };
+      await session.store.persist({ ...this.#draft(session), sync });
+      session.sync = sync;
+    });
   }
 
   sessionScope(sessionId: string):
@@ -369,14 +716,29 @@ export class SessionBroker {
     try {
       write.signal.throwIfAborted();
       const nextState = reduceReview(session.state, command);
-      const nextDraft: RecoverableDraft = {
+      const desiredDigest = reviewStateDigest(nextState);
+      const nextSync: DurableSaveSync = {
+        phase: session.destination.phase === "active" ? "saving" : "not-saved",
+        desiredRevision: nextState.revision,
+        desiredDigest,
+        savedRevision: session.sync.savedRevision,
+        ...(session.sync.savedDigest === undefined
+          ? {}
+          : { savedDigest: session.sync.savedDigest }),
+        ...(session.destination.phase === "active"
+          ? {}
+          : { failure: "destination-unconfigured" as const }),
+      };
+      const nextDraft: RecoverableDraftV2 = {
         ...this.#draft(session),
         state: nextState,
+        sync: nextSync,
         acknowledgedAt: this.#now().toISOString(),
       };
       await session.store.persist(nextDraft, write.signal);
       write.signal.throwIfAborted();
       session.state = nextState;
+      session.sync = nextSync;
       return nextState;
     } finally {
       write.complete();
