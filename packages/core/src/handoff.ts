@@ -29,6 +29,13 @@ export interface HandoffItem {
   readonly sourceHint?: SourceHint;
 }
 
+/**
+ * The model-readable Review Item projection is not specific to frozen handoffs.
+ * Keep the legacy name as the wire-compatible alias while live context and
+ * source-work protocols use the capability-neutral name.
+ */
+export type StructuredReviewItem = HandoffItem;
+
 export interface HandoffV1 {
   readonly schemaVersion: "1.0";
   readonly reviewId: string;
@@ -95,6 +102,8 @@ export function projectHandoffItem(item: ReviewItem, sourceHint?: SourceHint): H
     ...(sourceHint === undefined ? {} : { sourceHint }),
   };
 }
+
+export const projectStructuredReviewItem = projectHandoffItem;
 
 export function createHandoff(input: {
   readonly state: Pick<ReviewState, "sessionId" | "source" | "revision" | "items">;
