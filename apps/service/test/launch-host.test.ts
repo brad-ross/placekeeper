@@ -53,6 +53,102 @@ describe("persistent launch host", () => {
     expect(forked.sessionId).not.toBe(opened.sessionId);
   });
 
+  it("issues an independent bind proof only for a Codex launch", async () => {
+    const { pdf, host } = await fixture();
+    const browser = await host.open({ pdfPath: pdf, surface: "browser" });
+    const codex = await host.open({ pdfPath: pdf, surface: "codex" });
+    const finder = await host.open({ pdfPath: pdf, surface: "finder", fork: true });
+    if (
+      !browser.ok || browser.kind === "recovery-offered" ||
+      !codex.ok || codex.kind === "recovery-offered" ||
+      !finder.ok || finder.kind === "recovery-offered"
+    ) throw new Error("Expected launches");
+
+    expect(browser).not.toHaveProperty("bindProof");
+    expect(finder).not.toHaveProperty("bindProof");
+    expect(codex.documentGeneration).toBe(1);
+    expect(codex.bindProof).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(codex.url).not.toContain(codex.bindProof!);
+  });
+
+  it("activates a claimed task only after the authenticated Codex browser exchanges", async () => {
+    const { pdf, host } = await fixture();
+    const launched = await host.open({ pdfPath: pdf, surface: "codex" });
+    if (!launched.ok || launched.kind === "recovery-offered" || launched.bindProof === undefined) {
+      throw new Error("Expected Codex launch");
+    }
+    const launch = new URL(launched.url);
+    const capability = new URLSearchParams(launch.hash.slice(1)).get("cap")!;
+    expect(host.broker.taskBindings.claim({
+      bindProof: launched.bindProof,
+      taskSessionId: "codex-task-a",
+      reviewSessionId: launched.sessionId,
+      documentGeneration: 1,
+    })).toMatchObject({ status: "pending" });
+    expect(host.broker.taskBindings.bindingForTask("codex-task-a")).toBeUndefined();
+    expect((await fetch(`${launch.origin}/s/${launched.sessionId}/state`, {
+      headers: { authorization: `Bearer ${launched.bindProof}` },
+    })).status).toBe(401);
+
+    const exchanged = await fetch(`${launch.origin}/s/${launched.sessionId}/exchange`, {
+      method: "POST",
+      headers: {
+        origin: launch.origin,
+        "content-type": "application/json",
+        "sec-fetch-site": "same-origin",
+      },
+      body: JSON.stringify({ capability }),
+    });
+    const { credential } = await exchanged.json() as { credential: string };
+    expect(host.broker.taskBindings.bindingForTask("codex-task-a")).toMatchObject({
+      reviewSessionId: launched.sessionId,
+      documentGeneration: 1,
+    });
+
+    const scope = await fetch(`${launch.origin}/s/${launched.sessionId}/scope`, {
+      headers: { authorization: `Bearer ${credential}` },
+    });
+    const publicScope = await scope.text();
+    expect(JSON.parse(publicScope)).toMatchObject({
+      launchSurface: "codex",
+      codexContext: {
+        status: "refreshing",
+        proofreaderSessionId: launched.sessionId,
+        documentGeneration: 1,
+      },
+    });
+    expect(publicScope).not.toContain(launched.bindProof);
+    expect(publicScope).not.toContain(capability);
+
+    await host.broker.finish(launched.sessionId);
+    expect(host.broker.taskBindings.bindingForTask("codex-task-a")).toBeUndefined();
+  });
+
+  it("never exposes ambient Codex binding status to an ordinary browser launch", async () => {
+    const { pdf, host } = await fixture();
+    const launched = await host.open({ pdfPath: pdf, surface: "browser" });
+    if (!launched.ok || launched.kind === "recovery-offered") throw new Error("Expected launch");
+    const launch = new URL(launched.url);
+    const capability = new URLSearchParams(launch.hash.slice(1)).get("cap")!;
+    const exchanged = await fetch(`${launch.origin}/s/${launched.sessionId}/exchange`, {
+      method: "POST",
+      headers: {
+        origin: launch.origin,
+        "content-type": "application/json",
+        "sec-fetch-site": "same-origin",
+      },
+      body: JSON.stringify({ capability }),
+    });
+    const { credential } = await exchanged.json() as { credential: string };
+    const scope = await fetch(`${launch.origin}/s/${launched.sessionId}/scope`, {
+      headers: { authorization: `Bearer ${credential}` },
+    });
+    expect(await scope.json()).toMatchObject({ launchSurface: "browser" });
+    expect(await (await fetch(`${launch.origin}/s/${launched.sessionId}/scope`, {
+      headers: { authorization: `Bearer ${credential}` },
+    })).text()).not.toContain("codexContext");
+  });
+
   it("maps invalid input and unsupported roots to the two shared failures", async () => {
     const { root, pdf, host } = await fixture();
     const text = join(root, "not-a-pdf.txt");

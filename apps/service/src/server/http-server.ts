@@ -349,7 +349,11 @@ export async function startHttpServer(
         return;
       }
       if (scopeMatch !== null && request.method === "GET") {
-        sendJson(response, 200, broker.sessionScope(scopeMatch[1]!));
+        sendJson(
+          response,
+          200,
+          broker.sessionScope(scopeMatch[1]!, bearerCredential(request)),
+        );
         return;
       }
       if (saveMatch !== null) {
@@ -557,6 +561,7 @@ export async function startHttpServer(
       close: () =>
       new Promise<void>((resolve, reject) => {
         broker.controls.closeAllSockets();
+        broker.taskBindings.revokeAll();
         assetCapabilities.clear();
         server.close((error) => (error === undefined ? resolve() : reject(error)));
         server.closeAllConnections();

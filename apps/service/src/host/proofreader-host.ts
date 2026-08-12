@@ -1,4 +1,7 @@
-import type { RecoveryDecision } from "../sessions/session-broker.js";
+import type {
+  LaunchSurface as BrokerLaunchSurface,
+  RecoveryDecision,
+} from "../sessions/session-broker.js";
 import { SessionBroker } from "../sessions/session-broker.js";
 import { ReviewDeliveryService } from "../delivery/review-delivery-service.js";
 import {
@@ -10,7 +13,7 @@ import { createSelectedPdfWriter } from "../../../../packages/pdf-backends/src/s
 import { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import { MacOsDestinationPicker } from "./destination-picker.js";
 
-export type LaunchSurface = "browser" | "finder" | "codex" | "vscode";
+export type LaunchSurface = BrokerLaunchSurface;
 
 export interface LaunchRequest {
   readonly pdfPath: string;
@@ -34,6 +37,8 @@ export type LaunchResponse =
       readonly kind: "opened" | "focused";
       readonly url: string;
       readonly sessionId: string;
+      readonly documentGeneration: number;
+      readonly bindProof?: string;
     }
   | {
       readonly ok: true;
@@ -76,6 +81,14 @@ function launchUrl(
   return url.href;
 }
 
+function trustedSurface(value: LaunchRequest["surface"]): LaunchSurface {
+  const surface = value ?? "browser";
+  if (!["browser", "finder", "codex", "vscode"].includes(surface)) {
+    throw new TypeError("Unsupported launch surface");
+  }
+  return surface;
+}
+
 /** One long-lived host owns the only broker and HTTP authority used by all launchers. */
 export class ProofreaderHost {
   readonly broker: SessionBroker;
@@ -110,12 +123,14 @@ export class ProofreaderHost {
     const recoveryDecision: RecoveryDecision | undefined =
       request.fork === true ? "fork" : request.recovery;
     try {
+      const surface = trustedSurface(request.surface);
       const opened = await this.broker.openReview({
         pdfPath: request.pdfPath,
         ...(request.sourceRootPath === undefined
           ? {}
           : { sourceRootPath: request.sourceRootPath }),
         ...(recoveryDecision === undefined ? {} : { recoveryDecision }),
+        surface,
       });
       if (opened.kind === "recovery-offered") {
         return {
@@ -128,8 +143,12 @@ export class ProofreaderHost {
       return {
         ok: true,
         kind: opened.kind,
-        url: launchUrl(this.server.origin, opened.launch, request.surface ?? "browser"),
+        url: launchUrl(this.server.origin, opened.launch, surface),
         sessionId: opened.launch.sessionId,
+        documentGeneration: opened.launch.documentGeneration,
+        ...(opened.launch.bindProof === undefined
+          ? {}
+          : { bindProof: opened.launch.bindProof }),
       };
     } catch (error) {
       return request.sourceRootPath === undefined
