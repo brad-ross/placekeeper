@@ -5,37 +5,59 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   test:
-    runs-on: macos-15
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
         with:
           version: 11.16.0
-      - uses: actions/setup-node@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 24.14.0
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install chromium webkit
-      - run: pnpm lint
-      - run: pnpm typecheck
-      - run: pnpm test:pdf-conformance
-      - run: pnpm test:service
-      - run: pnpm test:u4
-      - run: pnpm test:u5
-      - run: pnpm test:u6
-      - run: pnpm test:u7-host
-      - run: pnpm test:e2e
-      - run: pnpm test:e2e:webkit
-      - run: pnpm test:visual
-      - run: pnpm validate:distribution
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Install Playwright browsers and system dependencies
+        if: github.event_name == 'pull_request'
+        run: pnpm exec playwright install --with-deps chromium webkit
+      - name: Generate PDF fixtures
+        if: github.event_name == 'pull_request'
+        run: pnpm fixtures:pdf
+      - name: Run canonical unit tests
+        if: github.event_name == 'pull_request'
+        run: pnpm test:ci:unit
+      - name: Build web distribution
+        if: github.event_name == 'pull_request'
+        run: pnpm build:web
+      - name: Run Chromium acceptance tests
+        if: github.event_name == 'pull_request'
+        run: pnpm test:ci:chromium
+      - name: Run WebKit acceptance tests
+        if: github.event_name == 'pull_request'
+        run: pnpm test:ci:webkit
+      - name: Run visual regression tests
+        if: github.event_name == 'pull_request'
+        run: pnpm test:ci:visual
+      - name: Validate distribution manifest
+        if: github.event_name == 'pull_request'
+        run: pnpm validate:distribution
       - name: Upload Playwright failure artifacts
-        if: failure()
+        if: failure() && github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: playwright-failure-artifacts

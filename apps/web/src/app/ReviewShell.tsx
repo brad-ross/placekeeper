@@ -1159,7 +1159,8 @@ export function ReviewShell(props: ReviewShellProps) {
                 }
               }}
             />
-            <section className="existing-annotations" data-existing-annotations-state={existingAnnotations.status} aria-label="External Annotations (read only)">
+            {existingAnnotations.status === 'empty' ? null : (
+              <section className="existing-annotations" data-existing-annotations-state={existingAnnotations.status} aria-label="External Annotations (read only)">
               <header className="existing-annotations__header">
                 <h2>External Annotations (read only)</h2>
               </header>
@@ -1169,7 +1170,6 @@ export function ReviewShell(props: ReviewShellProps) {
                   <span>Existing annotations are loading…</span>
                 </p>
               ) : null}
-              {existingAnnotations.status === 'empty' ? <p className="annotation-empty" data-annotation-status="empty">No existing annotations.</p> : null}
               {existingAnnotations.status === 'error' ? (
                 <div className="annotation-status annotation-status--error" data-annotation-status="error" role="alert">
                   <ReviewIcon name="alert" className="review-icon annotation-status__icon" />
@@ -1208,7 +1208,8 @@ export function ReviewShell(props: ReviewShellProps) {
                   })}
                 </ol>
               ) : null}
-            </section>
+              </section>
+            )}
             </div>}
             search={props.search ?? (
               <div className="workspace-state" data-workspace-focus-token="search:unavailable" tabIndex={-1}>

@@ -30,6 +30,9 @@ jobs:
       - run: pnpm validate:distribution
       - run: pnpm fixtures:pdf
       - run: pnpm build
+      - name: Validate macOS packaging contracts
+        if: matrix.arch == 'arm64'
+        run: pnpm exec vitest run packaging/macos/packaging.test.ts
       - name: Import Developer ID certificate
         env:
           CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
