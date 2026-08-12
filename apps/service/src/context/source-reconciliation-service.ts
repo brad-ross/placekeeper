@@ -529,6 +529,16 @@ export class SourceReconciliationService {
     this.#executionIdsByTask.delete(taskSessionId);
   }
 
+  discardExecution(taskSessionId: string, executionId: string): void {
+    const record = this.#records.get(executionId);
+    if (record?.taskSessionId !== taskSessionId) return;
+    this.#records.delete(executionId);
+    const remaining = (this.#executionIdsByTask.get(taskSessionId) ?? [])
+      .filter((candidate) => candidate !== executionId);
+    if (remaining.length === 0) this.#executionIdsByTask.delete(taskSessionId);
+    else this.#executionIdsByTask.set(taskSessionId, remaining);
+  }
+
   #record(taskSessionId: string, executionId: string): ExecutionRecord {
     const record = this.#records.get(executionId);
     if (record === undefined || record.taskSessionId !== taskSessionId) {

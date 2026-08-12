@@ -78,7 +78,7 @@ interface ActiveSession {
   readonly sourceSnapshotPath: string;
   readonly store: DraftSnapshotStore;
   readonly fileId: string;
-  readonly rootId?: string;
+  rootId?: string;
   state: ReviewState;
   lastExportAt?: string;
   currentOriginalDigest: string;
@@ -150,6 +150,7 @@ export class SessionBroker {
   readonly #activeBySource = new Map<string, string>();
   readonly #bootstrapScopes = new Map<string, BrowserLaunchScope>();
   readonly #credentialScopes = new Map<string, BrowserLaunchScope>();
+  readonly #sessionEndListeners = new Set<(sessionId: string) => void>();
 
   constructor(options: SessionBrokerOptions) {
     this.recoveryRoot = options.recoveryRoot;
@@ -166,6 +167,11 @@ export class SessionBroker {
       (options.portableReader === undefined
         ? assessPdfRewriteEligibility
         : async () => ({ eligible: true }));
+  }
+
+  onSessionEnd(listener: (sessionId: string) => void): () => void {
+    this.#sessionEndListeners.add(listener);
+    return () => this.#sessionEndListeners.delete(listener);
   }
 
   #store(sessionId: string): DraftSnapshotStore {
@@ -242,6 +248,9 @@ export class SessionBroker {
       this.capabilities.revokeFile(approvedFile.id);
       const session = this.#activeById.get(existingSessionId);
       if (session === undefined) throw new Error("Active session index is inconsistent");
+      if (request.sourceRootPath !== undefined) {
+        await this.#attachSourceRoot(session, request.sourceRootPath);
+      }
       return {
         kind: "focused",
         launch: this.#launch(session, request.surface ?? "browser"),
@@ -447,6 +456,35 @@ export class SessionBroker {
       kind: "opened",
       launch: this.#launch(session, request.surface ?? "browser"),
     };
+  }
+
+  async #attachSourceRoot(session: ActiveSession, sourceRootPath: string): Promise<void> {
+    const approvedRoot = await this.capabilities.approveRoot(sourceRootPath);
+    const predecessor = session.writeTail;
+    const { promise, resolve: release } = Promise.withResolvers<void>();
+    session.writeTail = promise;
+    await predecessor;
+    try {
+      if (session.ending) throw new Error("Review session is ending");
+      const previousRootId = session.rootId;
+      const nextState: ReviewState = {
+        ...session.state,
+        sourceRootId: approvedRoot.id,
+      };
+      const nextDraft: RecoverableDraftV2 = {
+        ...this.#draft(session),
+        state: nextState,
+      };
+      await session.store.persist(nextDraft);
+      session.rootId = approvedRoot.id;
+      session.state = nextState;
+      if (previousRootId !== undefined) this.capabilities.revokeRoot(previousRootId);
+    } catch (error) {
+      this.capabilities.revokeRoot(approvedRoot.id);
+      throw error;
+    } finally {
+      release();
+    }
   }
 
   #activate(session: ActiveSession): void {
@@ -745,12 +783,23 @@ export class SessionBroker {
     const sourceRootPath = session.rootId === undefined
       ? undefined
       : this.capabilities.getRootPath(session.rootId);
-    const launchScope = credential === undefined
+    const launchScope = credential === undefined || !this.authenticate(sessionId, credential)
       ? undefined
       : this.#credentialScopes.get(digestSecretHex(credential));
     const trustedLaunchScope = launchScope?.sessionId === sessionId
       ? launchScope
       : undefined;
+    const trustedCodexScope =
+      trustedLaunchScope?.surface === "codex" &&
+      trustedLaunchScope.documentGeneration === session.documentGeneration
+        ? trustedLaunchScope
+        : undefined;
+    if (trustedCodexScope !== undefined) {
+      this.taskBindings.renewBrowserHeartbeat({
+        reviewSessionId: sessionId,
+        documentGeneration: session.documentGeneration,
+      });
+    }
     return {
       documentTitle: basename(session.canonicalSourcePath),
       ...(sourceRootPath === undefined ? {} : { sourceRootPath }),
@@ -761,7 +810,11 @@ export class SessionBroker {
         ? {
             codexContext: this.taskBindings.statusForReview(
               sessionId,
-              trustedLaunchScope.documentGeneration,
+              {
+                documentGeneration: session.documentGeneration,
+                reviewRevision: session.state.revision,
+                sourceDigest: session.state.source.digest,
+              },
             ),
           }
         : {}),
@@ -1063,5 +1116,6 @@ export class SessionBroker {
     this.capabilities.revokeFile(session.fileId);
     if (session.rootId !== undefined) this.capabilities.revokeRoot(session.rootId);
     await session.store.remove();
+    for (const listener of this.#sessionEndListeners) listener(sessionId);
   }
 }

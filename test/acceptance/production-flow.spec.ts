@@ -2567,6 +2567,7 @@ test("shows command conflicts until a retry succeeds", async ({ page }) => {
     pdf,
     "Fresh command-conflict production launch failed",
   );
+  await chooseFreshCopyDestination(page);
 
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();

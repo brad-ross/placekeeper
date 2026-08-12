@@ -18,6 +18,7 @@ const DEFAULT_HANDLE_TTL_MS = 5 * 60_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_ANNOTATION_PAGE_SIZE = 1_000;
 const MAX_REVIEW_ITEM_PAGE_SIZE = 256;
+const MAX_EVIDENCE_RECORDS = 256;
 
 export type PdfEvidenceRequest =
   | { readonly kind: "document"; readonly maxBytes?: number }
@@ -193,6 +194,7 @@ export class PdfEvidenceService {
     };
     this.#deleteRecord(recordKey);
     this.#records.set(recordKey, record);
+    this.#trimRecords();
     const pages = input.pageCount === 0
       ? undefined
       : { start: 0, end: input.pageCount - 1 };
@@ -226,12 +228,28 @@ export class PdfEvidenceService {
     this.#deleteRecord(digest(handle));
   }
 
+  revokeTask(taskSessionId: string): void {
+    for (const [key, record] of this.#records) {
+      if (record.taskSessionId === taskSessionId) this.#deleteRecord(key);
+    }
+  }
+
+  revokeSession(reviewSessionId: string): void {
+    for (const [key, record] of this.#records) {
+      if (record.identity.proofreaderSessionId === reviewSessionId) this.#deleteRecord(key);
+    }
+  }
+
+  revokeAll(): void {
+    for (const key of [...this.#records.keys()]) this.#deleteRecord(key);
+  }
+
   /** Resolve the bound task behind a prompt-scoped handle without exposing the
    * task id in model context. Source-work commands use this as their bearer
    * boundary, then perform their own fresh observation before doing any work. */
   authorizeHandle(handle: string): EvidenceHandleAuthorization {
     const key = digest(handle);
-    const record = this.#records.get(key);
+    const record = this.#record(key);
     if (record === undefined) return { status: "unavailable", reason: "unauthorized" };
     if (record.expiresAtMs <= this.#now().getTime()) {
       this.#deleteRecord(key);
@@ -306,7 +324,7 @@ export class PdfEvidenceService {
     readonly handle: string;
     readonly request: PdfEvidenceRequest;
   }): Promise<PdfEvidenceRetrievalResult> {
-    const record = this.#records.get(digest(input.handle));
+    const record = this.#record(digest(input.handle));
     if (record === undefined || record.taskSessionId !== input.taskSessionId) {
       return unavailable("unauthorized");
     }
@@ -410,6 +428,22 @@ export class PdfEvidenceService {
     const now = this.#now().getTime();
     for (const [key, record] of this.#records) {
       if (record.expiresAtMs <= now) this.#deleteRecord(key);
+    }
+  }
+
+  #record(key: string): EvidenceRecord | undefined {
+    const record = this.#records.get(key);
+    if (record === undefined) return undefined;
+    this.#records.delete(key);
+    this.#records.set(key, record);
+    return record;
+  }
+
+  #trimRecords(): void {
+    while (this.#records.size > MAX_EVIDENCE_RECORDS) {
+      const oldest = this.#records.keys().next().value as string | undefined;
+      if (oldest === undefined) return;
+      this.#deleteRecord(oldest);
     }
   }
 

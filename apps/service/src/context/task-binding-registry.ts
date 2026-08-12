@@ -48,6 +48,12 @@ export interface ActiveTaskBinding {
   readonly lastVerified?: LiveObservationIdentity;
 }
 
+export interface LiveReviewIdentity {
+  readonly documentGeneration: number;
+  readonly reviewRevision: number;
+  readonly sourceDigest: string;
+}
+
 export type TaskBindingClaimResult =
   | { readonly status: "pending"; readonly expiresAt: string }
   | { readonly status: "active"; readonly leaseExpiresAt: string }
@@ -253,6 +259,27 @@ export class TaskBindingRegistry {
     return { status: "active", leaseExpiresAt: iso(active.leaseExpiresAtMs) };
   }
 
+  /** Renews the task already owning this exact review generation. The caller
+   * must first authenticate a Codex-scoped browser credential; no task id is
+   * accepted or returned across that browser boundary. */
+  renewBrowserHeartbeat(input: {
+    readonly reviewSessionId: string;
+    readonly documentGeneration: number;
+  }): BrowserActivationResult {
+    this.#sweep();
+    if (
+      !validId(input.reviewSessionId) ||
+      !validGeneration(input.documentGeneration)
+    ) return { status: "ignored" };
+    const active = this.#activeByReview.get(input.reviewSessionId);
+    if (
+      active === undefined ||
+      active.documentGeneration !== input.documentGeneration
+    ) return { status: "ignored" };
+    active.leaseExpiresAtMs = this.#nowMs() + this.#activeLeaseTtlMs;
+    return { status: "active", leaseExpiresAt: iso(active.leaseExpiresAtMs) };
+  }
+
   markVerified(taskSessionId: string, identity: LiveObservationIdentity): boolean {
     this.#sweep();
     const active = this.#activeByTask.get(taskSessionId);
@@ -281,41 +308,49 @@ export class TaskBindingRegistry {
 
   statusForReview(
     reviewSessionId: string,
-    documentGeneration: number,
+    live: LiveReviewIdentity,
   ): LiveContextBindingStatus {
     this.#sweep();
     const active = this.#activeByReview.get(reviewSessionId);
-    if (active?.documentGeneration === documentGeneration) {
-      return active.lastVerified === undefined
+    if (active?.documentGeneration === live.documentGeneration) {
+      const verified = active.lastVerified;
+      const verifiedCurrent =
+        verified !== undefined &&
+        verified.proofreaderSessionId === reviewSessionId &&
+        verified.documentGeneration === live.documentGeneration &&
+        verified.reviewRevision === live.reviewRevision &&
+        verified.source.digest === live.sourceDigest;
+      return !verifiedCurrent
         ? {
             status: "refreshing",
             proofreaderSessionId: reviewSessionId,
-            documentGeneration,
+            documentGeneration: live.documentGeneration,
+            ...(verified === undefined ? {} : { lastVerified: verified }),
           }
         : {
             status: "current",
-            identity: active.lastVerified,
+            identity: verified,
             leaseExpiresAt: iso(active.leaseExpiresAtMs),
           };
     }
     const pending = this.#pendingByReview.get(reviewSessionId);
-    if (pending?.documentGeneration === documentGeneration) {
+    if (pending?.documentGeneration === live.documentGeneration) {
       return {
         status: "pending",
         proofreaderSessionId: reviewSessionId,
-        documentGeneration,
+        documentGeneration: live.documentGeneration,
         expiresAt: iso(pending.expiresAtMs),
       };
     }
     for (const proof of this.#proofsByHash.values()) {
       if (
         proof.reviewSessionId === reviewSessionId &&
-        proof.documentGeneration === documentGeneration
+        proof.documentGeneration === live.documentGeneration
       ) {
         return {
           status: "pending",
           proofreaderSessionId: reviewSessionId,
-          documentGeneration,
+          documentGeneration: live.documentGeneration,
           expiresAt: iso(proof.expiresAtMs),
         };
       }

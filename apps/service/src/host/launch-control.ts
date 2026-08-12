@@ -32,6 +32,14 @@ import type { LaunchRequest, LaunchResponse, ProofreaderHost } from "./proofread
 // private control socket into an unbounded transport.
 const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 export const MAX_CONTROL_EVIDENCE_BYTES = 8 * 1024 * 1024;
+export const CONTROL_REQUEST_TIMEOUT_MS = 5_000;
+
+export class ProofreaderControlTimeoutError extends Error {
+  constructor() {
+    super("Proofreader service timed out");
+    this.name = "ProofreaderControlTimeoutError";
+  }
+}
 
 export type ProofreaderControlRequest =
   | { readonly kind: "launch"; readonly request: LaunchRequest }
@@ -225,6 +233,7 @@ async function dispatch(
     };
   }
   if (request.kind === "revoke-task") {
+    host.context.discardTask(request.taskSessionId);
     host.broker.taskBindings.revokeTask(request.taskSessionId);
     host.reconciliation.discardTask(request.taskSessionId);
     host.sourceWorkflow.discardTask(request.taskSessionId);
@@ -387,7 +396,8 @@ export function requestControl(
     const socket = createConnection(socketPath);
     let raw = "";
     socket.setEncoding("utf8");
-    socket.setTimeout(5_000, () => socket.destroy(new Error("Proofreader service timed out")));
+    socket.setTimeout(CONTROL_REQUEST_TIMEOUT_MS, () =>
+      socket.destroy(new ProofreaderControlTimeoutError()));
     socket.once("connect", () => socket.write(`${JSON.stringify(request)}\n`));
     socket.on("data", (chunk: string) => {
       raw += chunk;

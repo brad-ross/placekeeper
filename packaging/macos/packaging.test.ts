@@ -4,8 +4,17 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import {
+  CODEX_INSTALLED_LAUNCHER_COMMAND,
+  inspectHookEvent,
+} from "../../apps/service/src/cli/hook-command.js";
+import { CONTROL_REQUEST_TIMEOUT_MS } from "../../apps/service/src/host/launch-control.js";
 import { createNotarizationPlan } from "./notarize.js";
-import { validateAppBundleManifest, validateBackendRuntimeManifest } from "./validate-manifest.js";
+import {
+  validateAppBundleManifest,
+  validateBackendRuntimeManifest,
+  validateDistributionManifests,
+} from "./validate-manifest.js";
 import { finderServiceArgs } from "./launcher.mjs";
 import { validateDoctorEvidence } from "./smoke-installed.js";
 
@@ -117,6 +126,7 @@ describe("macOS distribution manifests", () => {
   });
 
   it("packages task-correlated Codex hooks through the installed executable", async () => {
+    await expect(validateDistributionManifests(resolve("."))).resolves.toBeUndefined();
     const plugin = JSON.parse(await readFile(resolve("integrations/codex-plugin/.codex-plugin/plugin.json"), "utf8")) as {
       description?: string;
       skills?: string;
@@ -127,16 +137,41 @@ describe("macOS distribution manifests", () => {
       interface: { longDescription: expect.stringContaining("every prompt") },
     });
     const hooks = JSON.parse(await readFile(resolve("integrations/codex-plugin/hooks/hooks.json"), "utf8")) as {
-      hooks?: Record<string, Array<{ hooks?: Array<{ command?: string; additionalContextLimit?: number }> }>>;
+      hooks?: Record<string, Array<{ hooks?: Array<{ command?: string; timeout?: number; additionalContextLimit?: number }> }>>;
     };
     expect(Object.keys(hooks.hooks ?? {}).sort()).toEqual(["PostToolUse", "SessionEnd", "UserPromptSubmit"]);
     for (const event of Object.values(hooks.hooks ?? {})) {
       expect(event).toHaveLength(1);
       expect(event[0]?.hooks).toEqual([expect.objectContaining({
-        command: '"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" hook --event',
+        command: `${CODEX_INSTALLED_LAUNCHER_COMMAND} hook --event`,
       })]);
     }
+    expect(hooks.hooks?.PostToolUse?.[0]?.hooks?.[0]?.timeout).toBeGreaterThan(CONTROL_REQUEST_TIMEOUT_MS / 1_000);
+    expect(hooks.hooks?.UserPromptSubmit?.[0]?.hooks?.[0]?.timeout).toBeGreaterThan(CONTROL_REQUEST_TIMEOUT_MS / 1_000);
+    expect(hooks.hooks?.SessionEnd?.[0]?.hooks?.[0]?.timeout).toBe(3);
     expect(hooks.hooks?.UserPromptSubmit?.[0]?.hooks?.[0]?.additionalContextLimit).toBe(131072);
+    const skill = await readFile(resolve("integrations/codex-plugin/skills/pdf-proofreader/SKILL.md"), "utf8");
+    expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf`);
+    expect(inspectHookEvent({
+      session_id: "packaged-contract-task",
+      hook_event_name: "PostToolUse",
+      tool_name: "Bash",
+      tool_input: {
+        command: `${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf /private/tmp/package-contract.pdf`,
+      },
+      tool_response: JSON.stringify({
+        ok: true,
+        kind: "opened",
+        url: "http://127.0.0.1:43127/s/package-contract/bootstrap#cap=browser-capability-secret",
+        sessionId: "package-contract",
+        documentGeneration: 1,
+        bindProof: "b".repeat(43),
+      }),
+    })).toMatchObject({
+      kind: "claim",
+      taskSessionId: "packaged-contract-task",
+      reviewSessionId: "package-contract",
+    });
     const build = await readFile(resolve("packaging/macos/build-app.ts"), "utf8");
     expect(build).toContain("appManifest.embeddedArtifacts.codexPlugin");
     expect(build).toContain('resolve(resources, "integrations/codex-plugin")');

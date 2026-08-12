@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ExistingPdfAnnotation } from "../../../packages/core/src/live-context.js";
 import type { ReviewItem } from "../../../packages/core/src/review-model.js";
@@ -52,6 +52,8 @@ const existing: ExistingPdfAnnotation = {
 
 async function fixture(options: {
   inspect?: ConstructorParameters<typeof LiveContextService>[0]["inspectPdf"];
+  querySourceHints?: ConstructorParameters<typeof LiveContextService>[0]["querySourceHints"];
+  sourceRoot?: boolean;
 } = {}): Promise<{
   broker: SessionBroker;
   launch: SessionLaunch;
@@ -66,7 +68,11 @@ async function fixture(options: {
     portableReader: async () => [],
     rewriteAssessor: async () => ({ eligible: true }),
   });
-  const opened = await broker.openReview({ pdfPath, surface: "codex" });
+  const opened = await broker.openReview({
+    pdfPath,
+    surface: "codex",
+    ...(options.sourceRoot === true ? { sourceRootPath: directory } : {}),
+  });
   if (opened.kind !== "opened" || opened.launch.bindProof === undefined) {
     throw new Error("Expected a bindable Codex launch");
   }
@@ -94,6 +100,7 @@ async function fixture(options: {
         [id(1), { path: "paper.tex", line: 12, confidence: "high", provenance: "synctex" }],
       ]),
     })),
+    ...(options.querySourceHints === undefined ? {} : { querySourceHints: options.querySourceHints }),
   });
   return { broker, launch: opened.launch, service };
 }
@@ -110,7 +117,11 @@ describe("atomic live-context service", () => {
       existingPdfAnnotations: { count: 1, items: [{ readOnly: true, origin: "source-pdf" }] },
     });
 
-    const unchanged = await service.refresh({ taskSessionId: "task-a" });
+    if (initial.status !== "current") throw new Error("Expected initial context");
+    const unchanged = await service.refresh({
+      taskSessionId: "task-a",
+      cursor: initial.reviewItems.cursor,
+    });
     expect(unchanged).toMatchObject({
       status: "current",
       reviewItems: { mode: "unchanged", baseCursor: "cursor-1", cursor: "cursor-2" },
@@ -121,7 +132,11 @@ describe("atomic live-context service", () => {
       expectedRevision: 0,
       item: item(1),
     });
-    const added = await service.refresh({ taskSessionId: "task-a" });
+    if (unchanged.status !== "current") throw new Error("Expected unchanged context");
+    const added = await service.refresh({
+      taskSessionId: "task-a",
+      cursor: unchanged.reviewItems.cursor,
+    });
     expect(added).toMatchObject({
       status: "current",
       saveStatus: { sync: { phase: "not-saved", desiredRevision: 1 } },
@@ -135,7 +150,11 @@ describe("atomic live-context service", () => {
       updatedAt: "2026-08-12T12:01:00.000Z",
       payload: { proposedText: "manual edit wins" },
     });
-    const edited = await service.refresh({ taskSessionId: "task-a" });
+    if (added.status !== "current") throw new Error("Expected added context");
+    const edited = await service.refresh({
+      taskSessionId: "task-a",
+      cursor: added.reviewItems.cursor,
+    });
     expect(edited).toMatchObject({
       status: "current",
       reviewItems: { mode: "delta", edited: [{ id: id(1), payload: { proposedText: "manual edit wins" } }] },
@@ -146,7 +165,11 @@ describe("atomic live-context service", () => {
       expectedRevision: 2,
       id: id(1),
     });
-    const removed = await service.refresh({ taskSessionId: "task-a" });
+    if (edited.status !== "current") throw new Error("Expected edited context");
+    const removed = await service.refresh({
+      taskSessionId: "task-a",
+      cursor: edited.reviewItems.cursor,
+    });
     expect(removed).toMatchObject({
       status: "current",
       reviewItems: { mode: "delta", removed: [id(1)] },
@@ -161,6 +184,105 @@ describe("atomic live-context service", () => {
       status: "current",
       reviewItems: { mode: "full", reason: "unknown-cursor", cursor: "cursor-2" },
     });
+  });
+
+  it("self-heals with a full baseline when the prior response was not acknowledged", async () => {
+    const { broker, launch, service } = await fixture();
+    const lost = await service.refresh({ taskSessionId: "task-a" });
+    expect(lost).toMatchObject({ status: "current", reviewItems: { mode: "full" } });
+    await broker.acceptMutation(launch.sessionId, {
+      type: "add",
+      expectedRevision: 0,
+      item: item(1),
+    });
+
+    const recovered = await service.refresh({ taskSessionId: "task-a" });
+    expect(recovered).toMatchObject({
+      status: "current",
+      reviewItems: {
+        mode: "full",
+        reason: "unknown-cursor",
+        itemCount: 1,
+        items: [{ id: id(1) }],
+      },
+    });
+  });
+
+  it("discards task observations, evidence, and session caches together", async () => {
+    let inspections = 0;
+    const { service } = await fixture({
+      inspect: async () => {
+        inspections += 1;
+        return { pageCount: 1, existingAnnotations: [], warnings: [], sourceHints: new Map() };
+      },
+    });
+    const initial = await service.refresh({ taskSessionId: "task-a" });
+    if (initial.status !== "current") throw new Error("Expected current context");
+    const handle = initial.evidence.handle.value;
+
+    service.discardTask("task-a");
+    expect(service.evidence.authorizeHandle(handle)).toEqual({
+      status: "unavailable",
+      reason: "unauthorized",
+    });
+    expect(await service.refresh({ taskSessionId: "task-a" })).toMatchObject({
+      status: "current",
+      reviewItems: { mode: "full", reason: "initial" },
+    });
+    expect(inspections).toBe(2);
+  });
+
+  it("invalidates live-context caches when the broker ends a session", async () => {
+    const { broker, launch, service } = await fixture();
+    await service.refresh({ taskSessionId: "task-a" });
+    const discard = vi.spyOn(service, "discardSession");
+
+    await broker.finish(launch.sessionId);
+
+    expect(discard).toHaveBeenCalledWith(launch.sessionId);
+  });
+
+  it("queries SyncTeX only for new items and reuses unchanged geometry", async () => {
+    const queriedIds: string[] = [];
+    const { broker, launch, service } = await fixture({
+      sourceRoot: true,
+      querySourceHints: async ({ items }) => {
+        queriedIds.push(...items.map(({ id: itemId }) => itemId));
+        return new Map(items.map(({ id: itemId }) => [
+          itemId,
+          { path: "paper.tex", line: 12, confidence: "high" as const, provenance: "synctex" as const },
+        ]));
+      },
+    });
+    await broker.acceptMutation(launch.sessionId, {
+      type: "add",
+      expectedRevision: 0,
+      item: item(1),
+    });
+    const first = await service.refresh({ taskSessionId: "task-a" });
+    if (first.status !== "current") throw new Error("Expected current context");
+    const unchanged = await service.refresh({
+      taskSessionId: "task-a",
+      cursor: first.reviewItems.cursor,
+    });
+    expect(unchanged).toMatchObject({ status: "current", reviewItems: { mode: "unchanged" } });
+    await broker.acceptMutation(launch.sessionId, {
+      type: "edit",
+      expectedRevision: 1,
+      id: id(1),
+      updatedAt: "2026-08-12T12:01:00.000Z",
+      payload: { proposedText: "geometry stayed put" },
+    });
+    if (unchanged.status !== "current") throw new Error("Expected unchanged context");
+    await service.refresh({ taskSessionId: "task-a", cursor: unchanged.reviewItems.cursor });
+    await broker.acceptMutation(launch.sessionId, {
+      type: "add",
+      expectedRevision: 2,
+      item: item(2),
+    });
+    await service.refresh({ taskSessionId: "task-a" });
+
+    expect(queriedIds).toEqual([id(1), id(2)]);
   });
 
   it("keeps accepted Review Items current when PDF persistence reports a write failure", async () => {

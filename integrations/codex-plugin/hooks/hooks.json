@@ -8,7 +8,7 @@
           {
             "type": "command",
             "command": "\"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader\" hook --event",
-            "timeout": 3,
+            "timeout": 8,
             "statusMessage": "Connecting PDF Proofreader context",
             "additionalContextLimit": 131072
           }
@@ -21,7 +21,7 @@
           {
             "type": "command",
             "command": "\"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader\" hook --event",
-            "timeout": 3,
+            "timeout": 8,
             "statusMessage": "Refreshing PDF Proofreader context",
             "additionalContextLimit": 131072
           }

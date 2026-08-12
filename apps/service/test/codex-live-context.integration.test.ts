@@ -5,7 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { addPageNote } from "../../../packages/core/src/review-commands.js";
 import { runContextCommand } from "../src/cli/context-command.js";
-import { runHookCommand } from "../src/cli/hook-command.js";
+import {
+  CODEX_INSTALLED_LAUNCHER_COMMAND,
+  runHookCommand,
+} from "../src/cli/hook-command.js";
 import {
   requestControl,
   requestLaunch,
@@ -38,9 +41,9 @@ function hookInput(
       hook_event_name: hookEventName,
       tool_name: "Bash",
       tool_input: {
-        command: "pdf-proofreader open --json --surface codex --pdf /private/tmp/acceptance.pdf",
+        command: `${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf /private/tmp/acceptance.pdf`,
       },
-      tool_response: { exit_code: 0, output: JSON.stringify(launch) },
+      tool_response: JSON.stringify(launch),
     });
   }
   return JSON.stringify({
@@ -152,8 +155,10 @@ describe("packaged Codex live-context lifecycle", () => {
       currentness: "current",
       document: { reviewRevision: 1 },
       reviewItems: {
-        mode: "delta",
-        added: [{ intent: "pageNote", pageIndex: 0, payload: { comment: "Check this argument." } }],
+        mode: "full",
+        reason: "unknown-cursor",
+        itemCount: 1,
+        completeItems: "retrieve",
       },
     });
     const handle = delta.evidence.handle as string;

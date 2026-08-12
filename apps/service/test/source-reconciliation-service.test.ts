@@ -274,4 +274,18 @@ describe("manual-precedence source reconciliation", () => {
       proposal: proposal(),
     })).rejects.toThrow(/unavailable to this task/i);
   });
+
+  it("can discard a partially registered workflow execution", async () => {
+    const value = await fixture();
+    const baseline = await value.service.captureBaseline({
+      taskSessionId: "task-a",
+      sourcePaths: ["paper.tex"],
+    });
+    value.service.discardExecution("task-a", baseline.executionId);
+    await expect(value.service.acceptProposal({
+      taskSessionId: "task-a",
+      executionId: baseline.executionId,
+      proposal: proposal(),
+    })).rejects.toThrow(/unavailable to this task/i);
+  });
 });

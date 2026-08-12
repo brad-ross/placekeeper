@@ -14,6 +14,7 @@ import { MacOsDestinationPicker } from "./destination-picker.js";
 import { LiveContextService } from "../context/live-context-service.js";
 import { SourceReconciliationService } from "../context/source-reconciliation-service.js";
 import { LiveSourceWorkflowService } from "../context/live-source-workflow-service.js";
+import type { TaskBindingRegistry } from "../context/task-binding-registry.js";
 
 export type LaunchSurface = BrokerLaunchSurface;
 
@@ -53,6 +54,7 @@ export type LaunchResponse =
 export interface ProofreaderHostOptions {
   readonly recoveryRoot: string;
   readonly webAssets?: WebAssetOptions;
+  readonly taskBindings?: TaskBindingRegistry;
 }
 
 function failure(
@@ -114,7 +116,10 @@ export class ProofreaderHost {
   }
 
   static async start(options: ProofreaderHostOptions): Promise<ProofreaderHost> {
-    const broker = new SessionBroker({ recoveryRoot: options.recoveryRoot });
+    const broker = new SessionBroker({
+      recoveryRoot: options.recoveryRoot,
+      ...(options.taskBindings === undefined ? {} : { taskBindings: options.taskBindings }),
+    });
     await broker.initialize();
     const saving = new PdfSaveCoordinator({
       broker,
@@ -178,6 +183,7 @@ export class ProofreaderHost {
   }
 
   close(): Promise<void> {
+    this.context.discardAll();
     return this.server.close();
   }
 }

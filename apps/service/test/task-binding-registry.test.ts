@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { LiveObservationIdentity } from "../../../packages/core/src/live-context.js";
 import { TaskBindingRegistry } from "../src/context/task-binding-registry.js";
 
 const BROWSER_CAPABILITY = "browser-capability-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -30,6 +31,17 @@ function issue(registry: TaskBindingRegistry, overrides: Partial<{
     browserCapability: BROWSER_CAPABILITY,
     ...overrides,
   });
+}
+
+function verifiedIdentity(overrides: Partial<LiveObservationIdentity> = {}): LiveObservationIdentity {
+  return {
+    proofreaderSessionId: "review-a",
+    documentGeneration: 1,
+    source: { fileId: "file-a", digest: "a".repeat(64), byteLength: 12 },
+    reviewRevision: 4,
+    stateDigest: "b".repeat(64),
+    ...overrides,
+  };
 }
 
 describe("task-scoped PDF binding registry", () => {
@@ -147,6 +159,85 @@ describe("task-scoped PDF binding registry", () => {
       reviewSessionId: "review-b",
       documentGeneration: 1,
     })).toEqual({ status: "denied" });
+  });
+
+  it("renews an exact active review from an authenticated browser heartbeat without a task id", () => {
+    const { registry, advance } = registryFixture();
+    const bindProof = issue(registry);
+    registry.claim({
+      bindProof,
+      taskSessionId: "task-a",
+      reviewSessionId: "review-a",
+      documentGeneration: 1,
+    });
+    registry.activateBrowser({
+      reviewSessionId: "review-a",
+      documentGeneration: 1,
+      browserCapability: BROWSER_CAPABILITY,
+    });
+    const originalExpiry = registry.bindingForTask("task-a")?.leaseExpiresAt;
+
+    advance(200);
+    expect(registry.renewBrowserHeartbeat({
+      reviewSessionId: "review-a",
+      documentGeneration: 2,
+    })).toEqual({ status: "ignored" });
+    expect(registry.renewBrowserHeartbeat({
+      reviewSessionId: "review-b",
+      documentGeneration: 1,
+    })).toEqual({ status: "ignored" });
+    expect(registry.bindingForTask("task-a")?.leaseExpiresAt).toBe(originalExpiry);
+
+    expect(registry.renewBrowserHeartbeat({
+      reviewSessionId: "review-a",
+      documentGeneration: 1,
+    })).toMatchObject({ status: "active" });
+    expect(registry.bindingForTask("task-a")?.leaseExpiresAt).not.toBe(originalExpiry);
+
+    registry.revokeTask("task-a");
+    expect(registry.renewBrowserHeartbeat({
+      reviewSessionId: "review-a",
+      documentGeneration: 1,
+    })).toEqual({ status: "ignored" });
+  });
+
+  it("reports current only while the verified identity matches live review state", () => {
+    const { registry } = registryFixture();
+    const bindProof = issue(registry);
+    registry.claim({
+      bindProof,
+      taskSessionId: "task-a",
+      reviewSessionId: "review-a",
+      documentGeneration: 1,
+    });
+    registry.activateBrowser({
+      reviewSessionId: "review-a",
+      documentGeneration: 1,
+      browserCapability: BROWSER_CAPABILITY,
+    });
+    const verified = verifiedIdentity();
+    expect(registry.markVerified("task-a", verified)).toBe(true);
+
+    expect(registry.statusForReview("review-a", {
+      documentGeneration: 1,
+      reviewRevision: 4,
+      sourceDigest: "a".repeat(64),
+    })).toMatchObject({ status: "current", identity: verified });
+    expect(registry.statusForReview("review-a", {
+      documentGeneration: 1,
+      reviewRevision: 5,
+      sourceDigest: "a".repeat(64),
+    })).toMatchObject({ status: "refreshing", lastVerified: verified });
+    expect(registry.statusForReview("review-a", {
+      documentGeneration: 1,
+      reviewRevision: 4,
+      sourceDigest: "c".repeat(64),
+    })).toMatchObject({ status: "refreshing", lastVerified: verified });
+    expect(registry.statusForReview("review-a", {
+      documentGeneration: 2,
+      reviewRevision: 4,
+      sourceDigest: "a".repeat(64),
+    })).toEqual({ status: "unbound" });
   });
 
   it("expires pending claims and active leases and supports explicit lifecycle revocation", () => {

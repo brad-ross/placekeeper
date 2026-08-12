@@ -11,7 +11,7 @@ import {
   type ReviewSnapshot,
 } from "../../../../packages/core/src/live-context.js";
 import type { SourceHint } from "../../../../packages/core/src/structured-review-item.js";
-import type { JsonValue } from "../../../../packages/core/src/review-model.js";
+import type { JsonValue, ReviewItem } from "../../../../packages/core/src/review-model.js";
 import { inspectPdfAnnotationCatalogWithEmbedPdf } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import {
   SessionBroker,
@@ -35,6 +35,7 @@ export interface LiveContextServiceOptions {
   ) => Promise<LivePdfInspection>;
   readonly now?: () => Date;
   readonly cursor?: () => string;
+  readonly querySourceHints?: typeof querySyncTexHintsForItems;
 }
 
 type AtomicRefreshProjection =
@@ -56,7 +57,33 @@ interface CachedPdfInspection {
   readonly inspection: LivePdfInspection;
 }
 
+interface CachedSourceHint {
+  readonly reviewSessionId: string;
+  readonly hint: SourceHint | undefined;
+}
+
 const MAX_REFRESH_ATTEMPTS = 2;
+const MAX_TASK_OBSERVATIONS = 128;
+const MAX_PDF_INSPECTIONS = 32;
+const MAX_SOURCE_HINTS = 2_048;
+const SOURCE_HINT_CONCURRENCY = 2;
+
+async function forEachConcurrent<T>(
+  values: readonly T[],
+  concurrency: number,
+  operation: (value: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  await Promise.all(Array.from(
+    { length: Math.min(concurrency, values.length) },
+    async () => {
+      while (next < values.length) {
+        const value = values[next++];
+        if (value !== undefined) await operation(value);
+      }
+    },
+  ));
+}
 
 function toRect(rect: {
   readonly origin: { readonly x: number; readonly y: number };
@@ -161,8 +188,10 @@ export class LiveContextService {
   readonly #inspectPdf: NonNullable<LiveContextServiceOptions["inspectPdf"]>;
   readonly #now: () => Date;
   readonly #cursor: () => string;
+  readonly #querySourceHints: typeof querySyncTexHintsForItems;
   readonly #observedByTask = new Map<string, TaskObservationCursor>();
   readonly #pdfInspectionBySession = new Map<string, CachedPdfInspection>();
+  readonly #sourceHints = new Map<string, CachedSourceHint>();
   readonly #taskTails = new Map<string, Promise<void>>();
 
   constructor(options: LiveContextServiceOptions) {
@@ -170,12 +199,39 @@ export class LiveContextService {
     this.#inspectPdf = options.inspectPdf ?? inspectLivePdf;
     this.#now = options.now ?? (() => new Date());
     this.#cursor = options.cursor ?? randomUUID;
+    this.#querySourceHints = options.querySourceHints ?? querySyncTexHintsForItems;
     this.evidence = options.evidence ?? new PdfEvidenceService({
       bindings: options.broker.taskBindings,
       now: this.#now,
       loadSource: async (reviewSessionId, expected) =>
         options.broker.loadVerifiedSourceSnapshot(reviewSessionId, expected),
     });
+    options.broker.onSessionEnd((sessionId) => this.discardSession(sessionId));
+  }
+
+  discardTask(taskSessionId: string, reviewSessionId?: string): void {
+    const observed = this.#observedByTask.get(taskSessionId);
+    this.#observedByTask.delete(taskSessionId);
+    this.evidence.revokeTask(taskSessionId);
+    const sessionId = observed?.reviewSessionId ?? reviewSessionId;
+    if (sessionId !== undefined) this.#discardSessionCaches(sessionId);
+  }
+
+  discardSession(reviewSessionId: string): void {
+    for (const [taskSessionId, observed] of this.#observedByTask) {
+      if (observed.reviewSessionId === reviewSessionId) {
+        this.#observedByTask.delete(taskSessionId);
+      }
+    }
+    this.evidence.revokeSession(reviewSessionId);
+    this.#discardSessionCaches(reviewSessionId);
+  }
+
+  discardAll(): void {
+    this.#observedByTask.clear();
+    this.#pdfInspectionBySession.clear();
+    this.#sourceHints.clear();
+    this.evidence.revokeAll();
   }
 
   refresh(input: {
@@ -190,13 +246,10 @@ export class LiveContextService {
     readonly cursor?: string;
   }): Promise<LiveContextRefreshResult> {
     const checkedAt = this.#now().toISOString();
-    const previousRecord = this.#observedByTask.get(input.taskSessionId);
+    const previousRecord = this.#touch(this.#observedByTask, input.taskSessionId);
     const binding = this.#broker.taskBindings.bindingForTask(input.taskSessionId);
     if (binding === undefined) {
-      if (previousRecord !== undefined) {
-        this.#pdfInspectionBySession.delete(previousRecord.reviewSessionId);
-      }
-      this.#observedByTask.delete(input.taskSessionId);
+      this.discardTask(input.taskSessionId);
       return createUnavailableLiveContextObservation({ checkedAt, reason: "unbound" });
     }
     const previous = previousRecord?.reviewSessionId === binding.reviewSessionId &&
@@ -238,8 +291,8 @@ export class LiveContextService {
           existingAnnotations: inspection.existingAnnotations,
           reviewItems: current.items,
         });
-        const cursorStatus = previous !== undefined && input.cursor !== undefined &&
-          input.cursor !== previous.cursor
+        const cursorStatus = previous !== undefined &&
+          (input.cursor === undefined || input.cursor !== previous.cursor)
           ? "unknown"
           : "known";
         const observation = createAtomicLiveContextObservation({
@@ -276,8 +329,7 @@ export class LiveContextService {
       });
     }
     if (projected.status === "stale-generation") {
-      this.#pdfInspectionBySession.delete(binding.reviewSessionId);
-      this.#observedByTask.delete(input.taskSessionId);
+      this.discardTask(input.taskSessionId, binding.reviewSessionId);
       return createUnavailableLiveContextObservation({
         checkedAt,
         reason: "stale_generation",
@@ -286,7 +338,7 @@ export class LiveContextService {
     }
     if (!this.#broker.taskBindings.markVerified(input.taskSessionId, projected.observation.identity)) {
       this.evidence.revoke(projected.observation.evidence.handle.value);
-      this.#observedByTask.delete(input.taskSessionId);
+      this.discardTask(input.taskSessionId, binding.reviewSessionId);
       return createUnavailableLiveContextObservation({
         checkedAt,
         reason: "unavailable",
@@ -298,12 +350,15 @@ export class LiveContextService {
       documentGeneration: projected.observation.identity.documentGeneration,
       snapshot: projected.snapshot,
     });
+    this.#trim(this.#observedByTask, MAX_TASK_OBSERVATIONS, (taskSessionId) => {
+      this.evidence.revokeTask(taskSessionId);
+    });
     return projected.observation;
   }
 
   async #inspectionFor(snapshot: AtomicSessionProjection): Promise<LivePdfInspection> {
     const key = [snapshot.sessionId, snapshot.documentGeneration, snapshot.state.source.digest].join("\0");
-    const cached = this.#pdfInspectionBySession.get(snapshot.sessionId);
+    const cached = this.#touch(this.#pdfInspectionBySession, snapshot.sessionId);
     if (cached?.key === key) return cached.inspection;
     const source = await this.#broker.loadVerifiedSourceSnapshot(snapshot.sessionId, {
       documentGeneration: snapshot.documentGeneration,
@@ -312,6 +367,7 @@ export class LiveContextService {
     if (source === undefined) throw new Error("The immutable PDF source changed during inspection");
     const inspection = await this.#inspectPdf({ ...snapshot, sourceBytes: source.bytes });
     this.#pdfInspectionBySession.set(snapshot.sessionId, { key, inspection });
+    this.#trim(this.#pdfInspectionBySession, MAX_PDF_INSPECTIONS);
     return inspection;
   }
 
@@ -320,14 +376,80 @@ export class LiveContextService {
     staticHints: ReadonlyMap<string, SourceHint>,
   ): Promise<ReadonlyMap<string, SourceHint>> {
     if (snapshot.sourceRootPath === undefined || snapshot.state.items.length === 0) {
+      this.#discardSourceHints(snapshot.sessionId);
       return staticHints;
     }
-    const itemHints = await querySyncTexHintsForItems({
-      items: snapshot.state.items,
-      sourceRoot: snapshot.sourceRootPath,
-      pdfPath: snapshot.sourcePdfPath,
+    const hints = new Map(staticHints);
+    const currentKeys = new Set<string>();
+    const missing: Array<{ readonly item: ReviewItem; readonly key: string }> = [];
+    for (const item of snapshot.state.items) {
+      const key = this.#sourceHintKey(snapshot, item);
+      currentKeys.add(key);
+      const cached = this.#touch(this.#sourceHints, key);
+      if (cached === undefined) missing.push({ item, key });
+      else if (cached.hint !== undefined) hints.set(item.id, cached.hint);
+    }
+    await forEachConcurrent(missing, SOURCE_HINT_CONCURRENCY, async ({ item, key }) => {
+      const queried = await this.#querySourceHints({
+        items: [item],
+        sourceRoot: snapshot.sourceRootPath!,
+        pdfPath: snapshot.sourcePdfPath,
+      });
+      const hint = queried.get(item.id);
+      this.#sourceHints.set(key, { reviewSessionId: snapshot.sessionId, hint });
+      if (hint !== undefined) hints.set(item.id, hint);
     });
-    return new Map([...staticHints, ...itemHints]);
+    for (const [key, cached] of this.#sourceHints) {
+      if (cached.reviewSessionId === snapshot.sessionId && !currentKeys.has(key)) {
+        this.#sourceHints.delete(key);
+      }
+    }
+    this.#trim(this.#sourceHints, MAX_SOURCE_HINTS);
+    return hints;
+  }
+
+  #sourceHintKey(snapshot: AtomicSessionProjection, item: ReviewItem): string {
+    const geometry = item.payload[
+      item.kind === "insert" || item.kind === "pageNote" ? "position" : "rect"
+    ];
+    return JSON.stringify([
+      snapshot.sessionId,
+      snapshot.documentGeneration,
+      snapshot.state.source.digest,
+      snapshot.sourceRootPath,
+      snapshot.sourcePdfPath,
+      item.id,
+      item.pageIndex,
+      geometry,
+    ]);
+  }
+
+  #discardSessionCaches(reviewSessionId: string): void {
+    this.#pdfInspectionBySession.delete(reviewSessionId);
+    this.#discardSourceHints(reviewSessionId);
+  }
+
+  #discardSourceHints(reviewSessionId: string): void {
+    for (const [key, cached] of this.#sourceHints) {
+      if (cached.reviewSessionId === reviewSessionId) this.#sourceHints.delete(key);
+    }
+  }
+
+  #touch<K, V>(values: Map<K, V>, key: K): V | undefined {
+    const value = values.get(key);
+    if (value === undefined) return undefined;
+    values.delete(key);
+    values.set(key, value);
+    return value;
+  }
+
+  #trim<K, V>(values: Map<K, V>, maximum: number, onEvict?: (key: K, value: V) => void): void {
+    while (values.size > maximum) {
+      const oldest = values.entries().next().value as [K, V] | undefined;
+      if (oldest === undefined) return;
+      values.delete(oldest[0]);
+      onEvict?.(oldest[0], oldest[1]);
+    }
   }
 
   #samePublishableState(

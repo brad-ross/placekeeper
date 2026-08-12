@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { CODEX_INSTALLED_LAUNCHER_COMMAND } from "../../apps/service/src/cli/hook-command.js";
 
 test("Finder Open With passes exactly one explicit path through the native document bridge", async () => {
   const bridge = await readFile(resolve("packaging/macos/finder-bridge.applescript"), "utf8");
@@ -18,15 +19,18 @@ test("Finder Open With passes exactly one explicit path through the native docum
 
 test("Codex plugin packages launch plus task-scoped live-context hooks", async () => {
   const plugin = JSON.parse(await readFile(resolve("integrations/codex-plugin/.codex-plugin/plugin.json"), "utf8")) as { name: string; skills: string; interface: { longDescription: string } };
-  const hooks = JSON.parse(await readFile(resolve("integrations/codex-plugin/hooks/hooks.json"), "utf8")) as { hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>> };
+  const hooks = JSON.parse(await readFile(resolve("integrations/codex-plugin/hooks/hooks.json"), "utf8")) as { hooks: Record<string, Array<{ hooks: Array<{ command: string; timeout: number }> }>> };
   const skill = await readFile(resolve("integrations/codex-plugin/skills/pdf-proofreader/SKILL.md"), "utf8");
   expect(plugin).toMatchObject({ name: "codex-plugin", skills: "./skills/" });
   expect(plugin.interface.longDescription).toContain("every prompt");
   expect(Object.keys(hooks.hooks).sort()).toEqual(["PostToolUse", "SessionEnd", "UserPromptSubmit"]);
   for (const declarations of Object.values(hooks.hooks)) {
-    expect(declarations[0]?.hooks[0]?.command).toBe('"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" hook --event');
+    expect(declarations[0]?.hooks[0]?.command).toBe(`${CODEX_INSTALLED_LAUNCHER_COMMAND} hook --event`);
   }
-  expect(skill).toContain("pdf-proofreader open --json --surface codex --pdf");
+  expect(hooks.hooks.PostToolUse?.[0]?.hooks[0]?.timeout).toBeGreaterThan(5);
+  expect(hooks.hooks.UserPromptSubmit?.[0]?.hooks[0]?.timeout).toBeGreaterThan(5);
+  expect(hooks.hooks.SessionEnd?.[0]?.hooks[0]?.timeout).toBe(3);
+  expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf`);
   expect(skill).toContain("desktop built-in browser");
   expect(skill).toContain("pdf-proofreader-live-context");
   expect(skill).toContain("context evidence --handle");

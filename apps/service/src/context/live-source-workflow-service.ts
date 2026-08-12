@@ -175,21 +175,26 @@ export class LiveSourceWorkflowService {
       taskSessionId,
       ...(input.sourcePaths === undefined ? {} : { sourcePaths: input.sourcePaths }),
     });
-    if (
-      baseline.identity.documentGeneration !== before.identity.documentGeneration ||
-      baseline.identity.stateDigest !== before.identity.stateDigest
-    ) throw new Error("Review State changed during baseline capture; refresh and begin source work again");
-    const after = await this.#refresh(taskSessionId);
-    if (baseline.identity.stateDigest !== after.identity.stateDigest) {
-      throw new Error("Review State changed during baseline capture; refresh and begin source work again");
+    try {
+      if (
+        baseline.identity.documentGeneration !== before.identity.documentGeneration ||
+        baseline.identity.stateDigest !== before.identity.stateDigest
+      ) throw new Error("Review State changed during baseline capture; refresh and begin source work again");
+      const after = await this.#refresh(taskSessionId);
+      if (baseline.identity.stateDigest !== after.identity.stateDigest) {
+        throw new Error("Review State changed during baseline capture; refresh and begin source work again");
+      }
+      this.#registerExecution(baseline.executionId, {
+        taskSessionId,
+        baseline,
+        guardedApplyByItem: new Map(),
+        verifiedRebuilds: new Set(),
+      });
+      return { freshness: freshness(after), result: baseline };
+    } catch (error) {
+      this.#reconciliation.discardExecution(taskSessionId, baseline.executionId);
+      throw error;
     }
-    this.#registerExecution(baseline.executionId, {
-      taskSessionId,
-      baseline,
-      guardedApplyByItem: new Map(),
-      verifiedRebuilds: new Set(),
-    });
-    return { freshness: freshness(after), result: baseline };
   }
 
   async propose(input: {
