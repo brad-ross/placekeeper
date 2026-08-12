@@ -30,7 +30,9 @@ export interface LivePdfInspection {
 export interface LiveContextServiceOptions {
   readonly broker: SessionBroker;
   readonly evidence?: PdfEvidenceService;
-  readonly inspectPdf?: (snapshot: AtomicSessionProjection) => Promise<LivePdfInspection>;
+  readonly inspectPdf?: (
+    snapshot: AtomicSessionProjection & { readonly sourceBytes: Buffer },
+  ) => Promise<LivePdfInspection>;
   readonly now?: () => Date;
   readonly cursor?: () => string;
 }
@@ -48,6 +50,13 @@ interface TaskObservationCursor {
   readonly documentGeneration: number;
   readonly snapshot: ReviewSnapshot;
 }
+
+interface CachedPdfInspection {
+  readonly key: string;
+  readonly inspection: LivePdfInspection;
+}
+
+const MAX_REFRESH_ATTEMPTS = 2;
 
 function toRect(rect: {
   readonly origin: { readonly x: number; readonly y: number };
@@ -86,7 +95,7 @@ function metadataValue(value: unknown): JsonValue | undefined {
 
 /** Inspects only the immutable source snapshot supplied by the broker. */
 export async function inspectLivePdf(
-  snapshot: AtomicSessionProjection,
+  snapshot: AtomicSessionProjection & { readonly sourceBytes: Buffer },
 ): Promise<LivePdfInspection> {
   const inspected = await inspectPdfAnnotationCatalogWithEmbedPdf(snapshot.sourceBytes);
   const ownedIds = new Set(inspected.portableItems.map(({ id }) => id));
@@ -115,20 +124,13 @@ export async function inspectLivePdf(
           : { metadata }),
       };
     });
-  const sourceHints = snapshot.sourceRootPath === undefined || snapshot.state.items.length === 0
-    ? new Map<string, SourceHint>()
-    : await querySyncTexHintsForItems({
-        items: snapshot.state.items,
-        sourceRoot: snapshot.sourceRootPath,
-        pdfPath: snapshot.sourcePdfPath,
-      });
   return {
     pageCount: inspected.pageCount,
     existingAnnotations,
     warnings: inspected.annotations.some(({ hasNormalAppearance }) => !hasNormalAppearance)
       ? ["Some Existing PDF Annotations do not define a normal appearance stream."]
       : [],
-    sourceHints,
+    sourceHints: new Map(),
   };
 }
 
@@ -160,6 +162,7 @@ export class LiveContextService {
   readonly #now: () => Date;
   readonly #cursor: () => string;
   readonly #observedByTask = new Map<string, TaskObservationCursor>();
+  readonly #pdfInspectionBySession = new Map<string, CachedPdfInspection>();
   readonly #taskTails = new Map<string, Promise<void>>();
 
   constructor(options: LiveContextServiceOptions) {
@@ -170,11 +173,8 @@ export class LiveContextService {
     this.evidence = options.evidence ?? new PdfEvidenceService({
       bindings: options.broker.taskBindings,
       now: this.#now,
-      loadSource: async (reviewSessionId) =>
-        options.broker.projectAtomicSession(reviewSessionId, async (snapshot) => ({
-          documentGeneration: snapshot.documentGeneration,
-          bytes: snapshot.sourceBytes,
-        })),
+      loadSource: async (reviewSessionId, expected) =>
+        options.broker.loadVerifiedSourceSnapshot(reviewSessionId, expected),
     });
   }
 
@@ -190,68 +190,76 @@ export class LiveContextService {
     readonly cursor?: string;
   }): Promise<LiveContextRefreshResult> {
     const checkedAt = this.#now().toISOString();
+    const previousRecord = this.#observedByTask.get(input.taskSessionId);
     const binding = this.#broker.taskBindings.bindingForTask(input.taskSessionId);
     if (binding === undefined) {
+      if (previousRecord !== undefined) {
+        this.#pdfInspectionBySession.delete(previousRecord.reviewSessionId);
+      }
       this.#observedByTask.delete(input.taskSessionId);
       return createUnavailableLiveContextObservation({ checkedAt, reason: "unbound" });
     }
-    const previousRecord = this.#observedByTask.get(input.taskSessionId);
     const previous = previousRecord?.reviewSessionId === binding.reviewSessionId &&
       previousRecord.documentGeneration === binding.documentGeneration
       ? previousRecord.snapshot
       : undefined;
     let projected: AtomicRefreshProjection | undefined;
     try {
-      projected = await this.#broker.projectAtomicSession(
-        binding.reviewSessionId,
-        async (snapshot): Promise<AtomicRefreshProjection> => {
-          if (snapshot.documentGeneration !== binding.documentGeneration) {
-            return { status: "stale-generation" };
-          }
-          const inspection = await this.#inspectPdf(snapshot);
-          const current = createReviewSnapshot({
-            cursor: this.#cursor(),
-            revision: snapshot.state.revision,
-            items: snapshot.state.items,
-            sourceHints: inspection.sourceHints,
-          });
-          const identity = {
-            proofreaderSessionId: snapshot.sessionId,
-            documentGeneration: snapshot.documentGeneration,
-            source: { ...snapshot.state.source },
-            reviewRevision: current.revision,
-            stateDigest: current.semanticDigest,
-          };
-          const catalog = this.evidence.mint({
-            taskSessionId: input.taskSessionId,
-            identity,
-            pageCount: inspection.pageCount,
-            sourceByteLength: snapshot.sourceBytes.byteLength,
-            existingAnnotations: inspection.existingAnnotations,
-            reviewItems: current.items,
-          });
-          const cursorStatus = previous !== undefined && input.cursor !== undefined &&
-            input.cursor !== previous.cursor
-            ? "unknown"
-            : "known";
-          const observation = createAtomicLiveContextObservation({
-            observedAt: checkedAt,
-            identity,
-            saveStatus: liveSaveStatus(snapshot),
-            reviewItems: diffReviewSnapshots({
-              current,
-              ...(previous === undefined ? {} : { previous }),
-              cursorStatus,
-            }),
-            existingPdfAnnotations: {
-              items: inspection.existingAnnotations,
-              warnings: inspection.warnings,
-            },
-            evidence: catalog,
-          });
-          return { status: "projected", observation, snapshot: current };
-        },
-      );
+      for (let attempt = 0; attempt < MAX_REFRESH_ATTEMPTS; attempt += 1) {
+        const snapshot = await this.#broker.snapshotAtomicSession(binding.reviewSessionId);
+        if (snapshot === undefined) break;
+        if (snapshot.documentGeneration !== binding.documentGeneration) {
+          projected = { status: "stale-generation" };
+          break;
+        }
+        const inspection = await this.#inspectionFor(snapshot);
+        const sourceHints = await this.#sourceHintsFor(snapshot, inspection.sourceHints);
+        const currentSnapshot = await this.#broker.snapshotAtomicSession(binding.reviewSessionId);
+        if (currentSnapshot === undefined) break;
+        if (!this.#samePublishableState(snapshot, currentSnapshot)) continue;
+        const current = createReviewSnapshot({
+          cursor: this.#cursor(),
+          revision: snapshot.state.revision,
+          items: snapshot.state.items,
+          sourceHints,
+        });
+        const identity = {
+          proofreaderSessionId: snapshot.sessionId,
+          documentGeneration: snapshot.documentGeneration,
+          source: { ...snapshot.state.source },
+          reviewRevision: current.revision,
+          stateDigest: current.semanticDigest,
+        };
+        const catalog = this.evidence.mint({
+          taskSessionId: input.taskSessionId,
+          identity,
+          pageCount: inspection.pageCount,
+          sourceByteLength: snapshot.sourceByteLength,
+          existingAnnotations: inspection.existingAnnotations,
+          reviewItems: current.items,
+        });
+        const cursorStatus = previous !== undefined && input.cursor !== undefined &&
+          input.cursor !== previous.cursor
+          ? "unknown"
+          : "known";
+        const observation = createAtomicLiveContextObservation({
+          observedAt: checkedAt,
+          identity,
+          saveStatus: liveSaveStatus(snapshot),
+          reviewItems: diffReviewSnapshots({
+            current,
+            ...(previous === undefined ? {} : { previous }),
+            cursorStatus,
+          }),
+          existingPdfAnnotations: {
+            items: inspection.existingAnnotations,
+            warnings: inspection.warnings,
+          },
+          evidence: catalog,
+        });
+        projected = { status: "projected", observation, snapshot: current };
+        break;
+      }
     } catch {
       return createUnavailableLiveContextObservation({
         checkedAt,
@@ -268,6 +276,7 @@ export class LiveContextService {
       });
     }
     if (projected.status === "stale-generation") {
+      this.#pdfInspectionBySession.delete(binding.reviewSessionId);
       this.#observedByTask.delete(input.taskSessionId);
       return createUnavailableLiveContextObservation({
         checkedAt,
@@ -290,6 +299,51 @@ export class LiveContextService {
       snapshot: projected.snapshot,
     });
     return projected.observation;
+  }
+
+  async #inspectionFor(snapshot: AtomicSessionProjection): Promise<LivePdfInspection> {
+    const key = [snapshot.sessionId, snapshot.documentGeneration, snapshot.state.source.digest].join("\0");
+    const cached = this.#pdfInspectionBySession.get(snapshot.sessionId);
+    if (cached?.key === key) return cached.inspection;
+    const source = await this.#broker.loadVerifiedSourceSnapshot(snapshot.sessionId, {
+      documentGeneration: snapshot.documentGeneration,
+      sourceDigest: snapshot.state.source.digest,
+    });
+    if (source === undefined) throw new Error("The immutable PDF source changed during inspection");
+    const inspection = await this.#inspectPdf({ ...snapshot, sourceBytes: source.bytes });
+    this.#pdfInspectionBySession.set(snapshot.sessionId, { key, inspection });
+    return inspection;
+  }
+
+  async #sourceHintsFor(
+    snapshot: AtomicSessionProjection,
+    staticHints: ReadonlyMap<string, SourceHint>,
+  ): Promise<ReadonlyMap<string, SourceHint>> {
+    if (snapshot.sourceRootPath === undefined || snapshot.state.items.length === 0) {
+      return staticHints;
+    }
+    const itemHints = await querySyncTexHintsForItems({
+      items: snapshot.state.items,
+      sourceRoot: snapshot.sourceRootPath,
+      pdfPath: snapshot.sourcePdfPath,
+    });
+    return new Map([...staticHints, ...itemHints]);
+  }
+
+  #samePublishableState(
+    before: AtomicSessionProjection,
+    after: AtomicSessionProjection,
+  ): boolean {
+    return before.sessionId === after.sessionId &&
+      before.documentGeneration === after.documentGeneration &&
+      before.state.revision === after.state.revision &&
+      before.state.source.digest === after.state.source.digest &&
+      before.destination.phase === after.destination.phase &&
+      before.destination.generation === after.destination.generation &&
+      before.sync.phase === after.sync.phase &&
+      before.sync.desiredRevision === after.sync.desiredRevision &&
+      before.sync.savedRevision === after.sync.savedRevision &&
+      before.sync.failure === after.sync.failure;
   }
 
   async #serializeTask<T>(taskSessionId: string, work: () => Promise<T>): Promise<T> {

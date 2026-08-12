@@ -37,6 +37,11 @@ export type PdfEvidenceUnavailableReason =
   | "too_large"
   | "unavailable";
 
+type EvidenceUnavailable = {
+  readonly status: "unavailable";
+  readonly reason: PdfEvidenceUnavailableReason;
+};
+
 export type PdfEvidenceRetrievalResult =
   | {
       readonly status: "ok";
@@ -44,10 +49,16 @@ export type PdfEvidenceRetrievalResult =
       readonly mediaType: string;
       readonly bytes: Buffer;
     }
+  | EvidenceUnavailable;
+
+export type ReviewItemRetrievalResult =
   | {
-      readonly status: "unavailable";
-      readonly reason: PdfEvidenceUnavailableReason;
-    };
+      readonly status: "ok";
+      readonly kind: "review-items";
+      readonly mediaType: "application/json";
+      readonly bytes: Buffer;
+    }
+  | EvidenceUnavailable;
 
 export interface PdfEvidenceSource {
   readonly documentGeneration: number;
@@ -60,6 +71,11 @@ interface EvidenceRecord {
   readonly pageCount: number;
   readonly expiresAtMs: number;
   readonly maxBytes: number;
+  readonly payloadKey: string;
+}
+
+interface EvidencePayload {
+  references: number;
   readonly existingAnnotations: readonly ExistingPdfAnnotation[];
   readonly reviewItems: readonly StructuredReviewItem[];
 }
@@ -70,7 +86,10 @@ export type EvidenceHandleAuthorization =
 
 export interface PdfEvidenceServiceOptions {
   readonly bindings: TaskBindingRegistry;
-  readonly loadSource: (reviewSessionId: string) => Promise<PdfEvidenceSource | undefined>;
+  readonly loadSource: (
+    reviewSessionId: string,
+    expected: { readonly documentGeneration: number; readonly sourceDigest: string },
+  ) => Promise<PdfEvidenceSource | undefined>;
   readonly inspectPage?: (
     bytes: Uint8Array,
     request: PdfPageEvidenceRequest,
@@ -89,7 +108,7 @@ function validPositiveInteger(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
 }
 
-function unavailable(reason: PdfEvidenceUnavailableReason): PdfEvidenceRetrievalResult {
+function unavailable(reason: PdfEvidenceUnavailableReason): EvidenceUnavailable {
   return { status: "unavailable", reason };
 }
 
@@ -102,6 +121,7 @@ export class PdfEvidenceService {
   readonly #maxResponseBytes: number;
   readonly #randomHandle: () => string;
   readonly #records = new Map<string, EvidenceRecord>();
+  readonly #payloads = new Map<string, EvidencePayload>();
 
   constructor(options: PdfEvidenceServiceOptions) {
     this.#bindings = options.bindings;
@@ -144,17 +164,35 @@ export class PdfEvidenceService {
       throw new RangeError("sourceByteLength must be a non-negative safe integer");
     }
     const value = this.#randomHandle();
+    const recordKey = digest(value);
     const expiresAtMs = this.#now().getTime() + this.#handleTtlMs;
+    const payloadKey = [
+      input.taskSessionId,
+      input.identity.proofreaderSessionId,
+      input.identity.documentGeneration,
+      input.identity.stateDigest,
+      digest(JSON.stringify([input.existingAnnotations, input.reviewItems])),
+    ].join("\0");
+    let payload = this.#payloads.get(payloadKey);
+    if (payload === undefined) {
+      payload = {
+        references: 0,
+        existingAnnotations: structuredClone(input.existingAnnotations),
+        reviewItems: structuredClone(input.reviewItems),
+      };
+      this.#payloads.set(payloadKey, payload);
+    }
+    payload.references += 1;
     const record: EvidenceRecord = {
       taskSessionId: input.taskSessionId,
       identity: structuredClone(input.identity),
       pageCount: input.pageCount,
       expiresAtMs,
       maxBytes: this.#maxResponseBytes,
-      existingAnnotations: structuredClone(input.existingAnnotations),
-      reviewItems: structuredClone(input.reviewItems),
+      payloadKey,
     };
-    this.#records.set(digest(value), record);
+    this.#deleteRecord(recordKey);
+    this.#records.set(recordKey, record);
     const pages = input.pageCount === 0
       ? undefined
       : { start: 0, end: input.pageCount - 1 };
@@ -185,7 +223,7 @@ export class PdfEvidenceService {
   }
 
   revoke(handle: string): void {
-    this.#records.delete(digest(handle));
+    this.#deleteRecord(digest(handle));
   }
 
   /** Resolve the bound task behind a prompt-scoped handle without exposing the
@@ -196,7 +234,7 @@ export class PdfEvidenceService {
     const record = this.#records.get(key);
     if (record === undefined) return { status: "unavailable", reason: "unauthorized" };
     if (record.expiresAtMs <= this.#now().getTime()) {
-      this.#records.delete(key);
+      this.#deleteRecord(key);
       return { status: "unavailable", reason: "expired" };
     }
     const binding = this.#bindings.bindingForTask(record.taskSessionId);
@@ -232,7 +270,7 @@ export class PdfEvidenceService {
     readonly limit?: number;
     readonly pageIndex?: number;
     readonly maxBytes?: number;
-  }): PdfEvidenceRetrievalResult {
+  }): ReviewItemRetrievalResult {
     const authorization = this.authorizeHandle(input.handle);
     if (authorization.status === "unavailable") return authorization;
     const record = this.#records.get(digest(input.handle))!;
@@ -245,9 +283,10 @@ export class PdfEvidenceService {
       !validPositiveInteger(maxBytes) || maxBytes > record.maxBytes ||
       (input.pageIndex !== undefined && (!Number.isSafeInteger(input.pageIndex) || input.pageIndex < 0))
     ) return unavailable("invalid_request");
+    const reviewItems = this.#payload(record).reviewItems;
     const filtered = input.pageIndex === undefined
-      ? record.reviewItems
-      : record.reviewItems.filter(({ pageIndex }) => pageIndex === input.pageIndex);
+      ? reviewItems
+      : reviewItems.filter(({ pageIndex }) => pageIndex === input.pageIndex);
     const items = filtered.slice(offset, offset + limit);
     const nextOffset = offset + items.length < filtered.length ? offset + items.length : undefined;
     const bytes = Buffer.from(JSON.stringify({
@@ -259,7 +298,7 @@ export class PdfEvidenceService {
       items,
     }));
     if (bytes.byteLength > maxBytes) return unavailable("too_large");
-    return { status: "ok", kind: "raw-annotations", mediaType: "application/json", bytes };
+    return { status: "ok", kind: "review-items", mediaType: "application/json", bytes };
   }
 
   async retrieve(input: {
@@ -272,7 +311,7 @@ export class PdfEvidenceService {
       return unavailable("unauthorized");
     }
     if (record.expiresAtMs <= this.#now().getTime()) {
-      this.#records.delete(digest(input.handle));
+      this.#deleteRecord(digest(input.handle));
       return unavailable("expired");
     }
     const binding = this.#bindings.bindingForTask(input.taskSessionId);
@@ -293,9 +332,16 @@ export class PdfEvidenceService {
       input.request.pageIndex >= record.pageCount
     )) return unavailable("invalid_request");
 
+    if (input.request.kind === "raw-annotations") {
+      return this.#rawAnnotations(record, input.request, maxBytes);
+    }
+
     let source: PdfEvidenceSource | undefined;
     try {
-      source = await this.#loadSource(record.identity.proofreaderSessionId);
+      source = await this.#loadSource(record.identity.proofreaderSessionId, {
+        documentGeneration: record.identity.documentGeneration,
+        sourceDigest: record.identity.source.digest,
+      });
     } catch {
       return unavailable("unavailable");
     }
@@ -307,10 +353,6 @@ export class PdfEvidenceService {
       currentBinding.documentGeneration !== record.identity.documentGeneration ||
       currentBinding.lastVerified?.stateDigest !== record.identity.stateDigest
     ) return unavailable("stale_generation");
-
-    if (input.request.kind === "raw-annotations") {
-      return this.#rawAnnotations(record, input.request, maxBytes);
-    }
 
     if (input.request.kind === "document") {
       if (source.bytes.byteLength > maxBytes) return unavailable("too_large");
@@ -348,14 +390,15 @@ export class PdfEvidenceService {
       !Number.isSafeInteger(offset) || offset < 0 ||
       !validPositiveInteger(limit) || limit > MAX_ANNOTATION_PAGE_SIZE
     ) return unavailable("invalid_request");
-    const items = record.existingAnnotations.slice(offset, offset + limit);
-    const nextOffset = offset + items.length < record.existingAnnotations.length
+    const annotations = this.#payload(record).existingAnnotations;
+    const items = annotations.slice(offset, offset + limit);
+    const nextOffset = offset + items.length < annotations.length
       ? offset + items.length
       : undefined;
     const bytes = Buffer.from(JSON.stringify({
       offset,
       limit,
-      total: record.existingAnnotations.length,
+      total: annotations.length,
       ...(nextOffset === undefined ? {} : { nextOffset }),
       items,
     }));
@@ -366,7 +409,23 @@ export class PdfEvidenceService {
   #sweep(): void {
     const now = this.#now().getTime();
     for (const [key, record] of this.#records) {
-      if (record.expiresAtMs <= now) this.#records.delete(key);
+      if (record.expiresAtMs <= now) this.#deleteRecord(key);
     }
+  }
+
+  #payload(record: EvidenceRecord): EvidencePayload {
+    const payload = this.#payloads.get(record.payloadKey);
+    if (payload === undefined) throw new Error("PDF evidence payload is unavailable");
+    return payload;
+  }
+
+  #deleteRecord(key: string): void {
+    const record = this.#records.get(key);
+    if (record === undefined) return;
+    this.#records.delete(key);
+    const payload = this.#payloads.get(record.payloadKey);
+    if (payload === undefined) return;
+    payload.references -= 1;
+    if (payload.references === 0) this.#payloads.delete(record.payloadKey);
   }
 }

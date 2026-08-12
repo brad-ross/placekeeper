@@ -54,6 +54,7 @@ interface Fixture {
 
 async function fixture(options: {
   inspectRebuild?: ConstructorParameters<typeof LiveSourceWorkflowService>[0]["inspectPdf"];
+  executionId?: () => string;
 } = {}): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-live-source-"));
   roots.push(root);
@@ -92,7 +93,7 @@ async function fixture(options: {
   let nextId = 0;
   const reconciliation = new SourceReconciliationService({
     broker,
-    executionId: () => "execution-1",
+    executionId: options.executionId ?? (() => "execution-1"),
     queryHints: async ({ items }) => new Map(items.map(({ id: itemId }) => [
       itemId,
       { path: "paper.tex", line: 1, confidence: "high" as const, provenance: "synctex" as const },
@@ -271,5 +272,27 @@ describe("same-task live source workflow", () => {
       executionId: begun.result.executionId,
       items: [{ itemId: id(1), status: "not-applied", explanation: "Not applied." }],
     })).rejects.toThrow(/handle|binding|unavailable/iu);
+  });
+
+  it("bounds retained task executions and evicts rebuild plans with their execution", async () => {
+    let execution = 0;
+    const value = await fixture({ executionId: () => `execution-${++execution}` });
+    const first = await value.workflow.begin({ handle: value.handle, sourcePaths: ["paper.tex"] });
+    const plan = await value.workflow.prepareCleanRebuild({
+      handle: first.freshness.evidenceHandle,
+      executionId: first.result.executionId,
+      command: "build",
+      outputPath: "build/paper.pdf",
+    });
+    let currentHandle = plan.freshness.evidenceHandle;
+    for (let index = 0; index < 8; index += 1) {
+      const begun = await value.workflow.begin({ handle: currentHandle, sourcePaths: ["paper.tex"] });
+      currentHandle = begun.freshness.evidenceHandle;
+    }
+    await expect(value.workflow.verifyCleanRebuild({
+      handle: currentHandle,
+      executionId: first.result.executionId,
+      planId: plan.result.planId,
+    })).rejects.toThrow(/execution is unavailable/i);
   });
 });

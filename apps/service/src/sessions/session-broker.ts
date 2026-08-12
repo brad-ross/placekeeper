@@ -14,7 +14,10 @@ import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-wr
 import { createReviewState } from "../../../../packages/core/src/review-model.js";
 import { createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
 import { reduceReview } from "../../../../packages/core/src/review-reducer.js";
-import { SessionCredentialStore } from "../../../../packages/core/src/session-security.js";
+import {
+  digestSecretHex,
+  SessionCredentialStore,
+} from "../../../../packages/core/src/session-security.js";
 import {
   FileCapabilityRegistry,
   hashFile,
@@ -117,10 +120,16 @@ export interface AtomicSessionProjection {
   readonly state: ReviewState;
   readonly destination: DurableSaveDestination;
   readonly sync: DurableSaveSync;
-  readonly sourceBytes: Buffer;
+  readonly sourceByteLength: number;
   readonly sourceSnapshotPath: string;
   readonly sourcePdfPath: string;
   readonly sourceRootPath?: string;
+}
+
+export interface VerifiedSourceSnapshot {
+  readonly documentGeneration: number;
+  readonly sourceDigest: string;
+  readonly bytes: Buffer;
 }
 
 function activeKey(path: string, digest: string): string {
@@ -193,10 +202,6 @@ export class SessionBroker {
     );
   }
 
-  #secretDigest(value: string): string {
-    return createHash("sha256").update(value).digest("hex");
-  }
-
   #launch(session: ActiveSession, surface: LaunchSurface): SessionLaunch {
     const capability = this.credentials.issueBootstrap(session.id);
     const launchScope: BrowserLaunchScope = {
@@ -204,7 +209,7 @@ export class SessionBroker {
       documentGeneration: session.documentGeneration,
       surface,
     };
-    this.#bootstrapScopes.set(this.#secretDigest(capability), launchScope);
+    this.#bootstrapScopes.set(digestSecretHex(capability), launchScope);
     const bindProof = surface === "codex"
       ? this.taskBindings.issueBindProof({
           reviewSessionId: session.id,
@@ -476,13 +481,13 @@ export class SessionBroker {
 
   exchangeBootstrap(sessionId: string, capability: string): string | undefined {
     if (!this.#activeById.has(sessionId)) return undefined;
-    const scopeKey = this.#secretDigest(capability);
+    const scopeKey = digestSecretHex(capability);
     const scope = this.#bootstrapScopes.get(scopeKey);
     const credential = this.credentials.exchangeBootstrap(sessionId, capability);
     if (credential === undefined) return undefined;
     this.#bootstrapScopes.delete(scopeKey);
     if (scope !== undefined && scope.sessionId === sessionId) {
-      this.#credentialScopes.set(this.#secretDigest(credential), scope);
+      this.#credentialScopes.set(digestSecretHex(credential), scope);
       if (scope.surface === "codex") {
         this.taskBindings.activateBrowser({
           reviewSessionId: sessionId,
@@ -742,7 +747,7 @@ export class SessionBroker {
       : this.capabilities.getRootPath(session.rootId);
     const launchScope = credential === undefined
       ? undefined
-      : this.#credentialScopes.get(this.#secretDigest(credential));
+      : this.#credentialScopes.get(digestSecretHex(credential));
     const trustedLaunchScope = launchScope?.sessionId === sessionId
       ? launchScope
       : undefined;
@@ -769,16 +774,9 @@ export class SessionBroker {
     return readFile(session.sourceSnapshotPath);
   }
 
-  /**
-   * Runs a read projection behind the same per-session tail as accepted
-   * mutations and Save Sync transitions. Expensive PDF inspection is allowed
-   * here intentionally: a context observation must never combine a new review
-   * revision with an older save state or source identity.
-   */
-  async projectAtomicSession<T>(
-    sessionId: string,
-    project: (snapshot: AtomicSessionProjection) => Promise<T>,
-  ): Promise<T | undefined> {
+  /** Capture a lightweight, internally consistent session snapshot. The write
+   * tail is held only while in-memory metadata is cloned. */
+  async snapshotAtomicSession(sessionId: string): Promise<AtomicSessionProjection | undefined> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) return undefined;
     return this.#withSessionTail(session, async () => {
@@ -786,18 +784,59 @@ export class SessionBroker {
       const sourceRootPath = session.rootId === undefined
         ? undefined
         : this.capabilities.getRootPath(session.rootId);
-      return project({
+      return {
         sessionId: session.id,
         documentGeneration: session.documentGeneration,
         state: structuredClone(session.state),
         destination: structuredClone(session.destination),
         sync: structuredClone(session.sync),
-        sourceBytes: await readFile(session.sourceSnapshotPath),
+        sourceByteLength: session.state.source.byteLength,
         sourceSnapshotPath: session.sourceSnapshotPath,
         sourcePdfPath: session.canonicalSourcePath,
         ...(sourceRootPath === undefined ? {} : { sourceRootPath }),
-      });
+      };
     });
+  }
+
+  /** Compatibility projection over a lightweight atomic snapshot. The
+   * callback deliberately runs outside the session write tail. */
+  async projectAtomicSession<T>(
+    sessionId: string,
+    project: (snapshot: AtomicSessionProjection) => Promise<T>,
+  ): Promise<T | undefined> {
+    const snapshot = await this.snapshotAtomicSession(sessionId);
+    return snapshot === undefined ? undefined : project(snapshot);
+  }
+
+  /** Read immutable source bytes without holding the mutation tail, then prove
+   * the active session still has the expected generation and source identity. */
+  async loadVerifiedSourceSnapshot(
+    sessionId: string,
+    expected: { readonly documentGeneration: number; readonly sourceDigest: string },
+  ): Promise<VerifiedSourceSnapshot | undefined> {
+    const before = await this.snapshotAtomicSession(sessionId);
+    if (
+      before === undefined ||
+      before.documentGeneration !== expected.documentGeneration ||
+      before.state.source.digest !== expected.sourceDigest
+    ) return undefined;
+    const bytes = await readFile(before.sourceSnapshotPath);
+    if (
+      bytes.byteLength !== before.sourceByteLength ||
+      createHash("sha256").update(bytes).digest("hex") !== expected.sourceDigest
+    ) return undefined;
+    const after = await this.snapshotAtomicSession(sessionId);
+    if (
+      after === undefined ||
+      after.documentGeneration !== expected.documentGeneration ||
+      after.state.source.digest !== expected.sourceDigest ||
+      after.sourceSnapshotPath !== before.sourceSnapshotPath
+    ) return undefined;
+    return {
+      documentGeneration: after.documentGeneration,
+      sourceDigest: after.state.source.digest,
+      bytes,
+    };
   }
 
   async freezeDelivery(sessionId: string): Promise<FrozenReviewDelivery> {

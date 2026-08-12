@@ -19,6 +19,7 @@ const existing = (suffix: number): ExistingPdfAnnotation => ({
 function fixture() {
   let now = 1_000;
   let generation = 1;
+  let sourceLoads = 0;
   const bytes = Buffer.from("%PDF-1.7\nprivate evidence\n%%EOF");
   const bindings = new TaskBindingRegistry({
     now: () => new Date(now),
@@ -47,7 +48,10 @@ function fixture() {
     handleTtlMs: 500,
     maxResponseBytes: 2_048,
     randomHandle: () => "evidence_handle_1234567890",
-    loadSource: async () => ({ documentGeneration: generation, bytes }),
+    loadSource: async () => {
+      sourceLoads += 1;
+      return { documentGeneration: generation, bytes };
+    },
     inspectPage: async (_bytes, request) => ({
       mediaType: request.kind === "page-text" ? "text/plain" : "application/json",
       bytes: Buffer.from(JSON.stringify(request)),
@@ -60,6 +64,7 @@ function fixture() {
     bytes,
     advance(milliseconds: number) { now += milliseconds; },
     setGeneration(value: number) { generation = value; },
+    sourceLoads() { return sourceLoads; },
   };
 }
 
@@ -99,7 +104,7 @@ describe("task-scoped PDF evidence service", () => {
   });
 
   it("paginates raw annotations and enforces item, page, and byte bounds", async () => {
-    const { service, identity, bytes } = fixture();
+    const { service, identity, bytes, sourceLoads } = fixture();
     const catalog = service.mint({
       reviewItems: [],
       taskSessionId: "task-a",
@@ -122,6 +127,7 @@ describe("task-scoped PDF evidence service", () => {
       nextOffset: 4,
       items: [existing(2), existing(3)],
     });
+    expect(sourceLoads()).toBe(0);
 
     expect(await service.retrieve({
       taskSessionId: "task-a",
@@ -164,7 +170,11 @@ describe("task-scoped PDF evidence service", () => {
       offset: 0,
       limit: 1,
     });
-    expect(result).toMatchObject({ status: "ok", mediaType: "application/json" });
+    expect(result).toMatchObject({
+      status: "ok",
+      kind: "review-items",
+      mediaType: "application/json",
+    });
     if (result.status !== "ok") throw new Error("Expected Review Item evidence");
     expect(JSON.parse(result.bytes.toString())).toEqual({
       offset: 0,

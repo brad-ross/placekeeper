@@ -102,6 +102,18 @@ export interface ProductionReviewAppProps {
   readonly viewer?: ReactNode;
 }
 
+const UNAVAILABLE_CODEX_CONTEXT: LiveContextBindingStatus = {
+  status: 'unavailable',
+  reason: 'unavailable',
+};
+
+function updateCodexContext(
+  current: LiveContextBindingStatus | undefined,
+  next: LiveContextBindingStatus,
+): LiveContextBindingStatus {
+  return JSON.stringify(current) === JSON.stringify(next) ? current ?? next : next;
+}
+
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [state, setState] = useState(props.initialState);
   const [saveStatus, setSaveStatus] = useState<ProductionSaveStatus>(
@@ -128,7 +140,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const selectionUpdateRef = useRef(selectionUpdate);
   selectionUpdateRef.current = selectionUpdate;
   const [commandError, setCommandError] = useState<string | null>(null);
-  const [scope, setScope] = useState(props.scope);
+  const [codexContext, setCodexContext] = useState(props.scope.codexContext);
   const [selectionPlacement, setSelectionPlacement] = useState<ViewerClientPlacement | null>(null);
   const [caret, setCaret] = useState<CaretAnchor | null>(null);
   const [caretPlacement, setCaretPlacement] = useState<ViewerClientPlacement | null>(null);
@@ -206,27 +218,34 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     [state.items],
   );
   useEffect(() => {
-    if (scope.launchSurface !== 'codex') return;
+    if (props.scope.launchSurface !== 'codex') return;
     let stopped = false;
-    const refreshScope = async () => {
+    let timer: number | undefined;
+    const refreshCodexContext = async () => {
       try {
         const next = await props.api.scope();
-        if (!stopped) setScope(next);
+        if (!stopped) {
+          const nextContext = next.launchSurface === 'codex'
+            ? next.codexContext ?? UNAVAILABLE_CODEX_CONTEXT
+            : UNAVAILABLE_CODEX_CONTEXT;
+          setCodexContext((current) => updateCodexContext(current, nextContext));
+        }
       } catch {
         if (!stopped) {
-          setScope((current) => ({
-            ...current,
-            codexContext: { status: 'unavailable', reason: 'unavailable' },
-          }));
+          setCodexContext((current) => updateCodexContext(current, UNAVAILABLE_CODEX_CONTEXT));
+        }
+      } finally {
+        if (!stopped) {
+          timer = window.setTimeout(() => { void refreshCodexContext(); }, 1_500);
         }
       }
     };
-    const timer = window.setInterval(() => { void refreshScope(); }, 1_500);
+    timer = window.setTimeout(() => { void refreshCodexContext(); }, 1_500);
     return () => {
       stopped = true;
-      window.clearInterval(timer);
+      if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [props.api, scope.launchSurface]);
+  }, [props.api, props.scope.launchSurface]);
   useEffect(() => {
     if (saveStatus.sync.phase !== "saving") return;
     const controller = new AbortController();
@@ -583,7 +602,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     <main data-production-review ref={productionRootRef}>
       <ReviewShell
         state={state}
-        documentTitle={scope.documentTitle}
+        documentTitle={props.scope.documentTitle}
         savedLabel="Saved"
         savePhase={saveStatus.sync.phase}
         saveOptionsOpen={destinationDialog !== null}
@@ -613,8 +632,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         canNavigateForward={navigationState.pendingMainNavigation === null
           && navigationState.mainHistory.index >= 0
           && navigationState.mainHistory.index < navigationState.mainHistory.entries.length - 1}
-        {...(scope.launchSurface === 'codex'
-          ? { codexContext: scope.codexContext ?? { status: 'unavailable', reason: 'unavailable' } }
+        {...(props.scope.launchSurface === 'codex'
+          ? { codexContext: codexContext ?? UNAVAILABLE_CODEX_CONTEXT }
           : {})}
         onLinkActionChoose={(choice, request) => {
           void navigationCoordinator.chooseLink(choice, request);

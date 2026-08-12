@@ -210,6 +210,7 @@ describe("manual-precedence source reconciliation", () => {
     await value.broker.acceptMutation(value.launch.sessionId, {
       type: "add", expectedRevision: 5, item: item(4),
     });
+    await rm(value.sourcePath);
 
     const report = await value.service.reconcile({ taskSessionId: "task-a", executionId: baseline.executionId });
     expect(report.outcomes).toHaveLength(3);

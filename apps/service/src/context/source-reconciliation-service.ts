@@ -1,8 +1,9 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import {
   createExecutionBaseline,
   createReconciliationOutcome,
+  canonicalSha256,
   reviewSemanticDigest,
   type LiveExecutionBaselineV1,
   type LiveObservationIdentity,
@@ -15,7 +16,7 @@ import {
   type StructuredReviewItem,
 } from "../../../../packages/core/src/structured-review-item.js";
 import type { ReviewItem } from "../../../../packages/core/src/review-model.js";
-import type { SessionBroker } from "../sessions/session-broker.js";
+import type { AtomicSessionProjection, SessionBroker } from "../sessions/session-broker.js";
 import { querySyncTexHintsForItems } from "../synctex/query.js";
 import {
   canonicalSourceRoot,
@@ -25,6 +26,7 @@ import {
 
 const MAX_EXECUTIONS_PER_TASK = 8;
 const MAX_PROPOSAL_TEXT_BYTES = 2 * 1024 * 1024;
+const MAX_CONCURRENT_SOURCE_READS = 8;
 
 export interface SourceReplacementProposalV1 {
   readonly schemaVersion: 1;
@@ -81,20 +83,6 @@ export interface SourceReconciliationServiceOptions {
     readonly sourceRoot: string;
     readonly pdfPath: string;
   }) => Promise<ReadonlyMap<string, SourceHint>>;
-}
-
-function stableJson(value: unknown): string {
-  if (value === null || typeof value === "boolean" || typeof value === "string") return JSON.stringify(value);
-  if (typeof value === "number") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (typeof value !== "object" || value === undefined) throw new Error("Proposal is not serializable");
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record).filter((key) => record[key] !== undefined).toSorted()
-    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
-}
-
-function digest(value: unknown): string {
-  return createHash("sha256").update(stableJson(value)).digest("hex");
 }
 
 function normalizedText(value: string): string {
@@ -242,6 +230,35 @@ function assertProposal(proposal: SourceReplacementProposalV1): void {
   }
 }
 
+async function readUniqueSources(
+  root: string,
+  paths: readonly string[],
+): Promise<ReadonlyMap<string, ScopedSourceRead>> {
+  const unique = [...new Set(paths)];
+  const sources = new Map<string, ScopedSourceRead>();
+  for (let offset = 0; offset < unique.length; offset += MAX_CONCURRENT_SOURCE_READS) {
+    const batch = unique.slice(offset, offset + MAX_CONCURRENT_SOURCE_READS);
+    const reads = await Promise.all(batch.map(async (path) => [
+      path,
+      await readScopedSource(root, path),
+    ] as const));
+    for (const [path, source] of reads) sources.set(path, source);
+  }
+  return sources;
+}
+
+function sameReviewIdentity(
+  snapshot: AtomicSessionProjection | undefined,
+  identity: LiveObservationIdentity,
+): boolean {
+  return snapshot !== undefined &&
+    snapshot.sessionId === identity.proofreaderSessionId &&
+    snapshot.documentGeneration === identity.documentGeneration &&
+    snapshot.state.revision === identity.reviewRevision &&
+    snapshot.state.source.digest === identity.source.digest &&
+    reviewSemanticDigest(snapshot.state.items) === identity.stateDigest;
+}
+
 export class SourceReconciliationService {
   readonly #broker: SessionBroker;
   readonly #now: () => Date;
@@ -311,6 +328,10 @@ export class SourceReconciliationService {
         return { root, sources, baseline };
       });
       if (captured === undefined) throw new Error("The bound PDF session is no longer active");
+      if (!sameReviewIdentity(
+        await this.#broker.snapshotAtomicSession(binding.reviewSessionId),
+        captured.baseline.identity,
+      )) throw new Error("Review State changed during source-work baseline capture");
       const record: ExecutionRecord = {
         taskSessionId: input.taskSessionId,
         reviewSessionId: binding.reviewSessionId,
@@ -348,7 +369,7 @@ export class SourceReconciliationService {
       if (source === undefined) {
         throw new Error("The proposal path was not captured inside this execution's approved source scope");
       }
-      const proposalDigest = digest(input.proposal);
+      const proposalDigest = canonicalSha256(input.proposal);
       const prior = record.proposalsByKey.get(input.proposal.idempotencyKey);
       if (prior !== undefined) {
         if (prior.digest !== proposalDigest) throw new Error("An idempotency key cannot be reused for different source work");
@@ -388,47 +409,67 @@ export class SourceReconciliationService {
         }
         const currentById = new Map(snapshot.state.items.map((item) => [item.id, item]));
         const baselineIds = new Set(record.baseline.items.map(({ id }) => id));
-        const currentSources = new Map<string, ScopedSourceRead>();
-        for (const proposalRecord of record.proposalsByKey.values()) {
-          const path = proposalRecord.proposal.path;
-          if (!currentSources.has(path)) currentSources.set(path, await readScopedSource(record.sourceRoot, path));
-        }
-        const outcomes = record.baseline.items.map((baselineItem): SourceReconciliationDecision => {
+        const classified = record.baseline.items.map((baselineItem):
+          | { readonly status: "complete"; readonly decision: SourceReconciliationDecision }
+          | {
+              readonly status: "needs-source";
+              readonly baselineItemId: string;
+              readonly proposalKey: string;
+              readonly proposal: SourceReplacementProposalV1;
+            } => {
           const currentItem = currentById.get(baselineItem.id);
           if (currentItem === undefined) {
             return {
-              outcome: outcome(
-                baselineItem.id,
-                "removed",
-                "The manual Review Item was removed after baseline capture and is preserved as removed.",
-              ),
+              status: "complete",
+              decision: {
+                outcome: outcome(
+                  baselineItem.id,
+                  "removed",
+                  "The manual Review Item was removed after baseline capture and is preserved as removed.",
+                ),
+              },
             };
           }
           const proposalKey = record.proposalKeyByItem.get(baselineItem.id);
           if (proposalKey === undefined) {
             return {
-              outcome: outcome(
-                baselineItem.id,
-                "ambiguous",
-                "No source proposal was registered for this baseline Review Item; no source change is inferred.",
-              ),
+              status: "complete",
+              decision: {
+                outcome: outcome(
+                  baselineItem.id,
+                  "ambiguous",
+                  "No source proposal was registered for this baseline Review Item; no source change is inferred.",
+                ),
+              },
             };
           }
           const proposal = record.proposalsByKey.get(proposalKey)!.proposal;
           const currentStructured = projectStructuredReviewItem(currentItem, baselineItem.sourceHint);
-          if (digest(currentStructured) !== digest(baselineItem)) {
+          if (canonicalSha256(currentStructured) !== canonicalSha256(baselineItem)) {
             return {
-              path: proposal.path,
-              outcome: outcome(
-                baselineItem.id,
-                "conflict",
-                "The Review Item was manually edited after baseline capture; its current semantics take precedence.",
-              ),
+              status: "complete",
+              decision: {
+                path: proposal.path,
+                outcome: outcome(
+                  baselineItem.id,
+                  "conflict",
+                  "The Review Item was manually edited after baseline capture; its current semantics take precedence.",
+                ),
+              },
             };
           }
+          return { status: "needs-source", baselineItemId: baselineItem.id, proposalKey, proposal };
+        });
+        const currentSources = await readUniqueSources(
+          record.sourceRoot,
+          classified.flatMap((entry) => entry.status === "needs-source" ? [entry.proposal.path] : []),
+        );
+        const outcomes = classified.map((entry): SourceReconciliationDecision => {
+          if (entry.status === "complete") return entry.decision;
+          const { baselineItemId, proposalKey, proposal } = entry;
           const baselineSource = record.sources.get(proposal.path)!;
           const currentSource = currentSources.get(proposal.path)!;
-          const classified = proposalClassification({
+          const sourceClassification = proposalClassification({
             baseline: baselineSource,
             current: currentSource,
             proposal,
@@ -436,7 +477,11 @@ export class SourceReconciliationService {
               ? {}
               : { guardedSha256: input.expectedSourceSha256ByProposal[proposalKey] }),
           });
-          const reconciled = outcome(baselineItem.id, classified.classification, classified.explanation);
+          const reconciled = outcome(
+            baselineItemId,
+            sourceClassification.classification,
+            sourceClassification.explanation,
+          );
           return {
             outcome: reconciled,
             path: proposal.path,
@@ -461,6 +506,10 @@ export class SourceReconciliationService {
         };
       });
       if (report === undefined) throw new Error("The bound PDF session ended during reconciliation");
+      if (!sameReviewIdentity(
+        await this.#broker.snapshotAtomicSession(record.reviewSessionId),
+        report.identity,
+      )) throw new Error("Review State changed during reconciliation");
       return {
         schemaVersion: 1,
         executionId: record.baseline.executionId,

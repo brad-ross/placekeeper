@@ -262,9 +262,11 @@ function canonicalJson(value: unknown): string {
   return `{${fields.join(",")}}`;
 }
 
-function sha256(value: unknown): string {
+export function canonicalSha256(value: unknown): string {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
+
+const sha256 = canonicalSha256;
 
 function assertNonEmpty(value: string, name: string): void {
   if (value.length === 0) throw new InvalidLiveContextContractError(`${name} must not be empty`);

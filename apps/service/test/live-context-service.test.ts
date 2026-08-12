@@ -192,15 +192,18 @@ describe("atomic live-context service", () => {
   });
 
   it("does not advance the cursor or claim current when inspection fails", async () => {
-    let fail = false;
-    const { broker, launch, service } = await fixture({
-      inspect: async () => {
+    const { broker, launch, service: verifier } = await fixture();
+    expect((await verifier.refresh({ taskSessionId: "task-a" })).status).toBe("current");
+    let fail = true;
+    const service = new LiveContextService({
+      broker,
+      now: () => new Date("2026-08-12T12:00:00.000Z"),
+      cursor: () => "cursor-after-recovery",
+      inspectPdf: async () => {
         if (fail) throw new Error("inspection failed");
         return { pageCount: 1, existingAnnotations: [], warnings: [], sourceHints: new Map() };
       },
     });
-    const initial = await service.refresh({ taskSessionId: "task-a" });
-    expect(initial.status).toBe("current");
     await broker.acceptMutation(launch.sessionId, {
       type: "add",
       expectedRevision: 0,
@@ -220,17 +223,19 @@ describe("atomic live-context service", () => {
     const recovered = await service.refresh({ taskSessionId: "task-a" });
     expect(recovered).toMatchObject({
       status: "current",
-      reviewItems: { mode: "delta", baseCursor: "cursor-1", added: [{ id: id(1) }] },
+      reviewItems: { mode: "full", cursor: "cursor-after-recovery", items: [{ id: id(1) }] },
     });
   });
 
-  it("serializes mutation with the atomic projection", async () => {
+  it("does not block mutation during delayed inspection and reuses the immutable catalog", async () => {
     let releaseInspection!: () => void;
     let inspectionStarted!: () => void;
+    let inspectionCount = 0;
     const started = new Promise<void>((resolve) => { inspectionStarted = resolve; });
     const release = new Promise<void>((resolve) => { releaseInspection = resolve; });
     const { broker, launch, service } = await fixture({
       inspect: async () => {
+        inspectionCount += 1;
         inspectionStarted();
         await release;
         return { pageCount: 1, existingAnnotations: [], warnings: [], sourceHints: new Map() };
@@ -246,15 +251,16 @@ describe("atomic live-context service", () => {
       item: item(1),
     }).then(() => { mutationSettled = true; });
     await Promise.resolve();
-    expect(mutationSettled).toBe(false);
+    await mutation;
+    expect(mutationSettled).toBe(true);
     releaseInspection();
 
-    expect(await refresh).toMatchObject({ status: "current", identity: { reviewRevision: 0 } });
-    await mutation;
+    expect(await refresh).toMatchObject({ status: "current", identity: { reviewRevision: 1 } });
     expect(await service.refresh({ taskSessionId: "task-a" })).toMatchObject({
       status: "current",
       identity: { reviewRevision: 1 },
     });
+    expect(inspectionCount).toBe(1);
   });
 
   it("fails closed for unbound, stale-generation, and ended sessions", async () => {

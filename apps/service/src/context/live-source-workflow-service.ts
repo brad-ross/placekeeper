@@ -34,6 +34,8 @@ import {
 
 const MAX_BUILD_COMMAND_BYTES = 32 * 1024;
 const MAX_REBUILT_PDF_BYTES = 512 * 1024 * 1024;
+const MAX_EXECUTIONS_PER_TASK = 8;
+const HASH_BUFFER_BYTES = 64 * 1024;
 
 export interface SourceWorkflowFreshness {
   readonly identity: AtomicLiveContextObservationV1["identity"];
@@ -77,7 +79,6 @@ interface RebuildPlanRecord {
   readonly outputPath: string;
   readonly relativeOutputPath: string;
   readonly priorOutputSha256?: string;
-  readonly command: string;
 }
 
 interface WorkflowExecution {
@@ -152,6 +153,7 @@ export class LiveSourceWorkflowService {
   readonly #id: () => string;
   readonly #inspectPdf: (bytes: Uint8Array) => Promise<InspectedPdf>;
   readonly #executions = new Map<string, WorkflowExecution>();
+  readonly #executionIdsByTask = new Map<string, string[]>();
   readonly #rebuildPlans = new Map<string, RebuildPlanRecord>();
 
   constructor(options: LiveSourceWorkflowServiceOptions) {
@@ -181,7 +183,7 @@ export class LiveSourceWorkflowService {
     if (baseline.identity.stateDigest !== after.identity.stateDigest) {
       throw new Error("Review State changed during baseline capture; refresh and begin source work again");
     }
-    this.#executions.set(baseline.executionId, {
+    this.#registerExecution(baseline.executionId, {
       taskSessionId,
       baseline,
       guardedApplyByItem: new Map(),
@@ -265,7 +267,6 @@ export class LiveSourceWorkflowService {
       outputPath: output.path,
       relativeOutputPath: output.relativePath,
       ...(priorOutputSha256 === undefined ? {} : { priorOutputSha256 }),
-      command: input.command,
     });
     return {
       freshness: freshness(observation),
@@ -401,6 +402,22 @@ export class LiveSourceWorkflowService {
     for (const [planId, plan] of this.#rebuildPlans) {
       if (plan.taskSessionId === taskSessionId) this.#rebuildPlans.delete(planId);
     }
+    this.#executionIdsByTask.delete(taskSessionId);
+  }
+
+  #registerExecution(executionId: string, execution: WorkflowExecution): void {
+    this.#executions.set(executionId, execution);
+    const executionIds = this.#executionIdsByTask.get(execution.taskSessionId) ?? [];
+    executionIds.push(executionId);
+    while (executionIds.length > MAX_EXECUTIONS_PER_TASK) {
+      const expired = executionIds.shift();
+      if (expired === undefined) continue;
+      this.#executions.delete(expired);
+      for (const [planId, plan] of this.#rebuildPlans) {
+        if (plan.executionId === expired) this.#rebuildPlans.delete(planId);
+      }
+    }
+    this.#executionIdsByTask.set(execution.taskSessionId, executionIds);
   }
 
   #authorize(handle: string): string {
@@ -481,8 +498,16 @@ export class LiveSourceWorkflowService {
     if (physical !== path) throw new Error("The rebuild output does not resolve canonically");
     const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
-      const bytes = await handle.readFile();
-      return sha256(bytes);
+      const hash = createHash("sha256");
+      const buffer = Buffer.allocUnsafe(HASH_BUFFER_BYTES);
+      let position = 0;
+      while (true) {
+        const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, position);
+        if (bytesRead === 0) break;
+        hash.update(buffer.subarray(0, bytesRead));
+        position += bytesRead;
+      }
+      return hash.digest("hex");
     } finally {
       await handle.close();
     }

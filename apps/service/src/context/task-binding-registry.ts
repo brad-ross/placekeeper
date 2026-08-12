@@ -1,9 +1,10 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 
 import type {
   LiveContextBindingStatus,
   LiveObservationIdentity,
 } from "../../../../packages/core/src/live-context.js";
+import { digestSecretHex } from "../../../../packages/core/src/session-security.js";
 
 const DEFAULT_PENDING_TTL_MS = 60_000;
 const DEFAULT_ACTIVE_LEASE_TTL_MS = 15 * 60_000;
@@ -55,10 +56,6 @@ export type TaskBindingClaimResult =
 export type BrowserActivationResult =
   | { readonly status: "active"; readonly leaseExpiresAt: string }
   | { readonly status: "ignored" };
-
-function digest(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
 
 function validId(value: string): boolean {
   return value.length > 0 && value.length <= MAX_ID_LENGTH;
@@ -119,8 +116,8 @@ export class TaskBindingRegistry {
     if (!/^[A-Za-z0-9_-]{43}$/u.test(proof)) {
       throw new Error("Bind proof source must return 32 random base64url bytes");
     }
-    const proofHash = digest(proof);
-    const browserCapabilityHash = digest(input.browserCapability);
+    const proofHash = digestSecretHex(proof);
+    const browserCapabilityHash = digestSecretHex(input.browserCapability);
     const record: BindProofRecord = {
       proofHash,
       browserCapabilityHash,
@@ -147,7 +144,7 @@ export class TaskBindingRegistry {
       !validGeneration(input.documentGeneration)
     ) return { status: "denied" };
 
-    const proofHash = digest(input.bindProof);
+    const proofHash = digestSecretHex(input.bindProof);
     const proof = this.#proofsByHash.get(proofHash);
     if (proof === undefined) return { status: "denied" };
     this.#consumeProof(proof);
@@ -211,7 +208,7 @@ export class TaskBindingRegistry {
       !validId(input.browserCapability)
     ) return { status: "ignored" };
 
-    const browserCapabilityHash = digest(input.browserCapability);
+    const browserCapabilityHash = digestSecretHex(input.browserCapability);
     const pending = this.#pendingByReview.get(input.reviewSessionId);
     if (
       pending === undefined ||

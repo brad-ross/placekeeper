@@ -3,8 +3,12 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 const BOOTSTRAP_BYTES = 32;
 const CREDENTIAL_BYTES = 32;
 
-function digestSecret(secret: string): Buffer {
+export function digestSecret(secret: string): Buffer {
   return createHash("sha256").update(secret).digest();
+}
+
+export function digestSecretHex(secret: string): string {
+  return digestSecret(secret).toString("hex");
 }
 
 function secretEquals(candidate: string, digest: Buffer): boolean {
