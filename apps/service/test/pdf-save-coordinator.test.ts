@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { PdfWriter } from "../../../packages/core/src/pdf-writer.js";
+import { PdfWriterError, type PdfWriter } from "../../../packages/core/src/pdf-writer.js";
 import type { ReviewCommand } from "../../../packages/core/src/review-model.js";
 import { PdfSaveCoordinator } from "../src/saving/pdf-save-coordinator.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
@@ -241,6 +241,28 @@ describe("coalescing PDF autosave", () => {
       destination: { phase: "none" },
       rewriteEligibility: { eligible: false },
       sync: { phase: "clean" },
+    });
+  });
+
+  it("classifies invalid annotation geometry as an actionable non-retryable save failure", async () => {
+    const writer: PdfWriter = {
+      assess: async () => ({ eligible: true }),
+      write: async () => {
+        throw new PdfWriterError(
+          "invalid-annotation-geometry",
+          "Annotation is outside the page canvas.",
+        );
+      },
+    };
+    const { root, broker, coordinator, sessionId } = await setup(undefined, { writer });
+    await coordinator.chooseCopy(sessionId, join(root, "paper-annotated.pdf"));
+    await broker.acceptMutation(sessionId, add(0));
+
+    await coordinator.requestSave(sessionId);
+
+    expect(broker.saveStatus(sessionId)?.sync).toMatchObject({
+      phase: "not-saved",
+      failure: "invalid-annotation-geometry",
     });
   });
 });

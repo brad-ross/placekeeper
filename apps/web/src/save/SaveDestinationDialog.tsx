@@ -2,6 +2,7 @@ import { useId, useLayoutEffect, useRef, useState } from "react";
 
 import type { SaveCopyProposal } from "../app/ProductionReviewApp.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
+import type { SaveFailureReason } from "../../../../packages/core/src/save-status.js";
 
 export interface SaveDestinationDialogProps {
   readonly open: boolean;
@@ -10,6 +11,7 @@ export interface SaveDestinationDialogProps {
   readonly error?: string;
   readonly rewriteEligibility?: PdfRewriteEligibility;
   readonly recoveryTarget?: string;
+  readonly recoveryFailure?: SaveFailureReason;
   readonly onConfirm: (choice: "copy" | "original", filename: string) => void | Promise<void>;
   readonly onCancel: () => void;
   readonly onChooseLocation?: () => void | Promise<void>;
@@ -63,7 +65,17 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
         <p id={descriptionId}>
           You can change this later by clicking the filename.
         </p>
-        {props.recoveryTarget && props.onRetry && props.onLocate ? (
+        {props.recoveryTarget && props.recoveryFailure === "invalid-annotation-geometry" ? (
+          <aside className="save-destination-recovery" aria-label="Save recovery">
+            <div>
+              <strong>An annotation is outside the page</strong>
+              <p>Remove or reposition that annotation, then save again. Your latest changes are protected.</p>
+            </div>
+            <div className="save-destination-recovery__actions">
+              <button className="review-button review-button--primary" type="button" onClick={props.onCancel}>Return to annotations</button>
+            </div>
+          </aside>
+        ) : props.recoveryTarget && props.onRetry && props.onLocate ? (
           <aside className="save-destination-recovery" aria-label="Save recovery">
             <div>
               <strong>This PDF isn’t up to date</strong>

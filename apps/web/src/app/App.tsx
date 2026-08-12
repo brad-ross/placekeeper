@@ -85,17 +85,16 @@ export function subscribeToMainDocumentOpened(
 
 export function clampPageNotePoint(
   point: Position,
-  page: Pick<PdfPageObject, 'size' | 'boxes'>,
+  page: Pick<PdfPageObject, 'size'>,
   inset = 0,
 ): Position {
-  const cropOrigin = page.boxes?.crop ?? { left: 0, top: 0 };
   const clampAxis = (value: number, start: number, end: number) => {
     const safeInset = Math.min(Math.max(0, inset), Math.max(0, end - start) / 2);
     return Math.min(end - safeInset, Math.max(start + safeInset, value));
   };
   return {
-    x: clampAxis(point.x, cropOrigin.left, cropOrigin.left + page.size.width),
-    y: clampAxis(point.y, cropOrigin.top, cropOrigin.top + page.size.height),
+    x: clampAxis(point.x, 0, page.size.width),
+    y: clampAxis(point.y, 0, page.size.height),
   };
 }
 
@@ -380,13 +379,12 @@ export function App({
     const pageIndex = Math.max(0, (scroll?.getCurrentPage() ?? 1) - 1);
     const page = document?.pages[pageIndex];
     if (!page) return;
-    const cropOrigin = page.boxes?.crop ?? { left: 0, top: 0 };
     publishKeyboardCursor({
       documentId,
       pageIndex,
       viewportGeneration: viewportGenerationRef.current,
-      x: cropOrigin.left + page.size.width / 2,
-      y: cropOrigin.top + page.size.height / 2,
+      x: page.size.width / 2,
+      y: page.size.height / 2,
     });
   }, [publishKeyboardCursor]);
 
@@ -481,10 +479,6 @@ export function App({
       if (interaction) {
         for (const page of document.pages) {
           const pointerId = page.index + 1;
-          const toCanonicalPoint = (position: { x: number; y: number }) => ({
-            x: position.x + (page.boxes?.crop.left ?? 0),
-            y: position.y + (page.boxes?.crop.top ?? 0),
-          });
           const pageGeometry = () => ownedGeometryByPageRef.current.get(page.index) ?? [];
           const setHoveredOwned = (id: string | undefined) => {
             if (hoveredOwnedId.current === id) return;
@@ -501,12 +495,12 @@ export function App({
                 ownedPointerGesture.current.pointerDown(
                   pointerId,
                   viewerPointerButton(event) ?? -1,
-                  toCanonicalPoint(position),
+                  position,
                   pageGeometry(),
                 );
               },
               onPointerMove: (position) => {
-                const point = toCanonicalPoint(position);
+                const point = position;
                 ownedPointerGesture.current.pointerMove(pointerId, point);
                 setHoveredOwned(hitTestOwnedMark(pageGeometry(), point));
               },
@@ -523,7 +517,7 @@ export function App({
                 const ownedId = ownedPointerGesture.current.pointerUp(
                   pointerId,
                   button,
-                  toCanonicalPoint(position),
+                  position,
                   pageGeometry(),
                 );
                 if (button !== 0) return;
@@ -531,16 +525,16 @@ export function App({
                   emit({ type: 'owned-mark', value: { id: ownedId, phase: 'activate' } });
                   return;
                 }
-                const canonicalPoint: ViewerPagePoint = {
+                const pagePoint: ViewerPagePoint = {
                   documentId,
                   pageIndex: page.index,
                   viewportGeneration: viewportGenerationRef.current,
-                  x: position.x + (page.boxes?.crop.left ?? 0),
-                  y: position.y + (page.boxes?.crop.top ?? 0),
+                  x: position.x,
+                  y: position.y,
                 };
                 if (keyboardActiveRef.current) {
-                  publishKeyboardCursor(canonicalPoint);
-                  emit({ type: 'page-note-commit', value: canonicalPoint });
+                  publishKeyboardCursor(pagePoint);
+                  emit({ type: 'page-note-commit', value: pagePoint });
                   publishKeyboardCursor(null);
                   return;
                 }
@@ -704,8 +698,8 @@ export function App({
             value: {
               pageIndex: placement.pageIndex,
               rect: {
-                x: placement.rect.origin.x + (page.boxes?.crop.left ?? 0),
-                y: placement.rect.origin.y + (page.boxes?.crop.top ?? 0),
+                x: placement.rect.origin.x,
+                y: placement.rect.origin.y,
                 width: placement.rect.size.width,
                 height: placement.rect.size.height,
               },
@@ -745,8 +739,12 @@ export function App({
     const registry = registryRef.current;
     const documentId = activeDocumentIdRef.current;
     if (!registry || !documentId) return false;
+    const page = registry.getStore().getState().core.documents[documentId]
+      ?.document?.pages[request.pageIndex];
+    if (!page) return false;
     const selection = registry.getPlugin<SelectionPlugin>(SelectionPlugin.id)?.provides();
     if (selection?.getState(documentId).selection !== null) return false;
+    const point = clampPageNotePoint(request, page, 18);
     emit({
       type: 'page-menu',
       value: {
@@ -755,8 +753,8 @@ export function App({
           documentId,
           pageIndex: request.pageIndex,
           viewportGeneration: viewportGenerationRef.current,
-          x: request.x,
-          y: request.y,
+          x: point.x,
+          y: point.y,
         },
         placement: { left: request.clientX, top: request.clientY },
       },

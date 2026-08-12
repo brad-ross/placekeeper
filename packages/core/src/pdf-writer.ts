@@ -7,6 +7,7 @@ export type PdfWriterErrorCode =
   | 'cancelled'
   | 'encrypted'
   | 'invalid-pdf'
+  | 'invalid-annotation-geometry'
   | 'permission-denied'
   | 'resource-limit'
   | 'signature-restricted'

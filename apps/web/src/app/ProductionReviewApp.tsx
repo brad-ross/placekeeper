@@ -782,14 +782,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           const documentId = core?.activeDocumentId;
           const scroll = registry?.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides();
           if (documentId && scroll) {
-            const page = core?.documents[documentId]?.document?.pages[item.pageIndex];
             const coordinates = reviewItemPoint(item) ?? undefined;
             scroll.forDocument(documentId).scrollToPage({
               pageNumber: item.pageIndex + 1,
               ...(coordinates === undefined ? {} : {
                 pageCoordinates: {
-                  x: coordinates.x - (page?.boxes?.crop.left ?? 0),
-                  y: coordinates.y - (page?.boxes?.crop.top ?? 0),
+                  x: coordinates.x,
+                  y: coordinates.y,
                 },
               }),
               behavior: "smooth",
@@ -823,7 +822,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           : { rewriteEligibility: saveStatus.rewriteEligibility })}
         {...(destinationError === undefined ? {} : { error: destinationError })}
         {...(saveStatus.sync.phase === "not-saved" && saveStatus.destination.phase === "active"
-          ? { recoveryTarget: saveStatus.destination.targetPath.split(/[\\/]/u).at(-1)! }
+          ? {
+              recoveryTarget: saveStatus.destination.targetPath.split(/[\\/]/u).at(-1)!,
+              ...(saveStatus.sync.failure === undefined
+                ? {}
+                : { recoveryFailure: saveStatus.sync.failure }),
+            }
           : {})}
         onRetry={async () => {
           if (destinationEstablishing) return;

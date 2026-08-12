@@ -1,6 +1,7 @@
 export type SaveFailureReason =
   | "destination-unconfigured"
   | "missing"
+  | "invalid-annotation-geometry"
   | "target-changed"
   | "permission-denied"
   | "verification-failed"

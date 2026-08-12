@@ -23,8 +23,6 @@ export interface PdfOutlineTargetOrderContext {
 
 export interface PdfAnnotationOrderContext {
   readonly page: PdfNaturalPageSize;
-  /** Canonical annotation geometry is top-origin and includes this crop offset. */
-  readonly cropOrigin?: PdfNaturalPoint;
 }
 
 /** Neutral page geometry captured from the active document by a viewer adapter. */
@@ -109,13 +107,12 @@ export function createPdfOutlineTargetOrderLocation(
   }
 }
 
-/** Maps canonical top-origin annotation evidence into crop-relative order. */
+/** Maps top-origin annotation evidence into crop-relative document order. */
 export function createPdfAnnotationOrderLocation(
   input: { readonly pageIndex: number; readonly point: PdfNaturalPoint },
   context: PdfAnnotationOrderContext,
 ): PdfDocumentOrderLocation | null {
   const { page } = context;
-  const cropOrigin = context.cropOrigin ?? { x: 0, y: 0 };
   if (
     !Number.isSafeInteger(input.pageIndex)
     || input.pageIndex < 0
@@ -123,13 +120,8 @@ export function createPdfAnnotationOrderLocation(
     || !validDimension(page.height)
     || !Number.isFinite(input.point.x)
     || !Number.isFinite(input.point.y)
-    || !Number.isFinite(cropOrigin.x)
-    || !Number.isFinite(cropOrigin.y)
   ) return null;
-  const anchor = {
-    x: input.point.x - cropOrigin.x,
-    y: input.point.y - cropOrigin.y,
-  };
+  const anchor = input.point;
   if (
     anchor.x < 0
     || anchor.y < 0

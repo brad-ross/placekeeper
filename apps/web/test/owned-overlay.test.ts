@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { positionOwnedRect } from "../src/pdf/owned-overlay.js";
 
 describe("owned annotation overlay geometry", () => {
-  it("subtracts the crop origin and applies 90-degree rotation plus zoom exactly once", () => {
+  it("treats owned geometry as crop-relative and applies rotation plus zoom exactly once", () => {
     const positioned = positionOwnedRect(
       {
         index: 0,
@@ -22,7 +22,7 @@ describe("owned annotation overlay geometry", () => {
         elevated: false,
       },
       Rotation.Degree0,
-      { x: 110, y: 220, width: 30, height: 40 },
+      { x: 10, y: 20, width: 30, height: 40 },
     );
     expect(positioned).toEqual({
       origin: { x: 1480, y: 20 },

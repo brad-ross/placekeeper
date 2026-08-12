@@ -74,16 +74,9 @@ export function createEngineAnchorPageReader(
           engine.extractText(document, [pageIndex]).toPromise(),
           engine.getPageTextRects(document, page).toPromise(),
         ]);
-        const crop = page.boxes?.crop ?? {
-          left: 0,
-          top: 0,
-          right: page.size.width,
-          bottom: page.size.height,
-        };
         return {
           pageIndex,
           size: page.size,
-          cropBox: crop,
           rotation: page.rotation,
           extractedText,
           textRects: textRects.map(({ content, rect }) => ({ content, rect })),
