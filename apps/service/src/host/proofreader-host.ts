@@ -27,11 +27,12 @@ export interface LaunchRequest {
 }
 
 export interface LaunchFailure {
-  readonly kind: "input-unavailable" | "unsupported-context";
+  readonly kind: "input-unavailable" | "unsupported-context" | "upgrade-required";
   readonly message: string;
   readonly recoveryAction:
     | "Choose one readable local PDF"
-    | "Choose a supported local workspace";
+    | "Choose a supported local workspace"
+    | "Close PDF Proofreader reviews and retry";
 }
 
 export type LaunchResponse =
@@ -58,7 +59,7 @@ export interface ProofreaderHostOptions {
 }
 
 function failure(
-  kind: LaunchFailure["kind"],
+  kind: Exclude<LaunchFailure["kind"], "upgrade-required">,
   message: string,
 ): LaunchResponse {
   return {

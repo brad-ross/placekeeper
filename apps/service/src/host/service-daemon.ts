@@ -5,6 +5,9 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import {
+  DaemonUpgradeRequiredError,
+  inspectDaemonCompatibility,
+  MANAGEMENT_PROTOCOL_VERSION,
   requestControl,
   requestLaunch,
   startLaunchControlServer,
@@ -19,6 +22,13 @@ export interface DaemonPaths {
   readonly recoveryRoot: string;
   readonly socketPath: string;
   readonly webAssetsRoot: string;
+}
+
+export const DAEMON_IDENTITY_ENV = "PDF_PROOFREADER_DAEMON_IDENTITY";
+export const INSTALL_ARTIFACT_IDENTITY_ENV = "PDF_PROOFREADER_INSTALL_ARTIFACT_IDENTITY";
+
+function currentDaemonIdentity(): string {
+  return process.env[DAEMON_IDENTITY_ENV] ?? "development";
 }
 
 export function defaultDaemonPaths(): DaemonPaths {
@@ -65,7 +75,12 @@ export async function startServiceDaemon(paths = defaultDaemonPaths()): Promise<
     webAssets: { root: paths.webAssetsRoot },
   });
   try {
-    const control = await startLaunchControlServer(host, paths.socketPath);
+    const control = await startLaunchControlServer(host, paths.socketPath, {
+      protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+      daemonIdentity: currentDaemonIdentity(),
+      lifecycle: "accepting",
+      activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
+    });
     return {
       host,
       close: async () => {
@@ -89,6 +104,12 @@ export async function launchThroughDaemon(
   paths = defaultDaemonPaths(),
 ): Promise<LaunchResponse> {
   try {
+    const compatibility = await inspectDaemonCompatibility(paths.socketPath, currentDaemonIdentity());
+    if (compatibility.kind !== "exact") {
+      throw new DaemonUpgradeRequiredError(
+        compatibility.kind === "incompatible" ? "incompatible" : compatibility.reason,
+      );
+    }
     return await requestLaunch(paths.socketPath, request);
   } catch (error) {
     if (!daemonUnavailable(error)) throw error;
@@ -104,6 +125,12 @@ export async function launchThroughDaemon(
   for (let attempt = 0; attempt < 60; attempt += 1) {
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
     try {
+      const compatibility = await inspectDaemonCompatibility(paths.socketPath, currentDaemonIdentity());
+      if (compatibility.kind !== "exact") {
+        throw new DaemonUpgradeRequiredError(
+          compatibility.kind === "incompatible" ? "incompatible" : compatibility.reason,
+        );
+      }
       return await requestLaunch(paths.socketPath, request);
     } catch (error) {
       if (!daemonUnavailable(error)) throw error;

@@ -1,10 +1,26 @@
 import { spawn } from "node:child_process";
-import { access, chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createHash, type Hash } from "node:crypto";
+import { access, chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, writeFile } from "node:fs/promises";
 import { isBuiltin } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { validateAppBundleManifest, validateBackendRuntimeManifest } from "./validate-manifest.js";
+import { MANAGEMENT_PROTOCOL_VERSION } from "../../apps/service/src/host/launch-control.js";
+
+export const BUILD_IDENTITY_FILENAME = "build-identity.json";
+
+export interface PackagedBuildIdentity {
+  readonly managementProtocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
+  readonly daemonIdentity: string;
+  readonly installArtifactIdentity: string;
+}
+
+interface PackagedBuildIdentityOptions {
+  readonly contentsRoot: string;
+  readonly serviceRoot: string;
+  readonly webRoot: string;
+}
 
 type Architecture = "arm64";
 
@@ -27,6 +43,69 @@ async function run(command: string, args: readonly string[]): Promise<string> {
     child.once("error", reject);
     child.once("exit", (code) => code === 0 ? resolvePromise(stdout.trim()) : reject(new Error(`${basename(command)} failed with exit code ${code ?? "unknown"}`)));
   });
+}
+
+function hashField(hash: Hash, field: string | Buffer): void {
+  const bytes = Buffer.isBuffer(field) ? field : Buffer.from(field);
+  hash.update(String(bytes.byteLength));
+  hash.update(":");
+  hash.update(bytes);
+  hash.update("\n");
+}
+
+async function hashTree(
+  hash: Hash,
+  root: string,
+  label: string,
+  excluded: (relativePath: string) => boolean = () => false,
+): Promise<void> {
+  const visit = async (directory: string, relativeDirectory: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    entries.sort((left, right) => left.name.localeCompare(right.name, "en"));
+    for (const entry of entries) {
+      const relativePath = relativeDirectory === "" ? entry.name : `${relativeDirectory}/${entry.name}`;
+      if (excluded(relativePath)) continue;
+      const absolutePath = resolve(directory, entry.name);
+      const info = await lstat(absolutePath);
+      hashField(hash, `${label}/${relativePath}`);
+      hashField(hash, String(info.mode & 0o777));
+      if (entry.isDirectory()) {
+        hashField(hash, "directory");
+        await visit(absolutePath, relativePath);
+      } else if (entry.isSymbolicLink()) {
+        hashField(hash, "symlink");
+        hashField(hash, await readlink(absolutePath));
+      } else if (entry.isFile()) {
+        hashField(hash, "file");
+        hashField(hash, await readFile(absolutePath));
+      } else {
+        throw new Error(`Unsupported packaged entry: ${relativePath}`);
+      }
+    }
+  };
+  await visit(root, "");
+}
+
+/** Hashes logical replacement inputs, excluding derived code signatures and
+ * the identity record itself so identical package inputs remain stable. */
+export async function computePackagedBuildIdentity(
+  options: PackagedBuildIdentityOptions,
+): Promise<PackagedBuildIdentity> {
+  const daemonHash = createHash("sha256");
+  hashField(daemonHash, `management:${MANAGEMENT_PROTOCOL_VERSION}`);
+  await hashTree(daemonHash, options.serviceRoot, "service");
+  await hashTree(daemonHash, options.webRoot, "web");
+
+  const artifactHash = createHash("sha256");
+  await hashTree(artifactHash, options.contentsRoot, "Contents", (relativePath) =>
+    relativePath === `Resources/${BUILD_IDENTITY_FILENAME}` ||
+    relativePath === "_CodeSignature" || relativePath.startsWith("_CodeSignature/") ||
+    relativePath.endsWith("/CodeResources"));
+  return {
+    managementProtocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+    daemonIdentity: daemonHash.digest("hex"),
+    installArtifactIdentity: artifactHash.digest("hex"),
+  };
 }
 
 function xml(value: string): string {
@@ -157,6 +236,16 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   await writeFile(resolve(contents, "Info.plist"), infoPlist(appManifest), { mode: 0o644 });
   await copyFile(resolve(repoRoot, "packaging/macos/launcher.mjs"), resolve(resources, "launcher.mjs"));
   await writeFile(launcherPath, launcherScript(), { mode: 0o755 });
+  const buildIdentity = await computePackagedBuildIdentity({
+    contentsRoot: contents,
+    serviceRoot: resolve(resources, "service"),
+    webRoot: resolve(resources, "web"),
+  });
+  await writeFile(
+    resolve(resources, BUILD_IDENTITY_FILENAME),
+    `${JSON.stringify(buildIdentity)}\n`,
+    { mode: 0o644 },
+  );
   if (options.signingIdentity !== undefined) {
     await signBundle(appPath, nodePath, launcherPath, options.signingIdentity, resolve(repoRoot, appManifest.signing.entitlements));
   } else {

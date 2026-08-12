@@ -33,6 +33,34 @@ import type { LaunchRequest, LaunchResponse, ProofreaderHost } from "./proofread
 const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 export const MAX_CONTROL_EVIDENCE_BYTES = 8 * 1024 * 1024;
 export const CONTROL_REQUEST_TIMEOUT_MS = 5_000;
+export const MANAGEMENT_PROTOCOL_VERSION = 1;
+
+export type DaemonLifecycleState = "accepting" | "draining" | "shutdown-committed";
+
+export interface DaemonAggregateActivity {
+  readonly reviewPresence: number;
+  readonly codexTasks: number;
+  readonly transientWork: number;
+}
+
+export interface DaemonManagementStatus {
+  readonly protocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
+  readonly daemonIdentity: string;
+  readonly lifecycle: DaemonLifecycleState;
+  readonly activity: DaemonAggregateActivity;
+}
+
+export type DaemonUninspectableReason =
+  | "legacy"
+  | "malformed"
+  | "oversized"
+  | "timeout"
+  | "early-close";
+
+export type DaemonCompatibilityResult =
+  | { readonly kind: "exact"; readonly status: DaemonManagementStatus }
+  | { readonly kind: "incompatible"; readonly status: DaemonManagementStatus }
+  | { readonly kind: "uninspectable"; readonly reason: DaemonUninspectableReason };
 
 export class ProofreaderControlTimeoutError extends Error {
   constructor() {
@@ -41,7 +69,26 @@ export class ProofreaderControlTimeoutError extends Error {
   }
 }
 
+export class ProofreaderControlProtocolError extends Error {
+  constructor(readonly reason: "malformed" | "oversized" | "early-close") {
+    super(`Proofreader service returned an ${reason} response`);
+    this.name = "ProofreaderControlProtocolError";
+  }
+}
+
+export class DaemonUpgradeRequiredError extends Error {
+  constructor(readonly reason: DaemonUninspectableReason | "incompatible") {
+    super("PDF Proofreader is already running an incompatible service build. Existing reviews were preserved.");
+    this.name = "DaemonUpgradeRequiredError";
+  }
+}
+
 export type ProofreaderControlRequest =
+  | {
+      readonly kind: "management";
+      readonly protocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
+      readonly operation: "status";
+    }
   | { readonly kind: "launch"; readonly request: LaunchRequest }
   | {
       readonly kind: "claim-binding";
@@ -110,6 +157,12 @@ export type ProofreaderControlRequest =
     };
 
 export type ProofreaderControlResponse =
+  | {
+      readonly kind: "management";
+      readonly protocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
+      readonly operation: "status";
+      readonly status: DaemonManagementStatus;
+    }
   | { readonly kind: "launch"; readonly response: LaunchResponse }
   | { readonly kind: "binding"; readonly result: TaskBindingClaimResult }
   | { readonly kind: "context"; readonly result: LiveContextRefreshResult }
@@ -168,6 +221,9 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function isControlRequest(value: unknown): value is ProofreaderControlRequest {
   if (!isObject(value) || typeof value.kind !== "string") return false;
+  if (value.kind === "management") {
+    return value.protocolVersion === MANAGEMENT_PROTOCOL_VERSION && value.operation === "status";
+  }
   if (value.kind === "launch") return isObject(value.request);
   if (value.kind === "refresh-context" || value.kind === "revoke-task") {
     return typeof value.taskSessionId === "string";
@@ -216,7 +272,16 @@ function isControlRequest(value: unknown): value is ProofreaderControlRequest {
 async function dispatch(
   host: ProofreaderHost,
   request: ProofreaderControlRequest,
+  managementStatus: DaemonManagementStatus,
 ): Promise<ProofreaderControlResponse> {
+  if (request.kind === "management") {
+    return {
+      kind: "management",
+      protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+      operation: "status",
+      status: managementStatus,
+    };
+  }
   if (request.kind === "launch") {
     return { kind: "launch", response: await host.open(request.request) };
   }
@@ -328,6 +393,12 @@ function writeResponse(socket: Socket, response: ProofreaderControlResponse): vo
 export async function startLaunchControlServer(
   host: ProofreaderHost,
   socketPath: string,
+  managementStatus: DaemonManagementStatus = {
+    protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+    daemonIdentity: "development",
+    lifecycle: "accepting",
+    activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
+  },
 ): Promise<LaunchControlServer> {
   await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 });
   const server = createServer((socket) => {
@@ -353,7 +424,7 @@ export async function startLaunchControlServer(
         writeResponse(socket, { kind: "error", reason: "invalid-request" });
         return;
       }
-      void dispatch(host, parsed).then(
+      void dispatch(host, parsed, managementStatus).then(
         (response) => writeResponse(socket, response),
         () => writeResponse(socket, { kind: "error", reason: "unavailable" }),
       );
@@ -391,29 +462,96 @@ function closeServer(server: Server): Promise<void> {
 export function requestControl(
   socketPath: string,
   request: ProofreaderControlRequest,
+  options: { readonly timeoutMs?: number; readonly maxMessageBytes?: number } = {},
 ): Promise<ProofreaderControlResponse> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(socketPath);
     let raw = "";
     socket.setEncoding("utf8");
-    socket.setTimeout(CONTROL_REQUEST_TIMEOUT_MS, () =>
+    socket.setTimeout(options.timeoutMs ?? CONTROL_REQUEST_TIMEOUT_MS, () =>
       socket.destroy(new ProofreaderControlTimeoutError()));
     socket.once("connect", () => socket.write(`${JSON.stringify(request)}\n`));
     socket.on("data", (chunk: string) => {
       raw += chunk;
-      if (Buffer.byteLength(raw) > MAX_MESSAGE_BYTES) {
-        socket.destroy(new Error("Proofreader response exceeded its size limit"));
+      if (Buffer.byteLength(raw) > (options.maxMessageBytes ?? MAX_MESSAGE_BYTES)) {
+        socket.destroy(new ProofreaderControlProtocolError("oversized"));
       }
     });
     socket.once("error", reject);
     socket.once("end", () => {
+      socket.destroy();
+      if (raw.length === 0) {
+        reject(new ProofreaderControlProtocolError("early-close"));
+        return;
+      }
       try {
         resolve(JSON.parse(raw) as ProofreaderControlResponse);
       } catch {
-        reject(new Error("Proofreader service returned an invalid response"));
+        reject(new ProofreaderControlProtocolError("malformed"));
       }
     });
   });
+}
+
+function isAggregateActivity(value: unknown): value is DaemonAggregateActivity {
+  if (!isObject(value)) return false;
+  return [value.reviewPresence, value.codexTasks, value.transientWork].every(
+    (count) => Number.isSafeInteger(count) && (count as number) >= 0,
+  );
+}
+
+function managementStatus(response: ProofreaderControlResponse): DaemonManagementStatus | undefined {
+  if (
+    response.kind !== "management" ||
+    response.protocolVersion !== MANAGEMENT_PROTOCOL_VERSION ||
+    response.operation !== "status" ||
+    !isObject(response.status) ||
+    response.status.protocolVersion !== MANAGEMENT_PROTOCOL_VERSION ||
+    typeof response.status.daemonIdentity !== "string" ||
+    !["accepting", "draining", "shutdown-committed"].includes(String(response.status.lifecycle)) ||
+    !isAggregateActivity(response.status.activity)
+  ) return undefined;
+  if (!/^(?:development|[a-f0-9]{64})$/u.test(response.status.daemonIdentity)) return undefined;
+  return {
+    protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+    daemonIdentity: response.status.daemonIdentity,
+    lifecycle: response.status.lifecycle as DaemonLifecycleState,
+    activity: {
+      reviewPresence: response.status.activity.reviewPresence,
+      codexTasks: response.status.activity.codexTasks,
+      transientWork: response.status.activity.transientWork,
+    },
+  };
+}
+
+export async function inspectDaemonCompatibility(
+  socketPath: string,
+  expectedDaemonIdentity: string,
+  options: { readonly timeoutMs?: number; readonly maxMessageBytes?: number } = {},
+): Promise<DaemonCompatibilityResult> {
+  try {
+    const response = await requestControl(
+      socketPath,
+      { kind: "management", protocolVersion: MANAGEMENT_PROTOCOL_VERSION, operation: "status" },
+      options,
+    );
+    if (response.kind === "error" && response.reason === "invalid-request") {
+      return { kind: "uninspectable", reason: "legacy" };
+    }
+    const status = managementStatus(response);
+    if (status === undefined) return { kind: "uninspectable", reason: "malformed" };
+    return status.daemonIdentity === expectedDaemonIdentity
+      ? { kind: "exact", status }
+      : { kind: "incompatible", status };
+  } catch (error) {
+    if (error instanceof ProofreaderControlTimeoutError) {
+      return { kind: "uninspectable", reason: "timeout" };
+    }
+    if (error instanceof ProofreaderControlProtocolError) {
+      return { kind: "uninspectable", reason: error.reason };
+    }
+    throw error;
+  }
 }
 
 export async function requestLaunch(
@@ -421,6 +559,6 @@ export async function requestLaunch(
   request: LaunchRequest,
 ): Promise<LaunchResponse> {
   const response = await requestControl(socketPath, { kind: "launch", request });
-  if (response.kind !== "launch") throw new Error("Launch service returned an invalid response");
+  if (response.kind !== "launch") throw new DaemonUpgradeRequiredError("malformed");
   return response.response;
 }

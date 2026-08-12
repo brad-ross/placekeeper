@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
@@ -17,6 +17,7 @@ import {
 } from "./validate-manifest.js";
 import { finderServiceArgs } from "./launcher.mjs";
 import { validateDoctorEvidence } from "./smoke-installed.js";
+import { computePackagedBuildIdentity } from "./build-app.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -101,6 +102,9 @@ describe("macOS distribution manifests", () => {
     const launcher = await readFile(resolve("packaging/macos/launcher.mjs"), "utf8");
     expect(launcher).toContain('system attribute "PDF_PROOFREADER_URL"');
     expect(launcher).toContain("PDF_PROOFREADER_PDFIUM_WASM");
+    expect(launcher).toContain("build-identity.json");
+    expect(launcher).toContain("PDF_PROOFREADER_DAEMON_IDENTITY");
+    expect(launcher).toContain("PDF_PROOFREADER_INSTALL_ARTIFACT_IDENTITY");
     expect(launcher).toContain('choose file of type {"com.adobe.pdf"}');
     expect(launcher).toContain('result.error?.kind === "input-unavailable"');
     expect(launcher).toContain("realpathSync");
@@ -110,6 +114,40 @@ describe("macOS distribution manifests", () => {
     expect(bridge).toContain("Contents/MacOS/pdf-proofreader");
     expect(bridge).toContain("quoted form of pdfPath");
     expect(bridge).not.toContain("Terminal");
+  });
+
+  it("derives stable daemon and complete artifact identities from packaged bytes", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "pdf-proofreader-build-identity-"));
+    const contents = join(root, "Contents");
+    const service = join(contents, "Resources/service");
+    const web = join(contents, "Resources/web");
+    try {
+      await mkdir(service, { recursive: true });
+      await mkdir(web, { recursive: true });
+      await writeFile(join(service, "main.js"), "service-a");
+      await writeFile(join(web, "app.js"), "web-a");
+      await writeFile(join(contents, "Info.plist"), "plist-a");
+
+      const first = await computePackagedBuildIdentity({ contentsRoot: contents, serviceRoot: service, webRoot: web });
+      expect(await computePackagedBuildIdentity({ contentsRoot: contents, serviceRoot: service, webRoot: web })).toEqual(first);
+      expect(first).toMatchObject({
+        managementProtocolVersion: 1,
+        daemonIdentity: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        installArtifactIdentity: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      });
+
+      await writeFile(join(contents, "Info.plist"), "plist-b");
+      const otherArtifact = await computePackagedBuildIdentity({ contentsRoot: contents, serviceRoot: service, webRoot: web });
+      expect(otherArtifact.daemonIdentity).toBe(first.daemonIdentity);
+      expect(otherArtifact.installArtifactIdentity).not.toBe(first.installArtifactIdentity);
+
+      await writeFile(join(web, "app.js"), "web-b");
+      const otherDaemon = await computePackagedBuildIdentity({ contentsRoot: contents, serviceRoot: service, webRoot: web });
+      expect(otherDaemon.daemonIdentity).not.toBe(first.daemonIdentity);
+      expect(otherDaemon.installArtifactIdentity).not.toBe(otherArtifact.installArtifactIdentity);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("requires content-free installed writer evidence matching the pinned runtime", () => {

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -38,8 +38,18 @@ function parse(serialized) {
   return JSON.parse(serialized);
 }
 
+function readBuildIdentity(resources) {
+  const identity = JSON.parse(readFileSync(resolve(resources, "build-identity.json"), "utf8"));
+  if (
+    identity?.managementProtocolVersion !== 1 ||
+    !/^[a-f0-9]{64}$/u.test(identity?.daemonIdentity ?? "") ||
+    !/^[a-f0-9]{64}$/u.test(identity?.installArtifactIdentity ?? "")
+  ) throw new Error("Installed PDF Proofreader build identity is invalid");
+  return identity;
+}
+
 async function nativeError(error) {
-  if (!error || !["input-unavailable", "unsupported-context"].includes(error.kind)) return;
+  if (!error || !["input-unavailable", "unsupported-context", "upgrade-required"].includes(error.kind)) return;
   await osascript(
     'display alert (system attribute "PDF_PROOFREADER_MESSAGE") buttons {(system attribute "PDF_PROOFREADER_ACTION")}',
     { PDF_PROOFREADER_MESSAGE: String(error.message), PDF_PROOFREADER_ACTION: String(error.recoveryAction) },
@@ -78,9 +88,12 @@ export async function main(args = process.argv.slice(2)) {
   const resources = dirname(fileURLToPath(import.meta.url));
   const nodePath = resolve(resources, "node/bin/node");
   const serviceEntry = resolve(resources, "service/main.js");
+  const buildIdentity = readBuildIdentity(resources);
   const serviceEnvironment = {
     ...process.env,
     PDF_PROOFREADER_PDFIUM_WASM: resolve(resources, "pdfium/pdfium.wasm"),
+    PDF_PROOFREADER_DAEMON_IDENTITY: buildIdentity.daemonIdentity,
+    PDF_PROOFREADER_INSTALL_ARTIFACT_IDENTITY: buildIdentity.installArtifactIdentity,
   };
   if (args.length === 1 && resolve(args[0]) === args[0] && args[0].toLowerCase().endsWith(".pdf")) {
     await openFinderPdf(nodePath, serviceEntry, args[0], serviceEnvironment);

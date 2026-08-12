@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import type { LaunchRequest, LaunchResponse, LaunchSurface } from "../host/proofreader-host.js";
+import { DaemonUpgradeRequiredError } from "../host/launch-control.js";
 import { launchThroughDaemon, runServiceDaemon } from "../host/service-daemon.js";
 import { runDoctorCommand } from "./doctor-command.js";
 import { readHookStdin, runHookCommand } from "./hook-command.js";
@@ -88,14 +89,23 @@ export async function runOpenCommand(
   try {
     response = await launch(parseOpenArguments(args));
   } catch (error) {
-    response = {
-      ok: false,
-      error: {
-        kind: "input-unavailable",
-        message: error instanceof Error ? error.message : "The launch request was invalid.",
-        recoveryAction: "Choose one readable local PDF",
-      },
-    };
+    response = error instanceof DaemonUpgradeRequiredError
+      ? {
+          ok: false,
+          error: {
+            kind: "upgrade-required",
+            message: error.message,
+            recoveryAction: "Close PDF Proofreader reviews and retry",
+          },
+        }
+      : {
+          ok: false,
+          error: {
+            kind: "input-unavailable",
+            message: error instanceof Error ? error.message : "The launch request was invalid.",
+            recoveryAction: "Choose one readable local PDF",
+          },
+        };
   }
   write(`${JSON.stringify(response)}\n`);
   return response.ok ? 0 : 2;
