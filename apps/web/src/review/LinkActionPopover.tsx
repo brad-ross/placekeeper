@@ -161,8 +161,8 @@ export function LinkActionMenuContent({
           ref={secondItemRef}
           type="button"
           role="menuitem"
-          aria-label="Follow in this Reference Tab"
-          title="Follow in this Reference Tab"
+          aria-label="Follow in this tab"
+          title="Follow in this tab"
           onClick={() => onChoose('same-reference')}
         >
           <ReviewIcon name="arrow-right" />
@@ -172,8 +172,8 @@ export function LinkActionMenuContent({
         ref={sourceScope === 'reference' ? thirdItemRef : secondItemRef}
         type="button"
         role="menuitem"
-        aria-label="Open in main"
-        title="Open in main"
+        aria-label="Open in main document"
+        title="Open in main document"
         onClick={() => onChoose('main')}
       >
         <ReviewIcon name={sourceScope === 'main' ? 'arrow-right' : 'main'} />

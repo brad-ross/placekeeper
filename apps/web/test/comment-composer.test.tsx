@@ -14,7 +14,9 @@ describe("CommentComposer Warm Neutral contract", () => {
       />,
     );
 
+    expect(html).toContain("data-comment-composer-backdrop");
     expect(html).toContain("data-comment-composer");
+    expect(html).toContain('aria-modal="true"');
     expect(html).toContain('class="comment-composer__field"');
     expect(html).toContain('class="comment-composer__input"');
     expect(html).toContain("Comment (optional)");

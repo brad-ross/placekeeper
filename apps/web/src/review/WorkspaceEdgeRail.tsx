@@ -37,6 +37,7 @@ export function WorkspaceEdgeRail({
       data-workspace-edge-rail={surface}
       data-edge-rail-open={open ? 'true' : 'false'}
       aria-label={railLabel(surface, open)}
+      title={railLabel(surface, open)}
       aria-expanded={open}
       aria-controls={controls}
       onClick={(event) => {

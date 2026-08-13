@@ -33,6 +33,7 @@ export function PageActionMenu(props: PageActionMenuProps) {
         role="menuitem"
         autoFocus
         aria-keyshortcuts={shortcutForReviewAction('pageNote')}
+        title="Add Page Note"
         onClick={props.onAddPageNote}
       >
         <ReviewIcon name="note" />Add Page Note

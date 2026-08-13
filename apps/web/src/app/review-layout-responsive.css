@@ -38,8 +38,14 @@
     transform: none;
   }
 
+  .comment-composer-backdrop {
+    place-items: end center;
+    padding: .5rem;
+  }
+
   .comment-composer {
-    inset: auto .5rem .5rem;
+    width: 100%;
+    max-height: calc(100dvh - 1rem);
   }
 }
 
@@ -66,6 +72,21 @@
 
   .review-chrome h1 {
     font-size: .82rem;
+  }
+
+  .review-workspace__tabs[data-workspace-mode-count="4"] {
+    gap: 1px;
+    padding-inline: 2px;
+  }
+
+  .review-workspace__tabs button {
+    padding-inline: 3px;
+    font-size: 10px;
+  }
+
+  .review-workspace__tab-label {
+    padding-inline: 3px;
+    font-size: 10px;
   }
 }
 

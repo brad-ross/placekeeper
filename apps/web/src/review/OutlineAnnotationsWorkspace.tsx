@@ -129,7 +129,6 @@ export function OutlineAnnotationsWorkspace({
             role="tablist"
             aria-label="Workspace modes"
             data-workspace-mode-count={toolModes.length}
-            style={{ gridTemplateColumns: `repeat(${toolModes.length}, minmax(0, 1fr))` }}
           >
             {toolModes.map((toolMode) => (
               <button
@@ -144,6 +143,7 @@ export function OutlineAnnotationsWorkspace({
                 data-workspace-mode={toolMode}
                 aria-selected={effectiveMode === toolMode}
                 aria-controls={`workspace-panel-${toolMode}`}
+                title={`Show ${TOOL_LABELS[toolMode]}`}
                 tabIndex={effectiveMode === toolMode ? 0 : -1}
                 onKeyDown={moveModeFocus}
                 onClick={() => onModeChange(toolMode)}

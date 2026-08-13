@@ -72,7 +72,7 @@ export function PdfSearchWorkspace({
     () => filterPdfSearchSymbolSuggestions(state.symbolCatalog, state.query),
     [state.query, state.symbolCatalog],
   );
-  const showSymbolSuggestions = symbolSuggestionsOpen && state.symbolCatalog.length > 0;
+  const showSymbolSuggestions = symbolSuggestionsOpen && symbolSuggestions.length > 0;
   const statusAnnouncement = indexing
     ? state.message || 'Searching this PDF.'
     : !hasEffectiveQuery
@@ -121,6 +121,7 @@ export function PdfSearchWorkspace({
           type="search"
           role="searchbox"
           aria-label="Search this PDF"
+          title="Search this PDF"
           aria-autocomplete="list"
           aria-controls="pdf-search-symbol-suggestions"
           placeholder="Words, phrases, symbols, or formulas"
@@ -157,6 +158,7 @@ export function PdfSearchWorkspace({
                 type="button"
                 role="option"
                 aria-selected="false"
+                title={`Search for ${symbol.label}`}
                 data-search-symbol={symbol.query}
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={() => chooseSymbol(symbol)}
@@ -165,9 +167,6 @@ export function PdfSearchWorkspace({
                 <span>{symbol.label}</span>
               </button>
             ))}
-            {symbolSuggestions.length === 0 ? (
-              <span className="pdf-search__symbol-empty">No matching symbols in this PDF.</span>
-            ) : null}
           </div>
         ) : null}
       </div>
@@ -188,6 +187,7 @@ export function PdfSearchWorkspace({
               <button
                 key={`${alternative.query}:${alternative.label}`}
                 type="button"
+                title={`Search for ${alternative.label}`}
                 onClick={() => onAlternativeActivate(alternative)}
               >
                 {alternative.label}
@@ -226,6 +226,7 @@ export function PdfSearchWorkspace({
                     className="annotation-item__content pdf-search__result"
                     data-workspace-focus-token={`search:${result.id}`}
                     aria-label={resultLabel(result)}
+                    title={`Go to result on page ${result.pageIndex + 1}`}
                     onClick={() => onResultActivate(result)}
                   >
                     <span className="annotation-item__excerpt pdf-search__excerpt">

@@ -276,7 +276,6 @@ export function ReferenceWorkspace({
           role="tablist"
           aria-label="Workspace modes"
           data-workspace-mode-count={modes.length}
-          style={{ gridTemplateColumns: `repeat(${modes.length}, minmax(0, 1fr))` }}
         >
           {modes.map((workspaceMode) => {
             const selected = workspaceMode === mode;
@@ -302,6 +301,7 @@ export function ReferenceWorkspace({
                 data-workspace-mode={workspaceMode}
                 aria-selected={selected}
                 aria-controls={`workspace-panel-${workspaceMode}`}
+                title={`Show ${MODE_LABELS[workspaceMode]}`}
                 tabIndex={selected ? 0 : -1}
                 onKeyDown={moveModeFocus}
                 onFocus={(event) => {
@@ -412,6 +412,7 @@ export function ReferenceWorkspace({
                     data-reference-tab={tab.identity}
                     data-workspace-focus-token={`reference:${tab.identity}`}
                     aria-label={destinationLabel}
+                    title={`Show ${destinationLabel}`}
                     aria-selected={selected}
                     aria-controls="active-reference-panel"
                     tabIndex={selected ? 0 : -1}
@@ -427,8 +428,8 @@ export function ReferenceWorkspace({
                       className="reference-tab-segment__action"
                       data-reference-tab-action="send"
                       data-workspace-focus-token={`reference-send:${tab.identity}`}
-                      aria-label="Send to main"
-                      title="Send to main"
+                      aria-label="Send to main document"
+                      title="Send to main document"
                       onClick={() => onSendToMain(tab.identity)}
                     >
                       <ReviewIcon name="main" />
@@ -473,6 +474,7 @@ export function ReferenceWorkspace({
                     ref={retryReferenceRef}
                     type="button"
                     data-workspace-focus-token="references:retry"
+                    title="Retry opening reference"
                     onClick={onRetryReference}
                   >
                     Retry reference

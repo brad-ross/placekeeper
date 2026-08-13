@@ -61,9 +61,9 @@ describe('link action chooser', () => {
 
     expect(html).toContain('role="menu"');
     expect(html).toContain(`id="${PDF_LINK_ACTION_MENU_ID}"`);
-    expect(html).toMatch(/aria-label="Open in References"[\s\S]*aria-label="Open in main"/u);
-    expect(html).toMatch(/title="Open in References"[\s\S]*title="Open in main"/u);
-    expect(html).toMatch(/aria-label="Open in main"[^>]*>[\s\S]*?lucide-arrow-right/u);
+    expect(html).toMatch(/aria-label="Open in References"[\s\S]*aria-label="Open in main document"/u);
+    expect(html).toMatch(/title="Open in References"[\s\S]*title="Open in main document"/u);
+    expect(html).toMatch(/aria-label="Open in main document"[^>]*>[\s\S]*?lucide-arrow-right/u);
     expect(html.match(/role="menuitem"/g)).toHaveLength(2);
     expect(html.match(/<svg/g)).toHaveLength(2);
     expect(html).not.toContain('<small>');
@@ -88,15 +88,13 @@ describe('link action chooser', () => {
     );
 
     expect(html).toMatch(
-      /aria-label="Open in References"[\s\S]*aria-label="Follow in this Reference Tab"[\s\S]*aria-label="Open in main"/u,
+      /aria-label="Open in References"[\s\S]*aria-label="Follow in this tab"[\s\S]*aria-label="Open in main document"/u,
     );
     expect(html).toMatch(
-      /title="Open in References"[\s\S]*title="Follow in this Reference Tab"[\s\S]*title="Open in main"/u,
+      /title="Open in References"[\s\S]*title="Follow in this tab"[\s\S]*title="Open in main document"/u,
     );
-    expect(html).toMatch(
-      /aria-label="Follow in this Reference Tab"[^>]*>[\s\S]*?lucide-arrow-right/u,
-    );
-    expect(html).toMatch(/aria-label="Open in main"[^>]*>[\s\S]*?lucide-maximize-2/u);
+    expect(html).toMatch(/aria-label="Follow in this tab"[^>]*>[\s\S]*?lucide-arrow-right/u);
+    expect(html).toMatch(/aria-label="Open in main document"[^>]*>[\s\S]*?lucide-maximize-2/u);
     expect(html.match(/role="menuitem"/g)).toHaveLength(3);
     expect(html.match(/<svg/g)).toHaveLength(3);
   });
@@ -178,7 +176,6 @@ describe('shared reference workspace', () => {
     expect(html).not.toMatch(/id="workspace-panel-annotations"[^>]*hidden/u);
     expect(html).toContain('aria-label="Search and annotations"');
     expect(html).toContain('data-workspace-mode-count="2"');
-    expect(html).toContain('grid-template-columns:repeat(2, minmax(0, 1fr))');
   });
 
   it('keeps Outline available while discovery is unavailable', () => {
@@ -264,7 +261,6 @@ describe('shared reference workspace', () => {
 
     expect(html).toContain('aria-label="Workspace modes"');
     expect(html).toContain('data-workspace-mode-count="4"');
-    expect(html).toContain('grid-template-columns:repeat(4, minmax(0, 1fr))');
     expect(html).not.toContain('aria-label="Close workspace"');
     expect(html.match(/role="tab"/g)).toHaveLength(6);
     expect(html.match(/aria-selected="true"/g)).toHaveLength(2);
@@ -318,8 +314,8 @@ describe('shared reference workspace', () => {
     expect(lemmaActive).toMatch(
       /data-reference-tab-segment="lemma"[\s\S]*role="tab"[\s\S]*aria-selected="true"[\s\S]*data-reference-tab-action="send"[\s\S]*data-reference-tab-action="close"/u,
     );
-    expect(lemmaActive).toContain('aria-label="Send to main"');
-    expect(lemmaActive).toContain('title="Send to main"');
+    expect(lemmaActive).toContain('aria-label="Send to main document"');
+    expect(lemmaActive).toContain('title="Send to main document"');
     expect(lemmaActive).toContain('data-workspace-focus-token="reference-send:lemma"');
     expect(lemmaActive).toContain('aria-label="Close active reference"');
     expect(lemmaActive).toContain('title="Close active reference"');
@@ -593,7 +589,7 @@ describe('outline navigator', () => {
     expect(resultsRow).toContain('aria-current="location"');
     expect(resultsRow).toContain('data-current="true"');
     expect(resultsRow).toContain(
-      '<span class="outline-navigator__summary"><span class="outline-navigator__title">Results</span><small class="outline-navigator__page" aria-hidden="true">· 8</small></span>',
+      '<span class="outline-navigator__summary"><span class="outline-navigator__title">Results</span><span class="outline-navigator__separator" aria-hidden="true">·</span><small class="outline-navigator__page" aria-hidden="true">8</small></span>',
     );
     expect(resultsRow).not.toContain('>Page 8</small>');
     expect(html.match(/class="outline-navigator__reference"/g)).toHaveLength(3);

@@ -1,5 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState } from "react";
 
+import { trapDialogFocus } from "../app/dialog-focus.js";
 import type { SaveCopyProposal } from "../app/ProductionReviewApp.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import type { SaveFailureReason } from "../../../../packages/core/src/save-status.js";
@@ -57,8 +58,11 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault();
+            event.stopPropagation();
             if (!props.establishing) props.onCancel();
+            return;
           }
+          trapDialogFocus(event);
         }}
       >
         <h2 id={titleId}>Choose where to save annotations</h2>
@@ -72,7 +76,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
               <p>Remove or reposition that annotation, then save again. Your latest changes are protected.</p>
             </div>
             <div className="save-destination-recovery__actions">
-              <button className="review-button review-button--primary" type="button" onClick={props.onCancel}>Return to annotations</button>
+              <button className="review-button review-button--primary" type="button" title="Return to annotations" onClick={props.onCancel}>Return to annotations</button>
             </div>
           </aside>
         ) : props.recoveryTarget && props.onRetry && props.onLocate ? (
@@ -82,8 +86,8 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
               <p>Your latest annotations are protected. Retry saving to {props.recoveryTarget}, or locate the PDF if it moved.</p>
             </div>
             <div className="save-destination-recovery__actions">
-              <button className="review-button review-button--primary" type="button" disabled={props.establishing} onClick={() => void props.onRetry?.()}>Retry</button>
-              <button className="review-button" type="button" disabled={props.establishing} onClick={() => void props.onLocate?.()}>Locate PDF…</button>
+              <button className="review-button review-button--primary" type="button" title="Retry saving" disabled={props.establishing} onClick={() => void props.onRetry?.()}>Retry</button>
+              <button className="review-button" type="button" title="Locate the PDF" disabled={props.establishing} onClick={() => void props.onLocate?.()}>Locate PDF…</button>
             </div>
           </aside>
         ) : null}
@@ -92,6 +96,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
           <label className="save-destination-choice" data-selected={choice === "original"}>
             <input
               type="radio"
+              title="Modify the original PDF"
               name="save-destination"
               checked={choice === "original"}
               disabled={restricted}
@@ -103,6 +108,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
             <input
               ref={firstRef}
               type="radio"
+              title="Save to a new copy"
               name="save-destination"
               checked={choice === "copy"}
               disabled={restricted}
@@ -116,6 +122,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
                 <span>Copy name</span>
                 <input
                   value={filename}
+                  title="Enter a name for the PDF copy"
                   disabled={props.establishing || restricted || props.proposal === undefined}
                   onChange={(event) => setFilename(event.currentTarget.value)}
                   aria-invalid={props.error !== undefined}
@@ -127,6 +134,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
                   <button
                     type="button"
                     className="save-destination-location"
+                    title="Change save location"
                     disabled={props.establishing || restricted || props.proposal === undefined}
                     onClick={() => void props.onChooseLocation?.()}
                   >
@@ -142,10 +150,11 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
         ) : null}
         {props.error ? <p className="save-destination-error" role="alert">{props.error}</p> : null}
         <footer>
-          <button className="review-button" type="button" disabled={props.establishing} onClick={props.onCancel}>Cancel</button>
+          <button className="review-button" type="button" title="Cancel save setup" disabled={props.establishing} onClick={props.onCancel}>Cancel</button>
           <button
             type="button"
             className="review-button review-button--primary"
+            title="Confirm automatic save options"
             disabled={
               restricted ||
               props.establishing ||

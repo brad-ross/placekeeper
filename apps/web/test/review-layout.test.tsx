@@ -108,6 +108,21 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-label="Selection review actions"');
     expect(html).not.toContain('aria-label="Page actions"');
   });
+
+  it('yields the modal layer to save options without unmounting nested review state', () => {
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        saveOptionsOpen
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        onCommand={async () => state}
+      >
+        <div>Document canvas</div>
+      </ReviewShell>,
+    );
+
+    expect(html).toMatch(/data-review-nested-host="true" hidden="" inert=""/u);
+  });
   const viewerControls: ViewerControls = {
     snapshot: () => ({
       ready: true,
@@ -242,7 +257,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(listHtml).toContain('data-annotation-state="active-corresponding"');
     expect(listHtml).toContain('<span class="annotation-item__separator">·</span><span class="annotation-item__page">4</span>');
     expect(listHtml).toContain('class="annotation-item__section" title="Methods and data">Methods and data</span>');
-    expect(listHtml).toContain('aria-label="highlight · Page 4 · Methods and data · Clarify the identifying variation behind this claim."');
+    expect(listHtml).toContain('aria-label="Highlight · Page 4 · Methods and data · Clarify the identifying variation behind this claim."');
     expect(listHtml).not.toContain('>Page 4<');
     expect(unsectionedListHtml).not.toContain('annotation-item__section');
     expect(unsectionedListHtml.match(/annotation-item__separator/gu)).toHaveLength(1);

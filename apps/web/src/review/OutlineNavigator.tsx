@@ -89,6 +89,7 @@ export function OutlineNavigator({
                   type="button"
                   className="outline-navigator__disclosure"
                   aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${item.label}`}
+                  title={`${isExpanded ? 'Collapse' : 'Expand'} ${item.label}`}
                   aria-expanded={isExpanded}
                   aria-controls={childrenId}
                   onClick={() => toggle(item.id)}
@@ -100,6 +101,7 @@ export function OutlineNavigator({
                 type="button"
                 className="outline-navigator__destination"
                 aria-label={destinationLabel}
+                title={item.target === null ? `${destinationLabel} is unavailable` : `Go to ${destinationLabel}`}
                 aria-current={currentItemId === item.id ? 'location' : undefined}
                 aria-disabled={item.target === null ? true : undefined}
                 disabled={item.target === null}
@@ -114,9 +116,10 @@ export function OutlineNavigator({
                   {pageNumber === null
                     ? null
                     : (
-                      <small className="outline-navigator__page" aria-hidden="true">
-                        · {pageNumber}
-                      </small>
+                      <>
+                        <span className="outline-navigator__separator" aria-hidden="true">·</span>
+                        <small className="outline-navigator__page" aria-hidden="true">{pageNumber}</small>
+                      </>
                     )}
                 </span>
               </button>

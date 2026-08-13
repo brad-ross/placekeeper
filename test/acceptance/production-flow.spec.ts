@@ -134,7 +134,7 @@ async function followLinkInSameReference(
     name: "Open Target-to-target detail link, Page 3",
   });
   const firstAction = menu.getByRole("menuitem", { name: /Open in References/u });
-  const action = menu.getByRole("menuitem", { name: "Follow in this Reference Tab" });
+  const action = menu.getByRole("menuitem", { name: "Follow in this tab" });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await link.evaluate((element) => element.focus({ preventScroll: true }));
     await expect(link).toBeFocused();
@@ -142,7 +142,8 @@ async function followLinkInSameReference(
     try {
       await expect(firstAction).toBeFocused({ timeout: 1_500 });
       await expect(menu.getByRole("menuitem")).toHaveCount(3);
-      await expect(action).toHaveAttribute("title", "Follow in this Reference Tab");
+      await expect(action).toHaveAttribute("title", "Follow in this tab");
+      await expect(action).toHaveText("");
       await page.keyboard.press("ArrowDown");
       await expect(action).toBeFocused({ timeout: 1_500 });
       await page.keyboard.press("Enter");
@@ -402,6 +403,11 @@ test("searches extracted PDF text with variants, history, references, and retain
   await expect(searchPanel).not.toContainText("Exact text");
   await expect(exact.locator(".pdf-search__result-match").first()).toHaveText("stable");
   const firstResultExcerpt = exact.locator(".pdf-search__excerpt").first();
+  const firstResultCard = exact.locator("[data-search-result]").first();
+  await expect(firstResultCard).toHaveCSS("background-color", "rgb(255, 254, 250)");
+  await expect(firstResultCard).toHaveCSS("border-style", "solid");
+  await expect(firstResultCard).toHaveCSS("border-radius", "11px");
+  await expect(firstResultCard).toHaveCSS("padding", "4px");
   const [pageNumberBox, separatorBox, snippetBox] = await Promise.all([
     firstResultExcerpt.locator(".pdf-search__result-page").boundingBox(),
     firstResultExcerpt.locator(".pdf-search__result-separator").boundingBox(),
@@ -432,7 +438,7 @@ test("searches extracted PDF text with variants, history, references, and retain
   await expect(searchPanel).not.toContainText("Exact symbol");
   await query.focus();
   await query.fill("lambda");
-  await expect(symbolSuggestions.getByRole("option")).toHaveCount(0);
+  await expect(symbolSuggestions).toBeHidden();
 
   await query.fill("degree");
   await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
@@ -524,7 +530,7 @@ test("searches extracted PDF text with variants, history, references, and retain
     }, 2_000);
     return { state, finish };
   });
-  await page.getByRole("button", { name: "Send to main" }).click();
+  await page.getByRole("button", { name: "Send to main document" }).click();
   await expect(page.getByRole("tab", { name: /stable, Page 1/u })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Open References tray" })).toBeVisible();
   await expect(page.getByLabel("Current page")).toHaveText("1 / 3");
@@ -604,6 +610,8 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(primaryMenu.getByRole("menuitem", { name: /Open in References/u })).toBeFocused();
   await expect(primaryMenu.getByRole("menuitem")).toHaveCount(2);
   await expect(primaryMenu.locator("svg")).toHaveCount(2);
+  await expect(primaryMenu.getByRole("menuitem").first()).toHaveAttribute("title", "Open in References");
+  await expect(primaryMenu.getByRole("menuitem").last()).toHaveAttribute("title", "Open in main document");
   await expect(primaryMenu.getByRole("menuitem").first()).toHaveText("");
   await expect(primaryMenu.getByRole("menuitem").last()).toHaveText("");
   const firstMenuItemBounds = await primaryMenu.getByRole("menuitem").first().boundingBox();
@@ -878,29 +886,63 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
       const referencesLabel = referencesSegment?.querySelector<HTMLElement>(
         ".review-workspace__tab-label",
       );
+      const regularTab = tablist.querySelector<HTMLElement>(
+        "[data-workspace-tab-segment='outline'] > [role='tab']",
+      );
       const moveButton = referencesSegment?.querySelector<HTMLElement>(
         "[data-reference-move='bottom']",
       );
-      if (!header || !referencesSegment || !referencesTab || !referencesLabel || !moveButton) {
+      const segments = [...tablist.querySelectorAll<HTMLElement>(
+        "[data-workspace-tab-segment]",
+      )];
+      if (
+        !header
+        || !referencesSegment
+        || !referencesTab
+        || !referencesLabel
+        || !regularTab
+        || !moveButton
+        || segments.length === 0
+      ) {
         throw new Error("Right workspace selector geometry is incomplete.");
       }
       const headerRect = header.getBoundingClientRect();
       const tablistRect = tablist.getBoundingClientRect();
       const segmentRect = referencesSegment.getBoundingClientRect();
+      const firstSegmentRect = segments[0]!.getBoundingClientRect();
+      const lastSegmentRect = segments.at(-1)!.getBoundingClientRect();
       const labelRect = referencesLabel.getBoundingClientRect();
       const moveRect = moveButton.getBoundingClientRect();
+      const regularTabStyle = getComputedStyle(regularTab);
+      const referencesLabelStyle = getComputedStyle(referencesLabel);
       return {
         leftInset: tablistRect.left - headerRect.left,
         rightInset: headerRect.right - tablistRect.right,
+        contentLeftInset: firstSegmentRect.left - tablistRect.left,
+        contentRightInset: tablistRect.right - lastSegmentRect.right,
+        segmentWidths: segments.map((segment) => segment.getBoundingClientRect().width),
         segmentCenter: segmentRect.left + segmentRect.width / 2,
         clusterCenter: (labelRect.left + moveRect.right) / 2,
         gap: moveRect.left - labelRect.right,
+        labelFits: referencesLabel.scrollWidth <= referencesLabel.clientWidth,
+        regularPaddingLeft: regularTabStyle.paddingLeft,
+        regularPaddingRight: regularTabStyle.paddingRight,
+        referencesPaddingLeft: referencesLabelStyle.paddingLeft,
+        referencesPaddingRight: referencesLabelStyle.paddingRight,
       };
     });
     expect(geometry.rightInset).toBeCloseTo(geometry.leftInset, 0);
+    expect(geometry.contentRightInset).toBeCloseTo(geometry.contentLeftInset, 0);
+    expect(new Set(geometry.segmentWidths.map((width) => Math.round(width))).size)
+      .toBeGreaterThan(1);
+    expect(geometry.segmentWidths.at(-1)).toBeGreaterThan(geometry.segmentWidths[0]!);
     expect(geometry.clusterCenter).toBeCloseTo(geometry.segmentCenter, 0);
     expect(geometry.gap).toBeGreaterThanOrEqual(0);
     expect(geometry.gap).toBeLessThanOrEqual(4);
+    expect(geometry.labelFits).toBe(true);
+    expect(geometry.regularPaddingLeft).toBe(geometry.regularPaddingRight);
+    expect(geometry.referencesPaddingLeft).toBe(geometry.referencesPaddingRight);
+    expect(geometry.referencesPaddingLeft).toBe(geometry.regularPaddingLeft);
   };
   await expectRightWorkspaceSelectorGeometry();
   const referencesMode = workspaceModes.getByRole("tab", { name: "References", exact: true });
@@ -937,6 +979,32 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     .toBeGreaterThan(initialRightValue);
   await rightSplitter.press("Home");
   const minimumRightValue = Number(await rightSplitter.getAttribute("aria-valuenow"));
+  const minimumSelectorGeometry = await workspaceModes.evaluate((tablist) => {
+    const segments = [...tablist.querySelectorAll<HTMLElement>(
+      "[data-workspace-tab-segment]",
+    )];
+    const moveButton = tablist.querySelector<HTMLElement>("[data-reference-move='bottom']");
+    if (segments.length === 0 || !moveButton) {
+      throw new Error("Minimum-width workspace selector geometry is incomplete.");
+    }
+    const tablistRect = tablist.getBoundingClientRect();
+    const firstRect = segments[0]!.getBoundingClientRect();
+    const lastRect = segments.at(-1)!.getBoundingClientRect();
+    const moveRect = moveButton.getBoundingClientRect();
+    return {
+      firstLeft: firstRect.left,
+      lastRight: lastRect.right,
+      moveRight: moveRect.right,
+      tablistLeft: tablistRect.left,
+      tablistRight: tablistRect.right,
+    };
+  });
+  expect(minimumSelectorGeometry.firstLeft)
+    .toBeGreaterThanOrEqual(minimumSelectorGeometry.tablistLeft - 1);
+  expect(minimumSelectorGeometry.lastRight)
+    .toBeLessThanOrEqual(minimumSelectorGeometry.tablistRight + 1);
+  expect(minimumSelectorGeometry.moveRight)
+    .toBeLessThanOrEqual(minimumSelectorGeometry.tablistRight + 1);
   await rightSplitter.press("ArrowLeft");
   await expect.poll(async () => Number(await rightSplitter.getAttribute("aria-valuenow")))
     .toBeGreaterThan(minimumRightValue);
@@ -1054,7 +1122,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
       - (pageBounds.y + pageBounds.height / 2),
     );
   }).toBeLessThan(2);
-  await page.getByRole("button", { name: "Send to main" }).click();
+  await page.getByRole("button", { name: "Send to main document" }).click();
   await expect(workspace).toHaveAttribute("data-workspace-open", "false");
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
   await expect(page.locator(".review-workspace__status")).toHaveText(
@@ -1307,7 +1375,7 @@ test("switches and sends references from the right-docked workspace", async ({ p
     );
   }).toBeLessThan(2);
 
-  await page.getByRole("button", { name: "Send to main" }).click();
+  await page.getByRole("button", { name: "Send to main document" }).click();
   await expect(page.locator(".review-workspace__status")).toHaveText(
     "Reference sent to the main document.",
   );
@@ -1377,7 +1445,7 @@ test("keeps compound reference actions in narrow keyboard order through survivor
   const forwardTab = browserName === 'webkit' ? 'Alt+Tab' : 'Tab';
   const backwardTab = browserName === 'webkit' ? 'Shift+Alt+Tab' : 'Shift+Tab';
   await page.keyboard.press(forwardTab);
-  const detailSend = page.getByRole("button", { name: "Send to main" });
+  const detailSend = page.getByRole("button", { name: "Send to main document" });
   await expect(detailSend).toBeFocused();
   await page.keyboard.press(forwardTab);
   await expect(page.getByRole("button", { name: "Close active reference" })).toBeFocused();
@@ -1509,15 +1577,21 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await expect(detailsReference).toHaveCSS("opacity", "0");
   await expect(nestedReference).toHaveCSS("opacity", "0");
 
-  const compactPageGap = await details.evaluate((destination) => {
+  const compactPageGaps = await details.evaluate((destination) => {
     const label = destination.querySelector<HTMLElement>(".outline-navigator__title");
+    const separator = destination.querySelector<HTMLElement>(".outline-navigator__separator");
     const pageNumber = destination.querySelector<HTMLElement>(".outline-navigator__page");
-    if (!label || !pageNumber) throw new Error("Outline page metadata is incomplete.");
+    if (!label || !separator || !pageNumber) throw new Error("Outline page metadata is incomplete.");
     const labelText = document.createRange();
     labelText.selectNodeContents(label);
-    return pageNumber.getBoundingClientRect().left - labelText.getBoundingClientRect().right;
+    const separatorBounds = separator.getBoundingClientRect();
+    return {
+      before: separatorBounds.left - labelText.getBoundingClientRect().right,
+      after: pageNumber.getBoundingClientRect().left - separatorBounds.right,
+    };
   });
-  expect(compactPageGap).toBeCloseTo(4, 0);
+  expect(compactPageGaps.before).toBeCloseTo(5, 0);
+  expect(compactPageGaps.after).toBeCloseTo(5, 0);
 
   const nestedRow = nestedReference.locator("..");
   expect(await nestedRow.evaluate((element) => {
@@ -1525,10 +1599,14 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     return {
       backgroundColor: style.backgroundColor,
       borderColor: style.borderColor,
+      borderRadius: style.borderRadius,
+      padding: style.padding,
     };
   })).toEqual({
-    backgroundColor: "rgba(0, 0, 0, 0)",
-    borderColor: "rgba(0, 0, 0, 0)",
+    backgroundColor: "rgb(255, 254, 250)",
+    borderColor: "rgb(226, 228, 222)",
+    borderRadius: "11px",
+    padding: "4px",
   });
   await nestedRow.hover();
   await expect(nestedReference).toHaveCSS("opacity", "1");
@@ -1549,14 +1627,16 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     const row = button.parentElement;
     const destination = row?.querySelector<HTMLElement>(".outline-navigator__destination");
     const label = destination?.querySelector<HTMLElement>(".outline-navigator__title");
+    const separator = destination?.querySelector<HTMLElement>(".outline-navigator__separator");
     const pageNumber = destination?.querySelector<HTMLElement>(".outline-navigator__page");
-    if (!row || !destination || !label || !pageNumber) {
+    if (!row || !destination || !label || !separator || !pageNumber) {
       throw new Error("Outline row geometry is incomplete.");
     }
     const rowBounds = row.getBoundingClientRect();
     const destinationBounds = destination.getBoundingClientRect();
     const actionBounds = button.getBoundingClientRect();
     const labelBounds = label.getBoundingClientRect();
+    const separatorBounds = separator.getBoundingClientRect();
     const pageBounds = pageNumber.getBoundingClientRect();
     const rowStyle = getComputedStyle(row);
     const destinationStyle = getComputedStyle(destination);
@@ -1573,6 +1653,9 @@ test("keeps outline and rejected link metadata inert inside the installed local 
       destinationDisplay: destinationStyle.display,
       destinationText: destination.textContent,
       pageText: pageNumber.textContent,
+      separatorText: separator.textContent,
+      separatorLeft: separatorBounds.left,
+      separatorRight: separatorBounds.right,
       pageLeft: pageBounds.left,
       pageRight: pageBounds.right,
       labelRight: labelBounds.right,
@@ -1600,14 +1683,17 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   expect(nestedLongLabelGeometry.destinationLeftInset).toBeLessThan(27);
   expect(nestedLongLabelGeometry).toMatchObject({
     destinationDisplay: "flex",
-    destinationText: "scriptalert(1)/script hostile outline· 2",
-    pageText: "· 2",
+    destinationText: "scriptalert(1)/script hostile outline·2",
+    pageText: "2",
+    separatorText: "·",
     labelFontSize: "13px",
   });
   expect(nestedLongLabelGeometry.pageRight)
     .toBeLessThanOrEqual(nestedLongLabelGeometry.actionLeft);
-  expect(nestedLongLabelGeometry.pageLeft - nestedLongLabelGeometry.labelRight)
-    .toBeCloseTo(4, 0);
+  expect(nestedLongLabelGeometry.separatorLeft - nestedLongLabelGeometry.labelRight)
+    .toBeCloseTo(5, 0);
+  expect(nestedLongLabelGeometry.pageLeft - nestedLongLabelGeometry.separatorRight)
+    .toBeCloseTo(5, 0);
   expect(nestedLongLabelGeometry.pageCenterY)
     .toBeCloseTo(nestedLongLabelGeometry.labelCenterY, 0);
   expect(nestedLongLabelGeometry.labelScrollWidth)
@@ -1632,6 +1718,10 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     has: page.locator('.annotation-item__section', { hasText: /^Nested result$/u }),
   }).first();
   await expect(nestedAnnotation).toBeVisible();
+  await expect(nestedAnnotation).toHaveCSS('background-color', 'rgb(255, 254, 250)');
+  await expect(nestedAnnotation).toHaveCSS('border-style', 'solid');
+  await expect(nestedAnnotation).toHaveCSS('border-radius', '11px');
+  await expect(nestedAnnotation).toHaveCSS('padding', '4px');
   await expect(nestedAnnotation.locator('.annotation-item__page')).toHaveText('3');
   await expect(nestedAnnotation.locator('.annotation-item__separator')).toHaveCount(2);
   await expect(nestedAnnotation.getByRole('button')).toHaveAccessibleName(
@@ -1667,6 +1757,10 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await expect(referenceWorkspace).toHaveAttribute("data-workspace-presentation", "bottom");
   await expect(detailsTab).toHaveAttribute("aria-selected", "true");
   await expect(detailsTab).toBeFocused();
+  const detailsReferenceCard = detailsTab.locator('..');
+  await expect(detailsReferenceCard).toHaveCSS('border-style', 'solid');
+  await expect(detailsReferenceCard).toHaveCSS('border-radius', '11px');
+  await expect(detailsReferenceCard).toHaveCSS('padding', '4px');
   await expect(page.locator("[data-reference-pdf-viewport] [data-page-index='2']")).toBeVisible();
   await expectMainStateUnchanged();
   await detailsReference.click();
@@ -1772,20 +1866,42 @@ test("collapses an outline-free PDF to Annotations and restores workspace focus"
     'aria-selected',
     'true',
   );
-  const [modeBarBounds, annotationsModeBounds] = await Promise.all([
-    modes.boundingBox(),
-    annotationsMode.boundingBox(),
-  ]);
-  expect(modeBarBounds).not.toBeNull();
-  expect(annotationsModeBounds).not.toBeNull();
   const visibleModes = modes.getByRole('tab');
   const expectedModes = (page.viewportSize()?.width ?? 1280) < 900
     ? ['Search', 'Annotations', 'References']
     : ['Search', 'Annotations'];
   await expect(visibleModes).toHaveText(expectedModes);
-  expect(Math.abs(
-    annotationsModeBounds!.width - modeBarBounds!.width / expectedModes.length,
-  )).toBeLessThan(10);
+  const intrinsicGeometry = await modes.evaluate((tablist) => {
+    const segments = [...tablist.querySelectorAll<HTMLElement>(
+      ':scope > [data-workspace-tab-segment], :scope > [role="tab"]',
+    )];
+    if (segments.length === 0) throw new Error('Workspace selector has no visible segments.');
+    const tablistBounds = tablist.getBoundingClientRect();
+    const firstBounds = segments[0]!.getBoundingClientRect();
+    const lastBounds = segments.at(-1)!.getBoundingClientRect();
+    return {
+      leftInset: firstBounds.left - tablistBounds.left,
+      rightInset: tablistBounds.right - lastBounds.right,
+      widths: segments.map((segment) => segment.getBoundingClientRect().width),
+      horizontalPaddings: segments.map((segment) => {
+        const label = segment.querySelector<HTMLElement>('.review-workspace__tab-label');
+        const tab = segment.matches('[role="tab"]')
+          ? segment
+          : segment.querySelector<HTMLElement>('[role="tab"]');
+        const style = getComputedStyle(label ?? tab!);
+        return [style.paddingLeft, style.paddingRight];
+      }),
+      referenceLabelFits: (() => {
+        const label = tablist.querySelector<HTMLElement>('.review-workspace__tab-label');
+        return label === null || label.scrollWidth <= label.clientWidth;
+      })(),
+    };
+  });
+  expect(intrinsicGeometry.rightInset).toBeCloseTo(intrinsicGeometry.leftInset, 0);
+  expect(new Set(intrinsicGeometry.widths.map((width) => Math.round(width))).size)
+    .toBeGreaterThan(1);
+  expect(intrinsicGeometry.horizontalPaddings.every(([left, right]) => left === right)).toBe(true);
+  expect(intrinsicGeometry.referenceLabelFits).toBe(true);
   await expect(workspace.getByRole('heading', { name: /^Annotations \d+$/u })).toBeVisible();
   await expect(workspace.getByRole('heading', {
     name: 'External Annotations (read only)',
@@ -2018,7 +2134,7 @@ test('edits the current page in a real multi-page viewer without losing adjacent
 
   const { annotations, workspace: workspaceRail } = await openAnnotationsWorkspace(page);
   const noteRow = page.getByRole('button', {
-    name: /pageNote · Page 1 · Keep this surrounding review state\./u,
+    name: /Page Note · Page 1 · Keep this surrounding review state\./u,
   });
   await expect(noteRow).toBeVisible();
   await page.getByRole('button', { name: 'Zoom in' }).click();
@@ -2476,7 +2592,7 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
     const box = await page.locator('#review-tools-workspace').boundingBox();
     return box === null ? Number.POSITIVE_INFINITY : Math.abs(box.x + box.width - 320);
   }).toBeLessThanOrEqual(1);
-  await page.getByRole('button', { name: /highlight · Page 1 · Existing supported highlight/iu }).click();
+  await page.getByRole('button', { name: /Highlight · Page 1 · Existing supported highlight/iu }).click();
   await expect.poll(async () => {
     const box = await page.locator('#review-tools-workspace').boundingBox();
     return box === null ? Number.POSITIVE_INFINITY : Math.abs(box.x + box.width - 320);

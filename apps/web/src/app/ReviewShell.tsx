@@ -40,7 +40,11 @@ import type { PdfViewerNavigation } from '../pdf/viewer-navigation-adapter.js';
 import type { ViewerPdfLinkInvocation } from '../pdf/viewer-interaction-events.js';
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
 import { AnnotationList } from '../review/AnnotationList.js';
-import { AnnotationMetadata, annotationAccessibleLabel } from '../review/AnnotationMetadata.js';
+import {
+  AnnotationMetadata,
+  annotationAccessibleLabel,
+  annotationKindLabel,
+} from '../review/AnnotationMetadata.js';
 import type { AnnotationOutlineLabels } from '../review/annotation-outline-context.js';
 import { AnnotationPeek } from '../review/AnnotationPeek.js';
 import { CommentComposer } from '../review/CommentComposer.js';
@@ -1174,7 +1178,7 @@ export function ReviewShell(props: ReviewShellProps) {
                 <div className="annotation-status annotation-status--error" data-annotation-status="error" role="alert">
                   <ReviewIcon name="alert" className="review-icon annotation-status__icon" />
                   <p><strong>Existing annotations unavailable.</strong><span>{existingAnnotations.message}</span></p>
-                  <button type="button" onClick={props.onRetryExistingAnnotations}>Retry</button>
+                  <button type="button" title="Retry loading existing annotations" onClick={props.onRetryExistingAnnotations}>Retry</button>
                 </div>
               ) : null}
               {existingAnnotations.status === 'ready' ? (
@@ -1196,7 +1200,7 @@ export function ReviewShell(props: ReviewShellProps) {
                         pageNumber: annotation.pageIndex + 1,
                         ...(sectionLabel === undefined ? {} : { sectionLabel }),
                         ...(annotation.contents ? { excerpt: annotation.contents } : {}),
-                      })} onClick={() => { markFramingUserIntent(); props.onNavigateExisting?.(annotation); }}>
+                      })} title={`Go to ${annotationKindLabel(annotation.subtype)} annotation on page ${annotation.pageIndex + 1}`} onClick={() => { markFramingUserIntent(); props.onNavigateExisting?.(annotation); }}>
                         <AnnotationMetadata
                           kind={annotation.subtype}
                           pageNumber={annotation.pageIndex + 1}
@@ -1241,7 +1245,12 @@ export function ReviewShell(props: ReviewShellProps) {
           ) : null}
         </div>
       </div>
-      <div className="review-nested-host" data-review-nested-host>
+      <div
+        className="review-nested-host"
+        data-review-nested-host
+        hidden={props.saveOptionsOpen ?? false}
+        inert={props.saveOptionsOpen ?? false}
+      >
         {textDraft ? (
           <CommentComposer
             title={textDraft.kind === 'replace' ? 'Replacement text' : 'Insertion text'}
@@ -1307,7 +1316,7 @@ export function ReviewShell(props: ReviewShellProps) {
         ) : null}
         {composer?.kind === 'edit' && mutableField(composer.item) ? (
           <CommentComposer
-            title={`Edit ${composer.item.kind}`}
+            title={`Edit ${annotationKindLabel(composer.item.kind)}`}
             {...(composer.item.kind === 'replace' || composer.item.kind === 'insert'
               ? {
                   allowWhitespace: true,

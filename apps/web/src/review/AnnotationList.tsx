@@ -1,7 +1,11 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
 import { documentOrderedItems } from './annotation-projection.js';
-import { AnnotationMetadata, annotationAccessibleLabel } from './AnnotationMetadata.js';
+import {
+  AnnotationMetadata,
+  annotationAccessibleLabel,
+  annotationKindLabel,
+} from './AnnotationMetadata.js';
 import { ReviewIcon } from './ReviewIcon.js';
 
 export interface AnnotationListProps {
@@ -109,6 +113,7 @@ export function AnnotationList({
       <ol ref={listRef} tabIndex={-1} aria-label="Annotations in document order">
         {ordered.map((item) => {
           const text = payloadText(item);
+          const kindLabel = annotationKindLabel(item.kind);
           const active = activeId === item.id;
           const corresponding = correspondingId === item.id;
           const sectionLabel = sectionLabels?.get(item.id);
@@ -145,6 +150,7 @@ export function AnnotationList({
                   ...(sectionLabel === undefined ? {} : { sectionLabel }),
                   ...(text ? { excerpt: text } : {}),
                 })}
+                title={`Go to ${kindLabel} annotation on page ${item.pageIndex + 1}`}
                 onClick={() => onNavigate(item)}
               >
                 <AnnotationMetadata
@@ -155,11 +161,11 @@ export function AnnotationList({
                 {text ? <span className="annotation-item__excerpt">{text}</span> : null}
               </button>
               {item.kind === 'delete' ? null : (
-                <button type="button" className="annotation-item__action" data-annotation-action="edit" aria-label={`Edit ${item.kind} on page ${item.pageIndex + 1}`} title="Edit annotation" onClick={(event) => onEdit(item, event.currentTarget)}>
+                <button type="button" className="annotation-item__action" data-annotation-action="edit" aria-label={`Edit ${kindLabel} annotation on page ${item.pageIndex + 1}`} title="Edit annotation" onClick={(event) => onEdit(item, event.currentTarget)}>
                   <ReviewIcon name="edit" size={15} />
                 </button>
               )}
-              <button type="button" className="annotation-item__action annotation-item__delete" data-annotation-action="delete" aria-label={`Delete ${item.kind} on page ${item.pageIndex + 1}`} title="Delete annotation" onClick={() => void remove(item)}>
+              <button type="button" className="annotation-item__action annotation-item__delete" data-annotation-action="delete" aria-label={`Remove ${kindLabel} annotation on page ${item.pageIndex + 1}`} title="Delete annotation" onClick={() => void remove(item)}>
                 <ReviewIcon name="delete" size={15} />
               </button>
             </li>
