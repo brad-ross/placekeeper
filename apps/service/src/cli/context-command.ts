@@ -4,13 +4,14 @@ import { isAbsolute } from "node:path";
 import type { LiveDispositionItemV1 } from "../../../../packages/core/src/disposition.js";
 import type { PdfEvidenceRequest } from "../context/pdf-evidence-service.js";
 import type { SourceReplacementProposalV1 } from "../context/source-reconciliation-service.js";
-import type { ProofreaderControlRequest, ProofreaderControlResponse } from "../host/launch-control.js";
+import type { PlacekeeperControlRequest, PlacekeeperControlResponse } from "../host/launch-control.js";
 import { controlThroughDaemon } from "../host/service-daemon.js";
+import { CODEX_INSTALLED_LAUNCHER_COMMAND } from "./hook-command.js";
 
-type ControlClient = (request: ProofreaderControlRequest) => Promise<ProofreaderControlResponse>;
+type ControlClient = (request: PlacekeeperControlRequest) => Promise<PlacekeeperControlResponse>;
 
 const HANDLE = /^[A-Za-z0-9._~-]{16,512}$/u;
-const INSTALLED = '"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader"';
+const INSTALLED = CODEX_INSTALLED_LAUNCHER_COMMAND;
 
 export interface ParsedContextEvidenceRequest {
   readonly handle: string;
@@ -69,7 +70,7 @@ function withoutFilePayloadFlags(args: readonly string[]): string[] {
   return filtered;
 }
 
-export function parseContextSourceArguments(args: readonly string[]): ProofreaderControlRequest {
+export function parseContextSourceArguments(args: readonly string[]): PlacekeeperControlRequest {
   if (args[0] !== "context" || args[1] !== "source" || args[2] === undefined) {
     throw new Error(`Use: ${INSTALLED} context source <begin|propose|reconcile|rebuild-plan|rebuild-verify|complete>`);
   }
@@ -251,7 +252,7 @@ export async function runContextCommand(
   write: (text: string) => void = (text) => process.stdout.write(text),
 ): Promise<number> {
   if (args[1] === "source") {
-    let request: ProofreaderControlRequest;
+    let request: PlacekeeperControlRequest;
     try {
       const payloads = await Promise.all([
         requestPayload(args, "--proposal-file", "Proposal"),
@@ -325,7 +326,7 @@ export async function runContextCommand(
     write(`${JSON.stringify({ ok: false, error: error instanceof Error ? error.message : "Invalid context request" })}\n`);
     return 2;
   }
-  let response: ProofreaderControlResponse;
+  let response: PlacekeeperControlResponse;
   try {
     response = await control({
       kind: "retrieve-evidence-by-handle",

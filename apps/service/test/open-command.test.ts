@@ -20,18 +20,16 @@ import {
 } from "../src/host/launch-control.js";
 import { DaemonLifecycleCoordinator } from "../src/host/daemon-lifecycle.js";
 import { acquireLifecycleLock } from "../src/host/lifecycle-lock.js";
-import { ProofreaderHost } from "../src/host/proofreader-host.js";
+import { PlacekeeperHost } from "../src/host/placekeeper-host.js";
 import { coordinateUpgrade } from "../src/host/upgrade-coordinator.js";
 import {
   initialDaemonIsAbsent,
-  legacySocketOwnerLookupArgs,
-  parseOwnedLegacyProcess,
 } from "../src/cli/daemon-command.js";
 import { defaultDaemonPaths } from "../src/host/service-daemon.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 
 const roots: string[] = [];
-const hosts: ProofreaderHost[] = [];
+const hosts: PlacekeeperHost[] = [];
 const controls: LaunchControlServer[] = [];
 const responders: Server[] = [];
 const responderSockets = new Set<import("node:net").Socket>();
@@ -129,30 +127,10 @@ describe("open command", () => {
     expect(write.mock.calls[0]![0]).not.toContain("cap=");
   });
 
-  it("prints a typed upgrade-required response for incompatible daemon protocols", async () => {
-    const write = vi.fn();
-    const code = await runOpenCommand(
-      ["open", "--json", "--pdf", "/tmp/paper.pdf"],
-      async () => { throw new DaemonUpgradeRequiredError("legacy"); },
-      write,
-    );
-
-    expect(code).toBe(2);
-    expect(JSON.parse(write.mock.calls[0]![0])).toEqual({
-      ok: false,
-      error: {
-        kind: "upgrade-required",
-        message: "An older Placekeeper service is running and cannot prove that reviews are idle. Existing work was preserved.",
-        recoveryAction: 'Close reviews, run "$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy, then retry',
-      },
-    });
-  });
-
   it.each([
     ["review-presence", "Close Placekeeper tabs or windows, then retry"],
     ["codex-task", "End the bound Codex task or wait for its lease, then retry"],
     ["transient-busy", "Wait a moment, then retry"],
-    ["legacy", 'Close reviews, run "$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy, then retry'],
   ] as const)("presents bounded state-specific upgrade guidance for %s", async (reason, recoveryAction) => {
     const write = vi.fn();
     await runOpenCommand(
@@ -170,7 +148,7 @@ describe("open command", () => {
   });
 
   it("serializes lifecycle owners and permits an explicit child handoff token", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-lock-"));
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-lock-"));
     roots.push(root);
     const lockPath = join(root, "lifecycle.lock");
     const first = await acquireLifecycleLock(lockPath, { timeoutMs: 100 });
@@ -193,7 +171,7 @@ describe("open command", () => {
   });
 
   it("does not let a paused stale reclaimer remove a later lifecycle owner", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-lock-race-"));
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-lock-race-"));
     roots.push(root);
     const lockPath = join(root, "lifecycle.lock");
     const staleToken = "stale_owner_token_00000000000000";
@@ -233,7 +211,7 @@ describe("open command", () => {
   });
 
   it("fails closed on an initial reset and validates the complete shutdown response", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-management-parse-"));
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-management-parse-"));
     roots.push(root);
     const reset = Object.assign(new Error("reset"), { code: "ECONNRESET" });
     const absent = Object.assign(new Error("absent"), { code: "ENOENT" });
@@ -261,13 +239,13 @@ describe("open command", () => {
   });
 
   it("does not accept an inherited web-assets override in default packaged paths", () => {
-    const previous = process.env.PDF_PROOFREADER_WEB_ASSETS;
-    process.env.PDF_PROOFREADER_WEB_ASSETS = "/tmp/untrusted-proofreader-assets";
+    const previous = process.env.PLACEKEEPER_WEB_ASSETS;
+    process.env.PLACEKEEPER_WEB_ASSETS = "/tmp/untrusted-placekeeper-assets";
     try {
-      expect(defaultDaemonPaths().webAssetsRoot).not.toBe("/tmp/untrusted-proofreader-assets");
+      expect(defaultDaemonPaths().webAssetsRoot).not.toBe("/tmp/untrusted-placekeeper-assets");
     } finally {
-      if (previous === undefined) delete process.env.PDF_PROOFREADER_WEB_ASSETS;
-      else process.env.PDF_PROOFREADER_WEB_ASSETS = previous;
+      if (previous === undefined) delete process.env.PLACEKEEPER_WEB_ASSETS;
+      else process.env.PLACEKEEPER_WEB_ASSETS = previous;
     }
   });
 
@@ -362,7 +340,7 @@ describe("open command", () => {
     expect(order).toEqual(["shutdown", "retired", "replace-ready"]);
   });
 
-  it.each(["legacy", "malformed", "timeout"] as const)(
+  it.each(["malformed", "timeout"] as const)(
     "defers a %s daemon before replacement",
     async (reason) => {
       const replaceAndReady = vi.fn();
@@ -377,27 +355,6 @@ describe("open command", () => {
       expect(replaceAndReady).not.toHaveBeenCalled();
     },
   );
-
-  it("requires the documented explicit legacy stop before a pre-handshake replacement", async () => {
-    let legacyStopped = false;
-    const replaceAndReady = vi.fn(async () => {});
-    const options = {
-      candidate: { daemonIdentity: "b".repeat(64), installArtifactIdentity: "c".repeat(64) },
-      installed: { daemonIdentity: "a".repeat(64), installArtifactIdentity: "a".repeat(64) },
-      inspect: async () => legacyStopped
-        ? { kind: "absent" as const }
-        : { kind: "uninspectable" as const, reason: "legacy" as const },
-      shutdown: vi.fn(),
-      waitForRetirement: vi.fn(),
-      replaceAndReady,
-    };
-
-    await expect(coordinateUpgrade(options)).rejects.toMatchObject({ reason: "legacy" });
-    expect(replaceAndReady).not.toHaveBeenCalled();
-    legacyStopped = true; // ownership-checked `daemon stop-legacy` is exercised separately below.
-    await expect(coordinateUpgrade(options)).resolves.toEqual({ status: "installed" });
-    expect(replaceAndReady).toHaveBeenCalledOnce();
-  });
 
   it("retries transient durable work before accepting idle shutdown", async () => {
     let attempts = 0;
@@ -423,39 +380,13 @@ describe("open command", () => {
     expect(attempts).toBe(3);
   });
 
-  it("validates an explicit legacy-stop target from owned socket and process evidence", () => {
-    const uid = process.getuid?.() ?? 501;
-    expect(parseOwnedLegacyProcess(
-      `p8722\nu${uid}\n`,
-      `${uid} /Applications/PDF Proofreader.app/Contents/Resources/node/bin/node /Applications/PDF Proofreader.app/Contents/Resources/service/main.js daemon`,
-      uid,
-    )).toBe(8722);
-    expect(parseOwnedLegacyProcess(
-      `p8722\nu${uid + 1}\n`,
-      `${uid + 1} /tmp/unrelated-service daemon`,
-      uid,
-    )).toBeUndefined();
-  });
-
-  it("passes lsof formatting flags before the legacy socket path", () => {
-    const socketPath = "/tmp/PDF Proofreader/control.sock";
-    expect(legacySocketOwnerLookupArgs(socketPath)).toEqual([
-      "-n",
-      "-P",
-      "-a",
-      "-U",
-      "-Fpu",
-      socketPath,
-    ]);
-  });
-
   it("inspects management compatibility independently from launch", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-management-"));
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-management-"));
     roots.push(root);
     const assets = join(root, "assets");
     await mkdir(assets);
     await writeFile(join(assets, "app.js"), "export function start(){}\n");
-    const host = await ProofreaderHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
+    const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
     hosts.push(host);
     const socketPath = join(root, "control.sock");
     const daemonIdentity = "a".repeat(64);
@@ -483,12 +414,12 @@ describe("open command", () => {
   });
 
   it("flushes an idle shutdown acknowledgement before closing HTTP and removing the socket", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-shutdown-"));
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-shutdown-"));
     roots.push(root);
     const assets = join(root, "assets");
     await mkdir(assets);
     await writeFile(join(assets, "app.js"), "export function start(){}\n");
-    const host = await ProofreaderHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
+    const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
     const socketPath = join(root, "control.sock");
     const daemonIdentity = "a".repeat(64);
     const control = await startLaunchControlServer(host, socketPath, { daemonIdentity });
@@ -516,7 +447,7 @@ describe("open command", () => {
     await mkdir(assets);
     await writeFile(join(assets, "app.js"), "export function start(){}\n");
     await writeFile(pdf, "%PDF-1.7\nclean\n%%EOF");
-    const host = await ProofreaderHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
+    const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
     const opened = await host.broker.openReview({ pdfPath: pdf });
     if (opened.kind !== "opened") throw new Error("Expected a new review");
     host.broker.credentials.revokeSession(opened.launch.sessionId);
@@ -535,12 +466,12 @@ describe("open command", () => {
   });
 
   it("keeps the management socket until host shutdown has completed", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-shutdown-order-"));
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-shutdown-order-"));
     roots.push(root);
     const assets = join(root, "assets");
     await mkdir(assets);
     await writeFile(join(assets, "app.js"), "export function start(){}\n");
-    const host = await ProofreaderHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
+    const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
     hosts.push(host);
     const releaseClose = Promise.withResolvers<void>();
     const close = vi.spyOn(host, "close").mockImplementation(() => releaseClose.promise);
@@ -560,14 +491,14 @@ describe("open command", () => {
   });
 
   it("refuses conditional shutdown with aggregate blockers and remains usable", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-shutdown-active-"));
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-shutdown-active-"));
     roots.push(root);
     const assets = join(root, "assets");
     const pdf = join(root, "paper.pdf");
     await mkdir(assets);
     await writeFile(join(assets, "app.js"), "export function start(){}\n");
     await writeFile(pdf, "%PDF-1.7\nfixture\n%%EOF");
-    const host = await ProofreaderHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
+    const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
     hosts.push(host);
     const socketPath = join(root, "control.sock");
     const daemonIdentity = "a".repeat(64);
@@ -601,11 +532,11 @@ describe("open command", () => {
   });
 
   it.each([
-    ["legacy", `${JSON.stringify({ kind: "error", reason: "invalid-request" })}\n`, "legacy"],
+    ["invalid request", `${JSON.stringify({ kind: "error", reason: "invalid-request" })}\n`, "malformed"],
     ["malformed", "not-json\n", "malformed"],
     ["early close", "", "early-close"],
   ] as const)("fails closed for a %s management responder", async (_label, response, reason) => {
-    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-uninspectable-"));
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-uninspectable-"));
     roots.push(root);
     const socketPath = join(root, "control.sock");
     const server = createServer((socket) => {
@@ -624,7 +555,7 @@ describe("open command", () => {
   });
 
   it("fails closed when the management responder times out", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-timeout-"));
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-timeout-"));
     roots.push(root);
     const socketPath = join(root, "control.sock");
     const server = createServer((socket) => {
@@ -642,7 +573,7 @@ describe("open command", () => {
   });
 
   it("fails closed when the management responder exceeds its byte budget", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-oversized-"));
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-oversized-"));
     roots.push(root);
     const socketPath = join(root, "control.sock");
     const server = createServer((socket) => {
@@ -663,14 +594,14 @@ describe("open command", () => {
   });
 
   it("uses a private per-user socket to reach the same persistent broker", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-control-"));
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-control-"));
     roots.push(root);
     const assets = join(root, "assets");
     const pdf = join(root, "paper.pdf");
     await mkdir(assets);
     await writeFile(join(assets, "app.js"), "export function start(){}\n");
     await writeFile(pdf, "%PDF-1.7\nfixture\n%%EOF");
-    const host = await ProofreaderHost.start({
+    const host = await PlacekeeperHost.start({
       recoveryRoot: join(root, "recovery"),
       webAssets: { root: assets },
     });
@@ -691,14 +622,14 @@ describe("open command", () => {
   });
 
   it("carries hook claims, prompt refresh, and task revocation over the same private daemon", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-lifecycle-control-"));
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-lifecycle-control-"));
     roots.push(root);
     const assets = join(root, "assets");
     const pdf = join(root, "paper.pdf");
     await mkdir(assets);
     await writeFile(join(assets, "app.js"), "export function start(){}\n");
     await writeFile(pdf, "%PDF-1.7\nfixture\n%%EOF");
-    const host = await ProofreaderHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
+    const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
     hosts.push(host);
     const socketPath = join(root, "control.sock");
     const control = await startLaunchControlServer(host, socketPath);

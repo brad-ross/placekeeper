@@ -57,7 +57,7 @@ Keep the header footprint fixed. The implementation uses a 24-by-24-pixel circul
 
 Do not derive the icon from network reachability or the last successful response alone. A reported current identity is visible as current only while all of the following still match the mounted Review State:
 
-- proofreader session
+- placekeeper session
 - review revision
 - source file identity
 - source digest

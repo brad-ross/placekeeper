@@ -50,7 +50,7 @@ export type LaunchResponse =
     }
   | { readonly ok: false; readonly error: LaunchFailure };
 
-export interface ProofreaderHostOptions {
+export interface PlacekeeperHostOptions {
   readonly recoveryRoot: string;
   readonly webAssets?: WebAssetOptions;
   readonly taskBindings?: TaskBindingRegistry;
@@ -93,7 +93,7 @@ function trustedSurface(value: LaunchRequest["surface"]): LaunchSurface {
 }
 
 /** One long-lived host owns the only broker and HTTP authority used by all launchers. */
-export class ProofreaderHost {
+export class PlacekeeperHost {
   readonly broker: SessionBroker;
   readonly server: LocalHttpServer;
   readonly context: LiveContextService;
@@ -121,7 +121,7 @@ export class ProofreaderHost {
     this.lifecycle = lifecycle;
   }
 
-  static async start(options: ProofreaderHostOptions): Promise<ProofreaderHost> {
+  static async start(options: PlacekeeperHostOptions): Promise<PlacekeeperHost> {
     const broker = new SessionBroker({
       recoveryRoot: options.recoveryRoot,
       ...(options.taskBindings === undefined ? {} : { taskBindings: options.taskBindings }),
@@ -152,7 +152,7 @@ export class ProofreaderHost {
     });
     const context = new LiveContextService({ broker });
     const reconciliation = new SourceReconciliationService({ broker });
-    return new ProofreaderHost(
+    return new PlacekeeperHost(
       broker,
       server,
       context,

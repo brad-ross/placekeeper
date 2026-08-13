@@ -8,7 +8,7 @@ describe("Codex live context status", () => {
     const html = renderToStaticMarkup(<CodexContextStatus status={{
       status: "current",
       identity: {
-        proofreaderSessionId: "review-a",
+        placekeeperSessionId: "review-a",
         documentGeneration: 1,
         source: { fileId: "file-a", digest: "a".repeat(64), byteLength: 12 },
         reviewRevision: 3,
@@ -29,7 +29,7 @@ describe("Codex live context status", () => {
   it("uses the same robot with an amber updating state", () => {
     const html = renderToStaticMarkup(<CodexContextStatus status={{
       status: "refreshing",
-      proofreaderSessionId: "review-a",
+      placekeeperSessionId: "review-a",
       documentGeneration: 1,
     }} />);
 

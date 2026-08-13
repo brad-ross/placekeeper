@@ -15,8 +15,8 @@ deepened: 2026-08-12
 
 ## Goal Capsule
 
-- **Objective:** Make the Codex task hosting PDF Proofreader automatically aware of the current PDF, every annotation, and subsequent annotation changes so the user can discuss and act on them without a handoff action.
-- **Product authority:** This plan supersedes the user-visible Codex handoff requirements in `docs/plans/2026-08-06-001-feat-local-pdf-proofreader-plan.md`, `docs/plans/2026-08-07-002-feat-reading-first-pdf-review-interface-plan.md`, and `docs/plans/2026-08-11-001-feat-saveless-pdf-annotation-persistence-plan.md`. Their local-file safeguards, portable annotation rules, stable identity, clean rebuild, and complete disposition guarantees remain authoritative unless this plan changes their presentation or synchronization behavior.
+- **Objective:** Make the Codex task hosting Placekeeper automatically aware of the current PDF, every annotation, and subsequent annotation changes so the user can discuss and act on them without a handoff action.
+- **Product authority:** This plan supersedes the user-visible Codex handoff requirements in `docs/plans/2026-08-06-001-feat-local-placekeeper-plan.md`, `docs/plans/2026-08-07-002-feat-reading-first-pdf-review-interface-plan.md`, and `docs/plans/2026-08-11-001-feat-saveless-pdf-annotation-persistence-plan.md`. Their local-file safeguards, portable annotation rules, stable identity, clean rebuild, and complete disposition guarantees remain authoritative unless this plan changes their presentation or synchronization behavior.
 - **Open blockers:** None. The implementation must first prove the packaged hook-to-launch correlation in an integration fixture; if that supported hook contract is absent at runtime, the feature must report `unavailable` rather than fall back to global discovery.
 - **Execution profile:** Cross-package feature spanning the core model, local service, Codex plugin, web interface, macOS packaging, and browser acceptance coverage. Work in dependency order from the protocol outward.
 - **Tail ownership:** The implementation run owns simplification, review remediation, browser verification, the commit, the pull request, and CI stabilization.
@@ -27,7 +27,7 @@ deepened: 2026-08-12
 
 ### Summary
 
-The existing PDF Proofreader plugin will give the Codex task hosting its in-app browser a fresh, lossless view of the complete PDF and structured annotation state on every user prompt.
+The existing Placekeeper plugin will give the Codex task hosting its in-app browser a fresh, lossless view of the complete PDF and structured annotation state on every user prompt.
 Chat will replace the Codex button, frozen handoff bundle, and fresh-task workflow for discussion, source edits, rebuilds, and disposition reporting.
 
 ### Problem Frame
@@ -44,8 +44,8 @@ That explicit delivery step is redundant when the current task already hosts the
 ### Actors
 
 - A1. **Reader and annotator:** Reads the PDF, adds or edits annotations, asks questions, and may ask Codex to apply the feedback to source.
-- A2. **Bound Codex task:** Hosts the PDF Proofreader browser, refreshes live document context before each response, and performs requested source work under normal Codex permissions.
-- A3. **PDF Proofreader:** Owns canonical Review Items, portable PDF persistence, save health, and the task-scoped context made available to Codex.
+- A2. **Bound Codex task:** Hosts the Placekeeper browser, refreshes live document context before each response, and performs requested source work under normal Codex permissions.
+- A3. **Placekeeper:** Owns canonical Review Items, portable PDF persistence, save health, and the task-scoped context made available to Codex.
 - A4. **PDF capability:** Supplies lossless page text, layout, rendering, and raw PDF annotation inspection when the conversation needs document evidence beyond the structured review state.
 
 ### Key Decisions
@@ -61,9 +61,9 @@ That explicit delivery step is redundant when the current task already hosts the
 
 **Task binding and freshness**
 
-- R1. Opening a PDF through the PDF Proofreader plugin in Codex shall bind that proofreader session to the Codex task hosting its in-app browser without another user action.
-- R2. A bound proofreader session shall be available automatically only to its hosting Codex task and shall never become a globally discoverable active document.
-- R3. Every user prompt in a bound task shall trigger a currentness check against the live proofreader session before Codex answers or acts on PDF-related context.
+- R1. Opening a PDF through the Placekeeper plugin in Codex shall bind that placekeeper session to the Codex task hosting its in-app browser without another user action.
+- R2. A bound placekeeper session shall be available automatically only to its hosting Codex task and shall never become a globally discoverable active document.
+- R3. Every user prompt in a bound task shall trigger a currentness check against the live placekeeper session before Codex answers or acts on PDF-related context.
 - R4. The currentness check shall expose the PDF identity, canonical review revision, save health, and annotation additions, edits, or removals since the task's previous observation.
 - R5. Codex shall receive the latest accepted Review Items even when PDF persistence is still saving or has failed, together with the current Save Sync state.
 - R6. An unchanged revision may reuse previously read content only after R3 confirms that the live document and annotation state are still current.
@@ -92,7 +92,7 @@ That explicit delivery step is redundant when the current task already hosts the
 - R20. The interface shall remove the Codex button, Codex drawer, frozen-handoff preparation, copied-instruction state, and fresh-task guidance from every host surface.
 - R21. The Codex-hosted view shall replace the action with a passive context status that stays visually and assistively quiet when current, announces one polite atomic update when refreshing or unavailable, and tells the user to ask Codex to reopen the PDF when fresh context cannot be restored.
 - R22. Finder, VS Code, and ordinary-browser sessions shall expose no reverse launch into Codex and shall gain no ambient Codex binding from this feature.
-- R23. Closing the proofreader session or ending its hosting task shall end the automatic binding without affecting the saved PDF or Protected Recovery.
+- R23. Closing the placekeeper session or ending its hosting task shall end the automatic binding without affecting the saved PDF or Protected Recovery.
 
 **Privacy and permissions**
 
@@ -103,7 +103,7 @@ The context flow is task-scoped and prompt-driven:
 
 ```mermaid
 flowchart TB
-  Open["Open PDF from a Codex task"] --> Bind["Bind task to scoped proofreader session"]
+  Open["Open PDF from a Codex task"] --> Bind["Bind task to scoped placekeeper session"]
   Bind --> Read["Read and annotate in the in-app browser"]
   Read --> State["Review Items and Save Sync advance"]
   State --> Prompt["User sends the next chat prompt"]
@@ -132,7 +132,7 @@ flowchart TB
     Bundle --> Fresh["Fresh Codex task"]
   end
   subgraph After["After"]
-    Browser["PDF Proofreader in the hosting task"] --> Passive["Passive context status"]
+    Browser["Placekeeper in the hosting task"] --> Passive["Passive context status"]
     Passive --> Chat["Continue in the same chat"]
   end
 ```
@@ -140,7 +140,7 @@ flowchart TB
 ### Key Flows
 
 - F1. Bind a PDF to its hosting task
-  - **Trigger:** A1 asks Codex to open one local PDF in PDF Proofreader.
+  - **Trigger:** A1 asks Codex to open one local PDF in Placekeeper.
   - **Actors:** A1, A2, A3
   - **Steps:** The existing plugin launches or focuses the scoped session, the in-app browser hosts it, and the task gains live context without a second control.
   - **Outcome:** The task can refresh the current document and review state on later prompts.
@@ -158,7 +158,7 @@ flowchart TB
   - **Outcome:** The result accounts for the targeted feedback without overwriting later manual work.
   - **Covered by:** R12-R19, R25
 - F4. Continue safely when live context is unavailable
-  - **Trigger:** The proofreader session closes, its capability expires, or the context refresh fails.
+  - **Trigger:** The placekeeper session closes, its capability expires, or the context refresh fails.
   - **Actors:** A1, A2, A3
   - **Steps:** A2 treats currentness as unknown, the browser surfaces the unavailable state, and no stale review state is presented as live.
   - **Outcome:** A1 can restore or reopen the session without hidden context drift.
@@ -198,12 +198,12 @@ flowchart TB
   - **Then:** A1's work remains authoritative, A2 does not overwrite it, and the disposition explains the adaptation or non-application.
 - AE7. No Codex context is presented as current after disconnect
   - **Covers R7, R21, R23.**
-  - **Given:** A1 closes the proofreader session before asking another PDF question.
+  - **Given:** A1 closes the placekeeper session before asking another PDF question.
   - **When:** The next prompt attempts to refresh the session.
   - **Then:** A2 states that live context is unavailable and does not answer from an unverified cached revision as though it were current.
 - AE8. Non-Codex hosts have no handoff button
   - **Covers R20, R22.**
-  - **Given:** A1 opens PDF Proofreader from Finder, VS Code, or an ordinary browser.
+  - **Given:** A1 opens Placekeeper from Finder, VS Code, or an ordinary browser.
   - **When:** The review interface loads.
   - **Then:** No Codex action or handoff drawer appears, and the session does not claim an ambient Codex binding.
 
@@ -218,11 +218,11 @@ flowchart TB
 ### Dependencies and Assumptions
 
 - Codex continues to support trusted plugin-bundled `PostToolUse`, `UserPromptSubmit`, and `SessionEnd` hooks. Hook-unavailable and hook-untrusted states are explicit degraded states.
-- A successful `pdf-proofreader open --surface codex --json` tool result is visible to `PostToolUse` with the hosting Codex `session_id`. U9 verifies this packaging contract before any dependent implementation begins.
+- A successful `placekeeper open --surface codex --json` tool result is visible to `PostToolUse` with the hosting Codex `session_id`. U9 verifies this packaging contract before any dependent implementation begins.
 - The installed PDF capability remains available for text extraction, page rendering, visual inspection, and raw PDF annotation inspection.
 - Review Items, Save Sync, Portable Annotation Identity, and Protected Recovery retain their meanings from `CONCEPTS.md`.
 - Existing source containment and ordinary Codex permissions remain the authority for source-changing work.
-- One proofreader session has one bound Codex task lease. Reopening it in the same task renews the lease; another task must use `--fork` or wait until the lease ends.
+- One placekeeper session has one bound Codex task lease. Reopening it in the same task renews the lease; another task must use `--fork` or wait until the lease ends.
 
 ### Outstanding Questions
 
@@ -231,7 +231,7 @@ No launch-blocking questions remain. U4 must verify the documented hook event sh
 ### Sources and Research
 
 - `integrations/codex-plugin/.codex-plugin/plugin.json` confirms that the existing plugin currently packages a launch skill without an MCP server or hooks.
-- `integrations/codex-plugin/skills/pdf-proofreader/SKILL.md` defines the current scoped browser launch and explicit-handoff boundary.
+- `integrations/codex-plugin/skills/placekeeper/SKILL.md` defines the current scoped browser launch and explicit-handoff boundary.
 - `apps/web/src/review/ReviewChrome.tsx`, `apps/web/src/app/CodexDrawer.tsx`, and `apps/web/src/export/CodexDelivery.tsx` define the button, frozen bundle, copied instruction, and fresh-task workflow replaced here.
 - `packages/core/src/review-model.ts`, `packages/core/src/annotation-projection.ts`, and `apps/service/src/saving/pdf-save-coordinator.ts` establish Review Items and automatic PDF persistence as the existing annotation authorities.
 - `apps/service/src/handoff/handoff-export.ts`, `apps/service/src/handoff/result-check.ts`, and `packages/core/src/handoff.ts` contain the frozen revision, digest, stable-ID, and result-integrity guarantees retained internally.
@@ -265,12 +265,12 @@ These diagrams define boundaries and ordering, not exact APIs.
 ```mermaid
 flowchart LR
   Task["Codex task"] --> Hooks["Plugin hooks"]
-  Hooks --> CLI["Local proofreader CLI"]
+  Hooks --> CLI["Local placekeeper CLI"]
   CLI --> Context["Live context service"]
   Context --> Broker["Session broker"]
   Broker --> Review["Canonical Review State"]
   Broker --> PDF["Immutable PDF source snapshot"]
-  Browser["In-app proofreader browser"] --> HTTP["Authenticated local HTTP"]
+  Browser["In-app placekeeper browser"] --> HTTP["Authenticated local HTTP"]
   HTTP --> Broker
   Browser --> Existing["Existing PDF Annotation discovery"]
   Existing --> Context
@@ -334,10 +334,10 @@ flowchart TB
 
 ### Protocol and State Contract
 
-- A bind proof is one-time, short-lived, scoped to one proofreader session, and never authorizes document or mutation access. The browser capability remains separate and is never placed in prompt context or logs.
+- A bind proof is one-time, short-lived, scoped to one placekeeper session, and never authorizes document or mutation access. The browser capability remains separate and is never placed in prompt context or logs.
 - An evidence handle is distinct from the bind proof and browser capability. It is local-only, read-only, byte bounded, tied to the active task lease plus observation generation, and expires quickly. The CLI rejects a wrong-task, expired, revoked, or stale-generation handle before it materializes evidence.
-- A pending binding contains the proofreader session identity, Codex task identity, document generation, creation time, and expiry. Activation requires the same proofreader session and generation observed during authenticated browser bootstrap.
-- A current observation is identified by `(proofreaderSessionId, documentGeneration, reviewRevision, stateDigest)`. Its envelope also carries source digest, Save Sync, existing-annotation digest, cursor, and item/evidence counts.
+- A pending binding contains the placekeeper session identity, Codex task identity, document generation, creation time, and expiry. Activation requires the same placekeeper session and generation observed during authenticated browser bootstrap.
+- A current observation is identified by `(placekeeperSessionId, documentGeneration, reviewRevision, stateDigest)`. Its envelope also carries source digest, Save Sync, existing-annotation digest, cursor, and item/evidence counts.
 - Observation commits use compare-and-set semantics on the task cursor. Concurrent or stale refreshes may return a snapshot, but only the newest valid observation advances the cursor.
 - Delta records contain added, edited, and removed Review Item identities plus the complete structured records required to interpret additions and edits. Unknown or expired cursors receive a full snapshot.
 - Evidence retrieval is task-authorized, page/range bounded, byte capped, paginated where needed, and generation gated. Rendered pages are returned as image/file resources rather than base64 prompt text.
@@ -423,10 +423,10 @@ flowchart LR
 
 ### U2. Add task binding, activation, lease, and revocation to the local service
 
-- **Goal:** Bind exactly one Codex task to one proofreader session without global discovery or capability leakage.
+- **Goal:** Bind exactly one Codex task to one placekeeper session without global discovery or capability leakage.
 - **Requirements:** R1-R3, R7, R21-R25; F1, F4; AE7-AE8.
 - **Dependencies:** U1.
-- **Files:** `apps/service/src/context/task-binding-registry.ts` (new), `apps/service/src/sessions/session-broker.ts`, `apps/service/src/host/proofreader-host.ts`, `apps/service/src/server/http-server.ts`, `apps/service/test/task-binding-registry.test.ts` (new), `apps/service/test/session-security.test.ts`, `apps/service/test/launch-host.test.ts`.
+- **Files:** `apps/service/src/context/task-binding-registry.ts` (new), `apps/service/src/sessions/session-broker.ts`, `apps/service/src/host/placekeeper-host.ts`, `apps/service/src/server/http-server.ts`, `apps/service/test/task-binding-registry.test.ts` (new), `apps/service/test/session-security.test.ts`, `apps/service/test/launch-host.test.ts`.
 - **Approach:** Issue a one-time bind proof only for the Codex launch surface. Claim it from the matching hook task, then activate it during authenticated browser bootstrap. Store generation-gated pending and active leases keyed by Codex task identity. Revoke on close, generation change, expiry, or explicit task end. Expose only passive binding status through authenticated session scope.
 - **Test scenarios:** Successful claim and activation; proof replay; wrong session, generation, or task; concurrent tasks; same-task renewal; lease expiry; task/session close; browser bootstrap never occurs; non-Codex launches produce no proof or binding; credentials and proofs never appear in returned context or logs.
 - **Verification:** Service security tests prove task isolation, two-stage activation, lifecycle cleanup, and no global lookup path.
@@ -446,8 +446,8 @@ flowchart LR
 - **Goal:** Make binding and refresh automatic for the hosting Codex task with no extra user control.
 - **Requirements:** R1-R7, R21-R25; F1, F2, F4; AE1-AE3, AE7.
 - **Dependencies:** U2, U3.
-- **Files:** `integrations/codex-plugin/hooks/hooks.json` (new), `integrations/codex-plugin/skills/pdf-proofreader/SKILL.md`, `integrations/codex-plugin/.codex-plugin/plugin.json`, `apps/service/src/cli/hook-command.ts` (new), `apps/service/src/cli/open-command.ts`, `apps/service/src/main.ts`, `apps/service/test/hook-command.test.ts` (new), `apps/service/test/open-command.test.ts`, `packaging/macos/build-app.ts`, `packaging/macos/packaging.test.ts`.
-- **Approach:** Route `PostToolUse`, `UserPromptSubmit`, and `SessionEnd` to the installed proofreader executable so no ambient Node runtime is required. Strictly recognize the successful Codex-surface open command and structured result before claiming a bind proof. On every prompt, refresh by hook `session_id` and return concise developer context with currentness, deltas, Save Sync, and bounded retrieval instructions. On failure or missing trust, emit explicit unavailability. End-task cleanup is best-effort.
+- **Files:** `integrations/codex-plugin/hooks/hooks.json` (new), `integrations/codex-plugin/skills/placekeeper/SKILL.md`, `integrations/codex-plugin/.codex-plugin/plugin.json`, `apps/service/src/cli/hook-command.ts` (new), `apps/service/src/cli/open-command.ts`, `apps/service/src/main.ts`, `apps/service/test/hook-command.test.ts` (new), `apps/service/test/open-command.test.ts`, `packaging/macos/build-app.ts`, `packaging/macos/packaging.test.ts`.
+- **Approach:** Route `PostToolUse`, `UserPromptSubmit`, and `SessionEnd` to the installed placekeeper executable so no ambient Node runtime is required. Strictly recognize the successful Codex-surface open command and structured result before claiming a bind proof. On every prompt, refresh by hook `session_id` and return concise developer context with currentness, deltas, Save Sync, and bounded retrieval instructions. On failure or missing trust, emit explicit unavailability. End-task cleanup is best-effort.
 - **Test scenarios:** Exact successful launch binds; failed or lookalike commands do not bind; structured output parsing; prompt before browser activation; prompt after activation; unchanged and changed prompts; oversized review summary; service unavailable; untrusted/disabled hook behavior; concurrent tasks; SessionEnd cleanup; evidence handle injection followed by same-task retrieval; wrong-task, expired-lease, and stale-generation denial; packaged hook discovery and executable resolution.
 - **Verification:** A hook fixture replays documented event JSON and proves PostToolUse claim, browser activation, next-prompt context injection, delta refresh, evidence retrieval through the CLI mediator, and task isolation through the packaged plugin shape.
 
@@ -466,7 +466,7 @@ flowchart LR
 - **Goal:** Support discussion, source edits, clean rebuild, and final dispositions in the bound task under ordinary Codex permissions.
 - **Requirements:** R12-R19, R25; F3; AE5-AE6.
 - **Dependencies:** U4, U5.
-- **Files:** `integrations/codex-plugin/skills/pdf-proofreader/SKILL.md`, `apps/service/src/cli/context-command.ts`, `apps/service/src/delivery/review-delivery-service.ts`, `apps/service/src/handoff/prompt-template.ts`, `apps/service/src/handoff/result-check.ts`, `apps/service/test/live-source-workflow.test.ts` (new), `test/conformance/reviewed-pdf.test.ts`.
+- **Files:** `integrations/codex-plugin/skills/placekeeper/SKILL.md`, `apps/service/src/cli/context-command.ts`, `apps/service/src/delivery/review-delivery-service.ts`, `apps/service/src/handoff/prompt-template.ts`, `apps/service/src/handoff/result-check.ts`, `apps/service/test/live-source-workflow.test.ts` (new), `test/conformance/reviewed-pdf.test.ts`.
 - **Approach:** Teach the skill to use the provider's baseline, evidence, reconciliation, rebuild, and disposition operations when the user requests source work. Require refresh before source-changing completion, but keep permissions and approval gates with normal Codex tools. Preserve the clean rebuild and observable-output contract. Remove frozen bundle, copied prompt, and returned-result selection paths once their reusable safeguards have moved.
 - **Test scenarios:** Discussion-only request performs no baseline or write; source request captures baseline; later equivalent work deduplicates; conflict skips or adapts; refresh failure blocks current completion; clean rebuild contains no review annotations; rebuilt output is observed; final report includes all baseline items and later-item notice.
 - **Verification:** End-to-end service tests prove the same task can move from live annotations through safe source work and an optional clean rebuild without a delivery artifact.

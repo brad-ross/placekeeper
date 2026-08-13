@@ -45,48 +45,33 @@ describe("portable annotation codec", () => {
     const custom = createPortableAnnotationCustom(item, annotation);
     const result = inspectPortableAnnotation(custom, visible);
 
-    expect(result).toEqual({ status: "owned", item, geometryVersion: 2 });
+    expect(result).toEqual({ status: "owned", item });
     expect(annotation.author).toBe("Placekeeper");
-    expect(custom.pdfMarkup).toMatchObject({
-      owner: "pdf-markup",
+    expect(custom.placekeeper).toMatchObject({
+      owner: "placekeeper",
       schemaVersion: 2,
       itemId: item.id,
       projection: { author: "Placekeeper" },
     });
-    expect(JSON.stringify(custom)).toContain('"pdfMarkup"');
+    expect(JSON.stringify(custom)).toContain('"placekeeper"');
     expect(JSON.stringify(custom)).not.toContain("sourceRootId");
   });
 
   it.each([
     ["missing", undefined, "foreign"],
-    ["future", { pdfMarkup: { schemaVersion: 3 } }, "invalid"],
-    ["mismatched id", { pdfMarkup: { ...createPortableAnnotationCustom(item, projectReviewItem(item)).pdfMarkup, item: { ...item, id: "other" } } }, "invalid"],
-    ["prototype key", JSON.parse('{"pdfMarkup":{"schemaVersion":1,"__proto__":{}}}'), "invalid"],
+    ["future", { placekeeper: { schemaVersion: 3 } }, "invalid"],
+    ["mismatched id", { placekeeper: { ...createPortableAnnotationCustom(item, projectReviewItem(item)).placekeeper, item: { ...item, id: "other" } } }, "invalid"],
+    ["prototype key", JSON.parse('{"placekeeper":{"schemaVersion":2,"__proto__":{}}}'), "invalid"],
   ] as const)("classifies %s metadata without claiming the visible mark", (_name, custom, status) => {
     expect(inspectPortableAnnotation(custom, visible).status).toBe(status);
   });
 
-  it("recognizes legacy v1 geometry so the PDF backend can migrate it", () => {
-    const legacyAnnotation = projectReviewItem(item, "PDF Proofreader");
-    const current = createPortableAnnotationCustom(item, legacyAnnotation);
-    const legacy = { pdfMarkup: { ...current.pdfMarkup, schemaVersion: 1 as const } };
-
-    expect(inspectPortableAnnotation(legacy, { ...visible, author: "PDF Proofreader" })).toEqual({
+  it("accepts only the exact Placekeeper author after validating the owned envelope", () => {
+    const annotation = projectReviewItem(item, "Placekeeper");
+    expect(inspectPortableAnnotation(annotation.custom, visible)).toEqual({
       status: "owned",
       item,
-      geometryVersion: 1,
     });
-  });
-
-  it("accepts only exact app author generations after validating the owned envelope", () => {
-    for (const author of ["Placekeeper", "PDF Proofreader"] as const) {
-      const annotation = projectReviewItem(item, author);
-      expect(inspectPortableAnnotation(annotation.custom, { ...visible, author })).toEqual({
-        status: "owned",
-        item,
-        geometryVersion: 2,
-      });
-    }
 
     const unrelated = projectReviewItem(item, "Placekeeper Preview");
     expect(inspectPortableAnnotation(unrelated.custom, {
@@ -112,14 +97,14 @@ describe("portable annotation codec", () => {
   it("rejects kind-invalid semantic payloads and semantic projection drift", () => {
     const custom = createPortableAnnotationCustom(item, projectReviewItem(item));
     expect(inspectPortableAnnotation({
-      pdfMarkup: {
-        ...custom.pdfMarkup,
+      placekeeper: {
+        ...custom.placekeeper,
         item: { ...item, payload: { ...item.payload, rect: { x: 72, y: 92, width: -1, height: 16 } } },
       },
     }, visible)).toMatchObject({ status: "invalid", reason: "invalid-payload" });
     expect(inspectPortableAnnotation({
-      pdfMarkup: {
-        ...custom.pdfMarkup,
+      placekeeper: {
+        ...custom.placekeeper,
         item: { ...item, payload: { ...item.payload, proposedText: "different semantics" } },
       },
     }, visible)).toMatchObject({ status: "invalid", reason: "projection-mismatch" });
@@ -154,7 +139,7 @@ describe("portable annotation codec", () => {
   it("bounds raw JSON before parsing and does not include rejected input in errors", () => {
     const secret = "PRIVATE-SECRET";
     const oversized = JSON.stringify({
-      pdfMarkup: { value: secret.repeat(PORTABLE_ANNOTATION_MAX_BYTES) },
+      placekeeper: { value: secret.repeat(PORTABLE_ANNOTATION_MAX_BYTES) },
     });
     const result = decodePortableAnnotationJson(oversized);
 

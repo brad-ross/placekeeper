@@ -11,11 +11,11 @@ import {
   requestControl,
   requestLaunch,
   startLaunchControlServer,
-  type ProofreaderControlRequest,
-  type ProofreaderControlResponse,
+  type PlacekeeperControlRequest,
+  type PlacekeeperControlResponse,
 } from "./launch-control.js";
-import type { LaunchRequest, LaunchResponse } from "./proofreader-host.js";
-import { ProofreaderHost } from "./proofreader-host.js";
+import type { LaunchRequest, LaunchResponse } from "./placekeeper-host.js";
+import { PlacekeeperHost } from "./placekeeper-host.js";
 import { acquireLifecycleLock, LifecycleLockTimeoutError } from "./lifecycle-lock.js";
 import { upgradeReason } from "./upgrade-coordinator.js";
 
@@ -27,11 +27,11 @@ export interface DaemonPaths {
   readonly lifecycleLockPath?: string;
 }
 
-export const DAEMON_IDENTITY_ENV = "PDF_PROOFREADER_DAEMON_IDENTITY";
-export const INSTALL_ARTIFACT_IDENTITY_ENV = "PDF_PROOFREADER_INSTALL_ARTIFACT_IDENTITY";
-export const LIFECYCLE_LOCK_TOKEN_ENV = "PDF_PROOFREADER_LIFECYCLE_LOCK_TOKEN";
-export const LIFECYCLE_LOCK_PATH_ENV = "PDF_PROOFREADER_LIFECYCLE_LOCK_PATH";
-export const READINESS_TOKEN_ENV = "PDF_PROOFREADER_READINESS_TOKEN";
+export const DAEMON_IDENTITY_ENV = "PLACEKEEPER_DAEMON_IDENTITY";
+export const INSTALL_ARTIFACT_IDENTITY_ENV = "PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY";
+export const LIFECYCLE_LOCK_TOKEN_ENV = "PLACEKEEPER_LIFECYCLE_LOCK_TOKEN";
+export const LIFECYCLE_LOCK_PATH_ENV = "PLACEKEEPER_LIFECYCLE_LOCK_PATH";
+export const READINESS_TOKEN_ENV = "PLACEKEEPER_READINESS_TOKEN";
 
 export interface CandidateDaemonReceipt {
   readonly version: 1;
@@ -49,7 +49,7 @@ export function defaultDaemonPaths(): DaemonPaths {
     homedir(),
     "Library",
     "Application Support",
-    "PDF Proofreader",
+    "Placekeeper",
   );
   return {
     appSupportRoot,
@@ -82,7 +82,7 @@ async function removeConfirmedStaleSocket(socketPath: string): Promise<void> {
 }
 
 export async function startServiceDaemon(paths = defaultDaemonPaths()): Promise<{
-  readonly host: ProofreaderHost;
+  readonly host: PlacekeeperHost;
   readonly closed: Promise<void>;
   close(): Promise<void>;
 }> {
@@ -93,10 +93,10 @@ export async function startServiceDaemon(paths = defaultDaemonPaths()): Promise<
       ? {}
       : { inheritedToken: process.env[LIFECYCLE_LOCK_TOKEN_ENV] }),
   });
-  let host: ProofreaderHost | undefined;
+  let host: PlacekeeperHost | undefined;
   try {
     await removeConfirmedStaleSocket(paths.socketPath);
-    host = await ProofreaderHost.start({
+    host = await PlacekeeperHost.start({
       recoveryRoot: paths.recoveryRoot,
       webAssets: { root: paths.webAssetsRoot },
     });
@@ -139,7 +139,7 @@ function spawnServiceDaemon(
     stdio: "ignore",
     env: {
       ...process.env,
-      PDF_PROOFREADER_WEB_ASSETS: paths.webAssetsRoot,
+      PLACEKEEPER_WEB_ASSETS: paths.webAssetsRoot,
       [LIFECYCLE_LOCK_TOKEN_ENV]: lifecycleToken,
       [LIFECYCLE_LOCK_PATH_ENV]: paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
       ...(readinessToken === undefined ? {} : { [READINESS_TOKEN_ENV]: readinessToken }),
@@ -181,7 +181,7 @@ export async function ensureServiceDaemonReady(
     throw new Error("Candidate readiness requires the inherited lifecycle lock");
   }
   const entry = process.argv[1];
-  if (entry === undefined) throw new Error("The proofreader launcher entry point is unavailable");
+  if (entry === undefined) throw new Error("The placekeeper launcher entry point is unavailable");
   const readinessToken = randomBytes(24).toString("base64url");
   const child = spawnServiceDaemon(entry, paths, lifecycleToken, readinessToken);
   if (child.pid === undefined) throw new Error("Candidate daemon did not expose its process identity");
@@ -253,7 +253,7 @@ async function launchWhileLocked(
     if (!daemonUnavailable(error)) throw error;
   }
   const entry = process.argv[1];
-  if (entry === undefined) throw new Error("The proofreader launcher entry point is unavailable");
+  if (entry === undefined) throw new Error("The placekeeper launcher entry point is unavailable");
   spawnServiceDaemon(entry, paths, lifecycleToken);
   for (let attempt = 0; attempt < 60; attempt += 1) {
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
@@ -271,7 +271,7 @@ async function launchWhileLocked(
       if (!daemonUnavailable(error)) throw error;
     }
   }
-  throw new Error("The local proofreader service did not become ready");
+  throw new Error("The local placekeeper service did not become ready");
 }
 
 async function waitForAcceptingCompatibility(socketPath: string, identity: string) {
@@ -289,9 +289,9 @@ async function waitForAcceptingCompatibility(socketPath: string, identity: strin
 /** Lifecycle hooks never start or discover a host; they address only the
  * private daemon created by the exact successful launch they observed. */
 export function controlThroughDaemon(
-  request: ProofreaderControlRequest,
+  request: PlacekeeperControlRequest,
   paths = defaultDaemonPaths(),
-): Promise<ProofreaderControlResponse> {
+): Promise<PlacekeeperControlResponse> {
   return requestControl(paths.socketPath, request);
 }
 

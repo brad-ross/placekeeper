@@ -7,4 +7,4 @@
 
 ## Residual Review Findings
 
-- P1 `apps/web/src/review/navigation-coordinator.ts:266` - Superseding recovery preserves the failed reference destination: [GitHub issue #8](https://github.com/brad-ross/pdf-markup/issues/8)
+- P1 `apps/web/src/review/navigation-coordinator.ts:266` - Superseding recovery preserves the failed reference destination: [GitHub issue #8](https://github.com/brad-ross/placekeeper/issues/8)

@@ -40,7 +40,7 @@ function fixture(options: {
   bindings.claim({ bindProof: proof, taskSessionId: "task-a", reviewSessionId: "review-a", documentGeneration: 1 });
   bindings.activateBrowser({ reviewSessionId: "review-a", documentGeneration: 1, browserCapability: capability });
   const identity: LiveObservationIdentity = {
-    proofreaderSessionId: "review-a",
+    placekeeperSessionId: "review-a",
     documentGeneration: 1,
     source: { fileId: "opaque-file-id", digest: "a".repeat(64), byteLength: bytes.byteLength },
     reviewRevision: 2,
@@ -333,14 +333,14 @@ describe("task-scoped PDF evidence service", () => {
     const pdf = new Uint8Array(await readFile(resolve("test/fixtures/pdfs/text-native.pdf")));
     const text = await inspectPdfPageEvidence(pdf, { kind: "page-text", pageIndex: 0 });
     expect(text.mediaType).toBe("text/plain; charset=utf-8");
-    expect(text.bytes.toString()).toContain("Selectable proofreader text");
+    expect(text.bytes.toString()).toContain("Selectable placekeeper text");
 
     const layout = await inspectPdfPageEvidence(pdf, { kind: "page-layout", pageIndex: 0 });
     expect(layout.mediaType).toBe("application/json");
     expect(JSON.parse(layout.bytes.toString())).toMatchObject({ pageIndex: 0 });
 
     const render = await inspectPdfPageEvidence(pdf, { kind: "page-render", pageIndex: 0 });
-    expect(render.mediaType).toBe("application/vnd.pdf-proofreader.rgba+json");
+    expect(render.mediaType).toBe("application/vnd.placekeeper.rgba+json");
     expect(JSON.parse(render.bytes.toString())).toMatchObject({ pageIndex: 0, width: 612, height: 792 });
   });
 });

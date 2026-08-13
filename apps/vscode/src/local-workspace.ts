@@ -26,7 +26,7 @@ export function resolveLauncherPath(
     ? configured
     : join(
         homeDirectory,
-        "Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader",
+        "Applications/Placekeeper.app/Contents/MacOS/placekeeper",
       );
 }
 

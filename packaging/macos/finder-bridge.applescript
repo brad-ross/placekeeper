@@ -1,6 +1,6 @@
 on launchPdf(pdfItem)
 	set appRoot to POSIX path of (path to me)
-	set launcherPath to appRoot & "Contents/MacOS/pdf-proofreader"
+	set launcherPath to appRoot & "Contents/MacOS/placekeeper"
 	set pdfPath to POSIX path of pdfItem
 	try
 		set launchCommand to (quoted form of launcherPath) & space & (quoted form of pdfPath)

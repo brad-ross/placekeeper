@@ -44,19 +44,19 @@ jobs:
           SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
         run: pnpm package:macos -- --arch "${{ matrix.arch }}" --node-runtime "$(command -v node)" --service-dist dist/service --web-dist dist/web --output "artifacts/${{ matrix.arch }}" --sign-identity "$SIGNING_IDENTITY"
       - name: Installed offline writer smoke
-        run: pnpm smoke:installed -- "artifacts/${{ matrix.arch }}/PDF Proofreader.app" test/fixtures/pdfs/text-native.pdf
+        run: pnpm smoke:installed -- "artifacts/${{ matrix.arch }}/Placekeeper.app" test/fixtures/pdfs/text-native.pdf
       - name: Archive signed app
-        run: ditto -c -k --keepParent "artifacts/${{ matrix.arch }}/PDF Proofreader.app" "artifacts/PDF-Proofreader-${{ matrix.arch }}-submission.zip"
+        run: ditto -c -k --keepParent "artifacts/${{ matrix.arch }}/Placekeeper.app" "artifacts/Placekeeper-${{ matrix.arch }}-submission.zip"
       - name: Notarize and staple
         env:
-          PDF_PROOFREADER_NOTARY_PROFILE: ${{ secrets.MACOS_NOTARY_PROFILE }}
-        run: pnpm notarize:macos -- "artifacts/PDF-Proofreader-${{ matrix.arch }}-submission.zip" "artifacts/${{ matrix.arch }}/PDF Proofreader.app"
+          PLACEKEEPER_NOTARY_PROFILE: ${{ secrets.MACOS_NOTARY_PROFILE }}
+        run: pnpm notarize:macos -- "artifacts/Placekeeper-${{ matrix.arch }}-submission.zip" "artifacts/${{ matrix.arch }}/Placekeeper.app"
       - name: Archive stapled app
-        run: ditto -c -k --keepParent "artifacts/${{ matrix.arch }}/PDF Proofreader.app" "artifacts/PDF-Proofreader-${{ matrix.arch }}.zip"
+        run: ditto -c -k --keepParent "artifacts/${{ matrix.arch }}/Placekeeper.app" "artifacts/Placekeeper-${{ matrix.arch }}.zip"
       - name: Gatekeeper assessment
-        run: spctl --assess --type execute --verbose=4 "artifacts/${{ matrix.arch }}/PDF Proofreader.app"
+        run: spctl --assess --type execute --verbose=4 "artifacts/${{ matrix.arch }}/Placekeeper.app"
       - uses: actions/upload-artifact@v4
         with:
-          name: PDF-Proofreader-${{ matrix.arch }}
-          path: artifacts/PDF-Proofreader-${{ matrix.arch }}.zip
+          name: Placekeeper-${{ matrix.arch }}
+          path: artifacts/Placekeeper-${{ matrix.arch }}.zip
           if-no-files-found: error

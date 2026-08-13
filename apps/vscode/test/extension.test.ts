@@ -17,7 +17,7 @@ import {
 import { runLaunchClient } from "../src/launch-client.js";
 
 describe("VS Code local host adapter", () => {
-  it("presents Placekeeper while preserving every VS Code compatibility identifier", async () => {
+  it("uses Placekeeper for every VS Code identity", async () => {
     const manifest = JSON.parse(
       await readFile(resolve("apps/vscode/package.json"), "utf8"),
     ) as {
@@ -35,15 +35,15 @@ describe("VS Code local host adapter", () => {
     };
 
     expect(manifest).toMatchObject({
-      name: "pdf-proofreader-vscode",
+      name: "placekeeper-vscode",
       displayName: "Placekeeper",
-      activationEvents: ["onCommand:pdfProofreader.open"],
+      activationEvents: ["onCommand:placekeeper.open"],
       contributes: {
-        commands: [{ command: "pdfProofreader.open", title: "Placekeeper: Open Local PDF" }],
+        commands: [{ command: "placekeeper.open", title: "Placekeeper: Open Local PDF" }],
         configuration: {
           title: "Placekeeper",
           properties: {
-            "pdfProofreader.launcherPath": {
+            "placekeeper.launcherPath": {
               description: "Absolute path to the installed Placekeeper launcher.",
             },
           },
@@ -53,11 +53,11 @@ describe("VS Code local host adapter", () => {
     expect(manifest.description).toContain("Placekeeper");
   });
 
-  it("uses an existing configured launcher first and otherwise the user-local compatibility path", () => {
-    expect(resolveLauncherPath("/custom/PDF Proofreader.app/pdf-proofreader", "/Users/reader"))
-      .toBe("/custom/PDF Proofreader.app/pdf-proofreader");
+  it("uses an existing configured launcher first and otherwise the user-local Placekeeper path", () => {
+    expect(resolveLauncherPath("/custom/Placekeeper.app/placekeeper", "/Users/reader"))
+      .toBe("/custom/Placekeeper.app/placekeeper");
     expect(resolveLauncherPath(undefined, "/Users/reader")).toBe(
-      "/Users/reader/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader",
+      "/Users/reader/Applications/Placekeeper.app/Contents/MacOS/placekeeper",
     );
   });
 
@@ -111,7 +111,7 @@ describe("VS Code local host adapter", () => {
       ok: false,
       error: {
         kind: "upgrade-required",
-        message: "PDF Proofreader has an active Codex task. Existing work was preserved.",
+        message: "Placekeeper has an active Codex task. Existing work was preserved.",
         recoveryAction: "End the bound Codex task or wait for its lease, then retry",
       },
     }))).toMatchObject({ ok: false, error: { kind: "upgrade-required" } });
@@ -119,8 +119,8 @@ describe("VS Code local host adapter", () => {
 
   it("spawns the launch client without a shell and bounds stdout", async () => {
     const invoke = vi.fn(async () => ({ stdout: JSON.stringify({ ok: true, kind: "opened", url: "http://127.0.0.1:49152/s/id/bootstrap?embed=vscode#cap=secret" }), stderr: "" }));
-    const result = await runLaunchClient("/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader", "/tmp/paper.pdf", undefined, invoke);
-    expect(invoke).toHaveBeenCalledWith("/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader", ["open", "--json", "--surface", "vscode", "--pdf", "/tmp/paper.pdf"], { shell: false, timeoutMs: 15_000, maxOutputBytes: 65_536 });
+    const result = await runLaunchClient("/Applications/Placekeeper.app/Contents/MacOS/placekeeper", "/tmp/paper.pdf", undefined, invoke);
+    expect(invoke).toHaveBeenCalledWith("/Applications/Placekeeper.app/Contents/MacOS/placekeeper", ["open", "--json", "--surface", "vscode", "--pdf", "/tmp/paper.pdf"], { shell: false, timeoutMs: 15_000, maxOutputBytes: 65_536 });
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected a successful launch");
     expect(result.kind).toBe("opened");

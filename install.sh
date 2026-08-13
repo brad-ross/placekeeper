@@ -9,10 +9,9 @@ NODE_SHA256="a1a54f46a750d2523d628d924aab61758a51c9dad3e0238beb14141be9615dd3"
 PNPM_VERSION="11.16.0"
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-user_home=${PDF_PROOFREADER_USER_HOME:-"$HOME"}
-install_root=${PDF_PROOFREADER_INSTALL_ROOT:-"$user_home/Applications"}
-app_path="$install_root/PDF Proofreader.app"
-obsolete_quick_action="$user_home/Library/Services/PDF Proofreader.workflow"
+user_home=${PLACEKEEPER_USER_HOME:-"$HOME"}
+install_root=${PLACEKEEPER_INSTALL_ROOT:-"$user_home/Applications"}
+app_path="$install_root/Placekeeper.app"
 node_root="$repo_root/.local/toolchains/node-v${NODE_VERSION}-darwin-arm64"
 node_bin="$node_root/bin/node"
 
@@ -53,10 +52,10 @@ fi
 
 tmp_root=${TMPDIR:-/tmp}
 case "$tmp_root" in /*) ;; *) tmp_root=/tmp ;; esac
-work_dir=$(/usr/bin/mktemp -d "$tmp_root/pdf-proofreader-install.XXXXXX")
+work_dir=$(/usr/bin/mktemp -d "$tmp_root/placekeeper-install.XXXXXX")
 cleanup() {
   case "$work_dir" in
-    "$tmp_root"/pdf-proofreader-install.*)
+    "$tmp_root"/placekeeper-install.*)
       if [ -d "$work_dir" ]; then /bin/rm -rf "$work_dir"; fi
       ;;
     *)
@@ -114,8 +113,8 @@ printf 'Building the Apple-silicon app...\n'
 build_root="$work_dir/build"
 /bin/mkdir -p "$build_root"
 run_pnpm package:macos -- --arch arm64 --node-runtime "$node_bin" --output "$build_root"
-built_app="$build_root/PDF Proofreader.app"
-if [ ! -x "$built_app/Contents/MacOS/pdf-proofreader" ]; then
+built_app="$build_root/Placekeeper.app"
+if [ ! -x "$built_app/Contents/MacOS/placekeeper" ]; then
   printf '%s\n' "The app build did not produce its launcher." >&2
   exit 1
 fi
@@ -124,10 +123,9 @@ printf 'Checking the packaged writer offline before installation...\n'
 run_pnpm smoke:installed -- "$built_app" "$repo_root/test/fixtures/pdfs/text-native.pdf"
 
 printf 'Coordinating the shared Placekeeper service before replacement...\n'
-if ! "$built_app/Contents/MacOS/pdf-proofreader" daemon coordinate-install \
+if ! "$built_app/Contents/MacOS/placekeeper" daemon coordinate-install \
   --candidate-app "$built_app" \
   --installed-app "$app_path" \
-  --obsolete-action "$obsolete_quick_action" \
   --replace-helper "$repo_root/packaging/macos/install-built-app.sh"; then
   printf '%s\n' "Installation was deferred; the installed app was not changed." >&2
   exit 1

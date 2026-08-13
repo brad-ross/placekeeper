@@ -319,7 +319,7 @@ function sameReviewIdentity(
   identity: LiveObservationIdentity,
 ): boolean {
   return snapshot !== undefined &&
-    snapshot.sessionId === identity.proofreaderSessionId &&
+    snapshot.sessionId === identity.placekeeperSessionId &&
     snapshot.documentGeneration === identity.documentGeneration &&
     snapshot.state.revision === identity.reviewRevision &&
     snapshot.state.source.digest === identity.source.digest &&
@@ -378,7 +378,7 @@ export class SourceReconciliationService {
           projectStructuredReviewItem(item, hints.get(item.id)),
         );
         const identity = {
-          proofreaderSessionId: snapshot.sessionId,
+          placekeeperSessionId: snapshot.sessionId,
           documentGeneration: snapshot.documentGeneration,
           source: { ...snapshot.state.source },
           reviewRevision: snapshot.state.revision,
@@ -575,7 +575,7 @@ export class SourceReconciliationService {
           .map((item) => projectStructuredReviewItem(item));
         return {
           identity: {
-            proofreaderSessionId: snapshot.sessionId,
+            placekeeperSessionId: snapshot.sessionId,
             documentGeneration: snapshot.documentGeneration,
             source: { ...snapshot.state.source },
             reviewRevision: snapshot.state.revision,

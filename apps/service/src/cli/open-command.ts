@@ -2,7 +2,7 @@ import { isAbsolute } from "node:path";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import type { LaunchRequest, LaunchResponse, LaunchSurface } from "../host/proofreader-host.js";
+import type { LaunchRequest, LaunchResponse, LaunchSurface } from "../host/placekeeper-host.js";
 import { DaemonUpgradeRequiredError } from "../host/launch-control.js";
 import { launchThroughDaemon, runServiceDaemon } from "../host/service-daemon.js";
 import { runDoctorCommand } from "./doctor-command.js";
@@ -20,7 +20,7 @@ function takeValue(args: readonly string[], index: number, flag: string): string
 
 export function parseOpenArguments(args: readonly string[]): LaunchRequest {
   if (args[0] !== "open" || !args.includes("--json")) {
-    throw new Error("Use: pdf-proofreader open --json --pdf <absolute-path>");
+    throw new Error("Use: placekeeper open --json --pdf <absolute-path>");
   }
   let pdfPath: string | undefined;
   let sourceRootPath: string | undefined;
@@ -146,7 +146,7 @@ if (isMainModule()) {
         ok: false,
         error: {
           kind: "input-unavailable",
-          message: "The local proofreader service is unavailable.",
+          message: "The local placekeeper service is unavailable.",
           recoveryAction: "Choose one readable local PDF",
         },
       })}\n`);

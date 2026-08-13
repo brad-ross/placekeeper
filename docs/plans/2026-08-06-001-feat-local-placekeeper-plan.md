@@ -1,8 +1,8 @@
 ---
-title: Local PDF Proofreader - Plan
+title: Local Placekeeper - Plan
 type: feat
 date: 2026-08-06
-topic: local-pdf-proofreader
+topic: local-placekeeper
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 product_contract_source: ce-brainstorm
@@ -10,7 +10,7 @@ execution: code
 deepened: 2026-08-06
 ---
 
-# Local PDF Proofreader - Plan
+# Local Placekeeper - Plan
 
 ## Goal Capsule
 
@@ -25,7 +25,7 @@ deepened: 2026-08-06
 
 ### Summary
 
-Implement the full local PDF proofreader contract through one capability-scoped local service and one shared browser UI.
+Implement the full local Placekeeper contract through one capability-scoped local service and one shared browser UI.
 Begin with a conformance gate that tests EmbedPDF/PDFium as the required shared viewer and first writer candidate, with PDFBox as a preservation-focused writer fallback only.
 The selected stack must then deliver Track-Changes-style review, crash-safe recovery, interoperable reviewed PDFs, and a source-aware Codex handoff across Finder, Codex, VS Code, and ordinary browsers.
 
@@ -41,7 +41,7 @@ They are projections of one canonical annotation session: a standards-based PDF 
 ### Actors
 
 - A1. **Reviewer:** Opens a PDF, records feedback, and chooses a human or Codex delivery path.
-- A2. **Recipient:** Reads the annotated PDF in a conventional PDF viewer without installing the proofreader.
+- A2. **Recipient:** Reads the annotated PDF in a conventional PDF viewer without installing the placekeeper.
 - A3. **Codex:** Uses the review handoff to locate source, apply unambiguous edits, rebuild a clean PDF, and report the disposition of every review item.
 
 ### Key Decisions
@@ -51,7 +51,7 @@ They are projections of one canonical annotation session: a standards-based PDF 
 - **Use a local service with an interchangeable browser UI.** (session-settled: user-directed — chosen over a Mac-native app, pure web app, and separate full integrations: it combines local file access with one interface across Codex, VS Code, and ordinary browsers.) Governs R1-R2, R20-R24.
 - **Make Finder, Codex, and VS Code launchers part of v1.** (session-settled: user-directed — chosen over a command-only launch floor: opening the markup view from the current work surface is required usability, not later polish.) Governs R22-R24.
 - **Default to a recoverable draft and an exported copy.** (session-settled: user-directed — chosen over immediate working-copy creation and manual-save-only behavior: the original stays safe without exposing review work to loss.) Governs R14-R15.
-- **Limit v1 to text-native PDFs and five review tools.** (session-settled: user-directed — chosen over built-in OCR, a bare proofreader, and a full Acrobat-style suite: the product should excel at semantic review without inheriting general PDF-editor scope.) Governs R3-R9, R13.
+- **Limit v1 to text-native PDFs and five review tools.** (session-settled: user-directed — chosen over built-in OCR, a bare placekeeper, and a full Acrobat-style suite: the product should excel at semantic review without inheriting general PDF-editor scope.) Governs R3-R9, R13.
 - **Create an explicit Codex handoff and copyable prompt.** (session-settled: user-directed — chosen over direct task submission and annotated-PDF-only ingestion: external PDF annotation extraction is not a documented reliability contract.) Governs R27-R30, R32-R34.
 - **Separate review evidence from the revised deliverable.** (session-settled: user-approved — chosen over carrying annotations into the regenerated PDF: recompilation can invalidate page-coordinate anchors.) Governs R30, R32-R34.
 
@@ -124,13 +124,13 @@ flowchart TB
 ### Key Flows
 
 - F1. Open from Finder
-  - **Trigger:** A1 invokes the proofreader for a selected PDF in Finder.
+  - **Trigger:** A1 invokes the placekeeper for a selected PDF in Finder.
   - **Actors:** A1.
   - **Steps:** The launcher opens or focuses the matching scoped local session and its browser UI; A1 may explicitly start an independent review instead.
   - **Outcome:** A1 can begin reviewing without using a terminal.
   - **Covers:** R20-R22.
 - F2. Open from an editor surface
-  - **Trigger:** A1 invokes the proofreader for a referenced or active PDF in Codex or VS Code.
+  - **Trigger:** A1 invokes the placekeeper for a referenced or active PDF in Codex or VS Code.
   - **Actors:** A1.
   - **Steps:** The surface launcher creates a scoped local session and opens its URL in that surface's browser view.
   - **Outcome:** The PDF remains beside the source-editing workflow instead of moving to a separate desktop app.
@@ -221,7 +221,7 @@ flowchart TB
 - AE11. Surface launch coverage
   - **Covers R22-R24.**
   - **Given:** A PDF is selected in Finder, referenced in Codex, or active in VS Code.
-  - **When:** A1 invokes the corresponding proofreader action.
+  - **When:** A1 invokes the corresponding placekeeper action.
   - **Then:** The same review interface opens with that PDF loaded in the appropriate browser surface.
 - AE12. Recovery after interruption
   - **Covers R14.**
@@ -248,7 +248,7 @@ flowchart TB
 **Deferred for later**
 
 - Additional operating-system launchers and deeper integrations beyond macOS, Codex, and VS Code.
-- Direct creation or population of a Codex task from the proofreader.
+- Direct creation or population of a Codex task from the placekeeper.
 - Editing every annotation type created by external PDF tools.
 - Browser-only operation without the local helper when it cannot meet the same file and source-linking guarantees.
 - Automatic carry-forward or re-anchoring of unresolved annotations onto a regenerated PDF.
@@ -327,7 +327,7 @@ The planning sections below choose implementation mechanisms and make deferred p
 - KTD15. **Distribute the Codex entry point as a plugin containing one canonical skill.** The skill invokes the shared launch client for a referenced PDF and asks the Codex desktop browser to open the returned localhost URL. It performs no direct task creation. (session-settled: user-directed — chosen over direct task submission and annotated-PDF-only ingestion: the explicit review file and copied prompt are the reliable v1 agent contract under R27-R30.)
 - KTD16. **Fail closed on signed and encrypted documents.** Signed PDFs can be viewed and privately reviewed, but v1 never replaces them in place. Password-protected editing is unavailable in v1. An annotated copy is enabled only when declared permissions allow annotation and the selected writer passes the signed/encrypted conformance fixture; otherwise the UI explains the restriction and leaves recovery and non-PDF review data intact.
 - KTD17. **Ship a source-first Apple-silicon installer before adding release infrastructure.** A one-command installer downloads a checksum-pinned Node toolchain with bounded waits, installs the exact pnpm dependency graph, bundles the service, web assets, launch adapters, native Finder document bridge, and U1-selected local WASM runtime, proves the packaged writer offline, then transactionally installs the app for the current user. A failed replacement restores the prior app. Developer ID signing, notarization, stapling, Intel/x64 builds, DMGs, auto-update, and release CI are optional future distribution work for this personal/friends app. Mutable runtime data remains outside the app bundle. (session-settled: user-directed — chosen over signed dual-architecture distribution for a source-first personal release.)
-- KTD18. **Keep Codex execution manual and human-authorized.** Every handoff shows a short data-flow summary naming the source root, evidence, destination, and fields the external task may use. Require confirmation on first use and whenever the source root, provider, destination, or retention setting changes rather than on every handoff. Codex discovers checked-in build guidance inside the approved root; the user does not author an executable, argument vector, or working-directory profile in the proofreader. Ordinary Codex permission gates remain authoritative for network access, installs, or elevated actions. The proofreader validates observable changed paths, hashes, evidence, output, and disposition but does not claim it can audit every external read; read containment depends on the external Codex sandbox. PDF text, annotations, source content, SyncTeX output, and build logs remain untrusted data.
+- KTD18. **Keep Codex execution manual and human-authorized.** Every handoff shows a short data-flow summary naming the source root, evidence, destination, and fields the external task may use. Require confirmation on first use and whenever the source root, provider, destination, or retention setting changes rather than on every handoff. Codex discovers checked-in build guidance inside the approved root; the user does not author an executable, argument vector, or working-directory profile in the placekeeper. Ordinary Codex permission gates remain authoritative for network access, installs, or elevated actions. The placekeeper validates observable changed paths, hashes, evidence, output, and disposition but does not claim it can audit every external read; read containment depends on the external Codex sandbox. PDF text, annotations, source content, SyncTeX output, and build logs remain untrusted data.
 
 ### High-Level Technical Design
 
@@ -456,7 +456,7 @@ sequenceDiagram
   - packages/pdf-backends/src/embedpdf-adapter.ts
   - packages/pdf-backends/src/backend-host.ts
   - packages/pdf-backends/pdfbox-worker/build.gradle.kts (conditional: create only if the EmbedPDF writer fails)
-  - packages/pdf-backends/pdfbox-worker/src/main/java/local/proofreader/pdf/PdfBoxWriter.java (conditional: create only if the EmbedPDF writer fails)
+  - packages/pdf-backends/pdfbox-worker/src/main/java/local/placekeeper/pdf/PdfBoxWriter.java (conditional: create only if the EmbedPDF writer fails)
   - test/conformance/pdf-viewer.conformance.spec.ts
   - test/conformance/pdf-writer.conformance.test.ts
   - test/fixtures/pdfs/
@@ -670,7 +670,7 @@ sequenceDiagram
   9. Force a build failure after source edits; verify the report is explicitly partial, no revised PDF is claimed, and every ID remains accounted for.
   10. Hash the reviewed PDF and handoff JSON before and after Codex execution; verify both remain byte-identical and the revised PDF contains no inherited review annotations while retaining legitimate generated link annotations.
   11. Exercise a new, undo-to-empty, delete-all, and recovered-empty review; verify Codex delivery remains disabled. With one active item, verify the summary names every file and field available to the external task, shows applicable retention controls and the local-only Human alternative, confirms on first use, and does not reconfirm an unchanged scope.
-  12. Deny a requested permission and inject hostile instructions through PDF text, annotations, filenames, source comments, SyncTeX output, build configuration, and build logs; verify the fresh task records a valid partial result without network access, installs, shell-command substitution, permission bypass, or out-of-scope writes. Verify the prompt requests the approved read root and does not claim the proofreader can audit every external read.
+  12. Deny a requested permission and inject hostile instructions through PDF text, annotations, filenames, source comments, SyncTeX output, build configuration, and build logs; verify the fresh task records a valid partial result without network access, installs, shell-command substitution, permission bypass, or out-of-scope writes. Verify the prompt requests the approved read root and does not claim the placekeeper can audit every external read.
 - **Verification:** A fresh Codex task can execute from only the copied instruction and local artifacts. The Result action—not Codex's narrative—checks observable allowed changes, exact-ID disposition, recorded build result, distinct clean output, and immutable evidence. The UI accurately states that read containment depends on the external Codex sandbox.
 
 ### U7. Deliver Finder, Codex, VS Code, and macOS packaging
@@ -682,8 +682,8 @@ sequenceDiagram
   - apps/service/src/cli/open-command.ts
   - packaging/macos/finder-bridge.applescript
   - integrations/codex-plugin/.codex-plugin/plugin.json
-  - integrations/codex-plugin/skills/pdf-proofreader/SKILL.md
-  - integrations/codex-plugin/skills/pdf-proofreader/agents/openai.yaml
+  - integrations/codex-plugin/skills/placekeeper/SKILL.md
+  - integrations/codex-plugin/skills/placekeeper/agents/openai.yaml
   - apps/vscode/package.json
   - apps/vscode/src/extension.ts
   - apps/vscode/src/local-workspace.ts
@@ -738,7 +738,7 @@ sequenceDiagram
 - **Signed and encrypted PDFs remain high risk.** V1 blocks ambiguous cases and does not claim signature validity merely because bytes were appended.
 - **Browser input events vary by host.** Cover the complete workflow in the primary Chromium path, run a compact WebKit smoke suite, and keep host-specific checks to launch, embedding, focus restoration, and export handoff.
 - **VS Code remote forwarding conflicts with local-only privacy.** V1 rejects remote and virtual workspaces; expanding that boundary requires a new threat model and product decision.
-- **Codex behavior is external.** The durable handoff/disposition schemas and fresh-task fixture provide a stronger contract than relying on PDF annotation extraction or prior conversation. The proofreader can validate observable writes and returned artifacts but cannot audit every external read, so the data-flow summary states the boundary and the external Codex sandbox owns read containment.
+- **Codex behavior is external.** The durable handoff/disposition schemas and fresh-task fixture provide a stronger contract than relying on PDF annotation extraction or prior conversation. The placekeeper can validate observable writes and returned artifacts but cannot audit every external read, so the data-flow summary states the boundary and the external Codex sandbox owns read containment.
 - **Interrupted Codex work is not orchestrated in v1.** A failed or interrupted task writes an explicit partial disposition when possible; any retry starts as a fresh task from immutable evidence after human review. Checkpoint ownership, stale-run reclamation, and cross-task resume remain deferred scope.
 - **SyncTeX is optional and approximate.** Missing binaries, stale sidecars, and ambiguous mappings cannot block handoff or override type-appropriate anchor evidence.
 - **Unsigned source builds require an intentional first launch.** A user who deliberately downloads and builds the source may need to Control-click and choose Open once. The installer must never disable Gatekeeper globally or remove quarantine recursively; optional future prebuilt downloads should use Developer ID signing and notarization.

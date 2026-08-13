@@ -177,7 +177,7 @@ const hiddenLinkRenderer = createRenderer<PdfLinkAnnoObject>({
 });
 
 const linkOnlyFallbackRenderer = createRenderer({
-  id: 'pdf-proofreader-inert-source-annotation',
+  id: 'placekeeper-inert-source-annotation',
   matches: (annotation) => annotation.type !== PdfAnnotationSubtype.LINK,
   render: () => <span aria-hidden="true" />,
   useAppearanceStream: false,

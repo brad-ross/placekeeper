@@ -1,4 +1,4 @@
-import { chmod, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -9,9 +9,6 @@ import {
   inspectHookEvent,
 } from "../../apps/service/src/cli/hook-command.js";
 import { coordinateUpgrade } from "../../apps/service/src/host/upgrade-coordinator.js";
-import { DraftSnapshotStore } from "../../apps/service/src/recovery/draft-snapshot.js";
-import { projectReviewItem } from "../../packages/core/src/annotation-projection.js";
-import { inspectPortableAnnotation } from "../../packages/core/src/portable-annotation.js";
 import { createNotarizationPlan } from "./notarize.js";
 import {
   validateAppBundleManifest,
@@ -23,11 +20,6 @@ import {
 import { finderServiceArgs } from "./launcher.mjs";
 import { validateDoctorEvidence } from "./smoke-installed.js";
 import {
-  LEGACY_BASELINE_IDS,
-  loadLegacyCompatibilityFixture,
-  materializeLegacyInstallation,
-} from "./test-fixtures/legacy-installation.js";
-import {
   appBundlePath,
   compileMacIcon,
   computePackagedBuildIdentity,
@@ -37,285 +29,18 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-async function writeUpgradeCandidate(
-  repoRoot: string,
-  candidate: string,
-  readiness: "ready" | "fail",
-): Promise<void> {
-  const executableRoot = resolve(candidate, "Contents/MacOS");
-  const resources = resolve(candidate, "Contents/Resources");
-  const launcher = [
-    "#!/bin/sh",
-    'if [ "${2:-}" = "ensure-ready" ]; then',
-    readiness === "ready" ? '  : > "$4"' : "  exit 1",
-    "  exit 0",
-    "fi",
-    'if [ "${2:-}" = "stop-ready" ]; then exit 0; fi',
-    "exit 1",
-    "",
-  ].join("\n");
-  await mkdir(executableRoot, { recursive: true });
-  await writeFile(resolve(executableRoot, "pdf-proofreader"), launcher, { mode: 0o755 });
-  await writeFile(resolve(executableRoot, "droplet"), "candidate bridge", { mode: 0o755 });
-  await writeFile(resolve(candidate, "placekeeper-candidate"), readiness);
-  await cp(
-    resolve(repoRoot, "integrations/codex-plugin"),
-    resolve(resources, "integrations/codex-plugin"),
-    { recursive: true },
-  );
-}
-
 describe("macOS distribution manifests", () => {
-  it("validates immutable repository-owned pre-rebrand compatibility baselines", async () => {
-    const fixture = await loadLegacyCompatibilityFixture(resolve("."));
-
-    expect(fixture.baselines.map(({ id }) => id)).toEqual(LEGACY_BASELINE_IDS);
-    expect(fixture.baselines).toEqual([
-      expect.objectContaining({
-        id: "transactional-pre-rebrand",
-        sourceCommit: "4cc17cea25aff0dd2be5d317ca5c44117751a395",
-        sourceDate: "2026-08-12T16:32:56-04:00",
-        lifecycleEvidence: "contract-model",
-        replacementMode: "coordinated",
-      }),
-      expect.objectContaining({
-        id: "pre-management-handshake",
-        sourceCommit: "f3d91b395e82424b271943d91eb296d9b06bba93",
-        sourceDate: "2026-08-12T09:15:29-04:00",
-        lifecycleEvidence: "contract-model",
-        replacementMode: "explicit-legacy-stop",
-      }),
-    ]);
-    expect(fixture).not.toHaveProperty("sourceArtifacts");
-    expect(fixture.artifacts.map(({ path }) => path)).toEqual([
-      "baselines.json",
-      "recovery-seed.json",
-      "legacy-portable-annotation.json",
-      "vscode-settings.json",
-      "legacy-skill.md",
-      "original.pdf",
-    ]);
-    expect(fixture.artifacts.every(({ sha256 }) => /^[a-f0-9]{64}$/u.test(sha256))).toBe(true);
-    expect(fixture.claims.physicallyExecutesLegacyBinary).toBe(false);
-    expect(fixture.claims.physicallyExecutesCurrentTransactionHelper).toBe(true);
-  });
-
-  it.each(LEGACY_BASELINE_IDS)("materializes %s with pending recovery and legacy integrations", async (baselineId) => {
-    const root = await mkdtemp(resolve(tmpdir(), "placekeeper-legacy-fixture-"));
-    try {
-      const installation = await materializeLegacyInstallation(resolve("."), root, baselineId);
-      expect(installation.appPath).toBe(resolve(root, "Applications/PDF Proofreader.app"));
-      expect(installation.recoveryRoot).toBe(resolve(root, "Library/Application Support/PDF Proofreader"));
-      expect(installation.pendingRecovery.state).toMatchObject({
-        revision: 1,
-        items: [{ id: "11111111-1111-4111-8111-111111111111" }],
-      });
-      expect(installation.pendingRecovery.sync.phase).toBe("not-saved");
-      expect(installation.legacyAnnotation).toMatchObject({
-        visible: { author: "PDF Proofreader" },
-        inspection: { status: "owned" },
-      });
-      expect(installation.vscodeSettings).toHaveProperty(
-        "pdfProofreader.launcherPath",
-        "$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader",
-      );
-      expect(installation.legacySkill).toContain("name: pdf-proofreader");
-      expect(installation.legacySkill).toContain("PDF Proofreader.app/Contents/MacOS/pdf-proofreader");
-      await expect(readFile(resolve(root, "Applications/Placekeeper.app"))).rejects.toThrow();
-      await expect(readFile(resolve(root, "Library/Application Support/Placekeeper"))).rejects.toThrow();
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it.runIf(process.platform === "darwin").each(LEGACY_BASELINE_IDS)(
-    "carries %s state through deferred, failed, and successful installed upgrades",
-    async (baselineId) => {
-      const repoRoot = resolve(".");
-      const root = await mkdtemp(resolve(tmpdir(), "placekeeper-legacy-upgrade-"));
-      const helper = resolve(repoRoot, "packaging/macos/install-built-app.sh");
-      const action = resolve(root, "Library/Services/PDF Proofreader.workflow");
-      const failedCandidate = resolve(root, "failed/PDF Proofreader.app");
-      const readyCandidate = resolve(root, "ready/PDF Proofreader.app");
-      try {
-        const installation = await materializeLegacyInstallation(repoRoot, root, baselineId);
-        const sessionStore = new DraftSnapshotStore(
-          resolve(installation.recoveryRoot, installation.pendingRecovery.state.sessionId),
-        );
-        const settingsPath = resolve(root, "Library/Application Support/Code/User/settings.json");
-        const legacySkillPath = resolve(
-          installation.appPath,
-          "Contents/Resources/integrations/codex-plugin/skills/pdf-proofreader/SKILL.md",
-        );
-        await writeFile(resolve(installation.appPath, "legacy-installation"), baselineId);
-        await mkdir(action, { recursive: true });
-        await writeFile(resolve(action, "legacy-action"), baselineId);
-        await writeUpgradeCandidate(repoRoot, failedCandidate, "fail");
-        await writeUpgradeCandidate(repoRoot, readyCandidate, "ready");
-
-        const initialState = {
-          recovery: await readFile(sessionStore.currentPath),
-          original: await readFile(installation.originalPdf),
-          annotation: await readFile(installation.legacyAnnotationPath),
-          settings: await readFile(settingsPath),
-          skill: await readFile(legacySkillPath),
-        };
-        const expectLegacyState = async (): Promise<void> => {
-          expect(await readFile(sessionStore.currentPath)).toEqual(initialState.recovery);
-          expect(await readFile(installation.originalPdf)).toEqual(initialState.original);
-          expect(await readFile(installation.legacyAnnotationPath)).toEqual(initialState.annotation);
-          expect(await readFile(settingsPath)).toEqual(initialState.settings);
-          expect(await sessionStore.recover()).toEqual(installation.pendingRecovery);
-          await expect(readFile(resolve(root, "Library/Application Support/Placekeeper"))).rejects.toThrow();
-        };
-        const candidateIdentity = {
-          daemonIdentity: "b".repeat(64),
-          installArtifactIdentity: "c".repeat(64),
-        };
-        const installedIdentity = {
-          daemonIdentity: "a".repeat(64),
-          installArtifactIdentity: "a".repeat(64),
-        };
-        let activeReview = true;
-        let legacyStopped = false;
-        let daemonPresent = true;
-        let replacements = 0;
-        const inspect = async () => {
-          if (!daemonPresent) return { kind: "absent" as const };
-          if (baselineId === "pre-management-handshake" && !legacyStopped) {
-            return { kind: "uninspectable" as const, reason: "legacy" as const };
-          }
-          return {
-            kind: "incompatible" as const,
-            status: {
-              protocolVersion: 1 as const,
-              daemonIdentity: installedIdentity.daemonIdentity,
-              lifecycle: "accepting" as const,
-              activity: { reviewPresence: activeReview ? 1 : 0, codexTasks: 0, transientWork: 0 },
-            },
-          };
-        };
-        const coordinate = (candidate: string) => coordinateUpgrade({
-          candidate: candidateIdentity,
-          installed: installedIdentity,
-          inspect,
-          shutdown: async () => {
-            daemonPresent = false;
-            return { status: "accepted" as const };
-          },
-          waitForRetirement: async () => {},
-          replaceAndReady: async () => {
-            replacements += 1;
-            await execFileAsync("/bin/sh", [
-              helper,
-              candidate,
-              installation.appPath,
-              action,
-              resolve(installation.appPath, "Contents/MacOS/pdf-proofreader"),
-            ]);
-          },
-        });
-
-        await expect(coordinate(failedCandidate)).rejects.toMatchObject({
-          reason: baselineId === "pre-management-handshake" ? "legacy" : "review-presence",
-        });
-        expect(replacements).toBe(0);
-        expect(await readFile(resolve(installation.appPath, "legacy-installation"), "utf8")).toBe(baselineId);
-        await expectLegacyState();
-
-        activeReview = false;
-        if (baselineId === "pre-management-handshake") {
-          legacyStopped = true;
-          daemonPresent = false;
-        }
-        await expect(coordinate(failedCandidate)).rejects.toThrow();
-        expect(replacements).toBe(1);
-        expect(await readFile(resolve(installation.appPath, "legacy-installation"), "utf8")).toBe(baselineId);
-        expect(await readFile(legacySkillPath)).toEqual(initialState.skill);
-        expect(await readFile(resolve(action, "legacy-action"), "utf8")).toBe(baselineId);
-        await expectLegacyState();
-
-        await expect(coordinate(readyCandidate)).resolves.toEqual({ status: "installed" });
-        expect(replacements).toBe(2);
-        expect(await readFile(resolve(installation.appPath, "placekeeper-candidate"), "utf8")).toBe("ready");
-        await expect(readFile(resolve(installation.appPath, "legacy-installation"))).rejects.toThrow();
-        await expect(readFile(resolve(action, "legacy-action"))).rejects.toThrow();
-        await expectLegacyState();
-
-        const recovered = await sessionStore.recover();
-        expect(recovered).toBeDefined();
-        const persistedLegacyAnnotation = JSON.parse(
-          await readFile(installation.legacyAnnotationPath, "utf8"),
-        ) as {
-          readonly custom: unknown;
-          readonly visible: typeof installation.legacyAnnotation.visible;
-        };
-        const legacyInspection = inspectPortableAnnotation(
-          persistedLegacyAnnotation.custom,
-          persistedLegacyAnnotation.visible,
-        );
-        expect(legacyInspection.status).toBe("owned");
-        if (recovered === undefined || legacyInspection.status !== "owned") {
-          throw new Error("Legacy recovery or annotation did not resume after upgrade");
-        }
-        const editedItem = {
-          ...legacyInspection.item,
-          updatedAt: "2026-08-13T12:00:00.000Z",
-          payload: {
-            ...legacyInspection.item.payload,
-            proposedText: "edited after Placekeeper upgrade",
-          },
-        };
-        const editedAnnotation = projectReviewItem(editedItem);
-        const editedVisible = {
-          ...persistedLegacyAnnotation.visible,
-          contents: editedAnnotation.contents,
-          author: editedAnnotation.author,
-        };
-        await writeFile(
-          installation.legacyAnnotationPath,
-          `${JSON.stringify({ visible: editedVisible, custom: editedAnnotation.custom })}\n`,
-        );
-        expect(inspectPortableAnnotation(editedAnnotation.custom, editedVisible)).toMatchObject({
-          status: "owned",
-          item: { id: editedItem.id, payload: { proposedText: "edited after Placekeeper upgrade" } },
-        });
-        await sessionStore.persist({
-          ...recovered,
-          state: { ...recovered.state, revision: 2, items: [editedItem] },
-        });
-        await expect(sessionStore.recover()).resolves.toMatchObject({
-          state: {
-            revision: 2,
-            items: [{ id: editedItem.id, payload: { proposedText: "edited after Placekeeper upgrade" } }],
-          },
-        });
-        expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual(installation.vscodeSettings);
-        for (const skill of ["placekeeper", "pdf-proofreader"]) {
-          await expect(readFile(resolve(
-            installation.appPath,
-            `Contents/Resources/integrations/codex-plugin/skills/${skill}/SKILL.md`,
-          ), "utf8")).resolves.toContain(`name: ${skill}`);
-        }
-        await expect(readFile(resolve(root, "Applications/Placekeeper.app"))).rejects.toThrow();
-        await expect(readFile(resolve(root, "Library/Application Support/Placekeeper"))).rejects.toThrow();
-      } finally {
-        await rm(root, { recursive: true, force: true });
-      }
-    },
-  );
-
-  it("separates the visible Placekeeper identity from the physical compatibility bundle", async () => {
+  it("uses the Placekeeper identity for the complete macOS bundle", async () => {
     const app = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8")) as unknown;
     const manifest = validateAppBundleManifest(app);
 
     expect(manifest).toMatchObject({
       productName: "Placekeeper",
-      bundleName: "PDF Proofreader",
-      bundleIdentifier: "local.pdf-proofreader",
-      executable: "pdf-proofreader",
+      bundleName: "Placekeeper",
+      bundleIdentifier: "local.placekeeper",
+      executable: "placekeeper",
       finderExecutable: "droplet",
-      runtimeDataDirectory: "Library/Application Support/PDF Proofreader",
+      runtimeDataDirectory: "Library/Application Support/Placekeeper",
       documentTypes: [{ contentType: "com.adobe.pdf", role: "Viewer", rank: "Alternate" }],
       icon: {
         master: "packaging/macos/icon/Placekeeper.svg",
@@ -324,15 +49,15 @@ describe("macOS distribution manifests", () => {
       },
     });
     expect(appBundlePath("/tmp/placekeeper-package", manifest)).toBe(
-      "/tmp/placekeeper-package/PDF Proofreader.app",
+      "/tmp/placekeeper-package/Placekeeper.app",
     );
 
     const plist = infoPlist(manifest);
-    expect(plist).toContain("<key>CFBundleDisplayName</key><string>PDF Proofreader</string>");
-    expect(plist).toContain("<key>CFBundleName</key><string>PDF Proofreader</string>");
+    expect(plist).toContain("<key>CFBundleDisplayName</key><string>Placekeeper</string>");
+    expect(plist).toContain("<key>CFBundleName</key><string>Placekeeper</string>");
     expect(plist).toContain("<key>LSHasLocalizedDisplayName</key><true/>");
     expect(plist).toContain("<key>CFBundleExecutable</key><string>droplet</string>");
-    expect(plist).toContain("<key>CFBundleIdentifier</key><string>local.pdf-proofreader</string>");
+    expect(plist).toContain("<key>CFBundleIdentifier</key><string>local.placekeeper</string>");
     expect(plist).toContain("<key>CFBundleIconFile</key><string>Placekeeper</string>");
     expect(infoPlistStrings(manifest)).toBe(
       '"CFBundleDisplayName" = "Placekeeper";\n"CFBundleName" = "Placekeeper";\n',
@@ -426,24 +151,24 @@ describe("macOS distribution manifests", () => {
     }
   });
 
-  it("rejects mutations to compatibility identities and visible/physical recoupling", async () => {
+  it("rejects mutations to the Placekeeper distribution identity", async () => {
     const app = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8")) as Record<string, unknown>;
     const mutations: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
-      ["visible product", { productName: "PDF Proofreader" }],
-      ["physical bundle", { bundleName: "Placekeeper" }],
-      ["bundle identifier", { bundleIdentifier: "local.placekeeper" }],
-      ["launcher executable", { executable: "placekeeper" }],
+      ["visible product", { productName: "Other" }],
+      ["physical bundle", { bundleName: "Other" }],
+      ["bundle identifier", { bundleIdentifier: "local.other" }],
+      ["launcher executable", { executable: "other" }],
       ["Finder bridge", { finderExecutable: "placekeeper-droplet" }],
-      ["runtime data root", { runtimeDataDirectory: "Library/Application Support/Placekeeper" }],
+      ["runtime data root", { runtimeDataDirectory: "Library/Application Support/Other" }],
       ["document registration", { documentTypes: [{ contentType: "com.adobe.pdf", role: "Editor", rank: "Owner" }] }],
     ];
 
     for (const [label, mutation] of mutations) {
-      expect(() => validateAppBundleManifest({ ...app, ...mutation }), label).toThrow(/compatibility|Placekeeper/u);
+      expect(() => validateAppBundleManifest({ ...app, ...mutation }), label).toThrow();
     }
   });
 
-  it("pins the compatibility ledger without pinning the content-derived daemon hash", async () => {
+  it("pins the Placekeeper runtime identity without pinning the content-derived daemon hash", async () => {
     const [installer, smoke, serviceDaemon, launchControl, hookCommand, pdfInspector, exportCoordinator, vscodePackage, vscodeExtension] =
       await Promise.all([
         readFile(resolve("install.sh"), "utf8"),
@@ -457,38 +182,35 @@ describe("macOS distribution manifests", () => {
         readFile(resolve("apps/vscode/src/extension.ts"), "utf8"),
       ]);
 
-    expect(installer).toContain('app_path="$install_root/PDF Proofreader.app"');
-    expect(installer).toContain('built_app="$build_root/PDF Proofreader.app"');
-    expect(installer).toContain("PDF_PROOFREADER_USER_HOME");
-    expect(installer).toContain("PDF_PROOFREADER_INSTALL_ROOT");
-    expect(smoke).toContain('"Library/Application Support/PDF Proofreader"');
+    expect(installer).toContain('app_path="$install_root/Placekeeper.app"');
+    expect(installer).toContain('built_app="$build_root/Placekeeper.app"');
+    expect(installer).toContain("PLACEKEEPER_USER_HOME");
+    expect(installer).toContain("PLACEKEEPER_INSTALL_ROOT");
+    expect(smoke).toContain('"Library/Application Support/Placekeeper"');
     expect(smoke).toContain('"daemon", "coordinate-install"');
-    expect(serviceDaemon).toContain('"PDF_PROOFREADER_DAEMON_IDENTITY"');
-    expect(serviceDaemon).toContain('"PDF_PROOFREADER_INSTALL_ARTIFACT_IDENTITY"');
+    expect(serviceDaemon).toContain('"PLACEKEEPER_DAEMON_IDENTITY"');
+    expect(serviceDaemon).toContain('"PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY"');
     expect(serviceDaemon).toContain('join(appSupportRoot, "lifecycle.lock")');
     expect(launchControl).toContain("export const MANAGEMENT_PROTOCOL_VERSION = 1");
     expect(launchControl).toContain('readonly kind: "exact"');
     expect(launchControl).toContain('readonly kind: "incompatible"');
-    expect(hookCommand).toContain('kind: "pdf-proofreader-live-context"');
-    expect(pdfInspector).toContain('"application/vnd.pdf-proofreader.rgba+json"');
-    expect(exportCoordinator).toContain('`.pdf-proofreader-${randomUUID()}.tmp`');
+    expect(hookCommand).toContain('kind: "placekeeper-live-context"');
+    expect(pdfInspector).toContain('"application/vnd.placekeeper.rgba+json"');
+    expect(exportCoordinator).toContain('`.placekeeper-${randomUUID()}.tmp`');
     expect(JSON.parse(vscodePackage)).toMatchObject({
-      name: "pdf-proofreader-vscode",
-      activationEvents: ["onCommand:pdfProofreader.open"],
+      name: "placekeeper-vscode",
+      activationEvents: ["onCommand:placekeeper.open"],
       contributes: {
-        commands: [{ command: "pdfProofreader.open" }],
-        configuration: { properties: { "pdfProofreader.launcherPath": expect.any(Object) } },
+        commands: [{ command: "placekeeper.open" }],
+        configuration: { properties: { "placekeeper.launcherPath": expect.any(Object) } },
       },
     });
-    expect(vscodeExtension).toContain('"pdfProofreader.review"');
+    expect(vscodeExtension).toContain('"placekeeper.review"');
 
-    for (const source of [installer, serviceDaemon, hookCommand, exportCoordinator, vscodePackage, vscodeExtension]) {
-      expect(source).not.toContain("Placekeeper.app");
-    }
+    expect(installer).toContain("Placekeeper.app");
+    expect(hookCommand).toContain("Placekeeper.app/Contents/MacOS/placekeeper");
     expect(smoke).toContain('"Applications/Placekeeper.app"');
-    for (const source of [installer, smoke, serviceDaemon, hookCommand, exportCoordinator, vscodePackage, vscodeExtension]) {
-      expect(source).not.toContain("Application Support/Placekeeper");
-    }
+    expect(serviceDaemon).toContain('"Application Support",\n    "Placekeeper"');
   });
 
   it("pins one offline runtime for the Apple-silicon source-first build", async () => {
@@ -510,13 +232,12 @@ describe("macOS distribution manifests", () => {
     const { stdout } = await execFileAsync("/bin/sh", [resolve("install.sh"), "--dry-run"], {
       cwd: resolve("."),
       encoding: "utf8",
-      env: { ...process.env, PDF_PROOFREADER_USER_HOME: "/tmp/pdf-proofreader-installer-home" },
+      env: { ...process.env, PLACEKEEPER_USER_HOME: "/tmp/placekeeper-installer-home" },
     });
     expect(stdout).toContain("Placekeeper Apple-silicon source install");
     expect(stdout).toContain("Node 24.14.0");
     expect(stdout).toContain("pnpm 11.16.0");
-    expect(stdout).toContain("/tmp/pdf-proofreader-installer-home/Applications/PDF Proofreader.app");
-    expect(stdout).not.toContain("PDF Proofreader Apple-silicon source install");
+    expect(stdout).toContain("/tmp/placekeeper-installer-home/Applications/Placekeeper.app");
     expect(stdout).toContain("No files were changed");
     expect(installer).toContain("Placekeeper installed successfully");
     expect(installer).toContain("Open With -> Placekeeper");
@@ -526,52 +247,33 @@ describe("macOS distribution manifests", () => {
     expect(installer).not.toContain("spctl --master-disable");
   });
 
-  it.runIf(process.platform === "darwin")("replaces the app transactionally and restores the app plus obsolete action after a partial failure", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "pdf-proofreader-install-test-"));
-    const built = resolve(root, "built/PDF Proofreader.app");
-    const app = resolve(root, "home/Applications/PDF Proofreader.app");
-    const services = resolve(root, "home/Library/Services");
-    const action = resolve(services, "PDF Proofreader.workflow");
+  it.runIf(process.platform === "darwin")("replaces the app transactionally", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "placekeeper-install-test-"));
+    const built = resolve(root, "built/Placekeeper.app");
+    const app = resolve(root, "home/Applications/Placekeeper.app");
     const helper = resolve("packaging/macos/install-built-app.sh");
     try {
       await mkdir(resolve(built, "Contents/MacOS"), { recursive: true });
-      await writeFile(resolve(built, "Contents/MacOS/pdf-proofreader"), "new launcher", { mode: 0o755 });
+      await writeFile(resolve(built, "Contents/MacOS/placekeeper"), "new launcher", { mode: 0o755 });
       await writeFile(resolve(built, "Contents/MacOS/droplet"), "native bridge", { mode: 0o755 });
       await writeFile(resolve(built, "new-app"), "new app");
-      await mkdir(action, { recursive: true });
-      await writeFile(resolve(action, "obsolete-action"), "obsolete action");
-      await execFileAsync("/bin/sh", [helper, built, app, action]);
+      await execFileAsync("/bin/sh", [helper, built, app]);
       expect(await readFile(resolve(app, "new-app"), "utf8")).toBe("new app");
-      await expect(readFile(resolve(action, "obsolete-action"), "utf8")).rejects.toThrow();
-
-      await rm(app, { recursive: true });
-      await rm(action, { recursive: true, force: true });
-      await mkdir(app, { recursive: true });
-      await mkdir(action, { recursive: true });
-      await writeFile(resolve(app, "old-app"), "old app");
-      await writeFile(resolve(action, "old-action"), "old action");
-      await chmod(services, 0o500);
-      await expect(execFileAsync("/bin/sh", [helper, built, app, action])).rejects.toThrow();
-      await chmod(services, 0o700);
-      expect(await readFile(resolve(app, "old-app"), "utf8")).toBe("old app");
-      expect(await readFile(resolve(action, "old-action"), "utf8")).toBe("old action");
     } finally {
-      await chmod(services, 0o700).catch(() => undefined);
       await rm(root, { recursive: true, force: true });
     }
   });
 
   it("keeps the previous app available until candidate daemon readiness succeeds", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "pdf-proofreader-readiness-test-"));
-    const built = resolve(root, "built/PDF Proofreader.app");
-    const app = resolve(root, "home/Applications/PDF Proofreader.app");
-    const action = resolve(root, "home/Library/Services/PDF Proofreader.workflow");
+    const root = await mkdtemp(resolve(tmpdir(), "placekeeper-readiness-test-"));
+    const built = resolve(root, "built/Placekeeper.app");
+    const app = resolve(root, "home/Applications/Placekeeper.app");
     const helper = resolve("packaging/macos/install-built-app.sh");
-    const readiness = resolve(app, "Contents/MacOS/pdf-proofreader");
+    const readiness = resolve(app, "Contents/MacOS/placekeeper");
     try {
       await mkdir(resolve(built, "Contents/MacOS"), { recursive: true });
       await writeFile(
-        resolve(built, "Contents/MacOS/pdf-proofreader"),
+        resolve(built, "Contents/MacOS/placekeeper"),
         "#!/bin/sh\nif [ \"${2:-}\" = \"stop-ready\" ]; then exit 0; fi\nexit 1\n",
         { mode: 0o755 },
       );
@@ -580,7 +282,7 @@ describe("macOS distribution manifests", () => {
       await mkdir(app, { recursive: true });
       await writeFile(resolve(app, "previous-marker"), "previous");
 
-      await expect(execFileAsync("/bin/sh", [helper, built, app, action, readiness])).rejects.toThrow();
+      await expect(execFileAsync("/bin/sh", [helper, built, app, readiness])).rejects.toThrow();
 
       expect(await readFile(resolve(app, "previous-marker"), "utf8")).toBe("previous");
       await expect(readFile(resolve(app, "candidate-marker"), "utf8")).rejects.toThrow();
@@ -592,12 +294,11 @@ describe("macOS distribution manifests", () => {
   it.each(["during-readiness", "at-readiness-exit"] as const)(
     "retires the exact candidate before rollback when interrupted %s",
     async (timing) => {
-      const root = await mkdtemp(resolve(tmpdir(), "pdf-proofreader-readiness-signal-"));
-      const built = resolve(root, "built/PDF Proofreader.app");
-      const app = resolve(root, "home/Applications/PDF Proofreader.app");
-      const action = resolve(root, "home/Library/Services/PDF Proofreader.workflow");
+      const root = await mkdtemp(resolve(tmpdir(), "placekeeper-readiness-signal-"));
+      const built = resolve(root, "built/Placekeeper.app");
+      const app = resolve(root, "home/Applications/Placekeeper.app");
       const helper = resolve("packaging/macos/install-built-app.sh");
-      const readiness = resolve(app, "Contents/MacOS/pdf-proofreader");
+      const readiness = resolve(app, "Contents/MacOS/placekeeper");
       const candidateMarker = resolve(root, "candidate-running");
       const signalLine = timing === "during-readiness"
         ? '  kill -TERM "$PPID"\n'
@@ -605,13 +306,13 @@ describe("macOS distribution manifests", () => {
       const launcher = [
         "#!/bin/sh",
         'if [ "${2:-}" = "ensure-ready" ]; then',
-        '  : > "$PDF_TEST_CANDIDATE_MARKER"',
+        '  : > "$PLACEKEEPER_TEST_CANDIDATE_MARKER"',
         '  : > "$4"',
         signalLine.trimEnd(),
         "  exit 0",
         "fi",
         'if [ "${2:-}" = "stop-ready" ]; then',
-        '  /bin/rm -f "$PDF_TEST_CANDIDATE_MARKER"',
+        '  /bin/rm -f "$PLACEKEEPER_TEST_CANDIDATE_MARKER"',
         "  exit 0",
         "fi",
         "exit 1",
@@ -619,14 +320,14 @@ describe("macOS distribution manifests", () => {
       ].join("\n");
       try {
         await mkdir(resolve(built, "Contents/MacOS"), { recursive: true });
-        await writeFile(resolve(built, "Contents/MacOS/pdf-proofreader"), launcher, { mode: 0o755 });
+        await writeFile(resolve(built, "Contents/MacOS/placekeeper"), launcher, { mode: 0o755 });
         await writeFile(resolve(built, "Contents/MacOS/droplet"), "candidate bridge", { mode: 0o755 });
         await writeFile(resolve(built, "candidate-marker"), "candidate");
         await mkdir(app, { recursive: true });
         await writeFile(resolve(app, "previous-marker"), "previous");
 
-        await expect(execFileAsync("/bin/sh", [helper, built, app, action, readiness], {
-          env: { ...process.env, PDF_TEST_CANDIDATE_MARKER: candidateMarker },
+        await expect(execFileAsync("/bin/sh", [helper, built, app, readiness], {
+          env: { ...process.env, PLACEKEEPER_TEST_CANDIDATE_MARKER: candidateMarker },
         })).rejects.toThrow();
 
         expect(await readFile(resolve(app, "previous-marker"), "utf8")).toBe("previous");
@@ -657,35 +358,35 @@ describe("macOS distribution manifests", () => {
   });
 
   it("uses current notarytool submission followed by staple and validation", () => {
-    expect(createNotarizationPlan("/tmp/PDF-Proofreader-arm64.zip", "/tmp/PDF Proofreader.app", "PDF_PROOFREADER_NOTARY")).toEqual([
-      { command: "xcrun", args: ["notarytool", "submit", "/tmp/PDF-Proofreader-arm64.zip", "--keychain-profile", "PDF_PROOFREADER_NOTARY", "--wait", "--output-format", "json"] },
-      { command: "xcrun", args: ["stapler", "staple", "/tmp/PDF Proofreader.app"] },
-      { command: "xcrun", args: ["stapler", "validate", "/tmp/PDF Proofreader.app"] },
+    expect(createNotarizationPlan("/tmp/Placekeeper-arm64.zip", "/tmp/Placekeeper.app", "PLACEKEEPER_NOTARY")).toEqual([
+      { command: "xcrun", args: ["notarytool", "submit", "/tmp/Placekeeper-arm64.zip", "--keychain-profile", "PLACEKEEPER_NOTARY", "--wait", "--output-format", "json"] },
+      { command: "xcrun", args: ["stapler", "staple", "/tmp/Placekeeper.app"] },
+      { command: "xcrun", args: ["stapler", "validate", "/tmp/Placekeeper.app"] },
     ]);
   });
 
   it("translates an installed raw Finder path without putting a capability in process arguments", async () => {
     expect(finderServiceArgs("/tmp/paper.pdf")).toEqual(["open", "--json", "--surface", "finder", "--pdf", "/tmp/paper.pdf"]);
     const launcher = await readFile(resolve("packaging/macos/launcher.mjs"), "utf8");
-    expect(launcher).toContain('system attribute "PDF_PROOFREADER_URL"');
-    expect(launcher).toContain("PDF_PROOFREADER_PDFIUM_WASM");
+    expect(launcher).toContain('system attribute "PLACEKEEPER_URL"');
+    expect(launcher).toContain("PLACEKEEPER_PDFIUM_WASM");
     expect(launcher).toContain("build-identity.json");
-    expect(launcher).toContain("PDF_PROOFREADER_DAEMON_IDENTITY");
-    expect(launcher).toContain("PDF_PROOFREADER_INSTALL_ARTIFACT_IDENTITY");
-    expect(launcher).toContain('PDF_PROOFREADER_WEB_ASSETS: resolve(resources, "web")');
-    expect(launcher.indexOf("...process.env")).toBeLessThan(launcher.indexOf("PDF_PROOFREADER_WEB_ASSETS:"));
+    expect(launcher).toContain("PLACEKEEPER_DAEMON_IDENTITY");
+    expect(launcher).toContain("PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY");
+    expect(launcher).toContain('PLACEKEEPER_WEB_ASSETS: resolve(resources, "web")');
+    expect(launcher.indexOf("...process.env")).toBeLessThan(launcher.indexOf("PLACEKEEPER_WEB_ASSETS:"));
     expect(launcher).toContain('choose file of type {"com.adobe.pdf"}');
     expect(launcher).toContain('result.error?.kind === "input-unavailable"');
     expect(launcher).toContain("realpathSync");
     expect(launcher).not.toContain('"/usr/bin/open"');
     const bridge = await readFile(resolve("packaging/macos/finder-bridge.applescript"), "utf8");
     expect(bridge).toContain("on open pdfItems");
-    expect(bridge).toContain("Contents/MacOS/pdf-proofreader");
+    expect(bridge).toContain("Contents/MacOS/placekeeper");
     expect(bridge).toContain("quoted form of pdfPath");
     expect(bridge).not.toContain("Terminal");
   });
 
-  it("presents Placekeeper on current app and Finder surfaces while retaining the legacy executable", async () => {
+  it("presents Placekeeper on current app and Finder surfaces", async () => {
     const [app, server, launcher, bridge] = await Promise.all([
       readFile(resolve("apps/web/src/app/App.tsx"), "utf8"),
       readFile(resolve("apps/service/src/server/http-server.ts"), "utf8"),
@@ -698,34 +399,11 @@ describe("macOS distribution manifests", () => {
     expect(launcher).toContain("Recover Placekeeper draft");
     expect(bridge).toContain('display alert "Placekeeper could not open this file"');
     expect(bridge).toContain('message "Placekeeper opens one local PDF at a time."');
-    expect(bridge).toContain("Contents/MacOS/pdf-proofreader");
-    for (const visibleSurface of [app, server, launcher, bridge]) {
-      expect(visibleSurface).not.toContain("PDF Proofreader");
-    }
-  });
-
-  it("limits the legacy product name in current guidance to documented compatibility locations", async () => {
-    const currentGuidance = await Promise.all([
-      "README.md",
-      "docs/installation.md",
-      "docs/privacy-and-recovery.md",
-      "docs/support.md",
-    ].map(async (path) => await readFile(resolve(path), "utf8")));
-    const withoutCompatibilityLocations = currentGuidance.join("\n")
-      .replaceAll("PDF Proofreader.app", "LEGACY_BUNDLE.app")
-      .replaceAll("PDF Proofreader.workflow", "LEGACY_WORKFLOW.workflow")
-      .replaceAll("Application Support/PDF Proofreader", "Application Support/LEGACY_STATE");
-
-    expect(withoutCompatibilityLocations).not.toContain("PDF Proofreader");
-    expect(currentGuidance[0]).toContain("focused everyday PDF reader and annotator for serious readers");
-    expect(currentGuidance[0]).toContain("packaging/macos/icon/Placekeeper.svg");
-    expect(currentGuidance[1]).toContain("stable compatibility path");
-    expect(currentGuidance[2]).toContain("legacy technical name");
-    expect(currentGuidance[3]).toContain("two-page reference-and-return icon");
+    expect(bridge).toContain("Contents/MacOS/placekeeper");
   });
 
   it("derives stable daemon and complete artifact identities from packaged bytes", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "pdf-proofreader-build-identity-"));
+    const root = await mkdtemp(resolve(tmpdir(), "placekeeper-build-identity-"));
     const contents = join(root, "Contents");
     const service = join(contents, "Resources/service");
     const web = join(contents, "Resources/web");
@@ -819,21 +497,21 @@ describe("macOS distribution manifests", () => {
     })).toThrow(/Codex plugin/u);
   });
 
-  it("rejects a missing or operationally divergent Codex skill alias", async () => {
+  it("rejects a missing or operationally incomplete Codex skill", async () => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-plugin-contract-"));
     const pluginRoot = join(root, "codex-plugin");
     try {
       await cp(resolve("integrations/codex-plugin"), pluginRoot, { recursive: true });
       await expect(validateCodexPlugin(pluginRoot)).resolves.toBeUndefined();
 
-      await rm(join(pluginRoot, "skills/pdf-proofreader/SKILL.md"));
-      await expect(validateCodexPlugin(pluginRoot)).rejects.toThrow(/pdf-proofreader.*alias|alias.*pdf-proofreader/ui);
+      await rm(join(pluginRoot, "skills/placekeeper/SKILL.md"));
+      await expect(validateCodexPlugin(pluginRoot)).rejects.toThrow(/placekeeper.*required|required.*placekeeper/ui);
 
       await cp(resolve("integrations/codex-plugin"), pluginRoot, { recursive: true, force: true });
-      const legacyPath = join(pluginRoot, "skills/pdf-proofreader/SKILL.md");
-      const legacy = await readFile(legacyPath, "utf8");
-      await writeFile(legacyPath, legacy.replace("A failed refresh blocks completion.", "A failed refresh may be ignored."));
-      await expect(validateCodexPlugin(pluginRoot)).rejects.toThrow(/operational.*diverge|diverge.*operational/ui);
+      const skillPath = join(pluginRoot, "skills/placekeeper/SKILL.md");
+      const skill = await readFile(skillPath, "utf8");
+      await writeFile(skillPath, skill.replace("A failed refresh blocks completion.", "A failed refresh may be ignored."));
+      await expect(validateCodexPlugin(pluginRoot)).rejects.toThrow(/omitted required contract text/ui);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

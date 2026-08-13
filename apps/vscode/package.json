@@ -1,5 +1,5 @@
 {
-  "name": "pdf-proofreader-vscode",
+  "name": "placekeeper-vscode",
   "displayName": "Placekeeper",
   "description": "Open one local PDF in the installed Placekeeper service.",
   "version": "0.1.0",
@@ -7,23 +7,23 @@
   "engines": { "vscode": ">=1.95.0" },
   "extensionKind": ["ui"],
   "main": "./dist/extension.js",
-  "activationEvents": ["onCommand:pdfProofreader.open"],
+  "activationEvents": ["onCommand:placekeeper.open"],
   "contributes": {
     "commands": [
-      { "command": "pdfProofreader.open", "title": "Placekeeper: Open Local PDF" }
+      { "command": "placekeeper.open", "title": "Placekeeper: Open Local PDF" }
     ],
     "menus": {
       "explorer/context": [
-        { "command": "pdfProofreader.open", "when": "resourceExtname == .pdf", "group": "navigation" }
+        { "command": "placekeeper.open", "when": "resourceExtname == .pdf", "group": "navigation" }
       ],
       "editor/title": [
-        { "command": "pdfProofreader.open", "when": "resourceExtname == .pdf", "group": "navigation" }
+        { "command": "placekeeper.open", "when": "resourceExtname == .pdf", "group": "navigation" }
       ]
     },
     "configuration": {
       "title": "Placekeeper",
       "properties": {
-        "pdfProofreader.launcherPath": {
+        "placekeeper.launcherPath": {
           "type": "string",
           "description": "Absolute path to the installed Placekeeper launcher."
         }

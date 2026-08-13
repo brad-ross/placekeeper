@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { inflateSync } from "node:zlib";
 
 const CODEX_INSTALLED_LAUNCHER_COMMAND =
-  '"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader"';
+  '"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper"';
 const CONTROL_REQUEST_TIMEOUT_SECONDS = 5;
 
 interface RuntimeAsset {
@@ -35,15 +35,15 @@ export interface BackendRuntimeManifest {
 export interface AppBundleManifest {
   readonly schemaVersion: 1;
   readonly productName: "Placekeeper";
-  readonly bundleName: "PDF Proofreader";
-  readonly bundleIdentifier: "local.pdf-proofreader";
+  readonly bundleName: "Placekeeper";
+  readonly bundleIdentifier: "local.placekeeper";
   readonly bundleVersion: string;
   readonly minimumSystemVersion: string;
   readonly architectures: readonly ["arm64"];
   readonly nodeVersion: string;
-  readonly executable: "pdf-proofreader";
+  readonly executable: "placekeeper";
   readonly finderExecutable: "droplet";
-  readonly runtimeDataDirectory: "Library/Application Support/PDF Proofreader";
+  readonly runtimeDataDirectory: "Library/Application Support/Placekeeper";
   readonly icon: {
     readonly master: "packaging/macos/icon/Placekeeper.svg";
     readonly source: "packaging/macos/icon/Placekeeper.iconset";
@@ -193,13 +193,13 @@ function boundedString(value: unknown, label: string): string {
   return value;
 }
 
-function compatibilityValue<const Expected extends string>(
+function requiredValue<const Expected extends string>(
   value: unknown,
   expected: Expected,
   label: string,
 ): Expected {
   if (value !== expected) {
-    throw new Error(`${label} is a pinned compatibility identity and must remain ${expected}`);
+    throw new Error(`${label} must remain ${expected}`);
   }
   return expected;
 }
@@ -261,7 +261,7 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   const root = record(value, "app bundle manifest");
   if (root.schemaVersion !== 1) throw new Error("Unsupported app bundle manifest version");
   if (root.productName !== "Placekeeper") throw new Error("The visible product name must remain Placekeeper");
-  const bundleName = compatibilityValue(root.bundleName, "PDF Proofreader", "Physical bundle name");
+  const bundleName = requiredValue(root.bundleName, "Placekeeper", "Physical bundle name");
   if (!Array.isArray(root.architectures) || root.architectures.length !== 1 || root.architectures[0] !== "arm64") {
     throw new Error("The source-first app target must be Apple silicon");
   }
@@ -269,7 +269,7 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   if (!Array.isArray(documentTypes) || documentTypes.length !== 1) throw new Error("Exactly one PDF document type is required");
   const documentType = record(documentTypes[0], "document type");
   if (documentType.contentType !== "com.adobe.pdf" || documentType.role !== "Viewer" || documentType.rank !== "Alternate") {
-    throw new Error("PDF document registration is a pinned compatibility identity and must remain an alternate viewer");
+    throw new Error("PDF document registration must remain an alternate viewer");
   }
   const signing = record(root.signing, "signing");
   if (signing.hardenedRuntime !== true || signing.secureTimestamp !== true) throw new Error("Hardened runtime and secure timestamp are required");
@@ -281,16 +281,16 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   if (runtimeDataDirectory.startsWith("/") || runtimeDataDirectory.startsWith("Contents/") || runtimeDataDirectory.split("/").includes("..")) {
     throw new Error("Mutable runtime data must be a user-relative path outside the signed bundle");
   }
-  const checkedRuntimeDataDirectory = compatibilityValue(
+  const checkedRuntimeDataDirectory = requiredValue(
     runtimeDataDirectory,
-    "Library/Application Support/PDF Proofreader",
+    "Library/Application Support/Placekeeper",
     "Runtime data directory",
   );
   const rawIcon = record(root.icon, "icon");
   const icon = {
-    master: compatibilityValue(rawIcon.master, "packaging/macos/icon/Placekeeper.svg", "Icon master"),
-    source: compatibilityValue(rawIcon.source, "packaging/macos/icon/Placekeeper.iconset", "Icon source"),
-    file: compatibilityValue(rawIcon.file, "Placekeeper", "Icon file"),
+    master: requiredValue(rawIcon.master, "packaging/macos/icon/Placekeeper.svg", "Icon master"),
+    source: requiredValue(rawIcon.source, "packaging/macos/icon/Placekeeper.iconset", "Icon source"),
+    file: requiredValue(rawIcon.file, "Placekeeper", "Icon file"),
   } as const;
   if (Object.keys(rawIcon).some((name) => !["master", "source", "file"].includes(name))) {
     throw new Error("Only the production master, iconset source, and resource basename may own the app icon");
@@ -303,7 +303,7 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   if (Object.keys(rawEmbeddedArtifacts).some((name) => !["codexPlugin", "vscodeExtension"].includes(name))) {
     throw new Error("Only the Codex plugin and VS Code extension may be embedded integrations");
   }
-  compatibilityValue(root.finderExecutable, "droplet", "Finder executable");
+  requiredValue(root.finderExecutable, "droplet", "Finder executable");
   if (Object.values(embeddedArtifacts).some((path) => path.startsWith("/") || path.split("/").includes(".."))) {
     throw new Error("Embedded artifact sources must stay inside the repository");
   }
@@ -311,12 +311,12 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
     schemaVersion: 1,
     productName: "Placekeeper",
     bundleName,
-    bundleIdentifier: compatibilityValue(root.bundleIdentifier, "local.pdf-proofreader", "Bundle identifier"),
+    bundleIdentifier: requiredValue(root.bundleIdentifier, "local.placekeeper", "Bundle identifier"),
     bundleVersion: boundedString(root.bundleVersion, "bundle version"),
     minimumSystemVersion: boundedString(root.minimumSystemVersion, "minimum system version"),
     architectures: ["arm64"],
     nodeVersion: boundedString(root.nodeVersion, "Node version"),
-    executable: compatibilityValue(root.executable, "pdf-proofreader", "Launcher executable"),
+    executable: requiredValue(root.executable, "placekeeper", "Launcher executable"),
     finderExecutable: "droplet",
     runtimeDataDirectory: checkedRuntimeDataDirectory,
     icon,
@@ -331,8 +331,7 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   };
 }
 
-export const CODEX_SKILL_ALIASES = ["placekeeper", "pdf-proofreader"] as const;
-type CodexSkillAlias = (typeof CODEX_SKILL_ALIASES)[number];
+export const CODEX_SKILL_NAME = "placekeeper";
 
 const CODEX_HOOK_SPECS = {
   PostToolUse: {
@@ -356,14 +355,13 @@ type CodexHookEvent = keyof typeof CODEX_HOOK_SPECS;
 
 export function normalizeCodexSkillContract(
   skill: string,
-  expectedAlias: CodexSkillAlias,
 ): string {
   if (!skill.startsWith("---\n")) {
-    throw new Error(`The packaged ${expectedAlias} skill must start with frontmatter`);
+    throw new Error(`The packaged ${CODEX_SKILL_NAME} skill must start with frontmatter`);
   }
   const frontmatterEnd = skill.indexOf("\n---\n", 4);
   if (frontmatterEnd < 0) {
-    throw new Error(`The packaged ${expectedAlias} skill has unterminated frontmatter`);
+    throw new Error(`The packaged ${CODEX_SKILL_NAME} skill has unterminated frontmatter`);
   }
   const entries = skill
     .slice(4, frontmatterEnd)
@@ -371,7 +369,7 @@ export function normalizeCodexSkillContract(
     .map((line) => {
       const separator = line.indexOf(":");
       if (separator <= 0) {
-        throw new Error(`The packaged ${expectedAlias} skill has invalid frontmatter`);
+        throw new Error(`The packaged ${CODEX_SKILL_NAME} skill has invalid frontmatter`);
       }
       return [line.slice(0, separator), line.slice(separator + 1).trim()] as const;
     });
@@ -381,24 +379,24 @@ export function normalizeCodexSkillContract(
     entries[1]?.[0] !== "description"
   ) {
     throw new Error(
-      `The packaged ${expectedAlias} skill may declare only name and description alias metadata`,
+      `The packaged ${CODEX_SKILL_NAME} skill may declare only name and description metadata`,
     );
   }
-  if (entries[0][1] !== expectedAlias) {
-    throw new Error(`The packaged ${expectedAlias} skill must declare name: ${expectedAlias}`);
+  if (entries[0][1] !== CODEX_SKILL_NAME) {
+    throw new Error(`The packaged ${CODEX_SKILL_NAME} skill must declare name: ${CODEX_SKILL_NAME}`);
   }
-  if (!entries[1][1].includes(`$${expectedAlias}`)) {
-    throw new Error(`The packaged ${expectedAlias} skill description must expose $${expectedAlias}`);
+  if (!entries[1][1].includes(`$${CODEX_SKILL_NAME}`)) {
+    throw new Error(`The packaged ${CODEX_SKILL_NAME} skill description must expose $${CODEX_SKILL_NAME}`);
   }
   return skill.slice(frontmatterEnd + "\n---\n".length);
 }
 
-async function requiredSkill(pluginRoot: string, alias: CodexSkillAlias): Promise<string> {
+async function requiredSkill(pluginRoot: string): Promise<string> {
   try {
-    return await readFile(resolve(pluginRoot, `skills/${alias}/SKILL.md`), "utf8");
+    return await readFile(resolve(pluginRoot, `skills/${CODEX_SKILL_NAME}/SKILL.md`), "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error(`The packaged ${alias} skill alias is required`);
+      throw new Error(`The packaged ${CODEX_SKILL_NAME} skill is required`);
     }
     throw error;
   }
@@ -466,20 +464,13 @@ function validateHookContract(hookManifest: Record<string, unknown>): void {
   }
 }
 
-async function validateSkillAliasParity(pluginRoot: string): Promise<void> {
-  const [canonicalSkill, legacySkill] = await Promise.all([
-    requiredSkill(pluginRoot, "placekeeper"),
-    requiredSkill(pluginRoot, "pdf-proofreader"),
-  ]);
-  const canonicalContract = normalizeCodexSkillContract(canonicalSkill, "placekeeper");
-  const legacyContract = normalizeCodexSkillContract(legacySkill, "pdf-proofreader");
-  if (canonicalContract !== legacyContract) {
-    throw new Error("The packaged Codex skill aliases have operational contract divergence");
-  }
+async function validateSkillContract(pluginRoot: string): Promise<void> {
+  const canonicalSkill = await requiredSkill(pluginRoot);
+  const canonicalContract = normalizeCodexSkillContract(canonicalSkill);
   const requiredContractFragments = [
     `${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf <absolute-local-pdf-path>`,
     "recovery-offered",
-    "pdf-proofreader-live-context",
+    "placekeeper-live-context",
     "context items --handle",
     "context changes --handle",
     "context evidence --handle",
@@ -500,25 +491,23 @@ async function validateSkillAliasParity(pluginRoot: string): Promise<void> {
       throw new Error(`The packaged Placekeeper skill omitted required contract text: ${fragment}`);
     }
   }
-  if (/(^|[^/A-Za-z0-9_-])pdf-proofreader\s+(context|daemon)\b/mu.test(canonicalContract)) {
+  if (/(^|[^/A-Za-z0-9_-])placekeeper\s+(context|daemon)\b/mu.test(canonicalContract)) {
     throw new Error("The packaged Placekeeper skills must not publish bare context or daemon commands");
   }
 
 }
 
 async function validateAgentMetadata(pluginRoot: string): Promise<void> {
-  const agents = await Promise.all(CODEX_SKILL_ALIASES.map((alias) =>
-    readFile(resolve(pluginRoot, `skills/${alias}/agents/openai.yaml`), "utf8"),
-  ));
-  for (const [index, alias] of CODEX_SKILL_ALIASES.entries()) {
-    const agent = agents[index] ?? "";
-    if (
-      !agent.includes('display_name: "Placekeeper"') ||
-      !agent.includes('short_description: "Open local PDFs in Placekeeper"') ||
-      !agent.includes(`default_prompt: "Use $${alias} to open this local PDF for review."`)
-    ) {
-      throw new Error(`The packaged ${alias} agent metadata must expose its Placekeeper alias prompt`);
-    }
+  const agent = await readFile(
+    resolve(pluginRoot, `skills/${CODEX_SKILL_NAME}/agents/openai.yaml`),
+    "utf8",
+  );
+  if (
+    !agent.includes('display_name: "Placekeeper"') ||
+    !agent.includes('short_description: "Open local PDFs in Placekeeper"') ||
+    !agent.includes(`default_prompt: "Use $${CODEX_SKILL_NAME} to open this local PDF for review."`)
+  ) {
+    throw new Error(`The packaged ${CODEX_SKILL_NAME} agent metadata must expose its Placekeeper prompt`);
   }
 }
 
@@ -530,7 +519,7 @@ export async function validateCodexPlugin(pluginRoot: string): Promise<void> {
   validatePluginIdentity(record(JSON.parse(pluginSource) as unknown, "Codex plugin manifest"));
   validateHookContract(record(JSON.parse(hookSource) as unknown, "Codex hook manifest"));
   await Promise.all([
-    validateSkillAliasParity(pluginRoot),
+    validateSkillContract(pluginRoot),
     validateAgentMetadata(pluginRoot),
   ]);
 }

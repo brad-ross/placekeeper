@@ -265,8 +265,6 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
     resolve(codexPlugin, "hooks/hooks.json"),
     resolve(codexPlugin, "skills/placekeeper/SKILL.md"),
     resolve(codexPlugin, "skills/placekeeper/agents/openai.yaml"),
-    resolve(codexPlugin, "skills/pdf-proofreader/SKILL.md"),
-    resolve(codexPlugin, "skills/pdf-proofreader/agents/openai.yaml"),
     iconMaster,
   ]) await access(required);
   await validateMacIconSet(iconset);
@@ -343,7 +341,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const serviceDist = argument("--service-dist") ?? resolve("dist/service");
   const webDist = argument("--web-dist") ?? resolve("dist/web");
   const outputDirectory = argument("--output") ??
-    await mkdtemp(resolve(tmpdir(), `pdf-proofreader-package-${arch}-`));
+    await mkdtemp(resolve(tmpdir(), `placekeeper-package-${arch}-`));
   const appPath = await buildMacApp({
     arch,
     nodeRuntime,

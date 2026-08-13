@@ -30,7 +30,7 @@ tags:
 
 After two Reference Tabs were open and the References workspace reflowed, selecting the inactive tab could focus the clicked control without completing the navigation transaction. The same surface also lacked a stable visual contract: Send-to-main and Close looked like full-height capsule segments, and right-docked tabs grew to accommodate their actions.
 
-The fix, merged in [PR #4](https://github.com/brad-ross/pdf-markup/pull/4), makes tab activation recover from stale saved geometry and gives the selector, compact actions, and right-docked rail an explicit sizing contract.
+The fix, merged in [PR #4](https://github.com/brad-ross/placekeeper/pull/4), makes tab activation recover from stale saved geometry and gives the selector, compact actions, and right-docked rail an explicit sizing contract.
 
 ## Symptoms
 
@@ -133,7 +133,7 @@ The tests protect user contracts rather than implementation proxies. The coordin
 
 ## Related Issues
 
-- [PR #4: fit linked PDFs to the Reference viewer width](https://github.com/brad-ross/pdf-markup/pull/4)
+- [PR #4: fit linked PDFs to the Reference viewer width](https://github.com/brad-ross/placekeeper/pull/4)
 - [Reference fit-width plan](../../plans/2026-08-11-001-feat-reference-fit-width-plan.md)
 - [Compact Reference Tab actions plan](../../plans/2026-08-10-002-feat-compact-reference-tab-actions-plan.md)
 - [Dockable Reference tray plan](../../plans/2026-08-10-001-feat-dockable-reference-tray-plan.md)

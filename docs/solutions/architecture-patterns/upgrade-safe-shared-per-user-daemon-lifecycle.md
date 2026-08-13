@@ -60,7 +60,7 @@ The unit of safety is the shared process, not the PDF that initiated installatio
 - pending and active agent-task bindings;
 - in-flight saves, broker writes, pickers, source workflows, launches, and HTTP/control routes.
 
-The broker combines browser presence and task activity; the host adds saving and transient work; the lifecycle coordinator includes active route leases (`apps/service/src/sessions/session-broker.ts:570-581`, `apps/service/src/host/proofreader-host.ts:135-147`, `apps/service/src/host/daemon-lifecycle.ts:34-43`).
+The broker combines browser presence and task activity; the host adds saving and transient work; the lifecycle coordinator includes active route leases (`apps/service/src/sessions/session-broker.ts:570-581`, `apps/service/src/host/placekeeper-host.ts:135-147`, `apps/service/src/host/daemon-lifecycle.ts:34-43`).
 
 Presence must not depend on a retained session record or browser unload. Connected authenticated control sockets are authoritative while present, and a bounded grace prevents a short navigation or disconnect gap from making an active review appear idle (`apps/service/src/sessions/control-socket.ts:45-70`, `apps/service/src/sessions/control-socket.ts:137-176`).
 
@@ -104,7 +104,7 @@ Four common coordinator paths are:
 
 Transient work may receive a bounded opportunity to drain, but the bundle is never replaced while old code still owns unfinished work (`apps/service/src/host/upgrade-coordinator.ts:38-66`).
 
-Legacy stopping stays explicit because old code cannot prove absence of work. The recovery command validates socket ownership and a unique same-user PDF Proofreader daemon before signaling only that PID (`apps/service/src/cli/daemon-command.ts:255-300`). Process-wide kill commands are not an installer strategy.
+Legacy stopping stays explicit because old code cannot prove absence of work. The recovery command validates socket ownership and a unique same-user Placekeeper daemon before signaling only that PID (`apps/service/src/cli/daemon-command.ts:255-300`). Process-wide kill commands are not an installer strategy.
 
 ### Prove candidate readiness before commit
 

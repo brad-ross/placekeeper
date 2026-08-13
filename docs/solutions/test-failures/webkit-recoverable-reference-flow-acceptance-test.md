@@ -31,7 +31,7 @@ tags:
 
 The production reference-navigation acceptance flow assumed that opening the first reference would immediately create the target tab. WebKit could instead reach the application's supported recoverable error state before the tab appeared, so the test failed even though the in-product retry path worked.
 
-The fix landed in [PR #7](https://github.com/brad-ross/pdf-markup/pull/7). It changed the acceptance flow—not the runtime recovery implementation—to accept both valid intermediate outcomes, recover when necessary, and then require the same selected and focused reference-tab postcondition.
+The fix landed in [PR #7](https://github.com/brad-ross/placekeeper/pull/7). It changed the acceptance flow—not the runtime recovery implementation—to accept both valid intermediate outcomes, recover when necessary, and then require the same selected and focused reference-tab postcondition.
 
 ## Symptoms
 
@@ -132,5 +132,5 @@ Verification for PR #7 included the exact WebKit gate (43 tests), the full Chrom
 
 ## Related Issues
 
-- [PR #7: stabilize recoverable reference flows](https://github.com/brad-ross/pdf-markup/pull/7)
+- [PR #7: stabilize recoverable reference flows](https://github.com/brad-ross/placekeeper/pull/7)
 - [Adaptive annotation tray framing without resizing the PDF viewer](../architecture-patterns/adaptive-annotation-tray-framing.md) — adjacent guidance for installed-style Chromium and WebKit coverage of stateful PDF interactions.

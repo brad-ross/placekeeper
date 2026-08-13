@@ -288,7 +288,7 @@ export class TaskBindingRegistry {
     const active = this.#activeByTask.get(taskSessionId);
     if (
       active === undefined ||
-      active.reviewSessionId !== identity.proofreaderSessionId ||
+      active.reviewSessionId !== identity.placekeeperSessionId ||
       active.documentGeneration !== identity.documentGeneration
     ) return false;
     active.lastVerified = identity;
@@ -325,7 +325,7 @@ export class TaskBindingRegistry {
       const verified = active.lastVerified;
       const verifiedCurrent =
         verified !== undefined &&
-        verified.proofreaderSessionId === reviewSessionId &&
+        verified.placekeeperSessionId === reviewSessionId &&
         verified.documentGeneration === live.documentGeneration &&
         verified.reviewRevision === live.reviewRevision &&
         verified.source.digest === live.sourceDigest &&
@@ -333,7 +333,7 @@ export class TaskBindingRegistry {
       return !verifiedCurrent
         ? {
             status: "refreshing",
-            proofreaderSessionId: reviewSessionId,
+            placekeeperSessionId: reviewSessionId,
             documentGeneration: live.documentGeneration,
             ...(verified === undefined ? {} : { lastVerified: verified }),
           }
@@ -347,7 +347,7 @@ export class TaskBindingRegistry {
     if (pending?.documentGeneration === live.documentGeneration) {
       return {
         status: "pending",
-        proofreaderSessionId: reviewSessionId,
+        placekeeperSessionId: reviewSessionId,
         documentGeneration: live.documentGeneration,
         expiresAt: iso(pending.expiresAtMs),
       };
@@ -359,7 +359,7 @@ export class TaskBindingRegistry {
       ) {
         return {
           status: "pending",
-          proofreaderSessionId: reviewSessionId,
+          placekeeperSessionId: reviewSessionId,
           documentGeneration: live.documentGeneration,
           expiresAt: iso(proof.expiresAtMs),
         };

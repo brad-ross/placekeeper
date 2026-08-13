@@ -15,9 +15,9 @@ deepened: 2026-08-12
 
 ## Goal Capsule
 
-- **Objective:** Make PDF Proofreader upgrades detect the running shared daemon, preserve every active PDF review, and replace only an incompatible daemon that has become safely idle.
+- **Objective:** Make Placekeeper upgrades detect the running shared daemon, preserve every active PDF review, and replace only an incompatible daemon that has become safely idle.
 - **Product authority:** The autosave and quiescent-session rules in `docs/plans/2026-08-11-001-feat-saveless-pdf-annotation-persistence-plan.md` remain authoritative. The task-scoped binding and failure-honesty rules in `docs/plans/2026-08-12-001-feat-live-pdf-codex-context-plan.md` remain authoritative.
-- **Open blockers:** None. A legacy daemon that cannot answer the management handshake must defer the first upgrade instead of being terminated.
+- **Open blockers:** None.
 - **Execution profile:** Cross-process lifecycle fix spanning the local service, web client presence, launch adapters, macOS installer, package metadata, and installed-bundle acceptance.
 - **Tail ownership:** The implementation run owns simplification, review remediation, browser and installed-bundle verification, the commit, the existing pull request update, and CI stabilization.
 
@@ -27,7 +27,7 @@ deepened: 2026-08-12
 
 ### Summary
 
-PDF Proofreader will coordinate app replacement with its one shared per-user daemon.
+Placekeeper will coordinate app replacement with its one shared per-user daemon.
 An ordinary launch will reuse an exact compatible daemon. A reinstall will be a no-op only when the complete installed bundle is identical; otherwise it will gracefully replace an incompatible idle build and leave any active or unverifiable daemon and installed app untouched with clear retry guidance.
 
 ### Problem Frame
@@ -78,7 +78,7 @@ The upgrade path therefore needs both a versioned management handshake and the m
 
 - R11. The installer shall complete build and offline smoke validation before daemon coordination, but shall finish coordination before moving or replacing the installed app.
 - R12. An incompatible idle daemon shall shut down gracefully. The installer shall hold the per-user lifecycle lock through coordination, bundle replacement, and candidate readiness, and shall treat management-socket disappearance as completion only after the old HTTP host and asset readers have closed.
-- R13. An active, timed-out, malformed, or legacy uninspectable daemon shall defer replacement and leave the old app byte-for-byte intact with state-specific retry guidance. Legacy guidance shall name the explicit `"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy` remediation, which acts only on the owned PDF Proofreader socket after the user invokes it and never runs automatically.
+- R13. An active, timed-out, or malformed daemon shall defer replacement and leave the installed app byte-for-byte intact with state-specific retry guidance.
 - R14. Finder, CLI, Codex, and VS Code launches shall present the same typed incompatibility outcome without exposing paths, capabilities, task IDs, bind proofs, or evidence handles.
 - R15. A blocked upgrade shall leave every existing PDF review and bound Codex task usable and current.
 - R16. This fix shall not transfer live review sessions, browser URLs, credentials, task bindings, or evidence handles into a new daemon.
@@ -103,7 +103,7 @@ The upgrade path therefore needs both a versioned management handshake and the m
   - **Steps:** A4 refuses conditional shutdown and the caller reports clear retry guidance without replacing the app.
   - **Outcome:** All active PDFs and task context remain usable.
   - **Covered by:** R6-R9, R13-R15
-- F4. Fail closed for a legacy daemon
+- F4. Fail closed for an unreadable daemon
   - **Trigger:** The global socket is reachable but cannot produce a valid management response.
   - **Actors:** A1, A2, A3, A4
   - **Steps:** The caller classifies the daemon as uninspectable and defers replacement or launch.
@@ -127,11 +127,11 @@ The upgrade path therefore needs both a versioned management handshake and the m
   - **Given:** The last page disconnects and starts the grace lease.
   - **When:** A review page reconnects before expiry while shutdown eligibility is being considered.
   - **Then:** The review returns to active, conditional shutdown refuses or cancels, and no capabilities or recovery are removed.
-- AE4. Legacy daemon fails closed
+- AE4. Unreadable daemon fails closed
   - **Covers:** R4, R13-R16.
-  - **Given:** A reachable daemon predates the management handshake.
+  - **Given:** A reachable daemon returns a malformed or timed-out management response.
   - **When:** A1 installs or launches the candidate.
-  - **Then:** The old daemon and app remain untouched, and the user receives explicit instructions to close reviews, run the supported `"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy` command, and retry. The command verifies the owned local socket/process target and never runs as an installer side effect.
+  - **Then:** The daemon and installed app remain untouched, and the user receives explicit instructions to close active work and retry.
 - AE5. Accepted annotation survives idle shutdown
   - **Covers:** R6-R8, R10, R12.
   - **Given:** The final annotation command has been accepted and its PDF Save Sync is still converging when the last client disconnects.
@@ -157,7 +157,7 @@ The upgrade path therefore needs both a versioned management handshake and the m
 
 - Reinstalling never interrupts an active PDF review or bound Codex task.
 - A manageable incompatible idle daemon is replaced without manual process commands.
-- An uninspectable legacy daemon produces actionable guidance and leaves the installed app untouched.
+- An unreadable daemon produces actionable guidance and leaves the installed app untouched.
 - Launchers never again surface “Launch service returned an invalid response” for a daemon compatibility mismatch.
 
 ---
@@ -170,7 +170,7 @@ The upgrade path therefore needs both a versioned management handshake and the m
 - KTD2. **Separate daemon compatibility from complete bundle equality.** The package emits an immutable daemon identity derived from the service and served assets plus an install-artifact identity derived from every bundled replacement input. The daemon captures the former at process start; only the latter can justify a reinstall no-op. This prevents an old process from serving assets that installation replaced under its canonical app path. This instantiates R2-R3 and R11-R12.
 - KTD3. **Implement the existing last-client grace lease for upgrade idleness.** Extend the authenticated control connection and presence portion of the quiescent-retirement design from `docs/plans/2026-08-11-001-feat-saveless-pdf-annotation-persistence-plan.md` rather than using broker-session count or browser unload as truth. Ordinary background retirement remains deferred. This instantiates R5-R6 and R10.
 - KTD4. **Use one atomic daemon drain gate.** The daemon moves from accepting to draining only when no non-drainable blocker exists, rejects concurrent launches during the gate, drains already accepted recovery/save work, requires both blocker and drainable sets to be empty, writes the response, and then closes. This instantiates R6-R8 and R12. (session-settled: user-approved — chosen over unconditional termination because the daemon can own unrelated PDFs and task bindings.)
-- KTD5. **Fail closed on legacy or unreadable management state.** The first transition from a pre-handshake daemon requires the user to close reviews and stop that legacy process; no caller guesses that it is idle. This instantiates R4 and R13-R16.
+- KTD5. **Fail closed on unreadable management state.** A timed-out or malformed management response requires the user to close active work and retry; no caller guesses that the daemon is idle. This instantiates R4 and R13-R16.
 - KTD6. **Coordinate before transactional replacement.** The source installer invokes the candidate's bounded coordinator after candidate smoke and before the replacement helper touches the destination. Equal complete install-artifact identities make the install a no-op; every actual bundle change requires the idle-only drain gate even when daemon compatibility identities match. Refusal or timeout exits with the old bundle intact. This instantiates R3 and R11-R13.
 - KTD7. **Keep management output aggregate and local.** Status may expose counts grouped as review presence, Codex-task activity, and transient durable work plus lifecycle/build compatibility, but never session IDs, paths, credentials, capabilities, task IDs, or evidence handles. This instantiates R9 and R14-R15.
 - KTD8. **Use a shared typed launch failure.** The service CLI emits one bounded upgrade-required error that Finder, VS Code, and Codex launch paths already know how to present; hooks never initiate daemon shutdown. This instantiates R4 and R14-R15.
@@ -310,7 +310,7 @@ flowchart TB
 - **Goal:** Let an incompatible daemon stop itself only when global activity is durably quiescent.
 - **Requirements:** R5-R10, R12, R15; KTD4, KTD5, KTD7.
 - **Dependencies:** U1, U2.
-- **Files:** `apps/service/src/saving/pdf-save-coordinator.ts`, `apps/service/src/host/proofreader-host.ts`, `apps/service/src/host/launch-control.ts`, `apps/service/src/host/service-daemon.ts`, `apps/service/test/pdf-save-coordinator.test.ts`, `apps/service/test/open-command.test.ts`, `apps/service/test/launch-host.test.ts`.
+- **Files:** `apps/service/src/saving/pdf-save-coordinator.ts`, `apps/service/src/host/placekeeper-host.ts`, `apps/service/src/host/launch-control.ts`, `apps/service/src/host/service-daemon.ts`, `apps/service/test/pdf-save-coordinator.test.ts`, `apps/service/test/open-command.test.ts`, `apps/service/test/launch-host.test.ts`.
 - **Approach:**
   1. Give the host a single activity/drain authority covering launches, reconnects, HTTP mutations, broker writes, save queues, picker work, task bindings, and source workflows.
   2. Add an atomic drain gate that blocks new launches, refuses immediately on non-drainable blockers, drains previously accepted recovery/save work when eligible, and requires both activity sets empty before acceptance.
@@ -340,17 +340,15 @@ flowchart TB
   3. Run candidate coordination after packaged smoke but before the transaction helper changes the installed app.
   4. Wait for confirmed final socket retirement before replacement or daemon respawn.
   5. Extend the shared bounded launch error contract so Finder, CLI, Codex, and VS Code preserve the same remediation.
-  6. Present one bounded outcome matrix: review presence → close PDF Proofreader tabs/windows and retry; Codex-task activity → end the bound Codex task or wait for its lease and retry; transient durable work/draining → retry automatically for up to five seconds, then ask the user to wait and retry; timeout/malformed state → leave the app untouched and retry after closing work; legacy state → close reviews, explicitly run `"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy`, and retry.
-  7. Implement `daemon stop-legacy` as an explicit user-invoked command that validates the owned local socket/process target before requesting termination; the installer, launcher, and plugin hooks never invoke it automatically.
+  6. Present one bounded outcome matrix: review presence → close Placekeeper tabs/windows and retry; Codex-task activity → end the bound Codex task or wait for its lease and retry; transient durable work/draining → retry automatically for up to five seconds, then ask the user to wait and retry; timeout/malformed state → leave the app untouched and retry after closing work.
 - **Execution note:** Keep the replacement helper transactional tests intact and add failure cases that assert no destination mutation.
 - **Patterns to follow:** Structured `LaunchResponse`, Finder native error presentation, VS Code bounded response parsing, and existing app rollback transaction.
 - **Test scenarios:**
   - Exact compatible daemon and installed bundle make reinstall a no-op without a stop request or bundle move.
   - Incompatible idle daemon stops and installation continues only after socket removal.
-  - Incompatible active daemon, management timeout, malformed response, and legacy response all abort before the old app is moved.
+  - Incompatible active daemon, management timeout, and malformed response all abort before the installed app is moved.
   - Closed pages with an active Codex binding report task-specific aggregate guidance and later succeed after task revocation or lease expiry.
   - A launch during draining retries within the five-second bound and either continues on the new daemon or returns the shared transient-busy outcome.
-  - Explicit legacy stop targets only the owned PDF Proofreader daemon; unrelated processes and automatic install paths are untouched.
   - A launch and a second installer entering immediately after old-socket retirement wait on the lifecycle lock and observe only the ready candidate.
   - Finder and VS Code accept the new typed error while retaining strict URL, size, and secret checks.
   - Codex launch failure does not create a bind claim and hooks never issue shutdown.
@@ -385,7 +383,7 @@ flowchart TB
 |---|---|---|---|
 | Focused service lifecycle | Control protocol, leases, recovery, save drain, host shutdown | U1-U3 | New compatibility and quiescence scenarios pass without fixed sleeps |
 | Host adapter contract | CLI, Finder, Codex hooks, VS Code | U1, U4 | All surfaces accept the typed outcome and preserve existing secret/URL bounds |
-| Packaging transaction | Preflight ordering, deferral, rollback, build identity | U1, U4 | Active, legacy, timeout, and malformed cases do not move the old app |
+| Packaging transaction | Preflight ordering, deferral, rollback, build identity | U1, U4 | Active, timeout, and malformed cases do not move the installed app |
 | Installed-bundle smoke | Real launcher, two builds, daemon, browser exchange, task context | U5 | Exact reuse, idle upgrade, active deferral, and retry pass in an isolated home |
 | Repository quality | TypeScript, service/web builds, distribution manifests, diff hygiene | U1-U5 | `pnpm typecheck`, `pnpm build`, `pnpm validate:distribution`, and `git diff --check` pass |
 | Release regression | Existing service, review, host, and launch-surface suites | U1-U5 | The applicable `pnpm test:service`, `pnpm test:u7-host`, and launch-surface acceptance gates pass |
@@ -399,6 +397,6 @@ flowchart TB
 - Conditional shutdown is atomic against concurrent launches and drains accepted durable work before process exit.
 - The installer never moves the old app when activity or compatibility cannot be disproved.
 - Finder, CLI, Codex, and VS Code surface one bounded upgrade-required outcome with no secret disclosure.
-- Installed smoke proves exact reuse, idle replacement, active multi-PDF deferral, legacy deferral, and a successful retry.
-- Documentation explains the one-time legacy transition and normal close-reviews-and-retry flow.
+- Installed smoke proves exact reuse, idle replacement, active multi-PDF deferral, unreadable-daemon deferral, and a successful retry.
+- Documentation explains the normal close-active-work-and-retry flow.
 - All Verification Contract gates pass, abandoned approaches are removed, and no unrelated user changes are reverted.

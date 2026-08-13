@@ -111,4 +111,4 @@ If only Annotations is visible, its tab width should approximate the selector’
 ## Related
 
 - [Adaptive annotation tray framing without resizing the PDF viewer](../architecture-patterns/adaptive-annotation-tray-framing.md)
-- [PR #11: compact outline and annotation context](https://github.com/brad-ross/pdf-markup/pull/11)
+- [PR #11: compact outline and annotation context](https://github.com/brad-ross/placekeeper/pull/11)

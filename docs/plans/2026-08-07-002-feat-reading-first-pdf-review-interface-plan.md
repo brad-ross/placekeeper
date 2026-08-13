@@ -14,7 +14,7 @@ execution: code
 
 ## Goal Capsule
 
-- **Objective:** Redesign the PDF Proofreader interface around uninterrupted reading while keeping markup, annotation review, and delivery easy to discover and use.
+- **Objective:** Redesign the Placekeeper interface around uninterrupted reading while keeping markup, annotation review, and delivery easy to discover and use.
 - **Product authority:** This contract owns the review shell, progressive disclosure, annotation peek and drawer behavior, Page Note entry, Finish Review flow, responsive behavior, and visual direction. The existing product plans remain authoritative for annotation semantics, recovery, exports, and the Codex handoff.
 - **Open blockers:** None. Exact styling and implementation choices remain for planning, bounded by the curated mockups and this Product Contract.
 - **Execution:** Code.
@@ -194,7 +194,7 @@ They illustrate only the accepted direction.
 - `apps/web/src/app/ReviewShell.tsx` and `apps/web/src/review/ReviewToolbar.tsx` show the current persistent review toolbar and annotation-list composition.
 - `apps/web/src/app/review-layout.css` defines the current wide 22-rem annotation column and narrow off-canvas list.
 - `apps/web/src/app/ProductionReviewApp.tsx` mounts Human and Codex delivery controls below the review shell.
-- `docs/plans/2026-08-06-001-feat-local-pdf-proofreader-plan.md` remains the product authority for the shared interface, markup model, recovery, and two delivery paths.
+- `docs/plans/2026-08-06-001-feat-local-placekeeper-plan.md` remains the product authority for the shared interface, markup model, recovery, and two delivery paths.
 - `docs/plans/2026-08-07-001-fix-pdf-text-selection-commands-plan.md` remains the product authority for always-ready proofread gestures and visible keyboard paths.
 
 ---
@@ -566,7 +566,7 @@ sequenceDiagram
 3. Remove spatial transition motion under reduced-motion preferences. Keep opacity or instantaneous state cues sufficient to communicate changes.
 4. Replace static layout assertions with joined browser interactions that record viewer mount identity, current page, zoom, scroll, selection, active annotation, drawer position, composer or delivery draft, and focus before and after each disclosure and resize.
 5. Exercise one shared production URL in ordinary Chromium and WebKit, add a production-layout case using the VS Code `?embed=vscode` query at narrow width, and run the existing host contract suite. Do not create a host-specific review component.
-6. Treat installed Codex and VS Code UI checks as manual release evidence. Use `test/fixtures/pdfs/text-native-with-annotations.pdf` from the release-candidate install: launch Codex with the installed plugin workflow and launch VS Code with **PDF Proofreader: Open Local PDF** or the PDF Explorer action. Record surface, build identifier, viewport width, page/zoom/scroll before and after a drawer, open surface, final focus target, and a screenshot or completed checklist in `test/acceptance/installed-hosts.md`; never record the capability URL.
+6. Treat installed Codex and VS Code UI checks as manual release evidence. Use `test/fixtures/pdfs/text-native-with-annotations.pdf` from the release-candidate install: launch Codex with the installed plugin workflow and launch VS Code with **Placekeeper: Open Local PDF** or the PDF Explorer action. Record surface, build identifier, viewport width, page/zoom/scroll before and after a drawer, open surface, final focus target, and a screenshot or completed checklist in `test/acceptance/installed-hosts.md`; never record the capability URL.
 
 **Patterns to follow:** Existing production and review acceptance harnesses, canonical review IDs for test locators, the selected mockups, and KTD9 accessibility sources.
 

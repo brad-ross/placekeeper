@@ -11,7 +11,7 @@ test("Finder Open With passes exactly one explicit path through the native docum
   expect(manifest.embeddedArtifacts).not.toHaveProperty("finderQuickAction");
   expect(bridge).toContain("on open pdfItems");
   expect(bridge).toContain("(count of pdfItems) is not 1");
-  expect(bridge).toContain("Contents/MacOS/pdf-proofreader");
+  expect(bridge).toContain("Contents/MacOS/placekeeper");
   expect(bridge).toContain("quoted form of pdfPath");
   expect(bridge).toContain("choose file of type");
   expect(bridge).not.toContain("Terminal.app");
@@ -56,24 +56,25 @@ test("Codex plugin packages launch plus task-scoped live-context hooks", async (
 
 test("VS Code manifest is desktop-local and exposes one PDF command", async () => {
   const manifest = JSON.parse(await readFile(resolve("apps/vscode/package.json"), "utf8")) as { name: string; displayName: string; extensionKind: string[]; browser?: string; contributes: { commands: Array<{ command: string; title: string }>; configuration: { properties: Record<string, unknown> } } };
-  expect(manifest.name).toBe("pdf-proofreader-vscode");
+  expect(manifest.name).toBe("placekeeper-vscode");
   expect(manifest.displayName).toBe("Placekeeper");
   expect(manifest.extensionKind).toEqual(["ui"]);
   expect(manifest.browser).toBeUndefined();
   expect(manifest.contributes.commands).toHaveLength(1);
-  expect(manifest.contributes.commands[0]).toEqual({ command: "pdfProofreader.open", title: "Placekeeper: Open Local PDF" });
-  expect(manifest.contributes.configuration.properties).toHaveProperty(["pdfProofreader.launcherPath"]);
+  expect(manifest.contributes.commands[0]).toEqual({ command: "placekeeper.open", title: "Placekeeper: Open Local PDF" });
+  expect(manifest.contributes.configuration.properties).toHaveProperty(["placekeeper.launcherPath"]);
 });
 
 test("only the Codex adapter requests the Codex launch surface", async () => {
   const finder = await readFile(resolve("packaging/macos/launcher.mjs"), "utf8");
   const vscode = await readFile(resolve("apps/vscode/src/launch-client.ts"), "utf8");
-  const skills = await Promise.all(["placekeeper", "pdf-proofreader"].map((alias) =>
-    readFile(resolve(`integrations/codex-plugin/skills/${alias}/SKILL.md`), "utf8"),
-  ));
+  const skill = await readFile(
+    resolve("integrations/codex-plugin/skills/placekeeper/SKILL.md"),
+    "utf8",
+  );
   expect(finder).toContain('["open", "--json", "--surface", "finder"');
   expect(finder).not.toContain('"--surface", "codex"');
   expect(vscode).toContain('["open", "--json", "--surface", "vscode"');
   expect(vscode).not.toContain('"--surface", "codex"');
-  for (const skill of skills) expect(skill).toContain("--surface codex");
+  expect(skill).toContain("--surface codex");
 });

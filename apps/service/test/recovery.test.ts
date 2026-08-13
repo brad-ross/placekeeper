@@ -39,7 +39,7 @@ afterEach(async () => {
 });
 
 async function temporaryDirectory(): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), "pdf-proofreader-recovery-"));
+  const path = await mkdtemp(join(tmpdir(), "placekeeper-recovery-"));
   temporaryDirectories.push(path);
   return path;
 }

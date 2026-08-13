@@ -26,7 +26,7 @@ tags:
 
 ## Context
 
-The PDF review interface uses compact, icon-heavy controls in its viewer chrome, workspace rails, annotation actions, and link interactions. Icons conserve reading space, but unfamiliar symbols need short explanations. During the interface-polish work proposed in [PR #29](https://github.com/brad-ross/pdf-markup/pull/29), an early direction made more controls visibly labeled; the settled direction restored icon-only presentation while adding matching hover explanations (session history). As of 2026-08-12, PR #29 is open and unmerged, so this convention is pending rather than behavior already on `main`.
+The PDF review interface uses compact, icon-heavy controls in its viewer chrome, workspace rails, annotation actions, and link interactions. Icons conserve reading space, but unfamiliar symbols need short explanations. During the interface-polish work proposed in [PR #29](https://github.com/brad-ross/placekeeper/pull/29), an early direction made more controls visibly labeled; the settled direction restored icon-only presentation while adding matching hover explanations (session history). As of 2026-08-12, PR #29 is open and unmerged, so this convention is pending rather than behavior already on `main`.
 
 The convention is intentionally mechanical: every literal native `button`, `input`, `select`, and `textarea` in TSX under `apps/web/src` carries an explicit `title` attribute. A TypeScript-AST test recursively discovers `.tsx` files, inspects native JSX opening elements, records the source location of every covered control without `title`, and requires that list to be empty (`apps/web/test/control-tooltips.test.ts:8-15`, `apps/web/test/control-tooltips.test.ts:18-48`).
 
@@ -62,7 +62,7 @@ A single source-wide rule prevents the common drift where neighboring compact co
 
 Separating `title` from accessible naming serves different needs without conflating the mechanisms. Pointer users receive a native hover hint, while accessibility APIs receive a purposeful name from `aria-label`, visible text, or the applicable labeling relationship. Reusing a single action label when meanings are identical reduces copy drift; allowing concise hover instructions when accessible names carry extra state prevents tooltips from becoming noisy.
 
-The convention also preserves the product's reading-first visual language. Icon-only buttons can remain compact without relying on icon recognition alone. Focused workflow and visual tests verified that the compact controls stayed understandable in the rendered PDF Proofreader rather than treating tooltip additions as copy-only cleanup (session history).
+The convention also preserves the product's reading-first visual language. Icon-only buttons can remain compact without relying on icon recognition alone. Focused workflow and visual tests verified that the compact controls stayed understandable in the rendered Placekeeper rather than treating tooltip additions as copy-only cleanup (session history).
 
 ## When to Apply
 
@@ -118,4 +118,4 @@ The alignment requirement is semantic: both strings tell the truth about the con
 - [Truthful compact agent-context status](../design-patterns/truthful-compact-agent-context-status.md) — the corresponding custom hover/focus disclosure pattern for a passive state indicator rather than a native actionable control.
 - [Outline-aware annotation workspace presentation](../design-patterns/outline-aware-annotation-workspace-presentation.md) — related guidance on accessible labeling and capability-driven workspace composition.
 - [Reliable compact right-docked Reference Tabs](../ui-bugs/reliable-compact-right-docked-reference-tabs.md) — complementary geometry and interaction guidance for compact Reference controls.
-- [PR #29: unify interface interactions and accessibility](https://github.com/brad-ross/pdf-markup/pull/29) — open implementation source as of 2026-08-12.
+- [PR #29: unify interface interactions and accessibility](https://github.com/brad-ross/placekeeper/pull/29) — open implementation source as of 2026-08-12.

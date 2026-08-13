@@ -39,7 +39,7 @@ function maintainPresence(session: ProductionSession): () => void {
     const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
     socket = new WebSocket(
       `${scheme}//${window.location.host}/s/${session.sessionId}/control`,
-      ["proofreader", `proofreader-auth.${session.credential}`],
+      ["placekeeper", `placekeeper-auth.${session.credential}`],
     );
     socket.addEventListener("open", () => {
       retryDelayMs = 1_000;

@@ -75,7 +75,7 @@ The browser regression then reproduces the actual geometry:
 3. Scroll a second main-PDF link beneath the reference viewport (`test/acceptance/production-flow.spec.ts:862-879`).
 4. Compute the intersection and assert both that overlap exists and that the main viewer is not the topmost hit target (`test/acceptance/production-flow.spec.ts:881-905`).
 
-The fix and regression were merged in [PR #9](https://github.com/brad-ross/pdf-markup/pull/9). During PR #9 verification, the focused regression was reported passing in Chromium and WebKit. The same verification session reported TypeScript and the Chromium acceptance suite passing locally after the then-current `main` was merged into the PR branch. (session history)
+The fix and regression were merged in [PR #9](https://github.com/brad-ross/placekeeper/pull/9). During PR #9 verification, the focused regression was reported passing in Chromium and WebKit. The same verification session reported TypeScript and the Chromium acceptance suite passing locally after the then-current `main` was merged into the PR branch. (session history)
 
 ## Why This Works
 
@@ -98,5 +98,5 @@ The acceptance test validates the user-visible consequence rather than the imple
 
 ## Related Issues
 
-- [PR #9: follow links in the active reference tab](https://github.com/brad-ross/pdf-markup/pull/9)
+- [PR #9: follow links in the active reference tab](https://github.com/brad-ross/placekeeper/pull/9)
 - [Adaptive annotation tray framing](../architecture-patterns/adaptive-annotation-tray-framing.md) documents the complementary interaction contract: PDF clicks, selection, panning, and scrolling remain document gestures while workspace closure stays explicit. Stacking containment ensures those gestures reach the visible workspace instead of an underlying viewer.

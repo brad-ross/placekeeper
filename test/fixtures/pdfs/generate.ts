@@ -68,7 +68,7 @@ async function textPdf(options: { annotations?: boolean; rotation?: number; crop
   const document = await PDFDocument.create();
   const page = document.addPage([612, 792]);
   const font = await document.embedFont(StandardFonts.Helvetica);
-  page.drawText('Selectable proofreader text: unique equilibrium clearly.', {
+  page.drawText('Selectable placekeeper text: unique equilibrium clearly.', {
     x: 72,
     y: 690,
     size: 14,

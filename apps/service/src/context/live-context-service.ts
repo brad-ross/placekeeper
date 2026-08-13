@@ -333,7 +333,7 @@ export class LiveContextService {
           sourceHints,
         });
         const identity = {
-          proofreaderSessionId: snapshot.sessionId,
+          placekeeperSessionId: snapshot.sessionId,
           documentGeneration: snapshot.documentGeneration,
           source: { ...snapshot.state.source },
           reviewRevision: current.revision,
@@ -407,7 +407,7 @@ export class LiveContextService {
       });
     }
     const delivery = {
-      reviewSessionId: projected.observation.identity.proofreaderSessionId,
+      reviewSessionId: projected.observation.identity.placekeeperSessionId,
       documentGeneration: projected.observation.identity.documentGeneration,
       snapshot: projected.snapshot,
     };

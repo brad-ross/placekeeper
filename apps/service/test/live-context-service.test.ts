@@ -60,7 +60,7 @@ async function fixture(options: {
   launch: SessionLaunch;
   service: LiveContextService;
 }> {
-  const directory = await mkdtemp(join(tmpdir(), "pdf-proofreader-live-context-"));
+  const directory = await mkdtemp(join(tmpdir(), "placekeeper-live-context-"));
   temporaryDirectories.push(directory);
   const pdfPath = join(directory, "paper.pdf");
   await writeFile(pdfPath, "%PDF-1.7\nimmutable source\n%%EOF");
@@ -445,7 +445,7 @@ describe("atomic live-context service", () => {
   });
 
   it("discovers foreign source-PDF annotations server-side as a separate read-only population", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "pdf-proofreader-existing-context-"));
+    const directory = await mkdtemp(join(tmpdir(), "placekeeper-existing-context-"));
     temporaryDirectories.push(directory);
     const pdfPath = join(directory, "annotated.pdf");
     await writeFile(

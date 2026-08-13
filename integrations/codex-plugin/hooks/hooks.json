@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader\" hook --event",
+            "command": "\"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper\" hook --event",
             "timeout": 8,
             "statusMessage": "Connecting Placekeeper context",
             "additionalContextLimit": 131072
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader\" hook --event",
+            "command": "\"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper\" hook --event",
             "timeout": 8,
             "statusMessage": "Refreshing Placekeeper context",
             "additionalContextLimit": 131072
@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader\" hook --event",
+            "command": "\"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper\" hook --event",
             "timeout": 3,
             "statusMessage": "Disconnecting Placekeeper context",
             "additionalContextLimit": 256

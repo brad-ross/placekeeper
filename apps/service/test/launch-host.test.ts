@@ -6,10 +6,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { addPageNote } from "../../../packages/core/src/review-commands.js";
 import { TaskBindingRegistry } from "../src/context/task-binding-registry.js";
-import { ProofreaderHost } from "../src/host/proofreader-host.js";
+import { PlacekeeperHost } from "../src/host/placekeeper-host.js";
 
 const roots: string[] = [];
-const hosts: ProofreaderHost[] = [];
+const hosts: PlacekeeperHost[] = [];
 
 afterEach(async () => {
   await Promise.all(hosts.splice(0).map((host) => host.close()));
@@ -20,7 +20,7 @@ async function fixture(options: {
   readonly taskBindings?: TaskBindingRegistry;
   readonly validPdf?: boolean;
 } = {}) {
-  const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-launch-"));
+  const root = await mkdtemp(join(tmpdir(), "placekeeper-launch-"));
   roots.push(root);
   const pdf = join(root, "paper.pdf");
   const sourceRoot = join(root, "source");
@@ -34,7 +34,7 @@ async function fixture(options: {
   }
   await writeFile(join(assets, "app.js"), "export async function start(){ document.body.dataset.productionApp = 'ready' }\n");
   await writeFile(join(assets, "pdfium.wasm"), "offline-wasm");
-  const host = await ProofreaderHost.start({
+  const host = await PlacekeeperHost.start({
     recoveryRoot: join(root, "recovery"),
     webAssets: { root: assets },
     ...(options.taskBindings === undefined ? {} : { taskBindings: options.taskBindings }),
@@ -173,7 +173,7 @@ describe("persistent launch host", () => {
       launchSurface: "codex",
       codexContext: {
         status: "refreshing",
-        proofreaderSessionId: launched.sessionId,
+        placekeeperSessionId: launched.sessionId,
         documentGeneration: 1,
       },
     });
@@ -369,7 +369,7 @@ describe("persistent launch host", () => {
     await host.close();
     hosts.splice(hosts.indexOf(host), 1);
 
-    const restarted = await ProofreaderHost.start({
+    const restarted = await PlacekeeperHost.start({
       recoveryRoot: join(root, "recovery"),
       webAssets: { root: join(root, "assets") },
     });
@@ -397,7 +397,6 @@ describe("persistent launch host", () => {
     expect(ordinary.headers.get("x-frame-options")).toBe("DENY");
     expect(ordinaryHtml).toContain("type=\"module\"");
     expect(ordinaryHtml).toContain("<title>Placekeeper</title>");
-    expect(ordinaryHtml).not.toContain("<title>PDF Proofreader</title>");
     expect(ordinaryHtml).not.toContain("URL.createObjectURL");
 
     const exchanged = await fetch(`${launch.origin}/s/${launched.sessionId}/exchange`, {
@@ -411,7 +410,7 @@ describe("persistent launch host", () => {
     });
     const cookie = exchanged.headers.get("set-cookie")?.split(";", 1)[0];
     const { credential } = await exchanged.json() as { credential: string };
-    expect(cookie).toContain("proofreader_session=");
+    expect(cookie).toContain("placekeeper_session=");
     const app = await fetch(`${launch.origin}/s/${launched.sessionId}/assets/app.js`, {
       headers: { cookie: cookie! },
     });

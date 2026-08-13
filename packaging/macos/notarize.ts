@@ -38,9 +38,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const args = process.argv.slice(2).filter((argument) => argument !== "--");
   const artifactPath = args[0];
   const stapleTarget = args[1];
-  const keychainProfile = process.env.PDF_PROOFREADER_NOTARY_PROFILE;
+  const keychainProfile = process.env.PLACEKEEPER_NOTARY_PROFILE;
   if (artifactPath === undefined || stapleTarget === undefined || keychainProfile === undefined) {
-    throw new Error("Usage: notarize.ts <submission-zip> <app-to-staple>; set PDF_PROOFREADER_NOTARY_PROFILE");
+    throw new Error("Usage: notarize.ts <submission-zip> <app-to-staple>; set PLACEKEEPER_NOTARY_PROFILE");
   }
   await notarizeAndStaple(artifactPath, stapleTarget, keychainProfile);
 }

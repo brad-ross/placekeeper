@@ -56,7 +56,7 @@ async function fixture(options: {
   inspectRebuild?: ConstructorParameters<typeof LiveSourceWorkflowService>[0]["inspectPdf"];
   executionId?: () => string;
 } = {}): Promise<Fixture> {
-  const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-live-source-"));
+  const root = await mkdtemp(join(tmpdir(), "placekeeper-live-source-"));
   roots.push(root);
   const pdfPath = join(root, "paper.pdf");
   const sourcePath = join(root, "paper.tex");
@@ -243,7 +243,7 @@ describe("same-task live source workflow", () => {
         annotationSubtypes: ["highlight"],
         annotations: [{
           id: id(1), pageIndex: 0, subtype: "highlight", contents: "review",
-          author: "PDF Proofreader", flags: [], hasNormalAppearance: true,
+          author: "Placekeeper", flags: [], hasNormalAppearance: true,
           rect: { origin: { x: 0, y: 0 }, size: { width: 1, height: 1 } },
           preservationFingerprint: "review",
         }],
@@ -274,9 +274,10 @@ describe("same-task live source workflow", () => {
     })).rejects.toThrow(/handle|binding|unavailable/iu);
   });
 
-  it.each(["Placekeeper", "PDF Proofreader"])(
-    "rejects validated %s app annotations but preserves author-only external annotations",
-    async (author) => {
+  it(
+    "rejects validated Placekeeper annotations but preserves author-only external annotations",
+    async () => {
+      const author = "Placekeeper";
       const owned = item(2);
       const appOwned = await fixture({
         inspectRebuild: async () => ({

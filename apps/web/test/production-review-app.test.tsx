@@ -292,7 +292,7 @@ describe("one production review tree", () => {
       scope={{
         documentTitle: "paper.pdf",
         launchSurface: "codex",
-        codexContext: { status: "refreshing", proofreaderSessionId: state.sessionId, documentGeneration: 1 },
+        codexContext: { status: "refreshing", placekeeperSessionId: state.sessionId, documentGeneration: 1 },
       }}
       api={api}
       viewer={<div>Viewer</div>}
@@ -322,7 +322,7 @@ describe("one production review tree", () => {
     const current = {
       status: "current" as const,
       identity: {
-        proofreaderSessionId: initial.sessionId,
+        placekeeperSessionId: initial.sessionId,
         documentGeneration: 1,
         source: initial.source,
         reviewRevision: 0,

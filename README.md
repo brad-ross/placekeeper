@@ -18,7 +18,7 @@ See [Install and uninstall](docs/installation.md) for first-launch, update, opti
 
 ## Use
 
-After installation, select one local PDF in Finder and choose **Open With -> Placekeeper**. You can also open the app from `~/Applications` and choose a PDF. For upgrade compatibility, the physical bundle remains at `~/Applications/PDF Proofreader.app`; Finder presents it as Placekeeper. The app runs on numeric loopback, bundles its browser and PDF assets, performs no telemetry, and leaves the original PDF unchanged unless you explicitly choose the separately confirmed Replace Original action.
+After installation, select one local PDF in Finder and choose **Open With -> Placekeeper**. You can also open `~/Applications/Placekeeper.app` and choose a PDF. The app runs on numeric loopback, bundles its browser and PDF assets, performs no telemetry, and leaves the original PDF unchanged unless you explicitly choose the separately confirmed Replace Original action.
 
 With the bundled Codex plugin installed, ask Codex to open one explicit local PDF in Placekeeper. The hosting task is bound automatically after the in-app browser loads. Each later prompt refreshes the current Review Items, Existing PDF Annotations, and save status; Codex retrieves bounded PDF text, layout, render, or annotation evidence only when needed. Finder, ordinary-browser, and VS Code launches remain unbound and show no Codex control.
 

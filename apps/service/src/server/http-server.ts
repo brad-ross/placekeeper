@@ -119,13 +119,13 @@ function bootstrapHtml(sessionId: string, nonce: string): string {
   if (!response.ok) throw new Error("Launch capability was rejected");
   const { credential } = await response.json();
   history.replaceState(null, "", location.pathname + location.search);
-  window.__proofreaderSession = Object.freeze({ sessionId: "${sessionId}", credential });
+  window.__placekeeperSession = Object.freeze({ sessionId: "${sessionId}", credential });
   const stylesheet = document.createElement("link");
   stylesheet.rel = "stylesheet";
   stylesheet.href = "/s/${sessionId}/assets/app.css";
   document.head.append(stylesheet);
   const app = await import("/s/${sessionId}/assets/app.js");
-  await app.start(window.__proofreaderSession);
+  await app.start(window.__placekeeperSession);
 })().catch(() => { document.body.textContent = "Unable to open this review session."; });`;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Placekeeper</title></head><body><div id="root"></div><script type="module" nonce="${nonce}">${script}</script></body></html>`;
 }
@@ -269,7 +269,7 @@ export async function startHttpServer(
         assetCapabilities.set(exchangeMatch[1]!, sessionAssetCapabilities);
         response.setHeader(
           "Set-Cookie",
-          `proofreader_session=${assetCapability}; Path=/s/${exchangeMatch[1]!}/assets; HttpOnly; SameSite=Strict`,
+          `placekeeper_session=${assetCapability}; Path=/s/${exchangeMatch[1]!}/assets; HttpOnly; SameSite=Strict`,
         );
         sendJson(response, 200, { credential });
         return;
@@ -281,7 +281,7 @@ export async function startHttpServer(
           send(response, 405, "Method not allowed");
           return;
         }
-        const assetCapability = cookieValue(request, "proofreader_session");
+        const assetCapability = cookieValue(request, "placekeeper_session");
         if (
           assetCapability === undefined ||
           assetCapabilities.get(assetMatch[1]!)?.has(assetCapability) !== true ||
@@ -470,9 +470,9 @@ export async function startHttpServer(
         ?.split(",")
         .map((value) => value.trim());
       const credential = protocols
-        ?.find((value) => value.startsWith("proofreader-auth."))
-        ?.slice("proofreader-auth.".length);
-      if (!protocols?.includes("proofreader")) {
+        ?.find((value) => value.startsWith("placekeeper-auth."))
+        ?.slice("placekeeper-auth.".length);
+      if (!protocols?.includes("placekeeper")) {
         return reject();
       }
       if (
@@ -487,7 +487,7 @@ export async function startHttpServer(
         .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
         .digest("base64");
       socket.write(
-        `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: proofreader\r\n\r\n`,
+        `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: placekeeper\r\n\r\n`,
       );
       broker.controls.registerSocket(match[1]!, socket, head);
       activity?.complete();

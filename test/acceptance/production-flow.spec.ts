@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ProofreaderHost } from "../../apps/service/src/host/proofreader-host.js";
+import { PlacekeeperHost } from "../../apps/service/src/host/placekeeper-host.js";
 import { TaskBindingRegistry } from "../../apps/service/src/context/task-binding-registry.js";
 import { addPageNote } from "../../packages/core/src/review-commands.js";
 
 let root = "";
-let host: ProofreaderHost;
+let host: PlacekeeperHost;
 let sourceRoot = "";
 let pdf = "";
 let multiPagePdf = "";
@@ -34,10 +34,10 @@ async function installSelectionCaptureGate(page: Page): Promise<void> {
       },
     };
     const testState = globalThis as unknown as {
-      __pdfProofreaderSelectionCaptureTestGate: typeof captureGate;
+      __placekeeperSelectionCaptureTestGate: typeof captureGate;
       __releasePdfSelectionCapture(): void;
     };
-    testState.__pdfProofreaderSelectionCaptureTestGate = captureGate;
+    testState.__placekeeperSelectionCaptureTestGate = captureGate;
     testState.__releasePdfSelectionCapture = () => {
       holding = false;
       for (const release of releases) release();
@@ -48,8 +48,8 @@ async function installSelectionCaptureGate(page: Page): Promise<void> {
 
 async function waitForSelectionCapture(page: Page): Promise<void> {
   await page.waitForFunction(() => {
-    const captureGate = globalThis.__pdfProofreaderSelectionCaptureTestGate as
-      | (NonNullable<typeof globalThis.__pdfProofreaderSelectionCaptureTestGate> & {
+    const captureGate = globalThis.__placekeeperSelectionCaptureTestGate as
+      | (NonNullable<typeof globalThis.__placekeeperSelectionCaptureTestGate> & {
         isWaiting(): boolean;
       })
       | undefined;
@@ -251,7 +251,7 @@ async function toggleWorkspace(page: Page) {
 }
 
 test.beforeAll(async () => {
-  root = await mkdtemp(join(tmpdir(), "pdf-proofreader-production-"));
+  root = await mkdtemp(join(tmpdir(), "placekeeper-production-"));
   sourceRoot = join(root, "source");
   await mkdir(sourceRoot);
   pdf = join(root, "paper.pdf");
@@ -265,7 +265,7 @@ test.beforeAll(async () => {
   await copyFile(resolve("test/fixtures/pdfs/reference-navigation.pdf"), referencePdf);
   await copyFile(resolve("test/fixtures/pdfs/pdf-search.pdf"), searchPdf);
   await copyFile(resolve("test/fixtures/latex/paper.tex"), join(sourceRoot, "paper.tex"));
-  host = await ProofreaderHost.start({
+  host = await PlacekeeperHost.start({
     recoveryRoot: join(root, "recovery"),
     webAssets: { root: resolve("dist/web") },
   });
@@ -283,7 +283,7 @@ test("fails mounted Codex status closed on lease expiry and aborts a hung scope 
     pendingTtlMs: 1_000,
     activeLeaseTtlMs: 2_000,
   });
-  const clockedHost = await ProofreaderHost.start({
+  const clockedHost = await PlacekeeperHost.start({
     recoveryRoot: join(root, "clocked-codex-recovery"),
     webAssets: { root: resolve("dist/web") },
     taskBindings,
@@ -2060,7 +2060,7 @@ test("one installed-style browser tree preserves review state across responsive 
     kind: "replace",
     pageIndex: 0,
     payload: {
-      quote: "Selectable proofreader text: unique equilibrium clearly",
+      quote: "Selectable placekeeper text: unique equilibrium clearly",
       proposedText: "bla",
       reliable: true,
     },

@@ -30,7 +30,7 @@ afterEach(async () => {
 });
 
 async function temporaryDirectory(): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), "pdf-proofreader-security-"));
+  const path = await mkdtemp(join(tmpdir(), "placekeeper-security-"));
   temporaryDirectories.push(path);
   return path;
 }
@@ -488,7 +488,7 @@ describe("loopback HTTP boundary", () => {
           upgrade: "websocket",
           "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
           "sec-websocket-version": "13",
-          "sec-websocket-protocol": `proofreader, proofreader-auth.${credential}`,
+          "sec-websocket-protocol": `placekeeper, placekeeper-auth.${credential}`,
         },
       });
       request.on("upgrade", (response, socket) => {
@@ -501,7 +501,7 @@ describe("loopback HTTP boundary", () => {
       request.on("error", reject);
       request.end();
     });
-    expect(upgraded.protocol).toBe("proofreader");
+    expect(upgraded.protocol).toBe("placekeeper");
     expect(upgraded.rawHeaders.join("\n")).not.toContain(credential);
     await broker.finish(launch.sessionId);
     await upgraded.close;

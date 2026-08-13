@@ -39,7 +39,7 @@ afterEach(async () => {
 });
 
 async function replacementFixture() {
-  const directory = await mkdtemp(join(tmpdir(), "pdf-proofreader-replace-"));
+  const directory = await mkdtemp(join(tmpdir(), "placekeeper-replace-"));
   temporaryDirectories.push(directory);
   const originalPath = join(directory, "paper.pdf");
   const snapshotPath = join(directory, "snapshot.pdf");
@@ -55,7 +55,7 @@ async function replacementFixture() {
     pageIndex: 0,
     rect: { x: 10, y: 10, width: 20, height: 20 },
     contents: "Check this page.",
-    author: "PDF Proofreader",
+    author: "Placekeeper",
     createdAt: "2026-08-07T12:00:00.000Z",
     modifiedAt: "2026-08-07T12:00:00.000Z",
   };
@@ -235,7 +235,7 @@ describe("explicit original replacement", () => {
   });
 
   it("recognizes an exact app-authored replacement after restart and permits a later revision", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "pdf-proofreader-replace-recovery-"));
+    const directory = await mkdtemp(join(tmpdir(), "placekeeper-replace-recovery-"));
     temporaryDirectories.push(directory);
     const originalPath = join(directory, "paper.pdf");
     const original = Buffer.from("%PDF-1.7\nopened source\n%%EOF");
@@ -257,8 +257,8 @@ describe("explicit original replacement", () => {
     expect(firstFrozen.annotations).toMatchObject([{
       author: "Placekeeper",
       custom: {
-        pdfMarkup: {
-          owner: "pdf-markup",
+        placekeeper: {
+          owner: "placekeeper",
           schemaVersion: 2,
           projection: { author: "Placekeeper" },
         },
@@ -347,7 +347,7 @@ describe("explicit original replacement", () => {
   });
 
   it("retains a discoverable prepared digest if post-rename bookkeeping is interrupted", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "pdf-proofreader-replace-crash-"));
+    const directory = await mkdtemp(join(tmpdir(), "placekeeper-replace-crash-"));
     temporaryDirectories.push(directory);
     const originalPath = join(directory, "paper.pdf");
     const original = Buffer.from("%PDF-1.7\ncrash source\n%%EOF");

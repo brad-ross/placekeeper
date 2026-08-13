@@ -5,10 +5,9 @@ Shared domain vocabulary for this project — entities, named processes, and sta
 ## Product identity
 
 ### Placekeeper
-The user-facing identity for the focused everyday PDF reader and annotator formerly named PDF Proofreader.
+The focused everyday PDF reader and annotator that preserves a reader's place while annotations, search, and Reference Tabs support nonlinear reading.
 
 Placekeeper emphasizes preserving the Main Reading Thread while annotations, search, and Reference Tabs support nonlinear reading.
-Compatibility identifiers and storage paths may retain the former internal name without changing the user-facing identity.
 
 ## PDF review
 
@@ -62,7 +61,7 @@ Its presentation may change with available reading space, but disclosure changes
 ### Live PDF Context
 The task-scoped, prompt-refreshed view of the PDF, Review Items, Existing PDF Annotations, and Save Sync made available to the agent task bound to the document's review session.
 
-Live PDF Context provides complete semantic access to Review Items plus bounded, on-demand document and annotation evidence without requiring every page to be injected into every prompt, and it ends when the bound task or proofreader session ends.
+Live PDF Context provides complete semantic access to Review Items plus bounded, on-demand document and annotation evidence without requiring every page to be injected into every prompt, and it ends when the bound task or placekeeper session ends.
 
 ### Quiescent Review Session
 A review session whose last authenticated page has disconnected and whose bounded reconnect grace lease has expired.
