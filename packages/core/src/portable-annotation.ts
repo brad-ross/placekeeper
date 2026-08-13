@@ -9,8 +9,8 @@ import { assertReviewItem } from "./review-reducer.js";
 
 export const PORTABLE_ANNOTATION_MAX_BYTES = 32 * 1024;
 export const PORTABLE_ANNOTATION_AUTHOR = "Placekeeper";
-export const LEGACY_PORTABLE_ANNOTATION_AUTHOR = "PDF Proofreader";
-export const PORTABLE_ANNOTATION_OWNER = "pdf-markup";
+const LEGACY_PORTABLE_ANNOTATION_AUTHOR = "PDF Proofreader";
+const PORTABLE_ANNOTATION_OWNER = "pdf-markup";
 const MAX_DEPTH = 12;
 const MAX_KEYS = 128;
 const MAX_STRING_LENGTH = 16 * 1024;

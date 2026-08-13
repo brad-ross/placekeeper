@@ -365,7 +365,6 @@ function portableItemsFromPages(
       counts.set(annotation.id, (counts.get(annotation.id) ?? 0) + 1);
     }
   }
-  const items: ReviewItem[] = [];
   const owned: Array<{
     pageIndex: number;
     annotation: PdfAnnotationObject;
@@ -384,12 +383,11 @@ function portableItemsFromPages(
         const item = inspected.geometryVersion === 1
           ? migrateLegacyItemGeometry(inspected.item, documentPages[pageIndex])
           : inspected.item;
-        items.push(item);
         owned.push({ pageIndex, annotation, item });
       }
     }
   });
-  return { items, owned };
+  return { items: owned.map(({ item }) => item), owned };
 }
 
 export async function readPortableReviewItems(bytes: Uint8Array): Promise<ReviewItem[]> {

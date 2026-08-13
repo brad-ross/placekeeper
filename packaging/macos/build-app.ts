@@ -43,25 +43,25 @@ async function run(command: string, args: readonly string[]): Promise<string> {
   return await new Promise<string>((resolvePromise, reject) => {
     const child = spawn(command, [...args], { shell: false, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
-    let stderr = "";
+    let stderr = Buffer.alloc(0);
     child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => { stdout += chunk; });
-    child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+    child.stderr.on("data", (chunk: Buffer) => {
+      const combined = Buffer.concat([stderr, chunk]);
+      stderr = combined.subarray(Math.max(0, combined.byteLength - 64 * 1024));
+    });
     child.once("error", reject);
     child.once("exit", (code) => code === 0
       ? resolvePromise(stdout.trim())
-      : reject(new Error(`${basename(command)} failed with exit code ${code ?? "unknown"}: ${stderr.trim()}`)));
+      : reject(new Error(`${basename(command)} failed with exit code ${code ?? "unknown"}: ${stderr.toString("utf8").trim()}`)));
   });
 }
 
-const ICNS_CHUNK_TYPES = ["icp4", "ic11", "icp5", "ic12", "ic07", "ic13", "ic08", "ic14", "ic09", "ic10"] as const;
-
 async function packMacIconSet(iconsetPath: string, outputPath: string): Promise<void> {
-  const chunks = await Promise.all(MAC_ICON_REPRESENTATIONS.map(async ([filename], index) => {
+  const chunks = await Promise.all(MAC_ICON_REPRESENTATIONS.map(async ([filename, , chunkType]) => {
     const png = await readFile(resolve(iconsetPath, filename));
     const chunk = Buffer.alloc(8 + png.byteLength);
-    chunk.write(ICNS_CHUNK_TYPES[index]!, 0, 4, "ascii");
+    chunk.write(chunkType, 0, 4, "ascii");
     chunk.writeUInt32BE(chunk.byteLength, 4);
     png.copy(chunk, 8);
     return chunk;
