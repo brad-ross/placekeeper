@@ -112,23 +112,24 @@ function xml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
-function infoPlist(manifest: ReturnType<typeof validateAppBundleManifest>): string {
+export function infoPlist(manifest: ReturnType<typeof validateAppBundleManifest>): string {
   const document = manifest.documentTypes[0];
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleDevelopmentRegion</key><string>en</string>
-<key>CFBundleDisplayName</key><string>${xml(manifest.productName)}</string>
+<key>CFBundleDisplayName</key><string>${xml(manifest.bundleName)}</string>
 <key>CFBundleExecutable</key><string>${xml(manifest.finderExecutable)}</string>
 <key>CFBundleIdentifier</key><string>${xml(manifest.bundleIdentifier)}</string>
 <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-<key>CFBundleName</key><string>${xml(manifest.productName)}</string>
+<key>CFBundleName</key><string>${xml(manifest.bundleName)}</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>${xml(manifest.bundleVersion)}</string>
 <key>CFBundleVersion</key><string>${xml(manifest.bundleVersion)}</string>
 <key>CFBundleIconFile</key><string>droplet</string>
 <key>CFBundleSignature</key><string>dplt</string>
 <key>LSMinimumSystemVersion</key><string>${xml(manifest.minimumSystemVersion)}</string>
+<key>LSHasLocalizedDisplayName</key><true/>
 <key>LSMultipleInstancesProhibited</key><true/>
 <key>OSAAppletShowStartupScreen</key><false/>
 <key>CFBundleDocumentTypes</key><array><dict>
@@ -138,6 +139,26 @@ function infoPlist(manifest: ReturnType<typeof validateAppBundleManifest>): stri
   <key>LSItemContentTypes</key><array><string>${document.contentType}</string></array>
 </dict></array>
 </dict></plist>\n`;
+}
+
+function stringsLiteral(value: string): string {
+  return value
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("\n", "\\n")
+    .replaceAll("\r", "\\r");
+}
+
+export function infoPlistStrings(manifest: ReturnType<typeof validateAppBundleManifest>): string {
+  const productName = stringsLiteral(manifest.productName);
+  return `"CFBundleDisplayName" = "${productName}";\n"CFBundleName" = "${productName}";\n`;
+}
+
+export function appBundlePath(
+  outputDirectory: string,
+  manifest: ReturnType<typeof validateAppBundleManifest>,
+): string {
+  return resolve(outputDirectory, `${manifest.bundleName}.app`);
 }
 
 function launcherScript(): string {
@@ -204,7 +225,7 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   if (version !== appManifest.nodeVersion) throw new Error(`Expected Node ${appManifest.nodeVersion}, received ${version}`);
   if (process.arch !== options.arch) throw new Error(`Build host architecture ${process.arch} does not match ${options.arch}`);
 
-  const appPath = resolve(options.outputDirectory, `${appManifest.productName}.app`);
+  const appPath = appBundlePath(options.outputDirectory, appManifest);
   try {
     await lstat(appPath);
     throw new Error(`Refusing to overwrite existing bundle: ${appPath}`);
@@ -234,6 +255,9 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
     await copyFile(resolve(repoRoot, asset.source), destination);
   }
   await writeFile(resolve(contents, "Info.plist"), infoPlist(appManifest), { mode: 0o644 });
+  const englishResources = resolve(resources, "en.lproj");
+  await mkdir(englishResources, { recursive: true, mode: 0o755 });
+  await writeFile(resolve(englishResources, "InfoPlist.strings"), infoPlistStrings(appManifest), { mode: 0o644 });
   await copyFile(resolve(repoRoot, "packaging/macos/launcher.mjs"), resolve(resources, "launcher.mjs"));
   await writeFile(launcherPath, launcherScript(), { mode: 0o755 });
   const buildIdentity = await computePackagedBuildIdentity({

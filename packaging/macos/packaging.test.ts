@@ -17,11 +17,106 @@ import {
 } from "./validate-manifest.js";
 import { finderServiceArgs } from "./launcher.mjs";
 import { validateDoctorEvidence } from "./smoke-installed.js";
-import { computePackagedBuildIdentity } from "./build-app.js";
+import {
+  appBundlePath,
+  computePackagedBuildIdentity,
+  infoPlist,
+  infoPlistStrings,
+} from "./build-app.js";
 
 const execFileAsync = promisify(execFile);
 
 describe("macOS distribution manifests", () => {
+  it("separates the visible Placekeeper identity from the physical compatibility bundle", async () => {
+    const app = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8")) as unknown;
+    const manifest = validateAppBundleManifest(app);
+
+    expect(manifest).toMatchObject({
+      productName: "Placekeeper",
+      bundleName: "PDF Proofreader",
+      bundleIdentifier: "local.pdf-proofreader",
+      executable: "pdf-proofreader",
+      finderExecutable: "droplet",
+      runtimeDataDirectory: "Library/Application Support/PDF Proofreader",
+      documentTypes: [{ contentType: "com.adobe.pdf", role: "Viewer", rank: "Alternate" }],
+    });
+    expect(appBundlePath("/tmp/placekeeper-package", manifest)).toBe(
+      "/tmp/placekeeper-package/PDF Proofreader.app",
+    );
+
+    const plist = infoPlist(manifest);
+    expect(plist).toContain("<key>CFBundleDisplayName</key><string>PDF Proofreader</string>");
+    expect(plist).toContain("<key>CFBundleName</key><string>PDF Proofreader</string>");
+    expect(plist).toContain("<key>LSHasLocalizedDisplayName</key><true/>");
+    expect(plist).toContain("<key>CFBundleExecutable</key><string>droplet</string>");
+    expect(plist).toContain("<key>CFBundleIdentifier</key><string>local.pdf-proofreader</string>");
+    expect(infoPlistStrings(manifest)).toBe(
+      '"CFBundleDisplayName" = "Placekeeper";\n"CFBundleName" = "Placekeeper";\n',
+    );
+  });
+
+  it("rejects mutations to compatibility identities and visible/physical recoupling", async () => {
+    const app = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8")) as Record<string, unknown>;
+    const mutations: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+      ["visible product", { productName: "PDF Proofreader" }],
+      ["physical bundle", { bundleName: "Placekeeper" }],
+      ["bundle identifier", { bundleIdentifier: "local.placekeeper" }],
+      ["launcher executable", { executable: "placekeeper" }],
+      ["Finder bridge", { finderExecutable: "placekeeper-droplet" }],
+      ["runtime data root", { runtimeDataDirectory: "Library/Application Support/Placekeeper" }],
+      ["document registration", { documentTypes: [{ contentType: "com.adobe.pdf", role: "Editor", rank: "Owner" }] }],
+    ];
+
+    for (const [label, mutation] of mutations) {
+      expect(() => validateAppBundleManifest({ ...app, ...mutation }), label).toThrow(/compatibility|Placekeeper/u);
+    }
+  });
+
+  it("pins the compatibility ledger without pinning the content-derived daemon hash", async () => {
+    const [installer, smoke, serviceDaemon, launchControl, hookCommand, pdfInspector, exportCoordinator, vscodePackage, vscodeExtension] =
+      await Promise.all([
+        readFile(resolve("install.sh"), "utf8"),
+        readFile(resolve("packaging/macos/smoke-installed.ts"), "utf8"),
+        readFile(resolve("apps/service/src/host/service-daemon.ts"), "utf8"),
+        readFile(resolve("apps/service/src/host/launch-control.ts"), "utf8"),
+        readFile(resolve("apps/service/src/cli/hook-command.ts"), "utf8"),
+        readFile(resolve("apps/service/src/pdf/inspect-pdf.ts"), "utf8"),
+        readFile(resolve("apps/service/src/export/export-coordinator.ts"), "utf8"),
+        readFile(resolve("apps/vscode/package.json"), "utf8"),
+        readFile(resolve("apps/vscode/src/extension.ts"), "utf8"),
+      ]);
+
+    expect(installer).toContain('app_path="$install_root/PDF Proofreader.app"');
+    expect(installer).toContain('built_app="$build_root/PDF Proofreader.app"');
+    expect(installer).toContain("PDF_PROOFREADER_USER_HOME");
+    expect(installer).toContain("PDF_PROOFREADER_INSTALL_ROOT");
+    expect(smoke).toContain('Library/Application Support/PDF Proofreader/control.sock');
+    expect(smoke).toContain('"daemon", "coordinate-install"');
+    expect(serviceDaemon).toContain('"PDF_PROOFREADER_DAEMON_IDENTITY"');
+    expect(serviceDaemon).toContain('"PDF_PROOFREADER_INSTALL_ARTIFACT_IDENTITY"');
+    expect(serviceDaemon).toContain('join(appSupportRoot, "lifecycle.lock")');
+    expect(launchControl).toContain("export const MANAGEMENT_PROTOCOL_VERSION = 1");
+    expect(launchControl).toContain('readonly kind: "exact"');
+    expect(launchControl).toContain('readonly kind: "incompatible"');
+    expect(hookCommand).toContain('kind: "pdf-proofreader-live-context"');
+    expect(pdfInspector).toContain('"application/vnd.pdf-proofreader.rgba+json"');
+    expect(exportCoordinator).toContain('`.pdf-proofreader-${randomUUID()}.tmp`');
+    expect(JSON.parse(vscodePackage)).toMatchObject({
+      name: "pdf-proofreader-vscode",
+      activationEvents: ["onCommand:pdfProofreader.open"],
+      contributes: {
+        commands: [{ command: "pdfProofreader.open" }],
+        configuration: { properties: { "pdfProofreader.launcherPath": expect.any(Object) } },
+      },
+    });
+    expect(vscodeExtension).toContain('"pdfProofreader.review"');
+
+    for (const source of [installer, smoke, serviceDaemon, hookCommand, exportCoordinator, vscodePackage, vscodeExtension]) {
+      expect(source).not.toContain("Placekeeper.app");
+      expect(source).not.toContain("Application Support/Placekeeper");
+    }
+  });
+
   it("pins one offline runtime for the Apple-silicon source-first build", async () => {
     const app = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8")) as unknown;
     const backend = JSON.parse(await readFile(resolve("packaging/macos/backend-runtime-manifest.json"), "utf8")) as unknown;

@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
-  "productName": "PDF Proofreader",
+  "productName": "Placekeeper",
+  "bundleName": "PDF Proofreader",
   "bundleIdentifier": "local.pdf-proofreader",
   "bundleVersion": "0.1.0",
   "minimumSystemVersion": "13.0",

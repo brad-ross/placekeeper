@@ -33,15 +33,16 @@ export interface BackendRuntimeManifest {
 
 export interface AppBundleManifest {
   readonly schemaVersion: 1;
-  readonly productName: string;
-  readonly bundleIdentifier: string;
+  readonly productName: "Placekeeper";
+  readonly bundleName: "PDF Proofreader";
+  readonly bundleIdentifier: "local.pdf-proofreader";
   readonly bundleVersion: string;
   readonly minimumSystemVersion: string;
   readonly architectures: readonly ["arm64"];
   readonly nodeVersion: string;
-  readonly executable: string;
+  readonly executable: "pdf-proofreader";
   readonly finderExecutable: "droplet";
-  readonly runtimeDataDirectory: string;
+  readonly runtimeDataDirectory: "Library/Application Support/PDF Proofreader";
   readonly documentTypes: readonly [{ readonly contentType: "com.adobe.pdf"; readonly role: "Viewer"; readonly rank: "Alternate" }];
   readonly embeddedArtifacts: {
     readonly codexPlugin: string;
@@ -63,6 +64,17 @@ function boundedString(value: unknown, label: string): string {
     throw new Error(`${label} must be a bounded string`);
   }
   return value;
+}
+
+function compatibilityValue<const Expected extends string>(
+  value: unknown,
+  expected: Expected,
+  label: string,
+): Expected {
+  if (value !== expected) {
+    throw new Error(`${label} is a pinned compatibility identity and must remain ${expected}`);
+  }
+  return expected;
 }
 
 export function validateBackendRuntimeManifest(value: unknown): BackendRuntimeManifest {
@@ -121,6 +133,11 @@ export function validateBackendRuntimeManifest(value: unknown): BackendRuntimeMa
 export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   const root = record(value, "app bundle manifest");
   if (root.schemaVersion !== 1) throw new Error("Unsupported app bundle manifest version");
+  if (root.productName !== "Placekeeper") throw new Error("The visible product name must remain Placekeeper");
+  const bundleName = compatibilityValue(root.bundleName, "PDF Proofreader", "Physical bundle name");
+  if (root.productName === bundleName) {
+    throw new Error("Visible and physical bundle identities must remain separate");
+  }
   if (!Array.isArray(root.architectures) || root.architectures.length !== 1 || root.architectures[0] !== "arm64") {
     throw new Error("The source-first app target must be Apple silicon");
   }
@@ -128,7 +145,7 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   if (!Array.isArray(documentTypes) || documentTypes.length !== 1) throw new Error("Exactly one PDF document type is required");
   const documentType = record(documentTypes[0], "document type");
   if (documentType.contentType !== "com.adobe.pdf" || documentType.role !== "Viewer" || documentType.rank !== "Alternate") {
-    throw new Error("The app must register as an alternate PDF viewer, not the default handler");
+    throw new Error("PDF document registration is a pinned compatibility identity and must remain an alternate viewer");
   }
   const signing = record(root.signing, "signing");
   if (signing.hardenedRuntime !== true || signing.secureTimestamp !== true) throw new Error("Hardened runtime and secure timestamp are required");
@@ -140,6 +157,11 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   if (runtimeDataDirectory.startsWith("/") || runtimeDataDirectory.startsWith("Contents/") || runtimeDataDirectory.split("/").includes("..")) {
     throw new Error("Mutable runtime data must be a user-relative path outside the signed bundle");
   }
+  compatibilityValue(
+    runtimeDataDirectory,
+    "Library/Application Support/PDF Proofreader",
+    "Runtime data directory",
+  );
   const rawEmbeddedArtifacts = record(root.embeddedArtifacts, "embedded artifacts");
   const embeddedArtifacts = {
     codexPlugin: boundedString(rawEmbeddedArtifacts.codexPlugin, "Codex plugin artifact"),
@@ -148,19 +170,20 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   if (Object.keys(rawEmbeddedArtifacts).some((name) => !["codexPlugin", "vscodeExtension"].includes(name))) {
     throw new Error("Only the Codex plugin and VS Code extension may be embedded integrations");
   }
-  if (root.finderExecutable !== "droplet") throw new Error("Finder executable must be the native document bridge");
+  compatibilityValue(root.finderExecutable, "droplet", "Finder executable");
   if (Object.values(embeddedArtifacts).some((path) => path.startsWith("/") || path.split("/").includes(".."))) {
     throw new Error("Embedded artifact sources must stay inside the repository");
   }
   return {
     schemaVersion: 1,
-    productName: boundedString(root.productName, "product name"),
-    bundleIdentifier: boundedString(root.bundleIdentifier, "bundle identifier"),
+    productName: "Placekeeper",
+    bundleName,
+    bundleIdentifier: compatibilityValue(root.bundleIdentifier, "local.pdf-proofreader", "Bundle identifier"),
     bundleVersion: boundedString(root.bundleVersion, "bundle version"),
     minimumSystemVersion: boundedString(root.minimumSystemVersion, "minimum system version"),
     architectures: ["arm64"],
     nodeVersion: boundedString(root.nodeVersion, "Node version"),
-    executable: boundedString(root.executable, "executable"),
+    executable: compatibilityValue(root.executable, "pdf-proofreader", "Launcher executable"),
     finderExecutable: "droplet",
     runtimeDataDirectory,
     documentTypes: [{ contentType: "com.adobe.pdf", role: "Viewer", rank: "Alternate" }],
