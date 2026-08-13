@@ -45,7 +45,6 @@ export interface LegacyCompatibilityFixture {
     readonly physicallyExecutesCurrentTransactionHelper: true;
     readonly modeledContracts: readonly string[];
   };
-  readonly sourceArtifacts: readonly (FixtureArtifact & { readonly commit: string })[];
   readonly artifacts: readonly FixtureArtifact[];
   readonly baselines: readonly LegacyBaseline[];
 }
@@ -91,6 +90,7 @@ export interface MaterializedLegacyInstallation {
   readonly appPath: string;
   readonly recoveryRoot: string;
   readonly originalPdf: string;
+  readonly legacyAnnotationPath: string;
   readonly pendingRecovery: RecoverableDraftV2;
   readonly legacyAnnotation: LegacyPortableFixture & { readonly inspection: PortableAnnotationInspection };
   readonly vscodeSettings: Record<string, unknown>;
@@ -112,6 +112,7 @@ export async function materializeLegacyInstallation(
   const sessionRoot = resolve(recoveryRoot, RECOVERY_SESSION_ID);
   const documents = resolve(isolatedHome, "Documents");
   const originalPdf = resolve(documents, "legacy-original.pdf");
+  const legacyAnnotationPath = resolve(documents, "legacy-portable-annotation.json");
   const sourceSnapshotPath = resolve(sessionRoot, "source.pdf");
   await mkdir(resolve(appPath, "Contents/Resources"), { recursive: true });
   await mkdir(documents, { recursive: true });
@@ -150,6 +151,7 @@ export async function materializeLegacyInstallation(
   ) as LegacyPortableFixture;
   const inspection = inspectPortableAnnotation(annotation.custom, annotation.visible);
   if (inspection.status !== "owned") throw new Error("Materialized legacy annotation is not editable");
+  await writeFile(legacyAnnotationPath, `${JSON.stringify(annotation)}\n`);
 
   const vscodeSettings = JSON.parse(await readFile(resolve(fixture.root, "vscode-settings.json"), "utf8")) as Record<string, unknown>;
   const legacySkill = await readFile(resolve(fixture.root, "legacy-skill.md"), "utf8");
@@ -165,6 +167,7 @@ export async function materializeLegacyInstallation(
     appPath,
     recoveryRoot,
     originalPdf,
+    legacyAnnotationPath,
     pendingRecovery,
     legacyAnnotation: { ...annotation, inspection },
     vscodeSettings,
