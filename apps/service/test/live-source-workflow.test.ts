@@ -274,6 +274,74 @@ describe("same-task live source workflow", () => {
     })).rejects.toThrow(/handle|binding|unavailable/iu);
   });
 
+  it.each(["Placekeeper", "PDF Proofreader"])(
+    "rejects validated %s app annotations but preserves author-only external annotations",
+    async (author) => {
+      const owned = item(2);
+      const appOwned = await fixture({
+        inspectRebuild: async () => ({
+          pageCount: 1,
+          pageFingerprints: ["page"],
+          annotationSubtypes: ["highlight"],
+          annotations: [{
+            id: owned.id, pageIndex: 0, subtype: "highlight", contents: "review",
+            author, flags: [], hasNormalAppearance: true,
+            rect: { origin: { x: 0, y: 0 }, size: { width: 1, height: 1 } },
+            preservationFingerprint: "review",
+          }],
+          portableItems: [owned],
+        }),
+      });
+      const begun = await appOwned.workflow.begin({
+        handle: appOwned.handle,
+        sourcePaths: ["paper.tex"],
+      });
+      const plan = await appOwned.workflow.prepareCleanRebuild({
+        handle: begun.freshness.evidenceHandle,
+        executionId: begun.result.executionId,
+        command: "build",
+        outputPath: "revised.pdf",
+      });
+      await writeFile(join(appOwned.root, "revised.pdf"), "%PDF-1.7\n%%EOF");
+      await expect(appOwned.workflow.verifyCleanRebuild({
+        handle: plan.freshness.evidenceHandle,
+        executionId: begun.result.executionId,
+        planId: plan.result.planId,
+      })).rejects.toThrow(/review annotations/u);
+
+      const external = await fixture({
+        inspectRebuild: async () => ({
+          pageCount: 1,
+          pageFingerprints: ["page"],
+          annotationSubtypes: ["highlight"],
+          annotations: [{
+            id: `external-${author}`, pageIndex: 0, subtype: "highlight", contents: "external",
+            author, flags: [], hasNormalAppearance: true,
+            rect: { origin: { x: 0, y: 0 }, size: { width: 1, height: 1 } },
+            preservationFingerprint: "external",
+          }],
+          portableItems: [],
+        }),
+      });
+      const externalBegun = await external.workflow.begin({
+        handle: external.handle,
+        sourcePaths: ["paper.tex"],
+      });
+      const externalPlan = await external.workflow.prepareCleanRebuild({
+        handle: externalBegun.freshness.evidenceHandle,
+        executionId: externalBegun.result.executionId,
+        command: "build",
+        outputPath: "revised.pdf",
+      });
+      await writeFile(join(external.root, "revised.pdf"), "%PDF-1.7\n%%EOF");
+      await expect(external.workflow.verifyCleanRebuild({
+        handle: externalPlan.freshness.evidenceHandle,
+        executionId: externalBegun.result.executionId,
+        planId: externalPlan.result.planId,
+      })).resolves.toMatchObject({ result: { reviewAnnotationsPresent: false } });
+    },
+  );
+
   it("bounds retained task executions and evicts rebuild plans with their execution", async () => {
     let execution = 0;
     const value = await fixture({ executionId: () => `execution-${++execution}` });

@@ -254,6 +254,16 @@ describe("explicit original replacement", () => {
       ),
     );
     const firstFrozen = await firstBroker.freezeDelivery(opened.launch.sessionId);
+    expect(firstFrozen.annotations).toMatchObject([{
+      author: "Placekeeper",
+      custom: {
+        pdfMarkup: {
+          owner: "pdf-markup",
+          schemaVersion: 2,
+          projection: { author: "Placekeeper" },
+        },
+      },
+    }]);
     const outputFor = (request: PdfWriteRequest): PdfWriteResult => {
       const pdfBytes = Buffer.from(`%PDF-1.7\nreviewed revision ${request.revision}\n%%EOF`);
       return {
@@ -314,6 +324,7 @@ describe("explicit original replacement", () => {
       ),
     );
     const secondFrozen = await restarted.freezeDelivery(resumed.launch.sessionId);
+    expect(secondFrozen.annotations.every(({ author }) => author === "Placekeeper")).toBe(true);
     expect(secondFrozen.source.digest).toBe(sha256(original));
     expect(secondFrozen.originalDigest).toBe(firstResult.digest);
     const secondCoordinator = new ExportCoordinator({

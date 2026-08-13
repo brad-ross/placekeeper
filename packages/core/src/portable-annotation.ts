@@ -8,6 +8,9 @@ import type {
 import { assertReviewItem } from "./review-reducer.js";
 
 export const PORTABLE_ANNOTATION_MAX_BYTES = 32 * 1024;
+export const PORTABLE_ANNOTATION_AUTHOR = "Placekeeper";
+export const LEGACY_PORTABLE_ANNOTATION_AUTHOR = "PDF Proofreader";
+export const PORTABLE_ANNOTATION_OWNER = "pdf-markup";
 const MAX_DEPTH = 12;
 const MAX_KEYS = 128;
 const MAX_STRING_LENGTH = 16 * 1024;
@@ -32,7 +35,7 @@ interface PortableProjection {
 
 interface PortableAnnotationEnvelope {
   readonly schemaVersion: 1 | 2;
-  readonly owner: "pdf-markup";
+  readonly owner: typeof PORTABLE_ANNOTATION_OWNER;
   readonly itemId: string;
   readonly item: ReviewItem;
   readonly projection: PortableProjection;
@@ -254,6 +257,10 @@ function isProjection(value: unknown): value is PortableProjection {
   );
 }
 
+export function isPortableAnnotationAuthor(author: string): boolean {
+  return author === PORTABLE_ANNOTATION_AUTHOR || author === LEGACY_PORTABLE_ANNOTATION_AUTHOR;
+}
+
 export function createPortableAnnotationCustom(
   item: ReviewItem,
   annotation: ReviewAnnotation,
@@ -261,7 +268,7 @@ export function createPortableAnnotationCustom(
   return {
     pdfMarkup: {
       schemaVersion: 2,
-      owner: "pdf-markup",
+      owner: PORTABLE_ANNOTATION_OWNER,
       itemId: item.id,
       item,
       projection: projectionFor(item, annotation),
@@ -280,7 +287,7 @@ export function inspectPortableAnnotation(
   if (!isRecord(envelope)) return { status: "invalid", reason: "invalid-envelope" };
   if (
     (envelope.schemaVersion !== 1 && envelope.schemaVersion !== 2) ||
-    envelope.owner !== "pdf-markup"
+    envelope.owner !== PORTABLE_ANNOTATION_OWNER
   ) {
     return { status: "invalid", reason: "unsupported-schema" };
   }
@@ -299,11 +306,30 @@ export function inspectPortableAnnotation(
   ) {
     return { status: "invalid", reason: "projection-mismatch" };
   }
+  if (!isPortableAnnotationAuthor(envelope.projection.author)) {
+    return { status: "invalid", reason: "unsupported-author" };
+  }
   return {
     status: "owned",
     item: envelope.item,
     geometryVersion: envelope.schemaVersion,
   };
+}
+
+export function inspectProjectedPortableAnnotation(
+  annotation: ReviewAnnotation,
+): PortableAnnotationInspection {
+  return inspectPortableAnnotation(annotation.custom, {
+    id: annotation.id,
+    pageIndex: annotation.pageIndex,
+    subtype: subtypeFor(annotation.kind),
+    contents: annotation.contents,
+    author: annotation.author,
+    rect: engineRect(annotation.rect),
+    ...(annotation.quadPoints === undefined
+      ? {}
+      : { segmentRects: annotation.quadPoints.map(engineRect) }),
+  });
 }
 
 export function decodePortableAnnotationJson(raw: string): PortableAnnotationInspection {
