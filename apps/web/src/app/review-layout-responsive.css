@@ -75,7 +75,6 @@
   }
 
   .review-workspace__tabs[data-workspace-mode-count="4"] {
-    grid-template-columns: minmax(0, .78fr) minmax(0, .78fr) minmax(0, 1.22fr) minmax(0, 1.22fr) !important;
     gap: 1px;
     padding-inline: 2px;
   }
@@ -86,6 +85,7 @@
   }
 
   .review-workspace__tab-label {
+    padding-inline: 3px;
     font-size: 10px;
   }
 }

@@ -123,6 +123,7 @@ export function PdfLinkControl({
       aria-label={metadata === null
         ? 'PDF link target unavailable'
         : accessibleLinkName(metadata.label, metadata.pageContext)}
+      title={metadata === null ? 'PDF link target unavailable' : 'Open link actions'}
       aria-haspopup="menu"
       aria-controls={PDF_LINK_ACTION_MENU_ID}
       aria-expanded={false}

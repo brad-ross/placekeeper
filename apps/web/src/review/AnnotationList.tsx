@@ -150,6 +150,7 @@ export function AnnotationList({
                   ...(sectionLabel === undefined ? {} : { sectionLabel }),
                   ...(text ? { excerpt: text } : {}),
                 })}
+                title={`Go to ${kindLabel} annotation on page ${item.pageIndex + 1}`}
                 onClick={() => onNavigate(item)}
               >
                 <AnnotationMetadata

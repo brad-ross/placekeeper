@@ -69,6 +69,7 @@ export function CommentComposer({
           <textarea
             className="comment-composer__input"
             ref={inputRef}
+            title={fieldLabel}
             value={value}
             onChange={(event) => setValue(event.currentTarget.value)}
             onKeyDown={(event) => {
@@ -82,6 +83,7 @@ export function CommentComposer({
           <button
             className="review-button review-button--secondary"
             type="button"
+            title={optional ? 'Keep without comment' : 'Cancel'}
             onClick={() => {
               if (optional && onSkip) void onSkip();
               else onDismiss();
@@ -92,6 +94,7 @@ export function CommentComposer({
           <button
             className="review-button review-button--primary"
             type="button"
+            title={saveLabel}
             disabled={!canSave}
             onClick={() => void onSave(value)}
           >

@@ -62,6 +62,7 @@ describe('installed EmbedPDF link renderer replacement', () => {
     expect(button.type).toBe('button');
     expect(button.props['data-pdf-link-control']).toBe('');
     expect(button.props['aria-label']).toBe('Open PDF link to img Equation 4, Page 2');
+    expect(button.props.title).toBe('Open link actions');
     expect(button.props['aria-haspopup']).toBe('menu');
     expect(button.props['aria-controls']).toBe(PDF_LINK_ACTION_MENU_ID);
     expect(button.props['aria-expanded']).toBe(false);
@@ -100,6 +101,7 @@ describe('installed EmbedPDF link renderer replacement', () => {
     });
     const rendered = renderer.render(rendererProps(link(target)));
     const button = PdfLinkControl(rendered.props);
+    expect(button.props.title).toBe('PDF link target unavailable');
     button.props.onClick({
       currentTarget: { getBoundingClientRect: vi.fn() },
       preventDefault: vi.fn(), stopPropagation: vi.fn(),

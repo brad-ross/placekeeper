@@ -864,7 +864,7 @@ export function App({
       <p data-document-title>{documentTitle}</p>
       <section aria-label="PDF review workspace">
         <div role="toolbar" aria-label="Review tools">
-          <button type="button">Page Note</button>
+          <button type="button" title="Add Page Note">Page Note</button>
         </div>
         {pageMessage ? <p data-recovery-kind="page">{pageMessage}</p> : null}
         {selectionMessage ? <p data-recovery-kind="selection">{selectionMessage}</p> : null}

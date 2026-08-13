@@ -380,6 +380,7 @@ export function PdfWorkspace({
                               className="owned-mark-focus-proxy"
                               data-owned-focus-id={group.id}
                               aria-label={`${annotation.kind} annotation on page ${annotation.pageIndex + 1}`}
+                              title={`Go to ${annotation.kind} annotation on page ${annotation.pageIndex + 1}`}
                               onFocus={() => onOwnedMarkInteraction?.({ id: group.id, phase: 'focus' })}
                               onBlur={() => onOwnedMarkInteraction?.({ id: group.id, phase: 'blur' })}
                               onKeyDown={(event) => {
@@ -416,6 +417,7 @@ export function PdfWorkspace({
                             className="page-note-placement-cursor"
                             data-review-contextual-ui
                             aria-label="Page Note placement cursor. Use arrow keys to move, Enter to place, or Escape to cancel."
+                            title="Place Page Note"
                             onKeyDown={(event) => {
                               if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter', 'Escape'].includes(event.key)) return;
                               event.preventDefault();

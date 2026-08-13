@@ -17,7 +17,8 @@ function ContextActionButton({ kind, iconOnly = false, onAction }: ContextAction
     <button
       type="button"
       className={`review-action-button${iconOnly ? ' review-action-button--icon' : ''}`}
-      {...(iconOnly ? { 'aria-label': action.label, title: action.label } : {})}
+      {...(iconOnly ? { 'aria-label': action.label } : {})}
+      title={action.label}
       aria-keyshortcuts={action.shortcut}
       onClick={(event) => {
         event.currentTarget.focus({ preventScroll: true });

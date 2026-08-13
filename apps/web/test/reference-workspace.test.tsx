@@ -176,7 +176,6 @@ describe('shared reference workspace', () => {
     expect(html).not.toMatch(/id="workspace-panel-annotations"[^>]*hidden/u);
     expect(html).toContain('aria-label="Search and annotations"');
     expect(html).toContain('data-workspace-mode-count="2"');
-    expect(html).toContain('grid-template-columns:repeat(2, minmax(0, 1fr))');
   });
 
   it('keeps Outline available while discovery is unavailable', () => {
@@ -262,7 +261,6 @@ describe('shared reference workspace', () => {
 
     expect(html).toContain('aria-label="Workspace modes"');
     expect(html).toContain('data-workspace-mode-count="4"');
-    expect(html).toContain('grid-template-columns:repeat(4, minmax(0, 1fr))');
     expect(html).not.toContain('aria-label="Close workspace"');
     expect(html.match(/role="tab"/g)).toHaveLength(6);
     expect(html.match(/aria-selected="true"/g)).toHaveLength(2);
@@ -591,7 +589,7 @@ describe('outline navigator', () => {
     expect(resultsRow).toContain('aria-current="location"');
     expect(resultsRow).toContain('data-current="true"');
     expect(resultsRow).toContain(
-      '<span class="outline-navigator__summary"><span class="outline-navigator__title">Results</span><small class="outline-navigator__page" aria-hidden="true">· 8</small></span>',
+      '<span class="outline-navigator__summary"><span class="outline-navigator__title">Results</span><span class="outline-navigator__separator" aria-hidden="true">·</span><small class="outline-navigator__page" aria-hidden="true">8</small></span>',
     );
     expect(resultsRow).not.toContain('>Page 8</small>');
     expect(html.match(/class="outline-navigator__reference"/g)).toHaveLength(3);

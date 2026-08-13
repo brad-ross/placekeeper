@@ -1178,7 +1178,7 @@ export function ReviewShell(props: ReviewShellProps) {
                 <div className="annotation-status annotation-status--error" data-annotation-status="error" role="alert">
                   <ReviewIcon name="alert" className="review-icon annotation-status__icon" />
                   <p><strong>Existing annotations unavailable.</strong><span>{existingAnnotations.message}</span></p>
-                  <button type="button" onClick={props.onRetryExistingAnnotations}>Retry</button>
+                  <button type="button" title="Retry loading existing annotations" onClick={props.onRetryExistingAnnotations}>Retry</button>
                 </div>
               ) : null}
               {existingAnnotations.status === 'ready' ? (
@@ -1200,7 +1200,7 @@ export function ReviewShell(props: ReviewShellProps) {
                         pageNumber: annotation.pageIndex + 1,
                         ...(sectionLabel === undefined ? {} : { sectionLabel }),
                         ...(annotation.contents ? { excerpt: annotation.contents } : {}),
-                      })} onClick={() => { markFramingUserIntent(); props.onNavigateExisting?.(annotation); }}>
+                      })} title={`Go to ${annotationKindLabel(annotation.subtype)} annotation on page ${annotation.pageIndex + 1}`} onClick={() => { markFramingUserIntent(); props.onNavigateExisting?.(annotation); }}>
                         <AnnotationMetadata
                           kind={annotation.subtype}
                           pageNumber={annotation.pageIndex + 1}

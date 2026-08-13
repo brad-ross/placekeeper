@@ -265,9 +265,10 @@
 }
 
 .review-workspace__tabs {
-  display: grid;
+  display: flex;
   min-width: 0;
   flex: 1;
+  justify-content: center;
   gap: 3px;
   padding: 3px;
   border-radius: var(--review-radius-control);
@@ -301,6 +302,7 @@
 .review-workspace__tab-label {
   z-index: 2;
   overflow: hidden;
+  padding-inline: 7px;
   color: var(--review-ink-muted);
   font-size: 11px;
   font-weight: 680;
@@ -623,7 +625,7 @@
   display: grid;
   grid-template-columns: max-content max-content minmax(0, 1fr);
   align-items: baseline;
-  column-gap: .5rem;
+  column-gap: var(--review-metadata-separator-gap);
   row-gap: 0;
 }
 
@@ -674,8 +676,10 @@
   flex: none;
   align-items: center;
   padding: 4px;
-  border: 1px solid transparent;
-  border-radius: var(--review-radius-control);
+  border: 1px solid var(--review-border-subtle);
+  border-radius: var(--review-radius-row);
+  background: var(--review-workspace-card-surface);
+  transition: border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
 }
 
 .reference-tab-segment--compound {
@@ -683,9 +687,20 @@
   max-width: calc(13rem + (2 * var(--review-control-compact)));
   gap: 4px;
   overflow: hidden;
-  border-color: var(--review-border);
-  background: var(--review-surface-panel);
-  box-shadow: 0 1px 2px rgb(24 26 23 / 8%);
+  border-color: var(--review-border-strong);
+  background: var(--review-selection-bg);
+  box-shadow: inset 0 0 0 1px var(--review-selection-ink);
+}
+
+.reference-tab-segment:hover,
+.reference-tab-segment:focus-within {
+  border-color: var(--review-border-strong);
+  background: var(--review-workspace-card-hover);
+}
+
+.reference-tab-segment--compound:hover,
+.reference-tab-segment--compound:focus-within {
+  background: var(--review-selection-bg);
 }
 
 .review-workspace[data-workspace-presentation="right"] .reference-tab-segment {
@@ -697,9 +712,10 @@
 .reference-tab-segment__selector {
   display: grid;
   min-width: 8rem;
+  min-height: 44px;
   max-width: 13rem;
   flex: 1 1 auto;
-  padding: 6px 9px;
+  padding: 7px 8px;
   text-align: left;
 }
 
@@ -880,7 +896,7 @@
 
 .outline-navigator ul {
   display: grid;
-  gap: 2px;
+  gap: 8px;
   margin: 0;
   padding: 0 0 0 15px;
   list-style: none;
@@ -916,9 +932,10 @@
 .outline-navigator__destination {
   display: flex;
   min-width: 0;
+  min-height: 44px;
   align-items: center;
   justify-content: flex-start;
-  padding: 6px 4px;
+  padding: 7px 8px;
   text-align: left;
 }
 
@@ -929,7 +946,7 @@
   max-width: 100%;
   flex: 0 1 auto;
   align-items: center;
-  gap: 4px;
+  gap: var(--review-metadata-separator-gap);
 }
 
 .outline-navigator__title {
@@ -943,6 +960,7 @@
   white-space: nowrap;
 }
 
+.outline-navigator__separator,
 .outline-navigator__page {
   flex: none;
   color: var(--review-ink-muted);
@@ -950,6 +968,10 @@
   font-variant-numeric: tabular-nums;
   line-height: 1.25;
   white-space: nowrap;
+}
+
+.outline-navigator__separator {
+  color: var(--review-ink-quiet);
 }
 
 .outline-navigator__reference {
@@ -1091,13 +1113,8 @@
   overflow: hidden;
   border: 1px solid var(--review-border-subtle);
   border-radius: var(--review-radius-row);
-  background: var(--review-surface-subtle);
+  background: var(--review-workspace-card-surface);
   transition: border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
-}
-
-.outline-navigator__row {
-  border-color: transparent;
-  background: transparent;
 }
 
 :is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:hover,
@@ -1107,6 +1124,7 @@
 .outline-navigator__row:hover,
 .outline-navigator__row:focus-within {
   border-color: var(--review-border-strong);
+  background: var(--review-workspace-card-hover);
 }
 
 :is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:active,
@@ -1161,7 +1179,7 @@
   display: flex;
   align-items: baseline;
   justify-content: flex-start;
-  gap: .3rem;
+  gap: var(--review-metadata-separator-gap);
   color: var(--review-ink-muted);
   font-size: 11px;
   line-height: 1.25;
@@ -1281,8 +1299,6 @@
 
 .existing-annotations li[data-readonly="true"] {
   display: block;
-  border-style: dashed;
-  background: var(--review-surface-panel);
 }
 
 .existing-annotation__content {
