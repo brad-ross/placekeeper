@@ -374,6 +374,27 @@ describe("open command", () => {
     },
   );
 
+  it("requires the documented explicit legacy stop before a pre-handshake replacement", async () => {
+    let legacyStopped = false;
+    const replaceAndReady = vi.fn(async () => {});
+    const options = {
+      candidate: { daemonIdentity: "b".repeat(64), installArtifactIdentity: "c".repeat(64) },
+      installed: { daemonIdentity: "a".repeat(64), installArtifactIdentity: "a".repeat(64) },
+      inspect: async () => legacyStopped
+        ? { kind: "absent" as const }
+        : { kind: "uninspectable" as const, reason: "legacy" as const },
+      shutdown: vi.fn(),
+      waitForRetirement: vi.fn(),
+      replaceAndReady,
+    };
+
+    await expect(coordinateUpgrade(options)).rejects.toMatchObject({ reason: "legacy" });
+    expect(replaceAndReady).not.toHaveBeenCalled();
+    legacyStopped = true; // ownership-checked `daemon stop-legacy` is exercised separately below.
+    await expect(coordinateUpgrade(options)).resolves.toEqual({ status: "installed" });
+    expect(replaceAndReady).toHaveBeenCalledOnce();
+  });
+
   it("retries transient durable work before accepting idle shutdown", async () => {
     let attempts = 0;
     await expect(coordinateUpgrade({

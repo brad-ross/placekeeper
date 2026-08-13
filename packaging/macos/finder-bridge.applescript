@@ -3,7 +3,8 @@ on launchPdf(pdfItem)
 	set launcherPath to appRoot & "Contents/MacOS/pdf-proofreader"
 	set pdfPath to POSIX path of pdfItem
 	try
-		do shell script quoted form of launcherPath & space & quoted form of pdfPath
+		set launchCommand to (quoted form of launcherPath) & space & (quoted form of pdfPath)
+		do shell script launchCommand
 	on error errorMessage number errorNumber
 		if errorNumber is not -128 then
 			display alert "Placekeeper could not open this file" message errorMessage buttons {"OK"} default button 1

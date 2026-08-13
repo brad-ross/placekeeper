@@ -10,6 +10,12 @@ For installation failures, run `./install.sh --dry-run` and confirm the host rep
 
 Finder displays the Placekeeper name and its production [two-page reference-and-return icon](../packaging/macos/icon/Placekeeper.svg). For upgrade compatibility, diagnostics still use the physical bundle path `~/Applications/PDF Proofreader.app` and recovery state path `~/Library/Application Support/PDF Proofreader`; those legacy technical names do not indicate a second installation.
 
+If an upgrade is deferred, close active Placekeeper reviews or end the bound Codex task and retry. A pre-management-handshake installation may instead require the explicit ownership-checked compatibility command `"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy` after reviews are closed. Replacement and readiness failures restore the previous app without moving the recovery root. LaunchServices refresh happens only after a healthy replacement commits; a warning affects Finder/Open With registration but does not roll back the usable app.
+
+Manual downgrade after using Placekeeper is unsupported. The installer can roll back a candidate only before transaction commit and before the candidate opens or autosaves a user document; the rebrand does not add a backward reader for state produced after use.
+
+Public distribution under the Placekeeper name is blocked until trademark, marketplace, and domain clearance is recorded. The implementation can be built and merged for validation before that external publication decision.
+
 Developer ID signing, notarization, stapling, Intel/x64 packages, DMGs, auto-updates, and release CI are deliberately deferred for this personal/friends source distribution. The optional notarization scripts remain available if a future prebuilt download is desired; they are not source-install acceptance gates.
 
 Detailed source-install, live-context, and host evidence lives in `test/acceptance/installed-hosts.md`.

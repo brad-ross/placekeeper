@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "claims": {
+    "physicallyExecutesLegacyBinary": false,
+    "physicallyExecutesCurrentTransactionHelper": true,
+    "modeledContracts": [
+      "legacy lifecycle inspection and explicit-stop boundary",
+      "pending recovery continuity",
+      "legacy annotation ownership",
+      "VS Code configuration and Codex alias continuity"
+    ]
+  },
+  "sourceArtifacts": [
+    { "commit": "4cc17cea25aff0dd2be5d317ca5c44117751a395", "path": "packaging/macos/app-bundle.json", "sha256": "4fb3448c722b3849c8ea7a236b640d5ff4e1ad1a123efceca2410a9eb9705026" },
+    { "commit": "4cc17cea25aff0dd2be5d317ca5c44117751a395", "path": "apps/service/src/recovery/draft-snapshot.ts", "sha256": "8197fbb98f3d9021c9bb64c28b5c631d365d766b0ab821ab46d3789aab3ffe03" },
+    { "commit": "4cc17cea25aff0dd2be5d317ca5c44117751a395", "path": "apps/vscode/package.json", "sha256": "d6ea1212473200d49c0b44207147d4bf8d770fea1532447fab94c69dc343cd12" },
+    { "commit": "f3d91b395e82424b271943d91eb296d9b06bba93", "path": "apps/service/src/host/launch-control.ts", "sha256": "65b376f8b0d10b0ff47d6ba0f2ca2a961578df8b9559ce7584568162831cdc3b" }
+  ],
+  "artifacts": [
+    { "path": "baselines.json", "sha256": "ebec93fef33019dd4846d5f79f07e636df44506879f3d0133aac880aaccd7511" },
+    { "path": "recovery-seed.json", "sha256": "fd042609bc9d0d7b8ce642def534b8b48bc447e1f175154d0f3080f5ff0a8955" },
+    { "path": "legacy-portable-annotation.json", "sha256": "6240940217c0f0796da56322435a3c3be8f9c434ddd230575f0015cfc314a91d" },
+    { "path": "vscode-settings.json", "sha256": "bfba057d128d2ffb08831c36f43438f46245513d0155927a3731f404d6c89880" },
+    { "path": "legacy-skill.md", "sha256": "c2a1f3aab67923aff579a00a7d13b0903b7c5b1551186f628536af4d191688bc" },
+    { "path": "original.pdf", "sha256": "0d629527c6e3ce76aa003c7633a3874f13e58e0fd9339433e2efe5f77a12ddcd" }
+  ]
+}

@@ -21,6 +21,12 @@ import {
 import { finderServiceArgs } from "./launcher.mjs";
 import { validateDoctorEvidence } from "./smoke-installed.js";
 import {
+  LEGACY_BASELINE_IDS,
+  evaluateLegacyUpgradeScenario,
+  loadLegacyCompatibilityFixture,
+  materializeLegacyInstallation,
+} from "./test-fixtures/legacy-installation.js";
+import {
   appBundlePath,
   compileMacIcon,
   computePackagedBuildIdentity,
@@ -31,6 +37,81 @@ import {
 const execFileAsync = promisify(execFile);
 
 describe("macOS distribution manifests", () => {
+  it("validates immutable repository-owned pre-rebrand compatibility baselines", async () => {
+    const fixture = await loadLegacyCompatibilityFixture(resolve("."));
+
+    expect(fixture.baselines.map(({ id }) => id)).toEqual(LEGACY_BASELINE_IDS);
+    expect(fixture.baselines).toEqual([
+      expect.objectContaining({
+        id: "transactional-pre-rebrand",
+        sourceCommit: "4cc17cea25aff0dd2be5d317ca5c44117751a395",
+        lifecycleEvidence: "contract-model",
+        replacementMode: "coordinated",
+      }),
+      expect.objectContaining({
+        id: "pre-management-handshake",
+        sourceCommit: "f3d91b395e82424b271943d91eb296d9b06bba93",
+        lifecycleEvidence: "contract-model",
+        replacementMode: "explicit-legacy-stop",
+      }),
+    ]);
+    expect(fixture.artifacts.every(({ sha256 }) => /^[a-f0-9]{64}$/u.test(sha256))).toBe(true);
+    expect(fixture.claims.physicallyExecutesLegacyBinary).toBe(false);
+    expect(fixture.claims.physicallyExecutesCurrentTransactionHelper).toBe(true);
+  });
+
+  it.each(LEGACY_BASELINE_IDS)("materializes %s with pending recovery and legacy integrations", async (baselineId) => {
+    const root = await mkdtemp(resolve(tmpdir(), "placekeeper-legacy-fixture-"));
+    try {
+      const installation = await materializeLegacyInstallation(resolve("."), root, baselineId);
+      expect(installation.appPath).toBe(resolve(root, "Applications/PDF Proofreader.app"));
+      expect(installation.recoveryRoot).toBe(resolve(root, "Library/Application Support/PDF Proofreader"));
+      expect(installation.pendingRecovery.state).toMatchObject({
+        revision: 1,
+        items: [{ id: "11111111-1111-4111-8111-111111111111" }],
+      });
+      expect(installation.pendingRecovery.sync.phase).toBe("not-saved");
+      expect(installation.legacyAnnotation).toMatchObject({
+        visible: { author: "PDF Proofreader" },
+        inspection: { status: "owned" },
+      });
+      expect(installation.vscodeSettings).toHaveProperty(
+        "pdfProofreader.launcherPath",
+        "$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader",
+      );
+      expect(installation.legacySkill).toContain("name: pdf-proofreader");
+      expect(installation.legacySkill).toContain("PDF Proofreader.app/Contents/MacOS/pdf-proofreader");
+      await expect(readFile(resolve(root, "Applications/Placekeeper.app"))).rejects.toThrow();
+      await expect(readFile(resolve(root, "Library/Application Support/Placekeeper"))).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("models every required legacy upgrade outcome without claiming an old binary run", async () => {
+    const fixture = await loadLegacyCompatibilityFixture(resolve("."));
+    const expected = {
+      "offline-smoke-failure": { outcome: "preserved", commit: false },
+      "active-review": { outcome: "deferred", commit: false },
+      "active-codex-task": { outcome: "deferred", commit: false },
+      "replacement-failure": { outcome: "rolled-back", commit: false },
+      "changed-hash-readiness": { outcome: "installed", commit: true },
+      "readiness-failure": { outcome: "rolled-back", commit: false },
+      "unchanged-destination": { outcome: "installed", commit: true },
+      "launch-services-failure": { outcome: "installed-with-warning", commit: true },
+    } as const;
+
+    for (const [scenario, result] of Object.entries(expected)) {
+      expect(evaluateLegacyUpgradeScenario(fixture, scenario as keyof typeof expected)).toMatchObject({
+        ...result,
+        destination: "Applications/PDF Proofreader.app",
+        supportRoot: "Library/Application Support/PDF Proofreader",
+        candidateOpenedUserDocumentBeforeCommit: false,
+        duplicateAppIdentity: false,
+        duplicateStateRoot: false,
+      });
+    }
+  });
   it("separates the visible Placekeeper identity from the physical compatibility bundle", async () => {
     const app = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8")) as unknown;
     const manifest = validateAppBundleManifest(app);
@@ -187,7 +268,7 @@ describe("macOS distribution manifests", () => {
     expect(installer).toContain('built_app="$build_root/PDF Proofreader.app"');
     expect(installer).toContain("PDF_PROOFREADER_USER_HOME");
     expect(installer).toContain("PDF_PROOFREADER_INSTALL_ROOT");
-    expect(smoke).toContain('Library/Application Support/PDF Proofreader/control.sock');
+    expect(smoke).toContain('"Library/Application Support/PDF Proofreader"');
     expect(smoke).toContain('"daemon", "coordinate-install"');
     expect(serviceDaemon).toContain('"PDF_PROOFREADER_DAEMON_IDENTITY"');
     expect(serviceDaemon).toContain('"PDF_PROOFREADER_INSTALL_ARTIFACT_IDENTITY"');
@@ -208,8 +289,11 @@ describe("macOS distribution manifests", () => {
     });
     expect(vscodeExtension).toContain('"pdfProofreader.review"');
 
-    for (const source of [installer, smoke, serviceDaemon, hookCommand, exportCoordinator, vscodePackage, vscodeExtension]) {
+    for (const source of [installer, serviceDaemon, hookCommand, exportCoordinator, vscodePackage, vscodeExtension]) {
       expect(source).not.toContain("Placekeeper.app");
+    }
+    expect(smoke).toContain('"Applications/Placekeeper.app"');
+    for (const source of [installer, smoke, serviceDaemon, hookCommand, exportCoordinator, vscodePackage, vscodeExtension]) {
       expect(source).not.toContain("Application Support/Placekeeper");
     }
   });
@@ -370,6 +454,13 @@ describe("macOS distribution manifests", () => {
     const helper = await readFile(resolve("packaging/macos/install-built-app.sh"), "utf8");
     expect(helper.indexOf('"$readiness_executable" daemon ensure-ready --receipt')).toBeLessThan(helper.lastIndexOf("committed=1"));
     expect(helper.indexOf('"$readiness_executable" daemon stop-ready --receipt')).toBeLessThan(helper.indexOf('if [ "$app_touched" -eq 1 ]'));
+    expect(helper.slice(0, helper.lastIndexOf("committed=1"))).not.toMatch(/\bopen\s+--json\b|autosave/u);
+
+    const launchServices = installer.indexOf('launch_services="/System/Library/Frameworks/CoreServices.framework');
+    expect(launchServices).toBeGreaterThan(installer.indexOf("daemon coordinate-install"));
+    expect(installer.slice(launchServices)).not.toContain("install-built-app.sh");
+    expect(installer.slice(launchServices)).toContain("Warning: macOS did not refresh Open With registration");
+    expect(installer.slice(launchServices)).toContain("Placekeeper installed successfully");
   });
 
   it("uses current notarytool submission followed by staple and validation", () => {

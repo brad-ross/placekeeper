@@ -154,11 +154,29 @@ async function installedHookTimeouts(installedApp: string): Promise<Record<HookE
     }
     timeouts[event] = handler.timeout * 1_000;
   }
-  const skill = await readFile(join(pluginRoot, "skills/pdf-proofreader/SKILL.md"), "utf8");
-  if (!skill.includes(`${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf`)) {
-    throw new Error("Installed PDF Proofreader skill does not use the canonical launcher");
+  for (const alias of ["placekeeper", "pdf-proofreader"] as const) {
+    const skill = await readFile(join(pluginRoot, `skills/${alias}/SKILL.md`), "utf8");
+    if (!skill.includes(`${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf`)) {
+      throw new Error(`Installed ${alias} skill does not use the canonical launcher`);
+    }
   }
   return timeouts;
+}
+
+async function assertInstalledRebrandIdentity(installedApp: string, isolatedHome: string): Promise<void> {
+  const localizedNames = await readFile(
+    join(installedApp, "Contents/Resources/en.lproj/InfoPlist.strings"),
+    "utf8",
+  );
+  if (!localizedNames.includes('"CFBundleDisplayName" = "Placekeeper";')) {
+    throw new Error("Installed compatibility-path bundle does not present Placekeeper");
+  }
+  if (await lstat(join(isolatedHome, "Applications/Placekeeper.app")).catch(() => undefined)) {
+    throw new Error("Installed smoke found a duplicate visible-name app identity");
+  }
+  if (await lstat(join(isolatedHome, "Library/Application Support", "Placekeeper")).catch(() => undefined)) {
+    throw new Error("Installed smoke found a duplicate visible-name state root");
+  }
 }
 
 function hookInput(
@@ -208,13 +226,17 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
   const smokeHome = await mkdtemp(join("/tmp", "pp-hook-smoke-"));
   const installedApp = join(smokeHome, "Applications/PDF Proofreader.app");
   const executable = join(installedApp, "Contents/MacOS/pdf-proofreader");
-  const socketPath = join(smokeHome, "Library/Application Support/PDF Proofreader/control.sock");
+  const supportRoot = join(smokeHome, "Library/Application Support/PDF Proofreader");
+  const socketPath = join(supportRoot, "control.sock");
+  const legacyRecoveryMarker = join(supportRoot, "legacy-pending-recovery.fixture");
   await mkdir(dirname(installedApp), { recursive: true });
   await symlink(resolve(appPath), installedApp);
   const pdfPath = join(smokeHome, "fixture.pdf");
   const secondPdfPath = join(smokeHome, "second-fixture.pdf");
   await copyFile(resolve(fixturePath), pdfPath);
   await copyFile(resolve(fixturePath), secondPdfPath);
+  await mkdir(supportRoot, { recursive: true });
+  await writeFile(legacyRecoveryMarker, "pending legacy recovery must survive replacement\n");
   const environment = {
     ...process.env,
     HOME: smokeHome,
@@ -233,6 +255,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
   let daemonSpawnError: Error | undefined;
   daemon.once("error", (error) => { daemonSpawnError = error; });
   try {
+    await assertInstalledRebrandIdentity(installedApp, smokeHome);
     await waitForSocket(socketPath, daemon, () => daemonSpawnError);
     const hookTimeouts = await installedHookTimeouts(installedApp);
     const launchOutput = await executeInstalled(
@@ -340,6 +363,9 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     if (stillInstalled.installArtifactIdentity !== oldIdentity.installArtifactIdentity) {
       throw new Error("Deferred upgrade changed the installed app");
     }
+    if ((await readFile(legacyRecoveryMarker, "utf8")) !== "pending legacy recovery must survive replacement\n") {
+      throw new Error("Deferred upgrade changed legacy recovery state");
+    }
     for (const [url, session] of [[launchUrl, firstSession], [secondUrl, secondSession]] as const) {
       const state = await fetch(`${url.origin}${url.pathname.replace(/\/bootstrap$/u, "/state")}`, {
         headers: { authorization: `Bearer ${String(session.credential)}` },
@@ -388,6 +414,10 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     );
     if (upgraded.code !== 0 || upgraded.response.status !== "installed") {
       throw new Error("Closed reviews did not converge to a successful installed upgrade");
+    }
+    await assertInstalledRebrandIdentity(installedApp, smokeHome);
+    if ((await readFile(legacyRecoveryMarker, "utf8")) !== "pending legacy recovery must survive replacement\n") {
+      throw new Error("Successful upgrade changed legacy recovery state before resume");
     }
     const postUpgrade = parseObject(await executeInstalled(
       executable,

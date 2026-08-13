@@ -24,6 +24,8 @@ The required v1 distribution is a source-first Apple-silicon install for a perso
 
 ## Upgrade lifecycle evidence
 
+The pre-rebrand compatibility inputs are repository-owned under `test/fixtures/compatibility/placekeeper-pre-rebrand/`. Their manifest pins the immediate pre-rebrand commit and the pre-management-handshake commit, source-artifact digests, and every modeled fixture digest. The deterministic harness does **not** execute an unpublished legacy binary: it materializes recovery, annotation, VS Code, and Codex contracts in an isolated temporary home. Existing macOS packaging tests separately execute the current `install-built-app.sh`, and the production installed smoke executes the current packaged candidate and transaction.
+
 | State | Automated result | Recovery shown to the user |
 |---|---|---|
 | Exact daemon and identical bundle | Existing daemon is reused; no shutdown request or bundle move. | None. |
@@ -32,6 +34,20 @@ The required v1 distribution is a source-first Apple-silicon install for a perso
 | Accepted save or lifecycle work | Coordinator retries for at most five seconds, then preserves the app if work is still active. | Wait a moment, then retry. |
 | Legacy, malformed, or timed-out daemon | Socket-level acceptance classifies it as uninspectable and the transaction helper is never invoked. | Close reviews. For a legacy daemon only, explicitly run `"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy`, then retry. |
 | Closed pages plus ended task | Presence grace expires, conditional shutdown completes, candidate replacement/readiness succeeds, and the new launcher opens the fixture. | Retry the install. |
+
+The modeled matrix also fixes the expected boundaries for offline-smoke failure, active-review deferral, active-Codex deferral, replacement failure, changed-hash readiness, readiness rollback, the unchanged physical destination, and warning-only LaunchServices failure. Candidate readiness is document-free: no user PDF is opened or autosaved before `install-built-app.sh` commits. A successful replacement preserves the pending recovery bytes and both old integration entry points; recovery and portable-annotation suites exercise resume, save, cleanup timing, and legacy-author editing with the current reader. A failed replacement restores the old app while leaving that same pending recovery material untouched.
+
+## Placekeeper release-candidate record
+
+Automated evidence does not stand in for Finder, Dock, or Open With rendering. Before a public artifact is approved, record a real Apple-silicon release-candidate check below. Use an isolated test account or temporary home; do not install over live work.
+
+| Date | Build digest | Finder + Open With name/icon | 16px / 32px / large / Dock | One compatibility-path bundle | Bundle-ID launch | Recovery + both aliases | Result |
+|---|---|---|---|---|---|---|---|
+| Pending | Pending | Pending | Pending | Pending | Pending | Pending | Pending |
+
+The check must confirm `Placekeeper` is visible, `/usr/bin/open -b local.pdf-proofreader` resolves the registered compatibility-path bundle, `Placekeeper.app` and `Library/Application Support/Placekeeper` are absent, old recovery resumes and saves, `$placekeeper` and `$pdf-proofreader` both launch, and `pdfProofreader.open` plus the saved `pdfProofreader.launcherPath` still work.
+
+Manual downgrade after Placekeeper has been used to create or save new state is unsupported. Transaction rollback is guaranteed only before commit and before candidate document writes; this rebrand intentionally adds no backward reader. Public distribution under the Placekeeper name remains blocked until trademark, marketplace, and domain clearance is recorded, although the implementation may merge before that decision.
 
 All upgrade acceptance uses temporary app-support roots and process groups. It records only aggregate outcome categories and build digests—never PDF paths, capabilities, task identifiers, bind proofs, credentials, or evidence handles—and does not address the user's real daemon.
 
