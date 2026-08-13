@@ -8,12 +8,10 @@ import {
   CODEX_INSTALLED_LAUNCHER_COMMAND,
   inspectHookEvent,
 } from "../../apps/service/src/cli/hook-command.js";
-import { CONTROL_REQUEST_TIMEOUT_MS } from "../../apps/service/src/host/launch-control.js";
 import { createNotarizationPlan } from "./notarize.js";
 import {
   validateAppBundleManifest,
   validateBackendRuntimeManifest,
-  normalizeCodexSkillContract,
   validateCodexPlugin,
   validateDistributionManifests,
   validateMacIconSet,
@@ -22,7 +20,6 @@ import { finderServiceArgs } from "./launcher.mjs";
 import { validateDoctorEvidence } from "./smoke-installed.js";
 import {
   LEGACY_BASELINE_IDS,
-  evaluateLegacyUpgradeScenario,
   loadLegacyCompatibilityFixture,
   materializeLegacyInstallation,
 } from "./test-fixtures/legacy-installation.js";
@@ -88,30 +85,6 @@ describe("macOS distribution manifests", () => {
     }
   });
 
-  it("models every required legacy upgrade outcome without claiming an old binary run", async () => {
-    const fixture = await loadLegacyCompatibilityFixture(resolve("."));
-    const expected = {
-      "offline-smoke-failure": { outcome: "preserved", commit: false },
-      "active-review": { outcome: "deferred", commit: false },
-      "active-codex-task": { outcome: "deferred", commit: false },
-      "replacement-failure": { outcome: "rolled-back", commit: false },
-      "changed-hash-readiness": { outcome: "installed", commit: true },
-      "readiness-failure": { outcome: "rolled-back", commit: false },
-      "unchanged-destination": { outcome: "installed", commit: true },
-      "launch-services-failure": { outcome: "installed-with-warning", commit: true },
-    } as const;
-
-    for (const [scenario, result] of Object.entries(expected)) {
-      expect(evaluateLegacyUpgradeScenario(fixture, scenario as keyof typeof expected)).toMatchObject({
-        ...result,
-        destination: "Applications/PDF Proofreader.app",
-        supportRoot: "Library/Application Support/PDF Proofreader",
-        candidateOpenedUserDocumentBeforeCommit: false,
-        duplicateAppIdentity: false,
-        duplicateStateRoot: false,
-      });
-    }
-  });
   it("separates the visible Placekeeper identity from the physical compatibility bundle", async () => {
     const app = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8")) as unknown;
     const manifest = validateAppBundleManifest(app);
@@ -595,30 +568,6 @@ describe("macOS distribution manifests", () => {
       skills: "./skills/",
       interface: { longDescription: expect.stringContaining("every prompt") },
     });
-    const hooks = JSON.parse(await readFile(resolve("integrations/codex-plugin/hooks/hooks.json"), "utf8")) as {
-      hooks?: Record<string, Array<{ hooks?: Array<{ command?: string; timeout?: number; additionalContextLimit?: number }> }>>;
-    };
-    expect(Object.keys(hooks.hooks ?? {}).sort()).toEqual(["PostToolUse", "SessionEnd", "UserPromptSubmit"]);
-    for (const event of Object.values(hooks.hooks ?? {})) {
-      expect(event).toHaveLength(1);
-      expect(event[0]?.hooks).toEqual([expect.objectContaining({
-        command: `${CODEX_INSTALLED_LAUNCHER_COMMAND} hook --event`,
-      })]);
-    }
-    expect(hooks.hooks?.PostToolUse?.[0]?.hooks?.[0]?.timeout).toBeGreaterThan(CONTROL_REQUEST_TIMEOUT_MS / 1_000);
-    expect(hooks.hooks?.UserPromptSubmit?.[0]?.hooks?.[0]?.timeout).toBeGreaterThan(CONTROL_REQUEST_TIMEOUT_MS / 1_000);
-    expect(hooks.hooks?.SessionEnd?.[0]?.hooks?.[0]?.timeout).toBe(3);
-    expect(hooks.hooks?.UserPromptSubmit?.[0]?.hooks?.[0]?.additionalContextLimit).toBe(131072);
-    const canonicalSkill = await readFile(resolve("integrations/codex-plugin/skills/placekeeper/SKILL.md"), "utf8");
-    const legacySkill = await readFile(resolve("integrations/codex-plugin/skills/pdf-proofreader/SKILL.md"), "utf8");
-    expect(normalizeCodexSkillContract(canonicalSkill, "placekeeper")).toBe(
-      normalizeCodexSkillContract(legacySkill, "pdf-proofreader"),
-    );
-    for (const skill of [canonicalSkill, legacySkill]) {
-      expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf`);
-      expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} context changes --handle`);
-      expect(skill).not.toMatch(/(^|[^/A-Za-z0-9_-])pdf-proofreader\s+(context|daemon)\b/mu);
-    }
     expect(inspectHookEvent({
       session_id: "packaged-contract-task",
       hook_event_name: "PostToolUse",

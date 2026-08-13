@@ -3,7 +3,7 @@ import { copyFile, cp, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile }
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { validateBackendRuntimeManifest } from "./validate-manifest.js";
+import { validateBackendRuntimeManifest, validateCodexPlugin } from "./validate-manifest.js";
 import { BUILD_IDENTITY_FILENAME, computePackagedBuildIdentity } from "./build-app.js";
 
 const execFileAsync = promisify(execFile);
@@ -127,6 +127,7 @@ type HookEvent = "PostToolUse" | "UserPromptSubmit" | "SessionEnd";
 
 async function installedHookTimeouts(installedApp: string): Promise<Record<HookEvent, number>> {
   const pluginRoot = join(installedApp, "Contents/Resources/integrations/codex-plugin");
+  await validateCodexPlugin(pluginRoot);
   const hooksDocument = parseObject(
     await readFile(join(pluginRoot, "hooks/hooks.json"), "utf8"),
     "installed hook manifest",
@@ -153,12 +154,6 @@ async function installedHookTimeouts(installedApp: string): Promise<Record<HookE
       throw new Error(`Installed ${event} hook has no bounded timeout`);
     }
     timeouts[event] = handler.timeout * 1_000;
-  }
-  for (const alias of ["placekeeper", "pdf-proofreader"] as const) {
-    const skill = await readFile(join(pluginRoot, `skills/${alias}/SKILL.md`), "utf8");
-    if (!skill.includes(`${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf`)) {
-      throw new Error(`Installed ${alias} skill does not use the canonical launcher`);
-    }
   }
   return timeouts;
 }
@@ -228,7 +223,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
   const executable = join(installedApp, "Contents/MacOS/pdf-proofreader");
   const supportRoot = join(smokeHome, "Library/Application Support/PDF Proofreader");
   const socketPath = join(supportRoot, "control.sock");
-  const legacyRecoveryMarker = join(supportRoot, "legacy-pending-recovery.fixture");
+  const supportRootSentinel = join(supportRoot, "legacy-support-content.fixture");
   await mkdir(dirname(installedApp), { recursive: true });
   await symlink(resolve(appPath), installedApp);
   const pdfPath = join(smokeHome, "fixture.pdf");
@@ -236,7 +231,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
   await copyFile(resolve(fixturePath), pdfPath);
   await copyFile(resolve(fixturePath), secondPdfPath);
   await mkdir(supportRoot, { recursive: true });
-  await writeFile(legacyRecoveryMarker, "pending legacy recovery must survive replacement\n");
+  await writeFile(supportRootSentinel, "legacy support-root content must survive replacement\n");
   const environment = {
     ...process.env,
     HOME: smokeHome,
@@ -317,6 +312,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     });
     if (!secondExchange.ok) throw new Error("Second installed browser capability exchange failed");
     const secondSession = parseObject(await secondExchange.text(), "second browser exchange");
+    const presenceExpiryAt = Date.now() + 5_100;
 
     const current = parseAdditionalContext(await executeInstalled(
       executable,
@@ -363,8 +359,8 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     if (stillInstalled.installArtifactIdentity !== oldIdentity.installArtifactIdentity) {
       throw new Error("Deferred upgrade changed the installed app");
     }
-    if ((await readFile(legacyRecoveryMarker, "utf8")) !== "pending legacy recovery must survive replacement\n") {
-      throw new Error("Deferred upgrade changed legacy recovery state");
+    if ((await readFile(supportRootSentinel, "utf8")) !== "legacy support-root content must survive replacement\n") {
+      throw new Error("Deferred upgrade changed arbitrary support-root content");
     }
     for (const [url, session] of [[launchUrl, firstSession], [secondUrl, secondSession]] as const) {
       const state = await fetch(`${url.origin}${url.pathname.replace(/\/bootstrap$/u, "/state")}`, {
@@ -404,7 +400,10 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     // Capability exchange records browser activity with a bounded close grace.
     // With no live WebSocket in this headless smoke, lease expiry represents
     // closed pages; SessionEnd above separately releases the task blocker.
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 5_100));
+    const remainingPresenceGrace = presenceExpiryAt - Date.now();
+    if (remainingPresenceGrace > 0) {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, remainingPresenceGrace));
+    }
     const upgraded = await coordinateInstalled(
       join(candidate, "Contents/MacOS/pdf-proofreader"),
       candidate,
@@ -416,8 +415,8 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
       throw new Error("Closed reviews did not converge to a successful installed upgrade");
     }
     await assertInstalledRebrandIdentity(installedApp, smokeHome);
-    if ((await readFile(legacyRecoveryMarker, "utf8")) !== "pending legacy recovery must survive replacement\n") {
-      throw new Error("Successful upgrade changed legacy recovery state before resume");
+    if ((await readFile(supportRootSentinel, "utf8")) !== "legacy support-root content must survive replacement\n") {
+      throw new Error("Successful upgrade changed arbitrary support-root content");
     }
     const postUpgrade = parseObject(await executeInstalled(
       executable,

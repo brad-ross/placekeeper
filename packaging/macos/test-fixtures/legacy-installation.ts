@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 
 import type { ReviewState } from "../../../packages/core/src/review-model.js";
 import {
@@ -25,24 +25,12 @@ export const LEGACY_BASELINE_IDS = [
 ] as const;
 export type LegacyBaselineId = (typeof LEGACY_BASELINE_IDS)[number];
 
-export type LegacyUpgradeScenario =
-  | "offline-smoke-failure"
-  | "active-review"
-  | "active-codex-task"
-  | "replacement-failure"
-  | "changed-hash-readiness"
-  | "readiness-failure"
-  | "unchanged-destination"
-  | "launch-services-failure";
-
 export interface LegacyBaseline {
   readonly id: LegacyBaselineId;
   readonly sourceCommit: string;
   readonly sourceDate: string;
   readonly lifecycleEvidence: "contract-model";
   readonly replacementMode: "coordinated" | "explicit-legacy-stop";
-  readonly daemonIdentity: string;
-  readonly installArtifactIdentity: string;
 }
 
 interface FixtureArtifact {
@@ -67,7 +55,7 @@ function sha256(bytes: string | Uint8Array): string {
 }
 
 function fixturePath(root: string, path: string): string {
-  if (path.startsWith("/") || path.split("/").includes("..")) {
+  if (isAbsolute(path) || path.split("/").includes("..")) {
     throw new Error(`Unsafe legacy fixture path: ${path}`);
   }
   return resolve(root, path);
@@ -103,7 +91,6 @@ export interface MaterializedLegacyInstallation {
   readonly appPath: string;
   readonly recoveryRoot: string;
   readonly originalPdf: string;
-  readonly reviewedPdf: string;
   readonly pendingRecovery: RecoverableDraftV2;
   readonly legacyAnnotation: LegacyPortableFixture & { readonly inspection: PortableAnnotationInspection };
   readonly vscodeSettings: Record<string, unknown>;
@@ -125,7 +112,6 @@ export async function materializeLegacyInstallation(
   const sessionRoot = resolve(recoveryRoot, RECOVERY_SESSION_ID);
   const documents = resolve(isolatedHome, "Documents");
   const originalPdf = resolve(documents, "legacy-original.pdf");
-  const reviewedPdf = resolve(documents, "legacy-reviewed.pdf");
   const sourceSnapshotPath = resolve(sessionRoot, "source.pdf");
   await mkdir(resolve(appPath, "Contents/Resources"), { recursive: true });
   await mkdir(documents, { recursive: true });
@@ -133,14 +119,7 @@ export async function materializeLegacyInstallation(
 
   const originalBytes = await readFile(resolve(fixture.root, "original.pdf"));
   await copyFile(resolve(fixture.root, "original.pdf"), originalPdf);
-  await copyFile(resolve(fixture.root, "original.pdf"), reviewedPdf);
   await copyFile(resolve(fixture.root, "original.pdf"), sourceSnapshotPath);
-  await writeFile(resolve(appPath, "Contents/Resources/legacy-artifact.json"), `${JSON.stringify({
-    evidence: "contract-model",
-    baseline: baseline.id,
-    daemonIdentity: baseline.daemonIdentity,
-    installArtifactIdentity: baseline.installArtifactIdentity,
-  })}\n`);
 
   const seed = JSON.parse(await readFile(resolve(fixture.root, "recovery-seed.json"), "utf8")) as {
     schemaVersion: 1;
@@ -186,53 +165,9 @@ export async function materializeLegacyInstallation(
     appPath,
     recoveryRoot,
     originalPdf,
-    reviewedPdf,
     pendingRecovery,
     legacyAnnotation: { ...annotation, inspection },
     vscodeSettings,
     legacySkill,
-  };
-}
-
-export interface LegacyUpgradeOutcome {
-  readonly outcome: "preserved" | "deferred" | "rolled-back" | "installed" | "installed-with-warning";
-  readonly commit: boolean;
-  readonly destination: typeof LEGACY_APP_DESTINATION;
-  readonly supportRoot: typeof LEGACY_SUPPORT_ROOT;
-  readonly candidateOpenedUserDocumentBeforeCommit: false;
-  readonly duplicateAppIdentity: false;
-  readonly duplicateStateRoot: false;
-  readonly registrationWarningOnly: boolean;
-}
-
-/**
- * Deterministic legacy-side contract oracle. Current helper execution is covered
- * separately by the macOS transaction tests; this function never runs old code.
- */
-export function evaluateLegacyUpgradeScenario(
-  fixture: LegacyCompatibilityFixture,
-  scenario: LegacyUpgradeScenario,
-): LegacyUpgradeOutcome {
-  if (fixture.claims.physicallyExecutesLegacyBinary !== false) {
-    throw new Error("Refusing an unfalsifiable legacy-binary claim");
-  }
-  const outcomes: Record<LegacyUpgradeScenario, Pick<LegacyUpgradeOutcome, "outcome" | "commit">> = {
-    "offline-smoke-failure": { outcome: "preserved", commit: false },
-    "active-review": { outcome: "deferred", commit: false },
-    "active-codex-task": { outcome: "deferred", commit: false },
-    "replacement-failure": { outcome: "rolled-back", commit: false },
-    "changed-hash-readiness": { outcome: "installed", commit: true },
-    "readiness-failure": { outcome: "rolled-back", commit: false },
-    "unchanged-destination": { outcome: "installed", commit: true },
-    "launch-services-failure": { outcome: "installed-with-warning", commit: true },
-  };
-  return {
-    ...outcomes[scenario],
-    destination: LEGACY_APP_DESTINATION,
-    supportRoot: LEGACY_SUPPORT_ROOT,
-    candidateOpenedUserDocumentBeforeCommit: false,
-    duplicateAppIdentity: false,
-    duplicateStateRoot: false,
-    registrationWarningOnly: scenario === "launch-services-failure",
   };
 }

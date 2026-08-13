@@ -262,9 +262,6 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   if (root.schemaVersion !== 1) throw new Error("Unsupported app bundle manifest version");
   if (root.productName !== "Placekeeper") throw new Error("The visible product name must remain Placekeeper");
   const bundleName = compatibilityValue(root.bundleName, "PDF Proofreader", "Physical bundle name");
-  if (root.productName === bundleName) {
-    throw new Error("Visible and physical bundle identities must remain separate");
-  }
   if (!Array.isArray(root.architectures) || root.architectures.length !== 1 || root.architectures[0] !== "arm64") {
     throw new Error("The source-first app target must be Apple silicon");
   }
@@ -284,7 +281,7 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   if (runtimeDataDirectory.startsWith("/") || runtimeDataDirectory.startsWith("Contents/") || runtimeDataDirectory.split("/").includes("..")) {
     throw new Error("Mutable runtime data must be a user-relative path outside the signed bundle");
   }
-  compatibilityValue(
+  const checkedRuntimeDataDirectory = compatibilityValue(
     runtimeDataDirectory,
     "Library/Application Support/PDF Proofreader",
     "Runtime data directory",
@@ -321,7 +318,7 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
     nodeVersion: boundedString(root.nodeVersion, "Node version"),
     executable: compatibilityValue(root.executable, "pdf-proofreader", "Launcher executable"),
     finderExecutable: "droplet",
-    runtimeDataDirectory,
+    runtimeDataDirectory: checkedRuntimeDataDirectory,
     icon,
     documentTypes: [{ contentType: "com.adobe.pdf", role: "Viewer", rank: "Alternate" }],
     embeddedArtifacts,
@@ -334,7 +331,28 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   };
 }
 
-type CodexSkillAlias = "placekeeper" | "pdf-proofreader";
+export const CODEX_SKILL_ALIASES = ["placekeeper", "pdf-proofreader"] as const;
+type CodexSkillAlias = (typeof CODEX_SKILL_ALIASES)[number];
+
+const CODEX_HOOK_SPECS = {
+  PostToolUse: {
+    timeout: 8,
+    additionalContextLimit: 131072,
+    statusMessage: "Connecting Placekeeper context",
+    matcher: "^Bash$",
+  },
+  UserPromptSubmit: {
+    timeout: 8,
+    additionalContextLimit: 131072,
+    statusMessage: "Refreshing Placekeeper context",
+  },
+  SessionEnd: {
+    timeout: 3,
+    additionalContextLimit: 256,
+    statusMessage: "Disconnecting Placekeeper context",
+  },
+} as const;
+type CodexHookEvent = keyof typeof CODEX_HOOK_SPECS;
 
 export function normalizeCodexSkillContract(
   skill: string,
@@ -386,9 +404,7 @@ async function requiredSkill(pluginRoot: string, alias: CodexSkillAlias): Promis
   }
 }
 
-export async function validateCodexPlugin(pluginRoot: string): Promise<void> {
-  const plugin = JSON.parse(await readFile(resolve(pluginRoot, ".codex-plugin/plugin.json"), "utf8")) as unknown;
-  const pluginManifest = record(plugin, "Codex plugin manifest");
+function validatePluginIdentity(pluginManifest: Record<string, unknown>): void {
   if (pluginManifest.skills !== "./skills/") throw new Error("The Codex plugin must expose its installed skill directory");
   const pluginAuthor = record(pluginManifest.author, "Codex plugin author");
   const pluginInterface = record(pluginManifest.interface, "Codex plugin interface");
@@ -402,43 +418,27 @@ export async function validateCodexPlugin(pluginRoot: string): Promise<void> {
   if (pluginInterface.defaultPrompt !== "Open this local PDF in Placekeeper with $placekeeper.") {
     throw new Error("The packaged Codex plugin default prompt must prefer $placekeeper");
   }
+}
 
-  const hooks = JSON.parse(await readFile(resolve(pluginRoot, "hooks/hooks.json"), "utf8")) as unknown;
-  const hookManifest = record(hooks, "Codex hook manifest");
+function validateHookContract(hookManifest: Record<string, unknown>): void {
   if (hookManifest.description !== "Task-scoped Placekeeper lifecycle hooks.") {
     throw new Error("The packaged Codex hook description must use Placekeeper");
   }
   const hooksRoot = record(hookManifest.hooks, "Codex hook events");
-  const expectedEvents = ["PostToolUse", "SessionEnd", "UserPromptSubmit"];
+  const expectedEvents = Object.keys(CODEX_HOOK_SPECS).sort();
   if (Object.keys(hooksRoot).sort().join("\0") !== expectedEvents.join("\0")) {
     throw new Error("The packaged Codex plugin must declare one plugin-global hook set");
   }
-  const expectedHooks = {
-    PostToolUse: {
-      timeout: 8,
-      additionalContextLimit: 131072,
-      statusMessage: "Connecting Placekeeper context",
-      matcher: "^Bash$",
-    },
-    UserPromptSubmit: {
-      timeout: 8,
-      additionalContextLimit: 131072,
-      statusMessage: "Refreshing Placekeeper context",
-    },
-    SessionEnd: {
-      timeout: 3,
-      additionalContextLimit: 256,
-      statusMessage: "Disconnecting Placekeeper context",
-    },
-  } as const;
-  for (const event of ["PostToolUse", "UserPromptSubmit", "SessionEnd"] as const) {
-    if (!Array.isArray(hooksRoot[event]) || hooksRoot[event].length !== 1) {
+  for (const event of Object.keys(CODEX_HOOK_SPECS) as CodexHookEvent[]) {
+    const declarations = hooksRoot[event];
+    if (!Array.isArray(declarations) || declarations.length !== 1) {
       throw new Error(`The packaged Codex plugin must declare exactly one ${event} hook`);
     }
 
-    const declaration = record(hooksRoot[event][0], `${event} hook declaration`);
-    const expectedMatcher = "matcher" in expectedHooks[event]
-      ? expectedHooks[event].matcher
+    const declaration = record(declarations[0], `${event} hook declaration`);
+    const expected = CODEX_HOOK_SPECS[event];
+    const expectedMatcher = "matcher" in expected
+      ? expected.matcher
       : undefined;
     if (declaration.matcher !== expectedMatcher) {
       throw new Error(`The packaged ${event} hook matcher changed`);
@@ -451,7 +451,6 @@ export async function validateCodexPlugin(pluginRoot: string): Promise<void> {
     if (handler.type !== "command" || handler.command !== expectedCommand) {
       throw new Error(`The packaged ${event} hook must use the canonical installed launcher command`);
     }
-    const expected = expectedHooks[event];
     if (
       handler.timeout !== expected.timeout ||
       handler.additionalContextLimit !== expected.additionalContextLimit ||
@@ -465,9 +464,13 @@ export async function validateCodexPlugin(pluginRoot: string): Promise<void> {
       );
     }
   }
+}
 
-  const canonicalSkill = await requiredSkill(pluginRoot, "placekeeper");
-  const legacySkill = await requiredSkill(pluginRoot, "pdf-proofreader");
+async function validateSkillAliasParity(pluginRoot: string): Promise<void> {
+  const [canonicalSkill, legacySkill] = await Promise.all([
+    requiredSkill(pluginRoot, "placekeeper"),
+    requiredSkill(pluginRoot, "pdf-proofreader"),
+  ]);
   const canonicalContract = normalizeCodexSkillContract(canonicalSkill, "placekeeper");
   const legacyContract = normalizeCodexSkillContract(legacySkill, "pdf-proofreader");
   if (canonicalContract !== legacyContract) {
@@ -501,8 +504,14 @@ export async function validateCodexPlugin(pluginRoot: string): Promise<void> {
     throw new Error("The packaged Placekeeper skills must not publish bare context or daemon commands");
   }
 
-  for (const alias of ["placekeeper", "pdf-proofreader"] as const) {
-    const agent = await readFile(resolve(pluginRoot, `skills/${alias}/agents/openai.yaml`), "utf8");
+}
+
+async function validateAgentMetadata(pluginRoot: string): Promise<void> {
+  const agents = await Promise.all(CODEX_SKILL_ALIASES.map((alias) =>
+    readFile(resolve(pluginRoot, `skills/${alias}/agents/openai.yaml`), "utf8"),
+  ));
+  for (const [index, alias] of CODEX_SKILL_ALIASES.entries()) {
+    const agent = agents[index] ?? "";
     if (
       !agent.includes('display_name: "Placekeeper"') ||
       !agent.includes('short_description: "Open local PDFs in Placekeeper"') ||
@@ -511,6 +520,19 @@ export async function validateCodexPlugin(pluginRoot: string): Promise<void> {
       throw new Error(`The packaged ${alias} agent metadata must expose its Placekeeper alias prompt`);
     }
   }
+}
+
+export async function validateCodexPlugin(pluginRoot: string): Promise<void> {
+  const [pluginSource, hookSource] = await Promise.all([
+    readFile(resolve(pluginRoot, ".codex-plugin/plugin.json"), "utf8"),
+    readFile(resolve(pluginRoot, "hooks/hooks.json"), "utf8"),
+  ]);
+  validatePluginIdentity(record(JSON.parse(pluginSource) as unknown, "Codex plugin manifest"));
+  validateHookContract(record(JSON.parse(hookSource) as unknown, "Codex hook manifest"));
+  await Promise.all([
+    validateSkillAliasParity(pluginRoot),
+    validateAgentMetadata(pluginRoot),
+  ]);
 }
 
 export async function validateDistributionManifests(repoRoot = process.cwd()): Promise<void> {

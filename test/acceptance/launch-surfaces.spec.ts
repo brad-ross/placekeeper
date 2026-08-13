@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
-import { CODEX_INSTALLED_LAUNCHER_COMMAND } from "../../apps/service/src/cli/hook-command.js";
+import { validateCodexPlugin } from "../../packaging/macos/validate-manifest.js";
 
 test("Finder Open With passes exactly one explicit path through the native document bridge", async () => {
   const bridge = await readFile(resolve("packaging/macos/finder-bridge.applescript"), "utf8");
@@ -18,6 +18,8 @@ test("Finder Open With passes exactly one explicit path through the native docum
 });
 
 test("Codex plugin packages launch plus task-scoped live-context hooks", async () => {
+  const pluginRoot = resolve("integrations/codex-plugin");
+  await expect(validateCodexPlugin(pluginRoot)).resolves.toBeUndefined();
   const marketplace = JSON.parse(await readFile(resolve(".agents/plugins/marketplace.json"), "utf8")) as {
     name: string;
     interface: { displayName: string };
@@ -29,11 +31,6 @@ test("Codex plugin packages launch plus task-scoped live-context hooks", async (
     }>;
   };
   const plugin = JSON.parse(await readFile(resolve("integrations/codex-plugin/.codex-plugin/plugin.json"), "utf8")) as { name: string; skills: string; author: { name: string }; interface: { displayName: string; developerName: string; defaultPrompt: string; longDescription: string } };
-  const hooks = JSON.parse(await readFile(resolve("integrations/codex-plugin/hooks/hooks.json"), "utf8")) as { description: string; hooks: Record<string, Array<{ hooks: Array<{ command: string; timeout: number; statusMessage: string }> }>> };
-  const skills = Object.fromEntries(await Promise.all(["placekeeper", "pdf-proofreader"].map(async (alias) => [
-    alias,
-    await readFile(resolve(`integrations/codex-plugin/skills/${alias}/SKILL.md`), "utf8"),
-  ])));
   expect(marketplace).toMatchObject({
     name: "placekeeper-local",
     interface: { displayName: "Placekeeper Local" },
@@ -55,27 +52,6 @@ test("Codex plugin packages launch plus task-scoped live-context hooks", async (
     },
   });
   expect(plugin.interface.longDescription).toContain("every prompt");
-  expect(hooks.description).toContain("Placekeeper");
-  expect(Object.keys(hooks.hooks).sort()).toEqual(["PostToolUse", "SessionEnd", "UserPromptSubmit"]);
-  for (const declarations of Object.values(hooks.hooks)) {
-    expect(declarations[0]?.hooks[0]?.command).toBe(`${CODEX_INSTALLED_LAUNCHER_COMMAND} hook --event`);
-    expect(declarations[0]?.hooks[0]?.statusMessage).toContain("Placekeeper");
-  }
-  expect(hooks.hooks.PostToolUse?.[0]?.hooks[0]?.timeout).toBeGreaterThan(5);
-  expect(hooks.hooks.UserPromptSubmit?.[0]?.hooks[0]?.timeout).toBeGreaterThan(5);
-  expect(hooks.hooks.SessionEnd?.[0]?.hooks[0]?.timeout).toBe(3);
-  for (const [alias, skill] of Object.entries(skills)) {
-    expect(skill).toContain(`name: ${alias}`);
-    expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf`);
-    expect(skill).toContain("desktop built-in browser");
-    expect(skill).toContain("pdf-proofreader-live-context");
-    expect(skill).toContain("context evidence --handle");
-    expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} context items --handle`);
-    expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} context changes --handle`);
-    expect(skill).not.toMatch(/(^|[^/A-Za-z0-9_-])pdf-proofreader\s+(context|daemon)\b/mu);
-    expect(skill).toContain("Do not submit");
-    expect(skill).not.toContain("[TODO:");
-  }
 });
 
 test("VS Code manifest is desktop-local and exposes one PDF command", async () => {
