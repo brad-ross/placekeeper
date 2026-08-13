@@ -271,10 +271,10 @@ export function formatPromptContext(
 ): string {
   if (result.status === "unavailable") {
     const recovery = result.reason === "pending"
-      ? "The task claim is pending browser authentication. Finish opening the already launched PDF Proofreader tab, then ask again."
+      ? "The task claim is pending browser authentication. Finish opening the already launched Placekeeper tab, then ask again."
       : result.reason === "expired"
         ? `The task binding expired. Reopen the PDF with ${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf <absolute-pdf-path>, then ask again.`
-        : "No current task binding is available. Reopen the PDF in PDF Proofreader from this task if live context is needed.";
+        : "No current task binding is available. Reopen the PDF in Placekeeper from this task if live context is needed.";
     return JSON.stringify({
       kind: "pdf-proofreader-live-context",
       schemaVersion: 1,
@@ -370,7 +370,7 @@ function hookOutput(
 function timeoutFailure(): HookFailureContext {
   return {
     kind: "service-timeout",
-    recovery: "The local refresh exceeded its five-second control deadline. Do not use cached context for this prompt. Retry with the next prompt; if it repeats, reopen the PDF in PDF Proofreader.",
+    recovery: "The local refresh exceeded its five-second control deadline. Do not use cached context for this prompt. Retry with the next prompt; if it repeats, reopen the PDF in Placekeeper.",
   };
 }
 
@@ -401,7 +401,7 @@ export async function runHookCommand(
       if (response.kind === "binding" && response.result.status !== "denied") {
         await write(`${JSON.stringify(hookOutput(
           "PostToolUse",
-          "PDF Proofreader associated this launch with the current task. Live context will become current after the in-app browser completes its authenticated bootstrap.",
+          "Placekeeper associated this launch with the current task. Live context will become current after the in-app browser completes its authenticated bootstrap.",
         ))}\n`);
       }
     } else if (event.kind === "refresh") {
@@ -435,8 +435,8 @@ export async function runHookCommand(
     if (event.kind === "claim" && timedOut) {
       await write(`${JSON.stringify(hookOutput(
         "PostToolUse",
-        "PDF Proofreader could not associate this launch because the local service timed out. Rerun the exact installed launch command to retry; do not infer a binding from the open browser.",
-        "PDF Proofreader binding timed out; rerun the installed launch command to restore live context.",
+        "Placekeeper could not associate this launch because the local service timed out. Rerun the exact installed launch command to retry; do not infer a binding from the open browser.",
+        "Placekeeper binding timed out; rerun the installed launch command to restore live context.",
       ))}\n`);
     }
     if (event.kind === "refresh") {
@@ -449,7 +449,7 @@ export async function runHookCommand(
           reason: "unavailable",
         }, timedOut ? timeoutFailure() : undefined),
         timedOut
-          ? "PDF Proofreader live context timed out; cached PDF and annotation state are unavailable for this prompt."
+          ? "Placekeeper live context timed out; cached PDF and annotation state are unavailable for this prompt."
           : undefined,
       ))}\n`);
     }

@@ -124,7 +124,7 @@ export function buildReviewWebviewHtml(serviceUrl: string, nonce: string): strin
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src ${origin}; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}';">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style nonce="${nonce}">html,body,iframe{width:100%;height:100%;margin:0;border:0;overflow:hidden}</style></head>
-<body><iframe id="review" title="PDF Proofreader" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads"></iframe>
+<body><iframe id="review" title="Placekeeper" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads"></iframe>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
 addEventListener('message', (event) => {

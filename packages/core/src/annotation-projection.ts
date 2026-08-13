@@ -1,6 +1,9 @@
 import type { ReviewAnnotation } from "./pdf-writer.js";
 import type { JsonValue, ReviewItem } from "./review-model.js";
-import { createPortableAnnotationCustom } from "./portable-annotation.js";
+import {
+  createPortableAnnotationCustom,
+  PORTABLE_ANNOTATION_AUTHOR,
+} from "./portable-annotation.js";
 
 function record(
   value: JsonValue | undefined,
@@ -31,7 +34,7 @@ function text(payload: ReviewItem["payload"], field: string): string {
 
 export function projectReviewItem(
   item: ReviewItem,
-  author = "PDF Proofreader",
+  author = PORTABLE_ANNOTATION_AUTHOR,
 ): ReviewAnnotation {
   const projectedRect = rect(item.payload.rect) ?? rect(item.payload.position);
   if (!projectedRect) {

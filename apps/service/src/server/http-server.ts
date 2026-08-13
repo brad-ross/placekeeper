@@ -127,7 +127,7 @@ function bootstrapHtml(sessionId: string, nonce: string): string {
   const app = await import("/s/${sessionId}/assets/app.js");
   await app.start(window.__proofreaderSession);
 })().catch(() => { document.body.textContent = "Unable to open this review session."; });`;
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>PDF Proofreader</title></head><body><div id="root"></div><script type="module" nonce="${nonce}">${script}</script></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Placekeeper</title></head><body><div id="root"></div><script type="module" nonce="${nonce}">${script}</script></body></html>`;
 }
 
 function assetContentType(path: string): string {
@@ -173,7 +173,7 @@ export async function startHttpServer(
   const server = createServer(async (request, response) => {
     const activity = options.lifecycle?.enterActivity();
     if (options.lifecycle !== undefined && activity === undefined) {
-      send(response, 503, "PDF Proofreader is restarting; retry shortly.");
+      send(response, 503, "Placekeeper is restarting; retry shortly.");
       return;
     }
     response.once("finish", () => activity?.complete());

@@ -34,7 +34,7 @@ export interface LifecycleLockOptions {
 
 export class LifecycleLockTimeoutError extends Error {
   constructor() {
-    super("PDF Proofreader lifecycle coordination is busy");
+    super("Placekeeper lifecycle coordination is busy");
     this.name = "LifecycleLockTimeoutError";
   }
 }

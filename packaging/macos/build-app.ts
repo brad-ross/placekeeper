@@ -5,7 +5,12 @@ import { isBuiltin } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { validateAppBundleManifest, validateBackendRuntimeManifest } from "./validate-manifest.js";
+import {
+  MAC_ICON_REPRESENTATIONS,
+  validateAppBundleManifest,
+  validateBackendRuntimeManifest,
+  validateMacIconSet,
+} from "./validate-manifest.js";
 import { MANAGEMENT_PROTOCOL_VERSION } from "../../apps/service/src/host/launch-control.js";
 
 export const BUILD_IDENTITY_FILENAME = "build-identity.json";
@@ -36,13 +41,51 @@ interface BuildOptions {
 
 async function run(command: string, args: readonly string[]): Promise<string> {
   return await new Promise<string>((resolvePromise, reject) => {
-    const child = spawn(command, [...args], { shell: false, stdio: ["ignore", "pipe", "inherit"] });
+    const child = spawn(command, [...args], { shell: false, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
+    let stderr = Buffer.alloc(0);
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr.on("data", (chunk: Buffer) => {
+      const combined = Buffer.concat([stderr, chunk]);
+      stderr = combined.subarray(Math.max(0, combined.byteLength - 64 * 1024));
+    });
     child.once("error", reject);
-    child.once("exit", (code) => code === 0 ? resolvePromise(stdout.trim()) : reject(new Error(`${basename(command)} failed with exit code ${code ?? "unknown"}`)));
+    child.once("exit", (code) => code === 0
+      ? resolvePromise(stdout.trim())
+      : reject(new Error(`${basename(command)} failed with exit code ${code ?? "unknown"}: ${stderr.toString("utf8").trim()}`)));
   });
+}
+
+async function packMacIconSet(iconsetPath: string, outputPath: string): Promise<void> {
+  const chunks = await Promise.all(MAC_ICON_REPRESENTATIONS.map(async ([filename, , chunkType]) => {
+    const png = await readFile(resolve(iconsetPath, filename));
+    const chunk = Buffer.alloc(8 + png.byteLength);
+    chunk.write(chunkType, 0, 4, "ascii");
+    chunk.writeUInt32BE(chunk.byteLength, 4);
+    png.copy(chunk, 8);
+    return chunk;
+  }));
+  const header = Buffer.alloc(8);
+  header.write("icns", 0, 4, "ascii");
+  header.writeUInt32BE(8 + chunks.reduce((length, chunk) => length + chunk.byteLength, 0), 4);
+  await writeFile(outputPath, Buffer.concat([header, ...chunks]), { mode: 0o644 });
+}
+
+/** Compile with Apple's iconutil. macOS 26.5 may reject even an iconset that
+ * iconutil itself reverse-expanded; its deterministic chunk-container fallback
+ * preserves the same ten standard representations and remains readable by
+ * iconutil in the reverse direction. */
+export async function compileMacIcon(iconsetPath: string, outputPath: string): Promise<void> {
+  await validateMacIconSet(iconsetPath);
+  try {
+    await run("/usr/bin/iconutil", ["-c", "icns", iconsetPath, "-o", outputPath]);
+  } catch (error) {
+    if (process.platform !== "darwin" || !(error instanceof Error) || !error.message.includes("Invalid Iconset")) {
+      throw error;
+    }
+    await packMacIconSet(iconsetPath, outputPath);
+  }
 }
 
 function hashField(hash: Hash, field: string | Buffer): void {
@@ -112,23 +155,24 @@ function xml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
-function infoPlist(manifest: ReturnType<typeof validateAppBundleManifest>): string {
+export function infoPlist(manifest: ReturnType<typeof validateAppBundleManifest>): string {
   const document = manifest.documentTypes[0];
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleDevelopmentRegion</key><string>en</string>
-<key>CFBundleDisplayName</key><string>${xml(manifest.productName)}</string>
+<key>CFBundleDisplayName</key><string>${xml(manifest.bundleName)}</string>
 <key>CFBundleExecutable</key><string>${xml(manifest.finderExecutable)}</string>
 <key>CFBundleIdentifier</key><string>${xml(manifest.bundleIdentifier)}</string>
 <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-<key>CFBundleName</key><string>${xml(manifest.productName)}</string>
+<key>CFBundleName</key><string>${xml(manifest.bundleName)}</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>${xml(manifest.bundleVersion)}</string>
 <key>CFBundleVersion</key><string>${xml(manifest.bundleVersion)}</string>
-<key>CFBundleIconFile</key><string>droplet</string>
+<key>CFBundleIconFile</key><string>${xml(manifest.icon.file)}</string>
 <key>CFBundleSignature</key><string>dplt</string>
 <key>LSMinimumSystemVersion</key><string>${xml(manifest.minimumSystemVersion)}</string>
+<key>LSHasLocalizedDisplayName</key><true/>
 <key>LSMultipleInstancesProhibited</key><true/>
 <key>OSAAppletShowStartupScreen</key><false/>
 <key>CFBundleDocumentTypes</key><array><dict>
@@ -138,6 +182,26 @@ function infoPlist(manifest: ReturnType<typeof validateAppBundleManifest>): stri
   <key>LSItemContentTypes</key><array><string>${document.contentType}</string></array>
 </dict></array>
 </dict></plist>\n`;
+}
+
+function stringsLiteral(value: string): string {
+  return value
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("\n", "\\n")
+    .replaceAll("\r", "\\r");
+}
+
+export function infoPlistStrings(manifest: ReturnType<typeof validateAppBundleManifest>): string {
+  const productName = stringsLiteral(manifest.productName);
+  return `"CFBundleDisplayName" = "${productName}";\n"CFBundleName" = "${productName}";\n`;
+}
+
+export function appBundlePath(
+  outputDirectory: string,
+  manifest: ReturnType<typeof validateAppBundleManifest>,
+): string {
+  return resolve(outputDirectory, `${manifest.bundleName}.app`);
 }
 
 function launcherScript(): string {
@@ -190,6 +254,8 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   const serviceEntry = resolve(options.serviceDist, "main.js");
   const vscodeDist = resolve(repoRoot, appManifest.embeddedArtifacts.vscodeExtension, "dist");
   const codexPlugin = resolve(repoRoot, appManifest.embeddedArtifacts.codexPlugin);
+  const iconMaster = resolve(repoRoot, appManifest.icon.master);
+  const iconset = resolve(repoRoot, appManifest.icon.source);
   for (const required of [
     options.nodeRuntime,
     serviceEntry,
@@ -197,14 +263,19 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
     resolve(vscodeDist, "extension.js"),
     resolve(codexPlugin, ".codex-plugin/plugin.json"),
     resolve(codexPlugin, "hooks/hooks.json"),
+    resolve(codexPlugin, "skills/placekeeper/SKILL.md"),
+    resolve(codexPlugin, "skills/placekeeper/agents/openai.yaml"),
     resolve(codexPlugin, "skills/pdf-proofreader/SKILL.md"),
+    resolve(codexPlugin, "skills/pdf-proofreader/agents/openai.yaml"),
+    iconMaster,
   ]) await access(required);
+  await validateMacIconSet(iconset);
   await assertSelfContainedService(serviceEntry);
   const version = (await run(options.nodeRuntime, ["--version"])).replace(/^v/u, "");
   if (version !== appManifest.nodeVersion) throw new Error(`Expected Node ${appManifest.nodeVersion}, received ${version}`);
   if (process.arch !== options.arch) throw new Error(`Build host architecture ${process.arch} does not match ${options.arch}`);
 
-  const appPath = resolve(options.outputDirectory, `${appManifest.productName}.app`);
+  const appPath = appBundlePath(options.outputDirectory, appManifest);
   try {
     await lstat(appPath);
     throw new Error(`Refusing to overwrite existing bundle: ${appPath}`);
@@ -234,6 +305,10 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
     await copyFile(resolve(repoRoot, asset.source), destination);
   }
   await writeFile(resolve(contents, "Info.plist"), infoPlist(appManifest), { mode: 0o644 });
+  const englishResources = resolve(resources, "en.lproj");
+  await mkdir(englishResources, { recursive: true, mode: 0o755 });
+  await writeFile(resolve(englishResources, "InfoPlist.strings"), infoPlistStrings(appManifest), { mode: 0o644 });
+  await compileMacIcon(iconset, resolve(resources, `${appManifest.icon.file}.icns`));
   await copyFile(resolve(repoRoot, "packaging/macos/launcher.mjs"), resolve(resources, "launcher.mjs"));
   await writeFile(launcherPath, launcherScript(), { mode: 0o755 });
   const buildIdentity = await computePackagedBuildIdentity({

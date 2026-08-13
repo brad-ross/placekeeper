@@ -1,18 +1,18 @@
 {
   "name": "codex-plugin",
   "version": "0.1.0",
-  "description": "Open a local PDF and keep its content and annotations current in the hosting Codex task.",
+  "description": "Open a local PDF in Placekeeper and keep its content and annotations current in the hosting Codex task.",
   "author": {
-    "name": "PDF Proofreader"
+    "name": "Placekeeper"
   },
   "skills": "./skills/",
   "interface": {
-    "displayName": "PDF Proofreader",
+    "displayName": "Placekeeper",
     "shortDescription": "Review a local PDF with live task context.",
     "longDescription": "Launches one explicitly referenced local PDF in the desktop built-in browser, then uses packaged lifecycle hooks to provide task-scoped PDF and annotation context on every prompt.",
-    "developerName": "PDF Proofreader",
+    "developerName": "Placekeeper",
     "category": "Productivity",
     "capabilities": [],
-    "defaultPrompt": "Open this local PDF in PDF Proofreader."
+    "defaultPrompt": "Open this local PDF in Placekeeper with $placekeeper."
   }
 }

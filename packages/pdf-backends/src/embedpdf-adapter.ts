@@ -27,6 +27,7 @@ import type {
 } from '../../core/src/pdf-writer.js';
 import {
   inspectPortableAnnotation,
+  inspectProjectedPortableAnnotation,
   type VisiblePortableAnnotation,
 } from '../../core/src/portable-annotation.js';
 import type { JsonValue, ReviewItem, ReviewState } from '../../core/src/review-model.js';
@@ -354,15 +355,21 @@ function migrateLegacyStateWithPages(
 function portableItemsFromPages(
   annotationPages: readonly (readonly PdfAnnotationObject[])[],
   documentPages: PdfDocumentObject['pages'],
-): { items: ReviewItem[]; owned: Array<{ pageIndex: number; annotation: PdfAnnotationObject }> } {
+): {
+  items: ReviewItem[];
+  owned: Array<{ pageIndex: number; annotation: PdfAnnotationObject; item: ReviewItem }>;
+} {
   const counts = new Map<string, number>();
   for (const annotations of annotationPages) {
     for (const annotation of annotations) {
       counts.set(annotation.id, (counts.get(annotation.id) ?? 0) + 1);
     }
   }
-  const items: ReviewItem[] = [];
-  const owned: Array<{ pageIndex: number; annotation: PdfAnnotationObject }> = [];
+  const owned: Array<{
+    pageIndex: number;
+    annotation: PdfAnnotationObject;
+    item: ReviewItem;
+  }> = [];
   annotationPages.forEach((annotations, pageIndex) => {
     for (const annotation of annotations) {
       const inspected = inspectPortableAnnotation(
@@ -373,16 +380,14 @@ function portableItemsFromPages(
           : {},
       );
       if (inspected.status === 'owned') {
-        items.push(
-          inspected.geometryVersion === 1
-            ? migrateLegacyItemGeometry(inspected.item, documentPages[pageIndex])
-            : inspected.item,
-        );
-        owned.push({ pageIndex, annotation });
+        const item = inspected.geometryVersion === 1
+          ? migrateLegacyItemGeometry(inspected.item, documentPages[pageIndex])
+          : inspected.item;
+        owned.push({ pageIndex, annotation, item });
       }
     }
   });
-  return { items, owned };
+  return { items: owned.map(({ item }) => item), owned };
 }
 
 export async function readPortableReviewItems(bytes: Uint8Array): Promise<ReviewItem[]> {
@@ -646,8 +651,23 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
     const portable = portableItemsFromPages(beforePages, document.pages);
     const ownedIds = new Set(portable.owned.map(({ annotation }) => annotation.id));
     const foreignPreexisting = preexisting.filter(({ id }) => !ownedIds.has(id));
+    const requestedPortableItems = new Map(
+      request.annotations.flatMap((annotation) => {
+        const inspected = inspectProjectedPortableAnnotation(annotation);
+        return inspected.status === 'owned' ? [[annotation.id, inspected.item] as const] : [];
+      }),
+    );
+    const preservedOwnedIds = new Set<string>();
 
     for (const owned of portable.owned) {
+      const requested = requestedPortableItems.get(owned.annotation.id);
+      if (
+        requested !== undefined &&
+        JSON.stringify(canonical(requested)) === JSON.stringify(canonical(owned.item))
+      ) {
+        preservedOwnedIds.add(owned.annotation.id);
+        continue;
+      }
       const page = document.pages[owned.pageIndex];
       if (!page || !(await engine.removePageAnnotation(document, page, owned.annotation).toPromise())) {
         throw new PdfWriterError(
@@ -658,6 +678,7 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
     }
 
     for (const annotation of request.annotations) {
+      if (preservedOwnedIds.has(annotation.id)) continue;
       const page = document.pages[annotation.pageIndex]!;
       await engine.createPageAnnotation(document, page, mapAnnotation(annotation)).toPromise();
     }
@@ -667,7 +688,10 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
     document = undefined;
 
     const reopened = await inspectWithEngine(engine, output);
-    assertPreexistingPreserved(foreignPreexisting, reopened.annotations);
+    assertPreexistingPreserved([
+      ...foreignPreexisting,
+      ...preexisting.filter(({ id }) => preservedOwnedIds.has(id)),
+    ], reopened.annotations);
     const requestedIds = new Set(request.annotations.map(({ id }) => id));
     const created = reopened.annotations.filter(({ id }) => requestedIds.has(id));
     if (created.length !== request.annotations.length) {

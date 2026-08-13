@@ -268,6 +268,8 @@ describe("Codex lifecycle hook", () => {
     const outer = JSON.parse(write.mock.calls[0]![0] as string);
     const context = JSON.parse(outer.hookSpecificOutput.additionalContext);
     expect(outer.systemMessage).toContain("timed out");
+    expect(JSON.stringify(outer)).toContain("Placekeeper");
+    expect(JSON.stringify(outer)).not.toContain("PDF Proofreader");
     expect(context).toMatchObject({
       currentness: "unavailable",
       hookFailure: { kind: "service-timeout", recovery: expect.stringContaining("Retry") },
@@ -283,6 +285,8 @@ describe("Codex lifecycle hook", () => {
     const output = write.mock.calls[0]![0] as string;
     const outer = JSON.parse(output);
     expect(outer.systemMessage).toContain("binding timed out");
+    expect(output).toContain("Placekeeper");
+    expect(output).not.toContain("PDF Proofreader");
     expect(outer.hookSpecificOutput.additionalContext).toContain("Rerun the exact installed launch command");
     expect(output).not.toMatch(/thr_codex|review-session|bindProof|cap=|127\.0\.0\.1/u);
   });

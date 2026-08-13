@@ -280,6 +280,16 @@ describe("reviewed PDF export transaction", () => {
       }),
     );
     const frozen = await broker.freezeDelivery(opened.launch.sessionId);
+    expect(frozen.annotations).toMatchObject([{
+      author: "Placekeeper",
+      custom: {
+        pdfMarkup: {
+          owner: "pdf-markup",
+          schemaVersion: 2,
+          projection: { author: "Placekeeper" },
+        },
+      },
+    }]);
     const result: PdfWriteResult = {
       pdfBytes: reviewed,
       evidence: {

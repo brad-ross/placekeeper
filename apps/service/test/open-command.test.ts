@@ -22,7 +22,11 @@ import { DaemonLifecycleCoordinator } from "../src/host/daemon-lifecycle.js";
 import { acquireLifecycleLock } from "../src/host/lifecycle-lock.js";
 import { ProofreaderHost } from "../src/host/proofreader-host.js";
 import { coordinateUpgrade } from "../src/host/upgrade-coordinator.js";
-import { initialDaemonIsAbsent, parseOwnedLegacyProcess } from "../src/cli/daemon-command.js";
+import {
+  initialDaemonIsAbsent,
+  legacySocketOwnerLookupArgs,
+  parseOwnedLegacyProcess,
+} from "../src/cli/daemon-command.js";
 import { defaultDaemonPaths } from "../src/host/service-daemon.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 
@@ -138,14 +142,14 @@ describe("open command", () => {
       ok: false,
       error: {
         kind: "upgrade-required",
-        message: "An older PDF Proofreader service is running and cannot prove that reviews are idle. Existing work was preserved.",
+        message: "An older Placekeeper service is running and cannot prove that reviews are idle. Existing work was preserved.",
         recoveryAction: 'Close reviews, run "$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy, then retry',
       },
     });
   });
 
   it.each([
-    ["review-presence", "Close PDF Proofreader tabs or windows, then retry"],
+    ["review-presence", "Close Placekeeper tabs or windows, then retry"],
     ["codex-task", "End the bound Codex task or wait for its lease, then retry"],
     ["transient-busy", "Wait a moment, then retry"],
     ["legacy", 'Close reviews, run "$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy, then retry'],
@@ -374,6 +378,27 @@ describe("open command", () => {
     },
   );
 
+  it("requires the documented explicit legacy stop before a pre-handshake replacement", async () => {
+    let legacyStopped = false;
+    const replaceAndReady = vi.fn(async () => {});
+    const options = {
+      candidate: { daemonIdentity: "b".repeat(64), installArtifactIdentity: "c".repeat(64) },
+      installed: { daemonIdentity: "a".repeat(64), installArtifactIdentity: "a".repeat(64) },
+      inspect: async () => legacyStopped
+        ? { kind: "absent" as const }
+        : { kind: "uninspectable" as const, reason: "legacy" as const },
+      shutdown: vi.fn(),
+      waitForRetirement: vi.fn(),
+      replaceAndReady,
+    };
+
+    await expect(coordinateUpgrade(options)).rejects.toMatchObject({ reason: "legacy" });
+    expect(replaceAndReady).not.toHaveBeenCalled();
+    legacyStopped = true; // ownership-checked `daemon stop-legacy` is exercised separately below.
+    await expect(coordinateUpgrade(options)).resolves.toEqual({ status: "installed" });
+    expect(replaceAndReady).toHaveBeenCalledOnce();
+  });
+
   it("retries transient durable work before accepting idle shutdown", async () => {
     let attempts = 0;
     await expect(coordinateUpgrade({
@@ -410,6 +435,18 @@ describe("open command", () => {
       `${uid + 1} /tmp/unrelated-service daemon`,
       uid,
     )).toBeUndefined();
+  });
+
+  it("passes lsof formatting flags before the legacy socket path", () => {
+    const socketPath = "/tmp/PDF Proofreader/control.sock";
+    expect(legacySocketOwnerLookupArgs(socketPath)).toEqual([
+      "-n",
+      "-P",
+      "-a",
+      "-U",
+      "-Fpu",
+      socketPath,
+    ]);
   });
 
   it("inspects management compatibility independently from launch", async () => {

@@ -396,6 +396,8 @@ describe("persistent launch host", () => {
     const ordinaryHtml = await ordinary.text();
     expect(ordinary.headers.get("x-frame-options")).toBe("DENY");
     expect(ordinaryHtml).toContain("type=\"module\"");
+    expect(ordinaryHtml).toContain("<title>Placekeeper</title>");
+    expect(ordinaryHtml).not.toContain("<title>PDF Proofreader</title>");
     expect(ordinaryHtml).not.toContain("URL.createObjectURL");
 
     const exchanged = await fetch(`${launch.origin}/s/${launched.sessionId}/exchange`, {

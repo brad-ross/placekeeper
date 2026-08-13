@@ -267,6 +267,10 @@ export function parseOwnedLegacyProcess(
   return pids[0];
 }
 
+export function legacySocketOwnerLookupArgs(socketPath: string): string[] {
+  return ["-n", "-P", "-a", "-U", "-Fpu", socketPath];
+}
+
 async function stopLegacyDaemon(): Promise<void> {
   const paths = defaultDaemonPaths();
   const lock = await acquireLifecycleLock(
@@ -277,22 +281,22 @@ async function stopLegacyDaemon(): Promise<void> {
     const info = await lstat(paths.socketPath);
     const uid = process.getuid?.();
     if (uid === undefined || !info.isSocket() || info.uid !== uid) {
-      throw new Error("The PDF Proofreader socket is not an owned local socket");
+      throw new Error("The Placekeeper socket is not an owned local socket");
     }
     const { stdout: lsofOutput } = await execFileAsync(
       "/usr/sbin/lsof",
-      ["-n", "-P", "-a", "-U", paths.socketPath, "-Fpu"],
+      legacySocketOwnerLookupArgs(paths.socketPath),
       { timeout: 2_000, maxBuffer: 16_384 },
     );
     const pidMatch = /^p(\d+)$/mu.exec(lsofOutput);
-    if (pidMatch === null) throw new Error("No owned PDF Proofreader daemon is listening");
+    if (pidMatch === null) throw new Error("No owned Placekeeper daemon is listening");
     const { stdout: psOutput } = await execFileAsync(
       "/bin/ps",
       ["-p", pidMatch[1]!, "-o", "uid=", "-o", "command="],
       { timeout: 2_000, maxBuffer: 16_384 },
     );
     const pid = parseOwnedLegacyProcess(lsofOutput, psOutput, uid);
-    if (pid === undefined) throw new Error("The socket listener is not a validated PDF Proofreader daemon");
+    if (pid === undefined) throw new Error("The socket listener is not a validated Placekeeper daemon");
     process.kill(pid, "SIGTERM");
     await waitForSocketRetirement(paths.socketPath);
   } finally {

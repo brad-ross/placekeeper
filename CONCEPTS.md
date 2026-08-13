@@ -2,6 +2,14 @@
 
 Shared domain vocabulary for this project — entities, named processes, and status concepts with project-specific meaning. Seeded with core domain vocabulary, then accretes as ce-compound and ce-compound-refresh process learnings; direct edits are fine. Glossary only, not a spec or catch-all.
 
+## Product identity
+
+### Placekeeper
+The user-facing identity for the focused everyday PDF reader and annotator formerly named PDF Proofreader.
+
+Placekeeper emphasizes preserving the Main Reading Thread while annotations, search, and Reference Tabs support nonlinear reading.
+Compatibility identifiers and storage paths may retain the former internal name without changing the user-facing identity.
+
 ## PDF review
 
 ### Review Item

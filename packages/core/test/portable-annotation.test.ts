@@ -32,7 +32,7 @@ const visible = {
   pageIndex: 0,
   subtype: "strikeOut",
   contents: "locally unique",
-  author: "PDF Proofreader",
+  author: "Placekeeper",
   rect: { origin: { x: 72, y: 92 }, size: { width: 90, height: 16 } },
   segmentRects: [
     { origin: { x: 72, y: 92 }, size: { width: 90, height: 16 } },
@@ -41,10 +41,18 @@ const visible = {
 
 describe("portable annotation codec", () => {
   it("round-trips the full semantic item through the crop-relative v2 envelope", () => {
-    const custom = createPortableAnnotationCustom(item, projectReviewItem(item));
+    const annotation = projectReviewItem(item);
+    const custom = createPortableAnnotationCustom(item, annotation);
     const result = inspectPortableAnnotation(custom, visible);
 
     expect(result).toEqual({ status: "owned", item, geometryVersion: 2 });
+    expect(annotation.author).toBe("Placekeeper");
+    expect(custom.pdfMarkup).toMatchObject({
+      owner: "pdf-markup",
+      schemaVersion: 2,
+      itemId: item.id,
+      projection: { author: "Placekeeper" },
+    });
     expect(JSON.stringify(custom)).toContain('"pdfMarkup"');
     expect(JSON.stringify(custom)).not.toContain("sourceRootId");
   });
@@ -59,14 +67,36 @@ describe("portable annotation codec", () => {
   });
 
   it("recognizes legacy v1 geometry so the PDF backend can migrate it", () => {
-    const current = createPortableAnnotationCustom(item, projectReviewItem(item));
+    const legacyAnnotation = projectReviewItem(item, "PDF Proofreader");
+    const current = createPortableAnnotationCustom(item, legacyAnnotation);
     const legacy = { pdfMarkup: { ...current.pdfMarkup, schemaVersion: 1 as const } };
 
-    expect(inspectPortableAnnotation(legacy, visible)).toEqual({
+    expect(inspectPortableAnnotation(legacy, { ...visible, author: "PDF Proofreader" })).toEqual({
       status: "owned",
       item,
       geometryVersion: 1,
     });
+  });
+
+  it("accepts only exact app author generations after validating the owned envelope", () => {
+    for (const author of ["Placekeeper", "PDF Proofreader"] as const) {
+      const annotation = projectReviewItem(item, author);
+      expect(inspectPortableAnnotation(annotation.custom, { ...visible, author })).toEqual({
+        status: "owned",
+        item,
+        geometryVersion: 2,
+      });
+    }
+
+    const unrelated = projectReviewItem(item, "Placekeeper Preview");
+    expect(inspectPortableAnnotation(unrelated.custom, {
+      ...visible,
+      author: "Placekeeper Preview",
+    })).toMatchObject({ status: "invalid", reason: "unsupported-author" });
+    expect(inspectPortableAnnotation(undefined, {
+      ...visible,
+      author: "Placekeeper",
+    })).toEqual({ status: "foreign" });
   });
 
   it("rejects mismatched visible projection and duplicate visible IDs", () => {
@@ -110,7 +140,7 @@ describe("portable annotation codec", () => {
       pageIndex: 0,
       subtype: "text",
       contents: "Check this page.",
-      author: "PDF Proofreader",
+      author: "Placekeeper",
       rect: { origin: { x: 40, y: 48 }, size: { width: 20, height: 20 } },
     };
 

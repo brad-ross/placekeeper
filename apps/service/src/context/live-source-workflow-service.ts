@@ -15,6 +15,9 @@ import {
 } from "../../../../packages/core/src/live-context.js";
 import type { ReviewItem } from "../../../../packages/core/src/review-model.js";
 import {
+  isPortableAnnotationAuthor,
+} from "../../../../packages/core/src/portable-annotation.js";
+import {
   inspectPdfWithEmbedPdf,
   type InspectedPdf,
 } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
@@ -345,11 +348,13 @@ export class LiveSourceWorkflowService {
     if (!Number.isSafeInteger(inspected.pageCount) || inspected.pageCount <= 0) {
       throw new Error("The rebuilt PDF could not be structurally observed");
     }
+    const validatedOwnedIds = new Set(inspected.portableItems.map(({ id }) => id));
     const inheritedReview = inspected.portableItems.some(({ id }) => plan.baselineItemIds.has(id)) ||
       inspected.annotations.some((annotation) =>
         plan.baselineItemIds.has(annotation.id) ||
-        annotation.author === "PDF Proofreader" ||
-        annotation.subtype !== "link",
+        validatedOwnedIds.has(annotation.id) &&
+          annotation.author !== undefined &&
+          isPortableAnnotationAuthor(annotation.author),
       );
     if (inheritedReview) throw new Error("The rebuilt PDF still contains review annotations");
     const verificationId = this.#id();

@@ -1,9 +1,9 @@
 ---
 name: pdf-proofreader
-description: Open one explicitly referenced local PDF in the installed PDF Proofreader and navigate the Codex desktop built-in browser to its scoped loopback review session. Use when the user asks to proofread, annotate, mark up, or review a local .pdf file in PDF Proofreader. Reject missing, multiple, remote, or non-PDF inputs through the launcher's shared errors.
+description: Legacy alias for opening one explicitly referenced local PDF in Placekeeper and navigating the Codex desktop built-in browser to its scoped loopback review session. Use when the user invokes $pdf-proofreader or asks to proofread, annotate, mark up, or review a local .pdf file. Reject missing, multiple, remote, or non-PDF inputs through the launcher's shared errors.
 ---
 
-# PDF Proofreader
+# Placekeeper
 
 ## Launch workflow
 
@@ -56,7 +56,7 @@ description: Open one explicitly referenced local PDF in the installed PDF Proof
 
   `"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" context source reconcile --handle <current-handle> --execution <execution-id> --guards-file <absolute-private-json-path>`
 
-  Apply only a still-`independent` result. Make the edit with ordinary Codex source tools; the proofreader provider never writes source and never bypasses sandbox or approval gates. If the guarded recheck changes classification or fails, do not write.
+  Apply only a still-`independent` result. Make the edit with ordinary Codex source tools; the Placekeeper provider never writes source and never bypasses sandbox or approval gates. If the guarded recheck changes classification or fails, do not write.
 - For a user-requested clean rebuild, ask the service to fence the intended output and exact user-specified build command:
 
   `"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" context source rebuild-plan --handle <current-handle> --execution <execution-id> --command <command> --output <source-root-relative-pdf>`
@@ -78,4 +78,4 @@ description: Open one explicitly referenced local PDF in the installed PDF Proof
 - Keep all review state in the installed local service. Do not upload the PDF or request network access.
 - Do not submit, create, or monitor another Codex task. Continue discussion and user-requested source work in this hosting task under ordinary Codex permissions.
 - Do not bypass ordinary permission prompts or retry an unsupported remote or virtual path through copying or port forwarding.
-- If the desktop built-in browser is unavailable, report that PDF Proofreader requires Codex desktop; do not substitute an undocumented URL scheme.
+- If the desktop built-in browser is unavailable, report that Placekeeper requires Codex desktop; do not substitute an undocumented URL scheme.

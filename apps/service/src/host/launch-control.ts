@@ -98,28 +98,28 @@ function upgradePresentation(reason: DaemonUpgradeReason): {
   readonly recoveryAction: string;
 } {
   if (reason === "review-presence") return {
-    message: "PDF Proofreader has active reviews. The upgrade was deferred and existing work was preserved.",
-    recoveryAction: "Close PDF Proofreader tabs or windows, then retry",
+    message: "Placekeeper has active reviews. The upgrade was deferred and existing work was preserved.",
+    recoveryAction: "Close Placekeeper tabs or windows, then retry",
   };
   if (reason === "codex-task") return {
-    message: "PDF Proofreader has an active Codex task. The upgrade was deferred and existing work was preserved.",
+    message: "Placekeeper has an active Codex task. The upgrade was deferred and existing work was preserved.",
     recoveryAction: "End the bound Codex task or wait for its lease, then retry",
   };
   if (reason === "transient-busy") return {
-    message: "PDF Proofreader is finishing saved work or another lifecycle operation. Existing work was preserved.",
+    message: "Placekeeper is finishing saved work or another lifecycle operation. Existing work was preserved.",
     recoveryAction: "Wait a moment, then retry",
   };
   if (reason === "legacy") return {
-    message: "An older PDF Proofreader service is running and cannot prove that reviews are idle. Existing work was preserved.",
+    message: "An older Placekeeper service is running and cannot prove that reviews are idle. Existing work was preserved.",
     recoveryAction: 'Close reviews, run "$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy, then retry',
   };
   if (["timeout", "malformed", "oversized", "early-close"].includes(reason)) return {
-    message: "PDF Proofreader could not safely inspect the running service. The upgrade was deferred and existing work was preserved.",
+    message: "Placekeeper could not safely inspect the running service. The upgrade was deferred and existing work was preserved.",
     recoveryAction: "Close active work, then retry",
   };
   return {
-    message: "PDF Proofreader is already running an incompatible service build. Existing reviews were preserved.",
-    recoveryAction: "Close PDF Proofreader reviews and retry",
+    message: "Placekeeper is already running an incompatible service build. Existing reviews were preserved.",
+    recoveryAction: "Close Placekeeper reviews and retry",
   };
 }
 

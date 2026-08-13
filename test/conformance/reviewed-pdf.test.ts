@@ -8,6 +8,8 @@ import type {
   PdfStructuralEvidence,
   ReviewAnnotation,
 } from "../../packages/core/src/pdf-writer.js";
+import { projectReviewItem } from "../../packages/core/src/annotation-projection.js";
+import type { ReviewItem } from "../../packages/core/src/review-model.js";
 import { createSelectedPdfWriter } from "../../packages/pdf-backends/src/selected-writer.js";
 import { inspectPdfWithEmbedPdf } from "../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { ExportCoordinator } from "../../apps/service/src/export/export-coordinator.js";
@@ -35,7 +37,7 @@ const annotations: readonly ReviewAnnotation[] = [
     rect: { x: 72, y: 92, width: 130, height: 14 },
     quadPoints: [{ x: 72, y: 92, width: 130, height: 14 }],
     contents: "locally unique equilibrium",
-    author: "PDF Proofreader",
+    author: "Placekeeper",
     createdAt: timestamp,
     modifiedAt: timestamp,
     textAnchorReliable: true,
@@ -47,7 +49,7 @@ const annotations: readonly ReviewAnnotation[] = [
     rect: { x: 210, y: 92, width: 45, height: 14 },
     quadPoints: [{ x: 210, y: 92, width: 45, height: 14 }],
     contents: "",
-    author: "PDF Proofreader",
+    author: "Placekeeper",
     createdAt: timestamp,
     modifiedAt: timestamp,
     textAnchorReliable: true,
@@ -58,7 +60,7 @@ const annotations: readonly ReviewAnnotation[] = [
     pageIndex: 0,
     rect: { x: 265, y: 88, width: 14, height: 20 },
     contents: "however",
-    author: "PDF Proofreader",
+    author: "Placekeeper",
     createdAt: timestamp,
     modifiedAt: timestamp,
     textAnchorReliable: true,
@@ -70,7 +72,7 @@ const annotations: readonly ReviewAnnotation[] = [
     rect: { x: 72, y: 120, width: 180, height: 16 },
     quadPoints: [{ x: 72, y: 120, width: 180, height: 16 }],
     contents: "Check this argument.",
-    author: "PDF Proofreader",
+    author: "Placekeeper",
     createdAt: timestamp,
     modifiedAt: timestamp,
     textAnchorReliable: true,
@@ -81,7 +83,7 @@ const annotations: readonly ReviewAnnotation[] = [
     pageIndex: 0,
     rect: { x: 500, y: 700, width: 24, height: 24 },
     contents: "Page-level comment.",
-    author: "PDF Proofreader",
+    author: "Placekeeper",
     createdAt: timestamp,
     modifiedAt: timestamp,
   },
@@ -149,7 +151,93 @@ describe("reviewed PDF conformance", () => {
       expect(written?.pageIndex).toBe(annotation.pageIndex);
       expect(written?.flags).toContain("print");
       expect(written?.hasNormalAppearance).toBe(true);
+      expect(written?.author).toBe("Placekeeper");
     }
+  }, 60_000);
+
+  it("round-trips mixed app generations without rewriting untouched legacy metadata", async () => {
+    const source = new Uint8Array(
+      await readFile(resolve("test/fixtures/pdfs/text-native.pdf")),
+    );
+    const legacyEdited: ReviewItem = {
+      id: "60000000-0000-4000-8000-000000000006",
+      kind: "highlight",
+      pageIndex: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      payload: {
+        quote: "unique equilibrium",
+        prefix: "text: ",
+        suffix: " clearly",
+        rect: { x: 72, y: 92, width: 150, height: 16 },
+        segmentRects: [{ x: 72, y: 92, width: 150, height: 16 }],
+        reliable: true,
+        comment: "Legacy edit",
+      },
+    };
+    const legacyUntouched: ReviewItem = {
+      id: "70000000-0000-4000-8000-000000000007",
+      kind: "pageNote",
+      pageIndex: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      payload: {
+        position: { x: 450, y: 650, width: 18, height: 18 },
+        comment: "Untouched legacy note",
+      },
+    };
+    const external: ReviewAnnotation = {
+      kind: "highlight",
+      id: "external-placekeeper-preview",
+      pageIndex: 0,
+      rect: { x: 72, y: 140, width: 100, height: 14 },
+      quadPoints: [{ x: 72, y: 140, width: 100, height: 14 }],
+      contents: "External review",
+      author: "Placekeeper Preview",
+      createdAt: timestamp,
+      modifiedAt: timestamp,
+      textAnchorReliable: true,
+    };
+    const writer = await createSelectedPdfWriter();
+    const seeded = await writer.write({
+      sourcePdf: source,
+      sourceSha256: sha256(source),
+      revision: 1,
+      annotations: [
+        projectReviewItem(legacyEdited, "PDF Proofreader"),
+        projectReviewItem(legacyUntouched, "PDF Proofreader"),
+        external,
+      ],
+    });
+    const edited: ReviewItem = {
+      ...legacyEdited,
+      updatedAt: "2026-08-07T12:01:00.000Z",
+      payload: { ...legacyEdited.payload, comment: "Edited after upgrade" },
+    };
+    const roundTripped = await writer.write({
+      sourcePdf: seeded.pdfBytes,
+      sourceSha256: sha256(seeded.pdfBytes),
+      revision: 2,
+      annotations: [projectReviewItem(edited), projectReviewItem(legacyUntouched)],
+    });
+    const inspected = await inspectPdfWithEmbedPdf(roundTripped.pdfBytes);
+
+    expect(inspected.portableItems).toEqual(expect.arrayContaining([edited, legacyUntouched]));
+    expect(inspected.portableItems).toHaveLength(2);
+    expect(inspected.annotations.find(({ id }) => id === edited.id)).toMatchObject({
+      author: "Placekeeper",
+      hasNormalAppearance: true,
+      custom: { pdfMarkup: { owner: "pdf-markup", schemaVersion: 2, itemId: edited.id } },
+    });
+    expect(inspected.annotations.find(({ id }) => id === legacyUntouched.id)).toMatchObject({
+      author: "PDF Proofreader",
+      hasNormalAppearance: true,
+      custom: { pdfMarkup: { owner: "pdf-markup", schemaVersion: 2, itemId: legacyUntouched.id } },
+    });
+    expect(inspected.annotations.find(({ id }) => id === external.id)).toMatchObject({
+      author: "Placekeeper Preview",
+      contents: external.contents,
+    });
   }, 60_000);
 
   it("preserves generated links whose PDF dictionary has no persistent annotation ID", async () => {

@@ -860,7 +860,7 @@ export function App({
 
   const content = (
     <main>
-      <h1>Local PDF Proofreader</h1>
+      <h1>Placekeeper</h1>
       <p data-document-title>{documentTitle}</p>
       <section aria-label="PDF review workspace">
         <div role="toolbar" aria-label="Review tools">

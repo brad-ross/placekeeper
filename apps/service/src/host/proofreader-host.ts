@@ -169,8 +169,8 @@ export class ProofreaderHost {
       ok: false,
       error: {
         kind: "upgrade-required",
-        message: "PDF Proofreader is restarting after an upgrade. Retry this launch.",
-        recoveryAction: "Close PDF Proofreader reviews and retry",
+        message: "Placekeeper is restarting after an upgrade. Retry this launch.",
+        recoveryAction: "Close Placekeeper reviews and retry",
       },
     };
   }

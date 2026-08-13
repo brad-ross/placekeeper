@@ -3,7 +3,7 @@ import { copyFile, cp, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile }
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { validateBackendRuntimeManifest } from "./validate-manifest.js";
+import { validateBackendRuntimeManifest, validateCodexPlugin } from "./validate-manifest.js";
 import { BUILD_IDENTITY_FILENAME, computePackagedBuildIdentity } from "./build-app.js";
 
 const execFileAsync = promisify(execFile);
@@ -127,6 +127,7 @@ type HookEvent = "PostToolUse" | "UserPromptSubmit" | "SessionEnd";
 
 async function installedHookTimeouts(installedApp: string): Promise<Record<HookEvent, number>> {
   const pluginRoot = join(installedApp, "Contents/Resources/integrations/codex-plugin");
+  await validateCodexPlugin(pluginRoot);
   const hooksDocument = parseObject(
     await readFile(join(pluginRoot, "hooks/hooks.json"), "utf8"),
     "installed hook manifest",
@@ -154,11 +155,23 @@ async function installedHookTimeouts(installedApp: string): Promise<Record<HookE
     }
     timeouts[event] = handler.timeout * 1_000;
   }
-  const skill = await readFile(join(pluginRoot, "skills/pdf-proofreader/SKILL.md"), "utf8");
-  if (!skill.includes(`${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf`)) {
-    throw new Error("Installed PDF Proofreader skill does not use the canonical launcher");
-  }
   return timeouts;
+}
+
+async function assertInstalledRebrandIdentity(installedApp: string, isolatedHome: string): Promise<void> {
+  const localizedNames = await readFile(
+    join(installedApp, "Contents/Resources/en.lproj/InfoPlist.strings"),
+    "utf8",
+  );
+  if (!localizedNames.includes('"CFBundleDisplayName" = "Placekeeper";')) {
+    throw new Error("Installed compatibility-path bundle does not present Placekeeper");
+  }
+  if (await lstat(join(isolatedHome, "Applications/Placekeeper.app")).catch(() => undefined)) {
+    throw new Error("Installed smoke found a duplicate visible-name app identity");
+  }
+  if (await lstat(join(isolatedHome, "Library/Application Support", "Placekeeper")).catch(() => undefined)) {
+    throw new Error("Installed smoke found a duplicate visible-name state root");
+  }
 }
 
 function hookInput(
@@ -208,13 +221,17 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
   const smokeHome = await mkdtemp(join("/tmp", "pp-hook-smoke-"));
   const installedApp = join(smokeHome, "Applications/PDF Proofreader.app");
   const executable = join(installedApp, "Contents/MacOS/pdf-proofreader");
-  const socketPath = join(smokeHome, "Library/Application Support/PDF Proofreader/control.sock");
+  const supportRoot = join(smokeHome, "Library/Application Support/PDF Proofreader");
+  const socketPath = join(supportRoot, "control.sock");
+  const supportRootSentinel = join(supportRoot, "legacy-support-content.fixture");
   await mkdir(dirname(installedApp), { recursive: true });
   await symlink(resolve(appPath), installedApp);
   const pdfPath = join(smokeHome, "fixture.pdf");
   const secondPdfPath = join(smokeHome, "second-fixture.pdf");
   await copyFile(resolve(fixturePath), pdfPath);
   await copyFile(resolve(fixturePath), secondPdfPath);
+  await mkdir(supportRoot, { recursive: true });
+  await writeFile(supportRootSentinel, "legacy support-root content must survive replacement\n");
   const environment = {
     ...process.env,
     HOME: smokeHome,
@@ -233,6 +250,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
   let daemonSpawnError: Error | undefined;
   daemon.once("error", (error) => { daemonSpawnError = error; });
   try {
+    await assertInstalledRebrandIdentity(installedApp, smokeHome);
     await waitForSocket(socketPath, daemon, () => daemonSpawnError);
     const hookTimeouts = await installedHookTimeouts(installedApp);
     const launchOutput = await executeInstalled(
@@ -294,6 +312,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     });
     if (!secondExchange.ok) throw new Error("Second installed browser capability exchange failed");
     const secondSession = parseObject(await secondExchange.text(), "second browser exchange");
+    const presenceExpiryAt = Date.now() + 5_100;
 
     const current = parseAdditionalContext(await executeInstalled(
       executable,
@@ -340,6 +359,9 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     if (stillInstalled.installArtifactIdentity !== oldIdentity.installArtifactIdentity) {
       throw new Error("Deferred upgrade changed the installed app");
     }
+    if ((await readFile(supportRootSentinel, "utf8")) !== "legacy support-root content must survive replacement\n") {
+      throw new Error("Deferred upgrade changed arbitrary support-root content");
+    }
     for (const [url, session] of [[launchUrl, firstSession], [secondUrl, secondSession]] as const) {
       const state = await fetch(`${url.origin}${url.pathname.replace(/\/bootstrap$/u, "/state")}`, {
         headers: { authorization: `Bearer ${String(session.credential)}` },
@@ -378,7 +400,10 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     // Capability exchange records browser activity with a bounded close grace.
     // With no live WebSocket in this headless smoke, lease expiry represents
     // closed pages; SessionEnd above separately releases the task blocker.
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 5_100));
+    const remainingPresenceGrace = presenceExpiryAt - Date.now();
+    if (remainingPresenceGrace > 0) {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, remainingPresenceGrace));
+    }
     const upgraded = await coordinateInstalled(
       join(candidate, "Contents/MacOS/pdf-proofreader"),
       candidate,
@@ -388,6 +413,10 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     );
     if (upgraded.code !== 0 || upgraded.response.status !== "installed") {
       throw new Error("Closed reviews did not converge to a successful installed upgrade");
+    }
+    await assertInstalledRebrandIdentity(installedApp, smokeHome);
+    if ((await readFile(supportRootSentinel, "utf8")) !== "legacy support-root content must survive replacement\n") {
+      throw new Error("Successful upgrade changed arbitrary support-root content");
     }
     const postUpgrade = parseObject(await executeInstalled(
       executable,
