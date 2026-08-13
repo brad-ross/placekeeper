@@ -22,7 +22,11 @@ import { DaemonLifecycleCoordinator } from "../src/host/daemon-lifecycle.js";
 import { acquireLifecycleLock } from "../src/host/lifecycle-lock.js";
 import { ProofreaderHost } from "../src/host/proofreader-host.js";
 import { coordinateUpgrade } from "../src/host/upgrade-coordinator.js";
-import { initialDaemonIsAbsent, parseOwnedLegacyProcess } from "../src/cli/daemon-command.js";
+import {
+  initialDaemonIsAbsent,
+  legacySocketOwnerLookupArgs,
+  parseOwnedLegacyProcess,
+} from "../src/cli/daemon-command.js";
 import { defaultDaemonPaths } from "../src/host/service-daemon.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 
@@ -431,6 +435,18 @@ describe("open command", () => {
       `${uid + 1} /tmp/unrelated-service daemon`,
       uid,
     )).toBeUndefined();
+  });
+
+  it("passes lsof formatting flags before the legacy socket path", () => {
+    const socketPath = "/tmp/PDF Proofreader/control.sock";
+    expect(legacySocketOwnerLookupArgs(socketPath)).toEqual([
+      "-n",
+      "-P",
+      "-a",
+      "-U",
+      "-Fpu",
+      socketPath,
+    ]);
   });
 
   it("inspects management compatibility independently from launch", async () => {

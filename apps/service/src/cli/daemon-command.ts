@@ -267,6 +267,10 @@ export function parseOwnedLegacyProcess(
   return pids[0];
 }
 
+export function legacySocketOwnerLookupArgs(socketPath: string): string[] {
+  return ["-n", "-P", "-a", "-U", "-Fpu", socketPath];
+}
+
 async function stopLegacyDaemon(): Promise<void> {
   const paths = defaultDaemonPaths();
   const lock = await acquireLifecycleLock(
@@ -281,7 +285,7 @@ async function stopLegacyDaemon(): Promise<void> {
     }
     const { stdout: lsofOutput } = await execFileAsync(
       "/usr/sbin/lsof",
-      ["-n", "-P", "-a", "-U", paths.socketPath, "-Fpu"],
+      legacySocketOwnerLookupArgs(paths.socketPath),
       { timeout: 2_000, maxBuffer: 16_384 },
     );
     const pidMatch = /^p(\d+)$/mu.exec(lsofOutput);
