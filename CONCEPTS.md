@@ -9,6 +9,11 @@ The focused everyday PDF reader and annotator that preserves a reader's place wh
 
 Placekeeper emphasizes preserving the Main Reading Thread while annotations, search, and Reference Tabs support nonlinear reading.
 
+### Clean-break Identity Migration
+A named process that replaces an application's human-facing and machine-facing identity as one indivisible contract while intentionally providing no compatibility path for the retired identity.
+
+Completion requires both exclusivity in source and built artifacts and separate removal of active installed state; a clean repository alone does not prove a clean machine.
+
 ## PDF review
 
 ### Review Item

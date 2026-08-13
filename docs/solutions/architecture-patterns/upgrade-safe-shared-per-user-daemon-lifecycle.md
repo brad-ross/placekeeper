@@ -1,6 +1,7 @@
 ---
 title: Upgrade-safe lifecycle for a shared per-user daemon
 date: 2026-08-12
+last_updated: 2026-08-13
 category: architecture-patterns
 module: Shared daemon lifecycle
 problem_type: architecture_pattern
@@ -100,11 +101,11 @@ Four common coordinator paths are:
 1. exact daemon and identical artifact → no-op;
 2. active reviews or tasks → defer and preserve every session;
 3. idle inspectable daemon → cooperative drain, retirement, and replacement;
-4. uninspectable legacy daemon → refuse automatic termination and require an explicit recovery command.
+4. uninspectable or malformed daemon → refuse automatic termination and require the operator to close active Placekeeper work before retrying.
 
 Transient work may receive a bounded opportunity to drain, but the bundle is never replaced while old code still owns unfinished work (`apps/service/src/host/upgrade-coordinator.ts:38-66`).
 
-Legacy stopping stays explicit because old code cannot prove absence of work. The recovery command validates socket ownership and a unique same-user Placekeeper daemon before signaling only that PID (`apps/service/src/cli/daemon-command.ts:255-300`). Process-wide kill commands are not an installer strategy.
+An uninspectable daemon cannot prove absence of work, so the installer leaves the bundle untouched and reports a close-and-retry recovery action (`apps/service/src/host/upgrade-coordinator.ts:38-46`, `apps/service/src/host/launch-control.ts:113-118`). There is no legacy-stop command or automatic signal fallback; process-wide kill commands are not an installer strategy.
 
 ### Prove candidate readiness before commit
 
@@ -175,6 +176,6 @@ When the new daemon cannot prove exact readiness, stop that exact candidate, pro
 ## Related
 
 - [Upgrade-safe shared-daemon plan](../../plans/2026-08-12-002-fix-upgrade-safe-shared-daemon-plan.md) records the originating requirements and rejected unconditional-stop approach.
-- [Installation and recovery](../../installation.md) provides the user-facing retry and legacy-stop workflow.
+- [Installation and recovery](../../installation.md) provides the user-facing defer, close, and retry workflow.
 - [Installed host acceptance](../../../test/acceptance/installed-hosts.md) records packaged multi-PDF evidence.
 - [Recoverable autosave for editable PDF annotations](recoverable-editable-pdf-annotation-autosave.md) explains the durable work that shutdown is allowed to drain.
