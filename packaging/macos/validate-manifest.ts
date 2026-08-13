@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { inflateSync } from "node:zlib";
 
 const CODEX_INSTALLED_LAUNCHER_COMMAND =
   '"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader"';
@@ -43,6 +44,11 @@ export interface AppBundleManifest {
   readonly executable: "pdf-proofreader";
   readonly finderExecutable: "droplet";
   readonly runtimeDataDirectory: "Library/Application Support/PDF Proofreader";
+  readonly icon: {
+    readonly master: "packaging/macos/icon/Placekeeper.svg";
+    readonly source: "packaging/macos/icon/Placekeeper.iconset";
+    readonly file: "Placekeeper";
+  };
   readonly documentTypes: readonly [{ readonly contentType: "com.adobe.pdf"; readonly role: "Viewer"; readonly rank: "Alternate" }];
   readonly embeddedArtifacts: {
     readonly codexPlugin: string;
@@ -50,6 +56,127 @@ export interface AppBundleManifest {
   };
   readonly distribution: { readonly mode: "source-first"; readonly signingRequired: false };
   readonly signing: { readonly hardenedRuntime: true; readonly secureTimestamp: true; readonly entitlements: string };
+}
+
+export const MAC_ICON_REPRESENTATIONS = [
+  ["icon_16x16.png", 16],
+  ["icon_16x16@2x.png", 32],
+  ["icon_32x32.png", 32],
+  ["icon_32x32@2x.png", 64],
+  ["icon_128x128.png", 128],
+  ["icon_128x128@2x.png", 256],
+  ["icon_256x256.png", 256],
+  ["icon_256x256@2x.png", 512],
+  ["icon_512x512.png", 512],
+  ["icon_512x512@2x.png", 1024],
+] as const;
+
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+function pngPixelEvidence(bytes: Buffer, filename: string): { width: number; height: number } {
+  if (bytes.byteLength < 33 || !bytes.subarray(0, PNG_SIGNATURE.byteLength).equals(PNG_SIGNATURE)) {
+    throw new Error(`Icon representation ${filename} must be a PNG file`);
+  }
+  if (bytes.readUInt32BE(8) !== 13 || bytes.toString("ascii", 12, 16) !== "IHDR") {
+    throw new Error(`Icon representation ${filename} has an invalid PNG header`);
+  }
+  const width = bytes.readUInt32BE(16);
+  const height = bytes.readUInt32BE(20);
+  if (width !== height) throw new Error(`Icon representation ${filename} must be square`);
+  const bitDepth = bytes[24];
+  const colorType = bytes[25];
+  const interlace = bytes[28];
+  if (bitDepth !== 8 || (colorType !== 2 && colorType !== 6) || interlace !== 0) {
+    throw new Error(`Icon representation ${filename} must be an 8-bit RGB or RGBA non-interlaced PNG`);
+  }
+
+  const compressed: Buffer[] = [];
+  let offset = PNG_SIGNATURE.byteLength;
+  let sawEnd = false;
+  while (offset + 12 <= bytes.byteLength) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.toString("ascii", offset + 4, offset + 8);
+    const end = offset + 12 + length;
+    if (end > bytes.byteLength) throw new Error(`Icon representation ${filename} has a truncated PNG chunk`);
+    if (type === "IDAT") compressed.push(bytes.subarray(offset + 8, offset + 8 + length));
+    if (type === "IEND") {
+      sawEnd = true;
+      break;
+    }
+    offset = end;
+  }
+  if (compressed.length === 0 || !sawEnd) throw new Error(`Icon representation ${filename} has incomplete PNG content`);
+
+  const channels = colorType === 6 ? 4 : 3;
+  const rowBytes = width * channels;
+  let decoded: Buffer;
+  try {
+    decoded = inflateSync(Buffer.concat(compressed));
+  } catch {
+    throw new Error(`Icon representation ${filename} has invalid PNG pixel data`);
+  }
+  if (decoded.byteLength !== (rowBytes + 1) * height) {
+    throw new Error(`Icon representation ${filename} has invalid PNG pixel dimensions`);
+  }
+
+  const previous = Buffer.alloc(rowBytes);
+  const current = Buffer.alloc(rowBytes);
+  const visibleColors = new Set<string>();
+  let hasVisiblePixel = false;
+  for (let y = 0; y < height; y += 1) {
+    const rowOffset = y * (rowBytes + 1);
+    const filter = decoded[rowOffset]!;
+    for (let x = 0; x < rowBytes; x += 1) {
+      const raw = decoded[rowOffset + 1 + x]!;
+      const left = x >= channels ? current[x - channels]! : 0;
+      const above = previous[x]!;
+      const upperLeft = x >= channels ? previous[x - channels]! : 0;
+      if (filter === 0) current[x] = raw;
+      else if (filter === 1) current[x] = (raw + left) & 0xff;
+      else if (filter === 2) current[x] = (raw + above) & 0xff;
+      else if (filter === 3) current[x] = (raw + Math.floor((left + above) / 2)) & 0xff;
+      else if (filter === 4) {
+        const estimate = left + above - upperLeft;
+        const leftDistance = Math.abs(estimate - left);
+        const aboveDistance = Math.abs(estimate - above);
+        const upperLeftDistance = Math.abs(estimate - upperLeft);
+        const predictor = leftDistance <= aboveDistance && leftDistance <= upperLeftDistance
+          ? left
+          : aboveDistance <= upperLeftDistance ? above : upperLeft;
+        current[x] = (raw + predictor) & 0xff;
+      } else {
+        throw new Error(`Icon representation ${filename} uses an unsupported PNG filter`);
+      }
+    }
+    for (let x = 0; x < rowBytes; x += channels) {
+      const alpha = channels === 4 ? current[x + 3]! : 255;
+      if (alpha === 0) continue;
+      hasVisiblePixel = true;
+      if (visibleColors.size < 2) {
+        visibleColors.add(`${current[x]},${current[x + 1]},${current[x + 2]},${alpha}`);
+      }
+    }
+    current.copy(previous);
+  }
+  if (!hasVisiblePixel || visibleColors.size < 2) {
+    throw new Error(`Icon representation ${filename} must have nonempty alpha and content bounds`);
+  }
+  return { width, height };
+}
+
+export async function validateMacIconSet(iconsetPath: string): Promise<Array<[string, number]>> {
+  const filenames = (await readdir(iconsetPath)).sort();
+  const expected = MAC_ICON_REPRESENTATIONS.map(([filename]) => filename).sort();
+  if (filenames.length !== expected.length || filenames.some((filename, index) => filename !== expected[index])) {
+    throw new Error(`Placekeeper iconset filenames must be exactly: ${expected.join(", ")}`);
+  }
+  for (const [filename, expectedPixels] of MAC_ICON_REPRESENTATIONS) {
+    const { width, height } = pngPixelEvidence(await readFile(resolve(iconsetPath, filename)), filename);
+    if (width !== expectedPixels || height !== expectedPixels) {
+      throw new Error(`Icon representation ${filename} dimensions must be ${expectedPixels}x${expectedPixels}`);
+    }
+  }
+  return MAC_ICON_REPRESENTATIONS.map(([filename, pixels]) => [filename, pixels]);
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -162,6 +289,15 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
     "Library/Application Support/PDF Proofreader",
     "Runtime data directory",
   );
+  const rawIcon = record(root.icon, "icon");
+  const icon = {
+    master: compatibilityValue(rawIcon.master, "packaging/macos/icon/Placekeeper.svg", "Icon master"),
+    source: compatibilityValue(rawIcon.source, "packaging/macos/icon/Placekeeper.iconset", "Icon source"),
+    file: compatibilityValue(rawIcon.file, "Placekeeper", "Icon file"),
+  } as const;
+  if (Object.keys(rawIcon).some((name) => !["master", "source", "file"].includes(name))) {
+    throw new Error("Only the production master, iconset source, and resource basename may own the app icon");
+  }
   const rawEmbeddedArtifacts = record(root.embeddedArtifacts, "embedded artifacts");
   const embeddedArtifacts = {
     codexPlugin: boundedString(rawEmbeddedArtifacts.codexPlugin, "Codex plugin artifact"),
@@ -186,6 +322,7 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
     executable: compatibilityValue(root.executable, "pdf-proofreader", "Launcher executable"),
     finderExecutable: "droplet",
     runtimeDataDirectory,
+    icon,
     documentTypes: [{ contentType: "com.adobe.pdf", role: "Viewer", rank: "Alternate" }],
     embeddedArtifacts,
     distribution: { mode: "source-first", signingRequired: false },
@@ -201,6 +338,11 @@ export async function validateDistributionManifests(repoRoot = process.cwd()): P
   const app = validateAppBundleManifest(JSON.parse(await readFile(resolve(repoRoot, "packaging/macos/app-bundle.json"), "utf8")) as unknown);
   const backend = validateBackendRuntimeManifest(JSON.parse(await readFile(resolve(repoRoot, "packaging/macos/backend-runtime-manifest.json"), "utf8")) as unknown);
   if (app.nodeVersion !== backend.nodeVersion) throw new Error("App and backend Node versions differ");
+  const iconMaster = await readFile(resolve(repoRoot, app.icon.master), "utf8");
+  if (!iconMaster.includes("<svg") || /<rect[^>]+width="220"[^>]+rx=/u.test(iconMaster)) {
+    throw new Error("The production icon master must be an SVG without a pre-masked system corner");
+  }
+  await validateMacIconSet(resolve(repoRoot, app.icon.source));
   for (const asset of backend.assets) {
     const bytes = await readFile(resolve(repoRoot, asset.source));
     const digest = createHash("sha256").update(bytes).digest("hex");

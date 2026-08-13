@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -14,11 +14,13 @@ import {
   validateAppBundleManifest,
   validateBackendRuntimeManifest,
   validateDistributionManifests,
+  validateMacIconSet,
 } from "./validate-manifest.js";
 import { finderServiceArgs } from "./launcher.mjs";
 import { validateDoctorEvidence } from "./smoke-installed.js";
 import {
   appBundlePath,
+  compileMacIcon,
   computePackagedBuildIdentity,
   infoPlist,
   infoPlistStrings,
@@ -39,6 +41,11 @@ describe("macOS distribution manifests", () => {
       finderExecutable: "droplet",
       runtimeDataDirectory: "Library/Application Support/PDF Proofreader",
       documentTypes: [{ contentType: "com.adobe.pdf", role: "Viewer", rank: "Alternate" }],
+      icon: {
+        master: "packaging/macos/icon/Placekeeper.svg",
+        source: "packaging/macos/icon/Placekeeper.iconset",
+        file: "Placekeeper",
+      },
     });
     expect(appBundlePath("/tmp/placekeeper-package", manifest)).toBe(
       "/tmp/placekeeper-package/PDF Proofreader.app",
@@ -50,9 +57,97 @@ describe("macOS distribution manifests", () => {
     expect(plist).toContain("<key>LSHasLocalizedDisplayName</key><true/>");
     expect(plist).toContain("<key>CFBundleExecutable</key><string>droplet</string>");
     expect(plist).toContain("<key>CFBundleIdentifier</key><string>local.pdf-proofreader</string>");
+    expect(plist).toContain("<key>CFBundleIconFile</key><string>Placekeeper</string>");
     expect(infoPlistStrings(manifest)).toBe(
       '"CFBundleDisplayName" = "Placekeeper";\n"CFBundleName" = "Placekeeper";\n',
     );
+  });
+
+  it("validates the complete Placekeeper iconset before packaging", async () => {
+    const iconset = resolve("packaging/macos/icon/Placekeeper.iconset");
+    await expect(validateMacIconSet(iconset)).resolves.toEqual([
+      ["icon_16x16.png", 16],
+      ["icon_16x16@2x.png", 32],
+      ["icon_32x32.png", 32],
+      ["icon_32x32@2x.png", 64],
+      ["icon_128x128.png", 128],
+      ["icon_128x128@2x.png", 256],
+      ["icon_256x256.png", 256],
+      ["icon_256x256@2x.png", 512],
+      ["icon_512x512.png", 512],
+      ["icon_512x512@2x.png", 1024],
+    ]);
+  });
+
+  it.runIf(process.platform === "darwin")("compiles a reverse-expandable Placekeeper icns", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "placekeeper-icns-test-"));
+    const icns = resolve(root, "Placekeeper.icns");
+    const expanded = resolve(root, "Expanded.iconset");
+    try {
+      await compileMacIcon(resolve("packaging/macos/icon/Placekeeper.iconset"), icns);
+      expect((await readFile(icns)).subarray(0, 4).toString("ascii")).toBe("icns");
+      await execFileAsync("/usr/bin/iconutil", ["-c", "iconset", icns, "-o", expanded]);
+      await expect(validateMacIconSet(expanded)).resolves.toHaveLength(10);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("packages the icon before build identity and signing", async () => {
+    const source = await readFile(resolve("packaging/macos/build-app.ts"), "utf8");
+    const build = source.slice(source.indexOf("export async function buildMacApp"));
+    expect(build.indexOf("await compileMacIcon(")).toBeLessThan(build.indexOf("await computePackagedBuildIdentity({"));
+    expect(build.indexOf("await computePackagedBuildIdentity({")).toBeLessThan(build.indexOf("await signBundle("));
+    expect(build.indexOf("await computePackagedBuildIdentity({")).toBeLessThan(build.indexOf("await signAdHocBundle("));
+  });
+
+  it("rejects incomplete, misnamed, nonsquare, and wrongly sized icon representations", async () => {
+    const source = resolve("packaging/macos/icon/Placekeeper.iconset");
+
+    const withIconset = async (mutate: (iconset: string) => Promise<void>): Promise<string> => {
+      const root = await mkdtemp(resolve(tmpdir(), "placekeeper-iconset-test-"));
+      const iconset = resolve(root, "Placekeeper.iconset");
+      await cp(source, iconset, { recursive: true });
+      await mutate(iconset);
+      return root;
+    };
+
+    const missingRoot = await withIconset(async (iconset) => {
+      await rm(resolve(iconset, "icon_16x16.png"));
+    });
+    const misnamedRoot = await withIconset(async (iconset) => {
+      await rename(resolve(iconset, "icon_16x16.png"), resolve(iconset, "icon_16.png"));
+    });
+    const wrongSizeRoot = await withIconset(async (iconset) => {
+      await writeFile(resolve(iconset, "icon_16x16.png"), await readFile(resolve(iconset, "icon_16x16@2x.png")));
+    });
+    const nonsquareRoot = await withIconset(async (iconset) => {
+      const path = resolve(iconset, "icon_16x16.png");
+      const png = await readFile(path);
+      png.writeUInt32BE(15, 20);
+      await writeFile(path, png);
+    });
+
+    try {
+      await expect(validateMacIconSet(resolve(missingRoot, "Placekeeper.iconset"))).rejects.toThrow(/filenames/u);
+      await expect(validateMacIconSet(resolve(misnamedRoot, "Placekeeper.iconset"))).rejects.toThrow(/filenames/u);
+      await expect(validateMacIconSet(resolve(wrongSizeRoot, "Placekeeper.iconset"))).rejects.toThrow(/dimensions/u);
+      await expect(validateMacIconSet(resolve(nonsquareRoot, "Placekeeper.iconset"))).rejects.toThrow(/square/u);
+    } finally {
+      await Promise.all([missingRoot, misnamedRoot, wrongSizeRoot, nonsquareRoot].map(async (root) => await rm(root, { recursive: true, force: true })));
+    }
+  });
+
+  it("keeps icon source ownership pinned in the app manifest", async () => {
+    const app = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8")) as Record<string, unknown>;
+    for (const icon of [
+      undefined,
+      { master: "packaging/macos/icon/Other.svg", source: "packaging/macos/icon/Placekeeper.iconset", file: "Placekeeper" },
+      { master: "packaging/macos/icon/Placekeeper.svg", source: "packaging/macos/icon/Other.iconset", file: "Placekeeper" },
+      { master: "packaging/macos/icon/Placekeeper.svg", source: "packaging/macos/icon/Placekeeper.iconset", file: "droplet" },
+    ]) {
+      expect(() => validateAppBundleManifest({ ...app, icon })).toThrow(/icon/iu);
+    }
   });
 
   it("rejects mutations to compatibility identities and visible/physical recoupling", async () => {
@@ -312,6 +407,7 @@ describe("macOS distribution manifests", () => {
       await writeFile(join(service, "main.js"), "service-a");
       await writeFile(join(web, "app.js"), "web-a");
       await writeFile(join(contents, "Info.plist"), "plist-a");
+      await writeFile(join(contents, "Resources/Placekeeper.icns"), "icon-a");
 
       const first = await computePackagedBuildIdentity({ contentsRoot: contents, serviceRoot: service, webRoot: web });
       expect(await computePackagedBuildIdentity({ contentsRoot: contents, serviceRoot: service, webRoot: web })).toEqual(first);
@@ -326,10 +422,15 @@ describe("macOS distribution manifests", () => {
       expect(otherArtifact.daemonIdentity).toBe(first.daemonIdentity);
       expect(otherArtifact.installArtifactIdentity).not.toBe(first.installArtifactIdentity);
 
+      await writeFile(join(contents, "Resources/Placekeeper.icns"), "icon-b");
+      const otherIcon = await computePackagedBuildIdentity({ contentsRoot: contents, serviceRoot: service, webRoot: web });
+      expect(otherIcon.daemonIdentity).toBe(first.daemonIdentity);
+      expect(otherIcon.installArtifactIdentity).not.toBe(otherArtifact.installArtifactIdentity);
+
       await writeFile(join(web, "app.js"), "web-b");
       const otherDaemon = await computePackagedBuildIdentity({ contentsRoot: contents, serviceRoot: service, webRoot: web });
       expect(otherDaemon.daemonIdentity).not.toBe(first.daemonIdentity);
-      expect(otherDaemon.installArtifactIdentity).not.toBe(otherArtifact.installArtifactIdentity);
+      expect(otherDaemon.installArtifactIdentity).not.toBe(otherIcon.installArtifactIdentity);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

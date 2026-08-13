@@ -10,6 +10,11 @@
   "executable": "pdf-proofreader",
   "finderExecutable": "droplet",
   "runtimeDataDirectory": "Library/Application Support/PDF Proofreader",
+  "icon": {
+    "master": "packaging/macos/icon/Placekeeper.svg",
+    "source": "packaging/macos/icon/Placekeeper.iconset",
+    "file": "Placekeeper"
+  },
   "documentTypes": [
     {
       "contentType": "com.adobe.pdf",
