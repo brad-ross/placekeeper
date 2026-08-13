@@ -6,8 +6,8 @@ umask 077
 : "${CERTIFICATE_PASSWORD:?MACOS_CERTIFICATE_PASSWORD is required}"
 : "${KEYCHAIN_PASSWORD:?MACOS_KEYCHAIN_PASSWORD is required}"
 
-certificate_path="${RUNNER_TEMP}/pdf-proofreader-signing.p12"
-keychain_path="${RUNNER_TEMP}/pdf-proofreader-signing.keychain-db"
+certificate_path="${RUNNER_TEMP}/placekeeper-signing.p12"
+keychain_path="${RUNNER_TEMP}/placekeeper-signing.keychain-db"
 trap '/bin/rm -f "$certificate_path"' EXIT
 
 /bin/echo "$CERTIFICATE_P12" | /usr/bin/base64 -D -o "$certificate_path"

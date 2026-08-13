@@ -160,7 +160,7 @@ describe("live PDF context contracts", () => {
     const observation = createAtomicLiveContextObservation({
       observedAt: "2026-08-12T12:01:00.000Z",
       identity: {
-        proofreaderSessionId: "proofreader-session",
+        placekeeperSessionId: "placekeeper-session",
         documentGeneration: 3,
         source,
         reviewRevision: 1,
@@ -191,7 +191,7 @@ describe("live PDF context contracts", () => {
       checkedAt: "2026-08-12T12:02:00.000Z",
       reason: "unavailable",
       lastVerified: {
-        proofreaderSessionId: "proofreader-session",
+        placekeeperSessionId: "placekeeper-session",
         documentGeneration: 1,
         source,
         reviewRevision: last.revision,
@@ -266,7 +266,7 @@ describe("live PDF context contracts", () => {
       executionId: "execution-1",
       capturedAt: "2026-08-12T12:00:00.000Z",
       identity: {
-        proofreaderSessionId: "proofreader-session",
+        placekeeperSessionId: "placekeeper-session",
         documentGeneration: 2,
         source,
         reviewRevision: captured.revision,

@@ -30,7 +30,7 @@ export async function runDoctorCommand(
 ): Promise<number> {
   try {
     const pdfPath = pdfArgument(args);
-    const wasmPath = process.env.PDF_PROOFREADER_PDFIUM_WASM;
+    const wasmPath = process.env.PLACEKEEPER_PDFIUM_WASM;
     if (wasmPath === undefined || !isAbsolute(wasmPath)) throw new Error("PDFium unavailable");
     const wasm = await readFile(wasmPath);
     const pdfiumSha256 = createHash("sha256").update(wasm).digest("hex");

@@ -106,7 +106,7 @@ export class ExportCoordinatorError extends Error {
 }
 
 function temporaryOutputPath(originalPath: string): string {
-  return join(dirname(originalPath), `.pdf-proofreader-${randomUUID()}.tmp`);
+  return join(dirname(originalPath), `.placekeeper-${randomUUID()}.tmp`);
 }
 
 function committedWarning(kind: PdfExportResult["kind"]): string {

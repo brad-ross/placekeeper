@@ -4,9 +4,9 @@ import { join, resolve } from 'node:path';
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-import { ProofreaderHost } from '../../apps/service/src/host/proofreader-host.js';
+import { PlacekeeperHost } from '../../apps/service/src/host/placekeeper-host.js';
 
-let installedHost: ProofreaderHost;
+let installedHost: PlacekeeperHost;
 let installedLaunchUrl = '';
 let installedRoot = '';
 
@@ -16,7 +16,7 @@ test.beforeAll(async () => {
   await mkdir(sourceRoot);
   const pdf = join(installedRoot, 'paper.pdf');
   await copyFile(resolve('test/fixtures/pdfs/text-native-with-annotations.pdf'), pdf);
-  installedHost = await ProofreaderHost.start({
+  installedHost = await PlacekeeperHost.start({
     recoveryRoot: join(installedRoot, 'recovery'),
     webAssets: { root: resolve('dist/web') },
   });

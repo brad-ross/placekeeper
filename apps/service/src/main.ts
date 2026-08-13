@@ -21,7 +21,7 @@ export async function startLocalService(
     homedir(),
     "Library",
     "Application Support",
-    "PDF Proofreader",
+    "Placekeeper",
     "recovery",
   ),
 ): Promise<RunningLocalService> {

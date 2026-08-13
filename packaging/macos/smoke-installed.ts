@@ -9,7 +9,7 @@ import { BUILD_IDENTITY_FILENAME, computePackagedBuildIdentity } from "./build-a
 const execFileAsync = promisify(execFile);
 const MAX_HOOK_OUTPUT_BYTES = 128 * 1024;
 const CODEX_INSTALLED_LAUNCHER_COMMAND =
-  '"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader"';
+  '"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper"';
 
 export interface DoctorEvidence {
   readonly ok: true;
@@ -85,7 +85,7 @@ function parseObject(serialized: string, label: string): Record<string, unknown>
 }
 
 async function distinctCandidate(appPath: string, root: string): Promise<string> {
-  const candidate = join(root, "candidate/PDF Proofreader.app");
+  const candidate = join(root, "candidate/Placekeeper.app");
   await mkdir(dirname(candidate), { recursive: true });
   await cp(resolve(appPath), candidate, { recursive: true });
   const contents = join(candidate, "Contents");
@@ -112,7 +112,6 @@ async function coordinateInstalled(
       "daemon", "coordinate-install",
       "--candidate-app", candidate,
       "--installed-app", installed,
-      "--obsolete-action", join(dirname(dirname(installed)), "Library/Services/PDF Proofreader.workflow"),
       "--replace-helper", resolve(repoRoot, "packaging/macos/install-built-app.sh"),
     ], { encoding: "utf8", env: environment, timeout: 30_000, maxBuffer: MAX_HOOK_OUTPUT_BYTES }, (error, stdout) => {
       const code = (error as NodeJS.ErrnoException & { code?: number } | null)?.code;
@@ -158,19 +157,16 @@ async function installedHookTimeouts(installedApp: string): Promise<Record<HookE
   return timeouts;
 }
 
-async function assertInstalledRebrandIdentity(installedApp: string, isolatedHome: string): Promise<void> {
+async function assertInstalledIdentity(installedApp: string, isolatedHome: string): Promise<void> {
   const localizedNames = await readFile(
     join(installedApp, "Contents/Resources/en.lproj/InfoPlist.strings"),
     "utf8",
   );
   if (!localizedNames.includes('"CFBundleDisplayName" = "Placekeeper";')) {
-    throw new Error("Installed compatibility-path bundle does not present Placekeeper");
+    throw new Error("Installed bundle does not present Placekeeper");
   }
-  if (await lstat(join(isolatedHome, "Applications/Placekeeper.app")).catch(() => undefined)) {
-    throw new Error("Installed smoke found a duplicate visible-name app identity");
-  }
-  if (await lstat(join(isolatedHome, "Library/Application Support", "Placekeeper")).catch(() => undefined)) {
-    throw new Error("Installed smoke found a duplicate visible-name state root");
+  if (installedApp !== join(isolatedHome, "Applications/Placekeeper.app")) {
+    throw new Error("Installed smoke is not using the canonical Placekeeper app path");
   }
 }
 
@@ -219,11 +215,11 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
   // Darwin limits AF_UNIX paths to roughly 104 bytes. The system TMPDIR is
   // already long enough that the app-support suffix can cross that limit.
   const smokeHome = await mkdtemp(join("/tmp", "pp-hook-smoke-"));
-  const installedApp = join(smokeHome, "Applications/PDF Proofreader.app");
-  const executable = join(installedApp, "Contents/MacOS/pdf-proofreader");
-  const supportRoot = join(smokeHome, "Library/Application Support/PDF Proofreader");
+  const installedApp = join(smokeHome, "Applications/Placekeeper.app");
+  const executable = join(installedApp, "Contents/MacOS/placekeeper");
+  const supportRoot = join(smokeHome, "Library/Application Support/Placekeeper");
   const socketPath = join(supportRoot, "control.sock");
-  const supportRootSentinel = join(supportRoot, "legacy-support-content.fixture");
+  const supportRootSentinel = join(supportRoot, "support-content.fixture");
   await mkdir(dirname(installedApp), { recursive: true });
   await symlink(resolve(appPath), installedApp);
   const pdfPath = join(smokeHome, "fixture.pdf");
@@ -231,12 +227,12 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
   await copyFile(resolve(fixturePath), pdfPath);
   await copyFile(resolve(fixturePath), secondPdfPath);
   await mkdir(supportRoot, { recursive: true });
-  await writeFile(supportRootSentinel, "legacy support-root content must survive replacement\n");
+  await writeFile(supportRootSentinel, "support-root content must survive replacement\n");
   const environment = {
     ...process.env,
     HOME: smokeHome,
     PATH: "/usr/bin:/bin",
-    PDF_PROOFREADER_OFFLINE: "1",
+    PLACEKEEPER_OFFLINE: "1",
     HTTP_PROXY: "http://127.0.0.1:9",
     HTTPS_PROXY: "http://127.0.0.1:9",
     ALL_PROXY: "http://127.0.0.1:9",
@@ -250,7 +246,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
   let daemonSpawnError: Error | undefined;
   daemon.once("error", (error) => { daemonSpawnError = error; });
   try {
-    await assertInstalledRebrandIdentity(installedApp, smokeHome);
+    await assertInstalledIdentity(installedApp, smokeHome);
     await waitForSocket(socketPath, daemon, () => daemonSpawnError);
     const hookTimeouts = await installedHookTimeouts(installedApp);
     const launchOutput = await executeInstalled(
@@ -324,7 +320,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     if (current.currentness !== "current") {
       throw new Error("Installed UserPromptSubmit hook did not receive current PDF context");
     }
-    const installedCommand = '"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader"';
+    const installedCommand = CODEX_INSTALLED_LAUNCHER_COMMAND;
     const evidence = current.evidence;
     if (typeof evidence !== "object" || evidence === null || Array.isArray(evidence)) {
       throw new Error("Installed prompt context omitted evidence retrieval instructions");
@@ -333,13 +329,13 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
       .filter((value): value is string => typeof value === "string")
       .join("\n");
     if (!publishedInstructions.includes(`${installedCommand} context items`) ||
-      /(^|[^/A-Za-z0-9_-])pdf-proofreader\s+(context|daemon)\b/mu.test(publishedInstructions)) {
+      /(^|[^/A-Za-z0-9_-])placekeeper\s+(context|daemon)\b/mu.test(publishedInstructions)) {
       throw new Error("Installed prompt context did not publish only canonical retriever commands");
     }
 
     const candidate = await distinctCandidate(appPath, smokeHome);
     const deferred = await coordinateInstalled(
-      join(candidate, "Contents/MacOS/pdf-proofreader"),
+      join(candidate, "Contents/MacOS/placekeeper"),
       candidate,
       installedApp,
       environment,
@@ -359,7 +355,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     if (stillInstalled.installArtifactIdentity !== oldIdentity.installArtifactIdentity) {
       throw new Error("Deferred upgrade changed the installed app");
     }
-    if ((await readFile(supportRootSentinel, "utf8")) !== "legacy support-root content must survive replacement\n") {
+    if ((await readFile(supportRootSentinel, "utf8")) !== "support-root content must survive replacement\n") {
       throw new Error("Deferred upgrade changed arbitrary support-root content");
     }
     for (const [url, session] of [[launchUrl, firstSession], [secondUrl, secondSession]] as const) {
@@ -405,7 +401,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
       await new Promise((resolveDelay) => setTimeout(resolveDelay, remainingPresenceGrace));
     }
     const upgraded = await coordinateInstalled(
-      join(candidate, "Contents/MacOS/pdf-proofreader"),
+      join(candidate, "Contents/MacOS/placekeeper"),
       candidate,
       installedApp,
       environment,
@@ -414,8 +410,8 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     if (upgraded.code !== 0 || upgraded.response.status !== "installed") {
       throw new Error("Closed reviews did not converge to a successful installed upgrade");
     }
-    await assertInstalledRebrandIdentity(installedApp, smokeHome);
-    if ((await readFile(supportRootSentinel, "utf8")) !== "legacy support-root content must survive replacement\n") {
+    await assertInstalledIdentity(installedApp, smokeHome);
+    if ((await readFile(supportRootSentinel, "utf8")) !== "support-root content must survive replacement\n") {
       throw new Error("Successful upgrade changed arbitrary support-root content");
     }
     const postUpgrade = parseObject(await executeInstalled(
@@ -434,7 +430,6 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
       new Promise<void>((resolveExit) => daemon.once("exit", () => resolveExit())),
       new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 1_000)),
     ]);
-    await executeInstalled(executable, ["daemon", "stop-legacy"], environment, undefined, 2_000).catch(() => undefined);
     await rm(smokeHome, { recursive: true, force: true });
   }
 }
@@ -443,7 +438,7 @@ export async function smokeInstalledBundle(appPath: string, fixturePath: string,
   const manifest = validateBackendRuntimeManifest(JSON.parse(await readFile(resolve(repoRoot, "packaging/macos/backend-runtime-manifest.json"), "utf8")) as unknown);
   const pdfium = manifest.assets.find((asset) => asset.id === "pdfium-wasm");
   if (pdfium === undefined) throw new Error("PDFium runtime asset is absent");
-  const executable = resolve(appPath, "Contents/MacOS/pdf-proofreader");
+  const executable = resolve(appPath, "Contents/MacOS/placekeeper");
   const result = await execFileAsync(executable, ["doctor", "--json", "--offline", "--writer", "--pdf", resolve(fixturePath)], {
     encoding: "utf8",
     timeout: 30_000,
@@ -451,7 +446,7 @@ export async function smokeInstalledBundle(appPath: string, fixturePath: string,
     env: {
       PATH: "/usr/bin:/bin",
       HOME: process.env.HOME,
-      PDF_PROOFREADER_OFFLINE: "1",
+      PLACEKEEPER_OFFLINE: "1",
       HTTP_PROXY: "http://127.0.0.1:9",
       HTTPS_PROXY: "http://127.0.0.1:9",
       ALL_PROXY: "http://127.0.0.1:9",

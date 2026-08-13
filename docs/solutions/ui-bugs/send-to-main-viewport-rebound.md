@@ -32,7 +32,7 @@ tags:
 
 Sending the final Reference Tab to Main visibly jolted the Main PDF even though the semantic navigation succeeded.
 
-The correction merged in [PR #12](https://github.com/brad-ross/pdf-markup/pull/12) on 2026-08-12.
+The correction merged in [PR #12](https://github.com/brad-ross/placekeeper/pull/12) on 2026-08-12.
 
 ## Symptoms
 
@@ -94,4 +94,4 @@ The browser test observes motion rather than checking only the final page. It re
 
 - [Adaptive annotation tray framing](../architecture-patterns/adaptive-annotation-tray-framing.md) defines Framing Sessions, per-axis ownership, and restoration boundaries.
 - [Reliable compact right-docked Reference Tabs](reliable-compact-right-docked-reference-tabs.md) covers the same Reference lifecycle and semantic fallback behavior.
-- [PR #12](https://github.com/brad-ross/pdf-markup/pull/12) contains the implementation and regression coverage described here.
+- [PR #12](https://github.com/brad-ross/placekeeper/pull/12) contains the implementation and regression coverage described here.

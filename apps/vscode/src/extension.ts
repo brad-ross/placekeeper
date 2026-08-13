@@ -13,7 +13,7 @@ import {
 } from "./local-workspace.js";
 import { buildReviewWebviewHtml, reviewPanelOptions } from "./review-panel.js";
 
-const COMMAND = "pdfProofreader.open";
+const COMMAND = "placekeeper.open";
 
 async function showSharedError(error: LaunchErrorPresentation): Promise<void> {
   const selected = await vscode.window.showErrorMessage(
@@ -65,7 +65,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       const configured = vscode.workspace
-        .getConfiguration("pdfProofreader")
+        .getConfiguration("placekeeper")
         .get<string>("launcherPath");
       const executable = resolveLauncherPath(configured, homedir());
       try {
@@ -93,7 +93,7 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         const panel = vscode.window.createWebviewPanel(
-          "pdfProofreader.review",
+          "placekeeper.review",
           "Placekeeper",
           vscode.ViewColumn.Active,
           reviewPanelOptions,

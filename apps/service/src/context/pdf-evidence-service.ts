@@ -188,7 +188,7 @@ export class PdfEvidenceService {
     const binding = this.#bindings.bindingForTask(input.taskSessionId);
     if (
       binding === undefined ||
-      binding.reviewSessionId !== input.identity.proofreaderSessionId ||
+      binding.reviewSessionId !== input.identity.placekeeperSessionId ||
       binding.documentGeneration !== input.identity.documentGeneration
     ) {
       throw new Error("The task does not own this PDF evidence scope");
@@ -214,7 +214,7 @@ export class PdfEvidenceService {
     };
     const payloadKey = [
       input.taskSessionId,
-      input.identity.proofreaderSessionId,
+      input.identity.placekeeperSessionId,
       input.identity.documentGeneration,
       input.identity.stateDigest,
       digest(JSON.stringify([input.existingAnnotations, input.reviewItems, reviewChanges])),
@@ -271,7 +271,7 @@ export class PdfEvidenceService {
           {
             id: "page-render",
             kind: "page-render" as const,
-            mediaType: "application/vnd.pdf-proofreader.rgba+json",
+            mediaType: "application/vnd.placekeeper.rgba+json",
             pages,
           },
         ]),
@@ -292,7 +292,7 @@ export class PdfEvidenceService {
 
   revokeSession(reviewSessionId: string): void {
     for (const [key, record] of this.#records) {
-      if (record.identity.proofreaderSessionId === reviewSessionId) this.#deleteRecord(key);
+      if (record.identity.placekeeperSessionId === reviewSessionId) this.#deleteRecord(key);
     }
   }
 
@@ -314,7 +314,7 @@ export class PdfEvidenceService {
     const binding = this.#bindings.bindingForTask(record.taskSessionId);
     if (
       binding === undefined ||
-      binding.reviewSessionId !== record.identity.proofreaderSessionId ||
+      binding.reviewSessionId !== record.identity.placekeeperSessionId ||
       binding.documentGeneration !== record.identity.documentGeneration ||
       binding.lastVerified?.stateDigest !== record.identity.stateDigest
     ) {
@@ -437,7 +437,7 @@ export class PdfEvidenceService {
     const binding = this.#bindings.bindingForTask(input.taskSessionId);
     if (
       binding === undefined ||
-      binding.reviewSessionId !== record.identity.proofreaderSessionId ||
+      binding.reviewSessionId !== record.identity.placekeeperSessionId ||
       binding.documentGeneration !== record.identity.documentGeneration ||
       binding.lastVerified?.stateDigest !== record.identity.stateDigest
     ) {
@@ -462,14 +462,14 @@ export class PdfEvidenceService {
     let source: PdfEvidenceSource | undefined;
     const sourceCacheKey = [
       "source",
-      record.identity.proofreaderSessionId,
+      record.identity.placekeeperSessionId,
       record.identity.documentGeneration,
       record.identity.source.digest,
     ].join("\0");
     try {
       source = await this.#cached(
         sourceCacheKey,
-        () => this.#loadSource(record.identity.proofreaderSessionId, {
+        () => this.#loadSource(record.identity.placekeeperSessionId, {
           documentGeneration: record.identity.documentGeneration,
           sourceDigest: record.identity.source.digest,
         }),
@@ -482,7 +482,7 @@ export class PdfEvidenceService {
     if (
       source === undefined ||
       source.documentGeneration !== record.identity.documentGeneration ||
-      currentBinding?.reviewSessionId !== record.identity.proofreaderSessionId ||
+      currentBinding?.reviewSessionId !== record.identity.placekeeperSessionId ||
       currentBinding.documentGeneration !== record.identity.documentGeneration ||
       currentBinding.lastVerified?.stateDigest !== record.identity.stateDigest
     ) return unavailable("stale_generation");
@@ -594,7 +594,7 @@ export class PdfEvidenceService {
       if (
         record.taskSessionId === taskSessionId &&
         (
-          record.identity.proofreaderSessionId !== identity.proofreaderSessionId ||
+          record.identity.placekeeperSessionId !== identity.placekeeperSessionId ||
           record.identity.documentGeneration !== identity.documentGeneration ||
           record.identity.source.digest !== identity.source.digest ||
           record.identity.reviewRevision !== identity.reviewRevision ||

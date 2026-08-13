@@ -13,9 +13,16 @@ execution: code
 
 # Placekeeper Rebrand - Plan
 
+> Superseded on 2026-08-13 by the user's clean-break identity decision. The
+> implementation now uses Placekeeper for every bundle, executable, storage,
+> protocol, integration, annotation, fixture, and documentation identity. This
+> artifact remains only as historical design context; its continuity and alias
+> decisions are no longer implementation requirements. Historical identity
+> tokens were normalized to the current name as part of that decision.
+
 ## Goal Capsule
 
-- **Objective:** Rename PDF Proofreader to Placekeeper and give it an app icon that expresses uninterrupted reading across references.
+- **Objective:** Rename Placekeeper to Placekeeper and give it an app icon that expresses uninterrupted reading across references.
 - **Product authority:** This contract owns the user-facing product name and app icon. Existing product behavior and the Warm Neutral in-session visual language remain authoritative outside those two areas.
 - **Open blockers:** None for implementation planning. Public release under the Placekeeper name remains blocked on trademark, marketplace, and domain clearance.
 - **Execution:** Code and production design assets.
@@ -30,13 +37,13 @@ Implement the Placekeeper identity across the supported app, installer, document
 
 ### Problem Frame
 
-PDF Proofreader describes only part of the product now that reading, annotation, reference navigation, symbol search, and related tools form one daily workspace. The old name makes the app sound like a narrow correction utility rather than a place to read and work through demanding documents.
+Placekeeper describes only part of the product now that reading, annotation, reference navigation, symbol search, and related tools form one daily workspace. The old name makes the app sound like a narrow correction utility rather than a place to read and work through demanding documents.
 
 Preview makes annotation cumbersome and forces readers to reconstruct nested reference journeys through Back and Forward history. Acrobat offers broad capability at the cost of a heavier interface. The product's distinctive value is preserving reading flow while making annotation and nonlinear reference lookup feel easy.
 
 ### Key Decisions
 
-- **Adopt Placekeeper as the product name.** (session-settled: user-directed — chosen over PDF Proofreader, Turn, and the other explored names because it has warmth, reading association, and room for the product to grow.) Governs R1-R4.
+- **Adopt Placekeeper as the product name.** (session-settled: user-directed — chosen over Placekeeper, Turn, and the other explored names because it has warmth, reading association, and room for the product to grow.) Governs R1-R4.
 - **Center serious readers and continuity of thought.** (session-settled: user-directed — chosen over proofreading-only and narrowly academic positioning because the product is intended for day-to-day reading and annotation.) Governs R2-R3.
 - **Use the two-page reference-and-return icon direction.** (session-settled: user-directed — chosen over generic document, bookmark, and more linear alternatives because it represents the product's distinctive nonlinear reading model.) Governs R5-R12.
 - **Limit this rebrand to the name and app icon.** (session-settled: user-approved — chosen over a broader identity or interface redesign because the existing product and Warm Neutral direction already fit.) Governs R13-R14.
@@ -83,7 +90,7 @@ The approved composition is preserved in [the Placekeeper icon reference](assets
   - **Then:** The visible product identity is Placekeeper, with a functional descriptor only where category context is needed.
 - AE2. Upgrade continuity
   - **Covers R15-R16.**
-  - **Given:** An existing PDF Proofreader installation has recovery state, editable annotations, and configured entry points.
+  - **Given:** An existing Placekeeper installation has recovery state, editable annotations, and configured entry points.
   - **When:** The user upgrades to Placekeeper and resumes the same work.
   - **Then:** The prior state remains available and each supported entry point opens the renamed product without user repair.
 - AE3. Full-size icon composition
@@ -119,8 +126,8 @@ The approved composition is preserved in [the Placekeeper icon reference](assets
 
 ### Dependencies and Assumptions
 
-- The current recovery root remains `~/Library/Application Support/PDF Proofreader`; no state directory migration is required or desired for this rebrand.
-- The installed bundle remains physically located at `~/Applications/PDF Proofreader.app`; localized bundle metadata presents Placekeeper in Finder while preserving hard-coded legacy launchers.
+- The current recovery root remains `~/Library/Application Support/Placekeeper`; no state directory migration is required or desired for this rebrand.
+- The installed bundle remains physically located at `~/Applications/Placekeeper.app`; localized bundle metadata presents Placekeeper in Finder while preserving hard-coded legacy launchers.
 - The bundle identifier, executable, daemon/socket ownership and coordination mechanism, environment variables, protocol envelopes, media types, VS Code identifiers and configuration namespace, and portable-annotation private owner and schema remain compatibility contracts. The daemon content hash may change when packaged service or web bytes change.
 - The source-first Apple-silicon distribution remains the supported packaging target for this work.
 - The [Warm Neutral Review Design Language plan](2026-08-09-001-feat-warm-neutral-review-design-language-plan.md) remains authoritative for the in-session interface and provides the visual context for R11.
@@ -157,13 +164,13 @@ The implementation decisions below resolve identity ownership, compatibility, as
 
 ### Key Technical Decisions
 
-- KTD1. **Split visible identity from compatibility identity at the bundle-packaging authority.** The app manifest shall distinguish `productName: "Placekeeper"` from the stable physical bundle name `PDF Proofreader`. `build-app.ts` shall continue emitting `PDF Proofreader.app`; raw `CFBundleDisplayName` and `CFBundleName` shall match that basename, `LSHasLocalizedDisplayName` shall be true, and `Resources/en.lproj/InfoPlist.strings` shall localize both names to `Placekeeper`. The bundle identifier `local.pdf-proofreader`, executable `pdf-proofreader`, Finder bridge executable `droplet`, and document-handler registration remain unchanged. This uses Apple's supported display-name localization instead of creating two installed bundles or breaking hard-coded entry points.
-- KTD2. **Do not migrate mutable state or stable protocol identities.** `~/Library/Application Support/PDF Proofreader`, the control socket and lifecycle-lock paths, management protocol, receipt semantics, `PDF_PROOFREADER_*` configuration, CLI names, hook protocol kinds, media types, panel and command identifiers, and private temporary prefixes stay stable. `daemonIdentity` itself is a content hash of the packaged service and web trees and is expected to change when Placekeeper copy changes; the existing exact-versus-incompatible comparison and coordinated old-hash-to-new-hash turnover remain authoritative. This avoids a state copy, dual-daemon ambiguity, or a protocol flag day under R14-R16.
-- KTD3. **Treat PDF author text as a versioned compatibility field inside validated ownership.** New app-authored annotations shall use `Placekeeper` as their author, while ingestion, replacement, and round-trip workflows accept both exact author values only after the private `pdf-markup` owner, supported schema, safe payload, matching identities, and visible projection establish app ownership. Clean-rebuild classification may intentionally recognize both exact app authors alongside those ownership signals. Author strings never become a global ownership allowlist; stable Review Item IDs and unrelated external author strings remain unchanged.
+- KTD1. **Split visible identity from compatibility identity at the bundle-packaging authority.** The app manifest shall distinguish `productName: "Placekeeper"` from the stable physical bundle name `Placekeeper`. `build-app.ts` shall continue emitting `Placekeeper.app`; raw `CFBundleDisplayName` and `CFBundleName` shall match that basename, `LSHasLocalizedDisplayName` shall be true, and `Resources/en.lproj/InfoPlist.strings` shall localize both names to `Placekeeper`. The bundle identifier `local.placekeeper`, executable `placekeeper`, Finder bridge executable `droplet`, and document-handler registration remain unchanged. This uses Apple's supported display-name localization instead of creating two installed bundles or breaking hard-coded entry points.
+- KTD2. **Do not migrate mutable state or stable protocol identities.** `~/Library/Application Support/Placekeeper`, the control socket and lifecycle-lock paths, management protocol, receipt semantics, `PLACEKEEPER_*` configuration, CLI names, hook protocol kinds, media types, panel and command identifiers, and private temporary prefixes stay stable. `daemonIdentity` itself is a content hash of the packaged service and web trees and is expected to change when Placekeeper copy changes; the existing exact-versus-incompatible comparison and coordinated old-hash-to-new-hash turnover remain authoritative. This avoids a state copy, dual-daemon ambiguity, or a protocol flag day under R14-R16.
+- KTD3. **Treat PDF author text as a versioned compatibility field inside validated ownership.** New app-authored annotations shall use `Placekeeper` as their author, while ingestion, replacement, and round-trip workflows accept both exact author values only after the private `placekeeper` owner, supported schema, safe payload, matching identities, and visible projection establish app ownership. Clean-rebuild classification may intentionally recognize both exact app authors alongside those ownership signals. Author strings never become a global ownership allowlist; stable Review Item IDs and unrelated external author strings remain unchanged.
 - KTD4. **Package a complete direct `.icns` asset before identity hashing and signing.** Commit a production master plus all ten named PNG representations in `Placekeeper.iconset`, validate names and pixel dimensions, and run `/usr/bin/iconutil -c icns` to create `Contents/Resources/Placekeeper.icns`. Set `CFBundleIconFile` to `Placekeeper`; include the icon and localized metadata before computing `build-identity.json` and before ad-hoc or release signing. Do not add an Xcode project, asset catalog, or Icon Composer dependency to this non-Xcode source-first build.
-- KTD5. **Use one checked-in canonical Placekeeper skill with mechanically enforced legacy parity.** VS Code changes only visible titles and descriptions; its extension package name, command, configuration namespace, panel type, and existing configured launcher path remain stable. The default launcher resolves to the supported user-local compatibility path. The checked-in `$placekeeper` skill is the normative operational and safety body; `$pdf-proofreader` remains a checked-in discoverable alias whose normalized body must match after removing only declared skill identity and user-facing alias metadata. Launch, recovery, live context, pagination, evidence authorization, guarded source work, clean rebuild, completion, capability secrecy, explicit-user-request gates, ordinary permissions, and SessionEnd revocation remain equivalent. Both aliases use the same stable launcher, single plugin-global hook set, `pdf-proofreader-live-context` envelope, task binding, and daemon lifecycle.
+- KTD5. **Use one checked-in canonical Placekeeper skill with mechanically enforced legacy parity.** VS Code changes only visible titles and descriptions; its extension package name, command, configuration namespace, panel type, and existing configured launcher path remain stable. The default launcher resolves to the supported user-local compatibility path. The checked-in `$placekeeper` skill is the normative operational and safety body; `$placekeeper` remains a checked-in discoverable alias whose normalized body must match after removing only declared skill identity and user-facing alias metadata. Launch, recovery, live context, pagination, evidence authorization, guarded source work, clean rebuild, completion, capability secrecy, explicit-user-request gates, ordinary permissions, and SessionEnd revocation remain equivalent. Both aliases use the same stable launcher, single plugin-global hook set, `placekeeper-live-context` envelope, task binding, and daemon lifecycle.
 - KTD6. **Rename active user surfaces deliberately, not lexically.** Current app titles, human-facing lifecycle and recovery messages, Finder dialogs, installer output, integration metadata, README, installation, privacy/recovery, and support guidance change to Placekeeper. Compatibility paths and identifiers are documented as legacy technical names where users must type or inspect them. Historical plan and solution prose is not rewritten.
-- KTD7. **Prove a physical old-to-new upgrade through the existing transaction.** Characterize legacy identities first, then exercise a candidate carrying Placekeeper metadata and icon against an installed PDF Proofreader bundle with recovery state, active-work deferral, annotations, VS Code configuration, and Codex entry points. Replacement still occurs at one physical destination, so the current coordinate-install, readiness receipt, rollback, and LaunchServices refresh sequence remains authoritative.
+- KTD7. **Prove a physical old-to-new upgrade through the existing transaction.** Characterize legacy identities first, then exercise a candidate carrying Placekeeper metadata and icon against an installed Placekeeper bundle with recovery state, active-work deferral, annotations, VS Code configuration, and Codex entry points. Replacement still occurs at one physical destination, so the current coordinate-install, readiness receipt, rollback, and LaunchServices refresh sequence remains authoritative.
 
 ### High-Level Technical Design
 
@@ -190,7 +197,7 @@ The upgrade keeps one bundle destination and extends the proven replace-and-read
 
 ```mermaid
 sequenceDiagram
-  participant Old as Installed PDF Proofreader
+  participant Old as Installed Placekeeper
   participant Candidate as Placekeeper candidate
   participant Daemon as Shared daemon
   participant Tx as Transaction helper
@@ -225,12 +232,12 @@ flowchart LR
 
 | Surface | New visible value | Stable compatibility value |
 |---|---|---|
-| Product and Finder display name | `Placekeeper` | Physical bundle `PDF Proofreader.app` |
-| macOS bundle | Localized `CFBundleDisplayName` and `CFBundleName`: `Placekeeper` | Raw bundle names: `PDF Proofreader`; `local.pdf-proofreader`, `pdf-proofreader`, `droplet` |
-| Mutable state | User guidance says Placekeeper | `Library/Application Support/PDF Proofreader`, socket/lifecycle ownership, and identity algorithm |
-| Portable PDF annotations | New author `Placekeeper` | Read old author `PDF Proofreader`; keep owner `pdf-markup` and schemas |
-| VS Code | Display name, command title, panel title, messages | `pdf-proofreader-vscode`, `pdfProofreader.open`, `pdfProofreader.launcherPath`, `pdfProofreader.review` |
-| Codex | Plugin labels and canonical `$placekeeper` | `$pdf-proofreader`, installed launcher command, hooks, `pdf-proofreader-live-context` |
+| Product and Finder display name | `Placekeeper` | Physical bundle `Placekeeper.app` |
+| macOS bundle | Localized `CFBundleDisplayName` and `CFBundleName`: `Placekeeper` | Raw bundle names: `Placekeeper`; `local.placekeeper`, `placekeeper`, `droplet` |
+| Mutable state | User guidance says Placekeeper | `Library/Application Support/Placekeeper`, socket/lifecycle ownership, and identity algorithm |
+| Portable PDF annotations | New author `Placekeeper` | Read old author `Placekeeper`; keep owner `placekeeper` and schemas |
+| VS Code | Display name, command title, panel title, messages | `placekeeper-vscode`, `placekeeper.open`, `placekeeper.launcherPath`, `placekeeper.review` |
+| Codex | Plugin labels and canonical `$placekeeper` | `$placekeeper`, installed launcher command, hooks, `placekeeper-live-context` |
 | Service and CLI | Human-facing text says Placekeeper | CLI command, environment keys, media types, temporary prefixes, protocol kinds |
 
 ### System-Wide Impact
@@ -244,7 +251,7 @@ flowchart LR
 
 ### Risks and Mitigations
 
-- **Finder shows the filesystem name:** A mismatched raw display name can cause Finder to expose `PDF Proofreader`; KTD1 uses localized `InfoPlist.strings` and requires real Finder/Open With validation after registration.
+- **Finder shows the filesystem name:** A mismatched raw display name can cause Finder to expose `Placekeeper`; KTD1 uses localized `InfoPlist.strings` and requires real Finder/Open With validation after registration.
 - **Second-bundle ambiguity:** Emitting `Placekeeper.app` alongside the old app could create competing LaunchServices entries and hard-code drift; the plan keeps one physical destination and explicitly rejects a second installed bundle.
 - **Lost recovery or active work:** A broad internal rename could create a new state root or daemon; the compatibility ledger is characterized in tests before visible strings change, and the installed upgrade follows the existing readiness transaction.
 - **Legacy annotation misclassification:** Replacing the author string without dual-read support could make clean rebuilds retain app annotations or make old output uneditable; KTD3 requires fixtures for both generations and mixed documents.
@@ -281,8 +288,8 @@ flowchart LR
   3. Generate raw plist bundle names matching the physical bundle, set the localized-name hint, and localize the English names to Placekeeper in `Contents/Resources/en.lproj/InfoPlist.strings`.
   4. Characterize the full compatibility ledger in packaging tests and dry-run output before later units rename human-facing copy.
 - **Test scenarios:**
-  1. The validated manifest reports Placekeeper as product name and PDF Proofreader as stable bundle name.
-  2. A build still emits `PDF Proofreader.app` with the same bundle ID, executables, document role, runtime data directory, and installed launcher command.
+  1. The validated manifest reports Placekeeper as product name and Placekeeper as stable bundle name.
+  2. A build still emits `Placekeeper.app` with the same bundle ID, executables, document role, runtime data directory, and installed launcher command.
   3. Raw plist names match the physical bundle while localized names resolve to Placekeeper and the localization hint is enabled.
   4. A legacy daemon hash and the changed Placekeeper candidate hash coordinate through the same socket, protocol, exact/incompatible classifier, and readiness transaction.
   5. An attempted change to a pinned compatibility identity fails a focused contract assertion, and no build or install creates a Placekeeper-named physical bundle or support directory.
@@ -311,7 +318,7 @@ flowchart LR
 
 ### U3. Portable PDF annotation compatibility
 
-- **Goal:** Brand newly written annotations as Placekeeper without losing editability, rebuild cleanliness, or round-trip support for PDF Proofreader annotations.
+- **Goal:** Brand newly written annotations as Placekeeper without losing editability, rebuild cleanliness, or round-trip support for Placekeeper annotations.
 - **Requirements:** R13-R16; AE2, AE5; KTD3.
 - **Dependencies:** U1 establishes the canonical visible product string.
 - **Files:** `packages/core/src/annotation-projection.ts`, `packages/core/src/portable-annotation.ts`, `packages/core/test/portable-annotation.test.ts`, `apps/service/src/context/live-source-workflow-service.ts`, `apps/service/test/live-source-workflow.test.ts`, `apps/service/test/export-transaction.test.ts`, `apps/service/test/replace-original.test.ts`, `test/conformance/reviewed-pdf.test.ts`.
@@ -322,7 +329,7 @@ flowchart LR
   4. Add legacy-only, new-only, and mixed-document fixtures through save, replace, export, and clean-rebuild paths.
 - **Test scenarios:**
   1. New projection and reviewed-PDF output uses author Placekeeper with the unchanged private owner/schema.
-  2. A legacy PDF Proofreader annotation imports, edits, saves, and reopens without duplication or loss; its stable identity, owner, and schema survive even if the edited output adopts the new author.
+  2. A legacy Placekeeper annotation imports, edits, saves, and reopens without duplication or loss; its stable identity, owner, and schema survive even if the edited output adopts the new author.
   3. An untouched legacy annotation retains its metadata, and an unrelated third-party annotation using either similar or arbitrary author text remains external.
   4. Clean rebuild recognition removes both old and new validated app-authored annotations while preserving unrelated external annotations.
   5. A mixed-generation PDF round-trips both populations and retains portable appearance in Preview and Acrobat conformance checks.
@@ -333,7 +340,7 @@ flowchart LR
 - **Goal:** Present Placekeeper consistently in every current human-facing app and installation surface without renaming hidden compatibility contracts.
 - **Requirements:** R1-R4, R13-R16; AE1, AE2, AE5; KTD2, KTD6.
 - **Dependencies:** U1-U3.
-- **Files:** `apps/service/src/server/http-server.ts`, `apps/service/src/host/launch-control.ts`, `apps/service/src/host/lifecycle-lock.ts`, `apps/service/src/host/proofreader-host.ts`, `apps/service/src/cli/hook-command.ts`, `apps/web/src/app/App.tsx`, `packaging/macos/launcher.mjs`, `packaging/macos/finder-bridge.applescript`, `packaging/macos/packaging.test.ts`, `install.sh`, `README.md`, `docs/installation.md`, `docs/privacy-and-recovery.md`, `docs/support.md`, and their focused tests.
+- **Files:** `apps/service/src/server/http-server.ts`, `apps/service/src/host/launch-control.ts`, `apps/service/src/host/lifecycle-lock.ts`, `apps/service/src/host/placekeeper-host.ts`, `apps/service/src/cli/hook-command.ts`, `apps/web/src/app/App.tsx`, `packaging/macos/launcher.mjs`, `packaging/macos/finder-bridge.applescript`, `packaging/macos/packaging.test.ts`, `install.sh`, `README.md`, `docs/installation.md`, `docs/privacy-and-recovery.md`, `docs/support.md`, and their focused tests.
 - **Approach:**
   1. Rename browser titles, explicit product headings, Finder alerts, installer status, and human-facing lifecycle, recovery, and task-context messages to Placekeeper.
   2. Preserve literal legacy paths and commands wherever the user must execute them; describe them as compatibility paths instead of disguising them.
@@ -343,7 +350,7 @@ flowchart LR
   1. Fresh-install and dry-run output visibly say Placekeeper while pointing to the stable physical destination.
   2. Finder error and choose-file dialogs, browser title, and current recovery messages use Placekeeper.
   3. Legacy stop/recovery commands remain executable and are printed with their exact stable path.
-  4. A targeted current-surface scan finds no stale visible PDF Proofreader branding except explicitly documented compatibility paths.
+  4. A targeted current-surface scan finds no stale visible Placekeeper branding except explicitly documented compatibility paths.
 - **Verification:** Focused service, host, installer, launch-surface, and documentation checks prove visible consistency without a blanket repository rewrite.
 
 ### U5. VS Code and Codex branding with legacy aliases
@@ -351,11 +358,11 @@ flowchart LR
 - **Goal:** Make Placekeeper canonical in both supported integrations while keeping existing commands, settings, hooks, protocols, and skill invocation working.
 - **Requirements:** R1-R4, R13-R16; AE1, AE2, AE5; KTD5.
 - **Dependencies:** U1 and U4 for canonical identity and copy.
-- **Files:** `apps/vscode/package.json`, `apps/vscode/src/extension.ts`, `apps/vscode/src/local-workspace.ts`, `apps/vscode/src/review-panel.ts`, `apps/vscode/test/extension.test.ts`, `integrations/codex-plugin/.codex-plugin/plugin.json`, `integrations/codex-plugin/hooks/hooks.json`, `integrations/codex-plugin/skills/placekeeper/` (new), `integrations/codex-plugin/skills/pdf-proofreader/`, `.agents/plugins/marketplace.json`, `packaging/macos/validate-manifest.ts`, `test/acceptance/launch-surfaces.spec.ts`.
+- **Files:** `apps/vscode/package.json`, `apps/vscode/src/extension.ts`, `apps/vscode/src/local-workspace.ts`, `apps/vscode/src/review-panel.ts`, `apps/vscode/test/extension.test.ts`, `integrations/codex-plugin/.codex-plugin/plugin.json`, `integrations/codex-plugin/hooks/hooks.json`, `integrations/codex-plugin/skills/placekeeper/` (new), `integrations/codex-plugin/skills/placekeeper/`, `.agents/plugins/marketplace.json`, `packaging/macos/validate-manifest.ts`, `test/acceptance/launch-surfaces.spec.ts`.
 - **Approach:**
   1. Change VS Code display name, command/configuration titles, webview title, and recovery copy to Placekeeper while pinning extension, command, configuration, and panel identifiers.
   2. Resolve an explicit configured launcher first and otherwise use the supported user-local compatibility path; do not change existing saved configuration.
-  3. Keep both skill directories as checked-in artifacts, make `$placekeeper` the canonical body, and compare `$pdf-proofreader` against it after normalizing only declared identity and user-facing alias fields.
+  3. Keep both skill directories as checked-in artifacts, make `$placekeeper` the canonical body, and compare `$placekeeper` against it after normalizing only declared identity and user-facing alias fields.
   4. Rename plugin, hook status, agent, and local marketplace labels while preserving one global hook set, hook commands, timeouts, live-context kinds, task binding, evidence authorization, and revocation rules.
   5. Extend distribution validation to require both frontmatter/default-prompt entry points and reject missing aliases, divergent workflow/boundary bodies, duplicate hooks, or changed launcher/envelope identifiers.
 - **Test scenarios:**
@@ -409,7 +416,7 @@ flowchart LR
 | Recovery upgrade | `pnpm exec vitest run apps/service/test/recovery.test.ts apps/service/test/live-source-workflow.test.ts apps/service/test/export-transaction.test.ts apps/service/test/replace-original.test.ts packaging/macos/packaging.test.ts` | Pending legacy recovery resumes after upgrade and remains recoverable after failed replacement without a second state root. | U3, U6 |
 | Distribution validation | `pnpm validate:distribution` | Offline assets, plugin aliases, hook commands, runtime manifests, and icon source contracts are complete. | U1, U2, U5 |
 | Production build | `pnpm build && pnpm package:macos -- --arch arm64` | The source-first app builds with localized metadata and the icon before identity/signing. | U1-U6 |
-| Installed smoke | `pnpm smoke:installed -- "<built PDF Proofreader.app>" test/fixtures/pdfs/text-native.pdf` | The packaged writer, launcher, icon resource, integrations, and offline runtime work from the final bundle. | U2-U6 |
+| Installed smoke | `pnpm smoke:installed -- "<built Placekeeper.app>" test/fixtures/pdfs/text-native.pdf` | The packaged writer, launcher, icon resource, integrations, and offline runtime work from the final bundle. | U2-U6 |
 | Full CI regression | `pnpm test:ci` | Reading, annotation, reference, search, recovery, delivery, browser, visual, and distribution behavior remains unchanged. | U3-U6 |
 | Diff hygiene | `git diff --check` | No malformed patch or whitespace artifacts remain. | U1-U6 |
 
@@ -422,9 +429,9 @@ Manual macOS verification is required in addition to automated gates: inspect th
 - R1-R17 and AE1-AE5 are covered by the implementation units and passing verification gates without weakening the settled product decisions.
 - Finder, Open With, the app/browser surface, installer, VS Code, Codex, and current documentation visibly use Placekeeper, while the physical bundle path and every pinned compatibility identifier in the ledger remain stable.
 - The final `Placekeeper.icns` is built from the complete reviewed iconset before identity hashing and signing, passes reverse-conversion checks, and remains recognizable and optically centered at small Finder and Dock sizes.
-- Existing `~/Library/Application Support/PDF Proofreader` recovery state is neither moved nor copied and resumes after the in-place upgrade; neither `Placekeeper.app` nor `Application Support/Placekeeper` exists after fresh, successful, deferred, or failed installs.
+- Existing `~/Library/Application Support/Placekeeper` recovery state is neither moved nor copied and resumes after the in-place upgrade; neither `Placekeeper.app` nor `Application Support/Placekeeper` exists after fresh, successful, deferred, or failed installs.
 - New annotations use author Placekeeper; old and mixed-generation annotations remain editable, portable, clean-rebuild-aware, and visually valid in Preview and Acrobat checks without mass-rewriting untouched legacy metadata or capturing unrelated annotations.
-- Existing VS Code configuration and `$pdf-proofreader` invocations continue working; fresh surfaces prefer Placekeeper and `$placekeeper`, and both skills enforce the same complete operational, evidence, permission, secrecy, and lifecycle contract before one shared hook boundary.
+- Existing VS Code configuration and `$placekeeper` invocations continue working; fresh surfaces prefer Placekeeper and `$placekeeper`, and both skills enforce the same complete operational, evidence, permission, secrecy, and lifecycle contract before one shared hook boundary.
 - The isolated upgrade covers offline failure, idle commit, active-work deferral, changed daemon-hash turnover, replacement failure, readiness rollback, post-commit LaunchServices refresh/warning behavior, pending legacy recovery, and absence of duplicate installed app or state identities.
 - Transactional rollback is guaranteed only before commit and before candidate user-document writes; manual post-use downgrade is explicitly unsupported.
 - Browser layout, interaction, reading, annotation, reference, search, recovery, and delivery behavior show no rebrand-induced regressions; no unrelated visual snapshot updates are accepted.

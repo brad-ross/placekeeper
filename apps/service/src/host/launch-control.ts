@@ -26,7 +26,7 @@ import type {
   SourceWorkflowResult,
 } from "../context/live-source-workflow-service.js";
 import { SourceWorkflowUnavailableError } from "../context/live-source-workflow-service.js";
-import type { LaunchRequest, LaunchResponse, ProofreaderHost } from "./proofreader-host.js";
+import type { LaunchRequest, LaunchResponse, PlacekeeperHost } from "./placekeeper-host.js";
 import type { ConditionalShutdownResult } from "./daemon-lifecycle.js";
 
 // Both directions are explicitly bounded. Evidence requests use a stricter
@@ -54,7 +54,6 @@ export interface DaemonManagementStatus {
 }
 
 export type DaemonUninspectableReason =
-  | "legacy"
   | "malformed"
   | "oversized"
   | "timeout"
@@ -68,17 +67,17 @@ export type DaemonCompatibilityResult =
   | { readonly kind: "incompatible"; readonly status: DaemonManagementStatus }
   | { readonly kind: "uninspectable"; readonly reason: DaemonUninspectableReason };
 
-export class ProofreaderControlTimeoutError extends Error {
+export class PlacekeeperControlTimeoutError extends Error {
   constructor() {
-    super("Proofreader service timed out");
-    this.name = "ProofreaderControlTimeoutError";
+    super("Placekeeper service timed out");
+    this.name = "PlacekeeperControlTimeoutError";
   }
 }
 
-export class ProofreaderControlProtocolError extends Error {
+export class PlacekeeperControlProtocolError extends Error {
   constructor(readonly reason: "malformed" | "oversized" | "early-close") {
-    super(`Proofreader service returned an ${reason} response`);
-    this.name = "ProofreaderControlProtocolError";
+    super(`Placekeeper service returned an ${reason} response`);
+    this.name = "PlacekeeperControlProtocolError";
   }
 }
 
@@ -109,10 +108,6 @@ function upgradePresentation(reason: DaemonUpgradeReason): {
     message: "Placekeeper is finishing saved work or another lifecycle operation. Existing work was preserved.",
     recoveryAction: "Wait a moment, then retry",
   };
-  if (reason === "legacy") return {
-    message: "An older Placekeeper service is running and cannot prove that reviews are idle. Existing work was preserved.",
-    recoveryAction: 'Close reviews, run "$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy, then retry',
-  };
   if (["timeout", "malformed", "oversized", "early-close"].includes(reason)) return {
     message: "Placekeeper could not safely inspect the running service. The upgrade was deferred and existing work was preserved.",
     recoveryAction: "Close active work, then retry",
@@ -123,7 +118,7 @@ function upgradePresentation(reason: DaemonUpgradeReason): {
   };
 }
 
-export type ProofreaderControlRequest =
+export type PlacekeeperControlRequest =
   | {
       readonly kind: "management";
       readonly protocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
@@ -209,7 +204,7 @@ export type ProofreaderControlRequest =
       readonly maxBytes?: number;
     };
 
-export type ProofreaderControlResponse =
+export type PlacekeeperControlResponse =
   | {
       readonly kind: "management";
       readonly protocolVersion: typeof MANAGEMENT_PROTOCOL_VERSION;
@@ -289,7 +284,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isControlRequest(value: unknown): value is ProofreaderControlRequest {
+function isControlRequest(value: unknown): value is PlacekeeperControlRequest {
   if (!isObject(value) || typeof value.kind !== "string") return false;
   if (value.kind === "management") {
     return value.protocolVersion === MANAGEMENT_PROTOCOL_VERSION &&
@@ -348,10 +343,10 @@ function isControlRequest(value: unknown): value is ProofreaderControlRequest {
 }
 
 async function dispatch(
-  host: ProofreaderHost,
-  request: ProofreaderControlRequest,
+  host: PlacekeeperHost,
+  request: PlacekeeperControlRequest,
   management: { readonly daemonIdentity: string; readonly readinessToken?: string },
-): Promise<ProofreaderControlResponse> {
+): Promise<PlacekeeperControlResponse> {
   if (request.kind === "management") {
     if (request.operation === "shutdown-if-idle") {
       return {
@@ -380,9 +375,9 @@ async function dispatch(
   if (request.kind === "launch") {
     return { kind: "launch", response: await host.open(request.request) };
   }
-  let response: ProofreaderControlResponse | undefined;
+  let response: PlacekeeperControlResponse | undefined;
   try {
-    response = await host.lifecycle.runActivity<ProofreaderControlResponse>(async () => {
+    response = await host.lifecycle.runActivity<PlacekeeperControlResponse>(async () => {
     if (request.kind === "claim-binding") {
       return {
         kind: "binding",
@@ -517,7 +512,7 @@ async function dispatch(
   return response ?? { kind: "error", reason: "unavailable" };
 }
 
-function writeResponse(socket: Socket, response: ProofreaderControlResponse): Promise<void> {
+function writeResponse(socket: Socket, response: PlacekeeperControlResponse): Promise<void> {
   const serialized = `${JSON.stringify(response)}\n`;
   const output = Buffer.byteLength(serialized) > MAX_MESSAGE_BYTES
     ? `${JSON.stringify({ kind: "error", reason: "unavailable" })}\n`
@@ -526,7 +521,7 @@ function writeResponse(socket: Socket, response: ProofreaderControlResponse): Pr
 }
 
 export async function startLaunchControlServer(
-  host: ProofreaderHost,
+  host: PlacekeeperHost,
   socketPath: string,
   management: { readonly daemonIdentity: string; readonly readinessToken?: string } | DaemonManagementStatus = {
     daemonIdentity: "development",
@@ -616,33 +611,33 @@ function closeServer(server: Server): Promise<void> {
 
 export function requestControl(
   socketPath: string,
-  request: ProofreaderControlRequest,
+  request: PlacekeeperControlRequest,
   options: { readonly timeoutMs?: number; readonly maxMessageBytes?: number } = {},
-): Promise<ProofreaderControlResponse> {
+): Promise<PlacekeeperControlResponse> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(socketPath);
     let raw = "";
     socket.setEncoding("utf8");
     socket.setTimeout(options.timeoutMs ?? CONTROL_REQUEST_TIMEOUT_MS, () =>
-      socket.destroy(new ProofreaderControlTimeoutError()));
+      socket.destroy(new PlacekeeperControlTimeoutError()));
     socket.once("connect", () => socket.write(`${JSON.stringify(request)}\n`));
     socket.on("data", (chunk: string) => {
       raw += chunk;
       if (Buffer.byteLength(raw) > (options.maxMessageBytes ?? MAX_MESSAGE_BYTES)) {
-        socket.destroy(new ProofreaderControlProtocolError("oversized"));
+        socket.destroy(new PlacekeeperControlProtocolError("oversized"));
       }
     });
     socket.once("error", reject);
     socket.once("end", () => {
       socket.destroy();
       if (raw.length === 0) {
-        reject(new ProofreaderControlProtocolError("early-close"));
+        reject(new PlacekeeperControlProtocolError("early-close"));
         return;
       }
       try {
-        resolve(JSON.parse(raw) as ProofreaderControlResponse);
+        resolve(JSON.parse(raw) as PlacekeeperControlResponse);
       } catch {
-        reject(new ProofreaderControlProtocolError("malformed"));
+        reject(new PlacekeeperControlProtocolError("malformed"));
       }
     });
   });
@@ -655,7 +650,7 @@ function isAggregateActivity(value: unknown): value is DaemonAggregateActivity {
   );
 }
 
-function managementStatus(response: ProofreaderControlResponse): DaemonManagementStatus | undefined {
+function managementStatus(response: PlacekeeperControlResponse): DaemonManagementStatus | undefined {
   if (
     response.kind !== "management" ||
     response.protocolVersion !== MANAGEMENT_PROTOCOL_VERSION ||
@@ -720,7 +715,7 @@ export async function inspectDaemonCompatibility(
       options,
     );
     if (response.kind === "error" && response.reason === "invalid-request") {
-      return { kind: "uninspectable", reason: "legacy" };
+      return { kind: "uninspectable", reason: "malformed" };
     }
     const status = managementStatus(response);
     if (status === undefined) return { kind: "uninspectable", reason: "malformed" };
@@ -728,10 +723,10 @@ export async function inspectDaemonCompatibility(
       ? { kind: "exact", status }
       : { kind: "incompatible", status };
   } catch (error) {
-    if (error instanceof ProofreaderControlTimeoutError) {
+    if (error instanceof PlacekeeperControlTimeoutError) {
       return { kind: "uninspectable", reason: "timeout" };
     }
-    if (error instanceof ProofreaderControlProtocolError) {
+    if (error instanceof PlacekeeperControlProtocolError) {
       return { kind: "uninspectable", reason: error.reason };
     }
     throw error;

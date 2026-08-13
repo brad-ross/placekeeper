@@ -51,8 +51,8 @@ function readBuildIdentity(resources) {
 async function nativeError(error) {
   if (!error || !["input-unavailable", "unsupported-context", "upgrade-required"].includes(error.kind)) return;
   await osascript(
-    'display alert (system attribute "PDF_PROOFREADER_MESSAGE") buttons {(system attribute "PDF_PROOFREADER_ACTION")}',
-    { PDF_PROOFREADER_MESSAGE: String(error.message), PDF_PROOFREADER_ACTION: String(error.recoveryAction) },
+    'display alert (system attribute "PLACEKEEPER_MESSAGE") buttons {(system attribute "PLACEKEEPER_ACTION")}',
+    { PLACEKEEPER_MESSAGE: String(error.message), PLACEKEEPER_ACTION: String(error.recoveryAction) },
   );
 }
 
@@ -81,7 +81,7 @@ async function openFinderPdf(nodePath, serviceEntry, pdfPath, serviceEnvironment
     return;
   }
   if (!["opened", "focused"].includes(result.kind) || typeof result.url !== "string" || !/^http:\/\/127\.0\.0\.1:\d+\/s\/[^/]+\/bootstrap#cap=[A-Za-z0-9_-]+$/u.test(result.url)) return;
-  await osascript('open location (system attribute "PDF_PROOFREADER_URL")', { PDF_PROOFREADER_URL: result.url });
+  await osascript('open location (system attribute "PLACEKEEPER_URL")', { PLACEKEEPER_URL: result.url });
 }
 
 export async function main(args = process.argv.slice(2)) {
@@ -91,10 +91,10 @@ export async function main(args = process.argv.slice(2)) {
   const buildIdentity = readBuildIdentity(resources);
   const serviceEnvironment = {
     ...process.env,
-    PDF_PROOFREADER_PDFIUM_WASM: resolve(resources, "pdfium/pdfium.wasm"),
-    PDF_PROOFREADER_DAEMON_IDENTITY: buildIdentity.daemonIdentity,
-    PDF_PROOFREADER_INSTALL_ARTIFACT_IDENTITY: buildIdentity.installArtifactIdentity,
-    PDF_PROOFREADER_WEB_ASSETS: resolve(resources, "web"),
+    PLACEKEEPER_PDFIUM_WASM: resolve(resources, "pdfium/pdfium.wasm"),
+    PLACEKEEPER_DAEMON_IDENTITY: buildIdentity.daemonIdentity,
+    PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY: buildIdentity.installArtifactIdentity,
+    PLACEKEEPER_WEB_ASSETS: resolve(resources, "web"),
   };
   if (args.length === 1 && resolve(args[0]) === args[0] && args[0].toLowerCase().endsWith(".pdf")) {
     await openFinderPdf(nodePath, serviceEntry, args[0], serviceEnvironment);

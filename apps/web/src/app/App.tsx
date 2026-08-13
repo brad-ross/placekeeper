@@ -655,7 +655,7 @@ export function App({
           onSelectionUpdate?.(selectionReads.current.invalidate());
           return;
         }
-        const captureGate = globalThis.__pdfProofreaderSelectionCaptureTestGate;
+        const captureGate = globalThis.__placekeeperSelectionCaptureTestGate;
         if (captureGate !== undefined) await captureGate.wait(generation);
         if (!selectionReads.current.isCurrent(generation)) return;
         const result = await captureViewerSelection({
@@ -894,7 +894,7 @@ export function App({
 
 declare global {
   /** Deterministic acceptance-only gate installed before the production app starts. */
-  var __pdfProofreaderSelectionCaptureTestGate:
+  var __placekeeperSelectionCaptureTestGate:
     | { wait(generation: number): Promise<void> }
     | undefined;
 }

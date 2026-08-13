@@ -60,7 +60,7 @@ async function setup(
     >;
   } = {},
 ) {
-  const root = await mkdtemp(join(tmpdir(), "pdf-markup-save-"));
+  const root = await mkdtemp(join(tmpdir(), "placekeeper-save-"));
   roots.push(root);
   const source = join(root, "paper.pdf");
   const original = new TextEncoder().encode("%PDF-1.7\nsource\n%%EOF");

@@ -77,7 +77,7 @@ await expect.poll(async () =>
 ).toBeGreaterThan(box.width);
 ```
 
-Only after both conditions hold does the test compute the zoomed pointer coordinates and start the second drag (`test/acceptance/viewer.spec.ts:95`). The fix was delivered and verified in [PR #5](https://github.com/brad-ross/pdf-markup/pull/5), which is merged.
+Only after both conditions hold does the test compute the zoomed pointer coordinates and start the second drag (`test/acceptance/viewer.spec.ts:95`). The fix was delivered and verified in [PR #5](https://github.com/brad-ross/placekeeper/pull/5), which is merged.
 
 ## Why This Works
 
@@ -99,4 +99,4 @@ The next coordinate-based action therefore no longer begins before those observe
 ## Related Issues
 
 - [Adaptive annotation tray framing without resizing the PDF viewer](../architecture-patterns/adaptive-annotation-tray-framing.md) — adjacent guidance on viewer-owned state, asynchronous framing, and real-browser geometry checks.
-- [PR #5](https://github.com/brad-ross/pdf-markup/pull/5) — merged implementation and CI verification.
+- [PR #5](https://github.com/brad-ross/placekeeper/pull/5) — merged implementation and CI verification.

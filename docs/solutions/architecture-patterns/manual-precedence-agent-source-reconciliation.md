@@ -77,7 +77,7 @@ The classifier is intentionally asymmetric: copied or moved text is not independ
 
 An independent result returns `applyGuardSha256`, the digest of the classified source (`apps/service/src/context/source-reconciliation-service.ts:546-571`). Immediately before the ordinary edit, reconcile again with that guard. If the digest changed, current manual state wins and the result becomes conflict or ambiguity (`apps/service/src/context/source-reconciliation-service.ts:210-225`).
 
-This second check closes the check-to-write race. Do not obtain a new guard after an unexpected change and proceed as if nothing happened. The installed workflow requires an immediately-before-edit check and permits writing only while the result remains independent (`integrations/codex-plugin/skills/pdf-proofreader/SKILL.md:50-59`).
+This second check closes the check-to-write race. Do not obtain a new guard after an unexpected change and proceed as if nothing happened. The installed workflow requires an immediately-before-edit check and permits writing only while the result remains independent (`integrations/codex-plugin/skills/placekeeper/SKILL.md:50-59`).
 
 The service itself never writes source. The agent uses ordinary editing tools, preserving the host's sandbox, review, and approval boundaries (`apps/service/test/live-source-workflow.test.ts:142-165`).
 
@@ -85,7 +85,7 @@ The service itself never writes source. The agent uses ordinary editing tools, p
 
 Begin, propose, reconcile, rebuild, and complete operations all obtain fresh task-scoped context (`apps/service/src/context/live-source-workflow-service.ts:175-314`, `apps/service/src/context/live-source-workflow-service.ts:374-407`). Task, review-session, and generation ownership remain valid throughout. Reconcile, rebuild, and completion additionally require the reconciliation report to match the fresh observation's generation and state digest (`apps/service/src/context/live-source-workflow-service.ts:458-466`), so a valid source classification cannot be paired with a different annotation set.
 
-Discussion alone does not capture a baseline or authorize mutation. The installed protocol starts source work only when the user requests source changes or a clean rebuild (`integrations/codex-plugin/skills/pdf-proofreader/SKILL.md:36-45`).
+Discussion alone does not capture a baseline or authorize mutation. The installed protocol starts source work only when the user requests source changes or a clean rebuild (`integrations/codex-plugin/skills/placekeeper/SKILL.md:36-45`).
 
 ### Keep rebuild execution outside the service
 

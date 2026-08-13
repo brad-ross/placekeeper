@@ -31,7 +31,7 @@ afterEach(async () => {
 });
 
 async function temporaryDirectory(): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), "pdf-proofreader-export-"));
+  const path = await mkdtemp(join(tmpdir(), "placekeeper-export-"));
   temporaryDirectories.push(path);
   return path;
 }
@@ -44,7 +44,7 @@ function annotation(): ReviewAnnotation {
     rect: { x: 72, y: 92, width: 80, height: 14 },
     quadPoints: [{ x: 72, y: 92, width: 80, height: 14 }],
     contents: "Check this.",
-    author: "PDF Proofreader",
+    author: "Placekeeper",
     createdAt: "2026-08-07T12:00:00.000Z",
     modifiedAt: "2026-08-07T12:00:00.000Z",
     textAnchorReliable: true,
@@ -283,8 +283,8 @@ describe("reviewed PDF export transaction", () => {
     expect(frozen.annotations).toMatchObject([{
       author: "Placekeeper",
       custom: {
-        pdfMarkup: {
-          owner: "pdf-markup",
+        placekeeper: {
+          owner: "placekeeper",
           schemaVersion: 2,
           projection: { author: "Placekeeper" },
         },

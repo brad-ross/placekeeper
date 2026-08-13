@@ -31,7 +31,7 @@ tags:
 
 ## Problem
 
-Saved PDFs retained enough private metadata for PDF Proofreader to reconstruct its Review Items, but their visible annotation projections were not reliably self-rendering outside the app. Highlights, strikeouts, insert notes, and page notes could therefore look correct in the app's overlay yet disappear or land outside the visible page in macOS Preview and other PDF viewers.
+Saved PDFs retained enough private metadata for Placekeeper to reconstruct its Review Items, but their visible annotation projections were not reliably self-rendering outside the app. Highlights, strikeouts, insert notes, and page notes could therefore look correct in the app's overlay yet disappear or land outside the visible page in macOS Preview and other PDF viewers.
 
 The writer already required standards-visible normal appearances. PR #21 completed the interoperability fix by moving capture, overlay rendering, document ordering, portable metadata, and PDF writing to crop-relative page geometry, with a migration for legacy offset coordinates.
 
@@ -67,7 +67,7 @@ The clean palette makes annotation meaning obvious without obscuring the documen
 
 ### Require a normal appearance after serialization
 
-The backend creates the mapped annotations through PDFium, saves a new PDF, and reopens the result. Reopen inspection checks the normal appearance bit; the save fails closed if any requested annotation is missing or has no normal appearance (`packages/pdf-backends/src/embedpdf-adapter.ts:619-640`). The generated golden PDF was also manually rendered through Poppler and macOS PDFKit, where its marks were visible without PDF Proofreader interpreting the private metadata (session history).
+The backend creates the mapped annotations through PDFium, saves a new PDF, and reopens the result. Reopen inspection checks the normal appearance bit; the save fails closed if any requested annotation is missing or has no normal appearance (`packages/pdf-backends/src/embedpdf-adapter.ts:619-640`). The generated golden PDF was also manually rendered through Poppler and macOS PDFKit, where its marks were visible without Placekeeper interpreting the private metadata (session history).
 
 ### Use one crop-relative geometry vocabulary
 
@@ -79,11 +79,11 @@ New Review States and portable envelopes use schema v2 (`packages/core/src/revie
 
 ### Keep private identity coupled to public evidence
 
-The `pdfMarkup` envelope stores the Review Item and a redundant visible projection. Import accepts ownership only when the embedded ID, page, subtype, contents, author, rectangle, and segment rectangles match the actual visible annotation (`packages/core/src/portable-annotation.ts:23-43`, `packages/core/src/portable-annotation.ts:181-205`, `packages/core/src/portable-annotation.ts:272-306`). The writer removes only annotations recognized as app-owned, writes the current Owned Annotation set, and verifies that Existing PDF Annotations remain unchanged (`packages/pdf-backends/src/embedpdf-adapter.ts:599-669`).
+The `placekeeper` envelope stores the Review Item and a redundant visible projection. Import accepts ownership only when the embedded ID, page, subtype, contents, author, rectangle, and segment rectangles match the actual visible annotation (`packages/core/src/portable-annotation.ts:23-43`, `packages/core/src/portable-annotation.ts:181-205`, `packages/core/src/portable-annotation.ts:272-306`). The writer removes only annotations recognized as app-owned, writes the current Owned Annotation set, and verifies that Existing PDF Annotations remain unchanged (`packages/pdf-backends/src/embedpdf-adapter.ts:599-669`).
 
 ## Why This Works
 
-External viewers receive a standard subtype, visible geometry, color and opacity, printable flag, contents, and a normal appearance. PDF Proofreader's Portable Annotation Identity remains embedded beside that public representation. Manual cross-viewer rendering confirmed that the saved file remains visible without the app, while the portable envelope makes the same annotations editable when reopened in PDF Proofreader (session history).
+External viewers receive a standard subtype, visible geometry, color and opacity, printable flag, contents, and a normal appearance. Placekeeper's Portable Annotation Identity remains embedded beside that public representation. Manual cross-viewer rendering confirmed that the saved file remains visible without the app, while the portable envelope makes the same annotations editable when reopened in Placekeeper (session history).
 
 The geometry correction also removes a compensating-error loop. Capture, overlay rendering, document ordering, portable metadata, and PDF writing now speak crop-relative page coordinates; rotation and zoom are presentation transforms applied only at the viewer boundary. Legacy v1 data is translated once during migration instead of forcing every downstream consumer to remember the old offset convention.
 

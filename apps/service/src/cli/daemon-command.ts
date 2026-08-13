@@ -8,8 +8,8 @@ import {
   inspectDaemonCompatibility,
   MANAGEMENT_PROTOCOL_VERSION,
   managementShutdownResult,
-  ProofreaderControlProtocolError,
-  ProofreaderControlTimeoutError,
+  PlacekeeperControlProtocolError,
+  PlacekeeperControlTimeoutError,
   requestControl,
 } from "../host/launch-control.js";
 import {
@@ -184,7 +184,6 @@ async function stopReadyCandidate(receiptPath: string): Promise<void> {
 async function coordinateInstall(args: readonly string[]): Promise<"noop" | "installed"> {
   const candidateApp = takeFlag(args, "--candidate-app");
   const installedApp = takeFlag(args, "--installed-app");
-  const obsoleteAction = takeFlag(args, "--obsolete-action");
   const replaceHelper = takeFlag(args, "--replace-helper");
   const candidate = await readIdentity(candidateApp);
   if (candidate === undefined) throw new Error("The candidate build identity is invalid");
@@ -218,10 +217,10 @@ async function coordinateInstall(args: readonly string[]): Promise<"noop" | "ins
           return await requestIdleShutdown(paths.socketPath);
         } catch (error) {
           if (daemonUnavailable(error)) return { status: "accepted" };
-          if (error instanceof ProofreaderControlTimeoutError) {
+          if (error instanceof PlacekeeperControlTimeoutError) {
             throw new DaemonUpgradeRequiredError("timeout");
           }
-          if (error instanceof ProofreaderControlProtocolError) {
+          if (error instanceof PlacekeeperControlProtocolError) {
             throw new DaemonUpgradeRequiredError(error.reason);
           }
           throw error;
@@ -233,8 +232,7 @@ async function coordinateInstall(args: readonly string[]): Promise<"noop" | "ins
           replaceHelper,
           candidateApp,
           installedApp,
-          obsoleteAction,
-          join(installedApp, "Contents/MacOS/pdf-proofreader"),
+          join(installedApp, "Contents/MacOS/placekeeper"),
         ], {
           timeout: 30_000,
           maxBuffer: 65_536,
@@ -252,58 +250,6 @@ async function coordinateInstall(args: readonly string[]): Promise<"noop" | "ins
   }
 }
 
-export function parseOwnedLegacyProcess(
-  lsofOutput: string,
-  psOutput: string,
-  expectedUid: number,
-): number | undefined {
-  const pids = [...lsofOutput.matchAll(/^p(\d+)$/gmu)].map((match) => Number(match[1]));
-  const uids = [...lsofOutput.matchAll(/^u(\d+)$/gmu)].map((match) => Number(match[1]));
-  if (pids.length !== 1 || uids.length === 0 || uids.some((uid) => uid !== expectedUid)) return undefined;
-  const match = /^\s*(\d+)\s+(.+)$/u.exec(psOutput.trim());
-  if (match === null || Number(match[1]) !== expectedUid) return undefined;
-  const command = match[2]!;
-  if (!/(?:PDF Proofreader\.app|pdf-markup).*\/service\/main\.js\s+daemon(?:\s|$)/u.test(command)) return undefined;
-  return pids[0];
-}
-
-export function legacySocketOwnerLookupArgs(socketPath: string): string[] {
-  return ["-n", "-P", "-a", "-U", "-Fpu", socketPath];
-}
-
-async function stopLegacyDaemon(): Promise<void> {
-  const paths = defaultDaemonPaths();
-  const lock = await acquireLifecycleLock(
-    paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
-    { timeoutMs: 5_000 },
-  );
-  try {
-    const info = await lstat(paths.socketPath);
-    const uid = process.getuid?.();
-    if (uid === undefined || !info.isSocket() || info.uid !== uid) {
-      throw new Error("The Placekeeper socket is not an owned local socket");
-    }
-    const { stdout: lsofOutput } = await execFileAsync(
-      "/usr/sbin/lsof",
-      legacySocketOwnerLookupArgs(paths.socketPath),
-      { timeout: 2_000, maxBuffer: 16_384 },
-    );
-    const pidMatch = /^p(\d+)$/mu.exec(lsofOutput);
-    if (pidMatch === null) throw new Error("No owned Placekeeper daemon is listening");
-    const { stdout: psOutput } = await execFileAsync(
-      "/bin/ps",
-      ["-p", pidMatch[1]!, "-o", "uid=", "-o", "command="],
-      { timeout: 2_000, maxBuffer: 16_384 },
-    );
-    const pid = parseOwnedLegacyProcess(lsofOutput, psOutput, uid);
-    if (pid === undefined) throw new Error("The socket listener is not a validated Placekeeper daemon");
-    process.kill(pid, "SIGTERM");
-    await waitForSocketRetirement(paths.socketPath);
-  } finally {
-    await lock.release();
-  }
-}
-
 export async function runDaemonCommand(
   args: readonly string[],
   write: (text: string) => void = (text) => process.stdout.write(text),
@@ -316,11 +262,6 @@ export async function runDaemonCommand(
   }
   if (args[0] === "stop-ready") {
     await stopReadyCandidate(takeFlag(args, "--receipt"));
-    write(`${JSON.stringify({ ok: true, status: "stopped" })}\n`);
-    return 0;
-  }
-  if (args[0] === "stop-legacy") {
-    await stopLegacyDaemon();
     write(`${JSON.stringify({ ok: true, status: "stopped" })}\n`);
     return 0;
   }

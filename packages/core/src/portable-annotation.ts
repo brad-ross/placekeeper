@@ -9,8 +9,7 @@ import { assertReviewItem } from "./review-reducer.js";
 
 export const PORTABLE_ANNOTATION_MAX_BYTES = 32 * 1024;
 export const PORTABLE_ANNOTATION_AUTHOR = "Placekeeper";
-const LEGACY_PORTABLE_ANNOTATION_AUTHOR = "PDF Proofreader";
-const PORTABLE_ANNOTATION_OWNER = "pdf-markup";
+const PORTABLE_ANNOTATION_OWNER = "placekeeper";
 const MAX_DEPTH = 12;
 const MAX_KEYS = 128;
 const MAX_STRING_LENGTH = 16 * 1024;
@@ -34,7 +33,7 @@ interface PortableProjection {
 }
 
 interface PortableAnnotationEnvelope {
-  readonly schemaVersion: 1 | 2;
+  readonly schemaVersion: 2;
   readonly owner: typeof PORTABLE_ANNOTATION_OWNER;
   readonly itemId: string;
   readonly item: ReviewItem;
@@ -42,7 +41,7 @@ interface PortableAnnotationEnvelope {
 }
 
 export interface PortableAnnotationCustom {
-  readonly pdfMarkup: PortableAnnotationEnvelope;
+  readonly placekeeper: PortableAnnotationEnvelope;
 }
 
 interface EngineRect {
@@ -66,8 +65,6 @@ export type PortableAnnotationInspection =
   | {
       readonly status: "owned";
       readonly item: ReviewItem;
-      /** v1 geometry includes the historical CropBox offset; v2 is crop-relative. */
-      readonly geometryVersion: 1 | 2;
     };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -258,7 +255,7 @@ function isProjection(value: unknown): value is PortableProjection {
 }
 
 export function isPortableAnnotationAuthor(author: string): boolean {
-  return author === PORTABLE_ANNOTATION_AUTHOR || author === LEGACY_PORTABLE_ANNOTATION_AUTHOR;
+  return author === PORTABLE_ANNOTATION_AUTHOR;
 }
 
 export function createPortableAnnotationCustom(
@@ -266,7 +263,7 @@ export function createPortableAnnotationCustom(
   annotation: ReviewAnnotation,
 ): PortableAnnotationCustom {
   return {
-    pdfMarkup: {
+    placekeeper: {
       schemaVersion: 2,
       owner: PORTABLE_ANNOTATION_OWNER,
       itemId: item.id,
@@ -281,12 +278,12 @@ export function inspectPortableAnnotation(
   visible: VisiblePortableAnnotation,
   options: { readonly visibleIdCount?: number } = {},
 ): PortableAnnotationInspection {
-  if (!isRecord(custom) || !("pdfMarkup" in custom)) return { status: "foreign" };
+  if (!isRecord(custom) || !("placekeeper" in custom)) return { status: "foreign" };
   if (!hasSafeShape(custom)) return { status: "invalid", reason: "unsafe-shape" };
-  const envelope = custom.pdfMarkup;
+  const envelope = custom.placekeeper;
   if (!isRecord(envelope)) return { status: "invalid", reason: "invalid-envelope" };
   if (
-    (envelope.schemaVersion !== 1 && envelope.schemaVersion !== 2) ||
+    envelope.schemaVersion !== 2 ||
     envelope.owner !== PORTABLE_ANNOTATION_OWNER
   ) {
     return { status: "invalid", reason: "unsupported-schema" };
@@ -312,7 +309,6 @@ export function inspectPortableAnnotation(
   return {
     status: "owned",
     item: envelope.item,
-    geometryVersion: envelope.schemaVersion,
   };
 }
 
@@ -339,7 +335,7 @@ export function decodePortableAnnotationJson(raw: string): PortableAnnotationIns
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!hasSafeShape(parsed)) return { status: "invalid", reason: "unsafe-shape" };
-    return isRecord(parsed) && "pdfMarkup" in parsed
+    return isRecord(parsed) && "placekeeper" in parsed
       ? { status: "invalid", reason: "requires-visible-annotation" }
       : { status: "foreign" };
   } catch {

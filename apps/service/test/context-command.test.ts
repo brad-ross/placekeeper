@@ -9,7 +9,7 @@ import {
   parseContextSourceArguments,
   runContextCommand,
 } from "../src/cli/context-command.js";
-import type { ProofreaderControlResponse } from "../src/host/launch-control.js";
+import type { PlacekeeperControlResponse } from "../src/host/launch-control.js";
 
 const roots: string[] = [];
 
@@ -19,7 +19,7 @@ afterEach(async () => {
 
 describe("context evidence command", () => {
   it("preserves a typed source-work handle failure through the CLI", async () => {
-    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({
+    const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({
       kind: "source-workflow-unavailable",
       reason: "expired",
     }));
@@ -45,7 +45,7 @@ describe("context evidence command", () => {
       expectedSourceSha256ByProposal: { "proposal-a": "abc" },
     });
 
-    const discussionControl = vi.fn(async (): Promise<ProofreaderControlResponse> => ({
+    const discussionControl = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({
       kind: "evidence",
       result: {
         status: "ok", evidenceKind: "review-items", mediaType: "application/json",
@@ -58,13 +58,13 @@ describe("context evidence command", () => {
     });
     expect(discussionControl).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "source-begin" }));
 
-    const sourceControl = vi.fn(async (): Promise<ProofreaderControlResponse> => ({
+    const sourceControl = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({
       kind: "source-workflow",
       operation: "begin",
       response: {
         freshness: {
           identity: {
-            proofreaderSessionId: "review-a", documentGeneration: 1,
+            placekeeperSessionId: "review-a", documentGeneration: 1,
             source: { fileId: "file-a", digest: "a".repeat(64), byteLength: 1 },
             reviewRevision: 2, stateDigest: "b".repeat(64),
           },
@@ -73,7 +73,7 @@ describe("context evidence command", () => {
         result: {
           schemaVersion: 1, executionId: "execution-a", capturedAt: "2026-08-12T12:00:00.000Z",
           identity: {
-            proofreaderSessionId: "review-a", documentGeneration: 1,
+            placekeeperSessionId: "review-a", documentGeneration: 1,
             source: { fileId: "file-a", digest: "a".repeat(64), byteLength: 1 },
             reviewRevision: 2, stateDigest: "b".repeat(64),
           },
@@ -91,7 +91,7 @@ describe("context evidence command", () => {
   });
 
   it("loads proposal JSON from a bounded absolute file instead of requiring shell-quoted source text", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-source-payload-"));
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-source-payload-"));
     roots.push(root);
     const path = join(root, "proposal.json");
     await import("node:fs/promises").then(({ writeFile }) => writeFile(path, JSON.stringify({
@@ -102,13 +102,13 @@ describe("context evidence command", () => {
       expectedText: "value with 'quotes' and $symbols",
       replacementText: "safe replacement",
     })));
-    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({
+    const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({
       kind: "source-workflow",
       operation: "propose",
       response: {
         freshness: {
           identity: {
-            proofreaderSessionId: "review-a", documentGeneration: 1,
+            placekeeperSessionId: "review-a", documentGeneration: 1,
             source: { fileId: "file-a", digest: "a".repeat(64), byteLength: 1 },
             reviewRevision: 2, stateDigest: "b".repeat(64),
           },
@@ -155,7 +155,7 @@ describe("context evidence command", () => {
       "context", "items", "--handle", "evidence_abcdefghijklmnop", "--page", "2", "--offset", "0", "--limit", "25",
     ])).toEqual({ handle: "evidence_abcdefghijklmnop", pageIndex: 2, offset: 0, limit: 25 });
     const payload = JSON.stringify({ offset: 0, limit: 25, total: 1, items: [{ id: "item-1", intent: "replace", pageIndex: 2 }] });
-    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({
+    const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({
       kind: "evidence",
       result: {
         status: "ok",
@@ -179,7 +179,7 @@ describe("context evidence command", () => {
   });
 
   it("returns bounded text evidence through the installed daemon mediator", async () => {
-    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({
+    const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({
       kind: "evidence",
       result: {
         status: "ok",
@@ -202,10 +202,10 @@ describe("context evidence command", () => {
   });
 
   it("keeps document bytes out of stdout and creates a private non-overwriting output", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-context-command-"));
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-context-command-"));
     roots.push(root);
     const outputPath = join(root, "evidence.pdf");
-    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({
+    const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({
       kind: "evidence",
       result: {
         status: "ok",

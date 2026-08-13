@@ -317,7 +317,7 @@ export class PdfSaveCoordinator {
           });
 
           const target = destination.targetPath;
-          const temporary = join(dirname(target), `.pdf-markup-${randomUUID()}.tmp`);
+          const temporary = join(dirname(target), `.placekeeper-${randomUUID()}.tmp`);
           const handle = await open(temporary, "wx", 0o600);
           try {
             await handle.writeFile(written.pdfBytes);

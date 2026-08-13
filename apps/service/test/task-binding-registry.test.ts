@@ -35,7 +35,7 @@ function issue(registry: TaskBindingRegistry, overrides: Partial<{
 
 function verifiedIdentity(overrides: Partial<LiveObservationIdentity> = {}): LiveObservationIdentity {
   return {
-    proofreaderSessionId: "review-a",
+    placekeeperSessionId: "review-a",
     documentGeneration: 1,
     source: { fileId: "file-a", digest: "a".repeat(64), byteLength: 12 },
     reviewRevision: 4,

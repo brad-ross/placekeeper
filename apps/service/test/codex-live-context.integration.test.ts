@@ -15,10 +15,10 @@ import {
   startLaunchControlServer,
   type LaunchControlServer,
 } from "../src/host/launch-control.js";
-import { ProofreaderHost } from "../src/host/proofreader-host.js";
+import { PlacekeeperHost } from "../src/host/placekeeper-host.js";
 
 const roots: string[] = [];
-const hosts: ProofreaderHost[] = [];
+const hosts: PlacekeeperHost[] = [];
 const controls: LaunchControlServer[] = [];
 const taskSessionId = "codex-task-acceptance";
 
@@ -62,14 +62,14 @@ function injectedContext(write: ReturnType<typeof vi.fn>): Record<string, any> {
 
 describe("packaged Codex live-context lifecycle", () => {
   it("binds the exact launch, activates in the browser, refreshes deltas, gates evidence, and revokes at task end", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-codex-acceptance-"));
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-codex-acceptance-"));
     roots.push(root);
     const assets = join(root, "assets");
     const pdf = join(root, "paper.pdf");
     await mkdir(assets);
     await writeFile(join(assets, "app.js"), "export function start(){}\n");
     await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
-    const host = await ProofreaderHost.start({
+    const host = await PlacekeeperHost.start({
       recoveryRoot: join(root, "recovery"),
       webAssets: { root: assets },
     });

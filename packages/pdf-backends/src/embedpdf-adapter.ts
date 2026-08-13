@@ -227,7 +227,7 @@ export async function assessPdfRewriteEligibility(
 }
 
 async function newEngine(): Promise<PdfiumNative> {
-  const configuredWasm = process.env.PDF_PROOFREADER_PDFIUM_WASM;
+  const configuredWasm = process.env.PLACEKEEPER_PDFIUM_WASM;
   if (configuredWasm !== undefined && !isAbsolute(configuredWasm)) {
     throw new PdfWriterError(
       'backend-error',
@@ -354,7 +354,6 @@ function migrateLegacyStateWithPages(
 
 function portableItemsFromPages(
   annotationPages: readonly (readonly PdfAnnotationObject[])[],
-  documentPages: PdfDocumentObject['pages'],
 ): {
   items: ReviewItem[];
   owned: Array<{ pageIndex: number; annotation: PdfAnnotationObject; item: ReviewItem }>;
@@ -380,10 +379,7 @@ function portableItemsFromPages(
           : {},
       );
       if (inspected.status === 'owned') {
-        const item = inspected.geometryVersion === 1
-          ? migrateLegacyItemGeometry(inspected.item, documentPages[pageIndex])
-          : inspected.item;
-        owned.push({ pageIndex, annotation, item });
+        owned.push({ pageIndex, annotation, item: inspected.item });
       }
     }
   });
@@ -400,7 +396,7 @@ export async function readPortableReviewItems(bytes: Uint8Array): Promise<Review
       const pages = await Promise.all(
         document.pages.map((page) => engine.getPageAnnotations(document, page).toPromise()),
       );
-      return portableItemsFromPages(pages, document.pages).items;
+      return portableItemsFromPages(pages).items;
     } finally {
       await engine.closeDocument(document).toPromise();
     }
@@ -477,7 +473,7 @@ async function inspectWithEngine(engine: PdfiumNative, bytes: Uint8Array): Promi
     const annotations = pages.flatMap((pageAnnotations, pageIndex) =>
       inspectAnnotations(pageAnnotations, pageIndex),
     );
-    const portableItems = portableItemsFromPages(pages, document.pages).items;
+    const portableItems = portableItemsFromPages(pages).items;
     return {
       pageCount: document.pageCount,
       pageFingerprints,
@@ -522,7 +518,7 @@ export async function inspectPdfAnnotationCatalogWithEmbedPdf(
       pageCount: document.pageCount,
       annotations: pages.flatMap((annotations, pageIndex) =>
         inspectAnnotations(annotations, pageIndex)),
-      portableItems: portableItemsFromPages(pages, document.pages).items,
+      portableItems: portableItemsFromPages(pages).items,
     };
   } catch (error) {
     throw new PdfWriterError('invalid-pdf', 'EmbedPDF could not inspect PDF annotations.', {
@@ -648,7 +644,7 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
     const preexisting = beforePages.flatMap((pageAnnotations, pageIndex) =>
       inspectAnnotations(pageAnnotations, pageIndex),
     );
-    const portable = portableItemsFromPages(beforePages, document.pages);
+    const portable = portableItemsFromPages(beforePages);
     const ownedIds = new Set(portable.owned.map(({ annotation }) => annotation.id));
     const foreignPreexisting = preexisting.filter(({ id }) => !ownedIds.has(id));
     const requestedPortableItems = new Map(

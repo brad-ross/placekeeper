@@ -3,9 +3,9 @@ import { isAbsolute, join } from "node:path";
 
 import type { LiveContextRefreshResult } from "../../../../packages/core/src/live-context.js";
 import {
-  ProofreaderControlTimeoutError,
-  type ProofreaderControlRequest,
-  type ProofreaderControlResponse,
+  PlacekeeperControlTimeoutError,
+  type PlacekeeperControlRequest,
+  type PlacekeeperControlResponse,
 } from "../host/launch-control.js";
 import { controlThroughDaemon } from "../host/service-daemon.js";
 import { parseOpenArguments } from "./open-command.js";
@@ -16,11 +16,11 @@ const MAX_INLINE_DELTA_BYTES = 48 * 1024;
 const IDENTIFIER = /^[A-Za-z0-9._:-]{1,256}$/u;
 const REVIEW_IDENTIFIER = /^[A-Za-z0-9_-]{1,256}$/u;
 const SECRET = /^[A-Za-z0-9_-]{43}$/u;
-const INSTALLED_LAUNCHER_RELATIVE_PATH = "Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader";
+const INSTALLED_LAUNCHER_RELATIVE_PATH = "Applications/Placekeeper.app/Contents/MacOS/placekeeper";
 
 /** The one shell token published by both the installed skill and plugin hooks. */
 export const CODEX_INSTALLED_LAUNCHER_COMMAND =
-  '"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader"';
+  '"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper"';
 
 export function installedLauncherPath(homeDirectory = homedir()): string {
   return join(homeDirectory, INSTALLED_LAUNCHER_RELATIVE_PATH);
@@ -42,7 +42,7 @@ export type HookLifecycleEvent =
   | { readonly kind: "revoke"; readonly taskSessionId: string }
   | { readonly kind: "ignored" };
 
-type ControlClient = (request: ProofreaderControlRequest) => Promise<ProofreaderControlResponse>;
+type ControlClient = (request: PlacekeeperControlRequest) => Promise<PlacekeeperControlResponse>;
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -117,7 +117,7 @@ function isCodexOpenCommand(value: unknown): boolean {
   const tokens = tokenizeCodexOpenCommand(value.command);
   if (
     tokens === undefined ||
-    (tokens[0] !== installedLauncherPath() && tokens[0] !== "pdf-proofreader")
+    (tokens[0] !== installedLauncherPath() && tokens[0] !== "placekeeper")
   ) return false;
   try {
     const request = parseOpenArguments(tokens.slice(1));
@@ -128,11 +128,7 @@ function isCodexOpenCommand(value: unknown): boolean {
 }
 
 function launchResponse(value: unknown): Omit<Extract<HookLifecycleEvent, { kind: "claim" }>, "kind" | "taskSessionId"> | undefined {
-  const output = typeof value === "string"
-    ? value
-    : isObject(value) && value.exit_code === 0 && typeof value.output === "string"
-      ? value.output
-      : undefined;
+  const output = typeof value === "string" ? value : undefined;
   if (output === undefined) return undefined;
   const serialized = output.trim();
   if (serialized.length === 0 || Buffer.byteLength(serialized) > 65_536) return undefined;
@@ -276,7 +272,7 @@ export function formatPromptContext(
         ? `The task binding expired. Reopen the PDF with ${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf <absolute-pdf-path>, then ask again.`
         : "No current task binding is available. Reopen the PDF in Placekeeper from this task if live context is needed.";
     return JSON.stringify({
-      kind: "pdf-proofreader-live-context",
+      kind: "placekeeper-live-context",
       schemaVersion: 1,
       currentness: "unavailable",
       reason: result.reason,
@@ -287,7 +283,7 @@ export function formatPromptContext(
     });
   }
   const envelope: JsonObject = {
-    kind: "pdf-proofreader-live-context",
+    kind: "placekeeper-live-context",
     schemaVersion: 1,
     currentness: "current",
     observedAt: result.observedAt,
@@ -325,7 +321,7 @@ export function formatPromptContext(
   // Defensive final compaction should be unreachable with bounded summaries,
   // but currentness remains truthful and the complete state stays retrievable.
   return JSON.stringify({
-    kind: "pdf-proofreader-live-context",
+    kind: "placekeeper-live-context",
     schemaVersion: 1,
     currentness: "current",
     observedAt: result.observedAt,
@@ -431,7 +427,7 @@ export async function runHookCommand(
       await control({ kind: "revoke-task", taskSessionId: event.taskSessionId });
     }
   } catch (error) {
-    const timedOut = error instanceof ProofreaderControlTimeoutError;
+    const timedOut = error instanceof PlacekeeperControlTimeoutError;
     if (event.kind === "claim" && timedOut) {
       await write(`${JSON.stringify(hookOutput(
         "PostToolUse",

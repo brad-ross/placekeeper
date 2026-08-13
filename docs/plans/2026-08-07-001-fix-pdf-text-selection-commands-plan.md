@@ -164,7 +164,7 @@ U3 joins the real viewer and review shell, proves the anchor-readiness race with
 
 ### Sources and Research
 
-- `docs/plans/2026-08-06-001-feat-local-pdf-proofreader-plan.md` supplies the earlier command, semantic-anchor, recovery, and delivery contracts; this plan explicitly supersedes its deliberate Proofread-mode requirement.
+- `docs/plans/2026-08-06-001-feat-local-placekeeper-plan.md` supplies the earlier command, semantic-anchor, recovery, and delivery contracts; this plan explicitly supersedes its deliberate Proofread-mode requirement.
 - `apps/web/src/pdf/PdfWorkspace.tsx` composes `PagePointerProvider`, `RenderLayer`, and `SelectionLayer` for every shared page.
 - `apps/web/src/app/App.tsx` enables selection and converts EmbedPDF selections into generation-guarded canonical anchors.
 - `apps/web/src/app/ReviewShell.tsx` and `apps/web/src/review/input-controller.ts` already produce the correct commands when a reliable anchor exists.

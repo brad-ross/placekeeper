@@ -23,7 +23,7 @@ export class InvalidLiveContextContractError extends Error {
 }
 
 export interface LiveObservationIdentity {
-  readonly proofreaderSessionId: string;
+  readonly placekeeperSessionId: string;
   readonly documentGeneration: number;
   readonly source: ReviewSourceIdentity;
   readonly reviewRevision: number;
@@ -42,7 +42,7 @@ export type LiveContextBindingStatus =
   | { readonly status: "unbound" }
   | {
       readonly status: "pending";
-      readonly proofreaderSessionId: string;
+      readonly placekeeperSessionId: string;
       readonly documentGeneration: number;
       readonly expiresAt: string;
     }
@@ -53,7 +53,7 @@ export type LiveContextBindingStatus =
     }
   | {
       readonly status: "refreshing";
-      readonly proofreaderSessionId: string;
+      readonly placekeeperSessionId: string;
       readonly documentGeneration: number;
       readonly lastVerified?: LiveObservationIdentity;
     }
@@ -291,7 +291,7 @@ function assertGeneration(value: number): void {
 }
 
 function assertIdentity(identity: LiveObservationIdentity): void {
-  assertNonEmpty(identity.proofreaderSessionId, "proofreaderSessionId");
+  assertNonEmpty(identity.placekeeperSessionId, "placekeeperSessionId");
   assertGeneration(identity.documentGeneration);
   if (!Number.isSafeInteger(identity.reviewRevision) || identity.reviewRevision < 0) {
     throw new InvalidLiveContextContractError("reviewRevision must be a non-negative safe integer");

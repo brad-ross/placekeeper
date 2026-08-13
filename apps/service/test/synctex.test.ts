@@ -11,7 +11,7 @@ const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "pdf-proofreader-synctex-"));
+  const root = await mkdtemp(join(tmpdir(), "placekeeper-synctex-"));
   roots.push(root);
   await writeFile(join(root, "paper.tex"), "\\documentclass{article}\n\\begin{document}\nHello\n\\end{document}\n");
   return root;

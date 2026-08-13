@@ -90,7 +90,7 @@ const annotations: readonly ReviewAnnotation[] = [
 ];
 
 async function deliveryForFixture(name: string) {
-  const directory = await mkdtemp(join(tmpdir(), "pdf-proofreader-conformance-"));
+  const directory = await mkdtemp(join(tmpdir(), "placekeeper-conformance-"));
   temporaryDirectories.push(directory);
   const source = new Uint8Array(
     await readFile(resolve("test/fixtures/pdfs", name)),
@@ -155,11 +155,11 @@ describe("reviewed PDF conformance", () => {
     }
   }, 60_000);
 
-  it("round-trips mixed app generations without rewriting untouched legacy metadata", async () => {
+  it("round-trips Placekeeper annotations without rewriting untouched metadata", async () => {
     const source = new Uint8Array(
       await readFile(resolve("test/fixtures/pdfs/text-native.pdf")),
     );
-    const legacyEdited: ReviewItem = {
+    const editedItem: ReviewItem = {
       id: "60000000-0000-4000-8000-000000000006",
       kind: "highlight",
       pageIndex: 0,
@@ -172,10 +172,10 @@ describe("reviewed PDF conformance", () => {
         rect: { x: 72, y: 92, width: 150, height: 16 },
         segmentRects: [{ x: 72, y: 92, width: 150, height: 16 }],
         reliable: true,
-        comment: "Legacy edit",
+        comment: "Initial edit",
       },
     };
-    const legacyUntouched: ReviewItem = {
+    const untouchedItem: ReviewItem = {
       id: "70000000-0000-4000-8000-000000000007",
       kind: "pageNote",
       pageIndex: 0,
@@ -183,7 +183,7 @@ describe("reviewed PDF conformance", () => {
       updatedAt: timestamp,
       payload: {
         position: { x: 450, y: 650, width: 18, height: 18 },
-        comment: "Untouched legacy note",
+        comment: "Untouched note",
       },
     };
     const external: ReviewAnnotation = {
@@ -204,35 +204,35 @@ describe("reviewed PDF conformance", () => {
       sourceSha256: sha256(source),
       revision: 1,
       annotations: [
-        projectReviewItem(legacyEdited, "PDF Proofreader"),
-        projectReviewItem(legacyUntouched, "PDF Proofreader"),
+        projectReviewItem(editedItem),
+        projectReviewItem(untouchedItem),
         external,
       ],
     });
     const edited: ReviewItem = {
-      ...legacyEdited,
+      ...editedItem,
       updatedAt: "2026-08-07T12:01:00.000Z",
-      payload: { ...legacyEdited.payload, comment: "Edited after upgrade" },
+      payload: { ...editedItem.payload, comment: "Edited after update" },
     };
     const roundTripped = await writer.write({
       sourcePdf: seeded.pdfBytes,
       sourceSha256: sha256(seeded.pdfBytes),
       revision: 2,
-      annotations: [projectReviewItem(edited), projectReviewItem(legacyUntouched)],
+      annotations: [projectReviewItem(edited), projectReviewItem(untouchedItem)],
     });
     const inspected = await inspectPdfWithEmbedPdf(roundTripped.pdfBytes);
 
-    expect(inspected.portableItems).toEqual(expect.arrayContaining([edited, legacyUntouched]));
+    expect(inspected.portableItems).toEqual(expect.arrayContaining([edited, untouchedItem]));
     expect(inspected.portableItems).toHaveLength(2);
     expect(inspected.annotations.find(({ id }) => id === edited.id)).toMatchObject({
       author: "Placekeeper",
       hasNormalAppearance: true,
-      custom: { pdfMarkup: { owner: "pdf-markup", schemaVersion: 2, itemId: edited.id } },
+      custom: { placekeeper: { owner: "placekeeper", schemaVersion: 2, itemId: edited.id } },
     });
-    expect(inspected.annotations.find(({ id }) => id === legacyUntouched.id)).toMatchObject({
-      author: "PDF Proofreader",
+    expect(inspected.annotations.find(({ id }) => id === untouchedItem.id)).toMatchObject({
+      author: "Placekeeper",
       hasNormalAppearance: true,
-      custom: { pdfMarkup: { owner: "pdf-markup", schemaVersion: 2, itemId: legacyUntouched.id } },
+      custom: { placekeeper: { owner: "placekeeper", schemaVersion: 2, itemId: untouchedItem.id } },
     });
     expect(inspected.annotations.find(({ id }) => id === external.id)).toMatchObject({
       author: "Placekeeper Preview",

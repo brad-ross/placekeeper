@@ -9,7 +9,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe("installed writer doctor", () => {
   it("emits only exact offline structural evidence for the pinned writer", async () => {
-    vi.stubEnv("PDF_PROOFREADER_PDFIUM_WASM", resolve("node_modules/@embedpdf/pdfium/dist/pdfium.wasm"));
+    vi.stubEnv("PLACEKEEPER_PDFIUM_WASM", resolve("node_modules/@embedpdf/pdfium/dist/pdfium.wasm"));
     const output: string[] = [];
     const code = await runDoctorCommand([
       "doctor", "--json", "--offline", "--writer", "--pdf",
@@ -29,7 +29,7 @@ describe("installed writer doctor", () => {
   });
 
   it("fails closed without the absolute pinned PDFium runtime", async () => {
-    vi.stubEnv("PDF_PROOFREADER_PDFIUM_WASM", "relative/pdfium.wasm");
+    vi.stubEnv("PLACEKEEPER_PDFIUM_WASM", "relative/pdfium.wasm");
     const output: string[] = [];
     expect(await runDoctorCommand([
       "doctor", "--json", "--offline", "--writer", "--pdf", "/missing.pdf",

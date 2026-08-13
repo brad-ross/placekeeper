@@ -19,7 +19,7 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 async function createEngine(): Promise<PdfiumNative> {
-  const configuredWasm = process.env.PDF_PROOFREADER_PDFIUM_WASM;
+  const configuredWasm = process.env.PLACEKEEPER_PDFIUM_WASM;
   if (configuredWasm !== undefined && !isAbsolute(configuredWasm)) {
     throw new Error("The packaged PDFium runtime path must be absolute");
   }
@@ -94,7 +94,7 @@ export async function inspectPdfPageEvidence(
       rendered.data.byteLength,
     );
     return {
-      mediaType: "application/vnd.pdf-proofreader.rgba+json",
+      mediaType: "application/vnd.placekeeper.rgba+json",
       bytes: Buffer.from(JSON.stringify({
         pageIndex: request.pageIndex,
         width: rendered.width,

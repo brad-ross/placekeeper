@@ -53,7 +53,7 @@ test.describe('EmbedPDF browser-worker viewer gate', () => {
     );
 
     expect(result.pageCount).toBe(1);
-    expect(result.text).toContain('Selectable proofreader text');
+    expect(result.text).toContain('Selectable placekeeper text');
     expect(result.reliableTextGeometry).toBe(true);
     expect(result.annotationSubtypes).toEqual(expect.arrayContaining(['highlight', 'stamp']));
     expect(result.renderedWidth).toBeGreaterThan(0);

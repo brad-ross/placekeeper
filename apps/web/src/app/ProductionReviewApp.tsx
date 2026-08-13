@@ -127,7 +127,7 @@ function contextMatchesReviewState(
   status: Extract<LiveContextBindingStatus, { readonly status: "current" }>,
   state: ReviewState,
 ): boolean {
-  return status.identity.proofreaderSessionId === state.sessionId &&
+  return status.identity.placekeeperSessionId === state.sessionId &&
     status.identity.reviewRevision === state.revision &&
     status.identity.source.fileId === state.source.fileId &&
     status.identity.source.digest === state.source.digest;
@@ -140,7 +140,7 @@ export function visibleCodexContext(
   if (status?.status !== "current" || contextMatchesReviewState(status, state)) return status;
   return {
     status: "refreshing",
-    proofreaderSessionId: state.sessionId,
+    placekeeperSessionId: state.sessionId,
     documentGeneration: status.identity.documentGeneration,
     lastVerified: status.identity,
   };
@@ -334,7 +334,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         current.identity.stateDigest === expectedDigest
         ? {
             status: "refreshing",
-            proofreaderSessionId: current.identity.proofreaderSessionId,
+            placekeeperSessionId: current.identity.placekeeperSessionId,
             documentGeneration: current.identity.documentGeneration,
             lastVerified: current.identity,
           }

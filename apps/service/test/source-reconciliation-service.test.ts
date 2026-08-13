@@ -53,7 +53,7 @@ async function fixture(
   source = "prefix old suffix\nuntouched\n",
   items: readonly ReviewItem[] = [item(1)],
 ): Promise<Fixture> {
-  const directory = await mkdtemp(join(tmpdir(), "pdf-proofreader-reconciliation-"));
+  const directory = await mkdtemp(join(tmpdir(), "placekeeper-reconciliation-"));
   temporaryDirectories.push(directory);
   const pdfPath = join(directory, "paper.pdf");
   const sourcePath = join(directory, "paper.tex");
@@ -267,7 +267,7 @@ describe("manual-precedence source reconciliation", () => {
       proposal: proposal(1, { path: "other.tex" }),
     })).rejects.toThrow(/approved source scope/i);
 
-    const external = await mkdtemp(join(tmpdir(), "pdf-proofreader-external-source-"));
+    const external = await mkdtemp(join(tmpdir(), "placekeeper-external-source-"));
     temporaryDirectories.push(external);
     await writeFile(join(external, "outside.tex"), "outside");
     await symlink(external, join(value.directory, "linked"));

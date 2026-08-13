@@ -9,8 +9,8 @@ import {
   runHookCommand,
 } from "../src/cli/hook-command.js";
 import {
-  ProofreaderControlTimeoutError,
-  type ProofreaderControlResponse,
+  PlacekeeperControlTimeoutError,
+  type PlacekeeperControlResponse,
 } from "../src/host/launch-control.js";
 
 const bindProof = "b".repeat(43);
@@ -59,7 +59,7 @@ const current: Extract<LiveContextRefreshResult, { status: "current" }> = {
   status: "current",
   observedAt: "2026-08-12T12:00:00.000Z",
   identity: {
-    proofreaderSessionId: "review-session",
+    placekeeperSessionId: "review-session",
     documentGeneration: 1,
     source: { fileId: "never-expose-file-capability", digest: "a".repeat(64), byteLength: 1200 },
     reviewRevision: 4,
@@ -113,7 +113,7 @@ describe("Codex lifecycle hook", () => {
     });
   });
 
-  it("accepts the canonical installed path and the legacy bare launcher only", () => {
+  it("accepts the canonical installed path and the bare Placekeeper launcher only", () => {
     const expected = expect.objectContaining({ kind: "claim", taskSessionId: "thr_codex_task_123" });
     expect(inspectHookEvent(postToolUse())).toEqual(expected);
     expect(inspectHookEvent(postToolUse({
@@ -122,18 +122,11 @@ describe("Codex lifecycle hook", () => {
       },
     }))).toEqual(expected);
     expect(inspectHookEvent(postToolUse({
-      tool_input: { command: "pdf-proofreader open --json --surface codex --pdf /private/tmp/paper.pdf" },
+      tool_input: { command: "placekeeper open --json --surface codex --pdf /private/tmp/paper.pdf" },
     }))).toEqual(expected);
     expect(inspectHookEvent(postToolUse({
-      tool_input: { command: '"/tmp/pdf-proofreader" open --json --surface codex --pdf /private/tmp/paper.pdf' },
+      tool_input: { command: '"/tmp/placekeeper" open --json --surface codex --pdf /private/tmp/paper.pdf' },
     }))).toEqual({ kind: "ignored" });
-  });
-
-  it("retains the former structured Bash response as compatibility input", () => {
-    const response = postToolUse().tool_response as string;
-    expect(inspectHookEvent(postToolUse({
-      tool_response: { exit_code: 0, output: response },
-    }))).toMatchObject({ kind: "claim", reviewSessionId: "review-session" });
   });
 
   it.each([
@@ -152,7 +145,7 @@ describe("Codex lifecycle hook", () => {
   });
 
   it("claims the proof without ever echoing the proof, task id, URL, or local path", async () => {
-    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({
+    const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({
       kind: "binding",
       result: { status: "pending", expiresAt: "2026-08-12T12:01:00.000Z" },
     }));
@@ -170,19 +163,19 @@ describe("Codex lifecycle hook", () => {
   });
 
   it("refreshes on every prompt and emits explicit task-scoped unavailability", async () => {
-    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({ kind: "context", result: unavailable }));
+    const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({ kind: "context", result: unavailable }));
     const write = vi.fn();
     await runHookCommand(["hook", "--event"], JSON.stringify(prompt()), control, write);
     expect(control).toHaveBeenCalledWith({ kind: "refresh-context", taskSessionId: "thr_codex_task_123" });
     const parsed = JSON.parse(write.mock.calls[0]![0] as string);
     const context = JSON.parse(parsed.hookSpecificOutput.additionalContext);
-    expect(context).toMatchObject({ kind: "pdf-proofreader-live-context", currentness: "unavailable", reason: "unbound" });
+    expect(context).toMatchObject({ kind: "placekeeper-live-context", currentness: "unavailable", reason: "unbound" });
     expect(JSON.stringify(parsed)).not.toContain("never-read");
     expect(JSON.stringify(parsed)).not.toContain("What did I annotate?");
   });
 
   it("injects current delta, save health, location/context, and opaque evidence instructions", async () => {
-    const control = vi.fn(async (request): Promise<ProofreaderControlResponse> => request.kind === "ack-context"
+    const control = vi.fn(async (request): Promise<PlacekeeperControlResponse> => request.kind === "ack-context"
       ? { kind: "context-acknowledged", accepted: true }
       : { kind: "context", result: current });
     const write = vi.fn();
@@ -213,7 +206,7 @@ describe("Codex lifecycle hook", () => {
   });
 
   it("does not acknowledge a cursor when prompt delivery fails", async () => {
-    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({ kind: "context", result: current }));
+    const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({ kind: "context", result: current }));
     const write = vi.fn(() => { throw new Error("stdout closed"); });
     await expect(runHookCommand(["hook", "--event"], JSON.stringify(prompt()), control, write)).rejects.toThrow("stdout closed");
     expect(control).toHaveBeenCalledTimes(1);
@@ -260,8 +253,8 @@ describe("Codex lifecycle hook", () => {
   });
 
   it("surfaces control timeouts with explicit unavailable recovery", async () => {
-    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => {
-      throw new ProofreaderControlTimeoutError();
+    const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => {
+      throw new PlacekeeperControlTimeoutError();
     });
     const write = vi.fn();
     await runHookCommand(["hook", "--event"], JSON.stringify(prompt()), control, write);
@@ -269,7 +262,6 @@ describe("Codex lifecycle hook", () => {
     const context = JSON.parse(outer.hookSpecificOutput.additionalContext);
     expect(outer.systemMessage).toContain("timed out");
     expect(JSON.stringify(outer)).toContain("Placekeeper");
-    expect(JSON.stringify(outer)).not.toContain("PDF Proofreader");
     expect(context).toMatchObject({
       currentness: "unavailable",
       hookFailure: { kind: "service-timeout", recovery: expect.stringContaining("Retry") },
@@ -277,8 +269,8 @@ describe("Codex lifecycle hook", () => {
   });
 
   it("makes a timed-out binding observable without leaking launch credentials", async () => {
-    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => {
-      throw new ProofreaderControlTimeoutError();
+    const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => {
+      throw new PlacekeeperControlTimeoutError();
     });
     const write = vi.fn();
     await runHookCommand(["hook", "--event"], JSON.stringify(postToolUse()), control, write);
@@ -286,7 +278,6 @@ describe("Codex lifecycle hook", () => {
     const outer = JSON.parse(output);
     expect(outer.systemMessage).toContain("binding timed out");
     expect(output).toContain("Placekeeper");
-    expect(output).not.toContain("PDF Proofreader");
     expect(outer.hookSpecificOutput.additionalContext).toContain("Rerun the exact installed launch command");
     expect(output).not.toMatch(/thr_codex|review-session|bindProof|cap=|127\.0\.0\.1/u);
   });
@@ -297,7 +288,7 @@ describe("Codex lifecycle hook", () => {
       status: "current",
       observedAt: "2026-08-12T12:00:00.000Z",
       identity: {
-        proofreaderSessionId: "review",
+        placekeeperSessionId: "review",
         documentGeneration: 1,
         source: { fileId: "opaque", digest: "a".repeat(64), byteLength: 1 },
         reviewRevision: 1,
@@ -326,7 +317,7 @@ describe("Codex lifecycle hook", () => {
   });
 
   it("treats SessionEnd as advisory task-only cleanup", async () => {
-    const control = vi.fn(async (): Promise<ProofreaderControlResponse> => ({ kind: "revoked" }));
+    const control = vi.fn(async (): Promise<PlacekeeperControlResponse> => ({ kind: "revoked" }));
     await runHookCommand(["hook", "--event"], JSON.stringify({ session_id: "thr_codex_task_123", hook_event_name: "SessionEnd", reason: "logout" }), control, vi.fn());
     expect(control).toHaveBeenCalledWith({ kind: "revoke-task", taskSessionId: "thr_codex_task_123" });
   });
