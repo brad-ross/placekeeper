@@ -233,11 +233,14 @@ describe("macOS distribution manifests", () => {
       encoding: "utf8",
       env: { ...process.env, PDF_PROOFREADER_USER_HOME: "/tmp/pdf-proofreader-installer-home" },
     });
-    expect(stdout).toContain("Apple-silicon source install");
+    expect(stdout).toContain("Placekeeper Apple-silicon source install");
     expect(stdout).toContain("Node 24.14.0");
     expect(stdout).toContain("pnpm 11.16.0");
     expect(stdout).toContain("/tmp/pdf-proofreader-installer-home/Applications/PDF Proofreader.app");
+    expect(stdout).not.toContain("PDF Proofreader Apple-silicon source install");
     expect(stdout).toContain("No files were changed");
+    expect(installer).toContain("Placekeeper installed successfully");
+    expect(installer).toContain("Open With -> Placekeeper");
     expect(installer).toContain("a1a54f46a750d2523d628d924aab61758a51c9dad3e0238beb14141be9615dd3");
     expect(installer).toContain("install --frozen-lockfile");
     expect(installer).not.toContain("xattr");
@@ -394,6 +397,45 @@ describe("macOS distribution manifests", () => {
     expect(bridge).toContain("Contents/MacOS/pdf-proofreader");
     expect(bridge).toContain("quoted form of pdfPath");
     expect(bridge).not.toContain("Terminal");
+  });
+
+  it("presents Placekeeper on current app and Finder surfaces while retaining the legacy executable", async () => {
+    const [app, server, launcher, bridge] = await Promise.all([
+      readFile(resolve("apps/web/src/app/App.tsx"), "utf8"),
+      readFile(resolve("apps/service/src/server/http-server.ts"), "utf8"),
+      readFile(resolve("packaging/macos/launcher.mjs"), "utf8"),
+      readFile(resolve("packaging/macos/finder-bridge.applescript"), "utf8"),
+    ]);
+
+    expect(app).toContain("<h1>Placekeeper</h1>");
+    expect(server).toContain("<title>Placekeeper</title>");
+    expect(launcher).toContain("Recover Placekeeper draft");
+    expect(bridge).toContain('display alert "Placekeeper could not open this file"');
+    expect(bridge).toContain('message "Placekeeper opens one local PDF at a time."');
+    expect(bridge).toContain("Contents/MacOS/pdf-proofreader");
+    for (const visibleSurface of [app, server, launcher, bridge]) {
+      expect(visibleSurface).not.toContain("PDF Proofreader");
+    }
+  });
+
+  it("limits the legacy product name in current guidance to documented compatibility locations", async () => {
+    const currentGuidance = await Promise.all([
+      "README.md",
+      "docs/installation.md",
+      "docs/privacy-and-recovery.md",
+      "docs/support.md",
+    ].map(async (path) => await readFile(resolve(path), "utf8")));
+    const withoutCompatibilityLocations = currentGuidance.join("\n")
+      .replaceAll("PDF Proofreader.app", "LEGACY_BUNDLE.app")
+      .replaceAll("PDF Proofreader.workflow", "LEGACY_WORKFLOW.workflow")
+      .replaceAll("Application Support/PDF Proofreader", "Application Support/LEGACY_STATE");
+
+    expect(withoutCompatibilityLocations).not.toContain("PDF Proofreader");
+    expect(currentGuidance[0]).toContain("focused everyday PDF reader and annotator for serious readers");
+    expect(currentGuidance[0]).toContain("packaging/macos/icon/Placekeeper.svg");
+    expect(currentGuidance[1]).toContain("stable compatibility path");
+    expect(currentGuidance[2]).toContain("legacy technical name");
+    expect(currentGuidance[3]).toContain("two-page reference-and-return icon");
   });
 
   it("derives stable daemon and complete artifact identities from packaged bytes", async () => {

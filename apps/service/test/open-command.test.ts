@@ -138,14 +138,14 @@ describe("open command", () => {
       ok: false,
       error: {
         kind: "upgrade-required",
-        message: "An older PDF Proofreader service is running and cannot prove that reviews are idle. Existing work was preserved.",
+        message: "An older Placekeeper service is running and cannot prove that reviews are idle. Existing work was preserved.",
         recoveryAction: 'Close reviews, run "$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy, then retry',
       },
     });
   });
 
   it.each([
-    ["review-presence", "Close PDF Proofreader tabs or windows, then retry"],
+    ["review-presence", "Close Placekeeper tabs or windows, then retry"],
     ["codex-task", "End the bound Codex task or wait for its lease, then retry"],
     ["transient-busy", "Wait a moment, then retry"],
     ["legacy", 'Close reviews, run "$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy, then retry'],

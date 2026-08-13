@@ -31,7 +31,7 @@ case "$#" in
     ;;
 esac
 if [ "$(/usr/bin/uname -s)" != "Darwin" ] || [ "$(/usr/bin/uname -m)" != "arm64" ]; then
-  printf '%s\n' "PDF Proofreader currently supports source installation on Apple-silicon macOS only." >&2
+  printf '%s\n' "Placekeeper currently supports source installation on Apple-silicon macOS only." >&2
   exit 1
 fi
 for command in /usr/bin/curl /usr/bin/ditto /usr/bin/shasum /usr/bin/tar /usr/bin/mktemp /usr/bin/osacompile /usr/bin/codesign; do
@@ -43,7 +43,7 @@ done
 
 if [ "$install_mode" = "dry-run" ]; then
   printf '%s\n' \
-    "PDF Proofreader Apple-silicon source install (dry run)" \
+    "Placekeeper Apple-silicon source install (dry run)" \
     "Toolchain: Node ${NODE_VERSION}, pnpm ${PNPM_VERSION}" \
     "App destination: ${app_path}" \
     "Finder entry point: native Open With document handler" \
@@ -123,7 +123,7 @@ fi
 printf 'Checking the packaged writer offline before installation...\n'
 run_pnpm smoke:installed -- "$built_app" "$repo_root/test/fixtures/pdfs/text-native.pdf"
 
-printf 'Coordinating the shared PDF Proofreader service before replacement...\n'
+printf 'Coordinating the shared Placekeeper service before replacement...\n'
 if ! "$built_app/Contents/MacOS/pdf-proofreader" daemon coordinate-install \
   --candidate-app "$built_app" \
   --installed-app "$app_path" \
@@ -142,8 +142,8 @@ else
   printf '%s\n' "Warning: LaunchServices registration is unavailable. Open the app and choose a PDF; Open With may appear after Finder refreshes." >&2
 fi
 
-printf '\nPDF Proofreader installed successfully.\n'
+printf '\nPlacekeeper installed successfully.\n'
 printf 'App: %s\n' "$app_path"
-printf 'Finder: select one PDF, then use Open With -> PDF Proofreader.\n'
-printf 'You can also open PDF Proofreader from Applications and choose a PDF.\n'
+printf 'Finder: select one PDF, then use Open With -> Placekeeper.\n'
+printf 'You can also open Placekeeper from Applications and choose a PDF.\n'
 printf 'If macOS warns on first launch, Control-click the app in Finder and choose Open.\n'

@@ -1,6 +1,6 @@
 # Install and uninstall
 
-PDF Proofreader is a personal, local-only Apple-silicon macOS app distributed from source. It does not require an Apple Developer account, Developer ID certificate, notarization profile, Homebrew, or a global Node installation.
+Placekeeper is a focused, local-only PDF reader and annotator for Apple-silicon macOS, distributed from source. It does not require an Apple Developer account, Developer ID certificate, notarization profile, Homebrew, or a global Node installation.
 
 ## Install from source
 
@@ -10,7 +10,7 @@ Requirements are macOS 13 or newer, an Apple-silicon Mac, internet access during
 ./install.sh
 ```
 
-The installer downloads the checksum-pinned Node 24.14.0 arm64 toolchain into the checkout, runs the exact pnpm 11.16.0 dependency graph from the lockfile, builds the app, and checks the packaged writer with networking disabled. It then transactionally installs the app at `~/Applications/PDF Proofreader.app` and asks macOS to register its native document bridge as an alternate PDF viewer. It does not modify the system Node installation or make PDF Proofreader the default PDF handler. Reinstalling removes the obsolete beta Quick Action if present.
+The installer downloads the checksum-pinned Node 24.14.0 arm64 toolchain into the checkout, runs the exact pnpm 11.16.0 dependency graph from the lockfile, builds the app, and checks the packaged writer with networking disabled. It then transactionally installs Placekeeper at the compatibility path `~/Applications/PDF Proofreader.app` and asks macOS to register its native document bridge as an alternate PDF viewer. Finder presents the localized name Placekeeper; the legacy physical bundle name preserves existing launch and upgrade entry points. The installer does not modify the system Node installation or make Placekeeper the default PDF handler. Reinstalling removes the obsolete beta Quick Action if present.
 
 Preview the actions without downloading or changing anything:
 
@@ -18,26 +18,26 @@ Preview the actions without downloading or changing anything:
 ./install.sh --dry-run
 ```
 
-To update, pull or download newer source and run `./install.sh` again. PDF Proofreader uses one shared local service for every open PDF, so the installer checks that service before it changes the app:
+To update, pull or download newer source and run `./install.sh` again. Placekeeper uses one shared local service for every open PDF, so the installer checks that service before it changes the app:
 
 - If the installed bundle and running service are already exact, reinstall is a no-op.
 - If no review or Codex task is active, the service finishes accepted saves, exits cleanly, and the installer replaces it. The new service must start and report its exact build before installation commits; otherwise the previous app is restored.
-- If a PDF Proofreader tab/window or a bound Codex task is active, installation is deferred. The installed app and every live review remain unchanged. Close the indicated work, wait a few seconds for its lease to expire, and run `./install.sh` again.
-- If PDF Proofreader is briefly finishing a save or another lifecycle operation, wait a moment and retry. A timeout or unreadable response also leaves the previous app untouched.
+- If a Placekeeper tab/window or a bound Codex task is active, installation is deferred. The installed app and every live review remain unchanged. Close the indicated work, wait a few seconds for its lease to expire, and run `./install.sh` again.
+- If Placekeeper is briefly finishing a save or another lifecycle operation, wait a moment and retry. A timeout or unreadable response also leaves the previous app untouched.
 
-The first update from a version that predates the safe management handshake cannot prove whether reviews are active. Close all PDF Proofreader tabs/windows and end bound Codex tasks, then explicitly run:
+The first update from a version that predates the safe management handshake cannot prove whether reviews are active. Close all Placekeeper tabs/windows and end bound Codex tasks, then explicitly run the launcher at its stable compatibility path:
 
 ```sh
 "$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy
 ```
 
-Then rerun `./install.sh`. `"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy` is never run automatically: it validates that the private socket belongs to the current user and that its listener is a PDF Proofreader daemon before requesting termination. Do not use `kill`, `pkill`, or `killall` as an upgrade workaround.
+Then rerun `./install.sh`. `"$HOME/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader" daemon stop-legacy` is never run automatically: it validates that the private socket belongs to the current user and that its listener is the legacy Placekeeper service before requesting termination. Do not use `kill`, `pkill`, or `killall` as an upgrade workaround.
 
 The installer replaces only its installed app; if replacement or candidate readiness fails, it restores the previous app. It leaves recovery data and user-owned exports alone.
 
 Because the source build is intentionally not Developer ID-signed or notarized (it receives only a local ad-hoc signature), macOS may warn on first launch. In Finder, Control-click `~/Applications/PDF Proofreader.app`, choose **Open**, and confirm once. Do not disable Gatekeeper globally and do not recursively remove quarantine attributes.
 
-After installation, select one local PDF in Finder and use **Open With -> PDF Proofreader**. Alternatively, open PDF Proofreader from `~/Applications` and choose a PDF. No terminal is needed for ordinary use.
+After installation, select one local PDF in Finder and use **Open With -> Placekeeper**. Alternatively, open Placekeeper from `~/Applications` and choose a PDF. No terminal is needed for ordinary use.
 
 ## Optional integrations
 
@@ -50,6 +50,6 @@ Install either directory through that application's local extension/plugin workf
 
 ## Uninstall
 
-Quit PDF Proofreader, move `~/Applications/PDF Proofreader.app` and `~/Library/Services/PDF Proofreader.workflow` to the Trash, and uninstall any optional Codex or VS Code integration. Then optionally remove the local toolchain cache in the source checkout at `.local/`.
+Quit Placekeeper, move the physical compatibility bundle `~/Applications/PDF Proofreader.app` and obsolete beta workflow `~/Library/Services/PDF Proofreader.workflow` to the Trash, and uninstall any optional Codex or VS Code integration. Then optionally remove the local toolchain cache in the source checkout at `.local/`.
 
-Removing the app does not remove recoverable drafts under `~/Library/Application Support/PDF Proofreader` or user-owned reviewed and revised PDFs. See [Privacy and recovery](privacy-and-recovery.md) before deleting recovery data.
+Removing the app does not remove recoverable drafts under Placekeeper's compatibility state path, `~/Library/Application Support/PDF Proofreader`, or user-owned reviewed and revised PDFs. See [Privacy and recovery](privacy-and-recovery.md) before deleting recovery data.

@@ -44,7 +44,7 @@ function readBuildIdentity(resources) {
     identity?.managementProtocolVersion !== 1 ||
     !/^[a-f0-9]{64}$/u.test(identity?.daemonIdentity ?? "") ||
     !/^[a-f0-9]{64}$/u.test(identity?.installArtifactIdentity ?? "")
-  ) throw new Error("Installed PDF Proofreader build identity is invalid");
+  ) throw new Error("Installed Placekeeper build identity is invalid");
   return identity;
 }
 
@@ -68,7 +68,7 @@ async function chooseFinderPdf() {
 async function openFinderPdf(nodePath, serviceEntry, pdfPath, serviceEnvironment, allowInputRecovery = true) {
   let result = parse(await run(nodePath, [serviceEntry, ...finderServiceArgs(pdfPath)], { env: serviceEnvironment, allowNonZero: true }));
   if (result.ok === true && result.kind === "recovery-offered") {
-    const choice = (await run("/usr/bin/osascript", ["-e", 'choose from list {"resume", "discard", "fork"} with title "Recover PDF Proofreader draft" without multiple selections allowed and empty selection allowed'], { env: { PATH: "/usr/bin:/bin" }, stdio: ["ignore", "pipe", "ignore"] })).trim();
+    const choice = (await run("/usr/bin/osascript", ["-e", 'choose from list {"resume", "discard", "fork"} with title "Recover Placekeeper draft" without multiple selections allowed and empty selection allowed'], { env: { PATH: "/usr/bin:/bin" }, stdio: ["ignore", "pipe", "ignore"] })).trim();
     if (!["resume", "discard", "fork"].includes(choice)) return;
     result = parse(await run(nodePath, [serviceEntry, ...finderServiceArgs(pdfPath, choice)], { env: serviceEnvironment, allowNonZero: true }));
   }
