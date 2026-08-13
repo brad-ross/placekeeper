@@ -13,6 +13,8 @@ import { createNotarizationPlan } from "./notarize.js";
 import {
   validateAppBundleManifest,
   validateBackendRuntimeManifest,
+  normalizeCodexSkillContract,
+  validateCodexPlugin,
   validateDistributionManifests,
   validateMacIconSet,
 } from "./validate-manifest.js";
@@ -516,10 +518,16 @@ describe("macOS distribution manifests", () => {
     expect(hooks.hooks?.UserPromptSubmit?.[0]?.hooks?.[0]?.timeout).toBeGreaterThan(CONTROL_REQUEST_TIMEOUT_MS / 1_000);
     expect(hooks.hooks?.SessionEnd?.[0]?.hooks?.[0]?.timeout).toBe(3);
     expect(hooks.hooks?.UserPromptSubmit?.[0]?.hooks?.[0]?.additionalContextLimit).toBe(131072);
-    const skill = await readFile(resolve("integrations/codex-plugin/skills/pdf-proofreader/SKILL.md"), "utf8");
-    expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf`);
-    expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} context changes --handle`);
-    expect(skill).not.toMatch(/(^|[^/A-Za-z0-9_-])pdf-proofreader\s+(context|daemon)\b/mu);
+    const canonicalSkill = await readFile(resolve("integrations/codex-plugin/skills/placekeeper/SKILL.md"), "utf8");
+    const legacySkill = await readFile(resolve("integrations/codex-plugin/skills/pdf-proofreader/SKILL.md"), "utf8");
+    expect(normalizeCodexSkillContract(canonicalSkill, "placekeeper")).toBe(
+      normalizeCodexSkillContract(legacySkill, "pdf-proofreader"),
+    );
+    for (const skill of [canonicalSkill, legacySkill]) {
+      expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf`);
+      expect(skill).toContain(`${CODEX_INSTALLED_LAUNCHER_COMMAND} context changes --handle`);
+      expect(skill).not.toMatch(/(^|[^/A-Za-z0-9_-])pdf-proofreader\s+(context|daemon)\b/mu);
+    }
     expect(inspectHookEvent({
       session_id: "packaged-contract-task",
       hook_event_name: "PostToolUse",
@@ -549,5 +557,25 @@ describe("macOS distribution manifests", () => {
       ...appManifest,
       embeddedArtifacts: { vscodeExtension: "apps/vscode" },
     })).toThrow(/Codex plugin/u);
+  });
+
+  it("rejects a missing or operationally divergent Codex skill alias", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-plugin-contract-"));
+    const pluginRoot = join(root, "codex-plugin");
+    try {
+      await cp(resolve("integrations/codex-plugin"), pluginRoot, { recursive: true });
+      await expect(validateCodexPlugin(pluginRoot)).resolves.toBeUndefined();
+
+      await rm(join(pluginRoot, "skills/pdf-proofreader/SKILL.md"));
+      await expect(validateCodexPlugin(pluginRoot)).rejects.toThrow(/pdf-proofreader.*alias|alias.*pdf-proofreader/ui);
+
+      await cp(resolve("integrations/codex-plugin"), pluginRoot, { recursive: true, force: true });
+      const legacyPath = join(pluginRoot, "skills/pdf-proofreader/SKILL.md");
+      const legacy = await readFile(legacyPath, "utf8");
+      await writeFile(legacyPath, legacy.replace("A failed refresh blocks completion.", "A failed refresh may be ignored."));
+      await expect(validateCodexPlugin(pluginRoot)).rejects.toThrow(/operational.*diverge|diverge.*operational/ui);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

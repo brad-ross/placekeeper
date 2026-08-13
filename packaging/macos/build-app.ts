@@ -263,7 +263,10 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
     resolve(vscodeDist, "extension.js"),
     resolve(codexPlugin, ".codex-plugin/plugin.json"),
     resolve(codexPlugin, "hooks/hooks.json"),
+    resolve(codexPlugin, "skills/placekeeper/SKILL.md"),
+    resolve(codexPlugin, "skills/placekeeper/agents/openai.yaml"),
     resolve(codexPlugin, "skills/pdf-proofreader/SKILL.md"),
+    resolve(codexPlugin, "skills/pdf-proofreader/agents/openai.yaml"),
     iconMaster,
   ]) await access(required);
   await validateMacIconSet(iconset);

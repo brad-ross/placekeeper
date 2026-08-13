@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   INPUT_UNAVAILABLE,
@@ -5,6 +7,7 @@ import {
   choosePdfInput,
   classifyWorkspace,
   localSourceRoot,
+  resolveLauncherPath,
 } from "../src/local-workspace.js";
 import {
   buildReviewWebviewHtml,
@@ -14,6 +17,50 @@ import {
 import { runLaunchClient } from "../src/launch-client.js";
 
 describe("VS Code local host adapter", () => {
+  it("presents Placekeeper while preserving every VS Code compatibility identifier", async () => {
+    const manifest = JSON.parse(
+      await readFile(resolve("apps/vscode/package.json"), "utf8"),
+    ) as {
+      name: string;
+      displayName: string;
+      description: string;
+      activationEvents: string[];
+      contributes: {
+        commands: Array<{ command: string; title: string }>;
+        configuration: {
+          title: string;
+          properties: Record<string, { description: string }>;
+        };
+      };
+    };
+
+    expect(manifest).toMatchObject({
+      name: "pdf-proofreader-vscode",
+      displayName: "Placekeeper",
+      activationEvents: ["onCommand:pdfProofreader.open"],
+      contributes: {
+        commands: [{ command: "pdfProofreader.open", title: "Placekeeper: Open Local PDF" }],
+        configuration: {
+          title: "Placekeeper",
+          properties: {
+            "pdfProofreader.launcherPath": {
+              description: "Absolute path to the installed Placekeeper launcher.",
+            },
+          },
+        },
+      },
+    });
+    expect(manifest.description).toContain("Placekeeper");
+  });
+
+  it("uses an existing configured launcher first and otherwise the user-local compatibility path", () => {
+    expect(resolveLauncherPath("/custom/PDF Proofreader.app/pdf-proofreader", "/Users/reader"))
+      .toBe("/custom/PDF Proofreader.app/pdf-proofreader");
+    expect(resolveLauncherPath(undefined, "/Users/reader")).toBe(
+      "/Users/reader/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader",
+    );
+  });
+
   it("rejects remote, web, virtual, and non-file workspaces", () => {
     expect(classifyWorkspace({ remoteName: "ssh-remote", uiKind: "desktop", workspaceSchemes: ["file"] })).toEqual(UNSUPPORTED_CONTEXT);
     expect(classifyWorkspace({ uiKind: "web", workspaceSchemes: ["file"] })).toEqual(UNSUPPORTED_CONTEXT);
@@ -39,6 +86,7 @@ describe("VS Code local host adapter", () => {
     expect(html).toContain("frame-src http://127.0.0.1:49152");
     expect(html).toContain("vscode.postMessage({ type: 'ready' })");
     expect(html).not.toContain("cap=secret");
+    expect(html).toContain('title="Placekeeper"');
     expect(reviewPanelOptions.localResourceRoots).toEqual([]);
     expect(reviewPanelOptions.enableScripts).toBe(true);
     expect(reviewPanelOptions.retainContextWhenHidden).toBe(false);

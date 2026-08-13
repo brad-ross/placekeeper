@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 export interface LaunchErrorPresentation {
   readonly kind: "input-unavailable" | "unsupported-context" | "upgrade-required";
   readonly message: string;
@@ -12,9 +14,21 @@ export const INPUT_UNAVAILABLE: LaunchErrorPresentation = Object.freeze({
 
 export const UNSUPPORTED_CONTEXT: LaunchErrorPresentation = Object.freeze({
   kind: "unsupported-context",
-  message: "PDF Proofreader works only in a local VS Code desktop window.",
+  message: "Placekeeper works only in a local VS Code desktop window.",
   recoveryAction: "Open Local Window",
 });
+
+export function resolveLauncherPath(
+  configured: string | undefined,
+  homeDirectory: string,
+): string {
+  return configured && configured.length > 0
+    ? configured
+    : join(
+        homeDirectory,
+        "Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader",
+      );
+}
 
 export interface WorkspaceContext {
   readonly remoteName?: string;

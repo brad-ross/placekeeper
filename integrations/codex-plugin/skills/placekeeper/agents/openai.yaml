@@ -1,4 +1,4 @@
 interface:
   display_name: "Placekeeper"
   short_description: "Open local PDFs in Placekeeper"
-  default_prompt: "Use $pdf-proofreader to open this local PDF for review."
+  default_prompt: "Use $placekeeper to open this local PDF for review."

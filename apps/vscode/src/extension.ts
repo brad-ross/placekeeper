@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { homedir } from "node:os";
 import * as vscode from "vscode";
 import { runLaunchClient } from "./launch-client.js";
 import {
@@ -6,6 +7,7 @@ import {
   choosePdfUriInput,
   classifyWorkspace,
   localSourceRoot,
+  resolveLauncherPath,
   type LaunchErrorPresentation,
   type UriLike,
 } from "./local-workspace.js";
@@ -65,8 +67,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const configured = vscode.workspace
         .getConfiguration("pdfProofreader")
         .get<string>("launcherPath");
-      const executable =
-        configured ?? "/Applications/PDF Proofreader.app/Contents/MacOS/pdf-proofreader";
+      const executable = resolveLauncherPath(configured, homedir());
       try {
         const sourceRoot = localSourceRoot(
           pdfUri,
@@ -75,7 +76,7 @@ export function activate(context: vscode.ExtensionContext): void {
         let result = await runLaunchClient(executable, pdfUri.fsPath, sourceRoot);
         while (result.ok && result.kind === "recovery-offered") {
           const decision = await vscode.window.showQuickPick(result.choices, {
-            title: "Recover PDF Proofreader draft",
+            title: "Recover Placekeeper draft",
             placeHolder: "Resume, discard, or start an independent review",
           });
           if (decision !== "resume" && decision !== "discard" && decision !== "fork") return;
@@ -93,7 +94,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         const panel = vscode.window.createWebviewPanel(
           "pdfProofreader.review",
-          "PDF Proofreader",
+          "Placekeeper",
           vscode.ViewColumn.Active,
           reviewPanelOptions,
         );

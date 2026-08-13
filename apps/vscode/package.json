@@ -1,7 +1,7 @@
 {
   "name": "pdf-proofreader-vscode",
-  "displayName": "PDF Proofreader",
-  "description": "Open one local PDF in the installed PDF Proofreader service.",
+  "displayName": "Placekeeper",
+  "description": "Open one local PDF in the installed Placekeeper service.",
   "version": "0.1.0",
   "private": true,
   "engines": { "vscode": ">=1.95.0" },
@@ -10,7 +10,7 @@
   "activationEvents": ["onCommand:pdfProofreader.open"],
   "contributes": {
     "commands": [
-      { "command": "pdfProofreader.open", "title": "PDF Proofreader: Open Local PDF" }
+      { "command": "pdfProofreader.open", "title": "Placekeeper: Open Local PDF" }
     ],
     "menus": {
       "explorer/context": [
@@ -21,11 +21,11 @@
       ]
     },
     "configuration": {
-      "title": "PDF Proofreader",
+      "title": "Placekeeper",
       "properties": {
         "pdfProofreader.launcherPath": {
           "type": "string",
-          "description": "Absolute path to the installed PDF Proofreader launcher."
+          "description": "Absolute path to the installed Placekeeper launcher."
         }
       }
     }

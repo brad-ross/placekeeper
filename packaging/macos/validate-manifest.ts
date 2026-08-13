@@ -334,6 +334,185 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   };
 }
 
+type CodexSkillAlias = "placekeeper" | "pdf-proofreader";
+
+export function normalizeCodexSkillContract(
+  skill: string,
+  expectedAlias: CodexSkillAlias,
+): string {
+  if (!skill.startsWith("---\n")) {
+    throw new Error(`The packaged ${expectedAlias} skill must start with frontmatter`);
+  }
+  const frontmatterEnd = skill.indexOf("\n---\n", 4);
+  if (frontmatterEnd < 0) {
+    throw new Error(`The packaged ${expectedAlias} skill has unterminated frontmatter`);
+  }
+  const entries = skill
+    .slice(4, frontmatterEnd)
+    .split("\n")
+    .map((line) => {
+      const separator = line.indexOf(":");
+      if (separator <= 0) {
+        throw new Error(`The packaged ${expectedAlias} skill has invalid frontmatter`);
+      }
+      return [line.slice(0, separator), line.slice(separator + 1).trim()] as const;
+    });
+  if (
+    entries.length !== 2 ||
+    entries[0]?.[0] !== "name" ||
+    entries[1]?.[0] !== "description"
+  ) {
+    throw new Error(
+      `The packaged ${expectedAlias} skill may declare only name and description alias metadata`,
+    );
+  }
+  if (entries[0][1] !== expectedAlias) {
+    throw new Error(`The packaged ${expectedAlias} skill must declare name: ${expectedAlias}`);
+  }
+  if (!entries[1][1].includes(`$${expectedAlias}`)) {
+    throw new Error(`The packaged ${expectedAlias} skill description must expose $${expectedAlias}`);
+  }
+  return skill.slice(frontmatterEnd + "\n---\n".length);
+}
+
+async function requiredSkill(pluginRoot: string, alias: CodexSkillAlias): Promise<string> {
+  try {
+    return await readFile(resolve(pluginRoot, `skills/${alias}/SKILL.md`), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`The packaged ${alias} skill alias is required`);
+    }
+    throw error;
+  }
+}
+
+export async function validateCodexPlugin(pluginRoot: string): Promise<void> {
+  const plugin = JSON.parse(await readFile(resolve(pluginRoot, ".codex-plugin/plugin.json"), "utf8")) as unknown;
+  const pluginManifest = record(plugin, "Codex plugin manifest");
+  if (pluginManifest.skills !== "./skills/") throw new Error("The Codex plugin must expose its installed skill directory");
+  const pluginAuthor = record(pluginManifest.author, "Codex plugin author");
+  const pluginInterface = record(pluginManifest.interface, "Codex plugin interface");
+  if (
+    pluginAuthor.name !== "Placekeeper" ||
+    pluginInterface.displayName !== "Placekeeper" ||
+    pluginInterface.developerName !== "Placekeeper"
+  ) {
+    throw new Error("The packaged Codex plugin visible identity must remain Placekeeper");
+  }
+  if (pluginInterface.defaultPrompt !== "Open this local PDF in Placekeeper with $placekeeper.") {
+    throw new Error("The packaged Codex plugin default prompt must prefer $placekeeper");
+  }
+
+  const hooks = JSON.parse(await readFile(resolve(pluginRoot, "hooks/hooks.json"), "utf8")) as unknown;
+  const hookManifest = record(hooks, "Codex hook manifest");
+  if (hookManifest.description !== "Task-scoped Placekeeper lifecycle hooks.") {
+    throw new Error("The packaged Codex hook description must use Placekeeper");
+  }
+  const hooksRoot = record(hookManifest.hooks, "Codex hook events");
+  const expectedEvents = ["PostToolUse", "SessionEnd", "UserPromptSubmit"];
+  if (Object.keys(hooksRoot).sort().join("\0") !== expectedEvents.join("\0")) {
+    throw new Error("The packaged Codex plugin must declare one plugin-global hook set");
+  }
+  const expectedHooks = {
+    PostToolUse: {
+      timeout: 8,
+      additionalContextLimit: 131072,
+      statusMessage: "Connecting Placekeeper context",
+      matcher: "^Bash$",
+    },
+    UserPromptSubmit: {
+      timeout: 8,
+      additionalContextLimit: 131072,
+      statusMessage: "Refreshing Placekeeper context",
+    },
+    SessionEnd: {
+      timeout: 3,
+      additionalContextLimit: 256,
+      statusMessage: "Disconnecting Placekeeper context",
+    },
+  } as const;
+  for (const event of ["PostToolUse", "UserPromptSubmit", "SessionEnd"] as const) {
+    if (!Array.isArray(hooksRoot[event]) || hooksRoot[event].length !== 1) {
+      throw new Error(`The packaged Codex plugin must declare exactly one ${event} hook`);
+    }
+
+    const declaration = record(hooksRoot[event][0], `${event} hook declaration`);
+    const expectedMatcher = "matcher" in expectedHooks[event]
+      ? expectedHooks[event].matcher
+      : undefined;
+    if (declaration.matcher !== expectedMatcher) {
+      throw new Error(`The packaged ${event} hook matcher changed`);
+    }
+    if (!Array.isArray(declaration.hooks) || declaration.hooks.length !== 1) {
+      throw new Error(`The packaged Codex plugin must declare exactly one ${event} handler`);
+    }
+    const handler = record(declaration.hooks[0], `${event} hook handler`);
+    const expectedCommand = `${CODEX_INSTALLED_LAUNCHER_COMMAND} hook --event`;
+    if (handler.type !== "command" || handler.command !== expectedCommand) {
+      throw new Error(`The packaged ${event} hook must use the canonical installed launcher command`);
+    }
+    const expected = expectedHooks[event];
+    if (
+      handler.timeout !== expected.timeout ||
+      handler.additionalContextLimit !== expected.additionalContextLimit ||
+      handler.statusMessage !== expected.statusMessage
+    ) {
+      throw new Error(`The packaged ${event} hook timeout, context limit, or status changed`);
+    }
+    if (event !== "SessionEnd" && expected.timeout <= CONTROL_REQUEST_TIMEOUT_SECONDS) {
+      throw new Error(
+        `The packaged ${event} hook timeout must exceed the ${CONTROL_REQUEST_TIMEOUT_SECONDS}-second control client timeout`,
+      );
+    }
+  }
+
+  const canonicalSkill = await requiredSkill(pluginRoot, "placekeeper");
+  const legacySkill = await requiredSkill(pluginRoot, "pdf-proofreader");
+  const canonicalContract = normalizeCodexSkillContract(canonicalSkill, "placekeeper");
+  const legacyContract = normalizeCodexSkillContract(legacySkill, "pdf-proofreader");
+  if (canonicalContract !== legacyContract) {
+    throw new Error("The packaged Codex skill aliases have operational contract divergence");
+  }
+  const requiredContractFragments = [
+    `${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf <absolute-local-pdf-path>`,
+    "recovery-offered",
+    "pdf-proofreader-live-context",
+    "context items --handle",
+    "context changes --handle",
+    "context evidence --handle",
+    "expired`, `stale_generation`, or `unauthorized",
+    "context source begin --handle",
+    "context source reconcile --handle",
+    "applyGuardSha256",
+    "context source rebuild-plan --handle",
+    "context source rebuild-verify --handle",
+    "context source complete --handle",
+    "A failed refresh blocks completion.",
+    "Do not print, summarize, save, or copy the capability URL elsewhere.",
+    "Do not bypass ordinary permission prompts",
+    "Do not submit, create, or monitor another Codex task.",
+  ];
+  for (const fragment of requiredContractFragments) {
+    if (!canonicalContract.includes(fragment)) {
+      throw new Error(`The packaged Placekeeper skill omitted required contract text: ${fragment}`);
+    }
+  }
+  if (/(^|[^/A-Za-z0-9_-])pdf-proofreader\s+(context|daemon)\b/mu.test(canonicalContract)) {
+    throw new Error("The packaged Placekeeper skills must not publish bare context or daemon commands");
+  }
+
+  for (const alias of ["placekeeper", "pdf-proofreader"] as const) {
+    const agent = await readFile(resolve(pluginRoot, `skills/${alias}/agents/openai.yaml`), "utf8");
+    if (
+      !agent.includes('display_name: "Placekeeper"') ||
+      !agent.includes('short_description: "Open local PDFs in Placekeeper"') ||
+      !agent.includes(`default_prompt: "Use $${alias} to open this local PDF for review."`)
+    ) {
+      throw new Error(`The packaged ${alias} agent metadata must expose its Placekeeper alias prompt`);
+    }
+  }
+}
+
 export async function validateDistributionManifests(repoRoot = process.cwd()): Promise<void> {
   const app = validateAppBundleManifest(JSON.parse(await readFile(resolve(repoRoot, "packaging/macos/app-bundle.json"), "utf8")) as unknown);
   const backend = validateBackendRuntimeManifest(JSON.parse(await readFile(resolve(repoRoot, "packaging/macos/backend-runtime-manifest.json"), "utf8")) as unknown);
@@ -349,49 +528,7 @@ export async function validateDistributionManifests(repoRoot = process.cwd()): P
     if (digest !== asset.sha256) throw new Error(`Runtime asset digest mismatch: ${asset.id}`);
   }
   const pluginRoot = resolve(repoRoot, app.embeddedArtifacts.codexPlugin);
-  const plugin = JSON.parse(await readFile(resolve(pluginRoot, ".codex-plugin/plugin.json"), "utf8")) as unknown;
-  const pluginManifest = record(plugin, "Codex plugin manifest");
-  if (pluginManifest.skills !== "./skills/") throw new Error("The Codex plugin must expose its installed skill directory");
-  const hooks = JSON.parse(await readFile(resolve(pluginRoot, "hooks/hooks.json"), "utf8")) as unknown;
-  const hooksRoot = record(record(hooks, "Codex hook manifest").hooks, "Codex hook events");
-  for (const event of ["PostToolUse", "UserPromptSubmit", "SessionEnd"] as const) {
-    if (!Array.isArray(hooksRoot[event]) || hooksRoot[event].length !== 1) {
-      throw new Error(`The packaged Codex plugin must declare exactly one ${event} hook`);
-    }
-
-    const declaration = record(hooksRoot[event][0], `${event} hook declaration`);
-    if (!Array.isArray(declaration.hooks) || declaration.hooks.length !== 1) {
-      throw new Error(`The packaged Codex plugin must declare exactly one ${event} handler`);
-    }
-    const handler = record(declaration.hooks[0], `${event} hook handler`);
-    const expectedCommand = `${CODEX_INSTALLED_LAUNCHER_COMMAND} hook --event`;
-    if (handler.command !== expectedCommand) {
-      throw new Error(`The packaged ${event} hook must use the canonical installed launcher`);
-    }
-    if (event === "SessionEnd") {
-      if (handler.timeout !== 3) {
-        throw new Error("The packaged SessionEnd hook must remain within Codex's 3-second limit");
-      }
-    } else if (
-      typeof handler.timeout !== "number" ||
-      handler.timeout <= CONTROL_REQUEST_TIMEOUT_SECONDS
-    ) {
-      throw new Error(
-        `The packaged ${event} hook timeout must exceed the ${CONTROL_REQUEST_TIMEOUT_SECONDS}-second control client timeout`,
-      );
-    }
-  }
-  const skill = await readFile(resolve(pluginRoot, "skills/pdf-proofreader/SKILL.md"), "utf8");
-  if (
-    !skill.includes(
-      `${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex --pdf <absolute-local-pdf-path>`,
-    )
-  ) {
-    throw new Error("The packaged PDF Proofreader skill must use the canonical installed launcher");
-  }
-  if (/(^|[^/A-Za-z0-9_-])pdf-proofreader\s+(context|daemon)\b/mu.test(skill)) {
-    throw new Error("The packaged PDF Proofreader skill must not publish bare context or daemon commands");
-  }
+  await validateCodexPlugin(pluginRoot);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

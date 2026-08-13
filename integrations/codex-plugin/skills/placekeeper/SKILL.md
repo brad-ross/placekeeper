@@ -1,6 +1,6 @@
 ---
-name: pdf-proofreader
-description: Legacy alias for opening one explicitly referenced local PDF in Placekeeper and navigating the Codex desktop built-in browser to its scoped loopback review session. Use when the user invokes $pdf-proofreader or asks to proofread, annotate, mark up, or review a local .pdf file. Reject missing, multiple, remote, or non-PDF inputs through the launcher's shared errors.
+name: placekeeper
+description: Open one explicitly referenced local PDF in Placekeeper and navigate the Codex desktop built-in browser to its scoped loopback review session. Use when the user invokes $placekeeper or asks to proofread, annotate, mark up, or review a local .pdf file. Reject missing, multiple, remote, or non-PDF inputs through the launcher's shared errors.
 ---
 
 # Placekeeper

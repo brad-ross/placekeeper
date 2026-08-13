@@ -1,7 +1,7 @@
 {
-  "name": "pdf-proofreader-local",
+  "name": "placekeeper-local",
   "interface": {
-    "displayName": "PDF Proofreader Local"
+    "displayName": "Placekeeper Local"
   },
   "plugins": [
     {
