@@ -736,6 +736,74 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.main.controls.applyTarget).toHaveBeenCalledWith(target(5));
   });
 
+  it('records annotation jumps for backward and forward traversal', async () => {
+    const run = harness();
+    const annotation = location(4, 160, 1);
+
+    expect(await run.coordinator.navigateMainAnnotation({
+      pageIndex: annotation.pageIndex,
+      point: annotation.anchor,
+    })).toBe(true);
+    expect(run.main.controls.applyLocation).toHaveBeenCalledWith(annotation);
+    expect(run.state().mainHistory.entries.map(({ pageIndex }) => pageIndex)).toEqual([0, 4]);
+    expect(run.state().mainHistory.index).toBe(1);
+
+    expect(await run.coordinator.historyBack()).toBe(true);
+    expect(run.main.controls.applyLocation).toHaveBeenLastCalledWith(location(0));
+    expect(await run.coordinator.historyForward()).toBe(true);
+    expect(run.main.controls.applyLocation).toHaveBeenLastCalledWith(annotation);
+  });
+
+  it('preserves the original history location across rapid annotation jumps', async () => {
+    const run = harness();
+    const original = location(0, 75, 1.2);
+    const firstAnnotation = location(3, 140, 1.2);
+    const secondAnnotation = location(5, 220, 1.2);
+    const firstApply = deferred<boolean>();
+    let pendingRollback: Promise<void> | null = null;
+    run.main.set(original);
+    vi.mocked(run.main.controls.cancelPendingNavigation).mockImplementation(
+      () => pendingRollback ?? Promise.resolve(),
+    );
+    vi.mocked(run.main.controls.applyLocation)
+      .mockImplementationOnce(async (value) => {
+        run.main.set(value);
+        return firstApply.promise;
+      })
+      .mockImplementationOnce(async (value) => {
+        run.main.set(value);
+        return true;
+      });
+
+    const firstJump = run.coordinator.navigateMainAnnotation({
+      pageIndex: firstAnnotation.pageIndex,
+      point: firstAnnotation.anchor,
+    });
+    await vi.waitFor(() => {
+      expect(run.main.controls.applyLocation).toHaveBeenCalledWith(firstAnnotation);
+    });
+
+    const rollback = deferred<void>();
+    pendingRollback = rollback.promise;
+    const secondJump = run.coordinator.navigateMainAnnotation({
+      pageIndex: secondAnnotation.pageIndex,
+      point: secondAnnotation.anchor,
+    });
+    await Promise.resolve();
+    expect(run.main.controls.applyLocation).toHaveBeenCalledTimes(1);
+
+    run.main.set(original);
+    pendingRollback = null;
+    rollback.resolve();
+    expect(await secondJump).toBe(true);
+    firstApply.resolve(true);
+    expect(await firstJump).toBe(false);
+
+    expect(run.state().mainHistory.entries).toEqual([original, secondAnnotation]);
+    expect(await run.coordinator.historyBack()).toBe(true);
+    expect(run.main.controls.applyLocation).toHaveBeenLastCalledWith(original);
+  });
+
   it('treats semantic no-op direct and outline targets as successful without history', async () => {
     const run = harness();
     run.dependencies.layout.revealReferences();

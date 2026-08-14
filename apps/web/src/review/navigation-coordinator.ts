@@ -12,7 +12,9 @@ import type {
 } from '../pdf/document-order-location.js';
 import type { PdfViewerNavigation } from '../pdf/viewer-navigation-adapter.js';
 import {
+  isPdfViewerLocation,
   samePdfViewerLocation,
+  type PdfNaturalPoint,
   type PdfViewerLocation,
 } from '../pdf/viewer-navigation.js';
 import type { LinkActionChoice } from './LinkActionPopover.js';
@@ -728,33 +730,19 @@ export class NavigationCoordinator {
       }
       return true;
     }
-    this.dependencies.dispatch({
-      type: 'request-main-jump',
-      token: operation.token,
+    const settledLocation = await this.applyMainJump(
+      operation,
+      main,
       currentLocation,
       destination,
-      ...(sameLocation && kind === 'search' ? { force: true } : {}),
-    });
-    const applied = await main.applyTarget(target);
+      () => main.applyTarget(target),
+      sameLocation && kind === 'search',
+    );
     if (!this.isCurrent(operation)) return false;
-    const settledLocation = applied ? main.captureLocation() : null;
-    if (!applied || settledLocation === null) {
-      this.dependencies.dispatch({
-        type: 'complete-main-jump',
-        token: operation.token,
-        documentGeneration: operation.documentGeneration,
-        success: false,
-      });
+    if (settledLocation === null) {
       this.dependencies.setAnnouncement(MAIN_FAILURE);
       return false;
     }
-    this.dependencies.dispatch({
-      type: 'complete-main-jump',
-      token: operation.token,
-      documentGeneration: operation.documentGeneration,
-      success: true,
-      settledLocation,
-    });
     this.dependencies.setAnnouncement(
       kind === 'outline' ? 'Outline destination opened.' : 'Main document destination opened.',
     );
@@ -765,6 +753,65 @@ export class NavigationCoordinator {
       await this.dependencies.layout.settle();
       if (this.isCurrent(operation)) main.focusAtDestination(settledLocation.pageIndex);
     }
+    return true;
+  }
+
+  async navigateMainAnnotation(input: {
+    readonly pageIndex: number;
+    readonly point: PdfNaturalPoint | null;
+  }): Promise<boolean> {
+    const operation = this.begin();
+    if (operation === null) return false;
+    const main = this.dependencies.getMainNavigation();
+    if (!main) {
+      this.dependencies.setAnnouncement(MAIN_FAILURE);
+      return false;
+    }
+    await main.cancelPendingNavigation();
+    if (!this.isCurrent(operation)) return false;
+    const currentLocation = main.captureLocation();
+    if (currentLocation === null) {
+      this.dependencies.setAnnouncement(MAIN_FAILURE);
+      return false;
+    }
+    const anchor = input.point !== null
+      && Number.isFinite(input.point.x)
+      && Number.isFinite(input.point.y)
+      && input.point.x >= 0
+      && input.point.y >= 0
+      ? input.point
+      : { x: 0, y: 0 };
+    const destination: PdfViewerLocation = {
+      pageIndex: input.pageIndex,
+      anchor,
+      alignment: { xPercent: 50, yPercent: 35 },
+      zoom: currentLocation.zoom,
+    };
+    if (!isPdfViewerLocation(destination)) {
+      this.dependencies.setAnnouncement(MAIN_FAILURE);
+      return false;
+    }
+    if (samePdfViewerLocation(currentLocation, destination)) {
+      main.focusAtDestination(destination.pageIndex);
+      this.dependencies.setAnnouncement('Annotation destination is already current.');
+      this.refreshCurrentOutline(currentLocation);
+      return true;
+    }
+    const settledLocation = await this.applyMainJump(
+      operation,
+      main,
+      currentLocation,
+      destination,
+      () => main.applyLocation(destination),
+    );
+    if (!this.isCurrent(operation)) return false;
+    if (settledLocation === null) {
+      this.dependencies.setAnnouncement(MAIN_FAILURE);
+      return false;
+    }
+    main.focusAtDestination(settledLocation.pageIndex);
+    this.dependencies.setAnnouncement('Annotation destination opened.');
+    this.refreshCurrentOutline(settledLocation);
     return true;
   }
 
@@ -968,6 +1015,34 @@ export class NavigationCoordinator {
       : 'Moved forward in document history.');
     this.refreshCurrentOutline(destination);
     return true;
+  }
+
+  private async applyMainJump(
+    operation: Operation,
+    main: PdfViewerNavigation,
+    currentLocation: PdfViewerLocation,
+    destination: PdfViewerLocation,
+    apply: () => Promise<boolean>,
+    force = false,
+  ): Promise<PdfViewerLocation | null> {
+    this.dependencies.dispatch({
+      type: 'request-main-jump',
+      token: operation.token,
+      currentLocation,
+      destination,
+      ...(force ? { force: true } : {}),
+    });
+    const applied = await apply();
+    if (!this.isCurrent(operation)) return null;
+    const settledLocation = applied ? main.captureLocation() : null;
+    this.dependencies.dispatch({
+      type: 'complete-main-jump',
+      token: operation.token,
+      documentGeneration: operation.documentGeneration,
+      success: settledLocation !== null,
+      ...(settledLocation === null ? {} : { settledLocation }),
+    });
+    return settledLocation;
   }
 
   private failReference(operation: Operation): false {
