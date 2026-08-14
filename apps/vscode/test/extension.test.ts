@@ -24,9 +24,15 @@ describe("VS Code local host adapter", () => {
       name: string;
       displayName: string;
       description: string;
+      publisher: string;
+      icon: string;
       activationEvents: string[];
       contributes: {
-        commands: Array<{ command: string; title: string }>;
+        commands: Array<{
+          command: string;
+          title: string;
+          icon: { light: string; dark: string };
+        }>;
         configuration: {
           title: string;
           properties: Record<string, { description: string }>;
@@ -37,9 +43,18 @@ describe("VS Code local host adapter", () => {
     expect(manifest).toMatchObject({
       name: "placekeeper-vscode",
       displayName: "Placekeeper",
+      publisher: "placekeeper-local",
+      icon: "assets/placekeeper.png",
       activationEvents: ["onCommand:placekeeper.open"],
       contributes: {
-        commands: [{ command: "placekeeper.open", title: "Placekeeper: Open Local PDF" }],
+        commands: [{
+          command: "placekeeper.open",
+          title: "Placekeeper: Open Local PDF",
+          icon: {
+            light: "assets/placekeeper.svg",
+            dark: "assets/placekeeper.svg",
+          },
+        }],
         configuration: {
           title: "Placekeeper",
           properties: {

@@ -199,9 +199,17 @@ describe("macOS distribution manifests", () => {
     expect(exportCoordinator).toContain('`.placekeeper-${randomUUID()}.tmp`');
     expect(JSON.parse(vscodePackage)).toMatchObject({
       name: "placekeeper-vscode",
+      publisher: "placekeeper-local",
+      icon: "assets/placekeeper.png",
       activationEvents: ["onCommand:placekeeper.open"],
       contributes: {
-        commands: [{ command: "placekeeper.open" }],
+        commands: [{
+          command: "placekeeper.open",
+          icon: {
+            light: "assets/placekeeper.svg",
+            dark: "assets/placekeeper.svg",
+          },
+        }],
         configuration: { properties: { "placekeeper.launcherPath": expect.any(Object) } },
       },
     });
@@ -460,11 +468,16 @@ describe("macOS distribution manifests", () => {
     const plugin = JSON.parse(await readFile(resolve("integrations/codex-plugin/.codex-plugin/plugin.json"), "utf8")) as {
       description?: string;
       skills?: string;
-      interface?: { longDescription?: string };
+      interface?: { composerIcon?: string; logo?: string; logoDark?: string; longDescription?: string };
     };
     expect(plugin).toMatchObject({
       skills: "./skills/",
-      interface: { longDescription: expect.stringContaining("every prompt") },
+      interface: {
+        composerIcon: "./assets/placekeeper.svg",
+        logo: "./assets/placekeeper.svg",
+        logoDark: "./assets/placekeeper.svg",
+        longDescription: expect.stringContaining("every prompt"),
+      },
     });
     expect(inspectHookEvent({
       session_id: "packaged-contract-task",
@@ -489,6 +502,7 @@ describe("macOS distribution manifests", () => {
     const build = await readFile(resolve("packaging/macos/build-app.ts"), "utf8");
     expect(build).toContain("appManifest.embeddedArtifacts.codexPlugin");
     expect(build).toContain('resolve(resources, "integrations/codex-plugin")');
+    expect(build).toContain('resolve(vscodeInstall, "assets")');
     expect(build).toContain('resolve(codexPlugin, "hooks/hooks.json")');
     const appManifest = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8"));
     expect(() => validateAppBundleManifest({

@@ -252,7 +252,8 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   if (!appManifest.architectures.includes(options.arch)) throw new Error(`Unsupported architecture: ${options.arch}`);
   if (appManifest.nodeVersion !== backendManifest.nodeVersion) throw new Error("Runtime manifest Node versions differ");
   const serviceEntry = resolve(options.serviceDist, "main.js");
-  const vscodeDist = resolve(repoRoot, appManifest.embeddedArtifacts.vscodeExtension, "dist");
+  const vscodeExtension = resolve(repoRoot, appManifest.embeddedArtifacts.vscodeExtension);
+  const vscodeDist = resolve(vscodeExtension, "dist");
   const codexPlugin = resolve(repoRoot, appManifest.embeddedArtifacts.codexPlugin);
   const iconMaster = resolve(repoRoot, appManifest.icon.master);
   const iconset = resolve(repoRoot, appManifest.icon.source);
@@ -261,9 +262,13 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
     serviceEntry,
     options.webDist,
     resolve(vscodeDist, "extension.js"),
+    resolve(vscodeExtension, "assets/placekeeper.png"),
+    resolve(vscodeExtension, "assets/placekeeper.svg"),
     resolve(codexPlugin, ".codex-plugin/plugin.json"),
+    resolve(codexPlugin, "assets/placekeeper.svg"),
     resolve(codexPlugin, "hooks/hooks.json"),
     resolve(codexPlugin, "skills/placekeeper/SKILL.md"),
+    resolve(codexPlugin, "skills/placekeeper/assets/placekeeper.svg"),
     resolve(codexPlugin, "skills/placekeeper/agents/openai.yaml"),
     iconMaster,
   ]) await access(required);
@@ -295,8 +300,9 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   await cp(codexPlugin, resolve(resources, "integrations/codex-plugin"), { recursive: true, errorOnExist: true });
   const vscodeInstall = resolve(resources, "integrations/vscode");
   await mkdir(vscodeInstall, { recursive: true, mode: 0o755 });
-  await copyFile(resolve(repoRoot, appManifest.embeddedArtifacts.vscodeExtension, "package.json"), resolve(vscodeInstall, "package.json"));
+  await copyFile(resolve(vscodeExtension, "package.json"), resolve(vscodeInstall, "package.json"));
   await cp(vscodeDist, resolve(vscodeInstall, "dist"), { recursive: true, errorOnExist: true });
+  await cp(resolve(vscodeExtension, "assets"), resolve(vscodeInstall, "assets"), { recursive: true, errorOnExist: true });
   for (const asset of backendManifest.assets) {
     const destination = resolve(contents, asset.installPath);
     await mkdir(dirname(destination), { recursive: true, mode: 0o755 });

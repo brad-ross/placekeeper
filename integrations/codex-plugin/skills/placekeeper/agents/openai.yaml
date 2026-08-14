@@ -1,4 +1,7 @@
 interface:
   display_name: "Placekeeper"
   short_description: "Open local PDFs in Placekeeper"
+  icon_small: "./assets/placekeeper.svg"
+  icon_large: "./assets/placekeeper.svg"
+  brand_color: "#264F7D"
   default_prompt: "Use $placekeeper to open this local PDF for review."

@@ -416,6 +416,14 @@ function validatePluginIdentity(pluginManifest: Record<string, unknown>): void {
   if (pluginInterface.defaultPrompt !== "Open this local PDF in Placekeeper with $placekeeper.") {
     throw new Error("The packaged Codex plugin default prompt must prefer $placekeeper");
   }
+  if (
+    pluginInterface.brandColor !== "#264F7D" ||
+    pluginInterface.composerIcon !== "./assets/placekeeper.svg" ||
+    pluginInterface.logo !== "./assets/placekeeper.svg" ||
+    pluginInterface.logoDark !== "./assets/placekeeper.svg"
+  ) {
+    throw new Error("The packaged Codex plugin must expose the Placekeeper app icon and brand color");
+  }
 }
 
 function validateHookContract(hookManifest: Record<string, unknown>): void {
@@ -505,23 +513,60 @@ async function validateAgentMetadata(pluginRoot: string): Promise<void> {
   if (
     !agent.includes('display_name: "Placekeeper"') ||
     !agent.includes('short_description: "Open local PDFs in Placekeeper"') ||
+    !agent.includes('icon_small: "./assets/placekeeper.svg"') ||
+    !agent.includes('icon_large: "./assets/placekeeper.svg"') ||
+    !agent.includes('brand_color: "#264F7D"') ||
     !agent.includes(`default_prompt: "Use $${CODEX_SKILL_NAME} to open this local PDF for review."`)
   ) {
-    throw new Error(`The packaged ${CODEX_SKILL_NAME} agent metadata must expose its Placekeeper prompt`);
+    throw new Error(`The packaged ${CODEX_SKILL_NAME} agent metadata must expose its Placekeeper identity and prompt`);
   }
 }
 
 export async function validateCodexPlugin(pluginRoot: string): Promise<void> {
-  const [pluginSource, hookSource] = await Promise.all([
+  const [pluginSource, hookSource, pluginIcon, skillIcon] = await Promise.all([
     readFile(resolve(pluginRoot, ".codex-plugin/plugin.json"), "utf8"),
     readFile(resolve(pluginRoot, "hooks/hooks.json"), "utf8"),
+    readFile(resolve(pluginRoot, "assets/placekeeper.svg"), "utf8"),
+    readFile(resolve(pluginRoot, `skills/${CODEX_SKILL_NAME}/assets/placekeeper.svg`), "utf8"),
   ]);
+  if (pluginIcon !== skillIcon || !pluginIcon.includes("Placekeeper reference and return icon")) {
+    throw new Error("The packaged Placekeeper plugin and skill icons must match the app artwork");
+  }
   validatePluginIdentity(record(JSON.parse(pluginSource) as unknown, "Codex plugin manifest"));
   validateHookContract(record(JSON.parse(hookSource) as unknown, "Codex hook manifest"));
   await Promise.all([
     validateSkillContract(pluginRoot),
     validateAgentMetadata(pluginRoot),
   ]);
+}
+
+async function validateVscodeIdentity(
+  extensionRoot: string,
+  iconMaster: string,
+  iconPng: Buffer,
+): Promise<void> {
+  const [manifestSource, commandIcon, extensionIcon] = await Promise.all([
+    readFile(resolve(extensionRoot, "package.json"), "utf8"),
+    readFile(resolve(extensionRoot, "assets/placekeeper.svg"), "utf8"),
+    readFile(resolve(extensionRoot, "assets/placekeeper.png")),
+  ]);
+  const manifest = record(JSON.parse(manifestSource) as unknown, "VS Code extension manifest");
+  const contributes = record(manifest.contributes, "VS Code extension contributions");
+  if (!Array.isArray(contributes.commands) || contributes.commands.length !== 1) {
+    throw new Error("The Placekeeper VS Code extension must expose one command");
+  }
+  const command = record(contributes.commands[0], "VS Code Placekeeper command");
+  const commandIconPaths = record(command.icon, "VS Code Placekeeper command icon");
+  if (
+    manifest.publisher !== "placekeeper-local" ||
+    manifest.icon !== "assets/placekeeper.png" ||
+    commandIconPaths.light !== "assets/placekeeper.svg" ||
+    commandIconPaths.dark !== "assets/placekeeper.svg" ||
+    commandIcon !== iconMaster ||
+    !extensionIcon.equals(iconPng)
+  ) {
+    throw new Error("The Placekeeper VS Code extension must use the canonical app icon resources");
+  }
 }
 
 export async function validateDistributionManifests(repoRoot = process.cwd()): Promise<void> {
@@ -533,6 +578,11 @@ export async function validateDistributionManifests(repoRoot = process.cwd()): P
     throw new Error("The production icon master must be an SVG without a pre-masked system corner");
   }
   await validateMacIconSet(resolve(repoRoot, app.icon.source));
+  await validateVscodeIdentity(
+    resolve(repoRoot, app.embeddedArtifacts.vscodeExtension),
+    iconMaster,
+    await readFile(resolve(repoRoot, app.icon.source, "icon_128x128.png")),
+  );
   for (const asset of backend.assets) {
     const bytes = await readFile(resolve(repoRoot, asset.source));
     const digest = createHash("sha256").update(bytes).digest("hex");

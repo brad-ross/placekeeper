@@ -1,6 +1,6 @@
 {
   "name": "codex-plugin",
-  "version": "0.1.0",
+  "version": "0.1.0+codex.20260813212014",
   "description": "Open a local PDF in Placekeeper and keep its content and annotations current in the hosting Codex task.",
   "author": {
     "name": "Placekeeper"
@@ -13,6 +13,10 @@
     "developerName": "Placekeeper",
     "category": "Productivity",
     "capabilities": [],
-    "defaultPrompt": "Open this local PDF in Placekeeper with $placekeeper."
+    "defaultPrompt": "Open this local PDF in Placekeeper with $placekeeper.",
+    "brandColor": "#264F7D",
+    "composerIcon": "./assets/placekeeper.svg",
+    "logo": "./assets/placekeeper.svg",
+    "logoDark": "./assets/placekeeper.svg"
   }
 }

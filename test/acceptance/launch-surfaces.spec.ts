@@ -30,7 +30,7 @@ test("Codex plugin packages launch plus task-scoped live-context hooks", async (
       category: string;
     }>;
   };
-  const plugin = JSON.parse(await readFile(resolve("integrations/codex-plugin/.codex-plugin/plugin.json"), "utf8")) as { name: string; skills: string; author: { name: string }; interface: { displayName: string; developerName: string; defaultPrompt: string; longDescription: string } };
+  const plugin = JSON.parse(await readFile(resolve("integrations/codex-plugin/.codex-plugin/plugin.json"), "utf8")) as { name: string; skills: string; author: { name: string }; interface: { displayName: string; developerName: string; defaultPrompt: string; composerIcon: string; logo: string; logoDark: string; longDescription: string } };
   expect(marketplace).toMatchObject({
     name: "placekeeper-local",
     interface: { displayName: "Placekeeper Local" },
@@ -49,19 +49,31 @@ test("Codex plugin packages launch plus task-scoped live-context hooks", async (
       displayName: "Placekeeper",
       developerName: "Placekeeper",
       defaultPrompt: "Open this local PDF in Placekeeper with $placekeeper.",
+      composerIcon: "./assets/placekeeper.svg",
+      logo: "./assets/placekeeper.svg",
+      logoDark: "./assets/placekeeper.svg",
     },
   });
   expect(plugin.interface.longDescription).toContain("every prompt");
 });
 
 test("VS Code manifest is desktop-local and exposes one PDF command", async () => {
-  const manifest = JSON.parse(await readFile(resolve("apps/vscode/package.json"), "utf8")) as { name: string; displayName: string; extensionKind: string[]; browser?: string; contributes: { commands: Array<{ command: string; title: string }>; configuration: { properties: Record<string, unknown> } } };
+  const manifest = JSON.parse(await readFile(resolve("apps/vscode/package.json"), "utf8")) as { name: string; displayName: string; publisher: string; icon: string; extensionKind: string[]; browser?: string; contributes: { commands: Array<{ command: string; title: string; icon: { light: string; dark: string } }>; configuration: { properties: Record<string, unknown> } } };
   expect(manifest.name).toBe("placekeeper-vscode");
   expect(manifest.displayName).toBe("Placekeeper");
+  expect(manifest.publisher).toBe("placekeeper-local");
+  expect(manifest.icon).toBe("assets/placekeeper.png");
   expect(manifest.extensionKind).toEqual(["ui"]);
   expect(manifest.browser).toBeUndefined();
   expect(manifest.contributes.commands).toHaveLength(1);
-  expect(manifest.contributes.commands[0]).toEqual({ command: "placekeeper.open", title: "Placekeeper: Open Local PDF" });
+  expect(manifest.contributes.commands[0]).toEqual({
+    command: "placekeeper.open",
+    title: "Placekeeper: Open Local PDF",
+    icon: {
+      light: "assets/placekeeper.svg",
+      dark: "assets/placekeeper.svg",
+    },
+  });
   expect(manifest.contributes.configuration.properties).toHaveProperty(["placekeeper.launcherPath"]);
 });
 
