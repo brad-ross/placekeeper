@@ -1,4 +1,5 @@
 import type { PdfSpaceRect } from './selection-anchor.js';
+import { isNavigationalPdfAnnotationSubtype } from '../../../../packages/core/src/pdf-annotation-classification.js';
 import {
   PdfAnnotationSubtype,
   PdfAnnotationSubtypeName,
@@ -45,17 +46,19 @@ export interface ExistingAnnotationDiscoveryToken {
 export function inventoryExistingAnnotations(
   annotations: readonly ExistingAnnotationSource[],
 ): readonly ExistingAnnotation[] {
-  return annotations.map((annotation) => ({
-    id: annotation.id,
-    subtype: annotation.subtype,
-    pageIndex: annotation.pageIndex,
-    rect: { ...annotation.rect },
-    contents: annotation.contents ?? '',
-    author: annotation.author ?? '',
-    flags: [...(annotation.flags ?? [])],
-    appearanceModes: [...(annotation.appearanceModes ?? [])],
-    supportedAppearance: annotation.supportedAppearance ?? false,
-  }));
+  return annotations
+    .filter(({ subtype }) => !isNavigationalPdfAnnotationSubtype(subtype))
+    .map((annotation) => ({
+      id: annotation.id,
+      subtype: annotation.subtype,
+      pageIndex: annotation.pageIndex,
+      rect: { ...annotation.rect },
+      contents: annotation.contents ?? '',
+      author: annotation.author ?? '',
+      flags: [...(annotation.flags ?? [])],
+      appearanceModes: [...(annotation.appearanceModes ?? [])],
+      supportedAppearance: annotation.supportedAppearance ?? false,
+    }));
 }
 
 export function existingAnnotationKey(
@@ -69,8 +72,13 @@ export function mergeExistingAnnotations(
   explicit: readonly ExistingAnnotation[],
 ): readonly ExistingAnnotation[] {
   const merged = new Map<string, ExistingAnnotation>();
-  for (const annotation of discovered) merged.set(existingAnnotationKey(annotation), annotation);
+  for (const annotation of discovered) {
+    if (!isNavigationalPdfAnnotationSubtype(annotation.subtype)) {
+      merged.set(existingAnnotationKey(annotation), annotation);
+    }
+  }
   for (const annotation of explicit) {
+    if (isNavigationalPdfAnnotationSubtype(annotation.subtype)) continue;
     const key = existingAnnotationKey(annotation);
     if (!merged.has(key)) merged.set(key, annotation);
   }
@@ -144,22 +152,24 @@ export async function inventoryDocumentAnnotations(
 ): Promise<readonly ExistingAnnotation[]> {
   const byPage = await engine.getAllAnnotations(document).toPromise();
   const sources = Object.entries(byPage).flatMap(([page, annotations]) =>
-    annotations.map((annotation) => ({
-      id: annotation.id,
-      subtype: PdfAnnotationSubtypeName[annotation.type] ?? `Unsupported ${annotation.type}`,
-      pageIndex: Number(page),
-      rect: {
-        x: annotation.rect.origin.x,
-        y: annotation.rect.origin.y,
-        width: annotation.rect.size.width,
-        height: annotation.rect.size.height,
-      },
-      ...(annotation.contents === undefined ? {} : { contents: annotation.contents }),
-      ...(annotation.author === undefined ? {} : { author: annotation.author }),
-      ...(annotation.flags === undefined ? {} : { flags: annotation.flags }),
-      appearanceModes: appearanceModeNames(annotation.appearanceModes),
-      supportedAppearance: annotation.type !== PdfAnnotationSubtype.UNKNOWN,
-    })),
+    annotations
+      .filter(({ type }) => type !== PdfAnnotationSubtype.LINK)
+      .map((annotation) => ({
+        id: annotation.id,
+        subtype: PdfAnnotationSubtypeName[annotation.type] ?? `Unsupported ${annotation.type}`,
+        pageIndex: Number(page),
+        rect: {
+          x: annotation.rect.origin.x,
+          y: annotation.rect.origin.y,
+          width: annotation.rect.size.width,
+          height: annotation.rect.size.height,
+        },
+        ...(annotation.contents === undefined ? {} : { contents: annotation.contents }),
+        ...(annotation.author === undefined ? {} : { author: annotation.author }),
+        ...(annotation.flags === undefined ? {} : { flags: annotation.flags }),
+        appearanceModes: appearanceModeNames(annotation.appearanceModes),
+        supportedAppearance: annotation.type !== PdfAnnotationSubtype.UNKNOWN,
+      })),
   );
   return inventoryExistingAnnotations(sources);
 }

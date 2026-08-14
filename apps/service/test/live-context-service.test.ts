@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ExistingPdfAnnotation } from "../../../packages/core/src/live-context.js";
 import type { ReviewItem } from "../../../packages/core/src/review-model.js";
-import { LiveContextService } from "../src/context/live-context-service.js";
+import { inspectLivePdf, LiveContextService } from "../src/context/live-context-service.js";
 import { SessionBroker, type SessionLaunch } from "../src/sessions/session-broker.js";
 
 const temporaryDirectories: string[] = [];
@@ -108,6 +108,14 @@ async function fixture(options: {
 }
 
 describe("atomic live-context service", () => {
+  it("excludes navigation links from existing PDF annotations", async () => {
+    const inspection = await inspectLivePdf({
+      sourceBytes: await readFile(resolve("test/fixtures/pdfs/hostile-actions.pdf")),
+    } as Parameters<typeof inspectLivePdf>[0]);
+
+    expect(inspection.existingAnnotations).toEqual([]);
+  });
+
   it("returns a full observation, unchanged state, then complete add/edit/remove deltas", async () => {
     const { broker, launch, service } = await fixture();
 

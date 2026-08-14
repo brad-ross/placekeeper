@@ -32,7 +32,7 @@ tags:
 
 The annotation workspace has three pieces of document-dependent presentation: an Outline mode, outline-derived subsection labels on annotation rows, and a References mode that may join the same selector. Treating those pieces as a fixed two- or three-column interface produces misleading empty states and fragile sizing. A PDF with a confirmed empty outline should not expose an inert Outline tab or fabricated subsection context, while an outline that is still loading—or whose discovery result belongs to an older document generation—must not be treated as absent.
 
-PR #11, merged on 2026-08-11, made the workspace derive its visible modes and annotation metadata from the current outline discovery state. It also aligned the two annotation populations under one visual hierarchy: user-owned Review Items remain “Annotations,” while PDF-sourced, non-editable marks are presented as “External Annotations (read only).” The latter is a presentation label for the existing **Existing PDF Annotation** domain concept, not a new entity.
+PR #11, merged on 2026-08-11, made the workspace derive its visible modes and annotation metadata from the current outline discovery state. It also aligned two reviewer-facing annotation populations under one visual hierarchy: user-owned Review Items remain “Annotations,” while reviewer-relevant, PDF-sourced, non-editable marks are presented as “External Annotations (read only).” Navigation-only annotations such as PDF Links remain part of the document but are filtered from this external-review population. The label is a presentation name for the existing **Existing PDF Annotation** domain concept, not a new entity.
 
 ## Guidance
 
@@ -62,7 +62,7 @@ Do not rely on implicit grid columns here. During implementation, a lone Annotat
 
 ### Present annotation populations with one hierarchy
 
-Owned and external annotations are peer sections in one tray, so their headings should share typography and spacing. The stylesheet applies one heading rule and one header-spacing rule to both sections (`apps/web/src/app/review-layout-annotations.css:808-815`, `apps/web/src/app/review-layout-annotations.css:1060-1063`). The owned section retains its count beside “Annotations” (`apps/web/src/review/AnnotationList.tsx:98-102`); the PDF-sourced section uses “External Annotations (read only)” as both its visible heading and section label (`apps/web/src/app/ReviewShell.tsx:1128-1131`). This communicates origin and capability without redundant overlines or a separate read-only pill.
+Owned and reviewer-relevant external annotations are peer sections in one tray, so their headings should share typography and spacing. The stylesheet applies one heading rule and one header-spacing rule to both sections (`apps/web/src/app/review-layout-annotations.css:808-815`, `apps/web/src/app/review-layout-annotations.css:1060-1063`). The owned section retains its count beside “Annotations” (`apps/web/src/review/AnnotationList.tsx:98-102`); the filtered PDF-sourced section uses “External Annotations (read only)” as both its visible heading and section label (`apps/web/src/app/ReviewShell.tsx:1128-1131`). This communicates origin and capability without redundant overlines or a separate read-only pill.
 
 When an outline tree exists, compact row metadata renders kind, page number, then subsection, separated by centered dots. The visible component omits the word “Page,” keeps the full wording in the accessible label, and conditionally adds a bounded, ellipsized subsection (`apps/web/src/review/AnnotationMetadata.tsx:7-29`, `apps/web/src/app/review-layout-annotations.css:944-988`). Omitting `sectionLabel` naturally removes both the second separator and the subsection.
 
@@ -80,7 +80,7 @@ The interface follows the document instead of exposing unavailable product struc
 
 Explicit mode-count sizing also makes responsive composition robust. A lone Annotations mode fills the selector; when References moves into the tray, both modes share it; when an outline exists, the selector can expand to three equal segments. No mode has a hard-coded fraction.
 
-Finally, consistent section hierarchy makes owned and external annotations feel related without blurring their distinct capabilities. The Main Reading Thread, Reference Tabs, Review Items, and Existing PDF Annotations keep their established domain meanings; this pattern changes only how the current document’s capabilities are projected into the tray.
+Finally, consistent section hierarchy makes owned and external annotations feel related without blurring their distinct capabilities. The Main Reading Thread, Reference Tabs, Review Items, and Existing PDF Annotations keep their established domain meanings; Navigational PDF Annotations remain navigation rather than becoming read-only review records. This pattern changes only how the current document’s reviewer-facing capabilities are projected into the tray.
 
 ## When to Apply
 
@@ -98,7 +98,7 @@ For a current `loaded-empty` result, render Annotations as the only tools mode, 
 
 ### Outline available
 
-For a current `loaded-tree`, retain Outline and allow both owned and external annotations to show their containing subsection. External rows remain read-only; adding outline context does not change their ownership or interaction semantics.
+For a current `loaded-tree`, retain Outline and allow both owned and reviewer-relevant external annotations to show their containing subsection. External rows remain read-only; adding outline context does not change their ownership or interaction semantics. Navigation-only PDF annotations do not enter this row population.
 
 ### Outline not yet known
 

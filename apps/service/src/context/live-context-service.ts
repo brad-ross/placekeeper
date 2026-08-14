@@ -12,6 +12,7 @@ import {
 } from "../../../../packages/core/src/live-context.js";
 import type { SourceHint } from "../../../../packages/core/src/structured-review-item.js";
 import type { JsonValue, ReviewItem } from "../../../../packages/core/src/review-model.js";
+import { isNavigationalPdfAnnotationSubtype } from "../../../../packages/core/src/pdf-annotation-classification.js";
 import { inspectPdfAnnotationCatalogWithEmbedPdf } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import {
   SessionBroker,
@@ -143,8 +144,10 @@ export async function inspectLivePdf(
 ): Promise<LivePdfInspection> {
   const inspected = await inspectPdfAnnotationCatalogWithEmbedPdf(snapshot.sourceBytes);
   const ownedIds = new Set(inspected.portableItems.map(({ id }) => id));
-  const existingAnnotations = inspected.annotations
-    .filter(({ id }) => !ownedIds.has(id))
+  const reviewerAnnotations = inspected.annotations.filter(
+    ({ id, subtype }) => !ownedIds.has(id) && !isNavigationalPdfAnnotationSubtype(subtype),
+  );
+  const existingAnnotations = reviewerAnnotations
     .map((annotation): ExistingPdfAnnotation => {
       const segmentRects = annotation.segmentRects?.map(toRect);
       const metadata = metadataValue({
@@ -171,7 +174,7 @@ export async function inspectLivePdf(
   return {
     pageCount: inspected.pageCount,
     existingAnnotations,
-    warnings: inspected.annotations.some(({ hasNormalAppearance }) => !hasNormalAppearance)
+    warnings: reviewerAnnotations.some(({ hasNormalAppearance }) => !hasNormalAppearance)
       ? ["Some Existing PDF Annotations do not define a normal appearance stream."]
       : [],
     sourceHints: new Map(),
