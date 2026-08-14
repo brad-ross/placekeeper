@@ -16,7 +16,31 @@ function source(id: string, contents = id) {
   };
 }
 
+function link(id: string) {
+  return { ...source(id), subtype: 'Link' };
+}
+
 describe('existing annotation discovery state', () => {
+  it('excludes navigation links from the external annotation inventory', () => {
+    const discovered = inventoryExistingAnnotations([source('highlight'), link('discovered-link')]);
+    const explicitLink = {
+      ...inventoryExistingAnnotations([source('explicit-shape')])[0]!,
+      id: 'explicit-link',
+      subtype: 'link',
+    };
+    const mergedDiscoveredLink = {
+      ...explicitLink,
+      id: 'merged-discovered-link',
+      subtype: 'LINK',
+    };
+
+    expect(discovered.map(({ id }) => id)).toEqual(['highlight']);
+    expect(
+      mergeExistingAnnotations([...discovered, mergedDiscoveredLink], [explicitLink])
+        .map(({ id }) => id),
+    ).toEqual(['highlight']);
+  });
+
   it('deduplicates discovered and explicit inventory without changing the DTO', () => {
     const explicit = inventoryExistingAnnotations([source('same', 'explicit'), source('explicit')]);
     const discovered = inventoryExistingAnnotations([source('same', 'discovered'), source('discovered')]);
