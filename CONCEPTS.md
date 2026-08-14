@@ -127,7 +127,7 @@ The framing policy for an author-encoded Reference destination that scales its p
 Reference Fit Width is used for a destination's initial opening and to reconstruct a Reference Tab when its saved settled view cannot survive a layout change. Author-provided vertical positioning is preserved only when it carries meaningful destination intent.
 
 ### Meaningful Jump
-An explicit destination change in the Main Reading Thread that enters PDF Back and Forward history, such as embedded-outline navigation or promotion from a Reference Tab.
+An explicit destination change in the Main Reading Thread that enters PDF Back and Forward history, such as activating an Annotation Tray row, embedded-outline navigation, or promotion from a Reference Tab.
 
 Ordinary scrolling, sequential page turns, and zoom changes are not Meaningful Jumps.
 
