@@ -61,6 +61,7 @@ interface PendingMainJump {
   readonly token: number;
   readonly currentLocation: PdfViewerLocation;
   readonly destination: PdfViewerLocation;
+  readonly force: boolean;
 }
 
 interface PendingHistoryTraversal {
@@ -436,6 +437,7 @@ export function reduceReferenceNavigation(
           token: action.token,
           currentLocation: action.currentLocation,
           destination: action.destination,
+          force: action.force === true,
         },
       };
     case 'complete-main-jump': {
@@ -446,14 +448,18 @@ export function reduceReferenceNavigation(
         || !completionIsCurrent(state, action)
       ) return state;
       if (!action.success) return { ...state, pendingMainNavigation: null };
+      const settledLocation = action.settledLocation ?? pending.destination;
       return {
         ...state,
         pendingMainNavigation: null,
-        mainHistory: appendHistoryDestination(
-          state.mainHistory,
-          pending.currentLocation,
-          action.settledLocation ?? pending.destination,
-        ),
+        mainHistory: !pending.force
+          && samePdfViewerLocation(pending.currentLocation, settledLocation)
+          ? state.mainHistory
+          : appendHistoryDestination(
+            state.mainHistory,
+            pending.currentLocation,
+            settledLocation,
+          ),
       };
     }
     case 'request-history-back':
