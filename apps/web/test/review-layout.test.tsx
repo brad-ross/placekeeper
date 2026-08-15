@@ -320,7 +320,9 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('aria-label="Workspace (0 annotations)"');
     expect(html).toContain('data-workspace-edge-rail="right"');
     expect(html).toContain('data-workspace-edge-rail="bottom"');
-    expect(html).toContain('class="review-workspace__title">References</strong>');
+    expect(html).toContain('class="review-workspace__activity-strip"');
+    expect(html).toContain('data-workspace-mode-count="1"');
+    expect(html).toContain('data-workspace-mode-label="references"');
     expect(html).toContain('aria-label="Move References to right"');
     expect(html).toMatch(/id="workspace-panel-references"[^>]*role="tabpanel"/u);
     expect(html).toMatch(/id="workspace-panel-annotations"[^>]*hidden=""[^>]*inert=""/u);
@@ -397,7 +399,7 @@ describe('review shell layout and accessibility contract', () => {
     );
   });
 
-  it('shares simple annotation section headers and lets each mode fill the tab bar', () => {
+  it('shares simple annotation section headers and keeps the activity strip intrinsic', () => {
     expect(annotationStyles).toMatch(
       /\.annotation-drawer__header h2,\s*\.existing-annotations__header h2\s*\{[^}]*font-size:\s*15px;[^}]*font-weight:\s*760;/u,
     );
@@ -409,6 +411,18 @@ describe('review shell layout and accessibility contract', () => {
     expect(annotationStyles).not.toContain('grid-auto-columns');
     expect(annotationStyles).not.toContain('grid-auto-flow');
     expect(annotationStyles).not.toContain('.review-tools-workspace .review-workspace__tabs');
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__activity-strip\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__mode-tab\s*\{[^}]*width:\s*var\(--review-control-compact\);[^}]*flex:\s*0 0 var\(--review-control-compact\);/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__mode-label\s*\{[^}]*min-width:\s*0;[^}]*text-overflow:\s*ellipsis;/u,
+    );
+    expect(annotationStyles).toContain('margin-top: var(--review-workspace-header-height)');
+    expect(annotationStyles).not.toContain('margin-top: 53px');
+    expect(annotationStyles).not.toContain('review-workspace__tab-segment--compound');
     expect(annotationStyles).not.toContain('.existing-annotations__readonly');
   });
 

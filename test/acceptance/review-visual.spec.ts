@@ -180,6 +180,7 @@ test('narrow unified References tray', async ({ page }) => {
   await page.getByRole('tab', { name: 'References', exact: true }).click();
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'narrow-unified');
   await expect(page.getByRole('tab', { name: 'References', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('button', { name: /^Move References to /u })).toHaveCount(0);
   await expectCompoundReferenceTabs(page, 'horizontal');
   await expectScene(product, 'narrow-unified-references.png');
 });

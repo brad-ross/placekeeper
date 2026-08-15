@@ -15,14 +15,9 @@ import {
   type WorkspaceMode,
 } from './reference-navigation-state.js';
 import type { RightWorkspaceMode } from './reference-workspace-layout.js';
+import { WorkspaceModeStrip } from './WorkspaceModeStrip.js';
 
 const OUTLINE_ABSENT_TOOL_MODES: readonly RightWorkspaceMode[] = ['search', 'annotations'];
-const TOOL_LABELS: Readonly<Record<RightWorkspaceMode, string>> = {
-  outline: 'Outline',
-  search: 'Search',
-  annotations: 'Annotations',
-};
-
 export interface OutlineAnnotationsWorkspaceProps {
   readonly workspaceRef?: Ref<HTMLElement>;
   readonly open: boolean;
@@ -70,6 +65,9 @@ export function OutlineAnnotationsWorkspace({
   const effectiveMode: WorkspaceMode = mode === 'outline' && !outlineAvailable
     ? 'annotations'
     : mode;
+  const effectiveToolMode: RightWorkspaceMode = effectiveMode === 'references'
+    ? 'annotations'
+    : effectiveMode;
   const tabRefs = useRef(new Map<RightWorkspaceMode, HTMLButtonElement>());
   const panelRefs = useRef(new Map<RightWorkspaceMode, HTMLElement>());
   const focusMemory = useRef(new Map<RightWorkspaceMode, HTMLElement>());
@@ -124,34 +122,16 @@ export function OutlineAnnotationsWorkspace({
     >
       {headerVariant === 'tools' ? (
         <header className="review-workspace__header">
-          <div
-            className="review-workspace__tabs"
-            role="tablist"
-            aria-label="Workspace modes"
-            data-workspace-mode-count={toolModes.length}
-          >
-            {toolModes.map((toolMode) => (
-              <button
-                key={toolMode}
-                ref={(element) => {
-                  if (element) tabRefs.current.set(toolMode, element);
-                  else tabRefs.current.delete(toolMode);
-                }}
-                id={`workspace-mode-${toolMode}`}
-                type="button"
-                role="tab"
-                data-workspace-mode={toolMode}
-                aria-selected={effectiveMode === toolMode}
-                aria-controls={`workspace-panel-${toolMode}`}
-                title={`Show ${TOOL_LABELS[toolMode]}`}
-                tabIndex={effectiveMode === toolMode ? 0 : -1}
-                onKeyDown={moveModeFocus}
-                onClick={() => onModeChange(toolMode)}
-              >
-                {TOOL_LABELS[toolMode]}
-              </button>
-            ))}
-          </div>
+          <WorkspaceModeStrip
+            modes={toolModes}
+            selectedMode={effectiveToolMode}
+            onModeChange={onModeChange}
+            onModeKeyDown={moveModeFocus}
+            onModeRef={(toolMode, element) => {
+              if (element) tabRefs.current.set(toolMode, element);
+              else tabRefs.current.delete(toolMode);
+            }}
+          />
         </header>
       ) : null}
 

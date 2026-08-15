@@ -554,7 +554,9 @@ test("searches extracted PDF text with variants, history, references, and retain
   expect(rebounds("top")).toBe(false);
 
   const workspaceTabs = page.getByRole("tablist", { name: "Workspace modes" }).getByRole("tab");
-  await expect(workspaceTabs).toHaveText(["Search", "Annotations"]);
+  await expect(workspaceTabs).toHaveCount(2);
+  expect(await workspaceTabs.evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("aria-label"))))
+    .toEqual(["Search", "Annotations"]);
   await page.getByRole("tab", { name: "Search", exact: true }).click();
   await expect(query).toHaveValue("stable");
 
@@ -563,8 +565,10 @@ test("searches extracted PDF text with variants, history, references, and retain
     "data-workspace-presentation",
     "bottom",
   );
-  await expect(page.getByRole("tablist", { name: "Workspace modes" }).getByRole("tab"))
-    .toHaveText(["Search", "Annotations", "References"]);
+  const narrowWorkspaceTabs = page.getByRole("tablist", { name: "Workspace modes" }).getByRole("tab");
+  await expect(narrowWorkspaceTabs).toHaveCount(3);
+  expect(await narrowWorkspaceTabs.evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("aria-label"))))
+    .toEqual(["Search", "Annotations", "References"]);
   await page.getByRole("tab", { name: "Search", exact: true }).click();
   await expect(query).toBeVisible();
   await expect(query).toHaveValue("stable");
@@ -577,7 +581,10 @@ test("searches extracted PDF text with variants, history, references, and retain
   expect(errors).toEqual([]);
 });
 
-test("keeps a real reference chain beside the anchored main PDF through reflow and history", async ({ page }) => {
+test("keeps a real reference chain beside the anchored main PDF through reflow and history", async ({
+  page,
+  browserName,
+}) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const documentRequests: Array<{ url: string; authorization?: string; cookie?: string }> = [];
   page.on("request", (request) => {
@@ -857,12 +864,10 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     "aria-expanded", "true",
   );
   const workspaceModes = page.getByRole("tablist", { name: "Workspace modes" });
-  await expect(workspaceModes.getByRole("tab")).toHaveText([
-    "Outline",
-    "Search",
-    "Annotations",
-    "References",
-  ]);
+  const modeTabs = workspaceModes.getByRole("tab");
+  await expect(modeTabs).toHaveCount(4);
+  expect(await modeTabs.evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("aria-label"))))
+    .toEqual(["Outline", "Search", "Annotations", "References"]);
   await expect(workspaceModes.getByRole("tab", { name: "References", exact: true })).toHaveAttribute(
     "aria-selected",
     "true",
@@ -876,82 +881,73 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   expect(rightDetailTabBox.x).toBeGreaterThan(rightPrimaryTabBox.x + rightPrimaryTabBox.width - 1);
   expect(rightDetailTabBox.y).toBeCloseTo(rightPrimaryTabBox.y, 0);
   await expect(page.getByRole("button", { name: "Move References to bottom" })).toBeVisible();
-  const expectRightWorkspaceSelectorGeometry = async () => {
-    const geometry = await workspaceModes.evaluate((tablist) => {
-      const header = tablist.closest(".review-workspace__header");
-      const referencesSegment = tablist.querySelector<HTMLElement>(
-        "[data-workspace-tab-segment='references']",
-      );
-      const referencesTab = referencesSegment?.querySelector<HTMLElement>("[role='tab']");
-      const referencesLabel = referencesSegment?.querySelector<HTMLElement>(
-        ".review-workspace__tab-label",
-      );
-      const regularTab = tablist.querySelector<HTMLElement>(
-        "[data-workspace-tab-segment='outline'] > [role='tab']",
-      );
-      const moveButton = referencesSegment?.querySelector<HTMLElement>(
-        "[data-reference-move='bottom']",
-      );
-      const segments = [...tablist.querySelectorAll<HTMLElement>(
-        "[data-workspace-tab-segment]",
-      )];
-      if (
-        !header
-        || !referencesSegment
-        || !referencesTab
-        || !referencesLabel
-        || !regularTab
-        || !moveButton
-        || segments.length === 0
-      ) {
-        throw new Error("Right workspace selector geometry is incomplete.");
-      }
-      const headerRect = header.getBoundingClientRect();
-      const tablistRect = tablist.getBoundingClientRect();
-      const segmentRect = referencesSegment.getBoundingClientRect();
-      const firstSegmentRect = segments[0]!.getBoundingClientRect();
-      const lastSegmentRect = segments.at(-1)!.getBoundingClientRect();
-      const labelRect = referencesLabel.getBoundingClientRect();
-      const moveRect = moveButton.getBoundingClientRect();
-      const regularTabStyle = getComputedStyle(regularTab);
-      const referencesLabelStyle = getComputedStyle(referencesLabel);
-      return {
-        leftInset: tablistRect.left - headerRect.left,
-        rightInset: headerRect.right - tablistRect.right,
-        contentLeftInset: firstSegmentRect.left - tablistRect.left,
-        contentRightInset: tablistRect.right - lastSegmentRect.right,
-        segmentWidths: segments.map((segment) => segment.getBoundingClientRect().width),
-        segmentCenter: segmentRect.left + segmentRect.width / 2,
-        clusterCenter: (labelRect.left + moveRect.right) / 2,
-        gap: moveRect.left - labelRect.right,
-        labelFits: referencesLabel.scrollWidth <= referencesLabel.clientWidth,
-        regularPaddingLeft: regularTabStyle.paddingLeft,
-        regularPaddingRight: regularTabStyle.paddingRight,
-        referencesPaddingLeft: referencesLabelStyle.paddingLeft,
-        referencesPaddingRight: referencesLabelStyle.paddingRight,
-      };
-    });
-    expect(geometry.rightInset).toBeCloseTo(geometry.leftInset, 0);
-    expect(geometry.contentRightInset).toBeCloseTo(geometry.contentLeftInset, 0);
-    expect(new Set(geometry.segmentWidths.map((width) => Math.round(width))).size)
-      .toBeGreaterThan(1);
-    expect(geometry.segmentWidths.at(-1)).toBeGreaterThan(geometry.segmentWidths[0]!);
-    expect(geometry.clusterCenter).toBeCloseTo(geometry.segmentCenter, 0);
-    expect(geometry.gap).toBeGreaterThanOrEqual(0);
-    expect(geometry.gap).toBeLessThanOrEqual(4);
-    expect(geometry.labelFits).toBe(true);
-    expect(geometry.regularPaddingLeft).toBe(geometry.regularPaddingRight);
-    expect(geometry.referencesPaddingLeft).toBe(geometry.referencesPaddingRight);
-    expect(geometry.referencesPaddingLeft).toBe(geometry.regularPaddingLeft);
-  };
-  await expectRightWorkspaceSelectorGeometry();
+  const rightStripGeometry = await workspaceModes.evaluate((tablist) => {
+    const header = tablist.closest<HTMLElement>(".review-workspace__header");
+    const strip = tablist.closest<HTMLElement>(".review-workspace__activity-strip");
+    const tabs = [...tablist.querySelectorAll<HTMLElement>("[role='tab']")];
+    const selectedTab = tablist.querySelector<HTMLElement>("[role='tab'][aria-selected='true']");
+    const selectedLabel = selectedTab?.querySelector<HTMLElement>("[data-workspace-mode-label]");
+    const moveButton = strip?.querySelector<HTMLElement>("[data-reference-move='bottom']");
+    if (!header || !strip || !selectedTab || !selectedLabel || !moveButton || tabs.length !== 4) {
+      throw new Error("Right workspace activity-strip geometry is incomplete.");
+    }
+    const headerRect = header.getBoundingClientRect();
+    const stripRect = strip.getBoundingClientRect();
+    const inactiveWidths = tabs
+      .filter((tab) => tab.getAttribute("aria-selected") !== "true")
+      .map((tab) => tab.getBoundingClientRect().width);
+    return {
+      leftInset: stripRect.left - headerRect.left,
+      rightSlack: headerRect.right - stripRect.right,
+      stripWidth: stripRect.width,
+      headerWidth: headerRect.width,
+      inactiveWidths,
+      selectedWidth: selectedTab.getBoundingClientRect().width,
+      moveWidth: moveButton.getBoundingClientRect().width,
+      labelFits: selectedLabel.scrollWidth <= selectedLabel.clientWidth,
+      visibleLabelCount: strip.querySelectorAll("[data-workspace-mode-label]").length,
+      moveInsideTablist: tablist.contains(moveButton),
+    };
+  });
+  expect(rightStripGeometry.leftInset).toBeCloseTo(6, 0);
+  expect(rightStripGeometry.rightSlack).toBeGreaterThan(0);
+  expect(rightStripGeometry.stripWidth).toBeLessThan(rightStripGeometry.headerWidth);
+  expect(new Set(rightStripGeometry.inactiveWidths.map((width) => Math.round(width))).size).toBe(1);
+  expect(rightStripGeometry.selectedWidth).toBeGreaterThan(rightStripGeometry.inactiveWidths[0]!);
+  expect(rightStripGeometry.moveWidth).toBeCloseTo(rightStripGeometry.inactiveWidths[0]!, 0);
+  expect(rightStripGeometry.labelFits).toBe(true);
+  expect(rightStripGeometry.visibleLabelCount).toBe(1);
+  expect(rightStripGeometry.moveInsideTablist).toBe(false);
   const referencesMode = workspaceModes.getByRole("tab", { name: "References", exact: true });
   await workspaceModes.getByRole("tab", { name: "Outline", exact: true }).click();
-  const referencesSegment = workspaceModes.locator("[data-workspace-tab-segment='references']");
-  const referencesSegmentBox = await referencesSegment.boundingBox();
-  if (!referencesSegmentBox) throw new Error("References selector segment has no bounds.");
-  await referencesSegment.click({ position: { x: 3, y: referencesSegmentBox.height / 2 } });
+  await expect(page.getByRole("button", { name: "Move References to bottom" })).toHaveCount(0);
+  await referencesMode.click();
   await expect(referencesMode).toHaveAttribute("aria-selected", "true");
+  const moveReferencesBottom = page.getByRole("button", { name: "Move References to bottom" });
+  await expect(moveReferencesBottom).toBeVisible();
+  await referencesMode.press("ArrowLeft");
+  const annotationsMode = workspaceModes.getByRole("tab", { name: "Annotations", exact: true });
+  await expect(annotationsMode).toBeFocused();
+  await expect(referencesMode).toHaveAttribute("aria-selected", "true");
+  await annotationsMode.press("Enter");
+  await expect(annotationsMode).toHaveAttribute("aria-selected", "true");
+  await expect(moveReferencesBottom).toHaveCount(0);
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  await annotationsMode.press("ArrowRight");
+  await expect(referencesMode).toBeFocused();
+  await referencesMode.press("Space");
+  await expect(referencesMode).toHaveAttribute("aria-selected", "true");
+  await expect(moveReferencesBottom).toBeVisible();
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  await referencesMode.focus();
+  await expect(referencesMode).toBeFocused();
+  const workspaceForwardTab = browserName === "webkit" ? "Alt+Tab" : "Tab";
+  await page.keyboard.press(workspaceForwardTab);
+  await expect(moveReferencesBottom).toBeFocused();
   await expect(mainWorkspace).toHaveAttribute("data-reference-main-mount", "stable");
   await expect(referenceWorkspace).toHaveAttribute("data-reference-mount", "stable");
 
@@ -980,31 +976,40 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await rightSplitter.press("Home");
   const minimumRightValue = Number(await rightSplitter.getAttribute("aria-valuenow"));
   const minimumSelectorGeometry = await workspaceModes.evaluate((tablist) => {
-    const segments = [...tablist.querySelectorAll<HTMLElement>(
-      "[data-workspace-tab-segment]",
-    )];
-    const moveButton = tablist.querySelector<HTMLElement>("[data-reference-move='bottom']");
-    if (segments.length === 0 || !moveButton) {
-      throw new Error("Minimum-width workspace selector geometry is incomplete.");
+    const strip = tablist.closest<HTMLElement>(".review-workspace__activity-strip");
+    const header = tablist.closest<HTMLElement>(".review-workspace__header");
+    const tabs = [...tablist.querySelectorAll<HTMLElement>("[role='tab']")];
+    const selectedLabel = tablist.querySelector<HTMLElement>("[data-workspace-mode-label]");
+    const moveButton = strip?.querySelector<HTMLElement>("[data-reference-move='bottom']");
+    if (!strip || !header || tabs.length === 0 || !selectedLabel || !moveButton) {
+      throw new Error("Minimum-width workspace activity-strip geometry is incomplete.");
     }
-    const tablistRect = tablist.getBoundingClientRect();
-    const firstRect = segments[0]!.getBoundingClientRect();
-    const lastRect = segments.at(-1)!.getBoundingClientRect();
+    const stripRect = strip.getBoundingClientRect();
+    const headerRect = header.getBoundingClientRect();
+    const firstRect = tabs[0]!.getBoundingClientRect();
+    const lastRect = tabs.at(-1)!.getBoundingClientRect();
     const moveRect = moveButton.getBoundingClientRect();
     return {
       firstLeft: firstRect.left,
       lastRight: lastRect.right,
       moveRight: moveRect.right,
-      tablistLeft: tablistRect.left,
-      tablistRight: tablistRect.right,
+      stripLeft: stripRect.left,
+      stripRight: stripRect.right,
+      headerRight: headerRect.right,
+      labelOverflow: getComputedStyle(selectedLabel).textOverflow,
+      labelWhiteSpace: getComputedStyle(selectedLabel).whiteSpace,
     };
   });
   expect(minimumSelectorGeometry.firstLeft)
-    .toBeGreaterThanOrEqual(minimumSelectorGeometry.tablistLeft - 1);
+    .toBeGreaterThanOrEqual(minimumSelectorGeometry.stripLeft - 1);
   expect(minimumSelectorGeometry.lastRight)
-    .toBeLessThanOrEqual(minimumSelectorGeometry.tablistRight + 1);
+    .toBeLessThanOrEqual(minimumSelectorGeometry.stripRight + 1);
   expect(minimumSelectorGeometry.moveRight)
-    .toBeLessThanOrEqual(minimumSelectorGeometry.tablistRight + 1);
+    .toBeLessThanOrEqual(minimumSelectorGeometry.stripRight + 1);
+  expect(minimumSelectorGeometry.moveRight)
+    .toBeLessThanOrEqual(minimumSelectorGeometry.headerRight + 1);
+  expect(minimumSelectorGeometry.labelOverflow).toBe("ellipsis");
+  expect(minimumSelectorGeometry.labelWhiteSpace).toBe("nowrap");
   await rightSplitter.press("ArrowLeft");
   await expect.poll(async () => Number(await rightSplitter.getAttribute("aria-valuenow")))
     .toBeGreaterThan(minimumRightValue);
@@ -1034,7 +1039,6 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(primaryTab).toHaveAccessibleName(/Primary result, Page 2/u);
   expect(rightCompoundGeometry.actionWidths[0]).toBeCloseTo(31, 0);
   expect(rightCompoundGeometry.actionWidths[1]).toBeCloseTo(31, 0);
-  await expectRightWorkspaceSelectorGeometry();
 
   await page.getByRole("tab", { name: "Annotations", exact: true }).click();
   await expect.poll(async () => (await workspace.boundingBox())?.width ?? 0)
@@ -1052,6 +1056,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     "aria-selected",
     "true",
   );
+  await expect(page.getByRole("button", { name: "Move References to bottom" })).toHaveCount(0);
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(page.locator("[data-review-stage]")).toHaveAttribute(
     "data-reference-layout",
@@ -1061,6 +1066,11 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     "aria-selected",
     "true",
   );
+  await expect(page.getByRole("button", { name: "Move References to bottom" })).toBeVisible();
+  await page.getByRole("button", { name: "Move References to bottom" }).focus();
+  await page.setViewportSize({ width: 760, height: 900 });
+  await expect(page.getByRole("tab", { name: "References", exact: true })).toBeFocused();
+  await page.setViewportSize({ width: 1280, height: 900 });
   await expect.poll(async () => (await workspace.boundingBox())?.width ?? 0)
     .toBeCloseTo(rememberedRightValue, 0);
 
@@ -1068,7 +1078,17 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "bottom");
   await expect.poll(async () => Number(await bottomSplitter.getAttribute("aria-valuenow")))
     .toBe(rememberedBottomValue);
-  await expect(page.getByRole("tab", { name: "References", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "References", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.getByRole("tablist", { name: "Workspace modes" }))
+    .toHaveAttribute("data-workspace-mode-count", "1");
+  await expect(page.getByRole("button", { name: "Move References to right" })).toBeVisible();
+  const bottomReferencesMode = page.getByRole("tab", { name: "References", exact: true });
+  await bottomReferencesMode.focus();
+  await bottomReferencesMode.press(workspaceForwardTab);
+  await expect(page.getByRole("button", { name: "Move References to right" })).toBeFocused();
   await page.getByRole("button", { name: "Open right workspace" }).click();
   await primaryTab.click();
 
@@ -1510,6 +1530,37 @@ test("keeps compound reference actions touch sized for coarse pointers", async (
       { width: 44, height: 44 },
       { width: 44, height: 44 },
     ]);
+    const activityStrips = page.locator(
+      '.review-workspace__header:visible > .review-workspace__activity-strip',
+    );
+    await expect(activityStrips).toHaveCount(2);
+    const stripGeometry = await activityStrips.evaluateAll((strips) => strips.map((strip) => {
+      const header = strip.closest<HTMLElement>('.review-workspace__header');
+      if (!header) throw new Error('Activity strip has no workspace header.');
+      const stripBounds = strip.getBoundingClientRect();
+      const headerBounds = header.getBoundingClientRect();
+      const tabs = [...strip.querySelectorAll<HTMLElement>('[role="tab"]')];
+      return {
+        topContained: stripBounds.top >= headerBounds.top,
+        bottomContained: stripBounds.bottom <= headerBounds.bottom,
+        tabs: tabs.map((tab) => {
+          const bounds = tab.getBoundingClientRect();
+          return {
+            height: bounds.height,
+            width: bounds.width,
+            selected: tab.getAttribute('aria-selected') === 'true',
+          };
+        }),
+      };
+    }));
+    expect(stripGeometry.every(({ topContained, bottomContained }) => (
+      topContained && bottomContained
+    ))).toBe(true);
+    expect(stripGeometry.flatMap(({ tabs }) => tabs)
+      .every(({ height, width }) => height === 44 && width >= 44)).toBe(true);
+    expect(stripGeometry.flatMap(({ tabs }) => tabs)
+      .filter(({ selected }) => !selected)
+      .every(({ width }) => width === 44)).toBe(true);
   } finally {
     await context.close();
   }
@@ -1870,38 +1921,39 @@ test("collapses an outline-free PDF to Annotations and restores workspace focus"
   const expectedModes = (page.viewportSize()?.width ?? 1280) < 900
     ? ['Search', 'Annotations', 'References']
     : ['Search', 'Annotations'];
-  await expect(visibleModes).toHaveText(expectedModes);
+  await expect(visibleModes).toHaveCount(expectedModes.length);
+  expect(await visibleModes.evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('aria-label'))))
+    .toEqual(expectedModes);
   const intrinsicGeometry = await modes.evaluate((tablist) => {
-    const segments = [...tablist.querySelectorAll<HTMLElement>(
-      ':scope > [data-workspace-tab-segment], :scope > [role="tab"]',
-    )];
-    if (segments.length === 0) throw new Error('Workspace selector has no visible segments.');
-    const tablistBounds = tablist.getBoundingClientRect();
-    const firstBounds = segments[0]!.getBoundingClientRect();
-    const lastBounds = segments.at(-1)!.getBoundingClientRect();
+    const strip = tablist.closest<HTMLElement>('.review-workspace__activity-strip');
+    const header = tablist.closest<HTMLElement>('.review-workspace__header');
+    const tabs = [...tablist.querySelectorAll<HTMLElement>(':scope > [role="tab"]')];
+    const label = tablist.querySelector<HTMLElement>('[data-workspace-mode-label]');
+    if (!strip || !header || tabs.length === 0 || !label) {
+      throw new Error('Workspace activity strip has no visible modes.');
+    }
+    const stripBounds = strip.getBoundingClientRect();
+    const headerBounds = header.getBoundingClientRect();
+    const firstBounds = tabs[0]!.getBoundingClientRect();
+    const lastBounds = tabs.at(-1)!.getBoundingClientRect();
     return {
-      leftInset: firstBounds.left - tablistBounds.left,
-      rightInset: tablistBounds.right - lastBounds.right,
-      widths: segments.map((segment) => segment.getBoundingClientRect().width),
-      horizontalPaddings: segments.map((segment) => {
-        const label = segment.querySelector<HTMLElement>('.review-workspace__tab-label');
-        const tab = segment.matches('[role="tab"]')
-          ? segment
-          : segment.querySelector<HTMLElement>('[role="tab"]');
-        const style = getComputedStyle(label ?? tab!);
-        return [style.paddingLeft, style.paddingRight];
-      }),
-      referenceLabelFits: (() => {
-        const label = tablist.querySelector<HTMLElement>('.review-workspace__tab-label');
-        return label === null || label.scrollWidth <= label.clientWidth;
-      })(),
+      firstInset: firstBounds.left - stripBounds.left,
+      lastInset: stripBounds.right - lastBounds.right,
+      leftAlignment: stripBounds.left - headerBounds.left,
+      rightSlack: headerBounds.right - stripBounds.right,
+      widths: tabs.map((tab) => tab.getBoundingClientRect().width),
+      labelFits: label.scrollWidth <= label.clientWidth,
+      visibleLabelCount: strip.querySelectorAll('[data-workspace-mode-label]').length,
     };
   });
-  expect(intrinsicGeometry.rightInset).toBeCloseTo(intrinsicGeometry.leftInset, 0);
+  expect(intrinsicGeometry.firstInset).toBeGreaterThanOrEqual(0);
+  expect(intrinsicGeometry.lastInset).toBeGreaterThanOrEqual(0);
+  expect(intrinsicGeometry.leftAlignment).toBeCloseTo(6, 0);
+  expect(intrinsicGeometry.rightSlack).toBeGreaterThan(0);
   expect(new Set(intrinsicGeometry.widths.map((width) => Math.round(width))).size)
     .toBeGreaterThan(1);
-  expect(intrinsicGeometry.horizontalPaddings.every(([left, right]) => left === right)).toBe(true);
-  expect(intrinsicGeometry.referenceLabelFits).toBe(true);
+  expect(intrinsicGeometry.labelFits).toBe(true);
+  expect(intrinsicGeometry.visibleLabelCount).toBe(1);
   await expect(workspace.getByRole('heading', { name: /^Annotations \d+$/u })).toBeVisible();
   await expect(workspace.getByRole('heading', {
     name: 'External Annotations (read only)',

@@ -1,6 +1,7 @@
 import {
   useLayoutEffect,
   useRef,
+  type FocusEvent,
   type KeyboardEvent,
   type Ref,
 } from 'react';
@@ -13,15 +14,17 @@ import {
 } from './reference-navigation-state.js';
 import { compositeFocusIndex, horizontalTabFocusIndex } from './LinkActionPopover.js';
 import { ReviewIcon } from './ReviewIcon.js';
+import { WorkspaceModeStrip, type WorkspaceDockAction } from './WorkspaceModeStrip.js';
 
 export { WORKSPACE_MODES } from './reference-navigation-state.js';
-const MODE_LABELS: Readonly<Record<WorkspaceMode, string>> = {
-  outline: 'Outline',
-  search: 'Search',
-  references: 'References',
-  annotations: 'Annotations',
-};
 type ReferenceTabOrientation = 'horizontal' | 'vertical';
+
+function focusMovedToConnectedTarget(event: FocusEvent<HTMLElement>): boolean {
+  const nextTarget = event.relatedTarget;
+  return nextTarget instanceof HTMLElement
+    && nextTarget !== event.currentTarget.ownerDocument.body
+    && nextTarget.isConnected;
+}
 
 export interface ReferenceWorkspaceTab {
   readonly identity: string;
@@ -131,6 +134,7 @@ export function ReferenceWorkspace({
     mode: WorkspaceMode;
     element: HTMLButtonElement;
   } | null>(null);
+  const dockActionFocused = useRef(false);
   const previous = useRef<{
     open: boolean;
     mode: WorkspaceMode;
@@ -145,6 +149,28 @@ export function ReferenceWorkspace({
   const reserveReferenceTabRail = referenceTabOrientation === 'vertical'
     && pendingReference?.status === 'loading';
   const modeListKey = modes.join(':');
+  const onDockActionFocus = () => { dockActionFocused.current = true; };
+  const onDockActionBlur = (event: FocusEvent<HTMLButtonElement>) => {
+    if (focusMovedToConnectedTarget(event)) dockActionFocused.current = false;
+  };
+  const dockAction: WorkspaceDockAction | undefined = mode === 'references'
+    ? presentation === 'right' && onMoveReferencesBottom
+      ? {
+          destination: 'bottom',
+          onClick: onMoveReferencesBottom,
+          onFocus: onDockActionFocus,
+          onBlur: onDockActionBlur,
+        }
+      : presentation === 'bottom' && headerVariant === 'references' && onMoveReferencesRight
+        ? {
+            destination: 'right',
+            onClick: onMoveReferencesRight,
+            onFocus: onDockActionFocus,
+            onBlur: onDockActionBlur,
+          }
+        : undefined
+    : undefined;
+  const dockActionVisible = dockAction !== undefined;
 
   const modeFallback = (targetMode: WorkspaceMode): HTMLElement | null => (
     chooseWorkspaceModeFocusTarget({
@@ -159,6 +185,15 @@ export function ReferenceWorkspace({
       emptyReference: emptyReferenceRef.current,
     })
   );
+
+  useLayoutEffect(() => {
+    if (dockActionVisible || !dockActionFocused.current) return;
+    dockActionFocused.current = false;
+    const timeout = setTimeout(() => {
+      focusWithoutScroll(modeTabRefs.current.get(mode) ?? modeFallback(mode));
+    }, 0);
+    return () => clearTimeout(timeout);
+  }, [dockActionVisible, mode]);
 
   useLayoutEffect(() => {
     const removedFocus = focusedModeTab.current;
@@ -267,96 +302,23 @@ export function ReferenceWorkspace({
       inert={!open}
     >
       <header className="review-workspace__header">
-        {headerVariant === 'references' ? (
-          <strong id="references-workspace-title" className="review-workspace__title">References</strong>
-        ) : null}
-        {headerVariant === 'tabs' ? (
-        <div
-          className="review-workspace__tabs"
-          role="tablist"
-          aria-label="Workspace modes"
-          data-workspace-mode-count={modes.length}
-        >
-          {modes.map((workspaceMode) => {
-            const selected = workspaceMode === mode;
-            const hasMoveControl = workspaceMode === 'references' && Boolean(onMoveReferencesBottom);
-            return (
-              <span
-                key={workspaceMode}
-                className={`review-workspace__tab-segment${
-                  hasMoveControl ? ' review-workspace__tab-segment--compound' : ''
-                }`}
-                data-workspace-tab-segment={workspaceMode}
-                data-workspace-tab-selected={selected ? 'true' : 'false'}
-                role="presentation"
-              >
-              <button
-                ref={(element) => {
-                  if (element) modeTabRefs.current.set(workspaceMode, element);
-                  else modeTabRefs.current.delete(workspaceMode);
-                }}
-                id={`workspace-mode-${workspaceMode}`}
-                type="button"
-                role="tab"
-                data-workspace-mode={workspaceMode}
-                aria-selected={selected}
-                aria-controls={`workspace-panel-${workspaceMode}`}
-                title={`Show ${MODE_LABELS[workspaceMode]}`}
-                tabIndex={selected ? 0 : -1}
-                onKeyDown={moveModeFocus}
-                onFocus={(event) => {
-                  focusedModeTab.current = { mode: workspaceMode, element: event.currentTarget };
-                }}
-                onBlur={(event) => {
-                  const nextTarget = event.relatedTarget;
-                  if (
-                    nextTarget instanceof HTMLElement
-                    && nextTarget !== event.currentTarget.ownerDocument.body
-                    && nextTarget.isConnected
-                  ) {
-                    focusedModeTab.current = null;
-                  }
-                }}
-                onClick={() => onModeChange(workspaceMode)}
-              >
-                {hasMoveControl ? (
-                  <span className="sr-only">{MODE_LABELS[workspaceMode]}</span>
-                ) : MODE_LABELS[workspaceMode]}
-              </button>
-              {hasMoveControl ? (
-                <span className="review-workspace__tab-label" aria-hidden="true">
-                  {MODE_LABELS[workspaceMode]}
-                </span>
-              ) : null}
-              {hasMoveControl ? (
-                <button
-                  type="button"
-                  className="review-workspace__move review-workspace__move--tab"
-                  data-reference-move="bottom"
-                  aria-label="Move References to bottom"
-                  title="Move References to bottom"
-                  onClick={onMoveReferencesBottom}
-                >
-                  <ReviewIcon name="chevron-down" size={14} />
-                </button>
-              ) : null}
-              </span>
-            );
-          })}
-        </div>
-        ) : null}
-        {headerVariant === 'references' && onMoveReferencesRight ? (
-          <button
-            type="button"
-            className="review-workspace__move review-workspace__move--header"
-            data-reference-move="right"
-            aria-label="Move References to right"
-            title="Move References to right"
-            onClick={onMoveReferencesRight}
-          >
-            <ReviewIcon name="chevron-right" size={14} />
-          </button>
-        ) : null}
+        <WorkspaceModeStrip
+          modes={modes}
+          selectedMode={mode}
+          onModeChange={onModeChange}
+          onModeKeyDown={moveModeFocus}
+          onModeRef={(workspaceMode, element) => {
+            if (element) modeTabRefs.current.set(workspaceMode, element);
+            else modeTabRefs.current.delete(workspaceMode);
+          }}
+          onModeFocus={(workspaceMode, event) => {
+            focusedModeTab.current = { mode: workspaceMode, element: event.currentTarget };
+          }}
+          onModeBlur={(_workspaceMode, event) => {
+            if (focusMovedToConnectedTarget(event)) focusedModeTab.current = null;
+          }}
+          {...(dockAction ? { dockAction } : {})}
+        />
       </header>
 
       <section
@@ -369,9 +331,7 @@ export function ReferenceWorkspace({
         data-reference-tabs-orientation={referenceTabOrientation}
         data-reference-panel-layout={showReferenceTabs || reserveReferenceTabRail ? 'split' : 'full'}
         role="tabpanel"
-        aria-labelledby={headerVariant === 'references'
-          ? 'references-workspace-title'
-          : 'workspace-mode-references'}
+        aria-labelledby="workspace-mode-references"
         tabIndex={-1}
         hidden={mode !== 'references' || !modes.includes('references')}
         inert={mode !== 'references' || !modes.includes('references')}

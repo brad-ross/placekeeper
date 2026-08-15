@@ -277,9 +277,48 @@ describe('shared reference workspace', () => {
     expect(html).toContain('aria-label="Close active reference"');
     expect(html).not.toMatch(/role="tab"[^>]*>[^<]*Close/u);
     expect(html).toContain('aria-live="polite"');
-    expect(html).toContain('review-workspace__tab-segment--compound');
-    expect(html).toContain('class="review-workspace__tab-label" aria-hidden="true">References</span>');
-    expect(html).toMatch(/data-workspace-tab-segment="references"[^>]*data-workspace-tab-selected="true"[\s\S]*data-reference-move="bottom"/u);
+    expect(html).toContain('class="review-workspace__activity-strip"');
+    expect(html).toContain('aria-label="Outline"');
+    expect(html).toContain('title="Show Outline"');
+    expect(html).toContain('aria-label="References"');
+    expect(html).toContain('title="Show References"');
+    expect(html.match(/data-workspace-mode-label/g)).toHaveLength(1);
+    expect(html).toContain('data-workspace-mode-label="references"');
+    expect(html).toContain('>References</span>');
+    expect(html).toContain('data-reference-move="bottom"');
+    expect(html).not.toContain('review-workspace__tab-segment--compound');
+  });
+
+  it('shows References docking only for the selected mode and a visible placement change', () => {
+    const renderWorkspace = (
+      mode: 'search' | 'references',
+      presentation: 'right' | 'bottom',
+      headerVariant: 'tabs' | 'references' = 'tabs',
+    ) => renderToStaticMarkup(
+      <ReferenceWorkspace
+        open
+        mode={mode}
+        presentation={presentation}
+        modes={headerVariant === 'references' ? ['references'] : ['search', 'references']}
+        headerVariant={headerVariant}
+        tabs={[]}
+        activeTabIdentity={null}
+        onModeChange={() => undefined}
+        onReferenceTabActivate={() => undefined}
+        onReferenceTabClose={() => undefined}
+        onSendToMain={() => undefined}
+        onRetryReference={() => undefined}
+        onMoveReferencesBottom={() => undefined}
+        onMoveReferencesRight={() => undefined}
+        onReferenceViewportHost={() => undefined}
+      />,
+    );
+
+    expect(renderWorkspace('search', 'right')).not.toContain('data-reference-move');
+    expect(renderWorkspace('references', 'right')).toContain('data-reference-move="bottom"');
+    expect(renderWorkspace('references', 'right')).not.toContain('data-reference-move="right"');
+    expect(renderWorkspace('references', 'bottom')).not.toContain('data-reference-move');
+    expect(renderWorkspace('references', 'bottom', 'references')).toContain('data-reference-move="right"');
   });
 
   it('keeps active reference actions beside, rather than inside, the selected semantic tab', () => {
@@ -381,7 +420,9 @@ describe('shared reference workspace', () => {
       />,
     );
 
-    expect(html).not.toContain('aria-label="Workspace modes"');
+    expect(html).toContain('aria-label="Workspace modes"');
+    expect(html).toContain('data-workspace-mode-count="1"');
+    expect(html).toContain('data-workspace-mode-label="references"');
     expect(html).toContain('aria-label="Open references"');
     expect(html).toContain('aria-orientation="vertical"');
     expect(html).toContain('data-reference-tabs-orientation="vertical"');
