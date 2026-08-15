@@ -709,9 +709,15 @@ export class NavigationCoordinator {
     const operation = this.begin(target.documentGeneration);
     if (operation === null) return false;
     const main = this.dependencies.getMainNavigation();
-    const currentLocation = main?.captureLocation() ?? null;
-    const destination = main?.resolveTarget(target) ?? null;
-    if (!main || currentLocation === null || destination === null) {
+    if (!main) {
+      this.dependencies.setAnnouncement(MAIN_FAILURE);
+      return false;
+    }
+    await main.cancelPendingNavigation();
+    if (!this.isCurrent(operation)) return false;
+    const currentLocation = main.captureLocation();
+    const destination = main.resolveTarget(target);
+    if (currentLocation === null || destination === null) {
       this.dependencies.setAnnouncement(MAIN_FAILURE);
       return false;
     }
@@ -736,7 +742,7 @@ export class NavigationCoordinator {
       currentLocation,
       destination,
       () => main.applyTarget(target),
-      sameLocation && kind === 'search',
+      kind === 'search',
     );
     if (!this.isCurrent(operation)) return false;
     if (settledLocation === null) {
