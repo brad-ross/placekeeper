@@ -102,6 +102,12 @@ test('installed real PDF reading', async ({ page }) => {
 test('wide Annotation Tray', async ({ page }) => {
   const product = await openScene(page, 'tray');
   await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-workspace-presentation', 'right');
+  const railBox = await page.getByRole('button', { name: 'Close right workspace' }).boundingBox();
+  const modesBox = await page.getByRole('tablist', { name: 'Workspace modes' }).boundingBox();
+  if (!railBox || !modesBox) throw new Error('Workspace navigation geometry is unavailable.');
+  expect(Math.abs(
+    railBox.y + railBox.height / 2 - (modesBox.y + modesBox.height / 2),
+  )).toBeLessThanOrEqual(0.5);
   const annotation = page.getByRole('button', { name: /Highlight · Page 1/u });
   await annotation.focus();
   await expect(annotation.locator('.annotation-item__page')).toHaveText('1');
@@ -172,6 +178,39 @@ test('wide right-docked References tray', async ({ page }) => {
   await expect(page.getByRole('tab', { name: 'References', exact: true })).toBeVisible();
   await expectCompoundReferenceTabs(page, 'horizontal');
   await expectScene(product, 'wide-right-references.png');
+});
+
+test('reference-layout workspace mode buttons remain interactive', async ({ page }) => {
+  await openScene(page, 'reference-layout');
+  await page.getByRole('button', { name: 'Open References tray' }).click();
+  await page.getByRole('button', { name: 'Move References to right' }).click();
+
+  const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
+  await annotations.click();
+  await expect(annotations).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('button', { name: 'Move References to bottom' })).toHaveCount(0);
+
+  const references = page.getByRole('tab', { name: 'References', exact: true });
+  await references.click();
+  await expect(references).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('button', { name: 'Move References to bottom' })).toBeVisible();
+});
+
+test('reference-layout reference tab selectors remain interactive', async ({ page }) => {
+  await openScene(page, 'reference-layout');
+  await page.getByRole('button', { name: 'Open References tray' }).click();
+
+  const equation = page.getByRole('tab', {
+    name: 'Equation (14): Equilibrium response mapping, Page 27',
+  });
+  await equation.click();
+  await expect(equation).toHaveAttribute('aria-selected', 'true');
+
+  const lemma = page.getByRole('tab', {
+    name: 'Lemma 2: Local identification under conditional independence, Page 18',
+  });
+  await lemma.click();
+  await expect(lemma).toHaveAttribute('aria-selected', 'true');
 });
 
 test('narrow unified References tray', async ({ page }) => {

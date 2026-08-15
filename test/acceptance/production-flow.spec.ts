@@ -1588,13 +1588,13 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   const workspace = page.locator("#review-tools-workspace");
   await expect(workspace).toHaveAttribute("data-tools-workspace-open", "true");
   await expect(page.getByRole("tab", { name: "Outline" })).toHaveAttribute("aria-selected", "true");
-  const workspaceHeader = workspace.locator('.review-workspace__header');
   const workspaceModes = page.getByRole('tablist', { name: 'Workspace modes' });
-  const headerBox = await workspaceHeader.boundingBox();
   const modesBox = await workspaceModes.boundingBox();
   const railBox = await workspaceControl.boundingBox();
-  if (!headerBox || !railBox || !modesBox) throw new Error('Workspace edge controls have no bounds.');
-  expect(railBox.y).toBeCloseTo(headerBox.y, 0);
+  if (!railBox || !modesBox) throw new Error('Workspace edge controls have no bounds.');
+  expect(Math.abs(
+    railBox.y + railBox.height / 2 - (modesBox.y + modesBox.height / 2),
+  )).toBeLessThanOrEqual(0.5);
   await expect(page.getByRole('button', { name: 'Close workspace' })).toHaveCount(0);
   const outline = page.getByRole("navigation", { name: "Document outline" });
   await expect(outline).toBeVisible();

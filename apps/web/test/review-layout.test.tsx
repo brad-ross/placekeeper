@@ -420,7 +420,11 @@ describe('review shell layout and accessibility contract', () => {
     expect(annotationStyles).toMatch(
       /\.review-workspace__mode-label\s*\{[^}]*min-width:\s*0;[^}]*text-overflow:\s*ellipsis;/u,
     );
-    expect(annotationStyles).toContain('margin-top: var(--review-workspace-header-height)');
+    expect(annotationStyles).toContain('height: var(--review-workspace-header-height, 44px)');
+    expect(annotationStyles).toContain('margin-top: var(--review-workspace-header-height, 44px)');
+    expect(annotationStyles).toContain(
+      'top: calc(var(--review-workspace-header-height, 44px) / 2)',
+    );
     expect(annotationStyles).not.toContain('margin-top: 53px');
     expect(annotationStyles).not.toContain('review-workspace__tab-segment--compound');
     expect(annotationStyles).not.toContain('.existing-annotations__readonly');

@@ -18,6 +18,10 @@ import {
 import type { ViewerInteractionListener } from '../../../apps/web/src/pdf/viewer-interaction-events.js';
 import type { PdfOutlineDiscovery } from '../../../apps/web/src/pdf/pdf-outline.js';
 import type { PdfViewerNavigation } from '../../../apps/web/src/pdf/viewer-navigation-adapter.js';
+import {
+  reduceReferenceNavigation,
+  type ReferenceNavigationState,
+} from '../../../apps/web/src/review/reference-navigation-state.js';
 import { createReviewState, type ReviewCommand, type ReviewState } from '../../../packages/core/src/review-model.js';
 import { reduceReview } from '../../../packages/core/src/review-reducer.js';
 import { resolveVisualScenario, VisualDocument } from './visual-scenarios.js';
@@ -244,6 +248,21 @@ function createHarnessViewerNavigation(
   };
 }
 
+function activateVisualReference(
+  state: ReferenceNavigationState,
+  identity: string,
+): ReferenceNavigationState {
+  const tab = state.tabs.find((candidate) => candidate.identity === identity);
+  if (!tab) return state;
+  return reduceReferenceNavigation(state, {
+    type: 'open-reference',
+    target: tab.originalTarget,
+    settledLocation: tab.settledLocation,
+    ...(tab.label === undefined ? {} : { label: tab.label }),
+    ...(tab.pageContext === undefined ? {} : { pageContext: tab.pageContext }),
+  });
+}
+
 function Harness() {
   const [state, setState] = useState(() => visualScenario?.state ?? createReviewState({
     sessionId: 'acceptance',
@@ -253,6 +272,9 @@ function Harness() {
     visualScenario ? (visualScenario.name === 'contextual' ? 'selection' : 'none') : 'selection',
   );
   const [selectionGeneration, setSelectionGeneration] = useState(0);
+  const [visualReferenceNavigation, setVisualReferenceNavigation] = useState(
+    visualScenario?.referenceNavigation,
+  );
   const anchorKindRef = useRef(anchorKind);
   anchorKindRef.current = anchorKind;
   const selectionGenerationRef = useRef(selectionGeneration);
@@ -317,8 +339,18 @@ function Harness() {
         existingAnnotations: visualScenario.existingAnnotations,
         annotationOutlineLabels: visualScenario.annotationOutlineLabels,
         outlineDiscovery: visualScenario.outlineDiscovery,
-        navigationState: visualScenario.referenceNavigation,
         referenceTabs: visualScenario.referenceTabs,
+        ...(visualReferenceNavigation === undefined ? {} : {
+          navigationState: visualReferenceNavigation,
+          onWorkspaceModeChange: (mode) => setVisualReferenceNavigation((current) => (
+            current === undefined
+              ? current
+              : reduceReferenceNavigation(current, { type: 'select-workspace-mode', mode })
+          )),
+          onReferenceTabActivate: (identity) => setVisualReferenceNavigation((current) => (
+            current === undefined ? current : activateVisualReference(current, identity)
+          )),
+        }),
       } : {})}
       {...(visualScenario ? {} : { viewerControls, viewerState, outlineDiscovery })}
       viewerNavigation={viewerNavigationRef.current}

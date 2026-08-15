@@ -77,7 +77,9 @@
 }
 
 .workspace-edge-rail[data-workspace-edge-rail="right"][data-edge-rail-open="true"] {
+  top: calc(var(--review-workspace-header-height, 44px) / 2);
   right: var(--tools-right-width);
+  transform: translateY(-50%);
 }
 
 .workspace-edge-rail[data-workspace-edge-rail="bottom"] {
@@ -239,7 +241,7 @@
 }
 
 .review-tools-workspace[data-tools-workspace-shared="true"] .review-workspace__panel {
-  margin-top: var(--review-workspace-header-height);
+  margin-top: var(--review-workspace-header-height, 44px);
   background: var(--review-surface-panel);
   pointer-events: auto;
 }
@@ -256,7 +258,7 @@
 .review-workspace__header {
   z-index: 3;
   display: flex;
-  height: var(--review-workspace-header-height);
+  height: var(--review-workspace-header-height, 44px);
   flex: none;
   align-items: center;
   padding: 6px;
