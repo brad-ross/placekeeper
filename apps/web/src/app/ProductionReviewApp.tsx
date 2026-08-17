@@ -66,6 +66,7 @@ import {
   deriveReferenceWorkspaceLayout,
   reduceReferenceWorkspaceLayout,
   type ReferenceWorkspaceLayoutAction,
+  type ReferenceWorkspaceLayoutState,
   type RightWorkspaceMode,
 } from "../review/reference-workspace-layout.js";
 import { SaveDestinationDialog } from "../save/SaveDestinationDialog.js";
@@ -84,6 +85,14 @@ export interface ProductionScope {
   readonly sourceRootPath?: string;
   readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode';
   readonly codexContext?: LiveContextBindingStatus;
+}
+
+function referenceFocusRailSurface(
+  layout: ReferenceWorkspaceLayoutState,
+  hasRemainingReferences: boolean,
+): 'bottom' | 'right' {
+  if (layout.regime === 'narrow') return 'bottom';
+  return hasRemainingReferences && layout.referenceDock === 'bottom' ? 'bottom' : 'right';
 }
 
 export type ProductionSaveStatus = SaveStatus;
@@ -450,18 +459,21 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           requestAnimationFrame(() => {
             if (layoutGeneration !== layoutGenerationRef.current
               || documentGeneration !== documentGenerationRef.current) return;
-            const surface = referenceLayoutStateRef.current.regime === 'narrow'
-              || referenceLayoutStateRef.current.referenceDock === 'bottom' ? 'bottom' : 'right';
+            const layout = referenceLayoutStateRef.current;
+            const surface = referenceFocusRailSurface(
+              layout,
+              navigationStateRef.current.tabs.length > 0,
+            );
             productionRootRef.current
               ?.querySelector<HTMLButtonElement>(`[data-workspace-edge-rail="${surface}"]`)
               ?.focus({ preventScroll: true });
           });
           return true;
         },
-        referenceRailFocusToken: () => referenceLayoutStateRef.current.regime === 'narrow'
-          || referenceLayoutStateRef.current.referenceDock === 'bottom'
-          ? BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN
-          : RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
+        referenceRailFocusToken: () => referenceFocusRailSurface(
+          referenceLayoutStateRef.current,
+          navigationStateRef.current.tabs.length > 1,
+        ) === 'bottom' ? BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN : RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
       },
       setPendingReference,
       setLinkActionRequest,

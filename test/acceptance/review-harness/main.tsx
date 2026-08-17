@@ -19,6 +19,7 @@ import type { ViewerInteractionListener } from '../../../apps/web/src/pdf/viewer
 import type { PdfOutlineDiscovery } from '../../../apps/web/src/pdf/pdf-outline.js';
 import type { PdfViewerNavigation } from '../../../apps/web/src/pdf/viewer-navigation-adapter.js';
 import {
+  createReferenceNavigationState,
   reduceReferenceNavigation,
   type ReferenceNavigationState,
 } from '../../../apps/web/src/review/reference-navigation-state.js';
@@ -275,6 +276,9 @@ function Harness() {
   const [visualReferenceNavigation, setVisualReferenceNavigation] = useState(
     visualScenario?.referenceNavigation,
   );
+  const [harnessReferenceNavigation, setHarnessReferenceNavigation] = useState(
+    () => createReferenceNavigationState(0),
+  );
   const anchorKindRef = useRef(anchorKind);
   anchorKindRef.current = anchorKind;
   const selectionGenerationRef = useRef(selectionGeneration);
@@ -352,6 +356,12 @@ function Harness() {
           )),
         }),
       } : {})}
+      {...(visualScenario ? {} : {
+        navigationState: harnessReferenceNavigation,
+        onWorkspaceModeChange: (mode) => setHarnessReferenceNavigation((current) => (
+          reduceReferenceNavigation(current, { type: 'select-workspace-mode', mode })
+        )),
+      })}
       {...(visualScenario ? {} : { viewerControls, viewerState, outlineDiscovery })}
       viewerNavigation={viewerNavigationRef.current}
       selectionUpdate={anchorKind === 'selection'
@@ -431,6 +441,25 @@ function Harness() {
           status: 'loaded-empty',
           documentGeneration: 0,
         })}>Set outline empty</button>
+        <button type="button" onClick={() => setHarnessReferenceNavigation((current) => (
+          reduceReferenceNavigation(current, {
+            type: 'open-reference',
+            target: {
+              documentGeneration: 0,
+              pageIndex: 0,
+              zoom: { mode: PdfZoomMode.XYZ, params: [72, 120, 1] },
+              identity: 'harness-reference',
+            },
+            settledLocation: {
+              pageIndex: 0,
+              anchor: { x: 72, y: 120 },
+              alignment: { xPercent: 50, yPercent: 20 },
+              zoom: 1,
+            },
+            label: 'Harness reference',
+            pageContext: 'Page 1',
+          })
+        ))}>Open harness reference</button>
         <button type="button" onClick={() => viewerControls.makePageControlsUnavailable()}>
           Make page controls unavailable
         </button>

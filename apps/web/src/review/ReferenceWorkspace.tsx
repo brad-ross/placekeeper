@@ -301,7 +301,7 @@ export function ReferenceWorkspace({
       aria-hidden={!open}
       inert={!open}
     >
-      <header className="review-workspace__header">
+      {modes.length > 0 ? <header className="review-workspace__header">
         <WorkspaceModeStrip
           modes={modes}
           selectedMode={mode}
@@ -319,9 +319,9 @@ export function ReferenceWorkspace({
           }}
           {...(dockAction ? { dockAction } : {})}
         />
-      </header>
+      </header> : null}
 
-      <section
+      {modes.includes('references') ? <section
         ref={(element) => {
           if (element) panelRefs.current.set('references', element);
           else panelRefs.current.delete('references');
@@ -333,8 +333,8 @@ export function ReferenceWorkspace({
         role="tabpanel"
         aria-labelledby="workspace-mode-references"
         tabIndex={-1}
-        hidden={mode !== 'references' || !modes.includes('references')}
-        inert={mode !== 'references' || !modes.includes('references')}
+        hidden={mode !== 'references'}
+        inert={mode !== 'references'}
         onFocusCapture={(event) => rememberPanelFocus('references', event.target)}
       >
         {showReferenceTabs ? (
@@ -465,7 +465,7 @@ export function ReferenceWorkspace({
             inert={pendingReference?.status === 'error' || (activeTab === null && pendingReference === null)}
           />
         </div>
-      </section>
+      </section> : null}
 
     </aside>
     <p className="sr-only review-workspace__status" role="status" aria-live="polite" aria-atomic="true">

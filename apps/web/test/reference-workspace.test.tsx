@@ -29,6 +29,7 @@ import {
   OutlineAnnotationsWorkspace,
 } from '../src/review/OutlineAnnotationsWorkspace.js';
 import type { PdfOutlineItem } from '../src/pdf/pdf-outline.js';
+import { RIGHT_WORKSPACE_MODES } from '../src/review/reference-navigation-state.js';
 
 const target = (identity: string, pageIndex: number) => ({
   documentGeneration: 3,
@@ -148,11 +149,12 @@ describe('shared reference workspace', () => {
     expect(WORKSPACE_MODES).toEqual(['outline', 'search', 'annotations', 'references']);
   });
 
-  it('collapses a confirmed empty outline to one selected Annotations surface', () => {
+  it('falls back to Search when the selected Outline mode is unavailable', () => {
     const html = renderToStaticMarkup(
       <OutlineAnnotationsWorkspace
         open
         mode="outline"
+        modes={RIGHT_WORKSPACE_MODES.filter((mode) => mode !== 'outline')}
         presentation="right"
         headerVariant="tools"
         outline={{ status: 'loaded-empty', documentGeneration: 1 }}
@@ -171,9 +173,12 @@ describe('shared reference workspace', () => {
     expect(html).not.toContain('This PDF has no embedded outline.');
     expect(html.match(/id="workspace-panel-annotations"/g)).toHaveLength(1);
     expect(html.match(/id="workspace-panel-search"/g)).toHaveLength(1);
-    expect(html).toMatch(/id="workspace-mode-annotations"[^>]*aria-selected="true"/u);
+    expect(html).toMatch(/id="workspace-mode-search"[^>]*aria-selected="true"/u);
+    const searchPanel = html.match(/<section[^>]*id="workspace-panel-search"[^>]*>/u)?.[0];
+    expect(searchPanel).not.toContain('hidden');
+    expect(searchPanel).not.toContain('inert');
     expect(html).toMatch(/id="workspace-panel-annotations"[^>]*aria-labelledby="workspace-mode-annotations"/u);
-    expect(html).not.toMatch(/id="workspace-panel-annotations"[^>]*hidden/u);
+    expect(html).toMatch(/id="workspace-panel-annotations"[^>]*hidden/u);
     expect(html).toContain('aria-label="Search and annotations"');
     expect(html).toContain('data-workspace-mode-count="2"');
   });
@@ -183,6 +188,7 @@ describe('shared reference workspace', () => {
       <OutlineAnnotationsWorkspace
         open
         mode="outline"
+        modes={RIGHT_WORKSPACE_MODES}
         presentation="right"
         headerVariant="tools"
         outline={{ status: 'unavailable', documentGeneration: 1 }}

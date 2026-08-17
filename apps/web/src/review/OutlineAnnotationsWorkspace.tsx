@@ -10,18 +10,15 @@ import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js'
 import type { AnnotationPresentation } from '../pdf/viewer-framing.js';
 import { horizontalTabFocusIndex } from './LinkActionPopover.js';
 import { OutlineNavigator } from './OutlineNavigator.js';
-import {
-  RIGHT_WORKSPACE_MODES,
-  type WorkspaceMode,
-} from './reference-navigation-state.js';
+import type { WorkspaceMode } from './reference-navigation-state.js';
 import type { RightWorkspaceMode } from './reference-workspace-layout.js';
 import { WorkspaceModeStrip } from './WorkspaceModeStrip.js';
 
-const OUTLINE_ABSENT_TOOL_MODES: readonly RightWorkspaceMode[] = ['search', 'annotations'];
 export interface OutlineAnnotationsWorkspaceProps {
   readonly workspaceRef?: Ref<HTMLElement>;
   readonly open: boolean;
   readonly mode: WorkspaceMode;
+  readonly modes: readonly RightWorkspaceMode[];
   readonly presentation: AnnotationPresentation;
   readonly headerVariant: 'tools' | 'shared';
   readonly outline: PdfOutlineDiscovery;
@@ -49,6 +46,7 @@ export function OutlineAnnotationsWorkspace({
   workspaceRef,
   open,
   mode,
+  modes,
   presentation,
   headerVariant,
   outline,
@@ -60,13 +58,14 @@ export function OutlineAnnotationsWorkspace({
   onOutlineReference,
   onModeFocusTokenChange,
 }: OutlineAnnotationsWorkspaceProps) {
-  const outlineAvailable = outline.status !== 'loaded-empty';
-  const toolModes = outlineAvailable ? RIGHT_WORKSPACE_MODES : OUTLINE_ABSENT_TOOL_MODES;
-  const effectiveMode: WorkspaceMode = mode === 'outline' && !outlineAvailable
-    ? 'annotations'
+  const outlineAvailable = modes.includes('outline');
+  const annotationsAvailable = modes.includes('annotations');
+  const toolModes = modes;
+  const effectiveMode: WorkspaceMode = mode !== 'references' && !modes.includes(mode)
+    ? modes[0] ?? 'search'
     : mode;
   const effectiveToolMode: RightWorkspaceMode = effectiveMode === 'references'
-    ? 'annotations'
+    ? modes[0] ?? 'search'
     : effectiveMode;
   const tabRefs = useRef(new Map<RightWorkspaceMode, HTMLButtonElement>());
   const panelRefs = useRef(new Map<RightWorkspaceMode, HTMLElement>());
@@ -116,7 +115,9 @@ export function OutlineAnnotationsWorkspace({
       data-tools-workspace-open={open ? 'true' : 'false'}
       data-tools-workspace-shared={headerVariant === 'shared' ? 'true' : 'false'}
       data-workspace-presentation={presentation}
-      aria-label={outlineAvailable ? 'Outline, search, and annotations' : 'Search and annotations'}
+      aria-label={outlineAvailable
+        ? annotationsAvailable ? 'Outline, search, and annotations' : 'Outline and search'
+        : annotationsAvailable ? 'Search and annotations' : 'Search'}
       aria-hidden={!open}
       inert={!open}
     >
@@ -145,8 +146,8 @@ export function OutlineAnnotationsWorkspace({
         role="tabpanel"
         aria-labelledby="workspace-mode-search"
         tabIndex={-1}
-        hidden={mode !== 'search'}
-        inert={mode !== 'search'}
+        hidden={effectiveMode !== 'search'}
+        inert={effectiveMode !== 'search'}
         onFocusCapture={(event) => rememberFocus('search', event.target)}
       >
         {search}
@@ -175,7 +176,7 @@ export function OutlineAnnotationsWorkspace({
         />
       </section> : null}
 
-      <section
+      {annotationsAvailable ? <section
         ref={(element) => {
           if (element) panelRefs.current.set('annotations', element);
           else panelRefs.current.delete('annotations');
@@ -191,7 +192,7 @@ export function OutlineAnnotationsWorkspace({
         onFocusCapture={(event) => rememberFocus('annotations', event.target)}
       >
         {annotations}
-      </section>
+      </section> : null}
     </aside>
   );
 }
