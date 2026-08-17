@@ -108,6 +108,8 @@ describe("Placekeeper link codec", () => {
     ["zero page", "placekeeper:///tmp/paper.pdf#v=1&page=0"],
     ["signed page", "placekeeper:///tmp/paper.pdf#v=1&page=+1"],
     ["unsafe item", "placekeeper:///tmp/paper.pdf#v=1&page=1&item=review%20item"],
+    ["uppercase item", "placekeeper:///tmp/paper.pdf#v=1&page=1&item=11111111-1111-4111-8111-11111111111A"],
+    ["uppercase grammar", "placekeeper:///tmp/paper.pdf#V=1&PAGE=1"],
     ["encoded control", "placekeeper:///tmp/paper%00.pdf#v=1&page=1"],
     ["session state", "placekeeper:///tmp/paper.pdf#v=1&page=1&session=secret"],
   ])("rejects %s", (_caseName, input) => {

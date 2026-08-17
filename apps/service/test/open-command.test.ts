@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { encodePlacekeeperLink } from "../../../packages/core/src/placekeeper-link.js";
 
 import {
+  INSTALLED_SMOKE_DAEMON_FLAG,
+  INSTALLED_SMOKE_HTTP_PORT_FLAG,
+  pathsForDirectDaemonLaunch,
   parseOpenLinkArguments,
   parseOpenArguments,
   runOpenLinkCommand,
@@ -52,6 +55,22 @@ afterEach(async () => {
 describe("open command", () => {
   it("pins the packaged daemon to the exported fixed browser origin", () => {
     expect(defaultDaemonPaths().httpPort).toBe(PLACEKEEPER_HTTP_PORT);
+  });
+
+  it("isolates only the installed lifecycle smoke from the fixed browser origin", () => {
+    expect(pathsForDirectDaemonLaunch([])?.httpPort).toBe(PLACEKEEPER_HTTP_PORT);
+    expect(pathsForDirectDaemonLaunch([
+      INSTALLED_SMOKE_DAEMON_FLAG,
+      INSTALLED_SMOKE_HTTP_PORT_FLAG,
+      "43210",
+    ])?.httpPort).toBe(43_210);
+    expect(() => pathsForDirectDaemonLaunch([
+      INSTALLED_SMOKE_DAEMON_FLAG,
+      INSTALLED_SMOKE_HTTP_PORT_FLAG,
+      "0",
+    ])).toThrow("invalid");
+    expect(pathsForDirectDaemonLaunch([INSTALLED_SMOKE_DAEMON_FLAG, "extra"])).toBeUndefined();
+    expect(pathsForDirectDaemonLaunch(["ensure-ready"])).toBeUndefined();
   });
 
   it("parses bounded app-link preflight and confirmed-open commands", () => {

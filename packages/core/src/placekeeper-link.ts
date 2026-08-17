@@ -3,7 +3,7 @@ export const PLACEKEEPER_LINK_MAX_LENGTH = 16 * 1024;
 const PLACEKEEPER_PREFIX = "placekeeper:///";
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/u;
 const ENCODED_SEPARATOR = /%(?:2f|5c)/iu;
-const PORTABLE_ITEM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const PORTABLE_ITEM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const VIEW_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 export type PlacekeeperLinkLocation =
@@ -114,7 +114,7 @@ export function decodePlacekeeperLinkFragment(fragment: string): PlacekeeperLink
   if (CONTROL_CHARACTERS.test(fragment) || fragment.startsWith("#")) {
     invalid("Placekeeper link location must not include a fragment marker");
   }
-  const match = /^v=1&page=([1-9][0-9]*)(?:&item=([0-9a-f-]+))?$/iu.exec(fragment);
+  const match = /^v=1&page=([1-9][0-9]*)(?:&item=([0-9a-f-]+))?$/u.exec(fragment);
   if (match === null) invalid("Placekeeper link location is malformed or unsupported");
   const page = Number(match[1]);
   assertPage(page);

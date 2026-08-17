@@ -11,10 +11,15 @@ import type {
 } from "../host/placekeeper-host.js";
 import { DaemonUpgradeRequiredError } from "../host/launch-control.js";
 import {
+  defaultDaemonPaths,
+  installedSmokeDaemonPaths,
+  INSTALLED_SMOKE_DAEMON_FLAG,
+  INSTALLED_SMOKE_HTTP_PORT_FLAG,
   launchThroughDaemon,
   openLinkThroughDaemon,
   preflightLinkThroughDaemon,
   runServiceDaemon,
+  type DaemonPaths,
 } from "../host/service-daemon.js";
 import { runDoctorCommand } from "./doctor-command.js";
 import { readHookStdin, runHookCommand } from "./hook-command.js";
@@ -36,6 +41,17 @@ export type ParsedOpenLinkRequest =
 type OpenLinkClient = (
   request: ParsedOpenLinkRequest,
 ) => Promise<LinkPreflightResponse | LinkLaunchResponse>;
+
+export { INSTALLED_SMOKE_DAEMON_FLAG, INSTALLED_SMOKE_HTTP_PORT_FLAG };
+
+/** Resolve only direct daemon launches. Management subcommands stay on their
+ * existing path; the isolated installed smoke alone receives an ephemeral
+ * HTTP port so it can run beside the real installed daemon. */
+export function pathsForDirectDaemonLaunch(args: readonly string[]): DaemonPaths | undefined {
+  if (args.length === 0) return defaultDaemonPaths();
+  if (args.length === 3 && args[0] === INSTALLED_SMOKE_DAEMON_FLAG) return installedSmokeDaemonPaths(args);
+  return undefined;
+}
 
 function takeValue(args: readonly string[], index: number, flag: string): string {
   const value = args[index + 1];
@@ -242,8 +258,10 @@ async function main(): Promise<number> {
     return runDoctorCommand(process.argv.slice(2));
   }
   if (process.argv[2] === "daemon") {
-    if (process.argv[3] !== undefined) return runDaemonCommand(process.argv.slice(3));
-    await runServiceDaemon();
+    const args = process.argv.slice(3);
+    const paths = pathsForDirectDaemonLaunch(args);
+    if (paths === undefined) return runDaemonCommand(args);
+    await runServiceDaemon(paths);
     return 0;
   }
   return runOpenCommand(process.argv.slice(2), launchThroughDaemon);

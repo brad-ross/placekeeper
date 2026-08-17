@@ -3,7 +3,7 @@ import type { PluginRegistry } from "@embedpdf/core";
 import type { PdfDocumentObject, PdfEngine } from '@embedpdf/models';
 import { SelectionPlugin } from "@embedpdf/plugin-selection";
 
-import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
+import type { ReviewCommand, ReviewItem, ReviewState } from "../../../../packages/core/src/review-model.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { CaretAnchor } from "../pdf/selection-anchor.js";
 import type { ExistingAnnotation, ExistingAnnotationsDiscovery } from "../pdf/existing-annotations.js";
@@ -125,7 +125,7 @@ export interface ProductionReviewAppProps {
   readonly viewer?: ReactNode;
 }
 
-function initiallyPortableItemIds(
+export function initiallyPortableItemIds(
   state: ReviewState,
   saveStatus: ProductionSaveStatus | undefined,
 ): Set<string> {
@@ -138,8 +138,7 @@ function saveStatusIsCleanCurrent(
   state: ReviewState,
   saveStatus: ProductionSaveStatus | undefined,
 ): boolean {
-  return saveStatus?.destination.phase === 'active'
-    && saveStatus.sync.phase === 'clean'
+  return saveStatus?.sync.phase === 'clean'
     && saveStatus.sync.savedRevision === state.revision
     && saveStatus.sync.desiredRevision === state.revision;
 }
@@ -667,7 +666,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       }
       return;
     }
-    for (const item of state.items) portableItemIdsRef.current.add(item.id);
+    portableItemIdsRef.current = new Set(state.items.map((item) => item.id));
   }, [navigationCoordinator, saveStatus, state]);
   const onViewerInteraction = useCallback((event: ViewerInteractionEvent) => {
     if (event.type === 'pdf-link') {
@@ -932,6 +931,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const onCommitMainFramingPositionChange = useCallback((commit: (() => void) | null) => {
     commitMainFramingPositionRef.current = commit ?? (() => undefined);
   }, []);
+  const writePlacekeeperLink = async (link: string) => {
+    if (navigator.clipboard?.writeText === undefined) {
+      throw new Error('Clipboard API unavailable');
+    }
+    await navigator.clipboard.writeText(link);
+  };
 
   return (
     <main data-production-review ref={productionRootRef}>
@@ -988,12 +993,18 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
                 navigationCoordinator.currentLinkLocation(),
               );
             },
-            writeText: async (link: string) => {
-              if (navigator.clipboard?.writeText === undefined) {
-                throw new Error('Clipboard API unavailable');
-              }
-              await navigator.clipboard.writeText(link);
-            },
+            writeText: writePlacekeeperLink,
+          },
+          copyItemLink: {
+            getLink: (item: ReviewItem) => portableItemIdsRef.current.has(item.id)
+              && saveStatusIsCleanCurrent(state, saveStatus)
+              ? buildPlacekeeperCopyLink(props.session.appLinkBase!, {
+                  kind: 'item',
+                  page: item.pageIndex + 1,
+                  itemId: item.id,
+                })
+              : undefined,
+            writeText: writePlacekeeperLink,
           },
         })}
         onLinkActionChoose={(choice, request) => {

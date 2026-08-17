@@ -284,9 +284,6 @@ export class SessionBroker {
     await this.initialize();
     const approvedFile = await this.capabilities.approvePdf(request.pdfPath);
     const sourceDigest = await hashFile(approvedFile.canonicalPath);
-    const rewriteEligibility = await this.#rewriteAssessor(
-      new Uint8Array(await readFile(approvedFile.canonicalPath)),
-    );
     const key = activeKey(approvedFile.canonicalPath, sourceDigest);
     const existingSessionId = this.#activeBySource.get(key);
     if (existingSessionId !== undefined && request.recoveryDecision !== "fork") {
@@ -301,6 +298,10 @@ export class SessionBroker {
         launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
       };
     }
+
+    const rewriteEligibility = await this.#rewriteAssessor(
+      new Uint8Array(await readFile(approvedFile.canonicalPath)),
+    );
 
     const drafts = await this.#recoverableDrafts();
     const identityMatches = drafts.filter(

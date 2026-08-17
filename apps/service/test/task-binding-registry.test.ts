@@ -167,6 +167,50 @@ describe("task-scoped PDF binding registry", () => {
     })).toEqual({ status: "denied" });
   });
 
+  it("keeps every claimed browser view for the same active task bound", () => {
+    const { registry } = registryFixture();
+    const firstProof = issue(registry);
+    expect(registry.claim({
+      bindProof: firstProof,
+      taskSessionId: "task-a",
+      reviewSessionId: "review-a",
+      documentGeneration: 1,
+    })).toMatchObject({ status: "pending" });
+    expect(registry.activateBrowser({
+      reviewSessionId: "review-a",
+      documentGeneration: 1,
+      browserCapability: BROWSER_CAPABILITY,
+    })).toMatchObject({ status: "active" });
+
+    const secondCapability = `${BROWSER_CAPABILITY}-second-view`;
+    const secondProof = issue(registry, { browserCapability: secondCapability });
+    expect(registry.claim({
+      bindProof: secondProof,
+      taskSessionId: "task-a",
+      reviewSessionId: "review-a",
+      documentGeneration: 1,
+    })).toMatchObject({ status: "active" });
+    registry.activateBrowser({
+      reviewSessionId: "review-a",
+      documentGeneration: 1,
+      browserCapability: secondCapability,
+    });
+
+    for (const capability of [BROWSER_CAPABILITY, secondCapability]) {
+      expect(registry.statusForReview("review-a", {
+        documentGeneration: 1,
+        reviewRevision: 0,
+        sourceDigest: "a".repeat(64),
+        stateDigest: "b".repeat(64),
+      }, digestSecretHex(capability))).toMatchObject({ status: "refreshing" });
+      expect(registry.renewBrowserHeartbeat({
+        reviewSessionId: "review-a",
+        documentGeneration: 1,
+        browserCapabilityHash: digestSecretHex(capability),
+      })).toMatchObject({ status: "active" });
+    }
+  });
+
   it("renews an exact active review from an authenticated browser heartbeat without a task id", () => {
     const { registry, advance } = registryFixture();
     const bindProof = issue(registry);

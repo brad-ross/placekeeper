@@ -1,5 +1,6 @@
 import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
 import { annotationKindLabel } from './AnnotationMetadata.js';
+import { CopyLinkControl, type CopyLinkControlProps } from './CopyLinkControl.js';
 
 function meaningfulPayload(item: ReviewItem): string {
   for (const field of ['proposedText', 'comment', 'quote', 'nearbyText']) {
@@ -12,9 +13,10 @@ function meaningfulPayload(item: ReviewItem): string {
 export interface AnnotationPeekProps {
   item: ReviewItem;
   onHoldChange(held: boolean): void;
+  copyLink?: CopyLinkControlProps;
 }
 
-export function AnnotationPeek({ item, onHoldChange }: AnnotationPeekProps) {
+export function AnnotationPeek({ item, onHoldChange, copyLink }: AnnotationPeekProps) {
   const kindLabel = annotationKindLabel(item.kind);
   return (
     <aside
@@ -29,6 +31,14 @@ export function AnnotationPeek({ item, onHoldChange }: AnnotationPeekProps) {
     >
       <p className="annotation-peek__meta"><strong>{kindLabel}</strong></p>
       <p className="annotation-peek__excerpt">{meaningfulPayload(item)}</p>
+      {copyLink === undefined ? null : (
+        <CopyLinkControl
+          {...copyLink}
+          variant="annotation"
+          ariaLabel={`Copy link to ${kindLabel} annotation on page ${item.pageIndex + 1}`}
+          title="Copy annotation link"
+        />
+      )}
     </aside>
   );
 }

@@ -165,6 +165,10 @@ export interface ReviewShellProps {
   viewerNavigation?: PdfViewerNavigation;
   codexContext?: LiveContextBindingStatus;
   copyLink?: CopyLinkControlProps;
+  copyItemLink?: {
+    readonly getLink: (item: ReviewItem) => string | undefined;
+    readonly writeText: (link: string) => Promise<void>;
+  };
   /** The production shell may control workspace visibility and retained navigation state. */
   workspaceOpen?: boolean;
   navigationState?: ReferenceNavigationState;
@@ -864,6 +868,12 @@ export function ReviewShell(props: ReviewShellProps) {
       '[data-review-chrome], [data-review-nested-host], [data-link-action-popover]',
     ) !== null)
   );
+  const copyLinkForItem = (item: ReviewItem): CopyLinkControlProps | undefined => {
+    const link = props.copyItemLink?.getLink(item);
+    return link === undefined || props.copyItemLink === undefined
+      ? undefined
+      : { getLink: () => link, writeText: props.copyItemLink.writeText };
+  };
   return (
     <section
       className="review-shell"
@@ -1008,9 +1018,12 @@ export function ReviewShell(props: ReviewShellProps) {
           ) : null}
           {!workspaceOpen && peekItemId ? (() => {
             const item = props.state.items.find(({ id }) => id === peekItemId);
-            return item ? (
+            if (item === undefined) return null;
+            const copyLink = copyLinkForItem(item);
+            return (
               <AnnotationPeek
                 item={item}
+                {...(copyLink === undefined ? {} : { copyLink })}
                 onHoldChange={(held) => {
                   peekHeldRef.current = held;
                   clearPeekTimer();
@@ -1019,7 +1032,7 @@ export function ReviewShell(props: ReviewShellProps) {
                   }
                 }}
               />
-            ) : null;
+            );
           })() : null}
         </div>
         <div className="review-drawer-host" data-review-drawer-host>
@@ -1146,6 +1159,7 @@ export function ReviewShell(props: ReviewShellProps) {
               {...(props.onItemCorrespondenceChange === undefined
                 ? {}
                 : { onCorrespondenceChange: props.onItemCorrespondenceChange })}
+              {...(props.copyItemLink === undefined ? {} : { copyLinkForItem })}
               onNavigate={(item) => {
                 markFramingUserIntent();
                 setActiveItemId(item.id);

@@ -17,7 +17,7 @@ import { LiveSourceWorkflowService } from "../context/live-source-workflow-servi
 import type { TaskBindingRegistry } from "../context/task-binding-registry.js";
 import { DaemonLifecycleCoordinator } from "./daemon-lifecycle.js";
 import { decodePlacekeeperLink } from "../../../../packages/core/src/placekeeper-link.js";
-import { resolvePlacekeeperLink } from "../links/placekeeper-link.js";
+import { createPlacekeeperLinkForPdf } from "../links/placekeeper-link.js";
 
 export type LaunchSurface = BrokerLaunchSurface;
 
@@ -238,7 +238,7 @@ export class PlacekeeperHost {
       if (request.confirmed !== true && !this.broker.activeReviewOwnsPath(decoded.path)) {
         return { ok: true, kind: "confirmation-required", path: decoded.path };
       }
-      const prepared = await resolvePlacekeeperLink(request.link);
+      const prepared = await createPlacekeeperLinkForPdf(decoded.path, decoded.location);
       const opened = await this.broker.openReview({
         pdfPath: prepared.pdfPath,
         ...(request.recovery === undefined ? {} : { recoveryDecision: request.recovery }),

@@ -40,6 +40,16 @@
   line-height: 1.5;
 }
 
+.annotation-peek > .copy-link-control {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+}
+
+.copy-link-control--annotation {
+  align-self: center;
+}
+
 .page-note-placement-cursor {
   position: absolute;
   z-index: 3;
@@ -1096,6 +1106,15 @@
 
 :is(.review-workspace, .review-tools-workspace) li[data-annotation-origin] {
   grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+:is(.review-workspace, .review-tools-workspace) li[data-item-copy-link="true"] {
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+}
+
+:is(.review-workspace, .review-tools-workspace) li[data-item-copy-link="true"]:focus-within {
+  z-index: 2;
+  overflow: visible;
 }
 
 :is(.review-workspace, .review-tools-workspace) li[data-search-result] {

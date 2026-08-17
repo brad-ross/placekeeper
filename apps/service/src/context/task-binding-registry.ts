@@ -30,7 +30,7 @@ interface ActiveBinding {
   readonly taskSessionId: string;
   readonly reviewSessionId: string;
   readonly documentGeneration: number;
-  readonly browserCapabilityHash: string;
+  readonly browserCapabilityHashes: Set<string>;
   leaseExpiresAtMs: number;
   lastVerified?: LiveObservationIdentity;
 }
@@ -173,6 +173,7 @@ export class TaskBindingRegistry {
         activeForReview.reviewSessionId === input.reviewSessionId &&
         activeForReview.documentGeneration === input.documentGeneration
       ) {
+        activeForReview.browserCapabilityHashes.add(proof.browserCapabilityHash);
         activeForReview.leaseExpiresAtMs = this.#nowMs() + this.#activeLeaseTtlMs;
         return { status: "active", leaseExpiresAt: iso(activeForReview.leaseExpiresAtMs) };
       }
@@ -240,7 +241,7 @@ export class TaskBindingRegistry {
       taskSessionId: pending.taskSessionId,
       reviewSessionId: pending.reviewSessionId,
       documentGeneration: pending.documentGeneration,
-      browserCapabilityHash: pending.browserCapabilityHash,
+      browserCapabilityHashes: new Set([pending.browserCapabilityHash]),
       leaseExpiresAtMs: this.#nowMs() + this.#activeLeaseTtlMs,
     };
     this.#activeByTask.set(active.taskSessionId, active);
@@ -281,7 +282,7 @@ export class TaskBindingRegistry {
     if (
       active === undefined ||
       active.documentGeneration !== input.documentGeneration ||
-      active.browserCapabilityHash !== input.browserCapabilityHash
+      !active.browserCapabilityHashes.has(input.browserCapabilityHash)
     ) return { status: "ignored" };
     active.leaseExpiresAtMs = this.#nowMs() + this.#activeLeaseTtlMs;
     return { status: "active", leaseExpiresAt: iso(active.leaseExpiresAtMs) };
@@ -328,7 +329,7 @@ export class TaskBindingRegistry {
     const active = this.#activeByReview.get(reviewSessionId);
     if (
       active?.documentGeneration === live.documentGeneration &&
-      active.browserCapabilityHash === browserCapabilityHash
+      active.browserCapabilityHashes.has(browserCapabilityHash)
     ) {
       const verified = active.lastVerified;
       const verifiedCurrent =

@@ -38,6 +38,8 @@ export const INSTALL_ARTIFACT_IDENTITY_ENV = "PLACEKEEPER_INSTALL_ARTIFACT_IDENT
 export const LIFECYCLE_LOCK_TOKEN_ENV = "PLACEKEEPER_LIFECYCLE_LOCK_TOKEN";
 export const LIFECYCLE_LOCK_PATH_ENV = "PLACEKEEPER_LIFECYCLE_LOCK_PATH";
 export const READINESS_TOKEN_ENV = "PLACEKEEPER_READINESS_TOKEN";
+export const INSTALLED_SMOKE_DAEMON_FLAG = "--isolated-installed-smoke";
+export const INSTALLED_SMOKE_HTTP_PORT_FLAG = "--http-port";
 
 export interface CandidateDaemonReceipt {
   readonly version: 1;
@@ -69,6 +71,25 @@ export function defaultDaemonPaths(): DaemonPaths {
     webAssetsRoot: resolve(dirname(process.argv[1] ?? "."), "../web"),
     httpPort: PLACEKEEPER_HTTP_PORT,
   };
+}
+
+/** Test-only command-line configuration for the installed lifecycle smoke.
+ * Production uses the fixed packaged port and never reads a port override
+ * from the environment. */
+export function installedSmokeDaemonPaths(args: readonly string[]): DaemonPaths | undefined {
+  const smokeIndexes = args.flatMap((value, index) => value === INSTALLED_SMOKE_DAEMON_FLAG ? [index] : []);
+  const portIndexes = args.flatMap((value, index) => value === INSTALLED_SMOKE_HTTP_PORT_FLAG ? [index] : []);
+  if (smokeIndexes.length === 0 && portIndexes.length === 0) return undefined;
+  if (smokeIndexes.length !== 1 || portIndexes.length !== 1) {
+    throw new Error("The isolated installed smoke requires one explicit HTTP port");
+  }
+  const portText = args[portIndexes[0]! + 1];
+  if (!/^[1-9][0-9]{0,4}$/u.test(portText ?? "")) {
+    throw new Error("The isolated installed smoke HTTP port is invalid");
+  }
+  const httpPort = Number(portText);
+  if (httpPort > 65_535) throw new Error("The isolated installed smoke HTTP port is invalid");
+  return { ...defaultDaemonPaths(), httpPort };
 }
 
 async function removeConfirmedStaleSocket(socketPath: string): Promise<void> {
@@ -142,7 +163,14 @@ function spawnServiceDaemon(
   lifecycleToken: string,
   readinessToken?: string,
 ): ChildProcess {
-  const child = spawn(process.execPath, [entry, "daemon"], {
+  const httpPort = paths.httpPort ?? PLACEKEEPER_HTTP_PORT;
+  const child = spawn(process.execPath, [
+    entry,
+    "daemon",
+    ...(httpPort === PLACEKEEPER_HTTP_PORT
+      ? []
+      : [INSTALLED_SMOKE_DAEMON_FLAG, INSTALLED_SMOKE_HTTP_PORT_FLAG, String(httpPort)]),
+  ], {
     detached: true,
     stdio: "ignore",
     env: {

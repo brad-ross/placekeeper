@@ -268,6 +268,39 @@ describe('review shell layout and accessibility contract', () => {
     expect(peekHtml).not.toContain('<button');
   });
 
+  it('offers an exact-item Copy Link action only for a portable saved annotation', () => {
+    const copyLink = {
+      getLink: () => 'placekeeper:///tmp/Paper.pdf#v=1&page=4&item=00000000-0000-4000-8000-000000000004',
+      writeText: async () => undefined,
+    };
+    const copyableList = renderToStaticMarkup(
+      <AnnotationList
+        items={[ownedAnnotation]}
+        copyLinkForItem={() => copyLink}
+        onNavigate={() => undefined}
+        onEdit={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
+    const pageOnlyList = renderToStaticMarkup(
+      <AnnotationList
+        items={[ownedAnnotation]}
+        onNavigate={() => undefined}
+        onEdit={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
+    const copyablePeek = renderToStaticMarkup(
+      <AnnotationPeek item={ownedAnnotation} copyLink={copyLink} onHoldChange={() => undefined} />,
+    );
+
+    expect(copyableList).toContain('data-item-copy-link="true"');
+    expect(copyableList).toContain('aria-label="Copy link to Highlight annotation on page 4"');
+    expect(copyablePeek).toContain('aria-label="Copy link to Highlight annotation on page 4"');
+    expect(pageOnlyList).toContain('data-item-copy-link="false"');
+    expect(pageOnlyList).not.toContain('data-annotation-action="copy-link"');
+  });
+
   it('exposes keyboard-equivalent controls, live status, and state-preserving drawer semantics', () => {
     const html = renderToStaticMarkup(
       <ReviewShell

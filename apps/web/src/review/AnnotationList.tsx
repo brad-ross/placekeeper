@@ -6,6 +6,7 @@ import {
   annotationAccessibleLabel,
   annotationKindLabel,
 } from './AnnotationMetadata.js';
+import { CopyLinkControl, type CopyLinkControlProps } from './CopyLinkControl.js';
 import { ReviewIcon } from './ReviewIcon.js';
 
 export interface AnnotationListProps {
@@ -16,6 +17,7 @@ export interface AnnotationListProps {
   sectionLabels?: ReadonlyMap<string, string>;
   onNavigate(item: ReviewItem): void;
   onCorrespondenceChange?(id: string | undefined): void;
+  copyLinkForItem?(item: ReviewItem): CopyLinkControlProps | undefined;
   onEdit(item: ReviewItem, trigger: HTMLButtonElement): void;
   onDelete(item: ReviewItem): Promise<void> | void;
 }
@@ -40,6 +42,7 @@ export function AnnotationList({
   sectionLabels,
   onNavigate,
   onCorrespondenceChange,
+  copyLinkForItem,
   onEdit,
   onDelete,
 }: AnnotationListProps) {
@@ -117,6 +120,7 @@ export function AnnotationList({
           const active = activeId === item.id;
           const corresponding = correspondingId === item.id;
           const sectionLabel = sectionLabels?.get(item.id);
+          const copyLink = copyLinkForItem?.(item);
           return (
             <li
               key={item.id}
@@ -130,6 +134,7 @@ export function AnnotationList({
               data-annotation-state={annotationState(active, corresponding)}
               data-active={active ? 'true' : 'false'}
               data-corresponding={corresponding ? 'true' : 'false'}
+              data-item-copy-link={copyLink === undefined ? 'false' : 'true'}
               onPointerEnter={() => onCorrespondenceChange?.(item.id)}
               onPointerLeave={() => onCorrespondenceChange?.(undefined)}
               onFocusCapture={() => onCorrespondenceChange?.(item.id)}
@@ -160,6 +165,14 @@ export function AnnotationList({
                 />
                 {text ? <span className="annotation-item__excerpt">{text}</span> : null}
               </button>
+              {copyLink === undefined ? null : (
+                <CopyLinkControl
+                  {...copyLink}
+                  variant="annotation"
+                  ariaLabel={`Copy link to ${kindLabel} annotation on page ${item.pageIndex + 1}`}
+                  title="Copy annotation link"
+                />
+              )}
               {item.kind === 'delete' ? null : (
                 <button type="button" className="annotation-item__action" data-annotation-action="edit" aria-label={`Edit ${kindLabel} annotation on page ${item.pageIndex + 1}`} title="Edit annotation" onClick={(event) => onEdit(item, event.currentTarget)}>
                   <ReviewIcon name="edit" size={15} />

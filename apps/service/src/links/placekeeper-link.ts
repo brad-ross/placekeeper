@@ -1,11 +1,8 @@
 import { open, realpath } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
-import { pathToFileURL } from "node:url";
 
 import {
   decodePlacekeeperReadableViewPathname,
-  decodePlacekeeperLink,
-  encodePlacekeeperLink,
   placekeeperLinkBase,
   type PlacekeeperLinkLocation,
 } from "../../../../packages/core/src/placekeeper-link.js";
@@ -33,9 +30,6 @@ export class PlacekeeperPdfLinkError extends Error {
 
 export interface PreparedPlacekeeperLink {
   readonly pdfPath: string;
-  readonly pdfFileUrl: string;
-  readonly appLinkBase: string;
-  readonly appLink: string;
   readonly location: PlacekeeperLinkLocation;
 }
 
@@ -88,16 +82,8 @@ export async function createPlacekeeperLinkForPdf(
   const canonicalPath = await approveLinkedPdf(pdfPath);
   return {
     pdfPath: canonicalPath,
-    pdfFileUrl: pathToFileURL(canonicalPath).href,
-    appLinkBase: placekeeperLinkBase(canonicalPath),
-    appLink: encodePlacekeeperLink({ path: canonicalPath, location }),
     location,
   };
-}
-
-export async function resolvePlacekeeperLink(input: string): Promise<PreparedPlacekeeperLink> {
-  const decoded = decodePlacekeeperLink(input);
-  return createPlacekeeperLinkForPdf(decoded.path, decoded.location);
 }
 
 /** Parses descriptive recovery data only. This must remain free of filesystem access. */

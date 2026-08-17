@@ -338,16 +338,20 @@ describe("broker acknowledgement and restart recovery", () => {
     const pdf = join(directory, "paper.pdf");
     await writeFile(pdf, "%PDF-1.7\nversion one\n%%EOF");
     const recoveryRoot = join(directory, "recovery");
-    const broker = new SessionBroker({ recoveryRoot });
+    const rewriteAssessor = vi.fn(async () => ({ eligible: true as const }));
+    const broker = new SessionBroker({ recoveryRoot, rewriteAssessor });
     const first = await broker.openReview({ pdfPath: pdf });
     if (first.kind !== "opened") throw new Error("Expected a new review");
+    expect(rewriteAssessor).toHaveBeenCalledOnce();
     const focused = await broker.openReview({ pdfPath: pdf });
     expect(focused).toMatchObject({
       kind: "focused",
       launch: { sessionId: first.launch.sessionId },
     });
+    expect(rewriteAssessor).toHaveBeenCalledOnce();
     const forked = await broker.openReview({ pdfPath: pdf, recoveryDecision: "fork" });
     if (forked.kind !== "opened") throw new Error("Expected independent fork");
+    expect(rewriteAssessor).toHaveBeenCalledTimes(2);
     expect(forked.launch.sessionId).not.toBe(first.launch.sessionId);
     await broker.finish(forked.launch.sessionId);
     const refocused = await broker.openReview({ pdfPath: pdf });
@@ -355,6 +359,7 @@ describe("broker acknowledgement and restart recovery", () => {
       kind: "focused",
       launch: { sessionId: first.launch.sessionId },
     });
+    expect(rewriteAssessor).toHaveBeenCalledTimes(2);
     await broker.acceptMutation(first.launch.sessionId, addCommand(0));
 
     const restart = new SessionBroker({ recoveryRoot });

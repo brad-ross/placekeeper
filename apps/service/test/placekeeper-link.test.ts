@@ -1,14 +1,11 @@
 import { chmod, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { encodePlacekeeperLink } from "../../../packages/core/src/placekeeper-link.js";
 import {
   createPlacekeeperLinkForPdf,
   parsePlacekeeperReadableViewRoute,
-  resolvePlacekeeperLink,
 } from "../src/links/placekeeper-link.js";
 
 const roots: string[] = [];
@@ -46,20 +43,15 @@ describe("Placekeeper service links", () => {
     )).toThrow();
   });
 
-  it("turns a decoded local path into the canonical file URL and ready app-link base", async () => {
+  it("approves a decoded local path and preserves its requested location", async () => {
     const path = await fixture("paper #1 %2F 论文.pdf");
     const prepared = await createPlacekeeperLinkForPdf(path, { kind: "page", page: 2 });
     const canonicalPath = await realpath(path);
 
     expect(prepared).toEqual({
       pdfPath: canonicalPath,
-      pdfFileUrl: pathToFileURL(canonicalPath).href,
-      appLinkBase: encodePlacekeeperLink({ path: canonicalPath, location: { kind: "page", page: 1 } }).split("#")[0],
-      appLink: encodePlacekeeperLink({ path: canonicalPath, location: { kind: "page", page: 2 } }),
       location: { kind: "page", page: 2 },
     });
-
-    await expect(resolvePlacekeeperLink(prepared.appLink)).resolves.toEqual(prepared);
   });
 
   it.each([

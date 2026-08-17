@@ -44,31 +44,53 @@ export interface CopyLinkControlProps {
   readonly getLink: () => string;
   readonly writeText: (link: string) => Promise<void>;
   readonly disabled?: boolean;
+  readonly ariaLabel?: string;
+  readonly title?: string;
+  readonly variant?: 'chrome' | 'annotation';
 }
 
-export function CopyLinkControl({ getLink, writeText, disabled = false }: CopyLinkControlProps) {
+export function CopyLinkControl({
+  getLink,
+  writeText,
+  disabled = false,
+  ariaLabel = 'Copy link to current PDF location',
+  title = 'Copy link',
+  variant = 'chrome',
+}: CopyLinkControlProps) {
   const getLinkRef = useRef(getLink);
   getLinkRef.current = getLink;
   const writeTextRef = useRef(writeText);
   writeTextRef.current = writeText;
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [status, setStatus] = useState<CopyLinkStatus>({ status: 'idle' });
   const commandRef = useRef<ReturnType<typeof createCopyLinkCommand> | null>(null);
   if (commandRef.current === null) {
     commandRef.current = createCopyLinkCommand({
       getLink: () => getLinkRef.current(),
       writeText: (link) => writeTextRef.current(link),
-      onStatus: setStatus,
+      onStatus: (next) => {
+        setStatus(next);
+        if (next.status === 'failure') queueMicrotask(() => triggerRef.current?.focus());
+      },
     });
   }
   const run = () => { void commandRef.current?.run(); };
+  const annotation = variant === 'annotation';
 
   return (
-    <div className="copy-link-control" data-copy-link-status={status.status}>
+    <div
+      className={`copy-link-control${annotation ? ' copy-link-control--annotation' : ''}`}
+      data-copy-link-status={status.status}
+    >
       <button
+        ref={triggerRef}
         type="button"
-        className="review-chrome__icon-control copy-link-control__trigger"
-        aria-label="Copy link to current PDF location"
-        title="Copy link"
+        className={annotation
+          ? 'annotation-item__action copy-link-control__trigger'
+          : 'review-chrome__icon-control copy-link-control__trigger'}
+        {...(annotation ? { 'data-annotation-action': 'copy-link' } : {})}
+        aria-label={ariaLabel}
+        title={title}
         aria-busy={status.status === 'pending' ? 'true' : 'false'}
         disabled={disabled || status.status === 'pending'}
         onClick={run}
