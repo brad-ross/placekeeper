@@ -21,6 +21,7 @@ export type VisualSceneName =
   | 'unavailable-controls'
   | 'contextual'
   | 'tray'
+  | 'outline'
   | 'reference-layout'
   | 'peek'
   | 'page-note'
@@ -36,6 +37,7 @@ export interface VisualScenario {
   readonly existingAnnotations: ExistingAnnotationsDiscovery;
   readonly annotationOutlineLabels?: AnnotationOutlineLabels;
   readonly outlineDiscovery?: PdfOutlineDiscovery;
+  readonly currentOutlineItemId?: string;
   readonly viewerState: ViewerControlsSnapshot;
   readonly referenceNavigation?: ReferenceNavigationState;
   readonly referenceTabs?: readonly ReferenceWorkspaceTab[];
@@ -179,12 +181,64 @@ function createVisualReferenceNavigation(): ReferenceNavigationState {
 
 const visualReferenceNavigation = createVisualReferenceNavigation();
 
+const outlineTarget = (identity: string, pageIndex: number) => ({
+  documentGeneration: 0,
+  pageIndex,
+  zoom: { mode: PdfZoomMode.FitPage, params: [] },
+  identity,
+});
+
+const visualOutlineDiscovery: PdfOutlineDiscovery = {
+  status: 'loaded-tree',
+  documentGeneration: 0,
+  items: [
+    {
+      id: 'outline-group',
+      label: 'Empirical framework',
+      pageContext: null,
+      target: null,
+      children: [{
+        id: 'outline-targetable-branch',
+        label: 'Identification strategy',
+        pageContext: 'Page 10',
+        target: outlineTarget('outline-identification', 9),
+        children: [{
+          id: 'outline-long-nested',
+          label: 'Conditional comparison groups and identifying variation across narrowly defined local markets',
+          pageContext: 'Page 18',
+          target: outlineTarget('outline-conditional-comparison', 17),
+          children: [{
+            id: 'outline-targetable-leaf',
+            label: 'Conditional comparison estimates',
+            pageContext: 'Page 24',
+            target: outlineTarget('outline-comparison-estimates', 23),
+            children: [],
+          }],
+        }],
+      }],
+    },
+    {
+      id: 'outline-peer-branch',
+      label: 'Robustness appendix',
+      pageContext: 'Page 64',
+      target: outlineTarget('outline-robustness', 63),
+      children: [{
+        id: 'outline-peer-leaf',
+        label: 'Leave-one-market-out estimates',
+        pageContext: 'Page 72',
+        target: outlineTarget('outline-leave-one-market-out', 71),
+        children: [],
+      }],
+    },
+  ],
+};
+
 export function resolveVisualScenario(search: string): VisualScenario | null {
   const parameters = new URLSearchParams(search);
   const requested = parameters.get('visual');
   if (!requested) return null;
   const name = requested as VisualSceneName;
-  if (!['reading', 'unavailable-controls', 'contextual', 'tray', 'reference-layout', 'peek', 'page-note', 'exceptional'].includes(name)) return null;
+  if (!['reading', 'unavailable-controls', 'contextual', 'tray', 'outline', 'reference-layout', 'peek', 'page-note', 'exceptional'].includes(name)) return null;
   const state = stateFor(name === 'contextual' || name === 'page-note' ? [] : seededItems);
   const exception = parameters.get('exception');
   const exceptionalAnnotations: ExistingAnnotationsDiscovery = exception === 'loading'
@@ -196,7 +250,7 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
     name,
     documentTitle: 'Identification Strategy, Local Equilibria, and Robustness — Author Revision 2026-08-09.pdf',
     state,
-    listOpen: name === 'tray' || name === 'exceptional',
+    listOpen: name === 'tray' || name === 'outline' || name === 'exceptional',
     pageMenuOpen: name === 'page-note',
     existingAnnotations: name === 'exceptional' ? exceptionalAnnotations : readyAnnotations,
     ...(name === 'tray' ? {
@@ -212,6 +266,10 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
           children: [],
         }],
       },
+    } : {}),
+    ...(name === 'outline' ? {
+      outlineDiscovery: visualOutlineDiscovery,
+      currentOutlineItemId: 'outline-long-nested',
     } : {}),
     viewerState: name === 'unavailable-controls' ? unavailableViewerControls() : viewerState,
     ...(name === 'reference-layout' ? {
