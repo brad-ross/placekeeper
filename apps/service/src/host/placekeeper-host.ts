@@ -77,6 +77,7 @@ export interface PlacekeeperHostOptions {
   readonly recoveryRoot: string;
   readonly webAssets?: WebAssetOptions;
   readonly taskBindings?: TaskBindingRegistry;
+  readonly port?: number;
 }
 
 function failure(
@@ -180,6 +181,7 @@ export class PlacekeeperHost {
       },
     });
     const server = await startHttpServer(broker, {
+      ...(options.port === undefined ? {} : { port: options.port }),
       ...(options.webAssets === undefined ? {} : { webAssets: options.webAssets }),
       saving,
       lifecycle,

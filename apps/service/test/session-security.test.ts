@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
-import { createConnection } from "node:net";
+import { createConnection, createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -12,7 +12,11 @@ import {
   type RequestSecurityContext,
 } from "../../../packages/core/src/session-security.js";
 import { FileCapabilityRegistry } from "../src/files/file-capabilities.js";
-import { startHttpServer, type LocalHttpServer } from "../src/server/http-server.js";
+import {
+  PLACEKEEPER_HTTP_PORT,
+  startHttpServer,
+  type LocalHttpServer,
+} from "../src/server/http-server.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
 import type { SessionLaunch } from "../src/sessions/session-broker.js";
 import { SessionControlRegistry } from "../src/sessions/control-socket.js";
@@ -317,6 +321,28 @@ function postJson(
 }
 
 describe("loopback HTTP boundary", () => {
+  it("supports an explicit fixed loopback port and fails on collision without falling back", async () => {
+    expect(PLACEKEEPER_HTTP_PORT).toBeGreaterThan(1_024);
+    expect(PLACEKEEPER_HTTP_PORT).toBeLessThanOrEqual(65_535);
+    const blocker = createNetServer();
+    await new Promise<void>((resolve, reject) => {
+      blocker.once("error", reject);
+      blocker.listen({ host: "127.0.0.1", port: 0 }, () => resolve());
+    });
+    const address = blocker.address();
+    if (address === null || typeof address === "string") throw new Error("Expected TCP blocker");
+    const directory = await temporaryDirectory();
+    const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
+
+    await expect(startHttpServer(broker, { port: address.port })).rejects.toMatchObject({
+      code: "EADDRINUSE",
+    });
+    await new Promise<void>((resolve, reject) => blocker.close((error) => error ? reject(error) : resolve()));
+    const rebound = await startHttpServer(broker, { port: address.port });
+    servers.push(rebound);
+    expect(rebound.port).toBe(address.port);
+  });
+
   it("exchanges the fragment once, scrubs it before protected assets, and scopes all bytes", async () => {
     const { broker, launch, server } = await openBroker();
     const bootstrap = await fetch(`${server.origin}${launch.launchPath}`);
@@ -418,6 +444,7 @@ describe("loopback HTTP boundary", () => {
       expect(await resumed.json()).toEqual({
         sessionId: launch.sessionId,
         credential: exchangeBody.credential,
+        appLinkBase: `placekeeper://${exchangeBody.view.pathname.replace(/^\/r\/[0-9a-f-]{36}/u, "")}`,
       });
     }
 
@@ -443,6 +470,41 @@ describe("loopback HTTP boundary", () => {
     expect((await fetch(`${server.origin}/s/${launch.sessionId}/state`, {
       headers: { authorization: `Bearer ${exchangeBody.credential}` },
     })).status).toBe(401);
+    const revokedRoute = await fetch(
+      `${server.origin}${exchangeBody.view.pathname}#v=1&page=7`,
+      { headers: { cookie } },
+    );
+    const revokedHtml = await revokedRoute.text();
+    expect(revokedRoute.status).toBe(200);
+    expect(revokedRoute.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(revokedHtml).toContain("data-terminal-recovery");
+    expect(revokedHtml).toContain("placekeeper:///");
+    expect(revokedHtml).toContain("#v=1&amp;page=1");
+    expect(revokedHtml).toContain("showTerminalRecovery");
+    expect(revokedHtml).not.toContain("/resume");
+    expect(revokedHtml).not.toContain(launch.sessionId);
+    expect(revokedHtml).not.toContain(exchangeBody.credential);
+    expect(revokedHtml).not.toContain(capability);
+
+    const unknownViewId = randomUUID();
+    const unknownPath = `/r/${unknownViewId}/private/tmp/Unknown%20Paper.pdf`;
+    const unknown = await fetch(`${server.origin}${unknownPath}#unsafe`, {
+      headers: { cookie: "placekeeper_view=stale-successor-cookie" },
+    });
+    const unknownHtml = await unknown.text();
+    expect(unknown.status).toBe(200);
+    expect(unknown.headers.get("set-cookie")).toContain(`Path=/r/${unknownViewId}/`);
+    expect(unknown.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(unknownHtml).toContain("placekeeper:///private/tmp/Unknown%20Paper.pdf#v=1&amp;page=1");
+    expect(unknownHtml).not.toContain("fetch(");
+    expect(unknownHtml).not.toContain("location.assign");
+    expect(unknownHtml).not.toContain("location.replace");
+    expect(unknownHtml).not.toContain(launch.sessionId);
+    expect(unknownHtml).not.toContain(exchangeBody.credential);
+    expect((await fetch(
+      `${server.origin}/r/${randomUUID()}/private/tmp/Bad%2FPath.pdf`,
+      { headers: { cookie: "placekeeper_view=stale-successor-cookie" } },
+    )).status).toBe(404);
 
     const reopened = await broker.openReview({ pdfPath: pdf, surface: "browser" });
     if (reopened.kind !== "focused") throw new Error("Expected another live view");

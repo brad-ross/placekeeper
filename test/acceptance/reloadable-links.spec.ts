@@ -51,3 +51,57 @@ test("a live readable review survives repeated hard refresh and fails closed aft
     new RegExp(`^placekeeper:///.*Paper%20One\\.pdf#v=1&page=1$`, "u"),
   );
 });
+
+test("a successor daemon keeps the old origin but serves a stale view as inert click-only recovery", async ({ page }) => {
+  const successorRoot = await mkdtemp(join(tmpdir(), "placekeeper-successor-view-"));
+  const successorPdf = join(successorRoot, "Successor Paper.pdf");
+  await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), successorPdf);
+  let first: PlacekeeperHost | undefined;
+  let successor: PlacekeeperHost | undefined;
+  try {
+    first = await PlacekeeperHost.start({
+      recoveryRoot: join(successorRoot, "first-recovery"),
+      webAssets: { root: resolve("dist/web") },
+      port: 0,
+    });
+    const launched = await first.open({ pdfPath: successorPdf, surface: "browser", fork: true });
+    if (!launched.ok || launched.kind === "recovery-offered") {
+      throw new Error("Expected a predecessor browser launch");
+    }
+    await page.goto(launched.url);
+    await expect(page.locator("#root")).toHaveAttribute("data-production-root", "true");
+    const readableUrl = new URL(page.url());
+    const predecessorPort = first.server.port;
+
+    await first.close();
+    first = undefined;
+    successor = await PlacekeeperHost.start({
+      recoveryRoot: join(successorRoot, "successor-recovery"),
+      webAssets: { root: resolve("dist/web") },
+      port: predecessorPort,
+    });
+    expect(successor.server.origin).toBe(readableUrl.origin);
+
+    await page.evaluate(() => { location.hash = "#unsafe"; });
+    const requests: string[] = [];
+    const recordRequest = (request: { url(): string }) => requests.push(request.url());
+    page.on("request", recordRequest);
+    await page.reload();
+    await expect(page.locator("[data-terminal-recovery]")).toBeVisible();
+    await expect(page.getByText("This live review is no longer available.")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Reopen in Placekeeper" })).toHaveAttribute(
+      "href",
+      /^placekeeper:\/\/\/.*Successor%20Paper\.pdf#v=1&page=1$/u,
+    );
+    expect(page.url()).toBe(`${readableUrl.origin}${readableUrl.pathname}#unsafe`);
+    expect(requests.some((url) => url.startsWith("placekeeper:"))).toBe(false);
+    expect(requests.some((url) => new URL(url).pathname.endsWith("/resume"))).toBe(false);
+    expect(requests.some((url) => new URL(url).pathname.startsWith("/s/"))).toBe(false);
+    expect((await page.context().cookies(readableUrl.origin)).some(({ name }) => name === "placekeeper_view"))
+      .toBe(false);
+  } finally {
+    await first?.close();
+    await successor?.close();
+    await rm(successorRoot, { recursive: true, force: true });
+  }
+});

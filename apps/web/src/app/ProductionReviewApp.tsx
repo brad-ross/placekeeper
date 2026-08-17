@@ -76,6 +76,8 @@ import {
 export interface ProductionSession {
   readonly sessionId: string;
   readonly credential: string;
+  /** Present for top-level readable views; embedded bootstrap sessions omit it. */
+  readonly appLinkBase?: string;
 }
 
 export interface ProductionScope {

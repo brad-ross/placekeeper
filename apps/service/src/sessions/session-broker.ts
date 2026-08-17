@@ -12,7 +12,8 @@ import type {
 } from "../../../../packages/core/src/review-model.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import {
-  encodePlacekeeperLink,
+  encodePlacekeeperLinkFragment,
+  encodePlacekeeperReadableViewPathname,
   type PlacekeeperLinkLocation,
 } from "../../../../packages/core/src/placekeeper-link.js";
 import { createReviewState } from "../../../../packages/core/src/review-model.js";
@@ -611,13 +612,10 @@ export class SessionBroker {
     const id = randomUUID();
     const cookie = randomBytes(32).toString("base64url");
     const location = scope.requestedLocation ?? { kind: "page" as const, page: 1 };
-    const canonicalLink = encodePlacekeeperLink({
+    const pathname = encodePlacekeeperReadableViewPathname({
+      viewId: id,
       path: session.canonicalSourcePath,
-      location,
     });
-    const fragmentIndex = canonicalLink.indexOf("#");
-    const encodedPath = canonicalLink.slice("placekeeper://".length, fragmentIndex);
-    const pathname = `/r/${id}${encodedPath}`;
     this.#viewsById.set(id, {
       id,
       cookieHash: digestSecretHex(cookie),
@@ -634,7 +632,7 @@ export class SessionBroker {
         id,
         cookie,
         pathname,
-        locationFragment: canonicalLink.slice(fragmentIndex + 1),
+        locationFragment: encodePlacekeeperLinkFragment(location),
       },
     };
   }
@@ -673,6 +671,19 @@ export class SessionBroker {
     }
     this.controls.noteAuthenticatedPage(view.sessionId);
     return { sessionId: view.sessionId, credential: view.credential };
+  }
+
+  isLiveViewRoute(viewId: string, pathname: string): boolean {
+    const view = this.#viewsById.get(viewId);
+    if (view === undefined || view.pathname !== pathname) return false;
+    const session = this.#activeById.get(view.sessionId);
+    const live =
+      session !== undefined &&
+      !session.ending &&
+      session.documentGeneration === view.documentGeneration &&
+      this.credentials.authenticate(view.sessionId, view.credential);
+    if (!live) this.#viewsById.delete(viewId);
+    return live;
   }
 
   revokeView(viewId: string): void {

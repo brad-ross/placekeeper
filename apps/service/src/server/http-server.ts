@@ -12,9 +12,14 @@ import { isContained } from "../files/file-capabilities.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
 import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { DaemonLifecycleCoordinator } from "../host/daemon-lifecycle.js";
+import { parsePlacekeeperReadableViewRoute } from "../links/placekeeper-link.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+const VIEW_UUID = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+
+/** Stable packaged-daemon browser origin. Direct hosts and tests default to port 0. */
+export const PLACEKEEPER_HTTP_PORT = 43_179;
 
 function setBaseHeaders(
   response: ServerResponse,
@@ -106,6 +111,13 @@ function cookieValue(request: IncomingMessage, name: string): string | undefined
   return undefined;
 }
 
+function clearViewCookie(response: ServerResponse, viewId: string): void {
+  response.setHeader(
+    "Set-Cookie",
+    `placekeeper_view=; Path=/r/${viewId}/; Max-Age=0; HttpOnly; SameSite=Strict`,
+  );
+}
+
 function bootstrapHtml(sessionId: string, nonce: string, embedded: boolean): string {
   const start = embedded
     ? `
@@ -135,8 +147,22 @@ function bootstrapHtml(sessionId: string, nonce: string, embedded: boolean): str
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Placekeeper</title></head><body><div id="root"></div><script type="module" nonce="${nonce}">${script}</script></body></html>`;
 }
 
-function readableViewHtml(nonce: string): string {
+function htmlAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function terminalRecoveryMarkup(appLinkBase: string, hidden = false): string {
+  const base = htmlAttribute(appLinkBase);
+  return `<main data-terminal-recovery${hidden ? " hidden" : ""}><p>This live review is no longer available.</p><a data-placekeeper-reopen data-app-link-base="${base}" href="${base}#v=1&amp;page=1">Reopen in Placekeeper</a></main>`;
+}
+
+function readableViewHtml(nonce: string, appLinkBase: string): string {
   const script = `
+let app;
 (async () => {
   const match = /^\\/r\\/([0-9a-f-]{36})\\//u.exec(location.pathname);
   if (!match) throw new Error("Invalid review view");
@@ -144,22 +170,20 @@ function readableViewHtml(nonce: string): string {
   stylesheet.rel = "stylesheet";
   stylesheet.href = "/assets/app.css";
   document.head.append(stylesheet);
-  const app = await import("/assets/app.js");
+  app = await import("/assets/app.js");
   await app.resume(match[1], location.pathname);
 })().catch(() => {
-  const encodedPath = location.pathname.replace(/^\\/r\\/[^/]+/u, "");
-  const fragment = /^#v=1&page=[1-9][0-9]*(?:&item=[0-9a-f-]+)?$/iu.test(location.hash)
-    ? location.hash
-    : "#v=1&page=1";
-  document.body.replaceChildren();
-  const message = document.createElement("p");
-  message.textContent = "This live review is no longer available.";
-  const reopen = document.createElement("a");
-  reopen.href = "placekeeper://" + encodedPath + fragment;
-  reopen.textContent = "Reopen in Placekeeper";
-  document.body.append(message, reopen);
+  document.querySelector("#root")?.remove();
+  const recovery = document.querySelector("[data-terminal-recovery]");
+  if (recovery instanceof HTMLElement) recovery.hidden = false;
+  app?.showTerminalRecovery();
 });`;
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Placekeeper</title></head><body><div id="root"></div><script type="module" nonce="${nonce}">${script}</script></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Placekeeper</title></head><body><div id="root"></div>${terminalRecoveryMarkup(appLinkBase, true)}<script type="module" nonce="${nonce}">${script}</script></body></html>`;
+}
+
+function terminalRecoveryHtml(nonce: string, appLinkBase: string): string {
+  const script = `import("/assets/app.js").then((app) => app.showTerminalRecovery()).catch(() => {});`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Placekeeper</title></head><body>${terminalRecoveryMarkup(appLinkBase)}<script type="module" nonce="${nonce}">${script}</script></body></html>`;
 }
 
 function assetContentType(path: string): string {
@@ -178,6 +202,7 @@ export interface WebAssetOptions {
 }
 
 export interface LocalHttpServerOptions {
+  readonly port?: number;
   readonly webAssets?: WebAssetOptions;
   readonly saving?: Pick<
     PdfSaveCoordinator,
@@ -214,7 +239,7 @@ export async function startHttpServer(
       const requestUrl = new URL(request.url ?? "/", origin);
       const pathname = requestUrl.pathname;
       const exchangeMatch = new RegExp(`^/s/(${UUID})/exchange$`, "u").exec(pathname);
-      const resumeMatch = new RegExp(`^/r/(${UUID})/resume$`, "u").exec(pathname);
+      const resumeMatch = new RegExp(`^/r/(${VIEW_UUID})/resume$`, "u").exec(pathname);
       const commandMatch = new RegExp(`^/s/(${UUID})/commands$`, "u").exec(pathname);
       const saveMatch = new RegExp(
         `^/s/(${UUID})/save/(status|proposal|copy|folder|original|retry|locate)$`,
@@ -338,15 +363,23 @@ export async function startHttpServer(
             ? broker.resumeView(resumeMatch[1]!, body.pathname, cookie)
             : undefined;
         if (resumed === undefined) {
+          clearViewCookie(response, resumeMatch[1]!);
           send(response, 401, "View is no longer available");
           return;
         }
-        sendJson(response, 200, resumed);
+        const { appLinkBase } = parsePlacekeeperReadableViewRoute(body.pathname as string);
+        sendJson(response, 200, { ...resumed, appLinkBase });
         return;
       }
 
-      const readableViewMatch = new RegExp(`^/r/(${UUID})/(.+)$`, "u").exec(pathname);
-      if (readableViewMatch !== null) {
+      const readableView = (() => {
+        try {
+          return parsePlacekeeperReadableViewRoute(pathname);
+        } catch {
+          return undefined;
+        }
+      })();
+      if (readableView !== undefined) {
         if (request.method !== "GET") {
           send(response, 405, "Method not allowed");
           return;
@@ -358,10 +391,14 @@ export async function startHttpServer(
             `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval'`,
           )
           .replace("frame-ancestors 'self'", "frame-ancestors 'none'");
+        const live = broker.isLiveViewRoute(readableView.viewId, pathname);
+        if (!live) clearViewCookie(response, readableView.viewId);
         send(
           response,
           200,
-          readableViewHtml(nonce),
+          live
+            ? readableViewHtml(nonce, readableView.appLinkBase)
+            : terminalRecoveryHtml(nonce, readableView.appLinkBase),
           "text/html; charset=utf-8",
           csp,
         );
@@ -616,7 +653,7 @@ export async function startHttpServer(
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen({ host: "127.0.0.1", port: 0 }, () => {
+    server.listen({ host: "127.0.0.1", port: options.port ?? 0 }, () => {
       server.off("error", reject);
       resolve();
     });

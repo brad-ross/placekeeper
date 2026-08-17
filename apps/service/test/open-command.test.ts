@@ -31,6 +31,7 @@ import {
   initialDaemonIsAbsent,
 } from "../src/cli/daemon-command.js";
 import { defaultDaemonPaths } from "../src/host/service-daemon.js";
+import { PLACEKEEPER_HTTP_PORT } from "../src/server/http-server.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 
 const roots: string[] = [];
@@ -49,6 +50,10 @@ afterEach(async () => {
 });
 
 describe("open command", () => {
+  it("pins the packaged daemon to the exported fixed browser origin", () => {
+    expect(defaultDaemonPaths().httpPort).toBe(PLACEKEEPER_HTTP_PORT);
+  });
+
   it("parses bounded app-link preflight and confirmed-open commands", () => {
     const link = "placekeeper:///tmp/Paper%20One.pdf#v=1&page=12";
     expect(parseOpenLinkArguments([

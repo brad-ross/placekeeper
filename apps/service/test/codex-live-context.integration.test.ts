@@ -128,7 +128,11 @@ describe("packaged Codex live-context lifecycle", () => {
         body: JSON.stringify({ pathname: view.pathname }),
       });
       expect(resumed.status).toBe(200);
-      expect(await resumed.json()).toEqual({ sessionId: launch.sessionId, credential });
+      expect(await resumed.json()).toEqual({
+        sessionId: launch.sessionId,
+        credential,
+        appLinkBase: expect.stringMatching(/^placekeeper:\/\/\/.+paper\.pdf$/u),
+      });
     }
     const resumedScope = await fetch(`${launchedUrl.origin}/s/${launch.sessionId}/scope`, {
       headers: { authorization: `Bearer ${credential}` },

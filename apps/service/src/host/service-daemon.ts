@@ -22,12 +22,14 @@ import type {
 import { PlacekeeperHost } from "./placekeeper-host.js";
 import { acquireLifecycleLock, LifecycleLockTimeoutError } from "./lifecycle-lock.js";
 import { upgradeReason } from "./upgrade-coordinator.js";
+import { PLACEKEEPER_HTTP_PORT } from "../server/http-server.js";
 
 export interface DaemonPaths {
   readonly appSupportRoot: string;
   readonly recoveryRoot: string;
   readonly socketPath: string;
   readonly webAssetsRoot: string;
+  readonly httpPort?: number;
   readonly lifecycleLockPath?: string;
 }
 
@@ -65,6 +67,7 @@ export function defaultDaemonPaths(): DaemonPaths {
     // object, but an inherited environment cannot make packaged code serve
     // caller-selected browser assets under a trusted build identity.
     webAssetsRoot: resolve(dirname(process.argv[1] ?? "."), "../web"),
+    httpPort: PLACEKEEPER_HTTP_PORT,
   };
 }
 
@@ -103,6 +106,7 @@ export async function startServiceDaemon(paths = defaultDaemonPaths()): Promise<
     host = await PlacekeeperHost.start({
       recoveryRoot: paths.recoveryRoot,
       webAssets: { root: paths.webAssetsRoot },
+      port: paths.httpPort ?? PLACEKEEPER_HTTP_PORT,
     });
     const startedHost = host;
     const control = await startLaunchControlServer(startedHost, paths.socketPath, {
