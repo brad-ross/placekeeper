@@ -24,12 +24,12 @@ export function createCopyLinkCommand(input: {
   readonly getLink: () => string;
   readonly writeText: (link: string) => Promise<void>;
   readonly onStatus: (status: CopyLinkStatus) => void;
-}): { readonly run: () => Promise<void> } {
+}): { readonly run: (linkOverride?: string) => Promise<void> } {
   let pending: Promise<void> | null = null;
   return {
-    run: () => {
+    run: (linkOverride) => {
       if (pending !== null) return pending;
-      const link = input.getLink();
+      const link = linkOverride ?? input.getLink();
       input.onStatus({ status: 'pending' });
       pending = input.writeText(link)
         .then(() => input.onStatus({ status: 'success' }))
@@ -43,9 +43,10 @@ export function createCopyLinkCommand(input: {
 export interface CopyLinkControlProps {
   readonly getLink: () => string;
   readonly writeText: (link: string) => Promise<void>;
+  readonly disabled?: boolean;
 }
 
-export function CopyLinkControl({ getLink, writeText }: CopyLinkControlProps) {
+export function CopyLinkControl({ getLink, writeText, disabled = false }: CopyLinkControlProps) {
   const getLinkRef = useRef(getLink);
   getLinkRef.current = getLink;
   const writeTextRef = useRef(writeText);
@@ -69,7 +70,7 @@ export function CopyLinkControl({ getLink, writeText }: CopyLinkControlProps) {
         aria-label="Copy link to current PDF location"
         title="Copy link"
         aria-busy={status.status === 'pending' ? 'true' : 'false'}
-        disabled={status.status === 'pending'}
+        disabled={disabled || status.status === 'pending'}
         onClick={run}
       >
         <ReviewIcon name="clipboard" />
@@ -81,10 +82,13 @@ export function CopyLinkControl({ getLink, writeText }: CopyLinkControlProps) {
         <div className="copy-link-control__fallback">
           <p role="alert">Clipboard access failed. Copy the link below.</p>
           <input aria-label="Placekeeper link" readOnly value={status.link} onFocus={(event) => event.currentTarget.select()} />
-          <button type="button" onClick={run}>Retry</button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => { void commandRef.current?.run(status.link); }}
+          >Retry</button>
         </div>
       ) : null}
     </div>
   );
 }
-

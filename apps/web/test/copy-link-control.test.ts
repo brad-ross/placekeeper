@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 import {
   buildPlacekeeperCopyLink,
+  CopyLinkControl,
   createCopyLinkCommand,
   type CopyLinkStatus,
 } from '../src/review/CopyLinkControl.js';
@@ -17,6 +20,16 @@ function deferred<T>() {
 }
 
 describe('Copy Link', () => {
+  it('disables copying while the surrounding navigation is unsettled', () => {
+    const markup = renderToStaticMarkup(createElement(CopyLinkControl, {
+      disabled: true,
+      getLink: () => 'placekeeper:///tmp/Paper.pdf#v=1&page=4',
+      writeText: async () => undefined,
+    }));
+
+    expect(markup).toContain('disabled=""');
+  });
+
   it('constructs only a safe encoded fragment from the validated app-link base', () => {
     expect(buildPlacekeeperCopyLink(
       'placekeeper:///Users/reader/Paper%20One.pdf',
@@ -52,7 +65,7 @@ describe('Copy Link', () => {
       .mockRejectedValueOnce(new Error('denied'))
       .mockResolvedValueOnce(undefined);
     const states: CopyLinkStatus[] = [];
-    const link = 'placekeeper:///tmp/Paper.pdf#v=1&page=7';
+    let link = 'placekeeper:///tmp/Paper.pdf#v=1&page=7';
     const command = createCopyLinkCommand({
       getLink: () => link,
       writeText,
@@ -61,8 +74,12 @@ describe('Copy Link', () => {
 
     await command.run();
     expect(states.at(-1)).toEqual({ status: 'failure', link });
-    await command.run();
+    const failedLink = link;
+    link = 'placekeeper:///tmp/Paper.pdf#v=1&page=9';
+    await command.run(failedLink);
     expect(writeText).toHaveBeenCalledTimes(2);
+    expect(writeText).toHaveBeenNthCalledWith(1, failedLink);
+    expect(writeText).toHaveBeenNthCalledWith(2, failedLink);
     expect(states.at(-1)).toEqual({ status: 'success' });
   });
 });

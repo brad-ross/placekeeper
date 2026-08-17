@@ -23,6 +23,8 @@ export default defineConfig({
       'apps/service/test/live-source-workflow.test.ts',
       'apps/service/test/codex-live-context.integration.test.ts',
       'packages/core/test/live-context.test.ts',
+      'packages/core/test/placekeeper-link.test.ts',
+      'apps/service/test/placekeeper-link.test.ts',
       'packages/core/test/review-commands.test.ts',
       'apps/web/test/save-state-controller.test.ts',
       'apps/web/test/proofread-gestures.test.tsx',

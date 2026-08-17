@@ -58,7 +58,10 @@ import {
 } from "../review/reference-navigation-state.js";
 import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
 import { PdfSearchWorkspace } from '../review/PdfSearchWorkspace.js';
-import { createTrailingTaskScheduler } from "../review/main-location-refresh.js";
+import {
+  createTrailingTaskScheduler,
+  waitForReviewNavigationReady,
+} from "../review/main-location-refresh.js";
 import {
   canDeriveAnnotationOutlineLabels,
   deriveAnnotationOutlineLabels,
@@ -630,15 +633,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     restoringLocationGenerationRef.current = generation;
     let cancelled = false;
     const restoreWhenSettled = async () => {
-      for (let frame = 0; frame < 120 && !cancelled; frame += 1) {
-        if (mainNavigationRef.current?.fitToWidthReady()) break;
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      }
-      if (
-        cancelled
-        || generation !== documentGenerationRef.current
-        || !mainNavigationRef.current?.fitToWidthReady()
-      ) {
+      const ready = await waitForReviewNavigationReady({
+        isCurrent: () => !cancelled && generation === documentGenerationRef.current,
+        isReady: () => mainNavigationRef.current?.fitToWidthReady() ?? false,
+      });
+      if (!ready) {
         if (restoringLocationGenerationRef.current === generation) {
           restoringLocationGenerationRef.current = null;
         }
@@ -980,10 +979,15 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           : {})}
         {...(props.session.appLinkBase === undefined || locationHistory === undefined ? {} : {
           copyLink: {
-            getLink: () => buildPlacekeeperCopyLink(
-              props.session.appLinkBase!,
-              navigationCoordinator.currentLinkLocation(),
-            ),
+            disabled: navigationState.pendingMainNavigation !== null
+              || navigationState.pendingSendToMain !== null,
+            getLink: () => {
+              mainLocationRefresh.flush();
+              return buildPlacekeeperCopyLink(
+                props.session.appLinkBase!,
+                navigationCoordinator.currentLinkLocation(),
+              );
+            },
             writeText: async (link: string) => {
               if (navigator.clipboard?.writeText === undefined) {
                 throw new Error('Clipboard API unavailable');
