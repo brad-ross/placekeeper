@@ -73,9 +73,10 @@ test.describe('canonical review workflow', () => {
       button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     ));
     const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
+    const search = page.getByRole('tab', { name: 'Search', exact: true });
     await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toHaveCount(0);
-    await expect(annotations).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('#workspace-panel-annotations')).toBeFocused();
+    await expect(search).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#workspace-panel-search')).toBeFocused();
 
     await page.getByRole('button', { name: 'Set outline tree' }).evaluate((button) => (
       button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -86,6 +87,7 @@ test.describe('canonical review workflow', () => {
     );
     await expect(page.locator('#workspace-panel-outline')).toBeFocused();
 
+    await page.getByRole('button', { name: 'Open harness reference' }).click();
     await page.getByRole('button', { name: 'Open References tray' }).click();
     await page.getByRole('button', { name: 'Move References to right' }).click();
     await expect(page.locator('[data-review-stage]')).toHaveAttribute(
