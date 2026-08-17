@@ -1,10 +1,11 @@
 import { execFile, spawn } from "node:child_process";
-import { copyFile, cp, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { copyFile, cp, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { validateBackendRuntimeManifest, validateCodexPlugin } from "./validate-manifest.js";
 import { BUILD_IDENTITY_FILENAME, computePackagedBuildIdentity } from "./build-app.js";
+import { encodePlacekeeperLink } from "../../packages/core/src/placekeeper-link.js";
 
 const execFileAsync = promisify(execFile);
 const MAX_HOOK_OUTPUT_BYTES = 128 * 1024;
@@ -222,7 +223,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
   const supportRootSentinel = join(supportRoot, "support-content.fixture");
   await mkdir(dirname(installedApp), { recursive: true });
   await symlink(resolve(appPath), installedApp);
-  const pdfPath = join(smokeHome, "fixture.pdf");
+  const pdfPath = join(smokeHome, "Paper One ✓.pdf");
   const secondPdfPath = join(smokeHome, "second-fixture.pdf");
   await copyFile(resolve(fixturePath), pdfPath);
   await copyFile(resolve(fixturePath), secondPdfPath);
@@ -249,6 +250,56 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     await assertInstalledIdentity(installedApp, smokeHome);
     await waitForSocket(socketPath, daemon, () => daemonSpawnError);
     const hookTimeouts = await installedHookTimeouts(installedApp);
+    const linkedPdfPath = await realpath(pdfPath);
+    const appLink = encodePlacekeeperLink({
+      path: linkedPdfPath,
+      location: { kind: "page", page: 12 },
+    });
+    const preflight = parseObject(await executeInstalled(
+      executable,
+      ["open-link", "--json", "--preflight", "--link", appLink],
+      environment,
+    ), "installed link preflight");
+    if (preflight.ok !== true || preflight.path !== linkedPdfPath || preflight.confirmationRequired !== true) {
+      throw new Error("Installed link preflight did not preserve the decoded unfamiliar path");
+    }
+    const linkedLaunch = parseObject(await executeInstalled(
+      executable,
+      ["open-link", "--json", "--confirmed", "--link", appLink],
+      environment,
+    ), "installed confirmed link launch");
+    if (linkedLaunch.ok !== true || linkedLaunch.kind !== "opened" || typeof linkedLaunch.url !== "string") {
+      throw new Error("Installed confirmed link did not open a browser review");
+    }
+    const linkedUrl = new URL(linkedLaunch.url);
+    const linkedCapability = new URLSearchParams(linkedUrl.hash.slice(1)).get("cap");
+    const linkedExchange = await fetch(`${linkedUrl.origin}${linkedUrl.pathname.replace(/\/bootstrap$/u, "/exchange")}`, {
+      method: "POST",
+      headers: { origin: linkedUrl.origin, "content-type": "application/json", "sec-fetch-site": "same-origin" },
+      body: JSON.stringify({ capability: linkedCapability }),
+    });
+    const linkedSession = parseObject(await linkedExchange.text(), "installed linked browser exchange");
+    const linkedScope = parseObject(await (await fetch(
+      `${linkedUrl.origin}${linkedUrl.pathname.replace(/\/bootstrap$/u, "/scope")}`,
+      { headers: { authorization: `Bearer ${String(linkedSession.credential)}` } },
+    )).text(), "installed linked browser scope");
+    const linkedLocation = linkedScope.requestedLocation as Record<string, unknown> | undefined;
+    if (
+      linkedScope.launchSurface !== "browser" ||
+      linkedLocation?.kind !== "page" ||
+      linkedLocation.page !== 12 ||
+      "codexContext" in linkedScope
+    ) {
+      throw new Error("Installed linked browser scope lost its location or gained Codex authority");
+    }
+    const warmPreflight = parseObject(await executeInstalled(
+      executable,
+      ["open-link", "--json", "--preflight", "--link", appLink],
+      environment,
+    ), "installed warm link preflight");
+    if (warmPreflight.ok !== true || warmPreflight.confirmationRequired !== false) {
+      throw new Error("Installed warm exact-path link did not reuse active review ownership");
+    }
     const launchOutput = await executeInstalled(
       executable,
       ["open", "--json", "--surface", "codex", "--pdf", pdfPath],

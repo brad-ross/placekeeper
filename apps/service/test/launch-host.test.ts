@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdtemp, mkdir, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { addPageNote } from "../../../packages/core/src/review-commands.js";
+import { encodePlacekeeperLink } from "../../../packages/core/src/placekeeper-link.js";
 import { TaskBindingRegistry } from "../src/context/task-binding-registry.js";
 import { PlacekeeperHost } from "../src/host/placekeeper-host.js";
 
@@ -44,6 +45,147 @@ async function fixture(options: {
 }
 
 describe("persistent launch host", () => {
+  it("preflights unfamiliar links without reading the PDF or creating a session", async () => {
+    const { root, host } = await fixture();
+    const missing = join(root, "Long Unicode ⌘ missing.pdf");
+    const link = encodePlacekeeperLink({ path: missing, location: { kind: "page", page: 12 } });
+
+    await expect(host.preflightLink(link)).resolves.toEqual({
+      ok: true,
+      kind: "link-preflight",
+      path: missing,
+      confirmationRequired: true,
+    });
+    expect(host.broker.activity()).toEqual({ reviewPresence: 0, codexTasks: 0, transientWork: 0 });
+    await expect(host.openLink({ link, confirmed: true })).resolves.toMatchObject({
+      ok: false,
+      error: { kind: "input-unavailable", message: expect.stringContaining("“Long Unicode ⌘ missing.pdf” is missing") },
+    });
+  });
+
+  it("skips confirmation only for an exact active lexical path and rechecks before reading", async () => {
+    const { root, pdf, host } = await fixture();
+    const canonicalPdf = await realpath(pdf);
+    const exact = encodePlacekeeperLink({ path: canonicalPdf, location: { kind: "page", page: 12 } });
+    const aliasPath = join(root, "paper-alias.pdf");
+    await symlink(pdf, aliasPath);
+    const alias = encodePlacekeeperLink({ path: aliasPath, location: { kind: "page", page: 12 } });
+    const opened = await host.open({ pdfPath: pdf });
+    if (!opened.ok || opened.kind === "recovery-offered") throw new Error("Expected launch");
+
+    await expect(host.preflightLink(exact)).resolves.toMatchObject({ confirmationRequired: false });
+    await expect(host.preflightLink(alias)).resolves.toMatchObject({ confirmationRequired: true });
+    await expect(host.openLink({ link: exact })).resolves.toMatchObject({
+      ok: true,
+      kind: "focused",
+      sessionId: opened.sessionId,
+    });
+
+    await host.broker.finish(opened.sessionId);
+    await unlink(pdf);
+    await expect(host.openLink({ link: exact })).resolves.toEqual({
+      ok: true,
+      kind: "confirmation-required",
+      path: canonicalPdf,
+    });
+  });
+
+  it("opens a confirmed current PDF with safe location and no Codex scope", async () => {
+    const { pdf, host } = await fixture({ validPdf: true });
+    const location = {
+      kind: "item" as const,
+      page: 12,
+      itemId: "00000000-0000-4000-8000-000000000123",
+    };
+    const link = encodePlacekeeperLink({ path: pdf, location });
+    const launched = await host.openLink({ link, confirmed: true });
+    if (!launched.ok || launched.kind === "recovery-offered" || launched.kind === "confirmation-required") {
+      throw new Error("Expected linked launch");
+    }
+    expect(launched).toMatchObject({ kind: "opened" });
+    expect(launched).not.toHaveProperty("bindProof");
+    const url = new URL(launched.url);
+    const capability = new URLSearchParams(url.hash.slice(1)).get("cap")!;
+    const exchanged = await fetch(`${url.origin}/s/${launched.sessionId}/exchange`, {
+      method: "POST",
+      headers: { origin: url.origin, "content-type": "application/json", "sec-fetch-site": "same-origin" },
+      body: JSON.stringify({ capability }),
+    });
+    const { credential } = await exchanged.json() as { credential: string };
+    await expect((await fetch(`${url.origin}/s/${launched.sessionId}/scope`, {
+      headers: { authorization: `Bearer ${credential}` },
+    })).json()).resolves.toMatchObject({ launchSurface: "browser", requestedLocation: location });
+  });
+
+  it("names unreadable and non-PDF linked inputs without substitution", async () => {
+    const { root, host } = await fixture();
+    const unreadable = join(root, "unreadable.pdf");
+    const notPdf = join(root, "named.pdf");
+    await writeFile(unreadable, "%PDF-1.7\n");
+    await chmod(unreadable, 0o000);
+    await writeFile(notPdf, "plain text");
+    try {
+      for (const [path, detail] of [[unreadable, "unreadable"], [notPdf, "not a PDF"]] as const) {
+        const response = await host.openLink({
+          link: encodePlacekeeperLink({ path, location: { kind: "page", page: 3 } }),
+          confirmed: true,
+        });
+        expect(response).toMatchObject({
+          ok: false,
+          error: { message: expect.stringContaining(detail) },
+        });
+      }
+    } finally {
+      await chmod(unreadable, 0o600);
+    }
+  });
+
+  it("preserves linked location through the existing Protected Recovery choice", async () => {
+    const { root, pdf, host } = await fixture();
+    const canonicalPdf = await realpath(pdf);
+    const location = { kind: "page" as const, page: 12 };
+    const link = encodePlacekeeperLink({ path: canonicalPdf, location });
+    const opened = await host.openLink({ link, confirmed: true });
+    if (!opened.ok || opened.kind !== "opened") throw new Error("Expected linked review");
+    await host.broker.acceptMutation(opened.sessionId, {
+      type: "add",
+      expectedRevision: 0,
+      item: {
+        id: randomUUID(),
+        kind: "pageNote",
+        pageIndex: 0,
+        createdAt: "2026-08-17T12:00:00.000Z",
+        updatedAt: "2026-08-17T12:00:00.000Z",
+        payload: { position: { x: 1, y: 1, width: 18, height: 18 }, comment: "Recover linked location." },
+      },
+    });
+    await host.close();
+    hosts.splice(hosts.indexOf(host), 1);
+
+    const restarted = await PlacekeeperHost.start({
+      recoveryRoot: join(root, "recovery"),
+      webAssets: { root: join(root, "assets") },
+    });
+    hosts.push(restarted);
+    await expect(restarted.openLink({ link, confirmed: true })).resolves.toMatchObject({
+      ok: true,
+      kind: "recovery-offered",
+    });
+    const resumed = await restarted.openLink({ link, confirmed: true, recovery: "resume" });
+    if (!resumed.ok || resumed.kind !== "opened") throw new Error("Expected linked recovery");
+    const url = new URL(resumed.url);
+    const capability = new URLSearchParams(url.hash.slice(1)).get("cap")!;
+    const exchange = await fetch(`${url.origin}/s/${resumed.sessionId}/exchange`, {
+      method: "POST",
+      headers: { origin: url.origin, "content-type": "application/json", "sec-fetch-site": "same-origin" },
+      body: JSON.stringify({ capability }),
+    });
+    const { credential } = await exchange.json() as { credential: string };
+    await expect((await fetch(`${url.origin}/s/${resumed.sessionId}/scope`, {
+      headers: { authorization: `Bearer ${credential}` },
+    })).json()).resolves.toMatchObject({ requestedLocation: location });
+  });
+
   it("reports only aggregate bootstrap, bind-proof, and task activity", async () => {
     let now = Date.parse("2026-08-12T12:00:00.000Z");
     const taskBindings = new TaskBindingRegistry({

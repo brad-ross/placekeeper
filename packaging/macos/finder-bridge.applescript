@@ -1,3 +1,5 @@
+use scripting additions
+
 on launchPdf(pdfItem)
 	set appRoot to POSIX path of (path to me)
 	set launcherPath to appRoot & "Contents/MacOS/placekeeper"
@@ -11,6 +13,23 @@ on launchPdf(pdfItem)
 		end if
 	end try
 end launchPdf
+
+on launchPlacekeeperUrl(placekeeperUrl)
+	set appRoot to POSIX path of (path to me)
+	set launcherPath to appRoot & "Contents/MacOS/placekeeper"
+	try
+		set launchCommand to (quoted form of launcherPath) & space & (quoted form of placekeeperUrl) & " >/dev/null 2>&1 &"
+		do shell script launchCommand
+	on error errorMessage number errorNumber
+		if errorNumber is not -128 then
+			display alert "Placekeeper could not open this link" message errorMessage buttons {"OK"} default button 1
+		end if
+	end try
+end launchPlacekeeperUrl
+
+on «event GURLGURL» placekeeperUrl
+	launchPlacekeeperUrl(placekeeperUrl)
+end «event GURLGURL»
 
 on open pdfItems
 	if (count of pdfItems) is not 1 then

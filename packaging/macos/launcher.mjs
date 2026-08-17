@@ -11,6 +11,15 @@ export function finderServiceArgs(pdfPath, recovery) {
   return args;
 }
 
+export function linkServiceArgs(link, options = {}) {
+  const args = ["open-link", "--json"];
+  if (options.preflight === true) args.push("--preflight");
+  if (options.confirmed === true) args.push("--confirmed");
+  if (options.recovery !== undefined) args.push("--recovery", options.recovery);
+  args.push("--link", link);
+  return args;
+}
+
 function run(executable, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
     const { allowNonZero = false, ...spawnOptions } = options;
@@ -65,6 +74,88 @@ async function chooseFinderPdf() {
   return selected.startsWith("/") && selected.toLowerCase().endsWith(".pdf") ? selected : undefined;
 }
 
+export const LINK_CONFIRMATION_SCRIPT = String.raw`
+use framework "AppKit"
+use scripting additions
+
+set pdfPath to system attribute "PLACEKEEPER_LINK_PATH"
+set alert to current application's NSAlert's alloc()'s init()
+alert's setMessageText:"Open this PDF in Placekeeper?"
+alert's setInformativeText:"Confirm the complete local path before Placekeeper reads the file."
+
+set accessory to current application's NSView's alloc()'s initWithFrame:{{0, 0}, {520, 112}}
+set pathLabel to current application's NSTextField's labelWithString:"PDF path"
+pathLabel's setFrame:{{0, 92}, {520, 20}}
+accessory's addSubview:pathLabel
+set scrollView to current application's NSScrollView's alloc()'s initWithFrame:{{0, 0}, {520, 88}}
+scrollView's setHasVerticalScroller:true
+scrollView's setHasHorizontalScroller:true
+scrollView's setBorderType:(current application's NSBezelBorder)
+set pathField to current application's NSTextView's alloc()'s initWithFrame:{{0, 0}, {516, 84}}
+pathField's setString:pdfPath
+pathField's setSelectable:true
+pathField's setEditable:false
+pathField's setRichText:false
+pathField's setAccessibilityLabel:(current application's NSString's stringWithString:"PDF path")
+scrollView's setDocumentView:pathField
+accessory's addSubview:scrollView
+alert's setAccessoryView:accessory
+
+alert's addButtonWithTitle:"Open"
+set cancelButton to alert's addButtonWithTitle:"Cancel"
+cancelButton's setKeyEquivalent:(ASCII character 27)
+alert's window()'s setInitialFirstResponder:cancelButton
+set response to alert's runModal()
+if response is (current application's NSAlertFirstButtonReturn) then return "open"
+return "cancel"
+`;
+
+async function confirmLinkedPath(path) {
+  const choice = (await run("/usr/bin/osascript", ["-l", "AppleScript", "-e", LINK_CONFIRMATION_SCRIPT], {
+    env: { PATH: "/usr/bin:/bin", PLACEKEEPER_LINK_PATH: path },
+    stdio: ["ignore", "pipe", "ignore"],
+    allowNonZero: true,
+  })).trim();
+  return choice === "open";
+}
+
+async function openLinkedPdf(nodePath, serviceEntry, link, serviceEnvironment) {
+  const invoke = async (options) => parse(await run(
+    nodePath,
+    [serviceEntry, ...linkServiceArgs(link, options)],
+    { env: serviceEnvironment, allowNonZero: true },
+  ));
+  const preflight = await invoke({ preflight: true });
+  if (preflight.ok !== true || preflight.kind !== "link-preflight" || typeof preflight.path !== "string") {
+    await nativeError(preflight.error);
+    return;
+  }
+
+  let confirmed = false;
+  if (preflight.confirmationRequired === true) {
+    confirmed = await confirmLinkedPath(preflight.path);
+    if (!confirmed) return;
+  }
+
+  let result = await invoke(confirmed ? { confirmed: true } : {});
+  if (result.ok === true && result.kind === "confirmation-required" && typeof result.path === "string") {
+    confirmed = await confirmLinkedPath(result.path);
+    if (!confirmed) return;
+    result = await invoke({ confirmed: true });
+  }
+  if (result.ok === true && result.kind === "recovery-offered") {
+    const choice = (await run("/usr/bin/osascript", ["-e", 'choose from list {"resume", "discard", "fork"} with title "Recover Placekeeper draft" without multiple selections allowed and empty selection allowed'], { env: { PATH: "/usr/bin:/bin" }, stdio: ["ignore", "pipe", "ignore"] })).trim();
+    if (!["resume", "discard", "fork"].includes(choice)) return;
+    result = await invoke({ confirmed: true, recovery: choice });
+  }
+  if (result.ok !== true) {
+    await nativeError(result.error);
+    return;
+  }
+  if (!["opened", "focused"].includes(result.kind) || typeof result.url !== "string" || !/^http:\/\/127\.0\.0\.1:\d+\/s\/[^/]+\/bootstrap#cap=[A-Za-z0-9_-]+$/u.test(result.url)) return;
+  await osascript('open location (system attribute "PLACEKEEPER_URL")', { PLACEKEEPER_URL: result.url });
+}
+
 async function openFinderPdf(nodePath, serviceEntry, pdfPath, serviceEnvironment, allowInputRecovery = true) {
   let result = parse(await run(nodePath, [serviceEntry, ...finderServiceArgs(pdfPath)], { env: serviceEnvironment, allowNonZero: true }));
   if (result.ok === true && result.kind === "recovery-offered") {
@@ -96,6 +187,10 @@ export async function main(args = process.argv.slice(2)) {
     PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY: buildIdentity.installArtifactIdentity,
     PLACEKEEPER_WEB_ASSETS: resolve(resources, "web"),
   };
+  if (args.length === 1 && args[0].startsWith("placekeeper:")) {
+    await openLinkedPdf(nodePath, serviceEntry, args[0], serviceEnvironment);
+    return;
+  }
   if (args.length === 1 && resolve(args[0]) === args[0] && args[0].toLowerCase().endsWith(".pdf")) {
     await openFinderPdf(nodePath, serviceEntry, args[0], serviceEnvironment);
     return;

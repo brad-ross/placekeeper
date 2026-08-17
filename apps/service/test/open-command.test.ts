@@ -3,9 +3,12 @@ import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { encodePlacekeeperLink } from "../../../packages/core/src/placekeeper-link.js";
 
 import {
+  parseOpenLinkArguments,
   parseOpenArguments,
+  runOpenLinkCommand,
   runOpenCommand,
 } from "../src/cli/open-command.js";
 import {
@@ -14,6 +17,8 @@ import {
   MANAGEMENT_PROTOCOL_VERSION,
   managementShutdownResult,
   requestLaunch,
+  requestLinkOpen,
+  requestLinkPreflight,
   requestControl,
   startLaunchControlServer,
   type LaunchControlServer,
@@ -44,6 +49,43 @@ afterEach(async () => {
 });
 
 describe("open command", () => {
+  it("parses bounded app-link preflight and confirmed-open commands", () => {
+    const link = "placekeeper:///tmp/Paper%20One.pdf#v=1&page=12";
+    expect(parseOpenLinkArguments([
+      "open-link", "--json", "--preflight", "--link", link,
+    ])).toEqual({ operation: "preflight", link });
+    expect(parseOpenLinkArguments([
+      "open-link", "--json", "--confirmed", "--recovery", "resume", "--link", link,
+    ])).toEqual({ operation: "open", link, confirmed: true, recovery: "resume" });
+    expect(() => parseOpenLinkArguments(["open-link", "--json", "--link", link, "extra"]))
+      .toThrow("one Placekeeper link");
+    expect(() => parseOpenLinkArguments([
+      "open-link", "--json", "--preflight", "--confirmed", "--link", link,
+    ])).toThrow("preflight");
+  });
+
+  it("prints one bounded structured app-link response", async () => {
+    const link = "placekeeper:///tmp/Paper%20One.pdf#v=1&page=12";
+    const write = vi.fn();
+    await expect(runOpenLinkCommand(
+      ["open-link", "--json", "--preflight", "--link", link],
+      async (request) => ({
+        ok: true,
+        kind: "link-preflight",
+        path: request.link,
+        confirmationRequired: true,
+      }),
+      write,
+    )).resolves.toBe(0);
+    expect(write).toHaveBeenCalledOnce();
+    expect(JSON.parse(write.mock.calls[0]![0])).toMatchObject({
+      ok: true,
+      kind: "link-preflight",
+      confirmationRequired: true,
+    });
+    expect(write.mock.calls[0]![0]).not.toMatch(/(?:cap=|taskSessionId|bindProof)/u);
+  });
+
   it("atomically drains accepted work and cancels when new activity wins the final recheck", async () => {
     const drainStarted = Promise.withResolvers<void>();
     const releaseDrain = Promise.withResolvers<void>();
@@ -411,6 +453,37 @@ describe("open command", () => {
       status: { daemonIdentity },
     });
     await expect(lstat(socketPath)).resolves.toMatchObject({ mode: expect.any(Number) });
+  });
+
+  it("carries bounded link preflight and confirmed opening over the private control socket", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-link-control-"));
+    roots.push(root);
+    const assets = join(root, "assets");
+    const pdf = join(root, "control-link.pdf");
+    await mkdir(assets);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    await writeFile(pdf, "%PDF-1.7\nfixture\n%%EOF");
+    const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
+    hosts.push(host);
+    const socketPath = join(root, "control.sock");
+    controls.push(await startLaunchControlServer(host, socketPath, { daemonIdentity: "a".repeat(64) }));
+    const link = encodePlacekeeperLink({ path: pdf, location: { kind: "page", page: 12 } });
+
+    await expect(requestLinkPreflight(socketPath, link)).resolves.toMatchObject({
+      ok: true,
+      kind: "link-preflight",
+      path: pdf,
+      confirmationRequired: true,
+    });
+    await expect(requestLinkOpen(socketPath, { link })).resolves.toEqual({
+      ok: true,
+      kind: "confirmation-required",
+      path: pdf,
+    });
+    await expect(requestLinkOpen(socketPath, { link, confirmed: true })).resolves.toMatchObject({
+      ok: true,
+      kind: "opened",
+    });
   });
 
   it("flushes an idle shutdown acknowledgement before closing HTTP and removing the socket", async () => {

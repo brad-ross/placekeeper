@@ -26,8 +26,16 @@ import type {
   SourceWorkflowResult,
 } from "../context/live-source-workflow-service.js";
 import { SourceWorkflowUnavailableError } from "../context/live-source-workflow-service.js";
-import type { LaunchRequest, LaunchResponse, PlacekeeperHost } from "./placekeeper-host.js";
+import type {
+  LaunchRequest,
+  LaunchResponse,
+  LinkLaunchResponse,
+  LinkOpenRequest,
+  LinkPreflightResponse,
+  PlacekeeperHost,
+} from "./placekeeper-host.js";
 import type { ConditionalShutdownResult } from "./daemon-lifecycle.js";
+import { PLACEKEEPER_LINK_MAX_LENGTH } from "../../../../packages/core/src/placekeeper-link.js";
 
 // Both directions are explicitly bounded. Evidence requests use a stricter
 // byte budget before base64 expansion, so a document can never turn this
@@ -130,6 +138,8 @@ export type PlacekeeperControlRequest =
       readonly operation: "shutdown-if-idle";
     }
   | { readonly kind: "launch"; readonly request: LaunchRequest }
+  | { readonly kind: "link-preflight"; readonly link: string }
+  | { readonly kind: "link-open"; readonly request: LinkOpenRequest }
   | {
       readonly kind: "claim-binding";
       readonly taskSessionId: string;
@@ -223,6 +233,8 @@ export type PlacekeeperControlResponse =
           };
     }
   | { readonly kind: "launch"; readonly response: LaunchResponse }
+  | { readonly kind: "link-preflight"; readonly response: LinkPreflightResponse }
+  | { readonly kind: "link-open"; readonly response: LinkLaunchResponse }
   | { readonly kind: "binding"; readonly result: TaskBindingClaimResult }
   | { readonly kind: "context"; readonly result: LiveContextRefreshResult }
   | { readonly kind: "revoked" }
@@ -292,6 +304,16 @@ function isControlRequest(value: unknown): value is PlacekeeperControlRequest {
         value.operation === "shutdown-if-idle");
   }
   if (value.kind === "launch") return isObject(value.request);
+  if (value.kind === "link-preflight") {
+    return typeof value.link === "string" && value.link.length <= PLACEKEEPER_LINK_MAX_LENGTH;
+  }
+  if (value.kind === "link-open") {
+    return isObject(value.request) &&
+      typeof value.request.link === "string" &&
+      value.request.link.length <= PLACEKEEPER_LINK_MAX_LENGTH &&
+      (value.request.confirmed === undefined || typeof value.request.confirmed === "boolean") &&
+      (value.request.recovery === undefined || ["resume", "discard", "fork"].includes(String(value.request.recovery)));
+  }
   if (value.kind === "refresh-context" || value.kind === "revoke-task") {
     return typeof value.taskSessionId === "string" &&
       (value.kind !== "refresh-context" || value.cursor === undefined || typeof value.cursor === "string");
@@ -374,6 +396,12 @@ async function dispatch(
   }
   if (request.kind === "launch") {
     return { kind: "launch", response: await host.open(request.request) };
+  }
+  if (request.kind === "link-preflight") {
+    return { kind: "link-preflight", response: await host.preflightLink(request.link) };
+  }
+  if (request.kind === "link-open") {
+    return { kind: "link-open", response: await host.openLink(request.request) };
   }
   let response: PlacekeeperControlResponse | undefined;
   try {
@@ -739,5 +767,23 @@ export async function requestLaunch(
 ): Promise<LaunchResponse> {
   const response = await requestControl(socketPath, { kind: "launch", request });
   if (response.kind !== "launch") throw new DaemonUpgradeRequiredError("malformed");
+  return response.response;
+}
+
+export async function requestLinkPreflight(
+  socketPath: string,
+  link: string,
+): Promise<LinkPreflightResponse> {
+  const response = await requestControl(socketPath, { kind: "link-preflight", link });
+  if (response.kind !== "link-preflight") throw new DaemonUpgradeRequiredError("malformed");
+  return response.response;
+}
+
+export async function requestLinkOpen(
+  socketPath: string,
+  request: LinkOpenRequest,
+): Promise<LinkLaunchResponse> {
+  const response = await requestControl(socketPath, { kind: "link-open", request });
+  if (response.kind !== "link-open") throw new DaemonUpgradeRequiredError("malformed");
   return response.response;
 }

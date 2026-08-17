@@ -11,6 +11,7 @@ import type {
   ReviewState,
 } from "../../../../packages/core/src/review-model.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
+import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import { createReviewState } from "../../../../packages/core/src/review-model.js";
 import { createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
 import { reduceReview } from "../../../../packages/core/src/review-reducer.js";
@@ -53,6 +54,7 @@ export interface OpenReviewRequest {
   readonly sourceRootPath?: string;
   readonly recoveryDecision?: RecoveryDecision;
   readonly surface?: LaunchSurface;
+  readonly requestedLocation?: PlacekeeperLinkLocation;
 }
 
 export interface SessionLaunch {
@@ -97,6 +99,7 @@ interface BrowserLaunchScope {
   readonly sessionId: string;
   readonly documentGeneration: number;
   readonly surface: LaunchSurface;
+  readonly requestedLocation?: PlacekeeperLinkLocation;
   readonly expiresAtMs: number;
 }
 
@@ -213,12 +216,17 @@ export class SessionBroker {
     );
   }
 
-  #launch(session: ActiveSession, surface: LaunchSurface): SessionLaunch {
+  #launch(
+    session: ActiveSession,
+    surface: LaunchSurface,
+    requestedLocation?: PlacekeeperLinkLocation,
+  ): SessionLaunch {
     const capability = this.credentials.issueBootstrap(session.id, BOOTSTRAP_TTL_MS);
     const launchScope: BrowserLaunchScope = {
       sessionId: session.id,
       documentGeneration: session.documentGeneration,
       surface,
+      ...(requestedLocation === undefined ? {} : { requestedLocation }),
       expiresAtMs: this.#now().getTime() + BOOTSTRAP_TTL_MS,
     };
     this.#bootstrapScopes.set(digestSecretHex(capability), launchScope);
@@ -259,7 +267,7 @@ export class SessionBroker {
       }
       return {
         kind: "focused",
-        launch: this.#launch(session, request.surface ?? "browser"),
+        launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
       };
     }
 
@@ -401,7 +409,7 @@ export class SessionBroker {
       this.#activate(session);
       return {
         kind: "opened",
-        launch: this.#launch(session, request.surface ?? "browser"),
+        launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
       };
     }
 
@@ -475,7 +483,7 @@ export class SessionBroker {
     this.#activate(session);
     return {
       kind: "opened",
-      launch: this.#launch(session, request.surface ?? "browser"),
+      launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
     };
   }
 
@@ -579,6 +587,15 @@ export class SessionBroker {
       codexTasks: this.taskBindings.activityCount(),
       transientWork: controls.transientWork,
     };
+  }
+
+  /** Lexical, process-memory-only ownership check used before admitting a
+   * custom-scheme link. It intentionally performs no path resolution or I/O. */
+  activeReviewOwnsPath(path: string): boolean {
+    for (const session of this.#activeById.values()) {
+      if (!session.ending && session.canonicalSourcePath === path) return true;
+    }
+    return false;
   }
 
   #sweepBootstrapScopes(): void {
@@ -819,6 +836,7 @@ export class SessionBroker {
         readonly documentTitle: string;
         readonly sourceRootPath?: string;
         readonly launchSurface?: LaunchSurface;
+        readonly requestedLocation?: PlacekeeperLinkLocation;
         readonly codexContext?: ReturnType<TaskBindingRegistry["statusForReview"]>;
       }
     | undefined {
@@ -850,6 +868,9 @@ export class SessionBroker {
       ...(trustedLaunchScope === undefined
         ? {}
         : { launchSurface: trustedLaunchScope.surface }),
+      ...(trustedLaunchScope?.requestedLocation === undefined
+        ? {}
+        : { requestedLocation: trustedLaunchScope.requestedLocation }),
       ...(trustedLaunchScope?.surface === "codex"
         ? {
             codexContext: this.taskBindings.statusForReview(

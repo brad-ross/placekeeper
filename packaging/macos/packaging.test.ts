@@ -17,7 +17,7 @@ import {
   validateDistributionManifests,
   validateMacIconSet,
 } from "./validate-manifest.js";
-import { finderServiceArgs } from "./launcher.mjs";
+import { finderServiceArgs, linkServiceArgs } from "./launcher.mjs";
 import { validateDoctorEvidence } from "./smoke-installed.js";
 import {
   appBundlePath,
@@ -59,6 +59,9 @@ describe("macOS distribution manifests", () => {
     expect(plist).toContain("<key>CFBundleExecutable</key><string>droplet</string>");
     expect(plist).toContain("<key>CFBundleIdentifier</key><string>local.placekeeper</string>");
     expect(plist).toContain("<key>CFBundleIconFile</key><string>Placekeeper</string>");
+    expect(plist).toContain("<key>CFBundleURLTypes</key><array><dict>");
+    expect(plist).toContain("<key>CFBundleURLName</key><string>local.placekeeper.review-link</string>");
+    expect(plist).toContain("<key>CFBundleURLSchemes</key><array><string>placekeeper</string></array>");
     expect(infoPlistStrings(manifest)).toBe(
       '"CFBundleDisplayName" = "Placekeeper";\n"CFBundleName" = "Placekeeper";\n',
     );
@@ -392,6 +395,31 @@ describe("macOS distribution manifests", () => {
     expect(bridge).toContain("Contents/MacOS/placekeeper");
     expect(bridge).toContain("quoted form of pdfPath");
     expect(bridge).not.toContain("Terminal");
+  });
+
+  it("delivers each custom URL event as one opaque launcher argument", async () => {
+    const link = "placekeeper:///tmp/Paper%20%E2%9C%93.pdf#v=1&page=12";
+    expect(linkServiceArgs(link, { preflight: true })).toEqual([
+      "open-link", "--json", "--preflight", "--link", link,
+    ]);
+    expect(linkServiceArgs(link, { confirmed: true, recovery: "resume" })).toEqual([
+      "open-link", "--json", "--confirmed", "--recovery", "resume", "--link", link,
+    ]);
+
+    const bridge = await readFile(resolve("packaging/macos/finder-bridge.applescript"), "utf8");
+    expect(bridge).toContain("on «event GURLGURL» placekeeperUrl");
+    expect(bridge).toContain("launchPlacekeeperUrl(placekeeperUrl)");
+    expect(bridge).toContain("quoted form of placekeeperUrl");
+    expect(bridge).not.toMatch(/placekeeperUrl.*(?:split|replace|decode|encode)/iu);
+
+    const launcher = await readFile(resolve("packaging/macos/launcher.mjs"), "utf8");
+    expect(launcher).toContain('setAccessibilityLabel:(current application\'s NSString\'s stringWithString:"PDF path")');
+    expect(launcher).toContain("setSelectable:true");
+    expect(launcher).toContain("setEditable:false");
+    expect(launcher).toContain("setInitialFirstResponder:cancelButton");
+    expect(launcher).toContain("setKeyEquivalent:(ASCII character 27)");
+    expect(launcher).toContain('addButtonWithTitle:"Open"');
+    expect(launcher).toContain('addButtonWithTitle:"Cancel"');
   });
 
   it("presents Placekeeper on current app and Finder surfaces", async () => {

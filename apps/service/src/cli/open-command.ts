@@ -2,15 +2,40 @@ import { isAbsolute } from "node:path";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import type { LaunchRequest, LaunchResponse, LaunchSurface } from "../host/placekeeper-host.js";
+import type {
+  LaunchRequest,
+  LaunchResponse,
+  LaunchSurface,
+  LinkLaunchResponse,
+  LinkPreflightResponse,
+} from "../host/placekeeper-host.js";
 import { DaemonUpgradeRequiredError } from "../host/launch-control.js";
-import { launchThroughDaemon, runServiceDaemon } from "../host/service-daemon.js";
+import {
+  launchThroughDaemon,
+  openLinkThroughDaemon,
+  preflightLinkThroughDaemon,
+  runServiceDaemon,
+} from "../host/service-daemon.js";
 import { runDoctorCommand } from "./doctor-command.js";
 import { readHookStdin, runHookCommand } from "./hook-command.js";
 import { runContextCommand } from "./context-command.js";
 import { runDaemonCommand } from "./daemon-command.js";
+import { PLACEKEEPER_LINK_MAX_LENGTH } from "../../../../packages/core/src/placekeeper-link.js";
 
 type LaunchClient = (request: LaunchRequest) => Promise<LaunchResponse>;
+
+export type ParsedOpenLinkRequest =
+  | { readonly operation: "preflight"; readonly link: string }
+  | {
+      readonly operation: "open";
+      readonly link: string;
+      readonly confirmed?: true;
+      readonly recovery?: "resume" | "discard" | "fork";
+    };
+
+type OpenLinkClient = (
+  request: ParsedOpenLinkRequest,
+) => Promise<LinkPreflightResponse | LinkLaunchResponse>;
 
 function takeValue(args: readonly string[], index: number, flag: string): string {
   const value = args[index + 1];
@@ -81,6 +106,90 @@ export function parseOpenArguments(args: readonly string[]): LaunchRequest {
   };
 }
 
+export function parseOpenLinkArguments(args: readonly string[]): ParsedOpenLinkRequest {
+  if (args[0] !== "open-link" || !args.includes("--json")) {
+    throw new Error("Use: placekeeper open-link --json --preflight|--confirmed --link <placekeeper-url>");
+  }
+  let link: string | undefined;
+  let preflight = false;
+  let confirmed = false;
+  let recovery: "resume" | "discard" | "fork" | undefined;
+  for (let index = 1; index < args.length; index += 1) {
+    const argument = args[index]!;
+    if (argument === "--json") continue;
+    if (argument === "--preflight") {
+      if (preflight) throw new Error("--preflight may be specified once");
+      preflight = true;
+      continue;
+    }
+    if (argument === "--confirmed") {
+      if (confirmed) throw new Error("--confirmed may be specified once");
+      confirmed = true;
+      continue;
+    }
+    if (argument === "--recovery") {
+      const value = takeValue(args, index, argument);
+      if (recovery !== undefined || !["resume", "discard", "fork"].includes(value)) {
+        throw new Error("--recovery must be resume, discard, or fork");
+      }
+      recovery = value as "resume" | "discard" | "fork";
+      index += 1;
+      continue;
+    }
+    if (argument === "--link") {
+      if (link !== undefined) throw new Error("Open one Placekeeper link at a time");
+      link = takeValue(args, index, argument);
+      index += 1;
+      continue;
+    }
+    throw new Error("Open one Placekeeper link at a time");
+  }
+  if (link === undefined) throw new Error("Open one Placekeeper link at a time");
+  if (link.length > PLACEKEEPER_LINK_MAX_LENGTH) throw new Error("Placekeeper link exceeds the length limit");
+  if (preflight && (confirmed || recovery !== undefined)) {
+    throw new Error("Link preflight cannot be confirmed or choose recovery");
+  }
+  return preflight
+    ? { operation: "preflight", link }
+    : {
+        operation: "open",
+        link,
+        ...(confirmed ? { confirmed: true } : {}),
+        ...(recovery === undefined ? {} : { recovery }),
+      };
+}
+
+export async function runOpenLinkCommand(
+  args: readonly string[],
+  launch: OpenLinkClient,
+  write: (text: string) => void = (text) => process.stdout.write(text),
+): Promise<number> {
+  let response: LinkPreflightResponse | LinkLaunchResponse;
+  try {
+    response = await launch(parseOpenLinkArguments(args));
+  } catch (error) {
+    response = error instanceof DaemonUpgradeRequiredError
+      ? {
+          ok: false,
+          error: {
+            kind: "upgrade-required",
+            message: error.message,
+            recoveryAction: error.recoveryAction,
+          },
+        }
+      : {
+          ok: false,
+          error: {
+            kind: "input-unavailable",
+            message: error instanceof Error ? error.message : "The Placekeeper link is invalid.",
+            recoveryAction: "Open a valid Placekeeper link",
+          },
+        };
+  }
+  write(`${JSON.stringify(response)}\n`);
+  return response.ok ? 0 : 2;
+}
+
 export async function runOpenCommand(
   args: readonly string[],
   launch: LaunchClient,
@@ -113,6 +222,16 @@ export async function runOpenCommand(
 }
 
 async function main(): Promise<number> {
+  if (process.argv[2] === "open-link") {
+    return runOpenLinkCommand(process.argv.slice(2), async (request) =>
+      request.operation === "preflight"
+        ? preflightLinkThroughDaemon(request.link)
+        : openLinkThroughDaemon({
+            link: request.link,
+            ...(request.confirmed === true ? { confirmed: true } : {}),
+            ...(request.recovery === undefined ? {} : { recovery: request.recovery }),
+          }));
+  }
   if (process.argv[2] === "hook") {
     return runHookCommand(process.argv.slice(2), await readHookStdin());
   }

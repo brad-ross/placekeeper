@@ -16,6 +16,8 @@ import { SourceReconciliationService } from "../context/source-reconciliation-se
 import { LiveSourceWorkflowService } from "../context/live-source-workflow-service.js";
 import type { TaskBindingRegistry } from "../context/task-binding-registry.js";
 import { DaemonLifecycleCoordinator } from "./daemon-lifecycle.js";
+import { decodePlacekeeperLink } from "../../../../packages/core/src/placekeeper-link.js";
+import { resolvePlacekeeperLink } from "../links/placekeeper-link.js";
 
 export type LaunchSurface = BrokerLaunchSurface;
 
@@ -32,6 +34,27 @@ export interface LaunchFailure {
   readonly message: string;
   readonly recoveryAction: string;
 }
+
+export interface LinkOpenRequest {
+  readonly link: string;
+  readonly confirmed?: boolean;
+  readonly recovery?: RecoveryDecision;
+}
+
+export type LinkPreflightResponse =
+  | {
+      readonly ok: true;
+      readonly kind: "link-preflight";
+      readonly path: string;
+      readonly confirmationRequired: boolean;
+    }
+  | { readonly ok: false; readonly error: LaunchFailure };
+
+export type LinkLaunchResponse = LaunchResponse | {
+  readonly ok: true;
+  readonly kind: "confirmation-required";
+  readonly path: string;
+};
 
 export type LaunchResponse =
   | {
@@ -59,7 +82,7 @@ export interface PlacekeeperHostOptions {
 function failure(
   kind: Exclude<LaunchFailure["kind"], "upgrade-required">,
   message: string,
-): LaunchResponse {
+): { readonly ok: false; readonly error: LaunchFailure } {
   return {
     ok: false,
     error: {
@@ -69,6 +92,17 @@ function failure(
         kind === "input-unavailable"
           ? "Choose one readable local PDF"
           : "Choose a supported local workspace",
+    },
+  };
+}
+
+function upgradeFailure(): { readonly ok: false; readonly error: LaunchFailure } {
+  return {
+    ok: false,
+    error: {
+      kind: "upgrade-required",
+      message: "Placekeeper is restarting after an upgrade. Retry this launch.",
+      recoveryAction: "Close Placekeeper reviews and retry",
     },
   };
 }
@@ -165,14 +199,73 @@ export class PlacekeeperHost {
 
   async open(request: LaunchRequest): Promise<LaunchResponse> {
     const response = await this.lifecycle.runActivity(() => this.#open(request));
-    return response ?? {
-      ok: false,
-      error: {
-        kind: "upgrade-required",
-        message: "Placekeeper is restarting after an upgrade. Retry this launch.",
-        recoveryAction: "Close Placekeeper reviews and retry",
-      },
-    };
+    return response ?? upgradeFailure();
+  }
+
+  async preflightLink(link: string): Promise<LinkPreflightResponse> {
+    const response = await this.lifecycle.runActivity<LinkPreflightResponse>(() => {
+      try {
+        const decoded = decodePlacekeeperLink(link);
+        return {
+          ok: true,
+          kind: "link-preflight",
+          path: decoded.path,
+          confirmationRequired: !this.broker.activeReviewOwnsPath(decoded.path),
+        };
+      } catch (error) {
+        return failure(
+          "input-unavailable",
+          error instanceof Error ? error.message : "The Placekeeper link is invalid.",
+        );
+      }
+    });
+    return response ?? upgradeFailure();
+  }
+
+  async openLink(request: LinkOpenRequest): Promise<LinkLaunchResponse> {
+    const response = await this.lifecycle.runActivity(() => this.#openLink(request));
+    return response ?? upgradeFailure();
+  }
+
+  async #openLink(request: LinkOpenRequest): Promise<LinkLaunchResponse> {
+    try {
+      const decoded = decodePlacekeeperLink(request.link);
+      // This commit check is deliberately synchronous with the first linked
+      // file operation below. If the preflight exemption vanished, no PDF is
+      // resolved, opened, hashed, or substituted.
+      if (request.confirmed !== true && !this.broker.activeReviewOwnsPath(decoded.path)) {
+        return { ok: true, kind: "confirmation-required", path: decoded.path };
+      }
+      const prepared = await resolvePlacekeeperLink(request.link);
+      const opened = await this.broker.openReview({
+        pdfPath: prepared.pdfPath,
+        ...(request.recovery === undefined ? {} : { recoveryDecision: request.recovery }),
+        surface: "browser",
+        requestedLocation: prepared.location,
+      });
+      if (opened.kind === "recovery-offered") {
+        return {
+          ok: true,
+          kind: "recovery-offered",
+          recoverySessionId: opened.recoverySessionId,
+          choices: opened.choices,
+        };
+      }
+      return {
+        ok: true,
+        kind: opened.kind,
+        url: launchUrl(this.server.origin, opened.launch, "browser"),
+        sessionId: opened.launch.sessionId,
+        documentGeneration: opened.launch.documentGeneration,
+      };
+    } catch (error) {
+      return failure(
+        "input-unavailable",
+        error instanceof Error
+          ? error.message
+          : "The Placekeeper link is invalid.",
+      );
+    }
   }
 
   async #open(request: LaunchRequest): Promise<LaunchResponse> {

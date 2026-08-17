@@ -9,12 +9,16 @@ import {
   DaemonUpgradeRequiredError,
   inspectDaemonCompatibility,
   requestControl,
-  requestLaunch,
   startLaunchControlServer,
   type PlacekeeperControlRequest,
   type PlacekeeperControlResponse,
 } from "./launch-control.js";
 import type { LaunchRequest, LaunchResponse } from "./placekeeper-host.js";
+import type {
+  LinkLaunchResponse,
+  LinkOpenRequest,
+  LinkPreflightResponse,
+} from "./placekeeper-host.js";
 import { PlacekeeperHost } from "./placekeeper-host.js";
 import { acquireLifecycleLock, LifecycleLockTimeoutError } from "./lifecycle-lock.js";
 import { upgradeReason } from "./upgrade-coordinator.js";
@@ -153,6 +157,33 @@ export async function launchThroughDaemon(
   request: LaunchRequest,
   paths = defaultDaemonPaths(),
 ): Promise<LaunchResponse> {
+  const response = await demandStartedControl({ kind: "launch", request }, paths);
+  if (response.kind !== "launch") throw new DaemonUpgradeRequiredError("malformed");
+  return response.response;
+}
+
+export async function preflightLinkThroughDaemon(
+  link: string,
+  paths = defaultDaemonPaths(),
+): Promise<LinkPreflightResponse> {
+  const response = await demandStartedControl({ kind: "link-preflight", link }, paths);
+  if (response.kind !== "link-preflight") throw new DaemonUpgradeRequiredError("malformed");
+  return response.response;
+}
+
+export async function openLinkThroughDaemon(
+  request: LinkOpenRequest,
+  paths = defaultDaemonPaths(),
+): Promise<LinkLaunchResponse> {
+  const response = await demandStartedControl({ kind: "link-open", request }, paths);
+  if (response.kind !== "link-open") throw new DaemonUpgradeRequiredError("malformed");
+  return response.response;
+}
+
+async function demandStartedControl(
+  request: PlacekeeperControlRequest,
+  paths: DaemonPaths,
+): Promise<PlacekeeperControlResponse> {
   const lockPath = paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock");
   let lifecycleLock;
   try {
@@ -164,10 +195,50 @@ export async function launchThroughDaemon(
     throw error;
   }
   try {
-    return await launchWhileLocked(request, paths, lifecycleLock.token);
+    return await controlWhileLocked(request, paths, lifecycleLock.token);
   } finally {
     await lifecycleLock.release();
   }
+}
+
+async function controlWhileLocked(
+  request: PlacekeeperControlRequest,
+  paths: DaemonPaths,
+  lifecycleToken: string,
+): Promise<PlacekeeperControlResponse> {
+  try {
+    const compatibility = await waitForAcceptingCompatibility(paths.socketPath, currentDaemonIdentity());
+    if (compatibility.kind !== "exact") {
+      throw new DaemonUpgradeRequiredError(
+        compatibility.kind === "incompatible"
+          ? upgradeReason(compatibility.status.activity) ?? "incompatible"
+          : compatibility.reason,
+      );
+    }
+    return await requestControl(paths.socketPath, request);
+  } catch (error) {
+    if (!daemonUnavailable(error)) throw error;
+  }
+  const entry = process.argv[1];
+  if (entry === undefined) throw new Error("The placekeeper launcher entry point is unavailable");
+  spawnServiceDaemon(entry, paths, lifecycleToken);
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+    try {
+      const compatibility = await waitForAcceptingCompatibility(paths.socketPath, currentDaemonIdentity());
+      if (compatibility.kind !== "exact") {
+        throw new DaemonUpgradeRequiredError(
+          compatibility.kind === "incompatible"
+            ? upgradeReason(compatibility.status.activity) ?? "incompatible"
+            : compatibility.reason,
+        );
+      }
+      return await requestControl(paths.socketPath, request);
+    } catch (error) {
+      if (!daemonUnavailable(error)) throw error;
+    }
+  }
+  throw new Error("The local placekeeper service did not become ready");
 }
 
 /** Starts the exact packaged daemon while an installer holds the lifecycle
@@ -232,46 +303,6 @@ export async function ensureServiceDaemonReady(
     ]);
     throw error;
   }
-}
-
-async function launchWhileLocked(
-  request: LaunchRequest,
-  paths: DaemonPaths,
-  lifecycleToken: string,
-): Promise<LaunchResponse> {
-  try {
-    const compatibility = await waitForAcceptingCompatibility(paths.socketPath, currentDaemonIdentity());
-    if (compatibility.kind !== "exact") {
-      throw new DaemonUpgradeRequiredError(
-        compatibility.kind === "incompatible"
-          ? upgradeReason(compatibility.status.activity) ?? "incompatible"
-          : compatibility.reason,
-      );
-    }
-    return await requestLaunch(paths.socketPath, request);
-  } catch (error) {
-    if (!daemonUnavailable(error)) throw error;
-  }
-  const entry = process.argv[1];
-  if (entry === undefined) throw new Error("The placekeeper launcher entry point is unavailable");
-  spawnServiceDaemon(entry, paths, lifecycleToken);
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
-    try {
-      const compatibility = await waitForAcceptingCompatibility(paths.socketPath, currentDaemonIdentity());
-      if (compatibility.kind !== "exact") {
-        throw new DaemonUpgradeRequiredError(
-          compatibility.kind === "incompatible"
-            ? upgradeReason(compatibility.status.activity) ?? "incompatible"
-            : compatibility.reason,
-        );
-      }
-      return await requestLaunch(paths.socketPath, request);
-    } catch (error) {
-      if (!daemonUnavailable(error)) throw error;
-    }
-  }
-  throw new Error("The local placekeeper service did not become ready");
 }
 
 async function waitForAcceptingCompatibility(socketPath: string, identity: string) {
