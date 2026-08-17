@@ -892,6 +892,7 @@
 
 .outline-navigator {
   --outline-tree-control-size: var(--review-control-compact);
+  --outline-tree-leading-size: calc(var(--outline-tree-control-size) + 8px);
   --outline-tree-rhythm: 4px;
 
   padding: 10px;
@@ -908,7 +909,7 @@
 .outline-navigator__children {
   position: relative;
   margin-top: var(--outline-tree-rhythm);
-  margin-left: calc(var(--outline-tree-control-size) / 2);
+  margin-left: calc(var(--outline-tree-leading-size) / 2);
   padding-left: var(--outline-tree-rhythm);
   border-left: 1px solid var(--review-border-subtle);
 }
@@ -917,13 +918,14 @@
   position: relative;
   display: grid;
   min-width: 0;
-  grid-template-columns: var(--outline-tree-control-size) minmax(0, 1fr) var(--outline-tree-control-size);
+  grid-template-columns: var(--outline-tree-leading-size) minmax(0, 1fr) var(--outline-tree-control-size);
   align-items: center;
   padding: 0;
   border: 0;
   border-radius: var(--review-radius-control);
   background: transparent;
-  transition: background-color var(--review-motion-fast) ease;
+  transition: background-color var(--review-motion-fast) ease,
+    box-shadow var(--review-motion-fast) ease;
 }
 
 .outline-navigator__row:hover,
@@ -933,6 +935,7 @@
 
 .outline-navigator__row:active {
   background: var(--review-surface-interactive);
+  box-shadow: inset 0 1px 2px rgb(24 26 23 / 16%);
 }
 
 .outline-navigator__row[data-current="true"] {
@@ -965,6 +968,7 @@
 
 .outline-navigator__disclosure {
   display: grid;
+  justify-self: center;
   margin: 0;
   padding: 0;
   place-items: center;
@@ -982,7 +986,7 @@
   min-height: 44px;
   align-items: center;
   justify-content: flex-start;
-  padding: 7px 8px;
+  padding: 7px 8px 7px 0;
   text-align: left;
 }
 

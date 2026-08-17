@@ -1545,7 +1545,7 @@ test("keeps compound reference actions touch sized for coarse pointers", async (
       };
     });
     expect(coarseTreeGeometry.columns).toHaveLength(3);
-    expect(coarseTreeGeometry.columns[0]).toBe(44);
+    expect(coarseTreeGeometry.columns[0]).toBe(52);
     expect(coarseTreeGeometry.columns[2]).toBe(44);
     expect(coarseTreeGeometry).toMatchObject({
       spacer: { width: 44, height: 44 },

@@ -142,6 +142,23 @@ async function expectOutlineTreeGeometry(
     .evaluate((element) => element.getBoundingClientRect().width);
   expect(disclosureWidth).toBe(expectedControlSize);
   expect(referenceWidth).toBe(expectedControlSize);
+  const disclosureRhythm = await navigator.locator(
+    '.outline-navigator__row:has(.outline-navigator__disclosure)',
+  ).first().evaluate((row) => {
+    const disclosure = row.querySelector('.outline-navigator__disclosure');
+    const title = row.querySelector('.outline-navigator__title');
+    if (!disclosure || !title) throw new Error('Outline disclosure rhythm is incomplete.');
+    const rowBounds = row.getBoundingClientRect();
+    const disclosureBounds = disclosure.getBoundingClientRect();
+    const titleBounds = title.getBoundingClientRect();
+    const disclosureCenter = disclosureBounds.left + disclosureBounds.width / 2;
+    return {
+      left: disclosureCenter - rowBounds.left,
+      right: titleBounds.left - disclosureCenter,
+    };
+  });
+  expect(Math.abs(disclosureRhythm.left - disclosureRhythm.right))
+    .toBeLessThanOrEqual(1);
 
   const overflow = await navigator.evaluate((element) => ({
     clientWidth: element.clientWidth,
@@ -258,6 +275,35 @@ test('wide Outline tree', async ({ page }) => {
   await expect(page.locator('[data-outline-item="outline-long-nested"] > .outline-navigator__row'))
     .toHaveAttribute('data-current', 'true');
   await expectScene(product, 'wide-outline-tree.png');
+});
+
+test('Outline current location remains distinct while pressed', async ({ page }) => {
+  await openOutlineScene(page);
+  const currentRow = page.locator(
+    '[data-outline-item="outline-long-nested"] > .outline-navigator__row',
+  );
+  const currentDestination = currentRow.locator('.outline-navigator__destination');
+  const currentBackground = await currentRow.evaluate(
+    (row) => getComputedStyle(row).backgroundColor,
+  );
+  const currentShadowAtRest = await currentRow.evaluate(
+    (row) => getComputedStyle(row).boxShadow,
+  );
+  const currentDestinationBounds = await currentDestination.boundingBox();
+  expect(currentDestinationBounds).not.toBeNull();
+  await page.mouse.move(
+    currentDestinationBounds!.x + currentDestinationBounds!.width / 2,
+    currentDestinationBounds!.y + currentDestinationBounds!.height / 2,
+  );
+  await page.mouse.down();
+  await expect(currentRow).toHaveCSS('background-color', currentBackground);
+  const currentShadowWhilePressed = await currentRow.evaluate(
+    (row) => getComputedStyle(row).boxShadow,
+  );
+  expect(currentShadowWhilePressed).not.toBe(currentShadowAtRest);
+  expect(currentShadowWhilePressed).toContain('inset');
+  await page.mouse.up();
+  await expect(currentRow).toHaveCSS('box-shadow', currentShadowAtRest);
 });
 
 test('narrow Outline tree', async ({ page }) => {
