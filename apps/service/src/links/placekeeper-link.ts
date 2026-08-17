@@ -3,11 +3,18 @@ import { basename, isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
+  decodePlacekeeperReadableViewPathname,
   decodePlacekeeperLink,
   encodePlacekeeperLink,
   placekeeperLinkBase,
   type PlacekeeperLinkLocation,
 } from "../../../../packages/core/src/placekeeper-link.js";
+
+export interface ParsedPlacekeeperReadableViewRoute {
+  readonly viewId: string;
+  readonly pdfPath: string;
+  readonly appLinkBase: string;
+}
 
 export class PlacekeeperPdfLinkError extends Error {
   readonly code: "MISSING" | "UNREADABLE" | "NOT_PDF";
@@ -89,4 +96,16 @@ export async function createPlacekeeperLinkForPdf(
 export async function resolvePlacekeeperLink(input: string): Promise<PreparedPlacekeeperLink> {
   const decoded = decodePlacekeeperLink(input);
   return createPlacekeeperLinkForPdf(decoded.path, decoded.location);
+}
+
+/** Parses descriptive recovery data only. This must remain free of filesystem access. */
+export function parsePlacekeeperReadableViewRoute(
+  pathname: string,
+): ParsedPlacekeeperReadableViewRoute {
+  const decoded = decodePlacekeeperReadableViewPathname(pathname);
+  return {
+    viewId: decoded.viewId,
+    pdfPath: decoded.path,
+    appLinkBase: placekeeperLinkBase(decoded.path),
+  };
 }

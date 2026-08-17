@@ -2,8 +2,9 @@ export const PLACEKEEPER_LINK_MAX_LENGTH = 16 * 1024;
 
 const PLACEKEEPER_PREFIX = "placekeeper:///";
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/u;
-const ENCODED_SLASH = /%2f/iu;
+const ENCODED_SEPARATOR = /%(?:2f|5c)/iu;
 const PORTABLE_ITEM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const VIEW_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 export type PlacekeeperLinkLocation =
   | { readonly kind: "page"; readonly page: number }
@@ -12,6 +13,11 @@ export type PlacekeeperLinkLocation =
 export interface PlacekeeperLinkTarget {
   readonly path: string;
   readonly location: PlacekeeperLinkLocation;
+}
+
+export interface PlacekeeperReadableViewRoute {
+  readonly viewId: string;
+  readonly path: string;
 }
 
 export class PlacekeeperLinkError extends Error {
@@ -50,6 +56,7 @@ function encodeAbsolutePath(path: string): string {
   if (
     !path.startsWith("/") ||
     path === "/" ||
+    path.includes("\\") ||
     CONTROL_CHARACTERS.test(path) ||
     !path.toLowerCase().endsWith(".pdf")
   ) {
@@ -73,17 +80,21 @@ export function placekeeperLinkBase(path: string): string {
 }
 
 export function encodePlacekeeperLink(target: PlacekeeperLinkTarget): string {
-  assertPage(target.location.page);
-  const item = target.location.kind === "item"
-    ? `&item=${(assertPortableItemId(target.location.itemId), target.location.itemId)}`
-    : "";
-  const link = `${placekeeperLinkBase(target.path)}#v=1&page=${target.location.page}${item}`;
+  const link = `${placekeeperLinkBase(target.path)}#${encodePlacekeeperLinkFragment(target.location)}`;
   assertLength(link);
   return link;
 }
 
+export function encodePlacekeeperLinkFragment(location: PlacekeeperLinkLocation): string {
+  assertPage(location.page);
+  const item = location.kind === "item"
+    ? `&item=${(assertPortableItemId(location.itemId), location.itemId)}`
+    : "";
+  return `v=1&page=${location.page}${item}`;
+}
+
 function decodeCanonicalPath(rawPath: string): string {
-  if (!rawPath.startsWith("/") || rawPath === "/" || ENCODED_SLASH.test(rawPath)) {
+  if (!rawPath.startsWith("/") || rawPath === "/" || ENCODED_SEPARATOR.test(rawPath)) {
     invalid("Placekeeper link path is not canonical");
   }
   let path: string;
@@ -96,6 +107,49 @@ function decodeCanonicalPath(rawPath: string): string {
     invalid("Placekeeper link path is not canonically encoded");
   }
   return path;
+}
+
+export function decodePlacekeeperLinkFragment(fragment: string): PlacekeeperLinkLocation {
+  assertLength(fragment);
+  if (CONTROL_CHARACTERS.test(fragment) || fragment.startsWith("#")) {
+    invalid("Placekeeper link location must not include a fragment marker");
+  }
+  const match = /^v=1&page=([1-9][0-9]*)(?:&item=([0-9a-f-]+))?$/iu.exec(fragment);
+  if (match === null) invalid("Placekeeper link location is malformed or unsupported");
+  const page = Number(match[1]);
+  assertPage(page);
+  const itemId = match[2];
+  if (itemId === undefined) return { kind: "page", page };
+  assertPortableItemId(itemId);
+  return { kind: "item", page, itemId };
+}
+
+export function encodePlacekeeperReadableViewPathname(
+  route: PlacekeeperReadableViewRoute,
+): string {
+  if (!VIEW_ID.test(route.viewId)) invalid("Placekeeper readable view ID is invalid");
+  const pathname = `/r/${route.viewId}${encodeAbsolutePath(route.path)}`;
+  assertLength(pathname);
+  return pathname;
+}
+
+export function decodePlacekeeperReadableViewPathname(
+  pathname: string,
+): PlacekeeperReadableViewRoute {
+  assertLength(pathname);
+  if (CONTROL_CHARACTERS.test(pathname) || pathname.includes("?") || pathname.includes("#")) {
+    invalid("Placekeeper readable view route is malformed");
+  }
+  const match = /^\/r\/([0-9a-f-]{36})(\/.*)$/u.exec(pathname);
+  if (match === null || !VIEW_ID.test(match[1]!)) {
+    invalid("Placekeeper readable view route is malformed");
+  }
+  const path = decodeCanonicalPath(match[2]!);
+  const route = { viewId: match[1]!, path };
+  if (encodePlacekeeperReadableViewPathname(route) !== pathname) {
+    invalid("Placekeeper readable view route is not canonical");
+  }
+  return route;
 }
 
 export function decodePlacekeeperLink(input: string): PlacekeeperLinkTarget {
@@ -127,13 +181,5 @@ export function decodePlacekeeperLink(input: string): PlacekeeperLinkTarget {
   if (parsed.pathname !== rawPath) invalid("Placekeeper link path is not canonical");
   const path = decodeCanonicalPath(rawPath);
 
-  const fragment = input.slice(hashIndex + 1);
-  const match = /^v=1&page=([1-9][0-9]*)(?:&item=([0-9a-f-]+))?$/iu.exec(fragment);
-  if (match === null) invalid("Placekeeper link location is malformed or unsupported");
-  const page = Number(match[1]);
-  assertPage(page);
-  const itemId = match[2];
-  if (itemId === undefined) return { path, location: { kind: "page", page } };
-  assertPortableItemId(itemId);
-  return { path, location: { kind: "item", page, itemId } };
+  return { path, location: decodePlacekeeperLinkFragment(input.slice(hashIndex + 1)) };
 }

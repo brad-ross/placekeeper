@@ -7,10 +7,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { encodePlacekeeperLink } from "../../../packages/core/src/placekeeper-link.js";
 import {
   createPlacekeeperLinkForPdf,
+  parsePlacekeeperReadableViewRoute,
   resolvePlacekeeperLink,
 } from "../src/links/placekeeper-link.js";
 
 const roots: string[] = [];
+const viewId = "22222222-2222-4222-8222-222222222222";
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -25,6 +27,25 @@ async function fixture(name = "paper.pdf"): Promise<string> {
 }
 
 describe("Placekeeper service links", () => {
+  it("derives inert recovery metadata from a readable route without requiring the PDF", () => {
+    expect(parsePlacekeeperReadableViewRoute(
+      `/r/${viewId}/missing/Paper%20%231%20%E8%AE%BA%E6%96%87.pdf`,
+    )).toEqual({
+      viewId,
+      pdfPath: "/missing/Paper #1 论文.pdf",
+      appLinkBase: "placekeeper:///missing/Paper%20%231%20%E8%AE%BA%E6%96%87.pdf",
+    });
+  });
+
+  it("rejects ambiguous readable routes instead of constructing a recovery link", () => {
+    expect(() => parsePlacekeeperReadableViewRoute(
+      `/r/${viewId}/missing/../secret.pdf`,
+    )).toThrow();
+    expect(() => parsePlacekeeperReadableViewRoute(
+      `/r/${viewId}/missing/paper%2Fsecret.pdf`,
+    )).toThrow();
+  });
+
   it("turns a decoded local path into the canonical file URL and ready app-link base", async () => {
     const path = await fixture("paper #1 %2F 论文.pdf");
     const prepared = await createPlacekeeperLinkForPdf(path, { kind: "page", page: 2 });
