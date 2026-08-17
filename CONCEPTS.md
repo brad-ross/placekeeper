@@ -68,7 +68,7 @@ Protected Recovery supports crash and write-failure recovery, but it is not the 
 ### Annotation Tray
 The nonmodal review surface that lists Review Items and Existing PDF Annotations while leaving the PDF available for reading and navigation.
 
-Its presentation may change with available reading space, but disclosure changes do not replace the underlying viewer or discard review state.
+Its presentation may change with available reading space, but disclosure changes do not replace the underlying viewer or discard review state. Its navigation exposes only destinations supported by current document or session state—including informative loading, failure, and pending surfaces—while preserving Search as a safe fallback.
 
 ### Live PDF Context
 The task-scoped, prompt-refreshed view of the PDF, Review Items, Existing PDF Annotations, and Save Sync made available to the agent task bound to the document's review session.
