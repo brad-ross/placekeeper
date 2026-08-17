@@ -187,11 +187,13 @@ async function openFreshProductionFixture(
   page: Page,
   pdfPath: string,
   failureMessage: string,
+  beforeNavigate?: (sessionId: string) => Promise<void>,
 ): Promise<{ sessionId: string; url: string }> {
   const startupErrors: string[] = [];
   page.on("pageerror", (error) => startupErrors.push(error.message));
   const launched = await host.open({ pdfPath, sourceRootPath: sourceRoot, fork: true });
   if (!launched.ok || launched.kind === "recovery-offered") throw new Error(failureMessage);
+  await beforeNavigate?.(launched.sessionId);
   await page.goto(launched.url);
   try {
     await expect(page.locator("[data-production-review]")).toBeVisible();
@@ -944,6 +946,8 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
+  const activeReferenceTab = referenceTabsList.locator('[role="tab"][aria-selected="true"]');
+  await expect(activeReferenceTab).toBeFocused();
   await referencesMode.focus();
   await expect(referencesMode).toBeFocused();
   await referencesMode.press("ArrowLeft");
@@ -964,6 +968,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
+  await expect(activeReferenceTab).toBeFocused();
   await referencesMode.focus();
   await expect(referencesMode).toBeFocused();
   const workspaceForwardTab = browserName === "webkit" ? "Alt+Tab" : "Tab";
@@ -1334,20 +1339,37 @@ test("keeps main PDF link hit targets below an open References viewer", async ({
 
 test("records annotation tray jumps in document history", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
-  await openFreshProductionFixture(page, referencePdf, "Annotation history launch failed");
+  await openFreshProductionFixture(
+    page,
+    referencePdf,
+    "Annotation history launch failed",
+    async (sessionId) => {
+      const initialState = host.broker.state(sessionId);
+      if (!initialState) throw new Error("Annotation history review state is missing");
+      await host.broker.acceptMutation(
+        sessionId,
+        addPageNote(
+          initialState,
+          2,
+          { x: 80, y: 160, width: 18, height: 18 },
+          "History destination.",
+        ),
+      );
+    },
+  );
   await expect(page.getByLabel("Current page")).toHaveText("1 / 4");
 
   await openAnnotationsWorkspace(page);
   const annotationsPanel = page.locator('#workspace-panel-annotations');
-  const pageThreeAnnotation = annotationsPanel.locator('[data-annotation-origin="source"]').filter({
-    has: page.locator('.annotation-item__page', { hasText: /^3$/u }),
+  const pageThreeAnnotation = annotationsPanel.getByRole("button", {
+    name: /^Page Note · Page 3 · .*History destination\.$/u,
   }).first();
   await expect(pageThreeAnnotation).toBeVisible();
 
   const back = page.getByRole("button", { name: "Back in document history" });
   const forward = page.getByRole("button", { name: "Forward in document history" });
   await expect(back).toBeDisabled();
-  await pageThreeAnnotation.getByRole("button").click();
+  await pageThreeAnnotation.click();
   await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
   await expect(back).toBeEnabled();
 
