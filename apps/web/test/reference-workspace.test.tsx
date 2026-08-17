@@ -548,6 +548,7 @@ describe('outline navigator', () => {
     expect(html).toContain('<ul');
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('aria-controls="outline-children-intro"');
+    expect(html).toContain('class="outline-navigator__children"');
     expect(html).toContain('aria-current="location"');
     expect(html).toContain('Setup');
   });
