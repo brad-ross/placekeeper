@@ -187,6 +187,15 @@ export class SessionCredentialStore {
     );
   }
 
+  revoke(sessionId: string, credential: string): void {
+    const record = this.#credentials.get(credential.slice(0, 12));
+    if (
+      record !== undefined &&
+      record.sessionId === sessionId &&
+      secretEquals(credential, record.digest)
+    ) record.revoked = true;
+  }
+
   pendingBootstrapCount(): number {
     const now = this.#now();
     let count = 0;

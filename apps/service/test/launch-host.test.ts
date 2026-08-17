@@ -526,7 +526,7 @@ describe("persistent launch host", () => {
     expect(resumed).toMatchObject({ ok: true, kind: "opened" });
   });
 
-  it("serves authenticated normal module assets and only enables the VS Code frame policy explicitly", async () => {
+  it("serves public top-level assets and only enables authenticated VS Code assets and framing explicitly", async () => {
     const { pdf, host } = await fixture();
     const launched = await host.open({ pdfPath: pdf });
     if (!launched.ok || launched.kind === "recovery-offered") throw new Error("Expected launch");
@@ -552,12 +552,14 @@ describe("persistent launch host", () => {
     });
     const cookie = exchanged.headers.get("set-cookie")?.split(";", 1)[0];
     const { credential } = await exchanged.json() as { credential: string };
-    expect(cookie).toContain("placekeeper_session=");
+    expect(cookie).toContain("placekeeper_view=");
     const app = await fetch(`${launch.origin}/s/${launched.sessionId}/assets/app.js`, {
       headers: { cookie: cookie! },
     });
-    expect(app.status).toBe(200);
-    expect(await app.text()).toContain("productionApp");
+    expect(app.status).toBe(401);
+    const publicApp = await fetch(`${launch.origin}/assets/app.js`);
+    expect(publicApp.status).toBe(200);
+    expect(await publicApp.text()).toContain("productionApp");
     const saveStatus = await fetch(`${launch.origin}/s/${launched.sessionId}/save/status`, {
       headers: { authorization: `Bearer ${credential}` },
     });
@@ -583,9 +585,10 @@ describe("persistent launch host", () => {
       body: JSON.stringify({ capability: embeddedCapability }),
     });
     const secondCookie = secondExchange.headers.get("set-cookie")?.split(";", 1)[0];
+    expect(secondCookie).toContain("placekeeper_session=");
     expect((await fetch(`${launch.origin}/s/${launched.sessionId}/assets/app.js`, {
       headers: { cookie: cookie! },
-    })).status).toBe(200);
+    })).status).toBe(401);
     expect((await fetch(`${launch.origin}/s/${launched.sessionId}/assets/app.js`, {
       headers: { cookie: secondCookie! },
     })).status).toBe(200);

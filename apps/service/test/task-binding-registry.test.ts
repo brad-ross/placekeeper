@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { LiveObservationIdentity } from "../../../packages/core/src/live-context.js";
+import { digestSecretHex } from "../../../packages/core/src/session-security.js";
 import { TaskBindingRegistry } from "../src/context/task-binding-registry.js";
 
 const BROWSER_CAPABILITY = "browser-capability-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -186,16 +187,19 @@ describe("task-scoped PDF binding registry", () => {
     expect(registry.renewBrowserHeartbeat({
       reviewSessionId: "review-a",
       documentGeneration: 2,
+      browserCapabilityHash: digestSecretHex(BROWSER_CAPABILITY),
     })).toEqual({ status: "ignored" });
     expect(registry.renewBrowserHeartbeat({
       reviewSessionId: "review-b",
       documentGeneration: 1,
+      browserCapabilityHash: digestSecretHex(BROWSER_CAPABILITY),
     })).toEqual({ status: "ignored" });
     expect(registry.bindingForTask("task-a")?.leaseExpiresAt).toBe(originalExpiry);
 
     expect(registry.renewBrowserHeartbeat({
       reviewSessionId: "review-a",
       documentGeneration: 1,
+      browserCapabilityHash: digestSecretHex(BROWSER_CAPABILITY),
     })).toMatchObject({ status: "active" });
     expect(registry.bindingForTask("task-a")?.leaseExpiresAt).not.toBe(originalExpiry);
 
@@ -203,7 +207,54 @@ describe("task-scoped PDF binding registry", () => {
     expect(registry.renewBrowserHeartbeat({
       reviewSessionId: "review-a",
       documentGeneration: 1,
+      browserCapabilityHash: digestSecretHex(BROWSER_CAPABILITY),
     })).toEqual({ status: "ignored" });
+  });
+
+  it("requires the activating browser capability discriminator for heartbeat and status", () => {
+    const { registry, advance } = registryFixture();
+    const bindProof = issue(registry);
+    registry.claim({
+      bindProof,
+      taskSessionId: "task-a",
+      reviewSessionId: "review-a",
+      documentGeneration: 1,
+    });
+    registry.activateBrowser({
+      reviewSessionId: "review-a",
+      documentGeneration: 1,
+      browserCapability: BROWSER_CAPABILITY,
+    });
+    const originalExpiry = registry.bindingForTask("task-a")?.leaseExpiresAt;
+    const activeDiscriminator = digestSecretHex(BROWSER_CAPABILITY);
+    const otherDiscriminator = digestSecretHex(`${BROWSER_CAPABILITY}-other-view`);
+
+    advance(200);
+    expect(registry.renewBrowserHeartbeat({
+      reviewSessionId: "review-a",
+      documentGeneration: 1,
+      browserCapabilityHash: otherDiscriminator,
+    })).toEqual({ status: "ignored" });
+    expect(registry.bindingForTask("task-a")?.leaseExpiresAt).toBe(originalExpiry);
+    expect(registry.statusForReview("review-a", {
+      documentGeneration: 1,
+      reviewRevision: 0,
+      sourceDigest: "a".repeat(64),
+      stateDigest: "b".repeat(64),
+    }, otherDiscriminator)).toEqual({ status: "unbound" });
+
+    expect(registry.renewBrowserHeartbeat({
+      reviewSessionId: "review-a",
+      documentGeneration: 1,
+      browserCapabilityHash: activeDiscriminator,
+    })).toMatchObject({ status: "active" });
+    expect(registry.bindingForTask("task-a")?.leaseExpiresAt).not.toBe(originalExpiry);
+    expect(registry.statusForReview("review-a", {
+      documentGeneration: 1,
+      reviewRevision: 0,
+      sourceDigest: "a".repeat(64),
+      stateDigest: "b".repeat(64),
+    }, activeDiscriminator)).toMatchObject({ status: "refreshing" });
   });
 
   it("reports current only while the verified identity matches live review state", () => {
@@ -228,31 +279,31 @@ describe("task-scoped PDF binding registry", () => {
       reviewRevision: 4,
       sourceDigest: "a".repeat(64),
       stateDigest: verified.stateDigest,
-    })).toMatchObject({ status: "current", identity: verified });
+    }, digestSecretHex(BROWSER_CAPABILITY))).toMatchObject({ status: "current", identity: verified });
     expect(registry.statusForReview("review-a", {
       documentGeneration: 1,
       reviewRevision: 4,
       sourceDigest: "a".repeat(64),
       stateDigest: "d".repeat(64),
-    })).toMatchObject({ status: "refreshing", lastVerified: verified });
+    }, digestSecretHex(BROWSER_CAPABILITY))).toMatchObject({ status: "refreshing", lastVerified: verified });
     expect(registry.statusForReview("review-a", {
       documentGeneration: 1,
       reviewRevision: 5,
       sourceDigest: "a".repeat(64),
       stateDigest: verified.stateDigest,
-    })).toMatchObject({ status: "refreshing", lastVerified: verified });
+    }, digestSecretHex(BROWSER_CAPABILITY))).toMatchObject({ status: "refreshing", lastVerified: verified });
     expect(registry.statusForReview("review-a", {
       documentGeneration: 1,
       reviewRevision: 4,
       sourceDigest: "c".repeat(64),
       stateDigest: verified.stateDigest,
-    })).toMatchObject({ status: "refreshing", lastVerified: verified });
+    }, digestSecretHex(BROWSER_CAPABILITY))).toMatchObject({ status: "refreshing", lastVerified: verified });
     expect(registry.statusForReview("review-a", {
       documentGeneration: 2,
       reviewRevision: 4,
       sourceDigest: "a".repeat(64),
       stateDigest: verified.stateDigest,
-    })).toEqual({ status: "unbound" });
+    }, digestSecretHex(BROWSER_CAPABILITY))).toEqual({ status: "unbound" });
   });
 
   it("expires pending claims and active leases and supports explicit lifecycle revocation", () => {

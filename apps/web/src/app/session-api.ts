@@ -8,6 +8,24 @@ import type {
 } from "./ProductionReviewApp.js";
 import type { RejectedReviewCommand } from "./ReviewShell.js";
 
+export async function resumeProductionSession(
+  viewId: string,
+  pathname: string,
+): Promise<ProductionSession> {
+  if (!/^[0-9a-f-]{36}$/u.test(viewId)) {
+    throw new Error("The live review address is invalid.");
+  }
+  const response = await fetch(`/r/${viewId}/resume`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pathname }),
+  });
+  if (!response.ok) {
+    throw new Error("This live review is no longer available.");
+  }
+  return Object.freeze(await response.json() as ProductionSession);
+}
+
 function client(session: ProductionSession) {
   const base = `/s/${session.sessionId}`;
   const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {

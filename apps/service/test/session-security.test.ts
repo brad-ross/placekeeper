@@ -323,7 +323,8 @@ describe("loopback HTTP boundary", () => {
     const html = await bootstrap.text();
     expect(bootstrap.status).toBe(200);
     expect(html).not.toContain(launch.fragment.slice("#cap=".length));
-    expect(html.indexOf("history.replaceState")).toBeLessThan(html.indexOf("stylesheet.href"));
+    expect(html).toContain("location.replace(view.pathname");
+    expect(html).not.toContain("stylesheet.href");
     expect(html).not.toMatch(/https?:\/\/(?!127\.0\.0\.1)/u);
     expect(bootstrap.headers.get("content-security-policy")).toContain("default-src 'none'");
 
@@ -339,7 +340,7 @@ describe("loopback HTTP boundary", () => {
     );
     expect(exchanged.status).toBe(200);
     const { credential } = (await exchanged.json()) as { credential: string };
-    const assetCookie = exchanged.headers.get("set-cookie")?.split(";", 1)[0];
+    const viewCookie = exchanged.headers.get("set-cookie")?.split(";", 1)[0];
     const replay = await postJson(
       `${server.origin}/s/${launch.sessionId}/exchange`,
       { capability },
@@ -349,9 +350,10 @@ describe("loopback HTTP boundary", () => {
     const authorization = { authorization: `Bearer ${credential}` };
     const asset = await fetch(
       `${server.origin}/s/${launch.sessionId}/assets/app.js`,
-      { headers: { cookie: assetCookie! } },
+      { headers: { cookie: viewCookie! } },
     );
-    expect(asset.status).toBe(200);
+    expect(asset.status).toBe(401);
+    expect((await fetch(`${server.origin}/assets/app.js`)).status).toBe(200);
     const document = await fetch(
       `${server.origin}/s/${launch.sessionId}/document/${launch.fileId}`,
       { headers: authorization },
@@ -364,6 +366,100 @@ describe("loopback HTTP boundary", () => {
     );
     expect(arbitrary.status).toBe(404);
     expect(broker.state(launch.sessionId)?.revision).toBe(0);
+  });
+
+  it("resumes a live readable view repeatedly with only its scoped HttpOnly cookie", async () => {
+    const { broker, launch, pdf, server } = await openBroker();
+    const capability = launch.fragment.slice("#cap=".length);
+    const exchanged = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability },
+    );
+    expect(exchanged.status).toBe(200);
+    const exchangeBody = await exchanged.json() as {
+      credential: string;
+      view: { id: string; pathname: string; locationFragment: string };
+    };
+    expect(exchangeBody.view).toMatchObject({
+      id: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      pathname: expect.stringMatching(/^\/r\/[0-9a-f-]{36}\/.+paper\.pdf$/u),
+      locationFragment: "v=1&page=1",
+    });
+    expect(exchangeBody.view.pathname).not.toContain(capability);
+    expect(exchangeBody.view.pathname).not.toContain(exchangeBody.credential);
+
+    const setCookie = exchanged.headers.get("set-cookie");
+    expect(setCookie).toContain("placekeeper_view=");
+    expect(setCookie).toContain(`Path=/r/${exchangeBody.view.id}/`);
+    expect(setCookie).toContain("HttpOnly");
+    expect(setCookie).toContain("SameSite=Strict");
+    expect(setCookie).not.toContain("Domain=");
+    const cookie = setCookie!.split(";", 1)[0]!;
+
+    const shellResponse = await fetch(`${server.origin}${exchangeBody.view.pathname}`);
+    const shell = await shellResponse.text();
+    expect(shellResponse.status).toBe(200);
+    expect(shell).not.toContain("private document text");
+    expect(shell).not.toContain(capability);
+    expect(shell).not.toContain(exchangeBody.credential);
+    expect(shell).not.toContain(launch.sessionId);
+
+    const publicAsset = await fetch(`${server.origin}/assets/app.js`);
+    expect(publicAsset.status).toBe(200);
+
+    const resumeUrl = `${server.origin}/r/${exchangeBody.view.id}/resume`;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const resumed = await postJson(
+        resumeUrl,
+        { pathname: exchangeBody.view.pathname },
+        { cookie },
+      );
+      expect(resumed.status).toBe(200);
+      expect(await resumed.json()).toEqual({
+        sessionId: launch.sessionId,
+        credential: exchangeBody.credential,
+      });
+    }
+
+    expect((await postJson(resumeUrl, { pathname: exchangeBody.view.pathname })).status).toBe(401);
+    expect((await postJson(
+      `${server.origin}/r/${randomUUID()}/resume`,
+      { pathname: exchangeBody.view.pathname },
+      { cookie },
+    )).status).toBe(401);
+    expect((await postJson(resumeUrl, { pathname: `${exchangeBody.view.pathname}-wrong` }, { cookie })).status).toBe(401);
+    expect((await postJson(resumeUrl, { pathname: exchangeBody.view.pathname }, { cookie: "placekeeper_view=wrong" })).status).toBe(401);
+    expect((await postJson(resumeUrl, { pathname: exchangeBody.view.pathname }, { cookie, origin: "http://127.0.0.1:1" })).status).toBe(403);
+    expect((await postJson(
+      `http://localhost:${server.port}/r/${exchangeBody.view.id}/resume`,
+      { pathname: exchangeBody.view.pathname },
+      { cookie },
+    )).status).toBe(403);
+
+    const copiedState = await fetch(`${server.origin}/s/${launch.sessionId}/state`);
+    expect(copiedState.status).toBe(401);
+    broker.revokeView(exchangeBody.view.id);
+    expect((await postJson(resumeUrl, { pathname: exchangeBody.view.pathname }, { cookie })).status).toBe(401);
+    expect((await fetch(`${server.origin}/s/${launch.sessionId}/state`, {
+      headers: { authorization: `Bearer ${exchangeBody.credential}` },
+    })).status).toBe(401);
+
+    const reopened = await broker.openReview({ pdfPath: pdf, surface: "browser" });
+    if (reopened.kind !== "focused") throw new Error("Expected another live view");
+    const endedExchange = await postJson(
+      `${server.origin}/s/${reopened.launch.sessionId}/exchange`,
+      { capability: reopened.launch.fragment.slice("#cap=".length) },
+    );
+    const endedBody = await endedExchange.json() as {
+      view: { id: string; pathname: string };
+    };
+    const endedCookie = endedExchange.headers.get("set-cookie")!.split(";", 1)[0]!;
+    await broker.finish(reopened.launch.sessionId);
+    expect((await postJson(
+      `${server.origin}/r/${endedBody.view.id}/resume`,
+      { pathname: endedBody.view.pathname },
+      { cookie: endedCookie },
+    )).status).toBe(401);
   });
 
   it("rejects hostile forms, aliases, forwarding, cross-site metadata, null origins, and oversized bodies without mutation", async () => {
