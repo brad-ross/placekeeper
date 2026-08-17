@@ -101,12 +101,11 @@ scrollView's setDocumentView:pathField
 accessory's addSubview:scrollView
 alert's setAccessoryView:accessory
 
-alert's addButtonWithTitle:"Open"
 set cancelButton to alert's addButtonWithTitle:"Cancel"
 cancelButton's setKeyEquivalent:(ASCII character 27)
-alert's window()'s setInitialFirstResponder:cancelButton
+alert's addButtonWithTitle:"Open"
 set response to alert's runModal()
-if response is (current application's NSAlertFirstButtonReturn) then return "open"
+if response is (current application's NSAlertSecondButtonReturn) then return "open"
 return "cancel"
 `;
 

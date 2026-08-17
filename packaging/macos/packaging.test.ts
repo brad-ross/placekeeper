@@ -416,10 +416,13 @@ describe("macOS distribution manifests", () => {
     expect(launcher).toContain('setAccessibilityLabel:(current application\'s NSString\'s stringWithString:"PDF path")');
     expect(launcher).toContain("setSelectable:true");
     expect(launcher).toContain("setEditable:false");
-    expect(launcher).toContain("setInitialFirstResponder:cancelButton");
+    expect(launcher).not.toContain("setInitialFirstResponder");
     expect(launcher).toContain("setKeyEquivalent:(ASCII character 27)");
     expect(launcher).toContain('addButtonWithTitle:"Open"');
     expect(launcher).toContain('addButtonWithTitle:"Cancel"');
+    expect(launcher.indexOf('addButtonWithTitle:"Cancel"'))
+      .toBeLessThan(launcher.indexOf('addButtonWithTitle:"Open"'));
+    expect(launcher).toContain("NSAlertSecondButtonReturn");
   });
 
   it("presents Placekeeper on current app and Finder surfaces", async () => {

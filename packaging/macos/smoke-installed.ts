@@ -6,6 +6,11 @@ import { promisify } from "node:util";
 import { validateBackendRuntimeManifest, validateCodexPlugin } from "./validate-manifest.js";
 import { BUILD_IDENTITY_FILENAME, computePackagedBuildIdentity } from "./build-app.js";
 import { encodePlacekeeperLink } from "../../packages/core/src/placekeeper-link.js";
+import {
+  MANAGEMENT_PROTOCOL_VERSION,
+  managementShutdownResult,
+  requestControl,
+} from "../../apps/service/src/host/launch-control.js";
 
 const execFileAsync = promisify(execFile);
 const MAX_HOOK_OUTPUT_BYTES = 128 * 1024;
@@ -75,6 +80,28 @@ async function waitForSocket(
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
   }
   throw new Error("Installed daemon did not create its control socket");
+}
+
+async function retireReplacementDaemon(socketPath: string): Promise<void> {
+  if ((await lstat(socketPath).catch(() => undefined))?.isSocket() !== true) return;
+  const deadline = Date.now() + 6_000;
+  while (true) {
+    const shutdown = managementShutdownResult(await requestControl(socketPath, {
+      kind: "management",
+      protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+      operation: "shutdown-if-idle",
+    }));
+    if (shutdown?.status === "accepted") break;
+    if (shutdown?.status !== "refused" || Date.now() >= deadline) {
+      throw new Error("Installed smoke replacement daemon remained active after validation");
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+  }
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (await lstat(socketPath).then(() => false, () => true)) return;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+  }
+  throw new Error("Installed smoke replacement daemon did not retire");
 }
 
 function parseObject(serialized: string, label: string): Record<string, unknown> {
@@ -245,6 +272,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     stdio: "ignore",
   });
   let daemonSpawnError: Error | undefined;
+  let replacementDaemonStarted = false;
   daemon.once("error", (error) => { daemonSpawnError = error; });
   try {
     await assertInstalledIdentity(installedApp, smokeHome);
@@ -461,6 +489,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     if (upgraded.code !== 0 || upgraded.response.status !== "installed") {
       throw new Error("Closed reviews did not converge to a successful installed upgrade");
     }
+    replacementDaemonStarted = true;
     await assertInstalledIdentity(installedApp, smokeHome);
     if ((await readFile(supportRootSentinel, "utf8")) !== "support-root content must survive replacement\n") {
       throw new Error("Successful upgrade changed arbitrary support-root content");
@@ -473,15 +502,37 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     if (postUpgrade.ok !== true || typeof postUpgrade.url !== "string") {
       throw new Error("The ready candidate could not launch a PDF after upgrade");
     }
-  } finally {
-    if (daemon.pid !== undefined) {
-      try { process.kill(-daemon.pid, "SIGTERM"); } catch { /* already stopped */ }
+    const postUpgradeUrl = new URL(postUpgrade.url);
+    const postUpgradeCapability = new URLSearchParams(postUpgradeUrl.hash.slice(1)).get("cap");
+    const postUpgradeExchange = await fetch(
+      `${postUpgradeUrl.origin}${postUpgradeUrl.pathname.replace(/\/bootstrap$/u, "/exchange")}`,
+      {
+        method: "POST",
+        headers: {
+          origin: postUpgradeUrl.origin,
+          "content-type": "application/json",
+          "sec-fetch-site": "same-origin",
+        },
+        body: JSON.stringify({ capability: postUpgradeCapability }),
+      },
+    );
+    if (!postUpgradeExchange.ok) {
+      throw new Error("The ready candidate could not exchange its post-upgrade browser capability");
     }
-    await Promise.race([
-      new Promise<void>((resolveExit) => daemon.once("exit", () => resolveExit())),
-      new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 1_000)),
-    ]);
-    await rm(smokeHome, { recursive: true, force: true });
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 5_100));
+  } finally {
+    try {
+      if (replacementDaemonStarted) await retireReplacementDaemon(socketPath);
+    } finally {
+      if (daemon.pid !== undefined) {
+        try { process.kill(-daemon.pid, "SIGTERM"); } catch { /* already stopped */ }
+      }
+      await Promise.race([
+        new Promise<void>((resolveExit) => daemon.once("exit", () => resolveExit())),
+        new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 1_000)),
+      ]);
+      await rm(smokeHome, { recursive: true, force: true });
+    }
   }
 }
 
