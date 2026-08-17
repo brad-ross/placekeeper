@@ -19,6 +19,8 @@ import {
 } from '../pdf/viewer-navigation.js';
 import type { LinkActionChoice } from './LinkActionPopover.js';
 import type { PendingReferencePanel } from './ReferenceWorkspace.js';
+import type { PlacekeeperLinkLocation } from '../../../../packages/core/src/placekeeper-link.js';
+import type { ReviewLocationHistoryPort } from './review-location-history.js';
 import type {
   ReferenceNavigationAction,
   ReferenceNavigationState,
@@ -63,6 +65,11 @@ export interface NavigationCoordinatorDependencies {
   readonly focusReferenceTab: (identity: string) => boolean;
   readonly getOutlineDiscovery: () => PdfOutlineDiscovery;
   readonly setCurrentOutlineItemId: (identity: string | null) => void;
+  readonly locationHistory?: ReviewLocationHistoryPort;
+  readonly resolvePortableItem?: (itemId: string) => {
+    readonly pageIndex: number;
+    readonly point: PdfNaturalPoint | null;
+  } | null;
 }
 
 function metadataFromLink(metadata: PdfNavigationMetadata): NavigationDestinationMetadata {
@@ -204,6 +211,20 @@ const REFERENCE_FAILURE = 'Reference unavailable. Retry when ready.';
 const MAIN_FAILURE = 'Destination unavailable. The current location was preserved.';
 const HISTORY_FAILURE = 'Document history destination unavailable.';
 const LINK_UNAVAILABLE = 'This PDF link cannot be opened safely.';
+const INVALID_LOCATION_NOTICE = 'The linked location was invalid. Opened page 1.';
+const MISSING_ITEM_NOTICE = 'The exact item is unavailable. Opened its page instead.';
+
+interface SemanticItemLocation {
+  readonly itemId: string;
+  readonly pageIndex: number;
+  readonly anchor: PdfNaturalPoint;
+}
+
+function sameSemanticAnchor(location: PdfViewerLocation, semantic: SemanticItemLocation): boolean {
+  return location.pageIndex === semantic.pageIndex
+    && Math.abs(location.anchor.x - semantic.anchor.x) <= 0.01
+    && Math.abs(location.anchor.y - semantic.anchor.y) <= 0.01;
+}
 
 /**
  * The sole transaction authority for current-document viewer navigation.
@@ -219,10 +240,57 @@ export class NavigationCoordinator {
   private linkRequestSourceTabIdentity: string | null = null;
   /** A Send-selected successor whose saved view is not currently rendered. */
   private referenceRestoreIdentity: string | null = null;
+  private semanticItemLocation: SemanticItemLocation | null = null;
+  private locationHistoryStarted = false;
+  private locationRestored: boolean;
   private disposed = false;
 
   constructor(private readonly dependencies: NavigationCoordinatorDependencies) {
     this.documentGeneration = dependencies.getState().documentGeneration;
+    this.locationRestored = dependencies.locationHistory === undefined;
+  }
+
+  startLocationHistory(): void {
+    if (this.locationHistoryStarted || this.dependencies.locationHistory === undefined) return;
+    this.locationHistoryStarted = true;
+    this.dependencies.locationHistory.start((direction) => {
+      void this.restoreCurrentLocation(direction);
+    });
+  }
+
+  async restoreCurrentLocation(
+    historyDirection?: 'back' | 'forward' | 'unknown',
+  ): Promise<boolean> {
+    const history = this.dependencies.locationHistory;
+    if (history === undefined) return false;
+    let target: PlacekeeperLinkLocation;
+    let notice = '';
+    try {
+      target = history.read();
+    } catch {
+      target = { kind: 'page', page: 1 };
+      history.replace(target);
+      notice = INVALID_LOCATION_NOTICE;
+    }
+    if (target.kind === 'item') {
+      const item = this.dependencies.resolvePortableItem?.(target.itemId) ?? null;
+      if (item !== null) {
+        const restored = await this.restoreLinkedLocation(target, item);
+        if (restored) {
+          this.locationRestored = true;
+          this.announceHistoryRestore(historyDirection, target);
+          return true;
+        }
+      }
+      target = { kind: 'page', page: target.page };
+      history.replace(target);
+      notice = MISSING_ITEM_NOTICE;
+    }
+    const restored = await this.restoreLinkedLocation(target, null);
+    this.locationRestored = true;
+    if (notice) this.dependencies.setAnnouncement(notice);
+    else this.announceHistoryRestore(historyDirection, target);
+    return restored;
   }
 
   requestLink(request: ViewerPdfLinkInvocation): boolean {
@@ -679,6 +747,7 @@ export class NavigationCoordinator {
     this.referenceRestoreIdentity = survivingIdentity;
     this.dependencies.setAnnouncement('Reference sent to the main document.');
     this.refreshCurrentOutline(settledLocation);
+    this.projectExplicitLocation({ kind: 'page', page: settledLocation.pageIndex + 1 }, null);
 
     if (survivingIdentity !== null) {
       const restored = await this.restoreReferenceTab(operation, survivingIdentity, false);
@@ -752,6 +821,7 @@ export class NavigationCoordinator {
     this.dependencies.setAnnouncement(
       kind === 'outline' ? 'Outline destination opened.' : 'Main document destination opened.',
     );
+    this.projectExplicitLocation({ kind: 'page', page: settledLocation.pageIndex + 1 }, null);
     if (kind === 'search') this.lastSearchTargetIdentity = target.identity;
     this.refreshCurrentOutline(settledLocation);
     if (kind === 'direct' || kind === 'search') {
@@ -765,6 +835,8 @@ export class NavigationCoordinator {
   async navigateMainAnnotation(input: {
     readonly pageIndex: number;
     readonly point: PdfNaturalPoint | null;
+    readonly portableItemId?: string;
+    readonly linkFallbackNotice?: string;
   }): Promise<boolean> {
     const operation = this.begin();
     if (operation === null) return false;
@@ -799,7 +871,9 @@ export class NavigationCoordinator {
     }
     if (samePdfViewerLocation(currentLocation, destination)) {
       main.focusAtDestination(destination.pageIndex);
-      this.dependencies.setAnnouncement('Annotation destination is already current.');
+      this.dependencies.setAnnouncement(input.linkFallbackNotice === undefined
+        ? 'Annotation destination is already current.'
+        : `Annotation destination is already current. ${input.linkFallbackNotice}`);
       this.refreshCurrentOutline(currentLocation);
       return true;
     }
@@ -816,17 +890,45 @@ export class NavigationCoordinator {
       return false;
     }
     main.focusAtDestination(settledLocation.pageIndex);
-    this.dependencies.setAnnouncement('Annotation destination opened.');
+    this.dependencies.setAnnouncement(input.linkFallbackNotice === undefined
+      ? 'Annotation destination opened.'
+      : `Annotation destination opened. ${input.linkFallbackNotice}`);
+    this.projectExplicitLocation(
+      input.portableItemId === undefined
+        ? { kind: 'page', page: settledLocation.pageIndex + 1 }
+        : { kind: 'item', page: settledLocation.pageIndex + 1, itemId: input.portableItemId },
+      input.portableItemId === undefined ? null : settledLocation,
+    );
     this.refreshCurrentOutline(settledLocation);
     return true;
   }
 
   historyBack(): Promise<boolean> {
+    if (this.dependencies.locationHistory !== undefined) {
+      return Promise.resolve(this.dependencies.locationHistory.back());
+    }
     return this.traverseHistory('back');
   }
 
   historyForward(): Promise<boolean> {
+    if (this.dependencies.locationHistory !== undefined) {
+      return Promise.resolve(this.dependencies.locationHistory.forward());
+    }
     return this.traverseHistory('forward');
+  }
+
+  currentLinkLocation(): PlacekeeperLinkLocation {
+    const fromHistory = this.safeHistoryLocation();
+    if (fromHistory !== null) return fromHistory;
+    const current = this.dependencies.getMainNavigation()?.captureLocation() ?? null;
+    return { kind: 'page', page: current === null ? 1 : current.pageIndex + 1 };
+  }
+
+  downgradeCurrentItemLocation(): void {
+    const current = this.safeHistoryLocation();
+    if (current?.kind !== 'item') return;
+    this.semanticItemLocation = null;
+    this.dependencies.locationHistory?.replace({ kind: 'page', page: current.page });
   }
 
   refreshMainLocation(): void {
@@ -835,6 +937,19 @@ export class NavigationCoordinator {
     const location = this.dependencies.getMainNavigation()?.captureLocation() ?? null;
     if (location === null || !this.generationMatches(state.documentGeneration)) return;
     this.dependencies.dispatch({ type: 'refresh-main-location', location });
+    if (!this.locationRestored) {
+      this.refreshCurrentOutline(location);
+      return;
+    }
+    if (this.semanticItemLocation !== null && sameSemanticAnchor(location, this.semanticItemLocation)) {
+      this.refreshCurrentOutline(location);
+      return;
+    }
+    this.semanticItemLocation = null;
+    const current = this.safeHistoryLocation();
+    if (current?.kind !== 'page' || current.page !== location.pageIndex + 1) {
+      this.dependencies.locationHistory?.replace({ kind: 'page', page: location.pageIndex + 1 });
+    }
     this.refreshCurrentOutline(location);
   }
 
@@ -861,6 +976,8 @@ export class NavigationCoordinator {
     this.linkRequest = null;
     this.linkRequestSourceTabIdentity = null;
     this.referenceRestoreIdentity = null;
+    this.semanticItemLocation = null;
+    this.locationRestored = this.dependencies.locationHistory === undefined;
     this.dependencies.getMainNavigation()?.replaceDocument(documentGeneration);
     this.dependencies.getReferenceNavigation()?.replaceDocument(documentGeneration);
     void this.dependencies.getReferenceController()?.replaceDocument(documentGeneration);
@@ -880,6 +997,8 @@ export class NavigationCoordinator {
     this.linkRequest = null;
     this.linkRequestSourceTabIdentity = null;
     this.referenceRestoreIdentity = null;
+    this.semanticItemLocation = null;
+    this.dependencies.locationHistory?.dispose();
     void this.dependencies.getReferenceController()?.close();
   }
 
@@ -1021,6 +1140,94 @@ export class NavigationCoordinator {
       : 'Moved forward in document history.');
     this.refreshCurrentOutline(destination);
     return true;
+  }
+
+  private async restoreLinkedLocation(
+    target: PlacekeeperLinkLocation,
+    item: { readonly pageIndex: number; readonly point: PdfNaturalPoint | null } | null,
+  ): Promise<boolean> {
+    const operation = this.begin();
+    if (operation === null) return false;
+    const main = this.dependencies.getMainNavigation();
+    if (main === null) return false;
+    await main.cancelPendingNavigation();
+    if (!this.isCurrent(operation)) return false;
+    const current = main.captureLocation();
+    if (current === null) return false;
+    const pageIndex = item?.pageIndex ?? target.page - 1;
+    const anchor = item?.point ?? { x: 0, y: 0 };
+    const destination: PdfViewerLocation = {
+      pageIndex,
+      anchor,
+      alignment: item === null ? { xPercent: 0, yPercent: 0 } : { xPercent: 50, yPercent: 35 },
+      zoom: current.zoom,
+    };
+    if (!isPdfViewerLocation(destination)) return false;
+    const applied = await main.applyLocation(destination);
+    if (!this.isCurrent(operation)) return false;
+    const settled = applied ? main.captureLocation() : null;
+    if (settled === null) {
+      const actual = main.captureLocation();
+      if (actual !== null) {
+        this.dependencies.locationHistory?.replace({ kind: 'page', page: actual.pageIndex + 1 });
+      }
+      this.semanticItemLocation = null;
+      return false;
+    }
+    if (target.kind === 'item') {
+      this.semanticItemLocation = {
+        itemId: target.itemId,
+        pageIndex: settled.pageIndex,
+        anchor: settled.anchor,
+      };
+    } else {
+      this.semanticItemLocation = null;
+    }
+    main.focusAtDestination(settled.pageIndex);
+    this.refreshCurrentOutline(settled);
+    return true;
+  }
+
+  private projectExplicitLocation(
+    location: PlacekeeperLinkLocation,
+    settled: PdfViewerLocation | null,
+  ): void {
+    if (location.kind === 'item' && settled !== null) {
+      this.semanticItemLocation = {
+        itemId: location.itemId,
+        pageIndex: settled.pageIndex,
+        anchor: settled.anchor,
+      };
+    } else {
+      this.semanticItemLocation = null;
+    }
+    this.dependencies.locationHistory?.push(location);
+  }
+
+  private safeHistoryLocation(): PlacekeeperLinkLocation | null {
+    try {
+      return this.dependencies.locationHistory?.read() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private announceHistoryRestore(
+    direction: 'back' | 'forward' | 'unknown' | undefined,
+    location: PlacekeeperLinkLocation,
+  ): void {
+    if (direction === undefined) return;
+    if (direction === 'back') {
+      this.dependencies.setAnnouncement('Moved back in document history.');
+      return;
+    }
+    if (direction === 'forward') {
+      this.dependencies.setAnnouncement('Moved forward in document history.');
+      return;
+    }
+    this.dependencies.setAnnouncement(location.kind === 'item'
+      ? `Restored linked item on page ${location.page}.`
+      : `Restored page ${location.page}.`);
   }
 
   private async applyMainJump(

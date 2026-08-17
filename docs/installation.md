@@ -27,6 +27,8 @@ To update, pull or download newer source and run `./install.sh` again. Placekeep
 
 The installer replaces only its installed app; if replacement or candidate readiness fails, it restores the previous app. It leaves recovery data and user-owned exports alone.
 
+The packaged service reuses one fixed numeric-loopback origin so a browser tab can reach the replacement service at the same literal URL. A still-live service resumes the exact in-memory review on refresh. A replacement service instead shows a terminal **Reopen in Placekeeper** screen carrying only the PDF path and page/saved-item location; choosing it follows the normal confirmation flow and opens a fresh non-Codex review. If Placekeeper is stopped, the tab may show the browser's connection error until the app is started and the tab is refreshed again.
+
 Because the source build is intentionally not Developer ID-signed or notarized (it receives only a local ad-hoc signature), macOS may warn on first launch. In Finder, Control-click `~/Applications/Placekeeper.app`, choose **Open**, and confirm once. Do not disable Gatekeeper globally and do not recursively remove quarantine attributes.
 
 After installation, select one local PDF in Finder and use **Open With -> Placekeeper**. Alternatively, open Placekeeper from `~/Applications` and choose a PDF. No terminal is needed for ordinary use.

@@ -17,6 +17,9 @@ function offlinePdfium(): Plugin {
 
 export default defineConfig({
   plugins: [offlinePdfium()],
+  resolve: {
+    dedupe: ["react", "react-dom"],
+  },
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),
   },

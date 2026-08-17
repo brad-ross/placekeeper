@@ -77,6 +77,7 @@ import {
   type RightWorkspaceMode,
 } from '../review/reference-workspace-layout.js';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
+import type { CopyLinkControlProps } from '../review/CopyLinkControl.js';
 import {
   createProofreadInputController,
   isEditableTarget,
@@ -163,6 +164,7 @@ export interface ReviewShellProps {
   viewerFraming?: ViewerFramingControls;
   viewerNavigation?: PdfViewerNavigation;
   codexContext?: LiveContextBindingStatus;
+  copyLink?: CopyLinkControlProps;
   /** The production shell may control workspace visibility and retained navigation state. */
   workspaceOpen?: boolean;
   navigationState?: ReferenceNavigationState;
@@ -940,6 +942,7 @@ export function ReviewShell(props: ReviewShellProps) {
         canNavigateBack={props.canNavigateBack ?? false}
         canNavigateForward={props.canNavigateForward ?? false}
         {...(props.codexContext === undefined ? {} : { codexContext: props.codexContext })}
+        {...(props.copyLink === undefined ? {} : { copyLink: props.copyLink })}
         onUndo={() => void submit(undoReview)}
         onRedo={() => void submit(redoReview)}
         onNavigateBack={() => props.onNavigateBack?.()}

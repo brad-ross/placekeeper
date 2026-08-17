@@ -20,6 +20,8 @@ See [Install and uninstall](docs/installation.md) for first-launch, update, opti
 
 After installation, select one local PDF in Finder and choose **Open With -> Placekeeper**. You can also open `~/Applications/Placekeeper.app` and choose a PDF. The app runs on numeric loopback, bundles its browser and PDF assets, performs no telemetry, and leaves the original PDF unchanged unless you explicitly choose the separately confirmed Replace Original action.
 
+Top-level review tabs use readable local addresses whose path names the PDF and whose fragment records only the current page or a saved Placekeeper item. A hard refresh resumes the exact review while its local service is still alive. **Copy Link** emits a `placekeeper:///…#v=1&page=…` app link that reopens the current file through the normal path-confirmation flow; Back and Forward follow explicit document jumps. If a replacement service receives an older tab URL, it offers an explicit fresh reopen instead of restoring credentials, unsaved viewer state, or Codex authority.
+
 With the bundled Codex plugin installed, ask Codex to open one explicit local PDF in Placekeeper. The hosting task is bound automatically after the in-app browser loads. Each later prompt refreshes the current Review Items, Existing PDF Annotations, and save status; Codex retrieves bounded PDF text, layout, render, or annotation evidence only when needed. Finder, ordinary-browser, and VS Code launches remain unbound and show no Codex control.
 
 ## Supported release scope

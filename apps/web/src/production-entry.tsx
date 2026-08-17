@@ -29,7 +29,61 @@ export function showTerminalRecovery(): void {
   } catch {
     // Invalid or future fragments recover conservatively at page 1.
   }
-  reopen.href = `${appLinkBase}#${fragment}`;
+  const link = `${appLinkBase}#${fragment}`;
+  reopen.href = link;
+  if (document.head.querySelector('link[data-placekeeper-terminal-style]') === null) {
+    const stylesheet = document.createElement('link');
+    stylesheet.rel = 'stylesheet';
+    stylesheet.href = '/assets/app.css';
+    stylesheet.dataset.placekeeperTerminalStyle = 'true';
+    document.head.append(stylesheet);
+  }
+
+  const heading = document.createElement('h1');
+  heading.textContent = 'Reopen this PDF';
+  heading.tabIndex = -1;
+  const explanation = document.createElement('p');
+  explanation.textContent = 'This live review is no longer available. Reopen the current PDF at this location in a fresh review.';
+  const addressLabel = document.createElement('label');
+  addressLabel.textContent = 'Placekeeper link';
+  const address = document.createElement('input');
+  address.readOnly = true;
+  address.value = link;
+  address.setAttribute('aria-label', 'Placekeeper link');
+  address.addEventListener('focus', () => address.select());
+  addressLabel.append(address);
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.textContent = 'Copy Link';
+  const copyStatus = document.createElement('p');
+  copyStatus.setAttribute('role', 'status');
+  let copyPending = false;
+  copy.addEventListener('click', () => {
+    if (copyPending) return;
+    copyPending = true;
+    copy.disabled = true;
+    copy.setAttribute('aria-busy', 'true');
+    copyStatus.textContent = 'Copying link…';
+    const write = navigator.clipboard?.writeText;
+    const attempt = write === undefined
+      ? Promise.reject(new Error('Clipboard API unavailable'))
+      : write.call(navigator.clipboard, link);
+    void attempt.then(() => {
+      copyStatus.textContent = 'Link copied.';
+    }).catch(() => {
+      copyStatus.setAttribute('role', 'alert');
+      copyStatus.textContent = 'Clipboard access failed. Select and copy the link above, or retry.';
+      copy.textContent = 'Retry';
+    }).finally(() => {
+      copyPending = false;
+      copy.disabled = false;
+      copy.removeAttribute('aria-busy');
+      copy.focus({ preventScroll: true });
+    });
+  });
+
+  recovery.replaceChildren(heading, explanation, reopen, copy, addressLabel, copyStatus);
+  requestAnimationFrame(() => heading.focus({ preventScroll: true }));
 }
 
 export async function start(session: ProductionSession): Promise<void> {

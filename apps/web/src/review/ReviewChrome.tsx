@@ -9,6 +9,7 @@ import {
 import { ReviewIcon } from './ReviewIcon.js';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import { CodexContextStatus } from './CodexContextStatus.js';
+import { CopyLinkControl, type CopyLinkControlProps } from './CopyLinkControl.js';
 
 export function validPageNumber(draft: string, totalPages: number): number | undefined {
   const normalized = draft.trim();
@@ -67,6 +68,7 @@ export interface ReviewChromeProps {
   readonly canNavigateBack?: boolean;
   readonly canNavigateForward?: boolean;
   readonly codexContext?: LiveContextBindingStatus;
+  readonly copyLink?: CopyLinkControlProps;
   readonly onUndo: () => void;
   readonly onRedo: () => void;
   readonly onNavigateBack?: () => void;
@@ -89,6 +91,7 @@ export function ReviewChrome({
   canNavigateBack = false,
   canNavigateForward = false,
   codexContext,
+  copyLink,
   onUndo,
   onRedo,
   onNavigateBack = () => undefined,
@@ -431,11 +434,18 @@ export function ReviewChrome({
           <button type="button" className="review-chrome__icon-control review-chrome__fit-width" data-review-zoom-action="fit-width" aria-label="Fit PDF to available width" title="Fit PDF to available width" aria-busy={fitWidthPending ? 'true' : 'false'} aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)} disabled={!viewerState.zoomReady || !fitWidthReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runFitWidth(event.currentTarget)}><ReviewIcon name="fit-width" /></button>
         </span>
       </div>
-      {codexContext === undefined ? null : (
-        <div className="review-chrome__context" data-review-context-status>
-          <CodexContextStatus status={codexContext} />
-        </div>
-      )}
+      <div className="review-chrome__actions">
+        {copyLink === undefined ? null : (
+          <div className="review-chrome__link" data-review-copy-link>
+            <CopyLinkControl {...copyLink} />
+          </div>
+        )}
+        {codexContext === undefined ? null : (
+          <div className="review-chrome__context" data-review-context-status>
+            <CodexContextStatus status={codexContext} />
+          </div>
+        )}
+      </div>
       {!viewerState.pageReady ? <p id={pageUnavailableId} className="sr-only">{viewerState.pageUnavailableReason}</p> : null}
       {!viewerState.zoomReady ? <p id={zoomUnavailableId} className="sr-only">{viewerState.zoomUnavailableReason}</p> : null}
       {viewerState.zoomReady && !fitWidthReady ? <p id={fitWidthUnavailableId} className="sr-only">Fit Width becomes available when PDF navigation is ready.</p> : null}
