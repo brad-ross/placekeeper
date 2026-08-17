@@ -29,6 +29,7 @@ import {
   OutlineAnnotationsWorkspace,
 } from '../src/review/OutlineAnnotationsWorkspace.js';
 import type { PdfOutlineItem } from '../src/pdf/pdf-outline.js';
+import { RIGHT_WORKSPACE_MODES } from '../src/review/reference-navigation-state.js';
 
 const target = (identity: string, pageIndex: number) => ({
   documentGeneration: 3,
@@ -148,11 +149,12 @@ describe('shared reference workspace', () => {
     expect(WORKSPACE_MODES).toEqual(['outline', 'search', 'annotations', 'references']);
   });
 
-  it('collapses a confirmed empty outline to one selected Annotations surface', () => {
+  it('falls back to Search when the selected Outline mode is unavailable', () => {
     const html = renderToStaticMarkup(
       <OutlineAnnotationsWorkspace
         open
         mode="outline"
+        modes={RIGHT_WORKSPACE_MODES.filter((mode) => mode !== 'outline')}
         presentation="right"
         headerVariant="tools"
         outline={{ status: 'loaded-empty', documentGeneration: 1 }}
@@ -171,9 +173,12 @@ describe('shared reference workspace', () => {
     expect(html).not.toContain('This PDF has no embedded outline.');
     expect(html.match(/id="workspace-panel-annotations"/g)).toHaveLength(1);
     expect(html.match(/id="workspace-panel-search"/g)).toHaveLength(1);
-    expect(html).toMatch(/id="workspace-mode-annotations"[^>]*aria-selected="true"/u);
+    expect(html).toMatch(/id="workspace-mode-search"[^>]*aria-selected="true"/u);
+    const searchPanel = html.match(/<section[^>]*id="workspace-panel-search"[^>]*>/u)?.[0];
+    expect(searchPanel).not.toContain('hidden');
+    expect(searchPanel).not.toContain('inert');
     expect(html).toMatch(/id="workspace-panel-annotations"[^>]*aria-labelledby="workspace-mode-annotations"/u);
-    expect(html).not.toMatch(/id="workspace-panel-annotations"[^>]*hidden/u);
+    expect(html).toMatch(/id="workspace-panel-annotations"[^>]*hidden/u);
     expect(html).toContain('aria-label="Search and annotations"');
     expect(html).toContain('data-workspace-mode-count="2"');
   });
@@ -183,6 +188,7 @@ describe('shared reference workspace', () => {
       <OutlineAnnotationsWorkspace
         open
         mode="outline"
+        modes={RIGHT_WORKSPACE_MODES}
         presentation="right"
         headerVariant="tools"
         outline={{ status: 'unavailable', documentGeneration: 1 }}
@@ -277,9 +283,57 @@ describe('shared reference workspace', () => {
     expect(html).toContain('aria-label="Close active reference"');
     expect(html).not.toMatch(/role="tab"[^>]*>[^<]*Close/u);
     expect(html).toContain('aria-live="polite"');
-    expect(html).toContain('review-workspace__tab-segment--compound');
-    expect(html).toContain('class="review-workspace__tab-label" aria-hidden="true">References</span>');
-    expect(html).toMatch(/data-workspace-tab-segment="references"[^>]*data-workspace-tab-selected="true"[\s\S]*data-reference-move="bottom"/u);
+    expect(html).toContain('class="review-workspace__activity-strip review-workspace__activity-strip--compound"');
+    expect(html).toContain('aria-label="Outline"');
+    expect(html).toContain('title="Show Outline"');
+    expect(html).toContain('aria-label="References"');
+    expect(html).toContain('title="Show References"');
+    expect(html.match(/data-workspace-mode-label/g)).toHaveLength(1);
+    expect(html).toContain('data-workspace-mode-label="references"');
+    expect(html).toContain('>References</span>');
+    expect(html).toContain('review-workspace__mode-segment--compound');
+    expect(html).toMatch(
+      /review-workspace__mode-segment--compound[\s\S]*data-workspace-mode="references"[\s\S]*<\/div><button[^>]*data-reference-move="bottom"/u,
+    );
+    const workspaceTablist = html.match(
+      /<div class="review-workspace__tabs" role="tablist"[\s\S]*?<\/div>/u,
+    )?.[0];
+    expect(workspaceTablist).toBeDefined();
+    expect(workspaceTablist).not.toContain('data-reference-move');
+    expect(html).toContain('data-reference-move="bottom"');
+    expect(html).not.toContain('review-workspace__tab-segment--compound');
+  });
+
+  it('shows References docking only for the selected mode and a visible placement change', () => {
+    const renderWorkspace = (
+      mode: 'search' | 'references',
+      presentation: 'right' | 'bottom',
+      headerVariant: 'tabs' | 'references' = 'tabs',
+    ) => renderToStaticMarkup(
+      <ReferenceWorkspace
+        open
+        mode={mode}
+        presentation={presentation}
+        modes={headerVariant === 'references' ? ['references'] : ['search', 'references']}
+        headerVariant={headerVariant}
+        tabs={[]}
+        activeTabIdentity={null}
+        onModeChange={() => undefined}
+        onReferenceTabActivate={() => undefined}
+        onReferenceTabClose={() => undefined}
+        onSendToMain={() => undefined}
+        onRetryReference={() => undefined}
+        onMoveReferencesBottom={() => undefined}
+        onMoveReferencesRight={() => undefined}
+        onReferenceViewportHost={() => undefined}
+      />,
+    );
+
+    expect(renderWorkspace('search', 'right')).not.toContain('data-reference-move');
+    expect(renderWorkspace('references', 'right')).toContain('data-reference-move="bottom"');
+    expect(renderWorkspace('references', 'right')).not.toContain('data-reference-move="right"');
+    expect(renderWorkspace('references', 'bottom')).not.toContain('data-reference-move');
+    expect(renderWorkspace('references', 'bottom', 'references')).toContain('data-reference-move="right"');
   });
 
   it('keeps active reference actions beside, rather than inside, the selected semantic tab', () => {
@@ -381,7 +435,9 @@ describe('shared reference workspace', () => {
       />,
     );
 
-    expect(html).not.toContain('aria-label="Workspace modes"');
+    expect(html).toContain('aria-label="Workspace modes"');
+    expect(html).toContain('data-workspace-mode-count="1"');
+    expect(html).toContain('data-workspace-mode-label="references"');
     expect(html).toContain('aria-label="Open references"');
     expect(html).toContain('aria-orientation="vertical"');
     expect(html).toContain('data-reference-tabs-orientation="vertical"');
