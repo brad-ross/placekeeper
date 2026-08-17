@@ -52,6 +52,10 @@ export class BrowserReviewLocationHistory implements ReviewLocationHistoryPort {
   private baseline = 0;
   private onPop: ((direction: 'back' | 'forward' | 'unknown') => void) | null = null;
   private readonly listeners = new Set<(snapshot: ReviewLocationHistorySnapshot) => void>();
+  private lastPublishedSnapshot: ReviewLocationHistorySnapshot = {
+    canBack: false,
+    canForward: false,
+  };
   private started = false;
 
   constructor(private readonly environment: ReviewLocationHistoryEnvironment) {}
@@ -155,6 +159,11 @@ export class BrowserReviewLocationHistory implements ReviewLocationHistoryPort {
 
   private publish(): void {
     const snapshot = this.snapshot();
+    if (
+      snapshot.canBack === this.lastPublishedSnapshot.canBack &&
+      snapshot.canForward === this.lastPublishedSnapshot.canForward
+    ) return;
+    this.lastPublishedSnapshot = snapshot;
     for (const listener of this.listeners) listener(snapshot);
   }
 }

@@ -6,6 +6,10 @@ import {
 } from "../../../packages/core/src/placekeeper-link.js";
 import { ProductionReviewApp, type ProductionSession } from "./app/ProductionReviewApp.js";
 import { loadProductionSession, resumeProductionSession } from "./app/session-api.js";
+import {
+  createCopyLinkCommand,
+  type CopyLinkStatus,
+} from "./review/CopyLinkControl.js";
 
 export async function resume(viewId: string, pathname: string): Promise<void> {
   await start(await resumeProductionSession(viewId, pathname));
@@ -57,27 +61,30 @@ export function showTerminalRecovery(): void {
   copy.textContent = 'Copy Link';
   const copyStatus = document.createElement('p');
   copyStatus.setAttribute('role', 'status');
-  let copyPending = false;
-  copy.addEventListener('click', () => {
-    if (copyPending) return;
-    copyPending = true;
-    copy.disabled = true;
-    copy.setAttribute('aria-busy', 'true');
-    copyStatus.textContent = 'Copying link…';
-    const write = navigator.clipboard?.writeText;
-    const attempt = write === undefined
-      ? Promise.reject(new Error('Clipboard API unavailable'))
-      : write.call(navigator.clipboard, link);
-    void attempt.then(() => {
-      copyStatus.textContent = 'Link copied.';
-    }).catch(() => {
-      copyStatus.setAttribute('role', 'alert');
+  const renderCopyStatus = (status: CopyLinkStatus) => {
+    const pending = status.status === 'pending';
+    copy.disabled = pending;
+    if (pending) copy.setAttribute('aria-busy', 'true');
+    else copy.removeAttribute('aria-busy');
+    copyStatus.setAttribute('role', status.status === 'failure' ? 'alert' : 'status');
+    if (status.status === 'pending') copyStatus.textContent = 'Copying link…';
+    else if (status.status === 'success') copyStatus.textContent = 'Link copied.';
+    else if (status.status === 'failure') {
       copyStatus.textContent = 'Clipboard access failed. Select and copy the link above, or retry.';
       copy.textContent = 'Retry';
-    }).finally(() => {
-      copyPending = false;
-      copy.disabled = false;
-      copy.removeAttribute('aria-busy');
+    }
+  };
+  const copyCommand = createCopyLinkCommand({
+    getLink: () => link,
+    writeText: async (value) => {
+      const write = navigator.clipboard?.writeText;
+      if (write === undefined) throw new Error('Clipboard API unavailable');
+      await write.call(navigator.clipboard, value);
+    },
+    onStatus: renderCopyStatus,
+  });
+  copy.addEventListener('click', () => {
+    void copyCommand.run().finally(() => {
       copy.focus({ preventScroll: true });
     });
   });

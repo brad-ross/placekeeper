@@ -144,14 +144,23 @@ async function openLinkedPdf(nodePath, serviceEntry, link, serviceEnvironment) {
     result = await invoke({ confirmed: true });
   }
   if (result.ok === true && result.kind === "recovery-offered") {
-    const choice = (await run("/usr/bin/osascript", ["-e", 'choose from list {"resume", "discard", "fork"} with title "Recover Placekeeper draft" without multiple selections allowed and empty selection allowed'], { env: { PATH: "/usr/bin:/bin" }, stdio: ["ignore", "pipe", "ignore"] })).trim();
-    if (!["resume", "discard", "fork"].includes(choice)) return;
+    const choice = await chooseRecoveryDecision();
+    if (choice === undefined) return;
     result = await invoke({ confirmed: true, recovery: choice });
   }
   if (result.ok !== true) {
     await nativeError(result.error);
     return;
   }
+  await openValidatedLaunchUrl(result);
+}
+
+async function chooseRecoveryDecision() {
+  const choice = (await run("/usr/bin/osascript", ["-e", 'choose from list {"resume", "discard", "fork"} with title "Recover Placekeeper draft" without multiple selections allowed and empty selection allowed'], { env: { PATH: "/usr/bin:/bin" }, stdio: ["ignore", "pipe", "ignore"] })).trim();
+  return ["resume", "discard", "fork"].includes(choice) ? choice : undefined;
+}
+
+async function openValidatedLaunchUrl(result) {
   if (!["opened", "focused"].includes(result.kind) || typeof result.url !== "string" || !/^http:\/\/127\.0\.0\.1:\d+\/s\/[^/]+\/bootstrap#cap=[A-Za-z0-9_-]+$/u.test(result.url)) return;
   await osascript('open location (system attribute "PLACEKEEPER_URL")', { PLACEKEEPER_URL: result.url });
 }
@@ -159,8 +168,8 @@ async function openLinkedPdf(nodePath, serviceEntry, link, serviceEnvironment) {
 async function openFinderPdf(nodePath, serviceEntry, pdfPath, serviceEnvironment, allowInputRecovery = true) {
   let result = parse(await run(nodePath, [serviceEntry, ...finderServiceArgs(pdfPath)], { env: serviceEnvironment, allowNonZero: true }));
   if (result.ok === true && result.kind === "recovery-offered") {
-    const choice = (await run("/usr/bin/osascript", ["-e", 'choose from list {"resume", "discard", "fork"} with title "Recover Placekeeper draft" without multiple selections allowed and empty selection allowed'], { env: { PATH: "/usr/bin:/bin" }, stdio: ["ignore", "pipe", "ignore"] })).trim();
-    if (!["resume", "discard", "fork"].includes(choice)) return;
+    const choice = await chooseRecoveryDecision();
+    if (choice === undefined) return;
     result = parse(await run(nodePath, [serviceEntry, ...finderServiceArgs(pdfPath, choice)], { env: serviceEnvironment, allowNonZero: true }));
   }
   if (result.ok !== true) {
@@ -171,8 +180,7 @@ async function openFinderPdf(nodePath, serviceEntry, pdfPath, serviceEnvironment
     }
     return;
   }
-  if (!["opened", "focused"].includes(result.kind) || typeof result.url !== "string" || !/^http:\/\/127\.0\.0\.1:\d+\/s\/[^/]+\/bootstrap#cap=[A-Za-z0-9_-]+$/u.test(result.url)) return;
-  await osascript('open location (system attribute "PLACEKEEPER_URL")', { PLACEKEEPER_URL: result.url });
+  await openValidatedLaunchUrl(result);
 }
 
 export async function main(args = process.argv.slice(2)) {

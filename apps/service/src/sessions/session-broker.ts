@@ -113,9 +113,7 @@ interface BrowserViewRecord {
   readonly cookieHash: string;
   readonly sessionId: string;
   readonly documentGeneration: number;
-  readonly surface: Exclude<LaunchSurface, "vscode">;
   readonly credential: string;
-  readonly browserCapabilityHash: string;
   readonly pathname: string;
 }
 
@@ -621,9 +619,7 @@ export class SessionBroker {
       cookieHash: digestSecretHex(cookie),
       sessionId,
       documentGeneration: scope.documentGeneration,
-      surface: scope.surface,
       credential,
-      browserCapabilityHash: scope.browserCapabilityHash,
       pathname,
     });
     return {
@@ -653,29 +649,27 @@ export class SessionBroker {
     pathname: string,
     cookie: string,
   ): ResumedBrowserView | undefined {
-    const view = this.#viewsById.get(viewId);
-    if (
-      view === undefined ||
-      view.pathname !== pathname ||
-      view.cookieHash !== digestSecretHex(cookie)
-    ) return undefined;
-    const session = this.#activeById.get(view.sessionId);
-    if (
-      session === undefined ||
-      session.ending ||
-      session.documentGeneration !== view.documentGeneration ||
-      !this.credentials.authenticate(view.sessionId, view.credential)
-    ) {
-      this.#viewsById.delete(viewId);
-      return undefined;
-    }
+    const view = this.#liveView(viewId, pathname, digestSecretHex(cookie));
+    if (view === undefined) return undefined;
     this.controls.noteAuthenticatedPage(view.sessionId);
     return { sessionId: view.sessionId, credential: view.credential };
   }
 
   isLiveViewRoute(viewId: string, pathname: string): boolean {
+    return this.#liveView(viewId, pathname) !== undefined;
+  }
+
+  #liveView(
+    viewId: string,
+    pathname: string,
+    cookieHash?: string,
+  ): BrowserViewRecord | undefined {
     const view = this.#viewsById.get(viewId);
-    if (view === undefined || view.pathname !== pathname) return false;
+    if (
+      view === undefined ||
+      view.pathname !== pathname ||
+      (cookieHash !== undefined && view.cookieHash !== cookieHash)
+    ) return undefined;
     const session = this.#activeById.get(view.sessionId);
     const live =
       session !== undefined &&
@@ -683,7 +677,7 @@ export class SessionBroker {
       session.documentGeneration === view.documentGeneration &&
       this.credentials.authenticate(view.sessionId, view.credential);
     if (!live) this.#viewsById.delete(viewId);
-    return live;
+    return live ? view : undefined;
   }
 
   revokeView(viewId: string): void {

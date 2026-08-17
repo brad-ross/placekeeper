@@ -227,6 +227,24 @@ export async function startHttpServer(
     ? undefined
     : await realpath(options.webAssets.root);
   const assetCapabilities = new Map<string, Set<string>>();
+  const serveWebAsset = async (response: ServerResponse, assetName: string): Promise<void> => {
+    if (webAssetRoot === undefined) {
+      send(response, 503, "Production assets are not installed");
+      return;
+    }
+    const candidate = join(webAssetRoot, assetName);
+    const physical = await realpath(candidate).catch(() => undefined);
+    if (physical === undefined || !isContained(webAssetRoot, physical)) {
+      send(response, 404, "Not found");
+      return;
+    }
+    const bytes = await readFile(physical);
+    setBaseHeaders(response);
+    response.statusCode = 200;
+    response.setHeader("Content-Type", assetContentType(physical));
+    response.setHeader("Content-Length", bytes.byteLength);
+    response.end(bytes);
+  };
   const server = createServer(async (request, response) => {
     const activity = options.lifecycle?.enterActivity();
     if (options.lifecycle !== undefined && activity === undefined) {
@@ -372,13 +390,15 @@ export async function startHttpServer(
         return;
       }
 
-      const readableView = (() => {
-        try {
-          return parsePlacekeeperReadableViewRoute(pathname);
-        } catch {
-          return undefined;
-        }
-      })();
+      const readableView = pathname.startsWith("/r/")
+        ? (() => {
+            try {
+              return parsePlacekeeperReadableViewRoute(pathname);
+            } catch {
+              return undefined;
+            }
+          })()
+        : undefined;
       if (readableView !== undefined) {
         if (request.method !== "GET") {
           send(response, 405, "Method not allowed");
@@ -411,22 +431,7 @@ export async function startHttpServer(
           send(response, 405, "Method not allowed");
           return;
         }
-        if (webAssetRoot === undefined) {
-          send(response, 503, "Production assets are not installed");
-          return;
-        }
-        const candidate = join(webAssetRoot, publicAssetMatch[1]!);
-        const physical = await realpath(candidate).catch(() => undefined);
-        if (physical === undefined || !isContained(webAssetRoot, physical)) {
-          send(response, 404, "Not found");
-          return;
-        }
-        const bytes = await readFile(physical);
-        setBaseHeaders(response);
-        response.statusCode = 200;
-        response.setHeader("Content-Type", assetContentType(physical));
-        response.setHeader("Content-Length", bytes.byteLength);
-        response.end(bytes);
+        await serveWebAsset(response, publicAssetMatch[1]!);
         return;
       }
 
@@ -445,22 +450,7 @@ export async function startHttpServer(
           send(response, 401, "Authentication required");
           return;
         }
-        if (webAssetRoot === undefined) {
-          send(response, 503, "Production assets are not installed");
-          return;
-        }
-        const candidate = join(webAssetRoot, assetMatch[2]!);
-        const physical = await realpath(candidate).catch(() => undefined);
-        if (physical === undefined || !isContained(webAssetRoot, physical)) {
-          send(response, 404, "Not found");
-          return;
-        }
-        const bytes = await readFile(physical);
-        setBaseHeaders(response);
-        response.statusCode = 200;
-        response.setHeader("Content-Type", assetContentType(physical));
-        response.setHeader("Content-Length", bytes.byteLength);
-        response.end(bytes);
+        await serveWebAsset(response, assetMatch[2]!);
         return;
       }
 
@@ -664,11 +654,15 @@ export async function startHttpServer(
   }
   hostHeader = `127.0.0.1:${address.port}`;
   origin = `http://${hostHeader}`;
+  const unsubscribeSessionEnd = broker.onSessionEnd((sessionId) => {
+    assetCapabilities.delete(sessionId);
+  });
   return {
     origin,
     port: address.port,
     close: () =>
       new Promise<void>((resolve, reject) => {
+        unsubscribeSessionEnd();
         broker.controls.closeAllSockets();
         broker.taskBindings.revokeAll();
         assetCapabilities.clear();

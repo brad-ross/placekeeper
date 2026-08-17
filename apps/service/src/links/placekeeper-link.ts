@@ -1,4 +1,4 @@
-import { open, realpath, stat } from "node:fs/promises";
+import { open, realpath } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -60,11 +60,13 @@ async function approveLinkedPdf(path: string): Promise<string> {
 
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    const info = await stat(canonicalPath);
-    if (!info.isFile() || !canonicalPath.toLowerCase().endsWith(".pdf")) {
+    if (!canonicalPath.toLowerCase().endsWith(".pdf")) {
       throw new PlacekeeperPdfLinkError("NOT_PDF", filename);
     }
     handle = await open(canonicalPath, "r");
+    if (!(await handle.stat()).isFile()) {
+      throw new PlacekeeperPdfLinkError("NOT_PDF", filename);
+    }
     const header = Buffer.alloc(1_024);
     const { bytesRead } = await handle.read(header, 0, header.length, 0);
     if (header.subarray(0, bytesRead).indexOf(Buffer.from("%PDF-")) < 0) {
