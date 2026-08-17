@@ -880,9 +880,9 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   );
   const workspaceModes = page.getByRole("tablist", { name: "Workspace modes" });
   const modeTabs = workspaceModes.getByRole("tab");
-  await expect(modeTabs).toHaveCount(3);
+  await expect(modeTabs).toHaveCount(4);
   expect(await modeTabs.evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("aria-label"))))
-    .toEqual(["Outline", "Search", "References"]);
+    .toEqual(["Outline", "Search", "Annotations", "References"]);
   await expect(workspaceModes.getByRole("tab", { name: "References", exact: true })).toHaveAttribute(
     "aria-selected",
     "true",
@@ -903,7 +903,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     const selectedTab = tablist.querySelector<HTMLElement>("[role='tab'][aria-selected='true']");
     const selectedLabel = selectedTab?.querySelector<HTMLElement>("[data-workspace-mode-label]");
     const moveButton = strip?.querySelector<HTMLElement>("[data-reference-move='bottom']");
-    if (!header || !strip || !selectedTab || !selectedLabel || !moveButton || tabs.length !== 3) {
+    if (!header || !strip || !selectedTab || !selectedLabel || !moveButton || tabs.length !== 4) {
       throw new Error("Right workspace activity-strip geometry is incomplete.");
     }
     const headerRect = header.getBoundingClientRect();
@@ -951,6 +951,9 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await referencesMode.focus();
   await expect(referencesMode).toBeFocused();
   await referencesMode.press("ArrowLeft");
+  const annotationsMode = workspaceModes.getByRole("tab", { name: "Annotations", exact: true });
+  await expect(annotationsMode).toBeFocused();
+  await annotationsMode.press("ArrowLeft");
   const searchMode = workspaceModes.getByRole("tab", { name: "Search", exact: true });
   await expect(searchMode).toBeFocused();
   await expect(referencesMode).toHaveAttribute("aria-selected", "true");
@@ -961,6 +964,8 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
   await searchMode.press("ArrowRight");
+  await expect(annotationsMode).toBeFocused();
+  await annotationsMode.press("ArrowRight");
   await expect(referencesMode).toBeFocused();
   await referencesMode.press("Space");
   await expect(referencesMode).toHaveAttribute("aria-selected", "true");
@@ -1570,7 +1575,7 @@ test("keeps compound reference actions in narrow keyboard order through survivor
 test("keeps compound reference actions touch sized for coarse pointers", async ({ browser }) => {
   const context = await browser.newContext({
     hasTouch: true,
-    viewport: { width: 1280, height: 900 },
+    viewport: { width: 320, height: 900 },
   });
   const page = await context.newPage();
   try {
@@ -1592,6 +1597,33 @@ test("keeps compound reference actions touch sized for coarse pointers", async (
       const bounds = button.getBoundingClientRect();
       return { width: bounds.width, height: bounds.height };
     })).toEqual({ width: 44, height: 44 });
+    const coarseTreeGeometry = await outline.evaluate((navigator) => {
+      const branchRow = navigator.querySelector<HTMLElement>(".outline-navigator__row");
+      const leafRow = navigator.querySelector<HTMLElement>(
+        ".outline-navigator__children .outline-navigator__row",
+      );
+      const spacer = leafRow?.querySelector<HTMLElement>(
+        ".outline-navigator__disclosure-spacer",
+      );
+      if (!branchRow || !leafRow || !spacer) throw new Error("Coarse outline geometry is incomplete.");
+      const navigatorBounds = navigator.getBoundingClientRect();
+      const leafBounds = leafRow.getBoundingClientRect();
+      const spacerBounds = spacer.getBoundingClientRect();
+      return {
+        columns: getComputedStyle(branchRow).gridTemplateColumns.split(" ").map(Number.parseFloat),
+        spacer: { width: spacerBounds.width, height: spacerBounds.height },
+        contained: leafBounds.left >= navigatorBounds.left && leafBounds.right <= navigatorBounds.right,
+        noHorizontalOverflow: navigator.scrollWidth <= navigator.clientWidth,
+      };
+    });
+    expect(coarseTreeGeometry.columns).toHaveLength(3);
+    expect(coarseTreeGeometry.columns[0]).toBe(52);
+    expect(coarseTreeGeometry.columns[2]).toBe(44);
+    expect(coarseTreeGeometry).toMatchObject({
+      spacer: { width: 44, height: 44 },
+      contained: true,
+      noHorizontalOverflow: true,
+    });
     await outlineReference.click();
 
     const actions = page.locator("[data-reference-tab-action]");
@@ -1607,7 +1639,7 @@ test("keeps compound reference actions touch sized for coarse pointers", async (
     const activityStrips = page.locator(
       '.review-workspace__header:visible > .review-workspace__activity-strip',
     );
-    await expect(activityStrips).toHaveCount(2);
+    await expect(activityStrips).toHaveCount(1);
     const stripGeometry = await activityStrips.evaluateAll((strips) => strips.map((strip) => {
       const header = strip.closest<HTMLElement>('.review-workspace__header');
       if (!header) throw new Error('Activity strip has no workspace header.');
@@ -1672,7 +1704,9 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await expect(page.getByRole('button', { name: 'Close workspace' })).toHaveCount(0);
   const outline = page.getByRole("navigation", { name: "Document outline" });
   await expect(outline).toBeVisible();
-  await expect(outline.getByRole("button", { name: "Collapse Details" })).toHaveAttribute(
+  const detailsDisclosure = outline.locator(".outline-navigator__disclosure");
+  await expect(detailsDisclosure).toHaveAccessibleName("Collapse Details");
+  await expect(detailsDisclosure).toHaveAttribute(
     "aria-expanded",
     "true",
   );
@@ -1702,6 +1736,101 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await expect(detailsReference).toHaveCSS("opacity", "0");
   await expect(nestedReference).toHaveCSS("opacity", "0");
 
+  const detailsRow = details.locator("..");
+  const nestedDestination = outline.getByRole("button", {
+    name: "Nested result, Page 3",
+    exact: true,
+  });
+  const nestedRow = nestedDestination.locator("..");
+  const detailsChildrenId = await detailsDisclosure.getAttribute("aria-controls");
+  if (!detailsChildrenId) throw new Error("Details disclosure does not control an outline branch.");
+  const detailsChildren = outline.locator(`[id="${detailsChildrenId}"]`);
+
+  const quietRowStyle = await nestedRow.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderRadius: style.borderRadius,
+      borderStyle: style.borderStyle,
+      borderWidth: style.borderWidth,
+      controlRadius: style.getPropertyValue("--review-radius-control").trim(),
+      padding: style.padding,
+    };
+  });
+  expect(quietRowStyle).toEqual({
+    backgroundColor: "rgba(0, 0, 0, 0)",
+    borderRadius: quietRowStyle.controlRadius,
+    borderStyle: "none",
+    borderWidth: "0px",
+    controlRadius: "9px",
+    padding: "0px",
+  });
+
+  const expandedBranchGeometry = await detailsChildren.evaluate((children) => {
+    const parentRow = children.previousElementSibling as HTMLElement | null;
+    const childRows = Array.from(
+      children.querySelectorAll<HTMLElement>(":scope > ul > li > .outline-navigator__row"),
+    );
+    if (!parentRow || childRows.length < 2) throw new Error("Outline branch rhythm is incomplete.");
+    const parentBounds = parentRow.getBoundingClientRect();
+    const firstChildBounds = childRows[0]!.getBoundingClientRect();
+    const secondChildBounds = childRows[1]!.getBoundingClientRect();
+    const style = getComputedStyle(children);
+    return {
+      borderLeftStyle: style.borderLeftStyle,
+      borderLeftWidth: style.borderLeftWidth,
+      childToChild: secondChildBounds.top - firstChildBounds.bottom,
+      parentToFirstChild: firstChildBounds.top - parentBounds.bottom,
+    };
+  });
+  expect(expandedBranchGeometry.borderLeftStyle).toBe("solid");
+  expect(expandedBranchGeometry.borderLeftWidth).toBe("1px");
+  expect(expandedBranchGeometry.parentToFirstChild)
+    .toBeCloseTo(expandedBranchGeometry.childToChild, 0);
+
+  const detailsLabel = details.locator(".outline-navigator__title");
+  const expandedLabelX = (await detailsLabel.boundingBox())?.x;
+  if (expandedLabelX === undefined) throw new Error("Details label has no expanded bounds.");
+  const expandedCaretTransform = await detailsDisclosure.locator(".review-icon")
+    .evaluate((icon) => getComputedStyle(icon).transform);
+  expect(expandedCaretTransform).not.toBe("none");
+  await detailsDisclosure.click();
+  await expect(detailsDisclosure).toHaveAttribute("aria-expanded", "false");
+  await expect(detailsDisclosure.locator(".review-icon")).toHaveCSS("transform", "none");
+  await expect(detailsChildren).toHaveAttribute("hidden", "");
+  await expect(detailsChildren).toHaveAttribute("inert", "");
+  await expect(detailsChildren).toBeHidden();
+  expect(await detailsChildren.evaluate((children) => children.getClientRects().length)).toBe(0);
+  expect((await detailsLabel.boundingBox())?.x).toBeCloseTo(expandedLabelX, 0);
+  await detailsDisclosure.click();
+  await expect(detailsDisclosure).toHaveAttribute("aria-expanded", "true");
+  await expect(detailsDisclosure.locator(".review-icon")).toHaveCSS(
+    "transform",
+    expandedCaretTransform,
+  );
+  await expect(detailsChildren).toBeVisible();
+  await expect(detailsChildren).toHaveCSS("border-left-width", "1px");
+  expect((await detailsLabel.boundingBox())?.x).toBeCloseTo(expandedLabelX, 0);
+
+  const forwardTab = browserName === "webkit" ? "Alt+Tab" : "Tab";
+  await detailsDisclosure.focus();
+  await page.keyboard.press(forwardTab);
+  await expect(details).toBeFocused();
+  await page.keyboard.press(forwardTab);
+  await expect(detailsReference).toBeFocused();
+
+  await page.getByLabel("Current page").focus();
+  await nestedRow.hover();
+  await expect(nestedRow).toHaveCSS("background-color", "rgb(241, 242, 237)");
+  await expect(detailsRow).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(nestedReference).toHaveCSS("opacity", "1");
+  await expect(detailsReference).toHaveCSS("opacity", "0");
+  await page.mouse.move(0, 0);
+  await nestedDestination.focus();
+  await expect(nestedRow).toHaveCSS("background-color", "rgb(241, 242, 237)");
+  await expect(detailsRow).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(nestedReference).toHaveCSS("opacity", "1");
+
   const compactPageGaps = await details.evaluate((destination) => {
     const label = destination.querySelector<HTMLElement>(".outline-navigator__title");
     const separator = destination.querySelector<HTMLElement>(".outline-navigator__separator");
@@ -1718,48 +1847,53 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   expect(compactPageGaps.before).toBeCloseTo(5, 0);
   expect(compactPageGaps.after).toBeCloseTo(5, 0);
 
-  const nestedRow = nestedReference.locator("..");
-  expect(await nestedRow.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return {
-      backgroundColor: style.backgroundColor,
-      borderColor: style.borderColor,
-      borderRadius: style.borderRadius,
-      padding: style.padding,
-    };
-  })).toEqual({
-    backgroundColor: "rgb(255, 254, 250)",
-    borderColor: "rgb(226, 228, 222)",
-    borderRadius: "11px",
-    padding: "4px",
-  });
-  await nestedRow.hover();
-  await expect(nestedReference).toHaveCSS("opacity", "1");
-  await expect(detailsReference).toHaveCSS("opacity", "0");
-
-  const nestedDestination = outline.getByRole("button", {
-    name: "Nested result, Page 3",
-    exact: true,
-  });
-  await nestedDestination.focus();
-  await page.keyboard.press(browserName === "webkit" ? "Alt+Tab" : "Tab");
+  await page.keyboard.press(forwardTab);
   await expect(nestedReference).toBeFocused();
   await expect(nestedReference).toHaveCSS("opacity", "1");
   await expect(nestedReference).toHaveCSS("outline-style", "solid");
 
   await outline.evaluate((element) => { element.style.width = "190px"; });
+  const fineDisclosureGeometry = await detailsDisclosure.evaluate((button) => {
+    const icon = button.querySelector<SVGElement>(".review-icon");
+    if (!icon) throw new Error("Outline disclosure icon is missing.");
+    const buttonBounds = button.getBoundingClientRect();
+    const iconBounds = icon.getBoundingClientRect();
+    return {
+      height: buttonBounds.height,
+      iconCenterDeltaX: Math.abs(
+        (buttonBounds.left + (buttonBounds.width / 2)) - (iconBounds.left + (iconBounds.width / 2)),
+      ),
+      iconCenterDeltaY: Math.abs(
+        (buttonBounds.top + (buttonBounds.height / 2)) - (iconBounds.top + (iconBounds.height / 2)),
+      ),
+      marginLeft: getComputedStyle(button).marginLeft,
+      width: buttonBounds.width,
+    };
+  });
+  expect(fineDisclosureGeometry).toMatchObject({
+    height: 31,
+    marginLeft: "0px",
+    width: 31,
+  });
+  expect(fineDisclosureGeometry.iconCenterDeltaX).toBeLessThanOrEqual(1);
+  expect(fineDisclosureGeometry.iconCenterDeltaY).toBeLessThanOrEqual(1);
+
   const nestedLongLabelGeometry = await hostileReference.evaluate((button) => {
     const row = button.parentElement;
     const destination = row?.querySelector<HTMLElement>(".outline-navigator__destination");
+    const spacer = row?.querySelector<HTMLElement>(".outline-navigator__disclosure-spacer");
     const label = destination?.querySelector<HTMLElement>(".outline-navigator__title");
     const separator = destination?.querySelector<HTMLElement>(".outline-navigator__separator");
     const pageNumber = destination?.querySelector<HTMLElement>(".outline-navigator__page");
-    if (!row || !destination || !label || !separator || !pageNumber) {
+    const navigator = row?.closest<HTMLElement>(".outline-navigator");
+    if (!row || !destination || !spacer || !label || !separator || !pageNumber || !navigator) {
       throw new Error("Outline row geometry is incomplete.");
     }
+    const navigatorBounds = navigator.getBoundingClientRect();
     const rowBounds = row.getBoundingClientRect();
     const destinationBounds = destination.getBoundingClientRect();
     const actionBounds = button.getBoundingClientRect();
+    const spacerBounds = spacer.getBoundingClientRect();
     const labelBounds = label.getBoundingClientRect();
     const separatorBounds = separator.getBoundingClientRect();
     const pageBounds = pageNumber.getBoundingClientRect();
@@ -1769,12 +1903,16 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     return {
       actionRightInset: rowBounds.right - actionBounds.right,
       actionWidth: actionBounds.width,
+      contained: rowBounds.left >= navigatorBounds.left && rowBounds.right <= navigatorBounds.right,
       rowBorderStyle: rowStyle.borderStyle,
       rowPaddingRight: rowStyle.paddingRight,
       destinationLeftInset: destinationBounds.left - rowBounds.left,
       destinationRight: destinationBounds.right,
       actionLeft: actionBounds.left,
       gridColumns: rowStyle.gridTemplateColumns,
+      noHorizontalOverflow: navigator.scrollWidth <= navigator.clientWidth,
+      spacerHeight: spacerBounds.height,
+      spacerWidth: spacerBounds.width,
       destinationDisplay: destinationStyle.display,
       destinationText: destination.textContent,
       pageText: pageNumber.textContent,
@@ -1794,18 +1932,23 @@ test("keeps outline and rejected link metadata inert inside the installed local 
       labelWhiteSpace: labelStyle.whiteSpace,
     };
   });
-  expect(nestedLongLabelGeometry.actionRightInset).toBeCloseTo(5, 0);
+  expect(nestedLongLabelGeometry.actionRightInset).toBeCloseTo(0, 0);
   expect(nestedLongLabelGeometry.actionWidth).toBe(31);
   expect(nestedLongLabelGeometry).toMatchObject({
-    rowBorderStyle: "solid",
-    rowPaddingRight: "4px",
+    contained: true,
+    noHorizontalOverflow: true,
+    rowBorderStyle: "none",
+    rowPaddingRight: "0px",
+    spacerHeight: 31,
+    spacerWidth: 31,
   });
   expect(nestedLongLabelGeometry.destinationRight)
     .toBeLessThanOrEqual(nestedLongLabelGeometry.actionLeft);
   const outlineColumns = nestedLongLabelGeometry.gridColumns.split(" ");
   expect(outlineColumns).toHaveLength(3);
-  expect(Number.parseFloat(outlineColumns[0]!)).toBeLessThan(20);
-  expect(nestedLongLabelGeometry.destinationLeftInset).toBeLessThan(27);
+  expect(Number.parseFloat(outlineColumns[0]!)).toBe(39);
+  expect(Number.parseFloat(outlineColumns[2]!)).toBe(31);
+  expect(nestedLongLabelGeometry.destinationLeftInset).toBeCloseTo(39, 0);
   expect(nestedLongLabelGeometry).toMatchObject({
     destinationDisplay: "flex",
     destinationText: "scriptalert(1)/script hostile outline·2",
@@ -1830,8 +1973,29 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   });
   await outline.evaluate((element) => { element.style.removeProperty("width"); });
 
-  await expect(page.getByRole("tab", { name: "Annotations", exact: true })).toHaveCount(0);
-  await expect(workspace.locator('#workspace-panel-annotations')).toHaveCount(0);
+  await page.getByRole("tab", { name: "Annotations", exact: true }).click();
+  const sourceRows = workspace.locator('[data-annotation-origin="source"]');
+  const unsectionedPageOne = sourceRows.filter({
+    has: page.locator('.annotation-item__page', { hasText: /^1$/u }),
+  }).first();
+  await expect(unsectionedPageOne).toBeVisible();
+  await expect(unsectionedPageOne.locator('.annotation-item__section')).toHaveCount(0);
+  await expect(unsectionedPageOne.locator('.annotation-item__separator')).toHaveCount(1);
+
+  const nestedAnnotation = sourceRows.filter({
+    has: page.locator('.annotation-item__section', { hasText: /^Nested result$/u }),
+  }).first();
+  await expect(nestedAnnotation).toBeVisible();
+  await expect(nestedAnnotation).toHaveCSS('background-color', 'rgb(255, 254, 250)');
+  await expect(nestedAnnotation).toHaveCSS('border-style', 'solid');
+  await expect(nestedAnnotation).toHaveCSS('border-radius', '11px');
+  await expect(nestedAnnotation).toHaveCSS('padding', '4px');
+  await expect(nestedAnnotation.locator('.annotation-item__page')).toHaveText('3');
+  await expect(nestedAnnotation.locator('.annotation-item__separator')).toHaveCount(2);
+  await expect(nestedAnnotation.getByRole('button')).toHaveAccessibleName(
+    /Page 3 · Nested result/u,
+  );
+  await page.getByRole("tab", { name: "Outline", exact: true }).click();
   await expect(nestedReference).toBeVisible();
 
   const mainViewport = mainWorkspace.locator("[data-viewer-framing-viewport]");
@@ -1901,9 +2065,39 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await expect(details).toBeFocused();
   await expect(workspace).toHaveAttribute("data-tools-workspace-open", "true");
   await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
-  await expect(outline.locator("[aria-current='location']")).toHaveAccessibleName(
+  const currentOutlineDestination = outline.locator("[aria-current='location']");
+  await expect(currentOutlineDestination).toHaveAccessibleName(
     "Nested result, Page 3",
   );
+  const currentOutlineRow = currentOutlineDestination.locator("..");
+  await expect(currentOutlineRow.locator(".outline-navigator__reference"))
+    .toHaveCSS("opacity", "1");
+  const currentMarker = await currentOutlineRow.evaluate((row) => {
+    const rowStyle = getComputedStyle(row);
+    const markerStyle = getComputedStyle(row, "::before");
+    return {
+      markerBackground: markerStyle.backgroundColor,
+      markerContent: markerStyle.content,
+      markerLeft: markerStyle.left,
+      markerPointerEvents: markerStyle.pointerEvents,
+      markerPosition: markerStyle.position,
+      markerWidth: markerStyle.width,
+      rowBackground: rowStyle.backgroundColor,
+    };
+  });
+  expect(currentMarker).toMatchObject({
+    markerContent: "\"\"",
+    markerLeft: "0px",
+    markerPointerEvents: "none",
+    markerPosition: "absolute",
+    markerWidth: "3px",
+  });
+  expect(currentMarker.markerBackground).not.toBe("rgba(0, 0, 0, 0)");
+  expect(currentMarker.rowBackground).not.toBe("rgba(0, 0, 0, 0)");
+  await currentOutlineDestination.focus();
+  await expect(currentOutlineRow).toHaveCSS("background-color", currentMarker.rowBackground);
+  expect(await currentOutlineRow.evaluate((row) => getComputedStyle(row, "::before").width))
+    .toBe("3px");
   await workspaceControl.click();
   await expect(workspaceControl).toBeFocused();
 

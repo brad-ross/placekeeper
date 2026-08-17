@@ -343,6 +343,7 @@ function Harness() {
         existingAnnotations: visualScenario.existingAnnotations,
         annotationOutlineLabels: visualScenario.annotationOutlineLabels,
         outlineDiscovery: visualScenario.outlineDiscovery,
+        currentOutlineItemId: visualScenario.currentOutlineItemId,
         referenceTabs: visualScenario.referenceTabs,
         ...(visualReferenceNavigation === undefined ? {} : {
           navigationState: visualReferenceNavigation,

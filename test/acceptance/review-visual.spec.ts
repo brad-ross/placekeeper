@@ -64,6 +64,124 @@ async function expectCompoundReferenceTabs(
   await expect(page.locator('.reference-panel__actions')).toHaveCount(0);
 }
 
+async function openOutlineScene(
+  page: Page,
+  viewport = { width: 1280, height: 900 },
+): Promise<Locator> {
+  const product = await openScene(page, 'outline', viewport);
+  const workspace = page.locator('#review-tools-workspace');
+  if (viewport.width <= 760) {
+    const rail = page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
+    if (await rail.getAttribute('aria-expanded') !== 'true') await rail.click();
+  }
+  const outlineTab = page.getByRole('tab', { name: 'Outline', exact: true });
+  if (await outlineTab.getAttribute('aria-selected') !== 'true') await outlineTab.click();
+  await expect(outlineTab).toHaveAttribute('aria-selected', 'true');
+  await expect(workspace).toBeVisible();
+  return product;
+}
+
+async function expectOutlineTreeGeometry(
+  page: Page,
+  expectedControlSize: number,
+): Promise<void> {
+  const navigator = page.getByRole('navigation', { name: 'Document outline' });
+  const visibleRows = navigator.locator('.outline-navigator__row:visible');
+  await expect(visibleRows).toHaveCount(6);
+
+  const deepestVisibleLevel = await visibleRows.evaluateAll((rows) => Math.max(...rows.map((row) => {
+    let depth = 0;
+    let ancestor = row.parentElement;
+    while (ancestor) {
+      if (ancestor.classList.contains('outline-navigator__children')) depth += 1;
+      ancestor = ancestor.parentElement;
+    }
+    return depth;
+  })));
+  expect(deepestVisibleLevel).toBeGreaterThanOrEqual(3);
+
+  const longItem = navigator.locator('[data-outline-item="outline-long-nested"]');
+  const longTitle = longItem.locator('.outline-navigator__title').first();
+  const longPage = longItem.locator('.outline-navigator__page').first();
+  const titleGeometry = await longTitle.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      overflow: style.overflow,
+      textOverflow: style.textOverflow,
+      whiteSpace: style.whiteSpace,
+    };
+  });
+  expect(titleGeometry.scrollWidth).toBeGreaterThan(titleGeometry.clientWidth);
+  expect(titleGeometry).toMatchObject({
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  });
+  await expect(longPage).toBeVisible();
+  await expect(longPage).toHaveText('18');
+
+  const visibleGuides = navigator.locator('.outline-navigator__children:visible');
+  expect(await visibleGuides.count()).toBeGreaterThanOrEqual(3);
+  for (const guide of await visibleGuides.all()) {
+    await expect.poll(() => guide.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return `${style.borderLeftStyle}:${style.borderLeftWidth}`;
+    })).toBe('solid:1px');
+  }
+  const peerDisclosure = page.getByRole('button', { name: 'Collapse Robustness appendix' });
+  const peerChildrenId = await peerDisclosure.getAttribute('aria-controls');
+  expect(peerChildrenId).toBeTruthy();
+  await peerDisclosure.click();
+  await expect(page.locator(`#${peerChildrenId}`)).toBeHidden();
+
+  const disclosureWidth = await navigator.locator('.outline-navigator__disclosure:visible').first()
+    .evaluate((element) => element.getBoundingClientRect().width);
+  const referenceWidth = await navigator.locator('.outline-navigator__reference:visible').first()
+    .evaluate((element) => element.getBoundingClientRect().width);
+  expect(disclosureWidth).toBe(expectedControlSize);
+  expect(referenceWidth).toBe(expectedControlSize);
+  const disclosureRhythm = await navigator.locator(
+    '.outline-navigator__row:has(.outline-navigator__disclosure)',
+  ).first().evaluate((row) => {
+    const disclosure = row.querySelector('.outline-navigator__disclosure');
+    const title = row.querySelector('.outline-navigator__title');
+    if (!disclosure || !title) throw new Error('Outline disclosure rhythm is incomplete.');
+    const rowBounds = row.getBoundingClientRect();
+    const disclosureBounds = disclosure.getBoundingClientRect();
+    const titleBounds = title.getBoundingClientRect();
+    const disclosureCenter = disclosureBounds.left + disclosureBounds.width / 2;
+    return {
+      left: disclosureCenter - rowBounds.left,
+      right: titleBounds.left - disclosureCenter,
+    };
+  });
+  expect(Math.abs(disclosureRhythm.left - disclosureRhythm.right))
+    .toBeLessThanOrEqual(1);
+
+  const overflow = await navigator.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    rows: [...element.querySelectorAll<HTMLElement>('.outline-navigator__row')]
+      .filter((row) => row.offsetParent !== null)
+      .map((row) => ({ clientWidth: row.clientWidth, scrollWidth: row.scrollWidth })),
+  }));
+  expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  for (const row of overflow.rows) expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth);
+
+  const containedActions = await navigator.locator('.outline-navigator__reference:visible').evaluateAll((actions) => (
+    actions.every((action) => {
+      const actionRect = action.getBoundingClientRect();
+      const rowRect = action.closest('.outline-navigator__row')?.getBoundingClientRect();
+      return rowRect !== undefined
+        && actionRect.left >= rowRect.left - 0.5
+        && actionRect.right <= rowRect.right + 0.5;
+    })
+  ));
+  expect(containedActions).toBe(true);
+}
+
 test('wide contextual review', async ({ page }) => {
   const product = await openScene(page, 'contextual');
   await page.getByRole('button', { name: 'Highlight', exact: true }).hover();
@@ -150,6 +268,64 @@ test('narrow Annotation Tray', async ({ page }) => {
     whiteSpace: 'nowrap',
   });
   await expectScene(product, 'narrow-annotation-tray.png');
+});
+
+test('wide Outline tree', async ({ page }) => {
+  const product = await openOutlineScene(page);
+  await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-workspace-presentation', 'right');
+  await expectOutlineTreeGeometry(page, 31);
+  await page.getByRole('button', {
+    name: 'Conditional comparison estimates, Page 24',
+    exact: true,
+  }).focus();
+  await expect(page.locator('[data-outline-item="outline-long-nested"] > .outline-navigator__row'))
+    .toHaveAttribute('data-current', 'true');
+  await expectScene(product, 'wide-outline-tree.png');
+});
+
+test('Outline current location remains distinct while pressed', async ({ page }) => {
+  await openOutlineScene(page);
+  const currentRow = page.locator(
+    '[data-outline-item="outline-long-nested"] > .outline-navigator__row',
+  );
+  const currentDestination = currentRow.locator('.outline-navigator__destination');
+  const currentBackground = await currentRow.evaluate(
+    (row) => getComputedStyle(row).backgroundColor,
+  );
+  const currentShadowAtRest = await currentRow.evaluate(
+    (row) => getComputedStyle(row).boxShadow,
+  );
+  const currentDestinationBounds = await currentDestination.boundingBox();
+  expect(currentDestinationBounds).not.toBeNull();
+  await page.mouse.move(
+    currentDestinationBounds!.x + currentDestinationBounds!.width / 2,
+    currentDestinationBounds!.y + currentDestinationBounds!.height / 2,
+  );
+  await page.mouse.down();
+  await expect(currentRow).toHaveCSS('background-color', currentBackground);
+  const currentShadowWhilePressed = await currentRow.evaluate(
+    (row) => getComputedStyle(row).boxShadow,
+  );
+  expect(currentShadowWhilePressed).not.toBe(currentShadowAtRest);
+  expect(currentShadowWhilePressed).toContain('inset');
+  await page.mouse.up();
+  await expect(currentRow).toHaveCSS('box-shadow', currentShadowAtRest);
+});
+
+test('narrow Outline tree', async ({ page }) => {
+  const product = await openOutlineScene(page, { width: 320, height: 720 });
+  await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-workspace-presentation', 'bottom');
+  const coarsePointer = await page.evaluate(() => (
+    window.matchMedia('(hover: none), (pointer: coarse)').matches
+  ));
+  await expectOutlineTreeGeometry(page, coarsePointer ? 44 : 31);
+  await page.getByRole('button', {
+    name: 'Conditional comparison estimates, Page 24',
+    exact: true,
+  }).focus();
+  await expect(page.locator('[data-outline-item="outline-long-nested"] > .outline-navigator__row'))
+    .toHaveAttribute('data-current', 'true');
+  await expectScene(product, 'narrow-outline-tree.png');
 });
 
 test('wide bottom References tray', async ({ page }) => {
