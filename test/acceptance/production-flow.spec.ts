@@ -1332,6 +1332,33 @@ test("keeps main PDF link hit targets below an open References viewer", async ({
   expect(hitState.topmost).not.toBe("main");
 });
 
+test("records annotation tray jumps in document history", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFreshProductionFixture(page, referencePdf, "Annotation history launch failed");
+  await expect(page.getByLabel("Current page")).toHaveText("1 / 4");
+
+  await openAnnotationsWorkspace(page);
+  const annotationsPanel = page.locator('#workspace-panel-annotations');
+  const pageThreeAnnotation = annotationsPanel.locator('[data-annotation-origin="source"]').filter({
+    has: page.locator('.annotation-item__page', { hasText: /^3$/u }),
+  }).first();
+  await expect(pageThreeAnnotation).toBeVisible();
+
+  const back = page.getByRole("button", { name: "Back in document history" });
+  const forward = page.getByRole("button", { name: "Forward in document history" });
+  await expect(back).toBeDisabled();
+  await pageThreeAnnotation.getByRole("button").click();
+  await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
+  await expect(back).toBeEnabled();
+
+  await back.click();
+  await expect(page.getByLabel("Current page")).toHaveText("1 / 4");
+  await expect(forward).toBeEnabled();
+
+  await forward.click();
+  await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
+});
+
 test("switches and sends references from the right-docked workspace", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, "Right-docked reference launch failed");

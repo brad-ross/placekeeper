@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import type { PluginRegistry } from "@embedpdf/core";
 import type { PdfDocumentObject, PdfEngine } from '@embedpdf/models';
-import { ScrollPlugin } from "@embedpdf/plugin-scroll";
 import { SelectionPlugin } from "@embedpdf/plugin-selection";
 
 import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
@@ -1001,38 +1000,16 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           return result;
         }}
         onNavigate={(item) => {
-          const registry = viewerRegistry.current;
-          const core = registry?.getStore().getState().core;
-          const documentId = core?.activeDocumentId;
-          const scroll = registry?.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides();
-          if (documentId && scroll) {
-            const coordinates = reviewItemPoint(item) ?? undefined;
-            scroll.forDocument(documentId).scrollToPage({
-              pageNumber: item.pageIndex + 1,
-              ...(coordinates === undefined ? {} : {
-                pageCoordinates: {
-                  x: coordinates.x,
-                  y: coordinates.y,
-                },
-              }),
-              behavior: "smooth",
-              alignX: 50,
-              alignY: 35,
-            });
-          }
+          void navigationCoordinator.navigateMainAnnotation({
+            pageIndex: item.pageIndex,
+            point: reviewItemPoint(item),
+          });
         }}
         onNavigateExisting={(annotation: ExistingAnnotation) => {
-          const registry = viewerRegistry.current;
-          const documentId = registry?.getStore().getState().core.activeDocumentId;
-          const scroll = registry?.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides();
-          if (documentId && scroll) {
-            scroll.forDocument(documentId).scrollToPage({
-              pageNumber: annotation.pageIndex + 1,
-              behavior: 'smooth',
-              alignX: 50,
-              alignY: 35,
-            });
-          }
+          void navigationCoordinator.navigateMainAnnotation({
+            pageIndex: annotation.pageIndex,
+            point: { x: annotation.rect.x, y: annotation.rect.y },
+          });
         }}
       >
         {viewer}

@@ -148,7 +148,7 @@ describe('document-scoped navigation coordinator', () => {
       return !cancelled;
     });
     const stale = run.coordinator.navigateMainTarget(target(3), 'direct');
-    expect(run.state().pendingMainNavigation).not.toBeNull();
+    await vi.waitFor(() => expect(run.state().pendingMainNavigation).not.toBeNull());
 
     const newest: ViewerPdfLinkInvocation = {
       sourceScope: 'main',
@@ -192,10 +192,11 @@ describe('document-scoped navigation coordinator', () => {
     vi.mocked(run.dependencies.layout.settle).mockReturnValueOnce(settled.promise);
 
     const jump = run.coordinator.navigateMainTarget(target(3), 'direct');
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(run.state().pendingMainNavigation).toBeNull();
-    expect(run.state().mainHistory.entries.map(({ pageIndex }) => pageIndex)).toEqual([0, 3]);
+    await vi.waitFor(() => {
+      expect(run.state().pendingMainNavigation).toBeNull();
+      expect(run.state().mainHistory.entries.map(({ pageIndex }) => pageIndex)).toEqual([0, 3]);
+      expect(run.dependencies.layout.settle).toHaveBeenCalledOnce();
+    });
 
     run.coordinator.unavailableDestination();
     settled.resolve();
@@ -736,6 +737,150 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.main.controls.applyTarget).toHaveBeenCalledWith(target(5));
   });
 
+  it('records annotation jumps for backward and forward traversal', async () => {
+    const run = harness();
+    const annotation = location(4, 160, 1);
+
+    expect(await run.coordinator.navigateMainAnnotation({
+      pageIndex: annotation.pageIndex,
+      point: annotation.anchor,
+    })).toBe(true);
+    expect(run.main.controls.applyLocation).toHaveBeenCalledWith(annotation);
+    expect(run.state().mainHistory.entries.map(({ pageIndex }) => pageIndex)).toEqual([0, 4]);
+    expect(run.state().mainHistory.index).toBe(1);
+
+    expect(await run.coordinator.historyBack()).toBe(true);
+    expect(run.main.controls.applyLocation).toHaveBeenLastCalledWith(location(0));
+    expect(await run.coordinator.historyForward()).toBe(true);
+    expect(run.main.controls.applyLocation).toHaveBeenLastCalledWith(annotation);
+  });
+
+  it('does not add a duplicate history stop when a repeated annotation settles in place', async () => {
+    const run = harness();
+    const original = location(0);
+    const annotation = location(4, 160, 1);
+    const settled = {
+      ...annotation,
+      anchor: { x: 12, y: 220 },
+      alignment: { xPercent: 50, yPercent: 50 },
+    };
+    vi.mocked(run.main.controls.applyLocation).mockImplementation(async () => {
+      run.main.set(settled);
+      return true;
+    });
+
+    const navigate = () => run.coordinator.navigateMainAnnotation({
+      pageIndex: annotation.pageIndex,
+      point: annotation.anchor,
+    });
+    expect(await navigate()).toBe(true);
+    expect(run.state().mainHistory).toEqual({ entries: [original, settled], index: 1 });
+
+    expect(await navigate()).toBe(true);
+    expect(run.state().mainHistory).toEqual({ entries: [original, settled], index: 1 });
+    expect(run.main.controls.applyLocation).toHaveBeenCalledTimes(2);
+
+    expect(await run.coordinator.historyBack()).toBe(true);
+    expect(run.main.controls.applyLocation).toHaveBeenLastCalledWith(original);
+  });
+
+  it('preserves the original history location across rapid annotation jumps', async () => {
+    const run = harness();
+    const original = location(0, 75, 1.2);
+    const firstAnnotation = location(3, 140, 1.2);
+    const secondAnnotation = location(5, 220, 1.2);
+    const firstApply = deferred<boolean>();
+    let pendingRollback: Promise<void> | null = null;
+    run.main.set(original);
+    vi.mocked(run.main.controls.cancelPendingNavigation).mockImplementation(
+      () => pendingRollback ?? Promise.resolve(),
+    );
+    vi.mocked(run.main.controls.applyLocation)
+      .mockImplementationOnce(async (value) => {
+        run.main.set(value);
+        return firstApply.promise;
+      })
+      .mockImplementationOnce(async (value) => {
+        run.main.set(value);
+        return true;
+      });
+
+    const firstJump = run.coordinator.navigateMainAnnotation({
+      pageIndex: firstAnnotation.pageIndex,
+      point: firstAnnotation.anchor,
+    });
+    await vi.waitFor(() => {
+      expect(run.main.controls.applyLocation).toHaveBeenCalledWith(firstAnnotation);
+    });
+
+    const rollback = deferred<void>();
+    pendingRollback = rollback.promise;
+    const secondJump = run.coordinator.navigateMainAnnotation({
+      pageIndex: secondAnnotation.pageIndex,
+      point: secondAnnotation.anchor,
+    });
+    await Promise.resolve();
+    expect(run.main.controls.applyLocation).toHaveBeenCalledTimes(1);
+
+    run.main.set(original);
+    pendingRollback = null;
+    rollback.resolve();
+    expect(await secondJump).toBe(true);
+    firstApply.resolve(true);
+    expect(await firstJump).toBe(false);
+
+    expect(run.state().mainHistory.entries).toEqual([original, secondAnnotation]);
+    expect(await run.coordinator.historyBack()).toBe(true);
+    expect(run.main.controls.applyLocation).toHaveBeenLastCalledWith(original);
+  });
+
+  it('waits for annotation rollback before capturing a successor target origin', async () => {
+    const run = harness();
+    const original = location(0, 75, 1.2);
+    const annotation = location(3, 140, 1.2);
+    const successor = target(5);
+    const firstApply = deferred<boolean>();
+    let pendingRollback: Promise<void> | null = null;
+    run.main.set(original);
+    vi.mocked(run.main.controls.cancelPendingNavigation).mockImplementation(
+      () => pendingRollback ?? Promise.resolve(),
+    );
+    vi.mocked(run.main.controls.applyLocation).mockImplementationOnce(async (value) => {
+      run.main.set(value);
+      return firstApply.promise;
+    });
+    vi.mocked(run.main.controls.applyTarget).mockImplementationOnce(async (value) => {
+      if (pendingRollback !== null) await pendingRollback;
+      run.main.set(location(value.pageIndex));
+      return true;
+    });
+
+    const firstJump = run.coordinator.navigateMainAnnotation({
+      pageIndex: annotation.pageIndex,
+      point: annotation.anchor,
+    });
+    await vi.waitFor(() => {
+      expect(run.main.controls.applyLocation).toHaveBeenCalledWith(annotation);
+    });
+
+    const rollback = deferred<void>();
+    pendingRollback = rollback.promise;
+    const successorJump = run.coordinator.navigateMainTarget(successor, 'outline');
+    await Promise.resolve();
+    expect(run.main.controls.applyTarget).not.toHaveBeenCalled();
+
+    run.main.set(original);
+    pendingRollback = null;
+    rollback.resolve();
+    expect(await successorJump).toBe(true);
+    firstApply.resolve(true);
+    expect(await firstJump).toBe(false);
+
+    expect(run.state().mainHistory.entries).toEqual([original, location(successor.pageIndex)]);
+    expect(await run.coordinator.historyBack()).toBe(true);
+    expect(run.main.controls.applyLocation).toHaveBeenLastCalledWith(original);
+  });
+
   it('treats semantic no-op direct and outline targets as successful without history', async () => {
     const run = harness();
     run.dependencies.layout.revealReferences();
@@ -762,6 +907,20 @@ describe('document-scoped navigation coordinator', () => {
 
     expect(run.state().mainHistory.entries).toHaveLength(3);
     expect(run.state().mainHistory.index).toBe(2);
+  });
+
+  it('records a distinct search occurrence when boundary clamping settles in place', async () => {
+    const run = harness();
+    const original = location(0);
+    const occurrence = { ...target(1), identity: 'search:clamped' };
+    vi.mocked(run.main.controls.applyTarget).mockImplementationOnce(async () => {
+      run.main.set(original);
+      return true;
+    });
+
+    expect(await run.coordinator.navigateMainTarget(occurrence, 'search')).toBe(true);
+
+    expect(run.state().mainHistory).toEqual({ entries: [original, original], index: 1 });
   });
 
   it('invalidates clone, viewer, focus, status, and late callbacks on document replacement', async () => {
