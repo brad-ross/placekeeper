@@ -420,6 +420,12 @@ describe('review shell layout and accessibility contract', () => {
     expect(annotationStyles).toMatch(
       /\.review-workspace__mode-label\s*\{[^}]*min-width:\s*0;[^}]*text-overflow:\s*ellipsis;/u,
     );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__mode-segment--compound\s*>\s*\.review-workspace__mode-tab\s*\{[^}]*border-radius:\s*var\(--review-radius-control\)\s*0\s*0\s*var\(--review-radius-control\);/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__activity-strip--compound\s*>\s*\.review-workspace__move--activity\s*\{[^}]*margin-left:\s*-1px;[^}]*border-radius:\s*0\s*var\(--review-radius-control\)\s*var\(--review-radius-control\)\s*0;/u,
+    );
     expect(annotationStyles).toContain('height: var(--review-workspace-header-height, 44px)');
     expect(annotationStyles).toContain('margin-top: var(--review-workspace-header-height, 44px)');
     expect(annotationStyles).toContain(

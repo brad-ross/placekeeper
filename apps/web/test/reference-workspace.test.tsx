@@ -277,7 +277,7 @@ describe('shared reference workspace', () => {
     expect(html).toContain('aria-label="Close active reference"');
     expect(html).not.toMatch(/role="tab"[^>]*>[^<]*Close/u);
     expect(html).toContain('aria-live="polite"');
-    expect(html).toContain('class="review-workspace__activity-strip"');
+    expect(html).toContain('class="review-workspace__activity-strip review-workspace__activity-strip--compound"');
     expect(html).toContain('aria-label="Outline"');
     expect(html).toContain('title="Show Outline"');
     expect(html).toContain('aria-label="References"');
@@ -285,6 +285,15 @@ describe('shared reference workspace', () => {
     expect(html.match(/data-workspace-mode-label/g)).toHaveLength(1);
     expect(html).toContain('data-workspace-mode-label="references"');
     expect(html).toContain('>References</span>');
+    expect(html).toContain('review-workspace__mode-segment--compound');
+    expect(html).toMatch(
+      /review-workspace__mode-segment--compound[\s\S]*data-workspace-mode="references"[\s\S]*<\/div><button[^>]*data-reference-move="bottom"/u,
+    );
+    const workspaceTablist = html.match(
+      /<div class="review-workspace__tabs" role="tablist"[\s\S]*?<\/div>/u,
+    )?.[0];
+    expect(workspaceTablist).toBeDefined();
+    expect(workspaceTablist).not.toContain('data-reference-move');
     expect(html).toContain('data-reference-move="bottom"');
     expect(html).not.toContain('review-workspace__tab-segment--compound');
   });

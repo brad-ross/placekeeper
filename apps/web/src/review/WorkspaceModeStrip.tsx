@@ -47,8 +47,12 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
   onModeBlur,
   dockAction,
 }: WorkspaceModeStripProps<Mode>) {
+  const dockAttached = selectedMode === 'references' && dockAction !== undefined;
+
   return (
-    <div className="review-workspace__activity-strip">
+    <div className={`review-workspace__activity-strip${
+      dockAttached ? ' review-workspace__activity-strip--compound' : ''
+    }`}>
       <div
         className="review-workspace__tabs"
         role="tablist"
@@ -58,40 +62,49 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
         {modes.map((mode) => {
           const selected = mode === selectedMode;
           const presentation = MODE_PRESENTATION[mode];
+          const compound = dockAttached && mode === 'references';
           return (
-            <button
+            <span
               key={mode}
-              ref={(element) => onModeRef(mode, element)}
-              id={`workspace-mode-${mode}`}
-              className="review-workspace__mode-tab"
-              type="button"
-              role="tab"
-              data-workspace-mode={mode}
-              aria-label={presentation.label}
-              aria-selected={selected}
-              aria-controls={`workspace-panel-${mode}`}
-              title={`Show ${presentation.label}`}
-              tabIndex={selected ? 0 : -1}
-              onKeyDown={onModeKeyDown}
-              onFocus={(event) => onModeFocus?.(mode, event)}
-              onBlur={(event) => onModeBlur?.(mode, event)}
-              onClick={() => onModeChange(mode)}
+              className={`review-workspace__mode-segment${
+                compound ? ' review-workspace__mode-segment--compound' : ''
+              }`}
+              data-workspace-mode-selected={selected ? 'true' : 'false'}
+              role="presentation"
             >
-              <ReviewIcon name={presentation.icon} size={15} />
-              {selected ? (
-                <span
-                  className="review-workspace__mode-label"
-                  data-workspace-mode-label={mode}
-                  aria-hidden="true"
-                >
-                  {presentation.label}
-                </span>
-              ) : null}
-            </button>
+              <button
+                ref={(element) => onModeRef(mode, element)}
+                id={`workspace-mode-${mode}`}
+                className="review-workspace__mode-tab"
+                type="button"
+                role="tab"
+                data-workspace-mode={mode}
+                aria-label={presentation.label}
+                aria-selected={selected}
+                aria-controls={`workspace-panel-${mode}`}
+                title={`Show ${presentation.label}`}
+                tabIndex={selected ? 0 : -1}
+                onKeyDown={onModeKeyDown}
+                onFocus={(event) => onModeFocus?.(mode, event)}
+                onBlur={(event) => onModeBlur?.(mode, event)}
+                onClick={() => onModeChange(mode)}
+              >
+                <ReviewIcon name={presentation.icon} size={15} />
+                {selected ? (
+                  <span
+                    className="review-workspace__mode-label"
+                    data-workspace-mode-label={mode}
+                    aria-hidden="true"
+                  >
+                    {presentation.label}
+                  </span>
+                ) : null}
+              </button>
+            </span>
           );
         })}
       </div>
-      {dockAction ? (
+      {dockAttached ? (
         <button
           type="button"
           className="review-workspace__move review-workspace__move--activity"

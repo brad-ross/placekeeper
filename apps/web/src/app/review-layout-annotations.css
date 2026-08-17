@@ -278,11 +278,26 @@
   background: var(--review-surface-subtle);
 }
 
+.review-workspace__activity-strip--compound {
+  gap: 0;
+}
+
 .review-workspace__tabs {
   display: flex;
   min-width: 0;
   flex: 0 1 auto;
   gap: 2px;
+}
+
+.review-workspace__mode-segment {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  align-items: center;
+}
+
+.review-workspace__mode-segment[data-workspace-mode-selected="true"] {
+  flex: 0 1 auto;
 }
 
 .review-workspace__move {
@@ -316,6 +331,18 @@
   flex: none;
   border-color: var(--review-border-subtle);
   background: color-mix(in srgb, var(--review-surface-panel) 62%, transparent);
+}
+
+.review-workspace__mode-segment--compound > .review-workspace__mode-tab {
+  border-radius: var(--review-radius-control) 0 0 var(--review-radius-control);
+}
+
+.review-workspace__activity-strip--compound > .review-workspace__move--activity {
+  margin-left: -1px;
+  border-color: var(--review-border);
+  border-radius: 0 var(--review-radius-control) var(--review-radius-control) 0;
+  background: var(--review-surface-panel);
+  box-shadow: 0 1px 2px rgb(24 26 23 / 8%);
 }
 
 .review-workspace__mode-tab {
@@ -750,6 +777,8 @@
   color: var(--review-danger);
 }
 
+.review-workspace__mode-segment--compound > button:focus-visible,
+.review-workspace__activity-strip--compound > .review-workspace__move--activity:focus-visible,
 .review-shell .reference-tab-segment--compound > button:focus-visible {
   position: relative;
   z-index: 1;

@@ -906,7 +906,10 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
       moveWidth: moveButton.getBoundingClientRect().width,
       labelFits: selectedLabel.scrollWidth <= selectedLabel.clientWidth,
       visibleLabelCount: strip.querySelectorAll("[data-workspace-mode-label]").length,
-      moveInsideTablist: tablist.contains(moveButton),
+      moveSharesReferenceSegment:
+        moveButton.parentElement === strip
+        && selectedTab.closest('.review-workspace__mode-segment--compound') !== null
+        && !tablist.contains(moveButton),
     };
   });
   expect(rightStripGeometry.leftInset).toBeCloseTo(6, 0);
@@ -917,7 +920,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   expect(rightStripGeometry.moveWidth).toBeCloseTo(rightStripGeometry.inactiveWidths[0]!, 0);
   expect(rightStripGeometry.labelFits).toBe(true);
   expect(rightStripGeometry.visibleLabelCount).toBe(1);
-  expect(rightStripGeometry.moveInsideTablist).toBe(false);
+  expect(rightStripGeometry.moveSharesReferenceSegment).toBe(true);
   const referencesMode = workspaceModes.getByRole("tab", { name: "References", exact: true });
   await workspaceModes.getByRole("tab", { name: "Outline", exact: true }).click();
   await expect(page.getByRole("button", { name: "Move References to bottom" })).toHaveCount(0);
@@ -1927,7 +1930,7 @@ test("collapses an outline-free PDF to Annotations and restores workspace focus"
   const intrinsicGeometry = await modes.evaluate((tablist) => {
     const strip = tablist.closest<HTMLElement>('.review-workspace__activity-strip');
     const header = tablist.closest<HTMLElement>('.review-workspace__header');
-    const tabs = [...tablist.querySelectorAll<HTMLElement>(':scope > [role="tab"]')];
+    const tabs = [...tablist.querySelectorAll<HTMLElement>('[role="tab"]')];
     const label = tablist.querySelector<HTMLElement>('[data-workspace-mode-label]');
     if (!strip || !header || tabs.length === 0 || !label) {
       throw new Error('Workspace activity strip has no visible modes.');

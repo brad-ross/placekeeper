@@ -193,7 +193,13 @@ test('reference-layout workspace mode buttons remain interactive', async ({ page
   const references = page.getByRole('tab', { name: 'References', exact: true });
   await references.click();
   await expect(references).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('button', { name: 'Move References to bottom' })).toBeVisible();
+  const moveReferences = page.getByRole('button', { name: 'Move References to bottom' });
+  await expect(moveReferences).toBeVisible();
+  expect(await moveReferences.evaluate((button) => (
+    button.parentElement?.classList.contains('review-workspace__activity-strip--compound') === true
+      && button.previousElementSibling?.getAttribute('role') === 'tablist'
+      && !button.previousElementSibling.contains(button)
+  ))).toBe(true);
 });
 
 test('reference-layout reference tab selectors remain interactive', async ({ page }) => {
