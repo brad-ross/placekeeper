@@ -421,10 +421,16 @@ describe('review shell layout and accessibility contract', () => {
       /\.review-workspace__mode-label\s*\{[^}]*min-width:\s*0;[^}]*text-overflow:\s*ellipsis;/u,
     );
     expect(annotationStyles).toMatch(
-      /\.review-workspace__mode-segment--compound\s*>\s*\.review-workspace__mode-tab\s*\{[^}]*border-radius:\s*var\(--review-radius-control\)\s*0\s*0\s*var\(--review-radius-control\);/u,
+      /\.review-workspace__mode-segment--compound::before\s*\{[^}]*border:\s*1px\s+solid\s+var\(--review-border\);[^}]*border-radius:\s*var\(--review-radius-control\);[^}]*background:\s*var\(--review-surface-panel\);/u,
     );
     expect(annotationStyles).toMatch(
-      /\.review-workspace__activity-strip--compound\s*>\s*\.review-workspace__move--activity\s*\{[^}]*margin-left:\s*-1px;[^}]*border-radius:\s*0\s*var\(--review-radius-control\)\s*var\(--review-radius-control\)\s*0;/u,
+      /\.review-workspace__mode-segment--compound\s*>\s*\.review-workspace__mode-tab\[aria-selected="true"\]\s*\{[^}]*padding-right:\s*2px;[^}]*border-color:\s*transparent;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__activity-strip--compound\s*>\s*\.review-workspace__move--activity\s*\{[^}]*border-color:\s*transparent;[^}]*border-radius:\s*var\(--review-radius-control\);[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__activity-strip--compound\s*>\s*\.review-workspace__move--activity:hover\s*\{[^}]*border-color:\s*var\(--review-border-strong\);[^}]*background:\s*var\(--review-surface-interactive\);/u,
     );
     expect(annotationStyles).toContain('height: var(--review-workspace-header-height, 44px)');
     expect(annotationStyles).toContain('margin-top: var(--review-workspace-header-height, 44px)');
