@@ -1,7 +1,7 @@
 ---
 title: Preserve document history for Annotation Tray navigation
 date: 2026-08-14
-last_updated: 2026-08-14
+last_updated: 2026-08-17
 category: ui-bugs
 module: Annotation Tray navigation
 problem_type: ui_bug
@@ -19,6 +19,7 @@ related_components:
   - "Main Reading Thread"
   - "Meaningful Jump"
   - "viewer-navigation-adapter"
+  - "BrowserReviewLocationHistory"
   - "testing_framework"
 tags:
   - "annotation-tray"
@@ -29,6 +30,7 @@ tags:
   - "back-forward"
   - "async-cancellation"
   - "settled-no-op"
+  - "browser-fragment-history"
 ---
 
 # Preserve document history for Annotation Tray navigation
@@ -37,7 +39,7 @@ tags:
 
 Annotation rows in the workspace tray owned PDF scrolling directly. Selecting a row moved the Main Reading Thread to the annotation, but bypassed the document-navigation transaction that records a Meaningful Jump. The PDF moved while Back still had no origin to restore.
 
-Open, unmerged [PR #34](https://github.com/brad-ross/placekeeper/pull/34) moves that responsibility into `NavigationCoordinator`. Both application-owned Review Items and read-only Existing PDF Annotations now send semantic page and point data through the same coordinated navigation path (`apps/web/src/app/ProductionReviewApp.tsx:990-1001`). The edge-case refinements documented below are included in this branch for that PR.
+Merged [PR #34](https://github.com/brad-ross/placekeeper/pull/34) moved that responsibility into `NavigationCoordinator`. Both application-owned Review Items and read-only Existing PDF Annotations now send semantic page and point data through the same coordinated navigation path (`apps/web/src/app/ProductionReviewApp.tsx:990-1001`). The edge-case refinements documented below landed with that change.
 
 The apparently simple change exposed three transaction edge cases. A repeated annotation request can differ from the captured viewport but still settle at that viewport because the viewer clamps coordinates near a page boundary. A successor started while an annotation jump is being cancelled can capture the annotation's transient viewport unless rollback completes first. Conversely, two distinct search occurrences may intentionally be separate history destinations even when viewer tolerances or boundary clamping give them identical settled coordinates.
 
@@ -94,6 +96,12 @@ The shared transaction records the origin and requested destination, applies the
 
 Distinct search occurrences remain forced because their semantic identity is richer than physical viewer geometry. `navigateMainTarget` passes the force flag for search jumps, preserving separate occurrences even when the viewer settles in place (`apps/web/src/review/navigation-coordinator.ts:724-745`).
 
+### Project semantic history into readable browser URLs
+
+The reducer/viewer transaction remains the authority for whether a Main jump succeeded, but a top-level readable review uses browser session history as its traversal owner and projects each settled semantic destination there. After a successful explicit annotation, outline, search, or promoted-reference jump, the coordinator calls one shared projection seam that pushes a canonical page or portable-item fragment (`apps/web/src/review/navigation-coordinator.ts:880-903`, `apps/web/src/review/navigation-coordinator.ts:1191-1205`). Ordinary settled reading updates the current fragment with `replaceState`, avoiding a Back stop for every scroll or sequential page change (`apps/web/src/review/navigation-coordinator.ts:931-953`, `apps/web/src/review/review-location-history.ts:89-105`).
+
+Back and Forward in that surface traverse native browser history. A `popstate` re-enters the coordinator, restores the page or portable item without pushing a second entry, and falls back to the page or page 1 when the semantic fragment is no longer valid (`apps/web/src/review/review-location-history.ts:63-81`, `apps/web/src/review/navigation-coordinator.ts:254-293`). Embedded surfaces without this adapter retain the reducer-backed traversal. Jump validation stays centralized while each mounted surface has one traversal owner.
+
 ## Why This Works
 
 Back and Forward need two authoritative locations: the stable origin before a jump and the settled destination after it. `NavigationCoordinator` already owns this transaction for other Meaningful Jumps, so placing annotation activation behind the same boundary keeps viewport movement and history state atomic. The ordinary unit regression proves that a jump creates `[origin, annotation]`, Back reapplies the origin, and Forward reapplies the annotation (`apps/web/test/navigation-coordinator.test.ts:740-755`). A second regression proves that repeating a boundary-clamped annotation does not add `[settled, settled]` to history (`apps/web/test/navigation-coordinator.test.ts:758-785`).
@@ -113,6 +121,7 @@ Operation-token checks complete the guarantee: a stale first click cannot comple
 5. Keep a narrow semantic escape hatch for destinations whose identity is richer than viewer geometry. Search occurrences require forced history semantics; ordinary annotation, direct, and outline jumps do not.
 6. Test the transaction matrix: ordinary Back/Forward traversal, repeated boundary-clamped destinations, rapid same-kind supersession, mixed-kind supersession, stale completion, and forced distinct occurrences (`apps/web/test/navigation-coordinator.test.ts:740-924`).
 7. Keep a browser-level assertion on both button state and page movement so a visually correct direct-scroll shortcut cannot silently bypass history (`test/acceptance/production-flow.spec.ts:1293-1318`).
+8. For readable browser reviews, assert URL-view convergence as well: ordinary reading replaces the fragment, each successful Meaningful Jump pushes once, and Back/Forward restoration does not recursively create entries (`apps/web/test/review-location-history.test.ts:64-121`, `test/acceptance/reloadable-links.spec.ts:31-111`).
 
 ## Related Issues
 
@@ -120,5 +129,6 @@ Operation-token checks complete the guarantee: a stale first click cannot comple
 - [Reliable compact right-docked Reference Tabs](reliable-compact-right-docked-reference-tabs.md) — transaction safety when physical viewport state must settle before capture.
 - [Adaptive Annotation Tray framing](../architecture-patterns/adaptive-annotation-tray-framing.md) — distinguishes automatic tray framing from explicit annotation selection; only the latter is a Meaningful Jump.
 - [Outline-aware annotation workspace presentation](../design-patterns/outline-aware-annotation-workspace-presentation.md) — defines the owned and Existing PDF Annotation populations governed by this navigation rule.
+- [Authority boundaries for reloadable local-review URLs](../architecture-patterns/reloadable-local-review-url-authority-boundaries.md) — defines the canonical fragment and refresh/reopen lifecycle that browser history projects.
 
-The base annotation-history change and these edge-case refinements are pending in open, unmerged [PR #34](https://github.com/brad-ross/placekeeper/pull/34) as of 2026-08-14.
+The base annotation-history change and these edge-case refinements merged in [PR #34](https://github.com/brad-ross/placekeeper/pull/34) on 2026-08-15 UTC.
