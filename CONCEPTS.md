@@ -136,7 +136,7 @@ A temporary, independently scrollable and zoomable view of one author-encoded de
 
 One live Reference Tab exists per target. Hiding the workspace preserves its tabs, while promotion to the Main Reading Thread consumes the promoted tab.
 
-A Reference Tab retains both its durable author-encoded destination and its last settled view. Activation prefers the settled view, but may reconstruct the destination when changed viewer geometry makes that view unusable.
+A Reference Tab retains both its immutable author-encoded origin and its last settled view. Activation prefers the settled view, but may reconstruct the origin when changed viewer geometry makes that view unusable. Returning to the origin updates only the Reference Tab's settled view and does not move the Main Reading Thread.
 
 ### Reference Fit Width
 The framing policy for an author-encoded Reference destination that scales its page to the usable Reference viewer width instead of fitting the whole page vertically.
