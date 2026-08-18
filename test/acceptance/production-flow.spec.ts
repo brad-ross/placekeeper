@@ -280,7 +280,7 @@ test.afterAll(async () => {
   if (root) await rm(root, { recursive: true, force: true });
 });
 
-test("fails mounted Codex status closed on lease expiry and aborts a hung scope poll", async ({ page }) => {
+test("keeps mounted Codex context through refresh, then fails closed on a hung scope poll", async ({ page }) => {
   const clientNow = Date.now();
   const taskBindings = new TaskBindingRegistry({
     now: () => new Date(clientNow),
@@ -294,7 +294,7 @@ test("fails mounted Codex status closed on lease expiry and aborts a hung scope 
   });
   try {
     const launched = await clockedHost.open({
-      pdfPath: pdf,
+      pdfPath: referencePdf,
       sourceRootPath: sourceRoot,
       surface: "codex",
       fork: true,
@@ -346,6 +346,16 @@ test("fails mounted Codex status closed on lease expiry and aborts a hung scope 
     await status.hover();
     await expect(status.locator("[role='tooltip']")).toBeVisible();
     await expect(status.locator("[role='tooltip']")).toContainText("PDF content and annotations are synced with the connected agent");
+
+    const readableUrl = new URL(page.url());
+    await page.evaluate(() => history.replaceState(history.state, "", "#v=1&page=3"));
+    await page.reload();
+    await expect(page).toHaveURL(`${readableUrl.origin}${readableUrl.pathname}#v=1&page=3`);
+    await expect(page.locator('.review-chrome__page-control')).toHaveText("3 / 4");
+    await expect(page.locator("[data-codex-context]")).toHaveAttribute(
+      "data-codex-context",
+      "current",
+    );
 
     await page.clock.fastForward(2_100);
     await expect(status).toHaveAttribute("data-codex-context", "connecting");

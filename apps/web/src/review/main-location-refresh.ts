@@ -1,5 +1,6 @@
 export interface TrailingTaskScheduler {
   schedule(): void;
+  flush(): void;
   cancel(): void;
 }
 
@@ -17,9 +18,25 @@ export function createTrailingTaskScheduler(
         task();
       }, delayMs);
     },
+    flush() {
+      if (timer === null) return;
+      clearTimeout(timer);
+      timer = null;
+      task();
+    },
     cancel() {
       if (timer !== null) clearTimeout(timer);
       timer = null;
     },
   };
+}
+
+export async function waitForReviewNavigationReady(input: {
+  readonly isReady: () => boolean;
+  readonly isCurrent: () => boolean;
+  readonly wait?: () => Promise<void>;
+}): Promise<boolean> {
+  const wait = input.wait ?? (() => new Promise<void>((resolve) => setTimeout(resolve, 100)));
+  while (input.isCurrent() && !input.isReady()) await wait();
+  return input.isCurrent() && input.isReady();
 }

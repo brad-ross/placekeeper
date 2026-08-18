@@ -30,6 +30,7 @@ interface ActiveBinding {
   readonly taskSessionId: string;
   readonly reviewSessionId: string;
   readonly documentGeneration: number;
+  readonly browserCapabilityHashes: Set<string>;
   leaseExpiresAtMs: number;
   lastVerified?: LiveObservationIdentity;
 }
@@ -172,6 +173,7 @@ export class TaskBindingRegistry {
         activeForReview.reviewSessionId === input.reviewSessionId &&
         activeForReview.documentGeneration === input.documentGeneration
       ) {
+        activeForReview.browserCapabilityHashes.add(proof.browserCapabilityHash);
         activeForReview.leaseExpiresAtMs = this.#nowMs() + this.#activeLeaseTtlMs;
         return { status: "active", leaseExpiresAt: iso(activeForReview.leaseExpiresAtMs) };
       }
@@ -239,6 +241,7 @@ export class TaskBindingRegistry {
       taskSessionId: pending.taskSessionId,
       reviewSessionId: pending.reviewSessionId,
       documentGeneration: pending.documentGeneration,
+      browserCapabilityHashes: new Set([pending.browserCapabilityHash]),
       leaseExpiresAtMs: this.#nowMs() + this.#activeLeaseTtlMs,
     };
     this.#activeByTask.set(active.taskSessionId, active);
@@ -268,6 +271,7 @@ export class TaskBindingRegistry {
   renewBrowserHeartbeat(input: {
     readonly reviewSessionId: string;
     readonly documentGeneration: number;
+    readonly browserCapabilityHash: string;
   }): BrowserActivationResult {
     this.#sweep();
     if (
@@ -277,7 +281,8 @@ export class TaskBindingRegistry {
     const active = this.#activeByReview.get(input.reviewSessionId);
     if (
       active === undefined ||
-      active.documentGeneration !== input.documentGeneration
+      active.documentGeneration !== input.documentGeneration ||
+      !active.browserCapabilityHashes.has(input.browserCapabilityHash)
     ) return { status: "ignored" };
     active.leaseExpiresAtMs = this.#nowMs() + this.#activeLeaseTtlMs;
     return { status: "active", leaseExpiresAt: iso(active.leaseExpiresAtMs) };
@@ -318,10 +323,14 @@ export class TaskBindingRegistry {
   statusForReview(
     reviewSessionId: string,
     live: LiveReviewIdentity,
+    browserCapabilityHash: string,
   ): LiveContextBindingStatus {
     this.#sweep();
     const active = this.#activeByReview.get(reviewSessionId);
-    if (active?.documentGeneration === live.documentGeneration) {
+    if (
+      active?.documentGeneration === live.documentGeneration &&
+      active.browserCapabilityHashes.has(browserCapabilityHash)
+    ) {
       const verified = active.lastVerified;
       const verifiedCurrent =
         verified !== undefined &&
@@ -344,7 +353,10 @@ export class TaskBindingRegistry {
           };
     }
     const pending = this.#pendingByReview.get(reviewSessionId);
-    if (pending?.documentGeneration === live.documentGeneration) {
+    if (
+      pending?.documentGeneration === live.documentGeneration &&
+      pending.browserCapabilityHash === browserCapabilityHash
+    ) {
       return {
         status: "pending",
         placekeeperSessionId: reviewSessionId,
@@ -355,7 +367,8 @@ export class TaskBindingRegistry {
     for (const proof of this.#proofsByHash.values()) {
       if (
         proof.reviewSessionId === reviewSessionId &&
-        proof.documentGeneration === live.documentGeneration
+        proof.documentGeneration === live.documentGeneration &&
+        proof.browserCapabilityHash === browserCapabilityHash
       ) {
         return {
           status: "pending",

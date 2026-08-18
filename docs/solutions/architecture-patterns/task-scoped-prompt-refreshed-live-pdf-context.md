@@ -1,6 +1,7 @@
 ---
 title: Task-scoped, prompt-refreshed live PDF context
 date: 2026-08-12
+last_updated: 2026-08-17
 category: architecture-patterns
 module: Live PDF Context
 problem_type: architecture_pattern
@@ -46,9 +47,15 @@ Live PDF Context therefore works as a task-scoped synchronization protocol. A la
 
 Use a two-sided handshake instead of inferring ownership from the active application window. A launch creates a one-time proof scoped to the review session, document generation, and browser capability (`apps/service/src/context/task-binding-registry.ts:110-139`). The agent hook claims that proof for its task, producing a pending binding; the authenticated browser must then activate the same review generation with its matching capability (`apps/service/src/context/task-binding-registry.ts:141-247`).
 
-Keep the association exclusive. Existing bindings are reusable only when task, review, and generation all match; competing claims are denied without disclosing the current owner (`apps/service/src/context/task-binding-registry.ts:166-205`). The packaged hook recognizes only the documented successful launcher command rather than inspecting transcript text or browser state (`apps/service/src/cli/hook-command.ts:130-180`).
+Keep the association exclusive. Existing bindings are reusable only when task, review, and generation all match; competing claims are denied without disclosing the current owner. Each accepted repeat claim adds only that launch's browser-capability hash to the existing binding (`apps/service/src/context/task-binding-registry.ts:166-205`). Browser heartbeats and status reads must present a capability hash already owned by that binding, so another task's later projection cannot borrow the first projection's scope (`apps/service/src/context/task-binding-registry.ts:268-288`, `apps/service/src/context/task-binding-registry.ts:323-379`). The packaged hook recognizes only the documented successful launcher command rather than inspecting transcript text or browser state (`apps/service/src/cli/hook-command.ts:130-180`).
 
 This handshake was preceded by a compatibility gate proving that the packaged hook actually received the necessary launch and prompt events. That spike avoided building task correlation on assumed host behavior (session history).
+
+### Resume the exact browser projection
+
+A hard browser refresh must resume the projection that completed the handshake, not reconstruct task ownership from the PDF path. The first authenticated bootstrap associates its credential with the original launch scope and creates a random readable view route. Reloading that route returns the same credential only when its view ID, pathname, scoped cookie, live session, document generation, and credential still match (`apps/service/src/sessions/session-broker.ts:581-681`). Scope polling then uses that credential's retained browser-capability discriminator, preserving the original task binding without exposing its task ID to the browser (`apps/service/src/sessions/session-broker.ts:969-1008`).
+
+That continuity is intentionally process-local. A copied route without its cookie, an ended view, or a route answered by a successor daemon cannot recreate the credential or Codex scope. Post-restart recovery may reopen the path and semantic location through a fresh ordinary browser launch, but Codex must perform a new explicit launch-and-bind handshake to regain task-scoped context. [Authority boundaries for reloadable local-review URLs](reloadable-local-review-url-authority-boundaries.md) defines the full live-resume versus successor-reopen contract.
 
 ### Refresh at prompt consumption
 
@@ -76,7 +83,7 @@ Removals remain first-class data instead of being inferred from absence. Tests c
 
 ### Lease ownership and revoke derived access together
 
-Bindings are temporary. Pending proofs and active bindings have bounded lifetimes; verified prompt refreshes and authenticated browser heartbeats renew only the exact active review generation (`apps/service/src/context/task-binding-registry.ts:265-296`, `apps/service/src/sessions/session-broker.ts:817-846`).
+Bindings are temporary. Pending proofs and active bindings have bounded lifetimes; verified prompt refreshes renew the task-owned review generation, while an authenticated browser heartbeat renews only when its credential retains a capability hash owned by that exact binding (`apps/service/src/context/task-binding-registry.ts:265-296`, `apps/service/src/sessions/session-broker.ts:969-1008`).
 
 Task cleanup removes acknowledged and pending cursors and revokes evidence. Session cleanup removes every observation and evidence handle for that review (`apps/service/src/context/live-context-service.ts:232-266`). Task end, session end, stale generation, explicit revocation, and expiry therefore fail closed rather than leaving ambient cached access (`apps/service/src/cli/hook-command.ts:430-432`, `apps/service/src/host/launch-control.ts:407-412`).
 
@@ -151,6 +158,7 @@ The prompt carries currentness, document generation, revision, digest, Review It
 ## Related
 
 - [Truthful compact status for live agent context](../design-patterns/truthful-compact-agent-context-status.md) covers the passive presentation of this freshness contract.
+- [Authority boundaries for reloadable local-review URLs](reloadable-local-review-url-authority-boundaries.md) explains why a live hard refresh may preserve this binding while a successor-daemon reopen may not.
 - [Recoverable autosave for editable PDF annotations](recoverable-editable-pdf-annotation-autosave.md) defines Review State and Save Sync authority on the persistence side.
 - [Outline-aware annotation workspace presentation](../design-patterns/outline-aware-annotation-workspace-presentation.md) applies the sibling fail-closed generation principle to document-derived UI.
 - [Live PDF Context plan](../../plans/2026-08-12-001-feat-live-pdf-codex-context-plan.md) records the originating requirements and design decisions.

@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
@@ -11,6 +11,11 @@ import type {
   ReviewState,
 } from "../../../../packages/core/src/review-model.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
+import {
+  encodePlacekeeperLinkFragment,
+  encodePlacekeeperReadableViewPathname,
+  type PlacekeeperLinkLocation,
+} from "../../../../packages/core/src/placekeeper-link.js";
 import { createReviewState } from "../../../../packages/core/src/review-model.js";
 import { createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
 import { reduceReview } from "../../../../packages/core/src/review-reducer.js";
@@ -53,6 +58,7 @@ export interface OpenReviewRequest {
   readonly sourceRootPath?: string;
   readonly recoveryDecision?: RecoveryDecision;
   readonly surface?: LaunchSurface;
+  readonly requestedLocation?: PlacekeeperLinkLocation;
 }
 
 export interface SessionLaunch {
@@ -97,7 +103,33 @@ interface BrowserLaunchScope {
   readonly sessionId: string;
   readonly documentGeneration: number;
   readonly surface: LaunchSurface;
+  readonly browserCapabilityHash: string;
+  readonly requestedLocation?: PlacekeeperLinkLocation;
   readonly expiresAtMs: number;
+}
+
+interface BrowserViewRecord {
+  readonly id: string;
+  readonly cookieHash: string;
+  readonly sessionId: string;
+  readonly documentGeneration: number;
+  readonly credential: string;
+  readonly pathname: string;
+}
+
+export interface HttpBootstrapExchange {
+  readonly credential: string;
+  readonly view?: {
+    readonly id: string;
+    readonly cookie: string;
+    readonly pathname: string;
+    readonly locationFragment: string;
+  };
+}
+
+export interface ResumedBrowserView {
+  readonly sessionId: string;
+  readonly credential: string;
 }
 
 const BOOTSTRAP_TTL_MS = 60_000;
@@ -155,6 +187,7 @@ export class SessionBroker {
   readonly #activeBySource = new Map<string, string>();
   readonly #bootstrapScopes = new Map<string, BrowserLaunchScope>();
   readonly #credentialScopes = new Map<string, BrowserLaunchScope>();
+  readonly #viewsById = new Map<string, BrowserViewRecord>();
   readonly #sessionEndListeners = new Set<(sessionId: string) => void>();
 
   constructor(options: SessionBrokerOptions) {
@@ -213,12 +246,18 @@ export class SessionBroker {
     );
   }
 
-  #launch(session: ActiveSession, surface: LaunchSurface): SessionLaunch {
+  #launch(
+    session: ActiveSession,
+    surface: LaunchSurface,
+    requestedLocation?: PlacekeeperLinkLocation,
+  ): SessionLaunch {
     const capability = this.credentials.issueBootstrap(session.id, BOOTSTRAP_TTL_MS);
     const launchScope: BrowserLaunchScope = {
       sessionId: session.id,
       documentGeneration: session.documentGeneration,
       surface,
+      browserCapabilityHash: digestSecretHex(capability),
+      ...(requestedLocation === undefined ? {} : { requestedLocation }),
       expiresAtMs: this.#now().getTime() + BOOTSTRAP_TTL_MS,
     };
     this.#bootstrapScopes.set(digestSecretHex(capability), launchScope);
@@ -245,9 +284,6 @@ export class SessionBroker {
     await this.initialize();
     const approvedFile = await this.capabilities.approvePdf(request.pdfPath);
     const sourceDigest = await hashFile(approvedFile.canonicalPath);
-    const rewriteEligibility = await this.#rewriteAssessor(
-      new Uint8Array(await readFile(approvedFile.canonicalPath)),
-    );
     const key = activeKey(approvedFile.canonicalPath, sourceDigest);
     const existingSessionId = this.#activeBySource.get(key);
     if (existingSessionId !== undefined && request.recoveryDecision !== "fork") {
@@ -259,9 +295,13 @@ export class SessionBroker {
       }
       return {
         kind: "focused",
-        launch: this.#launch(session, request.surface ?? "browser"),
+        launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
       };
     }
+
+    const rewriteEligibility = await this.#rewriteAssessor(
+      new Uint8Array(await readFile(approvedFile.canonicalPath)),
+    );
 
     const drafts = await this.#recoverableDrafts();
     const identityMatches = drafts.filter(
@@ -401,7 +441,7 @@ export class SessionBroker {
       this.#activate(session);
       return {
         kind: "opened",
-        launch: this.#launch(session, request.surface ?? "browser"),
+        launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
       };
     }
 
@@ -475,7 +515,7 @@ export class SessionBroker {
     this.#activate(session);
     return {
       kind: "opened",
-      launch: this.#launch(session, request.surface ?? "browser"),
+      launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
     };
   }
 
@@ -538,7 +578,7 @@ export class SessionBroker {
     };
   }
 
-  exchangeBootstrap(sessionId: string, capability: string): string | undefined {
+  #exchangeBootstrap(sessionId: string, capability: string): HttpBootstrapExchange | undefined {
     this.#sweepBootstrapScopes();
     if (!this.#activeById.has(sessionId)) return undefined;
     const scopeKey = digestSecretHex(capability);
@@ -557,7 +597,96 @@ export class SessionBroker {
         });
       }
     }
-    return credential;
+    if (
+      scope === undefined ||
+      scope.sessionId !== sessionId ||
+      scope.surface === "vscode"
+    ) return { credential };
+    const session = this.#activeById.get(sessionId);
+    if (
+      session === undefined ||
+      session.ending ||
+      session.documentGeneration !== scope.documentGeneration
+    ) return undefined;
+    const id = randomUUID();
+    const cookie = randomBytes(32).toString("base64url");
+    const location = scope.requestedLocation ?? { kind: "page" as const, page: 1 };
+    const pathname = encodePlacekeeperReadableViewPathname({
+      viewId: id,
+      path: session.canonicalSourcePath,
+    });
+    this.#viewsById.set(id, {
+      id,
+      cookieHash: digestSecretHex(cookie),
+      sessionId,
+      documentGeneration: scope.documentGeneration,
+      credential,
+      pathname,
+    });
+    return {
+      credential,
+      view: {
+        id,
+        cookie,
+        pathname,
+        locationFragment: encodePlacekeeperLinkFragment(location),
+      },
+    };
+  }
+
+  exchangeBootstrap(sessionId: string, capability: string): string | undefined {
+    return this.#exchangeBootstrap(sessionId, capability)?.credential;
+  }
+
+  exchangeBootstrapForHttp(
+    sessionId: string,
+    capability: string,
+  ): HttpBootstrapExchange | undefined {
+    return this.#exchangeBootstrap(sessionId, capability);
+  }
+
+  resumeView(
+    viewId: string,
+    pathname: string,
+    cookie: string,
+  ): ResumedBrowserView | undefined {
+    const view = this.#liveView(viewId, pathname, digestSecretHex(cookie));
+    if (view === undefined) return undefined;
+    this.controls.noteAuthenticatedPage(view.sessionId);
+    return { sessionId: view.sessionId, credential: view.credential };
+  }
+
+  isLiveViewRoute(viewId: string, pathname: string): boolean {
+    return this.#liveView(viewId, pathname) !== undefined;
+  }
+
+  #liveView(
+    viewId: string,
+    pathname: string,
+    cookieHash?: string,
+  ): BrowserViewRecord | undefined {
+    const view = this.#viewsById.get(viewId);
+    if (
+      view === undefined ||
+      view.pathname !== pathname ||
+      (cookieHash !== undefined && view.cookieHash !== cookieHash)
+    ) return undefined;
+    const session = this.#activeById.get(view.sessionId);
+    const live =
+      session !== undefined &&
+      !session.ending &&
+      session.documentGeneration === view.documentGeneration &&
+      this.credentials.authenticate(view.sessionId, view.credential);
+    if (!live) this.#viewsById.delete(viewId);
+    return live ? view : undefined;
+  }
+
+  revokeView(viewId: string): void {
+    const view = this.#viewsById.get(viewId);
+    if (view === undefined) return;
+    this.#viewsById.delete(viewId);
+    this.credentials.revoke(view.sessionId, view.credential);
+    this.#credentialScopes.delete(digestSecretHex(view.credential));
   }
 
   authenticate(sessionId: string, credential: string): boolean {
@@ -579,6 +708,15 @@ export class SessionBroker {
       codexTasks: this.taskBindings.activityCount(),
       transientWork: controls.transientWork,
     };
+  }
+
+  /** Lexical, process-memory-only ownership check used before admitting a
+   * custom-scheme link. It intentionally performs no path resolution or I/O. */
+  activeReviewOwnsPath(path: string): boolean {
+    for (const session of this.#activeById.values()) {
+      if (!session.ending && session.canonicalSourcePath === path) return true;
+    }
+    return false;
   }
 
   #sweepBootstrapScopes(): void {
@@ -819,6 +957,7 @@ export class SessionBroker {
         readonly documentTitle: string;
         readonly sourceRootPath?: string;
         readonly launchSurface?: LaunchSurface;
+        readonly requestedLocation?: PlacekeeperLinkLocation;
         readonly codexContext?: ReturnType<TaskBindingRegistry["statusForReview"]>;
       }
     | undefined {
@@ -842,6 +981,7 @@ export class SessionBroker {
       this.taskBindings.renewBrowserHeartbeat({
         reviewSessionId: sessionId,
         documentGeneration: session.documentGeneration,
+        browserCapabilityHash: trustedCodexScope.browserCapabilityHash,
       });
     }
     return {
@@ -850,6 +990,9 @@ export class SessionBroker {
       ...(trustedLaunchScope === undefined
         ? {}
         : { launchSurface: trustedLaunchScope.surface }),
+      ...(trustedLaunchScope?.requestedLocation === undefined
+        ? {}
+        : { requestedLocation: trustedLaunchScope.requestedLocation }),
       ...(trustedLaunchScope?.surface === "codex"
         ? {
             codexContext: this.taskBindings.statusForReview(
@@ -860,6 +1003,7 @@ export class SessionBroker {
                 sourceDigest: session.state.source.digest,
                 stateDigest: reviewSemanticDigest(session.state.items),
               },
+              trustedLaunchScope.browserCapabilityHash,
             ),
           }
         : {}),
@@ -1157,6 +1301,7 @@ export class SessionBroker {
     this.#activeBySource.clear();
     this.#bootstrapScopes.clear();
     this.#credentialScopes.clear();
+    this.#viewsById.clear();
   }
 
   async drainWrites(): Promise<void> {
@@ -1193,6 +1338,9 @@ export class SessionBroker {
     }
     for (const [key, scope] of this.#credentialScopes) {
       if (scope.sessionId === sessionId) this.#credentialScopes.delete(key);
+    }
+    for (const [viewId, view] of this.#viewsById) {
+      if (view.sessionId === sessionId) this.#viewsById.delete(viewId);
     }
     this.capabilities.revokeFile(session.fileId);
     if (session.rootId !== undefined) this.capabilities.revokeRoot(session.rootId);

@@ -12,6 +12,8 @@ Finder displays the Placekeeper name and its production [two-page reference-and-
 
 If an upgrade is deferred, close active Placekeeper reviews or end the bound Codex task and retry. Replacement and readiness failures restore the previous app without moving the recovery root. LaunchServices refresh happens only after a healthy replacement commits; a warning affects Finder/Open With registration but does not roll back the usable app.
 
+If a readable review tab stops loading, start Placekeeper and refresh it. A reachable ended or pre-update tab should show **Reopen this PDF** with a selectable `placekeeper:` link; it must not reopen the file or invoke macOS before you click. If startup reports that Placekeeper's fixed loopback port is occupied, stop the unrelated local listener rather than expecting Placekeeper to choose a different port.
+
 Manual downgrade after using Placekeeper is unsupported. The installer can roll back a candidate only before transaction commit and before the candidate opens or autosaves a user document; the rebrand does not add a backward reader for state produced after use.
 
 Public distribution under the Placekeeper name is blocked until trademark, marketplace, and domain clearance is recorded. The implementation can be built and merged for validation before that external publication decision.

@@ -3,14 +3,25 @@ set -eu
 PATH=/usr/bin:/bin
 export PATH
 
-if [ "$#" -ne 2 ] && [ "$#" -ne 3 ]; then
-  printf 'Usage: %s <built-app> <app-destination> [readiness-executable]\n' "$0" >&2
+if [ "$#" -lt 2 ] || [ "$#" -gt 4 ]; then
+  printf 'Usage: %s <built-app> <app-destination> [readiness-executable] [installed-smoke-port]\n' "$0" >&2
   exit 2
 fi
 
 built_app=$1
 app_path=$2
 readiness_executable=${3:-}
+installed_smoke_port=${4:-}
+case "$installed_smoke_port" in
+  "") ;;
+  *[!0-9]*) printf '%s\n' "Invalid installed smoke port." >&2; exit 2 ;;
+  *)
+  if [ "$installed_smoke_port" -lt 1 ] || [ "$installed_smoke_port" -gt 65535 ]; then
+    printf '%s\n' "Invalid installed smoke port." >&2
+    exit 2
+  fi
+  ;;
+esac
 
 if [ ! -x "$built_app/Contents/MacOS/placekeeper" ] || [ ! -x "$built_app/Contents/MacOS/droplet" ]; then
   printf '%s\n' "The built app is incomplete; live destinations were not changed." >&2
@@ -36,7 +47,14 @@ cleanup() {
     # resolve code or assets through the installed path. The readiness receipt
     # binds this stop to the exact candidate process started by this transaction.
     if [ "$readiness_started" -eq 1 ]; then
-      if ! "$readiness_executable" daemon stop-ready --receipt "$readiness_receipt" >/dev/null; then
+      if [ -n "$installed_smoke_port" ]; then
+        stop_status=0
+        "$readiness_executable" daemon stop-ready --receipt "$readiness_receipt" --isolated-installed-smoke --http-port "$installed_smoke_port" >/dev/null || stop_status=$?
+      else
+        stop_status=0
+        "$readiness_executable" daemon stop-ready --receipt "$readiness_receipt" >/dev/null || stop_status=$?
+      fi
+      if [ "$stop_status" -ne 0 ]; then
         printf '%s\n' "Candidate retirement failed; preserving the transaction and installed candidate." >&2
         rollback_safe=0
         status=1
@@ -87,7 +105,11 @@ if [ -n "$readiness_executable" ]; then
     *) printf 'Refusing unexpected readiness executable: %s\n' "$readiness_executable" >&2; exit 1 ;;
   esac
   readiness_started=1
-  "$readiness_executable" daemon ensure-ready --receipt "$readiness_receipt"
+  if [ -n "$installed_smoke_port" ]; then
+    "$readiness_executable" daemon ensure-ready --receipt "$readiness_receipt" --isolated-installed-smoke --http-port "$installed_smoke_port"
+  else
+    "$readiness_executable" daemon ensure-ready --receipt "$readiness_receipt"
+  fi
 fi
 
 committed=1

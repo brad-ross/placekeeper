@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createReviewState } from "../../../packages/core/src/review-model.js";
 import {
+  initiallyPortableItemIds,
   ProductionReviewApp,
   visibleCodexContext,
 } from "../src/app/ProductionReviewApp.js";
@@ -14,6 +15,28 @@ import {
 } from "../src/review/annotation-outline-context.js";
 
 describe("one production review tree", () => {
+  it("keeps clean imported review items portable without an active save destination", () => {
+    const state = {
+      ...createReviewState({
+        sessionId: "00000000-0000-4000-8000-000000000031",
+        source: { fileId: "00000000-0000-4000-8000-000000000032", digest: "a".repeat(64), byteLength: 12 },
+      }),
+      revision: 1,
+      items: [{
+        id: "00000000-0000-4000-8000-000000000033",
+        kind: "pageNote" as const,
+        pageIndex: 0,
+        createdAt: "2026-08-17T00:00:00.000Z",
+        updatedAt: "2026-08-17T00:00:00.000Z",
+        payload: { position: { x: 1, y: 2, width: 3, height: 4 }, comment: "Imported" },
+      }],
+    };
+    expect(initiallyPortableItemIds(state, {
+      destination: { phase: "none", generation: 0 },
+      sync: { phase: "clean", desiredRevision: 1, savedRevision: 1 },
+    })).toEqual(new Set(["00000000-0000-4000-8000-000000000033"]));
+  });
+
   it("derives owned and source subsection labels from safe document geometry", () => {
     const outlineTarget = {
       documentGeneration: 4,

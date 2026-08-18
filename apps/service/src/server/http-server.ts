@@ -12,9 +12,14 @@ import { isContained } from "../files/file-capabilities.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
 import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { DaemonLifecycleCoordinator } from "../host/daemon-lifecycle.js";
+import { parsePlacekeeperReadableViewRoute } from "../links/placekeeper-link.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+const VIEW_UUID = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+
+/** Stable packaged-daemon browser origin. Direct hosts and tests default to port 0. */
+export const PLACEKEEPER_HTTP_PORT = 43_179;
 
 function setBaseHeaders(
   response: ServerResponse,
@@ -106,7 +111,27 @@ function cookieValue(request: IncomingMessage, name: string): string | undefined
   return undefined;
 }
 
-function bootstrapHtml(sessionId: string, nonce: string): string {
+function clearViewCookie(response: ServerResponse, viewId: string): void {
+  response.setHeader(
+    "Set-Cookie",
+    `placekeeper_view=; Path=/r/${viewId}/; Max-Age=0; HttpOnly; SameSite=Strict`,
+  );
+}
+
+function bootstrapHtml(sessionId: string, nonce: string, embedded: boolean): string {
+  const start = embedded
+    ? `
+  history.replaceState(null, "", location.pathname + location.search);
+  window.__placekeeperSession = Object.freeze({ sessionId: "${sessionId}", credential });
+  const stylesheet = document.createElement("link");
+  stylesheet.rel = "stylesheet";
+  stylesheet.href = "/s/${sessionId}/assets/app.css";
+  document.head.append(stylesheet);
+  const app = await import("/s/${sessionId}/assets/app.js");
+  await app.start(window.__placekeeperSession);`
+    : `
+  if (!view) throw new Error("Readable review view was not created");
+  location.replace(view.pathname + "#" + view.locationFragment);`;
   const script = `
 (async () => {
   const capability = new URLSearchParams(location.hash.slice(1)).get("cap");
@@ -117,17 +142,48 @@ function bootstrapHtml(sessionId: string, nonce: string): string {
     body: JSON.stringify({ capability })
   });
   if (!response.ok) throw new Error("Launch capability was rejected");
-  const { credential } = await response.json();
-  history.replaceState(null, "", location.pathname + location.search);
-  window.__placekeeperSession = Object.freeze({ sessionId: "${sessionId}", credential });
-  const stylesheet = document.createElement("link");
-  stylesheet.rel = "stylesheet";
-  stylesheet.href = "/s/${sessionId}/assets/app.css";
-  document.head.append(stylesheet);
-  const app = await import("/s/${sessionId}/assets/app.js");
-  await app.start(window.__placekeeperSession);
+  const { credential, view } = await response.json();${start}
 })().catch(() => { document.body.textContent = "Unable to open this review session."; });`;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Placekeeper</title></head><body><div id="root"></div><script type="module" nonce="${nonce}">${script}</script></body></html>`;
+}
+
+function htmlAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function terminalRecoveryMarkup(appLinkBase: string, hidden = false): string {
+  const base = htmlAttribute(appLinkBase);
+  return `<main data-terminal-recovery${hidden ? " hidden" : ""}><p>This live review is no longer available.</p><a data-placekeeper-reopen data-app-link-base="${base}" href="${base}#v=1&amp;page=1">Reopen in Placekeeper</a></main>`;
+}
+
+function readableViewHtml(nonce: string, appLinkBase: string): string {
+  const script = `
+let app;
+(async () => {
+  const match = /^\\/r\\/([0-9a-f-]{36})\\//u.exec(location.pathname);
+  if (!match) throw new Error("Invalid review view");
+  const stylesheet = document.createElement("link");
+  stylesheet.rel = "stylesheet";
+  stylesheet.href = "/assets/app.css";
+  document.head.append(stylesheet);
+  app = await import("/assets/app.js");
+  await app.resume(match[1], location.pathname);
+})().catch(() => {
+  document.querySelector("#root")?.remove();
+  const recovery = document.querySelector("[data-terminal-recovery]");
+  if (recovery instanceof HTMLElement) recovery.hidden = false;
+  app?.showTerminalRecovery();
+});`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Placekeeper</title></head><body><div id="root"></div>${terminalRecoveryMarkup(appLinkBase, true)}<script type="module" nonce="${nonce}">${script}</script></body></html>`;
+}
+
+function terminalRecoveryHtml(nonce: string, appLinkBase: string): string {
+  const script = `import("/assets/app.js").then((app) => app.showTerminalRecovery()).catch(() => {});`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Placekeeper</title></head><body>${terminalRecoveryMarkup(appLinkBase)}<script type="module" nonce="${nonce}">${script}</script></body></html>`;
 }
 
 function assetContentType(path: string): string {
@@ -146,6 +202,7 @@ export interface WebAssetOptions {
 }
 
 export interface LocalHttpServerOptions {
+  readonly port?: number;
   readonly webAssets?: WebAssetOptions;
   readonly saving?: Pick<
     PdfSaveCoordinator,
@@ -170,6 +227,24 @@ export async function startHttpServer(
     ? undefined
     : await realpath(options.webAssets.root);
   const assetCapabilities = new Map<string, Set<string>>();
+  const serveWebAsset = async (response: ServerResponse, assetName: string): Promise<void> => {
+    if (webAssetRoot === undefined) {
+      send(response, 503, "Production assets are not installed");
+      return;
+    }
+    const candidate = join(webAssetRoot, assetName);
+    const physical = await realpath(candidate).catch(() => undefined);
+    if (physical === undefined || !isContained(webAssetRoot, physical)) {
+      send(response, 404, "Not found");
+      return;
+    }
+    const bytes = await readFile(physical);
+    setBaseHeaders(response);
+    response.statusCode = 200;
+    response.setHeader("Content-Type", assetContentType(physical));
+    response.setHeader("Content-Length", bytes.byteLength);
+    response.end(bytes);
+  };
   const server = createServer(async (request, response) => {
     const activity = options.lifecycle?.enterActivity();
     if (options.lifecycle !== undefined && activity === undefined) {
@@ -182,12 +257,13 @@ export async function startHttpServer(
       const requestUrl = new URL(request.url ?? "/", origin);
       const pathname = requestUrl.pathname;
       const exchangeMatch = new RegExp(`^/s/(${UUID})/exchange$`, "u").exec(pathname);
+      const resumeMatch = new RegExp(`^/r/(${VIEW_UUID})/resume$`, "u").exec(pathname);
       const commandMatch = new RegExp(`^/s/(${UUID})/commands$`, "u").exec(pathname);
       const saveMatch = new RegExp(
         `^/s/(${UUID})/save/(status|proposal|copy|folder|original|retry|locate)$`,
         "u",
       ).exec(pathname);
-      const mutates = exchangeMatch !== null || commandMatch !== null ||
+      const mutates = exchangeMatch !== null || resumeMatch !== null || commandMatch !== null ||
         (saveMatch !== null && saveMatch[2] !== "status" && saveMatch[2] !== "proposal");
       const expectsJson = mutates;
       const contentLength = Number(request.headers["content-length"] ?? 0);
@@ -236,7 +312,7 @@ export async function startHttpServer(
         send(
           response,
           200,
-          bootstrapHtml(sessionId, nonce),
+          bootstrapHtml(sessionId, nonce, embedded),
           "text/html; charset=utf-8",
           csp,
           embedded,
@@ -250,28 +326,112 @@ export async function startHttpServer(
           return;
         }
         const body = (await readJson(request)) as { capability?: unknown };
-        const credential =
+        const exchange =
           typeof body.capability === "string"
-            ? broker.exchangeBootstrap(exchangeMatch[1]!, body.capability)
+            ? broker.exchangeBootstrapForHttp(exchangeMatch[1]!, body.capability)
             : undefined;
-        if (credential === undefined) {
+        if (exchange === undefined) {
           send(response, 401, "Capability rejected");
           return;
         }
-        const assetCapability = randomBytes(32).toString("base64url");
-        const sessionAssetCapabilities = assetCapabilities.get(exchangeMatch[1]!) ?? new Set<string>();
-        while (sessionAssetCapabilities.size >= 8) {
-          const oldest = sessionAssetCapabilities.values().next().value;
-          if (oldest === undefined) break;
-          sessionAssetCapabilities.delete(oldest);
+        if (exchange.view === undefined) {
+          const assetCapability = randomBytes(32).toString("base64url");
+          const sessionAssetCapabilities = assetCapabilities.get(exchangeMatch[1]!) ?? new Set<string>();
+          while (sessionAssetCapabilities.size >= 8) {
+            const oldest = sessionAssetCapabilities.values().next().value;
+            if (oldest === undefined) break;
+            sessionAssetCapabilities.delete(oldest);
+          }
+          sessionAssetCapabilities.add(assetCapability);
+          assetCapabilities.set(exchangeMatch[1]!, sessionAssetCapabilities);
+          response.setHeader(
+            "Set-Cookie",
+            `placekeeper_session=${assetCapability}; Path=/s/${exchangeMatch[1]!}/assets; HttpOnly; SameSite=Strict`,
+          );
+        } else {
+          response.setHeader(
+            "Set-Cookie",
+            `placekeeper_view=${exchange.view.cookie}; Path=/r/${exchange.view.id}/; HttpOnly; SameSite=Strict`,
+          );
         }
-        sessionAssetCapabilities.add(assetCapability);
-        assetCapabilities.set(exchangeMatch[1]!, sessionAssetCapabilities);
-        response.setHeader(
-          "Set-Cookie",
-          `placekeeper_session=${assetCapability}; Path=/s/${exchangeMatch[1]!}/assets; HttpOnly; SameSite=Strict`,
+        sendJson(response, 200, {
+          credential: exchange.credential,
+          ...(exchange.view === undefined
+            ? {}
+            : {
+                view: {
+                  id: exchange.view.id,
+                  pathname: exchange.view.pathname,
+                  locationFragment: exchange.view.locationFragment,
+                },
+              }),
+        });
+        return;
+      }
+
+      if (resumeMatch !== null) {
+        if (request.method !== "POST") {
+          send(response, 405, "Method not allowed");
+          return;
+        }
+        const body = await readJson(request) as { pathname?: unknown };
+        const cookie = cookieValue(request, "placekeeper_view");
+        const resumed =
+          typeof body.pathname === "string" && cookie !== undefined
+            ? broker.resumeView(resumeMatch[1]!, body.pathname, cookie)
+            : undefined;
+        if (resumed === undefined) {
+          clearViewCookie(response, resumeMatch[1]!);
+          send(response, 401, "View is no longer available");
+          return;
+        }
+        const { appLinkBase } = parsePlacekeeperReadableViewRoute(body.pathname as string);
+        sendJson(response, 200, { ...resumed, appLinkBase });
+        return;
+      }
+
+      const readableView = pathname.startsWith("/r/")
+        ? (() => {
+            try {
+              return parsePlacekeeperReadableViewRoute(pathname);
+            } catch {
+              return undefined;
+            }
+          })()
+        : undefined;
+      if (readableView !== undefined) {
+        if (request.method !== "GET") {
+          send(response, 405, "Method not allowed");
+          return;
+        }
+        const nonce = randomBytes(18).toString("base64url");
+        const csp = RESTRICTIVE_CSP
+          .replace(
+            "script-src 'self'",
+            `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval'`,
+          )
+          .replace("frame-ancestors 'self'", "frame-ancestors 'none'");
+        const live = broker.isLiveViewRoute(readableView.viewId, pathname);
+        if (!live) clearViewCookie(response, readableView.viewId);
+        send(
+          response,
+          200,
+          live
+            ? readableViewHtml(nonce, readableView.appLinkBase)
+            : terminalRecoveryHtml(nonce, readableView.appLinkBase),
+          "text/html; charset=utf-8",
+          csp,
         );
-        sendJson(response, 200, { credential });
+        return;
+      }
+
+      const publicAssetMatch = /^\/assets\/([A-Za-z0-9._-]+)$/u.exec(pathname);
+      if (publicAssetMatch !== null) {
+        if (request.method !== "GET") {
+          send(response, 405, "Method not allowed");
+          return;
+        }
+        await serveWebAsset(response, publicAssetMatch[1]!);
         return;
       }
 
@@ -290,22 +450,7 @@ export async function startHttpServer(
           send(response, 401, "Authentication required");
           return;
         }
-        if (webAssetRoot === undefined) {
-          send(response, 503, "Production assets are not installed");
-          return;
-        }
-        const candidate = join(webAssetRoot, assetMatch[2]!);
-        const physical = await realpath(candidate).catch(() => undefined);
-        if (physical === undefined || !isContained(webAssetRoot, physical)) {
-          send(response, 404, "Not found");
-          return;
-        }
-        const bytes = await readFile(physical);
-        setBaseHeaders(response);
-        response.statusCode = 200;
-        response.setHeader("Content-Type", assetContentType(physical));
-        response.setHeader("Content-Length", bytes.byteLength);
-        response.end(bytes);
+        await serveWebAsset(response, assetMatch[2]!);
         return;
       }
 
@@ -498,7 +643,7 @@ export async function startHttpServer(
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen({ host: "127.0.0.1", port: 0 }, () => {
+    server.listen({ host: "127.0.0.1", port: options.port ?? 0 }, () => {
       server.off("error", reject);
       resolve();
     });
@@ -509,11 +654,15 @@ export async function startHttpServer(
   }
   hostHeader = `127.0.0.1:${address.port}`;
   origin = `http://${hostHeader}`;
+  const unsubscribeSessionEnd = broker.onSessionEnd((sessionId) => {
+    assetCapabilities.delete(sessionId);
+  });
   return {
     origin,
     port: address.port,
     close: () =>
       new Promise<void>((resolve, reject) => {
+        unsubscribeSessionEnd();
         broker.controls.closeAllSockets();
         broker.taskBindings.revokeAll();
         assetCapabilities.clear();

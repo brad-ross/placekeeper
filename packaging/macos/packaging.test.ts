@@ -17,7 +17,13 @@ import {
   validateDistributionManifests,
   validateMacIconSet,
 } from "./validate-manifest.js";
-import { finderServiceArgs } from "./launcher.mjs";
+import {
+  finderServiceArgs,
+  LINK_CONFIRMATION_SCRIPT,
+  linkServiceArgs,
+  NATIVE_ERROR_SCRIPT,
+  OPEN_LOCATION_SCRIPT,
+} from "./launcher.mjs";
 import { validateDoctorEvidence } from "./smoke-installed.js";
 import {
   appBundlePath,
@@ -59,6 +65,9 @@ describe("macOS distribution manifests", () => {
     expect(plist).toContain("<key>CFBundleExecutable</key><string>droplet</string>");
     expect(plist).toContain("<key>CFBundleIdentifier</key><string>local.placekeeper</string>");
     expect(plist).toContain("<key>CFBundleIconFile</key><string>Placekeeper</string>");
+    expect(plist).toContain("<key>CFBundleURLTypes</key><array><dict>");
+    expect(plist).toContain("<key>CFBundleURLName</key><string>local.placekeeper.review-link</string>");
+    expect(plist).toContain("<key>CFBundleURLSchemes</key><array><string>placekeeper</string></array>");
     expect(infoPlistStrings(manifest)).toBe(
       '"CFBundleDisplayName" = "Placekeeper";\n"CFBundleName" = "Placekeeper";\n',
     );
@@ -188,6 +197,8 @@ describe("macOS distribution manifests", () => {
     expect(installer).toContain("PLACEKEEPER_INSTALL_ROOT");
     expect(smoke).toContain('"Library/Application Support/Placekeeper"');
     expect(smoke).toContain('"daemon", "coordinate-install"');
+    expect(smoke).toContain('"/usr/bin/open", ["-n", "-g", "-a", probeApp, cold]');
+    expect(smoke).toContain("waitForGurlDeliveries(logPath, [cold, warm])");
     expect(serviceDaemon).toContain('"PLACEKEEPER_DAEMON_IDENTITY"');
     expect(serviceDaemon).toContain('"PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY"');
     expect(serviceDaemon).toContain('join(appSupportRoot, "lifecycle.lock")');
@@ -376,7 +387,8 @@ describe("macOS distribution manifests", () => {
   it("translates an installed raw Finder path without putting a capability in process arguments", async () => {
     expect(finderServiceArgs("/tmp/paper.pdf")).toEqual(["open", "--json", "--surface", "finder", "--pdf", "/tmp/paper.pdf"]);
     const launcher = await readFile(resolve("packaging/macos/launcher.mjs"), "utf8");
-    expect(launcher).toContain('system attribute "PLACEKEEPER_URL"');
+    expect(launcher).toContain('objectForKey:"PLACEKEEPER_URL"');
+    expect(launcher).not.toContain('system attribute "PLACEKEEPER_URL"');
     expect(launcher).toContain("PLACEKEEPER_PDFIUM_WASM");
     expect(launcher).toContain("build-identity.json");
     expect(launcher).toContain("PLACEKEEPER_DAEMON_IDENTITY");
@@ -392,6 +404,68 @@ describe("macOS distribution manifests", () => {
     expect(bridge).toContain("Contents/MacOS/placekeeper");
     expect(bridge).toContain("quoted form of pdfPath");
     expect(bridge).not.toContain("Terminal");
+  });
+
+  it("delivers each custom URL event as one opaque launcher argument", async () => {
+    const link = "placekeeper:///tmp/Paper%20%E2%9C%93.pdf#v=1&page=12";
+    expect(linkServiceArgs(link, { preflight: true })).toEqual([
+      "open-link", "--json", "--preflight", "--link", link,
+    ]);
+    expect(linkServiceArgs(link, { confirmed: true, recovery: "resume" })).toEqual([
+      "open-link", "--json", "--confirmed", "--recovery", "resume", "--link", link,
+    ]);
+
+    const bridge = await readFile(resolve("packaging/macos/finder-bridge.applescript"), "utf8");
+    expect(bridge).toContain("on «event GURLGURL» placekeeperUrl");
+    expect(bridge).toContain("launchPlacekeeperUrl(placekeeperUrl)");
+    expect(bridge).toContain("quoted form of placekeeperUrl");
+    expect(bridge).not.toMatch(/placekeeperUrl.*(?:split|replace|decode|encode)/iu);
+
+    const launcher = await readFile(resolve("packaging/macos/launcher.mjs"), "utf8");
+    expect(launcher).toContain("setSelectable:true");
+    expect(launcher).toContain("setEditable:false");
+    expect(launcher).not.toContain("setInitialFirstResponder");
+    expect(launcher).toContain("setKeyEquivalent:(character id 27)");
+    expect(launcher).toContain('addButtonWithTitle:"Open"');
+    expect(launcher).toContain('addButtonWithTitle:"Cancel"');
+    expect(launcher.indexOf('addButtonWithTitle:"Cancel"'))
+      .toBeLessThan(launcher.indexOf('addButtonWithTitle:"Open"'));
+    expect(launcher).toContain("NSAlertSecondButtonReturn");
+    expect(launcher).toContain('invoke({ ...(confirmed ? { confirmed: true } : {}), recovery: choice })');
+    expect(launcher).toContain('invoke({ confirmed: true, recovery: choice })');
+  });
+
+  it.runIf(process.platform === "darwin")("constructs the native link confirmation before entering its modal loop", async () => {
+    const modalStart = LINK_CONFIRMATION_SCRIPT.indexOf("set response to alert's runModal()");
+    expect(modalStart).toBeGreaterThan(0);
+    const setupProbe = `${LINK_CONFIRMATION_SCRIPT.slice(0, modalStart)}return "ready"\n`;
+    const { stdout } = await execFileAsync(
+      "/usr/bin/osascript",
+      ["-l", "AppleScript", "-e", setupProbe],
+      {
+        encoding: "utf8",
+        env: {
+          PATH: "/usr/bin:/bin",
+          PLACEKEEPER_LINK_PATH: "/tmp/Paper #12 % ✓.pdf",
+        },
+      },
+    );
+    expect(stdout.trim()).toBe("ready");
+  });
+
+  it.runIf(process.platform === "darwin")("compiles every installed native AppleScript interaction", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-native-scripts-"));
+    try {
+      for (const [name, script] of [
+        ["confirmation", LINK_CONFIRMATION_SCRIPT],
+        ["error", NATIVE_ERROR_SCRIPT],
+        ["open-location", OPEN_LOCATION_SCRIPT],
+      ] as const) {
+        await execFileAsync("/usr/bin/osacompile", ["-o", join(root, `${name}.scpt`), "-e", script]);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("presents Placekeeper on current app and Finder surfaces", async () => {

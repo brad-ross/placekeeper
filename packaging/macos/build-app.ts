@@ -175,6 +175,11 @@ export function infoPlist(manifest: ReturnType<typeof validateAppBundleManifest>
 <key>LSHasLocalizedDisplayName</key><true/>
 <key>LSMultipleInstancesProhibited</key><true/>
 <key>OSAAppletShowStartupScreen</key><false/>
+<key>CFBundleURLTypes</key><array><dict>
+  <key>CFBundleURLName</key><string>local.placekeeper.review-link</string>
+  <key>CFBundleTypeRole</key><string>Viewer</string>
+  <key>CFBundleURLSchemes</key><array><string>placekeeper</string></array>
+</dict></array>
 <key>CFBundleDocumentTypes</key><array><dict>
   <key>CFBundleTypeName</key><string>PDF document</string>
   <key>CFBundleTypeRole</key><string>${document.role}</string>

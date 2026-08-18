@@ -1,10 +1,21 @@
 import { execFile, spawn } from "node:child_process";
-import { copyFile, cp, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { createServer } from "node:net";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { validateBackendRuntimeManifest, validateCodexPlugin } from "./validate-manifest.js";
 import { BUILD_IDENTITY_FILENAME, computePackagedBuildIdentity } from "./build-app.js";
+import { encodePlacekeeperLink } from "../../packages/core/src/placekeeper-link.js";
+import {
+  INSTALLED_SMOKE_DAEMON_FLAG,
+  INSTALLED_SMOKE_HTTP_PORT_FLAG,
+} from "../../apps/service/src/cli/open-command.js";
+import {
+  MANAGEMENT_PROTOCOL_VERSION,
+  managementShutdownResult,
+  requestControl,
+} from "../../apps/service/src/host/launch-control.js";
 
 const execFileAsync = promisify(execFile);
 const MAX_HOOK_OUTPUT_BYTES = 128 * 1024;
@@ -76,6 +87,28 @@ async function waitForSocket(
   throw new Error("Installed daemon did not create its control socket");
 }
 
+async function retireReplacementDaemon(socketPath: string): Promise<void> {
+  if ((await lstat(socketPath).catch(() => undefined))?.isSocket() !== true) return;
+  const deadline = Date.now() + 6_000;
+  while (true) {
+    const shutdown = managementShutdownResult(await requestControl(socketPath, {
+      kind: "management",
+      protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
+      operation: "shutdown-if-idle",
+    }));
+    if (shutdown?.status === "accepted") break;
+    if (shutdown?.status !== "refused" || Date.now() >= deadline) {
+      throw new Error("Installed smoke replacement daemon remained active after validation");
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+  }
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (await lstat(socketPath).then(() => false, () => true)) return;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+  }
+  throw new Error("Installed smoke replacement daemon did not retire");
+}
+
 function parseObject(serialized: string, label: string): Record<string, unknown> {
   const parsed = JSON.parse(serialized) as unknown;
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
@@ -106,6 +139,7 @@ async function coordinateInstalled(
   installed: string,
   environment: NodeJS.ProcessEnv,
   repoRoot: string,
+  httpPort: number,
 ): Promise<{ readonly code: number; readonly response: Record<string, unknown> }> {
   return new Promise((resolvePromise, reject) => {
     const child = execFile(executable, [
@@ -113,6 +147,7 @@ async function coordinateInstalled(
       "--candidate-app", candidate,
       "--installed-app", installed,
       "--replace-helper", resolve(repoRoot, "packaging/macos/install-built-app.sh"),
+      INSTALLED_SMOKE_DAEMON_FLAG, INSTALLED_SMOKE_HTTP_PORT_FLAG, String(httpPort),
     ], { encoding: "utf8", env: environment, timeout: 30_000, maxBuffer: MAX_HOOK_OUTPUT_BYTES }, (error, stdout) => {
       const code = (error as NodeJS.ErrnoException & { code?: number } | null)?.code;
       if (error !== null && typeof code !== "number") reject(error);
@@ -120,6 +155,60 @@ async function coordinateInstalled(
     });
     child.stdin?.end();
   });
+}
+
+async function availableSmokePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolveListen);
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+    throw new Error("Installed smoke could not reserve a loopback port");
+  }
+  await new Promise<void>((resolveClose, reject) => server.close((error) => error === undefined ? resolveClose() : reject(error)));
+  return address.port;
+}
+
+async function waitForGurlDeliveries(logPath: string, expected: readonly string[]): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const delivered = await readFile(logPath, "utf8")
+      .then((value) => value.trim().split("\n").filter(Boolean), () => []);
+    if (expected.every((url) => delivered.includes(url))) return;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+  }
+  throw new Error("Launch Services did not deliver the complete cold and warm Placekeeper URLs");
+}
+
+/** Exercise the compiled shipping applet through Launch Services without
+ * touching a user's daemon or opening a browser. A copied bundle replaces
+ * only the Node launcher with an argv recorder; the GURL handler and plist are
+ * the same bytes that ship. */
+export async function smokeInstalledLaunchServicesBridge(appPath: string): Promise<void> {
+  if (process.platform !== "darwin") return;
+  const root = await mkdtemp(join("/tmp", "placekeeper-gurl-smoke-"));
+  const probeApp = join(root, "Placekeeper GURL Smoke.app");
+  const probeLauncher = join(probeApp, "Contents/MacOS/placekeeper");
+  const logPath = join(probeApp, "Contents/Resources/gurl-smoke.log");
+  const cold = "placekeeper:///tmp/Cold%20Paper%20%E2%9C%93.pdf#v=1&page=12";
+  const warm = "placekeeper:///tmp/Warm%20Paper%20%252F.pdf#v=1&page=7";
+  try {
+    await cp(resolve(appPath), probeApp, { recursive: true });
+    await writeFile(probeLauncher, `#!/bin/sh
+set -eu
+contents_dir=$(CDPATH= cd -- "$(/usr/bin/dirname -- "$0")/.." && pwd)
+if [ "$#" -eq 1 ]; then /usr/bin/printf '%s\\n' "$1" >> "$contents_dir/Resources/gurl-smoke.log"; fi
+`);
+    await chmod(probeLauncher, 0o755);
+    await execFileAsync("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", probeApp]);
+    await execFileAsync("/usr/bin/open", ["-n", "-g", "-a", probeApp, cold]);
+    await execFileAsync("/usr/bin/open", ["-g", "-a", probeApp, warm]);
+    await waitForGurlDeliveries(logPath, [cold, warm]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 }
 
 type HookEvent = "PostToolUse" | "UserPromptSubmit" | "SessionEnd";
@@ -222,7 +311,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
   const supportRootSentinel = join(supportRoot, "support-content.fixture");
   await mkdir(dirname(installedApp), { recursive: true });
   await symlink(resolve(appPath), installedApp);
-  const pdfPath = join(smokeHome, "fixture.pdf");
+  const pdfPath = join(smokeHome, "Paper One ✓.pdf");
   const secondPdfPath = join(smokeHome, "second-fixture.pdf");
   await copyFile(resolve(fixturePath), pdfPath);
   await copyFile(resolve(fixturePath), secondPdfPath);
@@ -238,17 +327,84 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     ALL_PROXY: "http://127.0.0.1:9",
     NO_PROXY: "127.0.0.1",
   };
-  const daemon = spawn(executable, ["daemon"], {
+  const httpPort = await availableSmokePort();
+  const expectedOrigin = `http://127.0.0.1:${httpPort}`;
+  const daemon = spawn(executable, [
+    "daemon",
+    INSTALLED_SMOKE_DAEMON_FLAG,
+    INSTALLED_SMOKE_HTTP_PORT_FLAG,
+    String(httpPort),
+  ], {
     detached: true,
     env: environment,
     stdio: "ignore",
   });
   let daemonSpawnError: Error | undefined;
+  let replacementDaemonStarted = false;
   daemon.once("error", (error) => { daemonSpawnError = error; });
   try {
     await assertInstalledIdentity(installedApp, smokeHome);
     await waitForSocket(socketPath, daemon, () => daemonSpawnError);
     const hookTimeouts = await installedHookTimeouts(installedApp);
+    const linkedPdfPath = await realpath(pdfPath);
+    const appLink = encodePlacekeeperLink({
+      path: linkedPdfPath,
+      location: { kind: "page", page: 12 },
+    });
+    const preflight = parseObject(await executeInstalled(
+      executable,
+      ["open-link", "--json", "--preflight", "--link", appLink],
+      environment,
+    ), "installed link preflight");
+    if (preflight.ok !== true || preflight.path !== linkedPdfPath || preflight.confirmationRequired !== true) {
+      throw new Error("Installed link preflight did not preserve the decoded unfamiliar path");
+    }
+    const linkedLaunch = parseObject(await executeInstalled(
+      executable,
+      ["open-link", "--json", "--confirmed", "--link", appLink],
+      environment,
+    ), "installed confirmed link launch");
+    if (linkedLaunch.ok !== true || linkedLaunch.kind !== "opened" || typeof linkedLaunch.url !== "string") {
+      throw new Error("Installed confirmed link did not open a browser review");
+    }
+    const linkedUrl = new URL(linkedLaunch.url);
+    if (linkedUrl.origin !== expectedOrigin) {
+      throw new Error("Installed link launch did not use the isolated stable origin");
+    }
+    const linkedCapability = new URLSearchParams(linkedUrl.hash.slice(1)).get("cap");
+    const linkedExchange = await fetch(`${linkedUrl.origin}${linkedUrl.pathname.replace(/\/bootstrap$/u, "/exchange")}`, {
+      method: "POST",
+      headers: { origin: linkedUrl.origin, "content-type": "application/json", "sec-fetch-site": "same-origin" },
+      body: JSON.stringify({ capability: linkedCapability }),
+    });
+    const linkedSession = parseObject(await linkedExchange.text(), "installed linked browser exchange");
+    const linkedView = linkedSession.view as Record<string, unknown> | undefined;
+    if (typeof linkedView?.pathname !== "string") {
+      throw new Error("Installed linked browser exchange omitted its readable route");
+    }
+    const linkedReadableUrl = `${expectedOrigin}${linkedView.pathname}#v=1&page=12`;
+    const linkedAppLinkBase = appLink.slice(0, appLink.indexOf("#"));
+    const linkedScope = parseObject(await (await fetch(
+      `${linkedUrl.origin}${linkedUrl.pathname.replace(/\/bootstrap$/u, "/scope")}`,
+      { headers: { authorization: `Bearer ${String(linkedSession.credential)}` } },
+    )).text(), "installed linked browser scope");
+    const linkedLocation = linkedScope.requestedLocation as Record<string, unknown> | undefined;
+    if (
+      linkedScope.launchSurface !== "browser" ||
+      linkedLocation?.kind !== "page" ||
+      linkedLocation.page !== 12 ||
+      "codexContext" in linkedScope
+    ) {
+      throw new Error("Installed linked browser scope lost its location or gained Codex authority");
+    }
+    const warmPreflight = parseObject(await executeInstalled(
+      executable,
+      ["open-link", "--json", "--preflight", "--link", appLink],
+      environment,
+    ), "installed warm link preflight");
+    if (warmPreflight.ok !== true || warmPreflight.confirmationRequired !== false) {
+      throw new Error("Installed warm exact-path link did not reuse active review ownership");
+    }
     const launchOutput = await executeInstalled(
       executable,
       ["open", "--json", "--surface", "codex", "--pdf", pdfPath],
@@ -263,7 +419,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
       throw new Error("Installed Codex launch did not return a bindable review");
     }
 
-    const exact = await coordinateInstalled(executable, resolve(appPath), installedApp, environment, repoRoot);
+    const exact = await coordinateInstalled(executable, resolve(appPath), installedApp, environment, repoRoot, httpPort);
     if (exact.code !== 0 || exact.response.status !== "noop") {
       throw new Error("An exact installed bundle did not reuse its running daemon");
     }
@@ -340,6 +496,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
       installedApp,
       environment,
       repoRoot,
+      httpPort,
     );
     if (deferred.code === 0 || (deferred.response.error as { kind?: unknown } | undefined)?.kind !== "upgrade-required") {
       throw new Error(`An active installed multi-PDF review did not defer replacement: ${JSON.stringify(deferred)}`);
@@ -406,10 +563,12 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
       installedApp,
       environment,
       repoRoot,
+      httpPort,
     );
     if (upgraded.code !== 0 || upgraded.response.status !== "installed") {
       throw new Error("Closed reviews did not converge to a successful installed upgrade");
     }
+    replacementDaemonStarted = true;
     await assertInstalledIdentity(installedApp, smokeHome);
     if ((await readFile(supportRootSentinel, "utf8")) !== "support-root content must survive replacement\n") {
       throw new Error("Successful upgrade changed arbitrary support-root content");
@@ -422,15 +581,50 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     if (postUpgrade.ok !== true || typeof postUpgrade.url !== "string") {
       throw new Error("The ready candidate could not launch a PDF after upgrade");
     }
-  } finally {
-    if (daemon.pid !== undefined) {
-      try { process.kill(-daemon.pid, "SIGTERM"); } catch { /* already stopped */ }
+    const postUpgradeUrl = new URL(postUpgrade.url);
+    if (postUpgradeUrl.origin !== expectedOrigin || postUpgradeUrl.origin !== linkedUrl.origin) {
+      throw new Error("Installed upgrade changed the readable browser origin");
     }
-    await Promise.race([
-      new Promise<void>((resolveExit) => daemon.once("exit", () => resolveExit())),
-      new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 1_000)),
-    ]);
-    await rm(smokeHome, { recursive: true, force: true });
+    const staleReadableResponse = await fetch(linkedReadableUrl);
+    const staleReadableHtml = await staleReadableResponse.text();
+    if (
+      !staleReadableResponse.ok ||
+      !staleReadableHtml.includes("data-terminal-recovery") ||
+      !staleReadableHtml.includes(`data-app-link-base="${linkedAppLinkBase}"`) ||
+      !linkedReadableUrl.endsWith("#v=1&page=12")
+    ) {
+      throw new Error("Installed upgrade did not preserve the old readable URL as inert recovery");
+    }
+    const postUpgradeCapability = new URLSearchParams(postUpgradeUrl.hash.slice(1)).get("cap");
+    const postUpgradeExchange = await fetch(
+      `${postUpgradeUrl.origin}${postUpgradeUrl.pathname.replace(/\/bootstrap$/u, "/exchange")}`,
+      {
+        method: "POST",
+        headers: {
+          origin: postUpgradeUrl.origin,
+          "content-type": "application/json",
+          "sec-fetch-site": "same-origin",
+        },
+        body: JSON.stringify({ capability: postUpgradeCapability }),
+      },
+    );
+    if (!postUpgradeExchange.ok) {
+      throw new Error("The ready candidate could not exchange its post-upgrade browser capability");
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 5_100));
+  } finally {
+    try {
+      if (replacementDaemonStarted) await retireReplacementDaemon(socketPath);
+    } finally {
+      if (daemon.pid !== undefined) {
+        try { process.kill(-daemon.pid, "SIGTERM"); } catch { /* already stopped */ }
+      }
+      await Promise.race([
+        new Promise<void>((resolveExit) => daemon.once("exit", () => resolveExit())),
+        new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 1_000)),
+      ]);
+      await rm(smokeHome, { recursive: true, force: true });
+    }
   }
 }
 
@@ -454,6 +648,7 @@ export async function smokeInstalledBundle(appPath: string, fixturePath: string,
     },
   });
   const evidence = validateDoctorEvidence(JSON.parse(result.stdout) as unknown, manifest.nodeVersion, pdfium.sha256);
+  await smokeInstalledLaunchServicesBridge(appPath);
   await smokeInstalledHookLifecycle(appPath, fixturePath, repoRoot);
   return evidence;
 }

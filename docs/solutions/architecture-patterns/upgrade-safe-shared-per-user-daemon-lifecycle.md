@@ -1,7 +1,7 @@
 ---
 title: Upgrade-safe lifecycle for a shared per-user daemon
 date: 2026-08-12
-last_updated: 2026-08-13
+last_updated: 2026-08-17
 category: architecture-patterns
 module: Shared daemon lifecycle
 problem_type: architecture_pattern
@@ -29,13 +29,14 @@ tags:
   - lifecycle-lock
   - candidate-readiness
   - transactional-rollback
+  - stable-loopback-origin
 ---
 
 # Upgrade-safe lifecycle for a shared per-user daemon
 
 ## Context
 
-A desktop app may use one long-lived daemon for several PDF windows and agent tasks. Replacing the application bundle while that daemon is running is not equivalent to restarting a stateless helper: the process owns review sessions, browser credentials, pending saves, task leases, an HTTP server, and a Unix control socket. Killing it for one upgrade can interrupt unrelated PDFs; replacing files beneath it can mix old process code with new installed assets.
+A desktop app may use one long-lived daemon for several PDF windows and agent tasks. Replacing the application bundle while that daemon is running is not equivalent to restarting a stateless helper: the process owns review sessions, browser credentials, pending saves, task leases, a fixed-origin HTTP server, and a Unix control socket. Killing it for one upgrade can interrupt unrelated PDFs; replacing files beneath it can mix old process code with new installed assets.
 
 The triggering failure was an installed launcher reaching an older daemon that still owned the shared socket and receiving “Launch service returned an invalid response” (session history). The safe response is neither to trust reachability nor to stop the process blindly. Upgrade must inspect compatibility and aggregate activity, defer while any review remains active, cooperatively drain an idle daemon, replace transactionally, and commit only after the exact candidate proves readiness.
 
@@ -113,9 +114,17 @@ Stage replacement privately, retain the prior app, and do not finalize until the
 
 If readiness fails, retire the exact candidate before restoring the previous bundle. If retirement cannot be proven, preserve the transaction rather than restoring old files underneath a potentially live new process (`packaging/macos/install-built-app.sh:33-71`).
 
+The packaged daemon's numeric-loopback port is part of readiness. Production always binds the fixed Placekeeper port; only the isolated installed smoke may inject another explicit port (`apps/service/src/server/http-server.ts:21-22`, `apps/service/src/host/service-daemon.ts:55-79`, `apps/service/src/host/service-daemon.ts:122-174`). A foreign listener therefore causes candidate startup and installation to fail explicitly. Never fall back to a random port or terminate an unknown process merely to make the candidate ready.
+
+### Preserve reachability without migrating authority
+
+Reusing the fixed loopback origin lets a browser retry the same literal readable URL after replacement, but it does not make the successor daemon the old daemon's security principal. Browser-view records, scoped cookie digests, credentials, launch scopes, and task bindings remain process-local. When the successor receives a syntactically valid old route with no matching live view, it clears the stale cookie and serves inert recovery containing only a canonical Placekeeper Link (`apps/service/src/server/http-server.ts:393-425`, `apps/service/src/sessions/session-broker.ts:648-689`).
+
+The user must explicitly follow that link through the normal file-confirmation and open flow. The resulting browser view is fresh and non-Codex; it cannot inherit the old credential or task binding. This successor behavior is document/location recovery, not live-session migration. [Authority boundaries for reloadable local-review URLs](reloadable-local-review-url-authority-boundaries.md) defines that distinction in detail.
+
 ### Test the physical installed lifecycle
 
-Unit tests cannot prove cross-process bundle-path behavior. The installed smoke must run real packaged launchers and daemons, open multiple authenticated PDFs, retain an active agent context, attempt an incompatible upgrade, and verify that the installed identity and both sessions remain usable. Only after task revocation and browser-grace expiry should replacement succeed and launch another PDF (`packaging/macos/smoke-installed.ts:321-399`).
+Unit tests cannot prove cross-process bundle-path behavior. The installed smoke must run real packaged launchers and daemons, open multiple authenticated PDFs, retain an active agent context, attempt an incompatible upgrade, and verify that the installed identity and both sessions remain usable. Only after task revocation and browser-grace expiry should replacement succeed and launch another PDF (`packaging/macos/smoke-installed.ts:321-399`). The successful-replacement phase must also prove that the successor owns the same origin while an old readable route becomes inert recovery rather than a resumed session (`packaging/macos/smoke-installed.ts:560-597`).
 
 The work progressed from focused lifecycle tests to this installed proof because unit-level checks alone did not validate the upgrade boundary (session history).
 
@@ -125,7 +134,7 @@ A shared daemon changes the question from “is this PDF idle?” to “can all 
 
 The drain/recheck state machine closes the idle-check race. The lifecycle lock closes the process race. Response-first closure closes the protocol race. Candidate readiness closes the filesystem race. Together they turn active-work deferral into a successful, convergent upgrade behavior rather than an error.
 
-Live-session migration is intentionally unnecessary. Safe deferral preserves browser credentials, recovery, and task-bound state in the old daemon until every user-visible owner ends naturally.
+Live-session migration is intentionally unnecessary. Safe deferral preserves browser credentials, recovery, and task-bound state in the old daemon until every user-visible owner ends naturally. After replacement, stable-origin reachability can recover only a document path and safe semantic location; it does not transfer those process-local authorities.
 
 ## When to Apply
 
@@ -179,3 +188,4 @@ When the new daemon cannot prove exact readiness, stop that exact candidate, pro
 - [Installation and recovery](../../installation.md) provides the user-facing defer, close, and retry workflow.
 - [Installed host acceptance](../../../test/acceptance/installed-hosts.md) records packaged multi-PDF evidence.
 - [Recoverable autosave for editable PDF annotations](recoverable-editable-pdf-annotation-autosave.md) explains the durable work that shutdown is allowed to drain.
+- [Authority boundaries for reloadable local-review URLs](reloadable-local-review-url-authority-boundaries.md) distinguishes same-daemon browser resume from the successor daemon's inert document/location recovery.

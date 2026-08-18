@@ -19,6 +19,7 @@ import {
   daemonUnavailable,
   ensureServiceDaemonReady,
   INSTALL_ARTIFACT_IDENTITY_ENV,
+  installedSmokeDaemonPaths,
   LIFECYCLE_LOCK_PATH_ENV,
   LIFECYCLE_LOCK_TOKEN_ENV,
 } from "../host/service-daemon.js";
@@ -130,8 +131,7 @@ async function requestIdleShutdown(socketPath: string) {
   return result;
 }
 
-async function stopReadyCandidate(receiptPath: string): Promise<void> {
-  const paths = defaultDaemonPaths();
+async function stopReadyCandidate(receiptPath: string, paths = defaultDaemonPaths()): Promise<void> {
   const inheritedToken = process.env[LIFECYCLE_LOCK_TOKEN_ENV];
   if (inheritedToken === undefined) throw new Error("Candidate retirement requires the inherited lifecycle lock");
   const raw = await readFile(receiptPath, "utf8").catch((error: NodeJS.ErrnoException) => {
@@ -181,7 +181,10 @@ async function stopReadyCandidate(receiptPath: string): Promise<void> {
   }
 }
 
-async function coordinateInstall(args: readonly string[]): Promise<"noop" | "installed"> {
+async function coordinateInstall(
+  args: readonly string[],
+  paths = defaultDaemonPaths(),
+): Promise<"noop" | "installed"> {
   const candidateApp = takeFlag(args, "--candidate-app");
   const installedApp = takeFlag(args, "--installed-app");
   const replaceHelper = takeFlag(args, "--replace-helper");
@@ -192,7 +195,7 @@ async function coordinateInstall(args: readonly string[]): Promise<"noop" | "ins
     candidate.installArtifactIdentity !== process.env[INSTALL_ARTIFACT_IDENTITY_ENV]
   ) throw new Error("The candidate launcher identity does not match its bundle");
 
-  const paths = defaultDaemonPaths();
+  const smokePort = installedSmokeDaemonPaths(args)?.httpPort;
   const lifecycleLock = await acquireLifecycleLock(
     paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock"),
     { timeoutMs: 5_000 },
@@ -233,6 +236,7 @@ async function coordinateInstall(args: readonly string[]): Promise<"noop" | "ins
           candidateApp,
           installedApp,
           join(installedApp, "Contents/MacOS/placekeeper"),
+          ...(smokePort === undefined ? [] : [String(smokePort)]),
         ], {
           timeout: 30_000,
           maxBuffer: 65_536,
@@ -254,20 +258,21 @@ export async function runDaemonCommand(
   args: readonly string[],
   write: (text: string) => void = (text) => process.stdout.write(text),
 ): Promise<number> {
+  const paths = installedSmokeDaemonPaths(args) ?? defaultDaemonPaths();
   if (args[0] === "ensure-ready") {
     const receiptPath = takeFlag(args, "--receipt");
-    await ensureServiceDaemonReady(defaultDaemonPaths(), process.env[LIFECYCLE_LOCK_TOKEN_ENV], receiptPath);
+    await ensureServiceDaemonReady(paths, process.env[LIFECYCLE_LOCK_TOKEN_ENV], receiptPath);
     write(`${JSON.stringify({ ok: true, status: "ready" })}\n`);
     return 0;
   }
   if (args[0] === "stop-ready") {
-    await stopReadyCandidate(takeFlag(args, "--receipt"));
+    await stopReadyCandidate(takeFlag(args, "--receipt"), paths);
     write(`${JSON.stringify({ ok: true, status: "stopped" })}\n`);
     return 0;
   }
   if (args[0] !== "coordinate-install") throw new Error("Unsupported daemon command");
   try {
-    const status = await coordinateInstall(args);
+    const status = await coordinateInstall(args, paths);
     write(`${JSON.stringify({ ok: true, status })}\n`);
     return 0;
   } catch (error) {

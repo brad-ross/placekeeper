@@ -9,6 +9,16 @@ The focused everyday PDF reader and annotator that preserves a reader's place wh
 
 Placekeeper emphasizes preserving the Main Reading Thread while annotations, search, and Reference Tabs support nonlinear reading.
 
+### Placekeeper Link
+The canonical, human-readable `placekeeper://` address for a local PDF, consisting of its absolute filesystem path and an optional page or PDF-recoverable semantic fragment.
+
+A Placekeeper Link reopens the current file at that path and carries no live browser credential, session identity, or Codex task authority.
+
+### Loopback Review URL
+The process-scoped HTTP projection that serves one active Placekeeper review through a local browser interface.
+
+While its owning daemon and review session remain live, a Loopback Review URL may resume only its exact in-memory projection and scoped authority. After daemon replacement, the same stable-origin route may offer an explicit Placekeeper Link reopen for the encoded path and location. The stale route itself never restores prior browser credentials or Codex task authority; any persisted session-state recovery occurs separately through the normal durable-draft flow.
+
 ### Clean-break Identity Migration
 A named process that replaces an application's human-facing and machine-facing identity as one indivisible contract while intentionally providing no compatibility path for the retired identity.
 

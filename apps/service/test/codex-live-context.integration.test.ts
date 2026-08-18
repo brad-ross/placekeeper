@@ -109,7 +109,39 @@ describe("packaged Codex live-context lifecycle", () => {
       body: JSON.stringify({ capability }),
     });
     expect(exchanged.status).toBe(200);
-    const { credential } = await exchanged.json() as { credential: string };
+    const { credential, view } = await exchanged.json() as {
+      credential: string;
+      view: { id: string; pathname: string; locationFragment: string };
+    };
+    const viewCookie = exchanged.headers.get("set-cookie")?.split(";", 1)[0];
+    expect(viewCookie).toMatch(/^placekeeper_view=/u);
+    expect(view.locationFragment).toBe("v=1&page=1");
+    for (let refresh = 0; refresh < 2; refresh += 1) {
+      const resumed = await fetch(`${launchedUrl.origin}/r/${view.id}/resume`, {
+        method: "POST",
+        headers: {
+          origin: launchedUrl.origin,
+          "content-type": "application/json",
+          "sec-fetch-site": "same-origin",
+          cookie: viewCookie!,
+        },
+        body: JSON.stringify({ pathname: view.pathname }),
+      });
+      expect(resumed.status).toBe(200);
+      expect(await resumed.json()).toEqual({
+        sessionId: launch.sessionId,
+        credential,
+        appLinkBase: expect.stringMatching(/^placekeeper:\/\/\/.+paper\.pdf$/u),
+      });
+    }
+    const resumedScope = await fetch(`${launchedUrl.origin}/s/${launch.sessionId}/scope`, {
+      headers: { authorization: `Bearer ${credential}` },
+    });
+    expect(resumedScope.status).toBe(200);
+    expect(await resumedScope.json()).toMatchObject({
+      launchSurface: "codex",
+      codexContext: { status: expect.stringMatching(/^(?:current|refreshing)$/u) },
+    });
 
     const firstWrite = vi.fn();
     await runHookCommand(["hook", "--event"], hookInput("UserPromptSubmit"), control, firstWrite);

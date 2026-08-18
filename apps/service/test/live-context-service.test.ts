@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExistingPdfAnnotation } from "../../../packages/core/src/live-context.js";
 import type { ReviewItem } from "../../../packages/core/src/review-model.js";
 import { inspectLivePdf, LiveContextService } from "../src/context/live-context-service.js";
+import { TaskBindingRegistry } from "../src/context/task-binding-registry.js";
 import { SessionBroker, type SessionLaunch } from "../src/sessions/session-broker.js";
 
 const temporaryDirectories: string[] = [];
@@ -108,6 +109,85 @@ async function fixture(options: {
 }
 
 describe("atomic live-context service", () => {
+  it("keeps an old Codex view scoped to task A when task B later binds the same review", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "placekeeper-view-binding-"));
+    temporaryDirectories.push(directory);
+    const pdfPath = join(directory, "paper.pdf");
+    await writeFile(pdfPath, "%PDF-1.7\nimmutable source\n%%EOF");
+    let now = 1_000;
+    const taskBindings = new TaskBindingRegistry({
+      now: () => new Date(now),
+      activeLeaseTtlMs: 1_000,
+    });
+    const broker = new SessionBroker({
+      recoveryRoot: join(directory, "recovery"),
+      portableReader: async () => [],
+      rewriteAssessor: async () => ({ eligible: true }),
+      taskBindings,
+    });
+
+    const launchA = await broker.openReview({ pdfPath, surface: "codex" });
+    if (launchA.kind !== "opened" || launchA.launch.bindProof === undefined) {
+      throw new Error("Expected task A launch");
+    }
+    taskBindings.claim({
+      bindProof: launchA.launch.bindProof,
+      taskSessionId: "task-a",
+      reviewSessionId: launchA.launch.sessionId,
+      documentGeneration: launchA.launch.documentGeneration,
+    });
+    const viewA = broker.exchangeBootstrapForHttp(
+      launchA.launch.sessionId,
+      launchA.launch.fragment.slice("#cap=".length),
+    );
+    expect(viewA?.view).toBeDefined();
+    expect(broker.sessionScope(launchA.launch.sessionId, viewA!.credential)?.codexContext)
+      .not.toMatchObject({ status: "unbound" });
+
+    taskBindings.revokeTask("task-a");
+    const launchB = await broker.openReview({ pdfPath, surface: "codex" });
+    if (launchB.kind !== "focused" || launchB.launch.bindProof === undefined) {
+      throw new Error("Expected task B launch");
+    }
+    taskBindings.claim({
+      bindProof: launchB.launch.bindProof,
+      taskSessionId: "task-b",
+      reviewSessionId: launchB.launch.sessionId,
+      documentGeneration: launchB.launch.documentGeneration,
+    });
+    const viewB = broker.exchangeBootstrapForHttp(
+      launchB.launch.sessionId,
+      launchB.launch.fragment.slice("#cap=".length),
+    );
+    expect(viewB?.view).toBeDefined();
+    const taskBExpiry = taskBindings.bindingForTask("task-b")?.leaseExpiresAt;
+
+    now += 200;
+    expect(broker.sessionScope(launchA.launch.sessionId, viewA!.credential)?.codexContext)
+      .toEqual({ status: "unbound" });
+    expect(taskBindings.bindingForTask("task-b")?.leaseExpiresAt).toBe(taskBExpiry);
+    expect(broker.sessionScope(launchB.launch.sessionId, viewB!.credential)?.codexContext)
+      .not.toMatchObject({ status: "unbound" });
+    expect(taskBindings.bindingForTask("task-b")?.leaseExpiresAt).not.toBe(taskBExpiry);
+
+    const linked = await broker.openReview({
+      pdfPath,
+      surface: "browser",
+      requestedLocation: { kind: "page", page: 12 },
+    });
+    if (linked.kind !== "focused") throw new Error("Expected app-link view");
+    const linkedView = broker.exchangeBootstrapForHttp(
+      linked.launch.sessionId,
+      linked.launch.fragment.slice("#cap=".length),
+    );
+    expect(linkedView?.view?.locationFragment).toBe("v=1&page=12");
+    expect(broker.sessionScope(linked.launch.sessionId, linkedView!.credential)).toMatchObject({
+      launchSurface: "browser",
+      requestedLocation: { kind: "page", page: 12 },
+    });
+    expect(broker.sessionScope(linked.launch.sessionId, linkedView!.credential)).not.toHaveProperty("codexContext");
+  });
+
   it("excludes navigation links from existing PDF annotations", async () => {
     const inspection = await inspectLivePdf({
       sourceBytes: await readFile(resolve("test/fixtures/pdfs/hostile-actions.pdf")),

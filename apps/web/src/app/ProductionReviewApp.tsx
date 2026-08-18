@@ -3,7 +3,7 @@ import type { PluginRegistry } from "@embedpdf/core";
 import type { PdfDocumentObject, PdfEngine } from '@embedpdf/models';
 import { SelectionPlugin } from "@embedpdf/plugin-selection";
 
-import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
+import type { ReviewCommand, ReviewItem, ReviewState } from "../../../../packages/core/src/review-model.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { CaretAnchor } from "../pdf/selection-anchor.js";
 import type { ExistingAnnotation, ExistingAnnotationsDiscovery } from "../pdf/existing-annotations.js";
@@ -46,13 +46,22 @@ import {
   NavigationCoordinator,
 } from "../review/navigation-coordinator.js";
 import {
+  BrowserReviewLocationHistory,
+  type ReviewLocationHistoryEnvironment,
+  type ReviewLocationHistorySnapshot,
+} from '../review/review-location-history.js';
+import { buildPlacekeeperCopyLink } from '../review/CopyLinkControl.js';
+import {
   createReferenceNavigationState,
   reduceReferenceNavigation,
   type ReferenceNavigationAction,
 } from "../review/reference-navigation-state.js";
 import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
 import { PdfSearchWorkspace } from '../review/PdfSearchWorkspace.js';
-import { createTrailingTaskScheduler } from "../review/main-location-refresh.js";
+import {
+  createTrailingTaskScheduler,
+  waitForReviewNavigationReady,
+} from "../review/main-location-refresh.js";
 import {
   canDeriveAnnotationOutlineLabels,
   deriveAnnotationOutlineLabels,
@@ -77,6 +86,8 @@ import {
 export interface ProductionSession {
   readonly sessionId: string;
   readonly credential: string;
+  /** Present for top-level readable views; embedded bootstrap sessions omit it. */
+  readonly appLinkBase?: string;
 }
 
 export interface ProductionScope {
@@ -121,6 +132,24 @@ export interface ProductionReviewAppProps {
   readonly scope: ProductionScope;
   readonly api: ProductionSessionApi;
   readonly viewer?: ReactNode;
+}
+
+export function initiallyPortableItemIds(
+  state: ReviewState,
+  saveStatus: ProductionSaveStatus | undefined,
+): Set<string> {
+  return saveStatusIsCleanCurrent(state, saveStatus)
+    ? new Set(state.items.map(({ id }) => id))
+    : new Set();
+}
+
+function saveStatusIsCleanCurrent(
+  state: ReviewState,
+  saveStatus: ProductionSaveStatus | undefined,
+): boolean {
+  return saveStatus?.sync.phase === 'clean'
+    && saveStatus.sync.savedRevision === state.revision
+    && saveStatus.sync.desiredRevision === state.revision;
 }
 
 const UNAVAILABLE_CODEX_CONTEXT: LiveContextBindingStatus = {
@@ -173,6 +202,10 @@ function updateCodexContext(
 
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [state, setState] = useState(props.initialState);
+  const portableItemIdsRef = useRef(initiallyPortableItemIds(
+    props.initialState,
+    props.initialSaveStatus,
+  ));
   const [saveStatus, setSaveStatus] = useState<ProductionSaveStatus>(
     props.initialSaveStatus ?? {
       destination: { phase: "none", generation: 0 },
@@ -237,6 +270,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const productionRootRef = useRef<HTMLElement | null>(null);
   const mainNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const [mainNavigationReadyGeneration, setMainNavigationReadyGeneration] = useState<number | null>(null);
+  const [mainDocumentReadyGeneration, setMainDocumentReadyGeneration] = useState<number | null>(null);
   const [mainNavigation, setMainNavigation] = useState<PdfViewerNavigation | null>(null);
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
@@ -270,6 +304,20 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     outlineDiscoveryRef.current,
   );
   const [currentOutlineItemId, setCurrentOutlineItemId] = useState<string | null>(null);
+  const locationHistory = useMemo(() => {
+    if (props.session.appLinkBase === undefined || typeof window === 'undefined') return undefined;
+    const environment: ReviewLocationHistoryEnvironment = {
+      location: window.location,
+      history: window.history,
+      addEventListener: (type, listener) => window.addEventListener(type, listener),
+      removeEventListener: (type, listener) => window.removeEventListener(type, listener),
+    };
+    return new BrowserReviewLocationHistory(environment);
+  }, [props.session.appLinkBase]);
+  const [locationHistorySnapshot, setLocationHistorySnapshot] = useState<ReviewLocationHistorySnapshot>({
+    canBack: false,
+    canForward: false,
+  });
   const [referenceViewportHost, setReferenceViewportHost] = useState<HTMLDivElement | null>(null);
   const markHoverRef = useRef<string | undefined>(undefined);
   const markFocusRef = useRef<string | undefined>(undefined);
@@ -277,10 +325,17 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const activationTokenRef = useRef(0);
   const [viewerState, setViewerState] = useState<ViewerControlsSnapshot>(unavailableViewerControls);
   const viewerAssets = useMemo(() => ({
-    pdfiumWasm: `/s/${props.session.sessionId}/assets/pdfium.wasm`,
+    pdfiumWasm: props.session.appLinkBase === undefined
+      ? `/s/${props.session.sessionId}/assets/pdfium.wasm`
+      : '/assets/pdfium.wasm',
     documentUrl: `/s/${props.session.sessionId}/document/${state.source.fileId}`,
     requestHeaders: { authorization: `Bearer ${props.session.credential}` },
-  }), [props.session.credential, props.session.sessionId, state.source.fileId]);
+  }), [
+    props.session.appLinkBase,
+    props.session.credential,
+    props.session.sessionId,
+    state.source.fileId,
+  ]);
   useEffect(() => props.api.presence?.(), [props.api]);
   const ownedAnnotations = useMemo(
     () => projectReviewItems(state.items),
@@ -483,6 +538,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         requestAnimationFrame(() => {
           if (layoutGeneration !== layoutGenerationRef.current
             || documentGeneration !== documentGenerationRef.current) return;
+          const activeElement = productionRootRef.current?.ownerDocument.activeElement;
+          if (activeElement instanceof HTMLElement && activeElement.dataset.workspaceMode) return;
           const target = [...(productionRootRef.current?.querySelectorAll<HTMLElement>(
             '[data-reference-tab]',
           ) ?? [])].find((element) => element.dataset.referenceTab === identity);
@@ -492,6 +549,16 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       },
       getOutlineDiscovery: () => outlineDiscoveryRef.current,
       setCurrentOutlineItemId,
+      ...(locationHistory === undefined ? {} : {
+        locationHistory,
+        resolvePortableItem: (itemId: string) => {
+          if (!portableItemIdsRef.current.has(itemId)) return null;
+          const item = stateRef.current.items.find(({ id }) => id === itemId);
+          return item === undefined
+            ? null
+            : { pageIndex: item.pageIndex, point: reviewItemPoint(item) };
+        },
+      }),
     });
   }
   const navigationCoordinator = coordinatorRef.current;
@@ -516,6 +583,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [mainLocationRefresh, navigationCoordinator]);
   const sourceIdentity = `${state.source.fileId}:${state.source.digest}`;
   const sourceIdentityRef = useRef(sourceIdentity);
+  const restoredLocationGenerationRef = useRef<number | null>(null);
+  const restoringLocationGenerationRef = useRef<number | null>(null);
   const initialSourceIdentityRef = useRef(
     `${props.initialState.source.fileId}:${props.initialState.source.digest}`,
   );
@@ -523,12 +592,19 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     const next = `${props.initialState.source.fileId}:${props.initialState.source.digest}`;
     if (next === initialSourceIdentityRef.current) return;
     initialSourceIdentityRef.current = next;
+    portableItemIdsRef.current = initiallyPortableItemIds(
+      props.initialState,
+      props.initialSaveStatus,
+    );
     setState(props.initialState);
   }, [props.initialState]);
   useEffect(() => {
     if (sourceIdentity === sourceIdentityRef.current) return;
     mainLocationRefresh.cancel();
     sourceIdentityRef.current = sourceIdentity;
+    portableItemIdsRef.current = new Set();
+    restoredLocationGenerationRef.current = null;
+    restoringLocationGenerationRef.current = null;
     const nextGeneration = documentGenerationRef.current + 1;
     documentGenerationRef.current = nextGeneration;
     for (const waiter of referenceNavigationWaiters.current.splice(0)) {
@@ -540,6 +616,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setExistingAnnotations({ status: 'loading', generation: 0 });
     setExistingAnnotationsSourceIdentity(sourceIdentity);
     setMainNavigationReadyGeneration(null);
+    setMainDocumentReadyGeneration(null);
     navigationCoordinator.replaceDocument(nextGeneration);
     searchControllerRef.current?.dispose();
     searchControllerRef.current = null;
@@ -553,6 +630,58 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     dispatchLayout({ type: 'replace-document' });
     setRightWorkspaceMode('outline');
   }, [mainLocationRefresh, navigationCoordinator, sourceIdentity]);
+  useEffect(() => {
+    if (locationHistory === undefined) return;
+    return locationHistory.subscribe(setLocationHistorySnapshot);
+  }, [locationHistory]);
+  useEffect(() => {
+    if (
+      locationHistory === undefined
+      || mainNavigationReadyGeneration !== documentGenerationRef.current
+      || mainDocumentReadyGeneration !== documentGenerationRef.current
+      || restoredLocationGenerationRef.current === documentGenerationRef.current
+      || restoringLocationGenerationRef.current === documentGenerationRef.current
+    ) return;
+    const generation = documentGenerationRef.current;
+    restoringLocationGenerationRef.current = generation;
+    let cancelled = false;
+    const restoreWhenSettled = async () => {
+      const ready = await waitForReviewNavigationReady({
+        isCurrent: () => !cancelled && generation === documentGenerationRef.current,
+        isReady: () => mainNavigationRef.current?.fitToWidthReady() ?? false,
+      });
+      if (!ready) {
+        if (restoringLocationGenerationRef.current === generation) {
+          restoringLocationGenerationRef.current = null;
+        }
+        return;
+      }
+      navigationCoordinator.startLocationHistory();
+      await navigationCoordinator.restoreCurrentLocation();
+      if (!cancelled && generation === documentGenerationRef.current) {
+        restoredLocationGenerationRef.current = generation;
+      }
+      if (restoringLocationGenerationRef.current === generation) {
+        restoringLocationGenerationRef.current = null;
+      }
+    };
+    void restoreWhenSettled();
+    return () => { cancelled = true; };
+  }, [
+    locationHistory,
+    mainDocumentReadyGeneration,
+    mainNavigationReadyGeneration,
+    navigationCoordinator,
+  ]);
+  useEffect(() => {
+    if (!saveStatusIsCleanCurrent(state, saveStatus)) {
+      if (restoredLocationGenerationRef.current === documentGenerationRef.current) {
+        navigationCoordinator.downgradeCurrentItemLocation();
+      }
+      return;
+    }
+    portableItemIdsRef.current = new Set(state.items.map((item) => item.id));
+  }, [navigationCoordinator, saveStatus, state]);
   const onViewerInteraction = useCallback((event: ViewerInteractionEvent) => {
     if (event.type === 'pdf-link') {
       navigationCoordinator.requestLink(event.value);
@@ -660,6 +789,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [mainLocationRefresh]);
   const onMainDocumentReady = useCallback((engine: PdfEngine, document: PdfDocumentObject) => {
     if (searchDocumentRef.current === document && searchControllerRef.current) return;
+    setMainDocumentReadyGeneration(documentGenerationRef.current);
     searchControllerRef.current?.dispose();
     searchDocumentRef.current = document;
     const search = createPdfSearchController({
@@ -815,6 +945,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const onCommitMainFramingPositionChange = useCallback((commit: (() => void) | null) => {
     commitMainFramingPositionRef.current = commit ?? (() => undefined);
   }, []);
+  const writePlacekeeperLink = async (link: string) => {
+    if (navigator.clipboard?.writeText === undefined) {
+      throw new Error('Clipboard API unavailable');
+    }
+    await navigator.clipboard.writeText(link);
+  };
 
   return (
     <main data-production-review ref={productionRootRef}>
@@ -849,13 +985,42 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         linkActionRequest={linkActionRequest}
         navigationAnnouncement={navigationAnnouncement}
         canNavigateBack={navigationState.pendingMainNavigation === null
-          && navigationState.mainHistory.index > 0}
+          && (locationHistory === undefined
+            ? navigationState.mainHistory.index > 0
+            : locationHistorySnapshot.canBack)}
         canNavigateForward={navigationState.pendingMainNavigation === null
-          && navigationState.mainHistory.index >= 0
-          && navigationState.mainHistory.index < navigationState.mainHistory.entries.length - 1}
+          && (locationHistory === undefined
+            ? navigationState.mainHistory.index >= 0
+              && navigationState.mainHistory.index < navigationState.mainHistory.entries.length - 1
+            : locationHistorySnapshot.canForward)}
         {...(props.scope.launchSurface === 'codex'
           ? { codexContext: visibleCodexContext(codexContext, state) ?? UNAVAILABLE_CODEX_CONTEXT }
           : {})}
+        {...(props.session.appLinkBase === undefined || locationHistory === undefined ? {} : {
+          copyLink: {
+            disabled: navigationState.pendingMainNavigation !== null
+              || navigationState.pendingSendToMain !== null,
+            getLink: () => {
+              mainLocationRefresh.flush();
+              return buildPlacekeeperCopyLink(
+                props.session.appLinkBase!,
+                navigationCoordinator.currentLinkLocation(),
+              );
+            },
+            writeText: writePlacekeeperLink,
+          },
+          copyItemLink: {
+            getLink: (item: ReviewItem) => portableItemIdsRef.current.has(item.id)
+              && saveStatusIsCleanCurrent(state, saveStatus)
+              ? buildPlacekeeperCopyLink(props.session.appLinkBase!, {
+                  kind: 'item',
+                  page: item.pageIndex + 1,
+                  itemId: item.id,
+                })
+              : undefined,
+            writeText: writePlacekeeperLink,
+          },
+        })}
         onLinkActionChoose={(choice, request) => {
           void navigationCoordinator.chooseLink(choice, request);
         }}
@@ -1000,15 +1165,21 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           return result;
         }}
         onNavigate={(item) => {
+          const portable = portableItemIdsRef.current.has(item.id)
+            && saveStatusIsCleanCurrent(state, saveStatus);
           void navigationCoordinator.navigateMainAnnotation({
             pageIndex: item.pageIndex,
             point: reviewItemPoint(item),
+            ...(portable
+              ? { portableItemId: item.id }
+              : { linkFallbackNotice: 'The shareable link uses this page until the item is saved.' }),
           });
         }}
         onNavigateExisting={(annotation: ExistingAnnotation) => {
           void navigationCoordinator.navigateMainAnnotation({
             pageIndex: annotation.pageIndex,
             point: { x: annotation.rect.x, y: annotation.rect.y },
+            linkFallbackNotice: 'External PDF annotations use page links.',
           });
         }}
       >

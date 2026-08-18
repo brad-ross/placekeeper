@@ -1,6 +1,7 @@
 ---
 title: Truthful compact status for live agent context
 date: 2026-08-12
+last_updated: 2026-08-17
 category: design-patterns
 module: PDF review interface
 problem_type: design_pattern
@@ -78,6 +79,12 @@ local Review State changes
   -> exact fresh evidence may restore current
 ```
 
+### Preserve status only for an exact live resume
+
+A top-level hard refresh may keep the current Codex status only because the readable view resumes the same in-memory browser credential and its original launch scope. Resume requires the exact view ID, pathname, scoped cookie, active session, document generation, and credential; scope polling then presents the retained browser-capability hash to the task binding (`apps/service/src/sessions/session-broker.ts:648-681`, `apps/service/src/sessions/session-broker.ts:969-1008`). The mounted acceptance flow verifies that hard reload preserves both the readable page location and the connected-agent status (`test/acceptance/production-flow.spec.ts:279-368`).
+
+Do not reconstruct status from a PDF path, readable view ID, or stable loopback origin. A copied route without its cookie and a successor-daemon recovery route have no authenticated launch scope. Reopening such a route through a Placekeeper Link creates an ordinary non-Codex browser view, so the indicator must remain absent unless Codex performs a new explicit bind flow.
+
 ### Put detail behind both hover and focus
 
 Color is an accent, not the status contract. The focusable status wrapper has a complete accessible name, including the verified review revision when current. Hover and keyboard focus reveal the same tooltip title and detail. The robot SVG itself stays decorative so assistive technology receives one coherent status description (`apps/web/src/review/CodexContextStatus.tsx:27-50`, `apps/web/src/review/ReviewIcon.tsx:81-95`).
@@ -135,3 +142,4 @@ Static component tests prove semantics; the mounted test proves the timing and p
 - [Live PDF Context plan](../../plans/2026-08-12-001-feat-live-pdf-codex-context-plan.md) defines the broader task binding, freshness, and passive-status contract behind this presentation.
 - [Outline-aware annotation workspace presentation](outline-aware-annotation-workspace-presentation.md) applies the same fail-closed projection principle to asynchronous document capabilities.
 - [Recoverable autosave for editable PDF annotations](../architecture-patterns/recoverable-editable-pdf-annotation-autosave.md) explains the related revision-and-digest authority used for save currentness.
+- [Authority boundaries for reloadable local-review URLs](../architecture-patterns/reloadable-local-review-url-authority-boundaries.md) defines when a browser refresh preserves this status and when restart recovery must discard it.
