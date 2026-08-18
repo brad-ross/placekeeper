@@ -279,6 +279,53 @@ async function referenceNavigationPdf() {
     annotations.push(context.register(annotation));
   }
 
+  const reviewAppearance = context.register(context.flateStream(
+    '0.95 0.83 0.2 rg 0 0 148 18 re f',
+    {
+      Type: 'XObject',
+      Subtype: 'Form',
+      BBox: [0, 0, 148, 18],
+      Resources: {},
+    },
+  ));
+  function addReviewAnnotation(
+    page: PDFPage,
+    id: string,
+    contents: string,
+    rect: readonly [number, number, number, number],
+  ): void {
+    const annotation = context.obj({
+      Type: 'Annot',
+      Subtype: 'Highlight',
+      NM: PDFString.of(id),
+      Contents: PDFString.of(contents),
+      Rect: [...rect],
+      QuadPoints: [rect[0], rect[3], rect[2], rect[3], rect[0], rect[1], rect[2], rect[1]],
+      C: [0.95, 0.83, 0.2],
+      F: 4,
+      AP: context.obj({ N: reviewAppearance }),
+    });
+    let annotations = page.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
+    if (!annotations) {
+      annotations = PDFArray.withContext(context);
+      page.node.set(PDFName.of('Annots'), annotations);
+    }
+    annotations.push(context.register(annotation));
+  }
+
+  addReviewAnnotation(
+    tocPage,
+    'reference-overview-note',
+    'Unsectioned review note',
+    [72, 700, 220, 718],
+  );
+  addReviewAnnotation(
+    detailPage,
+    'reference-details-note',
+    'Nested result review note',
+    [72, 360, 220, 378],
+  );
+
   addLink(tocPage, {
     rect: [72, 650, 230, 670],
     contents: 'Primary result',

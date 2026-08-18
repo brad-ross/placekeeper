@@ -74,37 +74,33 @@
     font-size: .82rem;
   }
 
-  .review-workspace__tabs[data-workspace-mode-count="4"] {
-    gap: 1px;
-    padding-inline: 2px;
-  }
-
-  .review-workspace__tabs button {
-    padding-inline: 3px;
-    font-size: 10px;
-  }
-
-  .review-workspace__tab-label {
-    padding-inline: 3px;
-    font-size: 10px;
+  .review-workspace__mode-tab[aria-selected="true"] {
+    max-width: 7rem;
   }
 }
 
 @media (hover: none), (pointer: coarse) {
+  #root[data-production-root="true"] {
+    --review-workspace-header-height: 53px;
+  }
+
+  .review-workspace__header {
+    padding-block: 2px;
+  }
+
   .annotation-item__action,
   .outline-navigator__reference {
     opacity: 1;
   }
 
-  .outline-navigator__row {
-    grid-template-columns: var(--review-control-touch) minmax(0, 1fr) var(--review-control-touch);
+  .outline-navigator {
+    --outline-tree-control-size: var(--review-control-touch);
   }
 
   .outline-navigator__disclosure,
   .outline-navigator__disclosure-spacer {
     width: var(--review-control-touch);
     height: var(--review-control-touch);
-    margin-left: 0;
   }
 
   .outline-navigator__reference {
@@ -125,6 +121,26 @@
   .review-chrome__icon-control {
     width: var(--review-control-touch);
     min-width: var(--review-control-touch);
+  }
+
+  .review-workspace__tabs .review-workspace__mode-tab,
+  .review-workspace__move--activity {
+    width: var(--review-control-touch);
+    min-width: var(--review-control-touch);
+    min-height: var(--review-control-touch);
+  }
+
+  .review-workspace__activity-strip--compound {
+    --review-workspace-compound-action-size: var(--review-control-touch);
+  }
+
+  .review-workspace__tabs .review-workspace__mode-tab {
+    flex-basis: var(--review-control-touch);
+  }
+
+  .review-workspace__tabs .review-workspace__mode-tab[aria-selected="true"] {
+    width: auto;
+    flex-basis: auto;
   }
 
   .review-chrome__page-editor,

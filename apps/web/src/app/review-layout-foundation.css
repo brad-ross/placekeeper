@@ -25,6 +25,7 @@
   --review-control-default: 34px;
   --review-control-touch: 44px;
   --review-chrome-height: 58px;
+  --review-workspace-header-height: 44px;
   --review-metadata-separator-gap: .3rem;
   --review-workspace-card-surface: var(--review-surface-panel);
   --review-workspace-card-hover: var(--review-surface-subtle);

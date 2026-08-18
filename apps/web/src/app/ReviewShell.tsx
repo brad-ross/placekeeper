@@ -310,6 +310,12 @@ export function ReviewShell(props: ReviewShellProps) {
     dispatchSurface({ type: 'close-transient' });
   }, [props.cancelPendingCommandToken]);
   const navigation = props.navigationState ?? surface.navigation;
+  const referenceTabs = props.referenceTabs ?? navigation.tabs.map((tab) => ({
+    identity: tab.identity,
+    label: `Page ${tab.originalTarget.pageIndex + 1}`,
+    pageContext: `Page ${tab.originalTarget.pageIndex + 1}`,
+  }));
+  const referencesAvailable = referenceTabs.length > 0 || props.pendingReference != null;
   const outlineDiscovery = props.outlineDiscovery;
   const visibleOutlineDiscovery = useMemo<PdfOutlineDiscovery>(() => (
     outlineDiscovery?.documentGeneration === navigation.documentGeneration
@@ -318,18 +324,28 @@ export function ReviewShell(props: ReviewShellProps) {
   ), [navigation.documentGeneration, outlineDiscovery]);
   const outlineAbsent = visibleOutlineDiscovery.status === 'loaded-empty';
   const showAnnotationOutlineLabels = visibleOutlineDiscovery.status === 'loaded-tree';
+  const existingAnnotations = props.existingAnnotations ?? { status: 'loading', generation: 0 };
+  const annotationsAvailable = props.state.items.length > 0
+    || (existingAnnotations.status === 'ready' && existingAnnotations.items.length > 0);
   const workspaceRequestedOpen = props.workspaceOpen ?? surface.baseSurface === 'workspace';
   const workspaceOpen = workspaceIsVisible(workspaceRequestedOpen, surface.baseSurface);
   const workspaceMode = navigation.workspace.lastMode;
-  const visibleWorkspaceMode: WorkspaceMode = outlineAbsent && workspaceMode === 'outline'
-    ? 'annotations'
-    : workspaceMode;
+  const visibleWorkspaceModes = WORKSPACE_MODES.filter((mode) => (
+    (referencesAvailable || mode !== 'references')
+    && (!outlineAbsent || mode !== 'outline')
+    && (annotationsAvailable || mode !== 'annotations')
+  ));
+  const visibleRightWorkspaceModes = visibleWorkspaceModes.filter(
+    (mode): mode is RightWorkspaceMode => mode !== 'references',
+  );
   const requestedRightWorkspaceMode: RightWorkspaceMode = props.rightWorkspaceMode
     ?? (workspaceMode === 'references' ? 'outline' : workspaceMode);
-  const rightWorkspaceMode: RightWorkspaceMode = outlineAbsent
-    && requestedRightWorkspaceMode === 'outline'
-    ? 'annotations'
-    : requestedRightWorkspaceMode;
+  const rightWorkspaceMode: RightWorkspaceMode = visibleRightWorkspaceModes.includes(
+    requestedRightWorkspaceMode,
+  ) ? requestedRightWorkspaceMode : visibleRightWorkspaceModes[0] ?? 'search';
+  const visibleWorkspaceMode: WorkspaceMode = visibleWorkspaceModes.includes(workspaceMode)
+    ? workspaceMode
+    : rightWorkspaceMode;
   const referenceLayout = props.referenceLayoutState ?? localReferenceLayout;
   const referenceLayoutControlled = props.referenceLayoutState !== undefined;
   const effectiveReferenceLayout = deriveReferenceWorkspaceLayout(
@@ -358,22 +374,15 @@ export function ReviewShell(props: ReviewShellProps) {
   const requestedEffectiveWorkspaceMode = effectiveReferenceLayout.kind === 'narrow-unified'
     ? effectiveReferenceLayout.activeMode
     : effectiveReferenceLayout.referenceDock === 'bottom' ? rightWorkspaceMode : visibleWorkspaceMode;
-  const effectiveWorkspaceMode: WorkspaceMode = outlineAbsent
-    && requestedEffectiveWorkspaceMode === 'outline'
-    ? 'annotations'
-    : requestedEffectiveWorkspaceMode;
+  const effectiveWorkspaceMode: WorkspaceMode = visibleWorkspaceModes.includes(
+    requestedEffectiveWorkspaceMode,
+  ) ? requestedEffectiveWorkspaceMode : rightWorkspaceMode;
   const anyWorkspaceOpen = workspaceOpen || referenceSurfaceOpen || toolsSurfaceOpen;
   const annotationsVisible = anyWorkspaceOpen && effectiveWorkspaceMode === 'annotations';
   const selectionAnchor = reliableSelection(props.selectionUpdate);
   const selectionActionsAvailable = selectionAnchor !== null
     && props.selectionUpdate.generation !== consumedSelectionGeneration;
   const lastPlacedPageNoteToken = useRef<number | undefined>(undefined);
-  const existingAnnotations = props.existingAnnotations ?? { status: 'loading', generation: 0 };
-  const referenceTabs = props.referenceTabs ?? navigation.tabs.map((tab) => ({
-    identity: tab.identity,
-    label: `Page ${tab.originalTarget.pageIndex + 1}`,
-    pageContext: `Page ${tab.originalTarget.pageIndex + 1}`,
-  }));
   const workspaceFraming = useWorkspaceFraming({
     workspaceOpen: anyWorkspaceOpen,
     ...(props.viewerFraming === undefined ? {} : { controls: props.viewerFraming }),
@@ -1055,7 +1064,7 @@ export function ReviewShell(props: ReviewShellProps) {
                 buttonRef={rightWorkspaceRailRef}
                 surface="right"
                 open={rightSurfaceOpen}
-                controls={effectiveReferenceLayout.referenceDock === 'right'
+                controls={effectiveReferenceLayout.referenceDock === 'right' && referencesAvailable
                   ? 'review-workspace review-tools-workspace'
                   : 'review-tools-workspace'}
                 onToggle={() => {
@@ -1065,7 +1074,7 @@ export function ReviewShell(props: ReviewShellProps) {
                   if (opening) focusWorkspaceModeAfterLayout(effectiveWorkspaceMode);
                 }}
               />
-              {effectiveReferenceLayout.referenceDock === 'bottom' ? <WorkspaceEdgeRail
+              {referencesAvailable && effectiveReferenceLayout.referenceDock === 'bottom' ? <WorkspaceEdgeRail
                 buttonRef={bottomWorkspaceRailRef}
                 surface="bottom"
                 open={effectiveReferenceLayout.bottomReferencesOpen}
@@ -1090,10 +1099,8 @@ export function ReviewShell(props: ReviewShellProps) {
               ? 'bottom' : 'right'}
             modes={effectiveReferenceLayout.kind === 'narrow-unified'
               || effectiveReferenceLayout.referenceDock === 'right'
-              ? outlineAbsent
-                ? ['search', 'annotations', 'references']
-                : WORKSPACE_MODES
-              : ['references']}
+              ? visibleWorkspaceModes
+              : referencesAvailable ? ['references'] : []}
             headerVariant={effectiveReferenceLayout.kind !== 'narrow-unified'
               && effectiveReferenceLayout.referenceDock === 'bottom' ? 'references' : 'tabs'}
             onMoveReferencesRight={() => {
@@ -1137,6 +1144,7 @@ export function ReviewShell(props: ReviewShellProps) {
             workspaceRef={workspaceFraming.toolsSurfaceRef}
             open={toolsSurfaceOpen}
             mode={effectiveWorkspaceMode}
+            modes={visibleRightWorkspaceModes}
             presentation={effectiveReferenceLayout.kind === 'narrow-unified' ? 'bottom' : 'right'}
             headerVariant={sharedWorkspace ? 'shared' : 'tools'}
             outline={visibleOutlineDiscovery}

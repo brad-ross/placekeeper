@@ -137,7 +137,12 @@ export function OutlineNavigator({
               )}
             </div>
             {hasChildren ? (
-              <div id={childrenId} hidden={!isExpanded} inert={!isExpanded}>
+              <div
+                className="outline-navigator__children"
+                id={childrenId}
+                hidden={!isExpanded}
+                inert={!isExpanded}
+              >
                 {renderItems(item.children)}
               </div>
             ) : null}

@@ -329,7 +329,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('role="toolbar"');
     expect(html).toContain('aria-label="Selection review actions"');
     expect(html).toContain('aria-keyshortcuts="Alt+Shift+H"');
-    expect(html).toContain('aria-label="All annotations"');
+    expect(html).not.toContain('aria-label="All annotations"');
     expect(html).toContain('aria-live="polite"');
     expect(html).toContain('data-workspace-open="false"');
     expect(html).toContain('data-review-chrome');
@@ -352,21 +352,23 @@ describe('review shell layout and accessibility contract', () => {
     expect(html.match(/data-main-history=/g)).toHaveLength(2);
     expect(html).not.toContain('aria-label="Workspace (0 annotations)"');
     expect(html).toContain('data-workspace-edge-rail="right"');
-    expect(html).toContain('data-workspace-edge-rail="bottom"');
-    expect(html).toContain('class="review-workspace__title">References</strong>');
-    expect(html).toContain('aria-label="Move References to right"');
-    expect(html).toMatch(/id="workspace-panel-references"[^>]*role="tabpanel"/u);
-    expect(html).toMatch(/id="workspace-panel-annotations"[^>]*hidden=""[^>]*inert=""/u);
-    expect(html).toContain('id="review-annotation-list"');
+    expect(html).not.toContain('data-workspace-edge-rail="bottom"');
+    expect(html).toContain('class="review-workspace__activity-strip"');
+    expect(html).toContain('data-workspace-mode-count="2"');
+    expect(html).not.toContain('data-workspace-mode-label="references"');
+    expect(html).not.toContain('aria-label="Move References to right"');
+    expect(html).not.toContain('id="workspace-panel-references"');
+    expect(html).not.toContain('id="workspace-panel-annotations"');
+    expect(html).not.toContain('id="review-annotation-list"');
     expect(html).toContain('data-review-workspace');
     expect(html).toContain('data-annotation-drawer');
     expect(html).not.toContain('aria-label="Close annotations"');
     expect(html).not.toContain('aria-label="Close workspace"');
-    expect(html).toContain('class="annotation-drawer__header"');
-    expect(html).toContain('aria-label="Owned annotations"');
-    expect(html).toContain('aria-label="External Annotations (read only)"');
-    expect(html).toContain('data-existing-annotations-state="loading"');
-    expect(html).toContain('data-annotation-status="loading"');
+    expect(html).not.toContain('class="annotation-drawer__header"');
+    expect(html).not.toContain('aria-label="Owned annotations"');
+    expect(html).not.toContain('aria-label="External Annotations (read only)"');
+    expect(html).not.toContain('data-existing-annotations-state="loading"');
+    expect(html).not.toContain('data-annotation-status="loading"');
     for (const tool of ['Replace', 'Delete', 'Highlight']) {
       expect(html).toContain(`aria-label="${tool}"`);
       expect(html).toContain(`title="${tool}"`);
@@ -389,12 +391,13 @@ describe('review shell layout and accessibility contract', () => {
       <ReviewShell
         state={state}
         referenceLayoutState={layout}
+        referenceTabs={[{ identity: 'reference', label: 'Reference', pageContext: 'Page 2' }]}
         selectionUpdate={{ kind: 'cleared', generation: 0 }}
         onCommand={async () => state}
       ><div>Document canvas</div></ReviewShell>,
     );
     expect(html).toContain('data-reference-layout="wide-split"');
-    expect(html).toContain('aria-label="Outline, search, and annotations"');
+    expect(html).toContain('aria-label="Outline and search"');
     expect(html).toContain('aria-label="References"');
     expect(html.match(/data-reference-viewport-host/g)).toHaveLength(1);
     expect(html.match(/id="workspace-panel-references"/g)).toHaveLength(1);
@@ -414,6 +417,7 @@ describe('review shell layout and accessibility contract', () => {
       <ReviewShell
         state={state}
         referenceLayoutState={layout}
+        referenceTabs={[{ identity: 'reference', label: 'Reference', pageContext: 'Page 2' }]}
         selectionUpdate={{ kind: 'cleared', generation: 0 }}
         onCommand={async () => state}
       ><div>Document canvas</div></ReviewShell>,
@@ -430,7 +434,7 @@ describe('review shell layout and accessibility contract', () => {
     );
   });
 
-  it('shares simple annotation section headers and lets each mode fill the tab bar', () => {
+  it('shares simple annotation section headers and keeps the activity strip intrinsic', () => {
     expect(annotationStyles).toMatch(
       /\.annotation-drawer__header h2,\s*\.existing-annotations__header h2\s*\{[^}]*font-size:\s*15px;[^}]*font-weight:\s*760;/u,
     );
@@ -442,6 +446,34 @@ describe('review shell layout and accessibility contract', () => {
     expect(annotationStyles).not.toContain('grid-auto-columns');
     expect(annotationStyles).not.toContain('grid-auto-flow');
     expect(annotationStyles).not.toContain('.review-tools-workspace .review-workspace__tabs');
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__activity-strip\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__mode-tab\s*\{[^}]*width:\s*var\(--review-control-compact\);[^}]*flex:\s*0 0 var\(--review-control-compact\);/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__mode-label\s*\{[^}]*min-width:\s*0;[^}]*text-overflow:\s*ellipsis;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__mode-segment--compound::before\s*\{[^}]*border:\s*1px\s+solid\s+var\(--review-border\);[^}]*border-radius:\s*var\(--review-radius-control\);[^}]*background:\s*var\(--review-surface-panel\);/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__mode-segment--compound\s*>\s*\.review-workspace__mode-tab\[aria-selected="true"\]\s*\{[^}]*padding-right:\s*2px;[^}]*border-color:\s*transparent;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__activity-strip--compound\s*>\s*\.review-workspace__move--activity\s*\{[^}]*border-color:\s*transparent;[^}]*border-radius:\s*var\(--review-radius-control\);[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__activity-strip--compound\s*>\s*\.review-workspace__move--activity:hover\s*\{[^}]*border-color:\s*var\(--review-border-strong\);[^}]*background:\s*var\(--review-surface-interactive\);/u,
+    );
+    expect(annotationStyles).toContain('height: var(--review-workspace-header-height, 44px)');
+    expect(annotationStyles).toContain('margin-top: var(--review-workspace-header-height, 44px)');
+    expect(annotationStyles).toContain(
+      'top: calc(var(--review-workspace-header-height, 44px) / 2)',
+    );
+    expect(annotationStyles).not.toContain('margin-top: 53px');
+    expect(annotationStyles).not.toContain('review-workspace__tab-segment--compound');
     expect(annotationStyles).not.toContain('.existing-annotations__readonly');
   });
 
@@ -453,6 +485,7 @@ describe('review shell layout and accessibility contract', () => {
       <ReviewShell
         state={state}
         referenceLayoutState={layout}
+        referenceTabs={[{ identity: 'reference', label: 'Reference', pageContext: 'Page 2' }]}
         selectionUpdate={{ kind: 'cleared', generation: 0 }}
         onCommand={async () => state}
       ><div>Document canvas</div></ReviewShell>,
@@ -516,13 +549,17 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('>Page 2<');
     expect(html).not.toContain('aria-label="Edit Highlight on page 2"');
     expect(html).not.toContain('aria-label="Delete Highlight on page 2"');
+    expect(html).toContain('id="workspace-mode-annotations"');
   });
 
-  it('omits the external annotations section when discovery confirms it is empty', () => {
+  it('omits the Annotations mode and panel when owned and source annotations are empty', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
         documentTitle="paper.pdf"
+        workspaceOpen
+        outlineDiscovery={{ status: 'loaded-empty', documentGeneration: 0 }}
+        rightWorkspaceMode="annotations"
         selectionUpdate={{ kind: 'cleared', generation: 0 }}
         existingAnnotations={{ status: 'empty', generation: 1, items: [] }}
         onCommand={async () => state}
@@ -531,13 +568,16 @@ describe('review shell layout and accessibility contract', () => {
       </ReviewShell>,
     );
 
-    expect(html).toContain('aria-label="Owned annotations"');
+    expect(html).not.toContain('aria-label="Owned annotations"');
     expect(html).not.toContain('aria-label="External Annotations (read only)"');
     expect(html).not.toContain('data-existing-annotations-state');
     expect(html).not.toContain('No existing annotations.');
+    expect(html).not.toContain('id="workspace-mode-annotations"');
+    expect(html).not.toContain('id="workspace-panel-annotations"');
+    expect(html).toMatch(/id="workspace-mode-search"[^>]*aria-selected="true"/u);
   });
 
-  it('shows an annotation-only workspace and suppresses injected outline context for an empty outline', () => {
+  it('keeps populated Annotations available and suppresses injected outline context for an empty outline', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={{ ...state, items: [ownedAnnotation] }}
@@ -572,7 +612,8 @@ describe('review shell layout and accessibility contract', () => {
 
     expect(html).not.toContain('id="workspace-mode-outline"');
     expect(html).not.toContain('id="workspace-panel-outline"');
-    expect(html).toMatch(/id="workspace-mode-annotations"[^>]*aria-selected="true"/u);
+    expect(html).toContain('id="workspace-mode-annotations"');
+    expect(html).toMatch(/id="workspace-mode-search"[^>]*aria-selected="true"/u);
     expect(html).not.toContain('Methods and data');
     expect(html).toContain('<h2>Annotations ');
     expect(html).toContain('<h2>External Annotations (read only)</h2>');
