@@ -538,6 +538,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         requestAnimationFrame(() => {
           if (layoutGeneration !== layoutGenerationRef.current
             || documentGeneration !== documentGenerationRef.current) return;
+          const activeElement = productionRootRef.current?.ownerDocument.activeElement;
+          if (activeElement instanceof HTMLElement && activeElement.dataset.workspaceMode) return;
           const target = [...(productionRootRef.current?.querySelectorAll<HTMLElement>(
             '[data-reference-tab]',
           ) ?? [])].find((element) => element.dataset.referenceTab === identity);

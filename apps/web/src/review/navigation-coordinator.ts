@@ -286,6 +286,37 @@ export class NavigationCoordinator {
       history.replace(target);
       notice = MISSING_ITEM_NOTICE;
     }
+    // A live mount can retain exact geometry behind its readable page entry.
+    // Reloaded or mismatched history has no such authority and falls through
+    // to the coarse page/item fragment below.
+    if (
+      notice === ''
+      && target.kind === 'page'
+      && (historyDirection === 'back' || historyDirection === 'forward')
+    ) {
+      const state = this.dependencies.getState();
+      const offset = historyDirection === 'back' ? -1 : 1;
+      const liveDestination = state.mainHistory.entries[state.mainHistory.index + offset];
+      if (liveDestination?.pageIndex === target.page - 1) {
+        const restored = await this.traverseHistory(historyDirection);
+        if (restored) {
+          this.locationRestored = true;
+          return true;
+        }
+      }
+    }
+    // A fresh viewer already starts on page 1. Reapplying that default after
+    // mount would create a late scroll jump while the surface is interactive.
+    if (
+      historyDirection === undefined
+      && target.kind === 'page'
+      && target.page === 1
+    ) {
+      this.locationRestored = true;
+      this.refreshCurrentOutline();
+      if (notice) this.dependencies.setAnnouncement(notice);
+      return true;
+    }
     const restored = await this.restoreLinkedLocation(target, null);
     this.locationRestored = true;
     if (notice) this.dependencies.setAnnouncement(notice);

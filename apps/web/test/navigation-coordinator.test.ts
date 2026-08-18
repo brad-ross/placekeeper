@@ -104,6 +104,7 @@ function locationHistory(initial: PlacekeeperLinkLocation = { kind: 'page', page
   };
   return {
     history,
+    set(location: PlacekeeperLinkLocation) { current = location; },
     pop(location: PlacekeeperLinkLocation) {
       current = location;
       onPop('unknown');
@@ -176,7 +177,7 @@ function harness(options: {
 }
 
 describe('document-scoped navigation coordinator', () => {
-  it('restores the initial page hash and converges an invalid hash to page 1', async () => {
+  it('restores distinct initial pages, leaves the current page stable, and converges invalid hashes', async () => {
     const validLocation = locationHistory({ kind: 'page', page: 4 });
     const valid = harness({ locationHistory: validLocation });
     valid.coordinator.startLocationHistory();
@@ -184,6 +185,12 @@ describe('document-scoped navigation coordinator', () => {
     expect(await valid.coordinator.restoreCurrentLocation()).toBe(true);
     expect(valid.main.controls.applyLocation).toHaveBeenCalledWith(expect.objectContaining({ pageIndex: 3 }));
     expect(validLocation.history.replace).not.toHaveBeenCalled();
+
+    const alreadyCurrentLocation = locationHistory();
+    const alreadyCurrent = harness({ locationHistory: alreadyCurrentLocation });
+    alreadyCurrent.coordinator.startLocationHistory();
+    expect(await alreadyCurrent.coordinator.restoreCurrentLocation()).toBe(true);
+    expect(alreadyCurrent.main.controls.applyLocation).not.toHaveBeenCalled();
 
     const invalidLocation = locationHistory();
     invalidLocation.failRead();
@@ -212,6 +219,45 @@ describe('document-scoped navigation coordinator', () => {
     expect(await missing.coordinator.restoreCurrentLocation()).toBe(true);
     expect(missingLocation.history.replace).toHaveBeenCalledWith({ kind: 'page', page: 5 });
     expect(missing.announcement()).toContain('exact item');
+  });
+
+  it('uses exact live locations for directed browser history and page fragments as fallback', async () => {
+    const browser = locationHistory();
+    const live = harness({ locationHistory: browser });
+    live.coordinator.startLocationHistory();
+    expect(await live.coordinator.restoreCurrentLocation()).toBe(true);
+    expect(await live.coordinator.navigateMainTarget(target(2), 'outline')).toBe(true);
+
+    browser.set({ kind: 'page', page: 1 });
+    vi.mocked(live.main.controls.applyLocation).mockClear();
+    expect(await live.coordinator.restoreCurrentLocation('back')).toBe(true);
+    expect(live.main.controls.applyLocation).toHaveBeenLastCalledWith(location(0));
+
+    browser.set({ kind: 'page', page: 3 });
+    vi.mocked(live.main.controls.applyLocation).mockClear();
+    expect(await live.coordinator.restoreCurrentLocation('forward')).toBe(true);
+    expect(live.main.controls.applyLocation).toHaveBeenLastCalledWith(location(2));
+    expect(browser.history.push).toHaveBeenCalledOnce();
+
+    browser.failRead();
+    vi.mocked(live.main.controls.applyLocation).mockClear();
+    expect(await live.coordinator.restoreCurrentLocation('back')).toBe(true);
+    expect(live.main.controls.applyLocation).toHaveBeenLastCalledWith(expect.objectContaining({
+      pageIndex: 0,
+      anchor: { x: 0, y: 0 },
+      alignment: { xPercent: 0, yPercent: 0 },
+    }));
+    expect(live.announcement()).toContain('page 1');
+
+    const reloadedBrowser = locationHistory({ kind: 'page', page: 3 });
+    const reloaded = harness({ locationHistory: reloadedBrowser });
+    reloaded.coordinator.startLocationHistory();
+    expect(await reloaded.coordinator.restoreCurrentLocation('forward')).toBe(true);
+    expect(reloaded.main.controls.applyLocation).toHaveBeenLastCalledWith(expect.objectContaining({
+      pageIndex: 2,
+      anchor: { x: 0, y: 0 },
+      alignment: { xPercent: 0, yPercent: 0 },
+    }));
   });
 
   it('pushes successful explicit jumps once and never pushes failed or semantic no-op jumps', async () => {
