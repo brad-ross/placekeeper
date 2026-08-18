@@ -240,6 +240,7 @@ function createHarnessViewerNavigation(
     },
     fitToWidthReady: () => true,
     resolveTarget: () => null,
+    targetVisibility: () => 'unavailable',
     captureDocumentOrderPages: () => [],
     applyTarget: async () => false,
     cancelPendingNavigation: async () => undefined,
@@ -275,6 +276,9 @@ function Harness() {
   const [selectionGeneration, setSelectionGeneration] = useState(0);
   const [visualReferenceNavigation, setVisualReferenceNavigation] = useState(
     visualScenario?.referenceNavigation,
+  );
+  const [visualReferenceReturn, setVisualReferenceReturn] = useState(
+    visualScenario?.referenceReturn ?? null,
   );
   const [harnessReferenceNavigation, setHarnessReferenceNavigation] = useState(
     () => createReferenceNavigationState(0),
@@ -345,6 +349,7 @@ function Harness() {
         outlineDiscovery: visualScenario.outlineDiscovery,
         currentOutlineItemId: visualScenario.currentOutlineItemId,
         referenceTabs: visualScenario.referenceTabs,
+        referenceReturn: visualReferenceReturn,
         ...(visualReferenceNavigation === undefined ? {} : {
           navigationState: visualReferenceNavigation,
           onWorkspaceModeChange: (mode) => setVisualReferenceNavigation((current) => (
@@ -355,6 +360,16 @@ function Harness() {
           onReferenceTabActivate: (identity) => setVisualReferenceNavigation((current) => (
             current === undefined ? current : activateVisualReference(current, identity)
           )),
+          onReferenceReturn: () => {
+            setVisualReferenceReturn((current) => (
+              current === null ? current : { ...current, pending: true }
+            ));
+            setTimeout(() => {
+              setVisualReferenceReturn((current) => (
+                current === null ? current : { ...current, pending: false }
+              ));
+            }, 50);
+          },
         }),
       } : {})}
       {...(visualScenario ? {} : {

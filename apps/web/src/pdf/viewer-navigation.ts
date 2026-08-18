@@ -35,6 +35,9 @@ export interface PdfViewerLocationTolerances {
   readonly zoom?: number;
 }
 
+/** Read-only semantic visibility of a destination in the viewer's usable viewport. */
+export type PdfTargetVisibility = 'visible' | 'outside' | 'unavailable';
+
 export interface ViewerNavigationControls {
   captureLocation(): PdfViewerLocation | null;
   applyLocation(location: PdfViewerLocation): Promise<boolean>;

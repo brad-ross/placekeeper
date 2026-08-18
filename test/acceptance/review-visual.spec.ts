@@ -406,6 +406,89 @@ test('narrow unified References tray', async ({ page }) => {
   await expectScene(product, 'narrow-unified-references.png');
 });
 
+for (const scene of [
+  {
+    name: 'wide bottom Reference return chip',
+    snapshot: 'wide-bottom-reference-return.png',
+    viewport: { width: 1280, height: 900 },
+    prepare: async (page: Page) => {
+      await page.getByRole('button', { name: 'Open References tray' }).click();
+      await expect(page.locator('[data-review-stage]'))
+        .toHaveAttribute('data-reference-layout', 'wide-bottom');
+    },
+  },
+  {
+    name: 'wide right Reference return chip',
+    snapshot: 'wide-right-reference-return.png',
+    viewport: { width: 1280, height: 900 },
+    prepare: async (page: Page) => {
+      await page.getByRole('button', { name: 'Open References tray' }).click();
+      await page.getByRole('button', { name: 'Move References to right' }).click();
+      await expect(page.locator('[data-review-stage]'))
+        .toHaveAttribute('data-reference-layout', 'wide-right');
+    },
+  },
+  {
+    name: 'narrow Reference return chip',
+    snapshot: 'narrow-reference-return.png',
+    viewport: { width: 760, height: 900 },
+    prepare: async (page: Page) => {
+      await page.getByRole('button', { name: 'Open References tray' }).click();
+      await page.getByRole('tab', { name: 'References', exact: true }).click();
+      await expect(page.locator('[data-review-stage]'))
+        .toHaveAttribute('data-reference-layout', 'narrow-unified');
+    },
+  },
+] as const) {
+  test(scene.name, async ({ page }) => {
+    const product = await openScene(
+      page,
+      'reference-layout&referenceReturn=visible',
+      scene.viewport,
+    );
+    await scene.prepare(page);
+    const returnControl = page.getByRole('button', { name: 'Return to reference' });
+    await expect(returnControl).toBeVisible();
+    await returnControl.scrollIntoViewIfNeeded();
+    const clearance = await returnControl.evaluate((control) => {
+      const viewport = document.querySelector<HTMLElement>('[data-reference-viewport-host]');
+      if (!viewport) throw new Error('Reference viewport host is unavailable.');
+      const controlBounds = control.getBoundingClientRect();
+      const viewportBounds = viewport.getBoundingClientRect();
+      return {
+        insideLeft: controlBounds.left >= viewportBounds.left,
+        insideTop: controlBounds.top >= viewportBounds.top,
+        clearOfScrollbar: controlBounds.right < viewportBounds.right - 8,
+        topmost: document.elementFromPoint(
+          controlBounds.left + controlBounds.width / 2,
+          controlBounds.top + controlBounds.height / 2,
+        )?.closest('[data-reference-return]') === control,
+      };
+    });
+    expect(clearance).toEqual({
+      insideLeft: true,
+      insideTop: true,
+      clearOfScrollbar: true,
+      topmost: true,
+    });
+    await expectScene(product, scene.snapshot);
+  });
+}
+
+test('failed Reference return preserves focus on its retryable icon control', async ({ page }) => {
+  await openScene(page, 'reference-layout&referenceReturn=visible');
+  await page.getByRole('button', { name: 'Open References tray' }).click();
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  const returnControl = page.getByRole('button', { name: 'Return to reference' });
+  await returnControl.focus();
+  await returnControl.press('Enter');
+  await expect(returnControl).toHaveAttribute('aria-disabled', 'true');
+  await expect(returnControl).not.toHaveAttribute('aria-disabled', 'true');
+  await expect(returnControl).toBeFocused();
+});
+
 test('annotation peek', async ({ page }) => {
   const product = await openScene(page, 'peek');
   await page.locator('[data-owned-focus-id="owned-highlight"]').focus();

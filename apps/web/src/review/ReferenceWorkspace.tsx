@@ -32,6 +32,49 @@ export interface ReferenceWorkspaceTab {
   readonly pageContext: string;
 }
 
+export interface ReferenceReturnControlState {
+  readonly tabIdentity: string;
+  readonly available: boolean;
+  readonly pending: boolean;
+}
+
+type ReferenceReturnButtonProps = Pick<
+  ReferenceReturnControlState,
+  'tabIdentity' | 'pending'
+> & {
+  readonly buttonRef: Ref<HTMLButtonElement>;
+  readonly onReturn: (identity: string) => void;
+};
+
+function ReferenceReturnButton({
+  tabIdentity,
+  pending,
+  buttonRef,
+  onReturn,
+}: ReferenceReturnButtonProps) {
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      className="reference-panel__return"
+      data-reference-return={tabIdentity}
+      aria-label="Return to reference"
+      title="Return to reference"
+      aria-busy={pending || undefined}
+      aria-disabled={pending || undefined}
+      onClick={(event) => {
+        if (pending) {
+          event.preventDefault();
+          return;
+        }
+        onReturn(tabIdentity);
+      }}
+    >
+      <ReviewIcon name="locate" />
+    </button>
+  );
+}
+
 export type PendingReferencePanel =
   | {
     readonly status: 'loading';
@@ -52,12 +95,14 @@ export interface ReferenceWorkspaceProps {
   readonly tabs: readonly ReferenceWorkspaceTab[];
   readonly activeTabIdentity: string | null;
   readonly pendingReference?: PendingReferencePanel | null;
+  readonly referenceReturn?: ReferenceReturnControlState | null;
   readonly announcement?: string;
   readonly onModeChange: (mode: WorkspaceMode) => void;
   readonly onReferenceTabActivate: (identity: string) => void;
   readonly onReferenceTabClose: (identity: string) => void;
   readonly onSendToMain: (identity: string) => void;
   readonly onRetryReference: () => void;
+  readonly onReferenceReturn?: (identity: string) => void;
   readonly modes?: readonly WorkspaceMode[];
   readonly headerVariant?: 'tabs' | 'references';
   readonly onMoveReferencesRight?: () => void;
@@ -110,12 +155,14 @@ export function ReferenceWorkspace({
   tabs,
   activeTabIdentity,
   pendingReference = null,
+  referenceReturn = null,
   announcement = '',
   onModeChange,
   onReferenceTabActivate,
   onReferenceTabClose,
   onSendToMain,
   onRetryReference,
+  onReferenceReturn,
   modes = WORKSPACE_MODES,
   headerVariant = 'tabs',
   onMoveReferencesRight,
@@ -129,6 +176,8 @@ export function ReferenceWorkspace({
   const referenceTabRefs = useRef(new Map<string, HTMLButtonElement>());
   const emptyReferenceRef = useRef<HTMLDivElement>(null);
   const retryReferenceRef = useRef<HTMLButtonElement>(null);
+  const referenceReturnRef = useRef<HTMLButtonElement>(null);
+  const restoreReferenceReturnFocus = useRef(false);
   const closeFocusIdentity = useRef<string | null>(null);
   const focusedModeTab = useRef<{
     mode: WorkspaceMode;
@@ -233,6 +282,18 @@ export function ReferenceWorkspace({
     requestAnimationFrame(() => focusWithoutScroll(target));
   }, [tabs]);
 
+  useLayoutEffect(() => {
+    if (referenceReturn?.pending || !restoreReferenceReturnFocus.current) return;
+    restoreReferenceReturnFocus.current = false;
+    const active = referenceReturnRef.current?.ownerDocument.activeElement;
+    if (
+      active instanceof HTMLElement
+      && active !== active.ownerDocument.body
+      && active.isConnected
+    ) return;
+    focusWithoutScroll(referenceReturnRef.current);
+  }, [referenceReturn?.pending]);
+
   const moveModeFocus = (event: KeyboardEvent<HTMLButtonElement>) => {
     const currentIndex = modes.indexOf(event.currentTarget.dataset.workspaceMode as WorkspaceMode);
     const nextIndex = horizontalTabFocusIndex(currentIndex, modes.length, event.key);
@@ -276,6 +337,13 @@ export function ReferenceWorkspace({
   };
 
   const activeTab = tabs.find(({ identity }) => identity === activeTabIdentity) ?? null;
+  const showReferenceReturn = open
+    && mode === 'references'
+    && pendingReference === null
+    && activeTab !== null
+    && referenceReturn?.available === true
+    && referenceReturn.tabIdentity === activeTab.identity
+    && onReferenceReturn !== undefined;
   const rememberPanelFocus = (targetMode: WorkspaceMode, target: EventTarget) => {
     if (!(target instanceof HTMLElement)) return;
     modeFocusMemory.current.set(targetMode, target);
@@ -455,6 +523,19 @@ export function ReferenceWorkspace({
               <strong>No references open.</strong>
               <span>An internal PDF link can open a reference here.</span>
             </div>
+          ) : null}
+
+          {showReferenceReturn ? (
+            <ReferenceReturnButton
+              tabIdentity={activeTab.identity}
+              pending={referenceReturn.pending}
+              buttonRef={referenceReturnRef}
+              onReturn={(identity) => {
+                restoreReferenceReturnFocus.current = referenceReturnRef.current?.matches(':focus')
+                  ?? false;
+                onReferenceReturn(identity);
+              }}
+            />
           ) : null}
 
           <div

@@ -13,6 +13,10 @@ import {
   sourceAnnotationLinkRenderers,
   sourceAnnotationVisualRenderers,
 } from './PdfLinkControl.js';
+import {
+  isReferenceScrollIntent,
+  type ReferenceScrollPosition,
+} from './reference-manual-scroll.js';
 import type { ViewerInteractionEvent } from './viewer-interaction-events.js';
 
 export interface ReferencePdfViewportProps {
@@ -21,6 +25,7 @@ export interface ReferencePdfViewportProps {
   readonly documentGeneration: number;
   readonly host: HTMLElement;
   readonly onInteraction?: (event: ViewerInteractionEvent) => void;
+  readonly onScrollIntent?: (position: ReferenceScrollPosition) => void;
   readonly onViewportElement?: (element: HTMLDivElement | null) => void;
   readonly searchResultsByPage?: ReadonlyMap<number, readonly PdfSearchResult[]>;
 }
@@ -32,6 +37,7 @@ export function ReferencePdfViewport({
   documentGeneration,
   host,
   onInteraction,
+  onScrollIntent,
   onViewportElement,
   searchResultsByPage = new Map(),
 }: ReferencePdfViewportProps) {
@@ -41,6 +47,10 @@ export function ReferencePdfViewport({
     pageCount: documentState.document?.pages.length ?? 0,
     ...(onInteraction === undefined ? {} : { onInteraction }),
   });
+  const publishScrollIntent = (root: HTMLDivElement) => {
+    const viewport = root.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
+    if (viewport) onScrollIntent?.({ left: viewport.scrollLeft, top: viewport.scrollTop });
+  };
 
   return createPortal(
     <div
@@ -49,6 +59,52 @@ export function ReferencePdfViewport({
       data-reference-pdf-viewport
       aria-label="Reference PDF document"
       role="region"
+      onWheelCapture={(event) => {
+        if (isReferenceScrollIntent({
+          kind: 'wheel',
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+        })) publishScrollIntent(event.currentTarget);
+      }}
+      onKeyDownCapture={(event) => {
+        if (isReferenceScrollIntent({
+          kind: 'key',
+          key: event.key,
+          altKey: event.altKey,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+        })) publishScrollIntent(event.currentTarget);
+      }}
+      onPointerDownCapture={(event) => {
+        const viewport = event.currentTarget.querySelector<HTMLElement>(
+          '[data-viewer-framing-viewport]',
+        );
+        if (isReferenceScrollIntent({
+          kind: 'pointer',
+          phase: 'down',
+          pointerType: event.pointerType,
+          button: event.button,
+          buttons: event.buttons,
+          clientX: event.clientX,
+          clientY: event.clientY,
+        }, viewport)) publishScrollIntent(event.currentTarget);
+      }}
+      onPointerMoveCapture={(event) => {
+        const input = {
+          kind: 'pointer',
+          phase: 'move',
+          pointerType: event.pointerType,
+          button: event.button,
+          buttons: event.buttons,
+          clientX: event.clientX,
+          clientY: event.clientY,
+        } as const;
+        if (input.buttons === 0) return;
+        const viewport = input.pointerType === 'mouse'
+          ? event.currentTarget.querySelector<HTMLElement>('[data-viewer-framing-viewport]')
+          : null;
+        if (isReferenceScrollIntent(input, viewport)) publishScrollIntent(event.currentTarget);
+      }}
     >
       <Viewport
         documentId={documentId}

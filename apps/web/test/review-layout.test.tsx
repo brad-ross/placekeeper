@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 
+import { PdfZoomMode } from '@embedpdf/models';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -32,6 +33,10 @@ import {
   createReferenceWorkspaceLayout,
   reduceReferenceWorkspaceLayout,
 } from '../src/review/reference-workspace-layout.js';
+import {
+  createReferenceNavigationState,
+  reduceReferenceNavigation,
+} from '../src/review/reference-navigation-state.js';
 
 const state = createReviewState({
   sessionId: 'layout-test',
@@ -431,6 +436,67 @@ describe('review shell layout and accessibility contract', () => {
   it('lets full-state bottom References panels occupy both vertical-grid columns', () => {
     expect(annotationStyles).toMatch(
       /\[data-reference-panel-layout="full"\]\s*>\s*\.reference-panel\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;/u,
+    );
+  });
+
+  it('threads the active Reference return control through the shell without changing viewer layout', () => {
+    const originalTarget = {
+      documentGeneration: 4,
+      pageIndex: 17,
+      zoom: { mode: PdfZoomMode.XYZ, params: [12, 700, 1] },
+      identity: 'lemma-origin',
+    };
+    const settledLocation = {
+      pageIndex: 18,
+      anchor: { x: 12, y: 640 },
+      alignment: { xPercent: 50, yPercent: 35 },
+      zoom: 1,
+    };
+    const navigationState = reduceReferenceNavigation(
+      createReferenceNavigationState(4),
+      { type: 'open-reference', target: originalTarget, settledLocation },
+    );
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        workspaceOpen
+        navigationState={navigationState}
+        referenceReturn={{ tabIdentity: 'lemma-origin', available: true, pending: false }}
+        onReferenceReturn={() => undefined}
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        onCommand={async () => state}
+      ><div>Document canvas</div></ReviewShell>,
+    );
+
+    expect(html.match(/data-reference-return=/g)).toHaveLength(1);
+    expect(html).toMatch(/data-reference-return="lemma-origin"[\s\S]*data-reference-viewport-host/u);
+    expect(html.match(/data-reference-viewport-host/g)).toHaveLength(1);
+  });
+
+  it('keeps the Reference return overlay out of grid sizing and enlarges only its coarse target', () => {
+    expect(annotationStyles).toMatch(
+      /\.reference-panel\s*\{[^}]*position:\s*relative;[^}]*isolation:\s*isolate;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.reference-panel__return\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*2;[^}]*top:\s*12px;[^}]*left:\s*12px;[^}]*inline-size:\s*var\(--review-control-compact\);/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.reference-panel__return:focus-visible\s*\{[^}]*outline:\s*3px solid var\(--review-focus\);/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.reference-panel__return:hover:not\(\[aria-disabled="true"\]\)/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.reference-panel__return\[aria-disabled="true"\]\s*\{[^}]*cursor:\s*wait;/u,
+    );
+    expect(annotationStyles).not.toMatch(
+      /\.reference-panel__return\s*\{[^}]*(?:grid-area|margin-bottom|height:\s*100%)/u,
+    );
+    const coarsePointerRules = responsiveStyles.match(
+      /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*?)\n\}/u,
+    )?.[1];
+    expect(coarsePointerRules).toMatch(
+      /\.reference-panel__return\s*\{[^}]*inline-size:\s*var\(--review-control-touch\);[^}]*min-height:\s*var\(--review-control-touch\);/u,
     );
   });
 

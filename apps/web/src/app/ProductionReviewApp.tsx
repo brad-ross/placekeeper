@@ -14,6 +14,7 @@ import {
 } from "../pdf/selection-state.js";
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import { App } from "./App.js";
+import { ReferenceManualScrollObserver } from '../pdf/reference-manual-scroll.js';
 import { ReviewShell, type RejectedReviewCommand } from "./ReviewShell.js";
 import { projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
 import {
@@ -44,6 +45,7 @@ import type {
 import { PageNotePlacementAuthority } from "../review/review-surface-state.js";
 import {
   NavigationCoordinator,
+  type ReferenceReturnPresentationState,
 } from "../review/navigation-coordinator.js";
 import {
   BrowserReviewLocationHistory,
@@ -55,6 +57,7 @@ import {
   createReferenceNavigationState,
   reduceReferenceNavigation,
   type ReferenceNavigationAction,
+  type ReferenceNavigationState,
 } from "../review/reference-navigation-state.js";
 import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
 import { PdfSearchWorkspace } from '../review/PdfSearchWorkspace.js';
@@ -132,6 +135,18 @@ export interface ProductionReviewAppProps {
   readonly scope: ProductionScope;
   readonly api: ProductionSessionApi;
   readonly viewer?: ReactNode;
+}
+
+export function referenceReturnForActiveTab(
+  scope: Pick<ReferenceNavigationState, 'activeTabIdentity' | 'documentGeneration'>,
+  presentation: ReferenceReturnPresentationState | null,
+): ReferenceReturnPresentationState | null {
+  return presentation !== null
+    && presentation.available
+    && presentation.tabIdentity === scope.activeTabIdentity
+    && presentation.documentGeneration === scope.documentGeneration
+    ? presentation
+    : null;
 }
 
 export function initiallyPortableItemIds(
@@ -274,6 +289,16 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [mainNavigation, setMainNavigation] = useState<PdfViewerNavigation | null>(null);
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
+  const referenceManualScrollObserverRef = useRef(new ReferenceManualScrollObserver());
+  const [referenceReturnState, renderReferenceReturnState] = useState<
+    ReferenceReturnPresentationState | null
+  >(null);
+  const referenceReturnStateRef = useRef(referenceReturnState);
+  referenceReturnStateRef.current = referenceReturnState;
+  const setReferenceReturnState = useCallback((next: ReferenceReturnPresentationState | null) => {
+    referenceReturnStateRef.current = next;
+    renderReferenceReturnState(next);
+  }, []);
   const referenceNavigationWaiters = useRef<Array<{
     readonly documentGeneration: number;
     readonly resolve: (navigation: PdfViewerNavigation | null) => void;
@@ -530,6 +555,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         ) === 'bottom' ? BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN : RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
       },
       setPendingReference,
+      getReferenceReturnState: () => referenceReturnStateRef.current,
+      setReferenceReturnState,
+      resetReferenceManualScrollIntent: () => referenceManualScrollObserverRef.current.clear(),
       setLinkActionRequest,
       setAnnouncement: setNavigationAnnouncement,
       focusReferenceTab: (identity) => {
@@ -634,6 +662,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     if (locationHistory === undefined) return;
     return locationHistory.subscribe(setLocationHistorySnapshot);
   }, [locationHistory]);
+  useEffect(() => {
+    if (referenceReturnStateRef.current?.available !== true) return;
+    const frame = requestAnimationFrame(() => {
+      void navigationCoordinator.refreshReferenceReturnAvailability();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [navigationCoordinator, referenceLayoutState]);
   useEffect(() => {
     if (
       locationHistory === undefined
@@ -742,7 +777,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [mainLocationRefresh, navigationCoordinator]);
   const onReferenceDocumentControls = useCallback((controls: ReferenceDocumentController | null) => {
     referenceControllerRef.current = controls;
-  }, []);
+    if (controls === null) navigationCoordinator.referenceNavigationUnavailable();
+  }, [navigationCoordinator]);
   const onViewerNavigationInitialized = useCallback((
     scope: 'main' | 'reference',
     navigation: PdfViewerNavigation | null,
@@ -756,6 +792,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       return;
     }
     referenceNavigationRef.current = navigation;
+    if (navigation === null) navigationCoordinator.referenceNavigationUnavailable();
     navigation?.replaceDocument(documentGenerationRef.current);
     if (navigation) {
       const generation = documentGenerationRef.current;
@@ -841,6 +878,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       documentGeneration={navigationState.documentGeneration}
       referenceViewportHost={referenceViewportHost}
       onReferenceDocumentControls={onReferenceDocumentControls}
+      onReferenceManualScroll={() => navigationCoordinator.observeReferenceManualScroll()}
+      referenceManualScrollObserver={referenceManualScrollObserverRef.current}
       onViewerNavigationInitialized={onViewerNavigationInitialized}
       onOutlineDiscovery={onOutlineDiscovery}
       onViewerInitialized={onViewerInitialized}
@@ -939,6 +978,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     rightWorkspaceMode,
     navigationState.workspace.lastMode,
   );
+  const activeReferenceReturn = referenceReturnForActiveTab(
+    navigationState,
+    referenceReturnState,
+  );
   const anyTrayOpen = effectiveReferenceLayout.kind === 'narrow-unified'
     ? effectiveReferenceLayout.open
     : effectiveReferenceLayout.rightWorkspaceOpen || effectiveReferenceLayout.bottomReferencesOpen;
@@ -979,6 +1022,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           pageContext: tab.pageContext ?? `Page ${tab.originalTarget.pageIndex + 1}`,
         }))}
         pendingReference={pendingReference}
+        referenceReturn={activeReferenceReturn}
         outlineDiscovery={outlineDiscovery}
         annotationOutlineLabels={annotationOutlineLabels}
         currentOutlineItemId={currentOutlineItemId}
@@ -1063,6 +1107,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           void navigationCoordinator.sendToMain(identity);
         }}
         onReferenceRetry={() => { void navigationCoordinator.retryReference(); }}
+        onReferenceReturn={(identity) => {
+          void navigationCoordinator.returnToReference(identity);
+        }}
         onOutlineActivate={(item) => {
           if (item.target === null) navigationCoordinator.unavailableDestination();
           else void navigationCoordinator.navigateMainTarget(item.target, 'outline');
