@@ -18,7 +18,10 @@ import {
   type PdfViewerLocation,
 } from '../pdf/viewer-navigation.js';
 import type { LinkActionChoice } from './LinkActionPopover.js';
-import type { PendingReferencePanel } from './ReferenceWorkspace.js';
+import type {
+  PendingReferencePanel,
+  ReferenceReturnControlState,
+} from './ReferenceWorkspace.js';
 import type { PlacekeeperLinkLocation } from '../../../../packages/core/src/placekeeper-link.js';
 import type { ReviewLocationHistoryPort } from './review-location-history.js';
 import type {
@@ -43,6 +46,11 @@ interface PendingReferenceRequest {
   readonly documentGeneration: number;
 }
 
+/** Transient, active-viewer presentation state; never part of durable review navigation. */
+export interface ReferenceReturnPresentationState extends ReferenceReturnControlState {
+  readonly documentGeneration: number;
+}
+
 export interface NavigationCoordinatorDependencies {
   readonly getState: () => ReferenceNavigationState;
   readonly dispatch: (action: ReferenceNavigationAction) => void;
@@ -60,6 +68,9 @@ export interface NavigationCoordinatorDependencies {
     readonly referenceRailFocusToken: () => string;
   };
   readonly setPendingReference: (pending: PendingReferencePanel | null) => void;
+  readonly getReferenceReturnState: () => ReferenceReturnPresentationState | null;
+  readonly setReferenceReturnState: (state: ReferenceReturnPresentationState | null) => void;
+  readonly resetReferenceManualScrollIntent: () => void;
   readonly setLinkActionRequest: (request: ViewerPdfLinkInvocation | null) => void;
   readonly setAnnouncement: (announcement: string) => void;
   readonly focusReferenceTab: (identity: string) => boolean;
@@ -413,6 +424,7 @@ export class NavigationCoordinator {
   ): Promise<boolean> {
     const operation = this.begin(target.documentGeneration);
     if (operation === null) return false;
+    this.clearReferenceReturnState();
     const state = this.dependencies.getState();
     if (
       state.activeTabIdentity !== sourceTabIdentity
@@ -425,7 +437,9 @@ export class NavigationCoordinator {
       this.dependencies.setAnnouncement(REFERENCE_FAILURE);
       return false;
     }
+    this.dependencies.resetReferenceManualScrollIntent();
     const applied = await navigation.applyTarget(target);
+    this.dependencies.resetReferenceManualScrollIntent();
     if (!this.isCurrent(operation)) return false;
     if (!applied) {
       this.dependencies.setAnnouncement(REFERENCE_FAILURE);
@@ -433,7 +447,9 @@ export class NavigationCoordinator {
     }
     const settledLocation = navigation.captureLocation();
     if (settledLocation === null) {
+      this.dependencies.resetReferenceManualScrollIntent();
       const restored = await navigation.applyLocation(origin);
+      this.dependencies.resetReferenceManualScrollIntent();
       if (!this.isCurrent(operation)) return false;
       const restoredLocation = restored ? navigation.captureLocation() : null;
       if (
@@ -461,6 +477,81 @@ export class NavigationCoordinator {
     return true;
   }
 
+  /** Re-evaluates the active origin only after user intent is paired with a Reference scroll. */
+  observeReferenceManualScroll(): void {
+    this.updateReferenceReturnAvailability(true);
+  }
+
+  /** Rechecks an already-established affordance after layout without creating manual intent. */
+  async refreshReferenceReturnAvailability(): Promise<void> {
+    const current = this.dependencies.getReferenceReturnState();
+    if (current?.available !== true || current.pending) return;
+    await this.dependencies.layout.settle();
+    const state = this.dependencies.getState();
+    const latest = this.dependencies.getReferenceReturnState();
+    if (
+      latest?.available !== true
+      || latest.pending
+      || latest.tabIdentity !== current.tabIdentity
+      || latest.documentGeneration !== current.documentGeneration
+      || state.activeTabIdentity !== current.tabIdentity
+      || state.documentGeneration !== current.documentGeneration
+    ) return;
+    this.updateReferenceReturnAvailability(false);
+  }
+
+  /** Clears transient state when the reusable Reference navigation adapter is disposed. */
+  referenceNavigationUnavailable(): void {
+    this.dependencies.resetReferenceManualScrollIntent();
+    this.clearReferenceReturnState();
+  }
+
+  async returnToReference(tabIdentity: string): Promise<boolean> {
+    const state = this.dependencies.getState();
+    const tab = state.activeTabIdentity === tabIdentity
+      ? state.tabs.find((candidate) => candidate.identity === tabIdentity) ?? null
+      : null;
+    const presentation = this.dependencies.getReferenceReturnState();
+    if (
+      tab === null
+      || tab.originalTarget.documentGeneration !== state.documentGeneration
+      || presentation === null
+      || presentation.tabIdentity !== tabIdentity
+      || presentation.documentGeneration !== state.documentGeneration
+      || !presentation.available
+      || presentation.pending
+    ) return false;
+
+    const operation = this.beginReferenceReturn(state.documentGeneration);
+    if (operation === null) return false;
+    const navigation = this.dependencies.getReferenceNavigation();
+    if (navigation === null) return this.failReferenceReturn(operation, presentation);
+    this.dependencies.setReferenceReturnState({ ...presentation, pending: true });
+    const settledLocation = await this.applyReferenceTargetAfterLayout(
+      operation,
+      navigation,
+      tab.originalTarget,
+    );
+    if (!this.isCurrent(operation)) return false;
+    if (this.dependencies.getReferenceNavigation() !== navigation) return false;
+    const current = this.dependencies.getState();
+    const currentTab = current.activeTabIdentity === tabIdentity
+      ? current.tabs.find((candidate) => candidate.identity === tabIdentity) ?? null
+      : null;
+    if (
+      settledLocation === null
+      || currentTab === null
+      || currentTab.originalTarget.identity !== tab.originalTarget.identity
+      || current.documentGeneration !== operation.documentGeneration
+    ) return this.failReferenceReturn(operation, presentation);
+
+    this.dependencies.dispatch({ type: 'refresh-active-reference', settledLocation });
+    this.dependencies.setReferenceReturnState(null);
+    this.dependencies.setAnnouncement('Returned to reference.');
+    navigation.focusAtDestination(settledLocation.pageIndex);
+    return true;
+  }
+
   async openReference(
     target: PdfNavigationTarget,
     metadata: NavigationDestinationMetadata,
@@ -468,6 +559,7 @@ export class NavigationCoordinator {
   ): Promise<boolean> {
     const operation = this.begin(target.documentGeneration);
     if (operation === null) return false;
+    this.clearReferenceReturnState();
     const state = this.dependencies.getState();
     const existing = state.tabs.find((tab) => tab.identity === target.identity);
     const preserveMain = preservedMainTarget !== undefined;
@@ -594,6 +686,7 @@ export class NavigationCoordinator {
     if (status !== 'failed' && status !== 'loaded') return false;
     const operation = this.begin(pending.documentGeneration, true);
     if (operation === null) return false;
+    this.clearReferenceReturnState();
     this.dependencies.setPendingReference({ status: 'loading', ...pending.metadata });
     const opened = status === 'failed' ? await controller.retry() : true;
     if (!this.isCurrent(operation)) return false;
@@ -626,6 +719,7 @@ export class NavigationCoordinator {
   async switchReference(identity: string): Promise<boolean> {
     const operation = this.begin();
     if (operation === null) return false;
+    this.clearReferenceReturnState();
     await this.dependencies.layout.settle();
     if (!this.isCurrent(operation)) return false;
     return this.restoreReferenceTab(operation, identity);
@@ -634,6 +728,7 @@ export class NavigationCoordinator {
   async openReferencesWorkspace(): Promise<boolean> {
     const operation = this.begin();
     if (operation === null) return false;
+    this.clearReferenceReturnState();
     this.dependencies.dispatch({ type: 'select-workspace-mode', mode: 'references' });
     this.dependencies.layout.revealReferences();
     await this.dependencies.layout.settle();
@@ -652,7 +747,9 @@ export class NavigationCoordinator {
       return false;
     }
     if (this.referenceRestoreIdentity === tab.identity) {
+      this.dependencies.resetReferenceManualScrollIntent();
       const applied = await navigation.applyLocation(tab.settledLocation);
+      this.dependencies.resetReferenceManualScrollIntent();
       if (!this.isCurrent(operation)) return false;
       const settled = applied ? navigation.captureLocation() : null;
       if (!applied || settled === null) {
@@ -672,6 +769,7 @@ export class NavigationCoordinator {
   async closeReference(identity: string): Promise<boolean> {
     const operation = this.begin();
     if (operation === null) return false;
+    this.clearReferenceReturnState();
     const state = this.dependencies.getState();
     const index = state.tabs.findIndex((tab) => tab.identity === identity);
     if (index < 0) return false;
@@ -717,6 +815,7 @@ export class NavigationCoordinator {
   async sendToMain(identity: string): Promise<boolean> {
     const operation = this.begin();
     if (operation === null) return false;
+    this.clearReferenceReturnState();
     const state = this.dependencies.getState();
     if (state.activeTabIdentity !== identity) return false;
     const reference = this.dependencies.getReferenceNavigation();
@@ -1000,6 +1099,8 @@ export class NavigationCoordinator {
 
   replaceDocument(documentGeneration: number): void {
     if (!Number.isSafeInteger(documentGeneration) || documentGeneration < 0) return;
+    this.dependencies.resetReferenceManualScrollIntent();
+    this.clearReferenceReturnState();
     this.operationToken += 1;
     this.documentGeneration = documentGeneration;
     this.lastSearchTargetIdentity = null;
@@ -1023,6 +1124,8 @@ export class NavigationCoordinator {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.dependencies.resetReferenceManualScrollIntent();
+    this.clearReferenceReturnState();
     this.operationToken += 1;
     this.pendingReference = null;
     this.linkRequest = null;
@@ -1040,7 +1143,10 @@ export class NavigationCoordinator {
   ): Promise<PdfViewerLocation | null> {
     await this.dependencies.layout.settle();
     if (!this.isCurrent(operation)) return null;
-    if (!await navigation.applyTarget(target, 'reference-fit-width')) return null;
+    this.dependencies.resetReferenceManualScrollIntent();
+    const applied = await navigation.applyTarget(target, 'reference-fit-width');
+    this.dependencies.resetReferenceManualScrollIntent();
+    if (!applied) return null;
     if (!this.isCurrent(operation)) return null;
     return navigation.captureLocation();
   }
@@ -1124,10 +1230,14 @@ export class NavigationCoordinator {
     navigation: PdfViewerNavigation,
     tab: ReferenceNavigationState['tabs'][number],
   ): Promise<PdfViewerLocation | null> {
+    this.dependencies.resetReferenceManualScrollIntent();
     let applied = await navigation.applyLocation(tab.settledLocation);
+    this.dependencies.resetReferenceManualScrollIntent();
     if (!this.isCurrent(operation)) return null;
     if (!applied) {
+      this.dependencies.resetReferenceManualScrollIntent();
       applied = await navigation.applyTarget(tab.originalTarget, 'reference-fit-width');
+      this.dependencies.resetReferenceManualScrollIntent();
       if (!this.isCurrent(operation)) return null;
     }
     return applied ? navigation.captureLocation() : null;
@@ -1289,6 +1399,67 @@ export class NavigationCoordinator {
     return settledLocation;
   }
 
+  private updateReferenceReturnAvailability(allowEstablish: boolean): void {
+    const state = this.dependencies.getState();
+    const identity = state.activeTabIdentity;
+    const current = this.dependencies.getReferenceReturnState();
+    const tab = identity === null
+      ? null
+      : state.tabs.find((candidate) => candidate.identity === identity) ?? null;
+    const currentMatches = current !== null
+      && current.tabIdentity === identity
+      && current.documentGeneration === state.documentGeneration;
+    if (
+      tab === null
+      || tab.originalTarget.documentGeneration !== state.documentGeneration
+      || current?.pending === true
+    ) {
+      if (!currentMatches || tab === null) this.clearReferenceReturnState();
+      return;
+    }
+    const navigation = this.dependencies.getReferenceNavigation();
+    const visibility = navigation?.targetVisibility(tab.originalTarget) ?? 'unavailable';
+    if (visibility === 'visible') {
+      this.clearReferenceReturnState();
+      return;
+    }
+    if (visibility === 'unavailable') {
+      if (!currentMatches) this.clearReferenceReturnState();
+      return;
+    }
+    if (!allowEstablish && !currentMatches) return;
+    if (currentMatches && current.available && !current.pending) return;
+    this.dependencies.setReferenceReturnState({
+      tabIdentity: tab.identity,
+      documentGeneration: state.documentGeneration,
+      available: true,
+      pending: false,
+    });
+  }
+
+  private failReferenceReturn(
+    operation: Operation,
+    presentation: ReferenceReturnPresentationState,
+  ): false {
+    if (!this.isCurrent(operation)) return false;
+    const state = this.dependencies.getState();
+    if (
+      state.activeTabIdentity === presentation.tabIdentity
+      && state.documentGeneration === presentation.documentGeneration
+      && state.tabs.some((tab) => tab.identity === presentation.tabIdentity)
+    ) {
+      this.dependencies.setReferenceReturnState({ ...presentation, pending: false });
+      this.dependencies.setAnnouncement(REFERENCE_FAILURE);
+    }
+    return false;
+  }
+
+  private clearReferenceReturnState(): void {
+    if (this.dependencies.getReferenceReturnState() !== null) {
+      this.dependencies.setReferenceReturnState(null);
+    }
+  }
+
   private failReference(operation: Operation): false {
     if (!this.isCurrent(operation)) return false;
     const pending = this.pendingReference;
@@ -1304,8 +1475,25 @@ export class NavigationCoordinator {
     preservePendingReference = false,
   ): Operation | null {
     if (!this.generationMatches(documentGeneration)) return null;
+    this.dependencies.resetReferenceManualScrollIntent();
     this.clearLinkRequest();
     this.cancelPendingTransactions(preservePendingReference);
+    return {
+      token: ++this.operationToken,
+      documentGeneration: this.documentGeneration,
+    };
+  }
+
+  private beginReferenceReturn(documentGeneration: number): Operation | null {
+    if (!this.generationMatches(documentGeneration)) return null;
+    const state = this.dependencies.getState();
+    if (
+      state.pendingMainNavigation !== null
+      || state.pendingReferenceSwitch !== null
+      || state.pendingSendToMain !== null
+    ) return null;
+    this.dependencies.resetReferenceManualScrollIntent();
+    this.dependencies.getReferenceNavigation()?.cancelPendingNavigation();
     return {
       token: ++this.operationToken,
       documentGeneration: this.documentGeneration,

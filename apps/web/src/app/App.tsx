@@ -69,6 +69,10 @@ import {
   REFERENCE_PDF_DOCUMENT_ID,
   type PdfViewerScope,
 } from '../pdf/viewer-document-ids.js';
+import {
+  ReferenceManualScrollObserver,
+  subscribeToReferenceManualScroll,
+} from '../pdf/reference-manual-scroll.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
 import type { PdfSearchResult } from '../pdf/pdf-search-model.js';
@@ -152,6 +156,8 @@ export interface AppProps {
   documentGeneration?: number;
   referenceViewportHost?: HTMLElement | null;
   onReferenceDocumentControls?: (controls: ReferenceDocumentController | null) => void;
+  onReferenceManualScroll?: () => void;
+  referenceManualScrollObserver?: ReferenceManualScrollObserver;
   onViewerNavigationInitialized?: (
     scope: PdfViewerScope,
     navigation: PdfViewerNavigation | null,
@@ -201,6 +207,8 @@ export function App({
   documentGeneration = 0,
   referenceViewportHost = null,
   onReferenceDocumentControls,
+  onReferenceManualScroll,
+  referenceManualScrollObserver: providedReferenceManualScrollObserver,
   onViewerNavigationInitialized,
   onOutlineDiscovery,
   onMainDocumentReady,
@@ -225,6 +233,11 @@ export function App({
   const mainNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
+  const ownedReferenceManualScrollObserver = useRef(new ReferenceManualScrollObserver());
+  const referenceManualScrollObserver = providedReferenceManualScrollObserver
+    ?? ownedReferenceManualScrollObserver.current;
+  const onReferenceManualScrollRef = useRef(onReferenceManualScroll);
+  onReferenceManualScrollRef.current = onReferenceManualScroll;
   const [viewerRunway, setViewerRunway] = useState<ViewerRunway>({ right: 0, bottom: 0 });
   const viewerRunwayRef = useRef<ViewerRunway>(viewerRunway);
   const activeDocumentIdRef = useRef<string | null>(null);
@@ -575,7 +588,9 @@ export function App({
     const documentManager = registry
       .getPlugin<DocumentManagerPlugin>(DocumentManagerPlugin.id)
       ?.provides();
+    const scroll = registry.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides();
     if (documentManager) {
+      let unsubscribeReferenceScroll: (() => void) | null = null;
       const initializeMain = (documentId: string) => {
         if (!initializationIsCurrent()) return;
         void loadDocument(documentId).then(() => {
@@ -590,6 +605,9 @@ export function App({
         subscribeToMainDocumentOpened(documentManager, initializeMain),
       );
       const disposeReferenceNavigation = () => {
+        unsubscribeReferenceScroll?.();
+        unsubscribeReferenceScroll = null;
+        referenceManualScrollObserver.clear();
         referenceNavigationRef.current?.dispose();
         referenceNavigationRef.current = null;
         onViewerNavigationInitialized?.('reference', null);
@@ -606,10 +624,25 @@ export function App({
           });
           referenceNavigationRef.current = referenceNavigation;
           onViewerNavigationInitialized?.('reference', referenceNavigation);
+          unsubscribeReferenceScroll = scroll === undefined
+            ? null
+            : subscribeToReferenceManualScroll(
+                scroll,
+                referenceManualScrollObserver,
+                () => {
+                  const viewport = referenceWorkspaceElementRef.current
+                    ?.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
+                  return viewport
+                    ? { left: viewport.scrollLeft, top: viewport.scrollTop }
+                    : null;
+                },
+                () => onReferenceManualScrollRef.current?.(),
+              );
         }),
         documentManager.onDocumentClosed((closedDocumentId) => {
           if (closedDocumentId === REFERENCE_PDF_DOCUMENT_ID) disposeReferenceNavigation();
         }),
+        disposeReferenceNavigation,
       );
       const referenceController = createReferenceDocumentController({
         documentManager,
@@ -621,7 +654,6 @@ export function App({
       onReferenceDocumentControls?.(referenceController);
     }
 
-    const scroll = registry.getPlugin<ScrollPlugin>(ScrollPlugin.id)?.provides();
     if (scroll) {
       subscriptions.current.push(
         scroll.onPageChange(({ documentId, pageNumber }) => {
@@ -839,6 +871,7 @@ export function App({
       onViewerInteraction={emit}
       referenceViewportHost={referenceViewportHost}
       onReferenceViewportElement={setReferenceWorkspaceElement}
+      onReferenceScrollIntent={(position) => referenceManualScrollObserver.arm(position)}
     />
   );
   const workspaceWithStatus = (

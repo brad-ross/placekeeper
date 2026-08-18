@@ -264,6 +264,7 @@ function navigationHarness(options: {
   initialPageTop?: number;
   pageRotation?: Rotation;
   documentRotation?: Rotation;
+  cropOrigin?: { readonly x: number; readonly y: number };
   updateGeometry?: boolean;
   viewportWidth?: number;
   throwViewportScroll?: boolean;
@@ -523,7 +524,16 @@ function navigationHarness(options: {
     pages: (options.farTargetInitiallyUnmounted || options.staleCurrentPageWithThirdVisible
       ? [0, 1, 2]
       : [0]).map((index) => ({
-      index, size: page, rotation: options.pageRotation ?? Rotation.Degree0, objectNumber: index + 1,
+      index,
+      size: page,
+      rotation: options.pageRotation ?? Rotation.Degree0,
+      objectNumber: index + 1,
+      boxes: {
+        crop: {
+          left: options.cropOrigin?.x ?? 0,
+          bottom: options.cropOrigin?.y ?? 0,
+        },
+      },
     })),
   };
   const coreState = () => ({
@@ -591,6 +601,73 @@ function navigationHarness(options: {
 }
 
 describe('viewer navigation adapter', () => {
+  it.each([
+    ['XYZ', target(PdfZoomMode.XYZ, [300, 400, 2])],
+    ['fit-page', target(PdfZoomMode.FitPage)],
+    ['fit-horizontal', target(PdfZoomMode.FitHorizontal, [400])],
+    ['fit-vertical', target(PdfZoomMode.FitVertical, [300])],
+    ['fit-rectangle', target(PdfZoomMode.FitRectangle, [200, 300, 400, 500])],
+  ] as const)('reports a mounted %s semantic anchor inside or outside the effective viewport', (
+    _name,
+    destination,
+  ) => {
+    const harness = navigationHarness();
+
+    expect(harness.navigation.targetVisibility(destination)).toBe('visible');
+    harness.pageRect.top = -801;
+    expect(harness.navigation.targetVisibility(destination)).toBe('outside');
+  });
+
+  it('uses rotation, scrollbar client boxes, runway clipping, and edge tolerance for visibility', () => {
+    const harness = navigationHarness({
+      initialViewportWidth: 620,
+      classicScrollbarWidth: 20,
+      pageRotation: Rotation.Degree90,
+      runway: { right: 200, bottom: 0 },
+    });
+    const destination = target(PdfZoomMode.XYZ, [300, 400, 1]);
+
+    harness.pageRect.left = 121.5;
+    harness.pageRect.top = -225;
+    expect(harness.navigation.targetVisibility(destination)).toBe('visible');
+    harness.pageRect.left = 121.6;
+    expect(harness.navigation.targetVisibility(destination)).toBe('outside');
+  });
+
+  it('resolves cropped destination coordinates before testing the displayed semantic anchor', () => {
+    const harness = navigationHarness({ cropOrigin: { x: 100, y: 200 } });
+    const destination = target(PdfZoomMode.XYZ, [400, 600, 1]);
+
+    expect(harness.navigation.targetVisibility(destination)).toBe('visible');
+    harness.pageRect.top = -801;
+    expect(harness.navigation.targetVisibility(destination)).toBe('outside');
+  });
+
+  it('reports unmounted live targets outside and invalid or unusable lifecycle states unavailable', () => {
+    const unmounted = navigationHarness({ farTargetInitiallyUnmounted: true });
+    const distantTarget = { ...target(PdfZoomMode.FitPage), pageIndex: 2 };
+    expect(unmounted.navigation.targetVisibility(distantTarget)).toBe('outside');
+
+    const unready = navigationHarness({ initiallyUnreadyPage: true });
+    expect(unready.navigation.targetVisibility(target(PdfZoomMode.FitPage))).toBe('unavailable');
+    expect(unmounted.navigation.targetVisibility({
+      ...target(PdfZoomMode.XYZ, [0, 0]),
+      zoom: { mode: PdfZoomMode.XYZ, params: [Number.NaN, 0, 1] },
+    })).toBe('unavailable');
+    expect(unmounted.navigation.targetVisibility({
+      ...target(PdfZoomMode.FitPage),
+      documentGeneration: 3,
+    })).toBe('unavailable');
+
+    unmounted.navigation.replaceDocument(5);
+    expect(unmounted.navigation.targetVisibility(distantTarget)).toBe('unavailable');
+    unmounted.navigation.dispose();
+    expect(unmounted.navigation.targetVisibility({
+      ...distantTarget,
+      documentGeneration: 5,
+    })).toBe('unavailable');
+  });
+
   it('fits the most-visible page to the viewport minus two standard gaps', async () => {
     const harness = navigationHarness({ viewportGap: 10 });
 

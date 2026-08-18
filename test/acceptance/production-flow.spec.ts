@@ -1287,6 +1287,183 @@ test("follows a PDF link in the same reference tab without moving main", async (
     .toBe(mainBefore.forwardDisabled);
 });
 
+test("returns an explored reference without moving main or browser history", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFreshProductionFixture(page, referencePdf, "Reference return launch failed");
+
+  const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
+  const mainViewport = mainWorkspace.locator("[data-viewer-framing-viewport]");
+  await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
+  const primaryLink = mainWorkspace.getByRole("button", {
+    name: "Open PDF link to Primary result, Page 2",
+  });
+  await openLinkInReferences(page, primaryLink);
+
+  const primaryTab = page.getByRole("tab", { name: /Primary result/u });
+  await expectReferenceReady(page, primaryTab);
+  const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
+  const referenceViewport = referenceWorkspace.locator("[data-viewer-framing-viewport]");
+  const originPage = referenceWorkspace.locator("[data-page-index='1']");
+  const returnControl = page.getByRole("button", { name: "Return to reference" });
+  await expect(originPage).toBeVisible();
+  await expect(returnControl).toHaveCount(0);
+
+  // Seed a second tab before exploration so the returned framing can be verified across a switch.
+  const detailLink = referenceWorkspace.getByRole("button", {
+    name: "Open PDF link to Target-to-target detail link, Page 3",
+  });
+  await detailLink.evaluate((element) => element.scrollIntoView({ block: "center" }));
+  await openLinkInReferences(page, detailLink);
+  const detailTab = page.getByRole("tab", { name: /Target-to-target detail link/u });
+  await expectReferenceReady(page, detailTab);
+  await primaryTab.click();
+  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+  await expect(originPage).toBeVisible();
+
+  const initialOriginWidth = await originPage.boundingBox().then((bounds) => bounds?.width ?? 0);
+  expect(initialOriginWidth).toBeGreaterThan(0);
+  const mainBefore = {
+    page: await page.getByLabel("Current page").textContent(),
+    zoom: await page.getByLabel("Zoom level").textContent(),
+    scroll: await mainViewport.evaluate((element) => ({
+      left: element.scrollLeft,
+      top: element.scrollTop,
+    })),
+    url: page.url(),
+    browserHistory: await page.evaluate(() => ({
+      length: history.length,
+      state: JSON.stringify(history.state),
+    })),
+    backDisabled: await page.getByRole("button", { name: "Back in document history" }).isDisabled(),
+    forwardDisabled: await page.getByRole("button", { name: "Forward in document history" }).isDisabled(),
+  };
+
+  await referenceViewport.hover();
+  const scrollBeforeWheel = await referenceViewport.evaluate((element) => element.scrollTop);
+  await page.mouse.wheel(0, 24);
+  await expect.poll(() => referenceViewport.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(scrollBeforeWheel);
+  await expect(returnControl).toHaveCount(0);
+
+  // Continue with real wheel input until the semantic origin leaves the viewport.
+  for (let step = 0; step < 3; step += 1) {
+    const scrollBeforeStep = await referenceViewport.evaluate((element) => element.scrollTop);
+    await page.mouse.wheel(0, 480);
+    await expect.poll(() => referenceViewport.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(scrollBeforeStep);
+  }
+  await expect(returnControl).toBeVisible();
+
+  let previousReferenceScroll = -1;
+  let stableReferenceScrollSamples = 0;
+  await expect.poll(async () => {
+    const current = await referenceViewport.evaluate((element) => element.scrollTop);
+    stableReferenceScrollSamples = Math.abs(current - previousReferenceScroll) < 0.5
+      ? stableReferenceScrollSamples + 1
+      : 0;
+    previousReferenceScroll = current;
+    return stableReferenceScrollSamples;
+  }).toBeGreaterThanOrEqual(2);
+
+  await page.getByRole("button", { name: "Return to reference" }).click();
+  await expect(page.locator(".review-workspace__status")).toHaveText("Returned to reference.");
+  await expect(returnControl).toHaveCount(0);
+  await expect(originPage).toBeFocused();
+  await expect(originPage).toBeVisible();
+  await expect.poll(() => originPage.boundingBox().then((bounds) => bounds?.width ?? 0))
+    .toBeCloseTo(initialOriginWidth, 0);
+
+  const returnedLocation = await Promise.all([
+    referenceViewport.evaluate((element) => element.scrollTop),
+    originPage.boundingBox(),
+    referenceViewport.boundingBox(),
+  ]).then(([scrollTop, pageBounds, viewportBounds]) => {
+    if (!pageBounds || !viewportBounds) throw new Error("Returned Reference geometry is unavailable.");
+    return {
+      scrollTop,
+      relativeTop: pageBounds.y - viewportBounds.y,
+    };
+  });
+  await detailTab.click();
+  await expect(detailTab).toHaveAttribute("aria-selected", "true");
+  await primaryTab.click();
+  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+  await expect(returnControl).toHaveCount(0);
+  await expect.poll(async () => {
+    const [scrollTop, pageBounds, viewportBounds] = await Promise.all([
+      referenceViewport.evaluate((element) => element.scrollTop),
+      originPage.boundingBox(),
+      referenceViewport.boundingBox(),
+    ]);
+    if (!pageBounds || !viewportBounds) return Number.POSITIVE_INFINITY;
+    return Math.max(
+      Math.abs(scrollTop - returnedLocation.scrollTop),
+      Math.abs((pageBounds.y - viewportBounds.y) - returnedLocation.relativeTop),
+    );
+  }).toBeLessThan(3);
+
+  expect(await page.getByLabel("Current page").textContent()).toBe(mainBefore.page);
+  expect(await page.getByLabel("Zoom level").textContent()).toBe(mainBefore.zoom);
+  expect(await mainViewport.evaluate((element) => ({
+    left: element.scrollLeft,
+    top: element.scrollTop,
+  }))).toEqual(mainBefore.scroll);
+  expect(page.url()).toBe(mainBefore.url);
+  expect(await page.evaluate(() => ({
+    length: history.length,
+    state: JSON.stringify(history.state),
+  }))).toEqual(mainBefore.browserHistory);
+  expect(await page.getByRole("button", { name: "Back in document history" }).isDisabled())
+    .toBe(mainBefore.backDisabled);
+  expect(await page.getByRole("button", { name: "Forward in document history" }).isDisabled())
+    .toBe(mainBefore.forwardDisabled);
+});
+
+test("returns an explored reference after right and narrow layout reflow", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFreshProductionFixture(page, referencePdf, "Reference return reflow launch failed");
+  const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
+  await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
+  await openLinkInReferences(page, mainWorkspace.getByRole("button", {
+    name: "Open PDF link to Primary result, Page 2",
+  }));
+
+  const primaryTab = page.getByRole("tab", { name: /Primary result/u });
+  await expectReferenceReady(page, primaryTab);
+  const stage = page.locator("[data-review-stage]");
+  const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
+  const referenceViewport = referenceWorkspace.locator("[data-viewer-framing-viewport]");
+  const originPage = referenceWorkspace.locator("[data-page-index='1']");
+  const returnControl = page.getByRole("button", { name: "Return to reference" });
+  const driftFromOrigin = async () => {
+    await referenceViewport.hover();
+    for (let step = 0; step < 6 && await returnControl.count() === 0; step += 1) {
+      const before = await referenceViewport.evaluate((element) => element.scrollTop);
+      await page.mouse.wheel(0, 480);
+      await expect.poll(() => referenceViewport.evaluate((element) => element.scrollTop))
+        .toBeGreaterThan(before);
+    }
+    await expect(returnControl).toBeVisible();
+  };
+  const returnAndExpectFocusedOrigin = async () => {
+    await returnControl.click();
+    await expect(page.locator(".review-workspace__status")).toHaveText("Returned to reference.");
+    await expect(returnControl).toHaveCount(0);
+    await expect(originPage).toBeVisible();
+    await expect(originPage).toBeFocused();
+  };
+
+  await page.getByRole("button", { name: "Move References to right" }).click();
+  await expect(stage).toHaveAttribute("data-reference-layout", "wide-right");
+  await driftFromOrigin();
+  await returnAndExpectFocusedOrigin();
+
+  await page.setViewportSize({ width: 760, height: 900 });
+  await expect(stage).toHaveAttribute("data-reference-layout", "narrow-unified");
+  await driftFromOrigin();
+  await returnAndExpectFocusedOrigin();
+});
+
 test("keeps main PDF link hit targets below an open References viewer", async ({ page }) => {
   await page.setViewportSize({ width: 1367, height: 1324 });
   await openFreshProductionFixture(page, referencePdf, "Reference layering launch failed");

@@ -12,6 +12,7 @@ import { ZoomGestureWrapper } from '@embedpdf/plugin-zoom/react';
 import { useMemo, useRef } from 'react';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { PdfSearchResult } from './pdf-search-model.js';
+import type { ReferenceScrollPosition } from './reference-manual-scroll.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
 import { combinePageRotation, positionOwnedRect } from './owned-overlay.js';
 import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
@@ -64,6 +65,7 @@ export interface PdfWorkspaceProps {
   onViewerInteraction?: (event: ViewerInteractionEvent) => void;
   referenceViewportHost?: HTMLElement | null;
   onReferenceViewportElement?: (element: HTMLDivElement | null) => void;
+  onReferenceScrollIntent?: (position: ReferenceScrollPosition) => void;
   searchResults?: readonly PdfSearchResult[];
 }
 
@@ -110,6 +112,7 @@ export function PdfWorkspace({
   onViewerInteraction,
   referenceViewportHost = null,
   onReferenceViewportElement,
+  onReferenceScrollIntent,
   searchResults = [],
 }: PdfWorkspaceProps) {
   const pressedPrimaryPointers = useRef(new Map<number, HTMLDivElement>());
@@ -475,6 +478,7 @@ export function PdfWorkspace({
                 searchResultsByPage={searchResultsByPage}
                 {...(onViewerInteraction === undefined ? {} : { onInteraction: onViewerInteraction })}
                 {...(onReferenceViewportElement === undefined ? {} : { onViewportElement: onReferenceViewportElement })}
+                {...(onReferenceScrollIntent === undefined ? {} : { onScrollIntent: onReferenceScrollIntent })}
               />
             ) : null}
             </>

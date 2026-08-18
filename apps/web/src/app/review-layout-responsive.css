@@ -200,6 +200,11 @@
     min-height: var(--review-control-touch);
     flex-basis: var(--review-control-touch);
   }
+
+  .reference-panel__return {
+    inline-size: var(--review-control-touch);
+    min-height: var(--review-control-touch);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

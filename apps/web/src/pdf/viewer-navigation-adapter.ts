@@ -6,6 +6,7 @@ import {
   transformPosition,
   transformSize,
   type PdfPageObject,
+  type Position,
 } from '@embedpdf/models';
 import { ScrollPlugin, type ScrollScope } from '@embedpdf/plugin-scroll';
 import { ViewportPlugin, type ViewportScope } from '@embedpdf/plugin-viewport';
@@ -28,6 +29,7 @@ import {
   pdfBottomOriginPointToNaturalAnchor,
   type PdfNaturalPageSize,
   type PdfNaturalPoint,
+  type PdfTargetVisibility,
   type PdfViewerLocation,
   type ViewerNavigationControls,
 } from './viewer-navigation.js';
@@ -62,6 +64,8 @@ export interface ViewerNavigationAdapterOptions {
 export interface PdfViewerNavigation extends ViewerNavigationControls {
   /** Resolves a semantic target without moving the viewer. */
   resolveTarget(target: PdfNavigationTarget): PdfViewerLocation | null;
+  /** Reports whether a live semantic target occupies the usable viewport. */
+  targetVisibility(target: PdfNavigationTarget): PdfTargetVisibility;
   /** Captures neutral page geometry without exposing viewer-library state. */
   captureDocumentOrderPages(): readonly PdfDocumentOrderPage[] | null;
   applyTarget(
@@ -546,6 +550,22 @@ export function createViewerNavigation(
     return { page, viewportElement, viewportRect, pageRect, rotation, scale };
   };
 
+  const clientPointForLocation = (
+    geometry: NonNullable<ReturnType<typeof pageGeometry>>,
+    location: PdfViewerLocation,
+  ): Position => {
+    const transformed = transformPosition(
+      geometry.page.size,
+      location.anchor,
+      geometry.rotation,
+      geometry.scale,
+    );
+    return {
+      x: geometry.pageRect.left + transformed.x,
+      y: geometry.pageRect.top + transformed.y,
+    };
+  };
+
   const hasUsablePageTree = (viewer: ActiveViewer): boolean => {
     if (viewer.pages.length === 0) return false;
     const root = options.root();
@@ -682,17 +702,13 @@ export function createViewerNavigation(
   ): boolean => {
     const geometry = pageGeometry(viewer, location.pageIndex);
     if (!geometry) return false;
-    const { viewportRect, pageRect, page, rotation, scale } = geometry;
+    const { viewportRect, pageRect, page } = geometry;
     if (
       location.anchor.x > page.size.width
       || location.anchor.y > page.size.height
       || Math.abs(viewer.zoom.getState().currentZoomLevel - location.zoom) > zoomTolerance
     ) return false;
-    const transformed = transformPosition(page.size, location.anchor, rotation, scale);
-    const actual = {
-      x: pageRect.left + transformed.x,
-      y: pageRect.top + transformed.y,
-    };
+    const actual = clientPointForLocation(geometry, location);
     const expected = {
       x: viewportRect.left + viewportRect.width * location.alignment.xPercent / 100,
       y: viewportRect.top + viewportRect.height * location.alignment.yPercent / 100,
@@ -946,18 +962,11 @@ export function createViewerNavigation(
       requireTargetScale
       && Math.abs(geometry.scale - location.zoom) > zoomTolerance
     ) return false;
-    const transformedAnchor = transformPosition(
-      geometry.page.size,
-      location.anchor,
-      geometry.rotation,
-      geometry.scale,
-    );
-    const horizontalCorrection = geometry.pageRect.left
-      + transformedAnchor.x
+    const clientAnchor = clientPointForLocation(geometry, location);
+    const horizontalCorrection = clientAnchor.x
       - geometry.viewportRect.left
       - geometry.viewportRect.width * location.alignment.xPercent / 100;
-    const verticalCorrection = geometry.pageRect.top
-      + transformedAnchor.y
+    const verticalCorrection = clientAnchor.y
       - geometry.viewportRect.top
       - geometry.viewportRect.height * location.alignment.yPercent / 100;
     if (
@@ -1073,15 +1082,10 @@ export function createViewerNavigation(
         // Both mutations occur in one task, so the viewer never paints this
         // preparatory position as a separate state.
         positionFittedPage(false);
-        const transformedAnchor = transformPosition(
-          page.size,
-          location.anchor,
-          rotation,
-          geometry.scale,
-        );
+        const clientAnchor = clientPointForLocation(geometry, location);
         const currentAnchorPosition = {
-          x: geometry.pageRect.left + transformedAnchor.x - geometry.viewportRect.left,
-          y: geometry.pageRect.top + transformedAnchor.y - geometry.viewportRect.top,
+          x: clientAnchor.x - geometry.viewportRect.left,
+          y: clientAnchor.y - geometry.viewportRect.top,
         };
         const targetAnchorPosition = {
           x: geometry.viewportRect.width * location.alignment.xPercent / 100,
@@ -1224,6 +1228,29 @@ export function createViewerNavigation(
     }, policy);
   };
 
+  const targetVisibility = (target: PdfNavigationTarget): PdfTargetVisibility => {
+    const viewer = activeViewer();
+    if (viewer === null) return 'unavailable';
+    const location = resolveTarget(viewer, target);
+    if (location === null || !hasUsablePageTree(viewer)) return 'unavailable';
+    const pageElement = options.root()
+      ?.querySelector<HTMLElement>(pageSelector(location.pageIndex)) ?? null;
+    if (pageElement === null) return 'outside';
+    const geometry = pageGeometry(viewer, location.pageIndex);
+    if (geometry === null) return 'unavailable';
+    if (
+      location.anchor.x > geometry.page.size.width
+      || location.anchor.y > geometry.page.size.height
+    ) return 'unavailable';
+    const clientAnchor = clientPointForLocation(geometry, location);
+    return clientAnchor.x >= geometry.viewportRect.left - coordinateTolerance
+      && clientAnchor.x <= geometry.viewportRect.right + coordinateTolerance
+      && clientAnchor.y >= geometry.viewportRect.top - coordinateTolerance
+      && clientAnchor.y <= geometry.viewportRect.bottom + coordinateTolerance
+      ? 'visible'
+      : 'outside';
+  };
+
   const waitForTargetLocation = async (
     viewer: ActiveViewer,
     target: PdfNavigationTarget,
@@ -1340,6 +1367,7 @@ export function createViewerNavigation(
       const viewer = activeViewer();
       return viewer ? resolveTarget(viewer, target) : null;
     },
+    targetVisibility,
     applyLocation,
     fitToWidth,
     fitToWidthReady() {

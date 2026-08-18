@@ -388,6 +388,121 @@ describe('shared reference workspace', () => {
     expect(proofActive).not.toContain('data-workspace-focus-token="reference-close:lemma"');
   });
 
+  it('overlays an icon-only Reference return control immediately before the viewport host', () => {
+    const onReturn = vi.fn();
+    const html = renderToStaticMarkup(
+      <ReferenceWorkspace
+        open
+        mode="references"
+        presentation="right"
+        modes={['references']}
+        tabs={[{ identity: 'lemma', label: 'Lemma A.7', pageContext: 'Page 18' }]}
+        activeTabIdentity="lemma"
+        referenceReturn={{ tabIdentity: 'lemma', available: true, pending: false }}
+        onReferenceReturn={onReturn}
+        onModeChange={() => undefined}
+        onReferenceTabActivate={() => undefined}
+        onReferenceTabClose={() => undefined}
+        onSendToMain={() => undefined}
+        onRetryReference={() => undefined}
+        onReferenceViewportHost={() => undefined}
+      />,
+    );
+
+    expect(html).toMatch(
+      /class="reference-panel__return"[\s\S]*data-reference-return="lemma"[\s\S]*lucide-locate-fixed[\s\S]*<\/button>[\s\S]*class="reference-panel__viewport"/u,
+    );
+    expect(html).toContain('aria-label="Return to reference"');
+    expect(html).toContain('title="Return to reference"');
+    expect(html).toContain('aria-hidden="true"');
+    expect(html).toContain('lucide-locate-fixed');
+    expect(html).not.toMatch(/>Return to reference</u);
+    expect(html).not.toContain('aria-busy="true"');
+
+  });
+
+  it('keeps a pending Reference return mounted, focusable, and busy', () => {
+    const html = renderToStaticMarkup(
+      <ReferenceWorkspace
+        open
+        mode="references"
+        presentation="bottom"
+        modes={['references']}
+        tabs={[{ identity: 'lemma', label: 'Lemma A.7', pageContext: 'Page 18' }]}
+        activeTabIdentity="lemma"
+        referenceReturn={{ tabIdentity: 'lemma', available: true, pending: true }}
+        onReferenceReturn={() => undefined}
+        onModeChange={() => undefined}
+        onReferenceTabActivate={() => undefined}
+        onReferenceTabClose={() => undefined}
+        onSendToMain={() => undefined}
+        onRetryReference={() => undefined}
+        onReferenceViewportHost={() => undefined}
+      />,
+    );
+
+    expect(html).toMatch(/data-reference-return="lemma"[^>]*aria-busy="true"[^>]*aria-disabled="true"/u);
+    expect(html).not.toMatch(/data-reference-return="lemma"[^>]*\sdisabled(?:=|\s|>)/u);
+    expect(html).toContain('aria-label="Return to reference"');
+    expect(html).toContain('title="Return to reference"');
+    expect(html).not.toMatch(/>Return to reference</u);
+  });
+
+  it.each([
+    ['origin visible', { tabIdentity: 'lemma', available: false, pending: false }, null],
+    ['another tab', { tabIdentity: 'proof', available: true, pending: false }, null],
+    ['no active tab', { tabIdentity: 'lemma', available: true, pending: false }, null],
+  ] as const)('hides the Reference return control for %s', (_label, referenceReturn, pendingReference) => {
+    const activeTabIdentity = _label === 'no active tab' ? null : 'lemma';
+    const html = renderToStaticMarkup(
+      <ReferenceWorkspace
+        open
+        mode="references"
+        presentation="right"
+        modes={['references']}
+        tabs={activeTabIdentity === null ? [] : [
+          { identity: 'lemma', label: 'Lemma A.7', pageContext: 'Page 18' },
+        ]}
+        activeTabIdentity={activeTabIdentity}
+        referenceReturn={referenceReturn}
+        pendingReference={pendingReference}
+        onReferenceReturn={() => undefined}
+        onModeChange={() => undefined}
+        onReferenceTabActivate={() => undefined}
+        onReferenceTabClose={() => undefined}
+        onSendToMain={() => undefined}
+        onRetryReference={() => undefined}
+        onReferenceViewportHost={() => undefined}
+      />,
+    );
+
+    expect(html).not.toContain('data-reference-return');
+  });
+
+  it.each(['loading', 'error'] as const)('hides the Reference return control while %s', (status) => {
+    const html = renderToStaticMarkup(
+      <ReferenceWorkspace
+        open
+        mode="references"
+        presentation="right"
+        modes={['references']}
+        tabs={[{ identity: 'lemma', label: 'Lemma A.7', pageContext: 'Page 18' }]}
+        activeTabIdentity="lemma"
+        referenceReturn={{ tabIdentity: 'lemma', available: true, pending: false }}
+        pendingReference={{ status, label: 'Proof', pageContext: 'Page 31' }}
+        onReferenceReturn={() => undefined}
+        onModeChange={() => undefined}
+        onReferenceTabActivate={() => undefined}
+        onReferenceTabClose={() => undefined}
+        onSendToMain={() => undefined}
+        onRetryReference={() => undefined}
+        onReferenceViewportHost={() => undefined}
+      />,
+    );
+
+    expect(html).not.toContain('data-reference-return');
+  });
+
   it('does not expose selected-tab actions while a reference is pending', () => {
     const html = renderToStaticMarkup(
       <ReferenceWorkspace

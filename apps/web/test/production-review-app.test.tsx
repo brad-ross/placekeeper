@@ -6,6 +6,7 @@ import { createReviewState } from "../../../packages/core/src/review-model.js";
 import {
   initiallyPortableItemIds,
   ProductionReviewApp,
+  referenceReturnForActiveTab,
   visibleCodexContext,
 } from "../src/app/ProductionReviewApp.js";
 import { SaveDestinationDialog } from "../src/save/SaveDestinationDialog.js";
@@ -15,6 +16,35 @@ import {
 } from "../src/review/annotation-outline-context.js";
 
 describe("one production review tree", () => {
+  it("exposes Reference return state only for the current tab and document generation", () => {
+    const presentation = {
+      tabIdentity: "reference-a",
+      documentGeneration: 4,
+      available: true,
+      pending: true,
+    } as const;
+    expect(referenceReturnForActiveTab({
+      activeTabIdentity: "reference-a",
+      documentGeneration: 4,
+    }, presentation)).toBe(presentation);
+    expect(referenceReturnForActiveTab({
+      activeTabIdentity: "reference-b",
+      documentGeneration: 4,
+    }, presentation)).toBeNull();
+    expect(referenceReturnForActiveTab({
+      activeTabIdentity: "reference-a",
+      documentGeneration: 5,
+    }, presentation)).toBeNull();
+    expect(referenceReturnForActiveTab({
+      activeTabIdentity: "reference-a",
+      documentGeneration: 4,
+    }, null)).toBeNull();
+    expect(referenceReturnForActiveTab({
+      activeTabIdentity: "reference-a",
+      documentGeneration: 4,
+    }, { ...presentation, available: false })).toBeNull();
+  });
+
   it("keeps clean imported review items portable without an active save destination", () => {
     const state = {
       ...createReviewState({

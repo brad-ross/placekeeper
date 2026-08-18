@@ -9,7 +9,10 @@ import {
   type ViewerControlsSnapshot,
 } from '../../../apps/web/src/pdf/viewer-controls.js';
 import type { ReviewItem, ReviewState } from '../../../packages/core/src/review-model.js';
-import type { ReferenceWorkspaceTab } from '../../../apps/web/src/review/ReferenceWorkspace.js';
+import type {
+  ReferenceReturnControlState,
+  ReferenceWorkspaceTab,
+} from '../../../apps/web/src/review/ReferenceWorkspace.js';
 import {
   createReferenceNavigationState,
   reduceReferenceNavigation,
@@ -41,6 +44,7 @@ export interface VisualScenario {
   readonly viewerState: ViewerControlsSnapshot;
   readonly referenceNavigation?: ReferenceNavigationState;
   readonly referenceTabs?: readonly ReferenceWorkspaceTab[];
+  readonly referenceReturn?: ReferenceReturnControlState;
 }
 
 const timestamp = '2026-08-09T12:00:00.000Z';
@@ -275,6 +279,13 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
     ...(name === 'reference-layout' ? {
       referenceNavigation: visualReferenceNavigation,
       referenceTabs: visualReferenceTabs,
+      ...(parameters.get('referenceReturn') === 'visible' ? {
+        referenceReturn: {
+          tabIdentity: 'visual-reference-lemma',
+          available: true,
+          pending: false,
+        },
+      } : {}),
     } : {}),
   };
   return {

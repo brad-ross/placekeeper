@@ -879,15 +879,57 @@
 }
 
 .reference-panel {
+  position: relative;
   display: grid;
   min-width: 0;
   min-height: 0;
   flex: 1;
   grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
+  isolation: isolate;
+}
+
+.reference-panel__return {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  left: 12px;
+  display: inline-flex;
+  inline-size: var(--review-control-compact);
+  min-height: var(--review-control-compact);
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--review-border-strong);
+  border-radius: var(--review-radius-round);
+  color: var(--review-ink-primary);
+  background: color-mix(in srgb, var(--review-surface-panel) 94%, transparent);
+  box-shadow: 0 2px 7px rgb(24 27 23 / 12%);
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.reference-panel__return:hover:not([aria-disabled="true"]) {
+  border-color: var(--review-focus);
+  background: var(--review-surface-interactive);
+}
+
+.reference-panel__return[aria-disabled="true"] {
+  opacity: 0.68;
+  cursor: wait;
+}
+
+.reference-panel__return:focus-visible {
+  outline: 3px solid var(--review-focus);
+  outline-offset: 2px;
 }
 
 .reference-panel__viewport {
+  position: relative;
+  z-index: 0;
   grid-area: 1 / 1;
   min-width: 0;
   min-height: 0;

@@ -55,6 +55,7 @@ import {
   ReferenceWorkspace,
   WORKSPACE_MODES,
   type PendingReferencePanel,
+  type ReferenceReturnControlState,
   type ReferenceWorkspaceTab,
 } from '../review/ReferenceWorkspace.js';
 import { ReviewChrome } from '../review/ReviewChrome.js';
@@ -174,6 +175,7 @@ export interface ReviewShellProps {
   navigationState?: ReferenceNavigationState;
   referenceTabs?: readonly ReferenceWorkspaceTab[];
   pendingReference?: PendingReferencePanel | null;
+  referenceReturn?: ReferenceReturnControlState | null;
   outlineDiscovery?: PdfOutlineDiscovery;
   annotationOutlineLabels?: AnnotationOutlineLabels;
   currentOutlineItemId?: string | null;
@@ -191,6 +193,7 @@ export interface ReviewShellProps {
   onReferenceTabClose?(identity: string): void;
   onReferenceSendToMain?(identity: string): void;
   onReferenceRetry?(): void;
+  onReferenceReturn?(identity: string): void;
   onOutlineActivate?(item: PdfOutlineItem): void;
   onOutlineReference?(item: PdfOutlineItem): void;
   onReferenceViewportHost?(element: HTMLDivElement | null): void;
@@ -1116,6 +1119,7 @@ export function ReviewShell(props: ReviewShellProps) {
             tabs={referenceTabs}
             activeTabIdentity={navigation.activeTabIdentity}
             {...(props.pendingReference === undefined ? {} : { pendingReference: props.pendingReference })}
+            {...(props.referenceReturn === undefined ? {} : { referenceReturn: props.referenceReturn })}
             announcement={props.navigationAnnouncement ?? announcement}
             onModeChange={selectWorkspaceMode}
             onReferenceTabActivate={(identity) => props.onReferenceTabActivate?.(identity)}
@@ -1137,6 +1141,9 @@ export function ReviewShell(props: ReviewShellProps) {
             }}
             onSendToMain={(identity) => props.onReferenceSendToMain?.(identity)}
             onRetryReference={() => props.onReferenceRetry?.()}
+            {...(props.onReferenceReturn === undefined
+              ? {}
+              : { onReferenceReturn: props.onReferenceReturn })}
             onReferenceViewportHost={props.onReferenceViewportHost ?? ignoreReferenceViewportHost}
             onModeFocusTokenChange={rememberWorkspaceModeFocus}
           />

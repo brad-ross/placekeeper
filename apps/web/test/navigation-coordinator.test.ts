@@ -13,6 +13,7 @@ import {
   NavigationCoordinator,
   resolveContainingOutlineItem,
   resolveCurrentOutlineItemId,
+  type ReferenceReturnPresentationState,
   type OutlineTargetOrderLocation,
   type NavigationCoordinatorDependencies,
 } from '../src/review/navigation-coordinator.js';
@@ -20,6 +21,7 @@ import type { ReviewLocationHistoryPort } from '../src/review/review-location-hi
 import {
   createReferenceNavigationState,
   reduceReferenceNavigation,
+  type ReferenceNavigationAction,
   type ReferenceNavigationState,
 } from '../src/review/reference-navigation-state.js';
 
@@ -62,6 +64,7 @@ function navigation(initial = location(0)) {
       captureLocation: vi.fn<() => PdfViewerLocation | null>(() => current),
       captureDocumentOrderPages: vi.fn(() => []),
       resolveTarget: vi.fn((value: PdfNavigationTarget) => location(value.pageIndex)),
+      targetVisibility: vi.fn<PdfViewerNavigation['targetVisibility']>(() => 'visible'),
       applyTarget: vi.fn(async (value: PdfNavigationTarget) => {
         current = location(value.pageIndex);
         return true;
@@ -121,7 +124,12 @@ function harness(options: {
   let state: ReferenceNavigationState = createReferenceNavigationState(1);
   let referencesOpen = false;
   let pending: Parameters<NavigationCoordinatorDependencies['setPendingReference']>[0] = null;
+  let referenceReturn: ReferenceReturnPresentationState | null = null;
   let announcement = '';
+  const setAnnouncement = vi.fn((value: string) => { announcement = value; });
+  const dispatch = vi.fn((action: ReferenceNavigationAction) => {
+    state = reduceReferenceNavigation(state, action);
+  });
   const main = navigation(location(0));
   const reference = navigation(location(2));
   const controller: ReferenceDocumentController = {
@@ -133,7 +141,7 @@ function harness(options: {
   };
   const dependencies: NavigationCoordinatorDependencies = {
     getState: () => state,
-    dispatch: (action) => { state = reduceReferenceNavigation(state, action); },
+    dispatch,
     getMainNavigation: () => main.controls,
     getReferenceNavigation: () => reference.controls,
     waitForReferenceNavigation: async () => reference.controls,
@@ -152,8 +160,11 @@ function harness(options: {
       referenceRailFocusToken: vi.fn(() => 'rail:bottom-references'),
     },
     setPendingReference: (value) => { pending = value; },
+    getReferenceReturnState: () => referenceReturn,
+    setReferenceReturnState: (value) => { referenceReturn = value; },
+    resetReferenceManualScrollIntent: vi.fn(),
     setLinkActionRequest: vi.fn(),
-    setAnnouncement: (value) => { announcement = value; },
+    setAnnouncement,
     focusReferenceTab: vi.fn(() => true),
     getOutlineDiscovery: () => ({ status: 'loaded-empty', documentGeneration: state.documentGeneration }),
     setCurrentOutlineItemId: vi.fn(),
@@ -172,6 +183,7 @@ function harness(options: {
     referencesOpen: () => referencesOpen,
     reopenReferences: () => { referencesOpen = true; },
     pending: () => pending,
+    referenceReturn: () => referenceReturn,
     announcement: () => announcement,
   };
 }
@@ -737,6 +749,143 @@ describe('document-scoped navigation coordinator', () => {
       .toHaveBeenCalledWith(target(2), 'reference-fit-width');
     expect(run.state().activeTabIdentity).toBe(target(2).identity);
     expect(run.announcement()).toBe('Reference active.');
+  });
+
+  it('publishes identity-scoped return availability only after manual Reference drift', async () => {
+    const run = harness();
+    const original = target(2);
+    await run.coordinator.openReference(original, { label: 'A', pageContext: 'Page 3' });
+
+    vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('outside');
+    run.coordinator.observeReferenceManualScroll();
+    expect(run.referenceReturn()).toEqual({
+      tabIdentity: original.identity,
+      documentGeneration: 1,
+      available: true,
+      pending: false,
+    });
+
+    vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('unavailable');
+    run.coordinator.observeReferenceManualScroll();
+    expect(run.referenceReturn()?.available).toBe(true);
+
+    vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('visible');
+    run.coordinator.observeReferenceManualScroll();
+    expect(run.referenceReturn()).toBeNull();
+  });
+
+  it('returns to the immutable Reference origin without touching Main routing or history', async () => {
+    const browser = locationHistory();
+    const run = harness({ locationHistory: browser });
+    const original = target(2);
+    await run.coordinator.openReference(original, { label: 'A', pageContext: 'Page 3' });
+    run.reference.set(location(8, 160, 1.7));
+    vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('outside');
+    run.coordinator.observeReferenceManualScroll();
+    vi.mocked(run.reference.controls.applyTarget).mockClear();
+    vi.mocked(run.main.controls.applyTarget).mockClear();
+    vi.mocked(run.main.controls.applyLocation).mockClear();
+    vi.mocked(run.main.controls.cancelPendingNavigation).mockClear();
+    vi.mocked(run.dependencies.dispatch).mockClear();
+    vi.mocked(run.dependencies.setAnnouncement).mockClear();
+
+    expect(await run.coordinator.returnToReference(original.identity)).toBe(true);
+
+    expect(run.reference.controls.applyTarget)
+      .toHaveBeenCalledWith(original, 'reference-fit-width');
+    expect(run.state().tabs[0]?.originalTarget).toEqual(original);
+    expect(run.state().tabs[0]?.settledLocation).toEqual(location(2));
+    expect(run.dependencies.dispatch).toHaveBeenCalledOnce();
+    expect(run.dependencies.dispatch).toHaveBeenCalledWith({
+      type: 'refresh-active-reference',
+      settledLocation: location(2),
+    });
+    expect(run.referenceReturn()).toBeNull();
+    expect(run.announcement()).toBe('Returned to reference.');
+    expect(run.reference.controls.focusAtDestination).toHaveBeenLastCalledWith(2);
+    expect(vi.mocked(run.dependencies.setAnnouncement).mock.invocationCallOrder.at(-1))
+      .toBeLessThan(vi.mocked(run.reference.controls.focusAtDestination).mock.invocationCallOrder.at(-1)!);
+    expect(run.main.controls.applyTarget).not.toHaveBeenCalled();
+    expect(run.main.controls.applyLocation).not.toHaveBeenCalled();
+    expect(run.main.controls.cancelPendingNavigation).not.toHaveBeenCalled();
+    expect(browser.history.push).not.toHaveBeenCalled();
+    expect(browser.history.replace).not.toHaveBeenCalled();
+  });
+
+  it('keeps a failed return retryable and rejects repeat activation while pending', async () => {
+    const run = harness();
+    const original = target(2);
+    await run.coordinator.openReference(original, { label: 'A', pageContext: 'Page 3' });
+    vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('outside');
+    run.coordinator.observeReferenceManualScroll();
+    const applied = deferred<boolean>();
+    vi.mocked(run.reference.controls.applyTarget).mockReturnValueOnce(applied.promise);
+
+    const returning = run.coordinator.returnToReference(original.identity);
+    await Promise.resolve();
+    expect(run.referenceReturn()).toEqual(expect.objectContaining({
+      tabIdentity: original.identity,
+      available: true,
+      pending: true,
+    }));
+    expect(await run.coordinator.returnToReference(original.identity)).toBe(false);
+    applied.resolve(false);
+    expect(await returning).toBe(false);
+
+    expect(run.referenceReturn()).toEqual(expect.objectContaining({
+      tabIdentity: original.identity,
+      available: true,
+      pending: false,
+    }));
+    expect(run.announcement()).toBe('Reference unavailable. Retry when ready.');
+    expect(run.state().tabs[0]?.settledLocation).toEqual(location(2));
+  });
+
+  it('drops stale return completion after a Reference lifecycle change', async () => {
+    const run = harness();
+    const first = target(2);
+    const second = target(5);
+    await run.coordinator.openReference(first, { label: 'A', pageContext: 'Page 3' });
+    await run.coordinator.openReference(second, { label: 'B', pageContext: 'Page 6' });
+    await run.coordinator.switchReference(first.identity);
+    vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('outside');
+    run.coordinator.observeReferenceManualScroll();
+    const applied = deferred<boolean>();
+    vi.mocked(run.reference.controls.applyTarget).mockReturnValueOnce(applied.promise);
+    const returning = run.coordinator.returnToReference(first.identity);
+    await Promise.resolve();
+
+    expect(await run.coordinator.switchReference(second.identity)).toBe(true);
+    applied.resolve(true);
+    expect(await returning).toBe(false);
+    expect(run.referenceReturn()).toBeNull();
+    expect(run.announcement()).toBe('Reference active.');
+    expect(run.state().activeTabIdentity).toBe(second.identity);
+    expect(run.state().tabs.find(({ identity }) => identity === first.identity)?.settledLocation)
+      .toEqual(location(2));
+  });
+
+  it('drops return completion when the Reference navigation adapter is disposed', async () => {
+    const run = harness();
+    const original = target(2);
+    await run.coordinator.openReference(original, { label: 'A', pageContext: 'Page 3' });
+    vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('outside');
+    run.coordinator.observeReferenceManualScroll();
+    const applied = deferred<boolean>();
+    vi.mocked(run.reference.controls.applyTarget).mockReturnValueOnce(applied.promise);
+    vi.mocked(run.dependencies.dispatch).mockClear();
+    vi.mocked(run.dependencies.setAnnouncement).mockClear();
+
+    const returning = run.coordinator.returnToReference(original.identity);
+    await Promise.resolve();
+    vi.spyOn(run.dependencies, 'getReferenceNavigation').mockReturnValue(null);
+    run.coordinator.referenceNavigationUnavailable();
+    applied.resolve(true);
+
+    expect(await returning).toBe(false);
+    expect(run.referenceReturn()).toBeNull();
+    expect(run.dependencies.dispatch).not.toHaveBeenCalled();
+    expect(run.dependencies.setAnnouncement).not.toHaveBeenCalled();
   });
 
   it('lets only the newest rapid reference operation commit', async () => {

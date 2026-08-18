@@ -1,7 +1,16 @@
 import { Rotation, transformPosition } from '@embedpdf/models';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { combinePageRotation } from '../src/pdf/owned-overlay.js';
+import {
+  isReferenceScrollIntent,
+  ReferenceManualScrollObserver,
+  subscribeToReferenceManualScroll,
+} from '../src/pdf/reference-manual-scroll.js';
+import {
+  MAIN_PDF_DOCUMENT_ID,
+  REFERENCE_PDF_DOCUMENT_ID,
+} from '../src/pdf/viewer-document-ids.js';
 import {
   fixedViewerClientRect,
   normalizePageClientPoint,
@@ -42,5 +51,122 @@ describe('viewer page interaction coordinates', () => {
       left: 10, top: 20, right: 40, bottom: 60, width: 30, height: 40,
     });
     expect(Object.isFrozen(fixed)).toBe(true);
+  });
+});
+
+describe('Reference manual-scroll observations', () => {
+  const scrollbarViewport = {
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 620, bottom: 400 }),
+    clientLeft: 0,
+    clientTop: 0,
+    clientWidth: 600,
+    clientHeight: 380,
+  };
+
+  it.each([
+    ['wheel', { kind: 'wheel' }],
+    ['touch pan', { kind: 'pointer', phase: 'move', pointerType: 'touch', button: -1, buttons: 1, clientX: 200, clientY: 200 }],
+    ['pointer scrollbar', { kind: 'pointer', phase: 'down', pointerType: 'mouse', button: 0, buttons: 1, clientX: 610, clientY: 200 }],
+    ['keyboard', { kind: 'key', key: 'PageDown', altKey: false, ctrlKey: false, metaKey: false }],
+  ] as const)('publishes one Reference observation after %s intent and Reference scrolling', (
+    _name,
+    input,
+  ) => {
+    const observer = new ReferenceManualScrollObserver();
+    expect(isReferenceScrollIntent(input, scrollbarViewport)).toBe(true);
+    observer.arm({ left: 0, top: 10 });
+    expect(observer.observeScroll(REFERENCE_PDF_DOCUMENT_ID, { left: 0, top: 11 })).toBe(true);
+    expect(observer.observeScroll(REFERENCE_PDF_DOCUMENT_ID, { left: 0, top: 12 })).toBe(false);
+  });
+
+  it('does not treat programmatic movement, Main scrolling, ordinary clicks, or shortcuts as Reference drift', () => {
+    const observer = new ReferenceManualScrollObserver();
+
+    expect(observer.observeScroll(REFERENCE_PDF_DOCUMENT_ID, { left: 0, top: 1 })).toBe(false);
+    observer.arm({ left: 0, top: 0 });
+    expect(observer.observeScroll(MAIN_PDF_DOCUMENT_ID, { left: 0, top: 1 })).toBe(false);
+    expect(observer.observeScroll(REFERENCE_PDF_DOCUMENT_ID, { left: 0, top: 1 })).toBe(true);
+    expect(isReferenceScrollIntent({
+      kind: 'pointer', phase: 'down', pointerType: 'mouse', button: 0, buttons: 1, clientX: 200, clientY: 200,
+    }, scrollbarViewport)).toBe(false);
+    expect(isReferenceScrollIntent({
+      kind: 'key', key: 'ArrowDown', altKey: false, ctrlKey: true, metaKey: false,
+    }, scrollbarViewport)).toBe(false);
+  });
+
+  it('expires unmatched input intent before a later programmatic Reference scroll', () => {
+    let expire: (() => void) | undefined;
+    const observer = new ReferenceManualScrollObserver((callback) => { expire = callback; });
+
+    observer.arm({ left: 0, top: 0 });
+    expire?.();
+    expect(observer.observeScroll(REFERENCE_PDF_DOCUMENT_ID, { left: 0, top: 1 })).toBe(false);
+
+    observer.arm({ left: 0, top: 0 });
+    expect(observer.observeScroll(REFERENCE_PDF_DOCUMENT_ID, { left: 0, top: 1 })).toBe(true);
+  });
+
+  it('does not publish when a paired Reference notification has no viewport movement', () => {
+    const observer = new ReferenceManualScrollObserver();
+
+    observer.arm({ left: 12, top: 34 });
+    expect(observer.observeScroll(
+      REFERENCE_PDF_DOCUMENT_ID,
+      { left: 12, top: 34 },
+    )).toBe(false);
+    expect(observer.observeScroll(
+      REFERENCE_PDF_DOCUMENT_ID,
+      { left: 12, top: 35 },
+    )).toBe(false);
+  });
+
+  it('keeps a scheduled observation paired with the input that created it', () => {
+    const observer = new ReferenceManualScrollObserver();
+    observer.arm({ left: 0, top: 10 });
+    const firstObservation = observer.takeScrollObservation(REFERENCE_PDF_DOCUMENT_ID);
+
+    observer.arm({ left: 0, top: 20 });
+
+    expect(firstObservation?.({ left: 0, top: 11 })).toBe(true);
+    expect(observer.observeScroll(
+      REFERENCE_PDF_DOCUMENT_ID,
+      { left: 0, top: 21 },
+    )).toBe(true);
+  });
+
+  it('invalidates a scheduled observation when the Reference lifecycle clears', () => {
+    const observer = new ReferenceManualScrollObserver();
+    observer.arm({ left: 0, top: 10 });
+    const scheduledObservation = observer.takeScrollObservation(REFERENCE_PDF_DOCUMENT_ID);
+
+    observer.clear();
+
+    expect(scheduledObservation?.({ left: 0, top: 11 })).toBe(false);
+  });
+
+  it('scopes the live subscription to Reference scrolls and disposes it with the Reference lifecycle', () => {
+    let scroll: ((event: { documentId: string }) => void) | undefined;
+    const unsubscribe = vi.fn();
+    const publish = vi.fn();
+    const observer = new ReferenceManualScrollObserver();
+    let position = { left: 0, top: 0 };
+    let scheduledObservation: (() => void) | undefined;
+    const dispose = subscribeToReferenceManualScroll({
+      onScroll: (listener) => {
+        scroll = listener;
+        return unsubscribe;
+      },
+    }, observer, () => position, publish, (observe) => { scheduledObservation = observe; });
+
+    observer.arm(position);
+    scroll?.({ documentId: MAIN_PDF_DOCUMENT_ID });
+    expect(publish).not.toHaveBeenCalled();
+    scroll?.({ documentId: REFERENCE_PDF_DOCUMENT_ID });
+    expect(publish).not.toHaveBeenCalled();
+    position = { left: 0, top: 1 };
+    scheduledObservation?.();
+    expect(publish).toHaveBeenCalledOnce();
+    dispose();
+    expect(unsubscribe).toHaveBeenCalledOnce();
   });
 });

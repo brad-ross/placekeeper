@@ -103,9 +103,16 @@ export function CopyLinkControl({
       {status.status === 'failure' ? (
         <div className="copy-link-control__fallback">
           <p role="alert">Clipboard access failed. Copy the link below.</p>
-          <input aria-label="Placekeeper link" readOnly value={status.link} onFocus={(event) => event.currentTarget.select()} />
+          <input
+            aria-label="Placekeeper link"
+            title="Placekeeper link"
+            readOnly
+            value={status.link}
+            onFocus={(event) => event.currentTarget.select()}
+          />
           <button
             type="button"
+            title="Retry copying link"
             disabled={disabled}
             onClick={() => { void commandRef.current?.run(status.link); }}
           >Retry</button>
