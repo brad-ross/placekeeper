@@ -330,6 +330,14 @@
   position: relative;
 }
 
+.copy-link-control__trigger--labeled {
+  gap: 7px;
+}
+
+.copy-link-control__label {
+  white-space: nowrap;
+}
+
 .copy-link-control__status {
   position: absolute;
   top: calc(100% + .45rem);
@@ -384,6 +392,22 @@
   border-radius: var(--review-radius-control);
   color: var(--review-ink-primary);
   background: var(--review-surface-panel);
+}
+
+.copy-link-control--feedback-inline {
+  display: grid;
+  min-width: 0;
+}
+
+.copy-link-control--feedback-inline .copy-link-control__status,
+.copy-link-control--feedback-inline .copy-link-control__fallback {
+  position: static;
+  max-width: 100%;
+  margin-top: .45rem;
+}
+
+.copy-link-control--feedback-inline .copy-link-control__fallback {
+  width: min(28rem, calc(100vw - 2rem));
 }
 
 .review-chrome__context {

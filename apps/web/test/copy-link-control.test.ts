@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createElement } from 'react';
+import { createElement, createRef } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import {
@@ -20,6 +20,42 @@ function deferred<T>() {
 }
 
 describe('Copy Link', () => {
+  it('uses the app-native chain-link glyph with the shared icon defaults', () => {
+    const markup = renderToStaticMarkup(createElement(CopyLinkControl, {
+      getLink: () => 'placekeeper:///tmp/Paper.pdf#v=1&page=4',
+      writeText: async () => undefined,
+    }));
+
+    expect(markup).toContain('lucide-link');
+    expect(markup).not.toContain('lucide-clipboard');
+    expect(markup).toContain('width="16"');
+    expect(markup).toContain('height="16"');
+    expect(markup).toContain('stroke-width="1.875"');
+  });
+
+  it('adapts presentation and semantics for a labeled menu action', () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    const markup = renderToStaticMarkup(createElement(CopyLinkControl, {
+      getLink: () => 'placekeeper:///tmp/Paper.pdf#v=2&page=4&view=xyz&x=12&y=24&zoom=1',
+      writeText: async () => undefined,
+      ariaLabel: 'Copy link to exact destination on page 4',
+      title: 'Copy exact destination link',
+      variant: 'row',
+      presentation: 'labeled',
+      buttonRole: 'menuitem',
+      triggerRef,
+      feedbackPlacement: 'inline',
+    }));
+
+    expect(markup).toContain('copy-link-control--row');
+    expect(markup).toContain('copy-link-control--feedback-inline');
+    expect(markup).toContain('role="presentation"');
+    expect(markup).toContain('role="menuitem"');
+    expect(markup).toContain('aria-label="Copy link to exact destination on page 4"');
+    expect(markup).toContain('title="Copy exact destination link"');
+    expect(markup).toContain('<span class="copy-link-control__label">Copy link to exact destination on page 4</span>');
+  });
+
   it('disables copying while the surrounding navigation is unsettled', () => {
     const markup = renderToStaticMarkup(createElement(CopyLinkControl, {
       disabled: true,

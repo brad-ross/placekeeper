@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState, type Ref } from 'react';
 
 import {
   encodePlacekeeperLinkFragment,
@@ -46,7 +46,28 @@ export interface CopyLinkControlProps {
   readonly disabled?: boolean;
   readonly ariaLabel?: string;
   readonly title?: string;
-  readonly variant?: 'chrome' | 'annotation';
+  readonly variant?: 'chrome' | 'annotation' | 'row' | 'popover';
+  readonly presentation?: 'icon-only' | 'labeled';
+  readonly buttonRole?: 'menuitem';
+  readonly triggerRef?: Ref<HTMLButtonElement>;
+  readonly feedbackPlacement?: 'floating' | 'inline';
+}
+
+function setRefValue<T>(ref: Ref<T> | undefined, value: T | null): void {
+  if (typeof ref === 'function') ref(value);
+  else if (ref != null) ref.current = value;
+}
+
+function triggerClassName(
+  variant: NonNullable<CopyLinkControlProps['variant']>,
+  presentation: NonNullable<CopyLinkControlProps['presentation']>,
+): string {
+  const surfaceClass = variant === 'chrome'
+    ? 'review-chrome__icon-control'
+    : variant === 'annotation'
+      ? 'annotation-item__action'
+      : `copy-link-control__trigger--${variant}`;
+  return `${surfaceClass} copy-link-control__trigger copy-link-control__trigger--${presentation}`;
 }
 
 export function CopyLinkControl({
@@ -56,12 +77,20 @@ export function CopyLinkControl({
   ariaLabel = 'Copy link to current PDF location',
   title = 'Copy link',
   variant = 'chrome',
+  presentation = 'icon-only',
+  buttonRole,
+  triggerRef,
+  feedbackPlacement = 'floating',
 }: CopyLinkControlProps) {
   const getLinkRef = useRef(getLink);
   getLinkRef.current = getLink;
   const writeTextRef = useRef(writeText);
   writeTextRef.current = writeText;
-  const triggerRef = useRef<HTMLButtonElement>(null);
+  const internalTriggerRef = useRef<HTMLButtonElement>(null);
+  const setTriggerNode = useCallback((node: HTMLButtonElement | null) => {
+    internalTriggerRef.current = node;
+    setRefValue(triggerRef, node);
+  }, [triggerRef]);
   const [status, setStatus] = useState<CopyLinkStatus>({ status: 'idle' });
   const commandRef = useRef<ReturnType<typeof createCopyLinkCommand> | null>(null);
   if (commandRef.current === null) {
@@ -70,32 +99,42 @@ export function CopyLinkControl({
       writeText: (link) => writeTextRef.current(link),
       onStatus: (next) => {
         setStatus(next);
-        if (next.status === 'failure') queueMicrotask(() => triggerRef.current?.focus());
+        if (next.status === 'failure') {
+          queueMicrotask(() => internalTriggerRef.current?.focus({ preventScroll: true }));
+        }
       },
     });
   }
   const run = () => { void commandRef.current?.run(); };
   const annotation = variant === 'annotation';
+  const controlClassName = [
+    'copy-link-control',
+    `copy-link-control--${variant}`,
+    `copy-link-control--feedback-${feedbackPlacement}`,
+  ].join(' ');
 
   return (
     <div
-      className={`copy-link-control${annotation ? ' copy-link-control--annotation' : ''}`}
+      className={controlClassName}
       data-copy-link-status={status.status}
+      {...(buttonRole === undefined ? {} : { role: 'presentation' as const })}
     >
       <button
-        ref={triggerRef}
+        ref={setTriggerNode}
         type="button"
-        className={annotation
-          ? 'annotation-item__action copy-link-control__trigger'
-          : 'review-chrome__icon-control copy-link-control__trigger'}
+        className={triggerClassName(variant, presentation)}
         {...(annotation ? { 'data-annotation-action': 'copy-link' } : {})}
+        {...(buttonRole === undefined ? {} : { role: buttonRole })}
         aria-label={ariaLabel}
         title={title}
         aria-busy={status.status === 'pending' ? 'true' : 'false'}
         disabled={disabled || status.status === 'pending'}
         onClick={run}
       >
-        <ReviewIcon name="clipboard" />
+        <ReviewIcon name="link" />
+        {presentation === 'labeled' ? (
+          <span className="copy-link-control__label">{ariaLabel}</span>
+        ) : null}
       </button>
       {status.status === 'success' ? (
         <span className="copy-link-control__status" role="status">Link copied.</span>
