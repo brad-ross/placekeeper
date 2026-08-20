@@ -551,6 +551,7 @@ export function App({
                   emit({ type: 'owned-mark', value: { id: ownedId, phase: 'activate' } });
                   return;
                 }
+                emit({ type: 'owned-mark-clear' });
                 const pagePoint: ViewerPagePoint = {
                   documentId,
                   pageIndex: page.index,
@@ -576,6 +577,11 @@ export function App({
                   placement: { left: event.clientX, top: event.clientY, suggestTop: true },
                   emit,
                 });
+              },
+              onClick: (position) => {
+                if (hitTestOwnedMark(pageGeometry(), position) === undefined) {
+                  emit({ type: 'owned-mark-clear' });
+                }
               },
             },
           }));

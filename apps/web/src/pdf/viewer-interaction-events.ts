@@ -86,6 +86,7 @@ export type ViewerInteractionEvent =
   | { readonly type: 'page-note-cursor'; readonly value: ViewerPagePoint | null }
   | { readonly type: 'page-note-commit'; readonly value: ViewerPagePoint }
   | { readonly type: 'owned-mark'; readonly value: ViewerOwnedMarkInteraction }
+  | { readonly type: 'owned-mark-clear' }
   | { readonly type: 'pdf-link'; readonly value: ViewerPdfLinkInvocation }
   | { readonly type: 'pdf-link-unavailable'; readonly value: ViewerPdfLinkUnavailable };
 
