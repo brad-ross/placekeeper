@@ -54,6 +54,21 @@ describe("Placekeeper service links", () => {
     });
   });
 
+  it("preserves an exact destination without weakening local PDF approval", async () => {
+    const path = await fixture("exact-target.pdf");
+    const location = {
+      kind: "destination" as const,
+      page: 4,
+      mode: "xyz" as const,
+      params: [72, 144, 1.25] as const,
+    };
+
+    await expect(createPlacekeeperLinkForPdf(path, location)).resolves.toEqual({
+      pdfPath: await realpath(path),
+      location,
+    });
+  });
+
   it.each([
     ["missing", "missing.pdf", undefined],
     ["non-PDF extension", "notes.txt", "%PDF-1.7\n%%EOF"],
