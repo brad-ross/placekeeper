@@ -169,6 +169,34 @@ describe('review shell layout and accessibility contract', () => {
     />,
   );
 
+  it('places the document Copy Link control beside the file title', () => {
+    const html = renderToStaticMarkup(
+      <ReviewChrome
+        documentTitle="paper.pdf"
+        controls={viewerControls}
+        viewerState={viewerControls.snapshot()}
+        copyLink={{
+          getLink: () => 'placekeeper:///tmp/paper.pdf#v=1&page=1',
+          writeText: async () => undefined,
+        }}
+        canUndo={false}
+        canRedo={false}
+        onUndo={vi.fn()}
+        onRedo={vi.fn()}
+      />,
+    );
+    const identityStart = html.indexOf('class="review-chrome__identity"');
+    const copyLink = html.indexOf('data-review-copy-link');
+    const viewerControlsIndex = html.indexOf('class="review-chrome__viewer-controls"');
+    const trailingActions = html.indexOf('class="review-chrome__actions"');
+
+    expect(identityStart).toBeGreaterThanOrEqual(0);
+    expect(copyLink).toBeGreaterThan(identityStart);
+    expect(copyLink).toBeLessThan(viewerControlsIndex);
+    expect(trailingActions).toBeGreaterThan(viewerControlsIndex);
+    expect(html.slice(trailingActions)).not.toContain('data-review-copy-link');
+  });
+
   it('keeps review icons decorative and button labels authoritative', () => {
     const html = renderToStaticMarkup(
       <button type="button" aria-label="Previous page">

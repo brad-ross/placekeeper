@@ -61,6 +61,24 @@ async function expectCompoundReferenceTabs(
   )).toHaveCount(1);
   await expect(tablist.getByRole('button', { name: 'Send to main document' })).toBeVisible();
   await expect(tablist.getByRole('button', { name: 'Close active reference' })).toBeVisible();
+  const actionGaps = await tablist.locator(
+    '.reference-tab-segment:has(> [role="tab"][aria-selected="true"])',
+  ).evaluate((segment) => {
+    const selector = segment.querySelector('[role="tab"]');
+    const actions = [...segment.querySelectorAll<HTMLElement>('.reference-tab-segment__action')];
+    if (!selector || actions.length !== 2) throw new Error('Reference tab actions are incomplete.');
+    const selectorBounds = selector.getBoundingClientRect();
+    const firstBounds = actions[0]!.getBoundingClientRect();
+    const secondBounds = actions[1]!.getBoundingClientRect();
+    return {
+      group: getComputedStyle(segment).columnGap,
+      selectorToAction: firstBounds.left - selectorBounds.right,
+      actionToAction: secondBounds.left - firstBounds.right,
+    };
+  });
+  expect(actionGaps.group).toBe('2px');
+  expect(actionGaps.selectorToAction).toBeCloseTo(2, 1);
+  expect(actionGaps.actionToAction).toBeCloseTo(2, 1);
   await expect(page.locator('.reference-panel__actions')).toHaveCount(0);
 }
 
@@ -142,6 +160,24 @@ async function expectOutlineTreeGeometry(
     .evaluate((element) => element.getBoundingClientRect().width);
   expect(disclosureWidth).toBe(expectedControlSize);
   expect(referenceWidth).toBe(expectedControlSize);
+  const referenceGap = await navigator.locator('.outline-navigator__reference:visible').first()
+    .evaluate((action) => {
+      const destination = action.previousElementSibling;
+      if (!(destination instanceof HTMLElement)) {
+        throw new Error('Outline reference action has no destination sibling.');
+      }
+      const destinationBounds = destination.getBoundingClientRect();
+      const actionBounds = action.getBoundingClientRect();
+      const destinationStyle = getComputedStyle(destination);
+      return {
+        gap: actionBounds.left - destinationBounds.right,
+        marginRight: destinationStyle.marginRight,
+        paddingRight: destinationStyle.paddingRight,
+      };
+    });
+  expect(referenceGap.gap).toBeCloseTo(2, 1);
+  expect(referenceGap.marginRight).toBe('2px');
+  expect(referenceGap.paddingRight).toBe('0px');
   const disclosureRhythm = await navigator.locator(
     '.outline-navigator__row:has(.outline-navigator__disclosure)',
   ).first().evaluate((row) => {
@@ -213,6 +249,15 @@ test('installed real PDF reading', async ({ page }) => {
   await expect.poll(() => image.evaluate((element) => (
     element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0
   ))).toBe(true);
+  const identityBox = await page.locator('.review-chrome__save-identity').boundingBox();
+  const copyLinkBox = await page.locator('[data-review-copy-link]').boundingBox();
+  const viewerControlsBox = await page.locator('.review-chrome__viewer-controls').boundingBox();
+  if (!identityBox || !copyLinkBox || !viewerControlsBox) {
+    throw new Error('Document chrome geometry is unavailable.');
+  }
+  expect(copyLinkBox.x).toBeGreaterThanOrEqual(identityBox.x + identityBox.width);
+  expect(copyLinkBox.x - (identityBox.x + identityBox.width)).toBeLessThanOrEqual(2.5);
+  expect(copyLinkBox.x + copyLinkBox.width).toBeLessThan(viewerControlsBox.x);
   await page.evaluate(async () => { await document.fonts.ready; });
   await expectScene(product, 'installed-real-pdf.png');
 });
