@@ -265,6 +265,8 @@ export class NavigationCoordinator {
   private referenceRestoreIdentity: string | null = null;
   private semanticItemLocation: SemanticItemLocation | null = null;
   private semanticDestinationLocation: SemanticAnchor | null = null;
+  /** Suppresses trailing viewer refresh while an exact route is still settling. */
+  private activeDestinationRestoreToken: number | null = null;
   private locationHistoryStarted = false;
   private locationRestored: boolean;
   private disposed = false;
@@ -289,6 +291,7 @@ export class NavigationCoordinator {
     if (history === undefined) return false;
     let target: PlacekeeperLinkLocation;
     let notice = '';
+    let destinationFallback: Extract<PlacekeeperLinkLocation, { readonly kind: 'page' }> | null = null;
     try {
       target = history.read();
     } catch {
@@ -311,7 +314,7 @@ export class NavigationCoordinator {
         ? target.page
         : 1;
       target = { kind: 'page', page: fallbackPage };
-      history.replace(target);
+      destinationFallback = target;
       notice = missingDestinationNotice(fallbackPage);
     }
     if (target.kind === 'item') {
@@ -354,16 +357,26 @@ export class NavigationCoordinator {
       && target.kind === 'page'
       && target.page === 1
     ) {
+      if (destinationFallback !== null) history.replace(destinationFallback);
       this.locationRestored = true;
       this.refreshCurrentOutline();
       if (notice) this.dependencies.setAnnouncement(notice);
       return true;
     }
-    const restored = await this.restoreLinkedLocation(target, null);
+    const restored = await this.restoreLinkedLocation(
+      target,
+      null,
+      destinationFallback !== null,
+    );
+    if (!restored) {
+      this.dependencies.setAnnouncement(HISTORY_FAILURE);
+      return false;
+    }
+    if (destinationFallback !== null) history.replace(destinationFallback);
     this.locationRestored = true;
     if (notice) this.dependencies.setAnnouncement(notice);
     else this.announceHistoryRestore(historyDirection, target);
-    return restored;
+    return true;
   }
 
   requestLink(request: ViewerPdfLinkInvocation): boolean {
@@ -1094,7 +1107,11 @@ export class NavigationCoordinator {
 
   refreshMainLocation(): void {
     const state = this.dependencies.getState();
-    if (state.pendingMainNavigation !== null || state.pendingSendToMain !== null) return;
+    if (
+      this.activeDestinationRestoreToken !== null
+      || state.pendingMainNavigation !== null
+      || state.pendingSendToMain !== null
+    ) return;
     const location = this.dependencies.getMainNavigation()?.captureLocation() ?? null;
     if (location === null || !this.generationMatches(state.documentGeneration)) return;
     this.dependencies.dispatch({ type: 'refresh-main-location', location });
@@ -1327,6 +1344,7 @@ export class NavigationCoordinator {
   private async restoreLinkedLocation(
     target: PlacekeeperLinkLocation,
     item: { readonly pageIndex: number; readonly point: PdfNaturalPoint | null } | null,
+    protectDestinationHistory = false,
   ): Promise<boolean> {
     const operation = this.begin();
     if (operation === null) return false;
@@ -1345,7 +1363,15 @@ export class NavigationCoordinator {
       zoom: current.zoom,
     };
     if (!isPdfViewerLocation(destination)) return false;
-    const applied = await main.applyLocation(destination);
+    if (protectDestinationHistory) this.activeDestinationRestoreToken = operation.token;
+    let applied: boolean;
+    try {
+      applied = await main.applyLocation(destination);
+    } finally {
+      if (this.activeDestinationRestoreToken === operation.token) {
+        this.activeDestinationRestoreToken = null;
+      }
+    }
     if (!this.isCurrent(operation)) return false;
     const settled = applied ? main.captureLocation() : null;
     if (settled === null) {
@@ -1385,7 +1411,15 @@ export class NavigationCoordinator {
     if (target === null) return 'unavailable';
     await main.cancelPendingNavigation();
     if (!this.isCurrent(operation)) return 'stale';
-    const applied = await main.applyTarget(target);
+    this.activeDestinationRestoreToken = operation.token;
+    let applied: boolean;
+    try {
+      applied = await main.applyTarget(target);
+    } finally {
+      if (this.activeDestinationRestoreToken === operation.token) {
+        this.activeDestinationRestoreToken = null;
+      }
+    }
     if (!this.isCurrent(operation)) return 'stale';
     const settled = applied ? main.captureLocation() : null;
     if (settled === null) {
@@ -1556,6 +1590,7 @@ export class NavigationCoordinator {
     this.dependencies.resetReferenceManualScrollIntent();
     this.clearLinkRequest();
     this.cancelPendingTransactions(preservePendingReference);
+    this.activeDestinationRestoreToken = null;
     return {
       token: ++this.operationToken,
       documentGeneration: this.documentGeneration,
@@ -1581,6 +1616,7 @@ export class NavigationCoordinator {
   private supersede(): void {
     this.clearLinkRequest();
     this.cancelPendingTransactions();
+    this.activeDestinationRestoreToken = null;
     this.operationToken += 1;
   }
 

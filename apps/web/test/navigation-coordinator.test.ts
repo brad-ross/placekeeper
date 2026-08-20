@@ -295,6 +295,20 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.announcement()).toBe('The exact destination is unavailable. Opened page 3 instead.');
   });
 
+  it('does not claim an exact-destination fallback when its page cannot be applied', async () => {
+    const browser = locationHistory(durableDestination(3));
+    const run = harness({ locationHistory: browser });
+    vi.mocked(run.main.controls.applyTarget).mockResolvedValueOnce(false);
+    vi.mocked(run.main.controls.applyLocation).mockResolvedValueOnce(false);
+    run.coordinator.startLocationHistory();
+
+    expect(await run.coordinator.restoreCurrentLocation()).toBe(false);
+    expect(browser.history.replace).toHaveBeenCalledOnce();
+    expect(browser.history.replace).toHaveBeenCalledWith({ kind: 'page', page: 1 });
+    expect(run.announcement()).toBe('Document history destination unavailable.');
+    expect(run.announcement()).not.toContain('Opened page 3');
+  });
+
   it('converges an out-of-range destination fallback to page 1 without retaining exactness', async () => {
     const browser = locationHistory(durableDestination(9));
     const run = harness({ locationHistory: browser, pageCount: 4 });
@@ -323,6 +337,32 @@ describe('document-scoped navigation coordinator', () => {
     run.coordinator.refreshMainLocation();
     expect(browser.history.replace).toHaveBeenCalledWith({ kind: 'page', page: 3 });
     expect(run.coordinator.currentLinkLocation()).toEqual({ kind: 'page', page: 3 });
+  });
+
+  it('protects an exact destination from viewer refresh until a slow restore settles', async () => {
+    const destination = durableDestination(3);
+    const browser = locationHistory(destination);
+    const run = harness({ locationHistory: browser });
+    const apply = deferred<boolean>();
+    vi.mocked(run.main.controls.applyTarget).mockImplementationOnce(() => {
+      run.main.set(location(2));
+      run.coordinator.refreshMainLocation();
+      return apply.promise;
+    });
+    run.coordinator.startLocationHistory();
+
+    const restoring = run.coordinator.restoreCurrentLocation('back');
+    await vi.waitFor(() => expect(run.main.controls.applyTarget).toHaveBeenCalledOnce());
+    expect(browser.history.replace).not.toHaveBeenCalled();
+    expect(run.coordinator.currentLinkLocation()).toEqual(destination);
+
+    apply.resolve(true);
+    expect(await restoring).toBe(true);
+    expect(run.coordinator.currentLinkLocation()).toEqual(destination);
+
+    run.main.set(location(2, 220));
+    run.coordinator.refreshMainLocation();
+    expect(browser.history.replace).toHaveBeenCalledWith({ kind: 'page', page: 3 });
   });
 
   it('does not let a superseded destination restore downgrade newer history', async () => {
