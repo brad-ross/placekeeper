@@ -116,6 +116,7 @@ export function RowActionGroup({ actions, rowLabel }: RowActionGroupProps) {
   const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault();
+      event.stopPropagation();
       closeAndRestore();
       return;
     }

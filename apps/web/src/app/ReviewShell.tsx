@@ -625,9 +625,11 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (
-      props.linkActionRequest
-      && event.target instanceof Element
-      && event.target.closest('[data-link-action-popover]') !== null
+      event.target instanceof Element
+      && (
+        (props.linkActionRequest && event.target.closest('[data-link-action-popover]') !== null)
+        || event.target.closest('[data-row-actions-open="true"]') !== null
+      )
     ) return;
     const editable = isEditableTarget(event.target);
     if (

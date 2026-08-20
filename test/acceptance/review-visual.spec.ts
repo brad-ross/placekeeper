@@ -156,28 +156,22 @@ async function expectOutlineTreeGeometry(
 
   const disclosureWidth = await navigator.locator('.outline-navigator__disclosure:visible').first()
     .evaluate((element) => element.getBoundingClientRect().width);
-  const referenceWidth = await navigator.locator('.outline-navigator__reference:visible').first()
-    .evaluate((element) => element.getBoundingClientRect().width);
+  const visibleActions = navigator.locator([
+    '.row-action-group__direct:visible button',
+    '.row-action-group__secondary:visible > button',
+  ].join(', '));
+  const actionWidths = await visibleActions.evaluateAll((actions) => actions.map(
+    (action) => action.getBoundingClientRect().width,
+  ));
   expect(disclosureWidth).toBe(expectedControlSize);
-  expect(referenceWidth).toBe(expectedControlSize);
-  const referenceGap = await navigator.locator('.outline-navigator__reference:visible').first()
-    .evaluate((action) => {
-      const destination = action.previousElementSibling;
-      if (!(destination instanceof HTMLElement)) {
-        throw new Error('Outline reference action has no destination sibling.');
-      }
-      const destinationBounds = destination.getBoundingClientRect();
-      const actionBounds = action.getBoundingClientRect();
-      const destinationStyle = getComputedStyle(destination);
-      return {
-        gap: actionBounds.left - destinationBounds.right,
-        marginRight: destinationStyle.marginRight,
-        paddingRight: destinationStyle.paddingRight,
-      };
-    });
-  expect(referenceGap.gap).toBeCloseTo(2, 1);
-  expect(referenceGap.marginRight).toBe('2px');
-  expect(referenceGap.paddingRight).toBe('0px');
+  expect(actionWidths.length).toBeGreaterThan(0);
+  expect(actionWidths.every((width) => width === 31 || width === 44)).toBe(true);
+  const visibleDirectGroups = navigator.locator('.row-action-group__direct:visible');
+  if (await visibleDirectGroups.count() > 0) {
+    expect(await visibleDirectGroups.evaluateAll((groups) => groups.map(
+      (group) => getComputedStyle(group).gap,
+    ))).toEqual(expect.arrayContaining(['2px']));
+  }
   const disclosureRhythm = await navigator.locator(
     '.outline-navigator__row:has(.outline-navigator__disclosure)',
   ).first().evaluate((row) => {
@@ -206,7 +200,10 @@ async function expectOutlineTreeGeometry(
   expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
   for (const row of overflow.rows) expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth);
 
-  const containedActions = await navigator.locator('.outline-navigator__reference:visible').evaluateAll((actions) => (
+  const containedActions = await navigator.locator([
+    '.row-action-group__direct:visible button',
+    '.row-action-group__secondary:visible > button',
+  ].join(', ')).evaluateAll((actions) => (
     actions.every((action) => {
       const actionRect = action.getBoundingClientRect();
       const rowRect = action.closest('.outline-navigator__row')?.getBoundingClientRect();
@@ -227,6 +224,8 @@ test('wide contextual review', async ({ page }) => {
 
 test('wide reading', async ({ page }) => {
   const product = await openScene(page, 'reading');
+  await expect(page.getByRole('button', { name: 'Copy link to current PDF location' })
+    .locator('.lucide-link')).toBeVisible();
   await expectScene(product, 'wide-reading.png');
 });
 
@@ -273,6 +272,8 @@ test('wide Annotation Tray', async ({ page }) => {
   )).toBeLessThanOrEqual(0.5);
   const annotation = page.getByRole('button', { name: /Highlight · Page 1/u });
   await annotation.focus();
+  await expect(page.getByRole('button', { name: /Copy link to Highlight annotation on page 1/u })
+    .locator('.lucide-link')).toBeVisible();
   await expect(annotation.locator('.annotation-item__page')).toHaveText('1');
   await expect(annotation.locator('.annotation-item__separator')).toHaveCount(2);
   await expect(annotation.locator('.annotation-item__section')).toHaveAttribute(
@@ -323,6 +324,9 @@ test('wide Outline tree', async ({ page }) => {
     name: 'Conditional comparison estimates, Page 24',
     exact: true,
   }).focus();
+  await expect(page.getByRole('button', {
+    name: 'Copy exact destination link for Conditional comparison estimates, Page 24',
+  }).locator('.lucide-link')).toBeVisible();
   await expect(page.locator('[data-outline-item="outline-long-nested"] > .outline-navigator__row'))
     .toHaveAttribute('data-current', 'true');
   await expectScene(product, 'wide-outline-tree.png');

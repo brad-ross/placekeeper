@@ -349,7 +349,12 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     const linkedPdfPath = await realpath(pdfPath);
     const appLink = encodePlacekeeperLink({
       path: linkedPdfPath,
-      location: { kind: "page", page: 12 },
+      location: {
+        kind: "destination",
+        page: 12,
+        mode: "fit-horizontal",
+        params: [640],
+      },
     });
     const preflight = parseObject(await executeInstalled(
       executable,
@@ -382,7 +387,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     if (typeof linkedView?.pathname !== "string") {
       throw new Error("Installed linked browser exchange omitted its readable route");
     }
-    const linkedReadableUrl = `${expectedOrigin}${linkedView.pathname}#v=1&page=12`;
+    const linkedReadableUrl = `${expectedOrigin}${linkedView.pathname}#v=2&page=12&mode=fit-horizontal&params=640`;
     const linkedAppLinkBase = appLink.slice(0, appLink.indexOf("#"));
     const linkedScope = parseObject(await (await fetch(
       `${linkedUrl.origin}${linkedUrl.pathname.replace(/\/bootstrap$/u, "/scope")}`,
@@ -391,8 +396,12 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
     const linkedLocation = linkedScope.requestedLocation as Record<string, unknown> | undefined;
     if (
       linkedScope.launchSurface !== "browser" ||
-      linkedLocation?.kind !== "page" ||
+      linkedLocation?.kind !== "destination" ||
       linkedLocation.page !== 12 ||
+      linkedLocation.mode !== "fit-horizontal" ||
+      !Array.isArray(linkedLocation.params) ||
+      linkedLocation.params.length !== 1 ||
+      linkedLocation.params[0] !== 640 ||
       "codexContext" in linkedScope
     ) {
       throw new Error("Installed linked browser scope lost its location or gained Codex authority");
@@ -591,7 +600,7 @@ export async function smokeInstalledHookLifecycle(appPath: string, fixturePath: 
       !staleReadableResponse.ok ||
       !staleReadableHtml.includes("data-terminal-recovery") ||
       !staleReadableHtml.includes(`data-app-link-base="${linkedAppLinkBase}"`) ||
-      !linkedReadableUrl.endsWith("#v=1&page=12")
+      !linkedReadableUrl.endsWith("#v=2&page=12&mode=fit-horizontal&params=640")
     ) {
       throw new Error("Installed upgrade did not preserve the old readable URL as inert recovery");
     }

@@ -401,7 +401,7 @@ async function referenceNavigationPdf() {
     destination: context.obj([99, PDFName.of('Fit')]),
   });
 
-  const outlines = context.obj({ Type: 'Outlines', Count: 4 });
+  const outlines = context.obj({ Type: 'Outlines', Count: 5 });
   const outlinesRef = context.register(outlines);
   const overview = context.obj({
     Title: PDFHexString.fromText('Overview'),
@@ -426,16 +426,24 @@ async function referenceNavigationPdf() {
     Parent: detailsRef,
     Dest: primaryDestination,
   });
+  const pageOnlyOutline = context.obj({
+    Title: PDFHexString.fromText('Page-only appendix'),
+    Parent: outlinesRef,
+    Dest: [hostilePage.ref],
+  });
   const nestedRef = context.register(nested);
   const hostileOutlineRef = context.register(hostileOutline);
+  const pageOnlyOutlineRef = context.register(pageOnlyOutline);
   overview.set(PDFName.of('Next'), detailsRef);
   details.set(PDFName.of('Prev'), overviewRef);
+  details.set(PDFName.of('Next'), pageOnlyOutlineRef);
   details.set(PDFName.of('First'), nestedRef);
   details.set(PDFName.of('Last'), hostileOutlineRef);
   nested.set(PDFName.of('Next'), hostileOutlineRef);
   hostileOutline.set(PDFName.of('Prev'), nestedRef);
+  pageOnlyOutline.set(PDFName.of('Prev'), detailsRef);
   outlines.set(PDFName.of('First'), overviewRef);
-  outlines.set(PDFName.of('Last'), detailsRef);
+  outlines.set(PDFName.of('Last'), pageOnlyOutlineRef);
   document.catalog.set(PDFName.of('Outlines'), outlinesRef);
   document.catalog.set(PDFName.of('PageMode'), PDFName.of('UseOutlines'));
 
