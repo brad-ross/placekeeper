@@ -101,6 +101,26 @@ describe('viewer navigation math', () => {
     })).toBe(true);
   });
 
+  it.each([
+    ['XYZ below minimum', target(PdfZoomMode.XYZ, [20, 700, 0.19])],
+    ['XYZ above maximum', target(PdfZoomMode.XYZ, [20, 700, 60.01])],
+    ['near-zero fit rectangle', target(PdfZoomMode.FitRectangle, [100, 100, 100.001, 100.001])],
+    ['oversized fit rectangle', target(PdfZoomMode.FitRectangle, [0, -4_000, 4_000, 0])],
+  ] as const)('does not mutate the viewer for an author target with %s zoom', async (_name, destination) => {
+    const harness = navigationHarness();
+
+    expect(await harness.navigation.applyTarget(destination)).toBe(false);
+    expect(harness.log).toEqual([]);
+  });
+
+  it.each([0.2, 60])('accepts the configured %s zoom boundary', (zoom) => {
+    expect(createPdfTargetLocation(target(PdfZoomMode.XYZ, [20, 700, zoom]), {
+      page,
+      viewport,
+      currentZoom: 1,
+    })?.zoom).toBe(zoom);
+  });
+
   it('maps cropped and rotated destinations in natural page coordinates', () => {
     expect(createPdfTargetLocation(target(PdfZoomMode.XYZ, [172, 740, 1]), {
       page: { ...page, cropOrigin: { x: 100, y: 200 } },

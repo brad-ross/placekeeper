@@ -6,7 +6,11 @@ import {
 } from '@embedpdf/models';
 import { describe, expect, it } from 'vitest';
 
-import { classifyPdfNavigationTarget } from '../src/pdf/pdf-navigation-target.js';
+import {
+  classifyPdfNavigationTarget,
+  pdfNavigationTargetFromPlacekeeperLocation,
+  placekeeperLocationFromPdfNavigationTarget,
+} from '../src/pdf/pdf-navigation-target.js';
 
 const context = { documentGeneration: 7, pageCount: 4 } as const;
 
@@ -93,5 +97,113 @@ describe('PDF navigation target classification and identity', () => {
     ['past final page', direct(xyz(4, 0, 0)), 'out-of-range'],
   ] as const)('rejects %s without producing an identity', (_name, target, reason) => {
     expect(classifyPdfNavigationTarget(target, context)).toEqual({ ok: false, reason });
+  });
+});
+
+describe('durable PDF navigation targets', () => {
+  it.each([
+    [PdfZoomMode.XYZ, [72, 640, 1.5], 'xyz'],
+    [PdfZoomMode.FitPage, [], 'fit-page'],
+    [PdfZoomMode.FitBoundingBox, [], 'fit-bounding-box'],
+    [PdfZoomMode.FitHorizontal, [640], 'fit-horizontal'],
+    [PdfZoomMode.FitVertical, [72], 'fit-vertical'],
+    [PdfZoomMode.FitBoundingBoxHorizontal, [640], 'fit-bounding-box-horizontal'],
+    [PdfZoomMode.FitBoundingBoxVertical, [72], 'fit-bounding-box-vertical'],
+    [PdfZoomMode.FitRectangle, [10, 20, 300, 700], 'fit-rectangle'],
+  ] as const)('maps and rehydrates %s without retaining live identity', (mode, params, durableMode) => {
+    const classified = classifyPdfNavigationTarget(direct({
+      pageIndex: 2,
+      zoom: mode === PdfZoomMode.XYZ
+        ? { mode, params: { x: params[0]!, y: params[1]!, zoom: params[2]! } }
+        : { mode },
+      view: [...params],
+    }), context);
+    if (!classified.ok) throw new Error(`valid ${String(mode)} target was rejected`);
+
+    const location = placekeeperLocationFromPdfNavigationTarget(classified.target, context);
+    expect(location).toEqual({
+      kind: 'destination',
+      page: 3,
+      mode: durableMode,
+      params: [...params],
+    });
+
+    const rehydrated = pdfNavigationTargetFromPlacekeeperLocation(location!, {
+      documentGeneration: 11,
+      pageCount: 4,
+    });
+    expect(rehydrated).toEqual({
+      documentGeneration: 11,
+      pageIndex: 2,
+      zoom: { mode, params: [...params] },
+      identity: JSON.stringify([11, 2, mode, ...params]),
+    });
+    expect(rehydrated?.identity).not.toBe(classified.target.identity);
+  });
+
+  it('normalizes page-only author metadata to v1 and can rehydrate its full available precision', () => {
+    const classified = classifyPdfNavigationTarget(
+      direct({ pageIndex: 3, zoom: { mode: PdfZoomMode.Unknown }, view: [] }),
+      context,
+    );
+    if (!classified.ok) throw new Error('valid page target was rejected');
+
+    const location = placekeeperLocationFromPdfNavigationTarget(classified.target, context);
+    expect(location).toEqual({ kind: 'page', page: 4 });
+    expect(pdfNavigationTargetFromPlacekeeperLocation(location!, {
+      documentGeneration: 13,
+      pageCount: 4,
+    })).toEqual({
+      documentGeneration: 13,
+      pageIndex: 3,
+      zoom: { mode: PdfZoomMode.Unknown, params: [] },
+      identity: JSON.stringify([13, 3, PdfZoomMode.Unknown]),
+    });
+  });
+
+  it('canonicalizes equivalent classified sources to the same generation-free location', () => {
+    const destination = xyz(1, 72, 640, 2);
+    const outline = classifyPdfNavigationTarget(direct(destination), context);
+    const link = classifyPdfNavigationTarget(
+      { type: 'action', action: { type: PdfActionType.Goto, destination } },
+      context,
+    );
+    if (!outline.ok || !link.ok) throw new Error('equivalent targets were rejected');
+
+    expect(placekeeperLocationFromPdfNavigationTarget(outline.target, context))
+      .toEqual(placekeeperLocationFromPdfNavigationTarget(link.target, context));
+  });
+
+  it('fails closed for stale, out-of-range, malformed, and non-location values', () => {
+    const valid = classifyPdfNavigationTarget(direct(xyz(1, 72, 640, 2)), context);
+    if (!valid.ok) throw new Error('valid target was rejected');
+
+    expect(placekeeperLocationFromPdfNavigationTarget(valid.target, {
+      ...context,
+      documentGeneration: 8,
+    })).toBeNull();
+    expect(placekeeperLocationFromPdfNavigationTarget({ ...valid.target, pageIndex: 4 }, context))
+      .toBeNull();
+    expect(placekeeperLocationFromPdfNavigationTarget({
+      ...valid.target,
+      zoom: { mode: PdfZoomMode.FitRectangle, params: [0, 0, 1] },
+    }, context)).toBeNull();
+    expect(pdfNavigationTargetFromPlacekeeperLocation({
+      kind: 'destination',
+      page: 5,
+      mode: 'fit-page',
+      params: [],
+    }, context)).toBeNull();
+    expect(pdfNavigationTargetFromPlacekeeperLocation({
+      kind: 'destination',
+      page: 1,
+      mode: 'xyz',
+      params: [0, 0, -1],
+    }, context)).toBeNull();
+    expect(pdfNavigationTargetFromPlacekeeperLocation({
+      kind: 'item',
+      page: 1,
+      itemId: '4c74f42b-353e-4297-97cd-d8f94296a39d',
+    }, context)).toBeNull();
   });
 });
