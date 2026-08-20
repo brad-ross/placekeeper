@@ -2,11 +2,17 @@ import { createRoot } from "react-dom/client";
 
 import {
   decodePlacekeeperLinkFragment,
-  encodePlacekeeperLinkFragment,
+  type PlacekeeperLinkLocation,
 } from "../../../packages/core/src/placekeeper-link.js";
 import { ProductionReviewApp, type ProductionSession } from "./app/ProductionReviewApp.js";
-import { loadProductionSession, resumeProductionSession } from "./app/session-api.js";
 import {
+  loadProductionSession,
+  reopenProductionSession,
+  resumeProductionSession,
+  type ReopenRecoveryChoice,
+} from "./app/session-api.js";
+import {
+  buildPlacekeeperCopyLink,
   createCopyLinkCommand,
   type CopyLinkStatus,
 } from "./review/CopyLinkControl.js";
@@ -25,15 +31,17 @@ export function showTerminalRecovery(): void {
     reopen === undefined ||
     appLinkBase === undefined
   ) return;
-  let fragment = encodePlacekeeperLinkFragment({ kind: "page", page: 1 });
+  let location: PlacekeeperLinkLocation = { kind: "page", page: 1 };
   try {
-    fragment = encodePlacekeeperLinkFragment(
-      decodePlacekeeperLinkFragment(window.location.hash.slice(1)),
-    );
+    location = decodePlacekeeperLinkFragment(window.location.hash.slice(1));
   } catch {
     // Invalid or future fragments recover conservatively at page 1.
   }
-  const link = `${appLinkBase}#${fragment}`;
+  const link = buildPlacekeeperCopyLink(appLinkBase, location);
+  const browserLink = buildPlacekeeperCopyLink(
+    `${window.location.origin}${window.location.pathname}`,
+    location,
+  );
   reopen.href = link;
   if (document.head.querySelector('link[data-placekeeper-terminal-style]') === null) {
     const stylesheet = document.createElement('link');
@@ -48,17 +56,102 @@ export function showTerminalRecovery(): void {
   heading.tabIndex = -1;
   const explanation = document.createElement('p');
   explanation.textContent = 'This live review is no longer available. Reopen the current PDF at this location in a fresh review.';
+  const reopenStatus = document.createElement('p');
+  reopenStatus.setAttribute('role', 'status');
+  const reopenActions = document.createElement('div');
+  let reopenPending = false;
+  const requestReopen = async (options: {
+    readonly confirmed?: true;
+    readonly recovery?: ReopenRecoveryChoice;
+  } = {}) => {
+    if (reopenPending) return;
+    reopenPending = true;
+    reopen.setAttribute('aria-busy', 'true');
+    reopen.setAttribute('aria-disabled', 'true');
+    reopenStatus.setAttribute('role', 'status');
+    reopenStatus.textContent = 'Opening…';
+    reopenActions.replaceChildren();
+    try {
+      const result = await reopenProductionSession(link, options);
+      if (result.kind === 'opened' || result.kind === 'focused') {
+        window.location.assign(result.url);
+        return;
+      }
+      if (result.kind === 'confirmation-required') {
+        reopenStatus.textContent = 'Confirm opening the local PDF named in the Placekeeper link below.';
+        const confirm = document.createElement('button');
+        confirm.type = 'button';
+        confirm.textContent = 'Open this PDF';
+        confirm.title = 'Open this PDF';
+        confirm.addEventListener('click', () => { void requestReopen({ confirmed: true }); });
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.textContent = 'Cancel';
+        cancel.title = 'Cancel';
+        cancel.addEventListener('click', () => {
+          reopenActions.replaceChildren();
+          reopenStatus.textContent = '';
+          reopen.focus({ preventScroll: true });
+        });
+        reopenActions.replaceChildren(confirm, cancel);
+        queueMicrotask(() => confirm.focus({ preventScroll: true }));
+        return;
+      }
+      if (result.kind === 'recovery-offered') {
+        reopenStatus.textContent = 'Choose how to handle the recovered draft.';
+        const labels = {
+          resume: 'Resume draft',
+          discard: 'Discard draft',
+          fork: 'Open separate copy',
+        } as const;
+        reopenActions.replaceChildren(...result.choices.map((choice) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.textContent = labels[choice];
+          button.title = labels[choice];
+          button.addEventListener('click', () => {
+            void requestReopen({ ...options, recovery: choice });
+          });
+          return button;
+        }));
+        queueMicrotask(() => reopenActions.querySelector('button')?.focus({ preventScroll: true }));
+        return;
+      }
+      throw new Error('The PDF could not be reopened.');
+    } catch {
+      reopenStatus.setAttribute('role', 'alert');
+      reopenStatus.textContent = 'Placekeeper could not reopen this PDF here. Use the Placekeeper task link below in Codex chat to reconnect it to this task.';
+    } finally {
+      reopenPending = false;
+      reopen.removeAttribute('aria-busy');
+      reopen.removeAttribute('aria-disabled');
+    }
+  };
+  reopen.addEventListener('click', (event) => {
+    event.preventDefault();
+    void requestReopen();
+  });
+  reopen.removeAttribute('aria-disabled');
   const addressLabel = document.createElement('label');
-  addressLabel.textContent = 'Placekeeper link';
+  addressLabel.textContent = 'Browser link';
   const address = document.createElement('input');
   address.readOnly = true;
-  address.value = link;
-  address.setAttribute('aria-label', 'Placekeeper link');
+  address.value = browserLink;
+  address.setAttribute('aria-label', 'Browser link');
   address.addEventListener('focus', () => address.select());
   addressLabel.append(address);
+  const taskAddressLabel = document.createElement('label');
+  taskAddressLabel.textContent = 'Placekeeper task link';
+  const taskAddress = document.createElement('input');
+  taskAddress.readOnly = true;
+  taskAddress.value = link;
+  taskAddress.setAttribute('aria-label', 'Placekeeper link');
+  taskAddress.addEventListener('focus', () => taskAddress.select());
+  taskAddressLabel.append(taskAddress);
   const copy = document.createElement('button');
   copy.type = 'button';
   copy.textContent = 'Copy Link';
+  copy.title = 'Copy Link';
   const copyStatus = document.createElement('p');
   copyStatus.setAttribute('role', 'status');
   const renderCopyStatus = (status: CopyLinkStatus) => {
@@ -75,7 +168,7 @@ export function showTerminalRecovery(): void {
     }
   };
   const copyCommand = createCopyLinkCommand({
-    getLink: () => link,
+    getLink: () => browserLink,
     writeText: async (value) => {
       const write = navigator.clipboard?.writeText;
       if (write === undefined) throw new Error('Clipboard API unavailable');
@@ -89,7 +182,17 @@ export function showTerminalRecovery(): void {
     });
   });
 
-  recovery.replaceChildren(heading, explanation, reopen, copy, addressLabel, copyStatus);
+  recovery.replaceChildren(
+    heading,
+    explanation,
+    reopen,
+    reopenStatus,
+    reopenActions,
+    copy,
+    addressLabel,
+    taskAddressLabel,
+    copyStatus,
+  );
   requestAnimationFrame(() => heading.focus({ preventScroll: true }));
 }
 

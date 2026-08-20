@@ -28,7 +28,7 @@ test.afterAll(async () => {
   if (root) await rm(root, { recursive: true, force: true });
 });
 
-test("a live readable review survives repeated hard refresh and fails closed after session end", async ({ page }) => {
+test("a live Codex review copies a browser-safe URL, survives refresh, and reopens in place", async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -40,7 +40,7 @@ test("a live readable review survives repeated hard refresh and fails closed aft
       },
     });
   });
-  const launched = await host.open({ pdfPath: pdf, surface: "browser", fork: true });
+  const launched = await host.open({ pdfPath: pdf, surface: "codex", fork: true });
   if (!launched.ok || launched.kind === "recovery-offered") {
     throw new Error("Expected a live browser launch");
   }
@@ -92,11 +92,43 @@ test("a live readable review survives repeated hard refresh and fails closed aft
   await page.getByRole("button", { name: "Copy link to current PDF location" }).click();
   await expect(page.locator('[data-copy-link-status="success"]').getByRole("status"))
     .toHaveText("Link copied.");
-  expect(await page.evaluate(() => (
+  const copiedLink = await page.evaluate(() => (
     globalThis as typeof globalThis & { __copiedPlacekeeperLink?: string }
-  ).__copiedPlacekeeperLink)).toMatch(/^placekeeper:\/\/\/.*Paper%20One\.pdf#v=1&page=1$/u);
+  ).__copiedPlacekeeperLink);
+  expect(copiedLink).toMatch(
+    /^http:\/\/127\.0\.0\.1:\d+\/r\/[0-9a-f-]{36}\/.*Paper%20One\.pdf#v=1&page=1$/u,
+  );
+  const pasted = await page.context().newPage();
+  await pasted.goto(copiedLink!);
+  await expect(pasted.locator("#root")).toHaveAttribute("data-production-root", "true");
+  await expectCurrentPage(pasted, "1 / 4");
+  await pasted.close();
 
   await host.broker.finish(launched.sessionId);
+  const slowPage = await page.context().newPage();
+  let releaseApp!: () => void;
+  const appGate = new Promise<void>((resolve) => { releaseApp = resolve; });
+  await slowPage.route("**/assets/app.js", async (route) => {
+    await appGate;
+    await route.continue();
+  });
+  await slowPage.goto(page.url(), { waitUntil: "domcontentloaded" });
+  const earlyReopen = slowPage.getByRole("link", { name: "Reopen in Placekeeper" });
+  await expect(earlyReopen).toHaveAttribute("href", "#");
+  await expect(earlyReopen).toHaveAttribute("aria-disabled", "true");
+  await earlyReopen.evaluate((anchor) => {
+    if (!(anchor instanceof HTMLAnchorElement)) throw new Error("Expected recovery link");
+    anchor.click();
+  });
+  expect(new URL(slowPage.url()).protocol).toBe("http:");
+  releaseApp();
+  await expect(earlyReopen).toHaveAttribute(
+    "href",
+    new RegExp(`^placekeeper:///.*Paper%20One\\.pdf#v=1&page=1$`, "u"),
+  );
+  await expect(earlyReopen).not.toHaveAttribute("aria-disabled", "true");
+  await slowPage.close();
+
   await page.reload();
   await expect(page.getByText("This live review is no longer available.")).toBeVisible();
   const reopen = page.getByRole("link", { name: "Reopen in Placekeeper" });
@@ -108,6 +140,21 @@ test("a live readable review survives repeated hard refresh and fails closed aft
   await expect(page.getByLabel("Placekeeper link")).toHaveValue(
     new RegExp(`^placekeeper:///.*Paper%20One\\.pdf#v=1&page=1$`, "u"),
   );
+  await expect(page.getByLabel("Browser link")).toHaveValue(
+    /^http:\/\/127\.0\.0\.1:\d+\/r\/[0-9a-f-]{36}\/.*Paper%20One\.pdf#v=1&page=1$/u,
+  );
+  await page.getByRole("button", { name: "Copy Link" }).click();
+  expect(await page.evaluate(() => (
+    globalThis as typeof globalThis & { __copiedPlacekeeperLink?: string }
+  ).__copiedPlacekeeperLink)).toMatch(
+    /^http:\/\/127\.0\.0\.1:\d+\/r\/[0-9a-f-]{36}\/.*Paper%20One\.pdf#v=1&page=1$/u,
+  );
+  await reopen.click();
+  await expect(page.getByRole("button", { name: "Open this PDF" })).toBeVisible();
+  await page.getByRole("button", { name: "Open this PDF" }).click();
+  await expect(page.locator("#root")).toHaveAttribute("data-production-root", "true");
+  await expectCurrentPage(page, "1 / 4");
+  await expect(page).toHaveURL(/\/r\/[0-9a-f-]{36}\/.*Paper%20One\.pdf#v=1&page=1$/u);
 });
 
 test("a successor daemon keeps the old origin but serves a stale view as inert click-only recovery", async ({ page }) => {

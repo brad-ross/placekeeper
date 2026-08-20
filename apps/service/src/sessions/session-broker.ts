@@ -50,8 +50,18 @@ import {
 import { SessionControlRegistry } from "./control-socket.js";
 import { TaskBindingRegistry } from "../context/task-binding-registry.js";
 
-export type RecoveryDecision = "resume" | "discard" | "fork";
-export type LaunchSurface = "browser" | "finder" | "codex" | "vscode";
+export const RECOVERY_DECISIONS = ["resume", "discard", "fork"] as const;
+export type RecoveryDecision = typeof RECOVERY_DECISIONS[number];
+export const LAUNCH_SURFACES = ["browser", "finder", "codex", "vscode"] as const;
+export type LaunchSurface = typeof LAUNCH_SURFACES[number];
+
+export function isRecoveryDecision(value: unknown): value is RecoveryDecision {
+  return typeof value === "string" && RECOVERY_DECISIONS.includes(value as RecoveryDecision);
+}
+
+export function isLaunchSurface(value: unknown): value is LaunchSurface {
+  return typeof value === "string" && LAUNCH_SURFACES.includes(value as LaunchSurface);
+}
 
 export interface OpenReviewRequest {
   readonly pdfPath: string;
@@ -330,7 +340,7 @@ export class SessionBroker {
       return {
         kind: "recovery-offered",
         recoverySessionId: matchingDraft.state.sessionId,
-        choices: ["resume", "discard", "fork"],
+        choices: RECOVERY_DECISIONS,
       };
     }
 

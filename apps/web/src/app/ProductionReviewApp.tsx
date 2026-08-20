@@ -339,6 +339,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     };
     return new BrowserReviewLocationHistory(environment);
   }, [props.session.appLinkBase]);
+  const copyLinkBase = useMemo(() => {
+    if (props.session.appLinkBase === undefined) return undefined;
+    if (props.scope.launchSurface !== 'codex' || typeof window === 'undefined') {
+      return props.session.appLinkBase;
+    }
+    return `${window.location.origin}${window.location.pathname}`;
+  }, [props.scope.launchSurface, props.session.appLinkBase]);
   const [locationHistorySnapshot, setLocationHistorySnapshot] = useState<ReviewLocationHistorySnapshot>({
     canBack: false,
     canForward: false,
@@ -1044,14 +1051,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         {...(props.scope.launchSurface === 'codex'
           ? { codexContext: visibleCodexContext(codexContext, state) ?? UNAVAILABLE_CODEX_CONTEXT }
           : {})}
-        {...(props.session.appLinkBase === undefined || locationHistory === undefined ? {} : {
+        {...(copyLinkBase === undefined || locationHistory === undefined ? {} : {
           copyLink: {
             disabled: navigationState.pendingMainNavigation !== null
               || navigationState.pendingSendToMain !== null,
             getLink: () => {
               mainLocationRefresh.flush();
               return buildPlacekeeperCopyLink(
-                props.session.appLinkBase!,
+                copyLinkBase,
                 navigationCoordinator.currentLinkLocation(),
               );
             },
@@ -1060,7 +1067,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           copyItemLink: {
             getLink: (item: ReviewItem) => portableItemIdsRef.current.has(item.id)
               && saveStatusIsCleanCurrent(state, saveStatus)
-              ? buildPlacekeeperCopyLink(props.session.appLinkBase!, {
+              ? buildPlacekeeperCopyLink(copyLinkBase, {
                   kind: 'item',
                   page: item.pageIndex + 1,
                   itemId: item.id,

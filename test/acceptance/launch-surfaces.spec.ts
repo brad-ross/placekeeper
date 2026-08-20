@@ -89,4 +89,9 @@ test("only the Codex adapter requests the Codex launch surface", async () => {
   expect(vscode).toContain('["open", "--json", "--surface", "vscode"');
   expect(vscode).not.toContain('"--surface", "codex"');
   expect(skill).toContain("--surface codex");
+  expect(skill).toContain(
+    '`"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper" open-link --json --surface codex --confirmed',
+  );
+  expect(skill).toContain("rerunning the same full installed-launcher command");
+  expect(skill).not.toContain("Then run `open-link");
 });

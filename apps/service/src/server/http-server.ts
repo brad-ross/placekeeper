@@ -9,10 +9,13 @@ import {
 } from "../../../../packages/core/src/session-security.js";
 import type { ReviewCommand } from "../../../../packages/core/src/review-model.js";
 import { isContained } from "../files/file-capabilities.js";
-import type { SessionBroker } from "../sessions/session-broker.js";
+import {
+  isRecoveryDecision,
+  type SessionBroker,
+} from "../sessions/session-broker.js";
 import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { DaemonLifecycleCoordinator } from "../host/daemon-lifecycle.js";
-import { parsePlacekeeperReadableViewRoute } from "../links/placekeeper-link.js";
+import { openPlacekeeperLink, parsePlacekeeperReadableViewRoute } from "../links/placekeeper-link.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
@@ -157,8 +160,15 @@ function htmlAttribute(value: string): string {
 
 function terminalRecoveryMarkup(appLinkBase: string, hidden = false): string {
   const base = htmlAttribute(appLinkBase);
-  return `<main data-terminal-recovery${hidden ? " hidden" : ""}><p>This live review is no longer available.</p><a data-placekeeper-reopen data-app-link-base="${base}" href="${base}#v=1&amp;page=1">Reopen in Placekeeper</a></main>`;
+  return `<main data-terminal-recovery${hidden ? " hidden" : ""}><p>This live review is no longer available.</p><a data-placekeeper-reopen data-app-link-base="${base}" href="#" aria-disabled="true">Reopen in Placekeeper</a></main>`;
 }
+
+const terminalRecoveryFallbackScript = `
+  const reopen = document.querySelector("[data-placekeeper-reopen]");
+  if (reopen instanceof HTMLAnchorElement && reopen.dataset.appLinkBase) {
+    reopen.href = reopen.dataset.appLinkBase + "#v=1&page=1";
+    reopen.removeAttribute("aria-disabled");
+  }`;
 
 function readableViewHtml(nonce: string, appLinkBase: string): string {
   const script = `
@@ -176,13 +186,19 @@ let app;
   document.querySelector("#root")?.remove();
   const recovery = document.querySelector("[data-terminal-recovery]");
   if (recovery instanceof HTMLElement) recovery.hidden = false;
-  app?.showTerminalRecovery();
+  if (app === undefined) {${terminalRecoveryFallbackScript}
+  } else {
+    app.showTerminalRecovery();
+  }
 });`;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Placekeeper</title></head><body><div id="root"></div>${terminalRecoveryMarkup(appLinkBase, true)}<script type="module" nonce="${nonce}">${script}</script></body></html>`;
 }
 
 function terminalRecoveryHtml(nonce: string, appLinkBase: string): string {
-  const script = `import("/assets/app.js").then((app) => app.showTerminalRecovery()).catch(() => {});`;
+  const script = `import("/assets/app.js")
+    .then((app) => app.showTerminalRecovery())
+    .catch(() => {${terminalRecoveryFallbackScript}
+    });`;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Placekeeper</title></head><body>${terminalRecoveryMarkup(appLinkBase)}<script type="module" nonce="${nonce}">${script}</script></body></html>`;
 }
 
@@ -258,12 +274,13 @@ export async function startHttpServer(
       const pathname = requestUrl.pathname;
       const exchangeMatch = new RegExp(`^/s/(${UUID})/exchange$`, "u").exec(pathname);
       const resumeMatch = new RegExp(`^/r/(${VIEW_UUID})/resume$`, "u").exec(pathname);
+      const reopenMatch = pathname === "/reopen";
       const commandMatch = new RegExp(`^/s/(${UUID})/commands$`, "u").exec(pathname);
       const saveMatch = new RegExp(
         `^/s/(${UUID})/save/(status|proposal|copy|folder|original|retry|locate)$`,
         "u",
       ).exec(pathname);
-      const mutates = exchangeMatch !== null || resumeMatch !== null || commandMatch !== null ||
+      const mutates = exchangeMatch !== null || resumeMatch !== null || reopenMatch || commandMatch !== null ||
         (saveMatch !== null && saveMatch[2] !== "status" && saveMatch[2] !== "proposal");
       const expectsJson = mutates;
       const contentLength = Number(request.headers["content-length"] ?? 0);
@@ -387,6 +404,52 @@ export async function startHttpServer(
         }
         const { appLinkBase } = parsePlacekeeperReadableViewRoute(body.pathname as string);
         sendJson(response, 200, { ...resumed, appLinkBase });
+        return;
+      }
+
+      if (reopenMatch) {
+        if (request.method !== "POST") {
+          send(response, 405, "Method not allowed");
+          return;
+        }
+        const body = await readJson(request) as {
+          link?: unknown;
+          confirmed?: unknown;
+          recovery?: unknown;
+        };
+        if (
+          typeof body.link !== "string" ||
+          (body.confirmed !== undefined && body.confirmed !== true) ||
+          (body.recovery !== undefined && !isRecoveryDecision(body.recovery))
+        ) {
+          send(response, 400, "Invalid request");
+          return;
+        }
+        const opened = await openPlacekeeperLink(broker, {
+          link: body.link,
+          ...(body.confirmed === undefined ? {} : { confirmed: body.confirmed }),
+          ...(body.recovery === undefined ? {} : { recovery: body.recovery }),
+          surface: "browser",
+        });
+        if (opened.kind === "confirmation-required") {
+          sendJson(response, 200, { ok: true, ...opened });
+          return;
+        }
+        if (opened.kind === "recovery-offered") {
+          sendJson(response, 200, {
+            ok: true,
+            kind: "recovery-offered",
+            choices: opened.choices,
+          });
+          return;
+        }
+        const launch = new URL(opened.launch.launchPath, origin);
+        launch.hash = opened.launch.fragment.slice(1);
+        sendJson(response, 200, {
+          ok: true,
+          kind: opened.kind,
+          url: launch.href,
+        });
         return;
       }
 

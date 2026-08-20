@@ -39,6 +39,17 @@ describe('Copy Link', () => {
       'placekeeper:///Users/reader/Paper.pdf#credential=secret',
       { kind: 'page', page: 1 },
     )).toThrow();
+
+    expect(buildPlacekeeperCopyLink(
+      'http://127.0.0.1:43179/r/22222222-2222-4222-8222-222222222222/Users/reader/Paper%20One.pdf',
+      { kind: 'page', page: 7 },
+    )).toBe(
+      'http://127.0.0.1:43179/r/22222222-2222-4222-8222-222222222222/Users/reader/Paper%20One.pdf#v=1&page=7',
+    );
+    expect(() => buildPlacekeeperCopyLink(
+      'https://example.com/r/22222222-2222-4222-8222-222222222222/Users/reader/Paper.pdf',
+      { kind: 'page', page: 1 },
+    )).toThrow();
   });
 
   it('deduplicates a pending write and reports honest success', async () => {

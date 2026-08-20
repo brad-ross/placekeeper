@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 
 import {
+  decodePlacekeeperReadableViewPathname,
   encodePlacekeeperLinkFragment,
   type PlacekeeperLinkLocation,
 } from '../../../../packages/core/src/placekeeper-link.js';
@@ -11,13 +12,30 @@ export type CopyLinkStatus =
   | { readonly status: 'failure'; readonly link: string };
 
 export function buildPlacekeeperCopyLink(
-  appLinkBase: string,
+  linkBase: string,
   location: PlacekeeperLinkLocation,
 ): string {
-  if (!appLinkBase.startsWith('placekeeper:///') || appLinkBase.includes('#') || appLinkBase.includes('?')) {
-    throw new Error('Placekeeper app-link base is invalid');
+  const appLink = linkBase.startsWith('placekeeper:///')
+    && !linkBase.includes('#')
+    && !linkBase.includes('?');
+  if (appLink) return `${linkBase}#${encodePlacekeeperLinkFragment(location)}`;
+  let readableLink = false;
+  try {
+    const url = new URL(linkBase);
+    readableLink = url.protocol === 'http:'
+      && url.hostname === '127.0.0.1'
+      && url.port.length > 0
+      && url.username.length === 0
+      && url.password.length === 0
+      && url.search.length === 0
+      && url.hash.length === 0
+      && linkBase === `${url.origin}${url.pathname}`;
+    if (readableLink) decodePlacekeeperReadableViewPathname(url.pathname);
+  } catch {
+    readableLink = false;
   }
-  return `${appLinkBase}#${encodePlacekeeperLinkFragment(location)}`;
+  if (!readableLink) throw new Error('Placekeeper link base is invalid');
+  return `${linkBase}#${encodePlacekeeperLinkFragment(location)}`;
 }
 
 export function createCopyLinkCommand(input: {

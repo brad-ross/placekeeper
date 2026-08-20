@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { addPageNote } from "../../../packages/core/src/review-commands.js";
+import { encodePlacekeeperLink } from "../../../packages/core/src/placekeeper-link.js";
 import { runContextCommand } from "../src/cli/context-command.js";
 import {
   CODEX_INSTALLED_LAUNCHER_COMMAND,
@@ -12,6 +13,7 @@ import {
 import {
   requestControl,
   requestLaunch,
+  requestLinkOpen,
   startLaunchControlServer,
   type LaunchControlServer,
 } from "../src/host/launch-control.js";
@@ -61,6 +63,64 @@ function injectedContext(write: ReturnType<typeof vi.fn>): Record<string, any> {
 }
 
 describe("packaged Codex live-context lifecycle", () => {
+  it("rebinds a canonical Placekeeper link opened explicitly through Codex", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-codex-link-"));
+    roots.push(root);
+    const assets = join(root, "assets");
+    const pdf = join(root, "linked.pdf");
+    await mkdir(assets);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
+    const host = await PlacekeeperHost.start({
+      recoveryRoot: join(root, "recovery"),
+      webAssets: { root: assets },
+    });
+    hosts.push(host);
+    const socketPath = join(root, "control.sock");
+    controls.push(await startLaunchControlServer(host, socketPath));
+    const control = (request: Parameters<typeof requestControl>[1]) => requestControl(socketPath, request);
+    const link = encodePlacekeeperLink({ path: pdf, location: { kind: "page", page: 2 } });
+    const launch = await requestLinkOpen(socketPath, {
+      link,
+      confirmed: true,
+      surface: "codex",
+    });
+    if (
+      !launch.ok || launch.kind === "recovery-offered" ||
+      launch.kind === "confirmation-required" || launch.bindProof === undefined
+    ) throw new Error("Expected a task-bindable linked launch");
+
+    await runHookCommand(["hook", "--event"], JSON.stringify({
+      session_id: taskSessionId,
+      hook_event_name: "PostToolUse",
+      tool_name: "Bash",
+      tool_input: {
+        command: `${CODEX_INSTALLED_LAUNCHER_COMMAND} open-link --json --surface codex --confirmed --link '${link}'`,
+      },
+      tool_response: JSON.stringify(launch),
+    }), control, vi.fn());
+
+    const launchedUrl = new URL(launch.url);
+    const capability = new URLSearchParams(launchedUrl.hash.slice(1)).get("cap");
+    const exchanged = await fetch(`${launchedUrl.origin}/s/${launch.sessionId}/exchange`, {
+      method: "POST",
+      headers: {
+        origin: launchedUrl.origin,
+        "content-type": "application/json",
+        "sec-fetch-site": "same-origin",
+      },
+      body: JSON.stringify({ capability }),
+    });
+    expect(exchanged.status).toBe(200);
+
+    const write = vi.fn();
+    await runHookCommand(["hook", "--event"], hookInput("UserPromptSubmit"), control, write);
+    expect(injectedContext(write)).toMatchObject({
+      currentness: "current",
+      reviewItems: { mode: "full" },
+    });
+  });
+
   it("binds the exact launch, activates in the browser, refreshes deltas, gates evidence, and revokes at task end", async () => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-codex-acceptance-"));
     roots.push(root);

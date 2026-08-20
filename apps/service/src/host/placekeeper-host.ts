@@ -2,7 +2,7 @@ import type {
   LaunchSurface as BrokerLaunchSurface,
   RecoveryDecision,
 } from "../sessions/session-broker.js";
-import { SessionBroker } from "../sessions/session-broker.js";
+import { isLaunchSurface, SessionBroker } from "../sessions/session-broker.js";
 import {
   startHttpServer,
   type LocalHttpServer,
@@ -17,7 +17,7 @@ import { LiveSourceWorkflowService } from "../context/live-source-workflow-servi
 import type { TaskBindingRegistry } from "../context/task-binding-registry.js";
 import { DaemonLifecycleCoordinator } from "./daemon-lifecycle.js";
 import { decodePlacekeeperLink } from "../../../../packages/core/src/placekeeper-link.js";
-import { createPlacekeeperLinkForPdf } from "../links/placekeeper-link.js";
+import { openPlacekeeperLink } from "../links/placekeeper-link.js";
 
 export type LaunchSurface = BrokerLaunchSurface;
 
@@ -39,6 +39,7 @@ export interface LinkOpenRequest {
   readonly link: string;
   readonly confirmed?: boolean;
   readonly recovery?: RecoveryDecision;
+  readonly surface?: LaunchSurface;
 }
 
 export type LinkPreflightResponse =
@@ -121,7 +122,7 @@ function launchUrl(
 
 function trustedSurface(value: LaunchRequest["surface"]): LaunchSurface {
   const surface = value ?? "browser";
-  if (!["browser", "finder", "codex", "vscode"].includes(surface)) {
+  if (!isLaunchSurface(surface)) {
     throw new TypeError("Unsupported launch surface");
   }
   return surface;
@@ -231,20 +232,16 @@ export class PlacekeeperHost {
 
   async #openLink(request: LinkOpenRequest): Promise<LinkLaunchResponse> {
     try {
-      const decoded = decodePlacekeeperLink(request.link);
-      // This commit check is deliberately synchronous with the first linked
-      // file operation below. If the preflight exemption vanished, no PDF is
-      // resolved, opened, hashed, or substituted.
-      if (request.confirmed !== true && !this.broker.activeReviewOwnsPath(decoded.path)) {
-        return { ok: true, kind: "confirmation-required", path: decoded.path };
-      }
-      const prepared = await createPlacekeeperLinkForPdf(decoded.path, decoded.location);
-      const opened = await this.broker.openReview({
-        pdfPath: prepared.pdfPath,
-        ...(request.recovery === undefined ? {} : { recoveryDecision: request.recovery }),
-        surface: "browser",
-        requestedLocation: prepared.location,
+      const surface = trustedSurface(request.surface);
+      const opened = await openPlacekeeperLink(this.broker, {
+        link: request.link,
+        ...(request.confirmed === undefined ? {} : { confirmed: request.confirmed }),
+        ...(request.recovery === undefined ? {} : { recovery: request.recovery }),
+        surface,
       });
+      if (opened.kind === "confirmation-required") {
+        return { ok: true, ...opened };
+      }
       if (opened.kind === "recovery-offered") {
         return {
           ok: true,
@@ -256,9 +253,12 @@ export class PlacekeeperHost {
       return {
         ok: true,
         kind: opened.kind,
-        url: launchUrl(this.server.origin, opened.launch, "browser"),
+        url: launchUrl(this.server.origin, opened.launch, surface),
         sessionId: opened.launch.sessionId,
         documentGeneration: opened.launch.documentGeneration,
+        ...(opened.launch.bindProof === undefined
+          ? {}
+          : { bindProof: opened.launch.bindProof }),
       };
     } catch (error) {
       return failure(

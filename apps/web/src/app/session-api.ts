@@ -8,6 +8,60 @@ import type {
 } from "./ProductionReviewApp.js";
 import type { RejectedReviewCommand } from "./ReviewShell.js";
 
+export type ReopenRecoveryChoice = "resume" | "discard" | "fork";
+
+export type ReopenProductionResult =
+  | { readonly kind: "opened" | "focused"; readonly url: string }
+  | { readonly kind: "confirmation-required"; readonly path: string }
+  | { readonly kind: "recovery-offered"; readonly choices: readonly ReopenRecoveryChoice[] };
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validBootstrapUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const target = new URL(value);
+  return target.protocol === "http:" && target.hostname === "127.0.0.1"
+    && target.port.length > 0 && target.search.length === 0
+    && /^\/s\/[A-Za-z0-9_-]+\/bootstrap$/u.test(target.pathname)
+    && /^#cap=[A-Za-z0-9_-]+$/u.test(target.hash)
+    ? target.href
+    : undefined;
+}
+
+export async function reopenProductionSession(
+  link: string,
+  options: { readonly confirmed?: true; readonly recovery?: ReopenRecoveryChoice } = {},
+): Promise<ReopenProductionResult> {
+  const response = await fetch("/reopen", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ link, ...options }),
+  });
+  if (!response.ok) throw new Error("The reopen request was rejected.");
+  const result: unknown = await response.json();
+  if (!isObject(result) || result.ok !== true) {
+    throw new Error("The PDF could not be reopened.");
+  }
+  if (result.kind === "opened" || result.kind === "focused") {
+    const url = validBootstrapUrl(result.url);
+    if (url === undefined) throw new Error("The reopen address is invalid.");
+    return { kind: result.kind, url };
+  }
+  if (result.kind === "confirmation-required" && typeof result.path === "string") {
+    return { kind: result.kind, path: result.path };
+  }
+  if (result.kind === "recovery-offered" && Array.isArray(result.choices)) {
+    const choices = result.choices.filter(
+      (choice): choice is ReopenRecoveryChoice =>
+        choice === "resume" || choice === "discard" || choice === "fork",
+    );
+    if (choices.length > 0) return { kind: result.kind, choices };
+  }
+  throw new Error("The PDF could not be reopened.");
+}
+
 export async function resumeProductionSession(
   viewId: string,
   pathname: string,

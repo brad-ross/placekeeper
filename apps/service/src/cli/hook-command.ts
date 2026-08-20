@@ -8,7 +8,7 @@ import {
   type PlacekeeperControlResponse,
 } from "../host/launch-control.js";
 import { controlThroughDaemon } from "../host/service-daemon.js";
-import { parseOpenArguments } from "./open-command.js";
+import { parseOpenArguments, parseOpenLinkArguments } from "./open-command.js";
 
 const MAX_HOOK_INPUT_BYTES = 128 * 1024;
 const MAX_PROMPT_CONTEXT_BYTES = 128 * 1024;
@@ -120,6 +120,10 @@ function isCodexOpenCommand(value: unknown): boolean {
     (tokens[0] !== installedLauncherPath() && tokens[0] !== "placekeeper")
   ) return false;
   try {
+    if (tokens[1] === "open-link") {
+      const request = parseOpenLinkArguments(tokens.slice(1));
+      return request.operation === "open" && request.surface === "codex";
+    }
     const request = parseOpenArguments(tokens.slice(1));
     return request.surface === "codex" && isAbsolute(request.pdfPath);
   } catch {

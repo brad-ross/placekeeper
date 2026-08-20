@@ -2,10 +2,17 @@ import { open, realpath } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
 
 import {
+  decodePlacekeeperLink,
   decodePlacekeeperReadableViewPathname,
   placekeeperLinkBase,
   type PlacekeeperLinkLocation,
 } from "../../../../packages/core/src/placekeeper-link.js";
+import type {
+  LaunchSurface,
+  OpenReviewResult,
+  RecoveryDecision,
+  SessionBroker,
+} from "../sessions/session-broker.js";
 
 export interface ParsedPlacekeeperReadableViewRoute {
   readonly viewId: string;
@@ -32,6 +39,18 @@ export interface PreparedPlacekeeperLink {
   readonly pdfPath: string;
   readonly location: PlacekeeperLinkLocation;
 }
+
+export interface OpenPlacekeeperLinkRequest {
+  readonly link: string;
+  readonly confirmed?: boolean;
+  readonly recovery?: RecoveryDecision;
+  readonly surface: LaunchSurface;
+}
+
+export type OpenPlacekeeperLinkResult = OpenReviewResult | {
+  readonly kind: "confirmation-required";
+  readonly path: string;
+};
 
 function namedFailure(error: unknown, filename: string): never {
   const code = (error as NodeJS.ErrnoException).code;
@@ -84,6 +103,26 @@ export async function createPlacekeeperLinkForPdf(
     pdfPath: canonicalPath,
     location,
   };
+}
+
+/** Applies the confirmation and file checks shared by every trusted link launcher. */
+export async function openPlacekeeperLink(
+  broker: SessionBroker,
+  request: OpenPlacekeeperLinkRequest,
+): Promise<OpenPlacekeeperLinkResult> {
+  const decoded = decodePlacekeeperLink(request.link);
+  // Keep this check synchronous with the first linked file operation. If an
+  // ownership exemption vanished, no PDF is resolved, opened, or substituted.
+  if (request.confirmed !== true && !broker.activeReviewOwnsPath(decoded.path)) {
+    return { kind: "confirmation-required", path: decoded.path };
+  }
+  const prepared = await createPlacekeeperLinkForPdf(decoded.path, decoded.location);
+  return broker.openReview({
+    pdfPath: prepared.pdfPath,
+    ...(request.recovery === undefined ? {} : { recoveryDecision: request.recovery }),
+    surface: request.surface,
+    requestedLocation: prepared.location,
+  });
 }
 
 /** Parses descriptive recovery data only. This must remain free of filesystem access. */
