@@ -501,7 +501,8 @@ test("searches extracted PDF text with variants, history, references, and retain
     top: element.scrollTop,
   }));
 
-  await exact.locator("[data-search-result]").first()
+  await firstResultCard.hover();
+  await firstResultCard
     .getByRole("button", { name: "Open result on page 1 in References" }).click();
   const searchReferenceTab = page.getByRole("tab", { name: /stable, Page 1/u });
   await expectReferenceReady(page, searchReferenceTab);
