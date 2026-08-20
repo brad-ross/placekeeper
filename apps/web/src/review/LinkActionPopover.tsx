@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type FocusEvent,
   type KeyboardEvent,
   type Ref,
 } from 'react';
@@ -15,6 +16,7 @@ import type {
   ViewerPdfLinkSourceScope,
 } from '../pdf/viewer-interaction-events.js';
 import { PDF_LINK_ACTION_MENU_ID } from '../pdf/viewer-interaction-events.js';
+import { CopyLinkControl, type CopyLinkControlProps } from './CopyLinkControl.js';
 import { ReviewIcon } from './ReviewIcon.js';
 
 export type LinkActionChoice = 'references' | 'main' | 'same-reference';
@@ -33,6 +35,7 @@ export interface LinkActionPopoverProps {
     request: ViewerPdfLinkInvocation,
     reason: LinkActionDismissReason,
   ) => void;
+  readonly copyLink?: CopyLinkControlProps;
   /** Resolves a stable focus surface when the source link has been virtualized. */
   readonly sourceFocusFallback?: (source: ViewerPdfLinkSourceScope) => HTMLElement | null;
 }
@@ -124,19 +127,19 @@ export function LinkActionMenuContent({
   pageContext,
   sourceScope,
   firstItemRef,
-  secondItemRef,
-  thirdItemRef,
+  copyLink,
   onChoose,
   onKeyDown,
+  onBlur,
 }: {
   readonly label: string;
   readonly pageContext: string;
   readonly sourceScope: ViewerPdfLinkSourceScope;
   readonly firstItemRef: Ref<HTMLButtonElement>;
-  readonly secondItemRef: Ref<HTMLButtonElement>;
-  readonly thirdItemRef: Ref<HTMLButtonElement>;
+  readonly copyLink?: CopyLinkControlProps;
   readonly onChoose: (choice: LinkActionChoice) => void;
   readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+  readonly onBlur: (event: FocusEvent<HTMLDivElement>) => void;
 }) {
   return (
     <div
@@ -145,6 +148,7 @@ export function LinkActionMenuContent({
       role="menu"
       aria-label={`Open ${label}, ${pageContext}`}
       onKeyDown={onKeyDown}
+      onBlur={onBlur}
     >
       <button
         ref={firstItemRef}
@@ -158,7 +162,6 @@ export function LinkActionMenuContent({
       </button>
       {sourceScope === 'reference' ? (
         <button
-          ref={secondItemRef}
           type="button"
           role="menuitem"
           aria-label="Follow in this tab"
@@ -169,7 +172,6 @@ export function LinkActionMenuContent({
         </button>
       ) : null}
       <button
-        ref={sourceScope === 'reference' ? thirdItemRef : secondItemRef}
         type="button"
         role="menuitem"
         aria-label="Open in main document"
@@ -178,8 +180,30 @@ export function LinkActionMenuContent({
       >
         <ReviewIcon name={sourceScope === 'main' ? 'arrow-right' : 'main'} />
       </button>
+      {copyLink === undefined ? null : (
+        <CopyLinkControl
+          {...copyLink}
+          variant="popover"
+          presentation="icon-only"
+          buttonRole="menuitem"
+          feedbackPlacement="inline"
+        />
+      )}
     </div>
   );
+}
+
+function enabledMenuItems(surface: HTMLElement): readonly HTMLButtonElement[] {
+  return [...surface.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')];
+}
+
+function completeFocusableSurface(surface: HTMLElement): readonly HTMLElement[] {
+  return [...surface.querySelectorAll<HTMLElement>([
+    'button:not(:disabled)',
+    'input:not(:disabled)',
+    '[href]',
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(','))];
 }
 
 function visibleViewport(): ViewportRect {
@@ -214,12 +238,11 @@ export function LinkActionPopover({
   request,
   onChoose,
   onDismiss,
+  copyLink,
   sourceFocusFallback,
 }: LinkActionPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const firstItemRef = useRef<HTMLButtonElement>(null);
-  const secondItemRef = useRef<HTMLButtonElement>(null);
-  const thirdItemRef = useRef<HTMLButtonElement>(null);
   const dismissingRef = useRef(false);
   const onChooseRef = useRef(onChoose);
   const onDismissRef = useRef(onDismiss);
@@ -260,11 +283,16 @@ export function LinkActionPopover({
         return;
       }
       const bounds = popover.getBoundingClientRect();
-      setPlacement(placeLinkActionPopover({
+      const nextPlacement = placeLinkActionPopover({
         anchor: request.clientRect,
         menu: { width: bounds.width, height: bounds.height },
         viewport: visibleViewport(),
-      }));
+      });
+      setPlacement((current) => current?.left === nextPlacement.left
+        && current.top === nextPlacement.top
+        && current.placement === nextPlacement.placement
+        ? current
+        : nextPlacement);
     };
     const popoverApi = popover as HTMLDivElement & { showPopover?: () => void };
     try {
@@ -283,10 +311,23 @@ export function LinkActionPopover({
       if (event.target instanceof Node && popover.contains(event.target)) return;
       dismiss('anchor-invalidated');
     };
-    const observeConnection = new MutationObserver(() => {
-      if (!rectStillAnchored(request)) dismiss('anchor-invalidated');
+    let updateFrame = 0;
+    const scheduleUpdate = () => {
+      cancelAnimationFrame(updateFrame);
+      updateFrame = requestAnimationFrame(update);
+    };
+    const observeConnection = new MutationObserver((records) => {
+      if (!rectStillAnchored(request)) {
+        dismiss('anchor-invalidated');
+        return;
+      }
+      if (records.some(({ target }) => popover.contains(target))) scheduleUpdate();
     });
     observeConnection.observe(document.body, { attributes: true, childList: true, subtree: true });
+    const observeBounds = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(scheduleUpdate);
+    observeBounds?.observe(popover);
     document.addEventListener('pointerdown', outsidePointer, true);
     window.addEventListener('resize', update);
     window.addEventListener('scroll', invalidateAnchor, true);
@@ -294,7 +335,9 @@ export function LinkActionPopover({
     viewport?.addEventListener('scroll', invalidateAnchor);
     return () => {
       setLinkActionOpenerExpanded(request.opener, false);
+      cancelAnimationFrame(updateFrame);
       observeConnection.disconnect();
+      observeBounds?.disconnect();
       document.removeEventListener('pointerdown', outsidePointer, true);
       window.removeEventListener('resize', update);
       window.removeEventListener('scroll', invalidateAnchor, true);
@@ -304,9 +347,6 @@ export function LinkActionPopover({
   }, [dismiss, request]);
 
   if (!request || typeof document === 'undefined') return null;
-  const items = request.sourceScope === 'reference'
-    ? [firstItemRef, secondItemRef, thirdItemRef]
-    : [firstItemRef, secondItemRef];
   const choose = (choice: LinkActionChoice) => {
     if (dismissingRef.current) return;
     dismissingRef.current = true;
@@ -321,14 +361,29 @@ export function LinkActionPopover({
       return;
     }
     if (event.key === 'Tab') {
-      dismiss('tab');
+      const focusable = completeFocusableSurface(event.currentTarget);
+      const activeIndex = focusable.indexOf(document.activeElement as HTMLElement);
+      const leaving = event.shiftKey ? activeIndex <= 0 : activeIndex === focusable.length - 1;
+      if (leaving) {
+        dismiss('tab');
+      } else {
+        event.preventDefault();
+        focusable[activeIndex + (event.shiftKey ? -1 : 1)]?.focus({ preventScroll: true });
+      }
       return;
     }
-    const activeIndex = items.findIndex(({ current }) => current === document.activeElement);
-    const nextIndex = compositeFocusIndex(Math.max(0, activeIndex), items.length, event.key);
+    const items = enabledMenuItems(event.currentTarget);
+    const activeIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (activeIndex < 0) return;
+    const nextIndex = compositeFocusIndex(activeIndex, items.length, event.key);
     if (nextIndex === null) return;
     event.preventDefault();
-    items[nextIndex]?.current?.focus({ preventScroll: true });
+    items[nextIndex]?.focus({ preventScroll: true });
+  };
+  const blur = (event: FocusEvent<HTMLDivElement>) => {
+    if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) {
+      dismiss('tab');
+    }
   };
   const style = {
     '--link-action-left': `${placement?.left ?? request.clientRect.left}px`,
@@ -349,10 +404,10 @@ export function LinkActionPopover({
         pageContext={request.metadata.pageContext}
         sourceScope={request.sourceScope}
         firstItemRef={firstItemRef}
-        secondItemRef={secondItemRef}
-        thirdItemRef={thirdItemRef}
+        {...(copyLink === undefined ? {} : { copyLink })}
         onChoose={choose}
         onKeyDown={keyDown}
+        onBlur={blur}
       />
     </div>,
     document.body,

@@ -1277,9 +1277,25 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
 
 .link-action-popover__surface {
   display: flex;
+  max-width: calc(100vw - 24px);
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--review-control-group-gap, 2px);
   padding: 5px;
+}
+
+.link-action-popover .copy-link-control--popover {
+  display: contents;
+}
+
+.link-action-popover .copy-link-control__status,
+.link-action-popover .copy-link-control__fallback {
+  order: 1;
+  flex: 1 0 100%;
+}
+
+.link-action-popover .copy-link-control__fallback {
+  width: min(28rem, calc(100vw - 36px));
 }
 
 .link-action-popover [role="menuitem"] {

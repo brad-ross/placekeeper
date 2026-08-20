@@ -141,7 +141,7 @@ async function followLinkInSameReference(
     await page.keyboard.press("Enter");
     try {
       await expect(firstAction).toBeFocused({ timeout: 1_500 });
-      await expect(menu.getByRole("menuitem")).toHaveCount(3);
+      await expect(menu.getByRole("menuitem")).toHaveCount(4);
       await expect(action).toHaveAttribute("title", "Follow in this tab");
       await expect(action).toHaveText("");
       await page.keyboard.press("ArrowDown");
@@ -611,6 +611,21 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   browserName,
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (value: string) => {
+          const state = globalThis as typeof globalThis & {
+            __copiedPdfTargetLink?: string;
+            __rejectPdfTargetCopy?: boolean;
+          };
+          if (state.__rejectPdfTargetCopy) throw new Error("denied");
+          state.__copiedPdfTargetLink = value;
+        },
+      },
+    });
+  });
   const documentRequests: Array<{ url: string; authorization?: string; cookie?: string }> = [];
   page.on("request", (request) => {
     if (!/\/document\//u.test(new URL(request.url()).pathname)) return;
@@ -640,10 +655,14 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   const primaryMenu = page.getByRole("menu", { name: "Open Primary result, Page 2" });
   await expect(primaryMenu).toBeVisible();
   await expect(primaryMenu.getByRole("menuitem", { name: /Open in References/u })).toBeFocused();
-  await expect(primaryMenu.getByRole("menuitem")).toHaveCount(2);
-  await expect(primaryMenu.locator("svg")).toHaveCount(2);
+  await expect(primaryMenu.getByRole("menuitem")).toHaveCount(3);
+  await expect(primaryMenu.locator("svg")).toHaveCount(3);
   await expect(primaryMenu.getByRole("menuitem").first()).toHaveAttribute("title", "Open in References");
-  await expect(primaryMenu.getByRole("menuitem").last()).toHaveAttribute("title", "Open in main document");
+  await expect(primaryMenu.getByRole("menuitem").nth(1)).toHaveAttribute("title", "Open in main document");
+  const copyTargetLink = primaryMenu.getByRole("menuitem", {
+    name: "Copy link to exact destination on page 2",
+  });
+  await expect(copyTargetLink).toHaveAttribute("title", "Copy exact destination link");
   await expect(primaryMenu.getByRole("menuitem").first()).toHaveText("");
   await expect(primaryMenu.getByRole("menuitem").last()).toHaveText("");
   const firstMenuItemBounds = await primaryMenu.getByRole("menuitem").first().boundingBox();
@@ -652,7 +671,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   expect(firstMenuItemBounds!.height).toBe(34);
   const menuBounds = await primaryMenu.boundingBox();
   expect(menuBounds).not.toBeNull();
-  expect(menuBounds!.width).toBeLessThan(100);
+  expect(menuBounds!.width).toBeLessThan(140);
   expect(menuBounds!.height).toBe(44);
   const popoverBounds = await page.locator("[data-link-action-popover]").boundingBox();
   expect(popoverBounds).not.toBeNull();
@@ -661,6 +680,17 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   expect(menuBounds!.y).toBeGreaterThanOrEqual(0);
   expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(1280);
   expect(menuBounds!.y + menuBounds!.height).toBeLessThanOrEqual(900);
+  await copyTargetLink.click();
+  await expect(primaryMenu.getByRole("status")).toHaveText("Link copied.");
+  await expect(primaryMenu).toBeVisible();
+  await expect(page.getByLabel("Current page")).toHaveText("1 / 4");
+  expect(await page.evaluate(() => (
+    globalThis as typeof globalThis & { __copiedPdfTargetLink?: string }
+  ).__copiedPdfTargetLink)).toMatch(/#v=2&page=2&mode=/u);
+  const copiedPopoverBounds = await page.locator("[data-link-action-popover]").boundingBox();
+  expect(copiedPopoverBounds).not.toBeNull();
+  expect(copiedPopoverBounds!.x + copiedPopoverBounds!.width).toBeLessThanOrEqual(1280);
+  expect(copiedPopoverBounds!.y + copiedPopoverBounds!.height).toBeLessThanOrEqual(900);
   await page.keyboard.press("Escape");
   await expect(primaryMenu).toHaveCount(0);
   await expect(primaryLink).toBeFocused();
@@ -668,6 +698,31 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
 
   await page.keyboard.press("Enter");
   await expect(primaryMenu.getByRole("menuitem", { name: /Open in References/u })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(primaryMenu.getByRole("menuitem", { name: "Open in main document" })).toBeFocused();
+  await expect(primaryMenu).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(copyTargetLink).toBeFocused();
+  await expect(primaryMenu).toBeVisible();
+  await page.evaluate(() => {
+    (globalThis as typeof globalThis & { __rejectPdfTargetCopy?: boolean })
+      .__rejectPdfTargetCopy = true;
+  });
+  await page.keyboard.press("Enter");
+  const fallbackLink = primaryMenu.getByRole("textbox", { name: "Placekeeper link" });
+  await expect(fallbackLink).toHaveValue(/#v=2&page=2&mode=/u);
+  await expect(copyTargetLink).toBeFocused();
+  const failedPopoverBounds = await page.locator("[data-link-action-popover]").boundingBox();
+  expect(failedPopoverBounds).not.toBeNull();
+  expect(failedPopoverBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(failedPopoverBounds!.y).toBeGreaterThanOrEqual(0);
+  expect(failedPopoverBounds!.x + failedPopoverBounds!.width).toBeLessThanOrEqual(1280);
+  expect(failedPopoverBounds!.y + failedPopoverBounds!.height).toBeLessThanOrEqual(900);
+  await page.keyboard.press("Tab");
+  await expect(fallbackLink).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(primaryMenu.getByRole("button", { name: "Retry" })).toBeFocused();
+  await expect(primaryMenu).toBeVisible();
   await page.keyboard.press("Tab");
   await expect(primaryMenu).toHaveCount(0);
   await expect(primaryLink).not.toBeFocused();

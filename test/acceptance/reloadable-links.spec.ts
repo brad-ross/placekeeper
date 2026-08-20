@@ -73,7 +73,7 @@ test("a live readable review survives repeated hard refresh and fails closed aft
     name: "Open Footnote return to body TOC, Page 1",
   });
   await expect(returnMenu).toBeVisible();
-  await returnMenu.getByRole("menuitem").last().click();
+  await returnMenu.getByRole("menuitem", { name: "Open in main document" }).click();
   await expectCurrentPage(page, "1 / 4");
   await expect(page).toHaveURL(/#v=1&page=1$/u);
   await expect.poll(() => page.evaluate(() => history.length)).toBe(historyLength + 1);

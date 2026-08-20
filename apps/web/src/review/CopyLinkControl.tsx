@@ -99,7 +99,7 @@ export function CopyLinkControl({
       writeText: (link) => writeTextRef.current(link),
       onStatus: (next) => {
         setStatus(next);
-        if (next.status === 'failure') {
+        if (next.status === 'failure' || (next.status === 'success' && variant === 'popover')) {
           queueMicrotask(() => internalTriggerRef.current?.focus({ preventScroll: true }));
         }
       },
@@ -128,7 +128,7 @@ export function CopyLinkControl({
         aria-label={ariaLabel}
         title={title}
         aria-busy={status.status === 'pending' ? 'true' : 'false'}
-        disabled={disabled || status.status === 'pending'}
+        disabled={disabled || (status.status === 'pending' && variant !== 'popover')}
         onClick={run}
       >
         <ReviewIcon name="link" />

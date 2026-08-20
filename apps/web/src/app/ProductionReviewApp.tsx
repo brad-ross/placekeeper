@@ -41,6 +41,7 @@ import type {
   ViewerClientPlacement,
   ViewerInteractionEvent,
   ViewerPageMenuInvocation,
+  ViewerPdfLinkInvocation,
 } from "../pdf/viewer-interaction-events.js";
 import { PageNotePlacementAuthority } from "../review/review-surface-state.js";
 import {
@@ -63,6 +64,7 @@ import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
 import { PdfSearchWorkspace } from '../review/PdfSearchWorkspace.js';
 import {
   createOutlineRowCopyLink,
+  createPdfTargetCopyLink,
   createSearchResultRowCopyLink,
 } from '../review/row-link-actions.js';
 import {
@@ -965,6 +967,30 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       currentDocumentGeneration: () => documentGenerationRef.current,
       writeText: writePlacekeeperLink,
     });
+  const copyLinkForLinkAction = props.session.appLinkBase === undefined
+    ? undefined
+    : (request: ViewerPdfLinkInvocation) => {
+      const copyLink = createPdfTargetCopyLink(request.target, {
+        appLinkBase: props.session.appLinkBase!,
+        document: {
+          documentGeneration: documentGenerationRef.current,
+          pageCount: viewerState.totalPages,
+        },
+        currentDocumentGeneration: () => documentGenerationRef.current,
+        writeText: writePlacekeeperLink,
+      });
+      if (copyLink === undefined) return undefined;
+      const page = request.target.pageIndex + 1;
+      return {
+        ...copyLink,
+        ariaLabel: copyLink.precision === 'exact'
+          ? `Copy link to exact destination on page ${page}`
+          : `Copy link to target page ${page}`,
+        title: copyLink.precision === 'exact'
+          ? 'Copy exact destination link'
+          : 'Copy target page link',
+      };
+    };
   const searchWorkspace = (
     <PdfSearchWorkspace
       state={searchState}
@@ -1096,6 +1122,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           void navigationCoordinator.chooseLink(choice, request);
         }}
         onLinkActionDismiss={(request) => navigationCoordinator.dismissLink(request)}
+        {...(copyLinkForLinkAction === undefined ? {} : { copyLinkForLinkAction })}
         onNavigateBack={() => { void navigationCoordinator.historyBack(); }}
         onNavigateForward={() => { void navigationCoordinator.historyForward(); }}
         onWorkspaceModeChange={(mode) => {

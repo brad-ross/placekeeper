@@ -186,6 +186,7 @@ export interface ReviewShellProps {
   canNavigateForward?: boolean;
   onLinkActionChoose?(choice: LinkActionChoice, request: ViewerPdfLinkInvocation): void;
   onLinkActionDismiss?(request: ViewerPdfLinkInvocation, reason: LinkActionDismissReason): void;
+  copyLinkForLinkAction?(request: ViewerPdfLinkInvocation): CopyLinkControlProps | undefined;
   onNavigateBack?(): void;
   onNavigateForward?(): void;
   onWorkspaceModeChange?(mode: WorkspaceMode): void;
@@ -888,6 +889,11 @@ export function ReviewShell(props: ReviewShellProps) {
       ? undefined
       : { getLink: () => link, writeText: props.copyItemLink.writeText };
   };
+  const activePdfLinkCopy = props.linkActionRequest === null
+    || props.linkActionRequest === undefined
+    || props.copyLinkForLinkAction === undefined
+    ? undefined
+    : props.copyLinkForLinkAction(props.linkActionRequest);
   return (
     <section
       className="review-shell"
@@ -1379,6 +1385,7 @@ export function ReviewShell(props: ReviewShellProps) {
       </div>
       <LinkActionPopover
         request={props.linkActionRequest ?? null}
+        {...(activePdfLinkCopy === undefined ? {} : { copyLink: activePdfLinkCopy })}
         onChoose={(choice, request) => props.onLinkActionChoose?.(choice, request)}
         onDismiss={(request, reason) => props.onLinkActionDismiss?.(request, reason)}
         sourceFocusFallback={(source) => {
