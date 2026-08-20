@@ -578,6 +578,11 @@ export function App({
                   emit,
                 });
               },
+              onClick: (position) => {
+                if (hitTestOwnedMark(pageGeometry(), position) === undefined) {
+                  emit({ type: 'owned-mark-clear' });
+                }
+              },
             },
           }));
         }
