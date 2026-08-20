@@ -12,6 +12,11 @@ import {
 } from '../src/review/LinkActionPopover.js';
 import { PDF_LINK_ACTION_MENU_ID } from '../src/pdf/viewer-interaction-events.js';
 import { OutlineNavigator } from '../src/review/OutlineNavigator.js';
+import { rowActionMenuFocusIndex } from '../src/review/RowActionGroup.js';
+import {
+  createOutlineRowCopyLink,
+  createSearchResultRowCopyLink,
+} from '../src/review/row-link-actions.js';
 import {
   chooseWorkspaceModeFocusTarget,
   referenceTabFocusIndex,
@@ -111,6 +116,15 @@ describe('link action chooser', () => {
     expect(compositeFocusIndex(2, 3, 'ArrowDown')).toBe(0);
     expect(compositeFocusIndex(0, 3, 'ArrowUp')).toBe(2);
     expect(compositeFocusIndex(0, 3, 'End')).toBe(2);
+  });
+
+  it('uses the same complete keyboard order for row action menus', () => {
+    expect(rowActionMenuFocusIndex(0, 2, 'ArrowDown')).toBe(1);
+    expect(rowActionMenuFocusIndex(1, 2, 'ArrowDown')).toBe(0);
+    expect(rowActionMenuFocusIndex(0, 2, 'ArrowUp')).toBe(1);
+    expect(rowActionMenuFocusIndex(1, 2, 'Home')).toBe(0);
+    expect(rowActionMenuFocusIndex(0, 2, 'End')).toBe(1);
+    expect(rowActionMenuFocusIndex(0, 2, 'Escape')).toBeNull();
   });
 
   it('keeps horizontal tab navigation to Left, Right, Home, and End', () => {
@@ -705,6 +719,61 @@ describe('outline navigator', () => {
     children: [],
   }];
 
+  it('builds exact Outline and page-only Search links against the current document', async () => {
+    let currentGeneration = 3;
+    const writeText = vi.fn(async () => undefined);
+    const context = {
+      appLinkBase: 'placekeeper:///tmp/Paper.pdf',
+      document: { documentGeneration: 3, pageCount: 10 },
+      currentDocumentGeneration: () => currentGeneration,
+      writeText,
+    };
+    const exactTarget = {
+      documentGeneration: 3,
+      pageIndex: 7,
+      zoom: { mode: PdfZoomMode.XYZ, params: [12, 34, 1.25] },
+      identity: JSON.stringify([3, 7, PdfZoomMode.XYZ, 12, 34, 1.25]),
+    };
+    const pageTarget = {
+      documentGeneration: 3,
+      pageIndex: 2,
+      zoom: { mode: PdfZoomMode.Unknown, params: [] },
+      identity: JSON.stringify([3, 2, PdfZoomMode.Unknown]),
+    };
+    const exact = createOutlineRowCopyLink({
+      id: 'exact', label: 'Results', pageContext: 'Page 8', target: exactTarget, children: [],
+    }, context);
+    const page = createOutlineRowCopyLink({
+      id: 'page', label: 'Methods', pageContext: 'Page 3', target: pageTarget, children: [],
+    }, context);
+    const search = createSearchResultRowCopyLink({ pageIndex: 5 }, context);
+
+    expect(exact?.precision).toBe('exact');
+    expect(exact?.getLink()).toBe(
+      'placekeeper:///tmp/Paper.pdf#v=2&page=8&mode=xyz&params=12,34,1.25',
+    );
+    expect(page?.precision).toBe('page');
+    expect(page?.getLink()).toBe('placekeeper:///tmp/Paper.pdf#v=1&page=3');
+    expect(search?.getLink()).toBe('placekeeper:///tmp/Paper.pdf#v=1&page=6');
+    expect(createSearchResultRowCopyLink({ pageIndex: 10 }, context)).toBeUndefined();
+    expect(createOutlineRowCopyLink({
+      id: 'stale',
+      label: 'Stale',
+      pageContext: 'Page 3',
+      target: { ...pageTarget, documentGeneration: 2 },
+      children: [],
+    }, context)).toBeUndefined();
+    expect(createOutlineRowCopyLink({
+      id: 'unavailable', label: 'Unavailable', pageContext: null, target: null, children: [],
+    }, context)).toBeUndefined();
+
+    await exact?.writeText(exact.getLink());
+    expect(writeText).toHaveBeenCalledOnce();
+    currentGeneration = 4;
+    await expect(page?.writeText(page.getLink())).rejects.toThrow('replaced PDF');
+    expect(writeText).toHaveBeenCalledOnce();
+  });
+
   it('uses nested native lists, separate disclosures, safe destinations, and current location', () => {
     const html = renderToStaticMarkup(
       <OutlineNavigator
@@ -724,7 +793,7 @@ describe('outline navigator', () => {
     expect(html).toContain('Setup');
   });
 
-  it('renders target-only References actions as sibling controls with the shared icon', () => {
+  it('renders ordered target actions without manufacturing a link for unavailable groups', () => {
     const groupingItem: PdfOutlineItem = {
       id: 'group',
       label: 'Appendices',
@@ -742,29 +811,42 @@ describe('outline navigator', () => {
         currentItemId="results"
         onActivate={() => undefined}
         onOpenReference={() => undefined}
+        copyLinkForItem={(item) => item.target === null ? undefined : {
+          precision: item.id === 'results' ? 'exact' : 'page',
+          getLink: () => item.id === 'results'
+            ? 'placekeeper:///tmp/Paper.pdf#v=2&page=8&mode=fit-page'
+            : `placekeeper:///tmp/Paper.pdf#v=1&page=${item.target!.pageIndex + 1}`,
+          writeText: async () => undefined,
+        }}
       />,
     );
-    const rows = html.match(/<div class="outline-navigator__row"[^>]*>[\s\S]*?<\/div>/gu) ?? [];
-    const groupingRow = rows.find((row) => row.includes('Appendices')) ?? '';
-    const introductionRow = rows.find((row) => row.includes('Introduction')) ?? '';
-    const resultsRow = rows.find((row) => row.includes('Results')) ?? '';
+    const groupingRow = html.slice(html.indexOf('data-outline-item="group"'), html.indexOf('data-outline-item="intro"'));
+    const introductionRow = html.slice(html.indexOf('data-outline-item="intro"'), html.indexOf('data-outline-item="setup"'));
+    const resultsRow = html.slice(html.indexOf('data-outline-item="results"'));
 
     expect(groupingRow).toContain('outline-navigator__disclosure');
     expect(groupingRow).toContain('outline-navigator__destination');
-    expect(groupingRow).not.toContain('outline-navigator__reference');
+    expect(groupingRow).not.toContain('row-action-group');
     expect(introductionRow).toMatch(
-      /class="outline-navigator__destination"[\s\S]*?<\/button><button[^>]*class="outline-navigator__reference"/u,
+      /class="outline-navigator__destination"[\s\S]*?<\/button><div class="row-action-group"/u,
     );
     expect(introductionRow).toContain('aria-label="Open Introduction, Page 1 in References"');
+    expect(introductionRow).toContain('aria-label="Copy page link for Introduction, Page 1"');
     expect(introductionRow).toContain('title="Open in References"');
     expect(introductionRow).toContain('lucide-panels-top-left');
     expect(resultsRow).toContain('aria-current="location"');
     expect(resultsRow).toContain('data-current="true"');
+    expect(resultsRow).toContain('aria-label="Copy exact destination link for Results, Page 8"');
+    expect(resultsRow).toContain('lucide-link');
+    expect(resultsRow).toContain('aria-label="Secondary actions for Results, Page 8"');
+    expect(resultsRow).toContain('aria-haspopup="menu"');
+    expect(resultsRow).toContain('aria-expanded="false"');
+    expect(resultsRow).toMatch(/aria-controls="row-actions-menu-[^"]+"/u);
     expect(resultsRow).toContain(
       '<span class="outline-navigator__summary"><span class="outline-navigator__title">Results</span><span class="outline-navigator__separator" aria-hidden="true">·</span><small class="outline-navigator__page" aria-hidden="true">8</small></span>',
     );
     expect(resultsRow).not.toContain('>Page 8</small>');
-    expect(html.match(/class="outline-navigator__reference"/g)).toHaveLength(3);
+    expect(html.match(/data-row-action="open-reference"/g)).toHaveLength(3);
   });
 
   it('distinguishes loading, loaded-empty, and unavailable states', () => {

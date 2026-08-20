@@ -32,6 +32,10 @@ describe('PDF search workspace', () => {
       onQueryChange={vi.fn()}
       onResultActivate={vi.fn()}
       onResultOpenReference={vi.fn()}
+      copyLinkForResult={(searchResult) => ({
+        getLink: () => `placekeeper:///tmp/Paper.pdf#v=1&page=${searchResult.pageIndex + 1}`,
+        writeText: async () => undefined,
+      })}
       onAlternativeActivate={vi.fn()}
     />);
 
@@ -42,11 +46,17 @@ describe('PDF search workspace', () => {
     expect(html).toContain('class="pdf-search__result-separator">·</span>');
     expect(html).toContain('Let <strong class="pdf-search__result-match">λ</strong> denote the arrival rate.');
     expect(html).toContain('aria-label="Open result on page 4 in References"');
+    expect(html).toContain('aria-label="Copy page link for Search result on page 4"');
+    expect(html).toContain('title="Copy page link for page 4"');
+    expect(html).toContain('lucide-link');
+    expect(html).toContain('aria-label="Secondary actions for Search result on page 4"');
+    expect(html).toContain('aria-haspopup="menu"');
+    expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('class="review-chrome__page-input pdf-search__input"');
     expect(html).toContain('pdf-search__search-icon');
     expect(html).toContain('aria-label="Clear search"');
     expect(html).toContain('class="annotation-item__content pdf-search__result"');
-    expect(html).toContain('class="annotation-item__action pdf-search__reference"');
+    expect(html).toContain('data-row-action="open-reference"');
     expect(html).not.toContain('Exact symbol');
     expect(html).not.toContain('First occurrence');
     expect(html).not.toContain('Try a symbol name or LaTeX command');

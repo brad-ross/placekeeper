@@ -79,6 +79,7 @@ import {
 } from '../review/reference-workspace-layout.js';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import type { CopyLinkControlProps } from '../review/CopyLinkControl.js';
+import type { OutlineCopyLink } from '../review/OutlineNavigator.js';
 import {
   createProofreadInputController,
   isEditableTarget,
@@ -196,6 +197,7 @@ export interface ReviewShellProps {
   onReferenceReturn?(identity: string): void;
   onOutlineActivate?(item: PdfOutlineItem): void;
   onOutlineReference?(item: PdfOutlineItem): void;
+  copyLinkForOutlineItem?(item: PdfOutlineItem): OutlineCopyLink | undefined;
   onReferenceViewportHost?(element: HTMLDivElement | null): void;
   onWorkspaceModeFocusTokenChange?(mode: WorkspaceMode, token: string): void;
   referenceLayoutState?: ReferenceWorkspaceLayoutState;
@@ -1159,6 +1161,9 @@ export function ReviewShell(props: ReviewShellProps) {
             onModeChange={selectWorkspaceMode}
             onOutlineActivate={(item) => props.onOutlineActivate?.(item)}
             onOutlineReference={(item) => props.onOutlineReference?.(item)}
+            {...(props.copyLinkForOutlineItem === undefined
+              ? {}
+              : { copyLinkForOutlineItem: props.copyLinkForOutlineItem })}
             onModeFocusTokenChange={rememberWorkspaceModeFocus}
             annotations={<div id="review-annotation-list" aria-label="All annotations">
             <AnnotationList

@@ -62,6 +62,10 @@ import {
 import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
 import { PdfSearchWorkspace } from '../review/PdfSearchWorkspace.js';
 import {
+  createOutlineRowCopyLink,
+  createSearchResultRowCopyLink,
+} from '../review/row-link-actions.js';
+import {
   createTrailingTaskScheduler,
   waitForReviewNavigationReady,
 } from "../review/main-location-refresh.js";
@@ -933,12 +937,41 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     if (immediate) run();
     else searchSubmitTimerRef.current = setTimeout(run, 180);
   };
+  const writePlacekeeperLink = async (link: string) => {
+    if (navigator.clipboard?.writeText === undefined) {
+      throw new Error('Clipboard API unavailable');
+    }
+    await navigator.clipboard.writeText(link);
+  };
+  const copyLinkForSearchResult = props.session.appLinkBase === undefined
+    ? undefined
+    : (result: PdfSearchResult) => createSearchResultRowCopyLink(result, {
+      appLinkBase: props.session.appLinkBase!,
+      document: {
+        documentGeneration: documentGenerationRef.current,
+        pageCount: viewerState.totalPages,
+      },
+      currentDocumentGeneration: () => documentGenerationRef.current,
+      writeText: writePlacekeeperLink,
+    });
+  const copyLinkForOutlineItem = props.session.appLinkBase === undefined
+    ? undefined
+    : (item: Parameters<typeof createOutlineRowCopyLink>[0]) => createOutlineRowCopyLink(item, {
+      appLinkBase: props.session.appLinkBase!,
+      document: {
+        documentGeneration: documentGenerationRef.current,
+        pageCount: viewerState.totalPages,
+      },
+      currentDocumentGeneration: () => documentGenerationRef.current,
+      writeText: writePlacekeeperLink,
+    });
   const searchWorkspace = (
     <PdfSearchWorkspace
       state={searchState}
       onQueryChange={submitSearchQuery}
       onResultActivate={activateSearchResult}
       onResultOpenReference={openSearchResultReference}
+      {...(copyLinkForSearchResult === undefined ? {} : { copyLinkForResult: copyLinkForSearchResult })}
       onAlternativeActivate={(alternative) => submitSearchQuery(alternative.query, true)}
     />
   );
@@ -989,13 +1022,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const onCommitMainFramingPositionChange = useCallback((commit: (() => void) | null) => {
     commitMainFramingPositionRef.current = commit ?? (() => undefined);
   }, []);
-  const writePlacekeeperLink = async (link: string) => {
-    if (navigator.clipboard?.writeText === undefined) {
-      throw new Error('Clipboard API unavailable');
-    }
-    await navigator.clipboard.writeText(link);
-  };
-
   return (
     <main data-production-review ref={productionRootRef}>
       <ReviewShell
@@ -1122,6 +1148,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             pageContext: item.pageContext ?? `Page ${item.target.pageIndex + 1}`,
           });
         }}
+        {...(copyLinkForOutlineItem === undefined ? {} : { copyLinkForOutlineItem })}
         onReferenceViewportHost={setReferenceViewportHost}
         onWorkspaceModeFocusTokenChange={(mode, token) => {
           const current = navigationStateRef.current.workspace.modes[mode];

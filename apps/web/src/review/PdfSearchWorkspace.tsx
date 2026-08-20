@@ -12,6 +12,8 @@ import type {
   PdfSearchResult,
   PdfSearchState,
 } from '../pdf/pdf-search-model.js';
+import type { CopyLinkControlProps } from './CopyLinkControl.js';
+import { RowActionGroup, type RowAction } from './RowActionGroup.js';
 import { ReviewIcon } from './ReviewIcon.js';
 
 export interface PdfSearchWorkspaceProps {
@@ -19,6 +21,9 @@ export interface PdfSearchWorkspaceProps {
   readonly onQueryChange: (query: string) => void;
   readonly onResultActivate: (result: PdfSearchResult) => void;
   readonly onResultOpenReference: (result: PdfSearchResult) => void;
+  readonly copyLinkForResult?: (
+    result: PdfSearchResult,
+  ) => Pick<CopyLinkControlProps, 'getLink' | 'writeText' | 'disabled'> | undefined;
   readonly onAlternativeActivate: (alternative: PdfSearchAlternative) => void;
 }
 
@@ -61,6 +66,7 @@ export function PdfSearchWorkspace({
   onQueryChange,
   onResultActivate,
   onResultOpenReference,
+  copyLinkForResult,
   onAlternativeActivate,
 }: PdfSearchWorkspaceProps) {
   const queryInputRef = useRef<HTMLInputElement>(null);
@@ -216,6 +222,27 @@ export function PdfSearchWorkspace({
             <ol>
               {group.results.map((result) => {
                 const excerptParts = resultExcerptParts(result);
+                const pageNumber = result.pageIndex + 1;
+                const copyLink = copyLinkForResult?.(result);
+                const actions: readonly RowAction[] = [
+                  {
+                    kind: 'command',
+                    id: 'open-reference',
+                    label: `Open result on page ${pageNumber} in References`,
+                    title: 'Open in References',
+                    icon: 'references',
+                    focusToken: `search-reference:${result.id}`,
+                    onInvoke: () => onResultOpenReference(result),
+                  },
+                  ...(copyLink === undefined ? [] : [{
+                    kind: 'copy-link' as const,
+                    id: 'copy-link',
+                    label: `Copy page link for Search result on page ${pageNumber}`,
+                    title: `Copy page link for page ${pageNumber}`,
+                    focusToken: `search-copy-link:${result.id}`,
+                    copyLink,
+                  }]),
+                ];
                 return <li
                   key={result.id}
                   data-search-result={result.id}
@@ -239,15 +266,7 @@ export function PdfSearchWorkspace({
                       </span>
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    className="annotation-item__action pdf-search__reference"
-                    aria-label={`Open result on page ${result.pageIndex + 1} in References`}
-                    title="Open in References"
-                    onClick={() => onResultOpenReference(result)}
-                  >
-                    <ReviewIcon name="references" size={15} />
-                  </button>
+                  <RowActionGroup actions={actions} rowLabel={`Search result on page ${pageNumber}`} />
                 </li>;
               })}
             </ol>

@@ -20,6 +20,10 @@ import {
 } from '../src/review/ReviewChrome.js';
 import { ReviewIcon } from '../src/review/ReviewIcon.js';
 import {
+  ROW_ACTION_CONTAINER_NAME,
+  ROW_ACTION_DIRECT_BREAKPOINT_PX,
+} from '../src/review/RowActionGroup.js';
+import {
   VIEWER_ZOOM_MAX_PERCENT,
   VIEWER_ZOOM_MIN_PERCENT,
   type ViewerControls,
@@ -62,6 +66,29 @@ const ownedAnnotation: ReviewItem = {
 };
 
 describe('review shell layout and accessibility contract', () => {
+  it('switches row actions at one shared geometry-derived container boundary', () => {
+    const below = ROW_ACTION_DIRECT_BREAKPOINT_PX - 1;
+    const above = ROW_ACTION_DIRECT_BREAKPOINT_PX + 1;
+
+    expect(below).toBe(271);
+    expect(above).toBe(273);
+    expect(annotationStyles).toContain(`container-name: ${ROW_ACTION_CONTAINER_NAME}`);
+    expect(annotationStyles).toContain(
+      `@container ${ROW_ACTION_CONTAINER_NAME} (max-width: ${ROW_ACTION_DIRECT_BREAKPOINT_PX}px)`,
+    );
+    expect(annotationStyles).toMatch(
+      /@container row-actions \(max-width: 272px\) \{[\s\S]*?\.row-action-group__direct\s*\{[^}]*display:\s*none;[\s\S]*?\.row-action-group__secondary\s*\{[^}]*display:\s*block;/u,
+    );
+    const coarsePointerRules = responsiveStyles.match(
+      /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*)\n\}/u,
+    )?.[1] ?? '';
+    expect(coarsePointerRules).toMatch(/\.row-action-group__direct\s*\{[^}]*display:\s*none;/u);
+    expect(coarsePointerRules).toMatch(/\.row-action-group__secondary\s*\{[^}]*display:\s*block;/u);
+    expect(annotationStyles).toMatch(
+      /\.row-action-group__trigger\s*\{[^}]*width:\s*var\(--review-control-touch\);[^}]*min-height:\s*var\(--review-control-touch\);/u,
+    );
+  });
+
   it('synchronizes externally controlled workspace open and hide', () => {
     const openedAction = controlledWorkspaceSurfaceAction({
       open: true,
