@@ -282,7 +282,7 @@
   max-width: 100%;
   min-width: 0;
   align-items: center;
-  gap: 2px;
+  gap: var(--review-control-group-gap);
   padding: 2px;
   border-radius: var(--review-radius-control);
   background: var(--review-surface-subtle);
@@ -291,14 +291,14 @@
 .review-workspace__activity-strip--compound {
   --review-workspace-compound-action-size: var(--review-control-compact);
 
-  gap: 2px;
+  gap: var(--review-control-group-gap);
 }
 
 .review-workspace__tabs {
   display: flex;
   min-width: 0;
   flex: 0 1 auto;
-  gap: 2px;
+  gap: var(--review-control-group-gap);
 }
 
 .review-workspace__mode-segment {
@@ -735,7 +735,7 @@
 .reference-tab-segment--compound {
   width: min(17rem, 100%);
   max-width: calc(13rem + (2 * var(--review-control-compact)));
-  gap: 4px;
+  gap: var(--review-control-group-gap);
   overflow: hidden;
   border-color: var(--review-border-strong);
   background: var(--review-selection-bg);
@@ -1165,7 +1165,7 @@
 .link-action-popover__surface {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--review-control-group-gap, 2px);
   padding: 5px;
 }
 
@@ -1261,7 +1261,7 @@
   position: relative;
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: var(--review-control-group-gap);
   padding: 4px;
   overflow: hidden;
   border: 1px solid var(--review-border-subtle);
