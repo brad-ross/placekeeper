@@ -39,6 +39,15 @@ const target = (pageIndex: number, generation = 1): PdfNavigationTarget => ({
   identity: JSON.stringify([generation, pageIndex, PdfZoomMode.XYZ, 12, 700 - pageIndex * 10, 1]),
 });
 
+const durableDestination = (
+  page = 3,
+): Extract<PlacekeeperLinkLocation, { readonly kind: 'destination' }> => ({
+  kind: 'destination',
+  page,
+  mode: 'xyz',
+  params: [12, 700 - (page - 1) * 10, 1],
+});
+
 const linkRequest = (
   pageIndex: number,
   sourceScope: 'main' | 'reference' = 'reference',
@@ -120,6 +129,7 @@ function harness(options: {
   readonly sharedReferenceSurface?: boolean;
   readonly locationHistory?: ReturnType<typeof locationHistory>;
   readonly portableItems?: ReadonlyMap<string, { readonly pageIndex: number; readonly point: { readonly x: number; readonly y: number } | null }>;
+  readonly pageCount?: number;
 } = {}) {
   let state: ReferenceNavigationState = createReferenceNavigationState(1);
   let referencesOpen = false;
@@ -168,6 +178,7 @@ function harness(options: {
     focusReferenceTab: vi.fn(() => true),
     getOutlineDiscovery: () => ({ status: 'loaded-empty', documentGeneration: state.documentGeneration }),
     setCurrentOutlineItemId: vi.fn(),
+    getPageCount: () => options.pageCount ?? 8,
     ...(options.locationHistory === undefined ? {} : {
       locationHistory: options.locationHistory.history,
       resolvePortableItem: (itemId: string) => options.portableItems?.get(itemId) ?? null,
@@ -231,6 +242,106 @@ describe('document-scoped navigation coordinator', () => {
     expect(await missing.coordinator.restoreCurrentLocation()).toBe(true);
     expect(missingLocation.history.replace).toHaveBeenCalledWith({ kind: 'page', page: 5 });
     expect(missing.announcement()).toContain('exact item');
+  });
+
+  it('restores a durable destination under the active generation without source UI or arrival feedback', async () => {
+    const destination = durableDestination();
+    const browser = locationHistory(destination);
+    const run = harness({ locationHistory: browser });
+    const before = run.state();
+    run.coordinator.startLocationHistory();
+
+    expect(await run.coordinator.restoreCurrentLocation()).toBe(true);
+    expect(run.main.controls.applyTarget).toHaveBeenCalledWith(target(2));
+    expect(run.main.controls.applyLocation).not.toHaveBeenCalled();
+    expect(browser.history.replace).not.toHaveBeenCalled();
+    expect(browser.history.push).not.toHaveBeenCalled();
+    expect(run.announcement()).toBe('');
+    expect(run.state()).toBe(before);
+    expect(run.referencesOpen()).toBe(false);
+    expect(run.dependencies.setLinkActionRequest).not.toHaveBeenCalled();
+  });
+
+  it('reapplies exact destinations for Back and Forward with existing movement announcements', async () => {
+    const browser = locationHistory(durableDestination(3));
+    const run = harness({ locationHistory: browser });
+    run.coordinator.startLocationHistory();
+
+    expect(await run.coordinator.restoreCurrentLocation('back')).toBe(true);
+    expect(run.main.controls.applyTarget).toHaveBeenLastCalledWith(target(2));
+    expect(run.announcement()).toBe('Moved back in document history.');
+
+    browser.set(durableDestination(5));
+    expect(await run.coordinator.restoreCurrentLocation('forward')).toBe(true);
+    expect(run.main.controls.applyTarget).toHaveBeenLastCalledWith(target(4));
+    expect(run.announcement()).toBe('Moved forward in document history.');
+    expect(browser.history.push).not.toHaveBeenCalled();
+  });
+
+  it('downgrades an unavailable durable destination to its valid page and announces once', async () => {
+    const browser = locationHistory(durableDestination(3));
+    const run = harness({ locationHistory: browser });
+    vi.mocked(run.main.controls.applyTarget).mockResolvedValueOnce(false);
+    run.coordinator.startLocationHistory();
+
+    expect(await run.coordinator.restoreCurrentLocation()).toBe(true);
+    expect(browser.history.replace).toHaveBeenCalledOnce();
+    expect(browser.history.replace).toHaveBeenCalledWith({ kind: 'page', page: 3 });
+    expect(run.main.controls.applyLocation).toHaveBeenCalledWith(expect.objectContaining({
+      pageIndex: 2,
+      anchor: { x: 0, y: 0 },
+    }));
+    expect(run.dependencies.setAnnouncement).toHaveBeenCalledOnce();
+    expect(run.announcement()).toBe('The exact destination is unavailable. Opened page 3 instead.');
+  });
+
+  it('converges an out-of-range destination fallback to page 1 without retaining exactness', async () => {
+    const browser = locationHistory(durableDestination(9));
+    const run = harness({ locationHistory: browser, pageCount: 4 });
+    run.coordinator.startLocationHistory();
+
+    expect(await run.coordinator.restoreCurrentLocation()).toBe(true);
+    expect(run.main.controls.applyTarget).not.toHaveBeenCalled();
+    expect(browser.history.replace).toHaveBeenCalledWith({ kind: 'page', page: 1 });
+    expect(run.main.controls.applyLocation).not.toHaveBeenCalled();
+    expect(run.announcement()).toBe('The exact destination is unavailable. Opened page 1 instead.');
+  });
+
+  it('retains a destination at its semantic anchor and downgrades it after manual movement', async () => {
+    const destination = durableDestination(3);
+    const browser = locationHistory(destination);
+    const run = harness({ locationHistory: browser });
+    run.coordinator.startLocationHistory();
+    expect(await run.coordinator.restoreCurrentLocation()).toBe(true);
+
+    run.main.set(location(2, 10, 1.8));
+    run.coordinator.refreshMainLocation();
+    expect(browser.history.replace).not.toHaveBeenCalled();
+    expect(run.coordinator.currentLinkLocation()).toEqual(destination);
+
+    run.main.set(location(2, 220, 1.8));
+    run.coordinator.refreshMainLocation();
+    expect(browser.history.replace).toHaveBeenCalledWith({ kind: 'page', page: 3 });
+    expect(run.coordinator.currentLinkLocation()).toEqual({ kind: 'page', page: 3 });
+  });
+
+  it('does not let a superseded destination restore downgrade newer history', async () => {
+    const browser = locationHistory(durableDestination(3));
+    const run = harness({ locationHistory: browser });
+    const firstApply = deferred<boolean>();
+    vi.mocked(run.main.controls.applyTarget).mockImplementationOnce(() => firstApply.promise);
+    run.coordinator.startLocationHistory();
+
+    const stale = run.coordinator.restoreCurrentLocation('back');
+    await vi.waitFor(() => expect(run.main.controls.applyTarget).toHaveBeenCalledOnce());
+    browser.set(durableDestination(5));
+    expect(await run.coordinator.restoreCurrentLocation('forward')).toBe(true);
+
+    firstApply.resolve(false);
+    expect(await stale).toBe(false);
+    expect(browser.history.replace).not.toHaveBeenCalled();
+    expect(run.coordinator.currentLinkLocation()).toEqual(durableDestination(5));
+    expect(run.announcement()).toBe('Moved forward in document history.');
   });
 
   it('uses exact live locations for directed browser history and page fragments as fallback', async () => {

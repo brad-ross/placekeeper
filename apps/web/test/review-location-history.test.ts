@@ -60,6 +60,12 @@ class FakeEnvironment implements ReviewLocationHistoryEnvironment {
 }
 
 const page = (value: number): PlacekeeperLinkLocation => ({ kind: 'page', page: value });
+const destination = (value: number): PlacekeeperLinkLocation => ({
+  kind: 'destination',
+  page: value,
+  mode: 'fit-horizontal',
+  params: [640],
+});
 
 describe('browser review location history', () => {
   it('replaces settled reading, pushes explicit jumps once, and restores through popstate', () => {
@@ -105,6 +111,25 @@ describe('browser review location history', () => {
     reloaded.start(() => undefined);
     expect(reloaded.snapshot()).toEqual({ canBack: true, canForward: true });
     expect(reloaded.read()).toEqual(page(4));
+  });
+
+  it('round-trips durable destinations through replace, push, Back, and Forward', () => {
+    const environment = new FakeEnvironment();
+    const restore = vi.fn();
+    const history = new BrowserReviewLocationHistory(environment);
+    history.start(restore);
+
+    history.replace(destination(3));
+    expect(history.read()).toEqual(destination(3));
+    expect(environment.location.hash).toBe('#v=2&page=3&mode=fit-horizontal&params=640');
+
+    history.push(destination(7));
+    expect(history.read()).toEqual(destination(7));
+    expect(history.back()).toBe(true);
+    expect(history.read()).toEqual(destination(3));
+    expect(history.forward()).toBe(true);
+    expect(history.read()).toEqual(destination(7));
+    expect(restore).toHaveBeenCalledTimes(2);
   });
 
   it('converges malformed fragments through a safe replacement without growing history', () => {

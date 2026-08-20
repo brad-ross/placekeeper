@@ -577,6 +577,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       },
       getOutlineDiscovery: () => outlineDiscoveryRef.current,
       setCurrentOutlineItemId,
+      getPageCount: () => searchDocumentRef.current?.pages.length ?? 0,
       ...(locationHistory === undefined ? {} : {
         locationHistory,
         resolvePortableItem: (itemId: string) => {

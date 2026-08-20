@@ -15,6 +15,19 @@ export async function resume(viewId: string, pathname: string): Promise<void> {
   await start(await resumeProductionSession(viewId, pathname));
 }
 
+/** Preserves any canonical readable location while stale routes shed all live-session authority. */
+export function terminalRecoveryLocationFragment(hash: string): string {
+  let fragment = encodePlacekeeperLinkFragment({ kind: "page", page: 1 });
+  try {
+    fragment = encodePlacekeeperLinkFragment(
+      decodePlacekeeperLinkFragment(hash.replace(/^#/u, "")),
+    );
+  } catch {
+    // Invalid or future fragments recover conservatively at page 1.
+  }
+  return fragment;
+}
+
 export function showTerminalRecovery(): void {
   const recovery = document.querySelector<HTMLElement>("[data-terminal-recovery]");
   const reopen = recovery?.querySelector<HTMLAnchorElement>("[data-placekeeper-reopen]");
@@ -25,14 +38,7 @@ export function showTerminalRecovery(): void {
     reopen === undefined ||
     appLinkBase === undefined
   ) return;
-  let fragment = encodePlacekeeperLinkFragment({ kind: "page", page: 1 });
-  try {
-    fragment = encodePlacekeeperLinkFragment(
-      decodePlacekeeperLinkFragment(window.location.hash.slice(1)),
-    );
-  } catch {
-    // Invalid or future fragments recover conservatively at page 1.
-  }
+  const fragment = terminalRecoveryLocationFragment(window.location.hash);
   const link = `${appLinkBase}#${fragment}`;
   reopen.href = link;
   if (document.head.querySelector('link[data-placekeeper-terminal-style]') === null) {
