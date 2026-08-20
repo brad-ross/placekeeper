@@ -156,6 +156,7 @@ export interface ReviewShellProps {
   onNavigateExisting?(item: ExistingAnnotation): void;
   existingAnnotations?: ExistingAnnotationsDiscovery;
   onRetryExistingAnnotations?(): void;
+  activeItemId?: string | null;
   correspondingItemId?: string;
   activationRequest?: { readonly id: string; readonly token: number };
   onItemCorrespondenceChange?(id: string | undefined): void;
@@ -277,7 +278,10 @@ export function ReviewShell(props: ReviewShellProps) {
   );
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
   const [composer, setComposer] = useState<Composer | null>(null);
-  const [activeItemId, setActiveItemId] = useState<string>();
+  const [localActiveItemId, setLocalActiveItemId] = useState<string>();
+  const activeItemId = props.activeItemId === undefined
+    ? localActiveItemId
+    : props.activeItemId ?? undefined;
   const [consumedSelectionGeneration, setConsumedSelectionGeneration] = useState<number>();
   const [listActivation, setListActivation] = useState<{ readonly id: string; readonly token: number }>();
   const [peekItemId, setPeekItemId] = useState<string>();
@@ -301,6 +305,10 @@ export function ReviewShell(props: ReviewShellProps) {
     kind: 'reading',
     token: 0,
   });
+  const setActiveItem = (id: string | undefined) => {
+    if (props.activeItemId === undefined) setLocalActiveItemId(id);
+    props.onActiveItemChange?.(id);
+  };
   useEffect(() => {
     if (props.cancelPendingCommandToken === undefined) return;
     setTextDraft(null);
@@ -491,9 +499,8 @@ export function ReviewShell(props: ReviewShellProps) {
   useEffect(() => {
     const request = props.activationRequest;
     if (!request) return;
-    setActiveItemId(request.id);
+    setActiveItem(request.id);
     setListActivation(request);
-    props.onActiveItemChange?.(request.id);
     setPeekItemId(undefined);
     const item = props.state.items.find(({ id }) => id === request.id);
     setWorkspaceRequest(item
@@ -928,6 +935,12 @@ export function ReviewShell(props: ReviewShellProps) {
         if (pointerScrollRef.current?.id === event.pointerId) pointerScrollRef.current = undefined;
       }}
       onClickCapture={(event) => {
+        if (
+          activeItemId !== undefined
+          && event.button === 0
+          && event.target instanceof Element
+          && event.target.closest('[data-review-item], [data-owned-focus-id], [data-page-index]') === null
+        ) setActiveItem(undefined);
         if (props.linkActionRequest) return;
         if (event.target instanceof Element) {
           const markTrigger = event.target.closest<HTMLElement>('[data-owned-focus-id]');
@@ -1177,8 +1190,7 @@ export function ReviewShell(props: ReviewShellProps) {
               {...(props.copyItemLink === undefined ? {} : { copyLinkForItem })}
               onNavigate={(item) => {
                 markFramingUserIntent();
-                setActiveItemId(item.id);
-                props.onActiveItemChange?.(item.id);
+                setActiveItem(item.id);
                 props.onNavigate?.(item);
               }}
               onEdit={(item, trigger) => {
@@ -1190,8 +1202,7 @@ export function ReviewShell(props: ReviewShellProps) {
                 const next = await submit((state) => removeReviewItem(state, item.id));
                 if (activeItemId === item.id) {
                   const ordered = next.items;
-                  setActiveItemId(ordered[0]?.id);
-                  props.onActiveItemChange?.(ordered[0]?.id);
+                  setActiveItem(ordered[0]?.id);
                 }
               }}
             />

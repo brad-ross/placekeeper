@@ -551,6 +551,7 @@ export function App({
                   emit({ type: 'owned-mark', value: { id: ownedId, phase: 'activate' } });
                   return;
                 }
+                emit({ type: 'owned-mark-clear' });
                 const pagePoint: ViewerPagePoint = {
                   documentId,
                   pageIndex: page.index,

@@ -3239,7 +3239,7 @@ test("cancels the pending first annotation without choosing or creating a destin
   await expect(page.locator("[data-owned-mark]")).toHaveCount(0);
 });
 
-test("creates a crop-relative Page Note from a real PDF context gesture without secondary-activating its mark", async ({ page }) => {
+test("selects Page Notes only until the next click outside annotations", async ({ page }) => {
   const launched = await host.open({
     pdfPath: pdf,
     sourceRootPath: sourceRoot,
@@ -3295,6 +3295,20 @@ test("creates a crop-relative Page Note from a real PDF context gesture without 
   await expect(mark).toHaveCount(1);
   await expect(mark).toHaveAttribute("data-active", "false");
 
+  await pageCanvas.click({ button: "right", position: { x: 500 * scale, y: 700 * scale } });
+  await page.getByRole("menuitem", { name: "Add Page Note" }).click();
+  await page.getByRole("dialog", { name: "Page Note" })
+    .getByRole("textbox", { name: "Comment" })
+    .fill("Check the evidence.");
+  await page.getByRole("button", { name: "Save comment" }).click();
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(2);
+  const secondNote = host.broker.state(launched.sessionId)?.items
+    .find((item) => item.payload.comment === "Check the evidence.");
+  expect(secondNote?.id).toBeTruthy();
+  const secondMark = page.locator(`[data-owned-mark="pageNote"][data-review-id="${secondNote!.id}"]`);
+  const secondRow = page.locator(`[data-review-item="${secondNote!.id}"]`);
+  await expect(secondMark).toHaveCount(1);
+
   const markBox = await mark.boundingBox();
   if (!markBox) throw new Error("Rendered Page Note mark has no bounds.");
   await page.mouse.click(markBox.x + markBox.width / 2, markBox.y + markBox.height / 2, {
@@ -3303,7 +3317,73 @@ test("creates a crop-relative Page Note from a real PDF context gesture without 
   await expect(page.getByRole("menu", { name: "Page actions" })).toHaveCount(0);
   await expect(mark).toHaveAttribute("data-active", "false");
   await expect(page.locator('[data-workspace-edge-rail][aria-expanded="true"]')).toHaveCount(0);
-  expect(host.broker.state(launched.sessionId)?.revision).toBe(1);
+
+  const markFocus = page.locator(`[data-owned-focus-id="${note!.id}"]`);
+  await page.mouse.click(markBox.x + markBox.width / 2, markBox.y + markBox.height / 2);
+  const row = page.locator(`[data-review-item="${note!.id}"]`);
+  const workspace = await currentWorkspaceRail(page);
+  await expect(mark).toHaveAttribute("data-active", "true");
+  await expect(row).toHaveAttribute("data-active", "true");
+  await expect(workspace).toHaveAttribute("aria-expanded", "true");
+
+  const secondMarkBox = await secondMark.boundingBox();
+  if (!secondMarkBox) throw new Error("Second rendered Page Note mark has no bounds.");
+  await page.mouse.click(
+    secondMarkBox.x + secondMarkBox.width / 2,
+    secondMarkBox.y + secondMarkBox.height / 2,
+  );
+  await expect(mark).toHaveAttribute("data-active", "false");
+  await expect(row).toHaveAttribute("data-active", "false");
+  await expect(secondMark).toHaveAttribute("data-active", "true");
+  await expect(secondRow).toHaveAttribute("data-active", "true");
+  await expect(workspace).toHaveAttribute("aria-expanded", "true");
+
+  await pageCanvas.click({ position: { x: 76, y: 98 } });
+  await expect(mark).toHaveAttribute("data-active", "false");
+  await expect(row).toHaveAttribute("data-active", "false");
+  await expect(secondMark).toHaveAttribute("data-active", "false");
+  await expect(secondRow).toHaveAttribute("data-active", "false");
+  await expect(workspace).toHaveAttribute("aria-expanded", "true");
+
+  await markFocus.evaluate((element) => {
+    (element as HTMLElement).focus({ preventScroll: true });
+    element.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
+  });
+  await expect(row).toHaveAttribute("data-active", "true");
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  await expect(mark).toHaveAttribute("data-active", "false");
+  await expect(row).toHaveAttribute("data-active", "false");
+  await expect(workspace).toHaveAttribute("aria-expanded", "true");
+
+  await markFocus.evaluate((element) => {
+    (element as HTMLElement).focus({ preventScroll: true });
+    element.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
+  });
+  await expect(row).toHaveAttribute("data-active", "true");
+  const viewport = page.locator("[data-viewer-framing-viewport]");
+  const [viewportBox, currentPageBox] = await Promise.all([
+    viewport.boundingBox(),
+    pageCanvas.boundingBox(),
+  ]);
+  if (!viewportBox || !currentPageBox || currentPageBox.x <= viewportBox.x) {
+    throw new Error("Rendered PDF viewport has no clickable gutter.");
+  }
+  const gutterTarget = await page.evaluate(({ x, y }) => {
+    const element = document.elementFromPoint(x, y);
+    return {
+      exemption: element?.closest("[data-review-item], [data-owned-focus-id], [data-page-index]")
+        ?.getAttribute("class") ?? null,
+      insidePage: element?.closest("[data-page-index]") !== null,
+      insideShell: element?.closest(".review-shell") !== null,
+    };
+  }, { x: viewportBox.x + 2, y: currentPageBox.y + 2 });
+  expect(gutterTarget).toMatchObject({ exemption: null, insidePage: false, insideShell: true });
+  await page.mouse.click(viewportBox.x + 2, currentPageBox.y + 2);
+  await expect(mark).toHaveAttribute("data-active", "false");
+  await expect(row).toHaveAttribute("data-active", "false");
+  await expect(workspace).toHaveAttribute("aria-expanded", "true");
+
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(2);
   expect(browserErrors).toEqual([]);
 });
 
