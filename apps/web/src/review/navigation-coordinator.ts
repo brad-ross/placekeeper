@@ -243,10 +243,6 @@ interface SemanticItemLocation extends SemanticAnchor {
   readonly itemId: string;
 }
 
-interface SemanticDestinationLocation extends SemanticAnchor {
-  readonly location: Extract<PlacekeeperLinkLocation, { readonly kind: 'destination' }>;
-}
-
 function sameSemanticAnchor(location: PdfViewerLocation, semantic: SemanticAnchor): boolean {
   return location.pageIndex === semantic.pageIndex
     && Math.abs(location.anchor.x - semantic.anchor.x) <= 0.01
@@ -268,7 +264,7 @@ export class NavigationCoordinator {
   /** A Send-selected successor whose saved view is not currently rendered. */
   private referenceRestoreIdentity: string | null = null;
   private semanticItemLocation: SemanticItemLocation | null = null;
-  private semanticDestinationLocation: SemanticDestinationLocation | null = null;
+  private semanticDestinationLocation: SemanticAnchor | null = null;
   private locationHistoryStarted = false;
   private locationRestored: boolean;
   private disposed = false;
@@ -1398,7 +1394,6 @@ export class NavigationCoordinator {
     }
     this.semanticItemLocation = null;
     this.semanticDestinationLocation = {
-      location,
       pageIndex: settled.pageIndex,
       anchor: settled.anchor,
     };

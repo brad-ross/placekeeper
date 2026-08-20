@@ -4,15 +4,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   LinkActionMenuContent,
-  compositeFocusIndex,
-  horizontalTabFocusIndex,
   linkActionDismissRestoresFocus,
   placeLinkActionPopover,
   setLinkActionOpenerExpanded,
 } from '../src/review/LinkActionPopover.js';
 import { PDF_LINK_ACTION_MENU_ID } from '../src/pdf/viewer-interaction-events.js';
 import { OutlineNavigator } from '../src/review/OutlineNavigator.js';
-import { rowActionMenuFocusIndex } from '../src/review/RowActionGroup.js';
+import { compositeFocusIndex, horizontalTabFocusIndex } from '../src/review/menu-focus.js';
 import {
   createOutlineRowCopyLink,
   createPdfTargetCopyLink,
@@ -129,15 +127,6 @@ describe('link action chooser', () => {
     expect(compositeFocusIndex(2, 3, 'ArrowDown')).toBe(0);
     expect(compositeFocusIndex(0, 3, 'ArrowUp')).toBe(2);
     expect(compositeFocusIndex(0, 3, 'End')).toBe(2);
-  });
-
-  it('uses the same complete keyboard order for row action menus', () => {
-    expect(rowActionMenuFocusIndex(0, 2, 'ArrowDown')).toBe(1);
-    expect(rowActionMenuFocusIndex(1, 2, 'ArrowDown')).toBe(0);
-    expect(rowActionMenuFocusIndex(0, 2, 'ArrowUp')).toBe(1);
-    expect(rowActionMenuFocusIndex(1, 2, 'Home')).toBe(0);
-    expect(rowActionMenuFocusIndex(0, 2, 'End')).toBe(1);
-    expect(rowActionMenuFocusIndex(0, 2, 'Escape')).toBeNull();
   });
 
   it('keeps horizontal tab navigation to Left, Right, Home, and End', () => {

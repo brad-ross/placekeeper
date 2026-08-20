@@ -79,7 +79,7 @@ import {
 } from '../review/reference-workspace-layout.js';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import type { CopyLinkControlProps } from '../review/CopyLinkControl.js';
-import type { OutlineCopyLink } from '../review/OutlineNavigator.js';
+import type { PdfDestinationCopyLink } from '../review/copy-link-model.js';
 import {
   createProofreadInputController,
   isEditableTarget,
@@ -198,7 +198,7 @@ export interface ReviewShellProps {
   onReferenceReturn?(identity: string): void;
   onOutlineActivate?(item: PdfOutlineItem): void;
   onOutlineReference?(item: PdfOutlineItem): void;
-  copyLinkForOutlineItem?(item: PdfOutlineItem): OutlineCopyLink | undefined;
+  copyLinkForOutlineItem?(item: PdfOutlineItem): PdfDestinationCopyLink | undefined;
   onReferenceViewportHost?(element: HTMLDivElement | null): void;
   onWorkspaceModeFocusTokenChange?(mode: WorkspaceMode, token: string): void;
   referenceLayoutState?: ReferenceWorkspaceLayoutState;

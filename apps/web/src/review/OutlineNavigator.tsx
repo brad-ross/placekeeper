@@ -4,16 +4,9 @@ import type {
   PdfOutlineDiscovery,
   PdfOutlineItem,
 } from '../pdf/pdf-outline.js';
-import type { CopyLinkControlProps } from './CopyLinkControl.js';
+import type { PdfDestinationCopyLink } from './copy-link-model.js';
 import { RowActionGroup, type RowAction } from './RowActionGroup.js';
 import { ReviewIcon } from './ReviewIcon.js';
-
-export interface OutlineCopyLink extends Pick<
-  CopyLinkControlProps,
-  'getLink' | 'writeText' | 'disabled'
-> {
-  readonly precision: 'exact' | 'page';
-}
 
 function branchIds(items: readonly PdfOutlineItem[]): string[] {
   return items.flatMap((item) => [
@@ -27,7 +20,7 @@ export interface OutlineNavigatorProps {
   readonly currentItemId: string | null;
   readonly onActivate: (item: PdfOutlineItem) => void;
   readonly onOpenReference: (item: PdfOutlineItem) => void;
-  readonly copyLinkForItem?: (item: PdfOutlineItem) => OutlineCopyLink | undefined;
+  readonly copyLinkForItem?: (item: PdfOutlineItem) => PdfDestinationCopyLink | undefined;
   readonly onFocusTokenChange?: (token: string) => void;
 }
 

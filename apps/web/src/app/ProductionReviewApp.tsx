@@ -66,6 +66,7 @@ import {
   createOutlineRowCopyLink,
   createPdfTargetCopyLink,
   createSearchResultRowCopyLink,
+  type PdfTargetCopyLinkContext,
 } from '../review/row-link-actions.js';
 import {
   createTrailingTaskScheduler,
@@ -945,40 +946,28 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     }
     await navigator.clipboard.writeText(link);
   };
-  const copyLinkForSearchResult = props.session.appLinkBase === undefined
-    ? undefined
-    : (result: PdfSearchResult) => createSearchResultRowCopyLink(result, {
-      appLinkBase: props.session.appLinkBase!,
+  const pdfTargetCopyLinkContext: PdfTargetCopyLinkContext | undefined =
+    props.session.appLinkBase === undefined ? undefined : {
+      appLinkBase: props.session.appLinkBase,
       document: {
         documentGeneration: documentGenerationRef.current,
         pageCount: viewerState.totalPages,
       },
       currentDocumentGeneration: () => documentGenerationRef.current,
       writeText: writePlacekeeperLink,
-    });
-  const copyLinkForOutlineItem = props.session.appLinkBase === undefined
+    };
+  const copyLinkForSearchResult = pdfTargetCopyLinkContext === undefined
     ? undefined
-    : (item: Parameters<typeof createOutlineRowCopyLink>[0]) => createOutlineRowCopyLink(item, {
-      appLinkBase: props.session.appLinkBase!,
-      document: {
-        documentGeneration: documentGenerationRef.current,
-        pageCount: viewerState.totalPages,
-      },
-      currentDocumentGeneration: () => documentGenerationRef.current,
-      writeText: writePlacekeeperLink,
-    });
-  const copyLinkForLinkAction = props.session.appLinkBase === undefined
+    : (result: PdfSearchResult) => createSearchResultRowCopyLink(result, pdfTargetCopyLinkContext);
+  const copyLinkForOutlineItem = pdfTargetCopyLinkContext === undefined
+    ? undefined
+    : (item: Parameters<typeof createOutlineRowCopyLink>[0]) => (
+      createOutlineRowCopyLink(item, pdfTargetCopyLinkContext)
+    );
+  const copyLinkForLinkAction = pdfTargetCopyLinkContext === undefined
     ? undefined
     : (request: ViewerPdfLinkInvocation) => {
-      const copyLink = createPdfTargetCopyLink(request.target, {
-        appLinkBase: props.session.appLinkBase!,
-        document: {
-          documentGeneration: documentGenerationRef.current,
-          pageCount: viewerState.totalPages,
-        },
-        currentDocumentGeneration: () => documentGenerationRef.current,
-        writeText: writePlacekeeperLink,
-      });
+      const copyLink = createPdfTargetCopyLink(request.target, pdfTargetCopyLinkContext);
       if (copyLink === undefined) return undefined;
       const page = request.target.pageIndex + 1;
       return {

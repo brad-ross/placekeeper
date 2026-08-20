@@ -8,11 +8,9 @@ import {
 
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
 import type { AnnotationPresentation } from '../pdf/viewer-framing.js';
-import { horizontalTabFocusIndex } from './LinkActionPopover.js';
-import {
-  OutlineNavigator,
-  type OutlineCopyLink,
-} from './OutlineNavigator.js';
+import type { PdfDestinationCopyLink } from './copy-link-model.js';
+import { horizontalTabFocusIndex } from './menu-focus.js';
+import { OutlineNavigator } from './OutlineNavigator.js';
 import type { WorkspaceMode } from './reference-navigation-state.js';
 import type { RightWorkspaceMode } from './reference-workspace-layout.js';
 import { WorkspaceModeStrip } from './WorkspaceModeStrip.js';
@@ -31,7 +29,7 @@ export interface OutlineAnnotationsWorkspaceProps {
   readonly onModeChange: (mode: RightWorkspaceMode) => void;
   readonly onOutlineActivate: (item: PdfOutlineItem) => void;
   readonly onOutlineReference: (item: PdfOutlineItem) => void;
-  readonly copyLinkForOutlineItem?: (item: PdfOutlineItem) => OutlineCopyLink | undefined;
+  readonly copyLinkForOutlineItem?: (item: PdfOutlineItem) => PdfDestinationCopyLink | undefined;
   readonly onModeFocusTokenChange?: (mode: RightWorkspaceMode, token: string) => void;
 }
 

@@ -6,10 +6,7 @@ import {
 } from '../pdf/pdf-navigation-target.js';
 import type { PdfSearchResult } from '../pdf/pdf-search-model.js';
 import { buildPlacekeeperCopyLink } from './CopyLinkControl.js';
-import type { OutlineCopyLink } from './OutlineNavigator.js';
-import type { RowCopyLinkAction } from './RowActionGroup.js';
-
-type CopyLinkData = RowCopyLinkAction['copyLink'];
+import type { CopyLinkActionData, PdfDestinationCopyLink } from './copy-link-model.js';
 
 export interface PdfTargetCopyLinkContext {
   readonly appLinkBase: string;
@@ -33,13 +30,12 @@ function generationCheckedWriter(
 export function createPdfTargetCopyLink(
   target: PdfNavigationTarget,
   context: PdfTargetCopyLinkContext,
-): (CopyLinkData & { readonly precision: 'exact' | 'page' }) | undefined {
+): PdfDestinationCopyLink | undefined {
   const location = placekeeperLocationFromPdfNavigationTarget(target, context.document);
   if (location === null) return undefined;
-  const link = buildPlacekeeperCopyLink(context.appLinkBase, location);
   return {
     precision: location.kind === 'destination' ? 'exact' : 'page',
-    getLink: () => link,
+    getLink: () => buildPlacekeeperCopyLink(context.appLinkBase, location),
     writeText: generationCheckedWriter(context.document.documentGeneration, context),
   };
 }
@@ -47,7 +43,7 @@ export function createPdfTargetCopyLink(
 export function createOutlineRowCopyLink(
   item: PdfOutlineItem,
   context: PdfTargetCopyLinkContext,
-): OutlineCopyLink | undefined {
+): PdfDestinationCopyLink | undefined {
   if (item.target === null) return undefined;
   return createPdfTargetCopyLink(item.target, context);
 }
@@ -55,18 +51,15 @@ export function createOutlineRowCopyLink(
 export function createSearchResultRowCopyLink(
   result: Pick<PdfSearchResult, 'pageIndex'>,
   context: PdfTargetCopyLinkContext,
-): CopyLinkData | undefined {
+): CopyLinkActionData | undefined {
   if (
     !Number.isSafeInteger(result.pageIndex)
     || result.pageIndex < 0
     || result.pageIndex >= context.document.pageCount
   ) return undefined;
-  const link = buildPlacekeeperCopyLink(context.appLinkBase, {
-    kind: 'page',
-    page: result.pageIndex + 1,
-  });
+  const location = { kind: 'page' as const, page: result.pageIndex + 1 };
   return {
-    getLink: () => link,
+    getLink: () => buildPlacekeeperCopyLink(context.appLinkBase, location),
     writeText: generationCheckedWriter(context.document.documentGeneration, context),
   };
 }

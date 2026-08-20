@@ -4,6 +4,7 @@ import {
   encodePlacekeeperLinkFragment,
   type PlacekeeperLinkLocation,
 } from '../../../../packages/core/src/placekeeper-link.js';
+import type { CopyLinkActionData } from './copy-link-model.js';
 import { ReviewIcon } from './ReviewIcon.js';
 
 export type CopyLinkStatus =
@@ -40,10 +41,7 @@ export function createCopyLinkCommand(input: {
   };
 }
 
-export interface CopyLinkControlProps {
-  readonly getLink: () => string;
-  readonly writeText: (link: string) => Promise<void>;
-  readonly disabled?: boolean;
+export interface CopyLinkControlProps extends CopyLinkActionData {
   readonly ariaLabel?: string;
   readonly title?: string;
   readonly variant?: 'chrome' | 'annotation' | 'row' | 'popover';

@@ -8,9 +8,9 @@ import {
   type Ref,
 } from 'react';
 
-import type { CopyLinkControlProps } from './CopyLinkControl.js';
 import { CopyLinkControl } from './CopyLinkControl.js';
-import { compositeFocusIndex } from './LinkActionPopover.js';
+import type { CopyLinkActionData } from './copy-link-model.js';
+import { compositeFocusIndex, enabledMenuItems } from './menu-focus.js';
 import { ReviewIcon, type ReviewIconName } from './ReviewIcon.js';
 
 export const ROW_ACTION_CONTAINER_NAME = 'row-actions';
@@ -31,10 +31,7 @@ export interface RowCommandAction extends RowActionBase {
 
 export interface RowCopyLinkAction extends RowActionBase {
   readonly kind: 'copy-link';
-  readonly copyLink: Pick<
-    CopyLinkControlProps,
-    'getLink' | 'writeText' | 'disabled'
-  >;
+  readonly copyLink: CopyLinkActionData;
 }
 
 export type RowAction = RowCommandAction | RowCopyLinkAction;
@@ -79,14 +76,6 @@ function DirectAction({ action }: { readonly action: RowAction }) {
   );
 }
 
-export function rowActionMenuFocusIndex(
-  currentIndex: number,
-  itemCount: number,
-  key: string,
-): number | null {
-  return compositeFocusIndex(currentIndex, itemCount, key);
-}
-
 export function RowActionGroup({ actions, rowLabel }: RowActionGroupProps) {
   const [open, setOpen] = useState(false);
   const generatedId = useId().replaceAll(':', '');
@@ -120,12 +109,10 @@ export function RowActionGroup({ actions, rowLabel }: RowActionGroupProps) {
       closeAndRestore();
       return;
     }
-    const items = Array.from(
-      event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'),
-    );
+    const items = enabledMenuItems(event.currentTarget);
     const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
     if (currentIndex < 0) return;
-    const nextIndex = rowActionMenuFocusIndex(currentIndex, items.length, event.key);
+    const nextIndex = compositeFocusIndex(currentIndex, items.length, event.key);
     if (nextIndex === null) return;
     event.preventDefault();
     items[nextIndex]?.focus({ preventScroll: true });
