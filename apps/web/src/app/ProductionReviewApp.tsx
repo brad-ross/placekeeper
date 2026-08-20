@@ -770,6 +770,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       });
       return;
     }
+    if (event.type === 'owned-mark-clear') {
+      setActiveItemId(undefined);
+      return;
+    }
     if (event.type === 'owned-mark') {
       const { id, phase } = event.value;
       if (phase === 'enter') markHoverRef.current = id;
@@ -1192,6 +1196,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         placedPageNote={placedPageNote}
         keyboardPageNoteActive={keyboardPageNoteActive}
         existingAnnotations={existingAnnotations}
+        activeItemId={activeItemId ?? null}
         {...(correspondingItemId === undefined ? {} : { correspondingItemId })}
         {...(activationRequest === undefined ? {} : { activationRequest })}
         onRetryExistingAnnotations={() => setInventoryRetryGeneration((generation) => generation + 1)}
