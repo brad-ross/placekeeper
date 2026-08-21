@@ -390,6 +390,7 @@ describe('document-scoped navigation coordinator', () => {
     live.coordinator.startLocationHistory();
     expect(await live.coordinator.restoreCurrentLocation()).toBe(true);
     expect(await live.coordinator.navigateMainTarget(target(2), 'outline')).toBe(true);
+    expect(live.main.controls.focusAtDestination).toHaveBeenLastCalledWith(2);
 
     browser.set({ kind: 'page', page: 1 });
     vi.mocked(live.main.controls.applyLocation).mockClear();
@@ -1381,7 +1382,7 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.main.controls.applyLocation).toHaveBeenLastCalledWith(original);
   });
 
-  it('treats semantic no-op direct and outline targets as successful without history', async () => {
+  it('keeps semantic no-op direct and outline targets history-free while focusing Main', async () => {
     const run = harness();
     run.dependencies.layout.revealReferences();
     expect(await run.coordinator.navigateMainTarget(target(0), 'direct')).toBe(true);
@@ -1394,7 +1395,7 @@ describe('document-scoped navigation coordinator', () => {
     expect(await run.coordinator.navigateMainTarget(target(0), 'outline')).toBe(true);
     expect(run.state().mainHistory.entries).toEqual([]);
     expect(run.referencesOpen()).toBe(true);
-    expect(run.main.controls.focusAtDestination).not.toHaveBeenCalled();
+    expect(run.main.controls.focusAtDestination).toHaveBeenCalledWith(0);
   });
 
   it('records distinct search occurrences even when viewer tolerances resolve them alike', async () => {

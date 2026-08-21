@@ -313,6 +313,8 @@ describe('review shell layout and accessibility contract', () => {
     );
 
     expect(listHtml).toContain('data-annotation-origin="owned"');
+    expect(listHtml).toContain('<h2>Annotations</h2>');
+    expect(listHtml).not.toContain('annotation-drawer__count');
     expect(listHtml).toContain('data-annotation-kind="highlight"');
     expect(listHtml).toContain('data-annotation-state="active-corresponding"');
     expect(listHtml).toContain('<span class="annotation-item__separator">·</span><span class="annotation-item__page">4</span>');
@@ -575,6 +577,9 @@ describe('review shell layout and accessibility contract', () => {
 
   it('shares simple annotation section headers and keeps the activity strip intrinsic', () => {
     expect(annotationStyles).toMatch(
+      /\.review-workspace__header\s*\{[^}]*height:\s*var\(--review-workspace-header-height, 44px\);[^}]*align-items:\s*center;[^}]*padding:\s*8px 6px 2px 7\.5px;/u,
+    );
+    expect(annotationStyles).toMatch(
       /\.annotation-drawer__header h2,\s*\.existing-annotations__header h2\s*\{[^}]*font-size:\s*15px;[^}]*font-weight:\s*760;/u,
     );
     expect(annotationStyles).toMatch(
@@ -587,6 +592,15 @@ describe('review shell layout and accessibility contract', () => {
     expect(annotationStyles).not.toContain('.review-tools-workspace .review-workspace__tabs');
     expect(annotationStyles).toMatch(
       /\.review-workspace__activity-strip\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__activity-strip--title\s*\{[^}]*padding:\s*0;[^}]*background:\s*transparent;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__activity-strip--title[\s\S]*\.review-workspace__mode-segment--compound::before\s*\{[^}]*content:\s*none;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__panel--references\[data-reference-tabs-orientation="vertical"\]\[data-reference-panel-layout="split"\][\s\S]*>\s*\.reference-panel\s*\{[^}]*border-top:\s*1px solid var\(--review-border-subtle\);[^}]*border-left:\s*1px solid var\(--review-border-subtle\);[^}]*border-radius:\s*var\(--review-radius-row\) 0 0;[^}]*box-shadow:\s*inset 6px 6px 14px/u,
     );
     expect(annotationStyles).toMatch(
       /\.review-workspace__mode-tab\s*\{[^}]*width:\s*var\(--review-control-compact\);[^}]*flex:\s*0 0 var\(--review-control-compact\);/u,
@@ -609,8 +623,10 @@ describe('review shell layout and accessibility contract', () => {
     expect(annotationStyles).toContain('height: var(--review-workspace-header-height, 44px)');
     expect(annotationStyles).toContain('margin-top: var(--review-workspace-header-height, 44px)');
     expect(annotationStyles).toContain(
-      'top: calc(var(--review-workspace-header-height, 44px) / 2)',
+      'top: calc((var(--review-workspace-header-height, 44px) / 2) + 3px)',
     );
+    expect(annotationStyles).not.toContain('[data-edge-rail-open="true"]::before');
+    expect(annotationStyles).not.toContain('border-image');
     expect(annotationStyles).not.toContain('margin-top: 53px');
     expect(annotationStyles).not.toContain('review-workspace__tab-segment--compound');
     expect(annotationStyles).not.toContain('.existing-annotations__readonly');
@@ -754,7 +770,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('id="workspace-mode-annotations"');
     expect(html).toMatch(/id="workspace-mode-search"[^>]*aria-selected="true"/u);
     expect(html).not.toContain('Methods and data');
-    expect(html).toContain('<h2>Annotations ');
+    expect(html).toContain('<h2>Annotations</h2>');
     expect(html).toContain('<h2>External Annotations (read only)</h2>');
     expect(html).not.toContain('Review comments');
     expect(html).not.toContain('Source PDF');
