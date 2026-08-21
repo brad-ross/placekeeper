@@ -149,7 +149,7 @@ test("copies canonical PDF destinations and reopens them without source UI state
   const outlineCopy = outline.getByRole("button", {
     name: "Copy exact destination link for Overview, Page 2",
   });
-  await expect(outlineCopy).toHaveAttribute("title", "Copy exact destination link");
+  expect(await outlineCopy.getAttribute("title")).toBeNull();
   await expect(outlineCopy.locator(".lucide-link")).toBeVisible();
   await outlineCopy.click();
   const outlineLink = await copiedPlacekeeperLink(page);
