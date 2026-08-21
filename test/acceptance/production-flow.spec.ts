@@ -2796,15 +2796,15 @@ test("one installed-style browser tree preserves review state across responsive 
   await page.keyboard.press("b");
   await releaseSelectionCapture(page);
 
-  const replacementDialog = page.getByRole("dialog", { name: "Replacement" });
-  await expect(replacementDialog).toBeVisible();
-  const replacementTextbox = replacementDialog.getByRole("textbox", { name: "Replacement" });
+  const replacementComposer = page.getByRole("region", { name: "Replacement" });
+  await expect(replacementComposer).toBeVisible();
+  const replacementTextbox = replacementComposer.getByRole("textbox", { name: "Replacement" });
   await expect(replacementTextbox).toHaveValue("b");
   await page.keyboard.type("la");
   await expect(replacementTextbox).toHaveValue("bla");
   const originalDigest = await sha256(pdf);
-  await replacementDialog.getByRole("button", { name: "Apply" }).click();
-  await expect(replacementDialog).toHaveCount(0);
+  await replacementComposer.getByRole("button", { name: "Apply" }).click();
+  await expect(replacementComposer).toHaveCount(0);
   const destinationDialog = page.getByRole("dialog", { name: "Choose Where to Save Annotations" });
   await expect(destinationDialog).toBeVisible();
   await expect(destinationDialog.getByRole("radio", { name: /Save to a new copy/u })).toBeChecked();
@@ -2891,7 +2891,7 @@ test('edits the current page in a real multi-page viewer without losing adjacent
     position: { x: firstPageBox.width * 0.8, y: firstPageBox.height * 0.7 },
   });
   await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
-  const composer = page.getByRole('dialog', { name: 'Page Note' });
+  const composer = page.getByRole('region', { name: 'Page Note' });
   await composer.getByRole('textbox', { name: 'Comment' }).fill('Keep this surrounding review state.');
   await composer.getByRole('button', { name: 'Save', exact: true }).click();
   await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
@@ -2929,6 +2929,65 @@ test('edits the current page in a real multi-page viewer without losing adjacent
   expect(host.broker.state(launched.sessionId)?.revision).toBe(1);
   expect(host.broker.state(launched.sessionId)?.items).toHaveLength(1);
   expect(browserErrors).toEqual([]);
+});
+
+test('returns a live authoring draft through document history without retargeting it', async ({ page }) => {
+  const launched = await openFreshProductionFixture(
+    page,
+    multiPagePdf,
+    'Fresh authoring Return launch failed',
+  );
+  await chooseFreshCopyDestination(page);
+
+  const firstPage = page.locator("[data-page-index='0']").first();
+  await waitForRenderedPageImage(firstPage);
+  const firstPageBox = await firstPage.boundingBox();
+  if (!firstPageBox) throw new Error('First authoring page has no bounds.');
+  await firstPage.click({
+    button: 'right',
+    position: { x: firstPageBox.width * 0.75, y: firstPageBox.height * 0.65 },
+  });
+  await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
+  const composer = page.getByRole('region', { name: 'Page Note' });
+  const editor = composer.getByRole('textbox', { name: 'Comment' });
+  await editor.fill('Draft remains on the original page.');
+  await composer.getByRole('button', { name: 'Read Document' }).click();
+
+  const currentPage = page.getByRole('button', {
+    name: 'Current page 1 of 2. Enter a page number',
+  });
+  await currentPage.click();
+  const pageNumber = page.getByRole('spinbutton', { name: 'Page number' });
+  await pageNumber.fill('2');
+  await pageNumber.press('Enter');
+  await expect(page.getByLabel('Current page')).toHaveText('2 / 2');
+  await expect.poll(() => new URL(page.url()).hash).toContain('page=2');
+  await expect(editor).toHaveValue('Draft remains on the original page.');
+
+  const returnToAnchor = composer.getByRole('button', { name: 'Return to Anchor' });
+  await expect(returnToAnchor).toBeEnabled();
+  await returnToAnchor.click();
+  await expect(editor).toHaveValue('Draft remains on the original page.');
+  await expect(page.getByRole('button', { name: 'Return to Editor' })).toBeVisible();
+  await expect(composer.locator('[data-return-state="visible"]')).toContainText('Anchor in view');
+  await expect.poll(() => new URL(page.url()).hash).toContain('page=1');
+
+  const back = page.getByRole('button', { name: 'Back in document history' });
+  const forward = page.getByRole('button', { name: 'Forward in document history' });
+  await expect(back).toBeEnabled();
+  await back.click();
+  await expect(page.getByLabel('Current page')).toHaveText('2 / 2');
+  await expect(composer).toBeVisible();
+  await expect(editor).toHaveValue('Draft remains on the original page.');
+  await expect(forward).toBeEnabled();
+  await forward.click();
+  await expect.poll(() => new URL(page.url()).hash).toContain('page=1');
+  await expect(composer.locator('[data-return-state="visible"]')).toContainText('Anchor in view');
+
+  await page.getByRole('button', { name: 'Return to Editor' }).click();
+  await expect(editor).toBeFocused();
+  await composer.getByRole('button', { name: 'Cancel' }).click();
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
 });
 
 test('fits a real PDF to closed, bottom, and resizable right reading widths as a one-shot zoom', async ({ page }) => {
@@ -3493,8 +3552,11 @@ test('keeps PDF drag selection available while the Annotation Tray is open', asy
   });
   expect(overlayOrder.contextual).toBeGreaterThan(overlayOrder.drawer);
   await selectionActions.getByRole('button', { name: 'Highlight', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Highlight Comment' })).toBeVisible();
-  await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('region', { name: 'Highlight Comment' })).toBeVisible();
+  await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-authoring-takeover', 'true');
+  await expect(page.locator('#review-tools-workspace')).toHaveAttribute('inert', '');
+  await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
+  await expect(workspaceControl).toHaveCount(0);
 });
 
 test("cancels the pending first annotation without choosing or creating a destination", async ({ page }) => {
@@ -3508,17 +3570,23 @@ test("cancels the pending first annotation without choosing or creating a destin
   await waitForRenderedPageImage(pageCanvas);
   await pageCanvas.click({ button: "right", position: { x: 320, y: 420 } });
   await page.getByRole("menuitem", { name: "Add Page Note" }).click();
-  const composer = page.getByRole("dialog", { name: "Page Note" });
-  await composer.getByRole("textbox", { name: "Comment" }).fill("Do not keep this note.");
+  const composer = page.locator('[data-comment-composer]');
+  await expect(page.getByRole("region", { name: "Page Note" })).toBeVisible();
+  const comment = composer.locator('textarea');
+  await comment.fill("Do not keep this note.");
   await composer.getByRole("button", { name: "Save", exact: true }).click();
   const destination = page.getByRole("dialog", { name: "Choose Where to Save Annotations" });
   await expect(destination).toBeVisible();
   await destination.getByRole("button", { name: "Cancel" }).click();
   await expect(destination).toHaveCount(0);
+  await expect(composer).toBeVisible();
+  await expect(comment).toHaveValue("Do not keep this note.");
   expect(host.broker.state(launched.sessionId)).toMatchObject({ revision: 0, items: [] });
   expect(host.broker.saveStatus(launched.sessionId)?.destination).toMatchObject({ phase: "none" });
   await expect(access(cancelPdf.replace(/\.pdf$/u, "-annotated.pdf"))).rejects.toMatchObject({ code: "ENOENT" });
   await expect(page.locator("[data-owned-mark]")).toHaveCount(0);
+  await composer.getByRole("button", { name: "Cancel" }).click();
+  await expect(composer).toHaveCount(0);
 });
 
 test("selects Page Notes only until the next click outside annotations", async ({ page, browserName }) => {
@@ -3549,7 +3617,7 @@ test("selects Page Notes only until the next click outside annotations", async (
   await expect(addPageNote).toBeFocused();
   await addPageNote.click();
 
-  const composer = page.getByRole("dialog", { name: "Page Note" });
+  const composer = page.getByRole("region", { name: "Page Note" });
   await expect(composer).toBeVisible();
   await composer.getByRole("textbox", { name: "Comment" }).fill("Check the conclusion.");
   await composer.getByRole("button", { name: "Save", exact: true }).click();
@@ -3580,7 +3648,7 @@ test("selects Page Notes only until the next click outside annotations", async (
   const secondPoint = { x: 300 * scale, y: 300 * scale };
   await pageCanvas.click({ button: "right", position: secondPoint });
   await page.getByRole("menuitem", { name: "Add Page Note" }).click();
-  await page.getByRole("dialog", { name: "Page Note" })
+  await page.getByRole("region", { name: "Page Note" })
     .getByRole("textbox", { name: "Comment" })
     .fill("Check the evidence.");
   await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -3698,7 +3766,7 @@ test("places a crop-relative Page Note through the real PDF keyboard cursor", as
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
 
-  const composer = page.getByRole("dialog", { name: "Page Note" });
+  const composer = page.getByRole("region", { name: "Page Note" });
   await expect(composer).toBeVisible();
   await composer.getByRole("textbox", { name: "Comment" }).fill("Keyboard-placed note.");
   await composer.getByRole("button", { name: "Save", exact: true }).click();
@@ -3750,7 +3818,7 @@ test("normalizes a real context gesture on a rotated cropped PDF into crop-relat
     position: { x: 300 * scale, y: 200 * scale },
   });
   await page.getByRole("menuitem", { name: "Add Page Note" }).click();
-  const composer = page.getByRole("dialog", { name: "Page Note" });
+  const composer = page.getByRole("region", { name: "Page Note" });
   await composer.getByRole("textbox", { name: "Comment" }).fill("Rotated geometry note.");
   await composer.getByRole("button", { name: "Save", exact: true }).click();
 
@@ -3871,6 +3939,48 @@ test("shows command conflicts until a retry succeeds", async ({ page }) => {
   expect(host.broker.state(launched.sessionId)?.revision).toBe(2);
 });
 
+test('returns a first-annotation conflict to the preserved composer for retry', async ({ page }) => {
+  const launched = await openFreshProductionFixture(
+    page,
+    pdf,
+    'Fresh pending-destination conflict launch failed',
+  );
+  const pageCanvas = page.locator("[data-page-index='0']").first();
+  await waitForRenderedPageImage(pageCanvas);
+  await dragPdfPhrase(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
+  await page.getByRole('button', { name: 'Replace', exact: true }).click();
+  const composer = page.getByRole('region', { name: 'Replacement' });
+  const editor = composer.getByRole('textbox', { name: 'Replacement' });
+  await editor.fill('retry from authoritative state');
+  await composer.getByRole('button', { name: 'Apply' }).click();
+
+  const destination = page.getByRole('dialog', { name: 'Choose Where to Save Annotations' });
+  await expect(destination).toBeVisible();
+  await destination.getByRole('textbox', { name: 'Copy name' })
+    .fill(`pending-conflict-${randomUUID()}.pdf`);
+  const externalState = host.broker.state(launched.sessionId);
+  if (!externalState) throw new Error('Pending-destination conflict state is missing.');
+  await host.broker.acceptMutation(
+    launched.sessionId,
+    addPageNote(
+      externalState,
+      0,
+      { x: 80, y: 160, width: 18, height: 18 },
+      'External conflict note.',
+    ),
+  );
+  await destination.getByRole('button', { name: 'Confirm' }).click();
+
+  await expect(destination).toHaveCount(0);
+  await expect(composer).toBeVisible();
+  await expect(editor).toHaveValue('retry from authoritative state');
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(1);
+  await composer.getByRole('button', { name: 'Apply' }).click();
+  await expect(composer).toHaveCount(0);
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(2);
+  expect(host.broker.state(launched.sessionId)?.items).toHaveLength(2);
+});
+
 test("discards queued typing when a pending selection is cleared", async ({ page }) => {
   const launched = await host.open({
     pdfPath: pdf,
@@ -3895,7 +4005,7 @@ test("discards queued typing when a pending selection is cleared", async ({ page
   await pageCanvas.click({ position: { x: 500, y: 300 } });
   await releaseSelectionCapture(page);
 
-  await expect(page.getByRole("dialog", { name: "Replacement" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Replacement" })).toHaveCount(0);
   await expect(page.locator("[data-review-item]")).toHaveCount(0);
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
 });
@@ -3925,11 +4035,11 @@ test("keeps only typing for the newest pending selection", async ({ page }) => {
   await page.keyboard.type("current");
   await releaseSelectionCapture(page);
 
-  const replacementDialog = page.getByRole("dialog", { name: "Replacement" });
-  await expect(replacementDialog).toBeVisible();
-  await expect(replacementDialog.getByRole("textbox", { name: "Replacement" })).toHaveValue("current");
-  await replacementDialog.getByRole("button", { name: "Apply" }).click();
-  await expect(replacementDialog).toHaveCount(0);
+  const replacementComposer = page.getByRole("region", { name: "Replacement" });
+  await expect(replacementComposer).toBeVisible();
+  await expect(replacementComposer.getByRole("textbox", { name: "Replacement" })).toHaveValue("current");
+  await replacementComposer.getByRole("button", { name: "Apply" }).click();
+  await expect(replacementComposer).toHaveCount(0);
   await expect(page.locator("[data-review-item]")).toHaveCount(1);
   const state = host.broker.state(launched.sessionId);
   expect(state?.revision).toBe(1);

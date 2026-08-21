@@ -30,6 +30,8 @@ import {
   type PdfNaturalPageSize,
   type PdfNaturalPoint,
   type PdfTargetVisibility,
+  type PdfViewportOcclusion,
+  type PdfViewportQuery,
   type PdfViewerLocation,
   type ViewerNavigationControls,
 } from './viewer-navigation.js';
@@ -66,6 +68,17 @@ export interface PdfViewerNavigation extends ViewerNavigationControls {
   resolveTarget(target: PdfNavigationTarget): PdfViewerLocation | null;
   /** Reports whether a live semantic target occupies the usable viewport. */
   targetVisibility(target: PdfNavigationTarget): PdfTargetVisibility;
+  /** Reports whether a neutral location occupies an optionally unobscured viewport. */
+  locationVisibility(
+    location: PdfViewerLocation,
+    viewport?: PdfViewportQuery,
+  ): PdfTargetVisibility;
+  /** Reports whether a natural page point occupies an optionally unobscured viewport. */
+  pointVisibility(
+    pageIndex: number,
+    point: PdfNaturalPoint,
+    viewport?: PdfViewportQuery,
+  ): PdfTargetVisibility;
   /** Captures neutral page geometry without exposing viewer-library state. */
   captureDocumentOrderPages(): readonly PdfDocumentOrderPage[] | null;
   applyTarget(
@@ -128,6 +141,42 @@ function validViewerZoom(value: number): boolean {
   return Number.isFinite(value)
     && value >= VIEWER_ZOOM_MIN_PERCENT / 100
     && value <= VIEWER_ZOOM_MAX_PERCENT / 100;
+}
+
+function validOcclusion(value: PdfViewportOcclusion): boolean {
+  return Number.isFinite(value.left)
+    && Number.isFinite(value.top)
+    && Number.isFinite(value.right)
+    && Number.isFinite(value.bottom)
+    && value.right > value.left
+    && value.bottom > value.top;
+}
+
+/** Returns the largest rectangular part of `viewport` not covered by `occlusion`. */
+function subtractViewportOcclusion(
+  viewport: EffectiveViewportRect,
+  occlusion: PdfViewportOcclusion | null | undefined,
+): EffectiveViewportRect | null {
+  if (occlusion === null || occlusion === undefined) return viewport;
+  if (!validOcclusion(occlusion)) return null;
+  const covered = intersectViewerRects(viewport, occlusion);
+  if (covered === null) return viewport;
+  const candidates = [
+    { left: viewport.left, top: viewport.top, right: covered.left, bottom: viewport.bottom },
+    { left: covered.right, top: viewport.top, right: viewport.right, bottom: viewport.bottom },
+    { left: viewport.left, top: viewport.top, right: viewport.right, bottom: covered.top },
+    { left: viewport.left, top: covered.bottom, right: viewport.right, bottom: viewport.bottom },
+  ].map((rect) => ({
+    ...rect,
+    width: rect.right - rect.left,
+    height: rect.bottom - rect.top,
+  })).filter((rect) => validDimension(rect.width) && validDimension(rect.height));
+  return candidates.reduce<EffectiveViewportRect | null>((largest, candidate) => {
+    if (largest === null) return candidate;
+    return candidate.width * candidate.height > largest.width * largest.height
+      ? candidate
+      : largest;
+  }, null);
 }
 
 export function fitViewerWidthZoom(input: {
@@ -516,17 +565,38 @@ export function createViewerNavigation(
     };
   };
 
-  const scrollAlignment = (location: PdfViewerLocation) => {
+  const unobscuredViewportRect = (
+    viewportElement: HTMLElement,
+    viewport?: PdfViewportQuery,
+  ): EffectiveViewportRect | null => subtractViewportOcclusion(
+    effectiveViewportRect(viewportElement),
+    viewport?.occlusion,
+  );
+
+  const scrollAlignment = (
+    location: PdfViewerLocation,
+    viewport?: PdfViewportQuery,
+  ) => {
     const root = options.root();
     const viewportElement = root?.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
     if (!viewportElement) return location.alignment;
-    const effectiveViewport = effectiveViewportRect(viewportElement);
+    const effectiveViewport = unobscuredViewportRect(viewportElement, viewport);
+    if (effectiveViewport === null) return null;
     if (!validDimension(viewportElement.clientWidth) || !validDimension(viewportElement.clientHeight)) {
       return location.alignment;
     }
+    const bounds = viewportElement.getBoundingClientRect();
+    const scrollportLeft = bounds.left + viewportElement.clientLeft;
+    const scrollportTop = bounds.top + viewportElement.clientTop;
     return {
-      xPercent: effectiveViewport.width / viewportElement.clientWidth * location.alignment.xPercent,
-      yPercent: effectiveViewport.height / viewportElement.clientHeight * location.alignment.yPercent,
+      xPercent: (
+        effectiveViewport.left - scrollportLeft
+        + effectiveViewport.width * location.alignment.xPercent / 100
+      ) / viewportElement.clientWidth * 100,
+      yPercent: (
+        effectiveViewport.top - scrollportTop
+        + effectiveViewport.height * location.alignment.yPercent / 100
+      ) / viewportElement.clientHeight * 100,
     };
   };
 
@@ -534,6 +604,7 @@ export function createViewerNavigation(
     viewer: ActiveViewer,
     pageIndex: number,
     measured?: { readonly viewportRect: EffectiveViewportRect; readonly pageRect: DOMRect },
+    viewport?: PdfViewportQuery,
   ) => {
     const page = viewer.pages[pageIndex];
     const root = options.root();
@@ -541,13 +612,14 @@ export function createViewerNavigation(
     const pageElement = root?.querySelector<HTMLElement>(pageSelector(pageIndex)) ?? null;
     if (!page || !viewportElement || !pageElement) return null;
     const viewportRect = measured?.viewportRect
-      ?? effectiveViewportRect(viewportElement);
+      ?? unobscuredViewportRect(viewportElement, viewport);
     const pageRect = measured?.pageRect ?? pageElement.getBoundingClientRect();
     const rotation = combinePageRotation(page.rotation, viewer.documentRotation);
     const rotatedPage = transformSize(page.size, rotation, 1);
     const scale = pageRect.width / rotatedPage.width;
     if (
-      !validDimension(viewportRect.width)
+      viewportRect === null
+      || !validDimension(viewportRect.width)
       || !validDimension(viewportRect.height)
       || !validDimension(pageRect.width)
       || !validDimension(pageRect.height)
@@ -687,6 +759,7 @@ export function createViewerNavigation(
       }
       if (!viewerStillOwnsDocument(viewer) || Date.now() >= deadline) return;
       const alignment = scrollAlignment(origin);
+      if (alignment === null) return;
       viewer.scroll.scrollToPage({
         pageNumber: origin.pageIndex + 1,
         pageCoordinates: origin.anchor,
@@ -705,8 +778,9 @@ export function createViewerNavigation(
     viewer: ActiveViewer,
     location: PdfViewerLocation,
     acceptScrollBoundary = false,
+    viewport?: PdfViewportQuery,
   ): boolean => {
-    const geometry = pageGeometry(viewer, location.pageIndex);
+    const geometry = pageGeometry(viewer, location.pageIndex, undefined, viewport);
     if (!geometry) return false;
     const { viewportRect, pageRect, page } = geometry;
     if (
@@ -789,7 +863,13 @@ export function createViewerNavigation(
         && pageRect.bottom <= viewportRect.bottom + coordinateTolerance,
       false,
     );
-    return horizontalMatches && verticalMatches;
+    const anchorIsUnobscured = actual.x >= viewportRect.left - coordinateTolerance
+      && actual.x <= viewportRect.right + coordinateTolerance
+      && actual.y >= viewportRect.top - coordinateTolerance
+      && actual.y <= viewportRect.bottom + coordinateTolerance;
+    return horizontalMatches
+      && verticalMatches
+      && (viewport?.occlusion === undefined || anchorIsUnobscured);
   };
 
   const waitForFrames = async (operation: NavigationOperation, count: number, deadline: number) => {
@@ -805,6 +885,7 @@ export function createViewerNavigation(
     location: PdfViewerLocation,
     operation: NavigationOperation,
     deadline: number,
+    viewport?: PdfViewportQuery,
   ): Promise<boolean> => {
     let resolveIdle: (value: boolean) => void = () => undefined;
     const idle = new Promise<boolean>((resolve) => { resolveIdle = resolve; });
@@ -843,7 +924,8 @@ export function createViewerNavigation(
         if (pageGeometry(viewer, location.pageIndex) === null) return false;
       }
       const scrollToLocation = () => {
-        const alignment = scrollAlignment(location);
+        const alignment = scrollAlignment(location, viewport);
+        if (alignment === null) return false;
         viewer.scroll.scrollToPage({
           pageNumber: location.pageIndex + 1,
           pageCoordinates: location.anchor,
@@ -851,10 +933,11 @@ export function createViewerNavigation(
           alignX: alignment.xPercent,
           alignY: alignment.yPercent,
         });
+        return true;
       };
       const targetWasMounted = pageGeometry(viewer, location.pageIndex) !== null;
       operation.mutated = true;
-      scrollToLocation();
+      if (!scrollToLocation()) return false;
       // Distant virtualized pages are commonly absent until the scroll request
       // expands the mounted page window. Wait only after issuing that request.
       while (
@@ -868,12 +951,12 @@ export function createViewerNavigation(
       // Some engines accept the first far-page request before the new page
       // geometry exists but do not retain its coordinates. Reapply once after
       // virtualization mounts that page; already-mounted targets scroll once.
-      if (!targetWasMounted) scrollToLocation();
+      if (!targetWasMounted && !scrollToLocation()) return false;
       if (!await waitForFrames(operation, 2, deadline)) return false;
       // An instant scroll can have reached its semantic postcondition while
       // the viewer still reports transient scroll activity. Do not turn that
       // already-settled destination into a bounded-timeout failure.
-      if (locationMatchesView(viewer, location, true)) return true;
+      if (locationMatchesView(viewer, location, true, viewport)) return true;
       if (!viewer.viewport.isScrolling() && !viewer.viewport.isSmoothScrolling()) {
         resolveIdle(true);
       }
@@ -890,6 +973,7 @@ export function createViewerNavigation(
     viewer: ActiveViewer,
     location: PdfViewerLocation,
     operation: NavigationOperation,
+    viewport?: PdfViewportQuery,
   ): Promise<boolean> => {
     if (
       !isPdfViewerLocation(location)
@@ -903,7 +987,9 @@ export function createViewerNavigation(
       || location.anchor.y > page.size.height
     ) return false;
     try {
-      if (locationMatchesView(viewer, location)) return operationIsCurrent(operation);
+      if (locationMatchesView(viewer, location, false, viewport)) {
+        return operationIsCurrent(operation);
+      }
     } catch {
       return false;
     }
@@ -929,27 +1015,36 @@ export function createViewerNavigation(
       })();
     if (!zoomed || !operationIsCurrent(operation)) return false;
     if (!await waitForFrames(operation, 2, deadline)) return false;
-    if (!await scrollAndWait(viewer, location, operation, deadline)) return false;
+    if (!await scrollAndWait(viewer, location, operation, deadline, viewport)) return false;
     if (!operationIsCurrent(operation)) return false;
     try {
       const rightRunwayActive = currentRunway().right > coordinateTolerance;
-      if (rightRunwayActive && !locationMatchesView(viewer, location, true)) {
-        if (!positionLocationInClientViewport(viewer, location, operation)) return false;
+      const transientOcclusionActive = viewport?.occlusion !== undefined;
+      if (
+        (rightRunwayActive || transientOcclusionActive)
+        && !locationMatchesView(viewer, location, true, viewport)
+      ) {
+        if (!positionLocationInClientViewport(viewer, location, operation, true, viewport)) {
+          return false;
+        }
         if (!await waitForFrames(operation, 2, deadline)) return false;
       }
-      return locationMatchesView(viewer, location, true);
+      return locationMatchesView(viewer, location, true, viewport);
     } catch {
       return false;
     }
   };
 
-  const applyLocation = async (location: PdfViewerLocation): Promise<boolean> => {
+  const applyLocation = async (
+    location: PdfViewerLocation,
+    viewport?: PdfViewportQuery,
+  ): Promise<boolean> => {
     const viewer = activeViewer();
     if (!viewer) return false;
     const operation = await beginOperation(viewer);
     if (operation === null) return false;
     try {
-      const applied = await applyResolvedLocation(viewer, location, operation);
+      const applied = await applyResolvedLocation(viewer, location, operation, viewport);
       if (!applied && !operation.signal.aborted && operation.mutated) {
         await rollbackOperation(operation);
       }
@@ -964,9 +1059,10 @@ export function createViewerNavigation(
     location: PdfViewerLocation,
     operation: NavigationOperation,
     requireTargetScale = true,
+    viewport?: PdfViewportQuery,
   ): boolean {
     if (!operationIsCurrent(operation)) return false;
-    const geometry = pageGeometry(viewer, location.pageIndex);
+    const geometry = pageGeometry(viewer, location.pageIndex, undefined, viewport);
     if (geometry === null) return false;
     if (
       requireTargetScale
@@ -1238,27 +1334,57 @@ export function createViewerNavigation(
     }, policy);
   };
 
-  const targetVisibility = (target: PdfNavigationTarget): PdfTargetVisibility => {
+  const pointVisibility = (
+    pageIndex: number,
+    point: PdfNaturalPoint,
+    viewport?: PdfViewportQuery,
+  ): PdfTargetVisibility => {
     const viewer = activeViewer();
     if (viewer === null) return 'unavailable';
-    const location = resolveTarget(viewer, target);
-    if (location === null || !hasUsablePageTree(viewer)) return 'unavailable';
-    const pageElement = options.root()
-      ?.querySelector<HTMLElement>(pageSelector(location.pageIndex)) ?? null;
-    if (pageElement === null) return 'outside';
-    const geometry = pageGeometry(viewer, location.pageIndex);
-    if (geometry === null) return 'unavailable';
     if (
-      location.anchor.x > geometry.page.size.width
-      || location.anchor.y > geometry.page.size.height
+      !Number.isSafeInteger(pageIndex)
+      || pageIndex < 0
+      || !Number.isFinite(point.x)
+      || !Number.isFinite(point.y)
+      || point.x < 0
+      || point.y < 0
+      || !hasUsablePageTree(viewer)
     ) return 'unavailable';
-    const clientAnchor = clientPointForLocation(geometry, location);
+    const page = viewer.pages[pageIndex];
+    if (page === undefined || point.x > page.size.width || point.y > page.size.height) {
+      return 'unavailable';
+    }
+    const pageElement = options.root()
+      ?.querySelector<HTMLElement>(pageSelector(pageIndex)) ?? null;
+    if (pageElement === null) return 'outside';
+    const geometry = pageGeometry(viewer, pageIndex, undefined, viewport);
+    if (geometry === null) return 'unavailable';
+    const clientAnchor = clientPointForLocation(geometry, {
+      pageIndex,
+      anchor: point,
+      alignment: { xPercent: 50, yPercent: 50 },
+      zoom: geometry.scale,
+    });
     return clientAnchor.x >= geometry.viewportRect.left - coordinateTolerance
       && clientAnchor.x <= geometry.viewportRect.right + coordinateTolerance
       && clientAnchor.y >= geometry.viewportRect.top - coordinateTolerance
       && clientAnchor.y <= geometry.viewportRect.bottom + coordinateTolerance
       ? 'visible'
       : 'outside';
+  };
+
+  const locationVisibility = (
+    location: PdfViewerLocation,
+    viewport?: PdfViewportQuery,
+  ): PdfTargetVisibility => isPdfViewerLocation(location)
+    ? pointVisibility(location.pageIndex, location.anchor, viewport)
+    : 'unavailable';
+
+  const targetVisibility = (target: PdfNavigationTarget): PdfTargetVisibility => {
+    const viewer = activeViewer();
+    if (viewer === null) return 'unavailable';
+    const location = resolveTarget(viewer, target);
+    return location === null ? 'unavailable' : locationVisibility(location);
   };
 
   const waitForTargetLocation = async (
@@ -1378,6 +1504,8 @@ export function createViewerNavigation(
       return viewer ? resolveTarget(viewer, target) : null;
     },
     targetVisibility,
+    locationVisibility,
+    pointVisibility,
     applyLocation,
     fitToWidth,
     fitToWidthReady() {

@@ -18,6 +18,7 @@ import {
   isPdfViewerLocation,
   samePdfViewerLocation,
   type PdfNaturalPoint,
+  type PdfViewportQuery,
   type PdfViewerLocation,
 } from '../pdf/viewer-navigation.js';
 import type { LinkActionChoice } from './LinkActionPopover.js';
@@ -264,9 +265,12 @@ export class NavigationCoordinator {
   /** A Send-selected successor whose saved view is not currently rendered. */
   private referenceRestoreIdentity: string | null = null;
   private semanticItemLocation: SemanticItemLocation | null = null;
-  private semanticDestinationLocation: SemanticAnchor | null = null;
+  private semanticDestinationLocation: PdfViewerLocation | null = null;
+  private semanticDestinationViewport: PdfViewportQuery | undefined;
   /** Suppresses trailing viewer refresh while an exact route is still settling. */
   private activeDestinationRestoreToken: number | null = null;
+  /** One-shot viewport used when browser history is traversed during authoring. */
+  private pendingHistoryViewport: PdfViewportQuery | undefined;
   private locationHistoryStarted = false;
   private locationRestored: boolean;
   private disposed = false;
@@ -279,14 +283,22 @@ export class NavigationCoordinator {
   startLocationHistory(): void {
     if (this.locationHistoryStarted || this.dependencies.locationHistory === undefined) return;
     this.locationHistoryStarted = true;
-    this.dependencies.locationHistory.start((direction) => {
-      void this.restoreCurrentLocation(direction);
+    this.dependencies.locationHistory.start(async (direction) => {
+      await this.restoreCurrentLocation(direction);
+      // Browser history mutates before React commits the coordinator reducer.
+      // Keep the opposite traversal unavailable through the settled-layout
+      // boundary so a rapid Back/Forward pair cannot read the previous index.
+      await this.dependencies.layout.settle();
     });
   }
 
   async restoreCurrentLocation(
     historyDirection?: 'back' | 'forward' | 'unknown',
   ): Promise<boolean> {
+    const historyViewport = historyDirection === undefined
+      ? undefined
+      : this.pendingHistoryViewport;
+    if (historyDirection !== undefined) this.pendingHistoryViewport = undefined;
     const history = this.dependencies.locationHistory;
     if (history === undefined) return false;
     let target: PlacekeeperLinkLocation;
@@ -343,7 +355,7 @@ export class NavigationCoordinator {
       const offset = historyDirection === 'back' ? -1 : 1;
       const liveDestination = state.mainHistory.entries[state.mainHistory.index + offset];
       if (liveDestination?.pageIndex === target.page - 1) {
-        const restored = await this.traverseHistory(historyDirection);
+        const restored = await this.traverseHistory(historyDirection, historyViewport);
         if (restored) {
           this.locationRestored = true;
           return true;
@@ -425,7 +437,11 @@ export class NavigationCoordinator {
     this.clearLinkRequest();
   }
 
-  async chooseLink(choice: LinkActionChoice, request: ViewerPdfLinkInvocation): Promise<boolean> {
+  async chooseLink(
+    choice: LinkActionChoice,
+    request: ViewerPdfLinkInvocation,
+    options: { readonly preserveWorkspace?: boolean } = {},
+  ): Promise<boolean> {
     if (this.linkRequest !== request || !this.generationMatches(request.target.documentGeneration)) {
       return false;
     }
@@ -440,7 +456,7 @@ export class NavigationCoordinator {
         );
         break;
       case 'main':
-        choiceOperation = this.navigateMainTarget(request.target, 'direct');
+        choiceOperation = this.navigateMainTarget(request.target, 'direct', options);
         break;
       case 'same-reference':
         choiceOperation = request.sourceScope === 'reference' && sourceTabIdentity !== null
@@ -948,6 +964,7 @@ export class NavigationCoordinator {
   async navigateMainTarget(
     target: PdfNavigationTarget,
     kind: 'direct' | 'outline' | 'search',
+    options: { readonly preserveWorkspace?: boolean } = {},
   ): Promise<boolean> {
     const operation = this.begin(target.documentGeneration);
     if (operation === null) return false;
@@ -966,7 +983,7 @@ export class NavigationCoordinator {
     }
     const sameLocation = samePdfViewerLocation(currentLocation, destination);
     if (sameLocation && (kind !== 'search' || this.lastSearchTargetIdentity === target.identity)) {
-      if (kind === 'direct' || kind === 'search') {
+      if ((kind === 'direct' || kind === 'search') && options.preserveWorkspace !== true) {
         this.dependencies.layout.hideReferences();
         await this.dependencies.layout.settle();
       }
@@ -998,7 +1015,7 @@ export class NavigationCoordinator {
     this.projectExplicitLocation({ kind: 'page', page: settledLocation.pageIndex + 1 }, null);
     if (kind === 'search') this.lastSearchTargetIdentity = target.identity;
     this.refreshCurrentOutline(settledLocation);
-    if (kind === 'direct' || kind === 'search') {
+    if ((kind === 'direct' || kind === 'search') && options.preserveWorkspace !== true) {
       this.dependencies.layout.hideReferences();
       await this.dependencies.layout.settle();
     }
@@ -1009,6 +1026,8 @@ export class NavigationCoordinator {
   async navigateMainAnnotation(input: {
     readonly pageIndex: number;
     readonly point: PdfNaturalPoint | null;
+    /** Present for an authoring Return action; never published as viewer runway. */
+    readonly viewport?: PdfViewportQuery;
     readonly portableItemId?: string;
     readonly linkFallbackNotice?: string;
   }): Promise<boolean> {
@@ -1043,6 +1062,15 @@ export class NavigationCoordinator {
       this.dependencies.setAnnouncement(MAIN_FAILURE);
       return false;
     }
+    if (
+      input.viewport !== undefined
+      && main.locationVisibility(destination, input.viewport) === 'visible'
+    ) {
+      main.focusAtDestination(destination.pageIndex);
+      this.dependencies.setAnnouncement('Annotation destination is already visible.');
+      this.refreshCurrentOutline(currentLocation);
+      return true;
+    }
     if (samePdfViewerLocation(currentLocation, destination)) {
       main.focusAtDestination(destination.pageIndex);
       this.dependencies.setAnnouncement(input.linkFallbackNotice === undefined
@@ -1056,7 +1084,11 @@ export class NavigationCoordinator {
       main,
       currentLocation,
       destination,
-      () => main.applyLocation(destination),
+      () => input.viewport === undefined
+        ? main.applyLocation(destination)
+        : main.applyLocation(destination, input.viewport),
+      false,
+      input.viewport === undefined ? undefined : () => destination,
     );
     if (!this.isCurrent(operation)) return false;
     if (settledLocation === null) {
@@ -1071,24 +1103,36 @@ export class NavigationCoordinator {
       input.portableItemId === undefined
         ? { kind: 'page', page: settledLocation.pageIndex + 1 }
         : { kind: 'item', page: settledLocation.pageIndex + 1, itemId: input.portableItemId },
-      input.portableItemId === undefined ? null : settledLocation,
+      settledLocation,
+      input.viewport,
     );
     this.refreshCurrentOutline(settledLocation);
     return true;
   }
 
-  historyBack(): Promise<boolean> {
+  historyBack(viewport?: PdfViewportQuery): Promise<boolean> {
     if (this.dependencies.locationHistory !== undefined) {
-      return Promise.resolve(this.dependencies.locationHistory.back());
+      this.pendingHistoryViewport = viewport;
+      const traversing = this.dependencies.locationHistory.back();
+      if (!traversing) this.pendingHistoryViewport = undefined;
+      return Promise.resolve(traversing);
     }
-    return this.traverseHistory('back');
+    return this.traverseHistory('back', viewport);
   }
 
-  historyForward(): Promise<boolean> {
+  /** Invalidates the current navigation transaction without publishing a failure. */
+  cancelPendingNavigation(): void {
+    this.supersede();
+  }
+
+  historyForward(viewport?: PdfViewportQuery): Promise<boolean> {
     if (this.dependencies.locationHistory !== undefined) {
-      return Promise.resolve(this.dependencies.locationHistory.forward());
+      this.pendingHistoryViewport = viewport;
+      const traversing = this.dependencies.locationHistory.forward();
+      if (!traversing) this.pendingHistoryViewport = undefined;
+      return Promise.resolve(traversing);
     }
-    return this.traverseHistory('forward');
+    return this.traverseHistory('forward', viewport);
   }
 
   currentLinkLocation(): PlacekeeperLinkLocation {
@@ -1112,31 +1156,51 @@ export class NavigationCoordinator {
       || state.pendingMainNavigation !== null
       || state.pendingSendToMain !== null
     ) return;
-    const location = this.dependencies.getMainNavigation()?.captureLocation() ?? null;
+    const navigation = this.dependencies.getMainNavigation();
+    const location = navigation?.captureLocation() ?? null;
     if (location === null || !this.generationMatches(state.documentGeneration)) return;
+    const preservesSemanticItem = this.semanticItemLocation !== null
+      && sameSemanticAnchor(location, this.semanticItemLocation);
+    const preservesSemanticDestination = this.semanticDestinationLocation !== null
+      && (
+        sameSemanticAnchor(location, this.semanticDestinationLocation)
+        || (
+          this.semanticDestinationViewport !== undefined
+          && navigation?.locationVisibility(
+            this.semanticDestinationLocation,
+            this.semanticDestinationViewport,
+          ) === 'visible'
+        )
+      );
+    if (preservesSemanticItem || preservesSemanticDestination) {
+      this.refreshCurrentOutline(location);
+      return;
+    }
     this.dependencies.dispatch({ type: 'refresh-main-location', location });
     if (!this.locationRestored) {
       this.refreshCurrentOutline(location);
       return;
     }
+    this.projectCurrentHistoryLocation(location);
+    this.refreshCurrentOutline(location);
+  }
+
+  private projectCurrentHistoryLocation(location: PdfViewerLocation): void {
     if (this.semanticItemLocation !== null && sameSemanticAnchor(location, this.semanticItemLocation)) {
-      this.refreshCurrentOutline(location);
       return;
     }
     if (
       this.semanticDestinationLocation !== null
       && sameSemanticAnchor(location, this.semanticDestinationLocation)
     ) {
-      this.refreshCurrentOutline(location);
       return;
     }
     this.semanticItemLocation = null;
-    this.semanticDestinationLocation = null;
+    this.clearSemanticDestination();
     const current = this.safeHistoryLocation();
     if (current?.kind !== 'page' || current.page !== location.pageIndex + 1) {
       this.dependencies.locationHistory?.replace({ kind: 'page', page: location.pageIndex + 1 });
     }
-    this.refreshCurrentOutline(location);
   }
 
   refreshCurrentOutline(location?: PdfViewerLocation): void {
@@ -1165,7 +1229,7 @@ export class NavigationCoordinator {
     this.linkRequestSourceTabIdentity = null;
     this.referenceRestoreIdentity = null;
     this.semanticItemLocation = null;
-    this.semanticDestinationLocation = null;
+    this.clearSemanticDestination();
     this.locationRestored = this.dependencies.locationHistory === undefined;
     this.dependencies.getMainNavigation()?.replaceDocument(documentGeneration);
     this.dependencies.getReferenceNavigation()?.replaceDocument(documentGeneration);
@@ -1189,7 +1253,7 @@ export class NavigationCoordinator {
     this.linkRequestSourceTabIdentity = null;
     this.referenceRestoreIdentity = null;
     this.semanticItemLocation = null;
-    this.semanticDestinationLocation = null;
+    this.clearSemanticDestination();
     this.dependencies.locationHistory?.dispose();
     void this.dependencies.getReferenceController()?.close();
   }
@@ -1301,23 +1365,40 @@ export class NavigationCoordinator {
     return applied ? navigation.captureLocation() : null;
   }
 
-  private async traverseHistory(kind: 'back' | 'forward'): Promise<boolean> {
+  private async traverseHistory(
+    kind: 'back' | 'forward',
+    viewport?: PdfViewportQuery,
+  ): Promise<boolean> {
     const operation = this.begin();
     if (operation === null) return false;
     const state = this.dependencies.getState();
     const destinationIndex = state.mainHistory.index + (kind === 'back' ? -1 : 1);
     const destination = state.mainHistory.entries[destinationIndex];
     const main = this.dependencies.getMainNavigation();
-    const currentLocation = main?.captureLocation() ?? null;
+    const capturedLocation = main?.captureLocation() ?? null;
+    const currentLocation = viewport === undefined
+      ? capturedLocation
+      : state.mainHistory.entries[state.mainHistory.index] ?? capturedLocation;
     if (!main || !destination || currentLocation === null) return false;
     this.dependencies.dispatch({
       type: kind === 'back' ? 'request-history-back' : 'request-history-forward',
       token: operation.token,
       currentLocation,
     });
-    const applied = await main.applyLocation(destination);
+    let applied = viewport === undefined
+      ? await main.applyLocation(destination)
+      : await main.applyLocation(destination, viewport);
     if (!this.isCurrent(operation)) return false;
-    if (!applied || main.captureLocation() === null) {
+    const capturedAfterApply = main.captureLocation();
+    if (
+      !applied
+      && viewport !== undefined
+      && (
+        main.locationVisibility(destination, viewport) === 'visible'
+        || capturedAfterApply?.pageIndex === destination.pageIndex
+      )
+    ) applied = true;
+    if (!applied || capturedAfterApply === null) {
       this.dependencies.dispatch({
         type: 'complete-history-navigation',
         token: operation.token,
@@ -1333,6 +1414,13 @@ export class NavigationCoordinator {
       documentGeneration: operation.documentGeneration,
       success: true,
     });
+    this.semanticItemLocation = null;
+    if (viewport === undefined) {
+      this.clearSemanticDestination();
+    } else {
+      this.semanticDestinationLocation = destination;
+      this.semanticDestinationViewport = viewport;
+    }
     main.focusAtDestination(destination.pageIndex);
     this.dependencies.setAnnouncement(kind === 'back'
       ? 'Moved back in document history.'
@@ -1391,7 +1479,7 @@ export class NavigationCoordinator {
     } else {
       this.semanticItemLocation = null;
     }
-    this.semanticDestinationLocation = null;
+    this.clearSemanticDestination();
     main.focusAtDestination(settled.pageIndex);
     this.refreshCurrentOutline(settled);
     return true;
@@ -1423,14 +1511,12 @@ export class NavigationCoordinator {
     if (!this.isCurrent(operation)) return 'stale';
     const settled = applied ? main.captureLocation() : null;
     if (settled === null) {
-      this.semanticDestinationLocation = null;
+      this.clearSemanticDestination();
       return 'unavailable';
     }
     this.semanticItemLocation = null;
-    this.semanticDestinationLocation = {
-      pageIndex: settled.pageIndex,
-      anchor: settled.anchor,
-    };
+    this.semanticDestinationLocation = settled;
+    this.semanticDestinationViewport = undefined;
     main.focusAtDestination(settled.pageIndex);
     this.refreshCurrentOutline(settled);
     return 'restored';
@@ -1439,6 +1525,7 @@ export class NavigationCoordinator {
   private projectExplicitLocation(
     location: PlacekeeperLinkLocation,
     settled: PdfViewerLocation | null,
+    semanticViewport?: PdfViewportQuery,
   ): void {
     if (location.kind === 'item' && settled !== null) {
       this.semanticItemLocation = {
@@ -1449,8 +1536,18 @@ export class NavigationCoordinator {
     } else {
       this.semanticItemLocation = null;
     }
-    this.semanticDestinationLocation = null;
+    if (location.kind === 'page' && settled !== null && semanticViewport !== undefined) {
+      this.semanticDestinationLocation = settled;
+      this.semanticDestinationViewport = semanticViewport;
+    } else {
+      this.clearSemanticDestination();
+    }
     this.dependencies.locationHistory?.push(location);
+  }
+
+  private clearSemanticDestination(): void {
+    this.semanticDestinationLocation = null;
+    this.semanticDestinationViewport = undefined;
   }
 
   private safeHistoryLocation(): PlacekeeperLinkLocation | null {
@@ -1490,7 +1587,12 @@ export class NavigationCoordinator {
     destination: PdfViewerLocation,
     apply: () => Promise<boolean>,
     force = false,
+    settledLocationAfterApply?: () => PdfViewerLocation | null,
   ): Promise<PdfViewerLocation | null> {
+    // A scroll/page-control refresh may still be trailing when an explicit jump begins.
+    // Commit the captured origin before pushing the destination so Back always returns
+    // to the location the jump actually displaced.
+    if (this.locationRestored) this.projectCurrentHistoryLocation(currentLocation);
     this.dependencies.dispatch({
       type: 'request-main-jump',
       token: operation.token,
@@ -1500,7 +1602,9 @@ export class NavigationCoordinator {
     });
     const applied = await apply();
     if (!this.isCurrent(operation)) return null;
-    const settledLocation = applied ? main.captureLocation() : null;
+    const settledLocation = applied
+      ? settledLocationAfterApply?.() ?? main.captureLocation()
+      : null;
     this.dependencies.dispatch({
       type: 'complete-main-jump',
       token: operation.token,

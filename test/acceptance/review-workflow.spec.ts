@@ -150,7 +150,7 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Use selection' }).click();
     const highlight = page.getByRole('button', { name: 'Highlight', exact: true });
     await highlight.click();
-    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Highlight Comment' })).toBeVisible();
     await page.getByRole('button', { name: 'Keep', exact: true }).click();
     await expect(highlight).toHaveCount(0);
     await page.getByRole('button', { name: 'Clear anchors' }).click();
@@ -611,7 +611,7 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('button', { name: 'Fit PDF to available width' })).toBeDisabled();
   });
 
-  test('keeps selection actions after rejection and for a newer selection', async ({ page }) => {
+  test('keeps the frozen authoring session after rejection and preserves a newer selection', async ({ page }) => {
     const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
 
     await page.getByRole('button', { name: 'Reject next command' }).click();
@@ -620,15 +620,241 @@ test.describe('canonical review workflow', () => {
 
     await page.getByRole('button', { name: 'Reject next command' }).click();
     await page.getByRole('button', { name: 'Replace', exact: true }).click();
-    await page.getByRole('textbox', { name: 'Replacement' }).fill('rejected replacement');
+    const replacement = page.getByRole('textbox', { name: 'Replacement' });
+    await replacement.fill('rejected replacement');
     await page.getByRole('button', { name: 'Apply' }).click();
-    await expect(selectionActions).toBeVisible();
+    await expect(replacement).toHaveValue('rejected replacement');
+    await expect(page.locator('.review-workspace__status')).toContainText('Review changed elsewhere');
 
-    await page.getByRole('button', { name: 'Replace', exact: true }).click();
-    await page.getByRole('textbox', { name: 'Replacement' }).fill('accepted replacement');
     await page.getByRole('button', { name: 'Use selection' }).evaluate((button: HTMLButtonElement) => button.click());
+    await expect(replacement).toHaveValue('rejected replacement');
+    await page.getByRole('application', { name: 'PDF review canvas' }).focus();
+    await page.keyboard.press('Alt+Shift+N');
+    await expect(page.getByRole('button', { name: 'Place Page Note' })).toHaveCount(0);
+    await expect(replacement).toHaveValue('rejected replacement');
+
+    await replacement.fill('accepted replacement');
     await page.getByRole('button', { name: 'Apply' }).click();
     await expect(selectionActions).toBeVisible();
+  });
+
+  test('gives the composer temporary tray ownership and restores exact workspace state', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 760 });
+    await page.getByRole('button', { name: 'Seed annotations' }).click();
+    await openAnnotationsWorkspace(page);
+    const workspace = page.locator('#review-tools-workspace');
+    const references = page.locator('#review-workspace');
+    const panel = page.locator('[data-annotation-scroll-viewport]');
+    const rows = panel.locator('[data-review-item]');
+    const origin = rows.nth(7);
+    const originContent = origin.locator('.annotation-item__content');
+    const originEdit = origin.locator('[data-annotation-action="edit"]');
+    await originContent.click();
+    await panel.evaluate((element) => { element.scrollTop = 137; });
+    const restoredScroll = await panel.evaluate((element) => element.scrollTop);
+    expect(restoredScroll).toBeGreaterThan(0);
+    const canvas = page.getByRole('application', { name: 'PDF review canvas' });
+    const canvasBefore = await canvas.boundingBox();
+    await workspace.evaluate((element) => element.setAttribute('data-takeover-mount-probe', 'stable'));
+    await references.evaluate((element) => element.setAttribute('data-takeover-mount-probe', 'stable'));
+
+    await originEdit.click();
+    const composer = page.getByRole('region', { name: 'Edit Page Note' });
+    await expect(composer).toBeVisible();
+    await expect(workspace).toHaveAttribute('data-authoring-takeover', 'true');
+    await expect(references).toHaveAttribute('data-authoring-takeover', 'true');
+    await expect(workspace).toHaveAttribute('inert', '');
+    await expect(references).toHaveAttribute('inert', '');
+    await expect(workspace).toHaveAttribute('aria-hidden', 'true');
+    await expect(references).toHaveAttribute('aria-hidden', 'true');
+    await expect(page.locator('[data-workspace-edge-rail]')).toHaveCount(0);
+    await expect(page.locator('[data-reference-resize-handle]')).toHaveCount(0);
+    await expect(origin).toHaveAttribute('data-active', 'true');
+
+    await page.locator('[data-owned-focus-id]').nth(2).click();
+    await expect(page.locator('[data-workspace-mode="annotations"]')).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(origin).toHaveAttribute('data-active', 'true');
+    await panel.evaluate((element) => { element.scrollTop = 0; });
+
+    await composer.evaluate((element) => element.setAttribute('data-composer-mount-probe', 'stable'));
+    await page.setViewportSize({ width: 840, height: 760 });
+    const stage = page.locator('[data-review-stage]');
+    await expect(stage).toHaveAttribute('data-annotation-presentation', 'bottom');
+    const [tabletComposer, tabletStage] = await Promise.all([
+      composer.boundingBox(),
+      stage.boundingBox(),
+    ]);
+    expect(tabletComposer).not.toBeNull();
+    expect(tabletStage).not.toBeNull();
+    expect(tabletComposer!.x).toBeCloseTo(tabletStage!.x, 0);
+    expect(tabletComposer!.width).toBeCloseTo(tabletStage!.width, 0);
+    expect(tabletComposer!.y + tabletComposer!.height).toBeLessThanOrEqual(760);
+
+    await page.setViewportSize({ width: 520, height: 420 });
+    await expect(composer).toHaveAttribute('data-composer-mount-probe', 'stable');
+    const narrowInput = composer.locator('textarea');
+    await narrowInput.focus();
+    await expect.poll(async () => {
+      const [input, body] = await Promise.all([
+        narrowInput.boundingBox(),
+        composer.locator('.comment-composer__body').boundingBox(),
+      ]);
+      return input !== null && body !== null
+        && input.y + input.height <= body.y + body.height + 1;
+    }).toBe(true);
+    const [composerBounds, titleBounds, editorBounds, actionBounds, bodyBounds] = await Promise.all([
+      composer.boundingBox(),
+      composer.locator('.comment-composer__header').boundingBox(),
+      narrowInput.boundingBox(),
+      composer.locator('.comment-composer__actions').boundingBox(),
+      composer.locator('.comment-composer__body').boundingBox(),
+    ]);
+    expect(composerBounds).not.toBeNull();
+    expect(titleBounds).not.toBeNull();
+    expect(editorBounds).not.toBeNull();
+    expect(actionBounds).not.toBeNull();
+    expect(bodyBounds).not.toBeNull();
+    expect(composerBounds!.height).toBeLessThanOrEqual(420);
+    expect(titleBounds!.y).toBeGreaterThanOrEqual(0);
+    expect(actionBounds!.y + actionBounds!.height).toBeLessThanOrEqual(420);
+    expect(editorBounds!.y + editorBounds!.height)
+      .toBeLessThanOrEqual(bodyBounds!.y + bodyBounds!.height + 1);
+    await page.setViewportSize({ width: 1280, height: 760 });
+    await expect(composer).toHaveAttribute('data-composer-mount-probe', 'stable');
+    await composer.getByRole('button', { name: 'Cancel' }).click();
+
+    await expect(composer).toHaveCount(0);
+    await expect(workspace).toHaveAttribute('data-takeover-mount-probe', 'stable');
+    await expect(references).toHaveAttribute('data-takeover-mount-probe', 'stable');
+    await expect(workspace).not.toHaveAttribute('data-authoring-takeover', 'true');
+    await expect(workspace).not.toHaveAttribute('inert', '');
+    await expect(workspace).toHaveAttribute('aria-hidden', 'false');
+    await expect(origin).toHaveAttribute('data-active', 'true');
+    await expect.poll(() => panel.evaluate((element) => element.scrollTop)).toBe(restoredScroll);
+    await expect(originEdit).toBeFocused();
+    expect(await canvas.boundingBox()).toEqual(canvasBefore);
+
+    await originEdit.click();
+    const acceptedComposer = page.getByRole('region', { name: 'Edit Page Note' });
+    await acceptedComposer.getByRole('textbox', { name: 'Comment' }).fill('Applied from takeover');
+    await panel.evaluate((element) => { element.scrollTop = 0; });
+    await acceptedComposer.getByRole('button', { name: 'Apply' }).click();
+    await expect(acceptedComposer).toHaveCount(0);
+    await expect.poll(() => panel.evaluate((element) => element.scrollTop)).toBe(restoredScroll);
+    await expect(origin).toHaveAttribute('data-active', 'true');
+    await expect(originEdit).toBeFocused();
+  });
+
+  test('keeps a closed tray closed and gives Save Destination Escape precedence', async ({ page }) => {
+    await page.getByRole('button', { name: 'Seed annotations' }).click();
+    const workspace = await currentWorkspaceRail(page);
+    await expect(workspace).toHaveAttribute('aria-expanded', 'false');
+    await page.getByRole('button', { name: 'Replace', exact: true }).click();
+    const composer = page.getByRole('region', { name: 'Replacement' });
+    const input = composer.getByRole('textbox', { name: 'Replacement' });
+    const inputElement = page.locator('[data-comment-composer] textarea');
+    await input.fill('draft survives save setup');
+
+    await page.getByRole('button', { name: /Open automatic save options/u }).click();
+    const destination = page.getByRole('dialog', { name: 'Choose Where to Save Annotations' });
+    await expect(destination).toBeVisible();
+    await expect(page.locator('[data-review-drawer-host]')).toHaveAttribute('inert', '');
+    await inputElement.evaluate((element) => element.focus());
+    await expect(inputElement).not.toBeFocused();
+    await page.keyboard.press('Escape');
+
+    await expect(destination).toHaveCount(0);
+    await expect(composer).toBeVisible();
+    await expect(inputElement).toHaveValue('draft survives save setup');
+    await expect(inputElement).toBeFocused();
+    await page.locator('[data-owned-focus-id]').first().click({ force: true });
+    await expect(page.locator('#review-tools-workspace')).toHaveAttribute(
+      'data-tools-workspace-open',
+      'false',
+    );
+    const canvas = page.getByRole('application', { name: 'PDF review canvas' });
+    await composer.getByRole('button', { name: 'Read Document' }).click();
+    await expect(canvas).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(composer).toHaveCount(0);
+    await expect(workspace).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('freezes review mutations while the composer yields focus to the PDF', async ({ page }) => {
+    await page.getByRole('button', { name: 'Seed annotations' }).click();
+    const revision = page.locator('[data-revision]');
+    const revisionBefore = await revision.getAttribute('data-revision');
+    const kindsBefore = await revision.getAttribute('data-kinds');
+    await page.getByRole('button', { name: 'Replace', exact: true }).click();
+    const composer = page.getByRole('region', { name: 'Replacement' });
+    const editor = composer.getByRole('textbox', { name: 'Replacement' });
+    await editor.fill('frozen draft');
+
+    await composer.getByRole('button', { name: 'Read Document' }).click();
+    await expect(page.getByRole('application', { name: 'PDF review canvas' })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Redo' })).toBeDisabled();
+    await page.keyboard.type('x');
+    await page.keyboard.press('Delete');
+    await page.keyboard.press('ControlOrMeta+z');
+
+    await expect(revision).toHaveAttribute('data-revision', revisionBefore ?? '');
+    await expect(revision).toHaveAttribute('data-kinds', kindsBefore ?? '');
+    await expect(editor).toHaveValue('frozen draft');
+    await page.getByRole('button', { name: 'Return to Editor' }).click();
+    await expect(editor).toBeFocused();
+  });
+
+  test('keeps the narrow editor reachable above a software keyboard visual viewport', async ({ page }) => {
+    await page.addInitScript(() => {
+      const viewport = new EventTarget();
+      Object.defineProperties(viewport, {
+        width: { value: 520 },
+        height: { value: 260 },
+        offsetLeft: { value: 0 },
+        offsetTop: { value: 0 },
+        pageLeft: { value: 0 },
+        pageTop: { value: 0 },
+        scale: { value: 1 },
+      });
+      Object.defineProperty(window, 'visualViewport', {
+        configurable: true,
+        value: viewport,
+      });
+    });
+    await page.setViewportSize({ width: 520, height: 760 });
+    await page.reload();
+    await page.getByRole('button', { name: 'Replace', exact: true }).click();
+    const composer = page.getByRole('region', { name: 'Replacement' });
+    const editor = composer.getByRole('textbox', { name: 'Replacement' });
+    await editor.focus();
+    await expect.poll(() => composer.evaluate((element) => {
+      const body = element.querySelector<HTMLElement>('.comment-composer__body');
+      const input = element.querySelector<HTMLElement>('.comment-composer__input');
+      if (body === null || input === null) return false;
+      const bodyBounds = body.getBoundingClientRect();
+      const inputBounds = input.getBoundingClientRect();
+      return Math.min(inputBounds.bottom, bodyBounds.bottom)
+        - Math.max(inputBounds.top, bodyBounds.top) >= 44;
+    })).toBe(true);
+    const [header, body, input, actions] = await Promise.all([
+      composer.locator('.comment-composer__header').boundingBox(),
+      composer.locator('.comment-composer__body').boundingBox(),
+      editor.boundingBox(),
+      composer.locator('.comment-composer__actions').boundingBox(),
+    ]);
+    expect(header).not.toBeNull();
+    expect(body).not.toBeNull();
+    expect(input).not.toBeNull();
+    expect(actions).not.toBeNull();
+    expect(header!.y).toBeGreaterThanOrEqual(0);
+    expect(actions!.y + actions!.height).toBeLessThanOrEqual(260);
+    expect(Math.min(input!.y + input!.height, body!.y + body!.height)
+      - Math.max(input!.y, body!.y)).toBeGreaterThanOrEqual(44);
+    await expect(editor).toBeFocused();
   });
 
   test('does not clear a newer selection when an older annotation finishes saving', async ({ page }) => {
@@ -744,7 +970,7 @@ test.describe('canonical review workflow', () => {
     await expect(edit.locator('svg')).toHaveCount(1);
     await expect(edit).toHaveText('');
     await edit.click();
-    const editor = page.getByRole('dialog', { name: 'Edit Highlight' });
+    const editor = page.getByRole('region', { name: 'Edit Highlight' });
     await expect(editor).toBeVisible();
     await editor.getByRole('button', { name: 'Cancel' }).click();
     await expect(editor).toHaveCount(0);
@@ -823,16 +1049,16 @@ test.describe('canonical review workflow', () => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.focus();
     await page.keyboard.press('Space');
-    const replacementDialog = page.getByRole('dialog', { name: 'Replacement' });
-    await expect(replacementDialog.getByRole('textbox', { name: 'Replacement' })).toHaveValue(' ');
-    await replacementDialog.getByRole('button', { name: 'Cancel' }).click();
+    const replacementComposer = page.getByRole('region', { name: 'Replacement' });
+    await expect(replacementComposer.getByRole('textbox', { name: 'Replacement' })).toHaveValue(' ');
+    await replacementComposer.getByRole('button', { name: 'Cancel' }).click();
     await expect(canvas).toBeFocused();
 
     const workspace = await currentWorkspaceRail(page);
     await workspace.press('Space');
 
     await expect(workspace).toHaveAttribute('aria-expanded', 'true');
-    await expect(page.getByRole('dialog', { name: 'Replacement' })).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'Replacement' })).toHaveCount(0);
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
 
@@ -840,7 +1066,7 @@ test.describe('canonical review workflow', () => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+R');
-    await expect(page.getByRole('dialog', { name: 'Replacement' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Replacement' })).toBeVisible();
     await page.getByRole('button', { name: 'Cancel' }).click();
 
     await canvas.focus();
@@ -850,20 +1076,20 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Use caret' }).click();
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+I');
-    await expect(page.getByRole('dialog', { name: 'Insertion' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Insertion' })).toBeVisible();
     await page.getByRole('button', { name: 'Cancel' }).click();
 
     await page.getByRole('button', { name: 'Use selection' }).click();
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+H');
-    await expect(page.getByRole('dialog', { name: 'Highlight Comment' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Highlight Comment' })).toBeVisible();
     await page.getByRole('button', { name: 'Keep', exact: true }).click();
 
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+N');
     await expect(page.getByRole('button', { name: 'Place Page Note' })).toBeVisible();
     await page.getByRole('button', { name: 'Place Page Note' }).click();
-    await expect(page.getByRole('dialog', { name: 'Page Note' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Page Note' })).toBeVisible();
   });
 
   test('announces anchor recovery and creates no mutation when selection authority is absent', async ({ page }) => {

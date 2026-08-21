@@ -10,7 +10,7 @@ export interface ReviewLocationHistorySnapshot {
 }
 
 export interface ReviewLocationHistoryPort {
-  start(onPop: (direction: 'back' | 'forward' | 'unknown') => void): void;
+  start(onPop: (direction: 'back' | 'forward' | 'unknown') => void | Promise<void>): void;
   read(): PlacekeeperLinkLocation;
   replace(location: PlacekeeperLinkLocation): void;
   push(location: PlacekeeperLinkLocation): void;
@@ -50,7 +50,7 @@ export class BrowserReviewLocationHistory implements ReviewLocationHistoryPort {
   private index = 0;
   private maximumIndex = 0;
   private baseline = 0;
-  private onPop: ((direction: 'back' | 'forward' | 'unknown') => void) | null = null;
+  private onPop: ((direction: 'back' | 'forward' | 'unknown') => void | Promise<void>) | null = null;
   private readonly listeners = new Set<(snapshot: ReviewLocationHistorySnapshot) => void>();
   private lastPublishedSnapshot: ReviewLocationHistorySnapshot = {
     canBack: false,
@@ -60,7 +60,7 @@ export class BrowserReviewLocationHistory implements ReviewLocationHistoryPort {
 
   constructor(private readonly environment: ReviewLocationHistoryEnvironment) {}
 
-  start(onPop: (direction: 'back' | 'forward' | 'unknown') => void): void {
+  start(onPop: (direction: 'back' | 'forward' | 'unknown') => void | Promise<void>): void {
     this.onPop = onPop;
     if (this.started) return;
     this.started = true;
@@ -145,8 +145,16 @@ export class BrowserReviewLocationHistory implements ReviewLocationHistoryPort {
       this.maximumIndex,
       this.environment.history.length - this.baseline - 1,
     );
-    this.publish();
-    this.onPop?.(direction);
+    const restoring = this.onPop?.(direction);
+    // Do not expose the newly available opposite-direction control until the
+    // exact viewer location has settled. Otherwise a fast Forward after Back
+    // can race the coordinator's live geometry mirror and degrade to a coarse
+    // page-top restore.
+    if (restoring === undefined) this.publish();
+    else void restoring.then(
+      () => this.publish(),
+      () => this.publish(),
+    );
   };
 
   private entryState(): PlacekeeperHistoryState {

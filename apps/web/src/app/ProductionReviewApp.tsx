@@ -25,6 +25,10 @@ import {
 } from "../pdf/viewer-controls.js";
 import type { ViewerFramingControls } from "../pdf/viewer-framing.js";
 import type { PdfViewerNavigation } from "../pdf/viewer-navigation-adapter.js";
+import type {
+  PdfTargetVisibility,
+  PdfViewportQuery,
+} from '../pdf/viewer-navigation.js';
 import type { ReferenceDocumentController } from "../pdf/reference-document.js";
 import type { PdfOutlineDiscovery } from "../pdf/pdf-outline.js";
 import {
@@ -92,6 +96,12 @@ import {
   gateReviewCommand,
   pollSaveStatusUntilSettled,
 } from "../save/save-state-controller.js";
+import {
+  authoringAuthorityFor,
+  authoringAuthorityMatches,
+  type AuthoringAuthority,
+  type AuthoringAnchorSnapshot,
+} from '../review/authoring-session.js';
 
 export interface ProductionSession {
   readonly sessionId: string;
@@ -122,6 +132,12 @@ export type ProductionSaveStatus = SaveStatus;
 export interface SaveCopyProposal {
   readonly filename: string;
   readonly folder: string;
+}
+
+interface AuthoringAnchorNavigationState {
+  readonly token: number;
+  readonly visibility: PdfTargetVisibility;
+  readonly pending: boolean;
 }
 
 export interface ProductionSessionApi {
@@ -165,6 +181,57 @@ export function initiallyPortableItemIds(
   return saveStatusIsCleanCurrent(state, saveStatus)
     ? new Set(state.items.map(({ id }) => id))
     : new Set();
+}
+
+export type PendingDestinationOutcome =
+  | 'cancelled'
+  | 'accepted'
+  | 'rejected'
+  | 'source-replaced';
+
+export function pendingDestinationDisposition(outcome: PendingDestinationOutcome): {
+  readonly closeDialog: boolean;
+  readonly notifyAuthoringShell: boolean;
+  readonly preserveDraft: boolean;
+} {
+  if (outcome === 'cancelled') {
+    return { closeDialog: true, notifyAuthoringShell: false, preserveDraft: true };
+  }
+  if (outcome === 'rejected') {
+    return { closeDialog: true, notifyAuthoringShell: false, preserveDraft: true };
+  }
+  return { closeDialog: true, notifyAuthoringShell: true, preserveDraft: false };
+}
+
+export function pendingDestinationIsCurrent(
+  pending: Pick<PendingAuthoringCommand, 'authority'>,
+  state: Pick<ReviewState, 'sessionId' | 'source'>,
+  documentGeneration: number,
+): boolean {
+  return authoringAuthorityMatches(
+    pending.authority,
+    authoringAuthorityFor(state, documentGeneration),
+  );
+}
+
+export function pendingDestinationAttemptIsCurrent(
+  attempt: number,
+  currentAttempt: number,
+  pending: Pick<PendingAuthoringCommand, 'authority'> | undefined,
+  state: Pick<ReviewState, 'sessionId' | 'source'>,
+  documentGeneration: number,
+): boolean {
+  return attempt === currentAttempt
+    && (pending === undefined || pendingDestinationIsCurrent(
+      pending,
+      state,
+      documentGeneration,
+    ));
+}
+
+interface PendingAuthoringCommand {
+  readonly command: ReviewCommand;
+  readonly authority: AuthoringAuthority;
 }
 
 function saveStatusIsCleanCurrent(
@@ -245,14 +312,24 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   );
   const [destinationDialog, setDestinationDialog] = useState<{
     readonly reason: "first-annotation" | "menu";
-    readonly pending?: ReviewCommand;
+    readonly pending?: PendingAuthoringCommand;
   } | null>(null);
   const [copyProposal, setCopyProposal] = useState<SaveCopyProposal>();
   const [folderSelectionId, setFolderSelectionId] = useState<string>();
   const [destinationEstablishing, setDestinationEstablishing] = useState(false);
   const [destinationError, setDestinationError] = useState<string>();
   const destinationAttemptRef = useRef(0);
-  const [cancelPendingCommandToken, setCancelPendingCommandToken] = useState(0);
+  const authoringResolutionTokenRef = useRef(0);
+  const [authoringSessionResolution, setAuthoringSessionResolution] = useState<{
+    readonly token: number;
+    readonly outcome: 'accepted' | 'source-replaced';
+  }>();
+  const authoringAnchorRef = useRef<AuthoringAnchorSnapshot | null>(null);
+  const authoringActiveRef = useRef(false);
+  const authoringViewportRef = useRef<PdfViewportQuery | null>(null);
+  const [authoringAnchorNavigation, setAuthoringAnchorNavigation] = useState<
+    AuthoringAnchorNavigationState | null
+  >(null);
   const [selectionUpdate, setSelectionUpdate] = useState<SelectionUpdate>(INITIAL_SELECTION_UPDATE);
   const selectionUpdateRef = useRef(selectionUpdate);
   selectionUpdateRef.current = selectionUpdate;
@@ -479,7 +556,18 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     return () => { cancelled = true; };
   }, [destinationDialog, props.api]);
 
-  const openCopyDialog = (reason: "first-annotation" | "menu", pending?: ReviewCommand) => {
+  const publishAuthoringResolution = (outcome: 'accepted' | 'source-replaced') => {
+    const disposition = pendingDestinationDisposition(outcome);
+    if (!disposition.notifyAuthoringShell) return;
+    setAuthoringSessionResolution({
+      token: ++authoringResolutionTokenRef.current,
+      outcome,
+    });
+  };
+  const openCopyDialog = (
+    reason: "first-annotation" | "menu",
+    pending?: PendingAuthoringCommand,
+  ) => {
     destinationAttemptRef.current += 1;
     setDestinationError(undefined);
     setCopyProposal(undefined);
@@ -615,6 +703,87 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     () => createTrailingTaskScheduler(() => navigationCoordinator.refreshMainLocation()),
     [navigationCoordinator],
   );
+  const readAuthoringAnchorVisibility = useCallback((): {
+    readonly token: number;
+    readonly visibility: PdfTargetVisibility;
+  } | null => {
+    const anchor = authoringAnchorRef.current;
+    if (anchor === null) return null;
+    const navigation = mainNavigationRef.current;
+    const currentAuthority = authoringAuthorityFor(
+      stateRef.current,
+      documentGenerationRef.current,
+    );
+    const current = anchor.point !== null
+      && authoringAuthorityMatches(anchor.authority, currentAuthority);
+    return {
+      token: anchor.token,
+      visibility: !current || navigation === null || anchor.point === null
+        ? 'unavailable'
+        : navigation.pointVisibility(
+          anchor.pageIndex,
+          anchor.point,
+          authoringViewportRef.current ?? undefined,
+        ),
+    };
+  }, []);
+  const refreshAuthoringAnchorNavigation = useCallback(() => {
+    const next = readAuthoringAnchorVisibility();
+    setAuthoringAnchorNavigation((current) => {
+      if (next === null) return null;
+      const pending = current?.token === next.token ? current.pending : false;
+      return current?.token === next.token
+        && current.visibility === next.visibility
+        && current.pending === pending
+        ? current
+        : { ...next, pending };
+    });
+  }, [readAuthoringAnchorVisibility]);
+  const authoringAnchorRefresh = useMemo(
+    () => createTrailingTaskScheduler(refreshAuthoringAnchorNavigation, 16),
+    [refreshAuthoringAnchorNavigation],
+  );
+  const onAuthoringAnchorChange = useCallback((anchor: AuthoringAnchorSnapshot | null) => {
+    authoringAnchorRef.current = anchor;
+    refreshAuthoringAnchorNavigation();
+  }, [refreshAuthoringAnchorNavigation]);
+  const onAuthoringViewportChange = useCallback((viewport: PdfViewportQuery | null) => {
+    authoringViewportRef.current = viewport;
+    authoringAnchorRefresh.schedule();
+  }, [authoringAnchorRefresh]);
+  const returnToAuthoringAnchor = useCallback(async (token: number) => {
+    const anchor = authoringAnchorRef.current;
+    if (anchor === null || anchor.token !== token || anchor.point === null) {
+      refreshAuthoringAnchorNavigation();
+      return;
+    }
+    const currentAuthority = authoringAuthorityFor(
+      stateRef.current,
+      documentGenerationRef.current,
+    );
+    if (!authoringAuthorityMatches(anchor.authority, currentAuthority)) {
+      refreshAuthoringAnchorNavigation();
+      return;
+    }
+    setAuthoringAnchorNavigation((current) => current?.token === token
+      ? { ...current, pending: true }
+      : current);
+    await navigationCoordinator.navigateMainAnnotation({
+      pageIndex: anchor.pageIndex,
+      point: anchor.point,
+      viewport: authoringViewportRef.current ?? {},
+    });
+    if (authoringAnchorRef.current?.token !== token) return;
+    const next = readAuthoringAnchorVisibility();
+    setAuthoringAnchorNavigation(next === null ? null : { ...next, pending: false });
+  }, [navigationCoordinator, readAuthoringAnchorVisibility, refreshAuthoringAnchorNavigation]);
+  const cancelAuthoringAnchorReturn = useCallback((token: number) => {
+    if (authoringAnchorRef.current?.token !== token) return;
+    navigationCoordinator.cancelPendingNavigation();
+    setAuthoringAnchorNavigation((current) => current?.token === token
+      ? { ...current, pending: false }
+      : current);
+  }, [navigationCoordinator]);
 
   const onSelectionUpdate = useCallback((update: SelectionUpdate) => {
     setSelectionUpdate((current) => acceptSelectionUpdate(current, update));
@@ -625,11 +794,19 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   useEffect(() => () => {
     navigationCoordinator.dispose();
     mainLocationRefresh.cancel();
+    authoringAnchorRefresh.cancel();
     viewerControlsRef.current?.dispose();
     placementAuthority.current.clear();
     if (searchSubmitTimerRef.current !== null) clearTimeout(searchSubmitTimerRef.current);
     searchControllerRef.current?.dispose();
-  }, [mainLocationRefresh, navigationCoordinator]);
+  }, [authoringAnchorRefresh, mainLocationRefresh, navigationCoordinator]);
+  useEffect(() => {
+    refreshAuthoringAnchorNavigation();
+  }, [
+    mainNavigationReadyGeneration,
+    refreshAuthoringAnchorNavigation,
+    viewerState,
+  ]);
   const sourceIdentity = `${state.source.fileId}:${state.source.digest}`;
   const sourceIdentityRef = useRef(sourceIdentity);
   const restoredLocationGenerationRef = useRef<number | null>(null);
@@ -679,6 +856,19 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     dispatchLayout({ type: 'replace-document' });
     setRightWorkspaceMode('outline');
   }, [mainLocationRefresh, navigationCoordinator, sourceIdentity]);
+  useEffect(() => {
+    const pending = destinationDialog?.pending;
+    if (
+      pending === undefined
+      || pendingDestinationIsCurrent(pending, state, documentGenerationRef.current)
+    ) return;
+    destinationAttemptRef.current += 1;
+    setDestinationEstablishing(false);
+    const disposition = pendingDestinationDisposition('source-replaced');
+    if (disposition.notifyAuthoringShell) publishAuthoringResolution('source-replaced');
+    if (disposition.closeDialog) setDestinationDialog(null);
+    setDestinationError(undefined);
+  }, [destinationDialog, sourceIdentity]);
   useEffect(() => {
     if (locationHistory === undefined) return;
     return locationHistory.subscribe(setLocationHistorySnapshot);
@@ -749,6 +939,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     }
     if (event.type === 'scroll') {
       mainLocationRefresh.schedule();
+      authoringAnchorRefresh.schedule();
       return;
     }
     if (event.type === "selection-placement") {
@@ -784,6 +975,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       return;
     }
     if (event.type === 'owned-mark-clear') {
+      if (authoringActiveRef.current) return;
       setActiveItemId(undefined);
       return;
     }
@@ -794,12 +986,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       if (phase === 'focus') markFocusRef.current = id;
       if (phase === 'blur' && markFocusRef.current === id) markFocusRef.current = undefined;
       if (phase === 'activate') {
+        if (authoringActiveRef.current) return;
         setActiveItemId(id);
         setActivationRequest({ id, token: ++activationTokenRef.current });
       }
       publishCorrespondence();
     }
-  }, [mainLocationRefresh, navigationCoordinator]);
+  }, [authoringAnchorRefresh, mainLocationRefresh, navigationCoordinator]);
   const onReferenceDocumentControls = useCallback((controls: ReferenceDocumentController | null) => {
     referenceControllerRef.current = controls;
     if (controls === null) navigationCoordinator.referenceNavigationUnavailable();
@@ -814,6 +1007,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       navigation?.replaceDocument(documentGenerationRef.current);
       setMainNavigationReadyGeneration(navigation === null ? null : documentGenerationRef.current);
       navigationCoordinator.refreshMainLocation();
+      refreshAuthoringAnchorNavigation();
       return;
     }
     referenceNavigationRef.current = navigation;
@@ -827,7 +1021,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         waiter.resolve(waiter.documentGeneration === generation ? navigation : null);
       }
     }
-  }, [navigationCoordinator]);
+  }, [navigationCoordinator, refreshAuthoringAnchorNavigation]);
   const onExistingAnnotationsDiscovery = useCallback((result: ExistingAnnotationsDiscovery) => {
     setExistingAnnotations(result);
     setExistingAnnotationsSourceIdentity(sourceIdentity);
@@ -1127,12 +1321,23 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           },
         })}
         onLinkActionChoose={(choice, request) => {
-          void navigationCoordinator.chooseLink(choice, request);
+          if (authoringActiveRef.current && choice === 'references') return;
+          void navigationCoordinator.chooseLink(choice, request, {
+            preserveWorkspace: authoringActiveRef.current,
+          });
         }}
         onLinkActionDismiss={(request) => navigationCoordinator.dismissLink(request)}
         {...(copyLinkForLinkAction === undefined ? {} : { copyLinkForLinkAction })}
-        onNavigateBack={() => { void navigationCoordinator.historyBack(); }}
-        onNavigateForward={() => { void navigationCoordinator.historyForward(); }}
+        onNavigateBack={() => {
+          void navigationCoordinator.historyBack(
+            authoringActiveRef.current ? authoringViewportRef.current ?? undefined : undefined,
+          );
+        }}
+        onNavigateForward={() => {
+          void navigationCoordinator.historyForward(
+            authoringActiveRef.current ? authoringViewportRef.current ?? undefined : undefined,
+          );
+        }}
         onWorkspaceModeChange={(mode) => {
           if (mode === 'references') {
             void navigationCoordinator.openReferencesWorkspace();
@@ -1242,7 +1447,21 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         onPlacedPageNoteConsumed={(token) => {
           setPlacedPageNote((current) => current?.token === token ? null : current);
         }}
-        cancelPendingCommandToken={cancelPendingCommandToken}
+        {...(authoringSessionResolution === undefined
+          ? {}
+          : { authoringSessionResolution })}
+        onAuthoringAnchorChange={onAuthoringAnchorChange}
+        onAuthoringActiveChange={(active) => { authoringActiveRef.current = active; }}
+        onAuthoringViewportChange={onAuthoringViewportChange}
+        {...(authoringAnchorNavigation === null ? {} : {
+          authoringAnchorNavigation: {
+            ...authoringAnchorNavigation,
+            onReturn: () => {
+              void returnToAuthoringAnchor(authoringAnchorNavigation.token);
+            },
+            onCancelReturn: () => cancelAuthoringAnchorReturn(authoringAnchorNavigation.token),
+          },
+        })}
         onPageNoteComposerComplete={() => {
           placementAuthority.current.clear();
           setPageMenu(null);
@@ -1256,17 +1475,51 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           if (!documentId) return;
           registry.getPlugin<SelectionPlugin>(SelectionPlugin.id)?.provides()?.clear(documentId);
         }}
-        onCommand={async (command) => {
-          const gated = gateReviewCommand(state, saveStatus, command);
-          if (gated.kind === "choose-destination") {
-            openCopyDialog("first-annotation", command);
+        onCommand={async (command, authority) => {
+          const currentState = stateRef.current;
+          const currentAuthority = authoringAuthorityFor(
+            currentState,
+            documentGenerationRef.current,
+          );
+          if (
+            authority !== undefined
+            && !authoringAuthorityMatches(authority, currentAuthority)
+          ) {
             return {
               accepted: false,
-              state,
+              state: currentState,
+              message: 'This draft belonged to the previous document and was not applied.',
+              reason: 'stale-authoring',
+            };
+          }
+          const gated = gateReviewCommand(currentState, saveStatus, command);
+          if (gated.kind === "choose-destination") {
+            openCopyDialog("first-annotation", {
+              command,
+              authority: authority ?? currentAuthority,
+            });
+            return {
+              accepted: false,
+              state: currentState,
               message: "Choose where annotations should be saved.",
+              reason: 'save-destination',
             };
           }
           const result = await props.api.command(command);
+          if (
+            authority !== undefined
+            && !authoringAuthorityMatches(
+              authority,
+              authoringAuthorityFor(stateRef.current, documentGenerationRef.current),
+            )
+          ) {
+            return {
+              accepted: false,
+              state: stateRef.current,
+              message: 'This draft belonged to the previous document and was not applied.',
+              reason: 'stale-authoring',
+            };
+          }
           const next = "accepted" in result ? result.state : result;
           setState(next);
           if (!("accepted" in result)) {
@@ -1355,15 +1608,27 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         onCancel={() => {
           if (destinationEstablishing) return;
           destinationAttemptRef.current += 1;
-          if (destinationDialog?.reason === "first-annotation") {
-            setCancelPendingCommandToken((token) => token + 1);
-          }
-          setDestinationDialog(null);
+          const disposition = pendingDestinationDisposition('cancelled');
+          if (disposition.closeDialog) setDestinationDialog(null);
           setDestinationError(undefined);
         }}
         onConfirm={async (choice, filename) => {
           const dialog = destinationDialog;
           if (dialog === null || destinationEstablishing) return;
+          if (
+            dialog.pending !== undefined
+            && !pendingDestinationIsCurrent(
+              dialog.pending,
+              stateRef.current,
+              documentGenerationRef.current,
+            )
+          ) {
+            const disposition = pendingDestinationDisposition('source-replaced');
+            if (disposition.notifyAuthoringShell) publishAuthoringResolution('source-replaced');
+            if (disposition.closeDialog) setDestinationDialog(null);
+            setDestinationError(undefined);
+            return;
+          }
           const attempt = destinationAttemptRef.current;
           setDestinationEstablishing(true);
           setDestinationError(undefined);
@@ -1371,19 +1636,66 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             const established = choice === "copy"
               ? await props.api.chooseCopy(filename, folderSelectionId)
               : await props.api.chooseOriginal();
-            if (destinationAttemptRef.current !== attempt) return;
+            if (!pendingDestinationAttemptIsCurrent(
+              attempt,
+              destinationAttemptRef.current,
+              dialog.pending,
+              stateRef.current,
+              documentGenerationRef.current,
+            )) {
+              if (dialog.pending !== undefined && !pendingDestinationIsCurrent(
+                dialog.pending,
+                stateRef.current,
+                documentGenerationRef.current,
+              )) {
+                const disposition = pendingDestinationDisposition('source-replaced');
+                if (disposition.notifyAuthoringShell) publishAuthoringResolution('source-replaced');
+                if (disposition.closeDialog) setDestinationDialog(null);
+              }
+              return;
+            }
             setSaveStatus(established);
             if (dialog.pending !== undefined) {
-              const result = await props.api.command(dialog.pending);
-              if (destinationAttemptRef.current !== attempt) return;
+              const result = await props.api.command(dialog.pending.command);
+              if (!pendingDestinationAttemptIsCurrent(
+                attempt,
+                destinationAttemptRef.current,
+                dialog.pending,
+                stateRef.current,
+                documentGenerationRef.current,
+              )) {
+                if (!pendingDestinationIsCurrent(
+                  dialog.pending,
+                  stateRef.current,
+                  documentGenerationRef.current,
+                )) {
+                  const disposition = pendingDestinationDisposition('source-replaced');
+                  if (disposition.notifyAuthoringShell) publishAuthoringResolution('source-replaced');
+                  if (disposition.closeDialog) setDestinationDialog(null);
+                }
+                return;
+              }
               const next = "accepted" in result ? result.state : result;
               setState(next);
-              if ("accepted" in result) throw new Error(result.message);
-              setCancelPendingCommandToken((token) => token + 1);
+              if ("accepted" in result) {
+                const disposition = pendingDestinationDisposition('rejected');
+                if (!disposition.preserveDraft) {
+                  throw new Error('Rejected annotation unexpectedly discarded its draft.');
+                }
+                setCommandError(result.message);
+                setDestinationError(undefined);
+                if (disposition.closeDialog) setDestinationDialog(null);
+                return;
+              }
+              setCommandError(null);
+              const disposition = pendingDestinationDisposition('accepted');
+              if (disposition.notifyAuthoringShell) publishAuthoringResolution('accepted');
               setSaveStatus(await props.api.saveStatus());
               if (destinationAttemptRef.current !== attempt) return;
             }
-            setDestinationDialog(null);
+            if (pendingDestinationDisposition('accepted').closeDialog) {
+              setDestinationDialog(null);
+            }
           } catch (error) {
             setDestinationError(
               error instanceof Error

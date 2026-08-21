@@ -10,6 +10,7 @@ import { combinePageRotation } from '../src/pdf/owned-overlay.js';
 import {
   pdfBottomOriginPointToNaturalAnchor,
   samePdfViewerLocation,
+  type PdfViewerLocation,
 } from '../src/pdf/viewer-navigation.js';
 import {
   createPdfAnnotationOrderLocation,
@@ -686,6 +687,70 @@ describe('viewer navigation adapter', () => {
       ...distantTarget,
       documentGeneration: 5,
     })).toBe('unavailable');
+  });
+
+  it('classifies neutral page points against transient right and bottom composer occlusion', () => {
+    const harness = navigationHarness();
+    const rightCovered: PdfViewerLocation = {
+      pageIndex: 0,
+      anchor: { x: 550, y: 300 },
+      alignment: { xPercent: 50, yPercent: 35 },
+      zoom: 1,
+    };
+    const bottomCovered: PdfViewerLocation = {
+      ...rightCovered,
+      anchor: { x: 300, y: 300 },
+    };
+
+    expect(harness.navigation.locationVisibility(rightCovered)).toBe('visible');
+    expect(harness.navigation.pointVisibility(
+      rightCovered.pageIndex,
+      rightCovered.anchor,
+    )).toBe('visible');
+    expect(harness.navigation.locationVisibility(rightCovered, {
+      occlusion: { left: 400, top: 0, right: 600, bottom: 400 },
+    })).toBe('outside');
+    expect(harness.navigation.pointVisibility(
+      rightCovered.pageIndex,
+      rightCovered.anchor,
+      { occlusion: { left: 400, top: 0, right: 600, bottom: 400 } },
+    )).toBe('outside');
+    expect(harness.navigation.locationVisibility(bottomCovered, {
+      occlusion: { left: 0, top: 80, right: 600, bottom: 400 },
+    })).toBe('outside');
+    expect(harness.navigation.locationVisibility({
+      ...rightCovered,
+      anchor: { x: Number.NaN, y: 10 },
+    })).toBe('unavailable');
+  });
+
+  it('returns a neutral page point into the same unobscured rectangle used for visibility', async () => {
+    const rightHarness = navigationHarness();
+    const rightDestination: PdfViewerLocation = {
+      pageIndex: 0,
+      anchor: { x: 550, y: 300 },
+      alignment: { xPercent: 50, yPercent: 35 },
+      zoom: 1,
+    };
+    const rightViewport = {
+      occlusion: { left: 400, top: 0, right: 600, bottom: 400 },
+    } as const;
+
+    expect(rightHarness.navigation.locationVisibility(rightDestination, rightViewport)).toBe('outside');
+    expect(await rightHarness.navigation.applyLocation(rightDestination, rightViewport)).toBe(true);
+    expect(rightHarness.navigation.locationVisibility(rightDestination, rightViewport)).toBe('visible');
+
+    const bottomHarness = navigationHarness();
+    const bottomDestination: PdfViewerLocation = {
+      ...rightDestination,
+      anchor: { x: 300, y: 300 },
+    };
+    const bottomViewport = {
+      occlusion: { left: 0, top: 80, right: 600, bottom: 400 },
+    } as const;
+    expect(bottomHarness.navigation.locationVisibility(bottomDestination, bottomViewport)).toBe('outside');
+    expect(await bottomHarness.navigation.applyLocation(bottomDestination, bottomViewport)).toBe(true);
+    expect(bottomHarness.navigation.locationVisibility(bottomDestination, bottomViewport)).toBe('visible');
   });
 
   it('fits the most-visible page to the viewport minus two standard gaps', async () => {

@@ -132,9 +132,14 @@ The review session's light-theme visual language: warm gray and ivory environmen
 Warm Neutral changes presentation only; reading-first behavior and adaptive Annotation Tray framing remain governed by their product contracts.
 
 ### Compact Editorial
-The Warm Neutral modal grammar for Save Destination and text-entry workflows: a direct task-title header, a task-specific body, a restrained footer, and compact icon-plus-label actions.
+The Warm Neutral task-surface grammar for Save Destination and review authoring workflows: a direct task-title header, a task-specific body, a restrained action region, and compact icon-plus-label actions.
 
-Supporting copy appears only when it adds context. Creation comments use Save, edits use Apply, and optional-comment workflows distinguish cancelling from keeping an annotation without text. Compact Editorial changes presentation only and preserves the existing modal behavior, state, and accessibility contracts.
+Supporting copy appears only when it adds context. Creation comments use Save, edits use Apply, and optional-comment workflows distinguish cancelling from keeping an annotation without text. Compact Editorial governs presentation and action language; each task surface's product contract governs lifecycle, state, and accessibility behavior.
+
+### Contextual Annotation Composer
+The nonmodal Compact Editorial authoring surface for replacement, insertion, highlight comments, Page Notes, and mutable Review Item edits.
+
+On wide surfaces it temporarily occupies the review edge while leaving the live PDF available. On narrow surfaces it becomes a contained bottom surface. Its draft remains bound to the original anchor during document navigation, and an explicit return recovers that anchor without overriding deliberate reading position or displaced Annotation Tray state.
 
 ## Reference navigation
 

@@ -19,6 +19,7 @@ import {
 } from '../../../apps/web/src/pdf/viewer-controls.js';
 import type { ViewerInteractionListener } from '../../../apps/web/src/pdf/viewer-interaction-events.js';
 import type { PdfOutlineDiscovery } from '../../../apps/web/src/pdf/pdf-outline.js';
+import type { PdfTargetVisibility } from '../../../apps/web/src/pdf/viewer-navigation.js';
 import type { PdfViewerNavigation } from '../../../apps/web/src/pdf/viewer-navigation-adapter.js';
 import {
   createReferenceNavigationState,
@@ -26,6 +27,7 @@ import {
   type ReferenceNavigationState,
 } from '../../../apps/web/src/review/reference-navigation-state.js';
 import { createReviewState, type ReviewCommand, type ReviewState } from '../../../packages/core/src/review-model.js';
+import { addPageNote } from '../../../packages/core/src/review-commands.js';
 import { reduceReview } from '../../../packages/core/src/review-reducer.js';
 import { resolveVisualScenario, VisualDocument } from './visual-scenarios.js';
 
@@ -35,6 +37,16 @@ const visualScenario = resolveVisualScenario(window.location.search);
 const previewParameters = new URLSearchParams(window.location.search);
 const saveEstablishing = previewParameters.has('establishing');
 const composerPreview = previewParameters.get('composer');
+const composerContextPreview = previewParameters.get('context');
+const requestedComposerReturn = previewParameters.get('return');
+const composerReturnPreview = requestedComposerReturn === 'outside'
+  || requestedComposerReturn === 'unavailable'
+  || requestedComposerReturn === 'pending'
+  ? requestedComposerReturn
+  : 'visible';
+const composerReturnVisibility: PdfTargetVisibility = composerReturnPreview === 'pending'
+  ? 'outside'
+  : composerReturnPreview;
 const composerPreviewTitles: Readonly<Record<string, string>> = {
   replacement: 'Replacement',
   insertion: 'Insertion',
@@ -54,24 +66,72 @@ function ComposerPreview({ name }: { readonly name: string }) {
   const common = {
     onSave: async () => undefined,
     onDismiss: () => undefined,
+    onReadDocument: () => undefined,
+    anchorNavigation: {
+      visibility: composerReturnVisibility,
+      pending: composerReturnPreview === 'pending',
+      onReturn: () => undefined,
+    },
+  };
+  const selectedText = composerContextPreview === 'unavailable' ? {
+    kind: 'anchor' as const,
+    pageNumber: 4,
+    anchorLabel: 'Selection anchor',
+  } : {
+    kind: 'selection' as const,
+    pageNumber: 4,
+    prefix: composerContextPreview === 'long'
+      ? 'The baseline specification absorbs market and period effects while preserving the comparison implied by the research design. Under the maintained assumptions, '
+      : 'Under the maintained assumptions, ',
+    quote: composerContextPreview === 'long'
+      ? 'the equilibrium response remains locally identified for every comparison group satisfying the overlap and conditional-independence restrictions'
+      : 'the unique equilibrium',
+    suffix: composerContextPreview === 'long'
+      ? ' and varies continuously with the policy parameter. The appendix states the regularity conditions and reports the corresponding leave-one-market-out estimates.'
+      : ' exists and varies continuously with the policy parameter.',
+  };
+  const insertionPoint = composerContextPreview === 'unavailable' ? {
+    kind: 'anchor' as const,
+    pageNumber: 4,
+    anchorLabel: 'Insertion anchor',
+  } : {
+    kind: 'caret' as const,
+    pageNumber: 4,
+    leftContext: composerContextPreview === 'long'
+      ? 'The estimates remain stable across the preferred specifications, the leave-one-market-out checks, and the alternative exposure definitions. The unique equilibrium'
+      : 'The unique equilibrium',
+    rightContext: composerContextPreview === 'long'
+      ? ' exists under the maintained assumptions and inherits the continuity properties established in the appendix under the stated regularity conditions.'
+      : ' exists under the maintained assumptions.',
+  };
+  const pageContext = composerContextPreview === 'unavailable' ? {
+    kind: 'anchor' as const,
+    pageNumber: 4,
+    anchorLabel: 'Page Note anchor',
+  } : {
+    kind: 'page' as const,
+    pageNumber: 4,
+    nearbyText: composerContextPreview === 'long'
+      ? 'Taken together, these estimates establish the identifying variation used below. The comparison remains stable across the preferred specifications, alternative exposure definitions, and the leave-one-market-out checks reported in the appendix. The next section uses this result to characterize the equilibrium response.'
+      : 'Taken together, these estimates establish the identifying variation used below.',
   };
   switch (name) {
     case 'replacement':
-      return <CommentComposer title="Replacement" fieldLabel="Replacement" saveLabel="Apply" allowWhitespace {...common} />;
+      return <CommentComposer title="Replacement" sourceContext={selectedText} fieldLabel="Replacement" saveLabel="Apply" allowWhitespace {...common} />;
     case 'insertion':
-      return <CommentComposer title="Insertion" fieldLabel="Insertion" saveLabel="Apply" allowWhitespace {...common} />;
+      return <CommentComposer title="Insertion" sourceContext={insertionPoint} fieldLabel="Insertion" saveLabel="Apply" allowWhitespace {...common} />;
     case 'highlight':
-      return <CommentComposer title="Highlight Comment" optional onSkip={async () => undefined} {...common} />;
+      return <CommentComposer title="Highlight Comment" sourceContext={selectedText} optional onSkip={async () => undefined} {...common} />;
     case 'page-note':
-      return <CommentComposer title="Page Note" {...common} />;
+      return <CommentComposer title="Page Note" sourceContext={pageContext} {...common} />;
     case 'edit-highlight':
-      return <CommentComposer title="Edit Highlight" saveLabel="Apply" initialValue="Check the identification claim." optional {...common} />;
+      return <CommentComposer title="Edit Highlight" sourceContext={selectedText} saveLabel="Apply" initialValue="Check the identification claim." optional {...common} />;
     case 'edit-page-note':
-      return <CommentComposer title="Edit Page Note" saveLabel="Apply" initialValue="Add a cross-reference to the appendix." {...common} />;
+      return <CommentComposer title="Edit Page Note" sourceContext={pageContext} saveLabel="Apply" initialValue="Add a cross-reference to the appendix." {...common} />;
     case 'edit-replacement':
-      return <CommentComposer title="Edit Replacement" fieldLabel="Replacement" saveLabel="Apply" allowWhitespace initialValue="admits a locally unique equilibrium" {...common} />;
+      return <CommentComposer title="Edit Replacement" sourceContext={selectedText} fieldLabel="Replacement" saveLabel="Apply" allowWhitespace initialValue="admits a locally unique equilibrium" {...common} />;
     case 'edit-insertion':
-      return <CommentComposer title="Edit Insertion" fieldLabel="Insertion" saveLabel="Apply" allowWhitespace initialValue="under the maintained assumptions" {...common} />;
+      return <CommentComposer title="Edit Insertion" sourceContext={insertionPoint} fieldLabel="Insertion" saveLabel="Apply" allowWhitespace initialValue="under the maintained assumptions" {...common} />;
     default:
       return null;
   }
@@ -286,6 +346,8 @@ function createHarnessViewerNavigation(
     fitToWidthReady: () => true,
     resolveTarget: () => null,
     targetVisibility: () => 'unavailable',
+    locationVisibility: () => 'unavailable',
+    pointVisibility: () => 'unavailable',
     captureDocumentOrderPages: () => [],
     applyTarget: async () => false,
     cancelPendingNavigation: async () => undefined,
@@ -342,6 +404,8 @@ function Harness() {
   const [correspondingItemId, setCorrespondingItemId] = useState<string | undefined>(visualScenario?.correspondingItemId);
   const [activeItemId, setActiveItemId] = useState<string>();
   const [activationRequest, setActivationRequest] = useState<{ id: string; token: number }>();
+  const authoringActiveRef = useRef(false);
+  const [saveDestinationOpen, setSaveDestinationOpen] = useState(false);
   const [outlineDiscovery, setOutlineDiscovery] = useState<PdfOutlineDiscovery>({
     status: 'loading',
     documentGeneration: 0,
@@ -384,6 +448,8 @@ function Harness() {
   const shell = (
     <ReviewShell
       state={state}
+      saveOptionsOpen={saveDestinationOpen}
+      onSaveOptions={() => setSaveDestinationOpen(true)}
       {...(visualScenario ? {
         ...(['reading', 'tray', 'outline'].includes(visualScenario.name) ? {
           copyLink: {
@@ -474,6 +540,7 @@ function Harness() {
         }
       }}
       onCommand={accept}
+      onAuthoringActiveChange={(active) => { authoringActiveRef.current = active; }}
       onNavigate={(item) => setNavigated(item.id)}
       {...(correspondingItemId === undefined ? {} : { correspondingItemId })}
       {...(activationRequest === undefined ? {} : { activationRequest })}
@@ -504,6 +571,18 @@ function Harness() {
         <button type="button" onClick={() => setRejectNextCommand(true)}>Reject next command</button>
         <button type="button" onClick={() => setHoldNextCommand(true)}>Hold next command</button>
         <button type="button" onClick={() => commandReleaseRef.current?.()}>Release command</button>
+        <button type="button" onClick={() => setState((current) => {
+          let seeded = current;
+          for (let index = 0; index < 16; index += 1) {
+            seeded = reduceReview(seeded, addPageNote(
+              seeded,
+              index % 4,
+              { x: 80 + index, y: 120 + (index * 18), width: 18, height: 18 },
+              `Seeded note ${index + 1}`,
+            ));
+          }
+          return seeded;
+        })}>Seed annotations</button>
         <button type="button" onClick={() => setPageMenuOpen(true)}>Open page actions</button>
         <button type="button" onClick={() => setOutlineDiscovery({
           status: 'loaded-tree',
@@ -595,6 +674,7 @@ function Harness() {
                 onFocus={() => setCorrespondingItemId(annotation.id)}
                 onBlur={() => setCorrespondingItemId(undefined)}
                 onClick={() => {
+                  if (authoringActiveRef.current) return;
                   setActiveItemId(annotation.id);
                   setActivationRequest({ id: annotation.id, token: Date.now() });
                 }}
@@ -617,13 +697,22 @@ function Harness() {
     </ReviewShell>
   );
 
-  if (!visualScenario) return shell;
-  const saveDestinationOpen = visualScenario.name === 'save-destination'
+  if (!visualScenario) return <>
+    {shell}
+    <SaveDestinationDialog
+      open={saveDestinationOpen}
+      proposal={{ filename: 'acceptance-annotated.pdf', folder: '/tmp' }}
+      onConfirm={async () => setSaveDestinationOpen(false)}
+      onCancel={() => setSaveDestinationOpen(false)}
+      onChooseLocation={async () => undefined}
+    />
+  </>;
+  const visualSaveDestinationOpen = visualScenario.name === 'save-destination'
     || visualScenario.name === 'save-recovery';
   return (
     <main data-production-review data-visual-scene={visualScenario.name}>
       {shell}
-      {saveDestinationOpen ? (
+      {visualSaveDestinationOpen ? (
         <SaveDestinationDialog
           open
           establishing={saveEstablishing}
@@ -641,7 +730,16 @@ function Harness() {
           onChooseLocation={async () => undefined}
         />
       ) : null}
-      {composerPreview ? <ComposerPreview name={composerPreview} /> : null}
+      {composerPreview ? (
+        <div
+          className="composer-preview-host review-drawer-host"
+          data-composer-preview-host
+          inert={visualSaveDestinationOpen}
+          aria-hidden={visualSaveDestinationOpen ? 'true' : undefined}
+        >
+          <ComposerPreview name={composerPreview} />
+        </div>
+      ) : null}
     </main>
   );
 }

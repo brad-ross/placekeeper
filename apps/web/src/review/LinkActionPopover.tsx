@@ -42,6 +42,7 @@ export interface LinkActionPopoverProps {
     reason: LinkActionDismissReason,
   ) => void;
   readonly copyLink?: CopyLinkControlProps;
+  readonly openInReferencesDisabled?: boolean;
   /** Resolves a stable focus surface when the source link has been virtualized. */
   readonly sourceFocusFallback?: (source: ViewerPdfLinkSourceScope) => HTMLElement | null;
 }
@@ -108,6 +109,7 @@ export function LinkActionMenuContent({
   sourceScope,
   firstItemRef,
   copyLink,
+  openInReferencesDisabled = false,
   onChoose,
   onKeyDown,
   onBlur,
@@ -117,6 +119,7 @@ export function LinkActionMenuContent({
   readonly sourceScope: ViewerPdfLinkSourceScope;
   readonly firstItemRef: Ref<HTMLButtonElement>;
   readonly copyLink?: CopyLinkControlProps;
+  readonly openInReferencesDisabled?: boolean;
   readonly onChoose: (choice: LinkActionChoice) => void;
   readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
   readonly onBlur: (event: FocusEvent<HTMLDivElement>) => void;
@@ -131,17 +134,19 @@ export function LinkActionMenuContent({
       onBlur={onBlur}
     >
       <button
-        ref={firstItemRef}
+        ref={openInReferencesDisabled ? undefined : firstItemRef}
         type="button"
         role="menuitem"
         aria-label="Open in References"
         title="Open in References"
+        disabled={openInReferencesDisabled}
         onClick={() => onChoose('references')}
       >
         <ReviewIcon name="references" />
       </button>
       {sourceScope === 'reference' ? (
         <button
+          ref={openInReferencesDisabled ? firstItemRef : undefined}
           type="button"
           role="menuitem"
           aria-label="Follow in this tab"
@@ -152,6 +157,7 @@ export function LinkActionMenuContent({
         </button>
       ) : null}
       <button
+        ref={openInReferencesDisabled && sourceScope === 'main' ? firstItemRef : undefined}
         type="button"
         role="menuitem"
         aria-label="Open in main document"
@@ -215,6 +221,7 @@ export function LinkActionPopover({
   onChoose,
   onDismiss,
   copyLink,
+  openInReferencesDisabled = false,
   sourceFocusFallback,
 }: LinkActionPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -388,6 +395,7 @@ export function LinkActionPopover({
         sourceScope={request.sourceScope}
         firstItemRef={firstItemRef}
         {...(dismissingCopyLink === undefined ? {} : { copyLink: dismissingCopyLink })}
+        openInReferencesDisabled={openInReferencesDisabled}
         onChoose={choose}
         onKeyDown={keyDown}
         onBlur={blur}
