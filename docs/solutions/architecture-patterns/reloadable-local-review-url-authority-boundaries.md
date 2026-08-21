@@ -1,6 +1,7 @@
 ---
 title: Authority boundaries for reloadable local-review URLs
 date: 2026-08-17
+last_updated: 2026-08-20
 category: architecture-patterns
 module: Reloadable review link lifecycle
 problem_type: architecture_pattern
@@ -10,23 +11,25 @@ applies_when:
   - "A local document app serves authenticated browser views from readable loopback routes"
   - "A hard refresh must preserve the exact live view and its still-valid agent-task scope"
   - "A replacement daemon can reuse the old origin but must not inherit old credentials or task authority"
-  - "Document continuity should preserve only a path and safe page or portable-item location"
-  - "Durable viewer state, session registries, and always-running background services are intentionally out of scope"
+  - "Document continuity should preserve only a path and a safe page, portable-item, or normalized author destination"
+  - "Copy Link actions sit beside navigation controls and must not change selection, focus correspondence, or reading position"
 related_components:
   - "task binding registry"
   - "shared daemon lifecycle"
   - "browser history"
   - "canonical Placekeeper links"
+  - "PDF navigation targets"
+  - "Copy Link controls"
   - "macOS application bundle"
 tags:
   - "reloadable-links"
-  - "loopback-review"
   - "live-resume"
   - "successor-daemon"
   - "task-binding"
   - "capability-scope"
-  - "fragment-history"
   - "no-durable-state"
+  - "pdf-destinations"
+  - "non-navigating-actions"
 ---
 
 # Authority boundaries for reloadable local-review URLs
@@ -35,7 +38,7 @@ tags:
 
 Placekeeper needs a browser address that behaves like a normal reading surface: human-readable enough to inspect, refreshable without losing the current page, and useful in Back and Forward history. The underlying review is nevertheless a privileged local session. The design becomes unsafe if “reload this live tab” and “reopen this document later” are treated as the same operation. They carry different authority and therefore need different recovery rules.
 
-The **Loopback Review URL** is the browser projection of one live review. Its pathname contains a random view ID followed by the canonically encoded absolute PDF path, and its fragment carries a page or portable-item location. The **Placekeeper Link** is the canonical `placekeeper://` document/location address with no live view ID. The shared codec validates absolute PDF paths, canonical segment encoding, versioned page fragments, and portable item UUIDs; it rejects queries, authorities, traversal, encoded separators, controls, and session-shaped fragment fields (`packages/core/src/placekeeper-link.ts:55-110`, `packages/core/src/placekeeper-link.ts:112-184`). The two forms are deliberately related but not interchangeable:
+The **Loopback Review URL** is the browser projection of one live review. Its pathname contains a random view ID followed by the canonically encoded absolute PDF path, and its fragment carries a page, portable-item, or normalized author destination. The **Placekeeper Link** is the canonical `placekeeper://` document/location address with no live view ID. The shared codec validates absolute PDF paths, canonical segment encoding, versioned fragments, portable item UUIDs, and the fixed arity of supported PDF destination modes; it rejects queries, authorities, traversal, encoded separators, controls, non-canonical numbers, and session-shaped fragment fields (`packages/core/src/placekeeper-link.ts:9-33`, `packages/core/src/placekeeper-link.ts:77-115`, `packages/core/src/placekeeper-link.ts:175-207`, `packages/core/src/placekeeper-link.ts:237-266`). The two forms are deliberately related but not interchangeable:
 
 ```text
 Loopback Review URL
@@ -45,16 +48,18 @@ canonical Placekeeper Link
 placekeeper:///Users/reader/Paper%20One.pdf#v=1&page=12
 ```
 
-The first can resume the exact in-memory browser view while its daemon, review generation, credential, and original Codex scope remain live. The second can ask Placekeeper to open the current file at the encoded location through the normal launch flow. A stale Loopback Review URL can be projected into the second form after a daemon restart, but it cannot recreate the old live authority.
+The first can resume the exact in-memory browser view while its daemon, review generation, credential, and original Codex scope remain live. The second can ask Placekeeper to open the current file at the encoded semantic location through the normal launch flow. Its exact destination, when present, contains only a one-based fallback page, a supported author view mode, and canonical finite parameters; document generation and live target identity are rebuilt from the newly opened PDF. A stale Loopback Review URL can be projected into the second form after a daemon restart, but it cannot recreate the old live authority.
 
 Earlier iterations first proved same-daemon resume, then clarified that a fixed origin cannot make a successor process the same authority. Persisting old credentials, treating the port as identity, or automatically launching the external protocol from an unauthenticated page load were rejected because each would turn descriptive reachability into authorization (session history).
+
+Later exact-destination work exposed the same boundary in the interface. Treating every target as exact was not truthful, because Search Results are derived runtime occurrences rather than author metadata. Letting nested Copy Link controls participate in row activation or focus-derived selection styling also made an inactive Outline entry or annotation look selected without moving the document. The settled contract uses exact links only for metadata-backed targets, uses page links otherwise, and keeps successful copying visually quiet and non-navigating (session history).
 
 Several other tempting designs fail the same boundary:
 
 - Keeping `#cap=...` in a readable URL turns copied history into a bearer-capability leak.
 - Persisting the old credential, session, task binding, or complete viewer state lets a successor daemon adopt authority it did not establish.
 - Automatically opening a filesystem path from an unauthenticated `GET` lets ordinary page loads trigger native UI and file access.
-- Encoding scroll, zoom, selection, search, or open panels turns a location link into durable viewer state. The typed location is intentionally limited to page and portable item (`packages/core/src/placekeeper-link.ts:9-16`, `packages/core/test/placekeeper-link.test.ts:125-132`).
+- Encoding selection, search state, open panels, live target identity, or document generation turns a location link into durable viewer state. The typed location is intentionally limited to a coarse page, a portable item with page fallback, or normalized PDF-authored destination semantics with page fallback (`packages/core/src/placekeeper-link.ts:9-33`).
 
 ## Guidance
 
@@ -64,7 +69,7 @@ Implement two explicit paths.
 
 **Live resume** restores the exact live projection. The initial bootstrap consumes a one-time capability, creates a browser credential, random view ID, random view cookie, exact readable pathname, and initial semantic fragment (`apps/service/src/sessions/session-broker.ts:581-634`). The bootstrap response sets the cookie, then `location.replace` scrubs the capability by navigating to the cap-free readable route (`apps/service/src/server/http-server.ts:121-147`, `apps/service/src/server/http-server.ts:323-369`). Reloading that route posts its exact pathname to `/r/<view-id>/resume`; the daemon matches view ID, pathname, cookie hash, active session, document generation, and credential before returning the same in-memory session credential (`apps/service/src/server/http-server.ts:372-390`, `apps/service/src/sessions/session-broker.ts:648-681`). This is resume, not reconstruction.
 
-**Post-restart reopen** restores only document identity and safe semantic location. A successor daemon has no matching view record, so it serves an inert terminal shell derived from strict route parsing, clears the stale cookie, and offers a canonical `placekeeper:` anchor (`apps/service/src/server/http-server.ts:393-425`). Client code preserves a valid `#v=1&page=...` or `&item=...` fragment and falls back to page 1 for malformed or future fragments; it renders an explicit “Reopen this PDF” action but does not invoke it (`apps/web/src/production-entry.tsx:18-57`). Only the user's click enters external-protocol handling.
+**Post-restart reopen** restores only document identity and safe semantic location. A successor daemon has no matching view record, so it serves an inert terminal shell derived from strict route parsing, clears the stale cookie, and offers a canonical `placekeeper:` anchor (`apps/service/src/server/http-server.ts:393-425`). Client code preserves any fragment accepted by the shared page/item/destination codec and falls back to page 1 for malformed or future fragments; it renders an explicit “Reopen this PDF” action but does not invoke it (`apps/web/src/production-entry.tsx:18-57`). Only the user's click enters external-protocol handling.
 
 The successor must never upgrade a stale route into a session on page load. Its recovery parser performs no filesystem access; it only decodes descriptive path data and constructs the canonical app-link base (`apps/service/src/links/placekeeper-link.ts:89-98`). After the click, the native launcher shows the unfamiliar path and requires an explicit Open choice (`packaging/macos/launcher.mjs:117-148`). The host rechecks confirmation immediately before its first linked-file operation, canonicalizes the path, verifies a readable regular `.pdf` whose header contains `%PDF-`, and opens it with `surface: "browser"` (`apps/service/src/host/placekeeper-host.ts:232-247`, `apps/service/src/links/placekeeper-link.ts:44-75`).
 
@@ -90,29 +95,44 @@ A successor reopen must not reproduce this handshake from the path. It launches 
 
 ### Use fragments for semantic location, not server state
 
-Keep page and saved portable-item references in `location.hash`. Fragments are client-side, so moving through a document does not expand server routes or disclose credentials in requests. The grammar is versioned and canonical: `#v=1&page=<one-based-page>` with optional `&item=<portable-uuid>` (`packages/core/src/placekeeper-link.ts:88-125`). When an item is unavailable, navigation falls back to its page; malformed fragments converge safely to page 1 (`apps/web/src/review/navigation-coordinator.ts:261-293`).
+Keep page, saved portable-item, and normalized PDF-author destinations in `location.hash`. Fragments are client-side, so moving through a document does not expand server routes or disclose credentials in requests. The additive grammar keeps `#v=1&page=<one-based-page>` with optional `&item=<portable-uuid>` byte-compatible, and reserves `#v=2&page=<one-based-page>&mode=<supported-mode>` with mode-specific canonical `params` for exact author destinations (`packages/core/src/placekeeper-link.ts:107-115`, `packages/core/src/placekeeper-link.ts:150-157`, `packages/core/src/placekeeper-link.ts:175-207`). The v2 page is always a coarse fallback, not a second competing destination.
+
+Project only generation-free semantics into the fragment. A live `PdfNavigationTarget` is accepted only when its document generation, page bounds, normalized zoom, and target identity match the active PDF. Supported author modes become exact destinations; unknown author views truthfully become page links. Reopening reverses that projection by rebuilding a fresh target under the current document generation (`apps/web/src/pdf/pdf-navigation-target.ts:231-282`). Outline entries and embedded PDF links use this shared target projection, while Search Results intentionally remain page-only because they do not carry durable author identity (`apps/web/src/review/row-link-actions.ts:30-64`).
+
+Restore through the navigation coordinator, not directly from a surface. It first attempts the current-generation exact target; if exact restoration is unavailable, it replaces the fragment with a verified page fallback and announces the loss of precision (`apps/web/src/review/navigation-coordinator.ts:287-319`, `apps/web/src/review/navigation-coordinator.ts:1400-1436`). When a portable item is unavailable, navigation similarly falls back to its page. Malformed fragments converge safely to page 1.
 
 Use browser history according to semantic intent. Settled ordinary reading—scrolling, sequential page changes, or reflow—updates the current fragment with `history.replaceState`, so it does not create a stop for every viewer signal (`apps/web/src/review/review-location-history.ts:89-105`, `apps/web/src/review/navigation-coordinator.ts:934-953`). A **Meaningful Jump**, such as an explicit outline, annotation, search, or promoted-reference destination, uses `pushState` once through the navigation coordinator (`apps/web/src/review/navigation-coordinator.ts:880-903`, `apps/web/src/review/navigation-coordinator.ts:1191-1205`). Back and Forward then restore semantic locations without pretending that zoom or panel layout is bookmark-worthy state.
+
+### Make Copy Link a quiet projection, not row activation
+
+Expose one shared Copy Link command, but keep target derivation and surface navigation separate. Outline and Search render the navigable content and its adjacent copy action as sibling controls; annotations likewise keep navigation on the content button. Copying therefore does not scroll, select the row, update correspondence, or create a Meaningful Jump. The shared command deduplicates pending clipboard writes and owns the success/failure lifecycle (`apps/web/src/review/CopyLinkControl.tsx:24-45`).
+
+Use the same chain-link icon and target-specific Copy Link accessible names across shared viewer surfaces, but do not turn success into a visible tooltip or popup. Enabled Copy Link controls intentionally omit `title`; success is exposed through a screen-reader-only status, while clipboard failure remains visible and retryable (`apps/web/src/review/CopyLinkControl.tsx:149-186`). After successful pointer activation in row or annotation contexts, release transient focus so inactive contextual actions disappear again; keyboard activation retains focus for predictable keyboard operation (`apps/web/src/review/CopyLinkControl.tsx:97-134`). In an embedded-link action popover, successful copy dismisses the popover; failure leaves it available (`apps/web/src/review/LinkActionPopover.tsx:368-394`).
+
+Selection styling must represent navigation state, not nested-action focus. Active Outline and annotation rows remain blue on hover, while inactive rows may use neutral hover feedback. A Copy Link press on an inactive row must not flash the active border or leave its action group disclosed. Browser acceptance should assert pointer and keyboard behavior separately because their intended focus outcomes differ (session history).
 
 ### Test each layer of the contract
 
 No one test level proves the whole pattern.
 
-- **Codec and history units:** `Placekeeper link codec` proves special-character and Unicode path round trips, strict readable-route parsing, safe fragment grammar, and rejection of authority-bearing or session-like fields (`packages/core/test/placekeeper-link.test.ts:17-132`). `browser review location history` proves replace-versus-push behavior, Back/Forward restoration, reload in the middle of history, and malformed-fragment convergence (`apps/web/test/review-location-history.test.ts:64-121`).
+- **Codec and history units:** `Placekeeper link codec` proves special-character and Unicode path round trips, strict readable-route parsing, byte-compatible v1 fragments, canonical fixed-arity v2 destinations, and rejection of authority-bearing or session-like fields (`packages/core/test/placekeeper-link.test.ts`). `browser review location history` proves replace-versus-push behavior, Back/Forward restoration, reload in the middle of history, and malformed-fragment convergence (`apps/web/test/review-location-history.test.ts:64-121`).
 - **HTTP and security integration:** `resumes a live readable view repeatedly with only its scoped HttpOnly cookie` proves repeated exact resume, missing or wrong cookie denial, path and origin binding, revocation, cookie clearing, inert unknown-view recovery, and the absence of automatic fetch or redirect behavior (`apps/service/test/session-security.test.ts:397-524`). `exchanges the fragment once, scrubs it before protected assets, and scopes all bytes` proves one-time capability exchange and bearer-gated document access (`apps/service/test/session-security.test.ts:346-395`).
-- **Real browser acceptance:** `a live readable review survives repeated hard refresh and fails closed after session end` proves the cap-free URL, restoration to page 3 through repeated hard reloads, Meaningful Jump history, canonical copy-link output, and the ended-session terminal screen (`test/acceptance/reloadable-links.spec.ts:31-111`). `a successor daemon keeps the old origin but serves a stale view as inert click-only recovery` proves same-origin reuse without resume, task API calls, external-protocol auto-launch, or stale cookies (`test/acceptance/reloadable-links.spec.ts:113-177`).
+- **Real browser acceptance:** `a live readable review survives repeated hard refresh and fails closed after session end` proves the cap-free URL, restoration through repeated hard reloads, Meaningful Jump history, canonical copy-link output, and the ended-session terminal screen (`test/acceptance/reloadable-links.spec.ts:31-122`). `copies canonical PDF destinations and reopens them without source UI state` proves exact Outline and embedded-link equivalence, page-only Outline and Search fallback, canonical reopen, Back/Forward replay, and truthful exact-to-page downgrade (`test/acceptance/reloadable-links.spec.ts:124-249`). `a successor daemon keeps the old origin but serves a stale view as inert click-only recovery` proves same-origin reuse without resume, task API calls, external-protocol auto-launch, or stale cookies (`test/acceptance/reloadable-links.spec.ts:251-315`).
+- **Interaction acceptance:** `settles tray copy actions without selection or tooltip flashes` proves that enabled Copy Link controls have no native tooltip, pointer copy neither selects nor outlines an inactive annotation or Outline row, pointer success releases the action focus, active rows keep their selection color on hover, and keyboard activation retains focus (`test/acceptance/production-flow.spec.ts:1671-1790`). The real embedded-link flow proves pending-write deduplication, successful dismissal with focus return, visible clipboard failure, and successful Retry (`test/acceptance/production-flow.spec.ts:664-759`).
 - **Codex lifecycle and mounted-browser acceptance:** `binds the exact launch, activates in the browser, refreshes deltas, gates evidence, and revokes at task end` proves the exact claim/bootstrap handshake, repeated readable-view resume with the same credential, Codex scope, prompt-time full/unchanged/delta delivery, and task-end revocation (`apps/service/test/codex-live-context.integration.test.ts:63-244`). `keeps mounted Codex context through refresh, then fails closed on a hung scope poll` proves that a production browser reload preserves the readable path, page 3, and current connected-agent status, then degrades to connecting and unavailable when scope refresh stops succeeding (`test/acceptance/production-flow.spec.ts:279-368`).
 - **Installed lifecycle smoke:** the packaged smoke proves the canonical-link confirmation gate, stable-origin and page-location propagation, and absence of Codex authority in an ordinary link-opened view (`packaging/macos/smoke-installed.ts:349-399`). After a real replacement it proves that the origin remains stable while the old readable URL becomes inert recovery rather than a resurrected session (`packaging/macos/smoke-installed.ts:560-597`).
 
 ## Why This Matters
 
-This separation gives users familiar browser behavior without making a local URL a durable bearer token. A reader can refresh an active tab, bookmark or copy a human-readable PDF location, jump to a page or saved annotation, use Back and Forward for deliberate navigation, and recover a stale tab after an application restart. At the same time, every stronger claim remains explicit:
+This separation gives users familiar browser behavior without making a local URL a durable bearer token. A reader can refresh an active tab, bookmark or copy a human-readable PDF location, reopen an author-defined destination at its supported precision, jump to a page or saved annotation, use Back and Forward for deliberate navigation, and recover a stale tab after an application restart. At the same time, every stronger claim remains explicit:
 
 - the Loopback Review URL identifies a projection, not a durable document or task;
 - the view cookie authorizes refresh only for the exact live projection;
 - the in-memory browser credential authorizes review APIs only while the owning daemon and session remain live;
 - the original Codex binding survives only because live resume recovers the exact credential and launch scope;
-- the Placekeeper Link carries only a local path and semantic location;
+- the Placekeeper Link carries only a local path and generation-free semantic location;
+- an exact destination retains a truthful page fallback and is rehydrated only against the current PDF generation;
+- copying that destination is a utility action and does not imply that the source row was selected or opened;
 - successor recovery requires a user gesture and normal file confirmation, and creates a fresh non-Codex view.
 
 Without this model, convenience features quietly widen authority. A copied URL could leak a capability; a replacement daemon could impersonate an old task; a public `GET` could touch the filesystem or launch native UI; or a fixed port could be mistaken for a trusted process identity. Conversely, refusing every reload would discard useful browser affordances even though exact, view-scoped in-memory authorization makes live resume safe.
@@ -126,6 +146,8 @@ Apply this pattern when a local desktop application:
 - serves privileged live state through a browser on loopback;
 - wants refreshable, inspectable URLs without exposing bearer material;
 - needs copied document locations to outlive one browser bootstrap but not to carry session authority;
+- exposes authored Outline or embedded-link destinations alongside derived Search Results or portable annotations;
+- places Copy Link beside controls whose primary action navigates or selects;
 - can restart or upgrade its local daemon while old tabs remain open;
 - binds some live views to an agent task or another external owner;
 - has a small semantic location model that can be restored independently of full viewer state.
@@ -201,9 +223,52 @@ restart and reopen from that link
   -> never restore zoom, selection, search, trays, or old task scope
 ```
 
+### Exact author destination without session authority
+
+```text
+Outline or embedded PDF link resolves to an author destination
+  -> classify it without navigation
+  -> verify active document generation, page bounds, mode, and parameters
+  -> project only the generation-free destination
+  -> copy placekeeper:///.../Paper.pdf#v=2&page=3&mode=xyz&params=72,144,1.5
+
+open the copied link later
+  -> run the normal path confirmation and PDF-open flow
+  -> create a fresh browser view and credential
+  -> rebuild the target under the current document generation
+  -> apply the exact destination when available
+  -> otherwise replace it with the verified page 3 fallback
+  -> never inherit the source task binding, selected row, tray, or popover
+```
+
+Search does not manufacture a v2 destination from its transient match geometry. It copies a v1 page link because page is the highest durable precision available from that source.
+
+### Copy from an inactive Outline or annotation row
+
+```text
+pointer presses the adjacent chain-link action
+  -> copy the row's already-derived Placekeeper Link
+  -> do not invoke the row's navigation callback
+  -> do not mark the row current or corresponding
+  -> announce success only to assistive technology
+  -> release transient pointer focus so inactive actions hide again
+
+keyboard activates the same action
+  -> perform the same non-navigating copy
+  -> retain focus for continued keyboard operation
+
+embedded-link popover copy succeeds
+  -> dismiss the popover and restore focus to its opener
+clipboard write fails
+  -> keep the fallback link and Retry available
+```
+
 ## Related
 
+- [PR #41: durable links and compact action controls](https://github.com/brad-ross/placekeeper/pull/41) extended this contract with exact PDF destinations and non-navigating Copy Link interactions.
 - [Task-scoped, prompt-refreshed live PDF context](task-scoped-prompt-refreshed-live-pdf-context.md) defines the exact task/browser-capability binding that a same-daemon live resume may preserve and a successor reopen must not recreate.
 - [Upgrade-safe lifecycle for a shared per-user daemon](upgrade-safe-shared-per-user-daemon-lifecycle.md) explains why review sessions, credentials, and task leases remain process-local through replacement.
 - [Truthful compact status for live agent context](../design-patterns/truthful-compact-agent-context-status.md) projects the same fail-closed ownership distinction into browser chrome.
+- [Content-aware annotation workspace presentation](../design-patterns/outline-aware-annotation-workspace-presentation.md) defines the neighboring active-row, workspace projection, and responsive presentation rules that Copy Link must not disturb.
+- [Native control tooltip contract for the PDF review interface](../conventions/native-control-tooltip-contract.md) documents the broader compact-control tooltip convention; enabled Copy Link controls are a deliberate exception because their visible success tooltip was misleading.
 - [Preserve document history for Annotation Tray navigation](../ui-bugs/preserve-document-history-for-annotation-tray-navigation.md) covers the in-view Meaningful Jump transaction semantics that browser fragment history projects into the address bar.
