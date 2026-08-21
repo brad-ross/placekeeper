@@ -580,6 +580,74 @@ test('Page Note composer', async ({ page }) => {
   await expectScene(product, 'page-note-composer.png');
 });
 
+test('Save Destination modal', async ({ page }) => {
+  const product = await openScene(page, 'save-destination');
+  const dialog = page.getByRole('dialog', { name: 'Choose where to save annotations' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Confirm' })).toBeVisible();
+  await expectScene(product, 'save-destination-modal.png');
+});
+
+test('Save Destination recovery modal', async ({ page }) => {
+  const product = await openScene(page, 'save-recovery');
+  const dialog = page.getByRole('dialog', { name: 'Choose where to save annotations' });
+  await expect(dialog.getByText('This PDF isn’t up to date')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Retry' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Locate PDF…' })).toBeVisible();
+  await expectScene(product, 'save-destination-recovery-modal.png');
+});
+
+test('Save Destination establishing motion respects user preference', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await openScene(page, 'save-destination&establishing=1');
+  const spinner = page.getByRole('dialog', { name: 'Choose where to save annotations' })
+    .locator('.lucide-loader-circle');
+  await expect(spinner).toBeVisible();
+  await expect(spinner).toHaveCSS('animation-name', 'none');
+});
+
+for (const scene of [
+  { name: 'page-note', dialogName: 'Page Note', openComposer: true, viewport: { width: 320, height: 720 } },
+  { name: 'save-recovery', dialogName: 'Choose where to save annotations', openComposer: false, viewport: { width: 320, height: 320 } },
+] as const) {
+  test(`narrow ${scene.dialogName} modal remains contained and touch sized`, async ({ page }) => {
+    await openScene(page, scene.name, scene.viewport);
+    if (scene.openComposer) await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
+    const dialog = page.getByRole('dialog', { name: scene.dialogName });
+    await expect(dialog).toBeVisible();
+    const geometry = await dialog.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const buttons = [...element.querySelectorAll<HTMLButtonElement>('button')];
+      const body = element.querySelector<HTMLElement>('.compact-editorial-modal__body');
+      const active = document.activeElement;
+      const bodyBounds = body?.getBoundingClientRect();
+      const activeBounds = active instanceof HTMLElement ? active.getBoundingClientRect() : undefined;
+      return {
+        top: bounds.top,
+        left: bounds.left,
+        right: bounds.right,
+        bottom: bounds.bottom,
+        buttonHeights: buttons.map((button) => button.getBoundingClientRect().height),
+        activeIsVisible: body !== null
+          && active instanceof HTMLElement
+          && body.contains(active)
+          && bodyBounds !== undefined
+          && activeBounds !== undefined
+          && activeBounds.top >= bodyBounds.top
+          && activeBounds.bottom <= bodyBounds.bottom,
+      };
+    });
+    expect(geometry.top).toBeGreaterThanOrEqual(0);
+    expect(geometry.left).toBeGreaterThanOrEqual(0);
+    expect(geometry.right).toBeLessThanOrEqual(scene.viewport.width);
+    expect(geometry.bottom).toBeLessThanOrEqual(scene.viewport.height);
+    expect(geometry.buttonHeights.length).toBeGreaterThan(0);
+    expect(Math.min(...geometry.buttonHeights)).toBeGreaterThanOrEqual(44);
+    expect(geometry.activeIsVisible).toBe(true);
+  });
+}
+
 for (const state of ['loading', 'empty', 'error'] as const) {
   test(`exceptional annotation ${state}`, async ({ page }) => {
     const product = await openScene(page, `exceptional&exception=${state}`);

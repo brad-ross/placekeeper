@@ -131,6 +131,11 @@ The review session's light-theme visual language: warm gray and ivory environmen
 
 Warm Neutral changes presentation only; reading-first behavior and adaptive Annotation Tray framing remain governed by their product contracts.
 
+### Compact Editorial
+The Warm Neutral modal grammar for Save Destination and text-entry workflows: a direct task-title header, a task-specific body, a restrained footer, and compact icon-plus-label actions.
+
+Supporting copy appears only when it adds context. Compact Editorial changes presentation only and preserves the existing modal behavior, state, and accessibility contracts.
+
 ## Reference navigation
 
 ### Main Reading Thread

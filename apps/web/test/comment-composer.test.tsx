@@ -10,6 +10,7 @@ describe("CommentComposer Warm Neutral contract", () => {
         title="Highlight comment"
         optional
         onSave={vi.fn()}
+        onSkip={vi.fn()}
         onDismiss={vi.fn()}
       />,
     );
@@ -17,13 +18,35 @@ describe("CommentComposer Warm Neutral contract", () => {
     expect(html).toContain("data-comment-composer-backdrop");
     expect(html).toContain("data-comment-composer");
     expect(html).toContain('aria-modal="true"');
+    expect(html).toContain('class="comment-composer compact-editorial-modal"');
+    expect(html).toContain('comment-composer__header compact-editorial-modal__header');
+    expect(html).toContain('compact-editorial-modal__body');
+    expect(html).toContain('comment-composer__actions compact-editorial-modal__footer');
     expect(html).toContain('class="comment-composer__field"');
     expect(html).toContain('class="comment-composer__input"');
     expect(html).toContain("Comment (optional)");
     expect(html).toContain("Keep without comment");
+    expect(html).not.toContain("Review note");
     expect(html).toContain('review-button review-button--primary');
     expect(html).toContain('class="lucide lucide-check review-icon"');
+    expect(html).toContain('class="lucide lucide-arrow-right review-icon"');
     expect(html).not.toContain("disabled");
+  });
+
+  it("uses a truthful cancel action for optional edit-style composers without a skip handler", () => {
+    const html = renderToStaticMarkup(
+      <CommentComposer
+        title="Edit Highlight"
+        optional
+        initialValue="Existing note"
+        onSave={vi.fn()}
+        onDismiss={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain(">Cancel</span>");
+    expect(html).toContain('class="lucide lucide-x review-icon"');
+    expect(html).not.toContain("Keep without comment");
   });
 
   it("keeps required whitespace-only content disabled on initial render", () => {
