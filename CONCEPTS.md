@@ -19,6 +19,13 @@ The process-scoped HTTP projection that serves one active Placekeeper review thr
 
 While its owning daemon and review session remain live, a Loopback Review URL may resume only its exact in-memory projection and scoped authority. After daemon replacement, the same stable-origin route may offer an explicit Placekeeper Link reopen for the encoded path and location. The stale route itself never restores prior browser credentials or Codex task authority; any persisted session-state recovery occurs separately through the normal durable-draft flow.
 
+After daemon replacement, a separate Restart Reconnect Ticket may let the freshly authenticated successor view regain the exact owning Codex task association. The URL remains descriptive: the ticket requires independent browser-side continuity and task-side prompt proofs, and durable review-state recovery remains a separate flow.
+
+### Restart Reconnect Ticket
+A short-lived, single-use correlation record that lets a freshly reopened successor review regain Codex scope only after browser continuity and the exact owning task's next prompt independently prove their halves of the relationship.
+
+It transfers no old browser credential, session identity, task identity, or viewer state. Missing, mismatched, expired, consumed, or revoked proof leaves the successor review browser-scoped.
+
 ### Clean-break Identity Migration
 A named process that replaces an application's human-facing and machine-facing identity as one indivisible contract while intentionally providing no compatibility path for the retired identity.
 
