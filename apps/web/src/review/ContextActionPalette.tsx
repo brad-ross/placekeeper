@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 import { ReviewIcon } from './ReviewIcon.js';
 import { reviewActions } from './review-actions.js';
 
-type ContextActionKind = 'replace' | 'delete' | 'highlight' | 'insert';
+type ContextActionKind = 'replace' | 'delete' | 'highlight';
 
 interface ContextActionButtonProps {
   readonly kind: ContextActionKind;
@@ -34,17 +34,17 @@ function ContextActionButton({ kind, iconOnly = false, onAction }: ContextAction
 export interface ContextPlacement {
   readonly left: number;
   readonly top: number;
+  readonly width?: number;
+  readonly height?: number;
   readonly suggestTop?: boolean;
 }
 
 export interface ContextActionPaletteProps {
-  readonly kind: 'selection' | 'insert';
   readonly placement: ContextPlacement;
   readonly hidden?: boolean;
   onReplace?(): void;
   onDelete?(): void;
   onHighlight?(): void;
-  onInsert?(): void;
 }
 
 export function ContextActionPalette(props: ContextActionPaletteProps) {
@@ -56,22 +56,39 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
   return (
     <div
       role="toolbar"
-      aria-label={props.kind === 'selection' ? 'Selection review actions' : 'Insertion review action'}
+      aria-label="Selection review actions"
       className="review-context-palette"
       data-review-contextual-ui
       hidden={props.hidden}
       inert={props.hidden}
       style={style}
     >
-      {props.kind === 'selection' ? (
-        <>
-          <ContextActionButton kind="replace" iconOnly onAction={props.onReplace} />
-          <ContextActionButton kind="delete" iconOnly onAction={props.onDelete} />
-          <ContextActionButton kind="highlight" iconOnly onAction={props.onHighlight} />
-        </>
-      ) : (
-        <ContextActionButton kind="insert" onAction={props.onInsert} />
-      )}
+      <ContextActionButton kind="replace" iconOnly onAction={props.onReplace} />
+      <ContextActionButton kind="delete" iconOnly onAction={props.onDelete} />
+      <ContextActionButton kind="highlight" iconOnly onAction={props.onHighlight} />
     </div>
+  );
+}
+
+export interface InsertionCaretProps {
+  readonly placement: ContextPlacement;
+  readonly hidden?: boolean;
+}
+
+export function InsertionCaret({ placement, hidden }: InsertionCaretProps) {
+  const style: CSSProperties = {
+    left: placement.left,
+    top: placement.top,
+    ...(placement.width === undefined ? {} : { width: placement.width }),
+    ...(placement.height === undefined ? {} : { height: placement.height }),
+  };
+  return (
+    <span
+      aria-hidden="true"
+      className="review-insertion-caret"
+      data-review-insertion-caret
+      hidden={hidden}
+      style={style}
+    />
   );
 }

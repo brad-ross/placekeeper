@@ -14,6 +14,8 @@ export const PDF_LINK_INTERACTION_ATTRIBUTE = 'data-pdf-link-control';
 export interface ViewerClientPlacement {
   readonly left: number;
   readonly top: number;
+  readonly width?: number;
+  readonly height?: number;
   readonly suggestTop?: boolean;
 }
 

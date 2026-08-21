@@ -15,7 +15,8 @@ export const reviewActions: readonly ReviewActionMetadata[] = Object.freeze([
 ]);
 
 export function reviewActionForKey(key: string): ReviewItemKind | undefined {
-  return reviewActions.find(({ shortcut }) => shortcut.endsWith(key.toUpperCase()))?.kind;
+  const action = reviewActions.find(({ shortcut }) => shortcut.endsWith(key.toUpperCase()));
+  return action?.kind === 'insert' ? undefined : action?.kind;
 }
 
 export function shortcutForReviewAction(kind: ReviewItemKind): string {

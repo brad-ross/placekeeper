@@ -11,6 +11,7 @@ import {
   type PdfEngine,
   type PdfPageObject,
   type Position,
+  type Rotation,
 } from '@embedpdf/models';
 
 import {
@@ -58,9 +59,11 @@ import {
   VIEWER_POINTER_BUTTON_NONE,
   ViewerPrimaryClickGesture,
   viewerPointerButton,
+  type ViewerClientPlacement,
   type ViewerInteractionEvent,
   type ViewerPagePoint,
 } from '../pdf/viewer-interaction-events.js';
+import type { CaretAnchor } from '../pdf/selection-anchor.js';
 import {
   createViewerNavigation,
   type PdfViewerNavigation,
@@ -111,10 +114,43 @@ export function clampPageNotePoint(
   };
 }
 
+export function caretClientPlacement(input: {
+  readonly anchor: CaretAnchor;
+  readonly page: Pick<PdfPageObject, 'size' | 'rotation'>;
+  readonly documentRotation: Rotation;
+  readonly pageBounds: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>;
+}): ViewerClientPlacement | null {
+  const rotation = combinePageRotation(input.page.rotation, input.documentRotation);
+  const rotatedSize = transformSize(input.page.size, rotation, 1);
+  if (
+    !Number.isFinite(input.pageBounds.left)
+    || !Number.isFinite(input.pageBounds.top)
+    || !Number.isFinite(input.pageBounds.width)
+    || !Number.isFinite(input.pageBounds.height)
+    || input.pageBounds.width <= 0
+    || input.pageBounds.height <= 0
+    || !Number.isFinite(rotatedSize.width)
+    || rotatedSize.width <= 0
+  ) return null;
+  const scale = input.pageBounds.width / rotatedSize.width;
+  if (!Number.isFinite(scale) || scale <= 0) return null;
+  const transformed = transformRect(input.page.size, {
+    origin: { x: input.anchor.position.x, y: input.anchor.position.y },
+    size: { width: input.anchor.position.width, height: input.anchor.position.height },
+  }, rotation, scale);
+  const placement = {
+    left: input.pageBounds.left + transformed.origin.x + transformed.size.width / 2,
+    top: input.pageBounds.top + transformed.origin.y + transformed.size.height / 2,
+    width: Math.max(2, transformed.size.width),
+    height: Math.max(2, transformed.size.height),
+  };
+  return Object.values(placement).every(Number.isFinite) ? placement : null;
+}
+
 export async function publishViewerCaretRead(input: {
   readonly read: Promise<ViewerCaretResult>;
   readonly isCurrent: () => boolean;
-  readonly placement: { readonly left: number; readonly top: number; readonly suggestTop: true };
+  readonly placement: ViewerClientPlacement | ((anchor: CaretAnchor) => ViewerClientPlacement);
   readonly emit: (event: ViewerInteractionEvent) => void;
 }): Promise<void> {
   try {
@@ -123,7 +159,12 @@ export async function publishViewerCaretRead(input: {
     input.emit({
       type: 'caret',
       value: result.ok
-        ? { anchor: result.anchor, placement: input.placement }
+        ? {
+            anchor: result.anchor,
+            placement: typeof input.placement === 'function'
+              ? input.placement(result.anchor)
+              : input.placement,
+          }
         : { anchor: null, placement: null, diagnostic: result.diagnostic },
     });
   } catch {
@@ -603,10 +644,21 @@ export function App({
                       : { geometry: selectionState.geometry[page.index] }),
                   }),
                   isCurrent: () => generation === caretReadGeneration.current,
-                  placement: {
-                    left: click.clientPoint.x,
-                    top: click.clientPoint.y,
-                    suggestTop: true,
+                  placement: (anchor) => {
+                    const fallback: ViewerClientPlacement = {
+                      left: click.clientPoint.x,
+                      top: click.clientPoint.y,
+                    };
+                    const active = registry.getStore().getState().core.documents[documentId];
+                    const element = workspaceElementRef.current
+                      ?.querySelector<HTMLElement>(`[data-page-index="${page.index}"]`);
+                    if (!active || !element) return fallback;
+                    return caretClientPlacement({
+                      anchor,
+                      page,
+                      documentRotation: active.rotation,
+                      pageBounds: element.getBoundingClientRect(),
+                    }) ?? fallback;
                   },
                   emit,
                 });

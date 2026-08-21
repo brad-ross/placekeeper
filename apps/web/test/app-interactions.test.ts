@@ -2,6 +2,7 @@ import { Rotation } from '@embedpdf/models';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  caretClientPlacement,
   clampPageNotePoint,
   subscribeToMainDocumentOpened,
   publishViewerCaretRead,
@@ -93,6 +94,21 @@ describe('App interaction boundaries', () => {
       },
     };
     expect(clampPageNotePoint({ x: -10, y: 50 }, page, 18)).toEqual({ x: 2, y: 1 });
+  });
+
+  it('positions the visible insertion caret from resolved PDF geometry', () => {
+    expect(caretClientPlacement({
+      anchor: {
+        pageIndex: 0,
+        position: { x: 149, y: 89, width: 2, height: 16 },
+        leftContext: 'Selectable p',
+        rightContext: 'lacekeeper text',
+        reliable: true,
+      },
+      page: { size: { width: 612, height: 792 }, rotation: Rotation.Degree0 },
+      documentRotation: Rotation.Degree0,
+      pageBounds: { left: 100, top: 50, width: 1_224, height: 1_584 },
+    })).toEqual({ left: 400, top: 244, width: 4, height: 32 });
   });
 
   it('drops a deferred caret read after its viewer generation becomes stale', async () => {

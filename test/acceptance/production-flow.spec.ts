@@ -2745,10 +2745,18 @@ test('creates an insertion from middle-of-line PDFium caret geometry', async ({ 
   await waitForRenderedPageImage(pdfPage);
   await dragPdfPointer(page, pdfPage, { x: 150, y: 99 }, { x: 154, y: 99 });
 
-  const insertionActions = page.getByRole('toolbar', { name: 'Insertion review action' });
-  await expect(insertionActions).toBeVisible();
-  await insertionActions.getByRole('button', { name: 'Insert', exact: true }).click();
+  const insertionCaret = page.locator('[data-review-insertion-caret]');
+  await expect(insertionCaret).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Insertion review action' })).toHaveCount(0);
+  await expect(insertionCaret).toHaveCSS('animation-name', 'review-insertion-caret-blink');
+  const [pageBox, caretBox] = await Promise.all([pdfPage.boundingBox(), insertionCaret.boundingBox()]);
+  if (!pageBox || !caretBox) throw new Error('Insertion caret geometry is unavailable.');
+  expect(caretBox.x - pageBox.x).toBeCloseTo(149, 0);
+  expect(caretBox.y - pageBox.y).toBeCloseTo(89, 0);
+
+  await page.keyboard.type('P');
   const composer = page.getByRole('dialog', { name: 'Insertion text' });
+  await expect(composer.getByRole('textbox', { name: 'Insertion text' })).toHaveValue('P');
   await composer.getByRole('textbox', { name: 'Insertion text' }).fill('Precisely ');
   await composer.getByRole('button', { name: 'Apply' }).click();
 
@@ -2789,6 +2797,7 @@ test('keeps repeated-click PDF text selection out of insertion mode', async ({ p
 
   await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toBeVisible();
   await expect(page.getByRole('toolbar', { name: 'Insertion review action' })).toHaveCount(0);
+  await expect(page.locator('[data-review-insertion-caret]')).toHaveCount(0);
 });
 
 test("one installed-style browser tree preserves review state across responsive layout", async ({ page }) => {
@@ -2992,6 +3001,199 @@ test('edits the current page in a real multi-page viewer without losing adjacent
   expect(host.broker.state(launched.sessionId)?.revision).toBe(1);
   expect(host.broker.state(launched.sessionId)?.items).toHaveLength(1);
   expect(browserErrors).toEqual([]);
+});
+
+test('keeps the workspace and its toggle moving together without relaying animated tray widths into the PDF runway', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFreshProductionFixture(page, pdf, 'Workspace runway animation launch failed');
+
+  const viewport = page.locator('[data-viewer-framing-viewport]');
+  const rail = page.locator('[data-workspace-edge-rail="right"]');
+  await expect(viewport).toBeVisible();
+  await expect(rail).toBeVisible();
+  const measureRestingMargins = () => page.evaluate(() => {
+    const stage = document.querySelector<HTMLElement>('[data-review-stage]');
+    const glyph = document.querySelector<HTMLElement>('[data-workspace-edge-rail="right"] .workspace-edge-rail__glyph');
+    const tray = document.querySelector<HTMLElement>('#review-tools-workspace');
+    if (stage === null || glyph === null || tray === null) throw new Error('Right workspace margin geometry is unavailable.');
+    const stageBounds = stage.getBoundingClientRect();
+    const glyphBounds = glyph.getBoundingClientRect();
+    const trayBounds = tray.getBoundingClientRect();
+    return {
+      right: tray.dataset.toolsWorkspaceOpen === 'true'
+        ? trayBounds.left - glyphBounds.right
+        : stageBounds.right - glyphBounds.right,
+      top: glyphBounds.top - stageBounds.top,
+    };
+  });
+  const closedMargins = await measureRestingMargins();
+  expect(closedMargins.top).toBeCloseTo(closedMargins.right, 0);
+  const closedWidth = await viewport.evaluate((element) => element.scrollWidth);
+  const closedRailRight = await rail.evaluate((element) => element.getBoundingClientRect().right);
+  const sampleMotion = async (phase: string) => {
+    const sampling = viewport.evaluate(async (element, marker) => {
+      const samples: Array<{
+        readonly open: boolean;
+        readonly railRight: number;
+        readonly timing: string;
+        readonly trayLeft: number;
+        readonly visibility: string;
+        readonly width: number;
+      }> = [];
+      document.documentElement.dataset.workspaceRunwaySampler = marker;
+      await new Promise<void>((resolve) => {
+        let frame = 0;
+        const sample = () => requestAnimationFrame(() => {
+          const railElement = document.querySelector<HTMLElement>('[data-workspace-edge-rail="right"]');
+          const tray = document.querySelector<HTMLElement>('#review-tools-workspace');
+          if (railElement === null || tray === null) throw new Error('Workspace motion geometry is unavailable.');
+          samples.push({
+            open: tray.dataset.toolsWorkspaceOpen === 'true',
+            railRight: railElement.getBoundingClientRect().right,
+            timing: getComputedStyle(tray).transitionTimingFunction,
+            trayLeft: tray.getBoundingClientRect().left,
+            visibility: getComputedStyle(tray).visibility,
+            width: element.scrollWidth,
+          });
+          frame += 1;
+          if (frame >= 24) resolve();
+          else sample();
+        });
+        sample();
+      });
+      delete document.documentElement.dataset.workspaceRunwaySampler;
+      return samples;
+    }, phase);
+    await expect.poll(() => page.evaluate(
+      () => document.documentElement.dataset.workspaceRunwaySampler,
+    )).toBe(phase);
+    await rail.click();
+    return sampling;
+  };
+
+  const sampled = await sampleMotion('opening');
+  const openWidth = await viewport.evaluate((element) => element.scrollWidth);
+  const openRailRight = await rail.evaluate((element) => element.getBoundingClientRect().right);
+  const openMargins = await measureRestingMargins();
+  expect(openMargins.top).toBeCloseTo(openMargins.right, 0);
+  const openingMotion = sampled.filter(({ open }) => open);
+  expect(openWidth).toBeGreaterThan(closedWidth);
+  expect(openingMotion).not.toHaveLength(0);
+  expect(openingMotion.map(({ timing, visibility }) => ({ timing, visibility })))
+    .not.toContainEqual(expect.objectContaining({ visibility: 'hidden' }));
+  expect(Math.max(...openingMotion.map(({ railRight, trayLeft }) => Math.abs(trayLeft - railRight))))
+    .toBeLessThanOrEqual(10);
+  expect(openingMotion.filter(({ railRight }) => (
+    railRight > openRailRight + 1 && railRight < closedRailRight - 1
+  ))).not.toHaveLength(0);
+  expect(Array.from(new Set(sampled.map(({ width }) => width).filter((width) => (
+    width > closedWidth + 1 && width < openWidth - 1
+  ))))).toEqual([]);
+
+  const closingSamples = await sampleMotion('closing');
+  const closingMotion = closingSamples.filter(({ open }) => !open);
+  expect(closingMotion).not.toHaveLength(0);
+  expect(Math.max(...closingMotion.map(({ railRight, trayLeft }) => Math.abs(trayLeft - railRight))))
+    .toBeLessThanOrEqual(10);
+  expect(closingMotion.filter(({ railRight }) => (
+    railRight > openRailRight + 1 && railRight < closedRailRight - 1
+  ))).not.toHaveLength(0);
+});
+
+test('keeps the bottom workspace and its toggle moving vertically together without sideways drift', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.setViewportSize({ width: 820, height: 900 });
+  await openFreshProductionFixture(page, pdf, 'Bottom workspace animation launch failed');
+
+  const rail = page.locator('[data-workspace-edge-rail="bottom"]');
+  const tray = page.locator('#review-tools-workspace');
+  await expect(rail).toBeVisible();
+  await expect(tray).toHaveAttribute('data-workspace-presentation', 'bottom');
+  const measureRestingMargins = () => page.evaluate(() => {
+    const stage = document.querySelector<HTMLElement>('[data-review-stage]');
+    const glyph = document.querySelector<HTMLElement>('[data-workspace-edge-rail="bottom"] .workspace-edge-rail__glyph');
+    const trayElement = document.querySelector<HTMLElement>('#review-tools-workspace');
+    if (stage === null || glyph === null || trayElement === null) throw new Error('Bottom workspace margin geometry is unavailable.');
+    const stageBounds = stage.getBoundingClientRect();
+    const glyphBounds = glyph.getBoundingClientRect();
+    const trayBounds = trayElement.getBoundingClientRect();
+    return {
+      bottom: trayElement.dataset.toolsWorkspaceOpen === 'true'
+        ? trayBounds.top - glyphBounds.bottom
+        : stageBounds.bottom - glyphBounds.bottom,
+      left: glyphBounds.left - stageBounds.left,
+    };
+  });
+  const closedMargins = await measureRestingMargins();
+  expect(closedMargins.left).toBeCloseTo(closedMargins.bottom, 0);
+  const closedRailBottom = await rail.evaluate((element) => element.getBoundingClientRect().bottom);
+  const sampleMotion = async (phase: string) => {
+    const sampling = tray.evaluate(async (element, marker) => {
+      const samples: Array<{
+        readonly open: boolean;
+        readonly railBottom: number;
+        readonly stageLeft: number;
+        readonly trayLeft: number;
+        readonly trayTop: number;
+        readonly visibility: string;
+      }> = [];
+      document.documentElement.dataset.bottomWorkspaceMotionSampler = marker;
+      await new Promise<void>((resolve) => {
+        let frame = 0;
+        const sample = () => requestAnimationFrame(() => {
+          const railElement = document.querySelector<HTMLElement>('[data-workspace-edge-rail="bottom"]');
+          const stage = document.querySelector<HTMLElement>('[data-review-stage]');
+          if (railElement === null || stage === null) throw new Error('Bottom workspace motion geometry is unavailable.');
+          samples.push({
+            open: element.dataset.toolsWorkspaceOpen === 'true',
+            railBottom: railElement.getBoundingClientRect().bottom,
+            stageLeft: stage.getBoundingClientRect().left,
+            trayLeft: element.getBoundingClientRect().left,
+            trayTop: element.getBoundingClientRect().top,
+            visibility: getComputedStyle(element).visibility,
+          });
+          frame += 1;
+          if (frame >= 24) resolve();
+          else sample();
+        });
+        sample();
+      });
+      delete document.documentElement.dataset.bottomWorkspaceMotionSampler;
+      return samples;
+    }, phase);
+    await expect.poll(() => page.evaluate(
+      () => document.documentElement.dataset.bottomWorkspaceMotionSampler,
+    )).toBe(phase);
+    await rail.click();
+    return sampling;
+  };
+
+  const openingSamples = await sampleMotion('opening');
+  const openRailBottom = await rail.evaluate((element) => element.getBoundingClientRect().bottom);
+  const openMargins = await measureRestingMargins();
+  expect(openMargins.left).toBeCloseTo(openMargins.bottom, 0);
+  const openingMotion = openingSamples.filter(({ open }) => open);
+  expect(openingMotion).not.toHaveLength(0);
+  expect(openingMotion.map(({ visibility }) => visibility)).not.toContain('hidden');
+  expect(Math.max(...openingMotion.map(({ railBottom, trayTop }) => Math.abs(trayTop - railBottom))))
+    .toBeLessThanOrEqual(10);
+  expect(Math.max(...openingMotion.map(({ stageLeft, trayLeft }) => Math.abs(trayLeft - stageLeft))))
+    .toBeLessThanOrEqual(1);
+  expect(openingMotion.filter(({ railBottom }) => (
+    railBottom > openRailBottom + 1 && railBottom < closedRailBottom - 1
+  ))).not.toHaveLength(0);
+
+  const closingSamples = await sampleMotion('closing');
+  const closingMotion = closingSamples.filter(({ open }) => !open);
+  expect(closingMotion).not.toHaveLength(0);
+  expect(Math.max(...closingMotion.map(({ railBottom, trayTop }) => Math.abs(trayTop - railBottom))))
+    .toBeLessThanOrEqual(10);
+  expect(Math.max(...closingMotion.map(({ stageLeft, trayLeft }) => Math.abs(trayLeft - stageLeft))))
+    .toBeLessThanOrEqual(1);
+  expect(closingMotion.filter(({ railBottom }) => (
+    railBottom > openRailBottom + 1 && railBottom < closedRailBottom - 1
+  ))).not.toHaveLength(0);
 });
 
 test('fits a real PDF to closed, bottom, and resizable right reading widths as a one-shot zoom', async ({ page }) => {
