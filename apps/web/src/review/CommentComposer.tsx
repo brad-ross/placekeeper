@@ -32,6 +32,8 @@ export function CommentComposer({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [value, setValue] = useState(initialValue);
   const canSave = optional || (allowWhitespace ? value.length > 0 : value.trim().length > 0);
+  const canSkip = optional && onSkip !== undefined;
+  const secondaryLabel = canSkip ? 'Keep without comment' : 'Cancel';
 
   useEffect(() => {
     const input = inputRef.current;
@@ -48,7 +50,7 @@ export function CommentComposer({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="comment-composer"
+        className="comment-composer compact-editorial-modal"
         data-comment-composer
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
@@ -60,36 +62,38 @@ export function CommentComposer({
           trapDialogFocus(event);
         }}
       >
-        <header className="comment-composer__header">
-          <p className="comment-composer__eyebrow">Review note</p>
+        <header className="comment-composer__header compact-editorial-modal__header">
           <h2 id={titleId}>{title}</h2>
         </header>
-        <label className="comment-composer__field">
-          <span className="comment-composer__label">{fieldLabel}</span>
-          <textarea
-            className="comment-composer__input"
-            ref={inputRef}
-            title={fieldLabel}
-            value={value}
-            onChange={(event) => setValue(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && canSave) {
-                void onSave(value);
-              }
-            }}
-          />
-        </label>
-        <div className="comment-composer__actions">
+        <div className="compact-editorial-modal__body">
+          <label className="comment-composer__field">
+            <span className="comment-composer__label">{fieldLabel}</span>
+            <textarea
+              className="comment-composer__input"
+              ref={inputRef}
+              title={fieldLabel}
+              value={value}
+              onChange={(event) => setValue(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && canSave) {
+                  void onSave(value);
+                }
+              }}
+            />
+          </label>
+        </div>
+        <footer className="comment-composer__actions compact-editorial-modal__footer">
           <button
             className="review-button review-button--secondary"
             type="button"
-            title={optional ? 'Keep without comment' : 'Cancel'}
+            title={secondaryLabel}
             onClick={() => {
-              if (optional && onSkip) void onSkip();
+              if (canSkip) void onSkip();
               else onDismiss();
             }}
           >
-            {optional ? 'Keep without comment' : 'Cancel'}
+            <ReviewIcon name={canSkip ? 'arrow-right' : 'close'} />
+            <span>{secondaryLabel}</span>
           </button>
           <button
             className="review-button review-button--primary"
@@ -101,7 +105,7 @@ export function CommentComposer({
             <ReviewIcon name="check" />
             <span>{saveLabel}</span>
           </button>
-        </div>
+        </footer>
       </div>
     </div>
   );

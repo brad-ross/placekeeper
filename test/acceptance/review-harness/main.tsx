@@ -6,6 +6,7 @@ import {
   ReviewShell,
   type RejectedReviewCommand,
 } from '../../../apps/web/src/app/ReviewShell.js';
+import { SaveDestinationDialog } from '../../../apps/web/src/save/SaveDestinationDialog.js';
 import { projectReviewItems } from '../../../apps/web/src/review/annotation-projection.js';
 import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
 import type { CaretAnchor, SelectionAnchor } from '../../../apps/web/src/pdf/selection-anchor.js';
@@ -30,6 +31,7 @@ import { resolveVisualScenario, VisualDocument } from './visual-scenarios.js';
 const root = document.querySelector('#root');
 if (!root) throw new Error('Review harness root is missing');
 const visualScenario = resolveVisualScenario(window.location.search);
+const saveEstablishing = new URLSearchParams(window.location.search).has('establishing');
 if (visualScenario) root.setAttribute('data-production-root', 'true');
 
 const selection: SelectionAnchor = {
@@ -572,9 +574,32 @@ function Harness() {
     </ReviewShell>
   );
 
-  return visualScenario
-    ? <main data-production-review data-visual-scene={visualScenario.name}>{shell}</main>
-    : shell;
+  if (!visualScenario) return shell;
+  const saveDestinationOpen = visualScenario.name === 'save-destination'
+    || visualScenario.name === 'save-recovery';
+  return (
+    <main data-production-review data-visual-scene={visualScenario.name}>
+      {shell}
+      {saveDestinationOpen ? (
+        <SaveDestinationDialog
+          open
+          establishing={saveEstablishing}
+          proposal={{
+            filename: 'Identification Strategy — annotated.pdf',
+            folder: '/Users/reviewer/Documents/Working Papers',
+          }}
+          {...(visualScenario.name === 'save-recovery' ? {
+            recoveryTarget: 'Identification Strategy — annotated.pdf',
+            onRetry: async () => undefined,
+            onLocate: async () => undefined,
+          } : {})}
+          onConfirm={async () => undefined}
+          onCancel={() => undefined}
+          onChooseLocation={async () => undefined}
+        />
+      ) : null}
+    </main>
+  );
 }
 
 createRoot(root).render(<Harness />);

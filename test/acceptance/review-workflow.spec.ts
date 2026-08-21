@@ -746,6 +746,12 @@ test.describe('canonical review workflow', () => {
     await edit.click();
     const editor = page.getByRole('dialog', { name: 'Edit Highlight' });
     await expect(editor).toBeVisible();
+    await editor.getByRole('button', { name: 'Cancel' }).click();
+    await expect(editor).toHaveCount(0);
+    await expect(page.locator('[data-review-item]')).toHaveCount(1);
+
+    await edit.click();
+    await expect(editor).toBeVisible();
     await editor.getByRole('textbox', { name: 'Comment (optional)' }).fill('Edited in the open tray.');
     await editor.getByRole('button', { name: 'Save comment' }).click();
 

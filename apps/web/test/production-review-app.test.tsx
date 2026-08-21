@@ -412,8 +412,14 @@ describe("one production review tree", () => {
     />);
 
     expect(html).toContain("Choose where to save annotations");
+    expect(html).toContain('class="save-destination-dialog compact-editorial-modal"');
+    expect(html).toContain('compact-editorial-modal__header');
+    expect(html).toContain('compact-editorial-modal__body');
+    expect(html).toContain('compact-editorial-modal__footer');
     expect(html.indexOf("Modify the original PDF")).toBeLessThan(html.indexOf("Save to a new copy"));
     expect(html).toContain("Confirm");
+    expect(html).toContain('class="lucide lucide-x review-icon"');
+    expect(html).toContain('class="lucide lucide-check review-icon"');
     expect(html).toContain("You can change this later by clicking the filename.");
     expect(html).not.toContain("Keep annotations in the file you opened.");
     expect(html).not.toContain("Keep the original unchanged.");
@@ -432,8 +438,10 @@ describe("one production review tree", () => {
 
     expect(html).toContain("This PDF isn’t up to date");
     expect(html).toContain("Your latest annotations are protected.");
-    expect(html).toContain(">Retry</button>");
+    expect(html).toContain(">Retry</span>");
     expect(html).toContain("Locate PDF…");
+    expect(html).toContain('class="lucide lucide-redo2 lucide-redo-2 review-icon"');
+    expect(html).toContain('class="lucide lucide-locate-fixed review-icon"');
   });
 
   it("routes invalid geometry back to annotation correction instead of generic retry", () => {
@@ -450,6 +458,7 @@ describe("one production review tree", () => {
 
     expect(html).toContain("An annotation is outside the page");
     expect(html).toContain("Return to annotations");
+    expect(html).toContain('class="lucide lucide-arrow-left review-icon"');
     expect(html).not.toContain(">Retry</button>");
   });
 });
