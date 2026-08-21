@@ -36,7 +36,9 @@ export function AnnotationPeek({ item, onHoldChange, copyLink }: AnnotationPeekP
           {...copyLink}
           variant="annotation"
           ariaLabel={`Copy link to ${kindLabel} annotation on page ${item.pageIndex + 1}`}
-          title="Copy annotation link"
+          title={copyLink.disabled
+            ? 'Save annotation before copying its link'
+            : 'Copy annotation link'}
         />
       )}
     </aside>

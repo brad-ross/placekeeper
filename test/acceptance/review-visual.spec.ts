@@ -61,6 +61,24 @@ async function expectCompoundReferenceTabs(
   )).toHaveCount(1);
   await expect(tablist.getByRole('button', { name: 'Send to main document' })).toBeVisible();
   await expect(tablist.getByRole('button', { name: 'Close active reference' })).toBeVisible();
+  const actionGaps = await tablist.locator(
+    '.reference-tab-segment:has(> [role="tab"][aria-selected="true"])',
+  ).evaluate((segment) => {
+    const selector = segment.querySelector('[role="tab"]');
+    const actions = [...segment.querySelectorAll<HTMLElement>('.reference-tab-segment__action')];
+    if (!selector || actions.length !== 2) throw new Error('Reference tab actions are incomplete.');
+    const selectorBounds = selector.getBoundingClientRect();
+    const firstBounds = actions[0]!.getBoundingClientRect();
+    const secondBounds = actions[1]!.getBoundingClientRect();
+    return {
+      group: getComputedStyle(segment).columnGap,
+      selectorToAction: firstBounds.left - selectorBounds.right,
+      actionToAction: secondBounds.left - firstBounds.right,
+    };
+  });
+  expect(actionGaps.group).toBe('2px');
+  expect(actionGaps.selectorToAction).toBeCloseTo(2, 1);
+  expect(actionGaps.actionToAction).toBeCloseTo(2, 1);
   await expect(page.locator('.reference-panel__actions')).toHaveCount(0);
 }
 
@@ -138,10 +156,22 @@ async function expectOutlineTreeGeometry(
 
   const disclosureWidth = await navigator.locator('.outline-navigator__disclosure:visible').first()
     .evaluate((element) => element.getBoundingClientRect().width);
-  const referenceWidth = await navigator.locator('.outline-navigator__reference:visible').first()
-    .evaluate((element) => element.getBoundingClientRect().width);
+  const visibleActions = navigator.locator([
+    '.row-action-group__direct:visible button',
+    '.row-action-group__secondary:visible > button',
+  ].join(', '));
+  const actionWidths = await visibleActions.evaluateAll((actions) => actions.map(
+    (action) => action.getBoundingClientRect().width,
+  ));
   expect(disclosureWidth).toBe(expectedControlSize);
-  expect(referenceWidth).toBe(expectedControlSize);
+  expect(actionWidths.length).toBeGreaterThan(0);
+  expect(actionWidths.every((width) => width === 31 || width === 44)).toBe(true);
+  const visibleDirectGroups = navigator.locator('.row-action-group__direct:visible');
+  if (await visibleDirectGroups.count() > 0) {
+    expect(await visibleDirectGroups.evaluateAll((groups) => groups.map(
+      (group) => getComputedStyle(group).gap,
+    ))).toEqual(expect.arrayContaining(['2px']));
+  }
   const disclosureRhythm = await navigator.locator(
     '.outline-navigator__row:has(.outline-navigator__disclosure)',
   ).first().evaluate((row) => {
@@ -170,7 +200,10 @@ async function expectOutlineTreeGeometry(
   expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
   for (const row of overflow.rows) expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth);
 
-  const containedActions = await navigator.locator('.outline-navigator__reference:visible').evaluateAll((actions) => (
+  const containedActions = await navigator.locator([
+    '.row-action-group__direct:visible button',
+    '.row-action-group__secondary:visible > button',
+  ].join(', ')).evaluateAll((actions) => (
     actions.every((action) => {
       const actionRect = action.getBoundingClientRect();
       const rowRect = action.closest('.outline-navigator__row')?.getBoundingClientRect();
@@ -191,6 +224,8 @@ test('wide contextual review', async ({ page }) => {
 
 test('wide reading', async ({ page }) => {
   const product = await openScene(page, 'reading');
+  await expect(page.getByRole('button', { name: 'Copy link to current PDF location' })
+    .locator('.lucide-link')).toBeVisible();
   await expectScene(product, 'wide-reading.png');
 });
 
@@ -213,6 +248,15 @@ test('installed real PDF reading', async ({ page }) => {
   await expect.poll(() => image.evaluate((element) => (
     element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0
   ))).toBe(true);
+  const identityBox = await page.locator('.review-chrome__save-identity').boundingBox();
+  const copyLinkBox = await page.locator('[data-review-copy-link]').boundingBox();
+  const viewerControlsBox = await page.locator('.review-chrome__viewer-controls').boundingBox();
+  if (!identityBox || !copyLinkBox || !viewerControlsBox) {
+    throw new Error('Document chrome geometry is unavailable.');
+  }
+  expect(copyLinkBox.x).toBeGreaterThanOrEqual(identityBox.x + identityBox.width);
+  expect(copyLinkBox.x - (identityBox.x + identityBox.width)).toBeLessThanOrEqual(2.5);
+  expect(copyLinkBox.x + copyLinkBox.width).toBeLessThan(viewerControlsBox.x);
   await page.evaluate(async () => { await document.fonts.ready; });
   await expectScene(product, 'installed-real-pdf.png');
 });
@@ -228,6 +272,8 @@ test('wide Annotation Tray', async ({ page }) => {
   )).toBeLessThanOrEqual(0.5);
   const annotation = page.getByRole('button', { name: /Highlight · Page 1/u });
   await annotation.focus();
+  await expect(page.getByRole('button', { name: /Copy link to Highlight annotation on page 1/u })
+    .locator('.lucide-link')).toBeVisible();
   await expect(annotation.locator('.annotation-item__page')).toHaveText('1');
   await expect(annotation.locator('.annotation-item__separator')).toHaveCount(2);
   await expect(annotation.locator('.annotation-item__section')).toHaveAttribute(
@@ -278,6 +324,9 @@ test('wide Outline tree', async ({ page }) => {
     name: 'Conditional comparison estimates, Page 24',
     exact: true,
   }).focus();
+  await expect(page.getByRole('button', {
+    name: 'Copy exact destination link for Conditional comparison estimates, Page 24',
+  }).locator('.lucide-link')).toBeVisible();
   await expect(page.locator('[data-outline-item="outline-long-nested"] > .outline-navigator__row'))
     .toHaveAttribute('data-current', 'true');
   await expectScene(product, 'wide-outline-tree.png');

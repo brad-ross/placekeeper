@@ -15,6 +15,7 @@ let pdf = "";
 let multiPagePdf = "";
 let rotatedPdf = "";
 let referencePdf = "";
+let annotatedReferencePdf = "";
 let searchPdf = "";
 
 const PRODUCTION_VIEWER_READY_TIMEOUT_MS = 15_000;
@@ -141,7 +142,7 @@ async function followLinkInSameReference(
     await page.keyboard.press("Enter");
     try {
       await expect(firstAction).toBeFocused({ timeout: 1_500 });
-      await expect(menu.getByRole("menuitem")).toHaveCount(3);
+      await expect(menu.getByRole("menuitem")).toHaveCount(4);
       await expect(action).toHaveAttribute("title", "Follow in this tab");
       await expect(action).toHaveText("");
       await page.keyboard.press("ArrowDown");
@@ -262,11 +263,16 @@ test.beforeAll(async () => {
   multiPagePdf = join(root, "multi-page.pdf");
   rotatedPdf = join(root, "rotated.pdf");
   referencePdf = join(root, "reference-navigation.pdf");
+  annotatedReferencePdf = join(root, "reference-navigation-annotated.pdf");
   searchPdf = join(root, "pdf-search.pdf");
   await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
   await copyFile(resolve("test/fixtures/pdfs/mixed-text-image.pdf"), multiPagePdf);
   await copyFile(resolve("test/fixtures/pdfs/rotation-90-crop.pdf"), rotatedPdf);
   await copyFile(resolve("test/fixtures/pdfs/reference-navigation.pdf"), referencePdf);
+  await copyFile(
+    resolve("test/fixtures/pdfs/reference-navigation-annotated.pdf"),
+    annotatedReferencePdf,
+  );
   await copyFile(resolve("test/fixtures/pdfs/pdf-search.pdf"), searchPdf);
   await copyFile(resolve("test/fixtures/latex/paper.tex"), join(sourceRoot, "paper.tex"));
   host = await PlacekeeperHost.start({
@@ -501,7 +507,8 @@ test("searches extracted PDF text with variants, history, references, and retain
     top: element.scrollTop,
   }));
 
-  await exact.locator("[data-search-result]").first()
+  await firstResultCard.hover();
+  await firstResultCard
     .getByRole("button", { name: "Open result on page 1 in References" }).click();
   const searchReferenceTab = page.getByRole("tab", { name: /stable, Page 1/u });
   await expectReferenceReady(page, searchReferenceTab);
@@ -611,6 +618,28 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   browserName,
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (value: string) => {
+          const state = globalThis as typeof globalThis & {
+            __copiedPdfTargetLink?: string;
+            __rejectPdfTargetCopy?: boolean;
+            __holdPdfTargetCopy?: boolean;
+            __releasePdfTargetCopy?: () => void;
+            __pdfTargetCopyCount?: number;
+          };
+          state.__pdfTargetCopyCount = (state.__pdfTargetCopyCount ?? 0) + 1;
+          if (state.__rejectPdfTargetCopy) throw new Error("denied");
+          if (state.__holdPdfTargetCopy) {
+            await new Promise<void>((resolve) => { state.__releasePdfTargetCopy = resolve; });
+          }
+          state.__copiedPdfTargetLink = value;
+        },
+      },
+    });
+  });
   const documentRequests: Array<{ url: string; authorization?: string; cookie?: string }> = [];
   page.on("request", (request) => {
     if (!/\/document\//u.test(new URL(request.url()).pathname)) return;
@@ -640,10 +669,14 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   const primaryMenu = page.getByRole("menu", { name: "Open Primary result, Page 2" });
   await expect(primaryMenu).toBeVisible();
   await expect(primaryMenu.getByRole("menuitem", { name: /Open in References/u })).toBeFocused();
-  await expect(primaryMenu.getByRole("menuitem")).toHaveCount(2);
-  await expect(primaryMenu.locator("svg")).toHaveCount(2);
+  await expect(primaryMenu.getByRole("menuitem")).toHaveCount(3);
+  await expect(primaryMenu.locator("svg")).toHaveCount(3);
   await expect(primaryMenu.getByRole("menuitem").first()).toHaveAttribute("title", "Open in References");
-  await expect(primaryMenu.getByRole("menuitem").last()).toHaveAttribute("title", "Open in main document");
+  await expect(primaryMenu.getByRole("menuitem").nth(1)).toHaveAttribute("title", "Open in main document");
+  const copyTargetLink = primaryMenu.getByRole("menuitem", {
+    name: "Copy link to exact destination on page 2",
+  });
+  await expect(copyTargetLink).not.toHaveAttribute("title", "Copy exact destination link");
   await expect(primaryMenu.getByRole("menuitem").first()).toHaveText("");
   await expect(primaryMenu.getByRole("menuitem").last()).toHaveText("");
   const firstMenuItemBounds = await primaryMenu.getByRole("menuitem").first().boundingBox();
@@ -652,7 +685,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   expect(firstMenuItemBounds!.height).toBe(34);
   const menuBounds = await primaryMenu.boundingBox();
   expect(menuBounds).not.toBeNull();
-  expect(menuBounds!.width).toBeLessThan(100);
+  expect(menuBounds!.width).toBeLessThan(140);
   expect(menuBounds!.height).toBe(44);
   const popoverBounds = await page.locator("[data-link-action-popover]").boundingBox();
   expect(popoverBounds).not.toBeNull();
@@ -661,16 +694,69 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   expect(menuBounds!.y).toBeGreaterThanOrEqual(0);
   expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(1280);
   expect(menuBounds!.y + menuBounds!.height).toBeLessThanOrEqual(900);
-  await page.keyboard.press("Escape");
+  await page.evaluate(() => {
+    (globalThis as typeof globalThis & { __holdPdfTargetCopy?: boolean })
+      .__holdPdfTargetCopy = true;
+  });
+  await copyTargetLink.click();
+  await expect(copyTargetLink).toHaveAttribute("aria-busy", "true");
+  await copyTargetLink.click();
+  expect(await page.evaluate(() => (
+    globalThis as typeof globalThis & { __pdfTargetCopyCount?: number }
+  ).__pdfTargetCopyCount)).toBe(1);
+  await page.evaluate(() => {
+    const state = globalThis as typeof globalThis & {
+      __holdPdfTargetCopy?: boolean;
+      __releasePdfTargetCopy?: () => void;
+    };
+    state.__holdPdfTargetCopy = false;
+    state.__releasePdfTargetCopy?.();
+  });
   await expect(primaryMenu).toHaveCount(0);
   await expect(primaryLink).toBeFocused();
   await expect(page.getByLabel("Current page")).toHaveText("1 / 4");
-
+  expect(await page.evaluate(() => (
+    globalThis as typeof globalThis & { __copiedPdfTargetLink?: string }
+  ).__copiedPdfTargetLink)).toMatch(/#v=2&page=2&mode=/u);
   await page.keyboard.press("Enter");
   await expect(primaryMenu.getByRole("menuitem", { name: /Open in References/u })).toBeFocused();
   await page.keyboard.press("Tab");
+  await expect(primaryMenu.getByRole("menuitem", { name: "Open in main document" })).toBeFocused();
+  await expect(primaryMenu).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(copyTargetLink).toBeFocused();
+  await expect(primaryMenu).toBeVisible();
+  await page.evaluate(() => {
+    (globalThis as typeof globalThis & { __rejectPdfTargetCopy?: boolean })
+      .__rejectPdfTargetCopy = true;
+  });
+  await page.keyboard.press("Enter");
+  const fallbackLink = primaryMenu.getByRole("textbox", { name: "Placekeeper link" });
+  await expect(fallbackLink).toHaveValue(/#v=2&page=2&mode=/u);
+  await expect(copyTargetLink).toBeFocused();
+  const failedPopoverBounds = await page.locator("[data-link-action-popover]").boundingBox();
+  expect(failedPopoverBounds).not.toBeNull();
+  expect(failedPopoverBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(failedPopoverBounds!.y).toBeGreaterThanOrEqual(0);
+  expect(failedPopoverBounds!.x + failedPopoverBounds!.width).toBeLessThanOrEqual(1280);
+  expect(failedPopoverBounds!.y + failedPopoverBounds!.height).toBeLessThanOrEqual(900);
+  await page.keyboard.press("Tab");
+  await expect(fallbackLink).toBeFocused();
+  await page.keyboard.press("Tab");
+  const retryCopy = primaryMenu.getByRole("button", { name: "Retry" });
+  await expect(retryCopy).toBeFocused();
+  await expect(primaryMenu).toBeVisible();
+  const failedTargetLink = await fallbackLink.inputValue();
+  await page.evaluate(() => {
+    (globalThis as typeof globalThis & { __rejectPdfTargetCopy?: boolean })
+      .__rejectPdfTargetCopy = false;
+  });
+  await retryCopy.click();
   await expect(primaryMenu).toHaveCount(0);
-  await expect(primaryLink).not.toBeFocused();
+  await expect(primaryLink).toBeFocused();
+  expect(await page.evaluate(() => (
+    globalThis as typeof globalThis & { __copiedPdfTargetLink?: string }
+  ).__copiedPdfTargetLink)).toBe(failedTargetLink);
 
   await openLinkInReferences(page, primaryLink);
   const workspace = page.locator("[data-review-workspace]");
@@ -1557,6 +1643,15 @@ test("records annotation tray jumps in document history", async ({ page }) => {
     name: /^Page Note · Page 3 · .*History destination\.$/u,
   }).first();
   await expect(pageThreeAnnotation).toBeVisible();
+  const pageThreeCopyLink = annotationsPanel.getByRole("button", {
+    name: "Copy link to Page Note annotation on page 3",
+  });
+  await expect(pageThreeCopyLink).toBeVisible();
+  await expect(pageThreeCopyLink).toBeDisabled();
+  await expect(pageThreeCopyLink).toHaveAttribute(
+    "title",
+    "Save annotation before copying its link",
+  );
 
   const back = page.getByRole("button", { name: "Back in document history" });
   const forward = page.getByRole("button", { name: "Forward in document history" });
@@ -1571,6 +1666,127 @@ test("records annotation tray jumps in document history", async ({ page }) => {
 
   await forward.click();
   await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
+});
+
+test("settles tray copy actions without selection or tooltip flashes", async ({ page }) => {
+  await page.addInitScript(() => {
+    const copyState = globalThis as typeof globalThis & {
+      __holdTrayCopy?: boolean;
+      __releaseTrayCopy?: () => void;
+    };
+    copyState.__holdTrayCopy = true;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async () => {
+          if (!copyState.__holdTrayCopy) return;
+          await new Promise<void>((resolve) => { copyState.__releaseTrayCopy = resolve; });
+        },
+      },
+    });
+  });
+  await openFreshProductionFixture(
+    page,
+    annotatedReferencePdf,
+    "Tray copy focus launch failed",
+  );
+
+  await openAnnotationsWorkspace(page);
+  const annotationRow = page.locator('[data-review-item]').first();
+  const annotationId = await annotationRow.getAttribute('data-review-item');
+  if (!annotationId) throw new Error('Owned annotation row has no stable id.');
+  const annotationMark = page.locator(`[data-owned-mark][data-review-id="${annotationId}"]`);
+  const annotationCopy = annotationRow.getByRole('button', {
+    name: 'Copy link to Delete annotation on page 1',
+  });
+  await expect(annotationCopy).toBeEnabled();
+  await expect(annotationCopy).not.toHaveAttribute('title');
+  await annotationCopy.click();
+  await expect(annotationCopy.locator('..')).toHaveAttribute('data-copy-link-status', 'pending');
+  await expect(annotationCopy).toBeEnabled();
+  await expect(annotationCopy).toBeFocused();
+  await page.mouse.move(0, 0);
+  await expect(annotationCopy).toBeFocused();
+  await expect(annotationRow).not.toHaveAttribute('data-active', 'true');
+  await expect(annotationRow).toHaveAttribute('data-corresponding', 'false');
+  await expect(annotationMark).not.toHaveAttribute('data-corresponding', 'true');
+  await expect(annotationRow).toHaveCSS('outline-style', 'none');
+  await page.evaluate(() => {
+    const copyState = globalThis as typeof globalThis & {
+      __holdTrayCopy?: boolean;
+      __releaseTrayCopy?: () => void;
+    };
+    copyState.__holdTrayCopy = false;
+    copyState.__releaseTrayCopy?.();
+  });
+  await expect(annotationCopy.locator('..')).toHaveAttribute('data-copy-link-status', 'success');
+  await expect(annotationCopy).not.toBeFocused();
+  await expect(annotationCopy).toHaveCSS('opacity', '0');
+
+  await annotationRow.locator('.annotation-item__content').click();
+  await page.getByLabel('Current page').hover();
+  await expect(annotationRow).toHaveAttribute('data-active', 'true');
+  const annotationSelectionBackground = await annotationRow.evaluate((element) => {
+    const probe = document.createElement('span');
+    probe.style.backgroundColor = getComputedStyle(element)
+      .getPropertyValue('--review-selection-bg')
+      .trim();
+    document.body.append(probe);
+    const normalized = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return normalized;
+  });
+  await expect(annotationRow).toHaveCSS('background-color', annotationSelectionBackground);
+  await annotationRow.hover();
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  await expect(annotationRow).toHaveCSS('background-color', annotationSelectionBackground);
+
+  await page.getByRole('tab', { name: 'Outline', exact: true }).click();
+  await expect(page.locator('#workspace-panel-outline')).toBeFocused();
+  const overview = page.getByRole('button', { name: 'Overview, Page 2', exact: true });
+  const outlineRow = overview.locator('..');
+  await overview.focus();
+  const outlineCopy = outlineRow.getByRole('button', {
+    name: 'Copy exact destination link for Overview, Page 2',
+  });
+  await expect(outlineCopy).not.toHaveAttribute('title');
+  await page.evaluate(() => {
+    const copyState = globalThis as typeof globalThis & {
+      __holdTrayCopy?: boolean;
+      __releaseTrayCopy?: () => void;
+    };
+    copyState.__holdTrayCopy = true;
+    delete copyState.__releaseTrayCopy;
+  });
+  await outlineRow.hover();
+  await outlineCopy.click();
+  await expect(outlineCopy.locator('..')).toHaveAttribute('data-copy-link-status', 'pending');
+  await expect(outlineCopy).toBeEnabled();
+  await expect(outlineCopy).toBeFocused();
+  await page.mouse.move(0, 0);
+  await expect(outlineCopy).toBeFocused();
+  await page.evaluate(() => {
+    const copyState = globalThis as typeof globalThis & {
+      __holdTrayCopy?: boolean;
+      __releaseTrayCopy?: () => void;
+    };
+    copyState.__holdTrayCopy = false;
+    copyState.__releaseTrayCopy?.();
+  });
+  await expect(outlineCopy.locator('..')).toHaveAttribute('data-copy-link-status', 'success');
+  await expect(outlineCopy).not.toBeFocused();
+  await expect(outlineRow).not.toHaveAttribute('data-current', 'true');
+  await expect(outlineRow).toHaveCSS('outline-style', 'none');
+  const outlineActions = outlineRow.locator('.row-action-group__direct');
+  await expect(outlineActions).toHaveCSS('opacity', '0');
+
+  await outlineCopy.focus();
+  await outlineCopy.press('Enter');
+  await expect(outlineCopy.locator('..')).toHaveAttribute('data-copy-link-status', 'success');
+  await expect(outlineCopy).toBeFocused();
+  await expect(outlineActions).toHaveCSS('opacity', '1');
 });
 
 test("switches and sends references from the right-docked workspace", async ({ page }) => {
@@ -1771,11 +1987,14 @@ test("keeps compound reference actions touch sized for coarse pointers", async (
     await expect(mainWorkspace.locator("[data-page-index='0']")).toBeVisible();
     await (await currentWorkspaceRail(page)).click();
     const outline = page.getByRole("navigation", { name: "Document outline" });
-    const outlineReference = outline.getByRole("button", {
-      name: "Open Details, Page 3 in References",
+    const outlineActions = outline.getByRole("button", {
+      name: "Secondary actions for Details, Page 3",
     });
-    await expect(outlineReference).toHaveCSS("opacity", "1");
-    expect(await outlineReference.evaluate((button) => {
+    await expect(outlineActions).toHaveAttribute("aria-haspopup", "menu");
+    await expect(outlineActions).toHaveAttribute("aria-expanded", "false");
+    const controlledMenuId = await outlineActions.getAttribute("aria-controls");
+    expect(controlledMenuId).toMatch(/^row-actions-menu-/u);
+    expect(await outlineActions.evaluate((button) => {
       const bounds = button.getBoundingClientRect();
       return { width: bounds.width, height: bounds.height };
     })).toEqual({ width: 44, height: 44 });
@@ -1805,13 +2024,26 @@ test("keeps compound reference actions touch sized for coarse pointers", async (
     });
     expect(coarseTreeGeometry.columns).toHaveLength(3);
     expect(coarseTreeGeometry.columns[0]).toBe(52);
-    expect(coarseTreeGeometry.columns[2]).toBe(44);
+    expect(coarseTreeGeometry.columns[2]).toBe(64);
     expect(coarseTreeGeometry).toMatchObject({
       spacer: { width: 44, height: 44 },
       contained: true,
       noHorizontalOverflow: true,
     });
-    await outlineReference.click();
+    await outlineActions.click();
+    await expect(outlineActions).toHaveAttribute("aria-expanded", "true");
+    const outlineMenu = page.getByRole("menu", { name: "Actions for Details, Page 3" });
+    await expect(outlineMenu).toHaveAttribute("id", controlledMenuId ?? "");
+    await expect(outlineMenu.getByRole("menuitem")).toHaveCount(2);
+    await expect(outlineMenu.getByRole("menuitem", {
+      name: "Copy exact destination link for Details, Page 3",
+    }).locator(".lucide-link")).toBeVisible();
+    const openDetails = outlineMenu.getByRole("menuitem", {
+      name: "Open Details, Page 3 in References",
+    });
+    await expect(openDetails).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expectReferenceReady(page, page.getByRole("tab", { name: /Details, Page 3/u }));
 
     const actions = page.locator("[data-reference-tab-action]");
     await expect(actions).toHaveCount(2);
@@ -1916,19 +2148,30 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   const nestedReference = outline.getByRole("button", {
     name: "Open Nested result, Page 3 in References",
   });
-  const hostileReference = outline.getByRole("button", {
-    name: "Open scriptalert(1)/script hostile outline, Page 2 in References",
-  });
-  await page.mouse.move(0, 0);
-  await expect(detailsReference).toHaveCSS("opacity", "0");
-  await expect(nestedReference).toHaveCSS("opacity", "0");
-
   const detailsRow = details.locator("..");
+  const openDetailsInReferences = async () => {
+    await details.focus();
+    if (await detailsReference.isVisible()) {
+      await detailsReference.click();
+      return;
+    }
+    await detailsRow.getByRole("button", {
+      name: "Secondary actions for Details, Page 3",
+    }).click();
+    await page.getByRole("menu", { name: "Actions for Details, Page 3" }).getByRole(
+      "menuitem",
+      { name: "Open Details, Page 3 in References" },
+    ).click();
+  };
+  await page.mouse.move(0, 0);
+  await expect(detailsRow.locator(".row-action-group__direct")).toHaveCSS("opacity", "0");
+
   const nestedDestination = outline.getByRole("button", {
     name: "Nested result, Page 3",
     exact: true,
   });
   const nestedRow = nestedDestination.locator("..");
+  await expect(nestedRow.locator(".row-action-group__direct")).toHaveCSS("opacity", "0");
   const detailsChildrenId = await detailsDisclosure.getAttribute("aria-controls");
   if (!detailsChildrenId) throw new Error("Details disclosure does not control an outline branch.");
   const detailsChildren = outline.locator(`[id="${detailsChildrenId}"]`);
@@ -1963,15 +2206,21 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     const firstChildBounds = childRows[0]!.getBoundingClientRect();
     const secondChildBounds = childRows[1]!.getBoundingClientRect();
     const style = getComputedStyle(children);
+    const parentLabel = parentRow.querySelector<HTMLElement>(".outline-navigator__title");
+    const childLabel = childRows[0]!.querySelector<HTMLElement>(".outline-navigator__title");
+    if (!parentLabel || !childLabel) throw new Error("Outline branch labels are incomplete.");
     return {
       borderLeftStyle: style.borderLeftStyle,
       borderLeftWidth: style.borderLeftWidth,
       childToChild: secondChildBounds.top - firstChildBounds.bottom,
+      labelIndent: childLabel.getBoundingClientRect().left
+        - parentLabel.getBoundingClientRect().left,
       parentToFirstChild: firstChildBounds.top - parentBounds.bottom,
     };
   });
   expect(expandedBranchGeometry.borderLeftStyle).toBe("solid");
   expect(expandedBranchGeometry.borderLeftWidth).toBe("1px");
+  expect(expandedBranchGeometry.labelIndent).toBeCloseTo(15, 0);
   expect(expandedBranchGeometry.parentToFirstChild)
     .toBeCloseTo(expandedBranchGeometry.childToChild, 0);
 
@@ -2010,13 +2259,13 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await nestedRow.hover();
   await expect(nestedRow).toHaveCSS("background-color", "rgb(241, 242, 237)");
   await expect(detailsRow).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(nestedReference).toHaveCSS("opacity", "1");
-  await expect(detailsReference).toHaveCSS("opacity", "0");
+  await expect(nestedRow.locator(".row-action-group__direct")).toHaveCSS("opacity", "1");
+  await expect(detailsRow.locator(".row-action-group__direct")).toHaveCSS("opacity", "0");
   await page.mouse.move(0, 0);
   await nestedDestination.focus();
   await expect(nestedRow).toHaveCSS("background-color", "rgb(241, 242, 237)");
   await expect(detailsRow).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(nestedReference).toHaveCSS("opacity", "1");
+  await expect(nestedRow.locator(".row-action-group__direct")).toHaveCSS("opacity", "1");
 
   const compactPageGaps = await details.evaluate((destination) => {
     const label = destination.querySelector<HTMLElement>(".outline-navigator__title");
@@ -2038,6 +2287,16 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await expect(nestedReference).toBeFocused();
   await expect(nestedReference).toHaveCSS("opacity", "1");
   await expect(nestedReference).toHaveCSS("outline-style", "solid");
+
+  const detailsDirect = detailsRow.locator(".row-action-group__direct");
+  const detailsSecondary = detailsRow.locator(".row-action-group__secondary");
+  await detailsRow.evaluate((element) => { element.style.width = "273px"; });
+  await expect(detailsDirect).toHaveCSS("display", "flex");
+  await expect(detailsSecondary).toHaveCSS("display", "none");
+  await detailsRow.evaluate((element) => { element.style.width = "271px"; });
+  await expect(detailsDirect).toHaveCSS("display", "none");
+  await expect(detailsSecondary).toHaveCSS("display", "block");
+  await detailsRow.evaluate((element) => { element.style.removeProperty("width"); });
 
   await outline.evaluate((element) => { element.style.width = "190px"; });
   const fineDisclosureGeometry = await detailsDisclosure.evaluate((button) => {
@@ -2065,8 +2324,21 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   expect(fineDisclosureGeometry.iconCenterDeltaX).toBeLessThanOrEqual(1);
   expect(fineDisclosureGeometry.iconCenterDeltaY).toBeLessThanOrEqual(1);
 
-  const nestedLongLabelGeometry = await hostileReference.evaluate((button) => {
-    const row = button.parentElement;
+  const hostileRow = hostileOutline.locator("..");
+  const hostileActions = hostileRow.getByRole("button", {
+    name: "Secondary actions for scriptalert(1)/script hostile outline, Page 2",
+  });
+  await expect(hostileActions).toHaveAttribute("aria-haspopup", "menu");
+  await hostileActions.click();
+  const hostileActionsMenu = page.getByRole("menu", {
+    name: "Actions for scriptalert(1)/script hostile outline, Page 2",
+  });
+  await expect(hostileActionsMenu.getByRole("menuitem")).toHaveCount(2);
+  await page.keyboard.press("Escape");
+  await expect(hostileActions).toBeFocused();
+
+  const nestedLongLabelGeometry = await hostileActions.evaluate((button) => {
+    const row = button.closest<HTMLElement>(".outline-navigator__row");
     const destination = row?.querySelector<HTMLElement>(".outline-navigator__destination");
     const spacer = row?.querySelector<HTMLElement>(".outline-navigator__disclosure-spacer");
     const label = destination?.querySelector<HTMLElement>(".outline-navigator__title");
@@ -2120,7 +2392,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     };
   });
   expect(nestedLongLabelGeometry.actionRightInset).toBeCloseTo(0, 0);
-  expect(nestedLongLabelGeometry.actionWidth).toBe(31);
+  expect(nestedLongLabelGeometry.actionWidth).toBe(44);
   expect(nestedLongLabelGeometry).toMatchObject({
     contained: true,
     noHorizontalOverflow: true,
@@ -2134,7 +2406,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   const outlineColumns = nestedLongLabelGeometry.gridColumns.split(" ");
   expect(outlineColumns).toHaveLength(3);
   expect(Number.parseFloat(outlineColumns[0]!)).toBe(39);
-  expect(Number.parseFloat(outlineColumns[2]!)).toBe(31);
+  expect(Number.parseFloat(outlineColumns[2]!)).toBe(64);
   expect(nestedLongLabelGeometry.destinationLeftInset).toBeCloseTo(39, 0);
   expect(nestedLongLabelGeometry).toMatchObject({
     destinationDisplay: "flex",
@@ -2206,7 +2478,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     await expect(mainWorkspace).toHaveAttribute("data-safety-main-mount", "stable");
     expect(await captureMainState()).toEqual(expectedState);
   };
-  await detailsReference.click();
+  await openDetailsInReferences();
   const detailsTab = page.getByRole("tab", { name: /Details, Page 3/u });
   const referenceWorkspace = page.locator("[data-review-workspace]");
   await expect(referenceWorkspace).toHaveAttribute("data-workspace-presentation", "bottom");
@@ -2218,7 +2490,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await expect(detailsReferenceCard).toHaveCSS('padding', '4px');
   await expect(page.locator("[data-reference-pdf-viewport] [data-page-index='2']")).toBeVisible();
   await expectMainStateUnchanged();
-  await detailsReference.click();
+  await openDetailsInReferences();
   await expect(page.getByRole("tablist", { name: "Open references" }).getByRole("tab"))
     .toHaveCount(1);
   await expect(detailsTab).toBeFocused();
@@ -2235,7 +2507,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
   const mainStateBeforeNarrowReference = await captureMainState();
-  await detailsReference.click();
+  await openDetailsInReferences();
   await expect(stage).toHaveAttribute("data-reference-layout", "narrow-unified");
   await expect(detailsTab).toHaveAttribute("aria-selected", "true");
   await expect(detailsTab).toBeFocused();
@@ -2257,8 +2529,17 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     "Nested result, Page 3",
   );
   const currentOutlineRow = currentOutlineDestination.locator("..");
-  await expect(currentOutlineRow.locator(".outline-navigator__reference"))
-    .toHaveCSS("opacity", "1");
+  const selectionBackground = await currentOutlineRow.evaluate((row) => {
+    const probe = document.createElement("span");
+    probe.style.backgroundColor = getComputedStyle(row)
+      .getPropertyValue("--review-selection-bg")
+      .trim();
+    document.body.append(probe);
+    const normalized = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return normalized;
+  });
+  await expect(currentOutlineRow).toHaveCSS("background-color", selectionBackground);
   const currentMarker = await currentOutlineRow.evaluate((row) => {
     const rowStyle = getComputedStyle(row);
     const markerStyle = getComputedStyle(row, "::before");
@@ -2282,6 +2563,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   expect(currentMarker.markerBackground).not.toBe("rgba(0, 0, 0, 0)");
   expect(currentMarker.rowBackground).not.toBe("rgba(0, 0, 0, 0)");
   await currentOutlineDestination.focus();
+  await currentOutlineRow.hover();
   await expect(currentOutlineRow).toHaveCSS("background-color", currentMarker.rowBackground);
   expect(await currentOutlineRow.evaluate((row) => getComputedStyle(row, "::before").width))
     .toBe("3px");

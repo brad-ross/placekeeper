@@ -79,6 +79,7 @@ import {
 } from '../review/reference-workspace-layout.js';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import type { CopyLinkControlProps } from '../review/CopyLinkControl.js';
+import type { PdfDestinationCopyLink } from '../review/copy-link-model.js';
 import {
   createProofreadInputController,
   isEditableTarget,
@@ -168,7 +169,8 @@ export interface ReviewShellProps {
   codexContext?: LiveContextBindingStatus;
   copyLink?: CopyLinkControlProps;
   copyItemLink?: {
-    readonly getLink: (item: ReviewItem) => string | undefined;
+    readonly getLink: (item: ReviewItem) => string;
+    readonly disabled?: (item: ReviewItem) => boolean;
     readonly writeText: (link: string) => Promise<void>;
   };
   /** The production shell may control workspace visibility and retained navigation state. */
@@ -186,6 +188,7 @@ export interface ReviewShellProps {
   canNavigateForward?: boolean;
   onLinkActionChoose?(choice: LinkActionChoice, request: ViewerPdfLinkInvocation): void;
   onLinkActionDismiss?(request: ViewerPdfLinkInvocation, reason: LinkActionDismissReason): void;
+  copyLinkForLinkAction?(request: ViewerPdfLinkInvocation): CopyLinkControlProps | undefined;
   onNavigateBack?(): void;
   onNavigateForward?(): void;
   onWorkspaceModeChange?(mode: WorkspaceMode): void;
@@ -197,6 +200,7 @@ export interface ReviewShellProps {
   onReferenceReturn?(identity: string): void;
   onOutlineActivate?(item: PdfOutlineItem): void;
   onOutlineReference?(item: PdfOutlineItem): void;
+  copyLinkForOutlineItem?(item: PdfOutlineItem): PdfDestinationCopyLink | undefined;
   onReferenceViewportHost?(element: HTMLDivElement | null): void;
   onWorkspaceModeFocusTokenChange?(mode: WorkspaceMode, token: string): void;
   referenceLayoutState?: ReferenceWorkspaceLayoutState;
@@ -629,9 +633,11 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (
-      props.linkActionRequest
-      && event.target instanceof Element
-      && event.target.closest('[data-link-action-popover]') !== null
+      event.target instanceof Element
+      && (
+        (props.linkActionRequest && event.target.closest('[data-link-action-popover]') !== null)
+        || event.target.closest('[data-row-actions-open="true"]') !== null
+      )
     ) return;
     const editable = isEditableTarget(event.target);
     if (
@@ -888,11 +894,19 @@ export function ReviewShell(props: ReviewShellProps) {
     ) !== null)
   );
   const copyLinkForItem = (item: ReviewItem): CopyLinkControlProps | undefined => {
-    const link = props.copyItemLink?.getLink(item);
-    return link === undefined || props.copyItemLink === undefined
-      ? undefined
-      : { getLink: () => link, writeText: props.copyItemLink.writeText };
+    if (props.copyItemLink === undefined) return undefined;
+    const link = props.copyItemLink.getLink(item);
+    return {
+      getLink: () => link,
+      writeText: props.copyItemLink.writeText,
+      disabled: props.copyItemLink.disabled?.(item) ?? false,
+    };
   };
+  const activePdfLinkCopy = props.linkActionRequest === null
+    || props.linkActionRequest === undefined
+    || props.copyLinkForLinkAction === undefined
+    ? undefined
+    : props.copyLinkForLinkAction(props.linkActionRequest);
   return (
     <section
       className="review-shell"
@@ -1172,6 +1186,9 @@ export function ReviewShell(props: ReviewShellProps) {
             onModeChange={selectWorkspaceMode}
             onOutlineActivate={(item) => props.onOutlineActivate?.(item)}
             onOutlineReference={(item) => props.onOutlineReference?.(item)}
+            {...(props.copyLinkForOutlineItem === undefined
+              ? {}
+              : { copyLinkForOutlineItem: props.copyLinkForOutlineItem })}
             onModeFocusTokenChange={rememberWorkspaceModeFocus}
             annotations={<div id="review-annotation-list" aria-label="All annotations">
             <AnnotationList
@@ -1385,6 +1402,7 @@ export function ReviewShell(props: ReviewShellProps) {
       </div>
       <LinkActionPopover
         request={props.linkActionRequest ?? null}
+        {...(activePdfLinkCopy === undefined ? {} : { copyLink: activePdfLinkCopy })}
         onChoose={(choice, request) => props.onLinkActionChoose?.(choice, request)}
         onDismiss={(request, reason) => props.onLinkActionDismiss?.(request, reason)}
         sourceFocusFallback={(source) => {

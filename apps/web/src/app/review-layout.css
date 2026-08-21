@@ -285,7 +285,7 @@
 .save-destination-recovery__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--review-action-group-gap);
 }
 
 .save-destination-error {
@@ -298,7 +298,7 @@
 .save-destination-dialog footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--review-action-group-gap);
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid var(--review-border-subtle);

@@ -272,6 +272,11 @@ export function ReviewChrome({
             {saveStatusDisplay}
           </span>
         </button>
+        {copyLink === undefined ? null : (
+          <div className="review-chrome__link" data-review-copy-link>
+            <CopyLinkControl {...copyLink} />
+          </div>
+        )}
       </div>
       <div className="review-chrome__viewer-controls" role="group" aria-label="PDF editing, navigation, and zoom">
         <span className="review-chrome__control-cluster review-chrome__edit-cluster" role="group" aria-label="Edit history">
@@ -435,11 +440,6 @@ export function ReviewChrome({
         </span>
       </div>
       <div className="review-chrome__actions">
-        {copyLink === undefined ? null : (
-          <div className="review-chrome__link" data-review-copy-link>
-            <CopyLinkControl {...copyLink} />
-          </div>
-        )}
         {codexContext === undefined ? null : (
           <div className="review-chrome__context" data-review-context-status>
             <CodexContextStatus status={codexContext} />

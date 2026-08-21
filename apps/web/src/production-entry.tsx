@@ -2,7 +2,7 @@ import { createRoot } from "react-dom/client";
 
 import {
   decodePlacekeeperLinkFragment,
-  type PlacekeeperLinkLocation,
+  encodePlacekeeperLinkFragment,
 } from "../../../packages/core/src/placekeeper-link.js";
 import { ProductionReviewApp, type ProductionSession } from "./app/ProductionReviewApp.js";
 import {
@@ -12,13 +12,25 @@ import {
   type ReopenRecoveryChoice,
 } from "./app/session-api.js";
 import {
-  buildPlacekeeperCopyLink,
   createCopyLinkCommand,
   type CopyLinkStatus,
 } from "./review/CopyLinkControl.js";
 
 export async function resume(viewId: string, pathname: string): Promise<void> {
   await start(await resumeProductionSession(viewId, pathname));
+}
+
+/** Preserves any canonical readable location while stale routes shed all live-session authority. */
+export function terminalRecoveryLocationFragment(hash: string): string {
+  let fragment = encodePlacekeeperLinkFragment({ kind: "page", page: 1 });
+  try {
+    fragment = encodePlacekeeperLinkFragment(
+      decodePlacekeeperLinkFragment(hash.replace(/^#/u, "")),
+    );
+  } catch {
+    // Invalid or future fragments recover conservatively at page 1.
+  }
+  return fragment;
 }
 
 export function showTerminalRecovery(): void {
@@ -31,17 +43,9 @@ export function showTerminalRecovery(): void {
     reopen === undefined ||
     appLinkBase === undefined
   ) return;
-  let location: PlacekeeperLinkLocation = { kind: "page", page: 1 };
-  try {
-    location = decodePlacekeeperLinkFragment(window.location.hash.slice(1));
-  } catch {
-    // Invalid or future fragments recover conservatively at page 1.
-  }
-  const link = buildPlacekeeperCopyLink(appLinkBase, location);
-  const browserLink = buildPlacekeeperCopyLink(
-    `${window.location.origin}${window.location.pathname}`,
-    location,
-  );
+  const fragment = terminalRecoveryLocationFragment(window.location.hash);
+  const link = `${appLinkBase}#${fragment}`;
+  const browserLink = `${window.location.origin}${window.location.pathname}#${fragment}`;
   reopen.href = link;
   if (document.head.querySelector('link[data-placekeeper-terminal-style]') === null) {
     const stylesheet = document.createElement('link');

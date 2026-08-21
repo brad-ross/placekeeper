@@ -498,7 +498,15 @@ describe("open command", () => {
     hosts.push(host);
     const socketPath = join(root, "control.sock");
     controls.push(await startLaunchControlServer(host, socketPath, { daemonIdentity: "a".repeat(64) }));
-    const link = encodePlacekeeperLink({ path: pdf, location: { kind: "page", page: 12 } });
+    const link = encodePlacekeeperLink({
+      path: pdf,
+      location: {
+        kind: "destination",
+        page: 12,
+        mode: "fit-rectangle",
+        params: [100, 200, 500, 700],
+      },
+    });
 
     await expect(requestLinkPreflight(socketPath, link)).resolves.toMatchObject({
       ok: true,
@@ -511,15 +519,20 @@ describe("open command", () => {
       kind: "confirmation-required",
       path: pdf,
     });
-    await expect(requestLinkOpen(socketPath, {
+    const opened = await requestLinkOpen(socketPath, {
       link,
       confirmed: true,
       surface: "codex",
-    })).resolves.toMatchObject({
+    });
+    expect(opened).toMatchObject({
       ok: true,
       kind: "opened",
       bindProof: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
     });
+    if (!opened.ok || opened.kind !== "opened") throw new Error("Expected an opened exact link");
+    const capability = new URL(opened.url).hash.slice("#cap=".length);
+    expect(host.broker.exchangeBootstrapForHttp(opened.sessionId, capability)?.view?.locationFragment)
+      .toBe("v=2&page=12&mode=fit-rectangle&params=100,200,500,700");
   });
 
   it("flushes an idle shutdown acknowledgement before closing HTTP and removing the socket", async () => {

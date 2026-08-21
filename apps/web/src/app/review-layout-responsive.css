@@ -88,9 +88,16 @@
     padding-block: 2px;
   }
 
-  .annotation-item__action,
-  .outline-navigator__reference {
+  .annotation-item__action {
     opacity: 1;
+  }
+
+  .row-action-group__direct {
+    display: none;
+  }
+
+  .row-action-group__secondary {
+    display: block;
   }
 
   .outline-navigator {
@@ -101,13 +108,6 @@
   .outline-navigator__disclosure-spacer {
     width: var(--review-control-touch);
     height: var(--review-control-touch);
-  }
-
-  .outline-navigator__reference {
-    width: var(--review-control-touch);
-    height: var(--review-control-touch);
-    min-width: var(--review-control-touch);
-    min-height: var(--review-control-touch);
   }
 
   .review-chrome button,

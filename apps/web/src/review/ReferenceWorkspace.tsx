@@ -12,7 +12,7 @@ import {
   WORKSPACE_MODES,
   type WorkspaceMode,
 } from './reference-navigation-state.js';
-import { compositeFocusIndex, horizontalTabFocusIndex } from './LinkActionPopover.js';
+import { compositeFocusIndex, horizontalTabFocusIndex } from './menu-focus.js';
 import { ReviewIcon } from './ReviewIcon.js';
 import { WorkspaceModeStrip, type WorkspaceDockAction } from './WorkspaceModeStrip.js';
 

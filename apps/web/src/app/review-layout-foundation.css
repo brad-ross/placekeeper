@@ -24,6 +24,8 @@
   --review-control-compact: 31px;
   --review-control-default: 34px;
   --review-control-touch: 44px;
+  --review-control-group-gap: 2px;
+  --review-action-group-gap: 6px;
   --review-chrome-height: 58px;
   --review-workspace-header-height: 44px;
   --review-metadata-separator-gap: .3rem;
@@ -111,7 +113,7 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: .55rem;
+  gap: var(--review-control-group-gap);
 }
 
 .review-chrome__file-badge {
@@ -151,13 +153,13 @@
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: .125rem;
+  gap: var(--review-control-group-gap);
 }
 
 .review-chrome__actions {
   justify-self: end;
   min-width: 0;
-  gap: .25rem;
+  gap: var(--review-action-group-gap);
 }
 
 .review-chrome button {
@@ -320,7 +322,7 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: .4rem;
+  gap: var(--review-action-group-gap);
   justify-self: end;
 }
 
@@ -328,18 +330,12 @@
   position: relative;
 }
 
-.copy-link-control__status {
-  position: absolute;
-  top: calc(100% + .45rem);
-  right: 0;
-  width: max-content;
-  padding: .35rem .55rem;
-  border: 1px solid var(--review-border);
-  border-radius: var(--review-radius-control);
-  color: var(--review-ink-primary);
-  background: var(--review-surface-panel);
-  box-shadow: var(--review-shadow-float);
-  font-size: .75rem;
+.copy-link-control__trigger--labeled {
+  gap: 7px;
+}
+
+.copy-link-control__label {
+  white-space: nowrap;
 }
 
 .copy-link-control__fallback {
@@ -382,6 +378,21 @@
   border-radius: var(--review-radius-control);
   color: var(--review-ink-primary);
   background: var(--review-surface-panel);
+}
+
+.copy-link-control--feedback-inline {
+  display: grid;
+  min-width: 0;
+}
+
+.copy-link-control--feedback-inline .copy-link-control__fallback {
+  position: static;
+  max-width: 100%;
+  margin-top: .45rem;
+}
+
+.copy-link-control--feedback-inline .copy-link-control__fallback {
+  width: min(28rem, calc(100vw - 2rem));
 }
 
 .review-chrome__context {
@@ -601,7 +612,7 @@
   z-index: 3;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--review-control-group-gap);
   padding: 5px;
   border: 1px solid var(--review-border);
   border-radius: var(--review-radius-float);
