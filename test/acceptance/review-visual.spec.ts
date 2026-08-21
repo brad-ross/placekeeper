@@ -106,6 +106,27 @@ async function expectOutlineTreeGeometry(
   const navigator = page.getByRole('navigation', { name: 'Document outline' });
   const visibleRows = navigator.locator('.outline-navigator__row:visible');
   await expect(visibleRows).toHaveCount(6);
+  expect(await navigator.locator('.outline-navigator__title:visible').evaluateAll((titles) => (
+    titles.every((title) => getComputedStyle(title).fontWeight === '700')
+  ))).toBe(true);
+
+  const rowSpacing = await visibleRows.evaluateAll((rows) => rows.map((row, index) => {
+    const bounds = row.getBoundingClientRect();
+    let depth = 0;
+    let ancestor = row.parentElement;
+    while (ancestor) {
+      if (ancestor.classList.contains('outline-navigator__children')) depth += 1;
+      ancestor = ancestor.parentElement;
+    }
+    if (index === 0) return { depth, gapAbove: null };
+    const previousBounds = rows[index - 1]!.getBoundingClientRect();
+    return { depth, gapAbove: bounds.top - previousBounds.bottom };
+  }));
+  for (let index = 1; index < rowSpacing.length; index += 1) {
+    const spacing = rowSpacing[index]!;
+    const previous = rowSpacing[index - 1]!;
+    expect(spacing.gapAbove).toBeGreaterThanOrEqual(spacing.depth === previous.depth ? 6 : 8);
+  }
 
   const deepestVisibleLevel = await visibleRows.evaluateAll((rows) => Math.max(...rows.map((row) => {
     let depth = 0;
@@ -266,9 +287,16 @@ test('wide Annotation Tray', async ({ page }) => {
   await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-workspace-presentation', 'right');
   const railBox = await page.getByRole('button', { name: 'Close right workspace' }).boundingBox();
   const modesBox = await page.getByRole('tablist', { name: 'Workspace modes' }).boundingBox();
-  if (!railBox || !modesBox) throw new Error('Workspace navigation geometry is unavailable.');
+  const headerBox = await page.locator('.review-workspace__header').boundingBox();
+  const stripBox = await page.locator('.review-workspace__activity-strip').boundingBox();
+  if (!railBox || !modesBox || !headerBox || !stripBox) {
+    throw new Error('Workspace navigation geometry is unavailable.');
+  }
   expect(Math.abs(
     railBox.y + railBox.height / 2 - (modesBox.y + modesBox.height / 2),
+  )).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(
+    (stripBox.x - headerBox.x) - (stripBox.y - headerBox.y),
   )).toBeLessThanOrEqual(0.5);
   const annotation = page.getByRole('button', { name: /Highlight · Page 1/u });
   await annotation.focus();

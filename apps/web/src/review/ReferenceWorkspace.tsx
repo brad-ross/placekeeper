@@ -220,6 +220,10 @@ export function ReferenceWorkspace({
         : undefined
     : undefined;
   const dockActionVisible = dockAction !== undefined;
+  const quietSingleMode = presentation === 'bottom'
+    && headerVariant === 'references'
+    && modes.length === 1
+    && modes[0] === 'references';
 
   const modeFallback = (targetMode: WorkspaceMode): HTMLElement | null => (
     chooseWorkspaceModeFocusTarget({
@@ -385,6 +389,7 @@ export function ReferenceWorkspace({
           onModeBlur={(_workspaceMode, event) => {
             if (focusMovedToConnectedTarget(event)) focusedModeTab.current = null;
           }}
+          quietSingleMode={quietSingleMode}
           {...(dockAction ? { dockAction } : {})}
         />
       </header> : null}

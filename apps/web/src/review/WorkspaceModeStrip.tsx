@@ -35,6 +35,7 @@ export interface WorkspaceModeStripProps<Mode extends WorkspaceMode> {
     event: FocusEvent<HTMLButtonElement>,
   ) => void;
   readonly dockAction?: WorkspaceDockAction;
+  readonly quietSingleMode?: boolean;
 }
 
 export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
@@ -46,12 +47,14 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
   onModeFocus,
   onModeBlur,
   dockAction,
+  quietSingleMode = false,
 }: WorkspaceModeStripProps<Mode>) {
   const dockAttached = selectedMode === 'references' && dockAction !== undefined;
 
   return (
     <div className={`review-workspace__activity-strip${
       dockAttached ? ' review-workspace__activity-strip--compound' : ''
+    }${quietSingleMode ? ' review-workspace__activity-strip--title' : ''
     }`}>
       <div
         className="review-workspace__tabs"
