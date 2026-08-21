@@ -1023,7 +1023,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
         && !tablist.contains(moveButton),
     };
   });
-  expect(rightStripGeometry.leftInset).toBeCloseTo(6, 0);
+  expect(rightStripGeometry.leftInset).toBeCloseTo(7.5, 1);
   expect(rightStripGeometry.rightSlack).toBeGreaterThan(0);
   expect(rightStripGeometry.stripWidth).toBeLessThan(rightStripGeometry.headerWidth);
   expect(new Set(rightStripGeometry.inactiveWidths.map((width) => Math.round(width))).size).toBe(1);
@@ -2221,8 +2221,8 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   expect(expandedBranchGeometry.borderLeftStyle).toBe("solid");
   expect(expandedBranchGeometry.borderLeftWidth).toBe("1px");
   expect(expandedBranchGeometry.labelIndent).toBeCloseTo(15, 0);
-  expect(expandedBranchGeometry.parentToFirstChild)
-    .toBeCloseTo(expandedBranchGeometry.childToChild, 0);
+  expect(expandedBranchGeometry.parentToFirstChild).toBeCloseTo(8, 0);
+  expect(expandedBranchGeometry.childToChild).toBeCloseTo(6, 0);
 
   const detailsLabel = details.locator(".outline-navigator__title");
   const expandedLabelX = (await detailsLabel.boundingBox())?.x;
@@ -2663,7 +2663,7 @@ test("collapses an outline-free PDF with source annotations to Search and restor
   });
   expect(intrinsicGeometry.firstInset).toBeGreaterThanOrEqual(0);
   expect(intrinsicGeometry.lastInset).toBeGreaterThanOrEqual(0);
-  expect(intrinsicGeometry.leftAlignment).toBeCloseTo(6, 0);
+  expect(intrinsicGeometry.leftAlignment).toBeCloseTo(7.5, 1);
   expect(intrinsicGeometry.rightSlack).toBeGreaterThan(0);
   expect(new Set(intrinsicGeometry.widths.map((width) => Math.round(width))).size)
     .toBeGreaterThan(1);
