@@ -1100,14 +1100,16 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             writeText: writePlacekeeperLink,
           },
           copyItemLink: {
-            getLink: (item: ReviewItem) => portableItemIdsRef.current.has(item.id)
-              && saveStatusIsCleanCurrent(state, saveStatus)
-              ? buildPlacekeeperCopyLink(props.session.appLinkBase!, {
-                  kind: 'item',
-                  page: item.pageIndex + 1,
-                  itemId: item.id,
-                })
-              : undefined,
+            getLink: (item: ReviewItem) => buildPlacekeeperCopyLink(
+              props.session.appLinkBase!,
+              {
+                kind: 'item',
+                page: item.pageIndex + 1,
+                itemId: item.id,
+              },
+            ),
+            disabled: (item: ReviewItem) => !portableItemIdsRef.current.has(item.id)
+              || !saveStatusIsCleanCurrent(state, saveStatus),
             writeText: writePlacekeeperLink,
           },
         })}

@@ -169,7 +169,8 @@ export interface ReviewShellProps {
   codexContext?: LiveContextBindingStatus;
   copyLink?: CopyLinkControlProps;
   copyItemLink?: {
-    readonly getLink: (item: ReviewItem) => string | undefined;
+    readonly getLink: (item: ReviewItem) => string;
+    readonly disabled?: (item: ReviewItem) => boolean;
     readonly writeText: (link: string) => Promise<void>;
   };
   /** The production shell may control workspace visibility and retained navigation state. */
@@ -893,10 +894,13 @@ export function ReviewShell(props: ReviewShellProps) {
     ) !== null)
   );
   const copyLinkForItem = (item: ReviewItem): CopyLinkControlProps | undefined => {
-    const link = props.copyItemLink?.getLink(item);
-    return link === undefined || props.copyItemLink === undefined
-      ? undefined
-      : { getLink: () => link, writeText: props.copyItemLink.writeText };
+    if (props.copyItemLink === undefined) return undefined;
+    const link = props.copyItemLink.getLink(item);
+    return {
+      getLink: () => link,
+      writeText: props.copyItemLink.writeText,
+      disabled: props.copyItemLink.disabled?.(item) ?? false,
+    };
   };
   const activePdfLinkCopy = props.linkActionRequest === null
     || props.linkActionRequest === undefined

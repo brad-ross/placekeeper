@@ -980,6 +980,7 @@
 .outline-navigator {
   --outline-tree-control-size: var(--review-control-compact);
   --outline-tree-leading-size: calc(var(--outline-tree-control-size) + 8px);
+  --outline-tree-indent: 14px;
   --outline-tree-rhythm: 4px;
 
   padding: 10px;
@@ -996,7 +997,7 @@
 .outline-navigator__children {
   position: relative;
   margin-top: var(--outline-tree-rhythm);
-  margin-left: calc(var(--outline-tree-leading-size) / 2);
+  margin-left: calc(var(--outline-tree-indent) - var(--outline-tree-rhythm));
   padding-left: var(--outline-tree-rhythm);
   border-left: 1px solid var(--review-border-subtle);
 }
@@ -1017,12 +1018,12 @@
     box-shadow var(--review-motion-fast) ease;
 }
 
-.outline-navigator__row:hover,
-.outline-navigator__row:focus-within {
+.outline-navigator__row:not([data-current="true"]):hover,
+.outline-navigator__row:not([data-current="true"]):focus-within:not(:has(.copy-link-control:focus-within)) {
   background: var(--review-workspace-card-hover);
 }
 
-.outline-navigator__row:active {
+.outline-navigator__row:active:not(:has(.copy-link-control__trigger:active)) {
   background: var(--review-surface-interactive);
   box-shadow: inset 0 1px 2px rgb(24 26 23 / 16%);
 }
@@ -1044,7 +1045,7 @@
   pointer-events: none;
 }
 
-.outline-navigator__row:focus-within {
+.outline-navigator__row:focus-within:not(:has(.copy-link-control:focus-within)) {
   outline: 3px solid var(--review-focus);
   outline-offset: 2px;
 }
@@ -1166,7 +1167,6 @@
 
 .outline-navigator__row:hover .row-action-group__direct,
 .outline-navigator__row:focus-within .row-action-group__direct,
-.outline-navigator__row[data-current="true"] .row-action-group__direct,
 li[data-search-result]:hover .row-action-group__direct,
 li[data-search-result]:focus-within .row-action-group__direct,
 li[data-search-result][data-active="true"] .row-action-group__direct {
@@ -1234,10 +1234,9 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   overflow: visible;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-search-result]:has(.copy-link-control:is(
-  [data-copy-link-status="success"],
-  [data-copy-link-status="failure"]
-)) {
+:is(.review-workspace, .review-tools-workspace) li[data-search-result]:has(
+  .copy-link-control[data-copy-link-status="failure"]
+) {
   z-index: 2;
   overflow: visible;
 }
@@ -1289,7 +1288,6 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   display: contents;
 }
 
-.link-action-popover .copy-link-control__status,
 .link-action-popover .copy-link-control__fallback {
   order: 1;
   flex: 1 0 100%;
@@ -1402,16 +1400,16 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   transition: border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:hover,
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:focus-within,
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:not([data-active="true"]):hover,
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:not([data-active="true"]):focus-within:not(:has(.copy-link-control:focus-within)),
 :is(.review-workspace, .review-tools-workspace) li[data-search-result]:hover,
-:is(.review-workspace, .review-tools-workspace) li[data-search-result]:focus-within {
+:is(.review-workspace, .review-tools-workspace) li[data-search-result]:focus-within:not(:has(.copy-link-control:focus-within)) {
   border-color: var(--review-border-strong);
   background: var(--review-workspace-card-hover);
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:active,
-:is(.review-workspace, .review-tools-workspace) li[data-search-result]:active {
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:active:not(:has(.copy-link-control__trigger:active)),
+:is(.review-workspace, .review-tools-workspace) li[data-search-result]:active:not(:has(.copy-link-control__trigger:active)) {
   background: var(--review-surface-interactive);
   box-shadow: inset 0 1px 2px rgb(24 26 23 / 16%);
 }
@@ -1525,8 +1523,8 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   outline: none;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:focus-within,
-:is(.review-workspace, .review-tools-workspace) li[data-search-result]:focus-within {
+:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:focus-within:not(:has(.copy-link-control:focus-within)),
+:is(.review-workspace, .review-tools-workspace) li[data-search-result]:focus-within:not(:has(.copy-link-control:focus-within)) {
   outline: 3px solid var(--review-focus);
   outline-offset: 2px;
 }

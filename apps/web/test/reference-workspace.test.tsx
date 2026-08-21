@@ -48,6 +48,7 @@ describe('link action chooser', () => {
     expect(linkActionDismissRestoresFocus('escape')).toBe(true);
     expect(linkActionDismissRestoresFocus('outside')).toBe(true);
     expect(linkActionDismissRestoresFocus('anchor-invalidated')).toBe(true);
+    expect(linkActionDismissRestoresFocus('copy-success')).toBe(true);
   });
 
   it('keeps the default action first in a compact icon-only nonmodal menu', () => {
@@ -72,7 +73,8 @@ describe('link action chooser', () => {
     expect(html).toContain('role="menu"');
     expect(html).toContain(`id="${PDF_LINK_ACTION_MENU_ID}"`);
     expect(html).toMatch(/aria-label="Open in References"[\s\S]*aria-label="Open in main document"[\s\S]*aria-label="Copy link to exact destination on page 18"/u);
-    expect(html).toMatch(/title="Open in References"[\s\S]*title="Open in main document"[\s\S]*title="Copy exact destination link"/u);
+    expect(html).toMatch(/title="Open in References"[\s\S]*title="Open in main document"/u);
+    expect(html).not.toContain('title="Copy exact destination link"');
     expect(html).toMatch(/aria-label="Open in main document"[^>]*>[\s\S]*?lucide-arrow-right/u);
     expect(html).toMatch(/aria-label="Copy link to exact destination on page 18"[^>]*>[\s\S]*?lucide-link/u);
     expect(html.match(/role="menuitem"/g)).toHaveLength(3);
@@ -107,8 +109,9 @@ describe('link action chooser', () => {
       /aria-label="Open in References"[\s\S]*aria-label="Follow in this tab"[\s\S]*aria-label="Open in main document"[\s\S]*aria-label="Copy link to exact destination on page 3"/u,
     );
     expect(html).toMatch(
-      /title="Open in References"[\s\S]*title="Follow in this tab"[\s\S]*title="Open in main document"[\s\S]*title="Copy exact destination link"/u,
+      /title="Open in References"[\s\S]*title="Follow in this tab"[\s\S]*title="Open in main document"/u,
     );
+    expect(html).not.toContain('title="Copy exact destination link"');
     expect(html).toMatch(/aria-label="Follow in this tab"[^>]*>[\s\S]*?lucide-arrow-right/u);
     expect(html).toMatch(/aria-label="Open in main document"[^>]*>[\s\S]*?lucide-maximize-2/u);
     expect(html).toMatch(/aria-label="Copy link to exact destination on page 3"[^>]*>[\s\S]*?lucide-link/u);

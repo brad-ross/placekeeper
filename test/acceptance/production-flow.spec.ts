@@ -15,6 +15,7 @@ let pdf = "";
 let multiPagePdf = "";
 let rotatedPdf = "";
 let referencePdf = "";
+let annotatedReferencePdf = "";
 let searchPdf = "";
 
 const PRODUCTION_VIEWER_READY_TIMEOUT_MS = 15_000;
@@ -262,11 +263,16 @@ test.beforeAll(async () => {
   multiPagePdf = join(root, "multi-page.pdf");
   rotatedPdf = join(root, "rotated.pdf");
   referencePdf = join(root, "reference-navigation.pdf");
+  annotatedReferencePdf = join(root, "reference-navigation-annotated.pdf");
   searchPdf = join(root, "pdf-search.pdf");
   await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
   await copyFile(resolve("test/fixtures/pdfs/mixed-text-image.pdf"), multiPagePdf);
   await copyFile(resolve("test/fixtures/pdfs/rotation-90-crop.pdf"), rotatedPdf);
   await copyFile(resolve("test/fixtures/pdfs/reference-navigation.pdf"), referencePdf);
+  await copyFile(
+    resolve("test/fixtures/pdfs/reference-navigation-annotated.pdf"),
+    annotatedReferencePdf,
+  );
   await copyFile(resolve("test/fixtures/pdfs/pdf-search.pdf"), searchPdf);
   await copyFile(resolve("test/fixtures/latex/paper.tex"), join(sourceRoot, "paper.tex"));
   host = await PlacekeeperHost.start({
@@ -670,7 +676,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   const copyTargetLink = primaryMenu.getByRole("menuitem", {
     name: "Copy link to exact destination on page 2",
   });
-  await expect(copyTargetLink).toHaveAttribute("title", "Copy exact destination link");
+  await expect(copyTargetLink).not.toHaveAttribute("title", "Copy exact destination link");
   await expect(primaryMenu.getByRole("menuitem").first()).toHaveText("");
   await expect(primaryMenu.getByRole("menuitem").last()).toHaveText("");
   const firstMenuItemBounds = await primaryMenu.getByRole("menuitem").first().boundingBox();
@@ -706,21 +712,12 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     state.__holdPdfTargetCopy = false;
     state.__releasePdfTargetCopy?.();
   });
-  await expect(primaryMenu.getByRole("status")).toHaveText("Link copied.");
-  await expect(primaryMenu).toBeVisible();
+  await expect(primaryMenu).toHaveCount(0);
+  await expect(primaryLink).toBeFocused();
   await expect(page.getByLabel("Current page")).toHaveText("1 / 4");
   expect(await page.evaluate(() => (
     globalThis as typeof globalThis & { __copiedPdfTargetLink?: string }
   ).__copiedPdfTargetLink)).toMatch(/#v=2&page=2&mode=/u);
-  const copiedPopoverBounds = await page.locator("[data-link-action-popover]").boundingBox();
-  expect(copiedPopoverBounds).not.toBeNull();
-  expect(copiedPopoverBounds!.x + copiedPopoverBounds!.width).toBeLessThanOrEqual(1280);
-  expect(copiedPopoverBounds!.y + copiedPopoverBounds!.height).toBeLessThanOrEqual(900);
-  await page.keyboard.press("Escape");
-  await expect(primaryMenu).toHaveCount(0);
-  await expect(primaryLink).toBeFocused();
-  await expect(page.getByLabel("Current page")).toHaveText("1 / 4");
-
   await page.keyboard.press("Enter");
   await expect(primaryMenu.getByRole("menuitem", { name: /Open in References/u })).toBeFocused();
   await page.keyboard.press("Tab");
@@ -755,15 +752,11 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
       .__rejectPdfTargetCopy = false;
   });
   await retryCopy.click();
-  await expect(primaryMenu.getByRole("status")).toHaveText("Link copied.");
-  await expect(copyTargetLink).toBeFocused();
+  await expect(primaryMenu).toHaveCount(0);
+  await expect(primaryLink).toBeFocused();
   expect(await page.evaluate(() => (
     globalThis as typeof globalThis & { __copiedPdfTargetLink?: string }
   ).__copiedPdfTargetLink)).toBe(failedTargetLink);
-  await expect(primaryMenu).toBeVisible();
-  await page.keyboard.press("Tab");
-  await expect(primaryMenu).toHaveCount(0);
-  await expect(primaryLink).not.toBeFocused();
 
   await openLinkInReferences(page, primaryLink);
   const workspace = page.locator("[data-review-workspace]");
@@ -1650,6 +1643,15 @@ test("records annotation tray jumps in document history", async ({ page }) => {
     name: /^Page Note · Page 3 · .*History destination\.$/u,
   }).first();
   await expect(pageThreeAnnotation).toBeVisible();
+  const pageThreeCopyLink = annotationsPanel.getByRole("button", {
+    name: "Copy link to Page Note annotation on page 3",
+  });
+  await expect(pageThreeCopyLink).toBeVisible();
+  await expect(pageThreeCopyLink).toBeDisabled();
+  await expect(pageThreeCopyLink).toHaveAttribute(
+    "title",
+    "Save annotation before copying its link",
+  );
 
   const back = page.getByRole("button", { name: "Back in document history" });
   const forward = page.getByRole("button", { name: "Forward in document history" });
@@ -1664,6 +1666,127 @@ test("records annotation tray jumps in document history", async ({ page }) => {
 
   await forward.click();
   await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
+});
+
+test("settles tray copy actions without selection or tooltip flashes", async ({ page }) => {
+  await page.addInitScript(() => {
+    const copyState = globalThis as typeof globalThis & {
+      __holdTrayCopy?: boolean;
+      __releaseTrayCopy?: () => void;
+    };
+    copyState.__holdTrayCopy = true;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async () => {
+          if (!copyState.__holdTrayCopy) return;
+          await new Promise<void>((resolve) => { copyState.__releaseTrayCopy = resolve; });
+        },
+      },
+    });
+  });
+  await openFreshProductionFixture(
+    page,
+    annotatedReferencePdf,
+    "Tray copy focus launch failed",
+  );
+
+  await openAnnotationsWorkspace(page);
+  const annotationRow = page.locator('[data-review-item]').first();
+  const annotationId = await annotationRow.getAttribute('data-review-item');
+  if (!annotationId) throw new Error('Owned annotation row has no stable id.');
+  const annotationMark = page.locator(`[data-owned-mark][data-review-id="${annotationId}"]`);
+  const annotationCopy = annotationRow.getByRole('button', {
+    name: 'Copy link to Delete annotation on page 1',
+  });
+  await expect(annotationCopy).toBeEnabled();
+  await expect(annotationCopy).not.toHaveAttribute('title');
+  await annotationCopy.click();
+  await expect(annotationCopy.locator('..')).toHaveAttribute('data-copy-link-status', 'pending');
+  await expect(annotationCopy).toBeEnabled();
+  await expect(annotationCopy).toBeFocused();
+  await page.mouse.move(0, 0);
+  await expect(annotationCopy).toBeFocused();
+  await expect(annotationRow).not.toHaveAttribute('data-active', 'true');
+  await expect(annotationRow).toHaveAttribute('data-corresponding', 'false');
+  await expect(annotationMark).not.toHaveAttribute('data-corresponding', 'true');
+  await expect(annotationRow).toHaveCSS('outline-style', 'none');
+  await page.evaluate(() => {
+    const copyState = globalThis as typeof globalThis & {
+      __holdTrayCopy?: boolean;
+      __releaseTrayCopy?: () => void;
+    };
+    copyState.__holdTrayCopy = false;
+    copyState.__releaseTrayCopy?.();
+  });
+  await expect(annotationCopy.locator('..')).toHaveAttribute('data-copy-link-status', 'success');
+  await expect(annotationCopy).not.toBeFocused();
+  await expect(annotationCopy).toHaveCSS('opacity', '0');
+
+  await annotationRow.locator('.annotation-item__content').click();
+  await page.getByLabel('Current page').hover();
+  await expect(annotationRow).toHaveAttribute('data-active', 'true');
+  const annotationSelectionBackground = await annotationRow.evaluate((element) => {
+    const probe = document.createElement('span');
+    probe.style.backgroundColor = getComputedStyle(element)
+      .getPropertyValue('--review-selection-bg')
+      .trim();
+    document.body.append(probe);
+    const normalized = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return normalized;
+  });
+  await expect(annotationRow).toHaveCSS('background-color', annotationSelectionBackground);
+  await annotationRow.hover();
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  await expect(annotationRow).toHaveCSS('background-color', annotationSelectionBackground);
+
+  await page.getByRole('tab', { name: 'Outline', exact: true }).click();
+  await expect(page.locator('#workspace-panel-outline')).toBeFocused();
+  const overview = page.getByRole('button', { name: 'Overview, Page 2', exact: true });
+  const outlineRow = overview.locator('..');
+  await overview.focus();
+  const outlineCopy = outlineRow.getByRole('button', {
+    name: 'Copy exact destination link for Overview, Page 2',
+  });
+  await expect(outlineCopy).not.toHaveAttribute('title');
+  await page.evaluate(() => {
+    const copyState = globalThis as typeof globalThis & {
+      __holdTrayCopy?: boolean;
+      __releaseTrayCopy?: () => void;
+    };
+    copyState.__holdTrayCopy = true;
+    delete copyState.__releaseTrayCopy;
+  });
+  await outlineRow.hover();
+  await outlineCopy.click();
+  await expect(outlineCopy.locator('..')).toHaveAttribute('data-copy-link-status', 'pending');
+  await expect(outlineCopy).toBeEnabled();
+  await expect(outlineCopy).toBeFocused();
+  await page.mouse.move(0, 0);
+  await expect(outlineCopy).toBeFocused();
+  await page.evaluate(() => {
+    const copyState = globalThis as typeof globalThis & {
+      __holdTrayCopy?: boolean;
+      __releaseTrayCopy?: () => void;
+    };
+    copyState.__holdTrayCopy = false;
+    copyState.__releaseTrayCopy?.();
+  });
+  await expect(outlineCopy.locator('..')).toHaveAttribute('data-copy-link-status', 'success');
+  await expect(outlineCopy).not.toBeFocused();
+  await expect(outlineRow).not.toHaveAttribute('data-current', 'true');
+  await expect(outlineRow).toHaveCSS('outline-style', 'none');
+  const outlineActions = outlineRow.locator('.row-action-group__direct');
+  await expect(outlineActions).toHaveCSS('opacity', '0');
+
+  await outlineCopy.focus();
+  await outlineCopy.press('Enter');
+  await expect(outlineCopy.locator('..')).toHaveAttribute('data-copy-link-status', 'success');
+  await expect(outlineCopy).toBeFocused();
+  await expect(outlineActions).toHaveCSS('opacity', '1');
 });
 
 test("switches and sends references from the right-docked workspace", async ({ page }) => {
@@ -2083,15 +2206,21 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     const firstChildBounds = childRows[0]!.getBoundingClientRect();
     const secondChildBounds = childRows[1]!.getBoundingClientRect();
     const style = getComputedStyle(children);
+    const parentLabel = parentRow.querySelector<HTMLElement>(".outline-navigator__title");
+    const childLabel = childRows[0]!.querySelector<HTMLElement>(".outline-navigator__title");
+    if (!parentLabel || !childLabel) throw new Error("Outline branch labels are incomplete.");
     return {
       borderLeftStyle: style.borderLeftStyle,
       borderLeftWidth: style.borderLeftWidth,
       childToChild: secondChildBounds.top - firstChildBounds.bottom,
+      labelIndent: childLabel.getBoundingClientRect().left
+        - parentLabel.getBoundingClientRect().left,
       parentToFirstChild: firstChildBounds.top - parentBounds.bottom,
     };
   });
   expect(expandedBranchGeometry.borderLeftStyle).toBe("solid");
   expect(expandedBranchGeometry.borderLeftWidth).toBe("1px");
+  expect(expandedBranchGeometry.labelIndent).toBeCloseTo(15, 0);
   expect(expandedBranchGeometry.parentToFirstChild)
     .toBeCloseTo(expandedBranchGeometry.childToChild, 0);
 
@@ -2400,8 +2529,17 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     "Nested result, Page 3",
   );
   const currentOutlineRow = currentOutlineDestination.locator("..");
-  await expect(currentOutlineRow.locator(".row-action-group__direct"))
-    .toHaveCSS("opacity", "1");
+  const selectionBackground = await currentOutlineRow.evaluate((row) => {
+    const probe = document.createElement("span");
+    probe.style.backgroundColor = getComputedStyle(row)
+      .getPropertyValue("--review-selection-bg")
+      .trim();
+    document.body.append(probe);
+    const normalized = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return normalized;
+  });
+  await expect(currentOutlineRow).toHaveCSS("background-color", selectionBackground);
   const currentMarker = await currentOutlineRow.evaluate((row) => {
     const rowStyle = getComputedStyle(row);
     const markerStyle = getComputedStyle(row, "::before");
@@ -2425,6 +2563,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   expect(currentMarker.markerBackground).not.toBe("rgba(0, 0, 0, 0)");
   expect(currentMarker.rowBackground).not.toBe("rgba(0, 0, 0, 0)");
   await currentOutlineDestination.focus();
+  await currentOutlineRow.hover();
   await expect(currentOutlineRow).toHaveCSS("background-color", currentMarker.rowBackground);
   expect(await currentOutlineRow.evaluate((row) => getComputedStyle(row, "::before").width))
     .toBe("3px");

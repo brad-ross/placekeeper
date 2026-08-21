@@ -21,7 +21,12 @@ import { compositeFocusIndex, enabledMenuItems } from './menu-focus.js';
 import { ReviewIcon } from './ReviewIcon.js';
 
 export type LinkActionChoice = 'references' | 'main' | 'same-reference';
-export type LinkActionDismissReason = 'escape' | 'outside' | 'tab' | 'anchor-invalidated';
+export type LinkActionDismissReason =
+  | 'escape'
+  | 'outside'
+  | 'tab'
+  | 'anchor-invalidated'
+  | 'copy-success';
 
 export function linkActionDismissRestoresFocus(reason: LinkActionDismissReason): boolean {
   // Tab owns its native sequential focus movement. The other dismissal paths
@@ -360,6 +365,13 @@ export function LinkActionPopover({
     '--link-action-left': `${placement?.left ?? request.clientRect.left}px`,
     '--link-action-top': `${placement?.top ?? request.clientRect.bottom + 8}px`,
   } as CSSProperties;
+  const dismissingCopyLink = copyLink === undefined ? undefined : {
+    ...copyLink,
+    onCopySuccess: () => {
+      copyLink.onCopySuccess?.();
+      dismiss('copy-success');
+    },
+  };
 
   return createPortal(
     <div
@@ -375,7 +387,7 @@ export function LinkActionPopover({
         pageContext={request.metadata.pageContext}
         sourceScope={request.sourceScope}
         firstItemRef={firstItemRef}
-        {...(copyLink === undefined ? {} : { copyLink })}
+        {...(dismissingCopyLink === undefined ? {} : { copyLink: dismissingCopyLink })}
         onChoose={choose}
         onKeyDown={keyDown}
         onBlur={blur}

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type Ref } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type Ref } from 'react';
 
 import {
   encodePlacekeeperLinkFragment,
@@ -25,6 +25,7 @@ export function createCopyLinkCommand(input: {
   readonly getLink: () => string;
   readonly writeText: (link: string) => Promise<void>;
   readonly onStatus: (status: CopyLinkStatus) => void;
+  readonly onCopySuccess?: () => void;
 }): { readonly run: (linkOverride?: string) => Promise<void> } {
   let pending: Promise<void> | null = null;
   return {
@@ -33,7 +34,10 @@ export function createCopyLinkCommand(input: {
       const link = linkOverride ?? input.getLink();
       input.onStatus({ status: 'pending' });
       pending = input.writeText(link)
-        .then(() => input.onStatus({ status: 'success' }))
+        .then(() => {
+          input.onStatus({ status: 'success' });
+          input.onCopySuccess?.();
+        })
         .catch(() => input.onStatus({ status: 'failure', link }))
         .finally(() => { pending = null; });
       return pending;
@@ -49,6 +53,7 @@ export interface CopyLinkControlProps extends CopyLinkActionData {
   readonly buttonRole?: 'menuitem';
   readonly triggerRef?: Ref<HTMLButtonElement>;
   readonly feedbackPlacement?: 'floating' | 'inline';
+  readonly onCopySuccess?: () => void;
 }
 
 function setRefValue<T>(ref: Ref<T> | undefined, value: T | null): void {
@@ -79,11 +84,17 @@ export function CopyLinkControl({
   buttonRole,
   triggerRef,
   feedbackPlacement = 'floating',
+  onCopySuccess,
 }: CopyLinkControlProps) {
   const getLinkRef = useRef(getLink);
   getLinkRef.current = getLink;
   const writeTextRef = useRef(writeText);
   writeTextRef.current = writeText;
+  const onCopySuccessRef = useRef(onCopySuccess);
+  onCopySuccessRef.current = onCopySuccess;
+  const variantRef = useRef(variant);
+  variantRef.current = variant;
+  const pointerActivationRef = useRef(false);
   const internalTriggerRef = useRef<HTMLButtonElement>(null);
   const setTriggerNode = useCallback((node: HTMLButtonElement | null) => {
     internalTriggerRef.current = node;
@@ -97,13 +108,31 @@ export function CopyLinkControl({
       writeText: (link) => writeTextRef.current(link),
       onStatus: (next) => {
         setStatus(next);
-        if (next.status === 'failure' || (next.status === 'success' && variant === 'popover')) {
-          queueMicrotask(() => internalTriggerRef.current?.focus({ preventScroll: true }));
+        if (next.status === 'failure') pointerActivationRef.current = false;
+      },
+      onCopySuccess: () => {
+        const pointerActivated = pointerActivationRef.current;
+        pointerActivationRef.current = false;
+        if (
+          pointerActivated
+          && (variantRef.current === 'row' || variantRef.current === 'annotation')
+        ) {
+          internalTriggerRef.current?.blur();
         }
+        onCopySuccessRef.current?.();
       },
     });
   }
-  const run = () => { void commandRef.current?.run(); };
+  useLayoutEffect(() => {
+    if (status.status === 'failure') {
+      internalTriggerRef.current?.focus({ preventScroll: true });
+    }
+  }, [status]);
+  const run = (trigger: HTMLButtonElement, pointerActivated: boolean) => {
+    pointerActivationRef.current ||= pointerActivated;
+    trigger.focus({ preventScroll: true });
+    void commandRef.current?.run();
+  };
   const annotation = variant === 'annotation';
   const controlClassName = [
     'copy-link-control',
@@ -124,10 +153,10 @@ export function CopyLinkControl({
         {...(annotation ? { 'data-annotation-action': 'copy-link' } : {})}
         {...(buttonRole === undefined ? {} : { role: buttonRole })}
         aria-label={ariaLabel}
-        title={title}
+        title={disabled ? title : undefined}
         aria-busy={status.status === 'pending' ? 'true' : 'false'}
-        disabled={disabled || (status.status === 'pending' && variant !== 'popover')}
-        onClick={run}
+        disabled={disabled}
+        onClick={(event) => run(event.currentTarget, event.detail > 0)}
       >
         <ReviewIcon name="link" />
         {presentation === 'labeled' ? (
@@ -135,7 +164,7 @@ export function CopyLinkControl({
         ) : null}
       </button>
       {status.status === 'success' ? (
-        <span className="copy-link-control__status" role="status">Link copied.</span>
+        <span className="sr-only" role="status">Link copied.</span>
       ) : null}
       {status.status === 'failure' ? (
         <div className="copy-link-control__fallback">

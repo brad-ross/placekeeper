@@ -328,7 +328,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(peekHtml).not.toContain('<button');
   });
 
-  it('offers an exact-item Copy Link action only for a portable saved annotation', () => {
+  it('keeps the annotation Copy Link affordance visible and right-most while durability is pending', () => {
     const copyLink = {
       getLink: () => 'placekeeper:///tmp/Paper.pdf#v=1&page=4&item=00000000-0000-4000-8000-000000000004',
       writeText: async () => undefined,
@@ -350,13 +350,31 @@ describe('review shell layout and accessibility contract', () => {
         onDelete={() => undefined}
       />,
     );
+    const pendingList = renderToStaticMarkup(
+      <AnnotationList
+        items={[ownedAnnotation]}
+        copyLinkForItem={() => ({ ...copyLink, disabled: true })}
+        onNavigate={() => undefined}
+        onEdit={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
     const copyablePeek = renderToStaticMarkup(
       <AnnotationPeek item={ownedAnnotation} copyLink={copyLink} onHoldChange={() => undefined} />,
     );
 
     expect(copyableList).toContain('data-item-copy-link="true"');
     expect(copyableList).toContain('aria-label="Copy link to Highlight annotation on page 4"');
+    expect(copyableList.indexOf('data-annotation-action="edit"')).toBeLessThan(
+      copyableList.indexOf('data-annotation-action="delete"'),
+    );
+    expect(copyableList.indexOf('data-annotation-action="delete"')).toBeLessThan(
+      copyableList.indexOf('data-annotation-action="copy-link"'),
+    );
     expect(copyablePeek).toContain('aria-label="Copy link to Highlight annotation on page 4"');
+    expect(pendingList).toContain('data-item-copy-link="true"');
+    expect(pendingList).toContain('title="Save annotation before copying its link"');
+    expect(pendingList).toContain('disabled=""');
     expect(pageOnlyList).toContain('data-item-copy-link="false"');
     expect(pageOnlyList).not.toContain('data-annotation-action="copy-link"');
   });

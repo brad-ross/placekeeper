@@ -33,7 +33,7 @@ describe('Copy Link', () => {
     expect(markup).toContain('stroke-width="1.875"');
   });
 
-  it('adapts presentation and semantics for a labeled menu action', () => {
+  it('adapts presentation and semantics without a transient native tooltip', () => {
     const triggerRef = createRef<HTMLButtonElement>();
     const markup = renderToStaticMarkup(createElement(CopyLinkControl, {
       getLink: () => 'placekeeper:///tmp/Paper.pdf#v=2&page=4&view=xyz&x=12&y=24&zoom=1',
@@ -52,7 +52,7 @@ describe('Copy Link', () => {
     expect(markup).toContain('role="presentation"');
     expect(markup).toContain('role="menuitem"');
     expect(markup).toContain('aria-label="Copy link to exact destination on page 4"');
-    expect(markup).toContain('title="Copy exact destination link"');
+    expect(markup).not.toContain('title="Copy exact destination link"');
     expect(markup).toContain('<span class="copy-link-control__label">Copy link to exact destination on page 4</span>');
   });
 
@@ -61,9 +61,11 @@ describe('Copy Link', () => {
       disabled: true,
       getLink: () => 'placekeeper:///tmp/Paper.pdf#v=1&page=4',
       writeText: async () => undefined,
+      title: 'Save annotation before copying its link',
     }));
 
     expect(markup).toContain('disabled=""');
+    expect(markup).toContain('title="Save annotation before copying its link"');
   });
 
   it('constructs only a safe encoded fragment from the validated app-link base', () => {
@@ -81,10 +83,12 @@ describe('Copy Link', () => {
     const write = deferred<void>();
     const writeText = vi.fn(() => write.promise);
     const states: CopyLinkStatus[] = [];
+    const onCopySuccess = vi.fn();
     const command = createCopyLinkCommand({
       getLink: () => 'placekeeper:///tmp/Paper.pdf#v=1&page=4',
       writeText,
       onStatus: (status) => states.push(status),
+      onCopySuccess,
     });
 
     const first = command.run();
@@ -94,6 +98,7 @@ describe('Copy Link', () => {
     write.resolve();
     await Promise.all([first, duplicate]);
     expect(states.at(-1)).toEqual({ status: 'success' });
+    expect(onCopySuccess).toHaveBeenCalledOnce();
   });
 
   it('keeps the generated address selectable after clipboard failure and retries', async () => {

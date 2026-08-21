@@ -100,6 +100,9 @@ test("a live readable review survives repeated hard refresh and fails closed aft
   await page.getByRole("button", { name: "Copy link to current PDF location" }).click();
   await expect(page.locator('[data-copy-link-status="success"]').getByRole("status"))
     .toHaveText("Link copied.");
+  await expect(page.locator('[data-copy-link-status="success"]').getByRole("status"))
+    .toHaveClass("sr-only");
+  await expect(page.locator(".copy-link-control__status")).toHaveCount(0);
   expect(await page.evaluate(() => (
     globalThis as typeof globalThis & { __copiedPlacekeeperLink?: string }
   ).__copiedPlacekeeperLink)).toMatch(/^placekeeper:\/\/\/.*Paper%20One\.pdf#v=1&page=1$/u);
