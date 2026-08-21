@@ -56,6 +56,17 @@ import {
 
 export const RECOVERY_DECISIONS = ["resume", "discard", "fork"] as const;
 export type RecoveryDecision = typeof RECOVERY_DECISIONS[number];
+export interface RecoveryOfferIdentity {
+  readonly id: string;
+  readonly expiresAt: string;
+}
+
+export class RecoveryOfferUnavailableError extends Error {
+  constructor(message = "Recovery choices are no longer current") {
+    super(message);
+    this.name = "RecoveryOfferUnavailableError";
+  }
+}
 export const LAUNCH_SURFACES = ["browser", "finder", "codex", "vscode"] as const;
 export type LaunchSurface = typeof LAUNCH_SURFACES[number];
 
@@ -71,6 +82,8 @@ export interface OpenReviewRequest {
   readonly pdfPath: string;
   readonly sourceRootPath?: string;
   readonly recoveryDecision?: RecoveryDecision;
+  readonly recoveryOffer?: RecoveryOfferIdentity;
+  readonly recoveryOperationId?: string;
   readonly surface?: LaunchSurface;
   readonly requestedLocation?: PlacekeeperLinkLocation;
 }
@@ -92,7 +105,27 @@ export type OpenReviewResult =
       readonly kind: "recovery-offered";
       readonly recoverySessionId: string;
       readonly choices: readonly RecoveryDecision[];
+      readonly recoveryOffer: RecoveryOfferIdentity;
     };
+
+interface RecoveryOfferRecord {
+  readonly expiresAt: string;
+  readonly recoverySessionId: string;
+  readonly recoveredSourceDigest: string;
+  readonly canonicalSourcePath: string;
+  readonly requestedSourceDigest: string;
+  readonly expiresAtMs: number;
+  claimedOperationId?: string;
+  claimedDecision?: RecoveryDecision;
+}
+
+interface RecoveryOperationRecord {
+  readonly fingerprint: string;
+  readonly result: Promise<OpenReviewResult>;
+  readonly offerId: string;
+  readonly recoverySessionId?: string;
+  readonly expiresAtMs: number;
+}
 
 interface ActiveSession {
   readonly id: string;
@@ -169,6 +202,8 @@ export interface ResumedBrowserView {
 }
 
 const BOOTSTRAP_TTL_MS = 60_000;
+const RECOVERY_OFFER_TTL_MS = 5 * 60_000;
+const RECOVERY_ID = /^[A-Za-z0-9_-]{16,128}$/u;
 // A prompt and the replacement browser bootstrap commonly arrive together;
 // keep the control request bounded while allowing their two-sided handshake.
 const RESTART_RECONNECT_WAIT_MS = 4_500;
@@ -229,6 +264,8 @@ export class SessionBroker {
   readonly #bootstrapScopes = new Map<string, BrowserLaunchScope>();
   readonly #credentialScopes = new Map<string, BrowserLaunchScope>();
   readonly #viewsById = new Map<string, BrowserViewRecord>();
+  readonly #recoveryOffers = new Map<string, RecoveryOfferRecord>();
+  readonly #recoveryOperations = new Map<string, RecoveryOperationRecord>();
   readonly #reconnectByBindProofHash = new Map<
     string,
     Omit<ReconnectBindingMetadata, "taskSessionId"> & { readonly expiresAtMs: number }
@@ -350,11 +387,78 @@ export class SessionBroker {
 
   async openReview(request: OpenReviewRequest): Promise<OpenReviewResult> {
     await this.initialize();
+    this.#sweepRecoveryRecords();
     const approvedFile = await this.capabilities.approvePdf(request.pdfPath);
     const sourceDigest = await hashFile(approvedFile.canonicalPath);
+    if (request.recoveryDecision === undefined) {
+      if (request.recoveryOffer !== undefined || request.recoveryOperationId !== undefined) {
+        this.capabilities.revokeFile(approvedFile.id);
+        throw new Error("Recovery identity requires an exact recovery choice");
+      }
+      return this.#openApprovedReview(request, approvedFile, sourceDigest);
+    }
+    const boundRecovery = request.recoveryOffer !== undefined &&
+      request.recoveryOperationId !== undefined;
+    if (!boundRecovery) {
+      if (request.recoveryDecision !== "fork") {
+        this.capabilities.revokeFile(approvedFile.id);
+        throw new Error("Recovery decision requires an exact offer and operation identity");
+      }
+      return this.#openApprovedReview(request, approvedFile, sourceDigest);
+    }
+    if (
+      !RECOVERY_ID.test(request.recoveryOffer!.id) ||
+      !RECOVERY_ID.test(request.recoveryOperationId!) ||
+      !Number.isFinite(Date.parse(request.recoveryOffer!.expiresAt))
+    ) {
+      this.capabilities.revokeFile(approvedFile.id);
+      throw new Error("Recovery identity is invalid");
+    }
+    const fingerprint = [
+      request.recoveryOffer!.id,
+      request.recoveryOffer!.expiresAt,
+      request.recoveryDecision,
+      approvedFile.canonicalPath,
+      sourceDigest,
+    ].join("\0");
+    const existing = this.#recoveryOperations.get(request.recoveryOperationId!);
+    if (existing !== undefined) {
+      this.capabilities.revokeFile(approvedFile.id);
+      if (existing.fingerprint !== fingerprint) {
+        throw new Error("Recovery operation was replayed with a different offer or choice");
+      }
+      return existing.result;
+    }
+    const offered = this.#recoveryOffers.get(request.recoveryOffer!.id);
+    const result = this.#openApprovedReview(request, approvedFile, sourceDigest);
+    this.#recoveryOperations.set(request.recoveryOperationId!, {
+      fingerprint,
+      result,
+      offerId: request.recoveryOffer!.id,
+      ...(offered === undefined ? {} : { recoverySessionId: offered.recoverySessionId }),
+      expiresAtMs: offered?.expiresAtMs ?? this.#now().getTime() + RECOVERY_OFFER_TTL_MS,
+    });
+    try {
+      return await result;
+    } catch (error) {
+      this.#recoveryOperations.delete(request.recoveryOperationId!);
+      const offer = this.#recoveryOffers.get(request.recoveryOffer!.id);
+      if (offer?.claimedOperationId === request.recoveryOperationId) {
+        delete offer.claimedOperationId;
+        delete offer.claimedDecision;
+      }
+      throw error;
+    }
+  }
+
+  async #openApprovedReview(
+    request: OpenReviewRequest,
+    approvedFile: { readonly id: string; readonly canonicalPath: string },
+    sourceDigest: string,
+  ): Promise<OpenReviewResult> {
     const key = activeKey(approvedFile.canonicalPath, sourceDigest);
     const existingSessionId = this.#activeBySource.get(key);
-    if (existingSessionId !== undefined && request.recoveryDecision !== "fork") {
+    if (existingSessionId !== undefined && request.recoveryDecision === undefined) {
       this.capabilities.revokeFile(approvedFile.id);
       const session = this.#activeById.get(existingSessionId);
       if (session === undefined) throw new Error("Active session index is inconsistent");
@@ -381,7 +485,7 @@ export class SessionBroker {
             draft.destination.kind === "original" &&
             draft.destination.fingerprint === sourceDigest)),
     );
-    const pathMatch = identityMatches.find(
+    const pathMatches = identityMatches.filter(
       (draft) => draft.canonicalSourcePath === approvedFile.canonicalPath,
     );
     const movedOriginalMatches = identityMatches.filter(
@@ -390,20 +494,89 @@ export class SessionBroker {
         draft.destination.kind === "original" &&
         draft.destination.fingerprint === sourceDigest,
     );
-    const matchingDraft = pathMatch ??
-      (movedOriginalMatches.length === 1 ? movedOriginalMatches[0] : undefined);
+    if (pathMatches.length > 1 || (pathMatches.length === 0 && movedOriginalMatches.length > 1)) {
+      this.capabilities.revokeFile(approvedFile.id);
+      throw new Error("Recovery target is ambiguous; protected work was left unchanged");
+    }
+    const matchingDraft = pathMatches[0] ?? movedOriginalMatches[0];
 
     if (matchingDraft !== undefined && request.recoveryDecision === undefined) {
       this.capabilities.revokeFile(approvedFile.id);
+      const currentOffer = [...this.#recoveryOffers.entries()].find(([, offer]) =>
+        offer.expiresAtMs > this.#now().getTime() &&
+        offer.recoverySessionId === matchingDraft.state.sessionId &&
+        offer.recoveredSourceDigest === matchingDraft.state.source.digest &&
+        offer.canonicalSourcePath === approvedFile.canonicalPath &&
+        offer.requestedSourceDigest === sourceDigest
+      );
+      const recoveryOffer = currentOffer === undefined
+        ? {
+            id: randomBytes(24).toString("base64url"),
+            expiresAt: new Date(this.#now().getTime() + RECOVERY_OFFER_TTL_MS).toISOString(),
+          } satisfies RecoveryOfferIdentity
+        : { id: currentOffer[0], expiresAt: currentOffer[1].expiresAt };
+      if (currentOffer === undefined) {
+        this.#recoveryOffers.set(recoveryOffer.id, {
+          expiresAt: recoveryOffer.expiresAt,
+          recoverySessionId: matchingDraft.state.sessionId,
+          recoveredSourceDigest: matchingDraft.state.source.digest,
+          canonicalSourcePath: approvedFile.canonicalPath,
+          requestedSourceDigest: sourceDigest,
+          expiresAtMs: Date.parse(recoveryOffer.expiresAt),
+        });
+      }
       return {
         kind: "recovery-offered",
         recoverySessionId: matchingDraft.state.sessionId,
         choices: RECOVERY_DECISIONS,
+        recoveryOffer,
       };
     }
 
-    if (matchingDraft !== undefined && request.recoveryDecision === "discard") {
-      await this.#store(matchingDraft.state.sessionId).remove();
+    if (request.recoveryOffer !== undefined) {
+      if (request.recoveryOperationId === undefined || request.recoveryDecision === undefined) {
+        this.capabilities.revokeFile(approvedFile.id);
+        throw new Error("Recovery offer requires an exact choice and operation identity");
+      }
+      const offer = this.#recoveryOffers.get(request.recoveryOffer.id);
+      if (
+        offer === undefined ||
+        offer.expiresAt !== request.recoveryOffer.expiresAt ||
+        offer.expiresAtMs <= this.#now().getTime() ||
+        matchingDraft === undefined ||
+        offer.recoverySessionId !== matchingDraft.state.sessionId ||
+        offer.recoveredSourceDigest !== matchingDraft.state.source.digest ||
+        offer.canonicalSourcePath !== approvedFile.canonicalPath ||
+        offer.requestedSourceDigest !== sourceDigest
+      ) {
+        this.capabilities.revokeFile(approvedFile.id);
+        throw new RecoveryOfferUnavailableError(
+          "Recovery offer is stale, expired, or does not match this protected draft",
+        );
+      }
+      if (
+        offer.claimedOperationId !== undefined &&
+        (offer.claimedOperationId !== request.recoveryOperationId ||
+          offer.claimedDecision !== request.recoveryDecision)
+      ) {
+        this.capabilities.revokeFile(approvedFile.id);
+        throw new RecoveryOfferUnavailableError(
+          "Recovery offer was already used by a different operation or choice",
+        );
+      }
+      offer.claimedOperationId = request.recoveryOperationId;
+      offer.claimedDecision = request.recoveryDecision;
+      for (const [siblingId, sibling] of this.#recoveryOffers) {
+        if (
+          siblingId !== request.recoveryOffer.id &&
+          sibling.recoverySessionId === offer.recoverySessionId
+        ) {
+          this.#deleteRecoveryOffer(siblingId);
+        }
+      }
+    } else if (matchingDraft !== undefined) {
+      this.capabilities.revokeFile(approvedFile.id);
+      throw new Error("Protected recovery requires the exact offered identity");
     }
 
     let approvedRoot:
@@ -581,6 +754,14 @@ export class SessionBroker {
     };
     await session.store.persist(this.#draft(session));
     this.#activate(session);
+    if (matchingDraft !== undefined && request.recoveryDecision === "discard") {
+      try {
+        await this.#store(matchingDraft.state.sessionId).remove();
+      } catch {
+        // The replacement is already durable and active. Redundant protected
+        // data is safer than making the successfully reopened review fail.
+      }
+    }
     return {
       kind: "opened",
       launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
@@ -983,6 +1164,41 @@ export class SessionBroker {
     for (const [capabilityHash, pending] of this.#pendingRestartReconnects) {
       if (pending.ticket.expiresAtMs <= now) {
         this.#pendingRestartReconnects.delete(capabilityHash);
+      }
+    }
+    this.#sweepRecoveryRecords();
+  }
+
+  #sweepRecoveryRecords(): void {
+    const now = this.#now().getTime();
+    for (const [offerId, offer] of this.#recoveryOffers) {
+      if (offer.expiresAtMs <= now) this.#deleteRecoveryOffer(offerId);
+    }
+    for (const [operationId, operation] of this.#recoveryOperations) {
+      if (operation.expiresAtMs <= now || !this.#recoveryOffers.has(operation.offerId)) {
+        this.#recoveryOperations.delete(operationId);
+      }
+    }
+  }
+
+  #deleteRecoveryOffer(offerId: string): void {
+    this.#recoveryOffers.delete(offerId);
+    for (const [operationId, operation] of this.#recoveryOperations) {
+      if (operation.offerId === offerId) this.#recoveryOperations.delete(operationId);
+    }
+  }
+
+  #clearRecoveryRecordsForSession(sessionId: string): void {
+    const removedOffers = new Set<string>();
+    for (const [offerId, offer] of this.#recoveryOffers) {
+      if (offer.recoverySessionId === sessionId) {
+        removedOffers.add(offerId);
+        this.#recoveryOffers.delete(offerId);
+      }
+    }
+    for (const [operationId, operation] of this.#recoveryOperations) {
+      if (operation.recoverySessionId === sessionId || removedOffers.has(operation.offerId)) {
+        this.#recoveryOperations.delete(operationId);
       }
     }
   }
@@ -1576,6 +1792,8 @@ export class SessionBroker {
       this.#notifyRestartReconnectExchange(capabilityHash);
     }
     this.#pendingRestartReconnects.clear();
+    this.#recoveryOffers.clear();
+    this.#recoveryOperations.clear();
   }
 
   async drainWrites(): Promise<void> {
@@ -1591,6 +1809,7 @@ export class SessionBroker {
     const session = this.#activeById.get(sessionId);
     if (session === undefined) return;
     session.ending = true;
+    this.#clearRecoveryRecordsForSession(sessionId);
     this.#activeById.delete(sessionId);
     for (const [key, owner] of this.#activeBySource) {
       if (owner === sessionId) this.#activeBySource.delete(key);

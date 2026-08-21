@@ -117,8 +117,13 @@ describe("VS Code local host adapter", () => {
   });
 
   it("accepts only the exact recovery choice contract", () => {
-    expect(parseLaunchResponse(JSON.stringify({ ok: true, kind: "recovery-offered", choices: ["resume", "discard", "fork"], recoverySessionId: "opaque-session" }))).toMatchObject({ kind: "recovery-offered" });
-    expect(() => parseLaunchResponse(JSON.stringify({ ok: true, kind: "recovery-offered", choices: ["resume", "fork"], recoverySessionId: "opaque-session" }))).toThrow(/invalid/u);
+    const recoveryOffer = {
+      id: "opaque_recovery_offer_1234",
+      expiresAt: "2026-08-21T20:00:00.000Z",
+    };
+    expect(parseLaunchResponse(JSON.stringify({ ok: true, kind: "recovery-offered", choices: ["resume", "discard", "fork"], recoverySessionId: "opaque-session", recoveryOffer }))).toMatchObject({ kind: "recovery-offered", recoveryOffer });
+    expect(() => parseLaunchResponse(JSON.stringify({ ok: true, kind: "recovery-offered", choices: ["resume", "fork"], recoverySessionId: "opaque-session", recoveryOffer }))).toThrow(/invalid/u);
+    expect(() => parseLaunchResponse(JSON.stringify({ ok: true, kind: "recovery-offered", choices: ["resume", "discard", "fork"], recoverySessionId: "opaque-session" }))).toThrow(/invalid/u);
   });
 
   it("accepts the bounded shared upgrade-required error without weakening URL checks", () => {
@@ -139,5 +144,42 @@ describe("VS Code local host adapter", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected a successful launch");
     expect(result.kind).toBe("opened");
+  });
+
+  it("carries the exact recovery offer and operation identity", async () => {
+    const invoke = vi.fn(async (
+      _executable: string,
+      _args: readonly string[],
+      _options: { readonly shell: false; readonly timeoutMs: number; readonly maxOutputBytes: number },
+    ) => ({
+      stdout: JSON.stringify({
+        ok: true,
+        kind: "opened",
+        url: "http://127.0.0.1:49152/s/id/bootstrap?embed=vscode#cap=secret",
+      }),
+      stderr: "",
+    }));
+    const recovery = {
+      decision: "resume" as const,
+      offer: {
+        id: "opaque_recovery_offer_1234",
+        expiresAt: "2026-08-21T20:00:00.000Z",
+      },
+      operationId: "operation_identifier_1234",
+    };
+    await runLaunchClient(
+      "/Applications/Placekeeper.app/Contents/MacOS/placekeeper",
+      "/tmp/paper.pdf",
+      undefined,
+      invoke,
+      recovery,
+    );
+    expect(invoke.mock.calls[0]![1]).toEqual([
+      "open", "--json", "--surface", "vscode", "--pdf", "/tmp/paper.pdf",
+      "--recovery", recovery.decision,
+      "--recovery-offer-id", recovery.offer.id,
+      "--recovery-offer-expires-at", recovery.offer.expiresAt,
+      "--recovery-operation-id", recovery.operationId,
+    ]);
   });
 });

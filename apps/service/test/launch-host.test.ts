@@ -167,11 +167,19 @@ describe("persistent launch host", () => {
       webAssets: { root: join(root, "assets") },
     });
     hosts.push(restarted);
-    await expect(restarted.openLink({ link, confirmed: true })).resolves.toMatchObject({
+    const offered = await restarted.openLink({ link, confirmed: true });
+    expect(offered).toMatchObject({
       ok: true,
       kind: "recovery-offered",
     });
-    const resumed = await restarted.openLink({ link, confirmed: true, recovery: "resume" });
+    if (!offered.ok || offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
+    const resumed = await restarted.openLink({
+      link,
+      confirmed: true,
+      recovery: "resume",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
+    });
     if (!resumed.ok || resumed.kind !== "opened") throw new Error("Expected linked recovery");
     const url = new URL(resumed.url);
     const capability = new URLSearchParams(url.hash.slice(1)).get("cap")!;
@@ -522,7 +530,13 @@ describe("persistent launch host", () => {
       kind: "recovery-offered",
       choices: ["resume", "discard", "fork"],
     });
-    const resumed = await restarted.open({ pdfPath: pdf, recovery: "resume" });
+    if (!offered.ok || offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
+    const resumed = await restarted.open({
+      pdfPath: pdf,
+      recovery: "resume",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
+    });
     expect(resumed).toMatchObject({ ok: true, kind: "opened" });
   });
 

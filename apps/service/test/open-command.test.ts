@@ -75,17 +75,26 @@ describe("open command", () => {
 
   it("parses bounded app-link preflight and confirmed-open commands", () => {
     const link = "placekeeper:///tmp/Paper%20One.pdf#v=1&page=12";
+    const recoveryOffer = {
+      id: "opaque_recovery_offer_1234",
+      expiresAt: "2026-08-21T20:00:00.000Z",
+    };
     expect(parseOpenLinkArguments([
       "open-link", "--json", "--preflight", "--link", link,
     ])).toEqual({ operation: "preflight", link });
     expect(parseOpenLinkArguments([
       "open-link", "--json", "--confirmed", "--recovery", "resume",
+      "--recovery-offer-id", recoveryOffer.id,
+      "--recovery-offer-expires-at", recoveryOffer.expiresAt,
+      "--recovery-operation-id", "operation_identifier_1234",
       "--surface", "codex", "--link", link,
     ])).toEqual({
       operation: "open",
       link,
       confirmed: true,
       recovery: "resume",
+      recoveryOffer,
+      recoveryOperationId: "operation_identifier_1234",
       surface: "codex",
     });
     expect(() => parseOpenLinkArguments(["open-link", "--json", "--link", link, "extra"]))
@@ -93,6 +102,9 @@ describe("open command", () => {
     expect(() => parseOpenLinkArguments([
       "open-link", "--json", "--preflight", "--confirmed", "--link", link,
     ])).toThrow("preflight");
+    expect(() => parseOpenLinkArguments([
+      "open-link", "--json", "--recovery", "resume", "--link", link,
+    ])).toThrow("offer and operation");
   });
 
   it("prints one bounded structured app-link response", async () => {
@@ -158,19 +170,31 @@ describe("open command", () => {
   });
 
   it("accepts one explicit absolute PDF plus optional approved scope and fork", () => {
+    const recoveryOffer = {
+      id: "opaque_recovery_offer_1234",
+      expiresAt: "2026-08-21T20:00:00.000Z",
+    };
     expect(parseOpenArguments([
       "open", "--json", "--pdf", "/tmp/paper.pdf",
       "--source-root", "/tmp/source", "--recovery", "resume", "--surface", "vscode",
+      "--recovery-offer-id", recoveryOffer.id,
+      "--recovery-offer-expires-at", recoveryOffer.expiresAt,
+      "--recovery-operation-id", "operation_identifier_1234",
     ])).toEqual({
       pdfPath: "/tmp/paper.pdf",
       sourceRootPath: "/tmp/source",
       recovery: "resume",
+      recoveryOffer,
+      recoveryOperationId: "operation_identifier_1234",
       surface: "vscode",
     });
     expect(() => parseOpenArguments(["open", "--json", "--pdf", "relative.pdf"]))
       .toThrow("absolute");
     expect(() => parseOpenArguments(["open", "--json", "--pdf", "/a.pdf", "/b.pdf"]))
       .toThrow("one explicit PDF");
+    expect(() => parseOpenArguments([
+      "open", "--json", "--pdf", "/a.pdf", "--recovery", "resume",
+    ])).toThrow("offer and operation");
   });
 
   it("prints exactly one structured response and never logs a secret on errors", async () => {

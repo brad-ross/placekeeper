@@ -46,11 +46,20 @@ export async function runLaunchClient(
   pdfPath: string,
   sourceRoot: string | undefined,
   invoke: LaunchInvoker = defaultInvoker,
-  recovery?: RecoveryDecision,
+  recovery?: {
+    readonly decision: RecoveryDecision;
+    readonly offer: RecoveryLaunch["recoveryOffer"];
+    readonly operationId: string;
+  },
 ): Promise<SuccessfulLaunch | RecoveryLaunch | FailedLaunch> {
   const args = ["open", "--json", "--surface", "vscode", "--pdf", pdfPath];
   if (sourceRoot !== undefined) args.push("--source-root", sourceRoot);
-  if (recovery !== undefined) args.push("--recovery", recovery);
+  if (recovery !== undefined) {
+    args.push("--recovery", recovery.decision);
+    args.push("--recovery-offer-id", recovery.offer.id);
+    args.push("--recovery-offer-expires-at", recovery.offer.expiresAt);
+    args.push("--recovery-operation-id", recovery.operationId);
+  }
   const { stdout } = await invoke(executable, args, {
     shell: false,
     timeoutMs: 15_000,

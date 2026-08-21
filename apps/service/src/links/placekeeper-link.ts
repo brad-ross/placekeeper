@@ -11,6 +11,7 @@ import type {
   LaunchSurface,
   OpenReviewResult,
   RecoveryDecision,
+  RecoveryOfferIdentity,
   SessionBroker,
 } from "../sessions/session-broker.js";
 
@@ -44,6 +45,8 @@ export interface OpenPlacekeeperLinkRequest {
   readonly link: string;
   readonly confirmed?: boolean;
   readonly recovery?: RecoveryDecision;
+  readonly recoveryOffer?: RecoveryOfferIdentity;
+  readonly recoveryOperationId?: string;
   readonly surface: LaunchSurface;
 }
 
@@ -120,6 +123,10 @@ export async function openPlacekeeperLink(
   return broker.openReview({
     pdfPath: prepared.pdfPath,
     ...(request.recovery === undefined ? {} : { recoveryDecision: request.recovery }),
+    ...(request.recoveryOffer === undefined ? {} : { recoveryOffer: request.recoveryOffer }),
+    ...(request.recoveryOperationId === undefined
+      ? {}
+      : { recoveryOperationId: request.recoveryOperationId }),
     surface: request.surface,
     requestedLocation: prepared.location,
   });

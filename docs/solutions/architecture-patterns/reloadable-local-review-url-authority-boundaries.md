@@ -198,12 +198,14 @@ replacement daemon answers the fixed origin
   -> strict pathname parse only
   -> no matching in-memory view
   -> clear stale /r/<old-view>/ cookie
-  -> show inert Reopen this PDF screen
+  -> show inert Reopen review screen
   -> preserve safe page/item fragment
 
-user clicks Reopen in Placekeeper
-  -> inline unfamiliar-path confirmation (native confirmation for the fallback link)
+user clicks Reopen review
+  -> that explicit POST is the unfamiliar-path confirmation boundary
   -> canonicalize and verify current PDF
+  -> if protected work exists, offer Resume draft / Discard draft / Open separate copy
+  -> require the exact bounded offer plus an idempotent operation ID for that choice
   -> normal browser launch
   -> fresh view ID, cookie, session credential
   -> browser-scoped review at page 12

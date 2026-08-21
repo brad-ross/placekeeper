@@ -10,10 +10,20 @@ import type { RejectedReviewCommand } from "./ReviewShell.js";
 
 export type ReopenRecoveryChoice = "resume" | "discard" | "fork";
 
+export interface ReopenRecoveryOffer {
+  readonly id: string;
+  readonly expiresAt: string;
+}
+
 export type ReopenProductionResult =
   | { readonly kind: "opened" | "focused"; readonly url: string }
   | { readonly kind: "confirmation-required"; readonly path: string }
-  | { readonly kind: "recovery-offered"; readonly choices: readonly ReopenRecoveryChoice[] };
+  | { readonly kind: "recovery-refresh-required" }
+  | {
+      readonly kind: "recovery-offered";
+      readonly choices: readonly ReopenRecoveryChoice[];
+      readonly recoveryOffer: ReopenRecoveryOffer;
+    };
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -21,19 +31,41 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function validBootstrapUrl(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
-  const target = new URL(value);
-  return target.protocol === "http:" && target.hostname === "127.0.0.1"
-    && target.port.length > 0 && target.search.length === 0
-    && /^\/s\/[A-Za-z0-9_-]+\/bootstrap$/u.test(target.pathname)
-    && /^#cap=[A-Za-z0-9_-]+$/u.test(target.hash)
-    ? target.href
-    : undefined;
+  try {
+    const target = new URL(value);
+    const currentOrigin = globalThis.location?.origin;
+    return currentOrigin !== undefined && target.href === value && target.origin === currentOrigin
+      && target.username === "" && target.password === ""
+      && target.search.length === 0
+      && /^\/s\/[A-Za-z0-9_-]+\/bootstrap$/u.test(target.pathname)
+      && /^#cap=[A-Za-z0-9_-]+$/u.test(target.hash)
+      ? target.href
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function validRecoveryOffer(value: unknown): ReopenRecoveryOffer | undefined {
+  if (!isObject(value)) return undefined;
+  const keys = Object.keys(value).sort();
+  if (keys.length !== 2 || keys[0] !== "expiresAt" || keys[1] !== "id") return undefined;
+  if (
+    typeof value.id !== "string" || !/^[A-Za-z0-9_-]{16,128}$/u.test(value.id) ||
+    typeof value.expiresAt !== "string" || !Number.isFinite(Date.parse(value.expiresAt))
+  ) return undefined;
+  return { id: value.id, expiresAt: value.expiresAt };
 }
 
 export async function reopenProductionSession(
   viewId: string,
   link: string,
-  options: { readonly confirmed?: true; readonly recovery?: ReopenRecoveryChoice } = {},
+  options: {
+    readonly confirmed?: true;
+    readonly recovery?: ReopenRecoveryChoice;
+    readonly recoveryOffer?: ReopenRecoveryOffer;
+    readonly recoveryOperationId?: string;
+  } = {},
 ): Promise<ReopenProductionResult> {
   if (!/^[0-9a-f-]{36}$/u.test(viewId)) {
     throw new Error("The live review address is invalid.");
@@ -43,6 +75,15 @@ export async function reopenProductionSession(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ link, ...options }),
   });
+  if (response.status === 409) {
+    const rejected: unknown = await response.json().catch(() => undefined);
+    if (
+      isObject(rejected) && rejected.ok === false && isObject(rejected.error) &&
+      rejected.error.kind === "recovery-offer-unavailable"
+    ) {
+      return { kind: "recovery-refresh-required" };
+    }
+  }
   if (!response.ok) throw new Error("The reopen request was rejected.");
   const result: unknown = await response.json();
   if (!isObject(result) || result.ok !== true) {
@@ -57,11 +98,18 @@ export async function reopenProductionSession(
     return { kind: result.kind, path: result.path };
   }
   if (result.kind === "recovery-offered" && Array.isArray(result.choices)) {
-    const choices = result.choices.filter(
-      (choice): choice is ReopenRecoveryChoice =>
-        choice === "resume" || choice === "discard" || choice === "fork",
-    );
-    if (choices.length > 0) return { kind: result.kind, choices };
+    const expected = new Set<ReopenRecoveryChoice>(["resume", "discard", "fork"]);
+    const valid = result.choices.length === expected.size && result.choices.every(
+      (choice) => typeof choice === "string" && expected.delete(choice as ReopenRecoveryChoice),
+    ) && expected.size === 0;
+    const recoveryOffer = validRecoveryOffer(result.recoveryOffer);
+    if (valid && recoveryOffer !== undefined) {
+      return {
+        kind: result.kind,
+        choices: ["resume", "discard", "fork"],
+        recoveryOffer,
+      };
+    }
   }
   throw new Error("The PDF could not be reopened.");
 }

@@ -5,7 +5,7 @@ import { createConnection, createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SessionCredentialStore,
   validateRequestSecurity,
@@ -13,6 +13,7 @@ import {
 } from "../../../packages/core/src/session-security.js";
 import { encodePlacekeeperLink } from "../../../packages/core/src/placekeeper-link.js";
 import { FileCapabilityRegistry } from "../src/files/file-capabilities.js";
+import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 import {
   PLACEKEEPER_HTTP_PORT,
   startHttpServer,
@@ -26,6 +27,7 @@ const temporaryDirectories: string[] = [];
 const servers: LocalHttpServer[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(servers.splice(0).map((server) => server.close()));
   await Promise.all(
     temporaryDirectories.splice(0).map((path) =>
@@ -322,6 +324,37 @@ function postJson(
 }
 
 describe("loopback HTTP boundary", () => {
+  it("keeps a stale readable GET outside every local-file and authority boundary", async () => {
+    const directory = await temporaryDirectory();
+    const assets = join(directory, "assets");
+    await mkdir(assets);
+    await writeFile(join(assets, "app.js"), "export function start() {}\n");
+    const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
+    const approvePdf = vi.spyOn(broker.capabilities, "approvePdf");
+    const recoverDraft = vi.spyOn(DraftSnapshotStore.prototype, "recover");
+    const openReview = vi.spyOn(broker, "openReview");
+    const stageReconnect = vi.spyOn(broker, "stageRestartReconnect");
+    const issueBootstrap = vi.spyOn(broker.credentials, "issueBootstrap");
+    const server = await startHttpServer(broker, { webAssets: { root: assets } });
+    servers.push(server);
+    const viewId = randomUUID();
+
+    const response = await fetch(
+      `${server.origin}/r/${viewId}/private/tmp/Stale%20Paper.pdf#v=1&page=4`,
+      { headers: { cookie: "placekeeper_view=stale; placekeeper_reconnect=stale" } },
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).toContain(`Path=/r/${viewId}/`);
+    expect(html).toContain("data-terminal-recovery");
+    expect(approvePdf).not.toHaveBeenCalled();
+    expect(recoverDraft).not.toHaveBeenCalled();
+    expect(openReview).not.toHaveBeenCalled();
+    expect(stageReconnect).not.toHaveBeenCalled();
+    expect(issueBootstrap).not.toHaveBeenCalled();
+  });
+
   it("keeps stale-session reopen same-origin, confirmed, and browser-scoped", async () => {
     const { pdf, broker, launch, server } = await openBroker();
     await broker.finish(launch.sessionId);
@@ -341,6 +374,35 @@ describe("loopback HTTP boundary", () => {
     })).status).toBe(403);
     expect((await postJson(reopenUrl, { link: "placekeeper:///invalid#fragment" })).status)
       .toBe(409);
+    expect((await postJson(reopenUrl, {
+      link,
+      confirmed: true,
+      recovery: "resume",
+    })).status).toBe(400);
+    expect((await postJson(reopenUrl, {
+      link,
+      confirmed: true,
+      recovery: "resume",
+      recoveryOffer: {
+        id: "opaque_recovery_offer_1234",
+        expiresAt: "2026-08-21T20:00:00.000Z",
+      },
+    })).status).toBe(400);
+    const unavailable = await postJson(reopenUrl, {
+      link,
+      confirmed: true,
+      recovery: "resume",
+      recoveryOffer: {
+        id: "opaque_recovery_offer_1234",
+        expiresAt: "2026-08-21T20:00:00.000Z",
+      },
+      recoveryOperationId: "operation_identifier_1234",
+    });
+    expect(unavailable.status).toBe(409);
+    await expect(unavailable.json()).resolves.toEqual({
+      ok: false,
+      error: { kind: "recovery-offer-unavailable" },
+    });
 
     const confirmation = await postJson(reopenUrl, { link });
     expect(await confirmation.json()).toEqual({
