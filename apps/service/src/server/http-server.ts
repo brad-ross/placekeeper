@@ -170,7 +170,7 @@ const terminalRecoveryFallbackScript = `
     reopen.removeAttribute("aria-disabled");
   }`;
 
-function readableViewHtml(nonce: string, appLinkBase: string): string {
+function readableViewHtml(nonce: string, appLinkBase: string, viewId: string): string {
   const script = `
 let app;
 (async () => {
@@ -188,15 +188,15 @@ let app;
   if (recovery instanceof HTMLElement) recovery.hidden = false;
   if (app === undefined) {${terminalRecoveryFallbackScript}
   } else {
-    app.showTerminalRecovery();
+    app.showTerminalRecovery("${viewId}");
   }
 });`;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Placekeeper</title></head><body><div id="root"></div>${terminalRecoveryMarkup(appLinkBase, true)}<script type="module" nonce="${nonce}">${script}</script></body></html>`;
 }
 
-function terminalRecoveryHtml(nonce: string, appLinkBase: string): string {
+function terminalRecoveryHtml(nonce: string, appLinkBase: string, viewId: string): string {
   const script = `import("/assets/app.js")
-    .then((app) => app.showTerminalRecovery())
+    .then((app) => app.showTerminalRecovery("${viewId}"))
     .catch(() => {${terminalRecoveryFallbackScript}
     });`;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Placekeeper</title></head><body>${terminalRecoveryMarkup(appLinkBase)}<script type="module" nonce="${nonce}">${script}</script></body></html>`;
@@ -274,7 +274,8 @@ export async function startHttpServer(
       const pathname = requestUrl.pathname;
       const exchangeMatch = new RegExp(`^/s/(${UUID})/exchange$`, "u").exec(pathname);
       const resumeMatch = new RegExp(`^/r/(${VIEW_UUID})/resume$`, "u").exec(pathname);
-      const reopenMatch = pathname === "/reopen";
+      const scopedReopenMatch = new RegExp(`^/r/(${VIEW_UUID})/reopen$`, "u").exec(pathname);
+      const reopenMatch = pathname === "/reopen" || scopedReopenMatch !== null;
       const commandMatch = new RegExp(`^/s/(${UUID})/commands$`, "u").exec(pathname);
       const saveMatch = new RegExp(
         `^/s/(${UUID})/save/(status|proposal|copy|folder|original|retry|locate)$`,
@@ -366,10 +367,12 @@ export async function startHttpServer(
             `placekeeper_session=${assetCapability}; Path=/s/${exchangeMatch[1]!}/assets; HttpOnly; SameSite=Strict`,
           );
         } else {
-          response.setHeader(
-            "Set-Cookie",
+          response.setHeader("Set-Cookie", [
             `placekeeper_view=${exchange.view.cookie}; Path=/r/${exchange.view.id}/; HttpOnly; SameSite=Strict`,
-          );
+            ...(exchange.view.reconnectCookie === undefined
+              ? []
+              : [`placekeeper_reconnect=${exchange.view.reconnectCookie}; Path=/r/${exchange.view.id}/; HttpOnly; SameSite=Strict`]),
+          ]);
         }
         sendJson(response, 200, {
           credential: exchange.credential,
@@ -443,12 +446,19 @@ export async function startHttpServer(
           });
           return;
         }
+        const reconnectPending = scopedReopenMatch === null
+          ? false
+          : await broker.stageRestartReconnect({
+              browserToken: cookieValue(request, "placekeeper_reconnect") ?? "",
+              launch: opened.launch,
+            });
         const launch = new URL(opened.launch.launchPath, origin);
         launch.hash = opened.launch.fragment.slice(1);
         sendJson(response, 200, {
           ok: true,
           kind: opened.kind,
           url: launch.href,
+          ...(reconnectPending ? { reconnectPending: true } : {}),
         });
         return;
       }
@@ -480,8 +490,8 @@ export async function startHttpServer(
           response,
           200,
           live
-            ? readableViewHtml(nonce, readableView.appLinkBase)
-            : terminalRecoveryHtml(nonce, readableView.appLinkBase),
+            ? readableViewHtml(nonce, readableView.appLinkBase, readableView.viewId)
+            : terminalRecoveryHtml(nonce, readableView.appLinkBase, readableView.viewId),
           "text/html; charset=utf-8",
           csp,
         );

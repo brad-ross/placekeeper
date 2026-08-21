@@ -1,7 +1,7 @@
 ---
 title: Authority boundaries for reloadable local-review URLs
 date: 2026-08-17
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 category: architecture-patterns
 module: Reloadable review link lifecycle
 problem_type: architecture_pattern
@@ -10,7 +10,7 @@ severity: high
 applies_when:
   - "A local document app serves authenticated browser views from readable loopback routes"
   - "A hard refresh must preserve the exact live view and its still-valid agent-task scope"
-  - "A replacement daemon can reuse the old origin but must not inherit old credentials or task authority"
+  - "A replacement daemon can reuse the old origin but must not infer old credentials or task authority from reachability"
   - "Document continuity should preserve only a path and a safe page, portable-item, or normalized author destination"
   - "Copy Link actions sit beside navigation controls and must not change selection, focus correspondence, or reading position"
 related_components:
@@ -48,7 +48,7 @@ canonical Placekeeper Link
 placekeeper:///Users/reader/Paper%20One.pdf#v=1&page=12
 ```
 
-The first can resume the exact in-memory browser view while its daemon, review generation, credential, and original Codex scope remain live. The second can ask Placekeeper to open the current file at the encoded semantic location through the normal launch flow. Its exact destination, when present, contains only a one-based fallback page, a supported author view mode, and canonical finite parameters; document generation and live target identity are rebuilt from the newly opened PDF. A stale Loopback Review URL can be projected into the second form after a daemon restart, but it cannot recreate the old live authority.
+The first can resume the exact in-memory browser view while its daemon, review generation, credential, and original Codex scope remain live. The second can ask Placekeeper to open the current file at the encoded semantic location through the normal launch flow. Its exact destination, when present, contains only a one-based fallback page, a supported author view mode, and canonical finite parameters; document generation and live target identity are rebuilt from the newly opened PDF. A stale Loopback Review URL can be projected into the second form after a daemon restart, but it cannot recreate the old live authority by itself. A separately persisted, short-lived two-sided reconnect ticket may restore the task association only after both the path-scoped browser token and the owning Codex task's next prompt independently prove their halves of the relationship.
 
 Earlier iterations first proved same-daemon resume, then clarified that a fixed origin cannot make a successor process the same authority. Persisting old credentials, treating the port as identity, or automatically launching the external protocol from an unauthenticated page load were rejected because each would turn descriptive reachability into authorization (session history).
 
@@ -73,7 +73,7 @@ Implement two explicit paths.
 
 The successor must never upgrade a stale route into a session on page load. Its recovery parser performs no filesystem access; it only decodes descriptive path data and constructs the canonical app-link base (`apps/service/src/links/placekeeper-link.ts:89-98`). After the click, the native launcher shows the unfamiliar path and requires an explicit Open choice (`packaging/macos/launcher.mjs:117-148`). The host rechecks confirmation immediately before its first linked-file operation, canonicalizes the path, verifies a readable regular `.pdf` whose header contains `%PDF-`, and opens it with `surface: "browser"` (`apps/service/src/host/placekeeper-host.ts:232-247`, `apps/service/src/links/placekeeper-link.ts:44-75`).
 
-Consequently, a successor reopen creates a fresh non-Codex browser view. The stale URL itself recovers no prior browser credential, task binding, document generation, or unsaved viewer state; it contributes only path and location. If Placekeeper separately finds a durable review draft for that PDF, the normal open flow may offer an explicit recovery choice that restores the draft's persisted session identity and review state.
+Consequently, a successor reopen always creates a fresh browser view and credential. The stale URL itself recovers no prior browser credential, task ID, document generation, or unsaved viewer state; it contributes only path and location. If the old view was Codex-bound, an additional opaque `HttpOnly` token scoped to that exact `/r/<view-id>/` path can match a private restart ticket containing only hashes. The successor stages that browser half after the explicit reopen and normal file confirmation, but keeps it browser-scoped until the owning task's next `UserPromptSubmit` supplies the other half. A foreign task, copied URL, missing cookie, expired ticket, different path, or changed source digest cannot attach it. If Placekeeper separately finds a durable review draft for that PDF, the normal open flow may offer an explicit recovery choice that restores the draft's persisted session identity and review state.
 
 ### Make refresh authority projection-scoped
 
@@ -85,13 +85,13 @@ Apply loopback request protections independently of the view cookie. The server 
 
 The fixed production port is only a reachability contract. The packaged daemon binds `127.0.0.1:43179`, and production configuration does not accept an environment-selected port (`apps/service/src/server/http-server.ts:22`, `apps/service/src/server/http-server.ts:644-656`, `apps/service/src/host/service-daemon.ts:55-78`). A replacement daemon can therefore answer the same literal URL, but the old URL remains unauthorized unless that same live daemon still owns its exact view record. If no daemon is listening, refresh can fail normally until Placekeeper is started; stable origin does not imply an always-running or durable session.
 
-### Preserve the original Codex scope only on live resume
+### Reattach Codex scope only through two independent proofs
 
 Codex binding is part of the initial live launch, not something inferable from a PDF path or open tab. A Codex launch issues a bind proof keyed to the review generation and browser capability; the task hook must claim it before the matching authenticated bootstrap activates the binding (`apps/service/src/sessions/session-broker.ts:249-280`, `apps/service/src/context/task-binding-registry.ts:142-249`). The browser credential retains the original launch scope, and scope polling renews only the active review whose browser-capability discriminator matches that credential (`apps/service/src/sessions/session-broker.ts:955-1008`, `apps/service/src/context/task-binding-registry.ts:268-288`). Because live refresh returns the same credential, the same task binding can remain visible after a hard reload. A later view for another task cannot borrow that projection's scope, and an ordinary browser view has no `codexContext` (`apps/service/test/live-context-service.test.ts:129-188`).
 
 Do not call browser activation “context current.” Activation proves the task/review/browser correlation. The next `UserPromptSubmit` hook requests a fresh projection, emits it into that prompt, and acknowledges its cursor only after output succeeds (`apps/service/src/cli/hook-command.ts:162-175`, `apps/service/src/cli/hook-command.ts:403-424`). Until a prompt-time observation matches the live revision and digests, browser status is `refreshing`; only a verified match is `current` (`apps/service/src/context/task-binding-registry.ts:323-353`, `apps/service/src/context/live-context-service.ts:403-425`). This is why a freshly activated or recently edited Codex view may truthfully show “updating” even though its connection is valid.
 
-A successor reopen must not reproduce this handshake from the path. It launches with `surface: "browser"`, so it is non-Codex unless Codex later performs a new explicit launch and bind flow. Never copy the previous task ID, bind proof, browser capability hash, or credential into restart recovery.
+A successor reopen must not reproduce this handshake from the path. It launches with `surface: "browser"` and stays there until the successor matches a short-lived browser reconnect token against the same canonical path and source digest, then independently receives the owning task ID from the next prompt hook. Only that exact two-sided match creates a new task binding for the new review generation and promotes the authenticated successor credential to Codex scope. The ticket is consumed and rotated after success; task/session revocation removes it. Never persist or copy the previous task ID, bind proof, browser capability hash, credential, session ID, or viewer state into restart recovery.
 
 ### Use fragments for semantic location, not server state
 
@@ -133,7 +133,7 @@ This separation gives users familiar browser behavior without making a local URL
 - the Placekeeper Link carries only a local path and generation-free semantic location;
 - an exact destination retains a truthful page fallback and is rehydrated only against the current PDF generation;
 - copying that destination is a utility action and does not imply that the source row was selected or opened;
-- successor recovery requires a user gesture and normal file confirmation, and creates a fresh non-Codex view.
+- successor recovery requires a user gesture and normal file confirmation, creates a fresh browser credential, and can regain Codex scope only through the separate browser-token-plus-next-prompt handshake.
 
 Without this model, convenience features quietly widen authority. A copied URL could leak a capability; a replacement daemon could impersonate an old task; a public `GET` could touch the filesystem or launch native UI; or a fixed port could be mistaken for a trusted process identity. Conversely, refusing every reload would discard useful browser affordances even though exact, view-scoped in-memory authorization makes live resume safe.
 
@@ -196,15 +196,25 @@ replacement daemon answers the fixed origin
   -> show inert Reopen this PDF screen
   -> preserve safe page/item fragment
 
-user clicks placekeeper:///.../Paper.pdf#v=1&page=12
+user clicks Reopen in Placekeeper
   -> native unfamiliar-path confirmation
   -> canonicalize and verify current PDF
   -> normal browser launch
   -> fresh view ID, cookie, session credential
-  -> non-Codex review at page 12
+  -> browser-scoped review at page 12
+
+if the old review carried a valid restart ticket
+  -> path-scoped opaque browser token matches path + source digest
+  -> successor stages a pending reconnect without a task ID
+
+next prompt in the owning Codex task
+  -> hook supplies the real task session ID
+  -> both halves match, ticket is consumed and rotated
+  -> fresh credential is promoted to Codex scope
+  -> current PDF context is emitted in that same prompt
 ```
 
-The new daemon reuses the origin so the literal tab becomes reachable; it does not reuse the old authority. If Placekeeper is stopped, the first refresh may still show the browser's connection error. Starting Placekeeper and refreshing again reaches the inert recovery screen.
+The new daemon reuses the origin so the literal tab becomes reachable; it does not reuse the old credential or infer ownership from the route. If Placekeeper is stopped, the first refresh may still show the browser's connection error. Starting Placekeeper and refreshing again reaches the inert recovery screen.
 
 ### Meaningful Jump versus ordinary reading
 

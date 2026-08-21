@@ -1,7 +1,7 @@
 ---
 title: Task-scoped, prompt-refreshed live PDF context
 date: 2026-08-12
-last_updated: 2026-08-17
+last_updated: 2026-08-21
 category: architecture-patterns
 module: Live PDF Context
 problem_type: architecture_pattern
@@ -55,7 +55,7 @@ This handshake was preceded by a compatibility gate proving that the packaged ho
 
 A hard browser refresh must resume the projection that completed the handshake, not reconstruct task ownership from the PDF path. The first authenticated bootstrap associates its credential with the original launch scope and creates a random readable view route. Reloading that route returns the same credential only when its view ID, pathname, scoped cookie, live session, document generation, and credential still match (`apps/service/src/sessions/session-broker.ts:581-681`). Scope polling then uses that credential's retained browser-capability discriminator, preserving the original task binding without exposing its task ID to the browser (`apps/service/src/sessions/session-broker.ts:969-1008`).
 
-That continuity is intentionally process-local. A copied route without its cookie, an ended view, or a route answered by a successor daemon cannot recreate the credential or Codex scope. Post-restart recovery may reopen the path and semantic location through a fresh ordinary browser launch, but Codex must perform a new explicit launch-and-bind handshake to regain task-scoped context. [Authority boundaries for reloadable local-review URLs](reloadable-local-review-url-authority-boundaries.md) defines the full live-resume versus successor-reopen contract.
+The credential continuity is intentionally process-local. A copied route without its cookie, an ended view, or a route answered by a successor daemon cannot recreate the credential or infer Codex scope. Post-restart recovery opens a fresh browser credential. It may reattach automatically on the owning task's next prompt only through a separate two-sided ticket: a path-scoped opaque browser token must match the same canonical source path and digest, and `UserPromptSubmit` must independently supply the exact task session ID. The ticket stores only hashes, expires, is consumed and rotated after success, and rejects foreign tasks. [Authority boundaries for reloadable local-review URLs](reloadable-local-review-url-authority-boundaries.md) defines the full live-resume versus successor-reopen contract.
 
 ### Refresh at prompt consumption
 

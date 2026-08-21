@@ -411,10 +411,11 @@ async function dispatch(
     if (request.kind === "claim-binding") {
       return {
         kind: "binding",
-        result: host.broker.taskBindings.claim(request),
+        result: await host.broker.claimTaskBinding(request),
       };
     }
     if (request.kind === "refresh-context") {
+      await host.broker.prepareTaskContext(request.taskSessionId);
       return {
         kind: "context",
         result: await host.context.refresh({
@@ -431,7 +432,7 @@ async function dispatch(
     }
     if (request.kind === "revoke-task") {
       host.context.discardTask(request.taskSessionId);
-      host.broker.taskBindings.revokeTask(request.taskSessionId);
+      await host.broker.revokeTask(request.taskSessionId);
       host.reconciliation.discardTask(request.taskSessionId);
       host.sourceWorkflow.discardTask(request.taskSessionId);
       return { kind: "revoked" };

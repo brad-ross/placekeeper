@@ -31,10 +31,14 @@ function validBootstrapUrl(value: unknown): string | undefined {
 }
 
 export async function reopenProductionSession(
+  viewId: string,
   link: string,
   options: { readonly confirmed?: true; readonly recovery?: ReopenRecoveryChoice } = {},
 ): Promise<ReopenProductionResult> {
-  const response = await fetch("/reopen", {
+  if (!/^[0-9a-f-]{36}$/u.test(viewId)) {
+    throw new Error("The live review address is invalid.");
+  }
+  const response = await fetch(`/r/${viewId}/reopen`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ link, ...options }),

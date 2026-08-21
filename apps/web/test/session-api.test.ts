@@ -14,6 +14,8 @@ afterEach(() => {
 });
 
 describe("stale production-session reopen", () => {
+  const viewId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
   it("returns validated recovery choices and sends the selected decision", async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
@@ -28,9 +30,10 @@ describe("stale production-session reopen", () => {
       }));
     vi.stubGlobal("fetch", fetch);
 
-    await expect(reopenProductionSession("placekeeper:///tmp/Paper.pdf#v=1&page=3"))
+    await expect(reopenProductionSession(viewId, "placekeeper:///tmp/Paper.pdf#v=1&page=3"))
       .resolves.toEqual({ kind: "recovery-offered", choices: ["resume", "fork"] });
     await expect(reopenProductionSession(
+      viewId,
       "placekeeper:///tmp/Paper.pdf#v=1&page=3",
       { confirmed: true, recovery: "resume" },
     )).resolves.toEqual({
@@ -42,6 +45,7 @@ describe("stale production-session reopen", () => {
       confirmed: true,
       recovery: "resume",
     });
+    expect(fetch).toHaveBeenCalledWith(`/r/${viewId}/reopen`, expect.any(Object));
   });
 
   it("rejects malformed and non-loopback reopen responses", async () => {
@@ -55,11 +59,11 @@ describe("stale production-session reopen", () => {
       .mockResolvedValueOnce(jsonResponse({ ok: false }, 409));
     vi.stubGlobal("fetch", fetch);
 
-    await expect(reopenProductionSession("placekeeper:///tmp/Paper.pdf#v=1&page=1"))
+    await expect(reopenProductionSession(viewId, "placekeeper:///tmp/Paper.pdf#v=1&page=1"))
       .rejects.toThrow("could not be reopened");
-    await expect(reopenProductionSession("placekeeper:///tmp/Paper.pdf#v=1&page=1"))
+    await expect(reopenProductionSession(viewId, "placekeeper:///tmp/Paper.pdf#v=1&page=1"))
       .rejects.toThrow("reopen address is invalid");
-    await expect(reopenProductionSession("placekeeper:///tmp/Paper.pdf#v=1&page=1"))
+    await expect(reopenProductionSession(viewId, "placekeeper:///tmp/Paper.pdf#v=1&page=1"))
       .rejects.toThrow("reopen request was rejected");
   });
 });

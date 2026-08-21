@@ -104,6 +104,8 @@ export interface ProductionScope {
   readonly documentTitle: string;
   readonly sourceRootPath?: string;
   readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode';
+  /** A restarted browser is awaiting task-scoped Codex reattachment. */
+  readonly reconnectPending?: true;
   readonly codexContext?: LiveContextBindingStatus;
 }
 
@@ -224,6 +226,9 @@ function updateCodexContext(
 
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [state, setState] = useState(props.initialState);
+  // A restart successor begins as an ordinary browser view, then its next
+  // task prompt promotes this same authenticated page to the Codex surface.
+  const [scope, setScope] = useState(props.scope);
   const portableItemIdsRef = useRef(initiallyPortableItemIds(
     props.initialState,
     props.initialSaveStatus,
@@ -252,7 +257,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const selectionUpdateRef = useRef(selectionUpdate);
   selectionUpdateRef.current = selectionUpdate;
   const [commandError, setCommandError] = useState<string | null>(null);
-  const [codexContext, setCodexContext] = useState(props.scope.codexContext);
+  const [codexContext, setCodexContext] = useState(scope.codexContext);
   const stateRef = useRef(state);
   stateRef.current = state;
   const [selectionPlacement, setSelectionPlacement] = useState<ViewerClientPlacement | null>(null);
@@ -348,11 +353,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [props.session.appLinkBase]);
   const copyLinkBase = useMemo(() => {
     if (props.session.appLinkBase === undefined) return undefined;
-    if (props.scope.launchSurface !== 'codex' || typeof window === 'undefined') {
+    if (scope.launchSurface !== 'codex' || typeof window === 'undefined') {
       return props.session.appLinkBase;
     }
     return `${window.location.origin}${window.location.pathname}`;
-  }, [props.scope.launchSurface, props.session.appLinkBase]);
+  }, [props.session.appLinkBase, scope.launchSurface]);
   const [locationHistorySnapshot, setLocationHistorySnapshot] = useState<ReviewLocationHistorySnapshot>({
     canBack: false,
     canForward: false,
@@ -381,7 +386,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     [state.items],
   );
   useEffect(() => {
-    if (props.scope.launchSurface !== 'codex') return;
+    if (scope.launchSurface !== 'codex' && scope.reconnectPending !== true) return;
     let stopped = false;
     let timer: number | undefined;
     let timeout: number | undefined;
@@ -400,6 +405,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           }),
         ]);
         if (!stopped && requestedStateKey === reviewStateRequestKey(stateRef.current)) {
+          setScope(next);
           const nextContext = next.launchSurface === 'codex'
             ? next.codexContext ?? UNAVAILABLE_CODEX_CONTEXT
             : UNAVAILABLE_CODEX_CONTEXT;
@@ -426,7 +432,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       if (timeout !== undefined) window.clearTimeout(timeout);
       controller?.abort();
     };
-  }, [props.api, props.scope.launchSurface]);
+  }, [props.api, scope.launchSurface, scope.reconnectPending]);
   useEffect(() => {
     if (codexContext?.status !== "current") return;
     const expectedDigest = codexContext.identity.stateDigest;
@@ -884,7 +890,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     <App
       embeddedInReviewShell
       assets={viewerAssets}
-      documentTitle={props.scope.documentTitle}
+      documentTitle={scope.documentTitle}
       toolError={commandError}
       onSelectionUpdate={onSelectionUpdate}
       ownedAnnotations={ownedAnnotations}
@@ -1052,7 +1058,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     <main data-production-review ref={productionRootRef}>
       <ReviewShell
         state={state}
-        documentTitle={props.scope.documentTitle}
+        documentTitle={scope.documentTitle}
         savedLabel="Saved"
         savePhase={saveStatus.sync.phase}
         saveOptionsOpen={destinationDialog !== null}
@@ -1090,7 +1096,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             ? navigationState.mainHistory.index >= 0
               && navigationState.mainHistory.index < navigationState.mainHistory.entries.length - 1
             : locationHistorySnapshot.canForward)}
-        {...(props.scope.launchSurface === 'codex'
+        {...(scope.launchSurface === 'codex'
           ? { codexContext: visibleCodexContext(codexContext, state) ?? UNAVAILABLE_CODEX_CONTEXT }
           : {})}
         {...(copyLinkBase === undefined || locationHistory === undefined ? {} : {

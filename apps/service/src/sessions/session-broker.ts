@@ -49,6 +49,10 @@ import {
 } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { SessionControlRegistry } from "./control-socket.js";
 import { TaskBindingRegistry } from "../context/task-binding-registry.js";
+import {
+  RestartReconnectStore,
+  type MatchedRestartReconnectTicket,
+} from "../context/restart-reconnect-store.js";
 
 export const RECOVERY_DECISIONS = ["resume", "discard", "fork"] as const;
 export type RecoveryDecision = typeof RECOVERY_DECISIONS[number];
@@ -116,6 +120,7 @@ interface BrowserLaunchScope {
   readonly browserCapabilityHash: string;
   readonly requestedLocation?: PlacekeeperLinkLocation;
   readonly expiresAtMs: number;
+  readonly reconnectBrowserToken?: string;
 }
 
 interface BrowserViewRecord {
@@ -134,7 +139,28 @@ export interface HttpBootstrapExchange {
     readonly cookie: string;
     readonly pathname: string;
     readonly locationFragment: string;
+    readonly reconnectCookie?: string;
   };
+}
+
+interface ReconnectBindingMetadata {
+  readonly taskSessionId: string;
+  readonly browserToken: string;
+  readonly reviewSessionId: string;
+  readonly documentGeneration: number;
+  readonly browserCapabilityHash: string;
+  readonly canonicalSourcePath: string;
+  readonly sourceDigest: string;
+}
+
+interface PendingRestartReconnect {
+  readonly ticket: MatchedRestartReconnectTicket;
+  readonly browserToken: string;
+  readonly reviewSessionId: string;
+  readonly documentGeneration: number;
+  readonly browserCapabilityHash: string;
+  readonly canonicalSourcePath: string;
+  readonly sourceDigest: string;
 }
 
 export interface ResumedBrowserView {
@@ -143,6 +169,9 @@ export interface ResumedBrowserView {
 }
 
 const BOOTSTRAP_TTL_MS = 60_000;
+// A prompt and the replacement browser bootstrap commonly arrive together;
+// keep the control request bounded while allowing their two-sided handshake.
+const RESTART_RECONNECT_WAIT_MS = 4_500;
 
 export interface SessionBrokerOptions {
   readonly recoveryRoot: string;
@@ -154,6 +183,7 @@ export interface SessionBrokerOptions {
   readonly portableReader?: (bytes: Uint8Array) => Promise<readonly ReviewItem[]>;
   readonly rewriteAssessor?: (bytes: Uint8Array) => Promise<PdfRewriteEligibility>;
   readonly taskBindings?: TaskBindingRegistry;
+  readonly restartReconnectStore?: RestartReconnectStore;
 }
 
 /**
@@ -189,6 +219,7 @@ export class SessionBroker {
   readonly credentials: SessionCredentialStore;
   readonly controls: SessionControlRegistry;
   readonly taskBindings: TaskBindingRegistry;
+  readonly restartReconnects: RestartReconnectStore;
   readonly #now: () => Date;
   readonly #snapshotHooks: SnapshotHooks;
   readonly #portableReader: (bytes: Uint8Array) => Promise<readonly ReviewItem[]>;
@@ -198,6 +229,13 @@ export class SessionBroker {
   readonly #bootstrapScopes = new Map<string, BrowserLaunchScope>();
   readonly #credentialScopes = new Map<string, BrowserLaunchScope>();
   readonly #viewsById = new Map<string, BrowserViewRecord>();
+  readonly #reconnectByBindProofHash = new Map<
+    string,
+    Omit<ReconnectBindingMetadata, "taskSessionId"> & { readonly expiresAtMs: number }
+  >();
+  readonly #reconnectBindingsByCapabilityHash = new Map<string, ReconnectBindingMetadata>();
+  readonly #pendingRestartReconnects = new Map<string, PendingRestartReconnect>();
+  readonly #restartReconnectWaiters = new Map<string, Set<() => void>>();
   readonly #sessionEndListeners = new Set<(sessionId: string) => void>();
 
   constructor(options: SessionBrokerOptions) {
@@ -208,6 +246,10 @@ export class SessionBroker {
     this.taskBindings = options.taskBindings ?? new TaskBindingRegistry(
       options.now === undefined ? {} : { now: options.now },
     );
+    this.restartReconnects = options.restartReconnectStore ??
+      new RestartReconnectStore(join(this.recoveryRoot, ".restart-reconnect"), {
+        ...(options.now === undefined ? {} : { now: options.now }),
+      });
     this.#now = options.now ?? (() => new Date());
     this.#snapshotHooks = options.snapshotHooks ?? {};
     this.#portableReader = options.portableReader ?? readPortableReviewItems;
@@ -231,10 +273,11 @@ export class SessionBroker {
 
   async initialize(): Promise<void> {
     await ensurePrivateDirectory(this.recoveryRoot);
+    await this.restartReconnects.initialize();
     const entries = await readdir(this.recoveryRoot, { withFileTypes: true });
     await Promise.all(
       entries
-        .filter((entry) => entry.isDirectory())
+        .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
         .map((entry) =>
           this.#store(entry.name).initialize(),
         ),
@@ -246,7 +289,7 @@ export class SessionBroker {
     const entries = await readdir(this.recoveryRoot, { withFileTypes: true });
     const recovered = await Promise.all(
       entries
-        .filter((entry) => entry.isDirectory())
+        .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
         .map((entry) =>
           this.#store(entry.name).recover(),
         ),
@@ -262,6 +305,9 @@ export class SessionBroker {
     requestedLocation?: PlacekeeperLinkLocation,
   ): SessionLaunch {
     const capability = this.credentials.issueBootstrap(session.id, BOOTSTRAP_TTL_MS);
+    const reconnectBrowserToken = surface === "codex"
+      ? randomBytes(32).toString("base64url")
+      : undefined;
     const launchScope: BrowserLaunchScope = {
       sessionId: session.id,
       documentGeneration: session.documentGeneration,
@@ -269,6 +315,7 @@ export class SessionBroker {
       browserCapabilityHash: digestSecretHex(capability),
       ...(requestedLocation === undefined ? {} : { requestedLocation }),
       expiresAtMs: this.#now().getTime() + BOOTSTRAP_TTL_MS,
+      ...(reconnectBrowserToken === undefined ? {} : { reconnectBrowserToken }),
     };
     this.#bootstrapScopes.set(digestSecretHex(capability), launchScope);
     const bindProof = surface === "codex"
@@ -278,6 +325,17 @@ export class SessionBroker {
           browserCapability: capability,
         })
       : undefined;
+    if (bindProof !== undefined && reconnectBrowserToken !== undefined) {
+      this.#reconnectByBindProofHash.set(digestSecretHex(bindProof), {
+        browserToken: reconnectBrowserToken,
+        reviewSessionId: session.id,
+        documentGeneration: session.documentGeneration,
+        browserCapabilityHash: launchScope.browserCapabilityHash,
+        canonicalSourcePath: session.canonicalSourcePath,
+        sourceDigest: session.state.source.digest,
+        expiresAtMs: launchScope.expiresAtMs,
+      });
+    }
     return {
       sessionId: session.id,
       fileId: session.fileId,
@@ -599,6 +657,7 @@ export class SessionBroker {
     this.#bootstrapScopes.delete(scopeKey);
     if (scope !== undefined && scope.sessionId === sessionId) {
       this.#credentialScopes.set(digestSecretHex(credential), scope);
+      this.#notifyRestartReconnectExchange(scope.browserCapabilityHash);
       if (scope.surface === "codex") {
         this.taskBindings.activateBrowser({
           reviewSessionId: sessionId,
@@ -640,6 +699,9 @@ export class SessionBroker {
         cookie,
         pathname,
         locationFragment: encodePlacekeeperLinkFragment(location),
+        ...(scope.reconnectBrowserToken === undefined
+          ? {}
+          : { reconnectCookie: scope.reconnectBrowserToken }),
       },
     };
   }
@@ -653,6 +715,187 @@ export class SessionBroker {
     capability: string,
   ): HttpBootstrapExchange | undefined {
     return this.#exchangeBootstrap(sessionId, capability);
+  }
+
+  async claimTaskBinding(input: {
+    readonly bindProof: string;
+    readonly taskSessionId: string;
+    readonly reviewSessionId: string;
+    readonly documentGeneration: number;
+  }): Promise<ReturnType<TaskBindingRegistry["claim"]>> {
+    const proofHash = digestSecretHex(input.bindProof);
+    const metadata = this.#reconnectByBindProofHash.get(proofHash);
+    const result = this.taskBindings.claim(input);
+    this.#reconnectByBindProofHash.delete(proofHash);
+    if (
+      result.status === "denied" ||
+      metadata === undefined ||
+      metadata.reviewSessionId !== input.reviewSessionId ||
+      metadata.documentGeneration !== input.documentGeneration
+    ) return result;
+    const { expiresAtMs: _expiresAtMs, ...reconnectMetadata } = metadata;
+    const binding: ReconnectBindingMetadata = {
+      ...reconnectMetadata,
+      taskSessionId: input.taskSessionId,
+    };
+    this.#reconnectBindingsByCapabilityHash.set(metadata.browserCapabilityHash, binding);
+    await this.restartReconnects.issue(binding);
+    return result;
+  }
+
+  /** Matches only a path-scoped browser restart token. Task ownership is
+   * deliberately unavailable until a later Codex hook supplies it. */
+  async stageRestartReconnect(input: {
+    readonly browserToken: string;
+    readonly launch: SessionLaunch;
+  }): Promise<boolean> {
+    const session = this.#activeById.get(input.launch.sessionId);
+    if (
+      session === undefined ||
+      session.ending ||
+      session.documentGeneration !== input.launch.documentGeneration
+    ) return false;
+    const ticket = await this.restartReconnects.matchBrowser({
+      browserToken: input.browserToken,
+      canonicalSourcePath: session.canonicalSourcePath,
+      sourceDigest: session.state.source.digest,
+    });
+    if (ticket === undefined) return false;
+    const capability = new URLSearchParams(input.launch.fragment.replace(/^#/u, "")).get("cap");
+    if (capability === null) return false;
+    const scopeKey = digestSecretHex(capability);
+    const scope = this.#bootstrapScopes.get(scopeKey);
+    if (
+      scope === undefined ||
+      scope.sessionId !== session.id ||
+      scope.documentGeneration !== session.documentGeneration ||
+      scope.browserCapabilityHash !== scopeKey
+    ) return false;
+    this.#bootstrapScopes.set(scopeKey, { ...scope, reconnectBrowserToken: input.browserToken });
+    this.#pendingRestartReconnects.set(scopeKey, {
+      ticket,
+      browserToken: input.browserToken,
+      reviewSessionId: session.id,
+      documentGeneration: session.documentGeneration,
+      browserCapabilityHash: scopeKey,
+      canonicalSourcePath: session.canonicalSourcePath,
+      sourceDigest: session.state.source.digest,
+    });
+    return true;
+  }
+
+  /** Runs before each task context refresh. A restarted browser is attached
+   * only when its private ticket and this exact task identity both match. */
+  async prepareTaskContext(taskSessionId: string): Promise<void> {
+    this.#sweepBootstrapScopes();
+    for (const [capabilityHash, pending] of this.#pendingRestartReconnects) {
+      if (!this.restartReconnects.matchesTask(pending.ticket, taskSessionId)) continue;
+      const authenticatedBrowser = await this.#waitForRestartReconnectExchange(capabilityHash, pending);
+      if (!authenticatedBrowser) continue;
+      // Re-read and consume the persisted record before making the task
+      // binding visible; staged copies are only advisory and may be revoked.
+      const consumed = await this.restartReconnects.consumeForTask(pending.ticket, taskSessionId);
+      if (!consumed) {
+        this.#clearPendingRestartReconnects(pending.ticket.ticketId);
+        continue;
+      }
+      this.#clearPendingRestartReconnects(pending.ticket.ticketId);
+      const attached = this.taskBindings.attachReconnectedBrowser({
+        taskSessionId,
+        reviewSessionId: pending.reviewSessionId,
+        documentGeneration: pending.documentGeneration,
+        browserCapabilityHash: capabilityHash,
+      });
+      if (attached.status === "denied") continue;
+      for (const [credentialHash, scope] of this.#credentialScopes) {
+        if (
+          scope.sessionId === pending.reviewSessionId &&
+          scope.documentGeneration === pending.documentGeneration &&
+          scope.browserCapabilityHash === capabilityHash
+        ) {
+          this.#credentialScopes.set(credentialHash, {
+            ...scope,
+            surface: "codex",
+            reconnectBrowserToken: pending.browserToken,
+          });
+        }
+      }
+      const binding: ReconnectBindingMetadata = {
+        taskSessionId,
+        browserToken: pending.browserToken,
+        reviewSessionId: pending.reviewSessionId,
+        documentGeneration: pending.documentGeneration,
+        browserCapabilityHash: capabilityHash,
+        canonicalSourcePath: pending.canonicalSourcePath,
+        sourceDigest: pending.sourceDigest,
+      };
+      this.#reconnectBindingsByCapabilityHash.set(capabilityHash, binding);
+      await this.restartReconnects.issue(binding);
+      return;
+    }
+    for (const binding of this.#reconnectBindingsByCapabilityHash.values()) {
+      if (binding.taskSessionId !== taskSessionId) continue;
+      const active = this.taskBindings.bindingForTask(taskSessionId);
+      if (
+        active?.reviewSessionId === binding.reviewSessionId &&
+        active.documentGeneration === binding.documentGeneration
+      ) await this.restartReconnects.issue(binding);
+      return;
+    }
+  }
+
+  async revokeTask(taskSessionId: string): Promise<void> {
+    this.taskBindings.revokeTask(taskSessionId);
+    for (const [capabilityHash, binding] of this.#reconnectBindingsByCapabilityHash) {
+      if (binding.taskSessionId === taskSessionId) {
+        this.#reconnectBindingsByCapabilityHash.delete(capabilityHash);
+      }
+    }
+    for (const pending of this.#pendingRestartReconnects.values()) {
+      if (this.restartReconnects.matchesTask(pending.ticket, taskSessionId)) {
+        this.#clearPendingRestartReconnects(pending.ticket.ticketId);
+      }
+    }
+    await this.restartReconnects.revokeTask(taskSessionId);
+  }
+
+  #isAuthenticatedRestartReconnect(capabilityHash: string, pending: PendingRestartReconnect): boolean {
+    return [...this.#credentialScopes.values()].some((scope) =>
+      scope.sessionId === pending.reviewSessionId &&
+      scope.documentGeneration === pending.documentGeneration &&
+      scope.browserCapabilityHash === capabilityHash
+    );
+  }
+
+  #waitForRestartReconnectExchange(
+    capabilityHash: string,
+    pending: PendingRestartReconnect,
+  ): Promise<boolean> {
+    if (this.#isAuthenticatedRestartReconnect(capabilityHash, pending)) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const waiters = this.#restartReconnectWaiters.get(capabilityHash) ?? new Set<() => void>();
+      const finish = () => {
+        clearTimeout(timeout);
+        waiters.delete(finish);
+        if (waiters.size === 0) this.#restartReconnectWaiters.delete(capabilityHash);
+        resolve(this.#isAuthenticatedRestartReconnect(capabilityHash, pending));
+      };
+      const timeout = setTimeout(finish, RESTART_RECONNECT_WAIT_MS);
+      waiters.add(finish);
+      this.#restartReconnectWaiters.set(capabilityHash, waiters);
+    });
+  }
+
+  #notifyRestartReconnectExchange(capabilityHash: string): void {
+    for (const finish of this.#restartReconnectWaiters.get(capabilityHash) ?? []) finish();
+  }
+
+  #clearPendingRestartReconnects(ticketId: string): void {
+    for (const [capabilityHash, candidate] of this.#pendingRestartReconnects) {
+      if (candidate.ticket.ticketId !== ticketId) continue;
+      this.#notifyRestartReconnectExchange(capabilityHash);
+      this.#pendingRestartReconnects.delete(capabilityHash);
+    }
   }
 
   resumeView(
@@ -733,6 +976,14 @@ export class SessionBroker {
     const now = this.#now().getTime();
     for (const [key, scope] of this.#bootstrapScopes) {
       if (scope.expiresAtMs <= now) this.#bootstrapScopes.delete(key);
+    }
+    for (const [proofHash, metadata] of this.#reconnectByBindProofHash) {
+      if (metadata.expiresAtMs <= now) this.#reconnectByBindProofHash.delete(proofHash);
+    }
+    for (const [capabilityHash, pending] of this.#pendingRestartReconnects) {
+      if (pending.ticket.expiresAtMs <= now) {
+        this.#pendingRestartReconnects.delete(capabilityHash);
+      }
     }
   }
 
@@ -967,6 +1218,9 @@ export class SessionBroker {
         readonly documentTitle: string;
         readonly sourceRootPath?: string;
         readonly launchSurface?: LaunchSurface;
+        /** A browser-authenticated restart successor is waiting for its
+         * owning task's next prompt. This contains no task identity. */
+        readonly reconnectPending?: true;
         readonly requestedLocation?: PlacekeeperLinkLocation;
         readonly codexContext?: ReturnType<TaskBindingRegistry["statusForReview"]>;
       }
@@ -1000,6 +1254,10 @@ export class SessionBroker {
       ...(trustedLaunchScope === undefined
         ? {}
         : { launchSurface: trustedLaunchScope.surface }),
+      ...(trustedLaunchScope?.surface === "browser" &&
+          this.#pendingRestartReconnects.has(trustedLaunchScope.browserCapabilityHash)
+        ? { reconnectPending: true as const }
+        : {}),
       ...(trustedLaunchScope?.requestedLocation === undefined
         ? {}
         : { requestedLocation: trustedLaunchScope.requestedLocation }),
@@ -1312,6 +1570,12 @@ export class SessionBroker {
     this.#bootstrapScopes.clear();
     this.#credentialScopes.clear();
     this.#viewsById.clear();
+    this.#reconnectByBindProofHash.clear();
+    this.#reconnectBindingsByCapabilityHash.clear();
+    for (const capabilityHash of this.#restartReconnectWaiters.keys()) {
+      this.#notifyRestartReconnectExchange(capabilityHash);
+    }
+    this.#pendingRestartReconnects.clear();
   }
 
   async drainWrites(): Promise<void> {
@@ -1341,16 +1605,33 @@ export class SessionBroker {
     }
     this.controls.cancel(sessionId);
     this.taskBindings.revokeSession(sessionId);
+    await this.restartReconnects.revokeSession(sessionId);
     await session.writeTail;
     this.credentials.revokeSession(sessionId);
     for (const [key, scope] of this.#bootstrapScopes) {
       if (scope.sessionId === sessionId) this.#bootstrapScopes.delete(key);
+    }
+    for (const [proofHash, metadata] of this.#reconnectByBindProofHash) {
+      if (metadata.reviewSessionId === sessionId) {
+        this.#reconnectByBindProofHash.delete(proofHash);
+      }
     }
     for (const [key, scope] of this.#credentialScopes) {
       if (scope.sessionId === sessionId) this.#credentialScopes.delete(key);
     }
     for (const [viewId, view] of this.#viewsById) {
       if (view.sessionId === sessionId) this.#viewsById.delete(viewId);
+    }
+    for (const [capabilityHash, binding] of this.#reconnectBindingsByCapabilityHash) {
+      if (binding.reviewSessionId === sessionId) {
+        this.#reconnectBindingsByCapabilityHash.delete(capabilityHash);
+      }
+    }
+    for (const [capabilityHash, pending] of this.#pendingRestartReconnects) {
+      if (pending.reviewSessionId === sessionId) {
+        this.#notifyRestartReconnectExchange(capabilityHash);
+        this.#pendingRestartReconnects.delete(capabilityHash);
+      }
     }
     this.capabilities.revokeFile(session.fileId);
     if (session.rootId !== undefined) this.capabilities.revokeRoot(session.rootId);

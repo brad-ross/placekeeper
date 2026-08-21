@@ -62,7 +62,175 @@ function injectedContext(write: ReturnType<typeof vi.fn>): Record<string, any> {
   return JSON.parse(output.hookSpecificOutput.additionalContext) as Record<string, any>;
 }
 
+function postJson(url: string, body: unknown, cookie?: string): Promise<Response> {
+  const origin = new URL(url).origin;
+  return fetch(url, {
+    method: "POST",
+    headers: {
+      origin,
+      "content-type": "application/json",
+      "sec-fetch-site": "same-origin",
+      ...(cookie === undefined ? {} : { cookie }),
+    },
+    body: JSON.stringify(body),
+  });
+}
+
 describe("packaged Codex live-context lifecycle", () => {
+  it("reattaches an interrupted Codex review on the owning task's next prompt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-codex-restart-"));
+    roots.push(root);
+    const assets = join(root, "assets");
+    const pdf = join(root, "restart-linked.pdf");
+    await mkdir(assets);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
+
+    const first = await PlacekeeperHost.start({
+      recoveryRoot: join(root, "recovery"),
+      webAssets: { root: assets },
+      port: 0,
+    });
+    hosts.push(first);
+    const firstSocket = join(root, "first-control.sock");
+    controls.push(await startLaunchControlServer(first, firstSocket));
+    const firstControl = (request: Parameters<typeof requestControl>[1]) =>
+      requestControl(firstSocket, request);
+    const launched = await requestLaunch(firstSocket, { pdfPath: pdf, surface: "codex" });
+    if (!launched.ok || launched.kind === "recovery-offered" || launched.bindProof === undefined) {
+      throw new Error("Expected an initial Codex launch");
+    }
+    await runHookCommand(
+      ["hook", "--event"],
+      hookInput("PostToolUse", launched),
+      firstControl,
+      vi.fn(),
+    );
+
+    const launchedUrl = new URL(launched.url);
+    const capability = new URLSearchParams(launchedUrl.hash.slice(1)).get("cap");
+    const exchange = await postJson(
+      `${launchedUrl.origin}/s/${launched.sessionId}/exchange`,
+      { capability },
+    );
+    expect(exchange.status).toBe(200);
+    const reconnectCookie = /(?:^|,\s*)(placekeeper_reconnect=[^;]+)/u
+      .exec(exchange.headers.get("set-cookie") ?? "")?.[1];
+    expect(reconnectCookie).toBeDefined();
+    const firstView = await exchange.json() as {
+      credential: string;
+      view: { id: string; pathname: string; locationFragment: string };
+    };
+
+    const port = first.server.port;
+    await first.server.close();
+    hosts.splice(hosts.indexOf(first), 1);
+    const successor = await PlacekeeperHost.start({
+      recoveryRoot: join(root, "recovery"),
+      webAssets: { root: assets },
+      port,
+    });
+    hosts.push(successor);
+    const successorSocket = join(root, "successor-control.sock");
+    controls.push(await startLaunchControlServer(successor, successorSocket));
+    const successorControl = (request: Parameters<typeof requestControl>[1]) =>
+      requestControl(successorSocket, request);
+
+    const stale = await fetch(`${successor.server.origin}${firstView.view.pathname}`, {
+      headers: { cookie: reconnectCookie! },
+    });
+    expect(await stale.text()).toContain("This live review is no longer available.");
+    const link = encodePlacekeeperLink({ path: pdf, location: { kind: "page", page: 2 } });
+    const unboundReopen = await postJson(
+      `${successor.server.origin}/r/${firstView.view.id}/reopen`,
+      { link, confirmed: true, recovery: "fork" },
+    );
+    const unboundResult = await unboundReopen.json() as {
+      ok: true;
+      url: string;
+      reconnectPending?: boolean;
+    };
+    expect(unboundResult).not.toHaveProperty("reconnectPending");
+    const unboundUrl = new URL(unboundResult.url);
+    const unboundSessionId = /^\/s\/([^/]+)\/bootstrap$/u.exec(unboundUrl.pathname)?.[1];
+    const unboundCapability = new URLSearchParams(unboundUrl.hash.slice(1)).get("cap");
+    const unboundExchange = await postJson(
+      `${successor.server.origin}/s/${unboundSessionId}/exchange`,
+      { capability: unboundCapability },
+    );
+    const unboundView = await unboundExchange.json() as { credential: string };
+    const unboundOwnerWrite = vi.fn();
+    await runHookCommand(["hook", "--event"], hookInput("UserPromptSubmit"), successorControl, unboundOwnerWrite);
+    expect(injectedContext(unboundOwnerWrite)).toMatchObject({ currentness: "unavailable" });
+    await expect((await fetch(`${successor.server.origin}/s/${unboundSessionId}/scope`, {
+      headers: { authorization: `Bearer ${unboundView.credential}` },
+    })).json()).resolves.toMatchObject({ launchSurface: "browser" });
+
+    const reopened = await postJson(
+      `${successor.server.origin}/r/${firstView.view.id}/reopen`,
+      { link, confirmed: true, recovery: "fork" },
+      reconnectCookie,
+    );
+    expect(reopened.status).toBe(200);
+    const reopenedResult = await reopened.json() as {
+      ok: true;
+      kind: "opened" | "focused";
+      url: string;
+      reconnectPending?: boolean;
+    };
+    expect(reopenedResult).toMatchObject({ reconnectPending: true });
+    expect(reopenedResult).not.toHaveProperty("bindProof");
+    const reopenedUrl = new URL(reopenedResult.url);
+    const reopenedCapability = new URLSearchParams(reopenedUrl.hash.slice(1)).get("cap");
+    const reopenedSessionId = /^\/s\/([^/]+)\/bootstrap$/u.exec(reopenedUrl.pathname)?.[1];
+    expect(reopenedSessionId).toBeDefined();
+    const foreignWrite = vi.fn();
+    await runHookCommand(["hook", "--event"], JSON.stringify({
+      session_id: "another-codex-task",
+      hook_event_name: "UserPromptSubmit",
+      prompt: "Check context.",
+    }), successorControl, foreignWrite);
+    expect(injectedContext(foreignWrite)).toMatchObject({ currentness: "unavailable" });
+
+    const ownerWrite = vi.fn();
+    // The task prompt can win the race with the browser bootstrap; it must
+    // wait for the matching capability rather than report unavailable.
+    const ownerPrompt = runHookCommand(
+      ["hook", "--event"],
+      hookInput("UserPromptSubmit"),
+      successorControl,
+      ownerWrite,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const reopenedExchange = await postJson(
+      `${successor.server.origin}/s/${reopenedSessionId}/exchange`,
+      { capability: reopenedCapability },
+    );
+    const reopenedView = await reopenedExchange.json() as {
+      credential: string;
+      view: { pathname: string };
+    };
+    await ownerPrompt;
+    const promotedScope = await fetch(
+      `${successor.server.origin}/s/${reopenedSessionId}/scope`,
+      { headers: { authorization: `Bearer ${reopenedView.credential}` } },
+    );
+    expect(promotedScope.status).toBe(200);
+    const promotedScopeBody = await promotedScope.json() as Record<string, unknown>;
+    expect(promotedScopeBody).toMatchObject({ launchSurface: "codex" });
+    expect(promotedScopeBody).not.toHaveProperty("reconnectPending");
+    expect(injectedContext(ownerWrite)).toMatchObject({
+      currentness: "current",
+      reviewItems: { mode: "full" },
+    });
+    await expect((await fetch(`${successor.server.origin}/s/${reopenedSessionId}/scope`, {
+      headers: { authorization: `Bearer ${reopenedView.credential}` },
+    })).json()).resolves.toMatchObject({
+      launchSurface: "codex",
+      codexContext: { status: expect.stringMatching(/^(?:current|refreshing)$/u) },
+    });
+  });
+
   it("rebinds a canonical Placekeeper link opened explicitly through Codex", async () => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-codex-link-"));
     roots.push(root);
