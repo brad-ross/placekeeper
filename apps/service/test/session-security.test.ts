@@ -11,6 +11,7 @@ import {
   validateRequestSecurity,
   type RequestSecurityContext,
 } from "../../../packages/core/src/session-security.js";
+import { encodePlacekeeperLink } from "../../../packages/core/src/placekeeper-link.js";
 import { FileCapabilityRegistry } from "../src/files/file-capabilities.js";
 import {
   PLACEKEEPER_HTTP_PORT,
@@ -321,6 +322,57 @@ function postJson(
 }
 
 describe("loopback HTTP boundary", () => {
+  it("keeps stale-session reopen same-origin, confirmed, and browser-scoped", async () => {
+    const { pdf, broker, launch, server } = await openBroker();
+    await broker.finish(launch.sessionId);
+    const reopenUrl = `${server.origin}/reopen`;
+    const link = encodePlacekeeperLink({ path: pdf, location: { kind: "page", page: 3 } });
+
+    expect((await postJson(reopenUrl, { link }, { origin: "http://127.0.0.1:1" })).status)
+      .toBe(403);
+    expect((await fetch(reopenUrl, {
+      method: "POST",
+      headers: {
+        origin: server.origin,
+        "content-type": "application/x-www-form-urlencoded",
+        "sec-fetch-site": "same-origin",
+      },
+      body: "link=unsafe",
+    })).status).toBe(403);
+    expect((await postJson(reopenUrl, { link: "placekeeper:///invalid#fragment" })).status)
+      .toBe(409);
+
+    const confirmation = await postJson(reopenUrl, { link });
+    expect(await confirmation.json()).toEqual({
+      ok: true,
+      kind: "confirmation-required",
+      path: pdf,
+    });
+    const reopened = await postJson(reopenUrl, { link, confirmed: true });
+    const result = await reopened.json() as {
+      ok: true;
+      kind: "opened" | "focused";
+      url: string;
+      bindProof?: string;
+    };
+    expect(result).toMatchObject({ ok: true, kind: "opened" });
+    expect(result).not.toHaveProperty("bindProof");
+    const target = new URL(result.url);
+    expect(target.origin).toBe(server.origin);
+    const capability = new URLSearchParams(target.hash.slice(1)).get("cap");
+    const sessionId = /^\/s\/([^/]+)\/bootstrap$/u.exec(target.pathname)?.[1];
+    expect(capability).toBeTruthy();
+    expect(sessionId).toBeTruthy();
+    const exchange = await postJson(`${server.origin}/s/${sessionId}/exchange`, { capability });
+    const { credential } = await exchange.json() as { credential: string };
+    await expect((await fetch(`${server.origin}/s/${sessionId}/scope`, {
+      headers: { authorization: `Bearer ${credential}` },
+    })).json()).resolves.toMatchObject({
+      launchSurface: "browser",
+      requestedLocation: { kind: "page", page: 3 },
+    });
+  });
+
   it("supports an explicit fixed loopback port and fails on collision without falling back", async () => {
     expect(PLACEKEEPER_HTTP_PORT).toBeGreaterThan(1_024);
     expect(PLACEKEEPER_HTTP_PORT).toBeLessThanOrEqual(65_535);
@@ -479,7 +531,8 @@ describe("loopback HTTP boundary", () => {
     expect(revokedRoute.headers.get("set-cookie")).toContain("Max-Age=0");
     expect(revokedHtml).toContain("data-terminal-recovery");
     expect(revokedHtml).toContain("placekeeper:///");
-    expect(revokedHtml).toContain("#v=1&amp;page=1");
+    expect(revokedHtml).toContain('href="#" aria-disabled="true"');
+    expect(revokedHtml).toContain('reopen.dataset.appLinkBase + "#v=1&page=1"');
     expect(revokedHtml).toContain("showTerminalRecovery");
     expect(revokedHtml).not.toContain("/resume");
     expect(revokedHtml).not.toContain(launch.sessionId);
@@ -495,7 +548,8 @@ describe("loopback HTTP boundary", () => {
     expect(unknown.status).toBe(200);
     expect(unknown.headers.get("set-cookie")).toContain(`Path=/r/${unknownViewId}/`);
     expect(unknown.headers.get("set-cookie")).toContain("Max-Age=0");
-    expect(unknownHtml).toContain("placekeeper:///private/tmp/Unknown%20Paper.pdf#v=1&amp;page=1");
+    expect(unknownHtml).toContain('data-app-link-base="placekeeper:///private/tmp/Unknown%20Paper.pdf"');
+    expect(unknownHtml).toContain('href="#" aria-disabled="true"');
     expect(unknownHtml).not.toContain("fetch(");
     expect(unknownHtml).not.toContain("location.assign");
     expect(unknownHtml).not.toContain("location.replace");

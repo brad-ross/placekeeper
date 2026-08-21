@@ -79,8 +79,15 @@ describe("open command", () => {
       "open-link", "--json", "--preflight", "--link", link,
     ])).toEqual({ operation: "preflight", link });
     expect(parseOpenLinkArguments([
-      "open-link", "--json", "--confirmed", "--recovery", "resume", "--link", link,
-    ])).toEqual({ operation: "open", link, confirmed: true, recovery: "resume" });
+      "open-link", "--json", "--confirmed", "--recovery", "resume",
+      "--surface", "codex", "--link", link,
+    ])).toEqual({
+      operation: "open",
+      link,
+      confirmed: true,
+      recovery: "resume",
+      surface: "codex",
+    });
     expect(() => parseOpenLinkArguments(["open-link", "--json", "--link", link, "extra"]))
       .toThrow("one Placekeeper link");
     expect(() => parseOpenLinkArguments([
@@ -512,10 +519,15 @@ describe("open command", () => {
       kind: "confirmation-required",
       path: pdf,
     });
-    const opened = await requestLinkOpen(socketPath, { link, confirmed: true });
+    const opened = await requestLinkOpen(socketPath, {
+      link,
+      confirmed: true,
+      surface: "codex",
+    });
     expect(opened).toMatchObject({
       ok: true,
       kind: "opened",
+      bindProof: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
     });
     if (!opened.ok || opened.kind !== "opened") throw new Error("Expected an opened exact link");
     const capability = new URL(opened.url).hash.slice("#cap=".length);

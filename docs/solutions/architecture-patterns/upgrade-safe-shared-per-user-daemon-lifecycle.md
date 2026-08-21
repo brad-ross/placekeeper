@@ -1,7 +1,7 @@
 ---
 title: Upgrade-safe lifecycle for a shared per-user daemon
 date: 2026-08-12
-last_updated: 2026-08-17
+last_updated: 2026-08-21
 category: architecture-patterns
 module: Shared daemon lifecycle
 problem_type: architecture_pattern
@@ -120,7 +120,7 @@ The packaged daemon's numeric-loopback port is part of readiness. Production alw
 
 Reusing the fixed loopback origin lets a browser retry the same literal readable URL after replacement, but it does not make the successor daemon the old daemon's security principal. Browser-view records, scoped cookie digests, credentials, launch scopes, and task bindings remain process-local. When the successor receives a syntactically valid old route with no matching live view, it clears the stale cookie and serves inert recovery containing only a canonical Placekeeper Link (`apps/service/src/server/http-server.ts:393-425`, `apps/service/src/sessions/session-broker.ts:648-689`).
 
-The user must explicitly follow that link through the normal file-confirmation and open flow. The resulting browser view is fresh and non-Codex; it cannot inherit the old credential or task binding. This successor behavior is document/location recovery, not live-session migration. [Authority boundaries for reloadable local-review URLs](reloadable-local-review-url-authority-boundaries.md) defines that distinction in detail.
+The user must explicitly follow that link through the normal file-confirmation and open flow. The resulting browser view and credential are fresh; they cannot inherit the old credential or infer a task binding from the path. A separately persisted, short-lived two-sided ticket may reattach the new view only when both a path-scoped browser token and the owning task's next prompt match. This remains document/location recovery plus a fresh proof of task ownership, not live-session migration. [Authority boundaries for reloadable local-review URLs](reloadable-local-review-url-authority-boundaries.md) defines that distinction in detail.
 
 ### Test the physical installed lifecycle
 
@@ -134,7 +134,7 @@ A shared daemon changes the question from “is this PDF idle?” to “can all 
 
 The drain/recheck state machine closes the idle-check race. The lifecycle lock closes the process race. Response-first closure closes the protocol race. Candidate readiness closes the filesystem race. Together they turn active-work deferral into a successful, convergent upgrade behavior rather than an error.
 
-Live-session migration is intentionally unnecessary. Safe deferral preserves browser credentials, recovery, and task-bound state in the old daemon until every user-visible owner ends naturally. After replacement, stable-origin reachability can recover only a document path and safe semantic location; it does not transfer those process-local authorities.
+Live-session migration is intentionally unnecessary. Safe deferral preserves browser credentials, recovery, and task-bound state in the old daemon until every user-visible owner ends naturally. After replacement, stable-origin reachability can recover only a document path and safe semantic location. An optional reconnect ticket transfers no credential or raw task identity; it merely permits the fresh successor browser and the independently identified owning task to prove they belong together again.
 
 ## When to Apply
 

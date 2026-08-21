@@ -73,6 +73,10 @@ function validGeneration(value: number): boolean {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
+function validSecretHash(value: string): boolean {
+  return /^[a-f0-9]{64}$/u.test(value);
+}
+
 function iso(milliseconds: number): string {
   return new Date(milliseconds).toISOString();
 }
@@ -244,6 +248,56 @@ export class TaskBindingRegistry {
       browserCapabilityHashes: new Set([pending.browserCapabilityHash]),
       leaseExpiresAtMs: this.#nowMs() + this.#activeLeaseTtlMs,
     };
+    this.#activeByTask.set(active.taskSessionId, active);
+    this.#activeByReview.set(active.reviewSessionId, active);
+    return { status: "active", leaseExpiresAt: iso(active.leaseExpiresAtMs) };
+  }
+
+  /** Completes a restart-only two-sided handshake after the successor has
+   * authenticated the browser and independently matched the current task's
+   * private reconnect ticket. The browser never supplies a task identity. */
+  attachReconnectedBrowser(input: {
+    readonly taskSessionId: string;
+    readonly reviewSessionId: string;
+    readonly documentGeneration: number;
+    readonly browserCapabilityHash: string;
+  }): TaskBindingClaimResult {
+    this.#sweep();
+    if (
+      !validId(input.taskSessionId) ||
+      !validId(input.reviewSessionId) ||
+      !validGeneration(input.documentGeneration) ||
+      !validSecretHash(input.browserCapabilityHash)
+    ) return { status: "denied" };
+
+    const activeForReview = this.#activeByReview.get(input.reviewSessionId);
+    const activeForTask = this.#activeByTask.get(input.taskSessionId);
+    if (activeForReview !== undefined || activeForTask !== undefined) {
+      if (
+        activeForReview === activeForTask &&
+        activeForReview?.taskSessionId === input.taskSessionId &&
+        activeForReview.reviewSessionId === input.reviewSessionId &&
+        activeForReview.documentGeneration === input.documentGeneration
+      ) {
+        activeForReview.browserCapabilityHashes.add(input.browserCapabilityHash);
+        activeForReview.leaseExpiresAtMs = this.#nowMs() + this.#activeLeaseTtlMs;
+        return { status: "active", leaseExpiresAt: iso(activeForReview.leaseExpiresAtMs) };
+      }
+      return { status: "denied" };
+    }
+
+    const pendingForReview = this.#pendingByReview.get(input.reviewSessionId);
+    const pendingForTask = this.#pendingByTask.get(input.taskSessionId);
+    if (pendingForReview !== undefined || pendingForTask !== undefined) return { status: "denied" };
+
+    const active: ActiveBinding = {
+      taskSessionId: input.taskSessionId,
+      reviewSessionId: input.reviewSessionId,
+      documentGeneration: input.documentGeneration,
+      browserCapabilityHashes: new Set([input.browserCapabilityHash]),
+      leaseExpiresAtMs: this.#nowMs() + this.#activeLeaseTtlMs,
+    };
+    this.#expiredTasks.delete(input.taskSessionId);
     this.#activeByTask.set(active.taskSessionId, active);
     this.#activeByReview.set(active.reviewSessionId, active);
     return { status: "active", leaseExpiresAt: iso(active.leaseExpiresAtMs) };

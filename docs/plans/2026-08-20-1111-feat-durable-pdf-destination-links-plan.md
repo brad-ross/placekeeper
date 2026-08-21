@@ -324,7 +324,7 @@ flowchart LR
 - **Durable URL contract:** Core parsing, stale readable-route projection, native launch, browser history, and installed smoke behavior must agree on the new location kind.
 - **Navigation:** Main Reading Thread restoration gains an exact author-target path but retains page and portable-item compatibility.
 - **Responsive UI:** Outline, Search, annotation, document chrome, and the PDF-link popover share Copy Link semantics and icon language.
-- **Agent boundary:** A copied or reopened destination conveys no task authority, browser credential, evidence handle, prompt context, or automatic Codex reattachment.
+- **Agent boundary:** A copied or reopened destination conveys no task authority, browser credential, evidence handle, or prompt context. Any successor-daemon Codex reattachment depends on a separate private restart ticket plus the exact owning task's next prompt; it is never encoded in or authorized by the destination.
 
 ### Risks and Mitigations
 
@@ -597,7 +597,7 @@ flowchart LR
 - Covers AE7. Exercise success, duplicate-pending, clipboard denial, selectable fallback, Retry, and focus return on representative direct and popover surfaces.
 - Covers AE8. Reopen v1 links unchanged and degrade a valid v2 destination when changed content makes its geometry structurally inapplicable. Do not claim that same-path file replacement is detected when the old geometry remains structurally valid.
 - Back and Forward preserve exact destinations until manual movement downgrades them.
-- A stale readable route retains a valid exact fragment as an inert click-only Placekeeper Link without resuming credentials, task binding, or session authority.
+- A stale readable route retains a valid exact fragment as an inert click-only Placekeeper Link without itself resuming credentials, task binding, or session authority. A separate verified restart ticket may later promote the fresh successor view for the exact owning task.
 
 **Verification:** Focused Chromium and WebKit acceptance, visual snapshots, and installed smoke prove the same behavior against freshly built assets.
 

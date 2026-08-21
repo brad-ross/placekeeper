@@ -36,7 +36,7 @@ test.afterAll(async () => {
   if (root) await rm(root, { recursive: true, force: true });
 });
 
-test("a live readable review survives repeated hard refresh and fails closed after session end", async ({ page }) => {
+test("a live Codex review copies a browser-safe URL, survives refresh, and reopens in place", async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -48,7 +48,7 @@ test("a live readable review survives repeated hard refresh and fails closed aft
       },
     });
   });
-  const launched = await host.open({ pdfPath: pdf, surface: "browser", fork: true });
+  const launched = await host.open({ pdfPath: pdf, surface: "codex", fork: true });
   if (!launched.ok || launched.kind === "recovery-offered") {
     throw new Error("Expected a live browser launch");
   }
@@ -103,11 +103,43 @@ test("a live readable review survives repeated hard refresh and fails closed aft
   await expect(page.locator('[data-copy-link-status="success"]').getByRole("status"))
     .toHaveClass("sr-only");
   await expect(page.locator(".copy-link-control__status")).toHaveCount(0);
-  expect(await page.evaluate(() => (
+  const copiedLink = await page.evaluate(() => (
     globalThis as typeof globalThis & { __copiedPlacekeeperLink?: string }
-  ).__copiedPlacekeeperLink)).toMatch(/^placekeeper:\/\/\/.*Paper%20One\.pdf#v=1&page=1$/u);
+  ).__copiedPlacekeeperLink);
+  expect(copiedLink).toMatch(
+    /^http:\/\/127\.0\.0\.1:\d+\/r\/[0-9a-f-]{36}\/.*Paper%20One\.pdf#v=1&page=1$/u,
+  );
+  const pasted = await page.context().newPage();
+  await pasted.goto(copiedLink!);
+  await expect(pasted.locator("#root")).toHaveAttribute("data-production-root", "true");
+  await expectCurrentPage(pasted, "1 / 4");
+  await pasted.close();
 
   await host.broker.finish(launched.sessionId);
+  const slowPage = await page.context().newPage();
+  let releaseApp!: () => void;
+  const appGate = new Promise<void>((resolve) => { releaseApp = resolve; });
+  await slowPage.route("**/assets/app.js", async (route) => {
+    await appGate;
+    await route.continue();
+  });
+  await slowPage.goto(page.url(), { waitUntil: "domcontentloaded" });
+  const earlyReopen = slowPage.getByRole("link", { name: "Reopen in Placekeeper" });
+  await expect(earlyReopen).toHaveAttribute("href", "#");
+  await expect(earlyReopen).toHaveAttribute("aria-disabled", "true");
+  await earlyReopen.evaluate((anchor) => {
+    if (!(anchor instanceof HTMLAnchorElement)) throw new Error("Expected recovery link");
+    anchor.click();
+  });
+  expect(new URL(slowPage.url()).protocol).toBe("http:");
+  releaseApp();
+  await expect(earlyReopen).toHaveAttribute(
+    "href",
+    new RegExp(`^placekeeper:///.*Paper%20One\\.pdf#v=1&page=1$`, "u"),
+  );
+  await expect(earlyReopen).not.toHaveAttribute("aria-disabled", "true");
+  await slowPage.close();
+
   await page.reload();
   await expect(page.getByText("This live review is no longer available.")).toBeVisible();
   const reopen = page.getByRole("link", { name: "Reopen in Placekeeper" });
@@ -119,6 +151,73 @@ test("a live readable review survives repeated hard refresh and fails closed aft
   await expect(page.getByLabel("Placekeeper link")).toHaveValue(
     new RegExp(`^placekeeper:///.*Paper%20One\\.pdf#v=1&page=1$`, "u"),
   );
+  await expect(page.getByLabel("Browser link")).toHaveValue(
+    /^http:\/\/127\.0\.0\.1:\d+\/r\/[0-9a-f-]{36}\/.*Paper%20One\.pdf#v=1&page=1$/u,
+  );
+  await page.getByRole("button", { name: "Copy Link" }).click();
+  expect(await page.evaluate(() => (
+    globalThis as typeof globalThis & { __copiedPlacekeeperLink?: string }
+  ).__copiedPlacekeeperLink)).toMatch(
+    /^http:\/\/127\.0\.0\.1:\d+\/r\/[0-9a-f-]{36}\/.*Paper%20One\.pdf#v=1&page=1$/u,
+  );
+  await reopen.click();
+  await expect(page.getByRole("button", { name: "Open this PDF" })).toBeVisible();
+  await page.getByRole("button", { name: "Open this PDF" }).click();
+  await expect(page.locator("#root")).toHaveAttribute("data-production-root", "true");
+  await expectCurrentPage(page, "1 / 4");
+  await expect(page).toHaveURL(/\/r\/[0-9a-f-]{36}\/.*Paper%20One\.pdf#v=1&page=1$/u);
+});
+
+test("a pending restarted browser is promoted to Codex without remounting", async ({ page }) => {
+  const restartRoot = await mkdtemp(join(tmpdir(), "placekeeper-reconnect-browser-"));
+  const restartPdf = join(restartRoot, "restart.pdf");
+  await copyFile(resolve("test/fixtures/pdfs/reference-navigation.pdf"), restartPdf);
+  const first = await PlacekeeperHost.start({
+    recoveryRoot: join(restartRoot, "recovery"),
+    webAssets: { root: resolve("dist/web") },
+  });
+  let successor: PlacekeeperHost | undefined;
+  try {
+    const launched = await first.open({ pdfPath: restartPdf, surface: "codex" });
+    if (!launched.ok || launched.kind === "recovery-offered" || launched.bindProof === undefined) {
+      throw new Error("Expected a task-bindable review");
+    }
+    await first.broker.claimTaskBinding({
+      bindProof: launched.bindProof,
+      taskSessionId: "restart-owner-task",
+      reviewSessionId: launched.sessionId,
+      documentGeneration: launched.documentGeneration,
+    });
+    await page.goto(launched.url);
+    await expect(page.locator("#root")).toHaveAttribute("data-production-root", "true");
+    const staleUrl = page.url();
+    const port = first.server.port;
+    // Closing the page releases its control socket so the old listener can
+    // relinquish the fixed loopback port before the successor starts.
+    await page.goto("about:blank");
+    await first.server.close();
+
+    successor = await PlacekeeperHost.start({
+      recoveryRoot: join(restartRoot, "recovery"),
+      webAssets: { root: resolve("dist/web") },
+      port,
+    });
+    await page.goto(staleUrl);
+    await page.getByRole("link", { name: "Reopen in Placekeeper" }).click();
+    await page.getByRole("button", { name: "Open this PDF" }).click();
+    await expect(page.locator("#root")).toHaveAttribute("data-production-root", "true");
+    await expect(page.locator('[data-codex-context]')).toHaveCount(0);
+    const rootElement = await page.locator("#root").elementHandle();
+
+    await successor.broker.prepareTaskContext("restart-owner-task");
+
+    await expect(page.locator('[data-codex-context]')).toHaveAttribute("data-codex-context", "connecting");
+    expect(await rootElement?.evaluate((element) => element.isConnected)).toBe(true);
+  } finally {
+    await successor?.close();
+    await first.close().catch(() => undefined);
+    await rm(restartRoot, { recursive: true, force: true });
+  }
 });
 
 test("copies canonical PDF destinations and reopens them without source UI state", async ({ page }) => {
@@ -298,6 +397,37 @@ test("a successor daemon keeps the old origin but serves a stale view as inert c
     await expect(page.getByLabel("Placekeeper link")).toHaveValue(
       /^placekeeper:\/\/\/.*Successor%20Paper\.pdf#v=2&page=1&mode=fit-horizontal&params=640$/u,
     );
+    const staleViewId = /^\/r\/([0-9a-f-]{36})\//u.exec(readableUrl.pathname)?.[1];
+    if (staleViewId === undefined) throw new Error("Expected a readable stale-view route");
+    let reopenRequests = 0;
+    await page.route(`**/r/${staleViewId}/reopen`, async (route) => {
+      reopenRequests += 1;
+      if (reopenRequests === 3) {
+        await route.fulfill({ status: 409 });
+        return;
+      }
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          kind: "confirmation-required",
+          path: successorPdf,
+        }),
+      });
+    });
+    const reopen = page.getByRole("link", { name: "Reopen in Placekeeper" });
+    await reopen.click();
+    await expect(page.getByRole("button", { name: "Open this PDF" })).toBeVisible();
+    await expect(reopen).toHaveAttribute("aria-disabled", "true");
+    await reopen.click({ force: true });
+    expect(reopenRequests).toBe(1);
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(reopen).not.toHaveAttribute("aria-disabled", "true");
+    await reopen.click();
+    await page.getByRole("button", { name: "Open this PDF" }).click();
+    await expect(page.getByRole("alert")).toContainText("could not reopen this PDF");
+    await expect(reopen).not.toHaveAttribute("aria-disabled", "true");
+    expect(reopenRequests).toBe(3);
     await page.evaluate(() => {
       Object.defineProperty(navigator, "clipboard", {
         configurable: true,
@@ -305,7 +435,7 @@ test("a successor daemon keeps the old origin but serves a stale view as inert c
       });
     });
     await page.getByRole("button", { name: "Copy Link" }).click();
-    await expect(page.getByRole("alert")).toContainText("Clipboard access failed");
+    await expect(page.getByText("Clipboard access failed. Select and copy the link above, or retry.")).toBeVisible();
     await expect(page.getByRole("button", { name: "Retry" })).toBeFocused();
     expect((await page.context().cookies(readableUrl.origin)).some(({ name }) => name === "placekeeper_view"))
       .toBe(false);

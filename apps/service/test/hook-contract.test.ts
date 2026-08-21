@@ -125,6 +125,11 @@ describe("Codex lifecycle hook", () => {
       tool_input: { command: "placekeeper open --json --surface codex --pdf /private/tmp/paper.pdf" },
     }))).toEqual(expected);
     expect(inspectHookEvent(postToolUse({
+      tool_input: {
+        command: `${CODEX_INSTALLED_LAUNCHER_COMMAND} open-link --json --surface codex --confirmed --link 'placekeeper:///private/tmp/paper.pdf#v=1&page=4'`,
+      },
+    }))).toEqual(expected);
+    expect(inspectHookEvent(postToolUse({
       tool_input: { command: '"/tmp/placekeeper" open --json --surface codex --pdf /private/tmp/paper.pdf' },
     }))).toEqual({ kind: "ignored" });
   });

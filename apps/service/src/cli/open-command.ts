@@ -26,6 +26,11 @@ import { readHookStdin, runHookCommand } from "./hook-command.js";
 import { runContextCommand } from "./context-command.js";
 import { runDaemonCommand } from "./daemon-command.js";
 import { PLACEKEEPER_LINK_MAX_LENGTH } from "../../../../packages/core/src/placekeeper-link.js";
+import {
+  isLaunchSurface,
+  isRecoveryDecision,
+  type RecoveryDecision,
+} from "../sessions/session-broker.js";
 
 type LaunchClient = (request: LaunchRequest) => Promise<LaunchResponse>;
 
@@ -35,7 +40,8 @@ export type ParsedOpenLinkRequest =
       readonly operation: "open";
       readonly link: string;
       readonly confirmed?: true;
-      readonly recovery?: "resume" | "discard" | "fork";
+      readonly recovery?: RecoveryDecision;
+      readonly surface?: LaunchSurface;
     };
 
 type OpenLinkClient = (
@@ -66,7 +72,7 @@ export function parseOpenArguments(args: readonly string[]): LaunchRequest {
   let pdfPath: string | undefined;
   let sourceRootPath: string | undefined;
   let fork = false;
-  let recovery: "resume" | "discard" | "fork" | undefined;
+  let recovery: RecoveryDecision | undefined;
   let surface: LaunchSurface | undefined;
   for (let index = 1; index < args.length; index += 1) {
     const argument = args[index]!;
@@ -78,10 +84,10 @@ export function parseOpenArguments(args: readonly string[]): LaunchRequest {
     }
     if (argument === "--recovery") {
       const value = takeValue(args, index, argument);
-      if (recovery !== undefined || !["resume", "discard", "fork"].includes(value)) {
+      if (recovery !== undefined || !isRecoveryDecision(value)) {
         throw new Error("--recovery must be resume, discard, or fork");
       }
-      recovery = value as "resume" | "discard" | "fork";
+      recovery = value;
       index += 1;
       continue;
     }
@@ -91,18 +97,18 @@ export function parseOpenArguments(args: readonly string[]): LaunchRequest {
       index += 1;
       continue;
     }
-    if (argument === "--source-root") {
-      if (sourceRootPath !== undefined) throw new Error("Choose one source root at a time");
-      sourceRootPath = takeValue(args, index, argument);
+    if (argument === "--surface") {
+      const value = takeValue(args, index, argument);
+      if (!isLaunchSurface(value)) {
+        throw new Error("Unsupported launch surface");
+      }
+      surface = value;
       index += 1;
       continue;
     }
-    if (argument === "--surface") {
-      const value = takeValue(args, index, argument);
-      if (!["browser", "finder", "codex", "vscode"].includes(value)) {
-        throw new Error("Unsupported launch surface");
-      }
-      surface = value as LaunchSurface;
+    if (argument === "--source-root") {
+      if (sourceRootPath !== undefined) throw new Error("Choose one source root at a time");
+      sourceRootPath = takeValue(args, index, argument);
       index += 1;
       continue;
     }
@@ -129,7 +135,8 @@ export function parseOpenLinkArguments(args: readonly string[]): ParsedOpenLinkR
   let link: string | undefined;
   let preflight = false;
   let confirmed = false;
-  let recovery: "resume" | "discard" | "fork" | undefined;
+  let recovery: RecoveryDecision | undefined;
+  let surface: LaunchSurface | undefined;
   for (let index = 1; index < args.length; index += 1) {
     const argument = args[index]!;
     if (argument === "--json") continue;
@@ -145,10 +152,19 @@ export function parseOpenLinkArguments(args: readonly string[]): ParsedOpenLinkR
     }
     if (argument === "--recovery") {
       const value = takeValue(args, index, argument);
-      if (recovery !== undefined || !["resume", "discard", "fork"].includes(value)) {
+      if (recovery !== undefined || !isRecoveryDecision(value)) {
         throw new Error("--recovery must be resume, discard, or fork");
       }
-      recovery = value as "resume" | "discard" | "fork";
+      recovery = value;
+      index += 1;
+      continue;
+    }
+    if (argument === "--surface") {
+      const value = takeValue(args, index, argument);
+      if (surface !== undefined || !isLaunchSurface(value)) {
+        throw new Error("Unsupported launch surface");
+      }
+      surface = value;
       index += 1;
       continue;
     }
@@ -162,7 +178,7 @@ export function parseOpenLinkArguments(args: readonly string[]): ParsedOpenLinkR
   }
   if (link === undefined) throw new Error("Open one Placekeeper link at a time");
   if (link.length > PLACEKEEPER_LINK_MAX_LENGTH) throw new Error("Placekeeper link exceeds the length limit");
-  if (preflight && (confirmed || recovery !== undefined)) {
+  if (preflight && (confirmed || recovery !== undefined || surface !== undefined)) {
     throw new Error("Link preflight cannot be confirmed or choose recovery");
   }
   return preflight
@@ -172,6 +188,7 @@ export function parseOpenLinkArguments(args: readonly string[]): ParsedOpenLinkR
         link,
         ...(confirmed ? { confirmed: true } : {}),
         ...(recovery === undefined ? {} : { recovery }),
+        ...(surface === undefined ? {} : { surface }),
       };
 }
 
@@ -246,6 +263,7 @@ async function main(): Promise<number> {
             link: request.link,
             ...(request.confirmed === true ? { confirmed: true } : {}),
             ...(request.recovery === undefined ? {} : { recovery: request.recovery }),
+            ...(request.surface === undefined ? {} : { surface: request.surface }),
           }));
   }
   if (process.argv[2] === "hook") {
