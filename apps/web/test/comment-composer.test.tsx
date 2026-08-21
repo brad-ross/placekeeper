@@ -7,7 +7,7 @@ describe("CommentComposer Warm Neutral contract", () => {
   it("owns its field and action styling without changing optional or disabled semantics", () => {
     const html = renderToStaticMarkup(
       <CommentComposer
-        title="Highlight comment"
+        title="Highlight Comment"
         optional
         onSave={vi.fn()}
         onSkip={vi.fn()}
@@ -24,8 +24,9 @@ describe("CommentComposer Warm Neutral contract", () => {
     expect(html).toContain('comment-composer__actions compact-editorial-modal__footer');
     expect(html).toContain('class="comment-composer__field"');
     expect(html).toContain('class="comment-composer__input"');
-    expect(html).toContain("Comment (optional)");
-    expect(html).toContain("Keep without comment");
+    expect(html).toContain('<span class="sr-only">Comment (optional)</span>');
+    expect(html).toContain(">Cancel</span>");
+    expect(html).toContain(">Keep</span>");
     expect(html).not.toContain("Review note");
     expect(html).toContain('review-button review-button--primary');
     expect(html).toContain('class="lucide lucide-check review-icon"');
@@ -46,7 +47,7 @@ describe("CommentComposer Warm Neutral contract", () => {
 
     expect(html).toContain(">Cancel</span>");
     expect(html).toContain('class="lucide lucide-x review-icon"');
-    expect(html).not.toContain("Keep without comment");
+    expect(html).not.toContain(">Keep</span>");
   });
 
   it("keeps required whitespace-only content disabled on initial render", () => {
@@ -59,7 +60,21 @@ describe("CommentComposer Warm Neutral contract", () => {
       />,
     );
 
-    expect(html).toContain("Save comment");
+    expect(html).toContain(">Save</span>");
     expect(html).toContain("disabled");
+  });
+
+  it("keeps the field name accessible without repeating the modal title visually", () => {
+    const html = renderToStaticMarkup(
+      <CommentComposer
+        title="Replacement"
+        fieldLabel="Replacement"
+        onSave={vi.fn()}
+        onDismiss={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('<span class="sr-only">Replacement</span>');
+    expect(html).not.toContain('class="comment-composer__label"');
   });
 });

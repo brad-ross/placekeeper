@@ -582,7 +582,7 @@ test('Page Note composer', async ({ page }) => {
 
 test('Save Destination modal', async ({ page }) => {
   const product = await openScene(page, 'save-destination');
-  const dialog = page.getByRole('dialog', { name: 'Choose where to save annotations' });
+  const dialog = page.getByRole('dialog', { name: 'Choose Where to Save Annotations' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Confirm' })).toBeVisible();
@@ -591,7 +591,7 @@ test('Save Destination modal', async ({ page }) => {
 
 test('Save Destination recovery modal', async ({ page }) => {
   const product = await openScene(page, 'save-recovery');
-  const dialog = page.getByRole('dialog', { name: 'Choose where to save annotations' });
+  const dialog = page.getByRole('dialog', { name: 'Choose Where to Save Annotations' });
   await expect(dialog.getByText('This PDF isn’t up to date')).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Retry' })).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Locate PDF…' })).toBeVisible();
@@ -601,7 +601,7 @@ test('Save Destination recovery modal', async ({ page }) => {
 test('Save Destination establishing motion respects user preference', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await openScene(page, 'save-destination&establishing=1');
-  const spinner = page.getByRole('dialog', { name: 'Choose where to save annotations' })
+  const spinner = page.getByRole('dialog', { name: 'Choose Where to Save Annotations' })
     .locator('.lucide-loader-circle');
   await expect(spinner).toBeVisible();
   await expect(spinner).toHaveCSS('animation-name', 'none');
@@ -609,7 +609,7 @@ test('Save Destination establishing motion respects user preference', async ({ p
 
 for (const scene of [
   { name: 'page-note', dialogName: 'Page Note', openComposer: true, viewport: { width: 320, height: 720 } },
-  { name: 'save-recovery', dialogName: 'Choose where to save annotations', openComposer: false, viewport: { width: 320, height: 320 } },
+  { name: 'save-recovery', dialogName: 'Choose Where to Save Annotations', openComposer: false, viewport: { width: 320, height: 320 } },
 ] as const) {
   test(`narrow ${scene.dialogName} modal remains contained and touch sized`, async ({ page }) => {
     await openScene(page, scene.name, scene.viewport);
