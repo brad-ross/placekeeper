@@ -110,6 +110,24 @@ async function expectOutlineTreeGeometry(
     titles.every((title) => getComputedStyle(title).fontWeight === '700')
   ))).toBe(true);
 
+  const rowSpacing = await visibleRows.evaluateAll((rows) => rows.map((row, index) => {
+    const bounds = row.getBoundingClientRect();
+    let depth = 0;
+    let ancestor = row.parentElement;
+    while (ancestor) {
+      if (ancestor.classList.contains('outline-navigator__children')) depth += 1;
+      ancestor = ancestor.parentElement;
+    }
+    if (index === 0) return { depth, gapAbove: null };
+    const previousBounds = rows[index - 1]!.getBoundingClientRect();
+    return { depth, gapAbove: bounds.top - previousBounds.bottom };
+  }));
+  for (let index = 1; index < rowSpacing.length; index += 1) {
+    const spacing = rowSpacing[index]!;
+    const previous = rowSpacing[index - 1]!;
+    expect(spacing.gapAbove).toBeGreaterThanOrEqual(spacing.depth === previous.depth ? 6 : 8);
+  }
+
   const deepestVisibleLevel = await visibleRows.evaluateAll((rows) => Math.max(...rows.map((row) => {
     let depth = 0;
     let ancestor = row.parentElement;
