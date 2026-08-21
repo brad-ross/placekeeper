@@ -13,6 +13,14 @@ async function expectCurrentPage(page: Page, value: string): Promise<void> {
   await expect(page.locator('.review-chrome__page-control')).toHaveText(value, { timeout: 15_000 });
 }
 
+async function copiedPlacekeeperLink(page: Page): Promise<string> {
+  const link = await page.evaluate(() => (
+    globalThis as typeof globalThis & { __copiedPlacekeeperLink?: string }
+  ).__copiedPlacekeeperLink);
+  if (link === undefined) throw new Error("No Placekeeper Link was copied");
+  return link;
+}
+
 test.beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "placekeeper-reloadable-links-"));
   pdf = join(root, "Paper One.pdf");
@@ -73,7 +81,7 @@ test("a live readable review survives repeated hard refresh and fails closed aft
     name: "Open Footnote return to body TOC, Page 1",
   });
   await expect(returnMenu).toBeVisible();
-  await returnMenu.getByRole("menuitem").last().click();
+  await returnMenu.getByRole("menuitem", { name: "Open in main document" }).click();
   await expectCurrentPage(page, "1 / 4");
   await expect(page).toHaveURL(/#v=1&page=1$/u);
   await expect.poll(() => page.evaluate(() => history.length)).toBe(historyLength + 1);
@@ -92,6 +100,9 @@ test("a live readable review survives repeated hard refresh and fails closed aft
   await page.getByRole("button", { name: "Copy link to current PDF location" }).click();
   await expect(page.locator('[data-copy-link-status="success"]').getByRole("status"))
     .toHaveText("Link copied.");
+  await expect(page.locator('[data-copy-link-status="success"]').getByRole("status"))
+    .toHaveClass("sr-only");
+  await expect(page.locator(".copy-link-control__status")).toHaveCount(0);
   expect(await page.evaluate(() => (
     globalThis as typeof globalThis & { __copiedPlacekeeperLink?: string }
   ).__copiedPlacekeeperLink)).toMatch(/^placekeeper:\/\/\/.*Paper%20One\.pdf#v=1&page=1$/u);
@@ -108,6 +119,133 @@ test("a live readable review survives repeated hard refresh and fails closed aft
   await expect(page.getByLabel("Placekeeper link")).toHaveValue(
     new RegExp(`^placekeeper:///.*Paper%20One\\.pdf#v=1&page=1$`, "u"),
   );
+});
+
+test("copies canonical PDF destinations and reopens them without source UI state", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (value: string) => {
+          (globalThis as typeof globalThis & { __copiedPlacekeeperLink?: string })
+            .__copiedPlacekeeperLink = value;
+        },
+      },
+    });
+  });
+  const launched = await host.open({ pdfPath: pdf, surface: "browser", fork: true });
+  if (!launched.ok || launched.kind === "recovery-offered") {
+    throw new Error("Expected a destination-link browser launch");
+  }
+  await page.goto(launched.url);
+  await expectCurrentPage(page, "1 / 4");
+
+  await page.getByRole("button", { name: "Open right workspace" }).click();
+  const outline = page.getByRole("navigation", { name: "Document outline" });
+  await expect(outline).toBeVisible();
+  const overview = outline.getByRole("button", { name: "Overview, Page 2", exact: true });
+  await overview.focus();
+  const outlineCopy = outline.getByRole("button", {
+    name: "Copy exact destination link for Overview, Page 2",
+  });
+  expect(await outlineCopy.getAttribute("title")).toBeNull();
+  await expect(outlineCopy.locator(".lucide-link")).toBeVisible();
+  await outlineCopy.click();
+  const outlineLink = await copiedPlacekeeperLink(page);
+  expect(outlineLink).toMatch(/#v=2&page=2&mode=xyz&params=72,640,0$/u);
+
+  const pageOnly = outline.getByRole("button", {
+    name: "Page-only appendix, Page 4",
+    exact: true,
+  });
+  await pageOnly.focus();
+  const pageOnlyCopy = outline.getByRole("button", {
+    name: "Copy page link for Page-only appendix, Page 4",
+  });
+  await pageOnlyCopy.click();
+  expect(await copiedPlacekeeperLink(page)).toMatch(/#v=1&page=4$/u);
+
+  await page.getByRole("tab", { name: "Search", exact: true }).click();
+  const search = page.getByRole("searchbox", { name: "Search this PDF" });
+  await search.fill("Detail target");
+  const result = page.locator("[data-search-result]").first();
+  await expect(result).toBeVisible();
+  await result.getByRole("button").first().focus();
+  const searchCopy = result.getByRole("button", {
+    name: /Copy page link for Search result on page/u,
+  });
+  await searchCopy.click();
+  expect(await copiedPlacekeeperLink(page)).toMatch(/#v=1&page=3$/u);
+
+  await page.getByRole("button", { name: "Close right workspace" }).click();
+  const primaryLink = page.locator(".pdf-workspace:not(.pdf-workspace--reference)").getByRole(
+    "button",
+    { name: "Open PDF link to Primary result, Page 2" },
+  );
+  await primaryLink.click();
+  const linkMenu = page.getByRole("menu", { name: "Open Primary result, Page 2" });
+  const popoverCopy = linkMenu.getByRole("menuitem", {
+    name: "Copy link to exact destination on page 2",
+  });
+  await expect(popoverCopy.locator(".lucide-link")).toBeVisible();
+  await popoverCopy.click();
+  expect(await copiedPlacekeeperLink(page)).toBe(outlineLink);
+
+  const reopened = await host.openLink({ link: outlineLink });
+  if (!reopened.ok || reopened.kind === "confirmation-required" || reopened.kind === "recovery-offered") {
+    throw new Error("Expected the copied exact destination to reopen");
+  }
+  await page.goto(reopened.url);
+  await expect(page).toHaveURL(/#v=2&page=2&mode=xyz&params=72,640,0$/u);
+  await expectCurrentPage(page, "2 / 4");
+  await expect(page.locator("#review-tools-workspace")).toHaveAttribute(
+    "data-tools-workspace-open",
+    "false",
+  );
+  await expect(page.locator("[data-review-workspace]")).toHaveAttribute("data-workspace-open", "false");
+  await expect(page.locator("[data-link-action-popover]")).toHaveCount(0);
+  await expect(page.locator(".review-workspace__status")).toHaveText("");
+
+  await page.evaluate(() => history.pushState(history.state, "", "#v=1&page=3"));
+  await page.goBack();
+  await expect(page).toHaveURL(/#v=2&page=2&mode=xyz&params=72,640,0$/u);
+  await expectCurrentPage(page, "2 / 4");
+  await page.goForward();
+  await expect(page).toHaveURL(/#v=1&page=3$/u);
+  await expectCurrentPage(page, "3 / 4");
+  await page.goBack();
+  await expect(page).toHaveURL(/#v=2&page=2&mode=xyz&params=72,640,0$/u);
+  await expectCurrentPage(page, "2 / 4");
+
+  await page.evaluate(() => history.replaceState(
+    history.state,
+    "",
+    "#v=2&page=3&mode=fit-rectangle&params=10,10,10,20",
+  ));
+  await page.reload();
+  await expect(page).toHaveURL(/#v=1&page=3$/u);
+  await expectCurrentPage(page, "3 / 4");
+  await expect(page.locator(".review-workspace__status")).toHaveText(
+    "The exact destination is unavailable. Opened page 3 instead.",
+  );
+
+  await page.evaluate(() => history.replaceState(
+    history.state,
+    "",
+    "#v=2&page=99&mode=fit-page",
+  ));
+  await page.reload();
+  await expect(page).toHaveURL(/#v=1&page=1$/u);
+  await expectCurrentPage(page, "1 / 4");
+  await expect(page.locator(".review-workspace__status")).toHaveText(
+    "The exact destination is unavailable. Opened page 1 instead.",
+  );
+
+  await page.evaluate(() => history.replaceState(history.state, "", "#v=1&page=4"));
+  await page.reload();
+  await expect(page).toHaveURL(/#v=1&page=4$/u);
+  await expectCurrentPage(page, "4 / 4");
 });
 
 test("a successor daemon keeps the old origin but serves a stale view as inert click-only recovery", async ({ page }) => {
@@ -140,7 +278,8 @@ test("a successor daemon keeps the old origin but serves a stale view as inert c
     });
     expect(successor.server.origin).toBe(readableUrl.origin);
 
-    await page.evaluate(() => { location.hash = "#unsafe"; });
+    const exactFragment = "#v=2&page=1&mode=fit-horizontal&params=640";
+    await page.evaluate((fragment) => { location.hash = fragment; }, exactFragment);
     const requests: string[] = [];
     const recordRequest = (request: { url(): string }) => requests.push(request.url());
     page.on("request", recordRequest);
@@ -149,15 +288,15 @@ test("a successor daemon keeps the old origin but serves a stale view as inert c
     await expect(page.getByText("This live review is no longer available.")).toBeVisible();
     await expect(page.getByRole("link", { name: "Reopen in Placekeeper" })).toHaveAttribute(
       "href",
-      /^placekeeper:\/\/\/.*Successor%20Paper\.pdf#v=1&page=1$/u,
+      /^placekeeper:\/\/\/.*Successor%20Paper\.pdf#v=2&page=1&mode=fit-horizontal&params=640$/u,
     );
-    expect(page.url()).toBe(`${readableUrl.origin}${readableUrl.pathname}#unsafe`);
+    expect(page.url()).toBe(`${readableUrl.origin}${readableUrl.pathname}${exactFragment}`);
     expect(requests.some((url) => url.startsWith("placekeeper:"))).toBe(false);
     expect(requests.some((url) => new URL(url).pathname.endsWith("/resume"))).toBe(false);
     expect(requests.some((url) => new URL(url).pathname.startsWith("/s/"))).toBe(false);
     await expect(page.getByRole("heading", { name: "Reopen this PDF" })).toBeFocused();
     await expect(page.getByLabel("Placekeeper link")).toHaveValue(
-      /^placekeeper:\/\/\/.*Successor%20Paper\.pdf#v=1&page=1$/u,
+      /^placekeeper:\/\/\/.*Successor%20Paper\.pdf#v=2&page=1&mode=fit-horizontal&params=640$/u,
     );
     await page.evaluate(() => {
       Object.defineProperty(navigator, "clipboard", {

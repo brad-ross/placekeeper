@@ -4,6 +4,8 @@ import type {
   PdfOutlineDiscovery,
   PdfOutlineItem,
 } from '../pdf/pdf-outline.js';
+import type { PdfDestinationCopyLink } from './copy-link-model.js';
+import { RowActionGroup, type RowAction } from './RowActionGroup.js';
 import { ReviewIcon } from './ReviewIcon.js';
 
 function branchIds(items: readonly PdfOutlineItem[]): string[] {
@@ -18,6 +20,7 @@ export interface OutlineNavigatorProps {
   readonly currentItemId: string | null;
   readonly onActivate: (item: PdfOutlineItem) => void;
   readonly onOpenReference: (item: PdfOutlineItem) => void;
+  readonly copyLinkForItem?: (item: PdfOutlineItem) => PdfDestinationCopyLink | undefined;
   readonly onFocusTokenChange?: (token: string) => void;
 }
 
@@ -26,6 +29,7 @@ export function OutlineNavigator({
   currentItemId,
   onActivate,
   onOpenReference,
+  copyLinkForItem,
   onFocusTokenChange,
 }: OutlineNavigatorProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(
@@ -78,6 +82,30 @@ export function OutlineNavigator({
         const pageNumber = item.target && item.pageContext && item.label !== item.pageContext
           ? item.target.pageIndex + 1
           : null;
+        const copyLink = copyLinkForItem?.(item);
+        const actions: readonly RowAction[] = item.target === null ? [] : [
+          {
+            kind: 'command',
+            id: 'open-reference',
+            label: `Open ${destinationLabel} in References`,
+            title: 'Open in References',
+            icon: 'references',
+            focusToken: `outline-reference:${item.id}`,
+            onInvoke: () => onOpenReference(item),
+          },
+          ...(copyLink === undefined ? [] : [{
+            kind: 'copy-link' as const,
+            id: 'copy-link',
+            label: copyLink.precision === 'exact'
+              ? `Copy exact destination link for ${destinationLabel}`
+              : `Copy page link for ${destinationLabel}`,
+            title: copyLink.precision === 'exact'
+              ? 'Copy exact destination link'
+              : 'Copy page link',
+            focusToken: `outline-copy-link:${item.id}`,
+            copyLink,
+          }]),
+        ];
         return (
           <li key={item.id} data-outline-item={item.id}>
             <div
@@ -123,18 +151,7 @@ export function OutlineNavigator({
                     )}
                 </span>
               </button>
-              {item.target === null ? null : (
-                <button
-                  type="button"
-                  className="outline-navigator__reference"
-                  aria-label={`Open ${destinationLabel} in References`}
-                  title="Open in References"
-                  onFocus={() => onFocusTokenChange?.(`outline-reference:${item.id}`)}
-                  onClick={() => onOpenReference(item)}
-                >
-                  <ReviewIcon name="references" />
-                </button>
-              )}
+              <RowActionGroup actions={actions} rowLabel={destinationLabel} />
             </div>
             {hasChildren ? (
               <div

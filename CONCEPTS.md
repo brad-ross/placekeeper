@@ -10,7 +10,7 @@ The focused everyday PDF reader and annotator that preserves a reader's place wh
 Placekeeper emphasizes preserving the Main Reading Thread while annotations, search, and Reference Tabs support nonlinear reading.
 
 ### Placekeeper Link
-The canonical, human-readable `placekeeper://` address for a local PDF, consisting of its absolute filesystem path and an optional page or PDF-recoverable semantic fragment.
+The canonical, human-readable `placekeeper://` address for a local PDF, consisting of its absolute filesystem path and an optional safe fragment for a page, portable Review Item, or normalized author-encoded same-document PDF destination.
 
 A Placekeeper Link reopens the current file at that path and carries no live browser credential, session identity, or Codex task authority.
 

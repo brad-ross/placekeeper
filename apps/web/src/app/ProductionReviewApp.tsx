@@ -41,6 +41,7 @@ import type {
   ViewerClientPlacement,
   ViewerInteractionEvent,
   ViewerPageMenuInvocation,
+  ViewerPdfLinkInvocation,
 } from "../pdf/viewer-interaction-events.js";
 import { PageNotePlacementAuthority } from "../review/review-surface-state.js";
 import {
@@ -61,6 +62,12 @@ import {
 } from "../review/reference-navigation-state.js";
 import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
 import { PdfSearchWorkspace } from '../review/PdfSearchWorkspace.js';
+import {
+  createOutlineRowCopyLink,
+  createPdfTargetCopyLink,
+  createSearchResultRowCopyLink,
+  type PdfTargetCopyLinkContext,
+} from '../review/row-link-actions.js';
 import {
   createTrailingTaskScheduler,
   waitForReviewNavigationReady,
@@ -577,6 +584,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       },
       getOutlineDiscovery: () => outlineDiscoveryRef.current,
       setCurrentOutlineItemId,
+      getPageCount: () => searchDocumentRef.current?.pages.length ?? 0,
       ...(locationHistory === undefined ? {} : {
         locationHistory,
         resolvePortableItem: (itemId: string) => {
@@ -936,12 +944,53 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     if (immediate) run();
     else searchSubmitTimerRef.current = setTimeout(run, 180);
   };
+  const writePlacekeeperLink = async (link: string) => {
+    if (navigator.clipboard?.writeText === undefined) {
+      throw new Error('Clipboard API unavailable');
+    }
+    await navigator.clipboard.writeText(link);
+  };
+  const pdfTargetCopyLinkContext: PdfTargetCopyLinkContext | undefined =
+    props.session.appLinkBase === undefined ? undefined : {
+      appLinkBase: props.session.appLinkBase,
+      document: {
+        documentGeneration: documentGenerationRef.current,
+        pageCount: viewerState.totalPages,
+      },
+      currentDocumentGeneration: () => documentGenerationRef.current,
+      writeText: writePlacekeeperLink,
+    };
+  const copyLinkForSearchResult = pdfTargetCopyLinkContext === undefined
+    ? undefined
+    : (result: PdfSearchResult) => createSearchResultRowCopyLink(result, pdfTargetCopyLinkContext);
+  const copyLinkForOutlineItem = pdfTargetCopyLinkContext === undefined
+    ? undefined
+    : (item: Parameters<typeof createOutlineRowCopyLink>[0]) => (
+      createOutlineRowCopyLink(item, pdfTargetCopyLinkContext)
+    );
+  const copyLinkForLinkAction = pdfTargetCopyLinkContext === undefined
+    ? undefined
+    : (request: ViewerPdfLinkInvocation) => {
+      const copyLink = createPdfTargetCopyLink(request.target, pdfTargetCopyLinkContext);
+      if (copyLink === undefined) return undefined;
+      const page = request.target.pageIndex + 1;
+      return {
+        ...copyLink,
+        ariaLabel: copyLink.precision === 'exact'
+          ? `Copy link to exact destination on page ${page}`
+          : `Copy link to target page ${page}`,
+        title: copyLink.precision === 'exact'
+          ? 'Copy exact destination link'
+          : 'Copy target page link',
+      };
+    };
   const searchWorkspace = (
     <PdfSearchWorkspace
       state={searchState}
       onQueryChange={submitSearchQuery}
       onResultActivate={activateSearchResult}
       onResultOpenReference={openSearchResultReference}
+      {...(copyLinkForSearchResult === undefined ? {} : { copyLinkForResult: copyLinkForSearchResult })}
       onAlternativeActivate={(alternative) => submitSearchQuery(alternative.query, true)}
     />
   );
@@ -992,13 +1041,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const onCommitMainFramingPositionChange = useCallback((commit: (() => void) | null) => {
     commitMainFramingPositionRef.current = commit ?? (() => undefined);
   }, []);
-  const writePlacekeeperLink = async (link: string) => {
-    if (navigator.clipboard?.writeText === undefined) {
-      throw new Error('Clipboard API unavailable');
-    }
-    await navigator.clipboard.writeText(link);
-  };
-
   return (
     <main data-production-review ref={productionRootRef}>
       <ReviewShell
@@ -1058,14 +1100,16 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             writeText: writePlacekeeperLink,
           },
           copyItemLink: {
-            getLink: (item: ReviewItem) => portableItemIdsRef.current.has(item.id)
-              && saveStatusIsCleanCurrent(state, saveStatus)
-              ? buildPlacekeeperCopyLink(props.session.appLinkBase!, {
-                  kind: 'item',
-                  page: item.pageIndex + 1,
-                  itemId: item.id,
-                })
-              : undefined,
+            getLink: (item: ReviewItem) => buildPlacekeeperCopyLink(
+              props.session.appLinkBase!,
+              {
+                kind: 'item',
+                page: item.pageIndex + 1,
+                itemId: item.id,
+              },
+            ),
+            disabled: (item: ReviewItem) => !portableItemIdsRef.current.has(item.id)
+              || !saveStatusIsCleanCurrent(state, saveStatus),
             writeText: writePlacekeeperLink,
           },
         })}
@@ -1073,6 +1117,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           void navigationCoordinator.chooseLink(choice, request);
         }}
         onLinkActionDismiss={(request) => navigationCoordinator.dismissLink(request)}
+        {...(copyLinkForLinkAction === undefined ? {} : { copyLinkForLinkAction })}
         onNavigateBack={() => { void navigationCoordinator.historyBack(); }}
         onNavigateForward={() => { void navigationCoordinator.historyForward(); }}
         onWorkspaceModeChange={(mode) => {
@@ -1125,6 +1170,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             pageContext: item.pageContext ?? `Page ${item.target.pageIndex + 1}`,
           });
         }}
+        {...(copyLinkForOutlineItem === undefined ? {} : { copyLinkForOutlineItem })}
         onReferenceViewportHost={setReferenceViewportHost}
         onWorkspaceModeFocusTokenChange={(mode, token) => {
           const current = navigationStateRef.current.workspace.modes[mode];

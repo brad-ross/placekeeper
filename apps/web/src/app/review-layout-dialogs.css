@@ -79,4 +79,4 @@
 .comment-composer__field { display: grid; gap: 6px; }
 .comment-composer__label { font-size: 11px; font-weight: 700; }
 .comment-composer__input { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; min-height: 7rem; padding: 9px 10px; resize: vertical; border: 1px solid var(--review-border); border-radius: var(--review-radius-control); color: var(--review-ink-primary); background: var(--review-surface-panel); font-size: 12px; line-height: 1.5; }
-.comment-composer__actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.comment-composer__actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--review-action-group-gap); margin-top: 12px; }

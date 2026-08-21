@@ -124,6 +124,12 @@ function validDimension(value: number): boolean {
   return Number.isFinite(value) && value > 0;
 }
 
+function validViewerZoom(value: number): boolean {
+  return Number.isFinite(value)
+    && value >= VIEWER_ZOOM_MIN_PERCENT / 100
+    && value <= VIEWER_ZOOM_MAX_PERCENT / 100;
+}
+
 export function fitViewerWidthZoom(input: {
   readonly viewportWidth: number;
   readonly pageWidth: number;
@@ -885,7 +891,11 @@ export function createViewerNavigation(
     location: PdfViewerLocation,
     operation: NavigationOperation,
   ): Promise<boolean> => {
-    if (!isPdfViewerLocation(location) || !operationIsCurrent(operation)) return false;
+    if (
+      !isPdfViewerLocation(location)
+      || !validViewerZoom(location.zoom)
+      || !operationIsCurrent(operation)
+    ) return false;
     const page = viewer.pages[location.pageIndex];
     if (
       !page

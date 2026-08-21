@@ -4,14 +4,18 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   LinkActionMenuContent,
-  compositeFocusIndex,
-  horizontalTabFocusIndex,
   linkActionDismissRestoresFocus,
   placeLinkActionPopover,
   setLinkActionOpenerExpanded,
 } from '../src/review/LinkActionPopover.js';
 import { PDF_LINK_ACTION_MENU_ID } from '../src/pdf/viewer-interaction-events.js';
 import { OutlineNavigator } from '../src/review/OutlineNavigator.js';
+import { compositeFocusIndex, horizontalTabFocusIndex } from '../src/review/menu-focus.js';
+import {
+  createOutlineRowCopyLink,
+  createPdfTargetCopyLink,
+  createSearchResultRowCopyLink,
+} from '../src/review/row-link-actions.js';
 import {
   chooseWorkspaceModeFocusTarget,
   referenceTabFocusIndex,
@@ -44,6 +48,7 @@ describe('link action chooser', () => {
     expect(linkActionDismissRestoresFocus('escape')).toBe(true);
     expect(linkActionDismissRestoresFocus('outside')).toBe(true);
     expect(linkActionDismissRestoresFocus('anchor-invalidated')).toBe(true);
+    expect(linkActionDismissRestoresFocus('copy-success')).toBe(true);
   });
 
   it('keeps the default action first in a compact icon-only nonmodal menu', () => {
@@ -53,20 +58,27 @@ describe('link action chooser', () => {
         pageContext="Page 18"
         sourceScope="main"
         firstItemRef={() => undefined}
-        secondItemRef={() => undefined}
-        thirdItemRef={() => undefined}
+        copyLink={{
+          getLink: () => 'placekeeper:///tmp/Paper.pdf#v=2&page=18&mode=fit-page',
+          writeText: async () => undefined,
+          ariaLabel: 'Copy link to exact destination on page 18',
+          title: 'Copy exact destination link',
+        }}
         onChoose={() => undefined}
         onKeyDown={() => undefined}
+        onBlur={() => undefined}
       />,
     );
 
     expect(html).toContain('role="menu"');
     expect(html).toContain(`id="${PDF_LINK_ACTION_MENU_ID}"`);
-    expect(html).toMatch(/aria-label="Open in References"[\s\S]*aria-label="Open in main document"/u);
+    expect(html).toMatch(/aria-label="Open in References"[\s\S]*aria-label="Open in main document"[\s\S]*aria-label="Copy link to exact destination on page 18"/u);
     expect(html).toMatch(/title="Open in References"[\s\S]*title="Open in main document"/u);
+    expect(html).not.toContain('title="Copy exact destination link"');
     expect(html).toMatch(/aria-label="Open in main document"[^>]*>[\s\S]*?lucide-arrow-right/u);
-    expect(html.match(/role="menuitem"/g)).toHaveLength(2);
-    expect(html.match(/<svg/g)).toHaveLength(2);
+    expect(html).toMatch(/aria-label="Copy link to exact destination on page 18"[^>]*>[\s\S]*?lucide-link/u);
+    expect(html.match(/role="menuitem"/g)).toHaveLength(3);
+    expect(html.match(/<svg/g)).toHaveLength(3);
     expect(html).not.toContain('<small>');
     expect(html).not.toContain('<span>Open in');
     expect(html).not.toContain('role="dialog"');
@@ -81,23 +93,30 @@ describe('link action chooser', () => {
         pageContext="Page 3"
         sourceScope="reference"
         firstItemRef={() => undefined}
-        secondItemRef={() => undefined}
-        thirdItemRef={() => undefined}
+        copyLink={{
+          getLink: () => 'placekeeper:///tmp/Paper.pdf#v=2&page=3&mode=fit-page',
+          writeText: async () => undefined,
+          ariaLabel: 'Copy link to exact destination on page 3',
+          title: 'Copy exact destination link',
+        }}
         onChoose={() => undefined}
         onKeyDown={() => undefined}
+        onBlur={() => undefined}
       />,
     );
 
     expect(html).toMatch(
-      /aria-label="Open in References"[\s\S]*aria-label="Follow in this tab"[\s\S]*aria-label="Open in main document"/u,
+      /aria-label="Open in References"[\s\S]*aria-label="Follow in this tab"[\s\S]*aria-label="Open in main document"[\s\S]*aria-label="Copy link to exact destination on page 3"/u,
     );
     expect(html).toMatch(
       /title="Open in References"[\s\S]*title="Follow in this tab"[\s\S]*title="Open in main document"/u,
     );
+    expect(html).not.toContain('title="Copy exact destination link"');
     expect(html).toMatch(/aria-label="Follow in this tab"[^>]*>[\s\S]*?lucide-arrow-right/u);
     expect(html).toMatch(/aria-label="Open in main document"[^>]*>[\s\S]*?lucide-maximize-2/u);
-    expect(html.match(/role="menuitem"/g)).toHaveLength(3);
-    expect(html.match(/<svg/g)).toHaveLength(3);
+    expect(html).toMatch(/aria-label="Copy link to exact destination on page 3"[^>]*>[\s\S]*?lucide-link/u);
+    expect(html.match(/role="menuitem"/g)).toHaveLength(4);
+    expect(html.match(/<svg/g)).toHaveLength(4);
   });
 
   it('wraps menu focus for arrows and supports Home and End', () => {
@@ -705,6 +724,64 @@ describe('outline navigator', () => {
     children: [],
   }];
 
+  it('builds exact Outline and page-only Search links against the current document', async () => {
+    let currentGeneration = 3;
+    const writeText = vi.fn(async () => undefined);
+    const context = {
+      appLinkBase: 'placekeeper:///tmp/Paper.pdf',
+      document: { documentGeneration: 3, pageCount: 10 },
+      currentDocumentGeneration: () => currentGeneration,
+      writeText,
+    };
+    const exactTarget = {
+      documentGeneration: 3,
+      pageIndex: 7,
+      zoom: { mode: PdfZoomMode.XYZ, params: [12, 34, 1.25] },
+      identity: JSON.stringify([3, 7, PdfZoomMode.XYZ, 12, 34, 1.25]),
+    };
+    const pageTarget = {
+      documentGeneration: 3,
+      pageIndex: 2,
+      zoom: { mode: PdfZoomMode.Unknown, params: [] },
+      identity: JSON.stringify([3, 2, PdfZoomMode.Unknown]),
+    };
+    const exact = createOutlineRowCopyLink({
+      id: 'exact', label: 'Results', pageContext: 'Page 8', target: exactTarget, children: [],
+    }, context);
+    const page = createOutlineRowCopyLink({
+      id: 'page', label: 'Methods', pageContext: 'Page 3', target: pageTarget, children: [],
+    }, context);
+    const search = createSearchResultRowCopyLink({ pageIndex: 5 }, context);
+    const clickedTarget = createPdfTargetCopyLink(exactTarget, context);
+
+    expect(exact?.precision).toBe('exact');
+    expect(exact?.getLink()).toBe(
+      'placekeeper:///tmp/Paper.pdf#v=2&page=8&mode=xyz&params=12,34,1.25',
+    );
+    expect(page?.precision).toBe('page');
+    expect(page?.getLink()).toBe('placekeeper:///tmp/Paper.pdf#v=1&page=3');
+    expect(search?.getLink()).toBe('placekeeper:///tmp/Paper.pdf#v=1&page=6');
+    expect(clickedTarget?.getLink()).toBe(exact?.getLink());
+    expect(createSearchResultRowCopyLink({ pageIndex: 10 }, context)).toBeUndefined();
+    expect(createOutlineRowCopyLink({
+      id: 'stale',
+      label: 'Stale',
+      pageContext: 'Page 3',
+      target: { ...pageTarget, documentGeneration: 2 },
+      children: [],
+    }, context)).toBeUndefined();
+    expect(createOutlineRowCopyLink({
+      id: 'unavailable', label: 'Unavailable', pageContext: null, target: null, children: [],
+    }, context)).toBeUndefined();
+
+    await exact?.writeText(exact.getLink());
+    expect(writeText).toHaveBeenCalledOnce();
+    currentGeneration = 4;
+    await expect(page?.writeText(page.getLink())).rejects.toThrow('replaced PDF');
+    await expect(clickedTarget?.writeText(clickedTarget.getLink())).rejects.toThrow('replaced PDF');
+    expect(writeText).toHaveBeenCalledOnce();
+  });
+
   it('uses nested native lists, separate disclosures, safe destinations, and current location', () => {
     const html = renderToStaticMarkup(
       <OutlineNavigator
@@ -724,7 +801,7 @@ describe('outline navigator', () => {
     expect(html).toContain('Setup');
   });
 
-  it('renders target-only References actions as sibling controls with the shared icon', () => {
+  it('renders ordered target actions without manufacturing a link for unavailable groups', () => {
     const groupingItem: PdfOutlineItem = {
       id: 'group',
       label: 'Appendices',
@@ -742,29 +819,42 @@ describe('outline navigator', () => {
         currentItemId="results"
         onActivate={() => undefined}
         onOpenReference={() => undefined}
+        copyLinkForItem={(item) => item.target === null ? undefined : {
+          precision: item.id === 'results' ? 'exact' : 'page',
+          getLink: () => item.id === 'results'
+            ? 'placekeeper:///tmp/Paper.pdf#v=2&page=8&mode=fit-page'
+            : `placekeeper:///tmp/Paper.pdf#v=1&page=${item.target!.pageIndex + 1}`,
+          writeText: async () => undefined,
+        }}
       />,
     );
-    const rows = html.match(/<div class="outline-navigator__row"[^>]*>[\s\S]*?<\/div>/gu) ?? [];
-    const groupingRow = rows.find((row) => row.includes('Appendices')) ?? '';
-    const introductionRow = rows.find((row) => row.includes('Introduction')) ?? '';
-    const resultsRow = rows.find((row) => row.includes('Results')) ?? '';
+    const groupingRow = html.slice(html.indexOf('data-outline-item="group"'), html.indexOf('data-outline-item="intro"'));
+    const introductionRow = html.slice(html.indexOf('data-outline-item="intro"'), html.indexOf('data-outline-item="setup"'));
+    const resultsRow = html.slice(html.indexOf('data-outline-item="results"'));
 
     expect(groupingRow).toContain('outline-navigator__disclosure');
     expect(groupingRow).toContain('outline-navigator__destination');
-    expect(groupingRow).not.toContain('outline-navigator__reference');
+    expect(groupingRow).not.toContain('row-action-group');
     expect(introductionRow).toMatch(
-      /class="outline-navigator__destination"[\s\S]*?<\/button><button[^>]*class="outline-navigator__reference"/u,
+      /class="outline-navigator__destination"[\s\S]*?<\/button><div class="row-action-group"/u,
     );
     expect(introductionRow).toContain('aria-label="Open Introduction, Page 1 in References"');
+    expect(introductionRow).toContain('aria-label="Copy page link for Introduction, Page 1"');
     expect(introductionRow).toContain('title="Open in References"');
     expect(introductionRow).toContain('lucide-panels-top-left');
     expect(resultsRow).toContain('aria-current="location"');
     expect(resultsRow).toContain('data-current="true"');
+    expect(resultsRow).toContain('aria-label="Copy exact destination link for Results, Page 8"');
+    expect(resultsRow).toContain('lucide-link');
+    expect(resultsRow).toContain('aria-label="Secondary actions for Results, Page 8"');
+    expect(resultsRow).toContain('aria-haspopup="menu"');
+    expect(resultsRow).toContain('aria-expanded="false"');
+    expect(resultsRow).toMatch(/aria-controls="row-actions-menu-[^"]+"/u);
     expect(resultsRow).toContain(
       '<span class="outline-navigator__summary"><span class="outline-navigator__title">Results</span><span class="outline-navigator__separator" aria-hidden="true">·</span><small class="outline-navigator__page" aria-hidden="true">8</small></span>',
     );
     expect(resultsRow).not.toContain('>Page 8</small>');
-    expect(html.match(/class="outline-navigator__reference"/g)).toHaveLength(3);
+    expect(html.match(/data-row-action="open-reference"/g)).toHaveLength(3);
   });
 
   it('distinguishes loading, loaded-empty, and unavailable states', () => {

@@ -6,9 +6,31 @@ const ENCODED_SEPARATOR = /%(?:2f|5c)/iu;
 const PORTABLE_ITEM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const VIEW_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
+const DESTINATION_PARAMETER_COUNTS = {
+  "xyz": 3,
+  "fit-page": 0,
+  "fit-bounding-box": 0,
+  "fit-horizontal": 1,
+  "fit-vertical": 1,
+  "fit-bounding-box-horizontal": 1,
+  "fit-bounding-box-vertical": 1,
+  "fit-rectangle": 4,
+} as const;
+
+export type PlacekeeperPdfDestinationMode = keyof typeof DESTINATION_PARAMETER_COUNTS;
+
+export interface PlacekeeperPdfDestinationLocation {
+  readonly kind: "destination";
+  /** One-based coarse fallback page. */
+  readonly page: number;
+  readonly mode: PlacekeeperPdfDestinationMode;
+  readonly params: readonly number[];
+}
+
 export type PlacekeeperLinkLocation =
   | { readonly kind: "page"; readonly page: number }
-  | { readonly kind: "item"; readonly page: number; readonly itemId: string };
+  | { readonly kind: "item"; readonly page: number; readonly itemId: string }
+  | PlacekeeperPdfDestinationLocation;
 
 export interface PlacekeeperLinkTarget {
   readonly path: string;
@@ -52,6 +74,46 @@ function assertPortableItemId(itemId: string): void {
   }
 }
 
+function destinationParameterCount(mode: unknown): number {
+  if (
+    typeof mode !== "string" ||
+    !Object.prototype.hasOwnProperty.call(DESTINATION_PARAMETER_COUNTS, mode)
+  ) {
+    return invalid("Placekeeper link destination mode is unsupported");
+  }
+  return DESTINATION_PARAMETER_COUNTS[mode as PlacekeeperPdfDestinationMode];
+}
+
+function encodeDestinationParameter(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || Object.is(value, -0)) {
+    return invalid("Placekeeper link destination parameters must be finite canonical numbers");
+  }
+  return String(value);
+}
+
+function decodeDestinationParameter(value: string): number {
+  const decoded = Number(value);
+  if (
+    value.length === 0 ||
+    !Number.isFinite(decoded) ||
+    Object.is(decoded, -0) ||
+    String(decoded) !== value
+  ) {
+    return invalid("Placekeeper link destination parameter is not canonical");
+  }
+  return decoded;
+}
+
+function encodeDestination(location: PlacekeeperPdfDestinationLocation): string {
+  const parameterCount = destinationParameterCount(location.mode);
+  if (!Array.isArray(location.params) || location.params.length !== parameterCount) {
+    return invalid("Placekeeper link destination has the wrong parameter count");
+  }
+  if (parameterCount === 0) return `v=2&page=${location.page}&mode=${location.mode}`;
+  const params = location.params.map(encodeDestinationParameter).join(",");
+  return `v=2&page=${location.page}&mode=${location.mode}&params=${params}`;
+}
+
 function encodeAbsolutePath(path: string): string {
   if (
     !path.startsWith("/") ||
@@ -87,6 +149,7 @@ export function encodePlacekeeperLink(target: PlacekeeperLinkTarget): string {
 
 export function encodePlacekeeperLinkFragment(location: PlacekeeperLinkLocation): string {
   assertPage(location.page);
+  if (location.kind === "destination") return encodeDestination(location);
   const item = location.kind === "item"
     ? `&item=${(assertPortableItemId(location.itemId), location.itemId)}`
     : "";
@@ -114,14 +177,33 @@ export function decodePlacekeeperLinkFragment(fragment: string): PlacekeeperLink
   if (CONTROL_CHARACTERS.test(fragment) || fragment.startsWith("#")) {
     invalid("Placekeeper link location must not include a fragment marker");
   }
-  const match = /^v=1&page=([1-9][0-9]*)(?:&item=([0-9a-f-]+))?$/u.exec(fragment);
-  if (match === null) invalid("Placekeeper link location is malformed or unsupported");
-  const page = Number(match[1]);
+  const v1Match = /^v=1&page=([1-9][0-9]*)(?:&item=([0-9a-f-]+))?$/u.exec(fragment);
+  if (v1Match !== null) {
+    const page = Number(v1Match[1]);
+    assertPage(page);
+    const itemId = v1Match[2];
+    if (itemId === undefined) return { kind: "page", page };
+    assertPortableItemId(itemId);
+    return { kind: "item", page, itemId };
+  }
+
+  const v2Match = /^v=2&page=([1-9][0-9]*)&mode=([a-z-]+)(?:&params=([^&]+))?$/u.exec(fragment);
+  if (v2Match === null) invalid("Placekeeper link location is malformed or unsupported");
+  const page = Number(v2Match[1]);
   assertPage(page);
-  const itemId = match[2];
-  if (itemId === undefined) return { kind: "page", page };
-  assertPortableItemId(itemId);
-  return { kind: "item", page, itemId };
+  const mode = v2Match[2]!;
+  const parameterCount = destinationParameterCount(mode);
+  const rawParams = v2Match[3];
+  const params = rawParams === undefined ? [] : rawParams.split(",").map(decodeDestinationParameter);
+  if (params.length !== parameterCount) {
+    invalid("Placekeeper link destination has the wrong parameter count");
+  }
+  return {
+    kind: "destination",
+    page,
+    mode: mode as PlacekeeperPdfDestinationMode,
+    params,
+  };
 }
 
 export function encodePlacekeeperReadableViewPathname(

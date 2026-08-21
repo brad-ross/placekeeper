@@ -340,6 +340,29 @@ function Harness() {
     <ReviewShell
       state={state}
       {...(visualScenario ? {
+        ...(['reading', 'tray', 'outline'].includes(visualScenario.name) ? {
+          copyLink: {
+            getLink: () => 'placekeeper:///tmp/Visual%20Review.pdf#v=1&page=18',
+            writeText: async () => undefined,
+          },
+        } : {}),
+        ...(visualScenario.name === 'tray' ? {
+          copyItemLink: {
+            getLink: (item) => `placekeeper:///tmp/Visual%20Review.pdf#v=1&page=${item.pageIndex + 1}&item=${item.id}`,
+            writeText: async () => undefined,
+          },
+        } : {}),
+        ...(visualScenario.name === 'outline' ? {
+          copyLinkForOutlineItem: (item) => (
+            item.target === null ? undefined : ({
+              precision: 'exact' as const,
+              getLink: () => `placekeeper:///tmp/Visual%20Review.pdf#v=2&page=${item.target!.pageIndex + 1}&mode=fit-page`,
+              writeText: async () => undefined,
+            })
+          ),
+        } : {}),
+      } : {})}
+      {...(visualScenario ? {
         documentTitle: visualScenario.documentTitle,
         savedLabel: "Saved",
         listOpen: visualScenario.listOpen,

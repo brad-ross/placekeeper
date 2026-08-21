@@ -8,7 +8,8 @@ import {
 
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
 import type { AnnotationPresentation } from '../pdf/viewer-framing.js';
-import { horizontalTabFocusIndex } from './LinkActionPopover.js';
+import type { PdfDestinationCopyLink } from './copy-link-model.js';
+import { horizontalTabFocusIndex } from './menu-focus.js';
 import { OutlineNavigator } from './OutlineNavigator.js';
 import type { WorkspaceMode } from './reference-navigation-state.js';
 import type { RightWorkspaceMode } from './reference-workspace-layout.js';
@@ -28,6 +29,7 @@ export interface OutlineAnnotationsWorkspaceProps {
   readonly onModeChange: (mode: RightWorkspaceMode) => void;
   readonly onOutlineActivate: (item: PdfOutlineItem) => void;
   readonly onOutlineReference: (item: PdfOutlineItem) => void;
+  readonly copyLinkForOutlineItem?: (item: PdfOutlineItem) => PdfDestinationCopyLink | undefined;
   readonly onModeFocusTokenChange?: (mode: RightWorkspaceMode, token: string) => void;
 }
 
@@ -56,6 +58,7 @@ export function OutlineAnnotationsWorkspace({
   onModeChange,
   onOutlineActivate,
   onOutlineReference,
+  copyLinkForOutlineItem,
   onModeFocusTokenChange,
 }: OutlineAnnotationsWorkspaceProps) {
   const outlineAvailable = modes.includes('outline');
@@ -172,6 +175,7 @@ export function OutlineAnnotationsWorkspace({
           currentItemId={currentOutlineItemId}
           onActivate={onOutlineActivate}
           onOpenReference={onOutlineReference}
+          {...(copyLinkForOutlineItem === undefined ? {} : { copyLinkForItem: copyLinkForOutlineItem })}
           onFocusTokenChange={(token) => onModeFocusTokenChange?.('outline', token)}
         />
       </section> : null}

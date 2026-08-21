@@ -136,8 +136,19 @@ export function AnnotationList({
               data-corresponding={corresponding ? 'true' : 'false'}
               data-item-copy-link={copyLink === undefined ? 'false' : 'true'}
               onPointerEnter={() => onCorrespondenceChange?.(item.id)}
-              onPointerLeave={() => onCorrespondenceChange?.(undefined)}
-              onFocusCapture={() => onCorrespondenceChange?.(item.id)}
+              onPointerLeave={(event) => {
+                const focusedElement = document.activeElement;
+                const copyControlFocused = focusedElement instanceof Element
+                  && focusedElement.closest('.copy-link-control') !== null;
+                if (!event.currentTarget.contains(focusedElement) || copyControlFocused) {
+                  onCorrespondenceChange?.(undefined);
+                }
+              }}
+              onFocusCapture={(event) => {
+                const copyControlFocused = event.target instanceof Element
+                  && event.target.closest('.copy-link-control') !== null;
+                onCorrespondenceChange?.(copyControlFocused ? undefined : item.id);
+              }}
               onBlurCapture={(event) => {
                 if (!event.currentTarget.contains(event.relatedTarget)) onCorrespondenceChange?.(undefined);
               }}
@@ -165,14 +176,6 @@ export function AnnotationList({
                 />
                 {text ? <span className="annotation-item__excerpt">{text}</span> : null}
               </button>
-              {copyLink === undefined ? null : (
-                <CopyLinkControl
-                  {...copyLink}
-                  variant="annotation"
-                  ariaLabel={`Copy link to ${kindLabel} annotation on page ${item.pageIndex + 1}`}
-                  title="Copy annotation link"
-                />
-              )}
               {item.kind === 'delete' ? null : (
                 <button type="button" className="annotation-item__action" data-annotation-action="edit" aria-label={`Edit ${kindLabel} annotation on page ${item.pageIndex + 1}`} title="Edit annotation" onClick={(event) => onEdit(item, event.currentTarget)}>
                   <ReviewIcon name="edit" size={15} />
@@ -181,6 +184,16 @@ export function AnnotationList({
               <button type="button" className="annotation-item__action annotation-item__delete" data-annotation-action="delete" aria-label={`Remove ${kindLabel} annotation on page ${item.pageIndex + 1}`} title="Delete annotation" onClick={() => void remove(item)}>
                 <ReviewIcon name="delete" size={15} />
               </button>
+              {copyLink === undefined ? null : (
+                <CopyLinkControl
+                  {...copyLink}
+                  variant="annotation"
+                  ariaLabel={`Copy link to ${kindLabel} annotation on page ${item.pageIndex + 1}`}
+                  title={copyLink.disabled
+                    ? 'Save annotation before copying its link'
+                    : 'Copy annotation link'}
+                />
+              )}
             </li>
           );
         })}

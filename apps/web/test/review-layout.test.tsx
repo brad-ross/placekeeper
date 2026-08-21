@@ -20,6 +20,10 @@ import {
 } from '../src/review/ReviewChrome.js';
 import { ReviewIcon } from '../src/review/ReviewIcon.js';
 import {
+  ROW_ACTION_CONTAINER_NAME,
+  ROW_ACTION_DIRECT_BREAKPOINT_PX,
+} from '../src/review/RowActionGroup.js';
+import {
   VIEWER_ZOOM_MAX_PERCENT,
   VIEWER_ZOOM_MIN_PERCENT,
   type ViewerControls,
@@ -62,6 +66,29 @@ const ownedAnnotation: ReviewItem = {
 };
 
 describe('review shell layout and accessibility contract', () => {
+  it('switches row actions at one shared geometry-derived container boundary', () => {
+    const below = ROW_ACTION_DIRECT_BREAKPOINT_PX - 1;
+    const above = ROW_ACTION_DIRECT_BREAKPOINT_PX + 1;
+
+    expect(below).toBe(271);
+    expect(above).toBe(273);
+    expect(annotationStyles).toContain(`container-name: ${ROW_ACTION_CONTAINER_NAME}`);
+    expect(annotationStyles).toContain(
+      `@container ${ROW_ACTION_CONTAINER_NAME} (max-width: ${ROW_ACTION_DIRECT_BREAKPOINT_PX}px)`,
+    );
+    expect(annotationStyles).toMatch(
+      /@container row-actions \(max-width: 272px\) \{[\s\S]*?\.row-action-group__direct\s*\{[^}]*display:\s*none;[\s\S]*?\.row-action-group__secondary\s*\{[^}]*display:\s*block;/u,
+    );
+    const coarsePointerRules = responsiveStyles.match(
+      /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*)\n\}/u,
+    )?.[1] ?? '';
+    expect(coarsePointerRules).toMatch(/\.row-action-group__direct\s*\{[^}]*display:\s*none;/u);
+    expect(coarsePointerRules).toMatch(/\.row-action-group__secondary\s*\{[^}]*display:\s*block;/u);
+    expect(annotationStyles).toMatch(
+      /\.row-action-group__trigger\s*\{[^}]*width:\s*var\(--review-control-touch\);[^}]*min-height:\s*var\(--review-control-touch\);/u,
+    );
+  });
+
   it('synchronizes externally controlled workspace open and hide', () => {
     const openedAction = controlledWorkspaceSurfaceAction({
       open: true,
@@ -169,6 +196,34 @@ describe('review shell layout and accessibility contract', () => {
     />,
   );
 
+  it('places the document Copy Link control beside the file title', () => {
+    const html = renderToStaticMarkup(
+      <ReviewChrome
+        documentTitle="paper.pdf"
+        controls={viewerControls}
+        viewerState={viewerControls.snapshot()}
+        copyLink={{
+          getLink: () => 'placekeeper:///tmp/paper.pdf#v=1&page=1',
+          writeText: async () => undefined,
+        }}
+        canUndo={false}
+        canRedo={false}
+        onUndo={vi.fn()}
+        onRedo={vi.fn()}
+      />,
+    );
+    const identityStart = html.indexOf('class="review-chrome__identity"');
+    const copyLink = html.indexOf('data-review-copy-link');
+    const viewerControlsIndex = html.indexOf('class="review-chrome__viewer-controls"');
+    const trailingActions = html.indexOf('class="review-chrome__actions"');
+
+    expect(identityStart).toBeGreaterThanOrEqual(0);
+    expect(copyLink).toBeGreaterThan(identityStart);
+    expect(copyLink).toBeLessThan(viewerControlsIndex);
+    expect(trailingActions).toBeGreaterThan(viewerControlsIndex);
+    expect(html.slice(trailingActions)).not.toContain('data-review-copy-link');
+  });
+
   it('keeps review icons decorative and button labels authoritative', () => {
     const html = renderToStaticMarkup(
       <button type="button" aria-label="Previous page">
@@ -273,7 +328,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(peekHtml).not.toContain('<button');
   });
 
-  it('offers an exact-item Copy Link action only for a portable saved annotation', () => {
+  it('keeps the annotation Copy Link affordance visible and right-most while durability is pending', () => {
     const copyLink = {
       getLink: () => 'placekeeper:///tmp/Paper.pdf#v=1&page=4&item=00000000-0000-4000-8000-000000000004',
       writeText: async () => undefined,
@@ -295,13 +350,31 @@ describe('review shell layout and accessibility contract', () => {
         onDelete={() => undefined}
       />,
     );
+    const pendingList = renderToStaticMarkup(
+      <AnnotationList
+        items={[ownedAnnotation]}
+        copyLinkForItem={() => ({ ...copyLink, disabled: true })}
+        onNavigate={() => undefined}
+        onEdit={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
     const copyablePeek = renderToStaticMarkup(
       <AnnotationPeek item={ownedAnnotation} copyLink={copyLink} onHoldChange={() => undefined} />,
     );
 
     expect(copyableList).toContain('data-item-copy-link="true"');
     expect(copyableList).toContain('aria-label="Copy link to Highlight annotation on page 4"');
+    expect(copyableList.indexOf('data-annotation-action="edit"')).toBeLessThan(
+      copyableList.indexOf('data-annotation-action="delete"'),
+    );
+    expect(copyableList.indexOf('data-annotation-action="delete"')).toBeLessThan(
+      copyableList.indexOf('data-annotation-action="copy-link"'),
+    );
     expect(copyablePeek).toContain('aria-label="Copy link to Highlight annotation on page 4"');
+    expect(pendingList).toContain('data-item-copy-link="true"');
+    expect(pendingList).toContain('title="Save annotation before copying its link"');
+    expect(pendingList).toContain('disabled=""');
     expect(pageOnlyList).toContain('data-item-copy-link="false"');
     expect(pageOnlyList).not.toContain('data-annotation-action="copy-link"');
   });
