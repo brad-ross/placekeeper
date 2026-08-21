@@ -572,6 +572,7 @@ describe('shared reference workspace', () => {
     expect(html).toContain('aria-label="Workspace modes"');
     expect(html).toContain('data-workspace-mode-count="1"');
     expect(html).toContain('data-workspace-mode-label="references"');
+    expect(html).toContain('review-workspace__activity-strip--title');
     expect(html).toContain('aria-label="Open references"');
     expect(html).toContain('aria-orientation="vertical"');
     expect(html).toContain('data-reference-tabs-orientation="vertical"');

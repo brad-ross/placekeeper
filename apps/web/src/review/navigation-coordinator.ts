@@ -969,9 +969,9 @@ export class NavigationCoordinator {
       if (kind === 'direct' || kind === 'search') {
         this.dependencies.layout.hideReferences();
         await this.dependencies.layout.settle();
-        if (this.isCurrent(operation)) main.focusAtDestination(destination.pageIndex);
       }
       if (this.isCurrent(operation)) {
+        main.focusAtDestination(destination.pageIndex);
         this.dependencies.setAnnouncement(
           kind === 'outline' ? 'Outline destination is already current.' : 'Main document destination is already current.',
         );
@@ -1001,8 +1001,8 @@ export class NavigationCoordinator {
     if (kind === 'direct' || kind === 'search') {
       this.dependencies.layout.hideReferences();
       await this.dependencies.layout.settle();
-      if (this.isCurrent(operation)) main.focusAtDestination(settledLocation.pageIndex);
     }
+    if (this.isCurrent(operation)) main.focusAtDestination(settledLocation.pageIndex);
     return true;
   }
 
