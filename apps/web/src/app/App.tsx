@@ -588,7 +588,8 @@ export function App({
                   return;
                 }
                 if (!click || click.hadSelectionAtPress) return;
-                if (selection && selection.getState(documentId).selection !== null) {
+                const selectionState = selection?.getState(documentId);
+                if (selection && selectionState?.selection !== null) {
                   selection.clear(documentId);
                 }
                 const generation = ++caretReadGeneration.current;
@@ -597,6 +598,9 @@ export function App({
                     pageIndex: page.index,
                     point: click.pagePoint,
                     pages: pageReaderFor(documentId, document),
+                    ...(selectionState?.geometry[page.index] === undefined
+                      ? {}
+                      : { geometry: selectionState.geometry[page.index] }),
                   }),
                   isCurrent: () => generation === caretReadGeneration.current,
                   placement: {

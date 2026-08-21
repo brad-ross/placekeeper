@@ -1,4 +1,10 @@
-import { Rotation, type PdfDocumentObject, type PdfEngine, type Position } from '@embedpdf/models';
+import {
+  Rotation,
+  type PdfDocumentObject,
+  type PdfEngine,
+  type PdfPageGeometry,
+  type Position,
+} from '@embedpdf/models';
 import type {
   FormattedSelection as ViewerFormattedSelection,
   SelectionDocumentState,
@@ -7,6 +13,7 @@ import type {
 import {
   createCaretAnchorAtPoint,
   createSelectionAnchor,
+  type AnchorGlyph,
   type AnchorPage,
   type SelectionAnchorResult,
 } from './selection-anchor.js';
@@ -89,16 +96,35 @@ export function createEngineAnchorPageReader(
   };
 }
 
+/** Reuse the selection plugin's page cache without another PDFium geometry read. */
+export function anchorGlyphsFromGeometry(
+  geometry: PdfPageGeometry | undefined,
+): readonly AnchorGlyph[] | undefined {
+  if (!geometry) return undefined;
+  return geometry.runs.flatMap((run) => run.glyphs.map((glyph, index) => ({
+    textOffset: run.charStart + index,
+    rect: {
+      origin: { x: glyph.x, y: glyph.y },
+      size: { width: glyph.width, height: glyph.height },
+    },
+  })));
+}
+
 export async function captureViewerCaret(input: {
   readonly pageIndex: number;
   readonly point: Position;
   readonly pages: AnchorPageReader;
   readonly coordinateRotation?: Rotation;
   readonly coordinateScale?: number;
+  readonly geometry?: PdfPageGeometry;
 }) {
   const page = await input.pages.read(input.pageIndex);
+  const glyphs = anchorGlyphsFromGeometry(input.geometry);
   return createCaretAnchorAtPoint({
-    page,
+    page: {
+      ...page,
+      ...(glyphs === undefined ? {} : { glyphs }),
+    },
     point: input.point,
     ...(input.coordinateRotation === undefined ? {} : { coordinateRotation: input.coordinateRotation }),
     ...(input.coordinateScale === undefined ? {} : { coordinateScale: input.coordinateScale }),

@@ -2728,7 +2728,7 @@ test("retries one failed reference clone without exposing raw load details", asy
   ))).toBe(true);
 });
 
-test('creates an insertion from real PDFium caret geometry', async ({ page }) => {
+test('creates an insertion from middle-of-line PDFium caret geometry', async ({ page }) => {
   const launched = await host.open({
     pdfPath: pdf,
     sourceRootPath: sourceRoot,
@@ -2743,7 +2743,7 @@ test('creates an insertion from real PDFium caret geometry', async ({ page }) =>
   const pdfPage = page.locator("[data-page-index='0']").first();
   await expect(pdfPage).toBeVisible();
   await waitForRenderedPageImage(pdfPage);
-  await dragPdfPointer(page, pdfPage, { x: 73, y: 99 }, { x: 77, y: 99 });
+  await dragPdfPointer(page, pdfPage, { x: 150, y: 99 }, { x: 154, y: 99 });
 
   const insertionActions = page.getByRole('toolbar', { name: 'Insertion review action' });
   await expect(insertionActions).toBeVisible();
@@ -2758,9 +2758,9 @@ test('creates an insertion from real PDFium caret geometry', async ({ page }) =>
       kind: 'insert',
       pageIndex: 0,
       payload: expect.objectContaining({
-        position: { x: 73, y: 92, width: 2, height: 14 },
-        leftContext: '',
-        rightContext: 'Selectable placekeeper text: unique equilibrium ',
+        position: { x: 149, y: 89, width: 2, height: 16 },
+        leftContext: 'Selectable p',
+        rightContext: 'lacekeeper text: unique equilibrium clearly.\r\nMu',
         proposedText: 'Precisely ',
         reliable: true,
       }),

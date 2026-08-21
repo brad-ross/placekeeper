@@ -3,6 +3,8 @@ import { Rotation, type Position, type Rect, type Size } from '@embedpdf/models'
 import {
   assessPageTextReliability,
   assessSelectionReliability,
+  hasUnsupportedReadingOrder,
+  isValidTextRect,
   SELECTION_UNAVAILABLE_MESSAGE,
   type PageText,
   type ReliabilityDiagnostic,
@@ -12,6 +14,13 @@ export interface AnchorPage extends PageText {
   pageIndex: number;
   size: Size;
   rotation: Rotation;
+  /** Exact PDFium character geometry with explicit extracted-text offsets. */
+  glyphs?: readonly AnchorGlyph[];
+}
+
+export interface AnchorGlyph {
+  readonly textOffset: number;
+  readonly rect: Rect;
 }
 
 export interface FormattedSelection {
@@ -402,10 +411,90 @@ interface CaretCandidate {
   readonly distance: number;
 }
 
+function alignedCaretGlyphs(
+  page: AnchorPage,
+  mapped: readonly MappedTextRect[],
+): readonly AnchorGlyph[] | null {
+  if (!page.glyphs || page.glyphs.length === 0) return null;
+  const requiredOffsets = new Map<number, MappedTextRect>();
+  for (const item of mapped) {
+    for (let offset = item.start; offset < item.end; offset += 1) {
+      requiredOffsets.set(offset, item);
+    }
+  }
+  const seenOffsets = new Set<number>();
+  const aligned: AnchorGlyph[] = [];
+  for (const glyph of page.glyphs) {
+    const { rect, textOffset } = glyph;
+    if (
+      !Number.isSafeInteger(textOffset)
+      || textOffset < 0
+      || textOffset >= page.extractedText.length
+    ) return null;
+    const owner = requiredOffsets.get(textOffset);
+    // Text rectangles omit PDF control slots such as line breaks. They cannot
+    // be clicked, so they do not participate in the visible-glyph contract.
+    if (!owner) continue;
+    if (
+      seenOffsets.has(textOffset)
+      || !isValidTextRect(rect)
+      || !rectsOverlap(rect, owner.rect)
+    ) return null;
+    seenOffsets.add(textOffset);
+    requiredOffsets.delete(textOffset);
+    aligned.push(glyph);
+  }
+  return requiredOffsets.size === 0 && aligned.length > 0 ? aligned : null;
+}
+
+function glyphCaretCandidates(
+  glyphs: readonly AnchorGlyph[],
+  point: Position,
+): CaretCandidate[] {
+  const candidates: CaretCandidate[] = [];
+  for (const glyph of glyphs) {
+    const { rect } = glyph;
+    const centerY = rect.origin.y + rect.size.height / 2;
+    const tolerance = Math.min(6, rect.size.height / 2);
+    if (Math.abs(point.y - centerY) > tolerance) continue;
+    const left = rect.origin.x;
+    const right = rect.origin.x + rect.size.width;
+    if (point.x >= left && point.x <= right) {
+      const after = point.x >= left + rect.size.width / 2;
+      candidates.push({
+        textOffset: glyph.textOffset + (after ? 1 : 0),
+        position: {
+          origin: { x: after ? right : left, y: rect.origin.y },
+          size: { width: 2, height: rect.size.height },
+        },
+        distance: 0,
+      });
+      continue;
+    }
+    for (const edge of [
+      { x: left, textOffset: glyph.textOffset },
+      { x: right, textOffset: glyph.textOffset + 1 },
+    ]) {
+      const distance = Math.hypot(point.x - edge.x, point.y - centerY);
+      if (distance <= tolerance) {
+        candidates.push({
+          textOffset: edge.textOffset,
+          position: {
+            origin: { x: edge.x, y: rect.origin.y },
+            size: { width: 2, height: rect.size.height },
+          },
+          distance,
+        });
+      }
+    }
+  }
+  return candidates;
+}
+
 /**
  * Reliably maps a fresh pointer release to an exact engine text edge.
- * Multi-character runs remain atomic: their interior never fabricates a
- * proportional character offset.
+ * Without exact glyph geometry, multi-character runs remain atomic: their
+ * interior never fabricates a proportional character offset.
  */
 export function createCaretAnchorAtPoint(input: CreateCaretAnchorAtPointInput): CaretAnchorDiagnosticResult {
   const pageReliability = assessPageTextReliability(input.page);
@@ -432,10 +521,16 @@ export function createCaretAnchorAtPoint(input: CreateCaretAnchorAtPointInput): 
     }
   }
   if (!readingOrderSupported(mapped)) return caretFailure('caret-reading-order-unsupported');
+  if (mapped.some(({ content }) => hasUnsupportedReadingOrder(content))) {
+    return caretFailure('caret-reading-order-unsupported');
+  }
 
-  const candidates: CaretCandidate[] = [];
+  const exactGlyphs = alignedCaretGlyphs(input.page, mapped);
+  const candidates = exactGlyphs === null
+    ? []
+    : glyphCaretCandidates(exactGlyphs, naturalPoint);
   let insideMultiCharacterRect = false;
-  for (const item of mapped) {
+  for (const item of candidates.length === 0 ? mapped : []) {
     const { rect } = item;
     const centerY = rect.origin.y + rect.size.height / 2;
     const tolerance = Math.min(6, rect.size.height / 2);
@@ -481,9 +576,11 @@ export function createCaretAnchorAtPoint(input: CreateCaretAnchorAtPointInput): 
   candidates.sort((a, b) => a.distance - b.distance);
   const chosen = candidates[0]!;
   if (
-    candidates[1] !== undefined &&
-    Math.abs(candidates[1].distance - chosen.distance) < 0.001 &&
-    candidates[1].textOffset !== chosen.textOffset
+    candidates.some((candidate, index) => (
+      index > 0
+      && Math.abs(candidate.distance - chosen.distance) < 0.001
+      && candidate.textOffset !== chosen.textOffset
+    ))
   ) return caretFailure('caret-candidate-tied');
 
   return createCaretAnchor({
