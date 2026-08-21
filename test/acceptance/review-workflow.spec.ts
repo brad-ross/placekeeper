@@ -128,7 +128,7 @@ test.describe('canonical review workflow', () => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.focus();
     await page.keyboard.press('l');
-    const replacement = page.getByRole('textbox', { name: 'Replacement text' });
+    const replacement = page.getByRole('textbox', { name: 'Replacement' });
     await expect(replacement).toBeFocused();
     await page.keyboard.type('oc');
     await expect(replacement).toHaveValue('loc');
@@ -143,7 +143,7 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Use caret' }).click();
     await canvas.focus();
     await page.keyboard.press('p');
-    const insertion = page.getByRole('textbox', { name: 'Insertion text' });
+    const insertion = page.getByRole('textbox', { name: 'Insertion' });
     await insertion.fill(' ');
     await page.getByRole('button', { name: 'Apply' }).click();
 
@@ -151,18 +151,18 @@ test.describe('canonical review workflow', () => {
     const highlight = page.getByRole('button', { name: 'Highlight', exact: true });
     await highlight.click();
     await expect(page.getByRole('dialog')).toBeVisible();
-    await page.getByRole('button', { name: 'Keep without comment' }).click();
+    await page.getByRole('button', { name: 'Keep', exact: true }).click();
     await expect(highlight).toHaveCount(0);
     await page.getByRole('button', { name: 'Clear anchors' }).click();
     await page.getByRole('button', { name: 'Use selection' }).click();
     await highlight.click();
     await page.getByRole('textbox', { name: 'Comment (optional)' }).fill('Check the claim.');
-    await page.getByRole('button', { name: 'Save comment' }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
 
     await page.getByRole('button', { name: 'Open page actions' }).click();
     await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
     await page.getByRole('textbox', { name: 'Comment' }).fill('Rewrite this paragraph.');
-    await page.getByRole('button', { name: 'Save comment' }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
 
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '6');
     await expect(page.locator('[data-revision]')).toHaveAttribute(
@@ -192,14 +192,14 @@ test.describe('canonical review workflow', () => {
     await expect(selectionActions).toBeVisible();
 
     await page.getByRole('button', { name: 'Replace', exact: true }).click();
-    await page.getByRole('textbox', { name: 'Replacement text' }).fill('replacement');
+    await page.getByRole('textbox', { name: 'Replacement' }).fill('replacement');
     await page.getByRole('button', { name: 'Apply' }).click();
     await expect(selectionActions).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Clear anchors' }).click();
     await page.getByRole('button', { name: 'Use selection' }).click();
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
-    await page.getByRole('button', { name: 'Keep without comment' }).click();
+    await page.getByRole('button', { name: 'Keep', exact: true }).click();
     await expect(selectionActions).toHaveCount(0);
   });
 
@@ -620,12 +620,12 @@ test.describe('canonical review workflow', () => {
 
     await page.getByRole('button', { name: 'Reject next command' }).click();
     await page.getByRole('button', { name: 'Replace', exact: true }).click();
-    await page.getByRole('textbox', { name: 'Replacement text' }).fill('rejected replacement');
+    await page.getByRole('textbox', { name: 'Replacement' }).fill('rejected replacement');
     await page.getByRole('button', { name: 'Apply' }).click();
     await expect(selectionActions).toBeVisible();
 
     await page.getByRole('button', { name: 'Replace', exact: true }).click();
-    await page.getByRole('textbox', { name: 'Replacement text' }).fill('accepted replacement');
+    await page.getByRole('textbox', { name: 'Replacement' }).fill('accepted replacement');
     await page.getByRole('button', { name: 'Use selection' }).evaluate((button: HTMLButtonElement) => button.click());
     await page.getByRole('button', { name: 'Apply' }).click();
     await expect(selectionActions).toBeVisible();
@@ -647,7 +647,7 @@ test.describe('canonical review workflow', () => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.focus();
     await page.keyboard.press('r');
-    const input = page.getByRole('textbox', { name: 'Replacement text' });
+    const input = page.getByRole('textbox', { name: 'Replacement' });
     await input.fill('revised wording');
     await page.setViewportSize({ width: 320, height: 720 });
     await expect(input).toHaveValue('revised wording');
@@ -736,7 +736,7 @@ test.describe('canonical review workflow', () => {
 
   test('keeps the annotations tray open while editing an owned annotation', async ({ page }) => {
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
-    await page.getByRole('button', { name: 'Keep without comment' }).click();
+    await page.getByRole('button', { name: 'Keep', exact: true }).click();
     const { annotations, workspace } = await openAnnotationsWorkspace(page);
 
     const edit = page.getByRole('button', { name: 'Edit Highlight annotation on page 1' });
@@ -753,7 +753,7 @@ test.describe('canonical review workflow', () => {
     await edit.click();
     await expect(editor).toBeVisible();
     await editor.getByRole('textbox', { name: 'Comment (optional)' }).fill('Edited in the open tray.');
-    await editor.getByRole('button', { name: 'Save comment' }).click();
+    await editor.getByRole('button', { name: 'Apply', exact: true }).click();
 
     await expect(editor).toHaveCount(0);
     await expect(workspace).toHaveAttribute('aria-expanded', 'true');
@@ -823,8 +823,8 @@ test.describe('canonical review workflow', () => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.focus();
     await page.keyboard.press('Space');
-    const replacementDialog = page.getByRole('dialog', { name: 'Replacement text' });
-    await expect(replacementDialog.getByRole('textbox', { name: 'Replacement text' })).toHaveValue(' ');
+    const replacementDialog = page.getByRole('dialog', { name: 'Replacement' });
+    await expect(replacementDialog.getByRole('textbox', { name: 'Replacement' })).toHaveValue(' ');
     await replacementDialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(canvas).toBeFocused();
 
@@ -832,7 +832,7 @@ test.describe('canonical review workflow', () => {
     await workspace.press('Space');
 
     await expect(workspace).toHaveAttribute('aria-expanded', 'true');
-    await expect(page.getByRole('dialog', { name: 'Replacement text' })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Replacement' })).toHaveCount(0);
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
 
@@ -840,7 +840,7 @@ test.describe('canonical review workflow', () => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+R');
-    await expect(page.getByRole('dialog', { name: 'Replacement text' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Replacement' })).toBeVisible();
     await page.getByRole('button', { name: 'Cancel' }).click();
 
     await canvas.focus();
@@ -850,14 +850,14 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Use caret' }).click();
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+I');
-    await expect(page.getByRole('dialog', { name: 'Insertion text' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Insertion' })).toBeVisible();
     await page.getByRole('button', { name: 'Cancel' }).click();
 
     await page.getByRole('button', { name: 'Use selection' }).click();
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+H');
-    await expect(page.getByRole('dialog', { name: 'Highlight comment' })).toBeVisible();
-    await page.getByRole('button', { name: 'Keep without comment' }).click();
+    await expect(page.getByRole('dialog', { name: 'Highlight Comment' })).toBeVisible();
+    await page.getByRole('button', { name: 'Keep', exact: true }).click();
 
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+N');
@@ -895,7 +895,7 @@ test.describe('canonical review workflow', () => {
 
   test('delays a hoverable mark peek and opens one selected owned row without shifting the document', async ({ page }) => {
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
-    await page.getByRole('button', { name: 'Keep without comment' }).click();
+    await page.getByRole('button', { name: 'Keep', exact: true }).click();
 
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     const markTarget = page.locator('[data-owned-focus-id]').first();
@@ -941,7 +941,7 @@ test.describe('canonical review workflow', () => {
         await page.getByRole('button', { name: 'Use selection' }).click();
       }
       await page.getByRole('button', { name: 'Highlight', exact: true }).click();
-      await page.getByRole('button', { name: 'Keep without comment' }).click();
+      await page.getByRole('button', { name: 'Keep', exact: true }).click();
     }
     await openAnnotationsWorkspace(page);
     const drawer = page.locator('[data-annotation-scroll-viewport]');

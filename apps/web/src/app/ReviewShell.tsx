@@ -1313,8 +1313,8 @@ export function ReviewShell(props: ReviewShellProps) {
       >
         {textDraft ? (
           <CommentComposer
-            title={textDraft.kind === 'replace' ? 'Replacement text' : 'Insertion text'}
-            fieldLabel={textDraft.kind === 'replace' ? 'Replacement text' : 'Insertion text'}
+            title={textDraft.kind === 'replace' ? 'Replacement' : 'Insertion'}
+            fieldLabel={textDraft.kind === 'replace' ? 'Replacement' : 'Insertion'}
             saveLabel="Apply"
             allowWhitespace
             initialValue={textDraft.initialText}
@@ -1336,7 +1336,7 @@ export function ReviewShell(props: ReviewShellProps) {
         ) : null}
         {composer?.kind === 'highlight' ? (
           <CommentComposer
-            title="Highlight comment"
+            title="Highlight Comment"
             optional
             triggerRef={modalTriggerRef}
             onDismiss={() => {
@@ -1376,12 +1376,16 @@ export function ReviewShell(props: ReviewShellProps) {
         ) : null}
         {composer?.kind === 'edit' && mutableField(composer.item) ? (
           <CommentComposer
-            title={`Edit ${annotationKindLabel(composer.item.kind)}`}
+            title={`Edit ${composer.item.kind === 'replace'
+              ? 'Replacement'
+              : composer.item.kind === 'insert'
+                ? 'Insertion'
+                : annotationKindLabel(composer.item.kind)}`}
+            saveLabel="Apply"
             {...(composer.item.kind === 'replace' || composer.item.kind === 'insert'
               ? {
                   allowWhitespace: true,
-                  fieldLabel: composer.item.kind === 'replace' ? 'Replacement text' : 'Insertion text',
-                  saveLabel: 'Apply',
+                  fieldLabel: composer.item.kind === 'replace' ? 'Replacement' : 'Insertion',
                 }
               : {})}
             initialValue={String(composer.item.payload[mutableField(composer.item)!] ?? '')}

@@ -411,7 +411,7 @@ describe("one production review tree", () => {
       onCancel={vi.fn()}
     />);
 
-    expect(html).toContain("Choose where to save annotations");
+    expect(html).toContain("Choose Where to Save Annotations");
     expect(html).toContain('class="save-destination-dialog compact-editorial-modal"');
     expect(html).toContain('compact-editorial-modal__header');
     expect(html).toContain('compact-editorial-modal__body');

@@ -67,7 +67,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
         }}
       >
         <header className="compact-editorial-modal__header">
-          <h2 id={titleId}>Choose where to save annotations</h2>
+          <h2 id={titleId}>Choose Where to Save Annotations</h2>
           <p id={descriptionId} className="compact-editorial-modal__description">
             You can change this later by clicking the filename.
           </p>

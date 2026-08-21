@@ -210,7 +210,7 @@ async function openFreshProductionFixture(
 
 async function chooseFreshCopyDestination(page: Page): Promise<void> {
   await page.getByRole("button", { name: /Open automatic save options$/u }).click();
-  const dialog = page.getByRole("dialog", { name: "Choose where to save annotations" });
+  const dialog = page.getByRole("dialog", { name: "Choose Where to Save Annotations" });
   const filename = `acceptance-annotations-${randomUUID()}.pdf`;
   const name = dialog.getByRole("textbox", { name: "Copy name" });
   await expect(name).toBeEnabled();
@@ -2796,16 +2796,16 @@ test("one installed-style browser tree preserves review state across responsive 
   await page.keyboard.press("b");
   await releaseSelectionCapture(page);
 
-  const replacementDialog = page.getByRole("dialog", { name: "Replacement text" });
+  const replacementDialog = page.getByRole("dialog", { name: "Replacement" });
   await expect(replacementDialog).toBeVisible();
-  const replacementTextbox = replacementDialog.getByRole("textbox", { name: "Replacement text" });
+  const replacementTextbox = replacementDialog.getByRole("textbox", { name: "Replacement" });
   await expect(replacementTextbox).toHaveValue("b");
   await page.keyboard.type("la");
   await expect(replacementTextbox).toHaveValue("bla");
   const originalDigest = await sha256(pdf);
   await replacementDialog.getByRole("button", { name: "Apply" }).click();
   await expect(replacementDialog).toHaveCount(0);
-  const destinationDialog = page.getByRole("dialog", { name: "Choose where to save annotations" });
+  const destinationDialog = page.getByRole("dialog", { name: "Choose Where to Save Annotations" });
   await expect(destinationDialog).toBeVisible();
   await expect(destinationDialog.getByRole("radio", { name: /Save to a new copy/u })).toBeChecked();
   await expect(destinationDialog.getByRole("textbox", { name: "Copy name" })).toHaveValue(
@@ -2893,7 +2893,7 @@ test('edits the current page in a real multi-page viewer without losing adjacent
   await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
   const composer = page.getByRole('dialog', { name: 'Page Note' });
   await composer.getByRole('textbox', { name: 'Comment' }).fill('Keep this surrounding review state.');
-  await composer.getByRole('button', { name: 'Save comment' }).click();
+  await composer.getByRole('button', { name: 'Save', exact: true }).click();
   await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe('clean');
 
@@ -3276,7 +3276,7 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
   });
   await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
   await page.getByRole('textbox', { name: 'Comment' }).fill('Reveal this note above the sheet.');
-  await page.getByRole('button', { name: 'Save comment' }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe('clean');
 
   const noteMark = page.locator('[data-owned-mark="pageNote"]').last();
@@ -3493,7 +3493,7 @@ test('keeps PDF drag selection available while the Annotation Tray is open', asy
   });
   expect(overlayOrder.contextual).toBeGreaterThan(overlayOrder.drawer);
   await selectionActions.getByRole('button', { name: 'Highlight', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Highlight comment' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Highlight Comment' })).toBeVisible();
   await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
 });
 
@@ -3510,8 +3510,8 @@ test("cancels the pending first annotation without choosing or creating a destin
   await page.getByRole("menuitem", { name: "Add Page Note" }).click();
   const composer = page.getByRole("dialog", { name: "Page Note" });
   await composer.getByRole("textbox", { name: "Comment" }).fill("Do not keep this note.");
-  await composer.getByRole("button", { name: "Save comment" }).click();
-  const destination = page.getByRole("dialog", { name: "Choose where to save annotations" });
+  await composer.getByRole("button", { name: "Save", exact: true }).click();
+  const destination = page.getByRole("dialog", { name: "Choose Where to Save Annotations" });
   await expect(destination).toBeVisible();
   await destination.getByRole("button", { name: "Cancel" }).click();
   await expect(destination).toHaveCount(0);
@@ -3552,7 +3552,7 @@ test("selects Page Notes only until the next click outside annotations", async (
   const composer = page.getByRole("dialog", { name: "Page Note" });
   await expect(composer).toBeVisible();
   await composer.getByRole("textbox", { name: "Comment" }).fill("Check the conclusion.");
-  await composer.getByRole("button", { name: "Save comment" }).click();
+  await composer.getByRole("button", { name: "Save", exact: true }).click();
 
   await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
@@ -3583,7 +3583,7 @@ test("selects Page Notes only until the next click outside annotations", async (
   await page.getByRole("dialog", { name: "Page Note" })
     .getByRole("textbox", { name: "Comment" })
     .fill("Check the evidence.");
-  await page.getByRole("button", { name: "Save comment" }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(2);
   const secondNote = host.broker.state(launched.sessionId)?.items
     .find((item) => item.payload.comment === "Check the evidence.");
@@ -3701,7 +3701,7 @@ test("places a crop-relative Page Note through the real PDF keyboard cursor", as
   const composer = page.getByRole("dialog", { name: "Page Note" });
   await expect(composer).toBeVisible();
   await composer.getByRole("textbox", { name: "Comment" }).fill("Keyboard-placed note.");
-  await composer.getByRole("button", { name: "Save comment" }).click();
+  await composer.getByRole("button", { name: "Save", exact: true }).click();
 
   await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
@@ -3752,7 +3752,7 @@ test("normalizes a real context gesture on a rotated cropped PDF into crop-relat
   await page.getByRole("menuitem", { name: "Add Page Note" }).click();
   const composer = page.getByRole("dialog", { name: "Page Note" });
   await composer.getByRole("textbox", { name: "Comment" }).fill("Rotated geometry note.");
-  await composer.getByRole("button", { name: "Save comment" }).click();
+  await composer.getByRole("button", { name: "Save", exact: true }).click();
 
   await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
@@ -3895,7 +3895,7 @@ test("discards queued typing when a pending selection is cleared", async ({ page
   await pageCanvas.click({ position: { x: 500, y: 300 } });
   await releaseSelectionCapture(page);
 
-  await expect(page.getByRole("dialog", { name: "Replacement text" })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Replacement" })).toHaveCount(0);
   await expect(page.locator("[data-review-item]")).toHaveCount(0);
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
 });
@@ -3925,9 +3925,9 @@ test("keeps only typing for the newest pending selection", async ({ page }) => {
   await page.keyboard.type("current");
   await releaseSelectionCapture(page);
 
-  const replacementDialog = page.getByRole("dialog", { name: "Replacement text" });
+  const replacementDialog = page.getByRole("dialog", { name: "Replacement" });
   await expect(replacementDialog).toBeVisible();
-  await expect(replacementDialog.getByRole("textbox", { name: "Replacement text" })).toHaveValue("current");
+  await expect(replacementDialog.getByRole("textbox", { name: "Replacement" })).toHaveValue("current");
   await replacementDialog.getByRole("button", { name: "Apply" }).click();
   await expect(replacementDialog).toHaveCount(0);
   await expect(page.locator("[data-review-item]")).toHaveCount(1);

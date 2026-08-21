@@ -22,7 +22,7 @@ export function CommentComposer({
   optional = false,
   allowWhitespace = false,
   fieldLabel = optional ? 'Comment (optional)' : 'Comment',
-  saveLabel = 'Save comment',
+  saveLabel = 'Save',
   triggerRef,
   onSave,
   onSkip,
@@ -33,7 +33,6 @@ export function CommentComposer({
   const [value, setValue] = useState(initialValue);
   const canSave = optional || (allowWhitespace ? value.length > 0 : value.trim().length > 0);
   const canSkip = optional && onSkip !== undefined;
-  const secondaryLabel = canSkip ? 'Keep without comment' : 'Cancel';
 
   useEffect(() => {
     const input = inputRef.current;
@@ -67,7 +66,7 @@ export function CommentComposer({
         </header>
         <div className="compact-editorial-modal__body">
           <label className="comment-composer__field">
-            <span className="comment-composer__label">{fieldLabel}</span>
+            <span className="sr-only">{fieldLabel}</span>
             <textarea
               className="comment-composer__input"
               ref={inputRef}
@@ -86,15 +85,23 @@ export function CommentComposer({
           <button
             className="review-button review-button--secondary"
             type="button"
-            title={secondaryLabel}
-            onClick={() => {
-              if (canSkip) void onSkip();
-              else onDismiss();
-            }}
+            title="Cancel"
+            onClick={onDismiss}
           >
-            <ReviewIcon name={canSkip ? 'arrow-right' : 'close'} />
-            <span>{secondaryLabel}</span>
+            <ReviewIcon name="close" />
+            <span>Cancel</span>
           </button>
+          {canSkip ? (
+            <button
+              className="review-button review-button--secondary"
+              type="button"
+              title="Keep highlight without comment"
+              onClick={() => void onSkip()}
+            >
+              <ReviewIcon name="arrow-right" />
+              <span>Keep</span>
+            </button>
+          ) : null}
           <button
             className="review-button review-button--primary"
             type="button"
