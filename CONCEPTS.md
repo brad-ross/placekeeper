@@ -134,7 +134,7 @@ Warm Neutral changes presentation only; reading-first behavior and adaptive Anno
 ### Compact Editorial
 The Warm Neutral modal grammar for Save Destination and text-entry workflows: a direct task-title header, a task-specific body, a restrained footer, and compact icon-plus-label actions.
 
-Supporting copy appears only when it adds context. Compact Editorial changes presentation only and preserves the existing modal behavior, state, and accessibility contracts.
+Supporting copy appears only when it adds context. Creation comments use Save, edits use Apply, and optional-comment workflows distinguish cancelling from keeping an annotation without text. Compact Editorial changes presentation only and preserves the existing modal behavior, state, and accessibility contracts.
 
 ## Reference navigation
 
