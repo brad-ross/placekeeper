@@ -15,6 +15,7 @@ import {
   fixedViewerClientRect,
   normalizePageClientPoint,
   recordViewerPointerButton,
+  ViewerPrimaryClickGesture,
   viewerPointerButton,
 } from '../src/pdf/viewer-interaction-events.js';
 
@@ -38,6 +39,33 @@ describe('viewer page interaction coordinates', () => {
 
     expect(viewerPointerButton({ currentTarget: pageTarget })).toBe(2);
     expect(viewerPointerButton({ currentTarget: null })).toBeUndefined();
+  });
+
+  it('anchors a jittery primary click at its press point', () => {
+    const gesture = new ViewerPrimaryClickGesture();
+    gesture.pointerDown(7, 0, { x: 73, y: 99 }, { x: 497, y: 167 });
+    gesture.pointerMove(7, 501, 167);
+
+    expect(gesture.pointerUp(7, 0, 501, 167)).toEqual({
+      pagePoint: { x: 73, y: 99 },
+      clientPoint: { x: 497, y: 167 },
+      hadSelectionAtPress: false,
+    });
+  });
+
+  it('preserves whether a click-like gesture began with text selected', () => {
+    const gesture = new ViewerPrimaryClickGesture();
+    gesture.pointerDown(7, 0, { x: 73, y: 99 }, { x: 497, y: 167 }, true);
+
+    expect(gesture.pointerUp(7, 0, 497, 167)?.hadSelectionAtPress).toBe(true);
+  });
+
+  it('does not turn a real drag into a click when it returns near the press point', () => {
+    const gesture = new ViewerPrimaryClickGesture();
+    gesture.pointerDown(7, 0, { x: 73, y: 99 }, { x: 497, y: 167 });
+    gesture.pointerMove(7, 503, 167);
+
+    expect(gesture.pointerUp(7, 0, 498, 167)).toBeUndefined();
   });
 
   it('copies a stable client rect instead of retaining a live DOMRect', () => {

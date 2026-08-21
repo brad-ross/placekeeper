@@ -150,6 +150,68 @@ export function viewerPointerButton(event: { readonly currentTarget: unknown }):
   return pointerButtonByTarget.get(currentTarget);
 }
 
+export interface ViewerPrimaryClick {
+  readonly pagePoint: Position;
+  readonly clientPoint: Position;
+  readonly hadSelectionAtPress: boolean;
+}
+
+interface PendingPrimaryClick extends ViewerPrimaryClick {
+  readonly pointerId: number;
+  dragged: boolean;
+}
+
+/** Preserves the press location for click-like gestures while rejecting real drags. */
+export class ViewerPrimaryClickGesture {
+  #pending: PendingPrimaryClick | null = null;
+
+  constructor(readonly movementThreshold = 5) {}
+
+  pointerDown(
+    pointerId: number,
+    button: number | undefined,
+    pagePoint: Position,
+    clientPoint: Position,
+    hadSelectionAtPress = false,
+  ): void {
+    this.#pending = button === 0
+      ? { pointerId, pagePoint, clientPoint, hadSelectionAtPress, dragged: false }
+      : null;
+  }
+
+  pointerMove(pointerId: number, clientX: number, clientY: number): void {
+    const pending = this.#pending;
+    if (!pending || pending.pointerId !== pointerId || pending.dragged) return;
+    if (Math.hypot(
+      clientX - pending.clientPoint.x,
+      clientY - pending.clientPoint.y,
+    ) > this.movementThreshold) pending.dragged = true;
+  }
+
+  pointerUp(
+    pointerId: number,
+    button: number | undefined,
+    clientX: number,
+    clientY: number,
+  ): ViewerPrimaryClick | undefined {
+    this.pointerMove(pointerId, clientX, clientY);
+    const pending = this.#pending;
+    this.#pending = null;
+    if (button !== 0 || !pending || pending.pointerId !== pointerId || pending.dragged) {
+      return undefined;
+    }
+    return {
+      pagePoint: pending.pagePoint,
+      clientPoint: pending.clientPoint,
+      hadSelectionAtPress: pending.hadSelectionAtPress,
+    };
+  }
+
+  cancel(): void {
+    this.#pending = null;
+  }
+}
+
 export interface PageEventGeometry {
   readonly pageSize: Size;
   readonly rotation: Rotation;

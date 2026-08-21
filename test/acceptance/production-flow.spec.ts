@@ -65,7 +65,7 @@ async function releaseSelectionCapture(page: Page): Promise<void> {
   });
 }
 
-async function dragPdfPhrase(
+async function dragPdfPointer(
   page: Page,
   pdfPage: ReturnType<Page["locator"]>,
   start: { x: number; y: number },
@@ -2743,7 +2743,7 @@ test('creates an insertion from real PDFium caret geometry', async ({ page }) =>
   const pdfPage = page.locator("[data-page-index='0']").first();
   await expect(pdfPage).toBeVisible();
   await waitForRenderedPageImage(pdfPage);
-  await pdfPage.click({ position: { x: 73, y: 99 } });
+  await dragPdfPointer(page, pdfPage, { x: 73, y: 99 }, { x: 77, y: 99 });
 
   const insertionActions = page.getByRole('toolbar', { name: 'Insertion review action' });
   await expect(insertionActions).toBeVisible();
@@ -2766,6 +2766,29 @@ test('creates an insertion from real PDFium caret geometry', async ({ page }) =>
       }),
     }),
   ]);
+});
+
+test('keeps repeated-click PDF text selection out of insertion mode', async ({ page }) => {
+  const launched = await host.open({
+    pdfPath: pdf,
+    sourceRootPath: sourceRoot,
+    surface: 'vscode',
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === 'recovery-offered') {
+    throw new Error('Repeated-click selection launch failed');
+  }
+  await page.goto(launched.url);
+
+  const pdfPage = page.locator("[data-page-index='0']").first();
+  await expect(pdfPage).toBeVisible();
+  await waitForRenderedPageImage(pdfPage);
+  const box = await pdfPage.boundingBox();
+  if (!box) throw new Error('Rendered PDF page has no bounds.');
+  await page.mouse.click(box.x + 150, box.y + 99, { clickCount: 3 });
+
+  await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Insertion review action' })).toHaveCount(0);
 });
 
 test("one installed-style browser tree preserves review state across responsive layout", async ({ page }) => {
@@ -2809,7 +2832,7 @@ test("one installed-style browser tree preserves review state across responsive 
   expect(canvasBoxBeforeSelection).not.toBeNull();
   if (canvasBoxBeforeSelection === null) throw new Error("Rendered PDF page has no bounds.");
   await expect(renderedPageImage).toHaveCSS("pointer-events", "none");
-  await dragPdfPhrase(
+  await dragPdfPointer(
     page,
     pageCanvas,
     { x: 76, y: 98 },
@@ -3834,7 +3857,7 @@ for (const key of ["Delete", "Backspace"] as const) {
     const pageCanvas = page.locator("[data-page-index='0']").first();
     await expect(pageCanvas).toBeVisible();
     await waitForRenderedPageImage(pageCanvas);
-    await dragPdfPhrase(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
+    await dragPdfPointer(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
     await expect(pageCanvas).toBeFocused();
     await waitForSelectionCapture(page);
     await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
@@ -3883,7 +3906,7 @@ test("shows command conflicts until a retry succeeds", async ({ page }) => {
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
   await waitForRenderedPageImage(pageCanvas);
-  await dragPdfPhrase(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
+  await dragPdfPointer(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
   const selectionActions = page.getByRole("toolbar", { name: "Selection review actions" });
   await expect(selectionActions).toBeVisible();
 
@@ -3927,7 +3950,7 @@ test("discards queued typing when a pending selection is cleared", async ({ page
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
   await waitForRenderedPageImage(pageCanvas);
-  await dragPdfPhrase(page, pageCanvas, { x: 76, y: 98 }, { x: 245, y: 98 });
+  await dragPdfPointer(page, pageCanvas, { x: 76, y: 98 }, { x: 245, y: 98 });
   await waitForSelectionCapture(page);
   await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
   await page.keyboard.type("discard me");
@@ -3956,12 +3979,12 @@ test("keeps only typing for the newest pending selection", async ({ page }) => {
   const pageCanvas = page.locator("[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
   await waitForRenderedPageImage(pageCanvas);
-  await dragPdfPhrase(page, pageCanvas, { x: 76, y: 98 }, { x: 245, y: 98 });
+  await dragPdfPointer(page, pageCanvas, { x: 76, y: 98 }, { x: 245, y: 98 });
   await waitForSelectionCapture(page);
   await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
   await page.keyboard.type("obsolete");
 
-  await dragPdfPhrase(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
+  await dragPdfPointer(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
   await page.keyboard.type("current");
   await releaseSelectionCapture(page);
 

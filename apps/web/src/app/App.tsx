@@ -56,6 +56,7 @@ import {
 } from '../pdf/viewer-selection-adapter.js';
 import {
   VIEWER_POINTER_BUTTON_NONE,
+  ViewerPrimaryClickGesture,
   viewerPointerButton,
   type ViewerInteractionEvent,
   type ViewerPagePoint,
@@ -266,6 +267,7 @@ export function App({
   const ownedGeometryByPageRef = useRef(ownedGeometryByPage);
   ownedGeometryByPageRef.current = ownedGeometryByPage;
   const ownedPointerGesture = useRef(new OwnedMarkPointerGesture());
+  const primaryClickGesture = useRef(new ViewerPrimaryClickGesture());
   const hoveredOwnedId = useRef<string | undefined>(undefined);
   const viewer = useMemo(() => createLocalPdfiumViewer(assets), [assets]);
   const emit = useCallback((event: ViewerInteractionEvent) => onViewerInteraction?.(event), [onViewerInteraction]);
@@ -514,32 +516,52 @@ export function App({
             hoveredOwnedId.current = id;
             if (id) emit({ type: 'owned-mark', value: { id, phase: 'enter' } });
           };
+          const clearOwnedPointerInteraction = () => {
+            ownedPointerGesture.current.pointerCancel(pointerId);
+            setHoveredOwned(undefined);
+          };
           subscriptions.current.push(interaction.registerAlways({
             scope: { type: 'page', documentId, pageIndex: page.index },
             handlers: {
               onPointerDown: (position, event) => {
+                const button = viewerPointerButton(event);
+                primaryClickGesture.current.pointerDown(
+                  pointerId,
+                  button,
+                  position,
+                  { x: event.clientX, y: event.clientY },
+                  (selection?.getState(documentId).selection ?? null) !== null,
+                );
                 ownedPointerGesture.current.pointerDown(
                   pointerId,
-                  viewerPointerButton(event) ?? -1,
+                  button ?? -1,
                   position,
                   pageGeometry(),
                 );
               },
-              onPointerMove: (position) => {
+              onPointerMove: (position, event) => {
                 const point = position;
+                primaryClickGesture.current.pointerMove(
+                  pointerId,
+                  event.clientX,
+                  event.clientY,
+                );
                 ownedPointerGesture.current.pointerMove(pointerId, point);
                 setHoveredOwned(hitTestOwnedMark(pageGeometry(), point));
               },
-              onPointerLeave: () => {
-                ownedPointerGesture.current.pointerCancel(pointerId);
-                setHoveredOwned(undefined);
-              },
+              onPointerLeave: clearOwnedPointerInteraction,
               onPointerCancel: () => {
-                ownedPointerGesture.current.pointerCancel(pointerId);
-                setHoveredOwned(undefined);
+                primaryClickGesture.current.cancel();
+                clearOwnedPointerInteraction();
               },
               onPointerUp: (position, event) => {
                 const button = viewerPointerButton(event) ?? VIEWER_POINTER_BUTTON_NONE;
+                const click = primaryClickGesture.current.pointerUp(
+                  pointerId,
+                  button,
+                  event.clientX,
+                  event.clientY,
+                );
                 const ownedId = ownedPointerGesture.current.pointerUp(
                   pointerId,
                   button,
@@ -565,16 +587,23 @@ export function App({
                   publishKeyboardCursor(null);
                   return;
                 }
-                if (selection?.getState(documentId).selection !== null) return;
+                if (!click || click.hadSelectionAtPress) return;
+                if (selection && selection.getState(documentId).selection !== null) {
+                  selection.clear(documentId);
+                }
                 const generation = ++caretReadGeneration.current;
                 void publishViewerCaretRead({
                   read: captureViewerCaret({
                     pageIndex: page.index,
-                    point: position,
+                    point: click.pagePoint,
                     pages: pageReaderFor(documentId, document),
                   }),
                   isCurrent: () => generation === caretReadGeneration.current,
-                  placement: { left: event.clientX, top: event.clientY, suggestTop: true },
+                  placement: {
+                    left: click.clientPoint.x,
+                    top: click.clientPoint.y,
+                    suggestTop: true,
+                  },
                   emit,
                 });
               },
@@ -714,6 +743,7 @@ export function App({
             onSelectionUpdate?.(selectionReads.current.invalidate());
             emit({ type: 'selection-placement', value: null });
           } else {
+            caretReadGeneration.current += 1;
             emit({ type: 'caret', value: { anchor: null, placement: null } });
             beginSelectionRead(documentId);
           }
