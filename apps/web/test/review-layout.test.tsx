@@ -632,6 +632,21 @@ describe('review shell layout and accessibility contract', () => {
     expect(annotationStyles).not.toContain('.existing-annotations__readonly');
   });
 
+  it('keeps Outline interaction rings separated across rows and branches', () => {
+    expect(annotationStyles).toMatch(
+      /\.outline-navigator\s*\{[^}]*--outline-tree-row-gap:\s*6px;[^}]*--outline-tree-branch-gap:\s*8px;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.outline-navigator ul\s*\{[^}]*gap:\s*var\(--outline-tree-row-gap\);/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.outline-navigator__children\s*\{[^}]*margin-top:\s*var\(--outline-tree-branch-gap\);/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.outline-navigator li:has\(> \.outline-navigator__children:not\(\[hidden\]\)\) \+ li\s*\{[^}]*margin-top:\s*calc\(var\(--outline-tree-branch-gap\) - var\(--outline-tree-row-gap\)\);/u,
+    );
+  });
+
   it('uses only the right rail and controls the combined surface when References is right-docked', () => {
     let layout = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
     layout = reduceReferenceWorkspaceLayout(layout, { type: 'show-references' });

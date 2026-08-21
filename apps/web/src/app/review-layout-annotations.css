@@ -1012,13 +1012,15 @@
   --outline-tree-leading-size: calc(var(--outline-tree-control-size) + 8px);
   --outline-tree-indent: 14px;
   --outline-tree-rhythm: 4px;
+  --outline-tree-row-gap: 6px;
+  --outline-tree-branch-gap: 8px;
 
   padding: 10px;
 }
 
 .outline-navigator ul {
   display: grid;
-  gap: var(--outline-tree-rhythm);
+  gap: var(--outline-tree-row-gap);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1026,10 +1028,14 @@
 
 .outline-navigator__children {
   position: relative;
-  margin-top: var(--outline-tree-rhythm);
+  margin-top: var(--outline-tree-branch-gap);
   margin-left: calc(var(--outline-tree-indent) - var(--outline-tree-rhythm));
   padding-left: var(--outline-tree-rhythm);
   border-left: 1px solid var(--review-border-subtle);
+}
+
+.outline-navigator li:has(> .outline-navigator__children:not([hidden])) + li {
+  margin-top: calc(var(--outline-tree-branch-gap) - var(--outline-tree-row-gap));
 }
 
 .outline-navigator__row {
