@@ -1,6 +1,7 @@
 ---
 title: Recoverable autosave for editable PDF annotations
 date: 2026-08-11
+last_updated: 2026-08-21
 category: architecture-patterns
 module: PDF annotation persistence
 problem_type: architecture_pattern
@@ -37,15 +38,15 @@ Routine PDF annotation is ongoing document editing, not a terminal export event.
 The implementation merged in PR #19 therefore separates three authorities:
 
 1. `ReviewState` is the semantic truth for app-created annotations. It holds the current Review Items, revision, and history without owning a save path (`packages/core/src/review-model.ts:26-37`).
-2. Protected Recovery is the acknowledgement boundary for an accepted mutation. The session broker writes the complete next state and synchronization metadata before publishing the new state in memory (`apps/service/src/sessions/session-broker.ts:714-758`).
-3. The PDF save coordinator freezes the semantic state, projects it into a complete candidate PDF, verifies it, and independently commits it to the selected Save Destination (`apps/service/src/sessions/session-broker.ts:683-708`, `apps/service/src/saving/pdf-save-coordinator.ts:251-354`).
+2. Protected Recovery is the acknowledgement boundary for an accepted mutation. The session broker writes the complete next state and synchronization metadata before publishing the new state in memory (`apps/service/src/sessions/session-broker.ts:1115-1163`).
+3. The PDF save coordinator freezes the semantic state, projects it into a complete candidate PDF, verifies it, and independently commits it to the selected Save Destination (`apps/service/src/sessions/session-broker.ts:1084-1113`, `apps/service/src/saving/pdf-save-coordinator.ts:269-380`).
 
 Earlier design and validation work exposed several insufficient shortcuts (session history):
 
 - Asking about saving when a PDF opens interrupts view-only use, while asking only at a terminal Finish step leaves the working PDF stale.
 - Revision numbers alone do not fence saves when the destination can change during an in-flight write.
 - A visible annotation identifier alone is not ownership evidence because PDFium may synthesize an ID when `/NM` is absent (`packages/pdf-backends/src/embedpdf-adapter.ts:258-266`).
-- Reloading the mounted viewer from each saved target would create a second semantic state path and disturb reading position; the viewer remains a projection of `ReviewState` instead (`apps/web/src/app/ProductionReviewApp.tsx:211-219`).
+- Reloading the mounted viewer from each saved target would create a second semantic state path and disturb reading position; the viewer remains a projection of `ReviewState` instead (`apps/web/src/app/ProductionReviewApp.tsx:372-375`, `apps/web/src/app/ProductionReviewApp.tsx:876-901`).
 - Immediate full rewrites for every command are correct but unnecessarily expensive. Save requests need coalescing because each physical write includes PDF generation, verification, file synchronization, and replacement.
 - A first-annotation dialog can race with cancellation or a newer attempt unless every asynchronous completion is revalidated before the pending command is submitted.
 
@@ -55,7 +56,7 @@ Earlier design and validation work exposed several insufficient shortcuts (sessi
 
 Treat `ReviewState.items` as the only editable annotation model. Add, edit, remove, undo, and redo commands pass through the reducer, which validates the expected revision and replaces the complete item set (`packages/core/src/review-reducer.ts:21-27`, `packages/core/src/review-reducer.ts:91-178`). Keep Save Destination and Save Sync beside that model in the durable session envelope rather than embedding filesystem state in Review Items (`apps/service/src/recovery/draft-snapshot.ts:33-43`, `packages/core/src/save-status.ts:9-28`).
 
-The command path must finish its recovery write before acknowledging success. The slower PDF rewrite follows afterward: the HTTP route requests autosave only after `acceptMutation` succeeds and only when a destination is active (`apps/service/src/server/http-server.ts:418-430`). A target failure moves save health to `not-saved`; it does not roll back an accepted Review Item (`apps/service/src/sessions/session-broker.ts:638-660`).
+The command path must finish its recovery write before acknowledging success. The slower PDF rewrite follows afterward: the HTTP route requests autosave only after `acceptMutation` succeeds and only when a destination is active (`apps/service/src/server/http-server.ts:549-561`). A target failure moves save health to `not-saved`; it does not roll back an accepted Review Item (`apps/service/src/sessions/session-broker.ts:930-952`).
 
 This produces two deliberately different guarantees:
 
@@ -64,25 +65,25 @@ This produces two deliberately different guarantees:
 
 ### Ask only when editing begins, then persist complete state
 
-A view-only open has no destination decision. The first attempted annotation stays outside canonical state while the UI opens the destination dialog (`apps/web/src/save/save-state-controller.ts:8-16`, `apps/web/src/app/ProductionReviewApp.tsx:760-778`). Only after destination establishment succeeds does the UI submit that pending command (`apps/web/src/app/ProductionReviewApp.tsx:881-903`).
+A view-only open has no destination decision. The first attempted annotation stays outside canonical state while the UI opens the destination dialog (`apps/web/src/save/save-state-controller.ts:8-16`, `apps/web/src/app/ProductionReviewApp.tsx:1246-1255`). Only after destination establishment succeeds does the UI submit that pending command (`apps/web/src/app/ProductionReviewApp.tsx:1342-1382`).
 
-Destination selection is itself durable state. Establishing or relocating one increments its generation and persists the new destination plus `saving` status on the session's serialized write tail (`apps/service/src/sessions/session-broker.ts:516-594`). Selecting the original does not rewrite an untouched zero-item PDF; selecting a copy immediately requests a save and creates the copy when that save succeeds (`apps/service/src/saving/pdf-save-coordinator.ts:191-233`).
+Destination selection is itself durable state. Establishing or relocating one increments its generation and persists the new destination plus `saving` status on the session's serialized write tail (`apps/service/src/sessions/session-broker.ts:750-763`, `apps/service/src/sessions/session-broker.ts:808-885`). Selecting the original does not rewrite an untouched zero-item PDF; selecting a copy immediately requests a save and creates the copy when that save succeeds (`apps/service/src/saving/pdf-save-coordinator.ts:238-249`).
 
 Each physical save is a full-state projection. The coordinator reads the private immutable source snapshot and writes that canonical base plus all current projected annotations (`apps/service/src/saving/pdf-save-coordinator.ts:256-265`, `apps/service/src/recovery/source-snapshot.ts:16-42`). It does not incrementally patch the previous target. Edit, delete, undo, retry, and destination switching therefore converge to exactly the latest Review Item set rather than accumulating rewrite history.
 
 ### Make ownership annotation-local and fail closed
 
-Every app annotation carries ordinary visible PDF properties plus a namespaced, versioned `placekeeper` envelope containing the stable item ID, the semantic Review Item, and redundant visible projection evidence (`packages/core/src/annotation-projection.ts:47-70`, `packages/core/src/portable-annotation.ts:31-43`, `packages/core/src/portable-annotation.ts:257-269`). The pinned EmbedPDF path persists the annotation ID through `/NM` and custom metadata through `/EPDFCustom`; the checked-in engine patch bounds custom metadata before parsing (`packages/pdf-backends/src/embedpdf-adapter.ts:110-122`, `patches/@embedpdf__engines@2.14.4.patch:7-15`).
+Every app annotation carries ordinary visible PDF properties plus a namespaced, versioned `placekeeper` envelope containing the stable item ID, the semantic Review Item, and redundant visible projection evidence (`packages/core/src/annotation-projection.ts:47-70`, `packages/core/src/portable-annotation.ts:25-45`, `packages/core/src/portable-annotation.ts:261-273`). The pinned EmbedPDF path persists the annotation ID through `/NM` and custom metadata through `/EPDFCustom`; the checked-in engine patch bounds custom metadata before parsing (`packages/pdf-backends/src/embedpdf-adapter.ts:110-122`, `patches/@embedpdf__engines@2.14.4.patch:7-32`).
 
-Ownership requires redundant agreement. Import accepts an annotation only when its envelope has the supported owner and schema, contains a valid item and projection, has a unique visible ID, and matches the visible page, subtype, contents, author, and geometry (`packages/core/src/portable-annotation.ts:272-306`). Missing metadata is foreign. Malformed or mismatched metadata is invalid, never owned. Size, depth, key-count, string-length, and prototype-key limits bound untrusted metadata (`packages/core/src/portable-annotation.ts:10-14`, `packages/core/src/portable-annotation.ts:73-85`, `packages/core/src/portable-annotation.ts:308-320`).
+Ownership requires redundant agreement. Import accepts an annotation only when its envelope has the supported owner and schema, contains a valid item and projection, has a unique visible ID, and matches the visible page, subtype, contents, author, and geometry (`packages/core/src/portable-annotation.ts:276-312`). Missing metadata is foreign. Malformed or mismatched metadata is invalid, never owned. Size, depth, key-count, string-length, and prototype-key limits bound untrusted metadata (`packages/core/src/portable-annotation.ts:10-16`, `packages/core/src/portable-annotation.ts:78-90`, `packages/core/src/portable-annotation.ts:331-344`).
 
-On rewrite, the backend removes only annotations that pass this ownership test, creates the complete current owned set, and leaves Existing PDF Annotations in place (`packages/pdf-backends/src/embedpdf-adapter.ts:599-623`). It then reopens the candidate and rejects it if foreign annotations changed, requested marks are missing, normal appearances are absent, or portable metadata does not reconstruct the requested items (`packages/pdf-backends/src/embedpdf-adapter.ts:624-657`). The independent verifier also checks page fingerprints, foreign inventory, owned identities, geometry, appearances, and writer evidence before a filesystem commit (`apps/service/src/export/pdf-verifier.ts:114-221`).
+On rewrite, the backend removes only annotations that pass this ownership test, creates the complete current owned set, and leaves Existing PDF Annotations in place (`packages/pdf-backends/src/embedpdf-adapter.ts:641-680`). It then reopens the candidate and rejects it if foreign annotations changed, requested marks are missing, normal appearances are absent, or portable metadata does not reconstruct the requested items (`packages/pdf-backends/src/embedpdf-adapter.ts:681-718`). The independent verifier also checks page fingerprints, foreign inventory, owned identities, geometry, appearances, and writer evidence before a filesystem commit (`apps/service/src/export/pdf-verifier.ts:114-221`).
 
-Identity is not appearance. Generic PDF viewers depend on the standard annotation subtype, crop-relative geometry, and explicit normal appearance; the private envelope exists so Placekeeper can recognize and edit the same mark later. Capture, overlay rendering, ordering, portable metadata, and the writer now use crop-relative page coordinates, while schema-v1 CropBox-offset state is migrated once on import or recovery (`packages/core/src/review-model.ts:26-29`, `packages/pdf-backends/src/embedpdf-adapter.ts:290-418`, `apps/service/src/sessions/session-broker.ts:229-261`). The writer rejects an annotation when its enclosing rectangle or any text segment falls outside that crop-relative page canvas (`packages/pdf-backends/src/embedpdf-adapter.ts:493-529`).
+Identity is not appearance. Generic PDF viewers depend on the standard annotation subtype, crop-relative geometry, and explicit normal appearance; the private envelope exists so Placekeeper can recognize and edit the same mark later. Capture, overlay rendering, ordering, portable metadata, and the writer now use crop-relative page coordinates, while schema-v1 CropBox-offset state is migrated once on import or recovery (`packages/core/src/review-model.ts:26-29`, `packages/pdf-backends/src/embedpdf-adapter.ts:290-418`, `apps/service/src/sessions/session-broker.ts:348-445`). The writer rejects an annotation when its enclosing rectangle or any text segment falls outside that crop-relative page canvas (`packages/pdf-backends/src/embedpdf-adapter.ts:535-571`).
 
 ### Serialize, coalesce, verify, and fence every commit
 
-Maintain one draining save loop per session. A request sets a `requested` bit; mutations arriving while a save runs collapse into a later pass over the newest frozen state (`apps/service/src/saving/pdf-save-coordinator.ts:235-250`). Different sessions that target the same path are serialized with a target lock (`apps/service/src/saving/pdf-save-coordinator.ts:25-38`, `apps/service/src/saving/pdf-save-coordinator.ts:258`).
+Maintain one draining save loop per session. A request sets a `requested` bit; mutations arriving while a save runs collapse into a later pass over the newest frozen state (`apps/service/src/saving/pdf-save-coordinator.ts:238-249`). Different sessions that target the same path are serialized with a target lock (`apps/service/src/saving/pdf-save-coordinator.ts:25-38`, `apps/service/src/saving/pdf-save-coordinator.ts:269-380`).
 
 The effective save identity is:
 
@@ -106,13 +107,13 @@ under the session write tail:
 otherwise queue the newest desired state again
 ```
 
-The coordinator synchronizes the temporary file before calling `commitSaveCandidate`. Its commit callback revalidates original or copy authority, atomically renames the candidate, synchronizes the directory, and refreshes the target digest (`apps/service/src/saving/pdf-save-coordinator.ts:290-343`). The broker checks the destination generation while holding the same serialized session tail, then records whether revision and digest are still current (`apps/service/src/sessions/session-broker.ts:614-635`). A stale generation discards the temporary file; a valid commit of an older state immediately schedules another pass (`apps/service/src/saving/pdf-save-coordinator.ts:345-351`).
+The coordinator synchronizes the temporary file before calling `commitSaveCandidate`. Its commit callback revalidates original or copy authority, atomically renames the candidate, synchronizes the directory, and refreshes the target digest (`apps/service/src/saving/pdf-save-coordinator.ts:269-380`). The broker checks the destination generation while holding the same serialized session tail, then records whether revision and digest are still current (`apps/service/src/sessions/session-broker.ts:906-927`). A stale generation discards the temporary file; a valid commit of an older state immediately schedules another pass.
 
 ### Let recovery converge through evidence
 
 Recovery stores checksummed current and previous generations with temporary-file synchronization, atomic rename, directory synchronization, and fallback to the highest valid revision (`apps/service/src/recovery/draft-snapshot.ts:47-69`, `apps/service/src/recovery/draft-snapshot.ts:117-195`). Its record contains complete semantic state, the canonical source snapshot path, destination, target fingerprint, and desired/saved synchronization watermarks (`apps/service/src/recovery/draft-snapshot.ts:33-43`).
 
-On restart, only non-clean drafts matching an approved source or target identity are recovery candidates (`apps/service/src/sessions/session-broker.ts:187-215`). Resume validates the immutable source, migrates legacy annotation geometry, rebinds an original to a newly approved file capability, and reauthorizes a copy only when its fingerprint still matches. A missing, changed, or geometrically invalid target keeps the semantic work protected but becomes visibly `not-saved` until the user repairs the annotation, retries, locates the PDF, or selects a new destination (`apps/service/src/sessions/session-broker.ts:229-322`, `apps/web/src/save/SaveDestinationDialog.tsx:68-88`). Clean desired/saved evidence suppresses a later recovery prompt without relying on browser unload or a Finish action (`apps/service/src/sessions/session-broker.ts:187-215`, `apps/service/src/sessions/session-broker.ts:473-513`).
+On restart, only non-clean drafts matching an approved source or target identity are recovery candidates (`apps/service/src/sessions/session-broker.ts:283-335`). Resume validates the immutable source, migrates legacy annotation geometry, rebinds an original to a newly approved file capability, and reauthorizes a copy only when its fingerprint still matches (`apps/service/src/sessions/session-broker.ts:348-445`). A missing or changed target keeps the semantic work protected but becomes visibly `not-saved` until the user retries, locates the PDF, or selects a new destination; invalid annotation geometry instead offers a return to annotations so the item can be repaired (`apps/web/src/save/SaveDestinationDialog.tsx:76-123`). Clean desired/saved evidence suppresses a later recovery prompt without relying on browser unload or a Finish action (`apps/service/src/sessions/session-broker.ts:1279-1291`).
 
 ## Why This Matters
 
@@ -143,16 +144,16 @@ Do not substitute a revision-only marker, an in-memory viewer commit event, the 
 
 1. The user opens and reads the PDF without a save prompt.
 2. The first annotation command is held pending and the dialog proposes an annotated-copy filename (`apps/web/src/save/save-state-controller.ts:8-16`, `apps/service/src/saving/save-destination.ts:5-15`).
-3. After destination capability and generation are persisted, the pending command is submitted once (`apps/web/src/app/ProductionReviewApp.tsx:881-903`).
-4. Recovery records the new ReviewState before autosave writes, verifies, and atomically commits the copy (`apps/service/src/sessions/session-broker.ts:714-758`, `apps/service/src/server/http-server.ts:423-430`).
+3. After destination capability and generation are persisted, the pending command is submitted once (`apps/web/src/app/ProductionReviewApp.tsx:1342-1382`).
+4. Recovery records the new ReviewState before autosave writes, verifies, and atomically commits the copy (`apps/service/src/sessions/session-broker.ts:1115-1163`, `apps/service/src/server/http-server.ts:549-561`).
 
 ### Rapid edits during an in-flight save
 
-If revision 4 is being rendered when revisions 5 and 6 are accepted, both later commands are already protected in recovery. Their requests set the same queue's `requested` bit rather than creating parallel writers. Revision 4 may commit to the current target, but it cannot make synchronization clean because its revision and digest are no longer desired. The next pass freezes revision 6; revision 5 need never exist as physical PDF bytes (`apps/service/src/saving/pdf-save-coordinator.ts:235-257`, `apps/service/src/sessions/session-broker.ts:473-497`).
+If revision 4 is being rendered when revisions 5 and 6 are accepted, both later commands are already protected in recovery. Their requests set the same queue's `requested` bit rather than creating parallel writers. Revision 4 may commit to the current target, but it cannot make synchronization clean because its revision and digest are no longer desired. The next pass freezes revision 6; revision 5 need never exist as physical PDF bytes (`apps/service/src/saving/pdf-save-coordinator.ts:238-249`, `apps/service/src/sessions/session-broker.ts:906-927`).
 
 ### Destination switch during an old save
 
-If a generation-2 copy save is in flight when the user selects the original, destination establishment persists generation 3. The generation-2 candidate fails its commit fence under the session tail and its temporary file is removed. The generation-3 request writes the complete latest state to the original (`apps/service/src/sessions/session-broker.ts:614-635`, `apps/service/src/saving/pdf-save-coordinator.ts:345-351`).
+If a generation-2 copy save is in flight when the user selects the original, destination establishment persists generation 3. The generation-2 candidate fails its commit fence under the session tail and its temporary file is removed. The generation-3 request writes the complete latest state to the original (`apps/service/src/sessions/session-broker.ts:906-927`, `apps/service/src/saving/pdf-save-coordinator.ts:269-380`).
 
 ### Reopen, edit, delete, and recover
 
@@ -161,6 +162,7 @@ When an annotated PDF is reopened without private recovery data, valid portable 
 ## Related
 
 - [Adaptive annotation tray framing](adaptive-annotation-tray-framing.md) applies the sibling pattern of coalescing latest work and invalidating stale asynchronous completions to viewer geometry rather than file persistence.
-- [Outline-aware annotation workspace presentation](../design-patterns/outline-aware-annotation-workspace-presentation.md) shows the same fail-closed generation principle for document-derived UI state.
+- [Content-aware annotation workspace presentation](../design-patterns/outline-aware-annotation-workspace-presentation.md) shows the same fail-closed generation principle for document-derived UI state.
+- [Compact Editorial language for annotation modals](../design-patterns/compact-editorial-language-for-annotation-modals.md) defines the recovery dialog's presentation and action language while preserving these persistence transitions.
 - [Portable PDF annotations invisible in external viewers](../integration-issues/portable-pdf-annotations-invisible-in-external-viewers.md) documents the narrower appearance and crop-relative geometry failure that PR #21 corrected without changing this broader autosave architecture.
 - PR #19 contains the implementation described here and merged into `main` on 2026-08-11 (America/New_York).
