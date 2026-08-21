@@ -226,6 +226,54 @@ describe('selection anchors', () => {
       .toMatchObject({ ok: false, diagnostic: 'caret-point-inside-multichar-rect' });
   });
 
+  it('aligns PDFium text rectangles with trailing control markers', () => {
+    const hitPage = {
+      ...page(Rotation.Degree0),
+      extractedText: 'first line\r\nsecond line',
+      textRects: [
+        {
+          content: 'first line\u0004',
+          rect: { origin: { x: 20, y: 30 }, size: { width: 60, height: 12 } },
+        },
+        {
+          content: 'second line\u0088',
+          rect: { origin: { x: 20, y: 50 }, size: { width: 66, height: 12 } },
+        },
+      ],
+    };
+
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 86, y: 56 } }))
+      .toMatchObject({
+        ok: true,
+        anchor: {
+          leftContext: 'first line\r\nsecond line',
+          rightContext: '',
+          reliable: true,
+        },
+      });
+  });
+
+  it('preserves an exact trailing-control match before using the PDFium fallback', () => {
+    const hitPage = {
+      ...page(Rotation.Degree0),
+      extractedText: 'same same\u0004',
+      textRects: [{
+        content: 'same\u0004',
+        rect: { origin: { x: 20, y: 30 }, size: { width: 40, height: 12 } },
+      }],
+    };
+
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 20, y: 36 } }))
+      .toMatchObject({
+        ok: true,
+        anchor: {
+          leftContext: 'same ',
+          rightContext: 'same\u0004',
+          reliable: true,
+        },
+      });
+  });
+
   it.each([
     ['ambiguous alignment', {
       extractedText: 'same same',

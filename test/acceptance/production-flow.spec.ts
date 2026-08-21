@@ -2728,6 +2728,46 @@ test("retries one failed reference clone without exposing raw load details", asy
   ))).toBe(true);
 });
 
+test('creates an insertion from real PDFium caret geometry', async ({ page }) => {
+  const launched = await host.open({
+    pdfPath: pdf,
+    sourceRootPath: sourceRoot,
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === 'recovery-offered') {
+    throw new Error('Real caret insertion launch failed');
+  }
+  await page.goto(launched.url);
+  await chooseFreshCopyDestination(page);
+
+  const pdfPage = page.locator("[data-page-index='0']").first();
+  await expect(pdfPage).toBeVisible();
+  await waitForRenderedPageImage(pdfPage);
+  await pdfPage.click({ position: { x: 73, y: 99 } });
+
+  const insertionActions = page.getByRole('toolbar', { name: 'Insertion review action' });
+  await expect(insertionActions).toBeVisible();
+  await insertionActions.getByRole('button', { name: 'Insert', exact: true }).click();
+  const composer = page.getByRole('dialog', { name: 'Insertion text' });
+  await composer.getByRole('textbox', { name: 'Insertion text' }).fill('Precisely ');
+  await composer.getByRole('button', { name: 'Apply' }).click();
+
+  await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+  expect(host.broker.state(launched.sessionId)?.items).toEqual([
+    expect.objectContaining({
+      kind: 'insert',
+      pageIndex: 0,
+      payload: expect.objectContaining({
+        position: { x: 73, y: 92, width: 2, height: 14 },
+        leftContext: '',
+        rightContext: 'Selectable placekeeper text: unique equilibrium ',
+        proposedText: 'Precisely ',
+        reliable: true,
+      }),
+    }),
+  ]);
+});
+
 test("one installed-style browser tree preserves review state across responsive layout", async ({ page }) => {
   const launched = await host.open({
     pdfPath: pdf,

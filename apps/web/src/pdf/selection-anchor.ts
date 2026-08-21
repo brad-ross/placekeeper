@@ -278,6 +278,9 @@ interface MappedTextRect {
   readonly end: number;
 }
 
+// Older PDFium bindings can expose a stale trailing control unit that page text omits.
+const PDFIUM_TRAILING_TEXT_CONTROL = /[\u0000-\u001f\u007f-\u009f]$/u;
+
 export interface CreateCaretAnchorAtPointInput {
   readonly page: AnchorPage;
   /** Pointer in the declared presentation coordinate space. */
@@ -342,13 +345,23 @@ function alignTextRects(page: AnchorPage): readonly MappedTextRect[] | null {
     const cached = solutionCache.get(cacheKey);
     if (cached) return cached;
     const current = rects[index]!;
+    let content = current.content;
+    let starts = occurrences(content, offset);
+    while (
+      starts.length === 0
+      && content.length > 1
+      && PDFIUM_TRAILING_TEXT_CONTROL.test(content)
+    ) {
+      content = content.slice(0, -1);
+      starts = occurrences(content, offset);
+    }
     const solutions: MappedTextRect[][] = [];
-    for (const start of occurrences(current.content, offset)) {
+    for (const start of starts) {
       const mapped = {
-        content: current.content,
+        content,
         rect: current.rect,
         start,
-        end: start + current.content.length,
+        end: start + content.length,
       };
       for (const suffix of solve(index + 1, mapped.end)) {
         solutions.push([mapped, ...suffix]);
