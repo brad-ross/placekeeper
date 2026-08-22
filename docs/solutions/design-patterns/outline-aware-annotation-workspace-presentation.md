@@ -1,7 +1,7 @@
 ---
 title: Content-aware annotation workspace presentation
 date: 2026-08-11
-last_updated: 2026-08-17
+last_updated: 2026-08-21
 category: design-patterns
 module: PDF review workspace presentation
 problem_type: design_pattern
@@ -36,7 +36,7 @@ tags:
 
 The workspace selector represents capabilities that are usable now, not four permanent product slots. A fixed Outline, Search, Annotations, and References bar becomes misleading when a PDF has no outline, no annotation exists yet, or the final Reference Tab closes. The problem becomes especially visible in a compact selector: blank or inert destinations make the control look structurally incomplete.
 
-PR #11 originally established outline-aware composition and outline-derived annotation labels. [PR #35](https://github.com/brad-ross/placekeeper/pull/35), pending as of 2026-08-17, generalizes the rule across all workspace modes and replaces the centered, flex-filling selector with an intrinsic activity strip. The durable pattern is to derive one ordered visible-mode projection from current content, use it for tabs and panels, and revalidate selection and focus whenever the projection changes.
+PR #11 originally established outline-aware composition and outline-derived annotation labels. [PR #35](https://github.com/brad-ross/placekeeper/pull/35), merged on 2026-08-17, generalized the rule across all workspace modes and replaced the centered, flex-filling selector with an intrinsic activity strip. The durable pattern is to derive one ordered visible-mode projection from current content, use it for tabs and panels, and revalidate selection and focus whenever the projection changes.
 
 This is primarily a state-and-interaction rule. Intrinsic width, icon treatment, selected labels, and inactive-only hover feedback express that rule visually; CSS does not decide whether a capability exists.
 
@@ -51,26 +51,26 @@ Keep the canonical vocabulary and ordering in one constant, then filter it once 
 - **Annotations** is available when at least one owned Review Item exists or current external-annotation discovery is ready with at least one item.
 - **Search** is unconditional, so the tools workspace always has a valid fallback.
 
-`ReviewShell` owns these predicates and derives `visibleRightWorkspaceModes` from the same projected list rather than recomputing document capabilities (`apps/web/src/app/ReviewShell.tsx:306-342`). The projected list feeds the shared right or narrow workspace and the tools-only workspace; the same `referencesAvailable` predicate supplies `['references']` to the independent bottom workspace (`apps/web/src/app/ReviewShell.tsx:1075-1133`).
+`ReviewShell` owns these predicates and derives `visibleRightWorkspaceModes` from the same projected list rather than recomputing document capabilities (`apps/web/src/app/ReviewShell.tsx:333-360`). The projected list feeds the shared right or narrow workspace and the tools-only workspace; the same `referencesAvailable` predicate supplies `['references']` to the independent bottom workspace (`apps/web/src/app/ReviewShell.tsx:1077-1183`).
 
-Do not reserve placeholders for filtered modes. `WorkspaceModeStrip` maps exactly the supplied array and preserves its order (`apps/web/src/review/WorkspaceModeStrip.tsx:52-105`). When the input shrinks, the visual strip, keyboard sequence, and accessible tablist shrink together.
+Do not reserve placeholders for filtered modes. `WorkspaceModeStrip` maps exactly the supplied array and preserves its order (`apps/web/src/review/WorkspaceModeStrip.tsx:52-109`). When the input shrinks, the visual strip, keyboard sequence, and accessible tablist shrink together.
 
 ### Keep tabs, panels, rails, and contextual actions under the same predicate
 
 Removing only a tab leaves an unreachable panel and broken `aria-controls` relationships. Removing only a panel leaves a control that points nowhere. Availability must govern the entire capability:
 
-- `OutlineAnnotationsWorkspace` always mounts Search, and mounts Outline and Annotations only when each appears in `modes`. Its panel visibility uses the same effective mode as the selected tab (`apps/web/src/review/OutlineAnnotationsWorkspace.tsx:61-69`, `apps/web/src/review/OutlineAnnotationsWorkspace.tsx:139-195`).
-- `ReferenceWorkspace` omits its header when it has no modes and mounts the References panel only when `references` is present (`apps/web/src/review/ReferenceWorkspace.tsx:288-338`).
-- The bottom References edge rail exists only while References is available, and the right rail stops claiming the References surface after the capability disappears (`apps/web/src/app/ReviewShell.tsx:1047-1072`).
-- The move-References action exists only while References is selected and a real docking destination is available. It remains outside the tablist so arrow-key navigation stays mode-only (`apps/web/src/review/ReferenceWorkspace.tsx:144-173`, `apps/web/src/review/WorkspaceModeStrip.tsx:50-65`, `apps/web/src/review/WorkspaceModeStrip.tsx:107-123`).
+- `OutlineAnnotationsWorkspace` always mounts Search, and mounts Outline and Annotations only when each appears in `modes`. Its panel visibility uses the same effective mode as the selected tab (`apps/web/src/review/OutlineAnnotationsWorkspace.tsx:64-72`, `apps/web/src/review/OutlineAnnotationsWorkspace.tsx:142-199`).
+- `ReferenceWorkspace` omits its header when it has no modes and mounts the References panel only when `references` is present (`apps/web/src/review/ReferenceWorkspace.tsx:376-410`).
+- The bottom References edge rail exists only while References is available, and the right rail stops claiming the References surface after the capability disappears (`apps/web/src/app/ReviewShell.tsx:1077-1118`).
+- The move-References action exists only while References is selected and a real docking destination is available. It remains outside the tablist so arrow-key navigation stays mode-only (`apps/web/src/review/ReferenceWorkspace.tsx:205-226`, `apps/web/src/review/WorkspaceModeStrip.tsx:50-65`, `apps/web/src/review/WorkspaceModeStrip.tsx:110-126`).
 
-Closing the final Reference Tab should not create a separate empty-mode cleanup path. The navigation reducer removes the tab, cancels operations that no longer have a source, and records the return-focus token (`apps/web/src/review/reference-navigation-state.ts:375-393`). On the next render, the normal availability projection removes the References tab, panel, docking action, and References-only rail together.
+Closing the final Reference Tab should not create a separate empty-mode cleanup path. The navigation reducer removes the tab, cancels operations that no longer have a source, and records the return-focus token (`apps/web/src/review/reference-navigation-state.ts:376-394`). On the next render, the normal availability projection removes the References tab, panel, docking action, and References-only rail together.
 
 ### Revalidate selection without erasing durable workspace memory
 
 Remembered navigation may name a mode that is no longer renderable. Preserve that memory for a future return, but derive a safe selection for the current frame.
 
-The shell accepts a requested mode only when it remains in the projected list; otherwise it chooses the first visible tools mode, with Search as the nonempty final fallback. It revalidates again after responsive layout selects the physical surface (`apps/web/src/app/ReviewShell.tsx:335-373`). `OutlineAnnotationsWorkspace` performs the same defensive membership check so a stale selection cannot leave every panel hidden (`apps/web/src/review/OutlineAnnotationsWorkspace.tsx:61-69`).
+The shell accepts a requested mode only when it remains in the projected list; otherwise it chooses the first visible tools mode, with Search as the nonempty final fallback. It revalidates again after responsive layout selects the physical surface (`apps/web/src/app/ReviewShell.tsx:348-394`). `OutlineAnnotationsWorkspace` performs the same defensive membership check so a stale selection cannot leave every panel hidden (`apps/web/src/review/OutlineAnnotationsWorkspace.tsx:64-72`).
 
 Workspace memory can still retain focus and scroll tokens for all canonical modes (`apps/web/src/review/reference-navigation-state.ts:22-30`). Falling back for this render must not destroy useful state merely because a capability is temporarily absent.
 
@@ -82,19 +82,19 @@ Availability and docking are separate concerns:
 - An independently bottom-docked References workspace receives only `['references']`, and only while References is available.
 - The tools workspace receives the projected non-References modes whether it owns its header or shares one rendered by `ReferenceWorkspace`.
 
-Moving References between right and bottom keeps References selected and restores focus after the new layout settles (`apps/web/src/app/ReviewShell.tsx:1090-1099`). Presentation changes should preserve the same mounted workspace and PDF reading state; they rearrange capability ownership rather than recreate navigation or viewer models. See [Adaptive annotation tray framing](../architecture-patterns/adaptive-annotation-tray-framing.md) for the mounted-state contract.
+Moving References between right and bottom keeps References selected and restores focus after the new layout settles (`apps/web/src/app/ReviewShell.tsx:1136-1145`). Presentation changes should preserve the same mounted workspace and PDF reading state; they rearrange capability ownership rather than recreate navigation or viewer models. See [Adaptive annotation tray framing](../architecture-patterns/adaptive-annotation-tray-framing.md) for the mounted-state contract.
 
 ### Repair focus when dynamic removal disconnects a control
 
 Filtering a mode can disconnect the focused tab. After reconciliation, focus a connected selected tab or a meaningful fallback within the selected panel rather than letting focus fall to the document body.
 
-`ReferenceWorkspace` detects when the previously focused mode tab is no longer connected and schedules focus to the remaining selected tab or its panel fallback (`apps/web/src/review/ReferenceWorkspace.tsx:189-206`). It similarly repairs focus when a contextual docking action disappears (`apps/web/src/review/ReferenceWorkspace.tsx:189-196`). The tools workspace rejects disconnected focus memory and falls back to the selected panel (`apps/web/src/review/OutlineAnnotationsWorkspace.tsx:70-85`).
+`ReferenceWorkspace` detects when the previously focused mode tab is no longer connected and schedules focus to the remaining selected tab or its panel fallback (`apps/web/src/review/ReferenceWorkspace.tsx:242-259`). It similarly repairs focus when a contextual docking action disappears. The tools workspace rejects disconnected focus memory and falls back to the selected panel (`apps/web/src/review/OutlineAnnotationsWorkspace.tsx:73-88`).
 
-Arrow-key movement must also use the rendered mode list, not the four-mode constant (`apps/web/src/review/OutlineAnnotationsWorkspace.tsx:87-101`). Removing a mode then closes both the visual and keyboard gaps.
+Arrow-key movement must also use the rendered mode list, not the four-mode constant (`apps/web/src/review/OutlineAnnotationsWorkspace.tsx:90-104`). Removing a mode then closes both the visual and keyboard gaps.
 
 ### Let the compact strip express the projection
 
-The activity strip is content-width and left-aligned by normal header flow. Inactive modes remain compact icon targets; only the selected mode expands to show a label, which can ellipsize. Hover feedback applies only to unselected modes because the selected mode already has a persistent surface treatment (`apps/web/src/app/review-layout-annotations.css:258-303`, `apps/web/src/app/review-layout-annotations.css:380-425`).
+The activity strip is content-width and left-aligned by normal header flow. Inactive modes remain compact icon targets; only the selected mode expands to show a label, which can ellipsize. Hover feedback applies only to unselected modes because the selected mode already has a persistent surface treatment (`apps/web/src/app/review-layout-annotations.css:268-325`, `apps/web/src/app/review-layout-annotations.css:413-458`).
 
 Do not derive capability from CSS position, mode count, or viewport. If a destination is unavailable, omit its element. The prior equal-width `repeat(count, 1fr)` grid was useful when tabs filled the entire header, but it is obsolete for an intrinsic activity strip.
 

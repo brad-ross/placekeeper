@@ -1,13 +1,16 @@
 ---
 name: placekeeper
-description: Open one explicitly referenced local PDF in Placekeeper and navigate the Codex desktop built-in browser to its scoped loopback review session. Use when the user invokes $placekeeper or asks to proofread, annotate, mark up, or review a local .pdf file. Reject missing, multiple, remote, or non-PDF inputs through the launcher's shared errors.
+description: Open one explicitly referenced local PDF or canonical Placekeeper link in the Codex desktop built-in browser and bind its scoped review session to the current task. Use when the user invokes $placekeeper, provides a placekeeper:/// link, or asks to proofread, annotate, mark up, or review a local .pdf file. Reject missing, multiple, remote, or non-PDF inputs through the launcher's shared errors.
 ---
 
 # Placekeeper
 
 ## Launch workflow
 
-1. Resolve exactly one user-referenced local `.pdf` path. Do not infer a file from unrelated workspace content.
+1. Resolve exactly one user-referenced local `.pdf` path or canonical `placekeeper:///` link. Do not infer a file or link from unrelated workspace content.
+   - For a canonical link, first run `"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper" open-link --json --preflight --link <placekeeper-link>`.
+   - If preflight requires confirmation, show the returned path and ask the user to confirm opening it. Then run `"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper" open-link --json --surface codex --confirmed --link <placekeeper-link>`; otherwise omit `--confirmed`.
+   - Handle `recovery-offered` with the same resume, discard, or fork choice described below, rerunning the same full installed-launcher command with `--recovery <choice>`. Continue at step 3 with the successful response.
 2. Run the installed app-bundle launch client with an argument array, never a shell-built command or a guessed PATH entry:
 
    `"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper" open --json --surface codex --pdf <absolute-local-pdf-path>`

@@ -2,6 +2,7 @@ import { useId, useLayoutEffect, useRef, useState } from "react";
 
 import { trapDialogFocus } from "../app/dialog-focus.js";
 import type { SaveCopyProposal } from "../app/ProductionReviewApp.js";
+import { ReviewIcon } from "../review/ReviewIcon.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import type { SaveFailureReason } from "../../../../packages/core/src/save-status.js";
 
@@ -33,7 +34,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
     setChoice("copy");
     lastProposalFilename.current = props.proposal?.filename;
     setFilename(props.proposal?.filename ?? "");
-    requestAnimationFrame(() => firstRef.current?.focus({ preventScroll: true }));
+    requestAnimationFrame(() => firstRef.current?.focus());
   }, [props.open]);
 
   useLayoutEffect(() => {
@@ -50,7 +51,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
   return (
     <div className="save-destination-backdrop" data-save-destination-backdrop>
       <section
-        className="save-destination-dialog"
+        className="save-destination-dialog compact-editorial-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -65,33 +66,62 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
           trapDialogFocus(event);
         }}
       >
-        <h2 id={titleId}>Choose where to save annotations</h2>
-        <p id={descriptionId}>
-          You can change this later by clicking the filename.
-        </p>
-        {props.recoveryTarget && props.recoveryFailure === "invalid-annotation-geometry" ? (
-          <aside className="save-destination-recovery" aria-label="Save recovery">
-            <div>
-              <strong>An annotation is outside the page</strong>
-              <p>Remove or reposition that annotation, then save again. Your latest changes are protected.</p>
-            </div>
-            <div className="save-destination-recovery__actions">
-              <button className="review-button review-button--primary" type="button" title="Return to annotations" onClick={props.onCancel}>Return to annotations</button>
-            </div>
-          </aside>
-        ) : props.recoveryTarget && props.onRetry && props.onLocate ? (
-          <aside className="save-destination-recovery" aria-label="Save recovery">
-            <div>
-              <strong>This PDF isn’t up to date</strong>
-              <p>Your latest annotations are protected. Retry saving to {props.recoveryTarget}, or locate the PDF if it moved.</p>
-            </div>
-            <div className="save-destination-recovery__actions">
-              <button className="review-button review-button--primary" type="button" title="Retry saving" disabled={props.establishing} onClick={() => void props.onRetry?.()}>Retry</button>
-              <button className="review-button" type="button" title="Locate the PDF" disabled={props.establishing} onClick={() => void props.onLocate?.()}>Locate PDF…</button>
-            </div>
-          </aside>
-        ) : null}
-        <fieldset className="save-destination-options">
+        <header className="compact-editorial-modal__header">
+          <h2 id={titleId}>Choose Where to Save Annotations</h2>
+          <p id={descriptionId} className="compact-editorial-modal__description">
+            You can change this later by clicking the filename.
+          </p>
+        </header>
+        <div className="compact-editorial-modal__body">
+          {props.recoveryTarget && props.recoveryFailure === "invalid-annotation-geometry" ? (
+            <aside className="save-destination-recovery" aria-label="Save recovery">
+              <div>
+                <strong>An annotation is outside the page</strong>
+                <p>Remove or reposition that annotation, then save again. Your latest changes are protected.</p>
+              </div>
+              <div className="save-destination-recovery__actions">
+                <button
+                  className="review-button review-button--primary"
+                  type="button"
+                  title="Return to annotations"
+                  onClick={props.onCancel}
+                >
+                  <ReviewIcon name="arrow-left" />
+                  <span>Return to annotations</span>
+                </button>
+              </div>
+            </aside>
+          ) : props.recoveryTarget && props.onRetry && props.onLocate ? (
+            <aside className="save-destination-recovery" aria-label="Save recovery">
+              <div>
+                <strong>This PDF isn’t up to date</strong>
+                <p>Your latest annotations are protected. Retry saving to {props.recoveryTarget}, or locate the PDF if it moved.</p>
+              </div>
+              <div className="save-destination-recovery__actions">
+                <button
+                  className="review-button review-button--primary"
+                  type="button"
+                  title="Retry saving"
+                  disabled={props.establishing}
+                  onClick={() => void props.onRetry?.()}
+                >
+                  <ReviewIcon name="redo" />
+                  <span>Retry</span>
+                </button>
+                <button
+                  className="review-button"
+                  type="button"
+                  title="Locate the PDF"
+                  disabled={props.establishing}
+                  onClick={() => void props.onLocate?.()}
+                >
+                  <ReviewIcon name="locate" />
+                  <span>Locate PDF…</span>
+                </button>
+              </div>
+            </aside>
+          ) : null}
+          <fieldset className="save-destination-options">
           <legend className="sr-only">Automatic save location</legend>
           <label className="save-destination-choice" data-selected={choice === "original"}>
             <input
@@ -138,19 +168,30 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
                     disabled={props.establishing || restricted || props.proposal === undefined}
                     onClick={() => void props.onChooseLocation?.()}
                   >
-                    Change location…
+                    <ReviewIcon name="locate" />
+                    <span>Change location…</span>
                   </button>
                 ) : null}
               </div>
             </div>
           ) : null}
-        </fieldset>
-        {restricted ? (
-          <p className="save-destination-error" role="alert">{props.rewriteEligibility?.message}</p>
-        ) : null}
-        {props.error ? <p className="save-destination-error" role="alert">{props.error}</p> : null}
-        <footer>
-          <button className="review-button" type="button" title="Cancel save setup" disabled={props.establishing} onClick={props.onCancel}>Cancel</button>
+          </fieldset>
+          {restricted ? (
+            <p className="save-destination-error" role="alert">{props.rewriteEligibility?.message}</p>
+          ) : null}
+          {props.error ? <p className="save-destination-error" role="alert">{props.error}</p> : null}
+        </div>
+        <footer className="compact-editorial-modal__footer">
+          <button
+            className="review-button"
+            type="button"
+            title="Cancel save setup"
+            disabled={props.establishing}
+            onClick={props.onCancel}
+          >
+            <ReviewIcon name="close" />
+            <span>Cancel</span>
+          </button>
           <button
             type="button"
             className="review-button review-button--primary"
@@ -162,7 +203,8 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
             }
             onClick={() => void props.onConfirm(choice, filename)}
           >
-            {props.establishing ? "Setting up…" : "Confirm"}
+            <ReviewIcon name={props.establishing ? "loading" : "check"} />
+            <span>{props.establishing ? "Setting up…" : "Confirm"}</span>
           </button>
         </footer>
       </section>

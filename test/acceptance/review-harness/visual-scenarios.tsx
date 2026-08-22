@@ -19,16 +19,25 @@ import {
   type ReferenceNavigationState,
 } from '../../../apps/web/src/review/reference-navigation-state.js';
 
-export type VisualSceneName =
-  | 'reading'
-  | 'unavailable-controls'
-  | 'contextual'
-  | 'tray'
-  | 'outline'
-  | 'reference-layout'
-  | 'peek'
-  | 'page-note'
-  | 'exceptional';
+const VISUAL_SCENE_NAMES = [
+  'reading',
+  'unavailable-controls',
+  'contextual',
+  'tray',
+  'outline',
+  'reference-layout',
+  'peek',
+  'page-note',
+  'save-destination',
+  'save-recovery',
+  'exceptional',
+] as const;
+
+export type VisualSceneName = (typeof VISUAL_SCENE_NAMES)[number];
+
+function isVisualSceneName(value: string): value is VisualSceneName {
+  return VISUAL_SCENE_NAMES.some((name) => name === value);
+}
 
 export interface VisualScenario {
   readonly name: VisualSceneName;
@@ -240,9 +249,8 @@ const visualOutlineDiscovery: PdfOutlineDiscovery = {
 export function resolveVisualScenario(search: string): VisualScenario | null {
   const parameters = new URLSearchParams(search);
   const requested = parameters.get('visual');
-  if (!requested) return null;
-  const name = requested as VisualSceneName;
-  if (!['reading', 'unavailable-controls', 'contextual', 'tray', 'outline', 'reference-layout', 'peek', 'page-note', 'exceptional'].includes(name)) return null;
+  if (!requested || !isVisualSceneName(requested)) return null;
+  const name = requested;
   const state = stateFor(name === 'contextual' || name === 'page-note' ? [] : seededItems);
   const exception = parameters.get('exception');
   const exceptionalAnnotations: ExistingAnnotationsDiscovery = exception === 'loading'

@@ -47,6 +47,10 @@
     width: 100%;
     max-height: calc(100dvh - 1rem);
   }
+
+  #root[data-production-root="true"] .compact-editorial-modal button {
+    min-height: var(--review-control-touch);
+  }
 }
 
 @media (max-width: 360px) {
@@ -114,7 +118,8 @@
   .review-context-palette button,
   .review-page-menu button,
   .review-workspace button,
-  .link-action-popover button {
+  .link-action-popover button,
+  #root[data-production-root="true"] .compact-editorial-modal button {
     min-height: var(--review-control-touch);
   }
 
@@ -218,6 +223,7 @@
   .annotation-peek,
   .annotation-status__icon,
   .workspace-state .review-icon,
+  .compact-editorial-modal .lucide-loader-circle,
   .pdf-workspace__loading .review-icon {
     transition: none;
     animation: none;

@@ -84,6 +84,35 @@ describe("task-scoped PDF binding registry", () => {
     expect(registry.activityCount()).toBe(0);
   });
 
+  it("reattaches only an authenticated successor browser to the exact task", () => {
+    const { registry } = registryFixture();
+    const successorCapabilityHash = digestSecretHex("successor-browser-capability");
+
+    expect(registry.attachReconnectedBrowser({
+      taskSessionId: "task-a",
+      reviewSessionId: "review-successor",
+      documentGeneration: 2,
+      browserCapabilityHash: successorCapabilityHash,
+    })).toMatchObject({ status: "active" });
+    expect(registry.bindingForTask("task-a")).toMatchObject({
+      reviewSessionId: "review-successor",
+      documentGeneration: 2,
+    });
+
+    expect(registry.attachReconnectedBrowser({
+      taskSessionId: "task-b",
+      reviewSessionId: "review-successor",
+      documentGeneration: 2,
+      browserCapabilityHash: successorCapabilityHash,
+    })).toEqual({ status: "denied" });
+    expect(registry.attachReconnectedBrowser({
+      taskSessionId: "task-a",
+      reviewSessionId: "other-review",
+      documentGeneration: 2,
+      browserCapabilityHash: successorCapabilityHash,
+    })).toEqual({ status: "denied" });
+  });
+
   it("fails closed for wrong review and generation and for browser-first launch", () => {
     const { registry } = registryFixture();
     const wrongReview = issue(registry);

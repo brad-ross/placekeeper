@@ -1,7 +1,7 @@
 ---
 title: Truthful compact status for live agent context
 date: 2026-08-12
-last_updated: 2026-08-17
+last_updated: 2026-08-21
 category: design-patterns
 module: PDF review interface
 problem_type: design_pattern
@@ -79,11 +79,11 @@ local Review State changes
   -> exact fresh evidence may restore current
 ```
 
-### Preserve status only for an exact live resume
+### Preserve status only for an exact live resume or verified restart reattach
 
 A top-level hard refresh may keep the current Codex status only because the readable view resumes the same in-memory browser credential and its original launch scope. Resume requires the exact view ID, pathname, scoped cookie, active session, document generation, and credential; scope polling then presents the retained browser-capability hash to the task binding (`apps/service/src/sessions/session-broker.ts:648-681`, `apps/service/src/sessions/session-broker.ts:969-1008`). The mounted acceptance flow verifies that hard reload preserves both the readable page location and the connected-agent status (`test/acceptance/production-flow.spec.ts:279-368`).
 
-Do not reconstruct status from a PDF path, readable view ID, or stable loopback origin. A copied route without its cookie and a successor-daemon recovery route have no authenticated launch scope. Reopening such a route through a Placekeeper Link creates an ordinary non-Codex browser view, so the indicator must remain absent unless Codex performs a new explicit bind flow.
+Do not reconstruct status from a PDF path, readable view ID, or stable loopback origin. A copied route without its cookie and a successor-daemon recovery route have no authenticated launch scope. Reopening creates a fresh browser-scoped credential, so the indicator stays absent until either Codex performs a new explicit bind flow or a restart-only two-sided ticket verifies both the path-scoped browser token and the owning task's next prompt. That successful match promotes only the fresh authenticated credential; a foreign task, copied URL, or missing/expired token remains unbound.
 
 ### Put detail behind both hover and focus
 

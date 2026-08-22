@@ -36,6 +36,7 @@ import type {
 } from "./placekeeper-host.js";
 import type { ConditionalShutdownResult } from "./daemon-lifecycle.js";
 import { PLACEKEEPER_LINK_MAX_LENGTH } from "../../../../packages/core/src/placekeeper-link.js";
+import { isLaunchSurface, isRecoveryDecision } from "../sessions/session-broker.js";
 
 // Both directions are explicitly bounded. Evidence requests use a stricter
 // byte budget before base64 expansion, so a document can never turn this
@@ -312,7 +313,8 @@ function isControlRequest(value: unknown): value is PlacekeeperControlRequest {
       typeof value.request.link === "string" &&
       value.request.link.length <= PLACEKEEPER_LINK_MAX_LENGTH &&
       (value.request.confirmed === undefined || typeof value.request.confirmed === "boolean") &&
-      (value.request.recovery === undefined || ["resume", "discard", "fork"].includes(String(value.request.recovery)));
+      (value.request.recovery === undefined || isRecoveryDecision(value.request.recovery)) &&
+      (value.request.surface === undefined || isLaunchSurface(value.request.surface));
   }
   if (value.kind === "refresh-context" || value.kind === "revoke-task") {
     return typeof value.taskSessionId === "string" &&
@@ -409,10 +411,11 @@ async function dispatch(
     if (request.kind === "claim-binding") {
       return {
         kind: "binding",
-        result: host.broker.taskBindings.claim(request),
+        result: await host.broker.claimTaskBinding(request),
       };
     }
     if (request.kind === "refresh-context") {
+      await host.broker.prepareTaskContext(request.taskSessionId);
       return {
         kind: "context",
         result: await host.context.refresh({
@@ -429,7 +432,7 @@ async function dispatch(
     }
     if (request.kind === "revoke-task") {
       host.context.discardTask(request.taskSessionId);
-      host.broker.taskBindings.revokeTask(request.taskSessionId);
+      await host.broker.revokeTask(request.taskSessionId);
       host.reconciliation.discardTask(request.taskSessionId);
       host.sourceWorkflow.discardTask(request.taskSessionId);
       return { kind: "revoked" };

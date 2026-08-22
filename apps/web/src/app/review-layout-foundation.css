@@ -82,16 +82,16 @@
   color: currentColor;
 }
 
-.review-shell button:focus-visible,
-.review-shell input:focus-visible,
-.review-shell textarea:focus-visible {
+:is(.review-shell, .compact-editorial-modal) button:focus-visible,
+:is(.review-shell, .compact-editorial-modal) input:focus-visible,
+:is(.review-shell, .compact-editorial-modal) textarea:focus-visible {
   outline: 3px solid var(--review-focus);
   outline-offset: 2px;
 }
 
-.review-shell button:disabled,
-.review-shell input:disabled,
-.review-shell textarea:disabled {
+:is(.review-shell, .compact-editorial-modal) button:disabled,
+:is(.review-shell, .compact-editorial-modal) input:disabled,
+:is(.review-shell, .compact-editorial-modal) textarea:disabled {
   cursor: not-allowed;
   opacity: .52;
 }

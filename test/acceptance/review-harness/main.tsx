@@ -6,6 +6,8 @@ import {
   ReviewShell,
   type RejectedReviewCommand,
 } from '../../../apps/web/src/app/ReviewShell.js';
+import { SaveDestinationDialog } from '../../../apps/web/src/save/SaveDestinationDialog.js';
+import { CommentComposer } from '../../../apps/web/src/review/CommentComposer.js';
 import { projectReviewItems } from '../../../apps/web/src/review/annotation-projection.js';
 import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
 import type { CaretAnchor, SelectionAnchor } from '../../../apps/web/src/pdf/selection-anchor.js';
@@ -30,7 +32,50 @@ import { resolveVisualScenario, VisualDocument } from './visual-scenarios.js';
 const root = document.querySelector('#root');
 if (!root) throw new Error('Review harness root is missing');
 const visualScenario = resolveVisualScenario(window.location.search);
+const previewParameters = new URLSearchParams(window.location.search);
+const saveEstablishing = previewParameters.has('establishing');
+const composerPreview = previewParameters.get('composer');
+const composerPreviewTitles: Readonly<Record<string, string>> = {
+  replacement: 'Replacement',
+  insertion: 'Insertion',
+  highlight: 'Highlight Comment',
+  'page-note': 'Page Note',
+  'edit-highlight': 'Edit Highlight',
+  'edit-page-note': 'Edit Page Note',
+  'edit-replacement': 'Edit Replacement',
+  'edit-insertion': 'Edit Insertion',
+};
 if (visualScenario) root.setAttribute('data-production-root', 'true');
+if (composerPreview && composerPreviewTitles[composerPreview]) {
+  document.title = `${composerPreviewTitles[composerPreview]} — Composer preview`;
+}
+
+function ComposerPreview({ name }: { readonly name: string }) {
+  const common = {
+    onSave: async () => undefined,
+    onDismiss: () => undefined,
+  };
+  switch (name) {
+    case 'replacement':
+      return <CommentComposer title="Replacement" fieldLabel="Replacement" saveLabel="Apply" allowWhitespace {...common} />;
+    case 'insertion':
+      return <CommentComposer title="Insertion" fieldLabel="Insertion" saveLabel="Apply" allowWhitespace {...common} />;
+    case 'highlight':
+      return <CommentComposer title="Highlight Comment" optional onSkip={async () => undefined} {...common} />;
+    case 'page-note':
+      return <CommentComposer title="Page Note" {...common} />;
+    case 'edit-highlight':
+      return <CommentComposer title="Edit Highlight" saveLabel="Apply" initialValue="Check the identification claim." optional {...common} />;
+    case 'edit-page-note':
+      return <CommentComposer title="Edit Page Note" saveLabel="Apply" initialValue="Add a cross-reference to the appendix." {...common} />;
+    case 'edit-replacement':
+      return <CommentComposer title="Edit Replacement" fieldLabel="Replacement" saveLabel="Apply" allowWhitespace initialValue="admits a locally unique equilibrium" {...common} />;
+    case 'edit-insertion':
+      return <CommentComposer title="Edit Insertion" fieldLabel="Insertion" saveLabel="Apply" allowWhitespace initialValue="under the maintained assumptions" {...common} />;
+    default:
+      return null;
+  }
+}
 
 const selection: SelectionAnchor = {
   pageIndex: 0,
@@ -572,9 +617,33 @@ function Harness() {
     </ReviewShell>
   );
 
-  return visualScenario
-    ? <main data-production-review data-visual-scene={visualScenario.name}>{shell}</main>
-    : shell;
+  if (!visualScenario) return shell;
+  const saveDestinationOpen = visualScenario.name === 'save-destination'
+    || visualScenario.name === 'save-recovery';
+  return (
+    <main data-production-review data-visual-scene={visualScenario.name}>
+      {shell}
+      {saveDestinationOpen ? (
+        <SaveDestinationDialog
+          open
+          establishing={saveEstablishing}
+          proposal={{
+            filename: 'Identification Strategy — annotated.pdf',
+            folder: '/Users/reviewer/Documents/Working Papers',
+          }}
+          {...(visualScenario.name === 'save-recovery' ? {
+            recoveryTarget: 'Identification Strategy — annotated.pdf',
+            onRetry: async () => undefined,
+            onLocate: async () => undefined,
+          } : {})}
+          onConfirm={async () => undefined}
+          onCancel={() => undefined}
+          onChooseLocation={async () => undefined}
+        />
+      ) : null}
+      {composerPreview ? <ComposerPreview name={composerPreview} /> : null}
+    </main>
+  );
 }
 
 createRoot(root).render(<Harness />);

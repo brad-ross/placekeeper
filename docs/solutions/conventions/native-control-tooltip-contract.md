@@ -1,7 +1,7 @@
 ---
 title: Native control tooltip contract for the PDF review interface
 date: 2026-08-12
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 category: conventions
 module: web-review-interface
 problem_type: convention
@@ -45,7 +45,7 @@ The source-wide presence check therefore complements—not replaces—targeted i
 
 Add an explicit `title` attribute to every literal native `button`, `input`, `select`, and `textarea` in `apps/web/src/**/*.tsx`. In the normal case, its runtime value should describe the immediate action rather than the surrounding feature. Navigation titles say where activation goes, mutation titles name the mutation, and disclosure controls say what they open.
 
-For example, the PDF link overlay has a target-specific accessible name, but its normal tooltip says `Open link actions` because activating the button opens a menu rather than immediately following the link. When no safe target is available, both channels expose that unavailability (`apps/web/src/pdf/PdfLinkControl.tsx:118-132`). Likewise, the workspace mode strip distinguishes selecting References from moving the workspace: the tab title says `Show References`, while the adjacent docking action has its own action-specific label and tooltip (`apps/web/src/review/WorkspaceModeStrip.tsx:75-113`).
+For example, the PDF link overlay has a target-specific accessible name, but its normal tooltip says `Open link actions` because activating the button opens a menu rather than immediately following the link. When no safe target is available, both channels expose that unavailability (`apps/web/src/pdf/PdfLinkControl.tsx:118-132`). Likewise, the workspace mode strip distinguishes selecting References from moving the workspace: the tab title says `Show References`, while the adjacent docking action has its own action-specific label and tooltip (`apps/web/src/review/WorkspaceModeStrip.tsx:78-126`).
 
 ### Keep hover text and accessible naming semantically aligned
 
@@ -53,7 +53,7 @@ For example, the PDF link overlay has a target-specific accessible name, but its
 
 `ContextActionButton` demonstrates the intended split: icon-only variants receive `aria-label={action.label}`, every variant receives `title={action.label}`, and visible-label variants render the same action label as text (`apps/web/src/review/ContextActionPalette.tsx:14-30`). The workspace edge rail similarly derives `aria-label` and `title` from the same state-aware function, preventing the two strings from drifting as the rail changes between open and closed states (`apps/web/src/review/WorkspaceEdgeRail.tsx:20-40`).
 
-Exact string duplication is not required when the channels serve different levels of detail. The page trigger includes current and total pages in its accessible name but uses the concise hover instruction `Enter a page number`; its resulting numeric input keeps a field-specific `aria-label` and the same instructional tooltip (`apps/web/src/review/ReviewChrome.tsx:287-346`). The zoom trigger and input follow the same pattern (`apps/web/src/review/ReviewChrome.tsx:362-425`). The invariant is semantic truthfulness: each string accurately describes its role and immediate action.
+Exact string duplication is not required when the channels serve different levels of detail. The page trigger includes current and total pages in its accessible name but uses the concise hover instruction `Enter a page number`; its resulting numeric input keeps a field-specific `aria-label` and the same instructional tooltip (`apps/web/src/review/ReviewChrome.tsx:295-354`). The zoom trigger and input follow the same pattern (`apps/web/src/review/ReviewChrome.tsx:363-435`). The invariant is semantic truthfulness: each string accurately describes its role and immediate action.
 
 ### Make exceptions state-specific, accessible, and tested
 
@@ -148,7 +148,8 @@ This is an explicit state policy, not a missing attribute. The focused test shou
 ## Related
 
 - [Truthful compact agent-context status](../design-patterns/truthful-compact-agent-context-status.md) — the corresponding custom hover/focus disclosure pattern for a passive state indicator rather than a native actionable control.
-- [Outline-aware annotation workspace presentation](../design-patterns/outline-aware-annotation-workspace-presentation.md) — related guidance on accessible labeling and capability-driven workspace composition.
+- [Content-aware annotation workspace presentation](../design-patterns/outline-aware-annotation-workspace-presentation.md) — related guidance on accessible labeling and capability-driven workspace composition.
+- [Compact Editorial language for annotation modals](../design-patterns/compact-editorial-language-for-annotation-modals.md) — complementary modal copy, action-label, and presentation guidance that retains explicit native-control tooltip policies.
 - [Reliable compact right-docked Reference Tabs](../ui-bugs/reliable-compact-right-docked-reference-tabs.md) — complementary geometry and interaction guidance for compact Reference controls.
 - [Authority boundaries for reloadable local-review URLs](../architecture-patterns/reloadable-local-review-url-authority-boundaries.md) — the durable-location and non-navigating Copy Link contract that motivates the enabled-tooltip exception.
 - [PR #29: unify interface interactions and accessibility](https://github.com/brad-ross/placekeeper/pull/29) — merged source of the general native-control tooltip convention.
