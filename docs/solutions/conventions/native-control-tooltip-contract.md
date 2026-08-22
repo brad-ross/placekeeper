@@ -149,7 +149,7 @@ This is an explicit state policy, not a missing attribute. The focused test shou
 
 - [Truthful compact agent-context status](../design-patterns/truthful-compact-agent-context-status.md) — the corresponding custom hover/focus disclosure pattern for a passive state indicator rather than a native actionable control.
 - [Content-aware annotation workspace presentation](../design-patterns/outline-aware-annotation-workspace-presentation.md) — related guidance on accessible labeling and capability-driven workspace composition.
-- [Compact Editorial language for annotation modals](../design-patterns/compact-editorial-language-for-annotation-modals.md) — complementary modal copy, action-label, and presentation guidance that retains explicit native-control tooltip policies.
+- [Compact Editorial language for review task surfaces](../design-patterns/compact-editorial-language-for-annotation-modals.md) — complementary task-surface copy, action-label, and presentation guidance that retains explicit native-control tooltip policies.
 - [Reliable compact right-docked Reference Tabs](../ui-bugs/reliable-compact-right-docked-reference-tabs.md) — complementary geometry and interaction guidance for compact Reference controls.
 - [Authority boundaries for reloadable local-review URLs](../architecture-patterns/reloadable-local-review-url-authority-boundaries.md) — the durable-location and non-navigating Copy Link contract that motivates the enabled-tooltip exception.
 - [PR #29: unify interface interactions and accessibility](https://github.com/brad-ross/placekeeper/pull/29) — merged source of the general native-control tooltip convention.

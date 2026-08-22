@@ -139,7 +139,7 @@ Supporting copy appears only when it adds context. Creation comments use Save, e
 ### Contextual Annotation Composer
 The nonmodal Compact Editorial authoring surface for replacement, insertion, highlight comments, Page Notes, and mutable Review Item edits.
 
-On wide surfaces it temporarily occupies the review edge while leaving the live PDF available. On narrow surfaces it becomes a contained bottom surface. Its draft remains bound to the original anchor during document navigation, and an explicit return recovers that anchor without overriding deliberate reading position or displaced Annotation Tray state.
+At authoring start it freezes the original anchor and document authority while projecting the mutable draft as a provisional Owned Annotation in the live PDF. It temporarily takes over the Annotation Tray presentation without discarding the underlying tray state; a title-adjacent target action appears only when the anchor leaves the usable viewport. Cancelling removes the projection without changing Review Items, while an accepted action commits through normal review state.
 
 Dedicated nonmodal task surfaces may adopt the same structural grammar without becoming literal modals. They retain their own behavior, lifecycle, and security contracts.
 

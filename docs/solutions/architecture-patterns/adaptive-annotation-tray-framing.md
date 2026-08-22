@@ -1,7 +1,7 @@
 ---
 title: Adaptive annotation tray framing without resizing the PDF viewer
 date: 2026-08-08
-last_updated: 2026-08-21
+last_updated: 2026-08-22
 category: architecture-patterns
 module: PDF review annotation tray framing
 problem_type: architecture_pattern
@@ -39,7 +39,9 @@ tags:
 
 An annotation surface over a PDF is not an ordinary drawer. It shares space with a stateful, zoomable document whose reading position is itself user state. Opening the surface must expose annotations without remounting or resizing the viewer, cover as little of the current reading context as possible, and distinguish movement performed by the interface from movement the reviewer performs while the surface is open.
 
-The implementation keeps the PDF full-stage while coordinating two workspace surfaces: `ReferenceWorkspace` owns References and `OutlineAnnotationsWorkspace` owns Outline, Search, and Annotations (`apps/web/src/app/ReviewShell.tsx:1121-1235`, `apps/web/src/review/OutlineAnnotationsWorkspace.tsx:113-200`). Disclosure and presentation remain independent, so right-drawer and bottom-sheet geometry can change without rebuilding the PDF viewer or its review state. Production coverage carries mount probes and zoom state through responsive transitions (`test/acceptance/production-flow.spec.ts:3126-3335`).
+The implementation keeps the PDF full-stage while coordinating two persistent workspace surfaces: `ReferenceWorkspace` owns References and `OutlineAnnotationsWorkspace` owns Outline, Search, and Annotations (`apps/web/src/app/ReviewShell.tsx:1454-1529`, `apps/web/src/review/OutlineAnnotationsWorkspace.tsx:113-200`). Disclosure and presentation remain independent, so right-drawer and bottom-sheet geometry can change without rebuilding the PDF viewer or its review state. Production coverage carries mount probes and zoom state through responsive transitions (`test/acceptance/production-flow.spec.ts:3488-3831`).
+
+Annotation authoring now adds a temporary presentation to that same edge host without becoming another framing owner. The Contextual Annotation Composer takes over the visible edge while the underlying workspaces remain mounted and inert; its rectangle is published as occlusion for frozen-anchor visibility and Return to annotation, not as animated PDF runway input (`apps/web/src/app/ReviewShell.tsx:1404-1529`, `apps/web/src/app/ProductionReviewApp.tsx:708-780`). Closing authoring restores the displaced workspace snapshot rather than reconstructing or reframing it (`apps/web/src/app/ReviewShell.tsx:688-715`, `apps/web/src/app/ReviewShell.tsx:765-803`).
 
 Earlier design and validation sessions exposed several tempting approaches that violated that contract (session history):
 
@@ -131,9 +133,9 @@ Use three complementary levels:
 
 1. Pure unit tests for minimum reveal, rectangle intersection/union, hysteresis, per-axis restoration, clamping, and stale-token invalidation (`apps/web/test/viewer-framing.test.ts:22-220`).
 2. Shell-level acceptance tests for toggle behavior, mounted drafts, mark activation, list correspondence, explicit dismissal, and focus restoration (`test/acceptance/review-workflow.spec.ts`).
-3. Installed-style browser tests against real EmbedPDF geometry for zoomed oversized pages, temporary runway, right/bottom presentation changes, height-only resizing, user-owned close behavior, document-gesture preservation, stacking and hit testing, and stable mount/zoom state (`test/acceptance/production-flow.spec.ts:1553-1616`, `test/acceptance/production-flow.spec.ts:3126-3498`). Run the geometry-sensitive scenarios in both Chromium and WebKit.
+3. Installed-style browser tests against real EmbedPDF geometry for zoomed oversized pages, temporary runway, right/bottom presentation changes, height-only resizing, user-owned close behavior, document-gesture preservation, stacking and hit testing, and stable mount/zoom state (`test/acceptance/production-flow.spec.ts:3103-3831`). Run the geometry-sensitive scenarios in both Chromium and WebKit.
 
-For animation regressions, sample the whole transition rather than asserting only the endpoints. The right-drawer test records intermediate frames, requires the rail to follow the tray, and rejects every runway width between the closed and committed-open widths (`test/acceptance/production-flow.spec.ts:3006-3102`). The bottom-sheet test also keeps the tray's left edge fixed to the stage so vertical disclosure cannot drift sideways (`test/acceptance/production-flow.spec.ts:3104-3197`). Static CSS checks protect the orientation-specific transforms, and Reduced Motion coverage requires zero-duration disclosure for both the tray and rail (`apps/web/test/review-layout.test.tsx:659-675`, `test/acceptance/review-workflow.spec.ts:764-773`).
+For animation regressions, sample the whole transition rather than asserting only the endpoints. The right-drawer test records intermediate frames, requires the rail to follow the tray, and rejects every runway width between the closed and committed-open widths (`test/acceptance/production-flow.spec.ts:3103-3199`). The bottom-sheet test also keeps the tray's left edge fixed to the stage so vertical disclosure cannot drift sideways (`test/acceptance/production-flow.spec.ts:3201-3294`). Static CSS checks protect the orientation-specific transforms, and Reduced Motion coverage requires zero-duration disclosure for both the tray and rail (`apps/web/test/review-layout.test.tsx:659-675`, `test/acceptance/review-workflow.spec.ts:989-1002`).
 
 ## Why This Matters
 
@@ -181,6 +183,7 @@ A click, drag selection, scrollbar movement, wheel or touch scroll, secondary po
 - [Prevent Send-to-Main viewport rebound](../ui-bugs/send-to-main-viewport-rebound.md) — a related motion failure caused by stale navigation and framing ownership rather than transition-frame geometry.
 - [Adaptive annotation tray reflow plan](../../plans/2026-08-08-001-fix-adaptive-annotation-tray-reflow-plan.md) — historical design exploration; its outside-tap dismissal rule was superseded by the explicit-close contract documented here.
 - [Content-aware annotation workspace presentation](../design-patterns/outline-aware-annotation-workspace-presentation.md)
+- [Contextual Annotation Composer preserves document context during authoring](../design-patterns/contextual-annotation-composer-preserves-document-context-during-authoring.md) — reuses the edge host without making its provisional preview or composer occlusion part of the runway authority.
 - [Selected behavior visual reference](../../plans/assets/2026-08-08-adaptive-annotation-tray/selected-behavior.html)
 - [Behavior alternatives visual reference](../../plans/assets/2026-08-08-adaptive-annotation-tray/behavior-options.html)
 - [Reading-first PDF review interface plan](../../plans/2026-08-07-002-feat-reading-first-pdf-review-interface-plan.md)

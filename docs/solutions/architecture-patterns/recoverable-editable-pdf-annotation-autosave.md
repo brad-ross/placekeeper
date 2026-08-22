@@ -163,6 +163,6 @@ When an annotated PDF is reopened without private recovery data, valid portable 
 
 - [Adaptive annotation tray framing](adaptive-annotation-tray-framing.md) applies the sibling pattern of coalescing latest work and invalidating stale asynchronous completions to viewer geometry rather than file persistence.
 - [Content-aware annotation workspace presentation](../design-patterns/outline-aware-annotation-workspace-presentation.md) shows the same fail-closed generation principle for document-derived UI state.
-- [Compact Editorial language for annotation modals](../design-patterns/compact-editorial-language-for-annotation-modals.md) defines the recovery dialog's presentation and action language while preserving these persistence transitions.
+- [Compact Editorial language for review task surfaces](../design-patterns/compact-editorial-language-for-annotation-modals.md) defines the recovery dialog's presentation and action language while preserving these persistence transitions.
 - [Portable PDF annotations invisible in external viewers](../integration-issues/portable-pdf-annotations-invisible-in-external-viewers.md) documents the narrower appearance and crop-relative geometry failure that PR #21 corrected without changing this broader autosave architecture.
 - PR #19 contains the implementation described here and merged into `main` on 2026-08-11 (America/New_York).
