@@ -109,6 +109,10 @@ body:has(.terminal-recovery) {
   gap: var(--review-action-group-gap);
 }
 
+.terminal-recovery__actions:empty {
+  display: none;
+}
+
 .terminal-recovery__actions:has(.terminal-recovery__choice) {
   display: grid;
   gap: .625rem;

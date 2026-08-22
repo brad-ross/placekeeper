@@ -401,6 +401,21 @@ test("a successor daemon keeps the old origin but serves a stale view as inert c
     });
     expect(footerGeometry.statusDisplay).toBe("none");
     expect(Math.abs(footerGeometry.actualHeight - footerGeometry.expectedHeight)).toBeLessThanOrEqual(1);
+    const bodyGeometry = await page.evaluate(() => {
+      const body = document.querySelector<HTMLElement>(".terminal-recovery__body")!;
+      const explanation = body.querySelector<HTMLElement>("p:first-child")!;
+      const actions = document.querySelector<HTMLElement>(".terminal-recovery__actions")!;
+      const style = getComputedStyle(body);
+      return {
+        actualHeight: body.getBoundingClientRect().height,
+        expectedHeight: explanation.getBoundingClientRect().height
+          + Number.parseFloat(style.paddingTop)
+          + Number.parseFloat(style.paddingBottom),
+        actionsDisplay: getComputedStyle(actions).display,
+      };
+    });
+    expect(bodyGeometry.actionsDisplay).toBe("none");
+    expect(Math.abs(bodyGeometry.actualHeight - bodyGeometry.expectedHeight)).toBeLessThanOrEqual(1);
     await expect(page.getByLabel("Browser link")).toHaveCount(0);
     await expect(page.getByLabel("Placekeeper link")).toHaveCount(0);
     expect(page.url()).toBe(`${readableUrl.origin}${readableUrl.pathname}${exactFragment}`);
@@ -520,6 +535,8 @@ test("a successor offers a real protected draft and preserves exact choices acro
     });
     await page.goto(staleUrl);
     await expect(page.locator("[data-terminal-recovery='enhanced']")).toBeVisible();
+    const ordinaryHeight = await page.locator("[data-terminal-recovery]")
+      .evaluate((element) => element.getBoundingClientRect().height);
     await page.getByRole("button", { name: "Reopen" }).click();
 
     const resume = page.getByRole("button", { name: "Resume draft" });
@@ -533,6 +550,9 @@ test("a successor offers a real protected draft and preserves exact choices acro
     await expect(fork.locator(".review-icon")).toHaveCount(1);
     await expect(resume).toBeFocused();
     await expect(page.locator(".terminal-recovery__choice")).toHaveCount(3);
+    const offeredHeight = await page.locator("[data-terminal-recovery]")
+      .evaluate((element) => element.getBoundingClientRect().height);
+    expect(offeredHeight).toBeGreaterThan(ordinaryHeight);
     await expect(page.getByText("Continue the protected draft with all unfinished work.")).toBeVisible();
     await expect(page.getByText(/Permanently remove the protected draft/iu)).toBeVisible();
     await expect(page.getByText(/independent session/iu)).toBeVisible();
