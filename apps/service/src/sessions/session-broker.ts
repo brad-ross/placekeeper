@@ -1429,7 +1429,7 @@ export class SessionBroker {
     });
   }
 
-  sessionScope(sessionId: string, credential?: string):
+  async sessionScope(sessionId: string, credential?: string): Promise<
     | {
         readonly documentTitle: string;
         readonly sourceRootPath?: string;
@@ -1440,7 +1440,8 @@ export class SessionBroker {
         readonly requestedLocation?: PlacekeeperLinkLocation;
         readonly codexContext?: ReturnType<TaskBindingRegistry["statusForReview"]>;
       }
-    | undefined {
+    | undefined
+  > {
     const session = this.#activeById.get(sessionId);
     if (session === undefined) return undefined;
     const sourceRootPath = session.rootId === undefined
@@ -1458,11 +1459,23 @@ export class SessionBroker {
         ? trustedLaunchScope
         : undefined;
     if (trustedCodexScope !== undefined) {
-      this.taskBindings.renewBrowserHeartbeat({
+      const heartbeat = this.taskBindings.renewBrowserHeartbeat({
         reviewSessionId: sessionId,
         documentGeneration: session.documentGeneration,
         browserCapabilityHash: trustedCodexScope.browserCapabilityHash,
       });
+      const reconnectBinding = this.#reconnectBindingsByCapabilityHash.get(
+        trustedCodexScope.browserCapabilityHash,
+      );
+      if (
+        heartbeat.status === "active" &&
+        reconnectBinding?.reviewSessionId === sessionId &&
+        reconnectBinding.documentGeneration === session.documentGeneration &&
+        reconnectBinding.canonicalSourcePath === session.canonicalSourcePath &&
+        reconnectBinding.sourceDigest === session.state.source.digest
+      ) {
+        await this.restartReconnects.issue(reconnectBinding);
+      }
     }
     return {
       documentTitle: basename(session.canonicalSourcePath),

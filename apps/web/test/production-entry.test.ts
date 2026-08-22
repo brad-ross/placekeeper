@@ -20,25 +20,16 @@ describe('terminal readable-view recovery', () => {
     expect(terminalRecoveryLocationFragment('#unsafe')).toBe('v=1&page=1');
   });
 
-  it('derives a human-readable filename and distinguishing parent hint from the canonical link', () => {
+  it('derives only the human-readable filename needed by the recovery heading', () => {
     expect(terminalRecoveryDocumentIdentity(
       'placekeeper:///Users/brad/Papers/Current%20Draft.pdf',
     )).toEqual({
       filename: 'Current Draft.pdf',
-      parentFolder: 'Papers',
-      pathMarker: expect.stringMatching(/^[a-z0-9]{7}$/u),
     });
     expect(terminalRecoveryDocumentIdentity(
       'placekeeper:///Root%20Paper.pdf',
     )).toEqual({
       filename: 'Root Paper.pdf',
-      parentFolder: '/',
-      pathMarker: expect.stringMatching(/^[a-z0-9]{7}$/u),
     });
-    expect(terminalRecoveryDocumentIdentity(
-      'placekeeper:///Users/brad/Papers/Draft.pdf',
-    ).pathMarker).not.toBe(terminalRecoveryDocumentIdentity(
-      'placekeeper:///Volumes/team/Papers/Draft.pdf',
-    ).pathMarker);
   });
 });

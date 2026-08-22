@@ -174,7 +174,7 @@ function htmlAttribute(value: string): string {
 
 function terminalRecoveryMarkup(appLinkBase: string, hidden = false): string {
   const base = htmlAttribute(appLinkBase);
-  return `<main data-terminal-recovery${hidden ? " hidden" : ""}><p>This live review is no longer available.</p><a data-placekeeper-reopen data-app-link-base="${base}" href="#" aria-disabled="true">Reopen in Placekeeper</a></main>`;
+  return `<main data-terminal-recovery${hidden ? " hidden" : ""}><p>This session is no longer available.</p><a data-placekeeper-reopen data-app-link-base="${base}" href="#" aria-disabled="true">Reopen</a></main>`;
 }
 
 const terminalRecoveryFallbackScript = `
@@ -582,7 +582,7 @@ export async function startHttpServer(
         sendJson(
           response,
           200,
-          broker.sessionScope(scopeMatch[1]!, bearerCredential(request)),
+          await broker.sessionScope(scopeMatch[1]!, bearerCredential(request)),
         );
         return;
       }

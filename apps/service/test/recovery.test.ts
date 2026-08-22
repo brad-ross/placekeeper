@@ -664,7 +664,7 @@ describe("save-aware recovery migration", () => {
       recoveryOperationId: randomUUID(),
     });
     if (resumed.kind !== "opened") throw new Error("Expected resumed review");
-    expect(restarted.sessionScope(resumed.launch.sessionId)?.documentTitle).toBe("moved-paper.pdf");
+    expect((await restarted.sessionScope(resumed.launch.sessionId))?.documentTitle).toBe("moved-paper.pdf");
     expect(restarted.saveStatus(resumed.launch.sessionId)).toMatchObject({
       destination: { phase: "active", kind: "original" },
       sync: { phase: "not-saved" },

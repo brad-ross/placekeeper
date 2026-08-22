@@ -139,7 +139,7 @@ describe("packaged Codex live-context lifecycle", () => {
     const stale = await fetch(`${successor.server.origin}${firstView.view.pathname}`, {
       headers: { cookie: reconnectCookie! },
     });
-    expect(await stale.text()).toContain("This live review is no longer available.");
+    expect(await stale.text()).toContain("This session is no longer available.");
     const link = encodePlacekeeperLink({ path: pdf, location: { kind: "page", page: 2 } });
     const unboundReopen = await postJson(
       `${successor.server.origin}/r/${firstView.view.id}/reopen`,

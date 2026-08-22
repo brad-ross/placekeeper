@@ -126,7 +126,7 @@ test("a live Codex review copies a browser-safe URL, survives refresh, and reope
     await route.continue();
   });
   await slowPage.goto(page.url(), { waitUntil: "domcontentloaded" });
-  const earlyReopen = slowPage.getByRole("link", { name: "Reopen in Placekeeper" });
+  const earlyReopen = slowPage.getByRole("link", { name: "Reopen" });
   await expect(earlyReopen).toHaveAttribute("href", "#");
   await expect(earlyReopen).toHaveAttribute("aria-disabled", "true");
   await earlyReopen.evaluate((anchor) => {
@@ -135,16 +135,16 @@ test("a live Codex review copies a browser-safe URL, survives refresh, and reope
   });
   expect(new URL(slowPage.url()).protocol).toBe("http:");
   releaseApp();
-  await expect(slowPage.getByRole("button", { name: "Reopen review" })).toBeVisible();
+  await expect(slowPage.getByRole("button", { name: "Reopen" })).toBeVisible();
   await expect(earlyReopen).toHaveCount(0);
   await slowPage.close();
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Reopen interrupted review" })).toBeFocused();
-  const reopen = page.getByRole("button", { name: "Reopen review" });
+  await expect(page.getByRole("heading", { name: "Reopen Paper One.pdf" })).toBeFocused();
+  const reopen = page.getByRole("button", { name: "Reopen" });
   await expect(page.getByLabel("Placekeeper link")).toHaveCount(0);
   await expect(page.getByLabel("Browser link")).toHaveCount(0);
-  await page.getByRole("button", { name: "Copy Placekeeper link" }).click();
+  await page.getByRole("button", { name: "Copy Link" }).click();
   expect(await page.evaluate(() => (
     globalThis as typeof globalThis & { __copiedPlacekeeperLink?: string }
   ).__copiedPlacekeeperLink)).toMatch(
@@ -193,7 +193,7 @@ test("a pending restarted browser is promoted to Codex without remounting", asyn
       port,
     });
     await page.goto(staleUrl);
-    await page.getByRole("button", { name: "Reopen review" }).click();
+    await page.getByRole("button", { name: "Reopen" }).click();
     await expect(page.getByRole("button", { name: "Open this PDF" })).toHaveCount(0);
     await expect(page.locator("#root")).toHaveAttribute("data-production-root", "true");
     await expect(page.locator('[data-codex-context]')).toHaveCount(0);
@@ -374,13 +374,33 @@ test("a successor daemon keeps the old origin but serves a stale view as inert c
     page.on("request", recordRequest);
     await page.reload();
     await expect(page.locator("[data-terminal-recovery]")).toBeVisible();
-    await expect(page.locator(".terminal-recovery__document strong")).toHaveText("Successor Paper.pdf");
-    await expect(page.locator(".terminal-recovery__document span")).toContainText(
-      successorRoot.split("/").at(-1)!,
-    );
+    await expect(page.getByRole("heading", { name: "Reopen Successor Paper.pdf" })).toBeFocused();
+    await expect(page.locator(".terminal-recovery__document")).toHaveCount(0);
     await expect(page.getByText(/unfinished work is available/iu)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Reopen review" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Copy Placekeeper link" })).toBeVisible();
+    const reopenButton = page.getByRole("button", { name: "Reopen" });
+    const copyButton = page.getByRole("button", { name: "Copy Link" });
+    await expect(reopenButton).toBeVisible();
+    await expect(reopenButton).toHaveAttribute("data-icon", "redo");
+    await expect(reopenButton.locator(".review-icon")).toHaveCount(1);
+    await expect(copyButton).toBeVisible();
+    await expect(copyButton).toHaveAttribute("data-icon", "link");
+    await expect(copyButton.locator(".review-icon")).toHaveCount(1);
+    const footerGeometry = await page.evaluate(() => {
+      const footer = document.querySelector<HTMLElement>(".terminal-recovery__footer")!;
+      const button = document.querySelector<HTMLElement>(".terminal-recovery__footer button")!;
+      const status = document.querySelector<HTMLElement>(".terminal-recovery__copy-status")!;
+      const style = getComputedStyle(footer);
+      return {
+        actualHeight: footer.getBoundingClientRect().height,
+        expectedHeight: button.getBoundingClientRect().height
+          + Number.parseFloat(style.paddingTop)
+          + Number.parseFloat(style.paddingBottom)
+          + Number.parseFloat(style.borderTopWidth),
+        statusDisplay: getComputedStyle(status).display,
+      };
+    });
+    expect(footerGeometry.statusDisplay).toBe("none");
+    expect(Math.abs(footerGeometry.actualHeight - footerGeometry.expectedHeight)).toBeLessThanOrEqual(1);
     await expect(page.getByLabel("Browser link")).toHaveCount(0);
     await expect(page.getByLabel("Placekeeper link")).toHaveCount(0);
     expect(page.url()).toBe(`${readableUrl.origin}${readableUrl.pathname}${exactFragment}`);
@@ -388,9 +408,11 @@ test("a successor daemon keeps the old origin but serves a stale view as inert c
     expect(requests.some((url) => new URL(url).pathname.endsWith("/reopen"))).toBe(false);
     expect(requests.some((url) => new URL(url).pathname.endsWith("/resume"))).toBe(false);
     expect(requests.some((url) => new URL(url).pathname.startsWith("/s/"))).toBe(false);
-    await expect(page.getByRole("heading", { name: "Reopen interrupted review" })).toBeFocused();
+    await expect(page.getByRole("heading", { name: "Reopen Successor Paper.pdf" })).toBeFocused();
     await page.keyboard.press(browserName === "webkit" ? "Alt+Tab" : "Tab");
-    await expect(page.getByRole("button", { name: "Reopen review" })).toBeFocused();
+    await expect(page.getByRole("button", { name: "Copy Link" })).toBeFocused();
+    await page.keyboard.press(browserName === "webkit" ? "Alt+Tab" : "Tab");
+    await expect(page.getByRole("button", { name: "Reopen" })).toBeFocused();
     const staleViewId = /^\/r\/([0-9a-f-]{36})\//u.exec(readableUrl.pathname)?.[1];
     if (staleViewId === undefined) throw new Error("Expected a readable stale-view route");
     let requestBody: unknown;
@@ -398,7 +420,7 @@ test("a successor daemon keeps the old origin but serves a stale view as inert c
       requestBody = route.request().postDataJSON();
       await route.fulfill({ status: 409 });
     });
-    const reopen = page.getByRole("button", { name: "Reopen review" });
+    const reopen = page.getByRole("button", { name: "Reopen" });
     await reopen.click();
     await expect(page.getByRole("alert")).toContainText("could not reopen this PDF");
     await expect(page.getByRole("alert")).toBeFocused();
@@ -422,7 +444,7 @@ test("a successor daemon keeps the old origin but serves a stale view as inert c
     });
     const beforeCopyUrl = page.url();
     const beforeCopySelection = await page.evaluate(() => window.getSelection()?.toString() ?? "");
-    await page.getByRole("button", { name: "Copy Placekeeper link" }).click();
+    await page.getByRole("button", { name: "Copy Link" }).click();
     expect(await copiedPlacekeeperLink(page)).toMatch(
       /^placekeeper:\/\/\/.*Successor%20Paper\.pdf#v=2&page=1&mode=fit-horizontal&params=640$/u,
     );
@@ -436,7 +458,7 @@ test("a successor daemon keeps the old origin but serves a stale view as inert c
         value: { writeText: async () => Promise.reject(new Error("denied")) },
       });
     });
-    await page.getByRole("button", { name: "Copy Placekeeper link" }).click();
+    await page.getByRole("button", { name: "Copy Link" }).click();
     await expect(page.getByText(/Clipboard access failed/iu)).toBeVisible();
     await expect(page.getByRole("button", { name: "Retry" })).toBeFocused();
     await expect(page.getByLabel("Canonical Placekeeper link")).toHaveValue(
@@ -445,7 +467,7 @@ test("a successor daemon keeps the old origin but serves a stale view as inert c
     expect((await page.context().cookies(readableUrl.origin)).some(({ name }) => name === "placekeeper_view"))
       .toBe(false);
     await page.unroute(`**/r/${staleViewId}/reopen`);
-    await page.getByRole("button", { name: "Reopen review" }).click();
+    await page.getByRole("button", { name: "Reopen" }).click();
     await expect(page.getByRole("button", { name: "Open this PDF" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Cancel" })).toHaveCount(0);
     await expect(page.locator("#root")).toHaveAttribute("data-production-root", "true");
@@ -498,16 +520,22 @@ test("a successor offers a real protected draft and preserves exact choices acro
     });
     await page.goto(staleUrl);
     await expect(page.locator("[data-terminal-recovery='enhanced']")).toBeVisible();
-    await page.getByRole("button", { name: "Reopen review" }).click();
+    await page.getByRole("button", { name: "Reopen" }).click();
 
     const resume = page.getByRole("button", { name: "Resume draft" });
     const discard = page.getByRole("button", { name: "Discard draft" });
     const fork = page.getByRole("button", { name: "Open separate copy" });
+    await expect(resume).toHaveAttribute("data-icon", "redo");
+    await expect(discard).toHaveAttribute("data-icon", "delete");
+    await expect(fork).toHaveAttribute("data-icon", "plus");
+    await expect(resume.locator(".review-icon")).toHaveCount(1);
+    await expect(discard.locator(".review-icon")).toHaveCount(1);
+    await expect(fork.locator(".review-icon")).toHaveCount(1);
     await expect(resume).toBeFocused();
     await expect(page.locator(".terminal-recovery__choice")).toHaveCount(3);
     await expect(page.getByText("Continue the protected draft with all unfinished work.")).toBeVisible();
     await expect(page.getByText(/Permanently remove the protected draft/iu)).toBeVisible();
-    await expect(page.getByText(/independent review copy/iu)).toBeVisible();
+    await expect(page.getByText(/independent session/iu)).toBeVisible();
 
     const tabKey = browserName === "webkit" ? "Alt+Tab" : "Tab";
     await page.keyboard.press(tabKey);
@@ -515,7 +543,7 @@ test("a successor offers a real protected draft and preserves exact choices acro
     await page.keyboard.press(tabKey);
     await expect(fork).toBeFocused();
     await page.keyboard.press(tabKey);
-    await expect(page.getByRole("button", { name: "Copy Placekeeper link" })).toBeFocused();
+    await expect(page.getByRole("button", { name: "Copy Link" })).toBeFocused();
 
     const viewId = /^\/r\/([0-9a-f-]{36})\//u.exec(new URL(staleUrl).pathname)?.[1];
     if (viewId === undefined) throw new Error("Expected a protected-draft stale route");
@@ -591,9 +619,9 @@ test("a successor offers a real protected draft and preserves exact choices acro
     });
     await page.getByRole("button", { name: "Resume draft" }).click();
     await expect(page.getByRole("alert")).toContainText("no longer current");
-    await expect(page.getByRole("button", { name: "Reopen review" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reopen" })).toBeVisible();
     await expect(page.locator(".terminal-recovery__choice")).toHaveCount(0);
-    await page.getByRole("button", { name: "Reopen review" }).click();
+    await page.getByRole("button", { name: "Reopen" }).click();
     await expect(page.getByRole("button", { name: "Resume draft" })).toBeFocused();
     await page.getByRole("button", { name: "Resume draft" }).click();
     await expect(page.locator("#root")).toHaveAttribute("data-production-root", "true");
@@ -628,18 +656,24 @@ test("terminal recovery contains narrow and short touch viewports without unders
     await page.goto(
       `${geometryHost.server.origin}/r/${randomUUID()}/private/tmp/Narrow%20Paper.pdf#v=1&page=1`,
     );
-    await expect(page.getByRole("button", { name: "Reopen review" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reopen" })).toBeVisible();
     expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
     const narrow = await page.evaluate(() => ({
       innerWidth,
       scrollWidth: document.documentElement.scrollWidth,
       recovery: document.querySelector<HTMLElement>("[data-terminal-recovery]")!.getBoundingClientRect().toJSON(),
+      copy: document.querySelector<HTMLElement>(".terminal-recovery__copy-actions > button")!
+        .getBoundingClientRect().toJSON(),
+      reopen: document.querySelector<HTMLElement>(".terminal-recovery__primary-actions > button")!
+        .getBoundingClientRect().toJSON(),
       controls: [...document.querySelectorAll<HTMLElement>("button")]
         .map((control) => control.getBoundingClientRect().toJSON()),
     }));
     expect(narrow.scrollWidth).toBeLessThanOrEqual(narrow.innerWidth);
     expect(narrow.recovery.left).toBeGreaterThanOrEqual(0);
     expect(narrow.recovery.right).toBeLessThanOrEqual(narrow.innerWidth);
+    expect(narrow.copy.right).toBeLessThan(narrow.reopen.left);
+    expect(Math.abs(narrow.copy.top - narrow.reopen.top)).toBeLessThanOrEqual(1);
     expect(narrow.controls.length).toBeGreaterThanOrEqual(2);
     for (const control of narrow.controls) expect(control.height).toBeGreaterThanOrEqual(44);
 
@@ -647,17 +681,27 @@ test("terminal recovery contains narrow and short touch viewports without unders
     const short = await page.evaluate(() => ({
       innerWidth,
       scrollWidth: document.documentElement.scrollWidth,
+      recovery: document.querySelector<HTMLElement>("[data-terminal-recovery]")!.getBoundingClientRect().toJSON(),
+      copy: document.querySelector<HTMLElement>(".terminal-recovery__copy-actions > button")!
+        .getBoundingClientRect().toJSON(),
+      reopen: document.querySelector<HTMLElement>(".terminal-recovery__primary-actions > button")!
+        .getBoundingClientRect().toJSON(),
       controls: [...document.querySelectorAll<HTMLElement>("button")]
         .map((control) => control.getBoundingClientRect().toJSON()),
     }));
     expect(short.scrollWidth).toBeLessThanOrEqual(short.innerWidth);
+    expect(short.recovery.width).toBeLessThan(short.innerWidth);
+    expect(short.recovery.left).toBeGreaterThan(0);
+    expect(short.recovery.right).toBeLessThan(short.innerWidth);
+    expect(short.copy.right).toBeLessThan(short.reopen.left);
+    expect(Math.abs(short.copy.top - short.reopen.top)).toBeLessThanOrEqual(1);
     for (const control of short.controls) {
       expect(control.left).toBeGreaterThanOrEqual(0);
       expect(control.right).toBeLessThanOrEqual(short.innerWidth);
     }
-    await page.getByRole("button", { name: "Reopen review" }).scrollIntoViewIfNeeded();
-    await page.getByRole("button", { name: "Copy Placekeeper link" }).scrollIntoViewIfNeeded();
-    await expect(page.getByRole("button", { name: "Copy Placekeeper link" })).toBeVisible();
+    await page.getByRole("button", { name: "Reopen" }).scrollIntoViewIfNeeded();
+    await page.getByRole("button", { name: "Copy Link" }).scrollIntoViewIfNeeded();
+    await expect(page.getByRole("button", { name: "Copy Link" })).toBeVisible();
   } finally {
     await context.close();
     await geometryHost.close();

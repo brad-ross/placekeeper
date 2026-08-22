@@ -52,18 +52,23 @@
     min-height: var(--review-control-touch);
   }
 
-  .terminal-recovery {
-    --terminal-recovery-gutter: 1rem;
+}
+
+@media (max-width: 480px) {
+  body:has(.terminal-recovery) {
+    padding: .75rem;
   }
 
-  .terminal-recovery__actions,
-  .terminal-recovery__copy-actions {
+  .terminal-recovery {
+    max-height: calc(100dvh - 1.5rem);
+  }
+
+  .terminal-recovery__choice {
+    grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
   }
 
-  .terminal-recovery__choice,
-  .terminal-recovery__actions > button,
-  .terminal-recovery__copy-actions > button {
+  .terminal-recovery__choice > button {
     width: 100%;
   }
 }
@@ -91,10 +96,6 @@
 
   .review-chrome h1 {
     font-size: .82rem;
-  }
-
-  .terminal-recovery {
-    --terminal-recovery-gutter: .75rem;
   }
 
   .review-workspace__mode-tab[aria-selected="true"] {
@@ -263,6 +264,10 @@
   .terminal-recovery *::after {
     scroll-behavior: auto !important;
     transition: none !important;
+  }
+
+  .terminal-recovery button[data-icon="loading"] .review-icon {
+    animation: none !important;
   }
 }
 

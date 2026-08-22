@@ -3,8 +3,9 @@
 @import './review-layout-dialogs.css';
 @import './review-layout-responsive.css';
 
-/* This is a full-page recovery surface, not a modal: the document owns
- * vertical scrolling and the footer stays in ordinary flow after the body. */
+/* The stale document owns the canvas, while the recovery task uses the same
+ * contained card geometry as Compact Editorial modals. It remains a page,
+ * not a dialog over an interactive review. */
 html:has(.terminal-recovery),
 body:has(.terminal-recovery) {
   min-height: 100%;
@@ -12,15 +13,27 @@ body:has(.terminal-recovery) {
   background: var(--review-surface-canvas, #e8e9e4);
 }
 
-.terminal-recovery {
-  --terminal-recovery-gutter: clamp(1.25rem, 4vw, 2.25rem);
+body:has(.terminal-recovery) {
   box-sizing: border-box;
   display: grid;
-  min-width: 0;
   min-height: 100dvh;
-  grid-template-rows: auto minmax(min-content, 1fr) auto;
+  place-items: center;
+  padding: 1rem;
+}
+
+.terminal-recovery {
+  box-sizing: border-box;
+  display: grid;
+  width: min(34rem, 100%);
+  min-width: 0;
+  max-height: calc(100dvh - 2rem);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--review-border-strong);
+  border-radius: var(--review-radius-dialog);
   color: var(--review-ink-primary);
-  background: var(--review-surface-canvas);
+  background: var(--review-surface-panel);
+  box-shadow: var(--review-shadow-float);
   font-size: .875rem;
   line-height: 1.5;
 }
@@ -29,48 +42,37 @@ body:has(.terminal-recovery) {
 .terminal-recovery__body,
 .terminal-recovery__footer {
   min-width: 0;
-  padding-inline: var(--terminal-recovery-gutter);
 }
 
 .terminal-recovery__header {
-  padding-block: clamp(1.25rem, 4vh, 2.25rem) 1rem;
+  padding: 16px 18px 13px;
   border-bottom: 1px solid var(--review-border-subtle);
-  background: var(--review-surface-panel);
 }
 
 .terminal-recovery__header h1 {
-  max-width: 42rem;
-  margin: 0 auto;
-  font-size: clamp(1.35rem, 2vw, 1.65rem);
+  margin: 0;
+  font-size: 17px;
   font-weight: 730;
   line-height: 1.25;
   letter-spacing: -.02em;
 }
 
-.terminal-recovery__document {
-  max-width: 42rem;
-  margin: .35rem auto 0;
-  overflow-wrap: anywhere;
-  color: var(--review-ink-muted);
-  font-size: .8125rem;
-}
-
-.terminal-recovery__document strong {
-  color: var(--review-ink-primary);
-  font-weight: 700;
+.terminal-recovery__header h1:focus {
+  outline: none;
 }
 
 .terminal-recovery__body {
   display: grid;
-  align-content: center;
-  gap: 1rem;
-  padding-block: clamp(1.5rem, 7vh, 4.5rem);
+  min-height: 0;
+  align-content: start;
+  gap: .875rem;
+  padding: 16px 18px;
+  overflow: auto;
 }
 
 .terminal-recovery__body > * {
-  width: min(42rem, 100%);
+  width: 100%;
   min-width: 0;
-  margin-inline: auto;
 }
 
 .terminal-recovery__body > p:first-child {
@@ -101,14 +103,27 @@ body:has(.terminal-recovery) {
 }
 
 .terminal-recovery__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--review-action-group-gap);
+}
+
+.terminal-recovery__actions:has(.terminal-recovery__choice) {
   display: grid;
-  gap: .75rem;
+  gap: .625rem;
 }
 
 .terminal-recovery__choice {
   display: grid;
+  grid-template-columns: minmax(9.5rem, max-content) minmax(0, 1fr);
   min-width: 0;
-  gap: .3rem;
+  align-items: center;
+  gap: .75rem;
+  padding: .7rem;
+  border: 1px solid var(--review-border-subtle);
+  border-radius: var(--review-radius-row);
+  background: color-mix(in srgb, var(--review-surface-subtle) 46%, var(--review-surface-panel));
 }
 
 .terminal-recovery__choice p {
@@ -122,16 +137,25 @@ body:has(.terminal-recovery) {
 .terminal-recovery__footer {
   display: grid;
   gap: .6rem;
-  padding-block: 1rem clamp(1.25rem, 4vh, 2rem);
+  padding: 12px 18px 14px;
   border-top: 1px solid var(--review-border-subtle);
   background: color-mix(in srgb, var(--review-surface-subtle) 42%, var(--review-surface-panel));
 }
 
+.terminal-recovery__footer-actions,
 .terminal-recovery__copy-actions,
+.terminal-recovery__primary-actions,
 .terminal-recovery__copy-status {
-  width: min(42rem, 100%);
   min-width: 0;
-  margin-inline: auto;
+}
+
+.terminal-recovery__footer-actions {
+  display: flex;
+  width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--review-action-group-gap);
 }
 
 .terminal-recovery__copy-actions {
@@ -141,8 +165,19 @@ body:has(.terminal-recovery) {
   gap: var(--review-action-group-gap);
 }
 
+.terminal-recovery__primary-actions {
+  display: flex;
+  align-items: center;
+}
+
 .terminal-recovery__copy-status {
+  width: 100%;
   color: var(--review-ink-muted);
+  text-align: right;
+}
+
+.terminal-recovery__copy-status:empty {
+  display: none;
 }
 
 .terminal-recovery__copy-status[role="alert"] {
@@ -166,6 +201,27 @@ body:has(.terminal-recovery) {
 
 .terminal-recovery [hidden] {
   display: none !important;
+}
+
+.terminal-recovery__button-icon {
+  display: grid;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  place-items: center;
+}
+
+.terminal-recovery__button-icon .review-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.terminal-recovery button[data-icon="loading"] .review-icon {
+  animation: terminal-recovery-spin .8s linear infinite;
+}
+
+@keyframes terminal-recovery-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* Automatic-save identity and destination surface */

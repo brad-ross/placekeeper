@@ -16,6 +16,7 @@ import {
   createCopyLinkCommand,
   type CopyLinkStatus,
 } from "./review/CopyLinkControl.js";
+import { ReviewIcon, type ReviewIconName } from "./review/ReviewIcon.js";
 
 export async function resume(viewId: string, pathname: string): Promise<void> {
   await start(await resumeProductionSession(viewId, pathname));
@@ -36,21 +37,11 @@ export function terminalRecoveryLocationFragment(hash: string): string {
 
 export function terminalRecoveryDocumentIdentity(appLinkBase: string): {
   readonly filename: string;
-  readonly parentFolder: string;
-  readonly pathMarker: string;
 } {
   const { path } = decodePlacekeeperLink(`${appLinkBase}#v=1&page=1`);
   const parts = path.split("/");
-  const parentPath = parts.slice(0, -1).join("/") || "/";
-  let hash = 2_166_136_261;
-  for (const character of parentPath) {
-    hash ^= character.codePointAt(0)!;
-    hash = Math.imul(hash, 16_777_619);
-  }
   return {
     filename: parts.at(-1)!,
-    parentFolder: parts.at(-2) || "/",
-    pathMarker: (hash >>> 0).toString(36).padStart(7, "0"),
   };
 }
 
@@ -82,17 +73,9 @@ export function showTerminalRecovery(viewId: string): void {
   const header = document.createElement('header');
   header.className = 'terminal-recovery__header';
   const heading = document.createElement('h1');
-  heading.textContent = 'Reopen interrupted review';
+  heading.textContent = `Reopen ${identity.filename}`;
   heading.tabIndex = -1;
-  const documentName = document.createElement('p');
-  documentName.className = 'terminal-recovery__document';
-  documentName.id = 'terminal-recovery-document';
-  const filename = document.createElement('strong');
-  filename.textContent = identity.filename;
-  const parent = document.createElement('span');
-  parent.textContent = ` in ${identity.parentFolder} · ${identity.pathMarker}`;
-  documentName.replaceChildren(filename, parent);
-  header.replaceChildren(heading, documentName);
+  header.replaceChildren(heading);
   const body = document.createElement('section');
   body.className = 'terminal-recovery__body';
   const explanation = document.createElement('p');
@@ -105,19 +88,48 @@ export function showTerminalRecovery(viewId: string): void {
   body.replaceChildren(explanation, stateStatus, actions);
   const footer = document.createElement('footer');
   footer.className = 'terminal-recovery__footer';
+  const footerActions = document.createElement('div');
+  footerActions.className = 'terminal-recovery__footer-actions';
   const copyActions = document.createElement('div');
   copyActions.className = 'terminal-recovery__copy-actions';
+  const primaryActions = document.createElement('div');
+  primaryActions.className = 'terminal-recovery__primary-actions';
   const copyStatus = document.createElement('p');
   copyStatus.className = 'terminal-recovery__copy-status';
   copyStatus.setAttribute('role', 'status');
-  footer.replaceChildren(copyActions, copyStatus);
+  footerActions.replaceChildren(copyActions, primaryActions);
+  footer.replaceChildren(footerActions, copyStatus);
+
+  const buttonViews = new WeakMap<HTMLButtonElement, {
+    readonly iconRoot: ReturnType<typeof createRoot>;
+    readonly label: HTMLSpanElement;
+  }>();
+  const setButtonContent = (
+    control: HTMLButtonElement,
+    iconName: ReviewIconName,
+    label: string,
+  ): void => {
+    let view = buttonViews.get(control);
+    if (view === undefined) {
+      const icon = document.createElement('span');
+      icon.className = 'terminal-recovery__button-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      const labelElement = document.createElement('span');
+      control.replaceChildren(icon, labelElement);
+      view = { iconRoot: createRoot(icon), label: labelElement };
+      buttonViews.set(control, view);
+    }
+    control.dataset.icon = iconName;
+    view.iconRoot.render(<ReviewIcon name={iconName} size={14} />);
+    view.label.textContent = label;
+  };
 
   const reopen = document.createElement('button');
   reopen.type = 'button';
-  reopen.textContent = 'Reopen review';
-  reopen.title = 'Reopen review';
+  reopen.title = 'Reopen';
   reopen.className = 'terminal-recovery__primary';
-  reopen.setAttribute('aria-describedby', `${documentName.id} ${explanation.id}`);
+  reopen.setAttribute('aria-describedby', explanation.id);
+  setButtonContent(reopen, 'redo', 'Reopen');
   let reopenPending = false;
   let activeOffer: Extract<Awaited<ReturnType<typeof reopenProductionSession>>, {
     readonly kind: 'recovery-offered';
@@ -135,14 +147,15 @@ export function showTerminalRecovery(viewId: string): void {
   };
   const button = (
     label: string,
+    iconName: ReviewIconName,
     onClick: () => void,
     className = 'terminal-recovery__secondary',
   ): HTMLButtonElement => {
     const control = document.createElement('button');
     control.type = 'button';
-    control.textContent = label;
     control.title = label;
     control.className = className;
+    setButtonContent(control, iconName, label);
     control.addEventListener('click', onClick);
     return control;
   };
@@ -168,7 +181,7 @@ export function showTerminalRecovery(viewId: string): void {
     focusSoon(stateStatus);
   };
   const renderOrdinary = (clearStatus = true): void => {
-    explanation.textContent = 'This live review was interrupted. Reopen it at the same location. If unfinished work is available, Placekeeper will show the safe recovery choices next.';
+    explanation.textContent = 'This Placekeeper session was interrupted. Reopen it at the same location. If unfinished work is available, Placekeeper will show the safe recovery choices next.';
     if (clearStatus) {
       stateStatus.hidden = true;
       stateStatus.textContent = '';
@@ -176,7 +189,9 @@ export function showTerminalRecovery(viewId: string): void {
     }
     reopen.disabled = reopenPending;
     reopen.toggleAttribute('aria-busy', reopenPending);
-    actions.replaceChildren(reopen);
+    setButtonContent(reopen, reopenPending ? 'loading' : 'redo', 'Reopen');
+    actions.replaceChildren();
+    primaryActions.replaceChildren(reopen);
   };
   const renderRecoveryOffer = (clearStatus = true): void => {
     if (activeOffer === undefined) return;
@@ -186,13 +201,14 @@ export function showTerminalRecovery(viewId: string): void {
       stateStatus.textContent = '';
       stateStatus.setAttribute('role', 'status');
     }
-    const resume = button('Resume draft', () => void requestReopen('resume'), 'terminal-recovery__primary');
-    const discard = button('Discard draft', renderDiscardConfirmation, 'terminal-recovery__destructive');
-    const fork = button('Open separate copy', () => void requestReopen('fork'));
+    const resume = button('Resume draft', 'redo', () => void requestReopen('resume'), 'terminal-recovery__primary');
+    const discard = button('Discard draft', 'delete', renderDiscardConfirmation, 'terminal-recovery__destructive');
+    const fork = button('Open separate copy', 'plus', () => void requestReopen('fork'));
+    primaryActions.replaceChildren();
     actions.replaceChildren(
       consequenceAction(resume, 'Continue the protected draft with all unfinished work.'),
       consequenceAction(discard, 'Permanently remove the protected draft and reopen the PDF without it.'),
-      consequenceAction(fork, 'Keep the protected draft and open an independent review copy.'),
+      consequenceAction(fork, 'Keep the protected draft and open an independent session.'),
     );
     if (reopenPending) {
       for (const control of actions.querySelectorAll('button')) control.disabled = true;
@@ -200,14 +216,16 @@ export function showTerminalRecovery(viewId: string): void {
     if (clearStatus) focusSoon(resume);
   };
   const renderDiscardConfirmation = (): void => {
-    explanation.textContent = `Permanently discard the unfinished draft for ${identity.filename}? This cannot be undone. A replacement review will be opened before the protected draft is removed.`;
+    explanation.textContent = `Permanently discard the unfinished draft for ${identity.filename}? This cannot be undone. A replacement session will be opened before the protected draft is removed.`;
     stateStatus.hidden = true;
+    primaryActions.replaceChildren();
     const confirm = button(
       'Permanently discard draft',
+      'delete',
       () => void requestReopen('discard'),
       'terminal-recovery__destructive',
     );
-    const cancel = button('Keep draft', () => renderRecoveryOffer());
+    const cancel = button('Keep draft', 'close', () => renderRecoveryOffer());
     actions.replaceChildren(confirm, cancel);
     focusSoon(confirm);
   };
@@ -216,7 +234,7 @@ export function showTerminalRecovery(viewId: string): void {
     reopenPending = true;
     stateStatus.setAttribute('role', 'status');
     stateStatus.removeAttribute('tabindex');
-    stateStatus.textContent = recoveryChoice === undefined ? 'Checking for unfinished work…' : 'Opening review…';
+    stateStatus.textContent = recoveryChoice === undefined ? 'Checking for unfinished work…' : 'Opening session…';
     stateStatus.hidden = false;
     if (activeOffer === undefined) renderOrdinary(false);
     else renderRecoveryOffer(false);
@@ -246,7 +264,7 @@ export function showTerminalRecovery(viewId: string): void {
         activeOffer = undefined;
         operationIds.clear();
         showError(
-          'Those recovery choices are no longer current. Reopen the review to check for protected work again.',
+          'Those recovery choices are no longer current. Reopen the session to check for protected work again.',
           false,
         );
         return;
@@ -267,26 +285,29 @@ export function showTerminalRecovery(viewId: string): void {
   });
   const copy = document.createElement('button');
   copy.type = 'button';
-  copy.textContent = 'Copy Placekeeper link';
-  copy.title = 'Copy Placekeeper link';
+  copy.title = 'Copy Link';
   copy.className = 'terminal-recovery__secondary';
+  setButtonContent(copy, 'link', 'Copy Link');
   const renderCopyStatus = (status: CopyLinkStatus) => {
     const pending = status.status === 'pending';
     copy.disabled = pending;
     if (pending) copy.setAttribute('aria-busy', 'true');
     else copy.removeAttribute('aria-busy');
     copyStatus.setAttribute('role', status.status === 'failure' ? 'alert' : 'status');
-    if (status.status === 'pending') copyStatus.textContent = 'Copying Placekeeper link…';
+    if (status.status === 'pending') {
+      copyStatus.textContent = 'Copying Placekeeper link…';
+      setButtonContent(copy, 'loading', 'Copy Link');
+    }
     else if (status.status === 'success') {
       copyStatus.textContent = 'Placekeeper link copied.';
-      copy.textContent = 'Copy Placekeeper link';
-      copy.title = 'Copy Placekeeper link';
+      copy.title = 'Copy Link';
+      setButtonContent(copy, 'link', 'Copy Link');
       copyActions.replaceChildren(copy);
     }
     else if (status.status === 'failure') {
       copyStatus.textContent = 'Clipboard access failed. Retry or select the canonical Placekeeper link.';
-      copy.textContent = 'Retry';
       copy.title = 'Retry copying Placekeeper link';
+      setButtonContent(copy, 'redo', 'Retry');
       const fallbackValue = document.createElement('input');
       fallbackValue.readOnly = true;
       fallbackValue.value = link;

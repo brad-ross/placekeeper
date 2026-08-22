@@ -54,12 +54,6 @@
   box-shadow: inset 3px 0 0 var(--review-danger);
 }
 
-.terminal-recovery .terminal-recovery__destructive::before {
-  content: "⚠";
-  font-size: 12px;
-  line-height: 1;
-}
-
 .terminal-recovery .terminal-recovery__destructive:hover:not(:disabled) {
   border-color: var(--review-danger);
   background: color-mix(in srgb, var(--review-danger) 12%, var(--review-surface-panel));
