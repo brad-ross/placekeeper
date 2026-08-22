@@ -3,6 +3,8 @@ import type {
   ReviewItem,
   ReviewState,
 } from '../../../../packages/core/src/review-model.js';
+import { projectReviewItem } from '../../../../packages/core/src/annotation-projection.js';
+import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { ReviewRect } from '../../../../packages/core/src/review-commands.js';
 import type { CaretAnchor, SelectionAnchor } from '../pdf/selection-anchor.js';
 import type { PdfNaturalPoint } from '../pdf/viewer-navigation.js';
@@ -59,32 +61,6 @@ export type AuthoringSource =
   | {
       readonly kind: 'edit';
       readonly item: ReviewItem;
-    };
-
-/** Truthful prose or anchor identity shown beside the live PDF while authoring. */
-export type AuthoringSourceContext =
-  | {
-      readonly kind: 'selection';
-      readonly pageNumber: number;
-      readonly prefix: string;
-      readonly quote: string;
-      readonly suffix: string;
-    }
-  | {
-      readonly kind: 'caret';
-      readonly pageNumber: number;
-      readonly leftContext: string;
-      readonly rightContext: string;
-    }
-  | {
-      readonly kind: 'page';
-      readonly pageNumber: number;
-      readonly nearbyText: string;
-    }
-  | {
-      readonly kind: 'anchor';
-      readonly pageNumber: number;
-      readonly anchorLabel: string;
     };
 
 export interface AuthoringSemantics {
@@ -332,66 +308,87 @@ export function canStartAuthoringSession(current: AuthoringSession | null): curr
   return current === null;
 }
 
-function payloadText(item: ReviewItem, field: string): string | null {
-  const value = item.payload[field];
-  return typeof value === 'string' ? value : null;
+function selectionPayload(
+  source: Extract<AuthoringSource, { readonly kind: 'replace' | 'highlight' }>,
+): Record<string, JsonValue> {
+  return {
+    quote: source.anchor.quote,
+    prefix: source.anchor.prefix,
+    suffix: source.anchor.suffix,
+    rect: { ...source.anchor.rect },
+    segmentRects: source.anchor.segmentRects.map((rect) => ({ ...rect })),
+    reliable: true,
+  };
 }
 
-function editAnchorLabel(item: ReviewItem): string {
-  if (item.kind === 'replace') return 'Replacement anchor';
-  if (item.kind === 'insert') return 'Insertion point';
-  if (item.kind === 'highlight') return 'Highlight anchor';
-  if (item.kind === 'pageNote') return 'Page Note anchor';
-  return 'Deletion anchor';
+function editableField(item: ReviewItem): 'proposedText' | 'comment' | null {
+  if (item.kind === 'replace' || item.kind === 'insert') return 'proposedText';
+  if (item.kind === 'highlight' || item.kind === 'pageNote') return 'comment';
+  return null;
 }
 
-/**
- * Projects only frozen, authored source evidence. Missing persisted prose falls
- * back to page/anchor identity; this adapter never attempts to reconstruct it.
- */
-export function authoringSourceContext(source: AuthoringSource): AuthoringSourceContext {
-  if (source.kind === 'replace' || source.kind === 'highlight') {
-    return {
-      kind: 'selection',
-      pageNumber: source.anchor.pageIndex + 1,
-      prefix: source.anchor.prefix,
-      quote: source.anchor.quote,
-      suffix: source.anchor.suffix,
-    };
-  }
-  if (source.kind === 'insert') {
-    return {
-      kind: 'caret',
-      pageNumber: source.anchor.pageIndex + 1,
-      leftContext: source.anchor.leftContext,
-      rightContext: source.anchor.rightContext,
-    };
-  }
-  if (source.kind === 'pageNote') {
-    return source.nearbyText !== undefined && source.nearbyText.trim().length > 0
-      ? { kind: 'page', pageNumber: source.pageIndex + 1, nearbyText: source.nearbyText }
-      : { kind: 'anchor', pageNumber: source.pageIndex + 1, anchorLabel: 'Page Note anchor' };
+/** Projects the current draft exactly as the accepted annotation layer renders it. */
+export function authoringPreviewAnnotation(
+  session: AuthoringSession,
+  value: string,
+): ReviewAnnotation | null {
+  const source = session.source;
+  if (source.kind === 'edit') {
+    const field = editableField(source.item);
+    if (field === null) return null;
+    return projectReviewItem({
+      ...source.item,
+      payload: { ...source.item.payload, [field]: value },
+    });
   }
 
-  const item = source.item;
-  const pageNumber = item.pageIndex + 1;
-  if (item.kind === 'replace' || item.kind === 'highlight' || item.kind === 'delete') {
-    const quote = payloadText(item, 'quote');
-    const prefix = payloadText(item, 'prefix');
-    const suffix = payloadText(item, 'suffix');
-    return quote !== null && quote.trim().length > 0 && prefix !== null && suffix !== null
-      ? { kind: 'selection', pageNumber, prefix, quote, suffix }
-      : { kind: 'anchor', pageNumber, anchorLabel: editAnchorLabel(item) };
-  }
-  if (item.kind === 'insert') {
-    const leftContext = payloadText(item, 'leftContext');
-    const rightContext = payloadText(item, 'rightContext');
-    return leftContext !== null && rightContext !== null
-      ? { kind: 'caret', pageNumber, leftContext, rightContext }
-      : { kind: 'anchor', pageNumber, anchorLabel: editAnchorLabel(item) };
-  }
-  const nearbyText = payloadText(item, 'nearbyText');
-  return nearbyText !== null && nearbyText.trim().length > 0
-    ? { kind: 'page', pageNumber, nearbyText }
-    : { kind: 'anchor', pageNumber, anchorLabel: editAnchorLabel(item) };
+  const timestamp = '1970-01-01T00:00:00.000Z';
+  const base = {
+    id: `authoring-preview:${session.token}`,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  } as const;
+  const item: ReviewItem = source.kind === 'replace'
+    ? {
+        ...base,
+        kind: 'replace',
+        pageIndex: source.anchor.pageIndex,
+        payload: { ...selectionPayload(source), proposedText: value },
+      }
+    : source.kind === 'insert'
+      ? {
+          ...base,
+          kind: 'insert',
+          pageIndex: source.anchor.pageIndex,
+          payload: {
+            position: { ...source.anchor.position },
+            leftContext: source.anchor.leftContext,
+            rightContext: source.anchor.rightContext,
+            reliable: true,
+            proposedText: value,
+          },
+        }
+      : source.kind === 'highlight'
+        ? {
+            ...base,
+            kind: 'highlight',
+            pageIndex: source.anchor.pageIndex,
+            payload: {
+              ...selectionPayload(source),
+              ...(value === '' ? {} : { comment: value }),
+            },
+          }
+        : {
+            ...base,
+            kind: 'pageNote',
+            pageIndex: source.pageIndex,
+            payload: {
+              position: { ...source.position },
+              comment: value,
+              ...(source.nearbyText === undefined || source.nearbyText === ''
+                ? {}
+                : { nearbyText: source.nearbyText }),
+            },
+          };
+  return projectReviewItem(item);
 }

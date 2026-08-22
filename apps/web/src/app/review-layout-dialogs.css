@@ -111,7 +111,7 @@
 .comment-composer {
   z-index: 5;
   grid-area: 1 / 1;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   align-self: stretch;
   justify-self: end;
   width: var(--tools-right-width, var(--reference-right-width, min(24rem, calc(100% - 3rem))));
@@ -139,158 +139,28 @@
   min-width: 0;
 }
 
-.comment-composer__read {
+.comment-composer__anchor {
   flex: none;
+  width: var(--review-control-default);
+  padding: 0;
 }
 
 .comment-composer__body {
   display: grid;
   align-content: start;
-  gap: 15px;
+  gap: 12px;
 }
 
 .comment-composer__actions {
-  position: sticky;
-  z-index: 2;
-  bottom: 0;
-}
-
-.comment-composer__context-row {
-  display: grid;
-  gap: 8px;
-}
-
-.comment-composer__source {
-  display: grid;
-  min-width: 0;
-  gap: 7px;
-  padding: 10px 11px;
-  border: 1px solid var(--review-border-subtle);
-  border-radius: var(--review-radius-row);
-  background: var(--review-surface-subtle);
-}
-
-.comment-composer__source-header {
   display: flex;
-  min-width: 0;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  color: var(--review-ink-muted);
-  font-size: 10px;
-  font-weight: 720;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-}
-
-.comment-composer__source-header strong {
-  flex: none;
-  color: var(--review-ink-primary);
-  font-weight: 760;
-}
-
-.comment-composer__source-viewport {
-  max-height: 9rem;
-  overflow: auto;
-  scrollbar-gutter: stable;
-}
-
-.comment-composer__source-prose,
-.comment-composer__source-unavailable {
-  margin: 0;
-  overflow-wrap: anywhere;
-  color: var(--review-ink-primary);
-  font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
-  font-size: 13px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-}
-
-.comment-composer__source-prose mark {
-  margin-inline: 1px;
-  padding: 1px 2px;
-  border-radius: 3px;
-  color: var(--review-ink-primary);
-  background: color-mix(in srgb, var(--review-warning) 48%, var(--review-surface-panel));
-}
-
-.comment-composer__source-prose--caret {
-  display: block;
-}
-
-.comment-composer__source-caret {
-  display: inline-block;
-  width: 2px;
-  height: 1.2em;
-  margin: 0 2px -0.22em;
-  border-radius: var(--review-radius-round);
-  background: var(--review-focus);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--review-focus) 12%, transparent);
-}
-
-.comment-composer__source-unavailable {
-  display: grid;
-  gap: 2px;
-  color: var(--review-ink-muted);
-  font-family: inherit;
-  font-size: 11px;
-}
-
-.comment-composer__source-unavailable strong {
-  color: var(--review-ink-primary);
-  font-size: 12px;
-}
-
-.comment-composer__context-disclosure,
-.comment-composer__return {
-  justify-self: start;
-  margin: 0;
-  padding: 2px 0;
-  border: 0;
-  color: var(--review-selection-ink);
-  background: transparent;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.comment-composer__context-disclosure:hover,
-.comment-composer__return:hover:not(:disabled) {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.comment-composer__return {
-  display: inline-flex;
-  min-height: var(--review-control-compact);
   align-items: center;
-  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--review-action-group-gap);
 }
 
-.comment-composer__return .review-icon {
-  width: 14px;
-  height: 14px;
-}
-
-.comment-composer__return[data-return-state="pending"] .review-icon {
+.comment-composer__anchor[data-return-state="pending"] .review-icon {
   animation: review-loader-spin .8s linear infinite;
-}
-
-.comment-composer__anchor-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  color: var(--review-ink-muted);
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.comment-composer__anchor-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--review-radius-round);
-  background: var(--review-success);
 }
 
 .comment-composer__field {
@@ -316,15 +186,6 @@
 
 .comment-composer__input:hover {
   border-color: var(--review-border-strong);
-}
-
-.comment-composer__return-editor {
-  position: absolute;
-  z-index: 5;
-  top: 12px;
-  left: 12px;
-  box-shadow: var(--review-shadow-float);
-  pointer-events: auto;
 }
 
 .composer-preview-host {

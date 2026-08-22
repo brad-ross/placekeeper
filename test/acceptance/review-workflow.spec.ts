@@ -776,7 +776,7 @@ test.describe('canonical review workflow', () => {
       'false',
     );
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
-    await composer.getByRole('button', { name: 'Read Document' }).click();
+    await canvas.focus();
     await expect(canvas).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(composer).toHaveCount(0);
@@ -793,8 +793,9 @@ test.describe('canonical review workflow', () => {
     const editor = composer.getByRole('textbox', { name: 'Replacement' });
     await editor.fill('frozen draft');
 
-    await composer.getByRole('button', { name: 'Read Document' }).click();
-    await expect(page.getByRole('application', { name: 'PDF review canvas' })).toBeFocused();
+    const canvas = page.getByRole('application', { name: 'PDF review canvas' });
+    await canvas.focus();
+    await expect(canvas).toBeFocused();
     await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Redo' })).toBeDisabled();
     await page.keyboard.type('x');
@@ -804,7 +805,7 @@ test.describe('canonical review workflow', () => {
     await expect(revision).toHaveAttribute('data-revision', revisionBefore ?? '');
     await expect(revision).toHaveAttribute('data-kinds', kindsBefore ?? '');
     await expect(editor).toHaveValue('frozen draft');
-    await page.getByRole('button', { name: 'Return to Editor' }).click();
+    await editor.focus();
     await expect(editor).toBeFocused();
   });
 

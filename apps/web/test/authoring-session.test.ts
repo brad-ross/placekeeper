@@ -4,6 +4,7 @@ import { createReviewState, type ReviewItem } from '../../../packages/core/src/r
 import {
   authoringAuthorityFor,
   authoringAnchorSnapshot,
+  authoringPreviewAnnotation,
   authoringSessionIsCurrent,
   canStartAuthoringSession,
   createAuthoringSession,
@@ -156,6 +157,62 @@ describe('frozen authoring-session contract', () => {
     expect(authoringAnchorSnapshot(createAuthoringSession(seed({
       kind: 'edit', item: editedItem,
     })))).toMatchObject({ pageIndex: 4, point: { x: 1, y: 2 } });
+  });
+
+  it('projects every new draft and edited content through the accepted PDF annotation model', () => {
+    const replacement = createAuthoringSession(seed({
+      kind: 'replace', anchor: selection, initialValue: '', selectionGeneration: 11,
+    }));
+    const insertion = createAuthoringSession(seed({
+      kind: 'insert', anchor: caret, initialValue: '',
+    }, 2));
+    const highlight = createAuthoringSession(seed({
+      kind: 'highlight', anchor: selection, selectionGeneration: 12,
+    }, 3));
+    const pageNote = createAuthoringSession(seed({
+      kind: 'pageNote',
+      pageIndex: 5,
+      position: { x: 40, y: 50, width: 18, height: 18 },
+      nearbyText: 'Nearby text',
+    }, 4));
+    const edited = createAuthoringSession(seed({ kind: 'edit', item: editedItem }, 2));
+
+    expect(authoringPreviewAnnotation(replacement, 'the revised passage')).toMatchObject({
+      id: 'authoring-preview:1',
+      kind: 'replace',
+      pageIndex: 2,
+      rect: selection.rect,
+      quadPoints: selection.segmentRects,
+      contents: 'the revised passage',
+    });
+    expect(authoringPreviewAnnotation(insertion, 'inserted phrase')).toMatchObject({
+      id: 'authoring-preview:2',
+      kind: 'insert',
+      pageIndex: 3,
+      rect: caret.position,
+      contents: 'inserted phrase',
+    });
+    expect(authoringPreviewAnnotation(highlight, 'New comment')).toMatchObject({
+      id: 'authoring-preview:3',
+      kind: 'highlight',
+      pageIndex: 2,
+      rect: selection.rect,
+      quadPoints: selection.segmentRects,
+      contents: 'New comment',
+    });
+    expect(authoringPreviewAnnotation(pageNote, 'Page-level note')).toMatchObject({
+      id: 'authoring-preview:4',
+      kind: 'pageNote',
+      pageIndex: 5,
+      rect: { x: 40, y: 50, width: 18, height: 18 },
+      contents: 'Page-level note',
+    });
+    expect(authoringPreviewAnnotation(edited, 'Revised comment')).toMatchObject({
+      id: editedItem.id,
+      kind: 'highlight',
+      pageIndex: editedItem.pageIndex,
+      contents: 'Revised comment',
+    });
   });
 
   it('keeps the first session authoritative when another entry point fires', () => {

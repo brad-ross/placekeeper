@@ -26,6 +26,7 @@ import {
   type ReviewRect,
 } from '../../../../packages/core/src/review-commands.js';
 import type { ReviewCommand, ReviewItem, ReviewState } from '../../../../packages/core/src/review-model.js';
+import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { CaretAnchor } from '../pdf/selection-anchor.js';
 import {
   existingAnnotationKey,
@@ -112,7 +113,7 @@ import {
   authoringAuthorityFor,
   authoringAuthorityMatches,
   authoringAnchorSnapshot,
-  authoringSourceContext,
+  authoringPreviewAnnotation,
   authoringSessionIsCurrent,
   canStartAuthoringSession,
   createAuthoringSession,
@@ -177,6 +178,7 @@ export interface ReviewShellProps {
   };
   onAuthoringAnchorChange?(anchor: AuthoringAnchorSnapshot | null): void;
   onAuthoringActiveChange?(active: boolean): void;
+  onAuthoringPreviewChange?(preview: ReviewAnnotation | null): void;
   /** U3/U4 may publish measured overlay geometry without affecting viewer framing. */
   onAuthoringViewportChange?(viewport: PdfViewportQuery | null): void;
   onNavigate?(item: ReviewItem): void;
@@ -276,6 +278,14 @@ function mutableField(item: ReviewItem): 'proposedText' | 'comment' | undefined 
   return undefined;
 }
 
+function initialAuthoringValue(session: AuthoringSession): string {
+  const source = session.source;
+  if (source.kind === 'replace' || source.kind === 'insert') return source.initialValue;
+  if (source.kind !== 'edit') return '';
+  const field = mutableField(source.item);
+  return field === undefined ? '' : String(source.item.payload[field] ?? '');
+}
+
 export function ReviewShell(props: ReviewShellProps) {
   const [localReferenceLayout, dispatchLocalReferenceLayout] = useReducer(
     reduceReferenceWorkspaceLayout,
@@ -313,7 +323,6 @@ export function ReviewShell(props: ReviewShellProps) {
   const authoringEditorRef = useRef<HTMLTextAreaElement>(null);
   const saveOptionsWasOpenRef = useRef(props.saveOptionsOpen ?? false);
   const [authoringSurfaceElement, setAuthoringSurfaceElement] = useState<HTMLElement | null>(null);
-  const [authoringReading, setAuthoringReading] = useState(false);
   const [localActiveItemId, setLocalActiveItemId] = useState<string>();
   const activeItemId = props.activeItemId === undefined
     ? localActiveItemId
@@ -334,6 +343,14 @@ export function ReviewShell(props: ReviewShellProps) {
       authoringSession === null ? null : authoringAnchorSnapshot(authoringSession),
     );
   }, [authoringSession, props.onAuthoringAnchorChange]);
+  useEffect(() => {
+    props.onAuthoringPreviewChange?.(
+      authoringSession === null
+        ? null
+        : authoringPreviewAnnotation(authoringSession, initialAuthoringValue(authoringSession)),
+    );
+    return () => props.onAuthoringPreviewChange?.(null);
+  }, [authoringSession, props.onAuthoringPreviewChange]);
   useEffect(() => {
     const wasOpen = saveOptionsWasOpenRef.current;
     const isOpen = props.saveOptionsOpen ?? false;
@@ -693,7 +710,6 @@ export function ReviewShell(props: ReviewShellProps) {
     });
     authoringSessionRef.current = session;
     props.onAuthoringActiveChange?.(true);
-    setAuthoringReading(false);
     setAuthoringSession(session);
     dispatchSurface({ type: 'open-nested' });
     return true;
@@ -754,8 +770,8 @@ export function ReviewShell(props: ReviewShellProps) {
     if (current === null || current.token !== token) return;
     authoringSessionRef.current = null;
     props.onAuthoringActiveChange?.(false);
+    props.onAuthoringPreviewChange?.(null);
     setAuthoringSession(null);
-    setAuthoringReading(false);
     inputController.clearDraft();
     dispatchSurface({ type: 'close-nested' });
     if (current.source.kind === 'pageNote') props.onPageNoteComposerComplete?.();
@@ -1152,18 +1168,6 @@ export function ReviewShell(props: ReviewShellProps) {
       commitMainFramingPosition();
     }
   }, [commitMainFramingPosition, props.viewerNavigationIntentToken]);
-  const focusDocumentForAuthoring = () => {
-    setAuthoringReading(true);
-    requestAnimationFrame(() => shellRef.current
-      ?.querySelector<HTMLElement>(
-        '.pdf-workspace:not(.pdf-workspace--reference) [data-page-index], [role="application"]',
-      )
-      ?.focus({ preventScroll: true }));
-  };
-  const focusAuthoringEditor = () => {
-    setAuthoringReading(false);
-    requestAnimationFrame(() => authoringEditorRef.current?.focus({ preventScroll: true }));
-  };
   const isWorkspaceOrChrome = (target: EventTarget | null) => (
     (target instanceof Node && (
       workspaceFraming.referenceSurfaceRef.current?.contains(target) === true
@@ -1191,11 +1195,7 @@ export function ReviewShell(props: ReviewShellProps) {
     const source = authoringSession.source;
     const editField = source.kind === 'edit' ? mutableField(source.item) : undefined;
     if (source.kind === 'edit' && editField === undefined) return null;
-    const initialValue = source.kind === 'replace' || source.kind === 'insert'
-      ? source.initialValue
-      : source.kind === 'edit'
-        ? String(source.item.payload[editField!] ?? '')
-        : '';
+    const initialValue = initialAuthoringValue(authoringSession);
     const fieldLabel = source.kind === 'replace'
       ? 'Replacement'
       : source.kind === 'insert'
@@ -1210,7 +1210,6 @@ export function ReviewShell(props: ReviewShellProps) {
       : undefined;
     return <CommentComposer
       title={authoringSession.semantics.title}
-      sourceContext={authoringSourceContext(source)}
       saveLabel={authoringSession.semantics.primaryLabel}
       optional={authoringSession.semantics.optional}
       allowWhitespace={authoringSession.semantics.allowWhitespace}
@@ -1218,8 +1217,11 @@ export function ReviewShell(props: ReviewShellProps) {
       initialValue={initialValue}
       editorRef={authoringEditorRef}
       surfaceRef={setAuthoringSurfaceElement}
-      onReadDocument={focusDocumentForAuthoring}
       anchorNavigation={anchorNavigation}
+      onValueChange={(value) => {
+        if (authoringSessionRef.current?.token !== authoringSession.token) return;
+        props.onAuthoringPreviewChange?.(authoringPreviewAnnotation(authoringSession, value));
+      }}
       onDismiss={() => dismissAuthoring(authoringSession)}
       {...(source.kind !== 'highlight'
         ? {}
@@ -1234,11 +1236,6 @@ export function ReviewShell(props: ReviewShellProps) {
       onKeyDownCapture={keyDown}
       onFocusCapture={(event) => {
         inputController.focusChanged(isEditableTarget(event.target));
-        if (authoringSessionRef.current === null || !(event.target instanceof Element)) return;
-        if (event.target.closest('[data-comment-composer]') !== null) setAuthoringReading(false);
-        else if (event.target.closest('.pdf-workspace:not(.pdf-workspace--reference)') !== null) {
-          setAuthoringReading(true);
-        }
       }}
       onCompositionStartCapture={(event) => inputController.compositionStart(event.target)}
       onCompositionEndCapture={compositionEnd}
@@ -1360,7 +1357,7 @@ export function ReviewShell(props: ReviewShellProps) {
               onHighlight={startHighlight}
             />
           ) : null}
-          {surface.baseSurface === 'reading' && !selectionAnchor && props.caretAnchor && props.caretPlacement ? (
+          {!selectionAnchor && props.caretAnchor && props.caretPlacement ? (
             <InsertionCaret
               key={`${props.caretAnchor.pageIndex}:${props.caretAnchor.position.x}:${props.caretAnchor.position.y}`}
               placement={props.caretPlacement}
@@ -1403,17 +1400,6 @@ export function ReviewShell(props: ReviewShellProps) {
               />
             );
           })() : null}
-          {authoringSession !== null && authoringReading ? (
-            <button
-              className="comment-composer__return-editor review-button review-button--secondary"
-              type="button"
-              title="Return to Editor"
-              onClick={focusAuthoringEditor}
-            >
-              <ReviewIcon name="edit" />
-              <span>Return to Editor</span>
-            </button>
-          ) : null}
         </div>
         <div
           className="review-drawer-host"

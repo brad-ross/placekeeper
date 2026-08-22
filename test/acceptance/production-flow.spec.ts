@@ -12,6 +12,7 @@ let root = "";
 let host: PlacekeeperHost;
 let sourceRoot = "";
 let pdf = "";
+let plainTextPdf = "";
 let multiPagePdf = "";
 let rotatedPdf = "";
 let referencePdf = "";
@@ -260,12 +261,14 @@ test.beforeAll(async () => {
   sourceRoot = join(root, "source");
   await mkdir(sourceRoot);
   pdf = join(root, "paper.pdf");
+  plainTextPdf = join(root, "plain-text.pdf");
   multiPagePdf = join(root, "multi-page.pdf");
   rotatedPdf = join(root, "rotated.pdf");
   referencePdf = join(root, "reference-navigation.pdf");
   annotatedReferencePdf = join(root, "reference-navigation-annotated.pdf");
   searchPdf = join(root, "pdf-search.pdf");
   await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
+  await copyFile(resolve("test/fixtures/pdfs/text-native.pdf"), plainTextPdf);
   await copyFile(resolve("test/fixtures/pdfs/mixed-text-image.pdf"), multiPagePdf);
   await copyFile(resolve("test/fixtures/pdfs/rotation-90-crop.pdf"), rotatedPdf);
   await copyFile(resolve("test/fixtures/pdfs/reference-navigation.pdf"), referencePdf);
@@ -2776,6 +2779,40 @@ test('creates an insertion from middle-of-line PDFium caret geometry', async ({ 
   ]);
 });
 
+test('keeps the insertion caret visible beside an open workspace', async ({ page }) => {
+  const launched = await host.open({
+    pdfPath: plainTextPdf,
+    sourceRootPath: sourceRoot,
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === 'recovery-offered') {
+    throw new Error('Workspace caret launch failed');
+  }
+  await page.goto(launched.url);
+
+  const pdfPage = page.locator("[data-page-index='0']").first();
+  await expect(pdfPage).toBeVisible();
+  await waitForRenderedPageImage(pdfPage);
+  const workspaceControl = await currentWorkspaceRail(page);
+  if (await workspaceControl.getAttribute('aria-expanded') !== 'true') {
+    await workspaceControl.click();
+  }
+  await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('tab', { name: 'Search', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+
+  const pageBox = await pdfPage.boundingBox();
+  if (!pageBox) throw new Error('Rendered PDF page has no bounds.');
+  await page.mouse.click(pageBox.x + 150, pageBox.y + 99);
+
+  const insertionCaret = page.locator('[data-review-insertion-caret]');
+  await expect(insertionCaret).toBeVisible();
+  await expect(insertionCaret).toHaveCSS('animation-name', 'review-insertion-caret-blink');
+  await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
+});
+
 test('keeps repeated-click PDF text selection out of insertion mode', async ({ page }) => {
   const launched = await host.open({
     pdfPath: pdf,
@@ -3003,7 +3040,7 @@ test('edits the current page in a real multi-page viewer without losing adjacent
   expect(browserErrors).toEqual([]);
 });
 
-test('returns a live authoring draft through document history without retargeting it', async ({ page }) => {
+test('returns a live PDF annotation preview through document history without retargeting it', async ({ page }) => {
   const launched = await openFreshProductionFixture(
     page,
     multiPagePdf,
@@ -3023,7 +3060,8 @@ test('returns a live authoring draft through document history without retargetin
   const composer = page.getByRole('region', { name: 'Page Note' });
   const editor = composer.getByRole('textbox', { name: 'Comment' });
   await editor.fill('Draft remains on the original page.');
-  await composer.getByRole('button', { name: 'Read Document' }).click();
+  const preview = page.locator('[data-authoring-preview="true"]');
+  await expect(preview).toHaveAttribute('data-owned-mark', 'pageNote');
 
   const currentPage = page.getByRole('button', {
     name: 'Current page 1 of 2. Enter a page number',
@@ -3036,12 +3074,11 @@ test('returns a live authoring draft through document history without retargetin
   await expect.poll(() => new URL(page.url()).hash).toContain('page=2');
   await expect(editor).toHaveValue('Draft remains on the original page.');
 
-  const returnToAnchor = composer.getByRole('button', { name: 'Return to Anchor' });
+  const returnToAnchor = composer.getByRole('button', { name: 'Return to annotation' });
   await expect(returnToAnchor).toBeEnabled();
   await returnToAnchor.click();
   await expect(editor).toHaveValue('Draft remains on the original page.');
-  await expect(page.getByRole('button', { name: 'Return to Editor' })).toBeVisible();
-  await expect(composer.locator('[data-return-state="visible"]')).toContainText('Anchor in view');
+  await expect(composer.locator('.comment-composer__anchor')).toHaveCount(0);
   await expect.poll(() => new URL(page.url()).hash).toContain('page=1');
 
   const back = page.getByRole('button', { name: 'Back in document history' });
@@ -3054,9 +3091,10 @@ test('returns a live authoring draft through document history without retargetin
   await expect(forward).toBeEnabled();
   await forward.click();
   await expect.poll(() => new URL(page.url()).hash).toContain('page=1');
-  await expect(composer.locator('[data-return-state="visible"]')).toContainText('Anchor in view');
+  await expect(composer.locator('.comment-composer__anchor')).toHaveCount(0);
+  await expect(preview).toHaveAttribute('data-owned-mark', 'pageNote');
 
-  await page.getByRole('button', { name: 'Return to Editor' }).click();
+  await editor.focus();
   await expect(editor).toBeFocused();
   await composer.getByRole('button', { name: 'Cancel' }).click();
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);

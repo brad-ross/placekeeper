@@ -581,25 +581,23 @@ test('Page Note composer', async ({ page }) => {
 });
 
 for (const composer of [
-  { name: 'replacement', title: 'Replacement', source: 'selection', primary: 'Apply' },
-  { name: 'insertion', title: 'Insertion', source: 'caret', primary: 'Apply' },
-  { name: 'highlight', title: 'Highlight Comment', source: 'selection', primary: 'Save', keep: true },
-  { name: 'page-note', title: 'Page Note', source: 'page', primary: 'Save' },
-  { name: 'edit-highlight', title: 'Edit Highlight', source: 'selection', primary: 'Apply' },
-  { name: 'edit-page-note', title: 'Edit Page Note', source: 'page', primary: 'Apply' },
-  { name: 'edit-replacement', title: 'Edit Replacement', source: 'selection', primary: 'Apply' },
-  { name: 'edit-insertion', title: 'Edit Insertion', source: 'caret', primary: 'Apply' },
+  { name: 'replacement', title: 'Replacement', primary: 'Apply' },
+  { name: 'insertion', title: 'Insertion', primary: 'Apply' },
+  { name: 'highlight', title: 'Highlight Comment', primary: 'Save', keep: true },
+  { name: 'page-note', title: 'Page Note', primary: 'Save' },
+  { name: 'edit-highlight', title: 'Edit Highlight', primary: 'Apply' },
+  { name: 'edit-page-note', title: 'Edit Page Note', primary: 'Apply' },
+  { name: 'edit-replacement', title: 'Edit Replacement', primary: 'Apply' },
+  { name: 'edit-insertion', title: 'Edit Insertion', primary: 'Apply' },
 ] as const) {
   test(`${composer.title} uses the contextual composer contract`, async ({ page }) => {
     await openScene(page, `reading&composer=${composer.name}`);
     const surface = page.getByRole('region', { name: composer.title });
     await expect(surface).toBeVisible();
     await expect(surface).not.toHaveAttribute('aria-modal');
-    await expect(surface.locator('[data-source-context]')).toHaveAttribute(
-      'data-source-context',
-      composer.source,
-    );
-    await expect(surface.getByRole('button', { name: 'Read Document' })).toBeVisible();
+    await expect(surface.locator('[data-source-context]')).toHaveCount(0);
+    await expect(surface.getByRole('button', { name: 'Read Document' })).toHaveCount(0);
+    await expect(surface.locator('.comment-composer__anchor')).toHaveCount(0);
     await expect(surface.getByRole('button', { name: 'Cancel' })).toBeVisible();
     await expect(surface.getByRole('button', { name: composer.primary, exact: true })).toBeVisible();
     await expect(surface.getByRole('button', { name: 'Keep', exact: true }))
@@ -672,26 +670,27 @@ test('narrow composer uses one contained bottom surface with touch-sized actions
   await expectScene(product, 'narrow-contextual-composer.png');
 });
 
-test('long source context expands inside the fixed right-edge composer', async ({ page }) => {
+test('the out-of-view anchor uses one icon button and keeps actions beneath the input', async ({ page }) => {
   const product = await openScene(page, 'reading&composer=replacement&context=long&return=outside');
   const composer = page.getByRole('region', { name: 'Replacement' });
   const before = await composer.boundingBox();
-  await composer.getByRole('button', { name: 'Show Full Context' }).click();
-  await expect(composer.locator('[data-context-expanded]')).toHaveAttribute(
-    'data-context-expanded',
-    'true',
-  );
+  const anchor = composer.getByRole('button', { name: 'Return to annotation' });
+  await expect(anchor).toBeVisible();
+  await expect(anchor.locator('span')).toHaveCount(0);
+  const inputBox = await composer.getByRole('textbox').boundingBox();
+  const actionsBox = await composer.locator('.comment-composer__actions').boundingBox();
+  expect(inputBox).not.toBeNull();
+  expect(actionsBox).not.toBeNull();
+  expect(actionsBox!.y).toBeGreaterThanOrEqual(inputBox!.y + inputBox!.height);
   expect(await composer.boundingBox()).toEqual(before);
-  await expect(composer.getByRole('button', { name: 'Return to Anchor' })).toBeVisible();
   await expectScene(product, 'wide-contextual-long-source.png');
 });
 
-test('unavailable source and anchor states remain truthful', async ({ page }) => {
+test('no anchor control is shown when its location is unavailable', async ({ page }) => {
   const product = await openScene(page, 'reading&composer=insertion&context=unavailable&return=unavailable');
   const composer = page.getByRole('region', { name: 'Insertion' });
-  await expect(composer.getByText('Text context unavailable')).toBeVisible();
-  const unavailable = composer.getByRole('button', { name: 'Anchor unavailable' });
-  await expect(unavailable).toBeDisabled();
+  await expect(composer.locator('.comment-composer__anchor')).toHaveCount(0);
+  await expect(composer.locator('[data-source-context]')).toHaveCount(0);
   await expectScene(product, 'wide-contextual-unavailable-anchor.png');
 });
 
@@ -718,7 +717,7 @@ test('Save Destination owns the modal layer above a preserved composer', async (
 test('pending Return motion respects reduced-motion preference', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await openScene(page, 'reading&composer=replacement&return=pending');
-  const pending = page.getByRole('button', { name: 'Returning…' });
+  const pending = page.getByRole('button', { name: 'Returning to annotation' });
   await expect(pending).toBeDisabled();
   await expect(pending.locator('.lucide-loader-circle')).toHaveCSS('animation-name', 'none');
 });

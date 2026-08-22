@@ -52,6 +52,7 @@ export interface PdfWorkspaceProps {
   documentLabel?: string;
   onInitialized?: (registry: PluginRegistry) => Promise<void>;
   ownedAnnotations?: readonly ReviewAnnotation[];
+  authoringPreview?: ReviewAnnotation | null;
   keyboardPageNoteCursor?: ViewerPagePoint | null;
   onKeyboardPageNoteKey?: (key: string) => void;
   onPageContextMenu?: (request: PageContextMenuRequest) => boolean;
@@ -99,6 +100,7 @@ export function PdfWorkspace({
   documentLabel = 'PDF document',
   onInitialized,
   ownedAnnotations = [],
+  authoringPreview = null,
   keyboardPageNoteCursor = null,
   onKeyboardPageNoteKey,
   onPageContextMenu,
@@ -118,9 +120,18 @@ export function PdfWorkspace({
   const pressedPrimaryPointers = useRef(new Map<number, HTMLDivElement>());
   const contextPointers = useRef(new Set<number>());
   const contextResetTarget = useRef<HTMLDivElement | null>(null);
+  const visibleAnnotations = useMemo(
+    () => authoringPreview === null
+      ? ownedAnnotations
+      : [
+          ...ownedAnnotations.filter(({ id }) => id !== authoringPreview.id),
+          authoringPreview,
+        ],
+    [authoringPreview, ownedAnnotations],
+  );
   const annotationsByPage = useMemo(
-    () => groupByPageIndex(ownedAnnotations),
-    [ownedAnnotations],
+    () => groupByPageIndex(visibleAnnotations),
+    [visibleAnnotations],
   );
   const geometryByPage = useMemo(
     () => groupOwnedMarkGeometryByPage(ownedAnnotations),
@@ -354,6 +365,7 @@ export function PdfWorkspace({
                                   key={`${annotation.id}:${index}`}
                                   data-owned-mark={annotation.kind}
                                   data-review-id={annotation.id}
+                                  data-authoring-preview={authoringPreview?.id === annotation.id ? 'true' : undefined}
                                   data-corresponding={correspondingOwnedAnnotationId === annotation.id ? 'true' : 'false'}
                                   data-active={activeOwnedAnnotationId === annotation.id ? 'true' : 'false'}
                                   style={{

@@ -4,6 +4,7 @@ import type { PdfDocumentObject, PdfEngine } from '@embedpdf/models';
 import { SelectionPlugin } from "@embedpdf/plugin-selection";
 
 import type { ReviewCommand, ReviewItem, ReviewState } from "../../../../packages/core/src/review-model.js";
+import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { CaretAnchor } from "../pdf/selection-anchor.js";
 import type { ExistingAnnotation, ExistingAnnotationsDiscovery } from "../pdf/existing-annotations.js";
@@ -330,6 +331,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [authoringAnchorNavigation, setAuthoringAnchorNavigation] = useState<
     AuthoringAnchorNavigationState | null
   >(null);
+  const [authoringPreview, setAuthoringPreview] = useState<ReviewAnnotation | null>(null);
   const [selectionUpdate, setSelectionUpdate] = useState<SelectionUpdate>(INITIAL_SELECTION_UPDATE);
   const selectionUpdateRef = useRef(selectionUpdate);
   selectionUpdateRef.current = selectionUpdate;
@@ -1088,6 +1090,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       toolError={commandError}
       onSelectionUpdate={onSelectionUpdate}
       ownedAnnotations={ownedAnnotations}
+      authoringPreview={authoringPreview}
       keyboardPageNoteActive={keyboardPageNoteActive}
       onViewerInteraction={onViewerInteraction}
       {...(activeItemId === undefined ? {} : { activeOwnedAnnotationId: activeItemId })}
@@ -1452,6 +1455,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           : { authoringSessionResolution })}
         onAuthoringAnchorChange={onAuthoringAnchorChange}
         onAuthoringActiveChange={(active) => { authoringActiveRef.current = active; }}
+        onAuthoringPreviewChange={setAuthoringPreview}
         onAuthoringViewportChange={onAuthoringViewportChange}
         {...(authoringAnchorNavigation === null ? {} : {
           authoringAnchorNavigation: {
