@@ -626,6 +626,29 @@
   display: none;
 }
 
+.review-insertion-caret {
+  position: fixed;
+  z-index: 3;
+  width: 2px;
+  height: 1.15rem;
+  border-radius: var(--review-radius-round);
+  background: var(--review-focus);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--review-surface-panel) 72%, transparent);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  animation: review-insertion-caret-blink 1.05s steps(1, end) infinite;
+}
+
+.review-insertion-caret[hidden] {
+  display: none;
+}
+
+@keyframes review-insertion-caret-blink {
+  0%, 48% { opacity: 1; }
+  49%, 96% { opacity: 0; }
+  97%, 100% { opacity: 1; }
+}
+
 .review-context-palette button,
 .review-page-menu button {
   display: inline-flex;

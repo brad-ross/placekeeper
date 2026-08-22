@@ -52,7 +52,11 @@ import {
 import type { AnnotationOutlineLabels } from '../review/annotation-outline-context.js';
 import { AnnotationPeek } from '../review/AnnotationPeek.js';
 import { CommentComposer } from '../review/CommentComposer.js';
-import { ContextActionPalette, type ContextPlacement } from '../review/ContextActionPalette.js';
+import {
+  ContextActionPalette,
+  InsertionCaret,
+  type ContextPlacement,
+} from '../review/ContextActionPalette.js';
 import { PageActionMenu } from '../review/PageActionMenu.js';
 import { LinkActionPopover, type LinkActionChoice, type LinkActionDismissReason } from '../review/LinkActionPopover.js';
 import {
@@ -934,9 +938,8 @@ export function ReviewShell(props: ReviewShellProps) {
       if (tool) {
         event.preventDefault();
         if (authoringSessionRef.current !== null) return;
-        if (tool === 'replace') startTextTool('replace');
+        if (tool === 'replace') startReplacement();
         if (tool === 'delete') deleteSelection();
-        if (tool === 'insert') startTextTool('insert');
         if (tool === 'highlight') startHighlight();
         if (tool === 'pageNote') {
           props.onRequestKeyboardPageNote?.();
@@ -984,27 +987,19 @@ export function ReviewShell(props: ReviewShellProps) {
     beginAuthoring({ kind: 'highlight', anchor, selectionGeneration }, 'selection', trigger);
   };
 
-  const startTextTool = (kind: 'replace' | 'insert') => {
+  const startReplacement = () => {
     if (authoringSessionRef.current !== null) return;
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    if (kind === 'replace') {
-      if (!selectionAnchor || props.selectionUpdate.kind !== 'reliable') {
-        setAnnouncement('Select reliable text to suggest a replacement.');
-        return;
-      }
-      beginAuthoring({
-        kind,
-        anchor: selectionAnchor,
-        initialValue: '',
-        selectionGeneration: props.selectionUpdate.generation,
-      }, 'selection', trigger);
-    } else {
-      if (!props.caretAnchor) {
-        setAnnouncement('Choose a reliable text position to suggest an insertion.');
-        return;
-      }
-      beginAuthoring({ kind, anchor: props.caretAnchor, initialValue: '' }, 'caret', trigger);
+    if (!selectionAnchor || props.selectionUpdate.kind !== 'reliable') {
+      setAnnouncement('Select reliable text to suggest a replacement.');
+      return;
     }
+    beginAuthoring({
+      kind: 'replace',
+      anchor: selectionAnchor,
+      initialValue: '',
+      selectionGeneration: props.selectionUpdate.generation,
+    }, 'selection', trigger);
   };
 
   const deleteSelection = () => {
@@ -1358,20 +1353,18 @@ export function ReviewShell(props: ReviewShellProps) {
         <div className="review-contextual-host" data-review-contextual-host>
           {selectionActionsAvailable && props.selectionPlacement ? (
             <ContextActionPalette
-              kind="selection"
               placement={props.selectionPlacement}
               hidden={surface.nestedLayer !== 'none'}
-              onReplace={() => startTextTool('replace')}
+              onReplace={startReplacement}
               onDelete={deleteSelection}
               onHighlight={startHighlight}
             />
           ) : null}
           {surface.baseSurface === 'reading' && !selectionAnchor && props.caretAnchor && props.caretPlacement ? (
-            <ContextActionPalette
-              kind="insert"
+            <InsertionCaret
+              key={`${props.caretAnchor.pageIndex}:${props.caretAnchor.position.x}:${props.caretAnchor.position.y}`}
               placement={props.caretPlacement}
               hidden={surface.nestedLayer !== 'none'}
-              onInsert={() => startTextTool('insert')}
             />
           ) : null}
           {surface.baseSurface === 'reading' && surface.nestedLayer === 'none' && props.pageMenu ? (

@@ -33,6 +33,7 @@ type BookmarkInspection = {
 type ViewerInspection = {
   pageCount: number;
   text: string;
+  textRectContents: string[];
   reliableTextGeometry: boolean;
   annotationSubtypes: string[];
   renderedWidth: number;
@@ -167,6 +168,7 @@ async function inspect(url: string, timeoutMs = 10_000): Promise<ViewerInspectio
     return {
       pageCount: document.pageCount,
       text: reliableTextGeometry ? normalizedText : '',
+      textRectContents: textRects.flat().map(({ content }) => content),
       reliableTextGeometry,
       annotationSubtypes: annotations.flat().map(({ type }) => subtypeName(type)),
       renderedWidth: rendered.size,

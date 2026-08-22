@@ -226,6 +226,141 @@ describe('selection anchors', () => {
       .toMatchObject({ ok: false, diagnostic: 'caret-point-inside-multichar-rect' });
   });
 
+  it('uses exact glyph geometry inside a multi-character text rect', () => {
+    const hitPage = {
+      ...page(Rotation.Degree0),
+      extractedText: 'word',
+      textRects: [{ content: 'word', rect: { origin: { x: 20, y: 30 }, size: { width: 40, height: 12 } } }],
+      glyphs: [
+        { textOffset: 0, rect: { origin: { x: 20, y: 30 }, size: { width: 10, height: 12 } } },
+        { textOffset: 1, rect: { origin: { x: 30, y: 30 }, size: { width: 10, height: 12 } } },
+        { textOffset: 2, rect: { origin: { x: 40, y: 30 }, size: { width: 10, height: 12 } } },
+        { textOffset: 3, rect: { origin: { x: 50, y: 30 }, size: { width: 10, height: 12 } } },
+      ],
+    };
+
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 36, y: 36 } }))
+      .toMatchObject({
+        ok: true,
+        anchor: {
+          position: { x: 40, y: 30, width: 2, height: 12 },
+          leftContext: 'wo',
+          rightContext: 'rd',
+          reliable: true,
+        },
+      });
+  });
+
+  it('does not guess inside a text rect when indexed glyph coverage is incomplete', () => {
+    const hitPage = {
+      ...page(Rotation.Degree0),
+      extractedText: 'word',
+      textRects: [{ content: 'word', rect: { origin: { x: 20, y: 30 }, size: { width: 40, height: 12 } } }],
+      glyphs: [
+        { textOffset: 0, rect: { origin: { x: 20, y: 30 }, size: { width: 10, height: 12 } } },
+        { textOffset: 1, rect: { origin: { x: 30, y: 30 }, size: { width: 10, height: 12 } } },
+      ],
+    };
+
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 46, y: 36 } }))
+      .toMatchObject({ ok: false, diagnostic: 'caret-point-inside-multichar-rect' });
+  });
+
+  it('skips ownerless control glyphs without disabling exact later-run carets', () => {
+    const hitPage = {
+      ...page(Rotation.Degree0),
+      extractedText: 'first\nword',
+      textRects: [
+        { content: 'first', rect: { origin: { x: 20, y: 30 }, size: { width: 50, height: 12 } } },
+        { content: 'word', rect: { origin: { x: 20, y: 50 }, size: { width: 40, height: 12 } } },
+      ],
+      glyphs: [
+        ...Array.from({ length: 5 }, (_, index) => ({
+          textOffset: index,
+          rect: { origin: { x: 20 + index * 10, y: 30 }, size: { width: 10, height: 12 } },
+        })),
+        { textOffset: 5, rect: { origin: { x: 0, y: 0 }, size: { width: 0, height: 0 } } },
+        ...Array.from({ length: 4 }, (_, index) => ({
+          textOffset: index + 6,
+          rect: { origin: { x: 20 + index * 10, y: 50 }, size: { width: 10, height: 12 } },
+        })),
+      ],
+    };
+
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 36, y: 56 } }))
+      .toMatchObject({
+        ok: true,
+        anchor: {
+          position: { x: 40, y: 50, width: 2, height: 12 },
+          leftContext: 'first\nwo',
+          rightContext: 'rd',
+        },
+      });
+  });
+
+  it('rejects indexed glyph carets for unsupported reading orders', () => {
+    const hitPage = {
+      ...page(Rotation.Degree0),
+      extractedText: 'אב',
+      textRects: [{ content: 'אב', rect: { origin: { x: 20, y: 30 }, size: { width: 20, height: 12 } } }],
+      glyphs: [
+        { textOffset: 0, rect: { origin: { x: 30, y: 30 }, size: { width: 10, height: 12 } } },
+        { textOffset: 1, rect: { origin: { x: 20, y: 30 }, size: { width: 10, height: 12 } } },
+      ],
+    };
+
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 36, y: 36 } }))
+      .toMatchObject({ ok: false, diagnostic: 'caret-reading-order-unsupported' });
+  });
+
+  it('aligns PDFium text rectangles with trailing control markers', () => {
+    const hitPage = {
+      ...page(Rotation.Degree0),
+      extractedText: 'first line\r\nsecond line',
+      textRects: [
+        {
+          content: 'first line\u0004',
+          rect: { origin: { x: 20, y: 30 }, size: { width: 60, height: 12 } },
+        },
+        {
+          content: 'second line\u0088',
+          rect: { origin: { x: 20, y: 50 }, size: { width: 66, height: 12 } },
+        },
+      ],
+    };
+
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 86, y: 56 } }))
+      .toMatchObject({
+        ok: true,
+        anchor: {
+          leftContext: 'first line\r\nsecond line',
+          rightContext: '',
+          reliable: true,
+        },
+      });
+  });
+
+  it('preserves an exact trailing-control match before using the PDFium fallback', () => {
+    const hitPage = {
+      ...page(Rotation.Degree0),
+      extractedText: 'same same\u0004',
+      textRects: [{
+        content: 'same\u0004',
+        rect: { origin: { x: 20, y: 30 }, size: { width: 40, height: 12 } },
+      }],
+    };
+
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 20, y: 36 } }))
+      .toMatchObject({
+        ok: true,
+        anchor: {
+          leftContext: 'same ',
+          rightContext: 'same\u0004',
+          reliable: true,
+        },
+      });
+  });
+
   it.each([
     ['ambiguous alignment', {
       extractedText: 'same same',

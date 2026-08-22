@@ -117,7 +117,7 @@ For acceptance testing, transient gesture presentation is treated as non-authori
 ### Viewer Runway
 Temporary scroll extent added beyond viewer content so an overlaid review surface does not make covered document regions unreachable.
 
-Runway expands reachability without participating in page layout and is removed when the overlay closes or the viewer is disposed.
+Runway expands reachability without participating in page layout and is removed when the overlay closes or the viewer is disposed. While an animated overlay is logically open, runway commits the overlay's resting layout extent and ignores transformed intermediate frames.
 
 ### Framing Session
 The interval during which an open review surface may automatically reveal document content while tracking which movement belongs to the interface and which belongs to the user.

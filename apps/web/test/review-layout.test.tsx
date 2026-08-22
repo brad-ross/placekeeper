@@ -55,6 +55,10 @@ const annotationStyles = readFileSync(
   new URL('../src/app/review-layout-annotations.css', import.meta.url),
   'utf8',
 );
+const foundationStyles = readFileSync(
+  new URL('../src/app/review-layout-foundation.css', import.meta.url),
+  'utf8',
+);
 
 const ownedAnnotation: ReviewItem = {
   id: 'owned-highlight',
@@ -139,6 +143,38 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('data-tools-workspace-open="true"');
     expect(html).toContain('aria-label="Selection review actions"');
     expect(html).not.toContain('aria-label="Page actions"');
+  });
+
+  it('shows a blinking visual caret without exposing an insertion action', () => {
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        selectionUpdate={{ kind: 'cleared', generation: 1 }}
+        caretAnchor={{
+          pageIndex: 0,
+          position: { x: 149, y: 89, width: 2, height: 16 },
+          leftContext: 'Selectable p',
+          rightContext: 'lacekeeper text',
+          reliable: true,
+        }}
+        caretPlacement={{ left: 250, top: 180, width: 2, height: 16 }}
+        onCommand={async () => state}
+      >
+        <div>Document canvas</div>
+      </ReviewShell>,
+    );
+
+    expect(html).toContain('data-review-insertion-caret="true"');
+    expect(html).toContain('aria-hidden="true"');
+    expect(html).toContain('left:250px;top:180px;width:2px;height:16px');
+    expect(html).not.toContain('Insertion review action');
+    expect(html).not.toContain('>Insert</button>');
+    expect(foundationStyles).toMatch(
+      /\.review-insertion-caret\s*\{[^}]*animation:\s*review-insertion-caret-blink/u,
+    );
+    expect(responsiveStyles).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.review-insertion-caret,[\s\S]*?animation:\s*none/u,
+    );
   });
 
   it('yields the modal layer to save options without unmounting nested review state', () => {
@@ -623,7 +659,19 @@ describe('review shell layout and accessibility contract', () => {
     expect(annotationStyles).toContain('height: var(--review-workspace-header-height, 44px)');
     expect(annotationStyles).toContain('margin-top: var(--review-workspace-header-height, 44px)');
     expect(annotationStyles).toContain(
-      'top: calc((var(--review-workspace-header-height, 44px) / 2) + 3px)',
+      'transition: transform var(--review-motion-surface) ease-out',
+    );
+    expect(annotationStyles).toContain(
+      'translateX(calc(-1 * var(--tools-right-width)))',
+    );
+    expect(annotationStyles).not.toContain(
+      'translateY(calc(-50% + (var(--review-workspace-header-height, 44px) / 2) + 3px))',
+    );
+    expect(annotationStyles).toContain(
+      'transform: translateY(calc(-1 * var(--reference-bottom-height)))',
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-tools-workspace\[data-workspace-presentation="bottom"\]\[data-tools-workspace-open="false"\]\s*\{[^}]*transform:\s*translateY\(102%\);/u,
     );
     expect(annotationStyles).not.toContain('[data-edge-rail-open="true"]::before');
     expect(annotationStyles).not.toContain('border-image');
