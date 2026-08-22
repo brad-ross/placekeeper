@@ -189,6 +189,7 @@ export interface AppProps {
   /** Production composes the viewer inside the canonical reading-first ReviewShell. */
   embeddedInReviewShell?: boolean;
   ownedAnnotations?: readonly ReviewAnnotation[];
+  authoringPreview?: ReviewAnnotation | null;
   onViewerInteraction?: (event: ViewerInteractionEvent) => void;
   keyboardPageNoteActive?: boolean;
   activeOwnedAnnotationId?: string;
@@ -240,6 +241,7 @@ export function App({
   toolError = null,
   embeddedInReviewShell = false,
   ownedAnnotations = [],
+  authoringPreview = null,
   onViewerInteraction,
   keyboardPageNoteActive = false,
   activeOwnedAnnotationId,
@@ -950,6 +952,7 @@ export function App({
       onInitialized={initializeViewer}
       searchResults={searchResults}
       ownedAnnotations={ownedAnnotations}
+      authoringPreview={authoringPreview}
       keyboardPageNoteCursor={keyboardCursor}
       onKeyboardPageNoteKey={keyboardCursorKey}
       onPageContextMenu={pageContextMenu}

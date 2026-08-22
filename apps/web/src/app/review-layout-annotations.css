@@ -261,6 +261,12 @@
   visibility: hidden;
 }
 
+:is(.review-workspace, .review-tools-workspace)[data-authoring-takeover="true"] {
+  visibility: hidden;
+  pointer-events: none;
+  transition: none;
+}
+
 .review-tools-workspace[data-workspace-presentation="bottom"][data-tools-workspace-open="false"] {
   transform: translateY(102%);
 }

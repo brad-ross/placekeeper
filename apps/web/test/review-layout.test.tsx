@@ -177,6 +177,30 @@ describe('review shell layout and accessibility contract', () => {
     );
   });
 
+  it('keeps the insertion caret visible beside an open workspace', () => {
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        workspaceOpen
+        selectionUpdate={{ kind: 'cleared', generation: 1 }}
+        caretAnchor={{
+          pageIndex: 0,
+          position: { x: 149, y: 89, width: 2, height: 16 },
+          leftContext: 'Selectable p',
+          rightContext: 'lacekeeper text',
+          reliable: true,
+        }}
+        caretPlacement={{ left: 250, top: 180, width: 2, height: 16 }}
+        onCommand={async () => state}
+      >
+        <div>Document canvas</div>
+      </ReviewShell>,
+    );
+
+    expect(html).toContain('data-tools-workspace-open="true"');
+    expect(html).toContain('data-review-insertion-caret="true"');
+  });
+
   it('yields the modal layer to save options without unmounting nested review state', () => {
     const html = renderToStaticMarkup(
       <ReviewShell

@@ -132,6 +132,42 @@ describe('browser review location history', () => {
     expect(restore).toHaveBeenCalledTimes(2);
   });
 
+  it('starts popstate restoration before publishing the new traversal controls', () => {
+    const environment = new FakeEnvironment();
+    const order: string[] = [];
+    const history = new BrowserReviewLocationHistory(environment);
+    history.start(() => { order.push('restore'); });
+    history.push(page(4));
+    order.length = 0;
+    history.subscribe((snapshot) => {
+      if (snapshot.canForward) order.push('publish');
+    });
+
+    expect(history.back()).toBe(true);
+    expect(order).toEqual(['restore', 'publish']);
+  });
+
+  it('withholds traversal-control publication until asynchronous restoration settles', async () => {
+    const environment = new FakeEnvironment();
+    const order: string[] = [];
+    let finishRestore: () => void = () => {};
+    const history = new BrowserReviewLocationHistory(environment);
+    history.start(() => new Promise<void>((resolve) => {
+      order.push('restore');
+      finishRestore = resolve;
+    }));
+    history.push(page(4));
+    order.length = 0;
+    history.subscribe((snapshot) => {
+      if (snapshot.canForward) order.push('publish');
+    });
+
+    expect(history.back()).toBe(true);
+    expect(order).toEqual(['restore']);
+    finishRestore();
+    await vi.waitFor(() => expect(order).toEqual(['restore', 'publish']));
+  });
+
   it('converges malformed fragments through a safe replacement without growing history', () => {
     const environment = new FakeEnvironment();
     environment.location.hash = '#unsafe';

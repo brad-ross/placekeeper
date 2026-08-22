@@ -580,6 +580,148 @@ test('Page Note composer', async ({ page }) => {
   await expectScene(product, 'page-note-composer.png');
 });
 
+for (const composer of [
+  { name: 'replacement', title: 'Replacement', primary: 'Apply' },
+  { name: 'insertion', title: 'Insertion', primary: 'Apply' },
+  { name: 'highlight', title: 'Highlight Comment', primary: 'Save', keep: true },
+  { name: 'page-note', title: 'Page Note', primary: 'Save' },
+  { name: 'edit-highlight', title: 'Edit Highlight', primary: 'Apply' },
+  { name: 'edit-page-note', title: 'Edit Page Note', primary: 'Apply' },
+  { name: 'edit-replacement', title: 'Edit Replacement', primary: 'Apply' },
+  { name: 'edit-insertion', title: 'Edit Insertion', primary: 'Apply' },
+] as const) {
+  test(`${composer.title} uses the contextual composer contract`, async ({ page }) => {
+    await openScene(page, `reading&composer=${composer.name}`);
+    const surface = page.getByRole('region', { name: composer.title });
+    await expect(surface).toBeVisible();
+    await expect(surface).not.toHaveAttribute('aria-modal');
+    await expect(surface.locator('[data-source-context]')).toHaveCount(0);
+    await expect(surface.getByRole('button', { name: 'Read Document' })).toHaveCount(0);
+    await expect(surface.locator('.comment-composer__anchor')).toHaveCount(0);
+    await expect(surface.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    await expect(surface.getByRole('button', { name: composer.primary, exact: true })).toBeVisible();
+    await expect(surface.getByRole('button', { name: 'Keep', exact: true }))
+      .toHaveCount(composer.keep === true ? 1 : 0);
+  });
+}
+
+test('wide replacement composer occupies the right edge without reframing the PDF', async ({ page }) => {
+  const product = await openScene(page, 'contextual');
+  const document = page.locator('.review-document');
+  const documentBefore = await document.boundingBox();
+  await page.getByRole('button', { name: 'Replace', exact: true }).click();
+  const composer = page.getByRole('region', { name: 'Replacement' });
+  await composer.getByRole('textbox', { name: 'Replacement' }).fill('a locally unique equilibrium');
+  const [stageBounds, composerBounds, documentAfter] = await Promise.all([
+    page.locator('[data-review-stage]').boundingBox(),
+    composer.boundingBox(),
+    document.boundingBox(),
+  ]);
+  expect(stageBounds).not.toBeNull();
+  expect(composerBounds).not.toBeNull();
+  expect(documentBefore).not.toBeNull();
+  expect(documentAfter).toEqual(documentBefore);
+  expect(composerBounds!.x + composerBounds!.width).toBeCloseTo(
+    stageBounds!.x + stageBounds!.width,
+    0,
+  );
+  await expect(page.locator('[data-visual-document]')).toBeVisible();
+  await expectScene(product, 'wide-contextual-replacement-composer.png');
+});
+
+test('wide tray takeover preserves PDF geometry behind the editor', async ({ page }) => {
+  const product = await openScene(page, 'tray');
+  const document = page.locator('.review-document');
+  const documentBefore = await document.boundingBox();
+  await page.getByRole('button', { name: 'Edit Highlight annotation on page 1' }).click();
+  const composer = page.getByRole('region', { name: 'Edit Highlight' });
+  await expect(composer).toBeVisible();
+  await expect(page.locator('#review-tools-workspace')).toHaveAttribute('inert', '');
+  await expect(page.locator('#review-tools-workspace')).toHaveAttribute(
+    'data-authoring-takeover',
+    'true',
+  );
+  expect(await document.boundingBox()).toEqual(documentBefore);
+  await expectScene(product, 'wide-contextual-tray-takeover.png');
+});
+
+test('narrow composer uses one contained bottom surface with touch-sized actions', async ({ page }) => {
+  const viewport = { width: 520, height: 720 };
+  const product = await openScene(page, 'contextual', viewport);
+  await page.getByRole('button', { name: 'Replace', exact: true }).click();
+  const composer = page.getByRole('region', { name: 'Replacement' });
+  const geometry = await composer.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return {
+      top: bounds.top,
+      left: bounds.left,
+      right: bounds.right,
+      bottom: bounds.bottom,
+      actionHeights: [...element.querySelectorAll<HTMLButtonElement>(
+        '.comment-composer__actions button',
+      )].map((button) => button.getBoundingClientRect().height),
+    };
+  });
+  expect(geometry.top).toBeGreaterThanOrEqual(0);
+  expect(geometry.left).toBeGreaterThanOrEqual(0);
+  expect(geometry.right).toBeLessThanOrEqual(viewport.width);
+  expect(geometry.bottom).toBeLessThanOrEqual(viewport.height);
+  expect(Math.min(...geometry.actionHeights)).toBeGreaterThanOrEqual(44);
+  await expectScene(product, 'narrow-contextual-composer.png');
+});
+
+test('the out-of-view anchor uses one icon button and keeps actions beneath the input', async ({ page }) => {
+  const product = await openScene(page, 'reading&composer=replacement&context=long&return=outside');
+  const composer = page.getByRole('region', { name: 'Replacement' });
+  const before = await composer.boundingBox();
+  const anchor = composer.getByRole('button', { name: 'Return to annotation' });
+  await expect(anchor).toBeVisible();
+  await expect(anchor.locator('span')).toHaveCount(0);
+  const inputBox = await composer.getByRole('textbox').boundingBox();
+  const actionsBox = await composer.locator('.comment-composer__actions').boundingBox();
+  expect(inputBox).not.toBeNull();
+  expect(actionsBox).not.toBeNull();
+  expect(actionsBox!.y).toBeGreaterThanOrEqual(inputBox!.y + inputBox!.height);
+  expect(await composer.boundingBox()).toEqual(before);
+  await expectScene(product, 'wide-contextual-long-source.png');
+});
+
+test('no anchor control is shown when its location is unavailable', async ({ page }) => {
+  const product = await openScene(page, 'reading&composer=insertion&context=unavailable&return=unavailable');
+  const composer = page.getByRole('region', { name: 'Insertion' });
+  await expect(composer.locator('.comment-composer__anchor')).toHaveCount(0);
+  await expect(composer.locator('[data-source-context]')).toHaveCount(0);
+  await expectScene(product, 'wide-contextual-unavailable-anchor.png');
+});
+
+test('Save Destination owns the modal layer above a preserved composer', async ({ page }) => {
+  const product = await openScene(page, 'save-destination&composer=replacement&return=outside');
+  const destination = page.getByRole('dialog', { name: 'Choose Where to Save Annotations' });
+  const previewHost = page.locator('[data-composer-preview-host]');
+  await expect(destination).toBeVisible();
+  await expect(previewHost).toHaveAttribute('inert', '');
+  await expect(previewHost).toHaveAttribute('aria-hidden', 'true');
+  const layers = await page.locator('[data-production-review]').evaluate((root) => {
+    const dialog = root.querySelector<HTMLElement>('.save-destination-backdrop');
+    const composer = root.querySelector<HTMLElement>('[data-composer-preview-host]');
+    if (!dialog || !composer) throw new Error('Composer and Save Destination layers are required.');
+    return {
+      dialog: Number.parseInt(getComputedStyle(dialog).zIndex, 10),
+      composer: Number.parseInt(getComputedStyle(composer).zIndex, 10),
+    };
+  });
+  expect(layers.dialog).toBeGreaterThan(layers.composer);
+  await expectScene(product, 'save-destination-over-composer.png');
+});
+
+test('pending Return motion respects reduced-motion preference', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await openScene(page, 'reading&composer=replacement&return=pending');
+  const pending = page.getByRole('button', { name: 'Returning to annotation' });
+  await expect(pending).toBeDisabled();
+  await expect(pending.locator('.lucide-loader-circle')).toHaveCSS('animation-name', 'none');
+});
+
 test('Save Destination modal', async ({ page }) => {
   const product = await openScene(page, 'save-destination');
   const dialog = page.getByRole('dialog', { name: 'Choose Where to Save Annotations' });
@@ -608,15 +750,15 @@ test('Save Destination establishing motion respects user preference', async ({ p
 });
 
 for (const scene of [
-  { name: 'page-note', dialogName: 'Page Note', openComposer: true, viewport: { width: 320, height: 720 } },
-  { name: 'save-recovery', dialogName: 'Choose Where to Save Annotations', openComposer: false, viewport: { width: 320, height: 320 } },
+  { name: 'page-note', surfaceName: 'Page Note', role: 'region', openComposer: true, viewport: { width: 320, height: 720 } },
+  { name: 'save-recovery', surfaceName: 'Choose Where to Save Annotations', role: 'dialog', openComposer: false, viewport: { width: 320, height: 320 } },
 ] as const) {
-  test(`narrow ${scene.dialogName} modal remains contained and touch sized`, async ({ page }) => {
+  test(`narrow ${scene.surfaceName} surface remains contained and touch sized`, async ({ page }) => {
     await openScene(page, scene.name, scene.viewport);
     if (scene.openComposer) await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
-    const dialog = page.getByRole('dialog', { name: scene.dialogName });
-    await expect(dialog).toBeVisible();
-    const geometry = await dialog.evaluate((element) => {
+    const surface = page.getByRole(scene.role, { name: scene.surfaceName });
+    await expect(surface).toBeVisible();
+    const geometry = await surface.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
       const buttons = [...element.querySelectorAll<HTMLButtonElement>('button')];
       const body = element.querySelector<HTMLElement>('.compact-editorial-modal__body');

@@ -74,6 +74,8 @@ function navigation(initial = location(0)) {
       captureDocumentOrderPages: vi.fn(() => []),
       resolveTarget: vi.fn((value: PdfNavigationTarget) => location(value.pageIndex)),
       targetVisibility: vi.fn<PdfViewerNavigation['targetVisibility']>(() => 'visible'),
+      locationVisibility: vi.fn<PdfViewerNavigation['locationVisibility']>(() => 'visible'),
+      pointVisibility: vi.fn<PdfViewerNavigation['pointVisibility']>(() => 'visible'),
       applyTarget: vi.fn(async (value: PdfNavigationTarget) => {
         current = location(value.pageIndex);
         return true;
@@ -117,9 +119,14 @@ function locationHistory(initial: PlacekeeperLinkLocation = { kind: 'page', page
   return {
     history,
     set(location: PlacekeeperLinkLocation) { current = location; },
-    pop(location: PlacekeeperLinkLocation) {
+    pop(
+      location: PlacekeeperLinkLocation,
+      direction: 'back' | 'forward' | 'unknown' = 'unknown',
+    ) {
       current = location;
-      onPop('unknown');
+      if (direction === 'back') snapshot = { canBack: false, canForward: true };
+      if (direction === 'forward') snapshot = { canBack: true, canForward: false };
+      onPop(direction);
     },
     failRead() { vi.mocked(history.read).mockImplementation(() => { throw new Error('invalid'); }); },
   };
@@ -464,6 +471,24 @@ describe('document-scoped navigation coordinator', () => {
     expect(browser.history.replace).toHaveBeenLastCalledWith({ kind: 'page', page: 4 });
   });
 
+  it('commits a trailing manual location before an explicit annotation jump', async () => {
+    const browser = locationHistory({ kind: 'page', page: 1 });
+    const run = harness({ locationHistory: browser });
+    run.coordinator.startLocationHistory();
+    expect(await run.coordinator.restoreCurrentLocation()).toBe(true);
+    run.main.set(location(1, 90));
+
+    expect(await run.coordinator.navigateMainAnnotation({
+      pageIndex: 0,
+      point: { x: 12, y: 160 },
+    })).toBe(true);
+
+    expect(browser.history.replace).toHaveBeenCalledWith({ kind: 'page', page: 2 });
+    expect(browser.history.push).toHaveBeenCalledWith({ kind: 'page', page: 1 });
+    expect(vi.mocked(browser.history.replace).mock.invocationCallOrder.at(-1))
+      .toBeLessThan(vi.mocked(browser.history.push).mock.invocationCallOrder.at(-1)!);
+  });
+
   it('downgrades a current item link when saving is no longer clean and explains page fallback', async () => {
     const itemId = '00000000-0000-4000-8000-000000000066';
     const browser = locationHistory({ kind: 'item', page: 3, itemId });
@@ -626,6 +651,24 @@ describe('document-scoped navigation coordinator', () => {
       target(5).identity,
     ]);
     expect(run.referencesOpen()).toBe(true);
+  });
+
+  it('follows a main-document link without changing the displaced workspace', async () => {
+    const run = harness();
+    await run.coordinator.openReference(target(2), {
+      label: 'Source reference', pageContext: 'Page 3',
+    });
+    vi.mocked(run.dependencies.layout.hideReferences).mockClear();
+    const request = linkRequest(5, 'main');
+
+    expect(run.coordinator.requestLink(request)).toBe(true);
+    expect(await run.coordinator.chooseLink('main', request, {
+      preserveWorkspace: true,
+    })).toBe(true);
+
+    expect(run.main.controls.captureLocation()?.pageIndex).toBe(5);
+    expect(run.referencesOpen()).toBe(true);
+    expect(run.dependencies.layout.hideReferences).not.toHaveBeenCalled();
   });
 
   it('rejects a reference link while the first durable tab is still loading', async () => {
@@ -1254,6 +1297,112 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.main.controls.applyLocation).toHaveBeenLastCalledWith(location(0));
     expect(await run.coordinator.historyForward()).toBe(true);
     expect(run.main.controls.applyLocation).toHaveBeenLastCalledWith(annotation);
+  });
+
+  it('supersedes a cancelled annotation return without history or failure output', async () => {
+    const run = harness();
+    const applied = deferred<boolean>();
+    vi.mocked(run.main.controls.applyLocation).mockReturnValueOnce(applied.promise);
+    const returning = run.coordinator.navigateMainAnnotation({
+      pageIndex: 4,
+      point: { x: 12, y: 160 },
+    });
+    await vi.waitFor(() => expect(run.main.controls.applyLocation).toHaveBeenCalled());
+
+    run.coordinator.cancelPendingNavigation();
+    applied.resolve(true);
+
+    expect(await returning).toBe(false);
+    expect(run.state().mainHistory.entries).toEqual([]);
+    expect(run.announcement()).toBe('');
+  });
+
+  it('keeps an already-unobscured authoring anchor history-free and aligns covered returns', async () => {
+    const run = harness();
+    const annotation = location(0, 160, 1);
+    const viewport = {
+      occlusion: { left: 400, top: 0, right: 600, bottom: 400 },
+    } as const;
+
+    vi.mocked(run.main.controls.locationVisibility).mockReturnValueOnce('visible');
+    expect(await run.coordinator.navigateMainAnnotation({
+      pageIndex: annotation.pageIndex,
+      point: annotation.anchor,
+      viewport,
+    })).toBe(true);
+    expect(run.main.controls.applyLocation).not.toHaveBeenCalled();
+    expect(run.state().mainHistory.entries).toEqual([]);
+    expect(run.main.controls.focusAtDestination).toHaveBeenCalledWith(0);
+
+    vi.mocked(run.main.controls.locationVisibility).mockReturnValueOnce('outside');
+    run.main.set(location(2));
+    expect(await run.coordinator.navigateMainAnnotation({
+      pageIndex: annotation.pageIndex,
+      point: annotation.anchor,
+      viewport,
+    })).toBe(true);
+    expect(run.main.controls.applyLocation).toHaveBeenLastCalledWith(annotation, viewport);
+    expect(run.state().mainHistory.entries.map(({ pageIndex }) => pageIndex)).toEqual([2, 0]);
+  });
+
+  it('records the requested anchor when a covered return leaves another page most visible', async () => {
+    const browser = locationHistory({ kind: 'page', page: 2 });
+    const run = harness({ locationHistory: browser });
+    run.coordinator.startLocationHistory();
+    expect(await run.coordinator.restoreCurrentLocation()).toBe(true);
+    const viewport = {
+      occlusion: { left: 0, top: 400, right: 760, bottom: 900 },
+    } as const;
+    run.main.set(location(1, 90));
+    vi.mocked(run.main.controls.locationVisibility).mockReturnValueOnce('outside');
+    vi.mocked(run.main.controls.applyLocation).mockImplementationOnce(async () => {
+      run.main.set(location(1, 300));
+      return true;
+    });
+
+    expect(await run.coordinator.navigateMainAnnotation({
+      pageIndex: 0,
+      point: { x: 12, y: 160 },
+      viewport,
+    })).toBe(true);
+
+    expect(run.state().mainHistory.entries.map(({ pageIndex }) => pageIndex)).toEqual([1, 0]);
+    expect(browser.history.push).toHaveBeenLastCalledWith({ kind: 'page', page: 1 });
+    expect(run.main.controls.focusAtDestination).toHaveBeenLastCalledWith(0);
+  });
+
+  it('keeps authoring viewport occlusion through browser Back and Forward', async () => {
+    const browser = locationHistory({ kind: 'page', page: 1 });
+    const run = harness({ locationHistory: browser });
+    run.coordinator.startLocationHistory();
+    expect(await run.coordinator.restoreCurrentLocation()).toBe(true);
+    const viewport = {
+      occlusion: { left: 0, top: 400, right: 760, bottom: 900 },
+    } as const;
+    run.main.set(location(1, 90));
+    vi.mocked(run.main.controls.locationVisibility).mockReturnValueOnce('outside');
+    vi.mocked(run.main.controls.applyLocation).mockImplementationOnce(async () => {
+      run.main.set(location(1, 300));
+      return true;
+    });
+    expect(await run.coordinator.navigateMainAnnotation({
+      pageIndex: 0,
+      point: { x: 12, y: 160 },
+      viewport,
+    })).toBe(true);
+
+    vi.mocked(run.main.controls.applyLocation).mockResolvedValueOnce(false);
+    expect(await run.coordinator.historyBack(viewport)).toBe(true);
+    browser.pop({ kind: 'page', page: 2 }, 'back');
+    await vi.waitFor(() => expect(run.main.controls.applyLocation)
+      .toHaveBeenLastCalledWith(location(1, 90), viewport));
+    await vi.waitFor(() => expect(run.state().mainHistory.index).toBe(0));
+    expect(run.state().mainHistory.entries[1]).toEqual(expect.objectContaining({ pageIndex: 0 }));
+
+    expect(await run.coordinator.historyForward(viewport)).toBe(true);
+    browser.pop({ kind: 'page', page: 1 }, 'forward');
+    await vi.waitFor(() => expect(run.main.controls.applyLocation)
+      .toHaveBeenLastCalledWith(expect.objectContaining({ pageIndex: 0 }), viewport));
   });
 
   it('does not add a duplicate history stop when a repeated annotation settles in place', async () => {

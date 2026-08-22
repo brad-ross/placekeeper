@@ -18,6 +18,8 @@ import { WorkspaceModeStrip } from './WorkspaceModeStrip.js';
 export interface OutlineAnnotationsWorkspaceProps {
   readonly workspaceRef?: Ref<HTMLElement>;
   readonly open: boolean;
+  /** The workspace keeps its live state while the composer temporarily occupies its edge. */
+  readonly authoringTakeover?: boolean;
   readonly mode: WorkspaceMode;
   readonly modes: readonly RightWorkspaceMode[];
   readonly presentation: AnnotationPresentation;
@@ -47,6 +49,7 @@ export function chooseToolModeFocusTarget(
 export function OutlineAnnotationsWorkspace({
   workspaceRef,
   open,
+  authoringTakeover = false,
   mode,
   modes,
   presentation,
@@ -116,13 +119,14 @@ export function OutlineAnnotationsWorkspace({
       id="review-tools-workspace"
       className="review-tools-workspace"
       data-tools-workspace-open={open ? 'true' : 'false'}
+      data-authoring-takeover={authoringTakeover ? 'true' : undefined}
       data-tools-workspace-shared={headerVariant === 'shared' ? 'true' : 'false'}
       data-workspace-presentation={presentation}
       aria-label={outlineAvailable
         ? annotationsAvailable ? 'Outline, search, and annotations' : 'Outline and search'
         : annotationsAvailable ? 'Search and annotations' : 'Search'}
-      aria-hidden={!open}
-      inert={!open}
+      aria-hidden={!open || authoringTakeover}
+      inert={!open || authoringTakeover}
     >
       {headerVariant === 'tools' ? (
         <header className="review-workspace__header">

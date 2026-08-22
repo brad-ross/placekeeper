@@ -35,12 +35,28 @@ export interface PdfViewerLocationTolerances {
   readonly zoom?: number;
 }
 
+/**
+ * A transient client-coordinate rectangle covering part of the live viewer.
+ * Authoring overlays use this read-only geometry without publishing runway or
+ * otherwise changing the viewer's framing state.
+ */
+export interface PdfViewportOcclusion {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
+export interface PdfViewportQuery {
+  readonly occlusion?: PdfViewportOcclusion | null;
+}
+
 /** Read-only semantic visibility of a destination in the viewer's usable viewport. */
 export type PdfTargetVisibility = 'visible' | 'outside' | 'unavailable';
 
 export interface ViewerNavigationControls {
   captureLocation(): PdfViewerLocation | null;
-  applyLocation(location: PdfViewerLocation): Promise<boolean>;
+  applyLocation(location: PdfViewerLocation, viewport?: PdfViewportQuery): Promise<boolean>;
   fitToWidth(waitForSettledGeometry?: WaitForSettledViewerGeometry): Promise<boolean>;
   fitToWidthReady(): boolean;
   replaceDocument(documentGeneration: number): void;

@@ -119,6 +119,24 @@ describe('link action chooser', () => {
     expect(html.match(/<svg/g)).toHaveLength(4);
   });
 
+  it('keeps main-document links available while References is displaced by authoring', () => {
+    const html = renderToStaticMarkup(
+      <LinkActionMenuContent
+        label="Lemma A.7"
+        pageContext="Page 18"
+        sourceScope="main"
+        firstItemRef={() => undefined}
+        openInReferencesDisabled
+        onChoose={() => undefined}
+        onKeyDown={() => undefined}
+        onBlur={() => undefined}
+      />,
+    );
+
+    expect(html).toMatch(/aria-label="Open in References"[^>]*disabled/u);
+    expect(html).toMatch(/aria-label="Open in main document"(?![^>]*disabled)/u);
+  });
+
   it('wraps menu focus for arrows and supports Home and End', () => {
     expect(compositeFocusIndex(0, 2, 'ArrowDown')).toBe(1);
     expect(compositeFocusIndex(1, 2, 'ArrowDown')).toBe(0);

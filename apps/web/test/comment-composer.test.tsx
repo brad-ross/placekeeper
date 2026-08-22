@@ -1,80 +1,90 @@
-import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { renderToStaticMarkup } from 'react-dom/server';
+import { describe, expect, it, vi } from 'vitest';
 
-import { CommentComposer } from "../src/review/CommentComposer.js";
+import { CommentComposer } from '../src/review/CommentComposer.js';
 
-describe("CommentComposer Warm Neutral contract", () => {
-  it("owns its field and action styling without changing optional or disabled semantics", () => {
-    const html = renderToStaticMarkup(
-      <CommentComposer
-        title="Highlight Comment"
-        optional
-        onSave={vi.fn()}
-        onSkip={vi.fn()}
-        onDismiss={vi.fn()}
-      />,
-    );
+function renderComposer(overrides: Partial<Parameters<typeof CommentComposer>[0]> = {}) {
+  return renderToStaticMarkup(
+    <CommentComposer
+      title="Highlight Comment"
+      optional
+      anchorNavigation={{ visibility: 'visible', pending: false, onReturn: vi.fn() }}
+      onSave={vi.fn()}
+      onSkip={vi.fn()}
+      onDismiss={vi.fn()}
+      {...overrides}
+    />,
+  );
+}
 
-    expect(html).toContain("data-comment-composer-backdrop");
-    expect(html).toContain("data-comment-composer");
-    expect(html).toContain('aria-modal="true"');
-    expect(html).toContain('class="comment-composer compact-editorial-modal"');
-    expect(html).toContain('comment-composer__header compact-editorial-modal__header');
-    expect(html).toContain('compact-editorial-modal__body');
-    expect(html).toContain('comment-composer__actions compact-editorial-modal__footer');
-    expect(html).toContain('class="comment-composer__field"');
-    expect(html).toContain('class="comment-composer__input"');
-    expect(html).toContain('<span class="sr-only">Comment (optional)</span>');
-    expect(html).toContain(">Cancel</span>");
-    expect(html).toContain(">Keep</span>");
-    expect(html).not.toContain("Review note");
-    expect(html).toContain('review-button review-button--primary');
-    expect(html).toContain('class="lucide lucide-check review-icon"');
-    expect(html).toContain('class="lucide lucide-arrow-right review-icon"');
-    expect(html).not.toContain("disabled");
+describe('CommentComposer contextual authoring contract', () => {
+  it('keeps the live PDF as the only source context and places actions beneath the input', () => {
+    const html = renderComposer();
+
+    expect(html).toContain('data-comment-composer');
+    expect(html).toContain('role="region"');
+    expect(html).toContain('<form');
+    expect(html).not.toContain('data-comment-composer-backdrop');
+    expect(html).not.toContain('aria-modal');
+    expect(html).not.toContain('role="dialog"');
+    expect(html).not.toContain('data-source-context');
+    expect(html).not.toContain('Read Document');
+    expect(html).not.toContain('Return to Editor');
+    expect(html).not.toContain('Anchor in view');
+    expect(html).toContain('>Cancel</span>');
+    expect(html).toContain('>Keep</span>');
+    expect(html).toContain('>Save</span>');
+    expect(html.indexOf('</textarea>')).toBeLessThan(html.indexOf('comment-composer__actions'));
   });
 
-  it("uses a truthful cancel action for optional edit-style composers without a skip handler", () => {
-    const html = renderToStaticMarkup(
-      <CommentComposer
-        title="Edit Highlight"
-        optional
-        initialValue="Existing note"
-        onSave={vi.fn()}
-        onDismiss={vi.fn()}
-      />,
-    );
+  it.each([
+    ['visible', false, false, ''],
+    ['unavailable', false, false, ''],
+    ['outside', false, true, 'Return to annotation'],
+    ['outside', true, true, 'Returning to annotation'],
+  ] as const)('shows one icon-only anchor control only while the anchor is %s', (
+    visibility,
+    pending,
+    visible,
+    label,
+  ) => {
+    const html = renderComposer({
+      initialValue: 'Draft remains here',
+      anchorNavigation: { visibility, pending, onReturn: vi.fn() },
+    });
 
-    expect(html).toContain(">Cancel</span>");
-    expect(html).toContain('class="lucide lucide-x review-icon"');
-    expect(html).not.toContain(">Keep</span>");
+    expect(html.includes('comment-composer__anchor')).toBe(visible);
+    if (visible) {
+      expect(html).toContain(`aria-label="${label}"`);
+      expect(html).not.toContain(`<span>${label}</span>`);
+    }
+    expect(html).toContain('Draft remains here');
   });
 
-  it("keeps required whitespace-only content disabled on initial render", () => {
-    const html = renderToStaticMarkup(
-      <CommentComposer
-        title="Page Note"
-        initialValue="   "
-        onSave={vi.fn()}
-        onDismiss={vi.fn()}
-      />,
-    );
+  it('retains optionality, whitespace, and accessible field-label semantics', () => {
+    const optional = renderComposer();
+    const requiredWhitespace = renderComposer({
+      title: 'Replacement',
+      optional: false,
+      allowWhitespace: false,
+      fieldLabel: 'Replacement',
+      initialValue: '   ',
+      saveLabel: 'Apply',
+      onSkip: undefined,
+    });
+    const allowedWhitespace = renderComposer({
+      title: 'Replacement',
+      optional: false,
+      allowWhitespace: true,
+      initialValue: ' ',
+      saveLabel: 'Apply',
+      onSkip: undefined,
+    });
 
-    expect(html).toContain(">Save</span>");
-    expect(html).toContain("disabled");
-  });
-
-  it("keeps the field name accessible without repeating the modal title visually", () => {
-    const html = renderToStaticMarkup(
-      <CommentComposer
-        title="Replacement"
-        fieldLabel="Replacement"
-        onSave={vi.fn()}
-        onDismiss={vi.fn()}
-      />,
-    );
-
-    expect(html).toContain('<span class="sr-only">Replacement</span>');
-    expect(html).not.toContain('class="comment-composer__label"');
+    expect(optional).not.toContain('disabled=""');
+    expect(requiredWhitespace).toContain('<span class="sr-only">Replacement</span>');
+    expect(requiredWhitespace).not.toContain('class="comment-composer__label"');
+    expect(requiredWhitespace).toContain('disabled=""');
+    expect(allowedWhitespace).not.toContain('disabled=""');
   });
 });

@@ -26,7 +26,8 @@ import {
   type ReviewRect,
 } from '../../../../packages/core/src/review-commands.js';
 import type { ReviewCommand, ReviewItem, ReviewState } from '../../../../packages/core/src/review-model.js';
-import type { CaretAnchor, SelectionAnchor } from '../pdf/selection-anchor.js';
+import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+import type { CaretAnchor } from '../pdf/selection-anchor.js';
 import {
   existingAnnotationKey,
   type ExistingAnnotation,
@@ -37,6 +38,10 @@ import type { ViewerControls, ViewerControlsSnapshot } from '../pdf/viewer-contr
 import { unavailableViewerControls } from '../pdf/viewer-controls.js';
 import type { ViewerFramingControls, ViewerPosition } from '../pdf/viewer-framing.js';
 import type { PdfViewerNavigation } from '../pdf/viewer-navigation-adapter.js';
+import type {
+  PdfTargetVisibility,
+  PdfViewportQuery,
+} from '../pdf/viewer-navigation.js';
 import type { ViewerPdfLinkInvocation } from '../pdf/viewer-interaction-events.js';
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
 import { AnnotationList } from '../review/AnnotationList.js';
@@ -104,21 +109,21 @@ import type {
   ReferenceNavigationState,
   WorkspaceMode,
 } from '../review/reference-navigation-state.js';
+import {
+  authoringAuthorityFor,
+  authoringAuthorityMatches,
+  authoringAnchorSnapshot,
+  authoringPreviewAnnotation,
+  authoringSessionIsCurrent,
+  canStartAuthoringSession,
+  createAuthoringSession,
+  type AuthoringAuthority,
+  type AuthoringAnchorSnapshot,
+  type AuthoringOriginKind,
+  type AuthoringSession,
+  type AuthoringSource,
+} from '../review/authoring-session.js';
 import './review-layout.css';
-
-type TextDraft =
-  | {
-      kind: 'replace';
-      anchor: SelectionAnchor;
-      initialText: string;
-      selectionGeneration: number;
-    }
-  | { kind: 'insert'; anchor: CaretAnchor; initialText: string };
-
-type Composer =
-  | { kind: 'highlight'; anchor: SelectionAnchor; selectionGeneration: number }
-  | { kind: 'pageNote'; pageIndex: number; position: ReviewRect; nearbyText?: string }
-  | { kind: 'edit'; item: ReviewItem };
 
 function ignoreReferenceViewportHost(_element: HTMLDivElement | null): void {}
 
@@ -155,8 +160,27 @@ export interface ReviewShellProps {
   onPlacedPageNoteConsumed?(token: number): void;
   onPageNoteComposerComplete?(): void;
   onSelectionConsumed?(generation: number): void;
-  onCommand(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand>;
-  cancelPendingCommandToken?: number;
+  onCommand(
+    command: ReviewCommand,
+    authority?: AuthoringAuthority,
+  ): Promise<ReviewState | RejectedReviewCommand>;
+  authoringSessionResolution?: {
+    readonly token: number;
+    readonly outcome: 'accepted' | 'source-replaced';
+  };
+  /** Production-owned, read-only visibility/Return state for the active frozen anchor. */
+  authoringAnchorNavigation?: {
+    readonly token: number;
+    readonly visibility: PdfTargetVisibility;
+    readonly pending: boolean;
+    readonly onReturn: () => void;
+    readonly onCancelReturn?: () => void;
+  };
+  onAuthoringAnchorChange?(anchor: AuthoringAnchorSnapshot | null): void;
+  onAuthoringActiveChange?(active: boolean): void;
+  onAuthoringPreviewChange?(preview: ReviewAnnotation | null): void;
+  /** U3/U4 may publish measured overlay geometry without affecting viewer framing. */
+  onAuthoringViewportChange?(viewport: PdfViewportQuery | null): void;
   onNavigate?(item: ReviewItem): void;
   onNavigateExisting?(item: ExistingAnnotation): void;
   existingAnnotations?: ExistingAnnotationsDiscovery;
@@ -220,6 +244,7 @@ export interface RejectedReviewCommand {
   readonly accepted: false;
   readonly state: ReviewState;
   readonly message: string;
+  readonly reason?: 'rejected' | 'save-destination' | 'stale-authoring';
 }
 
 export function controlledWorkspaceSurfaceAction(input: {
@@ -253,6 +278,14 @@ function mutableField(item: ReviewItem): 'proposedText' | 'comment' | undefined 
   return undefined;
 }
 
+function initialAuthoringValue(session: AuthoringSession): string {
+  const source = session.source;
+  if (source.kind === 'replace' || source.kind === 'insert') return source.initialValue;
+  if (source.kind !== 'edit') return '';
+  const field = mutableField(source.item);
+  return field === undefined ? '' : String(source.item.payload[field] ?? '');
+}
+
 export function ReviewShell(props: ReviewShellProps) {
   const [localReferenceLayout, dispatchLocalReferenceLayout] = useReducer(
     reduceReferenceWorkspaceLayout,
@@ -284,12 +317,19 @@ export function ReviewShell(props: ReviewShellProps) {
         })
       : INITIAL_REVIEW_SURFACE_STATE,
   );
-  const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
-  const [composer, setComposer] = useState<Composer | null>(null);
+  const [authoringSession, setAuthoringSession] = useState<AuthoringSession | null>(null);
+  const authoringSessionRef = useRef<AuthoringSession | null>(null);
+  const authoringSessionTokenRef = useRef(0);
+  const authoringEditorRef = useRef<HTMLTextAreaElement>(null);
+  const saveOptionsWasOpenRef = useRef(props.saveOptionsOpen ?? false);
+  const [authoringSurfaceElement, setAuthoringSurfaceElement] = useState<HTMLElement | null>(null);
   const [localActiveItemId, setLocalActiveItemId] = useState<string>();
   const activeItemId = props.activeItemId === undefined
     ? localActiveItemId
     : props.activeItemId ?? undefined;
+  const presentedActiveItemId = authoringSession === null
+    ? activeItemId
+    : authoringSession.workspace.activeItemId;
   const [consumedSelectionGeneration, setConsumedSelectionGeneration] = useState<number>();
   const [listActivation, setListActivation] = useState<{ readonly id: string; readonly token: number }>();
   const [peekItemId, setPeekItemId] = useState<string>();
@@ -297,12 +337,67 @@ export function ReviewShell(props: ReviewShellProps) {
   const peekHeldRef = useRef(false);
   const peekTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [announcement, setAnnouncement] = useState(`Review revision ${props.state.revision}.`);
+
+  useEffect(() => {
+    props.onAuthoringAnchorChange?.(
+      authoringSession === null ? null : authoringAnchorSnapshot(authoringSession),
+    );
+  }, [authoringSession, props.onAuthoringAnchorChange]);
+  useEffect(() => {
+    props.onAuthoringPreviewChange?.(
+      authoringSession === null
+        ? null
+        : authoringPreviewAnnotation(authoringSession, initialAuthoringValue(authoringSession)),
+    );
+    return () => props.onAuthoringPreviewChange?.(null);
+  }, [authoringSession, props.onAuthoringPreviewChange]);
+  useEffect(() => {
+    const wasOpen = saveOptionsWasOpenRef.current;
+    const isOpen = props.saveOptionsOpen ?? false;
+    saveOptionsWasOpenRef.current = isOpen;
+    if (!wasOpen || isOpen || authoringSessionRef.current === null) return;
+    requestAnimationFrame(() => authoringEditorRef.current?.focus({ preventScroll: true }));
+  }, [props.saveOptionsOpen]);
+  useLayoutEffect(() => {
+    if (authoringSurfaceElement === null) {
+      props.onAuthoringViewportChange?.(null);
+      return;
+    }
+    let frame = 0;
+    const publish = () => {
+      frame = 0;
+      const rect = authoringSurfaceElement.getBoundingClientRect();
+      props.onAuthoringViewportChange?.({
+        occlusion: {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+        },
+      });
+    };
+    const schedulePublish = () => {
+      if (frame !== 0) return;
+      frame = requestAnimationFrame(publish);
+    };
+    publish();
+    const observer = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(schedulePublish);
+    observer?.observe(authoringSurfaceElement);
+    window.addEventListener('resize', schedulePublish);
+    window.addEventListener('scroll', schedulePublish, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener('resize', schedulePublish);
+      window.removeEventListener('scroll', schedulePublish, true);
+      props.onAuthoringViewportChange?.(null);
+    };
+  }, [authoringSurfaceElement, props.onAuthoringViewportChange]);
   const acknowledgedRef = useRef(props.state);
   const commandTailRef = useRef<Promise<ReviewState>>(Promise.resolve(props.state));
-  const modalTriggerRef = useRef<HTMLElement>(null);
   const pageNoteTriggerRef = useRef<HTMLButtonElement>(null);
-  const draftTriggerRef = useRef<HTMLElement>(null);
-  const editTriggerRef = useRef<HTMLButtonElement>(null);
   const surfaceTriggersRef = useRef(new Map<ReviewBaseSurface, HTMLElement>());
   const rightWorkspaceRailRef = useRef<HTMLButtonElement>(null);
   const bottomWorkspaceRailRef = useRef<HTMLButtonElement>(null);
@@ -317,18 +412,13 @@ export function ReviewShell(props: ReviewShellProps) {
     if (props.activeItemId === undefined) setLocalActiveItemId(id);
     props.onActiveItemChange?.(id);
   };
-  useEffect(() => {
-    if (props.cancelPendingCommandToken === undefined) return;
-    setTextDraft(null);
-    setComposer(null);
-    if (props.selectionUpdate.kind === 'reliable') {
-      setConsumedSelectionGeneration(props.selectionUpdate.generation);
-      props.onSelectionConsumed?.(props.selectionUpdate.generation);
-    }
-    dispatchSurface({ type: 'close-nested' });
-    dispatchSurface({ type: 'close-transient' });
-  }, [props.cancelPendingCommandToken]);
   const navigation = props.navigationState ?? surface.navigation;
+  const currentAuthoringAuthority = authoringAuthorityFor(
+    props.state,
+    navigation.documentGeneration,
+  );
+  const currentAuthoringAuthorityRef = useRef(currentAuthoringAuthority);
+  currentAuthoringAuthorityRef.current = currentAuthoringAuthority;
   const referenceTabs = props.referenceTabs ?? navigation.tabs.map((tab) => ({
     identity: tab.identity,
     label: `Page ${tab.originalTarget.pageIndex + 1}`,
@@ -441,6 +531,7 @@ export function ReviewShell(props: ReviewShellProps) {
 
   useLayoutEffect(() => {
     if (props.workspaceOpen === undefined) return;
+    if (authoringSessionRef.current !== null) return;
     const action = controlledWorkspaceSurfaceAction({
       open: props.workspaceOpen,
       baseSurface: surface.baseSurface,
@@ -506,7 +597,7 @@ export function ReviewShell(props: ReviewShellProps) {
 
   useEffect(() => {
     const request = props.activationRequest;
-    if (!request) return;
+    if (!request || authoringSessionRef.current !== null) return;
     setActiveItem(request.id);
     setListActivation(request);
     setPeekItemId(undefined);
@@ -527,6 +618,7 @@ export function ReviewShell(props: ReviewShellProps) {
   }, [props.activationRequest?.id, props.activationRequest?.token]);
 
   const selectWorkspaceMode = (mode: WorkspaceMode) => {
+    if (authoringSessionRef.current !== null) return;
     if (mode === 'annotations' && (!workspaceOpen || workspaceMode !== 'annotations')) {
       setWorkspaceRequest({ kind: 'reading', token: ++annotationRequestTokenRef.current });
     }
@@ -540,15 +632,44 @@ export function ReviewShell(props: ReviewShellProps) {
     });
     props.onWorkspaceModeChange?.(mode);
   };
-  if (props.state.revision >= acknowledgedRef.current.revision) acknowledgedRef.current = props.state;
+  const acknowledgedAuthority = authoringAuthorityFor(
+    acknowledgedRef.current,
+    navigation.documentGeneration,
+  );
+  if (!authoringAuthorityMatches(acknowledgedAuthority, currentAuthoringAuthority)) {
+    acknowledgedRef.current = props.state;
+    commandTailRef.current = Promise.resolve(props.state);
+  } else if (props.state.revision >= acknowledgedRef.current.revision) {
+    acknowledgedRef.current = props.state;
+  }
 
   const submit = (
     build: (state: ReviewState) => ReviewCommand,
-    options?: { readonly onAccepted?: () => void },
+    options?: {
+      readonly authority?: AuthoringAuthority;
+      readonly onAccepted?: () => void;
+      readonly onStale?: () => void;
+    },
   ): Promise<ReviewState> => {
     const result = commandTailRef.current.then(async () => {
+      if (
+        options?.authority !== undefined
+        && !authoringAuthorityMatches(options.authority, currentAuthoringAuthorityRef.current)
+      ) {
+        setAnnouncement('This draft belonged to the previous document and was not applied.');
+        options.onStale?.();
+        return acknowledgedRef.current;
+      }
       const command = build(acknowledgedRef.current);
-      const result = await props.onCommand(command);
+      const result = await props.onCommand(command, options?.authority);
+      if (
+        options?.authority !== undefined
+        && !authoringAuthorityMatches(options.authority, currentAuthoringAuthorityRef.current)
+      ) {
+        setAnnouncement('This draft belonged to the previous document and was not applied.');
+        options.onStale?.();
+        return acknowledgedRef.current;
+      }
       const accepted = !('accepted' in result);
       const next = accepted ? result : result.state;
       acknowledgedRef.current = next;
@@ -564,7 +685,41 @@ export function ReviewShell(props: ReviewShellProps) {
     props.onSelectionConsumed?.(generation);
   };
 
+  const snapshotAuthoringWorkspace = () => ({
+    open: anyWorkspaceOpen,
+    mode: effectiveWorkspaceMode,
+    ...(activeItemId === undefined ? {} : { activeItemId }),
+    annotationScrollTop: shellRef.current
+      ?.querySelector<HTMLElement>('[data-annotation-scroll-viewport]')
+      ?.scrollTop ?? 0,
+  });
+
+  const beginAuthoring = (
+    source: AuthoringSource,
+    originKind: AuthoringOriginKind,
+    trigger: HTMLElement | null,
+  ): boolean => {
+    if (!canStartAuthoringSession(authoringSessionRef.current)) return false;
+    inputControllerRef.current?.clearDraft();
+    const session = createAuthoringSession({
+      token: ++authoringSessionTokenRef.current,
+      authority: currentAuthoringAuthorityRef.current,
+      source,
+      origin: { kind: originKind, trigger },
+      workspace: snapshotAuthoringWorkspace(),
+    });
+    authoringSessionRef.current = session;
+    props.onAuthoringActiveChange?.(true);
+    setAuthoringSession(session);
+    dispatchSurface({ type: 'open-nested' });
+    return true;
+  };
+
   const handleInputIntent = (intent: ProofreadInputIntent) => {
+    if (authoringSessionRef.current !== null) {
+      inputControllerRef.current?.clearDraft();
+      return;
+    }
     const selectionGeneration = props.selectionUpdate.kind === 'reliable'
       ? props.selectionUpdate.generation
       : undefined;
@@ -577,7 +732,7 @@ export function ReviewShell(props: ReviewShellProps) {
       );
       return;
     }
-    draftTriggerRef.current = document.activeElement instanceof HTMLElement
+    const trigger = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
     if (intent.kind === 'replaceDraft') {
@@ -585,16 +740,19 @@ export function ReviewShell(props: ReviewShellProps) {
         setAnnouncement('Select reliable text to suggest a replacement.');
         return;
       }
-      setTextDraft({
+      beginAuthoring({
         kind: 'replace',
         anchor: intent.anchor,
-        initialText: intent.initialText,
+        initialValue: intent.initialText,
         selectionGeneration,
-      });
+      }, 'typing', trigger);
     } else {
-      setTextDraft({ kind: 'insert', anchor: intent.anchor, initialText: intent.initialText });
+      beginAuthoring({
+        kind: 'insert',
+        anchor: intent.anchor,
+        initialValue: intent.initialText,
+      }, 'typing', trigger);
     }
-    dispatchSurface({ type: 'open-nested' });
   };
 
   const inputIntentRef = useRef(handleInputIntent);
@@ -604,18 +762,86 @@ export function ReviewShell(props: ReviewShellProps) {
     inputControllerRef.current = createProofreadInputController((intent) => inputIntentRef.current(intent));
   }
   const inputController = inputControllerRef.current;
-  const closeNested = () => {
-    const trigger = textDraft ? draftTriggerRef.current
-      : composer?.kind === 'edit' ? editTriggerRef.current
-      : modalTriggerRef.current;
-    if (textDraft) {
-      setTextDraft(null);
-      inputController.clearDraft();
-    }
-    if (composer) setComposer(null);
+  const closeAuthoringSession = (
+    token: number,
+    reason: 'accepted' | 'cancelled' | 'source-replaced',
+  ) => {
+    const current = authoringSessionRef.current;
+    if (current === null || current.token !== token) return;
+    authoringSessionRef.current = null;
+    props.onAuthoringActiveChange?.(false);
+    props.onAuthoringPreviewChange?.(null);
+    setAuthoringSession(null);
+    inputController.clearDraft();
     dispatchSurface({ type: 'close-nested' });
-    requestAnimationFrame(() => trigger?.focus());
+    if (current.source.kind === 'pageNote') props.onPageNoteComposerComplete?.();
+    if (reason === 'source-replaced') return;
+    setActiveItem(current.workspace.activeItemId);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const shell = shellRef.current;
+      if (shell === null) return;
+      const viewport = shell.querySelector<HTMLElement>('[data-annotation-scroll-viewport]');
+      if (viewport !== null) viewport.scrollTop = current.workspace.annotationScrollTop;
+      const originTrigger = current.origin.trigger;
+      const restoredItem = current.workspace.activeItemId === undefined
+        ? null
+        : [...shell.querySelectorAll<HTMLElement>('[data-review-item]')]
+          .find((element) => element.dataset.reviewItem === current.workspace.activeItemId);
+      const target = originTrigger?.isConnected === true
+        ? originTrigger
+        : current.origin.kind === 'tray-edit'
+          ? restoredItem?.querySelector<HTMLElement>('[data-annotation-action="edit"]')
+          : null;
+      const workspaceFallback = current.workspace.open
+        ? shell.querySelector<HTMLElement>(`#workspace-panel-${current.workspace.mode}`)
+        : null;
+      (target
+        ?? workspaceFallback
+        ?? shell.querySelector<HTMLElement>(
+          '.pdf-workspace:not(.pdf-workspace--reference) [data-page-index], [role="application"]',
+        ))?.focus({ preventScroll: true });
+    }));
   };
+  const dismissAuthoring = async (session: AuthoringSession) => {
+    if (
+      props.authoringAnchorNavigation?.token === session.token
+      && props.authoringAnchorNavigation.pending
+    ) await props.authoringAnchorNavigation.onCancelReturn?.();
+    closeAuthoringSession(session.token, 'cancelled');
+  };
+  const closeNested = async () => {
+    const current = authoringSessionRef.current;
+    if (current !== null) await dismissAuthoring(current);
+  };
+
+  useLayoutEffect(() => {
+    const current = authoringSessionRef.current;
+    if (
+      current === null
+      || authoringSessionIsCurrent(current, currentAuthoringAuthority)
+    ) return;
+    if (
+      props.authoringAnchorNavigation?.token === current.token
+      && props.authoringAnchorNavigation.pending
+    ) props.authoringAnchorNavigation.onCancelReturn?.();
+    setAnnouncement('This draft belonged to the previous document and was not applied.');
+    closeAuthoringSession(current.token, 'source-replaced');
+  }, [currentAuthoringAuthority.documentGeneration, currentAuthoringAuthority.sourceIdentity]);
+
+  useEffect(() => {
+    const resolution = props.authoringSessionResolution;
+    const current = authoringSessionRef.current;
+    if (resolution === undefined || current === null) return;
+    if (resolution.outcome === 'accepted') {
+      if (current.source.kind === 'replace' || current.source.kind === 'highlight') {
+        consumeSelectionActions(current.source.selectionGeneration);
+      }
+      closeAuthoringSession(current.token, 'accepted');
+      return;
+    }
+    setAnnouncement('This draft belonged to the previous document and was not applied.');
+    closeAuthoringSession(current.token, 'source-replaced');
+  }, [props.authoringSessionResolution?.token]);
   useLayoutEffect(() => {
     inputController.focusChanged(isEditableTarget(document.activeElement));
     inputController.setContext({
@@ -625,6 +851,14 @@ export function ReviewShell(props: ReviewShellProps) {
   }, [inputController, props.caretAnchor, props.selectionUpdate]);
 
   const beforeInput = (event: FormEvent<HTMLDivElement>) => {
+    if (
+      authoringSessionRef.current !== null
+      && !isEditableTarget(event.target)
+    ) {
+      inputController.clearDraft();
+      event.preventDefault();
+      return;
+    }
     const native = event.nativeEvent as InputEvent;
     inputController.beforeInput({
       inputType: native.inputType,
@@ -651,6 +885,7 @@ export function ReviewShell(props: ReviewShellProps) {
       && event.key.toLowerCase() === 'f'
       && !event.nativeEvent.isComposing
       && surface.nestedLayer === 'none'
+      && authoringSessionRef.current === null
     ) {
       event.preventDefault();
       setSearchFocusRequest((request) => request + 1);
@@ -682,7 +917,7 @@ export function ReviewShell(props: ReviewShellProps) {
       }
       if (surface.nestedLayer !== 'none') {
         event.preventDefault();
-        closeNested();
+        void closeNested();
         return;
       }
       if (props.keyboardPageNoteActive) {
@@ -703,11 +938,22 @@ export function ReviewShell(props: ReviewShellProps) {
         return;
       }
     }
+    if (authoringSessionRef.current !== null && !editable) {
+      inputController.clearDraft();
+      if (
+        event.key === 'Backspace'
+        || event.key === 'Delete'
+        || ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z')
+        || (event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey)
+      ) event.preventDefault();
+      return;
+    }
     if (event.defaultPrevented || editable || event.nativeEvent.isComposing) return;
     if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey) {
       const tool = reviewActionForKey(event.key);
       if (tool) {
         event.preventDefault();
+        if (authoringSessionRef.current !== null) return;
         if (tool === 'replace') startReplacement();
         if (tool === 'delete') deleteSelection();
         if (tool === 'highlight') startHighlight();
@@ -736,10 +982,15 @@ export function ReviewShell(props: ReviewShellProps) {
     });
   };
   const compositionEnd = (event: CompositionEvent<HTMLDivElement>) => {
+    if (authoringSessionRef.current !== null && !isEditableTarget(event.target)) {
+      inputController.clearDraft();
+      return;
+    }
     inputController.compositionEnd(event.data, event.target);
   };
 
   const startHighlight = () => {
+    if (authoringSessionRef.current !== null) return;
     const anchor = selectionAnchor;
     const selectionGeneration = props.selectionUpdate.kind === 'reliable'
       ? props.selectionUpdate.generation
@@ -748,36 +999,23 @@ export function ReviewShell(props: ReviewShellProps) {
       setAnnouncement('Select reliable text to add a highlight.');
       return;
     }
-    modalTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setComposer({ kind: 'highlight', anchor, selectionGeneration });
-    dispatchSurface({ type: 'open-nested' });
-  };
-
-  const saveHighlight = async (
-    pending: Extract<Composer, { kind: 'highlight' }>,
-    comment: string,
-  ) => {
-    await submit(
-      (state) => addHighlight(state, pending.anchor, comment),
-      { onAccepted: () => consumeSelectionActions(pending.selectionGeneration) },
-    );
-    setComposer(null);
-    dispatchSurface({ type: 'close-nested' });
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    beginAuthoring({ kind: 'highlight', anchor, selectionGeneration }, 'selection', trigger);
   };
 
   const startReplacement = () => {
+    if (authoringSessionRef.current !== null) return;
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!selectionAnchor || props.selectionUpdate.kind !== 'reliable') {
       setAnnouncement('Select reliable text to suggest a replacement.');
       return;
     }
-    draftTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setTextDraft({
+    beginAuthoring({
       kind: 'replace',
       anchor: selectionAnchor,
-      initialText: '',
+      initialValue: '',
       selectionGeneration: props.selectionUpdate.generation,
-    });
-    dispatchSurface({ type: 'open-nested' });
+    }, 'selection', trigger);
   };
 
   const deleteSelection = () => {
@@ -795,14 +1033,14 @@ export function ReviewShell(props: ReviewShellProps) {
   };
 
   const startPageNote = (anchor?: { pageIndex: number; position: ReviewRect; nearbyText?: string } | null) => {
+    if (authoringSessionRef.current !== null) return;
     if (!anchor) {
       setAnnouncement('Choose a safe page location to add a Page Note.');
       return;
     }
-    modalTriggerRef.current = pageNoteTriggerRef.current
+    const trigger = pageNoteTriggerRef.current
       ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
-    setComposer({ kind: 'pageNote', ...anchor });
-    dispatchSurface({ type: 'open-nested' });
+    beginAuthoring({ kind: 'pageNote', ...anchor }, 'page', trigger);
   };
 
   useEffect(() => {
@@ -813,10 +1051,62 @@ export function ReviewShell(props: ReviewShellProps) {
     props.onPlacedPageNoteConsumed?.(placed.token);
   }, [props.placedPageNote]);
 
-  const closeTextDraft = () => {
-    setTextDraft(null);
-    inputController.clearDraft();
-    dispatchSurface({ type: 'close-nested' });
+  const submitAuthoring = async (
+    session: AuthoringSession,
+    build: (state: ReviewState) => ReviewCommand,
+    onAccepted?: () => void,
+  ) => {
+    let accepted = false;
+    await submit(build, {
+      authority: session.authority,
+      onAccepted: () => {
+        accepted = true;
+        onAccepted?.();
+      },
+      onStale: () => closeAuthoringSession(session.token, 'source-replaced'),
+    });
+    if (accepted) closeAuthoringSession(session.token, 'accepted');
+  };
+
+  const saveAuthoring = async (session: AuthoringSession, value: string) => {
+    const source = session.source;
+    if (source.kind === 'replace') {
+      await submitAuthoring(
+        session,
+        (state) => addReplace(state, source.anchor, value),
+        () => consumeSelectionActions(source.selectionGeneration),
+      );
+      return;
+    }
+    if (source.kind === 'insert') {
+      await submitAuthoring(session, (state) => addInsert(state, source.anchor, value));
+      return;
+    }
+    if (source.kind === 'highlight') {
+      await submitAuthoring(
+        session,
+        (state) => addHighlight(state, source.anchor, value),
+        () => consumeSelectionActions(source.selectionGeneration),
+      );
+      return;
+    }
+    if (source.kind === 'pageNote') {
+      await submitAuthoring(session, (state) => addPageNote(
+        state,
+        source.pageIndex,
+        source.position,
+        value,
+        undefined,
+        source.nearbyText,
+      ));
+      return;
+    }
+    const field = mutableField(source.item);
+    if (field === undefined) return;
+    await submitAuthoring(
+      session,
+      (state) => editReviewItem(state, source.item.id, { [field]: value }),
+    );
   };
 
   const canUndo = props.state.historyCursor > 0;
@@ -884,7 +1174,7 @@ export function ReviewShell(props: ReviewShellProps) {
       || workspaceFraming.toolsSurfaceRef.current?.contains(target) === true
     ))
     || (target instanceof Element && target.closest(
-      '[data-review-chrome], [data-review-nested-host], [data-link-action-popover]',
+      '[data-review-chrome], [data-review-nested-host], [data-comment-composer], [data-link-action-popover]',
     ) !== null)
   );
   const copyLinkForItem = (item: ReviewItem): CopyLinkControlProps | undefined => {
@@ -901,12 +1191,52 @@ export function ReviewShell(props: ReviewShellProps) {
     || props.copyLinkForLinkAction === undefined
     ? undefined
     : props.copyLinkForLinkAction(props.linkActionRequest);
+  const authoringComposer = authoringSession === null ? null : (() => {
+    const source = authoringSession.source;
+    const editField = source.kind === 'edit' ? mutableField(source.item) : undefined;
+    if (source.kind === 'edit' && editField === undefined) return null;
+    const initialValue = initialAuthoringValue(authoringSession);
+    const fieldLabel = source.kind === 'replace'
+      ? 'Replacement'
+      : source.kind === 'insert'
+        ? 'Insertion'
+        : source.kind === 'edit' && source.item.kind === 'replace'
+          ? 'Replacement'
+          : source.kind === 'edit' && source.item.kind === 'insert'
+            ? 'Insertion'
+            : undefined;
+    const anchorNavigation = props.authoringAnchorNavigation?.token === authoringSession.token
+      ? props.authoringAnchorNavigation
+      : undefined;
+    return <CommentComposer
+      title={authoringSession.semantics.title}
+      saveLabel={authoringSession.semantics.primaryLabel}
+      optional={authoringSession.semantics.optional}
+      allowWhitespace={authoringSession.semantics.allowWhitespace}
+      {...(fieldLabel === undefined ? {} : { fieldLabel })}
+      initialValue={initialValue}
+      editorRef={authoringEditorRef}
+      surfaceRef={setAuthoringSurfaceElement}
+      anchorNavigation={anchorNavigation}
+      onValueChange={(value) => {
+        if (authoringSessionRef.current?.token !== authoringSession.token) return;
+        props.onAuthoringPreviewChange?.(authoringPreviewAnnotation(authoringSession, value));
+      }}
+      onDismiss={() => dismissAuthoring(authoringSession)}
+      {...(source.kind !== 'highlight'
+        ? {}
+        : { onSkip: () => saveAuthoring(authoringSession, '') })}
+      onSave={(value) => saveAuthoring(authoringSession, value)}
+    />;
+  })();
   return (
     <section
       className="review-shell"
       onBeforeInputCapture={beforeInput}
       onKeyDownCapture={keyDown}
-      onFocusCapture={(event) => inputController.focusChanged(isEditableTarget(event.target))}
+      onFocusCapture={(event) => {
+        inputController.focusChanged(isEditableTarget(event.target));
+      }}
       onCompositionStartCapture={(event) => inputController.compositionStart(event.target)}
       onCompositionEndCapture={compositionEnd}
       ref={shellRef}
@@ -944,7 +1274,8 @@ export function ReviewShell(props: ReviewShellProps) {
       }}
       onClickCapture={(event) => {
         if (
-          activeItemId !== undefined
+          authoringSessionRef.current === null
+          && activeItemId !== undefined
           && event.button === 0
           && event.target instanceof Element
           && event.target.closest('[data-review-item], [data-owned-focus-id], [data-page-index]') === null
@@ -980,14 +1311,18 @@ export function ReviewShell(props: ReviewShellProps) {
         onFitWidth={() => props.viewerNavigation
           ?.fitToWidth(workspaceFraming.waitForSettledGeometry)
           .then(() => undefined)}
-        canUndo={canUndo}
-        canRedo={canRedo}
+        canUndo={authoringSession === null && canUndo}
+        canRedo={authoringSession === null && canRedo}
         canNavigateBack={props.canNavigateBack ?? false}
         canNavigateForward={props.canNavigateForward ?? false}
         {...(props.codexContext === undefined ? {} : { codexContext: props.codexContext })}
         {...(props.copyLink === undefined ? {} : { copyLink: props.copyLink })}
-        onUndo={() => void submit(undoReview)}
-        onRedo={() => void submit(redoReview)}
+        onUndo={() => {
+          if (authoringSessionRef.current === null) void submit(undoReview);
+        }}
+        onRedo={() => {
+          if (authoringSessionRef.current === null) void submit(redoReview);
+        }}
         onNavigateBack={() => props.onNavigateBack?.()}
         onNavigateForward={() => props.onNavigateForward?.()}
       />
@@ -1022,7 +1357,7 @@ export function ReviewShell(props: ReviewShellProps) {
               onHighlight={startHighlight}
             />
           ) : null}
-          {surface.baseSurface === 'reading' && !selectionAnchor && props.caretAnchor && props.caretPlacement ? (
+          {!selectionAnchor && props.caretAnchor && props.caretPlacement ? (
             <InsertionCaret
               key={`${props.caretAnchor.pageIndex}:${props.caretAnchor.position.x}:${props.caretAnchor.position.y}`}
               placement={props.caretPlacement}
@@ -1047,7 +1382,7 @@ export function ReviewShell(props: ReviewShellProps) {
               }}
             />
           ) : null}
-          {!workspaceOpen && peekItemId ? (() => {
+          {authoringSession === null && !workspaceOpen && peekItemId ? (() => {
             const item = props.state.items.find(({ id }) => id === peekItemId);
             if (item === undefined) return null;
             const copyLink = copyLinkForItem(item);
@@ -1066,8 +1401,14 @@ export function ReviewShell(props: ReviewShellProps) {
             );
           })() : null}
         </div>
-        <div className="review-drawer-host" data-review-drawer-host>
-          {effectiveReferenceLayout.kind === 'narrow-unified' ? (
+        <div
+          className="review-drawer-host"
+          data-review-drawer-host
+          inert={props.saveOptionsOpen ?? false}
+          aria-hidden={props.saveOptionsOpen === true ? 'true' : undefined}
+        >
+          {authoringComposer}
+          {authoringSession === null ? (effectiveReferenceLayout.kind === 'narrow-unified' ? (
             <WorkspaceEdgeRail
               buttonRef={bottomWorkspaceRailRef}
               surface="bottom"
@@ -1109,10 +1450,11 @@ export function ReviewShell(props: ReviewShellProps) {
                 }}
               /> : null}
             </>
-          )}
+          )) : null}
           <ReferenceWorkspace
             workspaceRef={workspaceFraming.referenceSurfaceRef}
             open={referenceSurfaceOpen}
+            authoringTakeover={authoringSession !== null}
             mode={effectiveReferenceLayout.kind !== 'narrow-unified'
               && effectiveReferenceLayout.referenceDock === 'bottom'
               ? 'references' : effectiveWorkspaceMode}
@@ -1126,11 +1468,13 @@ export function ReviewShell(props: ReviewShellProps) {
             headerVariant={effectiveReferenceLayout.kind !== 'narrow-unified'
               && effectiveReferenceLayout.referenceDock === 'bottom' ? 'references' : 'tabs'}
             onMoveReferencesRight={() => {
+              if (authoringSessionRef.current !== null) return;
               dispatchReferenceLayout({ type: 'move-references-right' });
               selectWorkspaceMode('references');
               focusWorkspaceModeAfterLayout('references');
             }}
             onMoveReferencesBottom={() => {
+              if (authoringSessionRef.current !== null) return;
               dispatchReferenceLayout({ type: 'move-references-bottom' });
               selectWorkspaceMode('references');
               focusWorkspaceModeAfterLayout('references');
@@ -1141,8 +1485,11 @@ export function ReviewShell(props: ReviewShellProps) {
             {...(props.referenceReturn === undefined ? {} : { referenceReturn: props.referenceReturn })}
             announcement={props.navigationAnnouncement ?? announcement}
             onModeChange={selectWorkspaceMode}
-            onReferenceTabActivate={(identity) => props.onReferenceTabActivate?.(identity)}
+            onReferenceTabActivate={(identity) => {
+              if (authoringSessionRef.current === null) props.onReferenceTabActivate?.(identity);
+            }}
             onReferenceTabClose={(identity) => {
+              if (authoringSessionRef.current !== null) return;
               props.onReferenceTabClose?.(identity);
               if (props.navigationState === undefined) {
                 dispatchSurface({
@@ -1158,17 +1505,24 @@ export function ReviewShell(props: ReviewShellProps) {
                 });
               }
             }}
-            onSendToMain={(identity) => props.onReferenceSendToMain?.(identity)}
-            onRetryReference={() => props.onReferenceRetry?.()}
+            onSendToMain={(identity) => {
+              if (authoringSessionRef.current === null) props.onReferenceSendToMain?.(identity);
+            }}
+            onRetryReference={() => {
+              if (authoringSessionRef.current === null) props.onReferenceRetry?.();
+            }}
             {...(props.onReferenceReturn === undefined
               ? {}
-              : { onReferenceReturn: props.onReferenceReturn })}
+              : { onReferenceReturn: (identity: string) => {
+                  if (authoringSessionRef.current === null) props.onReferenceReturn?.(identity);
+                } })}
             onReferenceViewportHost={props.onReferenceViewportHost ?? ignoreReferenceViewportHost}
             onModeFocusTokenChange={rememberWorkspaceModeFocus}
           />
           <OutlineAnnotationsWorkspace
             workspaceRef={workspaceFraming.toolsSurfaceRef}
             open={toolsSurfaceOpen}
+            authoringTakeover={authoringSession !== null}
             mode={effectiveWorkspaceMode}
             modes={visibleRightWorkspaceModes}
             presentation={effectiveReferenceLayout.kind === 'narrow-unified' ? 'bottom' : 'right'}
@@ -1176,8 +1530,12 @@ export function ReviewShell(props: ReviewShellProps) {
             outline={visibleOutlineDiscovery}
             currentOutlineItemId={props.currentOutlineItemId ?? null}
             onModeChange={selectWorkspaceMode}
-            onOutlineActivate={(item) => props.onOutlineActivate?.(item)}
-            onOutlineReference={(item) => props.onOutlineReference?.(item)}
+            onOutlineActivate={(item) => {
+              if (authoringSessionRef.current === null) props.onOutlineActivate?.(item);
+            }}
+            onOutlineReference={(item) => {
+              if (authoringSessionRef.current === null) props.onOutlineReference?.(item);
+            }}
             {...(props.copyLinkForOutlineItem === undefined
               ? {}
               : { copyLinkForOutlineItem: props.copyLinkForOutlineItem })}
@@ -1188,7 +1546,7 @@ export function ReviewShell(props: ReviewShellProps) {
               {...(!showAnnotationOutlineLabels || props.annotationOutlineLabels === undefined
                 ? {}
                 : { sectionLabels: props.annotationOutlineLabels.owned })}
-              {...(activeItemId === undefined ? {} : { activeId: activeItemId })}
+              {...(presentedActiveItemId === undefined ? {} : { activeId: presentedActiveItemId })}
               {...(!annotationsVisible || props.correspondingItemId === undefined
                 ? {}
                 : { correspondingId: props.correspondingItemId })}
@@ -1198,16 +1556,17 @@ export function ReviewShell(props: ReviewShellProps) {
                 : { onCorrespondenceChange: props.onItemCorrespondenceChange })}
               {...(props.copyItemLink === undefined ? {} : { copyLinkForItem })}
               onNavigate={(item) => {
+                if (authoringSessionRef.current !== null) return;
                 markFramingUserIntent();
                 setActiveItem(item.id);
                 props.onNavigate?.(item);
               }}
               onEdit={(item, trigger) => {
-                editTriggerRef.current = trigger;
-                setComposer({ kind: 'edit', item });
-                dispatchSurface({ type: 'open-nested' });
+                if (authoringSessionRef.current !== null) return;
+                beginAuthoring({ kind: 'edit', item }, 'tray-edit', trigger);
               }}
               onDelete={async (item) => {
+                if (authoringSessionRef.current !== null) return;
                 const next = await submit((state) => removeReviewItem(state, item.id));
                 if (activeItemId === item.id) {
                   const ordered = next.items;
@@ -1252,7 +1611,11 @@ export function ReviewShell(props: ReviewShellProps) {
                         pageNumber: annotation.pageIndex + 1,
                         ...(sectionLabel === undefined ? {} : { sectionLabel }),
                         ...(annotation.contents ? { excerpt: annotation.contents } : {}),
-                      })} title={`Go to ${annotationKindLabel(annotation.subtype)} annotation on page ${annotation.pageIndex + 1}`} onClick={() => { markFramingUserIntent(); props.onNavigateExisting?.(annotation); }}>
+                      })} title={`Go to ${annotationKindLabel(annotation.subtype)} annotation on page ${annotation.pageIndex + 1}`} onClick={() => {
+                        if (authoringSessionRef.current !== null) return;
+                        markFramingUserIntent();
+                        props.onNavigateExisting?.(annotation);
+                      }}>
                         <AnnotationMetadata
                           kind={annotation.subtype}
                           pageNumber={annotation.pageIndex + 1}
@@ -1273,7 +1636,9 @@ export function ReviewShell(props: ReviewShellProps) {
               </div>
             )}
           />
-          {referenceSurfaceOpen && effectiveReferenceLayout.referenceResizable ? (
+          {authoringSession === null
+            && referenceSurfaceOpen
+            && effectiveReferenceLayout.referenceResizable ? (
             <ReferenceResizeHandle
               dock={effectiveReferenceLayout.kind !== 'narrow-unified'
                 ? effectiveReferenceLayout.referenceDock : 'bottom'}
@@ -1302,102 +1667,10 @@ export function ReviewShell(props: ReviewShellProps) {
         data-review-nested-host
         hidden={props.saveOptionsOpen ?? false}
         inert={props.saveOptionsOpen ?? false}
-      >
-        {textDraft ? (
-          <CommentComposer
-            title={textDraft.kind === 'replace' ? 'Replacement' : 'Insertion'}
-            fieldLabel={textDraft.kind === 'replace' ? 'Replacement' : 'Insertion'}
-            saveLabel="Apply"
-            allowWhitespace
-            initialValue={textDraft.initialText}
-            triggerRef={draftTriggerRef}
-            onDismiss={closeTextDraft}
-            onSave={async (value) => {
-              const frozen = textDraft;
-              await submit(
-                (state) => frozen.kind === 'replace'
-                  ? addReplace(state, frozen.anchor, value)
-                  : addInsert(state, frozen.anchor, value),
-                frozen.kind === 'replace'
-                  ? { onAccepted: () => consumeSelectionActions(frozen.selectionGeneration) }
-                  : undefined,
-              );
-              closeTextDraft();
-            }}
-          />
-        ) : null}
-        {composer?.kind === 'highlight' ? (
-          <CommentComposer
-            title="Highlight Comment"
-            optional
-            triggerRef={modalTriggerRef}
-            onDismiss={() => {
-              setComposer(null);
-              dispatchSurface({ type: 'close-nested' });
-            }}
-            onSkip={() => saveHighlight(composer, '')}
-            onSave={async (value) => {
-              await saveHighlight(composer, value);
-            }}
-          />
-        ) : null}
-        {composer?.kind === 'pageNote' ? (
-          <CommentComposer
-            title="Page Note"
-            triggerRef={modalTriggerRef}
-            onDismiss={() => {
-              setComposer(null);
-              dispatchSurface({ type: 'close-nested' });
-              props.onPageNoteComposerComplete?.();
-            }}
-            onSave={async (value) => {
-              const frozen = composer;
-              await submit((state) => addPageNote(
-                state,
-                frozen.pageIndex,
-                frozen.position,
-                value,
-                undefined,
-                frozen.nearbyText,
-              ));
-              setComposer(null);
-              dispatchSurface({ type: 'close-nested' });
-              props.onPageNoteComposerComplete?.();
-            }}
-          />
-        ) : null}
-        {composer?.kind === 'edit' && mutableField(composer.item) ? (
-          <CommentComposer
-            title={`Edit ${composer.item.kind === 'replace'
-              ? 'Replacement'
-              : composer.item.kind === 'insert'
-                ? 'Insertion'
-                : annotationKindLabel(composer.item.kind)}`}
-            saveLabel="Apply"
-            {...(composer.item.kind === 'replace' || composer.item.kind === 'insert'
-              ? {
-                  allowWhitespace: true,
-                  fieldLabel: composer.item.kind === 'replace' ? 'Replacement' : 'Insertion',
-                }
-              : {})}
-            initialValue={String(composer.item.payload[mutableField(composer.item)!] ?? '')}
-            optional={composer.item.kind === 'highlight'}
-            triggerRef={editTriggerRef}
-            onDismiss={() => {
-              setComposer(null);
-              dispatchSurface({ type: 'close-nested' });
-            }}
-            onSave={async (value) => {
-              const field = mutableField(composer.item)!;
-              await submit((state) => editReviewItem(state, composer.item.id, { [field]: value }));
-              setComposer(null);
-              dispatchSurface({ type: 'close-nested' });
-            }}
-          />
-        ) : null}
-      </div>
+      />
       <LinkActionPopover
         request={props.linkActionRequest ?? null}
+        openInReferencesDisabled={authoringSession !== null}
         {...(activePdfLinkCopy === undefined ? {} : { copyLink: activePdfLinkCopy })}
         onChoose={(choice, request) => props.onLinkActionChoose?.(choice, request)}
         onDismiss={(request, reason) => props.onLinkActionDismiss?.(request, reason)}

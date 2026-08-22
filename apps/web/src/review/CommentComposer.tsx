@@ -1,7 +1,20 @@
-import { useEffect, useId, useRef, useState, type RefObject } from 'react';
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
 
-import { trapDialogFocus } from '../app/dialog-focus.js';
+import type { PdfTargetVisibility } from '../pdf/viewer-navigation.js';
 import { ReviewIcon } from './ReviewIcon.js';
+
+export interface CommentComposerAnchorNavigation {
+  readonly visibility: PdfTargetVisibility;
+  readonly pending: boolean;
+  readonly onReturn: () => void;
+}
 
 export interface CommentComposerProps {
   title: string;
@@ -10,10 +23,35 @@ export interface CommentComposerProps {
   allowWhitespace?: boolean;
   fieldLabel?: string;
   saveLabel?: string;
-  triggerRef?: RefObject<{ focus(): void } | null>;
+  anchorNavigation?: CommentComposerAnchorNavigation | undefined;
+  editorRef?: RefObject<HTMLTextAreaElement | null>;
+  surfaceRef?: (element: HTMLElement | null) => void;
+  onValueChange?(value: string): void;
   onSave(value: string): void | Promise<void>;
-  onSkip?(): void | Promise<void>;
-  onDismiss(): void;
+  onSkip?: (() => void | Promise<void>) | undefined;
+  onDismiss(): void | Promise<void>;
+}
+
+function AnchorReturn({ navigation }: {
+  readonly navigation?: CommentComposerAnchorNavigation | undefined;
+}) {
+  const visibility = navigation?.visibility ?? 'unavailable';
+  const state = navigation?.pending === true ? 'pending' : visibility;
+  if (state !== 'outside' && state !== 'pending') return null;
+  const label = state === 'pending' ? 'Returning to annotation' : 'Return to annotation';
+  return (
+    <button
+      className="comment-composer__anchor review-button review-button--secondary"
+      type="button"
+      title={label}
+      aria-label={label}
+      data-return-state={state}
+      disabled={state === 'pending'}
+      onClick={() => navigation?.onReturn()}
+    >
+      <ReviewIcon name={state === 'pending' ? 'loading' : 'locate'} />
+    </button>
+  );
 }
 
 export function CommentComposer({
@@ -23,13 +61,17 @@ export function CommentComposer({
   allowWhitespace = false,
   fieldLabel = optional ? 'Comment (optional)' : 'Comment',
   saveLabel = 'Save',
-  triggerRef,
+  anchorNavigation,
+  editorRef,
+  surfaceRef,
+  onValueChange,
   onSave,
   onSkip,
   onDismiss,
 }: CommentComposerProps) {
   const titleId = useId();
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const ownInputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = editorRef ?? ownInputRef;
   const [value, setValue] = useState(initialValue);
   const canSave = optional || (allowWhitespace ? value.length > 0 : value.trim().length > 0);
   const canSkip = optional && onSkip !== undefined;
@@ -38,55 +80,117 @@ export function CommentComposer({
     const input = inputRef.current;
     input?.focus();
     input?.setSelectionRange(input.value.length, input.value.length);
-    return () => {
-      requestAnimationFrame(() => triggerRef?.current?.focus());
+  }, [inputRef]);
+
+  useLayoutEffect(() => {
+    const editor = inputRef.current;
+    const surface = editor?.closest<HTMLElement>('[data-comment-composer]');
+    if (surface === null || surface === undefined) return;
+    const viewport = globalThis.visualViewport;
+    let editorFrame = 0;
+    let viewportFrame = 0;
+    const keepEditorVisible = () => {
+      const body = surface.querySelector<HTMLElement>('.comment-composer__body');
+      if (editor === null || body === null || document.activeElement !== editor) return;
+      const editorRect = editor.getBoundingClientRect();
+      const bodyRect = body.getBoundingClientRect();
+      if (editorRect.top < bodyRect.top) body.scrollTop -= bodyRect.top - editorRect.top;
+      else if (editorRect.bottom > bodyRect.bottom) body.scrollTop += editorRect.bottom - bodyRect.bottom;
     };
-  }, [triggerRef]);
+    const scheduleEditorVisibility = () => {
+      if (editorFrame !== 0) return;
+      editorFrame = requestAnimationFrame(() => {
+        editorFrame = 0;
+        keepEditorVisible();
+      });
+    };
+    const updateUsableHeight = () => {
+      viewportFrame = 0;
+      const host = surface.parentElement?.getBoundingClientRect();
+      const viewportTop = viewport?.offsetTop ?? 0;
+      const viewportBottom = viewportTop
+        + (viewport?.height ?? document.documentElement.clientHeight);
+      const hostTop = Math.max(viewportTop, host?.top ?? viewportTop);
+      const hostBottom = Math.min(viewportBottom, host?.bottom ?? viewportBottom);
+      const usableHeight = `${Math.max(0, hostBottom - hostTop)}px`;
+      const bottomOffset = `${Math.max(0, (host?.bottom ?? viewportBottom) - viewportBottom)}px`;
+      if (surface.style.getPropertyValue('--comment-composer-usable-height') !== usableHeight) {
+        surface.style.setProperty('--comment-composer-usable-height', usableHeight);
+      }
+      if (
+        surface.style.getPropertyValue('--comment-composer-viewport-bottom-offset')
+        !== bottomOffset
+      ) {
+        surface.style.setProperty('--comment-composer-viewport-bottom-offset', bottomOffset);
+      }
+      scheduleEditorVisibility();
+    };
+    const scheduleViewportUpdate = () => {
+      if (viewportFrame !== 0) return;
+      viewportFrame = requestAnimationFrame(updateUsableHeight);
+    };
+    updateUsableHeight();
+    editor?.addEventListener('focus', scheduleEditorVisibility);
+    window.addEventListener('resize', scheduleViewportUpdate);
+    viewport?.addEventListener('resize', scheduleViewportUpdate);
+    viewport?.addEventListener('scroll', scheduleViewportUpdate);
+    return () => {
+      cancelAnimationFrame(editorFrame);
+      cancelAnimationFrame(viewportFrame);
+      editor?.removeEventListener('focus', scheduleEditorVisibility);
+      window.removeEventListener('resize', scheduleViewportUpdate);
+      viewport?.removeEventListener('resize', scheduleViewportUpdate);
+      viewport?.removeEventListener('scroll', scheduleViewportUpdate);
+    };
+  }, [inputRef]);
+
+  const submit = () => {
+    if (canSave) void onSave(value);
+  };
 
   return (
-    <div className="comment-composer-backdrop" data-comment-composer-backdrop>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="comment-composer compact-editorial-modal"
-        data-comment-composer
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') {
-            event.preventDefault();
-            event.stopPropagation();
-            onDismiss();
-            return;
-          }
-          trapDialogFocus(event);
-        }}
-      >
-        <header className="comment-composer__header compact-editorial-modal__header">
-          <h2 id={titleId}>{title}</h2>
-        </header>
-        <div className="compact-editorial-modal__body">
-          <label className="comment-composer__field">
-            <span className="sr-only">{fieldLabel}</span>
-            <textarea
-              className="comment-composer__input"
-              ref={inputRef}
-              title={fieldLabel}
-              value={value}
-              onChange={(event) => setValue(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && canSave) {
-                  void onSave(value);
-                }
-              }}
-            />
-          </label>
-        </div>
-        <footer className="comment-composer__actions compact-editorial-modal__footer">
+    <form
+      ref={surfaceRef}
+      role="region"
+      aria-labelledby={titleId}
+      className="comment-composer compact-editorial-modal"
+      data-comment-composer
+      onSubmit={(event) => {
+        event.preventDefault();
+        submit();
+      }}
+    >
+      <header className="comment-composer__header compact-editorial-modal__header">
+        <h2 id={titleId}>{title}</h2>
+        <AnchorReturn navigation={anchorNavigation} />
+      </header>
+      <div className="comment-composer__body compact-editorial-modal__body">
+        <label className="comment-composer__field">
+          <span className="sr-only">{fieldLabel}</span>
+          <textarea
+            className="comment-composer__input"
+            ref={inputRef}
+            title={fieldLabel}
+            value={value}
+            onChange={(event) => {
+              const next = event.currentTarget.value;
+              setValue(next);
+              onValueChange?.(next);
+            }}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && canSave) {
+                event.preventDefault();
+                submit();
+              }
+            }}
+          />
+        </label>
+        <div className="comment-composer__actions">
           <button
             className="review-button review-button--secondary"
             type="button"
             title="Cancel"
-            onClick={onDismiss}
+            onClick={() => void onDismiss()}
           >
             <ReviewIcon name="close" />
             <span>Cancel</span>
@@ -104,16 +208,15 @@ export function CommentComposer({
           ) : null}
           <button
             className="review-button review-button--primary"
-            type="button"
+            type="submit"
             title={saveLabel}
             disabled={!canSave}
-            onClick={() => void onSave(value)}
           >
             <ReviewIcon name="check" />
             <span>{saveLabel}</span>
           </button>
-        </footer>
+        </div>
       </div>
-    </div>
+    </form>
   );
 }

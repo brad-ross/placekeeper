@@ -71,6 +71,8 @@ function item(
 const seededItems: readonly ReviewItem[] = [
   item('owned-highlight', 'highlight', 0, {
     quote: 'identifying variation is local to the comparison group',
+    prefix: 'Our design compares outcomes within narrowly defined markets. The ',
+    suffix: ', so aggregate shocks are absorbed before the coefficient is estimated.',
     comment: 'Clarify which comparison group identifies this coefficient and why the restriction is credible.',
     rect: { x: 88, y: 126, width: 318, height: 16 },
     segmentRects: [{ x: 88, y: 126, width: 318, height: 16 }],
@@ -78,6 +80,8 @@ const seededItems: readonly ReviewItem[] = [
   }),
   item('owned-replace', 'replace', 1, {
     quote: 'a unique equilibrium',
+    prefix: 'Under the maintained assumptions, the model admits ',
+    suffix: '. The appendix gives the regularity conditions.',
     proposedText: 'a locally unique equilibrium under the stated regularity conditions',
     rect: { x: 96, y: 204, width: 176, height: 16 },
     segmentRects: [{ x: 96, y: 204, width: 176, height: 16 }],

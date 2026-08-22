@@ -89,6 +89,8 @@ export type PendingReferencePanel =
 
 export interface ReferenceWorkspaceProps {
   readonly open: boolean;
+  /** The workspace keeps its live state while the composer temporarily occupies its edge. */
+  readonly authoringTakeover?: boolean;
   readonly workspaceRef?: Ref<HTMLElement>;
   readonly mode: WorkspaceMode;
   readonly presentation: AnnotationPresentation;
@@ -149,6 +151,7 @@ export function chooseWorkspaceModeFocusTarget(input: {
 
 export function ReferenceWorkspace({
   open,
+  authoringTakeover = false,
   workspaceRef,
   mode,
   presentation,
@@ -369,9 +372,10 @@ export function ReferenceWorkspace({
       data-annotation-presentation={presentation}
       data-workspace-open={open ? 'true' : 'false'}
       data-list-open={open ? 'true' : 'false'}
+      data-authoring-takeover={authoringTakeover ? 'true' : undefined}
       aria-label={headerVariant === 'references' ? 'References' : 'Review workspace'}
-      aria-hidden={!open}
-      inert={!open}
+      aria-hidden={!open || authoringTakeover}
+      inert={!open || authoringTakeover}
     >
       {modes.length > 0 ? <header className="review-workspace__header">
         <WorkspaceModeStrip
