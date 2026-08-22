@@ -408,11 +408,30 @@ describe("macOS distribution manifests", () => {
 
   it("delivers each custom URL event as one opaque launcher argument", async () => {
     const link = "placekeeper:///tmp/Paper%20%E2%9C%93.pdf#v=1&page=12";
+    const recovery = {
+      recovery: "resume" as const,
+      recoveryOffer: {
+        id: "opaque_recovery_offer_1234",
+        expiresAt: "2026-08-21T20:00:00.000Z",
+      },
+      recoveryOperationId: "operation_identifier_1234",
+    };
     expect(linkServiceArgs(link, { preflight: true })).toEqual([
       "open-link", "--json", "--preflight", "--link", link,
     ]);
-    expect(linkServiceArgs(link, { confirmed: true, recovery: "resume" })).toEqual([
-      "open-link", "--json", "--confirmed", "--recovery", "resume", "--link", link,
+    expect(linkServiceArgs(link, { confirmed: true, ...recovery })).toEqual([
+      "open-link", "--json", "--confirmed", "--recovery", "resume",
+      "--recovery-offer-id", recovery.recoveryOffer.id,
+      "--recovery-offer-expires-at", recovery.recoveryOffer.expiresAt,
+      "--recovery-operation-id", recovery.recoveryOperationId,
+      "--link", link,
+    ]);
+    expect(finderServiceArgs("/tmp/paper.pdf", recovery)).toEqual([
+      "open", "--json", "--surface", "finder", "--pdf", "/tmp/paper.pdf",
+      "--recovery", "resume",
+      "--recovery-offer-id", recovery.recoveryOffer.id,
+      "--recovery-offer-expires-at", recovery.recoveryOffer.expiresAt,
+      "--recovery-operation-id", recovery.recoveryOperationId,
     ]);
 
     const bridge = await readFile(resolve("packaging/macos/finder-bridge.applescript"), "utf8");
@@ -431,8 +450,8 @@ describe("macOS distribution manifests", () => {
     expect(launcher.indexOf('addButtonWithTitle:"Cancel"'))
       .toBeLessThan(launcher.indexOf('addButtonWithTitle:"Open"'));
     expect(launcher).toContain("NSAlertSecondButtonReturn");
-    expect(launcher).toContain('invoke({ ...(confirmed ? { confirmed: true } : {}), recovery: choice })');
-    expect(launcher).toContain('invoke({ confirmed: true, recovery: choice })');
+    expect(launcher).toContain('invoke({ ...(confirmed ? { confirmed: true } : {}), ...recovery })');
+    expect(launcher).toContain('invoke({ confirmed: true, ...recovery })');
   });
 
   it.runIf(process.platform === "darwin")("constructs the native link confirmation before entering its modal loop", async () => {

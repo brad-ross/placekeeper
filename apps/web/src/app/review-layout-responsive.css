@@ -70,6 +70,26 @@
   #root[data-production-root="true"] .compact-editorial-modal button {
     min-height: var(--review-control-touch);
   }
+
+}
+
+@media (max-width: 480px) {
+  body:has(.terminal-recovery) {
+    padding: .75rem;
+  }
+
+  .terminal-recovery {
+    max-height: calc(100dvh - 1.5rem);
+  }
+
+  .terminal-recovery__choice {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .terminal-recovery__choice > button {
+    width: 100%;
+  }
 }
 
 @media (max-width: 360px) {
@@ -139,6 +159,10 @@
   .review-workspace button,
   .link-action-popover button,
   #root[data-production-root="true"] .compact-editorial-modal button {
+    min-height: var(--review-control-touch);
+  }
+
+  :is(#root[data-production-root="true"] .review-button, .terminal-recovery button) {
     min-height: var(--review-control-touch);
   }
 
@@ -254,5 +278,24 @@
   .review-shell *::before,
   .review-shell *::after {
     scroll-behavior: auto !important;
+  }
+
+  .terminal-recovery,
+  .terminal-recovery *,
+  .terminal-recovery *::before,
+  .terminal-recovery *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+
+  .terminal-recovery button[data-icon="loading"] .review-icon {
+    animation: none !important;
+  }
+}
+
+@media (max-height: 520px) {
+  .terminal-recovery__body {
+    align-content: start;
+    padding-block: 1rem;
   }
 }

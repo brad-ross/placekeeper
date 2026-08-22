@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { terminalRecoveryLocationFragment } from '../src/production-entry.js';
+import {
+  terminalRecoveryDocumentIdentity,
+  terminalRecoveryLocationFragment,
+} from '../src/production-entry.js';
 
 describe('terminal readable-view recovery', () => {
   it('preserves canonical page, item, and durable destination fragments', () => {
@@ -15,5 +18,18 @@ describe('terminal readable-view recovery', () => {
 
   it('converges malformed stale-route fragments to canonical page 1', () => {
     expect(terminalRecoveryLocationFragment('#unsafe')).toBe('v=1&page=1');
+  });
+
+  it('derives only the human-readable filename needed by the recovery heading', () => {
+    expect(terminalRecoveryDocumentIdentity(
+      'placekeeper:///Users/brad/Papers/Current%20Draft.pdf',
+    )).toEqual({
+      filename: 'Current Draft.pdf',
+    });
+    expect(terminalRecoveryDocumentIdentity(
+      'placekeeper:///Root%20Paper.pdf',
+    )).toEqual({
+      filename: 'Root Paper.pdf',
+    });
   });
 });

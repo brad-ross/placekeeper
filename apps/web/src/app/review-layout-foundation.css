@@ -1,4 +1,4 @@
-#root[data-production-root="true"] {
+:is(#root[data-production-root="true"], .terminal-recovery) {
   --review-ink-primary: #181a17;
   --review-ink-muted: #676a63;
   --review-ink-quiet: #8b8e87;
@@ -82,16 +82,16 @@
   color: currentColor;
 }
 
-:is(.review-shell, .compact-editorial-modal) button:focus-visible,
-:is(.review-shell, .compact-editorial-modal) input:focus-visible,
-:is(.review-shell, .compact-editorial-modal) textarea:focus-visible {
+:is(.review-shell, .compact-editorial-modal, .terminal-recovery) button:focus-visible,
+:is(.review-shell, .compact-editorial-modal, .terminal-recovery) input:focus-visible,
+:is(.review-shell, .compact-editorial-modal, .terminal-recovery) textarea:focus-visible {
   outline: 3px solid var(--review-focus);
   outline-offset: 2px;
 }
 
-:is(.review-shell, .compact-editorial-modal) button:disabled,
-:is(.review-shell, .compact-editorial-modal) input:disabled,
-:is(.review-shell, .compact-editorial-modal) textarea:disabled {
+:is(.review-shell, .compact-editorial-modal, .terminal-recovery) button:disabled,
+:is(.review-shell, .compact-editorial-modal, .terminal-recovery) input:disabled,
+:is(.review-shell, .compact-editorial-modal, .terminal-recovery) textarea:disabled {
   cursor: not-allowed;
   opacity: .52;
 }

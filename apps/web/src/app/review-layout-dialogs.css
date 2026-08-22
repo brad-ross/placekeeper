@@ -1,4 +1,4 @@
-#root[data-production-root="true"] .review-button {
+:is(#root[data-production-root="true"] .review-button, .terminal-recovery button) {
   display: inline-flex;
   min-height: var(--review-control-default);
   align-items: center;
@@ -18,27 +18,45 @@
   transition: color var(--review-motion-fast) ease, border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
 }
 
-#root[data-production-root="true"] .review-button:hover:not(:disabled) {
+:is(#root[data-production-root="true"] .review-button, .terminal-recovery button):hover:not(:disabled) {
   border-color: var(--review-border-strong);
   background: var(--review-surface-interactive);
 }
 
-#root[data-production-root="true"] .review-button:active:not(:disabled) {
+:is(#root[data-production-root="true"] .review-button, .terminal-recovery button):active:not(:disabled) {
   box-shadow: inset 0 0 0 1px var(--review-border-strong);
 }
 
-#root[data-production-root="true"] .review-button--primary,
-#root[data-production-root="true"] .review-button[data-primary-action="true"] {
+:is(
+  #root[data-production-root="true"] .review-button--primary,
+  #root[data-production-root="true"] .review-button[data-primary-action="true"],
+  .terminal-recovery .terminal-recovery__primary
+) {
   border-color: var(--review-ink-primary);
   color: var(--review-surface-panel);
   background: var(--review-ink-primary);
 }
 
-#root[data-production-root="true"] .review-button--primary:hover:not(:disabled),
-#root[data-production-root="true"] .review-button[data-primary-action="true"]:hover:not(:disabled) {
+:is(
+  #root[data-production-root="true"] .review-button--primary,
+  #root[data-production-root="true"] .review-button[data-primary-action="true"],
+  .terminal-recovery .terminal-recovery__primary
+):hover:not(:disabled) {
   border-color: var(--review-ink-primary);
   color: var(--review-surface-panel);
   background: color-mix(in srgb, var(--review-ink-primary) 88%, var(--review-surface-panel));
+}
+
+.terminal-recovery .terminal-recovery__destructive {
+  border-color: color-mix(in srgb, var(--review-danger) 58%, var(--review-border-strong));
+  color: var(--review-danger);
+  background: color-mix(in srgb, var(--review-danger) 7%, var(--review-surface-panel));
+  box-shadow: inset 3px 0 0 var(--review-danger);
+}
+
+.terminal-recovery .terminal-recovery__destructive:hover:not(:disabled) {
+  border-color: var(--review-danger);
+  background: color-mix(in srgb, var(--review-danger) 12%, var(--review-surface-panel));
 }
 
 .review-nested-host {

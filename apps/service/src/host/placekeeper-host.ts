@@ -1,6 +1,7 @@
 import type {
   LaunchSurface as BrokerLaunchSurface,
   RecoveryDecision,
+  RecoveryOfferIdentity,
 } from "../sessions/session-broker.js";
 import { isLaunchSurface, SessionBroker } from "../sessions/session-broker.js";
 import {
@@ -26,6 +27,8 @@ export interface LaunchRequest {
   readonly sourceRootPath?: string;
   readonly fork?: boolean;
   readonly recovery?: RecoveryDecision;
+  readonly recoveryOffer?: RecoveryOfferIdentity;
+  readonly recoveryOperationId?: string;
   readonly surface?: LaunchSurface;
 }
 
@@ -39,6 +42,8 @@ export interface LinkOpenRequest {
   readonly link: string;
   readonly confirmed?: boolean;
   readonly recovery?: RecoveryDecision;
+  readonly recoveryOffer?: RecoveryOfferIdentity;
+  readonly recoveryOperationId?: string;
   readonly surface?: LaunchSurface;
 }
 
@@ -71,6 +76,7 @@ export type LaunchResponse =
       readonly kind: "recovery-offered";
       readonly recoverySessionId: string;
       readonly choices: readonly RecoveryDecision[];
+      readonly recoveryOffer: RecoveryOfferIdentity;
     }
   | { readonly ok: false; readonly error: LaunchFailure };
 
@@ -237,6 +243,10 @@ export class PlacekeeperHost {
         link: request.link,
         ...(request.confirmed === undefined ? {} : { confirmed: request.confirmed }),
         ...(request.recovery === undefined ? {} : { recovery: request.recovery }),
+        ...(request.recoveryOffer === undefined ? {} : { recoveryOffer: request.recoveryOffer }),
+        ...(request.recoveryOperationId === undefined
+          ? {}
+          : { recoveryOperationId: request.recoveryOperationId }),
         surface,
       });
       if (opened.kind === "confirmation-required") {
@@ -248,6 +258,7 @@ export class PlacekeeperHost {
           kind: "recovery-offered",
           recoverySessionId: opened.recoverySessionId,
           choices: opened.choices,
+          recoveryOffer: opened.recoveryOffer,
         };
       }
       return {
@@ -284,6 +295,10 @@ export class PlacekeeperHost {
           ? {}
           : { sourceRootPath: request.sourceRootPath }),
         ...(recoveryDecision === undefined ? {} : { recoveryDecision }),
+        ...(request.recoveryOffer === undefined ? {} : { recoveryOffer: request.recoveryOffer }),
+        ...(request.recoveryOperationId === undefined
+          ? {}
+          : { recoveryOperationId: request.recoveryOperationId }),
         surface,
       });
       if (opened.kind === "recovery-offered") {
@@ -292,6 +307,7 @@ export class PlacekeeperHost {
           kind: "recovery-offered",
           recoverySessionId: opened.recoverySessionId,
           choices: opened.choices,
+          recoveryOffer: opened.recoveryOffer,
         };
       }
       return {

@@ -141,6 +141,8 @@ The nonmodal Compact Editorial authoring surface for replacement, insertion, hig
 
 At authoring start it freezes the original anchor and document authority while projecting the mutable draft as a provisional Owned Annotation in the live PDF. It temporarily takes over the Annotation Tray presentation without discarding the underlying tray state; a title-adjacent target action appears only when the anchor leaves the usable viewport. Cancelling removes the projection without changing Review Items, while an accepted action commits through normal review state.
 
+Dedicated nonmodal task surfaces may adopt the same structural grammar without becoming literal modals. They retain their own behavior, lifecycle, and security contracts.
+
 ## Reference navigation
 
 ### Main Reading Thread

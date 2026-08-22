@@ -85,7 +85,11 @@ export function activate(context: vscode.ExtensionContext): void {
             pdfUri.fsPath,
             sourceRoot,
             undefined,
-            decision,
+            {
+              decision,
+              offer: result.recoveryOffer,
+              operationId: randomBytes(18).toString("base64url"),
+            },
           );
         }
         if (!result.ok) {
