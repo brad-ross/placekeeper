@@ -13,6 +13,10 @@ export interface RecoveryLaunch {
   readonly kind: "recovery-offered";
   readonly choices: readonly ["resume", "discard", "fork"];
   readonly recoverySessionId: string;
+  readonly recoveryOffer: {
+    readonly id: string;
+    readonly expiresAt: string;
+  };
 }
 
 export interface FailedLaunch {
@@ -92,13 +96,22 @@ export function parseLaunchResponse(serialized: string): SuccessfulLaunch | Reco
     recovery.choices[1] === "discard" &&
     recovery.choices[2] === "fork" &&
     typeof recovery.recoverySessionId === "string" &&
-    /^[A-Za-z0-9_-]{1,128}$/u.test(recovery.recoverySessionId)
+    /^[A-Za-z0-9_-]{1,128}$/u.test(recovery.recoverySessionId) &&
+    typeof recovery.recoveryOffer === "object" && recovery.recoveryOffer !== null &&
+    typeof recovery.recoveryOffer.id === "string" &&
+    /^[A-Za-z0-9_-]{16,128}$/u.test(recovery.recoveryOffer.id) &&
+    typeof recovery.recoveryOffer.expiresAt === "string" &&
+    Number.isFinite(Date.parse(recovery.recoveryOffer.expiresAt))
   ) {
     return {
       ok: true,
       kind: "recovery-offered",
       choices: ["resume", "discard", "fork"],
       recoverySessionId: recovery.recoverySessionId,
+      recoveryOffer: {
+        id: recovery.recoveryOffer.id,
+        expiresAt: recovery.recoveryOffer.expiresAt,
+      },
     };
   }
   if (candidate.ok === false && isSharedError(candidate.error)) {

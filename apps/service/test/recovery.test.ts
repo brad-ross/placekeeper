@@ -209,14 +209,22 @@ describe("broker acknowledgement and restart recovery", () => {
     expect(await readFile(pdf)).toEqual(original);
 
     const restarted = new SessionBroker({ recoveryRoot });
-    await expect(restarted.openReview({ pdfPath: pdf })).resolves.toEqual({
+    const offered = await restarted.openReview({ pdfPath: pdf });
+    expect(offered).toMatchObject({
       kind: "recovery-offered",
       recoverySessionId: opened.launch.sessionId,
       choices: ["resume", "discard", "fork"],
+      recoveryOffer: {
+        id: expect.any(String),
+        expiresAt: expect.any(String),
+      },
     });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
     const resumed = await restarted.openReview({
       pdfPath: pdf,
       recoveryDecision: "resume",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: "resume_operation_1234",
     });
     if (resumed.kind !== "opened") throw new Error("Expected resumed review");
     expect(restarted.state(resumed.launch.sessionId)).toMatchObject({
@@ -224,6 +232,192 @@ describe("broker acknowledgement and restart recovery", () => {
       items: [{ payload: { comment: "remember this" } }],
     });
     expect(await restarted.documentBytes(resumed.launch.sessionId)).toEqual(original);
+  });
+
+  it("binds recovery decisions to one exact offer and replays only the same operation", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\nversion one\n%%EOF");
+    const recoveryRoot = join(directory, "recovery");
+    const first = new SessionBroker({ recoveryRoot });
+    const opened = await first.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected a new review");
+    await first.acceptMutation(opened.launch.sessionId, addCommand(0));
+
+    const restarted = new SessionBroker({ recoveryRoot });
+    const offered = await restarted.openReview({ pdfPath: pdf });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
+    const request = {
+      pdfPath: pdf,
+      recoveryDecision: "fork" as const,
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: "fork_operation_123456",
+    };
+    const committed = await restarted.openReview(request);
+    const replayed = await restarted.openReview(request);
+    expect(replayed).toEqual(committed);
+    await expect(restarted.openReview({
+      ...request,
+      recoveryDecision: "discard",
+    })).rejects.toThrow(/operation|choice|offer/iu);
+    await expect(restarted.openReview({
+      ...request,
+      recoveryOperationId: "different_operation_1234",
+    })).rejects.toThrow(/offer|recovery/iu);
+  });
+
+  it("shares one offer per protected draft and permits only one competing operation", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\nversion one\n%%EOF");
+    const recoveryRoot = join(directory, "recovery");
+    const first = new SessionBroker({ recoveryRoot });
+    const opened = await first.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected a new review");
+    await first.acceptMutation(opened.launch.sessionId, addCommand(0));
+
+    const restarted = new SessionBroker({ recoveryRoot });
+    const firstOffer = await restarted.openReview({ pdfPath: pdf });
+    const secondOffer = await restarted.openReview({ pdfPath: pdf });
+    if (firstOffer.kind !== "recovery-offered" || secondOffer.kind !== "recovery-offered") {
+      throw new Error("Expected recovery offers");
+    }
+    expect(secondOffer.recoveryOffer).toEqual(firstOffer.recoveryOffer);
+
+    const outcomes = await Promise.allSettled([
+      restarted.openReview({
+        pdfPath: pdf,
+        recoveryDecision: "fork",
+        recoveryOffer: firstOffer.recoveryOffer,
+        recoveryOperationId: "first_competing_operation",
+      }),
+      restarted.openReview({
+        pdfPath: pdf,
+        recoveryDecision: "discard",
+        recoveryOffer: secondOffer.recoveryOffer,
+        recoveryOperationId: "second_competing_operation",
+      }),
+    ]);
+    expect(outcomes.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter(({ status }) => status === "rejected")).toHaveLength(1);
+    expect(restarted.activity().reviewPresence).toBe(1);
+  });
+
+  it("expires an unused offer without changing protected work", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\nversion one\n%%EOF");
+    const recoveryRoot = join(directory, "recovery");
+    let now = new Date("2026-08-21T18:00:00.000Z");
+    const first = new SessionBroker({ recoveryRoot, now: () => now });
+    const opened = await first.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected a new review");
+    await first.acceptMutation(opened.launch.sessionId, addCommand(0));
+
+    const restarted = new SessionBroker({ recoveryRoot, now: () => now });
+    const offered = await restarted.openReview({ pdfPath: pdf });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
+    now = new Date("2026-08-21T18:06:00.000Z");
+    await expect(restarted.openReview({
+      pdfPath: pdf,
+      recoveryDecision: "discard",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
+    })).rejects.toThrow(/stale|expired/iu);
+    await expect(new DraftSnapshotStore(
+      join(recoveryRoot, opened.launch.sessionId),
+    ).recover()).resolves.toMatchObject({ state: { revision: 1 } });
+  });
+
+  it("fails closed when more than one protected draft matches the same source", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\nversion one\n%%EOF");
+    const recoveryRoot = join(directory, "recovery");
+    const first = new SessionBroker({ recoveryRoot });
+    const opened = await first.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected a new review");
+    await first.acceptMutation(opened.launch.sessionId, addCommand(0));
+    const original = await new DraftSnapshotStore(
+      join(recoveryRoot, opened.launch.sessionId),
+    ).recover();
+    if (original === undefined) throw new Error("Expected protected draft");
+    const duplicateId = randomUUID();
+    await new DraftSnapshotStore(join(recoveryRoot, duplicateId)).persist({
+      ...original,
+      state: { ...original.state, sessionId: duplicateId },
+    });
+
+    const restarted = new SessionBroker({ recoveryRoot });
+    await expect(restarted.openReview({ pdfPath: pdf })).rejects.toThrow(/ambiguous/iu);
+    await expect(new DraftSnapshotStore(
+      join(recoveryRoot, opened.launch.sessionId),
+    ).recover()).resolves.toBeDefined();
+    await expect(new DraftSnapshotStore(
+      join(recoveryRoot, duplicateId),
+    ).recover()).resolves.toBeDefined();
+  });
+
+  it("keeps a discarded draft until its replacement is durably active", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\nversion one\n%%EOF");
+    const recoveryRoot = join(directory, "recovery");
+    const first = new SessionBroker({ recoveryRoot });
+    const opened = await first.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected a new review");
+    await first.acceptMutation(opened.launch.sessionId, addCommand(0));
+
+    let failReplacement = false;
+    const restarted = new SessionBroker({
+      recoveryRoot,
+      snapshotHooks: {
+        beforeFinalRename: () => {
+          if (failReplacement) throw new Error("replacement persistence failed");
+        },
+      },
+    });
+    const offered = await restarted.openReview({ pdfPath: pdf });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
+    failReplacement = true;
+    await expect(restarted.openReview({
+      pdfPath: pdf,
+      recoveryDecision: "discard",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
+    })).rejects.toThrow("replacement persistence failed");
+    await expect(new DraftSnapshotStore(
+      join(recoveryRoot, opened.launch.sessionId),
+    ).recover()).resolves.toMatchObject({ state: { revision: 1 } });
+  });
+
+  it("keeps the durable replacement active when old draft cleanup fails", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\nversion one\n%%EOF");
+    const recoveryRoot = join(directory, "recovery");
+    const first = new SessionBroker({ recoveryRoot });
+    const opened = await first.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected a new review");
+    await first.acceptMutation(opened.launch.sessionId, addCommand(0));
+
+    const restarted = new SessionBroker({ recoveryRoot });
+    const offered = await restarted.openReview({ pdfPath: pdf });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
+    vi.spyOn(DraftSnapshotStore.prototype, "remove").mockRejectedValueOnce(
+      new Error("old draft cleanup failed"),
+    );
+    const replacement = await restarted.openReview({
+      pdfPath: pdf,
+      recoveryDecision: "discard",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
+    });
+    if (replacement.kind !== "opened") throw new Error("Expected durable replacement");
+    expect(restarted.state(replacement.launch.sessionId)).toBeDefined();
+    await expect(new DraftSnapshotStore(
+      join(recoveryRoot, opened.launch.sessionId),
+    ).recover()).resolves.toBeDefined();
   });
 
   it("never acknowledges a mutation whose atomic persistence fails", async () => {
@@ -328,8 +522,15 @@ describe("broker acknowledgement and restart recovery", () => {
       "tampered bytes",
     );
     const restart = new SessionBroker({ recoveryRoot });
+    const offered = await restart.openReview({ pdfPath: pdf });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
     await expect(
-      restart.openReview({ pdfPath: pdf, recoveryDecision: "resume" }),
+      restart.openReview({
+        pdfPath: pdf,
+        recoveryDecision: "resume",
+        recoveryOffer: offered.recoveryOffer,
+        recoveryOperationId: randomUUID(),
+      }),
     ).rejects.toThrow("integrity");
   });
 
@@ -364,8 +565,13 @@ describe("broker acknowledgement and restart recovery", () => {
 
     const restart = new SessionBroker({ recoveryRoot });
     const offered = await restart.openReview({ pdfPath: pdf });
-    expect(offered.kind).toBe("recovery-offered");
-    const discarded = await restart.openReview({ pdfPath: pdf, recoveryDecision: "discard" });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
+    const discarded = await restart.openReview({
+      pdfPath: pdf,
+      recoveryDecision: "discard",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
+    });
     expect(discarded.kind).toBe("opened");
   });
 
@@ -408,9 +614,17 @@ describe("broker acknowledgement and restart recovery", () => {
     const opened = await first.openReview({ pdfPath: pdf, sourceRootPath: sourceRoot });
     if (opened.kind !== "opened") throw new Error("Expected a new review");
     expect(first.state(opened.launch.sessionId)?.sourceRootId).toBeDefined();
+    await first.acceptMutation(opened.launch.sessionId, addCommand(0));
 
     const restart = new SessionBroker({ recoveryRoot });
-    const resumed = await restart.openReview({ pdfPath: pdf, recoveryDecision: "resume" });
+    const offered = await restart.openReview({ pdfPath: pdf });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
+    const resumed = await restart.openReview({
+      pdfPath: pdf,
+      recoveryDecision: "resume",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
+    });
     if (resumed.kind !== "opened") throw new Error("Expected a resumed review");
     expect(restart.state(resumed.launch.sessionId)?.sourceRootId).toBeUndefined();
     expect(resumed.launch.rootId).toBeUndefined();
@@ -442,9 +656,15 @@ describe("save-aware recovery migration", () => {
       kind: "recovery-offered",
       recoverySessionId: opened.launch.sessionId,
     });
-    const resumed = await restarted.openReview({ pdfPath: moved, recoveryDecision: "resume" });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
+    const resumed = await restarted.openReview({
+      pdfPath: moved,
+      recoveryDecision: "resume",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
+    });
     if (resumed.kind !== "opened") throw new Error("Expected resumed review");
-    expect(restarted.sessionScope(resumed.launch.sessionId)?.documentTitle).toBe("moved-paper.pdf");
+    expect((await restarted.sessionScope(resumed.launch.sessionId))?.documentTitle).toBe("moved-paper.pdf");
     expect(restarted.saveStatus(resumed.launch.sessionId)).toMatchObject({
       destination: { phase: "active", kind: "original" },
       sync: { phase: "not-saved" },
@@ -471,9 +691,13 @@ describe("save-aware recovery migration", () => {
     await first.acceptMutation(opened.launch.sessionId, addCommand(0));
 
     const restarted = new SessionBroker({ recoveryRoot, portableReader: async () => [] });
+    const offered = await restarted.openReview({ pdfPath: pdf });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
     const resumed = await restarted.openReview({
       pdfPath: pdf,
       recoveryDecision: "resume",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
     });
     if (resumed.kind !== "opened") throw new Error("Expected resumed review");
     const status = restarted.saveStatus(resumed.launch.sessionId);
@@ -517,9 +741,13 @@ describe("save-aware recovery migration", () => {
     await first.acceptMutation(opened.launch.sessionId, addCommand(0));
 
     const restarted = new SessionBroker({ recoveryRoot, portableReader: async () => [] });
+    const offered = await restarted.openReview({ pdfPath: pdf });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
     const resumed = await restarted.openReview({
       pdfPath: pdf,
       recoveryDecision: "resume",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
     });
     if (resumed.kind !== "opened") throw new Error("Expected resumed review");
     const active = restarted.saveStatus(resumed.launch.sessionId)?.destination;
@@ -548,9 +776,13 @@ describe("save-aware recovery migration", () => {
     await rm(copy);
 
     const missingRestart = new SessionBroker({ recoveryRoot, portableReader: async () => [] });
+    const missingOffer = await missingRestart.openReview({ pdfPath: pdf });
+    if (missingOffer.kind !== "recovery-offered") throw new Error("Expected recovery offer");
     const missing = await missingRestart.openReview({
       pdfPath: pdf,
       recoveryDecision: "resume",
+      recoveryOffer: missingOffer.recoveryOffer,
+      recoveryOperationId: randomUUID(),
     });
     if (missing.kind !== "opened") throw new Error("Expected missing-copy recovery");
     expect(missingRestart.saveStatus(missing.launch.sessionId)).toMatchObject({

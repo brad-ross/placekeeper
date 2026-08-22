@@ -1,13 +1,22 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MAX_OUTPUT = 65_536;
 
-export function finderServiceArgs(pdfPath, recovery) {
+function appendRecoveryArgs(args, options) {
+  if (options.recovery === undefined) return;
+  args.push("--recovery", options.recovery);
+  args.push("--recovery-offer-id", options.recoveryOffer.id);
+  args.push("--recovery-offer-expires-at", options.recoveryOffer.expiresAt);
+  args.push("--recovery-operation-id", options.recoveryOperationId);
+}
+
+export function finderServiceArgs(pdfPath, options = {}) {
   const args = ["open", "--json", "--surface", "finder", "--pdf", pdfPath];
-  if (recovery !== undefined) args.push("--recovery", recovery);
+  appendRecoveryArgs(args, options);
   return args;
 }
 
@@ -15,7 +24,7 @@ export function linkServiceArgs(link, options = {}) {
   const args = ["open-link", "--json"];
   if (options.preflight === true) args.push("--preflight");
   if (options.confirmed === true) args.push("--confirmed");
-  if (options.recovery !== undefined) args.push("--recovery", options.recovery);
+  appendRecoveryArgs(args, options);
   args.push("--link", link);
   return args;
 }
@@ -45,6 +54,20 @@ async function osascript(script, environment) {
 function parse(serialized) {
   if (Buffer.byteLength(serialized) > MAX_OUTPUT) throw new Error("Launch response too large");
   return JSON.parse(serialized);
+}
+
+function recoveryRequest(result, recovery) {
+  const offer = result?.recoveryOffer;
+  if (
+    !offer || typeof offer !== "object" ||
+    typeof offer.id !== "string" || !/^[A-Za-z0-9_-]{16,128}$/u.test(offer.id) ||
+    typeof offer.expiresAt !== "string" || !Number.isFinite(Date.parse(offer.expiresAt))
+  ) throw new Error("Recovery offer is invalid");
+  return {
+    recovery,
+    recoveryOffer: { id: offer.id, expiresAt: offer.expiresAt },
+    recoveryOperationId: randomBytes(18).toString("base64url"),
+  };
 }
 
 function readBuildIdentity(resources) {
@@ -150,11 +173,12 @@ async function openLinkedPdf(nodePath, serviceEntry, link, serviceEnvironment) {
   if (result.ok === true && result.kind === "recovery-offered") {
     const choice = await chooseRecoveryDecision();
     if (choice === undefined) return;
-    result = await invoke({ ...(confirmed ? { confirmed: true } : {}), recovery: choice });
+    const recovery = recoveryRequest(result, choice);
+    result = await invoke({ ...(confirmed ? { confirmed: true } : {}), ...recovery });
     if (result.ok === true && result.kind === "confirmation-required" && typeof result.path === "string") {
       confirmed = await confirmLinkedPath(result.path);
       if (!confirmed) return;
-      result = await invoke({ confirmed: true, recovery: choice });
+      result = await invoke({ confirmed: true, ...recovery });
     }
   }
   if (result.ok !== true) {
@@ -184,7 +208,10 @@ async function openFinderPdf(nodePath, serviceEntry, pdfPath, serviceEnvironment
   if (result.ok === true && result.kind === "recovery-offered") {
     const choice = await chooseRecoveryDecision();
     if (choice === undefined) return;
-    result = parse(await run(nodePath, [serviceEntry, ...finderServiceArgs(pdfPath, choice)], { env: serviceEnvironment, allowNonZero: true }));
+    result = parse(await run(nodePath, [serviceEntry, ...finderServiceArgs(
+      pdfPath,
+      recoveryRequest(result, choice),
+    )], { env: serviceEnvironment, allowNonZero: true }));
   }
   if (result.ok !== true) {
     await nativeError(result.error);

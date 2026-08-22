@@ -11,6 +11,8 @@ import type { ReviewCommand } from "../../../../packages/core/src/review-model.j
 import { isContained } from "../files/file-capabilities.js";
 import {
   isRecoveryDecision,
+  RecoveryOfferUnavailableError,
+  type RecoveryOfferIdentity,
   type SessionBroker,
 } from "../sessions/session-broker.js";
 import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
@@ -20,6 +22,18 @@ import { openPlacekeeperLink, parsePlacekeeperReadableViewRoute } from "../links
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const VIEW_UUID = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+const RECOVERY_ID = /^[A-Za-z0-9_-]{16,128}$/u;
+
+function recoveryOfferIdentity(value: unknown): RecoveryOfferIdentity | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  if (keys.length !== 2 || keys[0] !== "expiresAt" || keys[1] !== "id") return undefined;
+  return typeof record.id === "string" && RECOVERY_ID.test(record.id) &&
+      typeof record.expiresAt === "string" && Number.isFinite(Date.parse(record.expiresAt))
+    ? { id: record.id, expiresAt: record.expiresAt }
+    : undefined;
+}
 
 /** Stable packaged-daemon browser origin. Direct hosts and tests default to port 0. */
 export const PLACEKEEPER_HTTP_PORT = 43_179;
@@ -160,7 +174,7 @@ function htmlAttribute(value: string): string {
 
 function terminalRecoveryMarkup(appLinkBase: string, hidden = false): string {
   const base = htmlAttribute(appLinkBase);
-  return `<main data-terminal-recovery${hidden ? " hidden" : ""}><p>This live review is no longer available.</p><a data-placekeeper-reopen data-app-link-base="${base}" href="#" aria-disabled="true">Reopen in Placekeeper</a></main>`;
+  return `<main data-terminal-recovery${hidden ? " hidden" : ""}><p>This session is no longer available.</p><a data-placekeeper-reopen data-app-link-base="${base}" href="#" aria-disabled="true">Reopen</a></main>`;
 }
 
 const terminalRecoveryFallbackScript = `
@@ -419,11 +433,22 @@ export async function startHttpServer(
           link?: unknown;
           confirmed?: unknown;
           recovery?: unknown;
+          recoveryOffer?: unknown;
+          recoveryOperationId?: unknown;
         };
+        const parsedRecoveryOffer = recoveryOfferIdentity(body.recoveryOffer);
+        const hasRecoveryIdentity = body.recoveryOffer !== undefined ||
+          body.recoveryOperationId !== undefined;
         if (
           typeof body.link !== "string" ||
           (body.confirmed !== undefined && body.confirmed !== true) ||
-          (body.recovery !== undefined && !isRecoveryDecision(body.recovery))
+          (body.recovery !== undefined && !isRecoveryDecision(body.recovery)) ||
+          (body.recovery === undefined && hasRecoveryIdentity) ||
+          (body.recovery !== undefined && (
+            parsedRecoveryOffer === undefined ||
+            typeof body.recoveryOperationId !== "string" ||
+            !RECOVERY_ID.test(body.recoveryOperationId)
+          ))
         ) {
           send(response, 400, "Invalid request");
           return;
@@ -432,6 +457,10 @@ export async function startHttpServer(
           link: body.link,
           ...(body.confirmed === undefined ? {} : { confirmed: body.confirmed }),
           ...(body.recovery === undefined ? {} : { recovery: body.recovery }),
+          ...(parsedRecoveryOffer === undefined ? {} : { recoveryOffer: parsedRecoveryOffer }),
+          ...(typeof body.recoveryOperationId !== "string"
+            ? {}
+            : { recoveryOperationId: body.recoveryOperationId }),
           surface: "browser",
         });
         if (opened.kind === "confirmation-required") {
@@ -443,6 +472,7 @@ export async function startHttpServer(
             ok: true,
             kind: "recovery-offered",
             choices: opened.choices,
+            recoveryOffer: opened.recoveryOffer,
           });
           return;
         }
@@ -552,7 +582,7 @@ export async function startHttpServer(
         sendJson(
           response,
           200,
-          broker.sessionScope(scopeMatch[1]!, bearerCredential(request)),
+          await broker.sessionScope(scopeMatch[1]!, bearerCredential(request)),
         );
         return;
       }
@@ -640,6 +670,11 @@ export async function startHttpServer(
         send(response, 413, "Request rejected");
       } else if (error instanceof SyntaxError) {
         send(response, 400, "Invalid request");
+      } else if (error instanceof RecoveryOfferUnavailableError) {
+        sendJson(response, 409, {
+          ok: false,
+          error: { kind: "recovery-offer-unavailable" },
+        });
       } else {
         send(response, 409, "Request could not be applied");
       }

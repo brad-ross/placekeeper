@@ -136,6 +136,8 @@ The Warm Neutral modal grammar for Save Destination and text-entry workflows: a 
 
 Supporting copy appears only when it adds context. Creation comments use Save, edits use Apply, and optional-comment workflows distinguish cancelling from keeping an annotation without text. Compact Editorial changes presentation only and preserves the existing modal behavior, state, and accessibility contracts.
 
+Dedicated nonmodal task surfaces may adopt the same structural grammar without becoming literal modals. They retain their own behavior, lifecycle, and security contracts.
+
 ## Reference navigation
 
 ### Main Reading Thread

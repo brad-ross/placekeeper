@@ -30,7 +30,10 @@ import {
   isLaunchSurface,
   isRecoveryDecision,
   type RecoveryDecision,
+  type RecoveryOfferIdentity,
 } from "../sessions/session-broker.js";
+
+const RECOVERY_ID = /^[A-Za-z0-9_-]{16,128}$/u;
 
 type LaunchClient = (request: LaunchRequest) => Promise<LaunchResponse>;
 
@@ -41,6 +44,8 @@ export type ParsedOpenLinkRequest =
       readonly link: string;
       readonly confirmed?: true;
       readonly recovery?: RecoveryDecision;
+      readonly recoveryOffer?: RecoveryOfferIdentity;
+      readonly recoveryOperationId?: string;
       readonly surface?: LaunchSurface;
     };
 
@@ -73,6 +78,9 @@ export function parseOpenArguments(args: readonly string[]): LaunchRequest {
   let sourceRootPath: string | undefined;
   let fork = false;
   let recovery: RecoveryDecision | undefined;
+  let recoveryOfferId: string | undefined;
+  let recoveryOfferExpiresAt: string | undefined;
+  let recoveryOperationId: string | undefined;
   let surface: LaunchSurface | undefined;
   for (let index = 1; index < args.length; index += 1) {
     const argument = args[index]!;
@@ -88,6 +96,28 @@ export function parseOpenArguments(args: readonly string[]): LaunchRequest {
         throw new Error("--recovery must be resume, discard, or fork");
       }
       recovery = value;
+      index += 1;
+      continue;
+    }
+    if (argument === "--recovery-offer-id") {
+      if (recoveryOfferId !== undefined) throw new Error("--recovery-offer-id may be specified once");
+      recoveryOfferId = takeValue(args, index, argument);
+      index += 1;
+      continue;
+    }
+    if (argument === "--recovery-offer-expires-at") {
+      if (recoveryOfferExpiresAt !== undefined) {
+        throw new Error("--recovery-offer-expires-at may be specified once");
+      }
+      recoveryOfferExpiresAt = takeValue(args, index, argument);
+      index += 1;
+      continue;
+    }
+    if (argument === "--recovery-operation-id") {
+      if (recoveryOperationId !== undefined) {
+        throw new Error("--recovery-operation-id may be specified once");
+      }
+      recoveryOperationId = takeValue(args, index, argument);
       index += 1;
       continue;
     }
@@ -119,11 +149,28 @@ export function parseOpenArguments(args: readonly string[]): LaunchRequest {
   if (sourceRootPath !== undefined && !isAbsolute(sourceRootPath)) {
     throw new Error("The source-root path must be absolute");
   }
+  const recoveryIdentityPresent = recoveryOfferId !== undefined ||
+    recoveryOfferExpiresAt !== undefined || recoveryOperationId !== undefined;
+  if (
+    (recovery !== undefined && recovery !== "fork" && !recoveryIdentityPresent) ||
+    (recoveryIdentityPresent && (
+      recovery === undefined || recoveryOfferId === undefined ||
+      recoveryOfferExpiresAt === undefined || recoveryOperationId === undefined ||
+      !RECOVERY_ID.test(recoveryOfferId) || !RECOVERY_ID.test(recoveryOperationId) ||
+      !Number.isFinite(Date.parse(recoveryOfferExpiresAt))
+    ))
+  ) {
+    throw new Error("Recovery requires one valid offer and operation identity");
+  }
   return {
     pdfPath,
     ...(sourceRootPath === undefined ? {} : { sourceRootPath }),
     ...(fork ? { fork: true } : {}),
     ...(recovery === undefined ? {} : { recovery }),
+    ...(recoveryOfferId === undefined || recoveryOfferExpiresAt === undefined
+      ? {}
+      : { recoveryOffer: { id: recoveryOfferId, expiresAt: recoveryOfferExpiresAt } }),
+    ...(recoveryOperationId === undefined ? {} : { recoveryOperationId }),
     ...(surface === undefined ? {} : { surface }),
   };
 }
@@ -136,6 +183,9 @@ export function parseOpenLinkArguments(args: readonly string[]): ParsedOpenLinkR
   let preflight = false;
   let confirmed = false;
   let recovery: RecoveryDecision | undefined;
+  let recoveryOfferId: string | undefined;
+  let recoveryOfferExpiresAt: string | undefined;
+  let recoveryOperationId: string | undefined;
   let surface: LaunchSurface | undefined;
   for (let index = 1; index < args.length; index += 1) {
     const argument = args[index]!;
@@ -159,6 +209,28 @@ export function parseOpenLinkArguments(args: readonly string[]): ParsedOpenLinkR
       index += 1;
       continue;
     }
+    if (argument === "--recovery-offer-id") {
+      if (recoveryOfferId !== undefined) throw new Error("--recovery-offer-id may be specified once");
+      recoveryOfferId = takeValue(args, index, argument);
+      index += 1;
+      continue;
+    }
+    if (argument === "--recovery-offer-expires-at") {
+      if (recoveryOfferExpiresAt !== undefined) {
+        throw new Error("--recovery-offer-expires-at may be specified once");
+      }
+      recoveryOfferExpiresAt = takeValue(args, index, argument);
+      index += 1;
+      continue;
+    }
+    if (argument === "--recovery-operation-id") {
+      if (recoveryOperationId !== undefined) {
+        throw new Error("--recovery-operation-id may be specified once");
+      }
+      recoveryOperationId = takeValue(args, index, argument);
+      index += 1;
+      continue;
+    }
     if (argument === "--surface") {
       const value = takeValue(args, index, argument);
       if (surface !== undefined || !isLaunchSurface(value)) {
@@ -178,7 +250,20 @@ export function parseOpenLinkArguments(args: readonly string[]): ParsedOpenLinkR
   }
   if (link === undefined) throw new Error("Open one Placekeeper link at a time");
   if (link.length > PLACEKEEPER_LINK_MAX_LENGTH) throw new Error("Placekeeper link exceeds the length limit");
-  if (preflight && (confirmed || recovery !== undefined || surface !== undefined)) {
+  const recoveryIdentityPresent = recoveryOfferId !== undefined ||
+    recoveryOfferExpiresAt !== undefined || recoveryOperationId !== undefined;
+  if (
+    (recovery !== undefined && recovery !== "fork" && !recoveryIdentityPresent) ||
+    (recoveryIdentityPresent && (
+      recovery === undefined || recoveryOfferId === undefined ||
+      recoveryOfferExpiresAt === undefined || recoveryOperationId === undefined ||
+      !RECOVERY_ID.test(recoveryOfferId) || !RECOVERY_ID.test(recoveryOperationId) ||
+      !Number.isFinite(Date.parse(recoveryOfferExpiresAt))
+    ))
+  ) {
+    throw new Error("Recovery requires one valid offer and operation identity");
+  }
+  if (preflight && (confirmed || recovery !== undefined || recoveryIdentityPresent || surface !== undefined)) {
     throw new Error("Link preflight cannot be confirmed or choose recovery");
   }
   return preflight
@@ -188,6 +273,10 @@ export function parseOpenLinkArguments(args: readonly string[]): ParsedOpenLinkR
         link,
         ...(confirmed ? { confirmed: true } : {}),
         ...(recovery === undefined ? {} : { recovery }),
+        ...(recoveryOfferId === undefined || recoveryOfferExpiresAt === undefined
+          ? {}
+          : { recoveryOffer: { id: recoveryOfferId, expiresAt: recoveryOfferExpiresAt } }),
+        ...(recoveryOperationId === undefined ? {} : { recoveryOperationId }),
         ...(surface === undefined ? {} : { surface }),
       };
 }
@@ -263,6 +352,10 @@ async function main(): Promise<number> {
             link: request.link,
             ...(request.confirmed === true ? { confirmed: true } : {}),
             ...(request.recovery === undefined ? {} : { recovery: request.recovery }),
+            ...(request.recoveryOffer === undefined ? {} : { recoveryOffer: request.recoveryOffer }),
+            ...(request.recoveryOperationId === undefined
+              ? {}
+              : { recoveryOperationId: request.recoveryOperationId }),
             ...(request.surface === undefined ? {} : { surface: request.surface }),
           }));
   }
