@@ -765,9 +765,11 @@ test.describe('canonical review workflow', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openAnnotationsWorkspace(page);
     const drawer = page.locator('#review-tools-workspace');
+    const rail = page.locator('[data-workspace-edge-rail]');
     await expect(drawer).toBeVisible();
     await expect(drawer).toHaveCSS('transition-duration', '0s');
     await expect(drawer).toHaveCSS('animation-duration', '0s');
+    await expect(rail).toHaveCSS('transition-duration', '0s');
   });
 
   test('keeps native editors and composer fields outside semantic command capture', async ({ page }) => {
@@ -836,7 +838,7 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
 
-  test('invokes every semantic tool shortcut without activation', async ({ page }) => {
+  test('invokes action shortcuts while insertion remains typing-only', async ({ page }) => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+R');
@@ -848,9 +850,14 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '1');
 
     await page.getByRole('button', { name: 'Use caret' }).click();
+    await expect(page.locator('[data-review-insertion-caret]')).toBeVisible();
+    await expect(page.getByRole('toolbar', { name: 'Insertion review action' })).toHaveCount(0);
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+I');
+    await expect(page.getByRole('dialog', { name: 'Insertion' })).toHaveCount(0);
+    await page.keyboard.type('i');
     await expect(page.getByRole('dialog', { name: 'Insertion' })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Insertion' })).toHaveValue('i');
     await page.getByRole('button', { name: 'Cancel' }).click();
 
     await page.getByRole('button', { name: 'Use selection' }).click();
@@ -876,7 +883,7 @@ test.describe('canonical review workflow', () => {
     await page.keyboard.press('Alt+Shift+D');
     await expect(announcement).toContainText('Select reliable text');
     await page.keyboard.press('Alt+Shift+I');
-    await expect(announcement).toContainText('Choose a reliable text position');
+    await expect(page.getByRole('dialog', { name: 'Insertion' })).toHaveCount(0);
     await page.keyboard.press('Alt+Shift+H');
     await expect(announcement).toContainText('Select reliable text');
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');

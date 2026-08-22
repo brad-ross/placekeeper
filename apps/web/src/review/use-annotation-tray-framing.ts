@@ -14,12 +14,12 @@ import {
   chooseAnnotationPresentation,
   frameUserOwnedPosition,
   intersectViewerRects,
-  occupiedRunway,
   restoreViewportPosition,
   revealDelta,
   type AnnotationPresentation,
   type ViewerFramingControls,
   type ViewerPosition,
+  type ViewerRunway,
   type WaitForSettledViewerGeometry,
 } from '../pdf/viewer-framing.js';
 
@@ -39,6 +39,29 @@ function waitForWorkspaceLayout(signal: AbortSignal): Promise<boolean> {
     };
     signal.addEventListener('abort', abort, { once: true });
   });
+}
+
+function workspaceSurfaceIsOpen(surface: HTMLElement): boolean {
+  return surface.dataset.workspaceOpen === 'true'
+    || surface.dataset.toolsWorkspaceOpen === 'true';
+}
+
+function committedWorkspaceRunway(
+  stage: Pick<DOMRect, 'width' | 'height'>,
+  surfaces: readonly HTMLElement[],
+): ViewerRunway {
+  // Reserve the open surface's resting layout extent once. Measuring its
+  // transformed bounds here would resize the PDF runway on every slide frame.
+  const runway: ViewerRunway = { right: 0, bottom: 0 };
+  for (const surface of surfaces) {
+    if (!workspaceSurfaceIsOpen(surface)) continue;
+    if (surface.dataset.workspacePresentation === 'bottom') {
+      runway.bottom = Math.max(runway.bottom, Math.min(stage.height, surface.offsetHeight));
+    } else {
+      runway.right = Math.max(runway.right, Math.min(stage.width, surface.offsetWidth));
+    }
+  }
+  return runway;
 }
 
 export type WorkspaceOpenRequest =
@@ -134,7 +157,6 @@ export function useWorkspaceFraming(input: {
   useLayoutEffect(() => {
     const elements = [stageRef.current, referenceSurfaceRef.current, toolsSurfaceRef.current]
       .filter((element): element is HTMLElement => element !== null);
-    const transitioning = new Set<HTMLElement>();
     let sample = 0;
     let scheduler: LatestFrameRequest<number>;
     scheduler = new LatestFrameRequest<number>({
@@ -143,7 +165,6 @@ export function useWorkspaceFraming(input: {
       commit: () => {
         geometrySettlementRef.current.markChanged();
         setGeometryRevision((revision) => revision + 1);
-        if (transitioning.size > 0) scheduler.publish(++sample);
       },
     });
     const publish = () => scheduler.publish(++sample);
@@ -175,13 +196,11 @@ export function useWorkspaceFraming(input: {
 
     const onTransitionRun = (event: TransitionEvent) => {
       if (!(event.currentTarget instanceof HTMLElement) || event.target !== event.currentTarget) return;
-      transitioning.add(event.currentTarget);
       geometrySettlementRef.current.beginTransition(event.currentTarget, event.propertyName);
       publish();
     };
     const onTransitionSettled = (event: TransitionEvent) => {
       if (!(event.currentTarget instanceof HTMLElement) || event.target !== event.currentTarget) return;
-      transitioning.delete(event.currentTarget);
       geometrySettlementRef.current.settleTransition(event.currentTarget, event.propertyName);
       publish();
     };
@@ -202,7 +221,6 @@ export function useWorkspaceFraming(input: {
         surface?.removeEventListener('transitionend', onTransitionSettled);
         surface?.removeEventListener('transitioncancel', onTransitionSettled);
       }
-      transitioning.clear();
     };
   }, []);
 
@@ -399,14 +417,8 @@ export function useWorkspaceFraming(input: {
       const stageBounds = stageRef.current?.getBoundingClientRect();
       if (!stageBounds) return;
       const surfaces = [referenceSurfaceRef.current, toolsSurfaceRef.current]
-        .filter((surface): surface is HTMLElement => surface !== null)
-        .map((surface) => ({
-          presentation: surface.dataset.workspacePresentation === 'bottom'
-            ? 'bottom' as const
-            : 'right' as const,
-          bounds: surface.getBoundingClientRect(),
-        }));
-      const runway = occupiedRunway({ stage: stageBounds, surfaces });
+        .filter((surface): surface is HTMLElement => surface !== null);
+      const runway = committedWorkspaceRunway(stageBounds, surfaces);
       const exclusionWidth = runway.right;
       const exclusionHeight = runway.bottom;
       await controls.setRunway(runway);

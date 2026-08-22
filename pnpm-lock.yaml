@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@embedpdf/engines@2.14.4': 78cc1280bb7156c7d3b4504e2f9e8819409cb3b1a3d50263f2f3857a65cd484a
+  '@embedpdf/engines@2.14.4': f47ed383302340230e1f8af22731d10adec095fa4331900418878fa25aafd750
 
 importers:
 
@@ -16,7 +16,7 @@ importers:
         version: 2.14.4(preact@10.29.8)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(svelte@5.56.8)(vue@3.5.41(typescript@5.9.3))
       '@embedpdf/engines':
         specifier: 2.14.4
-        version: 2.14.4(patch_hash=78cc1280bb7156c7d3b4504e2f9e8819409cb3b1a3d50263f2f3857a65cd484a)(preact@10.29.8)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(svelte@5.56.8)(vue@3.5.41(typescript@5.9.3))
+        version: 2.14.4(patch_hash=f47ed383302340230e1f8af22731d10adec095fa4331900418878fa25aafd750)(preact@10.29.8)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(svelte@5.56.8)(vue@3.5.41(typescript@5.9.3))
       '@embedpdf/models':
         specifier: 2.14.4
         version: 2.14.4
@@ -1092,7 +1092,7 @@ snapshots:
 
   '@embedpdf/core@2.14.4(preact@10.29.8)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(svelte@5.56.8)(vue@3.5.41(typescript@5.9.3))':
     dependencies:
-      '@embedpdf/engines': 2.14.4(patch_hash=78cc1280bb7156c7d3b4504e2f9e8819409cb3b1a3d50263f2f3857a65cd484a)(preact@10.29.8)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(svelte@5.56.8)(vue@3.5.41(typescript@5.9.3))
+      '@embedpdf/engines': 2.14.4(patch_hash=f47ed383302340230e1f8af22731d10adec095fa4331900418878fa25aafd750)(preact@10.29.8)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(svelte@5.56.8)(vue@3.5.41(typescript@5.9.3))
       '@embedpdf/models': 2.14.4
       preact: 10.29.8
       react: 19.2.8
@@ -1100,7 +1100,7 @@ snapshots:
       svelte: 5.56.8
       vue: 3.5.41(typescript@5.9.3)
 
-  '@embedpdf/engines@2.14.4(patch_hash=78cc1280bb7156c7d3b4504e2f9e8819409cb3b1a3d50263f2f3857a65cd484a)(preact@10.29.8)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(svelte@5.56.8)(vue@3.5.41(typescript@5.9.3))':
+  '@embedpdf/engines@2.14.4(patch_hash=f47ed383302340230e1f8af22731d10adec095fa4331900418878fa25aafd750)(preact@10.29.8)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(svelte@5.56.8)(vue@3.5.41(typescript@5.9.3))':
     dependencies:
       '@embedpdf/fonts-arabic': 1.0.0
       '@embedpdf/fonts-hebrew': 1.0.0

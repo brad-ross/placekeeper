@@ -213,9 +213,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .workspace-edge-rail,
   .review-workspace,
   .review-tools-workspace,
   .review-context-palette,
+  .review-insertion-caret,
   .review-page-menu,
   .page-note-placement-cursor,
   .annotation-peek,

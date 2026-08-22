@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 type ViewerInspection = {
   pageCount: number;
   text: string;
+  textRectContents: string[];
   reliableTextGeometry: boolean;
   annotationSubtypes: string[];
   renderedWidth: number;
@@ -54,6 +55,10 @@ test.describe('EmbedPDF browser-worker viewer gate', () => {
 
     expect(result.pageCount).toBe(1);
     expect(result.text).toContain('Selectable placekeeper text');
+    expect(result.textRectContents).toEqual([
+      'Selectable placekeeper text: unique equilibrium clearly.',
+      'Multiline selection with soft-hyphen-like and combining context.',
+    ]);
     expect(result.reliableTextGeometry).toBe(true);
     expect(result.annotationSubtypes).toEqual(expect.arrayContaining(['highlight', 'stamp']));
     expect(result.renderedWidth).toBeGreaterThan(0);

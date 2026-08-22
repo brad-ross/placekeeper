@@ -110,7 +110,7 @@ function occurrenceCount(text: string, quote: string): number {
   return count;
 }
 
-function hasUnsupportedReadingOrder(text: string): boolean {
+export function hasUnsupportedReadingOrder(text: string): boolean {
   return /[\u0590-\u08ff\u2e80-\u9fff\uf900-\ufaff]/u.test(text);
 }
 
