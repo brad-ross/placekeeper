@@ -1,6 +1,7 @@
 ---
 title: Return-to-origin navigation for stateful PDF Reference Tabs
 date: 2026-08-18
+last_updated: 2026-08-22
 category: architecture-patterns
 module: PDF reference navigation and viewer framing
 problem_type: architecture_pattern
@@ -35,7 +36,7 @@ tags:
 
 A Reference Tab has two legitimate meanings of “where it belongs.” Its origin is the semantic PDF target that created the tab, while its settled view is the latest physical location at which the viewer successfully landed. The model keeps these meanings separate as immutable `originalTarget` and mutable `settledLocation` (`apps/web/src/review/reference-navigation-state.ts:33-40`). Opening a tab initializes both; later refreshes replace only `settledLocation` (`apps/web/src/review/reference-navigation-state.ts:319-341`).
 
-That split supports a local return-to-origin affordance without introducing another navigation stack. The implementation is open in [PR #39](https://github.com/brad-ross/placekeeper/pull/39) and remains pending until that PR merges. The durable lesson is broader: secondary-viewer recovery should restore a semantic destination through the application's navigation authority while keeping transient visibility, input intent, and focus state out of durable routing.
+That split supports a local return-to-origin affordance without introducing another navigation stack. The implementation merged in [PR #39](https://github.com/brad-ross/placekeeper/pull/39) on 2026-08-18. The durable lesson is broader: secondary-viewer recovery should restore a semantic destination through the application's navigation authority while keeping transient visibility, input intent, and focus state out of durable routing.
 
 Cross-engine iteration showed that timing adjustments and synthetic viewport movement were not enough to prove user-caused scrolling. Native Reference scroll observation paired with real wheel input made the causal contract testable instead (session history).
 
@@ -51,7 +52,7 @@ Do not store whether the return control is visible, pending, or retryable in `Re
 
 The return action is a guarded navigation transaction, not a React callback that changes `scrollTop`. `NavigationCoordinator` is the sole authority for current-document viewer navigation, reducer mutations, focus, visibility, and announcements (`apps/web/src/review/navigation-coordinator.ts:240-247`).
 
-The transaction validates active tab identity, document generation, availability, and pending state; settles layout; reapplies `originalTarget` using `reference-fit-width`; captures the verified result; and dispatches one `refresh-active-reference` update (`apps/web/src/review/navigation-coordinator.ts:509-552`, `apps/web/src/review/navigation-coordinator.ts:1139-1151`). It does not invoke Main navigation or browser-location history, so the Main Reading Thread's page, zoom, scroll, URL, and Back/Forward entries remain unchanged.
+The transaction validates active tab identity, document generation, availability, and pending state; settles layout; reapplies `originalTarget` using `reference-fit-width`; captures the verified result; and dispatches one `refresh-active-reference` update (`apps/web/src/review/navigation-coordinator.ts:569-612`, `apps/web/src/review/navigation-coordinator.ts:1261-1275`). It does not invoke Main navigation or browser-location history, so the Main Reading Thread's page, zoom, scroll, URL, and Back/Forward entries remain unchanged.
 
 ### Ask the viewer adapter whether the semantic target is visible
 
@@ -63,7 +64,7 @@ Use three outcomes:
 - `outside`: the target is valid but its page is unmounted or its anchor is offscreen.
 - `unavailable`: the target, page tree, or geometry cannot be trusted.
 
-The adapter resolves the author target before transforming its anchor into client space and applying the configured tolerance (`apps/web/src/pdf/viewer-navigation-adapter.ts:1183-1228`, `apps/web/src/pdf/viewer-navigation-adapter.ts:1231-1251`). An unmounted valid page is `outside`, not invalid, which is essential for virtualized PDFs.
+The adapter resolves the author target before transforming its anchor into client space and applying the configured tolerance (`apps/web/src/pdf/viewer-navigation-adapter.ts:1341-1388`). An unmounted valid page is `outside`, not invalid, which is essential for virtualized PDFs.
 
 ### Establish drift only from Reference-scoped manual intent
 
@@ -77,7 +78,7 @@ Programmatic Reference movement clears manual intent before and after target app
 
 Operation token, document generation, tab identity, and adapter identity protect different race axes. The coordinator checks the exact adapter after the awaited apply because a viewer can be disposed and replaced without changing the active tab (`apps/web/src/review/navigation-coordinator.ts:525-546`). Do not collapse these checks into one generic “current” flag.
 
-On success, commit the new settled view, remove the transient control, announce completion, and focus the returned page (`apps/web/src/review/navigation-coordinator.ts:548-552`). On failure, leave durable tab state unchanged, clear pending state, and keep the retry path available (`apps/web/src/review/navigation-coordinator.ts:1440-1454`).
+On success, commit the new settled view, remove the transient control, announce completion, and focus the returned page (`apps/web/src/review/navigation-coordinator.ts:604-612`). On failure, leave durable tab state unchanged, clear pending state, and keep the retry path available (`apps/web/src/review/navigation-coordinator.ts:1656-1670`).
 
 The viewer-local control can remain icon-only while retaining `Return to reference` as both its accessible name and native tooltip (`apps/web/src/review/ReferenceWorkspace.tsx:49-74`). Use `aria-disabled` rather than native `disabled` when pending work must preserve focus for a failed retry; guard repeat activation explicitly and restore focus only when it otherwise fell back to no connected target (`apps/web/src/review/ReferenceWorkspace.tsx:61-70`, `apps/web/src/review/ReferenceWorkspace.tsx:285-295`).
 
@@ -107,7 +108,7 @@ Use a physical scroll bookmark only when offsets themselves are the product cont
 2. Consume it only for a Reference-document scroll notification.
 3. On the next frame, require an actual position change and a still-current observation.
 4. Ask whether the immutable origin is `visible`, `outside`, or `unavailable`.
-5. Show the affordance only for `outside`; clear it whenever the origin becomes visible again (`apps/web/src/review/navigation-coordinator.ts:1402-1437`).
+5. Show the affordance only for `outside`; clear it whenever the origin becomes visible again (`apps/web/src/review/navigation-coordinator.ts:1618-1653`).
 
 ### Return transaction
 
@@ -126,4 +127,5 @@ Use a physical scroll bookmark only when offsets themselves are the product cont
 - [Adaptive Annotation Tray framing](adaptive-annotation-tray-framing.md) — separates interface-driven reflow from user-owned viewer movement.
 - [Reloadable local review URL authority boundaries](reloadable-local-review-url-authority-boundaries.md) — defines Main URL and browser-history ownership.
 - [WebKit recoverable Reference flow acceptance test](../test-failures/webkit-recoverable-reference-flow-acceptance-test.md) — cross-engine guidance for portal, focus, and recoverable Reference flows.
+- [Contextual Annotation Composer preserves document context during authoring](../design-patterns/contextual-annotation-composer-preserves-document-context-during-authoring.md) — adapts the immutable-origin, semantic-visibility, and outside-only target-control pattern to a frozen draft anchor in the Main viewer.
 - [Reference destination return plan](../../plans/2026-08-17-1129-feat-reference-destination-return-plan.md)
