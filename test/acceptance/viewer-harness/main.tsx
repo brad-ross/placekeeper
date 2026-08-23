@@ -15,18 +15,20 @@ if (!root) throw new Error('Acceptance root is missing.');
 
 let registry: PluginRegistry | null = null;
 let lastSelectionUpdate: SelectionUpdate | null = null;
+let lastCaretPageIndex: number | null = null;
+let lastCaretLeftContext = '';
 const viewerInteractionCounts = new Map<ViewerInteractionEvent['type'], number>();
 const params = new URLSearchParams(globalThis.location.search);
 
 globalThis.__htmlPayloadExecuted = false;
 globalThis.viewerAcceptance = {
   ready: false,
-  selectionGeometryReady() {
+  selectionGeometryReady(pageIndex = 0) {
     if (!registry) return false;
     const documentId = registry.getStore().getState().core.activeDocumentId;
     if (!documentId) return false;
     const selection = registry.getPlugin<SelectionPlugin>(SelectionPlugin.id)?.provides();
-    return selection?.getState(documentId).geometry[0] !== undefined;
+    return selection?.getState(documentId).geometry[pageIndex] !== undefined;
   },
   selectionRectCount() {
     if (!registry) return 0;
@@ -64,6 +66,12 @@ globalThis.viewerAcceptance = {
   interactionCount(type: ViewerInteractionEvent['type']) {
     return viewerInteractionCounts.get(type) ?? 0;
   },
+  caretAnchorPageIndex() {
+    return lastCaretPageIndex;
+  },
+  caretAnchorLeftContext() {
+    return lastCaretLeftContext;
+  },
 };
 
 createRoot(root).render(
@@ -73,7 +81,9 @@ createRoot(root).render(
         documentUrl:
           params.get('fixture') === 'mixed'
             ? '/test/fixtures/pdfs/mixed-text-image.pdf'
-            : '/test/fixtures/pdfs/text-native-with-annotations.pdf',
+            : params.get('fixture') === 'multi-text'
+              ? '/test/fixtures/pdfs/multi-page-text.pdf'
+              : '/test/fixtures/pdfs/text-native-with-annotations.pdf',
       }}
       documentTitle={`Metadata ${htmlPayload}`}
       toolError={`Tool error ${htmlPayload}`}
@@ -115,6 +125,10 @@ createRoot(root).render(
       }}
       onViewerInteraction={(event) => {
         viewerInteractionCounts.set(event.type, (viewerInteractionCounts.get(event.type) ?? 0) + 1);
+        if (event.type === 'caret') {
+          lastCaretPageIndex = event.value.anchor?.pageIndex ?? null;
+          lastCaretLeftContext = event.value.anchor?.leftContext ?? '';
+        }
       }}
   />,
 );
@@ -123,12 +137,14 @@ declare global {
   var __htmlPayloadExecuted: boolean;
   var viewerAcceptance: {
     ready: boolean;
-    selectionGeometryReady(): boolean;
+    selectionGeometryReady(pageIndex?: number): boolean;
     selectionRectCount(): number;
     zoomLevel(): number;
     selectionAnchorStatus(): string;
     goToPage(pageNumber: number): void;
     reviewItemCount(): number;
     interactionCount(type: ViewerInteractionEvent['type']): number;
+    caretAnchorPageIndex(): number | null;
+    caretAnchorLeftContext(): string;
   };
 }

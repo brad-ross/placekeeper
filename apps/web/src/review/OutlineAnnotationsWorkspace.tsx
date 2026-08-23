@@ -86,7 +86,12 @@ export function OutlineAnnotationsWorkspace({
       focusMemory.current.get(effectiveMode),
       panelRefs.current.get(effectiveMode),
     );
-    const timeout = setTimeout(() => focusWithoutScroll(target), 0);
+    const panel = panelRefs.current.get(effectiveMode);
+    const timeout = setTimeout(() => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && panel?.contains(active)) return;
+      focusWithoutScroll(target);
+    }, 0);
     return () => clearTimeout(timeout);
   }, [effectiveMode, open]);
 

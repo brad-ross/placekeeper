@@ -43,6 +43,11 @@ The reliable PDF insertion target that couples an exact extracted-text boundary 
 
 Only geometry capable of owning or changing the pointer's text edge participates in click-specific ambiguity checks; unrelated distant geometry does not veto the anchor, while local ambiguity fails closed.
 
+### Selection Snapshot
+The temporally consistent combination of selected text, extracted-text offsets, and page-space rectangles used to create a PDF text annotation anchor.
+
+Selection capture may await document work only while the selection's semantic state remains unchanged; if that state changes before capture completes, the snapshot is rejected rather than combining values from different selections.
+
 ### Owned Annotation
 A viewer marking projected from a Review Item and identified by that item's canonical identity.
 

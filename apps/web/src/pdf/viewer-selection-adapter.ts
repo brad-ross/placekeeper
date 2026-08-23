@@ -17,6 +17,7 @@ import {
   type AnchorPage,
   type SelectionAnchorResult,
 } from './selection-anchor.js';
+import { SELECTION_UNAVAILABLE_MESSAGE } from './text-reliability.js';
 
 export interface PublicSelectionReader {
   getFormattedSelection(documentId?: string): ViewerFormattedSelection[];
@@ -35,15 +36,57 @@ export interface CaptureViewerSelectionInput {
   contextCharacters?: number;
 }
 
+function selectionSnapshotSignature(
+  formatted: readonly ViewerFormattedSelection[],
+  state: SelectionDocumentState,
+): string {
+  const rect = ({ origin, size }: ViewerFormattedSelection['rect']) => [
+    origin.x,
+    origin.y,
+    size.width,
+    size.height,
+  ];
+  const pages = <Value>(values: Record<number, Value>) => Object.entries(values)
+    .sort(([left], [right]) => Number(left) - Number(right));
+  return JSON.stringify({
+    formatted: formatted.map((selection) => ({
+      pageIndex: selection.pageIndex,
+      rect: rect(selection.rect),
+      segmentRects: selection.segmentRects.map(rect),
+    })),
+    rects: pages(state.rects).map(([pageIndex, pageRects]) => [
+      pageIndex,
+      pageRects.map(rect),
+    ]),
+    selection: state.selection,
+    slices: pages(state.slices),
+    active: state.active,
+    selecting: state.selecting,
+  });
+}
+
 /** Convert the public EmbedPDF selection seam into the engine-neutral anchor contract. */
 export async function captureViewerSelection(
   input: CaptureViewerSelectionInput,
 ): Promise<SelectionAnchorResult> {
   const formatted = input.selection.getFormattedSelection(input.documentId);
-  const pageIndex = formatted[0]?.pageIndex ?? 0;
-  const page = await input.pages.read(pageIndex);
-  const selectedText = await input.selection.getSelectedText(input.documentId).toPromise();
   const state = input.selection.getState(input.documentId);
+  const snapshotSignature = selectionSnapshotSignature(formatted, state);
+  const pageIndex = formatted[0]?.pageIndex ?? 0;
+  const selectedTextReading = input.selection.getSelectedText(input.documentId).toPromise();
+  const [page, selectedText] = await Promise.all([
+    input.pages.read(pageIndex),
+    selectedTextReading,
+  ]);
+  const currentFormatted = input.selection.getFormattedSelection(input.documentId);
+  const currentState = input.selection.getState(input.documentId);
+  if (selectionSnapshotSignature(currentFormatted, currentState) !== snapshotSignature) {
+    return {
+      ok: false,
+      userMessage: SELECTION_UNAVAILABLE_MESSAGE,
+      diagnostic: 'selection-text-geometry-mismatch',
+    };
+  }
   const glyphCount = Object.values(state.slices).reduce((total, slice) => total + slice.count, 0);
   const selectedSlice = state.slices[pageIndex];
 

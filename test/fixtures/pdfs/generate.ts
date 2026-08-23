@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
@@ -14,6 +15,10 @@ import {
   degrees,
   rgb,
 } from 'pdf-lib';
+
+import { projectReviewItem } from '../../../packages/core/src/annotation-projection.js';
+import type { ReviewItem } from '../../../packages/core/src/review-model.js';
+import { createSelectedPdfWriter } from '../../../packages/pdf-backends/src/selected-writer.js';
 
 const reportedMathSymbolInventory = [
   '·', 'Π', 'α', 'δ', 'θ', 'κ', 'λ', 'ν', 'ξ', 'ρ', 'σ', 'τ', 'ϕ', 'ϵ', '˜',
@@ -85,7 +90,6 @@ function addReportedMathSymbolInventory(document: PDFDocument, page: PDFPage): v
     `BT /FMathInventory 12 Tf 72 630 Td <${encoded}> Tj ET`,
   )));
 }
-
 const outputDirectory = resolve('test/fixtures/pdfs');
 const encryptedNoAnnotationBase64 =
   'JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PAovUHJvZHVjZXIgPGRlOTU0NjMwYzIwMGU1MTc2YmYwNjdhOTAxMWYxNjBjMjZlN2Y5M2NiMDg1YzNmMTc0MzAzYmQ5NmVlYWU5ODU+Cj4+CmVuZG9iagoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwovQ291bnQgMQovS2lkcyBbIDQgMCBSIF0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL0NhdGFsb2cKL1BhZ2VzIDIgMCBSCj4+CmVuZG9iago0IDAgb2JqCjw8Ci9UeXBlIC9QYWdlCi9SZXNvdXJjZXMgPDwKL0ZvbnQgPDwKL0hlbHZldGljYS03MDk4NDgwNzg5IDUgMCBSCi9IZWx2ZXRpY2EtOTc0MjY4MjU2OCA1IDAgUgo+PgovWE9iamVjdCA8PAo+PgovRXh0R1N0YXRlIDw8Cj4+Cj4+Ci9NZWRpYUJveCBbIDAgMCA2MTIgNzkyIF0KL0Fubm90cyBbIF0KL0NvbnRlbnRzIFsgNiAwIFIgXQovUGFyZW50IDIgMCBSCj4+CmVuZG9iago1IDAgb2JqCjw8Ci9UeXBlIC9Gb250Ci9TdWJ0eXBlIC9UeXBlMQovQmFzZUZvbnQgL0hlbHZldGljYQovRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZwo+PgplbmRvYmoKNiAwIG9iago8PAovRmlsdGVyIC9GbGF0ZURlY29kZQovTGVuZ3RoIDI1Ngo+PgpzdHJlYW0K+D741cssH9mtvMVGLzls9Uow/5r8LccUtB9r7Lwh1mStk3Na1fAdvsTJ4jNo7Ar07jFUILdMwU1qaQIQ4cQbQzSkxonj+kiYVngxdZLOUPnASxVGRFuZuTOp9h/+/8Go4xRIoK4IDYF9sTEbyUzr/28knmX1oJtUOV1CENJeHcU4IENHxw3P99W18tTKufF4DrjyKqsVCo3QrbrhvesjJNWiINW3cmTJlPWMMc23UP4nxs3QFqXLSyZXp/6RVTwfSb9w5hNeiaV0rdRuLf0upQ2i9glRC4GT1H3Xq+iqtkShFfjDpJlPX7VFzd/+SBv+PXfRIN7Cui271Ps2WhfnlQplbmRzdHJlYW0KZW5kb2JqCjcgMCBvYmoKPDwKL1YgNQovUiA2Ci9MZW5ndGggMjU2Ci9QIDQKL0ZpbHRlciAvU3RhbmRhcmQKL08gPDUxZGNjOGJmM2FkYjYzNDMwMDc1NTA1ZWI4ODk1ZmVlOWQyMDRhOTg5ZjhjMjZjOWY1ZDQ0OWNiMGI2MjRmZTkwNTJjMGQxNGIzYzhiYzhiNmU5ZGE4NGUzM2UzM2I5ZD4KL1UgPGM1NjJmYTI4YTU3YzE5MTQ3MDE0ZTdkNzA4ZTJjZjJiZjRmN2Y2NjMxMzljMzIxZDM5MmNhNmJhM2M0NzJmZmU3MjVjMjlkNTliODliZWFmMGIyOTJjNWQ0MzJlNGQxZD4KL0NGIDw8Ci9TdGRDRiA8PAovQXV0aEV2ZW50IC9Eb2NPcGVuCi9DRk0gL0FFU1YzCi9MZW5ndGggMzIKPj4KPj4KL1N0bUYgL1N0ZENGCi9TdHJGIC9TdGRDRgovT0UgPGFlOWI4OGVhZDM2MWVlMjUyOTYyZGY2NmNmNWYzMjQ2NDdlMDliNWNhZDMwNzZmYzJlMDI4OGE3MzA0YmY2MTU+Ci9VRSA8ZTQ4NWM4MjNhNTM2MzVkMTdkYmZlZDk4ZTAzNDIxYzEwYTU2MGI5ZWM3NDlkZGM1MzY0ZWNlMGFkY2MyY2UxMj4KL1Blcm1zIDw3MDBlMDE5YmRlNjE4ZGRmMzk0NzNhYjdiMzMxMWMyMz4KPj4KZW5kb2JqCnhyZWYKMCA4CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAxNSAwMDAwMCBuIAowMDAwMDAwMTEzIDAwMDAwIG4gCjAwMDAwMDAxNzIgMDAwMDAgbiAKMDAwMDAwMDIyMSAwMDAwMCBuIAowMDAwMDAwNDQzIDAwMDAwIG4gCjAwMDAwMDA1NDAgMDAwMDAgbiAKMDAwMDAwMDg2OCAwMDAwMCBuIAp0cmFpbGVyCjw8Ci9TaXplIDgKL1Jvb3QgMyAwIFIKL0luZm8gMSAwIFIKL0lEIFsgPDM1MzQzOTMxNjMzOTYxMzczMjY1NjEzOTM5NjMzNDY0MzEzMTMxNjMzNjY1MzQ2MTY0Mzg2NTM0MzE2NjMyMzc+IDwzNTM0MzkzMTYzMzk2MTM3MzI2NTYxMzkzOTYzMzQ2NDMxMzEzMTYzMzY2NTM0NjE2NDM4NjUzNDMxNjYzMjM3PiBdCi9FbmNyeXB0IDcgMCBSCj4+CnN0YXJ0eHJlZgoxNDE0CiUlRU9GCg==';
@@ -183,6 +187,55 @@ async function mixedTextImagePdf() {
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
   );
   imagePage.drawImage(png, { x: 72, y: 600, width: 300, height: 120 });
+  return document.save({ useObjectStreams: false });
+}
+
+async function equationSelectionPdf() {
+  const document = await PDFDocument.create();
+  const page = document.addPage([612, 792]);
+  const roman = await document.embedFont(StandardFonts.TimesRoman);
+  const italic = await document.embedFont(StandardFonts.TimesRomanItalic);
+  const symbol = await document.embedFont(StandardFonts.Symbol);
+
+  let inlineX = 72;
+  const drawInline = (text: string, y: number, size: number, font = roman) => {
+    page.drawText(text, { x: inlineX, y, size, font });
+    inlineX += font.widthOfTextAtSize(text, size);
+  };
+  drawInline('Inline equation: distance ', 690, 14);
+  drawInline('d', 690, 14, italic);
+  drawInline('ij', 686, 9, italic);
+  drawInline(' remains selectable.', 690, 14);
+
+  let displayX = 190;
+  const drawDisplay = (text: string, y: number, size: number, font = roman) => {
+    page.drawText(text, { x: displayX, y, size, font });
+    displayX += font.widthOfTextAtSize(text, size);
+  };
+  drawDisplay('t', 620, 14, italic);
+  drawDisplay('k|ij', 616, 9, italic);
+  drawDisplay(' = ', 620, 14);
+  drawDisplay('ν', 620, 14, symbol);
+  drawDisplay('-1', 629, 9);
+  drawDisplay('k', 616, 9, italic);
+  drawDisplay(' · d', 620, 14);
+  drawDisplay('k|ij', 616, 9, italic);
+  drawDisplay('.', 620, 14);
+
+  return document.save({ useObjectStreams: true });
+}
+
+async function multiPageTextPdf() {
+  const document = await PDFDocument.create();
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  for (const [index, pageLabel] of ['one', 'two'].entries()) {
+    const page = document.addPage([612, 792]);
+    const repeatedText = 'Repeated insertion context.';
+    page.drawText(repeatedText, { x: 72, y: 690, size: 14, font });
+    page.drawText(repeatedText, { x: 72, y: 660, size: 14, font });
+    page.drawText(`Repeated context for page ${index + 1}.`, { x: 72, y: 630, size: 12, font });
+    page.drawText(`End of page ${pageLabel}.`, { x: 72, y: 600, size: 12, font });
+  }
   return document.save({ useObjectStreams: false });
 }
 
@@ -534,6 +587,33 @@ async function referenceNavigationPdf() {
   return document.save({ useObjectStreams: false });
 }
 
+async function annotatedReferenceNavigationPdf(sourcePdf: Uint8Array): Promise<Uint8Array> {
+  const timestamp = '2026-08-23T12:00:00.000Z';
+  const item: ReviewItem = {
+    id: '51000000-0000-4000-8000-000000000051',
+    kind: 'delete',
+    pageIndex: 0,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    payload: {
+      quote: 'Reference navigation fixture',
+      prefix: '',
+      suffix: ' — page 1',
+      rect: { x: 72, y: 46, width: 214, height: 18 },
+      segmentRects: [{ x: 72, y: 46, width: 214, height: 18 }],
+      reliable: true,
+    },
+  };
+  const writer = await createSelectedPdfWriter();
+  const written = await writer.write({
+    sourcePdf,
+    sourceSha256: createHash('sha256').update(sourcePdf).digest('hex'),
+    revision: 1,
+    annotations: [projectReviewItem(item)],
+  });
+  return written.pdfBytes;
+}
+
 async function preservationCorpusPdf() {
   const document = await PDFDocument.load(await textPdf());
   const page = document.getPage(0);
@@ -637,6 +717,7 @@ async function certifiedPdf() {
 
 await mkdir(outputDirectory, { recursive: true });
 await mkdir(resolve('test/fixtures/pdfium'), { recursive: true });
+const referenceNavigation = referenceNavigationPdf();
 await Promise.all([
   writeFile(
     resolve('test/fixtures/pdfium/pdfium.wasm'),
@@ -646,13 +727,19 @@ await Promise.all([
   writeFixture('text-native-with-annotations.pdf', await textPdf({ annotations: true })),
   writeFixture('image-only.pdf', await imageOnlyPdf()),
   writeFixture('mixed-text-image.pdf', await mixedTextImagePdf()),
+  writeFixture('equation-selection.pdf', await equationSelectionPdf()),
+  writeFixture('multi-page-text.pdf', await multiPageTextPdf()),
   writeFixture('pdf-search.pdf', await pdfSearchPdf()),
   writeFixture('rotation-0-crop.pdf', await textPdf({ rotation: 0, crop: true })),
   writeFixture('rotation-90-crop.pdf', await textPdf({ rotation: 90, crop: true })),
   writeFixture('rotation-180-crop.pdf', await textPdf({ rotation: 180, crop: true })),
   writeFixture('rotation-270-crop.pdf', await textPdf({ rotation: 270, crop: true })),
   writeFixture('hostile-actions.pdf', await hostileActionsPdf()),
-  writeFixture('reference-navigation.pdf', await referenceNavigationPdf()),
+  writeFixture('reference-navigation.pdf', await referenceNavigation),
+  writeFixture(
+    'reference-navigation-annotated.pdf',
+    await annotatedReferenceNavigationPdf(await referenceNavigation),
+  ),
   writeFixture('preservation-corpus.pdf', await preservationCorpusPdf()),
   writeFixture(
     'encrypted-no-annotation.pdf',

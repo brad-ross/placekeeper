@@ -385,6 +385,61 @@ function alignTextRects(page: AnchorPage): readonly MappedTextRect[] | null {
   return solutions.length === 1 ? solutions[0]! : null;
 }
 
+function alignPointerTextRectsWithGlyphs(
+  page: AnchorPage,
+  point: Position,
+): readonly MappedTextRect[] | null {
+  const glyphs = page.glyphs ?? [];
+  const rects = page.textRects.filter(({ content, rect }) => (
+    content.length > 0 && caretPointNearRect(rect, point)
+  ));
+  const validGlyphsByOffset = new Map<number, AnchorGlyph[]>();
+  const occurrenceCache = new Map<string, readonly number[]>();
+  const occurrences = (content: string): readonly number[] => {
+    const cached = occurrenceCache.get(content);
+    if (cached) return cached;
+    const found = textOccurrences(page.extractedText, content, 0);
+    occurrenceCache.set(content, found);
+    return found;
+  };
+  for (const glyph of glyphs) {
+    if (
+      !Number.isSafeInteger(glyph.textOffset)
+      || glyph.textOffset < 0
+      || glyph.textOffset >= page.extractedText.length
+      || !isValidTextRect(glyph.rect)
+    ) continue;
+    const existing = validGlyphsByOffset.get(glyph.textOffset) ?? [];
+    existing.push(glyph);
+    validGlyphsByOffset.set(glyph.textOffset, existing);
+  }
+
+  const mapped: MappedTextRect[] = [];
+  for (const current of rects) {
+    let content = current.content;
+    let starts = occurrences(content);
+    while (
+      starts.length === 0
+      && content.length > 1
+      && PDFIUM_TRAILING_TEXT_CONTROL.test(content)
+    ) {
+      content = content.slice(0, -1);
+      starts = occurrences(content);
+    }
+    if (starts.length > 1) {
+      starts = starts.filter((start) => Array.from({ length: content.length }, (_, index) => start + index)
+        .every((offset) => (
+          !NON_WHITESPACE.test(page.extractedText[offset] ?? '')
+          || validGlyphsByOffset.get(offset)?.some(({ rect }) => rectsOverlap(rect, current.rect)) === true
+        )));
+    }
+    if (starts.length !== 1) return null;
+    const start = starts[0]!;
+    mapped.push({ content, rect: current.rect, start, end: start + content.length });
+  }
+  return mapped;
+}
+
 function rectsOverlap(a: Rect, b: Rect): boolean {
   return (
     a.origin.x < b.origin.x + b.size.width &&
@@ -414,7 +469,16 @@ function readingOrderSupported(
     const previous = mapped[index - 1]!.rect;
     const current = mapped[index]!.rect;
     if (!caretPointNearRect(previous, point) && !caretPointNearRect(current, point)) continue;
-    const sameLine = Math.abs(current.origin.y - previous.origin.y) <= Math.min(6, previous.size.height / 2);
+    const verticalOverlap = Math.min(
+      previous.origin.y + previous.size.height,
+      current.origin.y + current.size.height,
+    ) - Math.max(previous.origin.y, current.origin.y);
+    const previousCenter = previous.origin.y + previous.size.height / 2;
+    const currentCenter = current.origin.y + current.size.height / 2;
+    const sameLine = verticalOverlap > 0 || Math.abs(currentCenter - previousCenter) <= Math.min(
+      6,
+      Math.max(previous.size.height, current.size.height) / 2,
+    );
     if (sameLine && current.origin.x < previous.origin.x) return false;
     if (!sameLine && current.origin.y < previous.origin.y) return false;
   }
@@ -540,7 +604,9 @@ export function createCaretAnchorAtPoint(input: CreateCaretAnchorAtPointInput): 
     return caretFailure('selection-geometry-invalid');
   }
 
-  const mapped = alignTextRects(input.page);
+  const mapped = input.page.glyphs && input.page.glyphs.length > 0
+    ? alignPointerTextRectsWithGlyphs(input.page, naturalPoint)
+    : alignTextRects(input.page);
   if (mapped === null) return caretFailure('caret-text-rect-alignment-nonunique');
   // Subscripts and superscripts commonly overlap; reject only overlaps that can own this point.
   for (let first = 0; first < mapped.length; first += 1) {
