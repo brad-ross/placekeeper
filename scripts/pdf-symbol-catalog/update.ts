@@ -1,20 +1,11 @@
-import { createHash } from 'node:crypto';
 import { gzipSync, gunzipSync } from 'node:zlib';
-import { cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-import { type SourceManifest } from './compile.js';
-import { buildCatalogArtifacts } from './generate.js';
-
-const sourceKeys = [
-  'derivedName',
-  'derivedGeneralCategory',
-  'derivedCoreProperties',
-  'unicodeData',
-  'w3cUnicode',
-] as const;
+import { SOURCE_KEYS, type SourceManifest } from './compile.js';
+import { buildCatalogArtifacts, sha256, writeAtomically } from './generate.js';
 
 interface UpdateOptions {
   readonly repositoryRoot: string;
@@ -29,25 +20,10 @@ interface CompleteManifest extends SourceManifest {
   }>>;
 }
 
-const sha256 = (value: Uint8Array): string =>
-  createHash('sha256').update(value).digest('hex');
-
 const download = async (fetcher: typeof globalThis.fetch, url: string): Promise<Buffer> => {
   const response = await fetcher(url, { redirect: 'follow' });
   if (!response.ok) throw new Error(`catalog update download failed for ${url}: HTTP ${response.status}`);
   return Buffer.from(await response.arrayBuffer());
-};
-
-const atomicWrite = async (path: string, value: Uint8Array): Promise<void> => {
-  await mkdir(dirname(path), { recursive: true });
-  const stage = await mkdtemp(join(dirname(path), '.catalog-update-'));
-  const temporary = join(stage, 'value');
-  try {
-    await writeFile(temporary, value);
-    await rename(temporary, path);
-  } finally {
-    await rm(stage, { recursive: true, force: true });
-  }
 };
 
 export const updateCatalogSources = async (options: UpdateOptions): Promise<void> => {
@@ -81,7 +57,7 @@ export const updateCatalogSources = async (options: UpdateOptions): Promise<void
     }
 
     const stagedManifest = structuredClone(manifest) as CompleteManifest;
-    for (const key of sourceKeys) {
+    for (const key of SOURCE_KEYS) {
       const entry = stagedManifest.sources[key];
       if (entry.url === undefined || entry.file === undefined) {
         throw new Error(`source manifest entry ${key} requires url and file`);
@@ -127,7 +103,7 @@ export const updateCatalogSources = async (options: UpdateOptions): Promise<void
 
     // Publication begins only after every download, checksum, schema, compiler, and artifact check passes.
     const publications: { path: string; value: Buffer }[] = [];
-    for (const key of sourceKeys) {
+    for (const key of SOURCE_KEYS) {
       const entry = stagedManifest.sources[key];
       if (entry.file === undefined) throw new Error(`source manifest entry ${key} requires file`);
       publications.push({
@@ -161,7 +137,7 @@ export const updateCatalogSources = async (options: UpdateOptions): Promise<void
     let published = 0;
     try {
       for (const publication of publications) {
-        await atomicWrite(publication.path, publication.value);
+        await writeAtomically(publication.path, publication.value);
         published += 1;
       }
     } catch (error) {
@@ -172,7 +148,7 @@ export const updateCatalogSources = async (options: UpdateOptions): Promise<void
         if (original === null || original === undefined) {
           await rm(publication.path, { force: true });
         } else {
-          await atomicWrite(publication.path, original);
+          await writeAtomically(publication.path, original);
         }
       }
       throw error;

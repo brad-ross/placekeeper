@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { XMLParser } from 'fast-xml-parser';
 
-const SOURCE_KEYS = [
+export const SOURCE_KEYS = [
   'derivedName',
   'derivedGeneralCategory',
   'derivedCoreProperties',
@@ -10,7 +10,7 @@ const SOURCE_KEYS = [
   'w3cUnicode',
 ] as const;
 
-type SourceKey = (typeof SOURCE_KEYS)[number];
+export type SourceKey = (typeof SOURCE_KEYS)[number];
 
 export interface ManifestSource {
   readonly version: string;

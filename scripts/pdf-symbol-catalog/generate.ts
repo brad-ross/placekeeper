@@ -6,19 +6,13 @@ import { fileURLToPath } from 'node:url';
 
 import {
   compileSymbolCatalog,
+  SOURCE_KEYS,
   type CatalogEquivalenceFamily,
   type CatalogOverrides,
   type CatalogRecord,
+  type SourceKey,
   type SourceManifest,
 } from './compile.js';
-
-const sourceKeys = [
-  'derivedName',
-  'derivedGeneralCategory',
-  'derivedCoreProperties',
-  'unicodeData',
-  'w3cUnicode',
-] as const;
 
 const artifactRelativePaths = {
   audit: 'scripts/pdf-symbol-catalog/generated/catalog.audit.json',
@@ -65,7 +59,7 @@ const byteCompare = (left: string, right: string): number =>
 const uniqueSorted = (values: Iterable<string>): string[] =>
   [...new Set(values)].sort(byteCompare);
 
-const sha256 = (value: string | Uint8Array): string =>
+export const sha256 = (value: string | Uint8Array): string =>
   createHash('sha256').update(value).digest('hex');
 
 const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
@@ -262,8 +256,8 @@ const readCompilerInputs = async (repositoryRoot: string) => {
   const overrides = JSON.parse(
     await readFile(join(catalogRoot, 'overrides.json'), 'utf8'),
   ) as CatalogOverrides;
-  const sources = {} as Record<(typeof sourceKeys)[number], string>;
-  for (const key of sourceKeys) {
+  const sources = {} as Record<SourceKey, string>;
+  for (const key of SOURCE_KEYS) {
     const entry = manifest.sources[key];
     if (entry.file === undefined || entry.compressedSha256 === undefined) {
       throw new Error(`source manifest entry ${key} requires file and compressedSha256`);
@@ -379,12 +373,15 @@ export const buildCatalogArtifacts = async (
   return { audit, runtime, report };
 };
 
-const writeAtomically = async (path: string, contents: string): Promise<void> => {
+export const writeAtomically = async (
+  path: string,
+  contents: string | Uint8Array,
+): Promise<void> => {
   await mkdir(dirname(path), { recursive: true });
   const temporary = await mkdtemp(join(dirname(path), '.catalog-generate-'));
   const staged = join(temporary, 'artifact');
   try {
-    await writeFile(staged, contents, 'utf8');
+    await writeFile(staged, contents);
     await rename(staged, path);
   } finally {
     await rm(temporary, { recursive: true, force: true });
