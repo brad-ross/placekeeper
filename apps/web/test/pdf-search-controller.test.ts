@@ -281,6 +281,97 @@ describe('PDF search controller', () => {
     });
   });
 
+  it('recognizes omitted Greek and punctuation-class LaTeX symbols from extracted text', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['κ · κ']),
+    });
+
+    const kappa = await controller.search('\\kappa');
+    expect(kappa.groups[0]?.results).toHaveLength(2);
+    expect(kappa.groups[0]?.results[0]?.matchedForm).toBe('κ');
+
+    const centerDot = await controller.search('\\cdot');
+    expect(centerDot.groups[0]?.results).toHaveLength(1);
+    expect(centerDot.groups[0]?.results[0]?.matchedForm).toBe('·');
+  });
+
+  it('searches every mathematical symbol extracted from the reported PDF', async () => {
+    const extractedSymbols = [
+      ['·', '\\cdot'],
+      ['Π', '\\Pi'],
+      ['α', '\\alpha'],
+      ['δ', '\\delta'],
+      ['θ', '\\theta'],
+      ['κ', '\\kappa'],
+      ['λ', '\\lambda'],
+      ['ν', '\\nu'],
+      ['ξ', '\\xi'],
+      ['ρ', '\\rho'],
+      ['σ', '\\sigma'],
+      ['τ', '\\tau'],
+      ['ϕ', '\\varphi'],
+      ['ϵ', '\\varepsilon'],
+      ['˜', '\\tilde'],
+      ['→', '\\to'],
+      ['∂', '\\partial'],
+      ['∈', '\\in'],
+      ['∑', '\\sum'],
+      ['−', 'minus'],
+      ['∗', '\\ast'],
+      ['∝', '\\propto'],
+      ['∫', '\\int'],
+      ['≡', '\\equiv'],
+      ['≤', '\\leq'],
+      ['≥', '\\geq'],
+      ['⏐', 'vertical line extension'],
+      ['+', 'plus'],
+      ['<', 'less than'],
+      ['=', 'equals'],
+      ['>', 'greater than'],
+      ['|', 'vertical bar'],
+      ['/', 'slash'],
+    ] as const;
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader([extractedSymbols.map(([glyph]) => glyph).join(' ')]),
+    });
+
+    for (const [glyph, query] of extractedSymbols) {
+      const state = await controller.search(query);
+      expect(state.groups.flatMap(({ results }) => results).map(({ matchedForm }) => matchedForm), query)
+        .toContain(glyph);
+    }
+  });
+
+  it('returns every detected glyph that shares a symbol alias', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['| ⏐ φ ϕ']),
+    });
+
+    const verticalBars = await controller.search('\\vert');
+    expect(verticalBars.groups[0]?.results.map(({ matchedForm }) => matchedForm))
+      .toEqual(['|', '⏐']);
+
+    const phiVariants = await controller.search('\\phi');
+    expect(phiVariants.groups[0]?.results.map(({ matchedForm }) => matchedForm))
+      .toEqual(['φ', 'ϕ']);
+  });
+
+  it('keeps ASCII hyphen and Unicode minus searches code-point exact', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['ride-hailing − cost']),
+    });
+
+    const hyphen = await controller.search('-');
+    expect(hyphen.groups[0]?.results.map(({ matchedForm }) => matchedForm)).toEqual(['-']);
+
+    const minus = await controller.search('minus');
+    expect(minus.groups[0]?.results.map(({ matchedForm }) => matchedForm)).toEqual(['−']);
+  });
+
   it('prepares a detected-symbol catalog before a query is entered', async () => {
     const controller = createPdfSearchController({
       documentGeneration: 1,

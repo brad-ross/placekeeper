@@ -42,6 +42,8 @@ export default defineConfig({
       'apps/web/test/navigation-coordinator.test.ts',
       'apps/web/test/review-location-history.test.ts',
       'apps/web/test/copy-link-control.test.ts',
+      'apps/web/test/pdf-search-controller.test.ts',
+      'apps/web/test/pdf-symbol-catalog.test.ts',
       'apps/vscode/test/extension.test.ts',
       'packaging/macos/packaging.test.ts',
     ],

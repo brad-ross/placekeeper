@@ -25,8 +25,9 @@ import {
 import { relatedPhraseQueries } from './pdf-search-morphology.js';
 import {
   detectedSymbolSuggestions,
+  isKnownSymbolGlyph,
   isSymbolAliasQuery,
-  resolveDetectedSymbolQuery,
+  resolveDetectedSymbolQueries,
 } from './pdf-symbol-catalog.js';
 
 export interface PdfSearchPageSnapshot {
@@ -157,7 +158,8 @@ function documentWords(pages: readonly IndexedPage[]): string[] {
 
 function addDetectedGlyphs(text: string, result: Set<string>): void {
   for (const character of text) {
-    if (/[^\p{L}\p{N}\p{M}\p{P}\p{Z}\p{C}]/u.test(character)
+    if (isKnownSymbolGlyph(character)
+      || /[^\p{L}\p{N}\p{M}\p{P}\p{Z}\p{C}]/u.test(character)
       || /[\u0370-\u03ff\u2190-\u22ff\u27c0-\u27ef\u2980-\u2aff]/u.test(character)) {
       result.add(character);
     }
@@ -437,7 +439,7 @@ export function createPdfSearchController(
   let activeSearch: { readonly token: number; readonly query: string } | null = null;
   let progressiveExact: {
     readonly token: number;
-    readonly effectiveQuery: string;
+    readonly effectiveQueries: readonly string[];
     readonly matchKind: PdfSearchMatchKind;
     readonly formula: boolean;
     readonly pageIndexes: Set<number>;
@@ -522,21 +524,22 @@ export function createPdfSearchController(
     if (disposed || token !== queryToken || activeSearch?.token !== token) return;
     const queryKind = classifyPdfSearchQuery(query);
     const symbolAlias = isSymbolAliasQuery(query);
-    const symbol = resolveDetectedSymbolQuery(query, glyphInventory);
-    const effectiveQuery = symbol?.glyph ?? query;
-    const matchKind: PdfSearchMatchKind = symbol
+    const symbols = resolveDetectedSymbolQueries(query, glyphInventory);
+    const effectiveQueries = symbols.length > 0 ? symbols.map(({ glyph }) => glyph) : [query];
+    const matchKind: PdfSearchMatchKind = symbols.length > 0
       ? 'symbol'
       : queryKind === 'formula' ? 'formula' : 'exact';
-    const formula = Boolean(symbol) || queryKind === 'formula';
+    const formula = symbols.length > 0 || queryKind === 'formula';
     if (
       progressiveExact?.token !== token
-      || progressiveExact.effectiveQuery !== effectiveQuery
+      || progressiveExact.effectiveQueries.length !== effectiveQueries.length
+      || progressiveExact.effectiveQueries.some((value, index) => value !== effectiveQueries[index])
       || progressiveExact.matchKind !== matchKind
       || progressiveExact.formula !== formula
     ) {
       progressiveExact = {
         token,
-        effectiveQuery,
+        effectiveQueries,
         matchKind,
         formula,
         pageIndexes: new Set(),
@@ -546,15 +549,19 @@ export function createPdfSearchController(
     for (const page of pages) {
       if (progressiveExact.pageIndexes.has(page.pageIndex)) continue;
       progressiveExact.pageIndexes.add(page.pageIndex);
-      progressiveExact.results.push(...findPageMatches({
-        page,
-        documentGeneration: options.documentGeneration,
-        query: effectiveQuery,
-        kind: matchKind,
-        formula,
-      }));
+      for (const effectiveQuery of effectiveQueries) {
+        progressiveExact.results.push(...findPageMatches({
+          page,
+          documentGeneration: options.documentGeneration,
+          query: effectiveQuery,
+          kind: matchKind,
+          formula,
+        }));
+      }
     }
-    const exact = ordered(progressiveExact.results);
+    const exact = ordered([...new Map(
+      progressiveExact.results.map((result) => [result.id, result]),
+    ).values()]);
 
     const relatedQueries = complete && queryKind === 'prose' && !symbolAlias
       ? relatedPhraseQueries(query, documentWords(pages))
