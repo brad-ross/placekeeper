@@ -9,6 +9,7 @@
   "scripts": {
     "build": "pnpm build:service && pnpm build:web && pnpm build:vscode",
     "build:service": "vite build --config apps/service/vite.config.ts",
+    "prebuild:web": "pnpm catalog:check",
     "build:web": "vite build --config apps/web/vite.production.config.ts",
     "build:vscode": "pnpm --dir apps/vscode run build",
     "catalog:generate": "tsx scripts/pdf-symbol-catalog/generate.ts",
@@ -38,7 +39,7 @@
     "test:ci:chromium": "playwright test test/conformance/pdf-viewer.conformance.spec.ts test/acceptance/viewer.spec.ts test/acceptance/review-workflow.spec.ts test/acceptance/launch-surfaces.spec.ts test/acceptance/production-flow.spec.ts test/acceptance/reloadable-links.spec.ts",
     "test:ci:webkit": "playwright test --config playwright.webkit.config.ts test/acceptance/review-workflow.spec.ts test/acceptance/production-flow.spec.ts test/acceptance/reloadable-links.spec.ts",
     "test:ci:visual": "playwright test --config playwright.visual.config.ts",
-    "test:ci": "pnpm fixtures:pdf && pnpm typecheck && pnpm test:ci:unit && pnpm build:web && pnpm test:ci:chromium && pnpm test:ci:webkit && pnpm test:ci:visual && pnpm validate:distribution",
+    "test:ci": "pnpm fixtures:pdf && pnpm catalog:check && pnpm typecheck && pnpm test:ci:unit && pnpm build:web && pnpm test:ci:chromium && pnpm test:ci:webkit && pnpm test:ci:visual && pnpm validate:distribution",
     "validate:distribution": "tsx packaging/macos/validate-manifest.ts",
     "package:macos": "pnpm build && tsx packaging/macos/build-app.ts",
     "install:local": "/bin/sh ./install.sh",

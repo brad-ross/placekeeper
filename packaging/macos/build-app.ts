@@ -7,6 +7,8 @@ import { basename, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   MAC_ICON_REPRESENTATIONS,
+  CATALOG_NOTICE_RESOURCE_PATH,
+  validateCatalogRuntimeDistribution,
   validateAppBundleManifest,
   validateBackendRuntimeManifest,
   validateMacIconSet,
@@ -318,8 +320,17 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   await mkdir(englishResources, { recursive: true, mode: 0o755 });
   await writeFile(resolve(englishResources, "InfoPlist.strings"), infoPlistStrings(appManifest), { mode: 0o644 });
   await compileMacIcon(iconset, resolve(resources, `${appManifest.icon.file}.icns`));
+  await copyFile(
+    resolve(repoRoot, "THIRD_PARTY_NOTICES.md"),
+    resolve(contents, CATALOG_NOTICE_RESOURCE_PATH),
+  );
   await copyFile(resolve(repoRoot, "packaging/macos/launcher.mjs"), resolve(resources, "launcher.mjs"));
   await writeFile(launcherPath, launcherScript(), { mode: 0o755 });
+  await validateCatalogRuntimeDistribution({
+    runtimeRoot: resources,
+    webEntry: resolve(resources, "web/app.js"),
+    noticePath: resolve(contents, CATALOG_NOTICE_RESOURCE_PATH),
+  });
   const buildIdentity = await computePackagedBuildIdentity({
     contentsRoot: contents,
     serviceRoot: resolve(resources, "service"),

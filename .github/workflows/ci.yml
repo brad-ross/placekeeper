@@ -30,6 +30,8 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Check generated mathematical symbol catalog
+        run: pnpm catalog:check
       - name: Typecheck
         run: pnpm typecheck
       - name: Install Playwright browsers and system dependencies

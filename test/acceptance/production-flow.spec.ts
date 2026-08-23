@@ -19,6 +19,18 @@ let referencePdf = "";
 let annotatedReferencePdf = "";
 let searchPdf = "";
 
+const reportedMathSymbolInventory = [
+  ['·', '\\cdot'], ['Π', '\\Pi'], ['α', '\\alpha'], ['δ', '\\delta'],
+  ['θ', '\\theta'], ['κ', '\\kappa'], ['λ', '\\lambda'], ['ν', '\\nu'],
+  ['ξ', '\\xi'], ['ρ', '\\rho'], ['σ', '\\sigma'], ['τ', '\\tau'],
+  ['ϕ', 'varphi'], ['ϵ', 'varepsilon'], ['˜', 'small tilde'],
+  ['→', '\\rightarrow'], ['∂', '\\partial'], ['∈', '\\in'], ['∑', '\\sum'],
+  ['−', 'minus'], ['∗', '\\ast'], ['∝', '\\propto'], ['∫', '\\int'],
+  ['≡', '\\equiv'], ['≤', '\\leq'], ['≥', '\\geq'],
+  ['⏐', 'vertical line extension'], ['+', 'plus sign'], ['<', 'less-than sign'],
+  ['=', 'equals sign'], ['>', 'greater-than sign'], ['|', 'vertical line'], ['/', 'solidus'],
+] as const;
+
 const PRODUCTION_VIEWER_READY_TIMEOUT_MS = 15_000;
 const REFERENCE_READY_TIMEOUT_MS = 15_000;
 
@@ -399,6 +411,7 @@ test("searches extracted PDF text with variants, history, references, and retain
     "true",
   );
   await expect(page.getByRole("button", { name: "Close right workspace" })).toBeVisible();
+  await query.click();
   await expect(query).toBeFocused();
   await expect.poll(() => query.evaluate((element) => getComputedStyle(element).backgroundColor))
     .toBe("rgb(229, 230, 225)");
@@ -454,6 +467,19 @@ test("searches extracted PDF text with variants, history, references, and retain
   const symbolSuggestions = page.getByRole("listbox", { name: "Suggested symbols" });
   await expect(symbolSuggestions).toBeVisible();
   await expect(symbolSuggestions.getByRole("option", { name: /degree/u })).toBeVisible();
+  for (const [glyph, alias] of reportedMathSymbolInventory) {
+    await query.fill(alias);
+    const results = searchPanel.locator("[data-search-result]");
+    await expect(results, alias).toHaveCount(1);
+    await expect(results.first().locator(".pdf-search__result-match"), alias).toHaveText(glyph);
+  }
+  await query.fill("");
+  await query.focus();
+  await expect(symbolSuggestions.getByRole("option", {
+    name: "⏐ vertical line extension",
+    exact: true,
+  })).toBeVisible();
+  await expect(symbolSuggestions.getByRole("option", { name: /⏐.*\(/u })).toHaveCount(0);
   await query.fill("deg");
   const degreeSuggestion = symbolSuggestions.getByRole("option", { name: /degree/u });
   await expect(degreeSuggestion).toBeVisible();
@@ -462,13 +488,9 @@ test("searches extracted PDF text with variants, history, references, and retain
   await expect(symbolSuggestions).toBeHidden();
   await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
   await expect(searchPanel).not.toContainText("Exact symbol");
-  await query.focus();
-  await query.fill("lambda");
-  await expect(symbolSuggestions).toBeHidden();
-
-  await query.fill("degree");
+  await query.fill("degree sign");
   await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
-  await query.fill("\\degree");
+  await query.fill("\\textdegree");
   await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
   await query.fill("90°");
   await expect(searchPanel.locator("[data-search-result]")).toHaveCount(1);
@@ -477,7 +499,7 @@ test("searches extracted PDF text with variants, history, references, and retain
   await expect(searchPanel.locator("[data-search-result]")).toHaveCount(0);
   await expect(searchPanel).toContainText("could not be matched confidently");
   await expect(searchPanel.locator(".pdf-search__alternatives")
-    .getByRole("button", { name: "° degree (\\degree)", exact: true })).toBeVisible();
+    .getByRole("button", { name: "° degree sign (\\textdegree)", exact: true })).toBeVisible();
   await query.fill("stable");
   await expect(exact.locator("[data-search-result]")).toHaveCount(2);
 

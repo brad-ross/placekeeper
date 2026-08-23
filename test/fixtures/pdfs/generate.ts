@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 
 import {
   PDFArray,
+  PDFDict,
   PDFDocument,
   PDFHexString,
   PDFName,
@@ -13,6 +14,77 @@ import {
   degrees,
   rgb,
 } from 'pdf-lib';
+
+const reportedMathSymbolInventory = [
+  '·', 'Π', 'α', 'δ', 'θ', 'κ', 'λ', 'ν', 'ξ', 'ρ', 'σ', 'τ', 'ϕ', 'ϵ', '˜',
+  '→', '∂', '∈', '∑', '−', '∗', '∝', '∫', '≡', '≤', '≥', '⏐', '+', '<', '=', '>', '|', '/',
+] as const;
+
+const utf16BeHex = (glyph: string): string => {
+  const codePoint = glyph.codePointAt(0);
+  if (codePoint === undefined) throw new Error('Math symbol fixture requires one scalar');
+  if (codePoint <= 0xffff) return codePoint.toString(16).toUpperCase().padStart(4, '0');
+  const scalar = codePoint - 0x10000;
+  const high = 0xd800 + (scalar >>> 10);
+  const low = 0xdc00 + (scalar & 0x3ff);
+  return `${high.toString(16).toUpperCase()}${low.toString(16).toUpperCase()}`;
+};
+
+function addReportedMathSymbolInventory(document: PDFDocument, page: PDFPage): void {
+  const context = document.context;
+  const glyphNames = reportedMathSymbolInventory.map((_, index) => `math${index + 1}`);
+  const glyphProcedure = context.register(context.flateStream('600 0 0 0 560 650 d1 40 40 480 570 re S'));
+  const charProcs = context.obj(Object.fromEntries(glyphNames.map((name) => [name, glyphProcedure])));
+  const encoding = context.obj({
+    Type: 'Encoding',
+    Differences: [1, ...glyphNames.map((name) => PDFName.of(name))],
+  });
+  const mappings = reportedMathSymbolInventory.map((glyph, index) =>
+    `<${(index + 1).toString(16).toUpperCase().padStart(2, '0')}> <${utf16BeHex(glyph)}>`);
+  const toUnicode = context.register(context.flateStream([
+    '/CIDInit /ProcSet findresource begin',
+    '12 dict begin',
+    'begincmap',
+    '/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def',
+    '/CMapName /PlacekeeperMathSymbols def',
+    '/CMapType 2 def',
+    '1 begincodespacerange',
+    '<01> <FF>',
+    'endcodespacerange',
+    `${mappings.length} beginbfchar`,
+    ...mappings,
+    'endbfchar',
+    'endcmap',
+    'CMapName currentdict /CMap defineresource pop',
+    'end',
+    'end',
+  ].join('\n')));
+  const font = context.register(context.obj({
+    Type: 'Font',
+    Subtype: 'Type3',
+    Name: 'FMathInventory',
+    FontBBox: [0, 0, 600, 700],
+    FontMatrix: [0.001, 0, 0, 0.001, 0, 0],
+    CharProcs: charProcs,
+    Encoding: encoding,
+    FirstChar: 1,
+    LastChar: reportedMathSymbolInventory.length,
+    Widths: reportedMathSymbolInventory.map(() => 600),
+    Resources: {},
+    ToUnicode: toUnicode,
+  }));
+  const resources = page.node.Resources() ?? context.obj({});
+  page.node.set(PDFName.of('Resources'), resources);
+  const fonts = resources.lookupMaybe(PDFName.of('Font'), PDFDict) ?? context.obj({});
+  fonts.set(PDFName.of('FMathInventory'), font);
+  resources.set(PDFName.of('Font'), fonts);
+  const encoded = reportedMathSymbolInventory
+    .map((_, index) => (index + 1).toString(16).toUpperCase().padStart(2, '0'))
+    .join('');
+  page.node.addContentStream(context.register(context.flateStream(
+    `BT /FMathInventory 12 Tf 72 630 Td <${encoded}> Tj ET`,
+  )));
+}
 
 const outputDirectory = resolve('test/fixtures/pdfs');
 const encryptedNoAnnotationBase64 =
@@ -124,6 +196,13 @@ async function pdfSearchPdf() {
     size: 14,
     font,
   });
+  first.drawText('Reported extracted mathematical symbol inventory:', {
+    x: 72,
+    y: 650,
+    size: 12,
+    font,
+  });
+  addReportedMathSymbolInventory(document, first);
   const second = document.addPage([612, 792]);
   second.drawText('The model stabilizes after iteration. A stable limit follows.', {
     x: 72,

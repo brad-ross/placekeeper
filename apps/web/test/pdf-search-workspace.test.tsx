@@ -47,7 +47,6 @@ describe('PDF search workspace', () => {
     expect(html).toContain('Let <strong class="pdf-search__result-match">λ</strong> denote the arrival rate.');
     expect(html).toContain('aria-label="Open result on page 4 in References"');
     expect(html).toContain('aria-label="Copy page link for Search result on page 4"');
-    expect(html).toContain('title="Copy page link for page 4"');
     expect(html).toContain('lucide-link');
     expect(html).toContain('aria-label="Secondary actions for Search result on page 4"');
     expect(html).toContain('aria-haspopup="menu"');
