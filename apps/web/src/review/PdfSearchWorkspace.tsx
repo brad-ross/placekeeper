@@ -7,10 +7,11 @@ import {
   type KeyboardEvent,
 } from 'react';
 
-import type {
-  PdfSearchAlternative,
-  PdfSearchResult,
-  PdfSearchState,
+import {
+  isSingleUnicodeScalarQuery,
+  type PdfSearchAlternative,
+  type PdfSearchResult,
+  type PdfSearchState,
 } from '../pdf/pdf-search-model.js';
 import type { CopyLinkControlProps } from './CopyLinkControl.js';
 import { RowActionGroup, type RowAction } from './RowActionGroup.js';
@@ -58,7 +59,7 @@ export function filterPdfSearchSymbolSuggestions(
 
   // Literal glyph filtering must not normalize: compatibility scalars such as
   // OHM SIGN and GREEK CAPITAL LETTER OMEGA remain distinct suggestions.
-  if (Array.from(needle).length === 1) {
+  if (isSingleUnicodeScalarQuery(needle)) {
     return symbols.filter((symbol) => (symbol.symbolSearch?.glyph ?? symbol.query) === needle);
   }
 

@@ -3680,6 +3680,11 @@
       ],
       "commands": [
         {
+          "token": "\\degree",
+          "field": "override",
+          "set": null
+        },
+        {
           "token": "\\textdegree",
           "field": "latex",
           "set": null
@@ -3693,7 +3698,10 @@
         "DEGREE SIGN",
         "degree sign"
       ],
-      "nameAliases": [],
+      "nameAliases": [
+        "degree",
+        "degrees"
+      ],
       "provenance": {
         "unicode": {
           "version": "17.0.0",
@@ -3745,7 +3753,41 @@
             }
           ]
         },
-        "overrides": []
+        "overrides": [
+          {
+            "namespace": "command",
+            "alias": "\\degree",
+            "codePoints": [
+              "00B0"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          },
+          {
+            "namespace": "name",
+            "alias": "degree",
+            "codePoints": [
+              "00B0"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          },
+          {
+            "namespace": "name",
+            "alias": "degrees",
+            "codePoints": [
+              "00B0"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          }
+        ]
       }
     },
     {
@@ -4341,6 +4383,10 @@
               "22C5"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "00B7",
+              "22C5"
+            ],
             "rationale": "Treat the commonly extracted middle dot and dedicated dot operator as mathematical glyph variants.",
             "upstream": "W3C assigns \\cdot to U+00B7 MIDDLE DOT and U+22C5 DOT OPERATOR."
           }
@@ -5057,6 +5103,10 @@
               "212B"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "00C5",
+              "212B"
+            ],
             "rationale": "Treat the canonically equivalent letter and compatibility unit sign as glyph variants while literal lookup stays exact.",
             "upstream": "W3C assigns \\AA to U+00C5 LATIN CAPITAL LETTER A WITH RING ABOVE and U+212B ANGSTROM SIGN."
           }
@@ -14175,6 +14225,10 @@
               "03D2"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "03A5",
+              "03D2"
+            ],
             "rationale": "Preserve generic capital-upsilon input across the letter and hook-shaped symbol variants.",
             "upstream": "W3C assigns \\Upsilon to U+03A5 GREEK CAPITAL LETTER UPSILON and U+03D2 GREEK UPSILON WITH HOOK SYMBOL."
           }
@@ -14608,6 +14662,10 @@
               "2126"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "03A9",
+              "2126"
+            ],
             "rationale": "Treat the canonically equivalent Greek letter and compatibility ohm sign as glyph variants.",
             "upstream": "W3C assigns \\Omega to U+03A9 GREEK CAPITAL LETTER OMEGA and U+2126 OHM SIGN."
           }
@@ -17308,6 +17366,9 @@
               "03D5"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "03D5"
+            ],
             "rationale": "Preserve generic phi input across the two Unicode phi variants.",
             "upstream": "W3C assigns \\varphi to U+03C6 and \\phi to U+03D5; Placekeeper historically accepted \\phi for both variants."
           }
@@ -18113,6 +18174,10 @@
               "03D2"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "03A5",
+              "03D2"
+            ],
             "rationale": "Preserve generic capital-upsilon input across the letter and hook-shaped symbol variants.",
             "upstream": "W3C assigns \\Upsilon to U+03A5 GREEK CAPITAL LETTER UPSILON and U+03D2 GREEK UPSILON WITH HOOK SYMBOL."
           }
@@ -18240,6 +18305,9 @@
               "03D5"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "03D5"
+            ],
             "rationale": "Preserve generic phi input across the two Unicode phi variants.",
             "upstream": "W3C assigns \\varphi to U+03C6 and \\phi to U+03D5; Placekeeper historically accepted \\phi for both variants."
           }
@@ -26635,6 +26703,10 @@
               "2126"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "03A9",
+              "2126"
+            ],
             "rationale": "Treat the canonically equivalent Greek letter and compatibility ohm sign as glyph variants.",
             "upstream": "W3C assigns \\Omega to U+03A9 GREEK CAPITAL LETTER OMEGA and U+2126 OHM SIGN."
           }
@@ -26929,6 +27001,10 @@
               "212B"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "00C5",
+              "212B"
+            ],
             "rationale": "Treat the canonically equivalent letter and compatibility unit sign as glyph variants while literal lookup stays exact.",
             "upstream": "W3C assigns \\AA to U+00C5 LATIN CAPITAL LETTER A WITH RING ABOVE and U+212B ANGSTROM SIGN."
           }
@@ -29809,6 +29885,11 @@
           "token": "\\rightarrow",
           "field": "mathlatex",
           "set": "unicode-math"
+        },
+        {
+          "token": "\\to",
+          "field": "override",
+          "set": null
         }
       ],
       "entities": [
@@ -29826,7 +29907,10 @@
         "rightwards arrow",
         "short right arrow"
       ],
-      "nameAliases": [],
+      "nameAliases": [
+        "arrow",
+        "right arrow"
+      ],
       "provenance": {
         "unicode": {
           "version": "17.0.0",
@@ -29913,7 +29997,41 @@
             }
           ]
         },
-        "overrides": []
+        "overrides": [
+          {
+            "namespace": "command",
+            "alias": "\\to",
+            "codePoints": [
+              "2192"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          },
+          {
+            "namespace": "name",
+            "alias": "arrow",
+            "codePoints": [
+              "2192"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          },
+          {
+            "namespace": "name",
+            "alias": "right arrow",
+            "codePoints": [
+              "2192"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          }
+        ]
       }
     },
     {
@@ -38724,7 +38842,10 @@
         "alias ISOTECH part",
         "partial differential"
       ],
-      "nameAliases": [],
+      "nameAliases": [
+        "partial",
+        "partial derivative"
+      ],
       "provenance": {
         "unicode": {
           "version": "17.0.0",
@@ -38806,6 +38927,28 @@
             "canonicalCodePoint": "2202",
             "rationale": "Keep the generic command on the base operator and styled partial scalars distinct.",
             "upstream": "W3C assigns \\partial to U+2202 PARTIAL DIFFERENTIAL and five mathematical styled partial-differential scalars."
+          },
+          {
+            "namespace": "name",
+            "alias": "partial",
+            "codePoints": [
+              "2202"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          },
+          {
+            "namespace": "name",
+            "alias": "partial derivative",
+            "codePoints": [
+              "2202"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
           }
         ]
       }
@@ -39228,7 +39371,10 @@
         "alias ISOTECH nabla",
         "nabla = backward difference"
       ],
-      "nameAliases": [],
+      "nameAliases": [
+        "del",
+        "gradient"
+      ],
       "provenance": {
         "unicode": {
           "version": "17.0.0",
@@ -39294,7 +39440,30 @@
             }
           ]
         },
-        "overrides": []
+        "overrides": [
+          {
+            "namespace": "name",
+            "alias": "del",
+            "codePoints": [
+              "2207"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          },
+          {
+            "namespace": "name",
+            "alias": "gradient",
+            "codePoints": [
+              "2207"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          }
+        ]
       }
     },
     {
@@ -39972,7 +40141,9 @@
         "alias for &amp;prod;",
         "n-ary product = product sign"
       ],
-      "nameAliases": [],
+      "nameAliases": [
+        "product"
+      ],
       "provenance": {
         "unicode": {
           "version": "17.0.0",
@@ -40039,7 +40210,19 @@
             }
           ]
         },
-        "overrides": []
+        "overrides": [
+          {
+            "namespace": "name",
+            "alias": "product",
+            "codePoints": [
+              "220F"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          }
+        ]
       }
     },
     {
@@ -40179,7 +40362,9 @@
         "alias ISOAMSB sum",
         "n-ary sumation"
       ],
-      "nameAliases": [],
+      "nameAliases": [
+        "summation"
+      ],
       "provenance": {
         "unicode": {
           "version": "17.0.0",
@@ -40246,7 +40431,19 @@
             }
           ]
         },
-        "overrides": []
+        "overrides": [
+          {
+            "namespace": "name",
+            "alias": "summation",
+            "codePoints": [
+              "2211"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          }
+        ]
       }
     },
     {
@@ -45328,7 +45525,10 @@
         "alias ISOTECH ap",
         "almost equal to = asymptotic to"
       ],
-      "nameAliases": [],
+      "nameAliases": [
+        "approximately",
+        "approximately equal"
+      ],
       "provenance": {
         "unicode": {
           "version": "17.0.0",
@@ -45451,7 +45651,30 @@
             }
           ]
         },
-        "overrides": []
+        "overrides": [
+          {
+            "namespace": "name",
+            "alias": "approximately",
+            "codePoints": [
+              "2248"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          },
+          {
+            "namespace": "name",
+            "alias": "approximately equal",
+            "codePoints": [
+              "2248"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          }
+        ]
       }
     },
     {
@@ -47409,6 +47632,11 @@
           "token": "\\ne",
           "field": "mathlatex",
           "set": "unicode-math"
+        },
+        {
+          "token": "\\neq",
+          "field": "override",
+          "set": null
         }
       ],
       "entities": [
@@ -47422,7 +47650,9 @@
         "alias ISOTECH ne",
         "not equal to"
       ],
-      "nameAliases": [],
+      "nameAliases": [
+        "not equal"
+      ],
       "provenance": {
         "unicode": {
           "version": "17.0.0",
@@ -47489,7 +47719,30 @@
             }
           ]
         },
-        "overrides": []
+        "overrides": [
+          {
+            "namespace": "command",
+            "alias": "\\neq",
+            "codePoints": [
+              "2260"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          },
+          {
+            "namespace": "name",
+            "alias": "not equal",
+            "codePoints": [
+              "2260"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          }
+        ]
       }
     },
     {
@@ -47773,7 +48026,9 @@
         "alias ISOTECH le",
         "less-than or equal to"
       ],
-      "nameAliases": [],
+      "nameAliases": [
+        "less than or equal"
+      ],
       "provenance": {
         "unicode": {
           "version": "17.0.0",
@@ -47839,7 +48094,19 @@
             }
           ]
         },
-        "overrides": []
+        "overrides": [
+          {
+            "namespace": "name",
+            "alias": "less than or equal",
+            "codePoints": [
+              "2264"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          }
+        ]
       }
     },
     {
@@ -47878,7 +48145,9 @@
         "alias ISOTECH ge",
         "greater-than or equal to"
       ],
-      "nameAliases": [],
+      "nameAliases": [
+        "greater than or equal"
+      ],
       "provenance": {
         "unicode": {
           "version": "17.0.0",
@@ -47951,7 +48220,19 @@
             }
           ]
         },
-        "overrides": []
+        "overrides": [
+          {
+            "namespace": "name",
+            "alias": "greater than or equal",
+            "codePoints": [
+              "2265"
+            ],
+            "action": "allow",
+            "expectedUpstreamCodePoints": [],
+            "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+            "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+          }
+        ]
       }
     },
     {
@@ -48267,6 +48548,10 @@
               "2A87"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "2268",
+              "2A87"
+            ],
             "rationale": "Treat the established not-less-or-equal forms as relation glyph variants.",
             "upstream": "W3C assigns \\lneq to U+2268 LESS-THAN BUT NOT EQUAL TO and U+2A87 LESS-THAN AND SINGLE-LINE NOT EQUAL TO."
           }
@@ -48382,6 +48667,10 @@
               "2A88"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "2269",
+              "2A88"
+            ],
             "rationale": "Treat the established not-greater-or-equal forms as relation glyph variants.",
             "upstream": "W3C assigns \\gneq to U+2269 NOT GREATER-THAN BUT EQUAL TO and U+2A88 GREATER-THAN AND SINGLE-LINE NOT EQUAL TO."
           }
@@ -50341,6 +50630,10 @@
               "2AB0"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "227D",
+              "2AB0"
+            ],
             "rationale": "Treat the standardized succeeds-or-equal forms as relation variants.",
             "upstream": "W3C assigns \\succeq to U+227D SUCCEEDS OR EQUAL TO and U+2AB0 SUCCEEDS ABOVE SINGLE-LINE EQUALS SIGN."
           }
@@ -50464,6 +50757,10 @@
               "2AB7"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "227E",
+              "2AB7"
+            ],
             "rationale": "Treat the standardized preceding-or-approximate forms as relation variants.",
             "upstream": "W3C assigns \\precapprox to U+227E PRECEDES OR EQUIVALENT TO and U+2AB7 PRECEDES ABOVE ALMOST EQUAL TO."
           }
@@ -50587,6 +50884,10 @@
               "2AB8"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "227F",
+              "2AB8"
+            ],
             "rationale": "Treat the standardized succeeding-or-approximate forms as relation variants.",
             "upstream": "W3C assigns \\succapprox to U+227F SUCCEEDS OR EQUIVALENT TO and U+2AB8 SUCCEEDS ABOVE ALMOST EQUAL TO."
           }
@@ -51305,6 +51606,10 @@
               "2AC5"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "2286",
+              "2AC5"
+            ],
             "rationale": "Treat the single-line and double-line subset-or-equal forms as relation variants.",
             "upstream": "W3C assigns \\subseteqq to U+2286 SUBSET OF OR EQUAL TO and U+2AC5 SUBSET OF ABOVE EQUALS SIGN."
           }
@@ -51439,6 +51744,10 @@
               "2AC6"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "2287",
+              "2AC6"
+            ],
             "rationale": "Treat the single-line and double-line superset-or-equal forms as relation variants.",
             "upstream": "W3C assigns \\supseteqq to U+2287 SUPERSET OF OR EQUAL TO and U+2AC6 SUPERSET OF ABOVE EQUALS SIGN."
           }
@@ -51760,6 +52069,10 @@
               "2ACB"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "228A",
+              "2ACB"
+            ],
             "rationale": "Treat the single-line and double-line non-equal subset forms as relation variants.",
             "upstream": "W3C assigns \\subsetneqq to U+228A SUBSET OF WITH NOT EQUAL TO and U+2ACB SUBSET OF ABOVE NOT EQUAL TO."
           }
@@ -51875,6 +52188,10 @@
               "2ACC"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "228B",
+              "2ACC"
+            ],
             "rationale": "Treat the single-line and double-line non-equal superset forms as relation variants.",
             "upstream": "W3C assigns \\supsetneqq to U+228B SUPERSET OF WITH NOT EQUAL TO and U+2ACC SUPERSET OF ABOVE NOT EQUAL TO."
           }
@@ -57022,6 +57339,10 @@
               "22C5"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "00B7",
+              "22C5"
+            ],
             "rationale": "Treat the commonly extracted middle dot and dedicated dot operator as mathematical glyph variants.",
             "upstream": "W3C assigns \\cdot to U+00B7 MIDDLE DOT and U+22C5 DOT OPERATOR."
           }
@@ -58935,6 +59256,10 @@
               "2A8B"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "22DA",
+              "2A8B"
+            ],
             "rationale": "Treat the standardized less/equal/greater constructions as relation variants.",
             "upstream": "W3C assigns \\lesseqqgtr to U+22DA LESS-THAN EQUAL TO OR GREATER-THAN and U+2A8B LESS-THAN ABOVE DOUBLE-LINE EQUAL ABOVE GREATER-THAN."
           }
@@ -59058,6 +59383,10 @@
               "2A8C"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "22DB",
+              "2A8C"
+            ],
             "rationale": "Treat the standardized greater/equal/less constructions as relation variants.",
             "upstream": "W3C assigns \\gtreqqless to U+22DB GREATER-THAN EQUAL TO OR LESS-THAN and U+2A8C GREATER-THAN ABOVE DOUBLE-LINE EQUAL ABOVE LESS-THAN."
           }
@@ -60150,6 +60479,10 @@
               "2ABA"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "22E9",
+              "2ABA"
+            ],
             "rationale": "Treat the standardized succeeds-but-not-approximate forms as relation variants.",
             "upstream": "W3C assigns \\succnapprox to U+22E9 SUCCEEDS BUT NOT EQUIVALENT TO and U+2ABA SUCCEEDS ABOVE NOT ALMOST EQUAL TO."
           }
@@ -110608,6 +110941,10 @@
               "2A87"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "2268",
+              "2A87"
+            ],
             "rationale": "Treat the established not-less-or-equal forms as relation glyph variants.",
             "upstream": "W3C assigns \\lneq to U+2268 LESS-THAN BUT NOT EQUAL TO and U+2A87 LESS-THAN AND SINGLE-LINE NOT EQUAL TO."
           }
@@ -110723,6 +111060,10 @@
               "2A88"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "2269",
+              "2A88"
+            ],
             "rationale": "Treat the established not-greater-or-equal forms as relation glyph variants.",
             "upstream": "W3C assigns \\gneq to U+2269 NOT GREATER-THAN BUT EQUAL TO and U+2A88 GREATER-THAN AND SINGLE-LINE NOT EQUAL TO."
           }
@@ -111033,6 +111374,10 @@
               "2A8B"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "22DA",
+              "2A8B"
+            ],
             "rationale": "Treat the standardized less/equal/greater constructions as relation variants.",
             "upstream": "W3C assigns \\lesseqqgtr to U+22DA LESS-THAN EQUAL TO OR GREATER-THAN and U+2A8B LESS-THAN ABOVE DOUBLE-LINE EQUAL ABOVE GREATER-THAN."
           }
@@ -111148,6 +111493,10 @@
               "2A8C"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "22DB",
+              "2A8C"
+            ],
             "rationale": "Treat the standardized greater/equal/less constructions as relation variants.",
             "upstream": "W3C assigns \\gtreqqless to U+22DB GREATER-THAN EQUAL TO OR LESS-THAN and U+2A8C GREATER-THAN ABOVE DOUBLE-LINE EQUAL ABOVE LESS-THAN."
           }
@@ -113932,6 +114281,10 @@
               "2AB0"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "227D",
+              "2AB0"
+            ],
             "rationale": "Treat the standardized succeeds-or-equal forms as relation variants.",
             "upstream": "W3C assigns \\succeq to U+227D SUCCEEDS OR EQUAL TO and U+2AB0 SUCCEEDS ABOVE SINGLE-LINE EQUALS SIGN."
           }
@@ -114495,6 +114848,10 @@
               "2AB7"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "227E",
+              "2AB7"
+            ],
             "rationale": "Treat the standardized preceding-or-approximate forms as relation variants.",
             "upstream": "W3C assigns \\precapprox to U+227E PRECEDES OR EQUIVALENT TO and U+2AB7 PRECEDES ABOVE ALMOST EQUAL TO."
           }
@@ -114610,6 +114967,10 @@
               "2AB8"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "227F",
+              "2AB8"
+            ],
             "rationale": "Treat the standardized succeeding-or-approximate forms as relation variants.",
             "upstream": "W3C assigns \\succapprox to U+227F SUCCEEDS OR EQUIVALENT TO and U+2AB8 SUCCEEDS ABOVE ALMOST EQUAL TO."
           }
@@ -114823,6 +115184,10 @@
               "2ABA"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "22E9",
+              "2ABA"
+            ],
             "rationale": "Treat the standardized succeeds-but-not-approximate forms as relation variants.",
             "upstream": "W3C assigns \\succnapprox to U+22E9 SUCCEEDS BUT NOT EQUIVALENT TO and U+2ABA SUCCEEDS ABOVE NOT ALMOST EQUAL TO."
           }
@@ -115690,6 +116055,10 @@
               "2AC5"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "2286",
+              "2AC5"
+            ],
             "rationale": "Treat the single-line and double-line subset-or-equal forms as relation variants.",
             "upstream": "W3C assigns \\subseteqq to U+2286 SUBSET OF OR EQUAL TO and U+2AC5 SUBSET OF ABOVE EQUALS SIGN."
           }
@@ -115805,6 +116174,10 @@
               "2AC6"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "2287",
+              "2AC6"
+            ],
             "rationale": "Treat the single-line and double-line superset-or-equal forms as relation variants.",
             "upstream": "W3C assigns \\supseteqq to U+2287 SUPERSET OF OR EQUAL TO and U+2AC6 SUPERSET OF ABOVE EQUALS SIGN."
           }
@@ -116173,6 +116546,10 @@
               "2ACB"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "228A",
+              "2ACB"
+            ],
             "rationale": "Treat the single-line and double-line non-equal subset forms as relation variants.",
             "upstream": "W3C assigns \\subsetneqq to U+228A SUBSET OF WITH NOT EQUAL TO and U+2ACB SUBSET OF ABOVE NOT EQUAL TO."
           }
@@ -116289,6 +116666,10 @@
               "2ACC"
             ],
             "action": "allow",
+            "expectedUpstreamCodePoints": [
+              "228B",
+              "2ACC"
+            ],
             "rationale": "Treat the single-line and double-line non-equal superset forms as relation variants.",
             "upstream": "W3C assigns \\supsetneqq to U+228B SUPERSET OF WITH NOT EQUAL TO and U+2ACC SUPERSET OF ABOVE NOT EQUAL TO."
           }
@@ -200494,6 +200875,10 @@
           "212B"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "00C5",
+          "212B"
+        ],
         "rationale": "Treat the canonically equivalent letter and compatibility unit sign as glyph variants while literal lookup stays exact.",
         "upstream": "W3C assigns \\AA to U+00C5 LATIN CAPITAL LETTER A WITH RING ABOVE and U+212B ANGSTROM SIGN."
       },
@@ -200505,6 +200890,10 @@
           "2126"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "03A9",
+          "2126"
+        ],
         "rationale": "Treat the canonically equivalent Greek letter and compatibility ohm sign as glyph variants.",
         "upstream": "W3C assigns \\Omega to U+03A9 GREEK CAPITAL LETTER OMEGA and U+2126 OHM SIGN."
       },
@@ -200516,6 +200905,10 @@
           "03D2"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "03A5",
+          "03D2"
+        ],
         "rationale": "Preserve generic capital-upsilon input across the letter and hook-shaped symbol variants.",
         "upstream": "W3C assigns \\Upsilon to U+03A5 GREEK CAPITAL LETTER UPSILON and U+03D2 GREEK UPSILON WITH HOOK SYMBOL."
       },
@@ -200599,8 +200992,23 @@
           "22C5"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "00B7",
+          "22C5"
+        ],
         "rationale": "Treat the commonly extracted middle dot and dedicated dot operator as mathematical glyph variants.",
         "upstream": "W3C assigns \\cdot to U+00B7 MIDDLE DOT and U+22C5 DOT OPERATOR."
+      },
+      {
+        "namespace": "command",
+        "alias": "\\degree",
+        "codePoints": [
+          "00B0"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
       },
       {
         "namespace": "command",
@@ -200634,6 +201042,10 @@
           "2A88"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "2269",
+          "2A88"
+        ],
         "rationale": "Treat the established not-greater-or-equal forms as relation glyph variants.",
         "upstream": "W3C assigns \\gneq to U+2269 NOT GREATER-THAN BUT EQUAL TO and U+2A88 GREATER-THAN AND SINGLE-LINE NOT EQUAL TO."
       },
@@ -200645,6 +201057,10 @@
           "2A8C"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "22DB",
+          "2A8C"
+        ],
         "rationale": "Treat the standardized greater/equal/less constructions as relation variants.",
         "upstream": "W3C assigns \\gtreqqless to U+22DB GREATER-THAN EQUAL TO OR LESS-THAN and U+2A8C GREATER-THAN ABOVE DOUBLE-LINE EQUAL ABOVE LESS-THAN."
       },
@@ -200682,6 +201098,10 @@
           "2A8B"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "22DA",
+          "2A8B"
+        ],
         "rationale": "Treat the standardized less/equal/greater constructions as relation variants.",
         "upstream": "W3C assigns \\lesseqqgtr to U+22DA LESS-THAN EQUAL TO OR GREATER-THAN and U+2A8B LESS-THAN ABOVE DOUBLE-LINE EQUAL ABOVE GREATER-THAN."
       },
@@ -200693,8 +201113,23 @@
           "2A87"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "2268",
+          "2A87"
+        ],
         "rationale": "Treat the established not-less-or-equal forms as relation glyph variants.",
         "upstream": "W3C assigns \\lneq to U+2268 LESS-THAN BUT NOT EQUAL TO and U+2A87 LESS-THAN AND SINGLE-LINE NOT EQUAL TO."
+      },
+      {
+        "namespace": "command",
+        "alias": "\\neq",
+        "codePoints": [
+          "2260"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
       },
       {
         "namespace": "command",
@@ -200732,6 +201167,9 @@
           "03D5"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "03D5"
+        ],
         "rationale": "Preserve generic phi input across the two Unicode phi variants.",
         "upstream": "W3C assigns \\varphi to U+03C6 and \\phi to U+03D5; Placekeeper historically accepted \\phi for both variants."
       },
@@ -200743,6 +201181,10 @@
           "2AB7"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "227E",
+          "2AB7"
+        ],
         "rationale": "Treat the standardized preceding-or-approximate forms as relation variants.",
         "upstream": "W3C assigns \\precapprox to U+227E PRECEDES OR EQUIVALENT TO and U+2AB7 PRECEDES ABOVE ALMOST EQUAL TO."
       },
@@ -200766,6 +201208,10 @@
           "2AC5"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "2286",
+          "2AC5"
+        ],
         "rationale": "Treat the single-line and double-line subset-or-equal forms as relation variants.",
         "upstream": "W3C assigns \\subseteqq to U+2286 SUBSET OF OR EQUAL TO and U+2AC5 SUBSET OF ABOVE EQUALS SIGN."
       },
@@ -200777,6 +201223,10 @@
           "2ACB"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "228A",
+          "2ACB"
+        ],
         "rationale": "Treat the single-line and double-line non-equal subset forms as relation variants.",
         "upstream": "W3C assigns \\subsetneqq to U+228A SUBSET OF WITH NOT EQUAL TO and U+2ACB SUBSET OF ABOVE NOT EQUAL TO."
       },
@@ -200788,6 +201238,10 @@
           "2AB8"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "227F",
+          "2AB8"
+        ],
         "rationale": "Treat the standardized succeeding-or-approximate forms as relation variants.",
         "upstream": "W3C assigns \\succapprox to U+227F SUCCEEDS OR EQUIVALENT TO and U+2AB8 SUCCEEDS ABOVE ALMOST EQUAL TO."
       },
@@ -200799,6 +201253,10 @@
           "2AB0"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "227D",
+          "2AB0"
+        ],
         "rationale": "Treat the standardized succeeds-or-equal forms as relation variants.",
         "upstream": "W3C assigns \\succeq to U+227D SUCCEEDS OR EQUAL TO and U+2AB0 SUCCEEDS ABOVE SINGLE-LINE EQUALS SIGN."
       },
@@ -200810,6 +201268,10 @@
           "2ABA"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "22E9",
+          "2ABA"
+        ],
         "rationale": "Treat the standardized succeeds-but-not-approximate forms as relation variants.",
         "upstream": "W3C assigns \\succnapprox to U+22E9 SUCCEEDS BUT NOT EQUIVALENT TO and U+2ABA SUCCEEDS ABOVE NOT ALMOST EQUAL TO."
       },
@@ -200821,6 +201283,10 @@
           "2AC6"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "2287",
+          "2AC6"
+        ],
         "rationale": "Treat the single-line and double-line superset-or-equal forms as relation variants.",
         "upstream": "W3C assigns \\supseteqq to U+2287 SUPERSET OF OR EQUAL TO and U+2AC6 SUPERSET OF ABOVE EQUALS SIGN."
       },
@@ -200832,8 +201298,23 @@
           "2ACC"
         ],
         "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "228B",
+          "2ACC"
+        ],
         "rationale": "Treat the single-line and double-line non-equal superset forms as relation variants.",
         "upstream": "W3C assigns \\supsetneqq to U+228B SUPERSET OF WITH NOT EQUAL TO and U+2ACC SUPERSET OF ABOVE NOT EQUAL TO."
+      },
+      {
+        "namespace": "command",
+        "alias": "\\to",
+        "codePoints": [
+          "2192"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
       },
       {
         "namespace": "command",
@@ -200989,6 +201470,171 @@
         "canonicalCodePoint": "22BB",
         "rationale": "Keep the conventional entity on XOR rather than the distinct small-vee-with-underbar relation.",
         "upstream": "W3C assigns veebar to U+22BB XOR and U+2A61 SMALL VEE WITH UNDERBAR."
+      },
+      {
+        "namespace": "name",
+        "alias": "approximately",
+        "codePoints": [
+          "2248"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+      },
+      {
+        "namespace": "name",
+        "alias": "approximately equal",
+        "codePoints": [
+          "2248"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+      },
+      {
+        "namespace": "name",
+        "alias": "arrow",
+        "codePoints": [
+          "2192"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+      },
+      {
+        "namespace": "name",
+        "alias": "degree",
+        "codePoints": [
+          "00B0"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+      },
+      {
+        "namespace": "name",
+        "alias": "degrees",
+        "codePoints": [
+          "00B0"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+      },
+      {
+        "namespace": "name",
+        "alias": "del",
+        "codePoints": [
+          "2207"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+      },
+      {
+        "namespace": "name",
+        "alias": "gradient",
+        "codePoints": [
+          "2207"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+      },
+      {
+        "namespace": "name",
+        "alias": "greater than or equal",
+        "codePoints": [
+          "2265"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+      },
+      {
+        "namespace": "name",
+        "alias": "less than or equal",
+        "codePoints": [
+          "2264"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+      },
+      {
+        "namespace": "name",
+        "alias": "not equal",
+        "codePoints": [
+          "2260"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+      },
+      {
+        "namespace": "name",
+        "alias": "partial",
+        "codePoints": [
+          "2202"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+      },
+      {
+        "namespace": "name",
+        "alias": "partial derivative",
+        "codePoints": [
+          "2202"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+      },
+      {
+        "namespace": "name",
+        "alias": "product",
+        "codePoints": [
+          "220F"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+      },
+      {
+        "namespace": "name",
+        "alias": "right arrow",
+        "codePoints": [
+          "2192"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+      },
+      {
+        "namespace": "name",
+        "alias": "summation",
+        "codePoints": [
+          "2211"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [],
+        "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
+        "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
       }
     ],
     "recordCount": 3060,

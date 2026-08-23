@@ -174,6 +174,11 @@ Ordinary scrolling, sequential page turns, and zoom changes are not Meaningful J
 
 ## PDF search
 
+### Mathematical Symbol Catalog
+The build-generated, standards-derived mapping from Unicode glyphs to authoritative names and standard commands used by Search.
+
+At runtime the Mathematical Symbol Catalog is intersected with symbols reliably detected in the current PDF. Hand-authored entries are limited to documented naming conflicts and compatibility exceptions rather than defining the ordinary repertoire.
+
 ### Search Result
 A page-positioned occurrence derived from reliable searchable text in the current source PDF.
 

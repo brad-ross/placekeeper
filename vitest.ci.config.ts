@@ -44,6 +44,7 @@ export default defineConfig({
       'apps/web/test/copy-link-control.test.ts',
       'scripts/pdf-symbol-catalog/compile.test.ts',
       'scripts/pdf-symbol-catalog/generate.test.ts',
+      'apps/web/test/pdf-search-model.test.ts',
       'apps/web/test/pdf-search-controller.test.ts',
       'apps/web/test/pdf-symbol-catalog.test.ts',
       'apps/web/test/pdf-search-workspace.test.tsx',

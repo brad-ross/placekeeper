@@ -38,13 +38,30 @@ describe('PDF symbol catalog artifact generation', () => {
       report: { recordCount: number };
     };
     const report = JSON.parse(artifacts.report) as {
-      aliasCollisions: { unresolved: unknown[] };
+      aliasCollisions: {
+        unresolved: unknown[];
+        suppressedNaturalNames: {
+          alias: string;
+          codePoints: string[];
+          retainedCodePoint?: string;
+        }[];
+      };
       indexCardinalities: Record<string, number>;
     };
 
     expect(audit.records.length).toBeGreaterThan(1_000);
     expect(audit.report.recordCount).toBe(audit.records.length);
     expect(report.aliasCollisions.unresolved).toEqual([]);
+    expect(report.aliasCollisions.suppressedNaturalNames).toContainEqual({
+      alias: 'legacy uppercase name',
+      codePoints: expect.arrayContaining(['U+0022', 'U+2122']),
+    });
+    expect(report.aliasCollisions.suppressedNaturalNames).toContainEqual({
+      alias: 'ac current',
+      codePoints: ['U+223F', 'U+23E6'],
+      retainedCodePoint: 'U+23E6',
+    });
+    expect(artifacts.runtime).not.toContain('legacy uppercase name');
     expect(report.indexCardinalities.glyph).toBe(audit.records.length);
     expect(audit.records.some(({ codePoint }) => codePoint === 0x0020)).toBe(false);
     expect(audit.records.some(({ codePoint }) => codePoint === 0x00e9)).toBe(false);
@@ -114,6 +131,11 @@ describe('PDF symbol catalog artifact generation', () => {
         gunzipSync(await readFile(join(root, 'scripts/pdf-symbol-catalog', entry.file))),
       );
     }
+    await writeFile(
+      join(root, 'apps/web/src/pdf/pdf-symbol-catalog.generated.ts'),
+      `${before.runtime}// stale generated projection\n`,
+      'utf8',
+    );
 
     await updateCatalogSources({
       repositoryRoot: root,
@@ -126,6 +148,17 @@ describe('PDF symbol catalog artifact generation', () => {
     });
 
     await expect(checkCatalogArtifacts({ repositoryRoot: root })).resolves.toBeDefined();
+    expect(await snapshot(root)).toEqual(before);
+
+    await updateCatalogSources({
+      repositoryRoot: root,
+      fetch: async (input) => {
+        const source = downloaded.get(String(input));
+        return source === undefined
+          ? new Response('missing fixture', { status: 404 })
+          : new Response(Uint8Array.from(source).buffer, { status: 200 });
+      },
+    });
     expect(await snapshot(root)).toEqual(before);
   });
 });

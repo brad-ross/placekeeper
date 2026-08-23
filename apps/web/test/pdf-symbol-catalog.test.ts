@@ -42,6 +42,7 @@ describe('PDF symbol catalog', () => {
   it('recognizes catalog aliases before checking this document inventory', () => {
     expect(isSymbolAliasQuery('theta')).toBe(true);
     expect(resolveDetectedSymbolQueries('deg', detected('°'))[0]?.glyph).toBe('°');
+    expect(detectedSymbolSuggestions(detected('°'))[0]?.preferredCommand).toBe('\\textdegree');
     expect(isSymbolAliasQuery('stability')).toBe(false);
   });
 
@@ -63,6 +64,30 @@ describe('PDF symbol catalog', () => {
       expect(resolveDetectedSymbolQueries(query, ids).map((entry) => entry.glyph), query)
         .toContain(glyph);
     }
+  });
+
+  it.each([
+    ['∑', 'summation'],
+    ['∏', 'product'],
+    ['∂', 'partial'],
+    ['∂', 'partial derivative'],
+    ['∇', 'gradient'],
+    ['∇', 'del'],
+    ['°', 'degree'],
+    ['°', '\\degree'],
+    ['°', 'degrees'],
+    ['≤', 'less than or equal'],
+    ['≥', 'greater than or equal'],
+    ['≠', 'not equal'],
+    ['≠', '\\neq'],
+    ['≈', 'approximately equal'],
+    ['≈', 'approximately'],
+    ['→', 'right arrow'],
+    ['→', '\\to'],
+    ['→', 'arrow'],
+  ] as const)('preserves legacy compatibility input %s through %s', (glyph, query) => {
+    expect(resolveDetectedSymbolQueries(query, detected(glyph)).map((record) => record.glyph))
+      .toEqual([glyph]);
   });
 
   it('preserves case for commands and entity identifiers', () => {

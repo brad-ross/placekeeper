@@ -179,6 +179,8 @@ describe('PDF symbol catalog compiler', () => {
           namespace: 'command',
           alias: '\\phi',
           codePoints: ['03C6', '03D5'],
+          action: 'allow',
+          expectedUpstreamCodePoints: ['03D5'],
           rationale: 'Preserve the established generic phi input across Unicode phi variants.',
           upstream: 'W3C assigns \\varphi and \\phi to distinct variants.',
         }],
@@ -216,7 +218,7 @@ describe('PDF symbol catalog compiler', () => {
       overrides: {
         schemaVersion: 1,
         aliasGroups: [
-          { namespace: 'command', alias: '\\phi', codePoints: ['03C6', '03D5'], action: 'allow', rationale: 'Fixture variants.', upstream: 'Fixture collision.' },
+          { namespace: 'command', alias: '\\phi', codePoints: ['03C6', '03D5'], action: 'allow', expectedUpstreamCodePoints: ['03C6', '03D5'], rationale: 'Fixture variants.', upstream: 'Fixture collision.' },
           { namespace: 'command', alias: '\\partial', codePoints: ['03B1', '2202'], action: 'prefer', canonicalCodePoint: '2202', rationale: 'Fixture canonical relation.', upstream: 'Fixture collision.' },
           { namespace: 'command', alias: '\\u', codePoints: ['2202', '1D401'], action: 'drop', rationale: 'Fixture unsafe accent.', upstream: 'Fixture collision.' },
         ],
@@ -241,6 +243,43 @@ describe('PDF symbol catalog compiler', () => {
         }],
       },
     }))).toThrowError(/stale drop override.*upstream collision no longer matches/i);
+  });
+
+  it('adds one-scalar compatibility aliases without weakening standards admission', () => {
+    const compiled = compileSymbolCatalog(fixtureInput({
+      overrides: {
+        schemaVersion: 1,
+        aliasGroups: [{
+          namespace: 'name',
+          alias: 'addition',
+          codePoints: ['002B'],
+          action: 'allow',
+          expectedUpstreamCodePoints: [],
+          rationale: 'Fixture compatibility alias.',
+          upstream: 'Fixture has no upstream alias.',
+        }],
+      },
+    }));
+
+    expect(compiled.records.find(({ codePoint }) => codePoint === 0x002b)?.nameAliases)
+      .toContain('addition');
+  });
+
+  it('rejects allow decisions when any expected upstream mapping changes', () => {
+    expect(() => compileSymbolCatalog(fixtureInput({
+      overrides: {
+        schemaVersion: 1,
+        aliasGroups: [{
+          namespace: 'command',
+          alias: '\\phi',
+          codePoints: ['03C6', '03D5'],
+          action: 'allow',
+          expectedUpstreamCodePoints: ['03C6', '03D5'],
+          rationale: 'Fixture stale allow decision.',
+          upstream: 'Fixture expects two upstream mappings.',
+        }],
+      },
+    }))).toThrowError(/stale allow override.*expectedUpstreamCodePoints/i);
   });
 
   it.each([
@@ -330,6 +369,7 @@ describe('PDF symbol catalog compiler', () => {
           namespace: 'name',
           alias: 'missing symbol',
           codePoints: ['03B1', '10FFFF'],
+          action: 'allow',
           rationale: 'Fixture for stale data.',
           upstream: 'No corresponding upstream record.',
         }],
@@ -343,6 +383,7 @@ describe('PDF symbol catalog compiler', () => {
           namespace: 'literal' as 'command',
           alias: '-',
           codePoints: ['002B'],
+          action: 'allow',
           rationale: 'Forbidden literal redirect.',
           upstream: 'Not applicable.',
         }],

@@ -1,4 +1,5 @@
 import { GENERATED_PDF_SYMBOL_CATALOG } from './pdf-symbol-catalog.generated.js';
+import { isSingleUnicodeScalarQuery } from './pdf-search-model.js';
 
 export type PdfSymbolRecordId = number;
 
@@ -64,11 +65,6 @@ for (const record of RECORDS) {
   }
 }
 
-function isSingleUnicodeScalar(value: string): boolean {
-  const trimmed = value.trim();
-  return trimmed.length > 0 && Array.from(trimmed).length === 1;
-}
-
 function sortedDetectedRecords(
   detectedRecordIds: ReadonlySet<PdfSymbolRecordId>,
 ): PdfSymbolSuggestion[] {
@@ -82,7 +78,7 @@ function sortedDetectedRecords(
 
 function aliasCandidateIds(query: string): readonly PdfSymbolRecordId[] {
   const exactQuery = query.trim();
-  if (exactQuery.length === 0 || isSingleUnicodeScalar(exactQuery)) return [];
+  if (exactQuery.length === 0 || isSingleUnicodeScalarQuery(exactQuery)) return [];
   if (exactQuery.startsWith('\\')) return COMMAND_INDEX.get(exactQuery) ?? [];
 
   // Exact, case-sensitive entity IDs take precedence over case-folded natural names.

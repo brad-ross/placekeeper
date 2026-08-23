@@ -135,6 +135,9 @@ describe("macOS distribution manifests", () => {
       expect(() => validateCatalogThirdPartyNotices(notice.replace(missing, "omitted")), missing)
         .toThrow(/missing required attribution/u);
     }
+    expect(() => validateCatalogThirdPartyNotices(
+      notice.replace("free of charge", "without charge"),
+    )).toThrow(/reviewed complete content/u);
   });
 
   it("pins reviewed catalog counts, indexes, and deterministic artifact bytes", async () => {
@@ -143,16 +146,22 @@ describe("macOS distribution manifests", () => {
       records: 3_060,
       indexCardinalities: {
         glyph: 3_060,
-        command: 2_792,
+        command: 2_795,
         entity: 1_975,
-        normalizedName: 4_761,
+        normalizedName: 4_724,
       },
       artifactBytes: {
-        audit: 4_962_169,
-        runtime: 390_916,
-        report: 402_526,
+        audit: 4_982_952,
+        runtime: 388_237,
+        report: 352_169,
       },
-      productionWebJavaScriptBytes: 2_349_708,
+      artifactSha256: {
+        audit: "8c8f9ae58936d1413db73f9e39e53ba7b7efa99c0528c9a3bd67f88ed18706c4",
+        runtime: "e68aabd29edbfcb3f7acc4756f72b6a78264457243a594e3a789b7f1ff621273",
+        report: "6f9e427ffebd69810f8dc15fc30f3950d263fc41c841bc1d7f747d4d9fef7f52",
+        thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
+      },
+      productionWebJavaScriptBytes: 2_346_255,
     });
 
     const root = await mkdtemp(resolve(tmpdir(), "placekeeper-catalog-baseline-"));
@@ -166,6 +175,16 @@ describe("macOS distribution manifests", () => {
       await copyFile(resolve("apps/web/src/pdf/pdf-symbol-catalog.generated.ts"), resolve(runtime, "pdf-symbol-catalog.generated.ts"));
       await writeFile(resolve(runtime, "pdf-symbol-catalog.generated.ts"), "reviewed baseline regression\n");
       await expect(validateCatalogSourceBaseline(root)).rejects.toThrow(/baseline changed/u);
+      await copyFile(resolve("apps/web/src/pdf/pdf-symbol-catalog.generated.ts"), resolve(runtime, "pdf-symbol-catalog.generated.ts"));
+      const reportPath = resolve(generated, "update-report.json");
+      const report = await readFile(reportPath, "utf8");
+      const tamperedReport = report.replace(
+        /("beforeSha256": ")([0-9a-f])/u,
+        (_match, prefix: string, digit: string) => `${prefix}${digit === "0" ? "1" : "0"}`,
+      );
+      expect(Buffer.byteLength(tamperedReport)).toBe(Buffer.byteLength(report));
+      await writeFile(reportPath, tamperedReport);
+      await expect(validateCatalogSourceBaseline(root)).rejects.toThrow(/digest baseline changed/u);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -14,16 +14,22 @@ export const CATALOG_DISTRIBUTION_BASELINE = {
   records: 3_060,
   indexCardinalities: {
     glyph: 3_060,
-    command: 2_792,
+    command: 2_795,
     entity: 1_975,
-    normalizedName: 4_761,
+    normalizedName: 4_724,
   },
   artifactBytes: {
-    audit: 4_962_169,
-    runtime: 390_916,
-    report: 402_526,
+    audit: 4_982_952,
+    runtime: 388_237,
+    report: 352_169,
   },
-  productionWebJavaScriptBytes: 2_349_708,
+  artifactSha256: {
+    audit: "8c8f9ae58936d1413db73f9e39e53ba7b7efa99c0528c9a3bd67f88ed18706c4",
+    runtime: "e68aabd29edbfcb3f7acc4756f72b6a78264457243a594e3a789b7f1ff621273",
+    report: "6f9e427ffebd69810f8dc15fc30f3950d263fc41c841bc1d7f747d4d9fef7f52",
+    thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
+  },
+  productionWebJavaScriptBytes: 2_346_255,
 } as const;
 
 const CATALOG_ATTRIBUTION_URLS = [
@@ -65,6 +71,10 @@ export function validateCatalogThirdPartyNotices(source: string): void {
     if (!source.includes(marker)) {
       throw new Error(`Mathematical symbol catalog notice is missing required attribution: ${marker}`);
     }
+  }
+  const actual = createHash("sha256").update(source, "utf8").digest("hex");
+  if (actual !== CATALOG_DISTRIBUTION_BASELINE.artifactSha256.thirdPartyNotices) {
+    throw new Error("Mathematical symbol catalog notice does not match the reviewed complete content");
   }
 }
 
@@ -146,6 +156,16 @@ export async function validateCatalogSourceBaseline(repoRoot: string): Promise<v
     || runtime.byteLength !== expected.artifactBytes.runtime
     || reportSource.byteLength !== expected.artifactBytes.report) {
     throw new Error("Mathematical symbol catalog record, index-cardinality, or artifact-byte baseline changed; review and update the distribution baseline with the generated report");
+  }
+  const actualSha256 = {
+    audit: createHash("sha256").update(audit).digest("hex"),
+    runtime: createHash("sha256").update(runtime).digest("hex"),
+    report: createHash("sha256").update(reportSource).digest("hex"),
+  };
+  if (actualSha256.audit !== expected.artifactSha256.audit
+    || actualSha256.runtime !== expected.artifactSha256.runtime
+    || actualSha256.report !== expected.artifactSha256.report) {
+    throw new Error("Mathematical symbol catalog artifact digest baseline changed; review and update the distribution baseline with the generated artifacts");
   }
   if (/"(?:duration|elapsed|timing|wallClock|milliseconds?|generatedAt|timestamp)[^"]*"\s*:/iu.test(reportSource.toString("utf8"))) {
     throw new Error("Deterministic catalog report must not contain wall-clock timing fields");
