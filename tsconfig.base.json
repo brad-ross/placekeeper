@@ -19,6 +19,7 @@
     "apps/**/*.ts",
     "apps/**/*.tsx",
     "packages/**/*.ts",
+    "scripts/**/*.ts",
     "test/**/*.ts",
     "test/**/*.tsx",
     "playwright.config.ts",

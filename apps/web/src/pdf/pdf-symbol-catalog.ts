@@ -1,70 +1,151 @@
+import { GENERATED_PDF_SYMBOL_CATALOG } from './pdf-symbol-catalog.generated.js';
+import { isSingleUnicodeScalarQuery } from './pdf-search-model.js';
+
+export type PdfSymbolRecordId = number;
+
 export interface PdfSymbolSuggestion {
+  readonly recordId: PdfSymbolRecordId;
+  readonly codePoint: number;
   readonly glyph: string;
   readonly name: string;
-  readonly latex: string;
-  readonly aliases: readonly string[];
+  readonly preferredCommand: string | null;
+  readonly commands: readonly string[];
+  readonly entities: readonly string[];
+  readonly names: readonly string[];
 }
 
-const SYMBOLS: readonly PdfSymbolSuggestion[] = [
-  { glyph: 'β', name: 'beta', latex: '\\beta', aliases: [] },
-  { glyph: 'λ', name: 'lambda', latex: '\\lambda', aliases: [] },
-  { glyph: '∑', name: 'summation', latex: '\\sum', aliases: ['sum'] },
-  { glyph: 'α', name: 'alpha', latex: '\\alpha', aliases: [] },
-  { glyph: 'γ', name: 'gamma', latex: '\\gamma', aliases: [] },
-  { glyph: 'δ', name: 'delta', latex: '\\delta', aliases: [] },
-  { glyph: 'θ', name: 'theta', latex: '\\theta', aliases: [] },
-  { glyph: 'μ', name: 'mu', latex: '\\mu', aliases: [] },
-  { glyph: 'π', name: 'pi', latex: '\\pi', aliases: [] },
-  { glyph: 'ρ', name: 'rho', latex: '\\rho', aliases: [] },
-  { glyph: 'σ', name: 'sigma', latex: '\\sigma', aliases: [] },
-  { glyph: 'τ', name: 'tau', latex: '\\tau', aliases: [] },
-  { glyph: 'φ', name: 'phi', latex: '\\phi', aliases: [] },
-  { glyph: 'ω', name: 'omega', latex: '\\omega', aliases: [] },
-  { glyph: '∏', name: 'product', latex: '\\prod', aliases: [] },
-  { glyph: '∫', name: 'integral', latex: '\\int', aliases: [] },
-  { glyph: '∂', name: 'partial', latex: '\\partial', aliases: ['partial derivative'] },
-  { glyph: '∇', name: 'nabla', latex: '\\nabla', aliases: ['gradient', 'del'] },
-  { glyph: '∞', name: 'infinity', latex: '\\infty', aliases: [] },
-  { glyph: '°', name: 'degree', latex: '\\degree', aliases: ['degrees'] },
-  { glyph: '≤', name: 'less than or equal', latex: '\\leq', aliases: ['le', 'leq'] },
-  { glyph: '≥', name: 'greater than or equal', latex: '\\geq', aliases: ['ge', 'geq'] },
-  { glyph: '≠', name: 'not equal', latex: '\\neq', aliases: [] },
-  { glyph: '≈', name: 'approximately equal', latex: '\\approx', aliases: ['approximately'] },
-  { glyph: '→', name: 'right arrow', latex: '\\to', aliases: ['arrow'] },
-  { glyph: '∈', name: 'element of', latex: '\\in', aliases: [] },
-  { glyph: '∀', name: 'for all', latex: '\\forall', aliases: [] },
-  { glyph: '∃', name: 'there exists', latex: '\\exists', aliases: [] },
-];
+interface PdfSymbolRecord extends PdfSymbolSuggestion {
+  readonly semanticFamilyCodePoints: readonly number[];
+}
 
-function normalizedAlias(value: string): string {
-  return value.normalize('NFC').trim().toLocaleLowerCase();
+const RECORDS: readonly PdfSymbolRecord[] = GENERATED_PDF_SYMBOL_CATALOG.map(([
+  codePoint,
+  glyph,
+  name,
+  preferredCommand,
+  commands,
+  entities,
+  names,
+  semanticFamilyCodePoints,
+], recordId) => ({
+  recordId,
+  codePoint,
+  glyph,
+  name,
+  preferredCommand,
+  commands,
+  entities,
+  names,
+  semanticFamilyCodePoints,
+}));
+
+const GLYPH_INDEX = new Map<string, PdfSymbolRecordId>();
+const CODE_POINT_INDEX = new Map<number, PdfSymbolRecordId>();
+const COMMAND_INDEX = new Map<string, PdfSymbolRecordId[]>();
+const ENTITY_INDEX = new Map<string, PdfSymbolRecordId[]>();
+const NAME_INDEX = new Map<string, PdfSymbolRecordId[]>();
+
+function addIndexEntry(
+  index: Map<string, PdfSymbolRecordId[]>,
+  key: string,
+  recordId: PdfSymbolRecordId,
+): void {
+  const existing = index.get(key);
+  if (existing) {
+    if (existing.at(-1) !== recordId) existing.push(recordId);
+  } else {
+    index.set(key, [recordId]);
+  }
+}
+
+function normalizedNaturalName(value: string): string {
+  return value.normalize('NFC').trim().toLowerCase();
+}
+
+for (const record of RECORDS) {
+  GLYPH_INDEX.set(record.glyph, record.recordId);
+  CODE_POINT_INDEX.set(record.codePoint, record.recordId);
+  for (const command of record.commands) addIndexEntry(COMMAND_INDEX, command, record.recordId);
+  for (const entity of record.entities) addIndexEntry(ENTITY_INDEX, entity, record.recordId);
+  for (const name of [record.name, ...record.names]) {
+    const normalized = normalizedNaturalName(name);
+    if (normalized.length > 0) addIndexEntry(NAME_INDEX, normalized, record.recordId);
+  }
+}
+
+function sortedDetectedRecords(
+  detectedRecordIds: ReadonlySet<PdfSymbolRecordId>,
+): PdfSymbolSuggestion[] {
+  return [...detectedRecordIds]
+    .sort((left, right) => left - right)
+    .flatMap((recordId) => {
+      const record = RECORDS[recordId];
+      return record ? [record] : [];
+    });
+}
+
+function aliasCandidateIds(query: string): readonly PdfSymbolRecordId[] {
+  const exactQuery = query.trim();
+  if (exactQuery.length === 0 || isSingleUnicodeScalarQuery(exactQuery)) return [];
+  if (exactQuery.startsWith('\\')) return COMMAND_INDEX.get(exactQuery) ?? [];
+
+  // Exact, case-sensitive entity IDs take precedence over case-folded natural names.
+  const entityCandidates = ENTITY_INDEX.get(exactQuery);
+  if (entityCandidates) return entityCandidates;
+  const naturalNameCandidates = NAME_INDEX.get(normalizedNaturalName(exactQuery)) ?? [];
+  // Generated descriptions are retained for search, but an unaudited collision
+  // cannot authorize semantic fan-out. Audited groups use command/entity data.
+  return naturalNameCandidates.length === 1 ? naturalNameCandidates : [];
+}
+
+/** Incrementally adds generated record IDs found in newly reliable extracted text. */
+export function addDetectedSymbolRecordIds(
+  text: string,
+  result: Set<PdfSymbolRecordId>,
+): boolean {
+  let changed = false;
+  for (const character of text) {
+    const recordId = GLYPH_INDEX.get(character);
+    if (recordId !== undefined && !result.has(recordId)) {
+      result.add(recordId);
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 export function detectedSymbolSuggestions(
-  detectedGlyphs: ReadonlySet<string>,
+  detectedRecordIds: ReadonlySet<PdfSymbolRecordId>,
 ): PdfSymbolSuggestion[] {
-  return SYMBOLS.filter(({ glyph }) => detectedGlyphs.has(glyph));
+  return sortedDetectedRecords(detectedRecordIds);
 }
 
-export function resolveDetectedSymbolQuery(
+export function resolveDetectedSymbolQueries(
   query: string,
-  detectedGlyphs: ReadonlySet<string>,
-): PdfSymbolSuggestion | null {
-  const normalized = normalizedAlias(query);
-  return detectedSymbolSuggestions(detectedGlyphs).find((symbol) => (
-    symbol.glyph === query
-    || normalizedAlias(symbol.name) === normalized
-    || normalizedAlias(symbol.latex) === normalized
-    || symbol.aliases.some((alias) => normalizedAlias(alias) === normalized)
-  )) ?? null;
+  detectedRecordIds: ReadonlySet<PdfSymbolRecordId>,
+): PdfSymbolSuggestion[] {
+  const expandedRecordIds = new Set<PdfSymbolRecordId>();
+  for (const recordId of aliasCandidateIds(query)) {
+    const record = RECORDS[recordId];
+    if (!record) continue;
+    if (record.semanticFamilyCodePoints.length === 0) {
+      expandedRecordIds.add(recordId);
+      continue;
+    }
+    for (const codePoint of record.semanticFamilyCodePoints) {
+      const familyRecordId = CODE_POINT_INDEX.get(codePoint);
+      if (familyRecordId !== undefined) expandedRecordIds.add(familyRecordId);
+    }
+  }
+  return [...expandedRecordIds]
+    .sort((left, right) => left - right)
+    .filter((recordId) => detectedRecordIds.has(recordId))
+    .flatMap((recordId) => {
+      const record = RECORDS[recordId];
+      return record ? [record] : [];
+    });
 }
 
 export function isSymbolAliasQuery(query: string): boolean {
-  const normalized = normalizedAlias(query);
-  return SYMBOLS.some((symbol) => (
-    symbol.glyph === query
-    || normalizedAlias(symbol.name) === normalized
-    || normalizedAlias(symbol.latex) === normalized
-    || symbol.aliases.some((alias) => normalizedAlias(alias) === normalized)
-  ));
+  return aliasCandidateIds(query).length > 0;
 }

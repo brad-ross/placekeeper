@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -11,8 +11,13 @@ import {
 import { coordinateUpgrade } from "../../apps/service/src/host/upgrade-coordinator.js";
 import { createNotarizationPlan } from "./notarize.js";
 import {
+  CATALOG_DISTRIBUTION_BASELINE,
+  CATALOG_NOTICE_RESOURCE_PATH,
   validateAppBundleManifest,
   validateBackendRuntimeManifest,
+  validateCatalogRuntimeDistribution,
+  validateCatalogSourceBaseline,
+  validateCatalogThirdPartyNotices,
   validateCodexPlugin,
   validateDistributionManifests,
   validateMacIconSet,
@@ -109,6 +114,125 @@ describe("macOS distribution manifests", () => {
     expect(build.indexOf("await compileMacIcon(")).toBeLessThan(build.indexOf("await computePackagedBuildIdentity({"));
     expect(build.indexOf("await computePackagedBuildIdentity({")).toBeLessThan(build.indexOf("await signBundle("));
     expect(build.indexOf("await computePackagedBuildIdentity({")).toBeLessThan(build.indexOf("await signAdHocBundle("));
+  });
+
+  it("packages complete catalog notices before build identity", async () => {
+    const source = await readFile(resolve("packaging/macos/build-app.ts"), "utf8");
+    const build = source.slice(source.indexOf("export async function buildMacApp"));
+    expect(CATALOG_NOTICE_RESOURCE_PATH).toBe("Resources/THIRD_PARTY_NOTICES.md");
+    expect(build.indexOf('resolve(repoRoot, "THIRD_PARTY_NOTICES.md")'))
+      .toBeLessThan(build.indexOf("await computePackagedBuildIdentity({"));
+
+    const notice = await readFile(resolve("THIRD_PARTY_NOTICES.md"), "utf8");
+    expect(() => validateCatalogThirdPartyNotices(notice)).not.toThrow();
+    for (const missing of [
+      "UNICODE LICENSE V3",
+      "W3C Software Notice and License",
+      "Copyright David Carlisle 1999-2025",
+      "Modification notice: On 2026-08-23",
+      "https://raw.githubusercontent.com/w3c/xml-entities/ed8b732d7d38112f258e74aadecbb1e409eafdd9/unicode.xml",
+    ]) {
+      expect(() => validateCatalogThirdPartyNotices(notice.replace(missing, "omitted")), missing)
+        .toThrow(/missing required attribution/u);
+    }
+    expect(() => validateCatalogThirdPartyNotices(
+      notice.replace("free of charge", "without charge"),
+    )).toThrow(/reviewed complete content/u);
+  });
+
+  it("pins reviewed catalog counts, indexes, and deterministic artifact bytes", async () => {
+    await expect(validateCatalogSourceBaseline(resolve("."))).resolves.toBeUndefined();
+    expect(CATALOG_DISTRIBUTION_BASELINE).toMatchObject({
+      records: 3_060,
+      indexCardinalities: {
+        glyph: 3_060,
+        command: 2_795,
+        entity: 1_975,
+        normalizedName: 4_724,
+      },
+      artifactBytes: {
+        runtime: 400_389,
+        report: 7_181,
+      },
+      artifactSha256: {
+        runtime: "e7d653177705de1acbba73848edc5071779bbdf76be82d2d92bee62ed4fb2fa0",
+        report: "98a4eca4e8a546f5302f9a7989c156528f7f5709464a35d61cee5636f2254a36",
+        thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
+      },
+      productionWebJavaScriptBytes: 2_369_939,
+    });
+
+    const root = await mkdtemp(resolve(tmpdir(), "placekeeper-catalog-baseline-"));
+    try {
+      const generated = resolve(root, "scripts/pdf-symbol-catalog/generated");
+      const runtime = resolve(root, "apps/web/src/pdf");
+      await mkdir(generated, { recursive: true });
+      await mkdir(runtime, { recursive: true });
+      await copyFile(resolve("scripts/pdf-symbol-catalog/generated/update-report.json"), resolve(generated, "update-report.json"));
+      await copyFile(resolve("apps/web/src/pdf/pdf-symbol-catalog.generated.ts"), resolve(runtime, "pdf-symbol-catalog.generated.ts"));
+      await writeFile(resolve(runtime, "pdf-symbol-catalog.generated.ts"), "reviewed baseline regression\n");
+      await expect(validateCatalogSourceBaseline(root)).rejects.toThrow(/baseline changed/u);
+      await copyFile(resolve("apps/web/src/pdf/pdf-symbol-catalog.generated.ts"), resolve(runtime, "pdf-symbol-catalog.generated.ts"));
+      const reportPath = resolve(generated, "update-report.json");
+      const report = await readFile(reportPath, "utf8");
+      const tamperedReport = report.replace(
+        /("catalogSha256": ")([0-9a-f])/u,
+        (_match, prefix: string, digit: string) => `${prefix}${digit === "0" ? "1" : "0"}`,
+      );
+      expect(Buffer.byteLength(tamperedReport)).toBe(Buffer.byteLength(report));
+      await writeFile(reportPath, tamperedReport);
+      await expect(validateCatalogSourceBaseline(root)).rejects.toThrow(/digest baseline changed/u);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("ships only compact catalog behavior and confines attribution URLs to the notice", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "placekeeper-catalog-runtime-"));
+    const runtime = resolve(root, "Resources");
+    const web = resolve(runtime, "web");
+    const notice = resolve(runtime, "THIRD_PARTY_NOTICES.md");
+    try {
+      await mkdir(web, { recursive: true });
+      await copyFile(resolve("THIRD_PARTY_NOTICES.md"), notice);
+      const compact = 'const catalog = "⏐ vertical line extension";\n';
+      await writeFile(resolve(web, "app.js"), compact);
+      await expect(validateCatalogRuntimeDistribution({
+        runtimeRoot: runtime,
+        webEntry: resolve(web, "app.js"),
+        noticePath: notice,
+      })).resolves.toBeUndefined();
+
+      await writeFile(resolve(web, "source-manifest.json"), "{}\n");
+      await expect(validateCatalogRuntimeDistribution({
+        runtimeRoot: runtime,
+        webEntry: resolve(web, "app.js"),
+        noticePath: notice,
+      })).rejects.toThrow(/must not ship/u);
+      await rm(resolve(web, "source-manifest.json"));
+
+      await writeFile(resolve(web, "app.js"), `${compact}const source = "https://www.unicode.org/Public/17.0.0/ucd/";\n`);
+      await expect(validateCatalogRuntimeDistribution({
+        runtimeRoot: runtime,
+        webEntry: resolve(web, "app.js"),
+        noticePath: notice,
+      })).rejects.toThrow(/leaked into runtime asset/u);
+
+      await writeFile(
+        resolve(web, "app.js"),
+        Buffer.concat([
+          Buffer.from(compact),
+          Buffer.alloc(CATALOG_DISTRIBUTION_BASELINE.productionWebJavaScriptBytes, 0x78),
+        ]),
+      );
+      await expect(validateCatalogRuntimeDistribution({
+        runtimeRoot: runtime,
+        webEntry: resolve(web, "app.js"),
+        noticePath: notice,
+      })).rejects.toThrow(/bundle baseline/u);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("rejects incomplete, misnamed, nonsquare, and wrongly sized icon representations", async () => {

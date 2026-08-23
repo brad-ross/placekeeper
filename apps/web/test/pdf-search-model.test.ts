@@ -5,6 +5,7 @@ import {
   canonicalizeFormula,
   canonicalizeProse,
   classifyPdfSearchQuery,
+  isSingleUnicodeScalarQuery,
 } from '../src/pdf/pdf-search-model.js';
 
 describe('PDF search model', () => {
@@ -17,6 +18,15 @@ describe('PDF search model', () => {
     expect(canonicalizeFormula('  λ  x + β ')).toBe('λx+β');
     expect(canonicalizeFormula('λ')).not.toBe(canonicalizeFormula('Λ'));
     expect(canonicalizeFormula('≤')).not.toBe(canonicalizeFormula('<='));
+    expect(canonicalizeFormula('Ω')).not.toBe(canonicalizeFormula('Ω'));
+  });
+
+  it('recognizes exactly one trimmed Unicode scalar without normalizing it', () => {
+    expect(isSingleUnicodeScalarQuery(' 𝔼 ')).toBe(true);
+    expect(isSingleUnicodeScalarQuery('Ω')).toBe(true);
+    expect(isSingleUnicodeScalarQuery('Ω')).toBe(true);
+    expect(isSingleUnicodeScalarQuery('ab')).toBe(false);
+    expect(isSingleUnicodeScalarQuery('')).toBe(false);
   });
 
   it('classifies notation separately from prose', () => {

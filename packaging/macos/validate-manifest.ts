@@ -1,12 +1,175 @@
 import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { extname, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { inflateSync } from "node:zlib";
 
 const CODEX_INSTALLED_LAUNCHER_COMMAND =
   '"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper"';
 const CONTROL_REQUEST_TIMEOUT_SECONDS = 5;
+
+export const CATALOG_NOTICE_RESOURCE_PATH = "Resources/THIRD_PARTY_NOTICES.md";
+
+export const CATALOG_DISTRIBUTION_BASELINE = {
+  records: 3_060,
+  indexCardinalities: {
+    glyph: 3_060,
+    command: 2_795,
+    entity: 1_975,
+    normalizedName: 4_724,
+  },
+  artifactBytes: {
+    runtime: 400_389,
+    report: 7_181,
+  },
+  artifactSha256: {
+    runtime: "e7d653177705de1acbba73848edc5071779bbdf76be82d2d92bee62ed4fb2fa0",
+    report: "98a4eca4e8a546f5302f9a7989c156528f7f5709464a35d61cee5636f2254a36",
+    thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
+  },
+  productionWebJavaScriptBytes: 2_369_939,
+} as const;
+
+const CATALOG_ATTRIBUTION_URLS = [
+  "https://www.unicode.org/Public/17.0.0/ucd/",
+  "https://raw.githubusercontent.com/w3c/xml-entities/ed8b732d7d38112f258e74aadecbb1e409eafdd9/unicode.xml",
+  "https://www.w3.org/copyright/software-license-2002/",
+] as const;
+
+const FORBIDDEN_CATALOG_RUNTIME_MARKERS = [
+  ...CATALOG_ATTRIBUTION_URLS,
+  "ed8b732d7d38112f258e74aadecbb1e409eafdd9",
+  "catalog:update",
+  "updateCatalogSources",
+  "source-manifest.json",
+  "catalog.audit.json",
+  "update-report.json",
+  "DerivedName.txt",
+  "DerivedGeneralCategory.txt",
+  "DerivedCoreProperties.txt",
+  "UnicodeData.txt",
+  "unicode.xml",
+  "# DerivedName-17.0.0.txt",
+  "# DerivedGeneralCategory-17.0.0.txt",
+  "# DerivedCoreProperties-17.0.0.txt",
+] as const;
+
+const CATALOG_RUNTIME_TEXT_EXTENSIONS = new Set([
+  ".cjs", ".css", ".html", ".js", ".json", ".md", ".mjs", ".ts", ".txt", ".xml",
+]);
+
+export function validateCatalogThirdPartyNotices(source: string): void {
+  const required = [
+    "UNICODE LICENSE V3",
+    "W3C Software Notice and License",
+    "Copyright David Carlisle 1999-2025",
+    "Modification notice: On 2026-08-23",
+    ...CATALOG_ATTRIBUTION_URLS,
+  ];
+  for (const marker of required) {
+    if (!source.includes(marker)) {
+      throw new Error(`Mathematical symbol catalog notice is missing required attribution: ${marker}`);
+    }
+  }
+  const actual = createHash("sha256").update(source, "utf8").digest("hex");
+  if (actual !== CATALOG_DISTRIBUTION_BASELINE.artifactSha256.thirdPartyNotices) {
+    throw new Error("Mathematical symbol catalog notice does not match the reviewed complete content");
+  }
+}
+
+interface CatalogRuntimeDistributionOptions {
+  readonly runtimeRoot: string;
+  readonly webEntry: string;
+  readonly noticePath: string;
+}
+
+const catalogRuntimeFiles = async (root: string): Promise<string[]> => {
+  const files: string[] = [];
+  const visit = async (directory: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const path = resolve(directory, entry.name);
+      if (entry.isDirectory()) await visit(path);
+      else if (entry.isFile()) files.push(path);
+      else throw new Error(`Unsupported catalog runtime entry: ${relative(root, path)}`);
+    }
+  };
+  await visit(root);
+  return files;
+};
+
+export async function validateCatalogRuntimeDistribution(
+  options: CatalogRuntimeDistributionOptions,
+): Promise<void> {
+  const runtimeRoot = resolve(options.runtimeRoot);
+  const noticePath = resolve(options.noticePath);
+  const webEntry = resolve(options.webEntry);
+  const notice = await readFile(noticePath, "utf8");
+  validateCatalogThirdPartyNotices(notice);
+
+  const webBytes = await readFile(webEntry);
+  if (webBytes.byteLength > CATALOG_DISTRIBUTION_BASELINE.productionWebJavaScriptBytes) {
+    throw new Error(
+      `Production web JavaScript exceeds the reviewed ${CATALOG_DISTRIBUTION_BASELINE.productionWebJavaScriptBytes}-byte catalog bundle baseline: ${webBytes.byteLength}`,
+    );
+  }
+  const webSource = webBytes.toString("utf8");
+  for (const marker of ["⏐", "vertical line extension"] as const) {
+    if (!webSource.includes(marker)) {
+      throw new Error(`Production web JavaScript is missing compact catalog behavior: ${marker}`);
+    }
+  }
+
+  for (const path of await catalogRuntimeFiles(runtimeRoot)) {
+    if (path === noticePath) continue;
+    const runtimePath = relative(runtimeRoot, path).replaceAll("\\", "/");
+    if (/(?:^|\/)(?:sources|generated)\/|(?:Derived(?:Name|GeneralCategory|CoreProperties)\.txt|UnicodeData\.txt|unicode\.xml)(?:\.gz)?$|(?:catalog\.audit|update-report|source-manifest)\.json$|(?:^|\/)pdf-symbol-catalog\/(?:compile|generate|update)\.(?:c?js|mjs|ts)$/iu.test(runtimePath)) {
+      throw new Error(`Catalog source or audit artifact must not ship in runtime assets: ${runtimePath}`);
+    }
+    if (!CATALOG_RUNTIME_TEXT_EXTENSIONS.has(extname(path).toLowerCase())) continue;
+    const source = await readFile(path, "utf8");
+    for (const marker of FORBIDDEN_CATALOG_RUNTIME_MARKERS) {
+      if (source.includes(marker)) {
+        throw new Error(`Catalog source, update, or attribution marker leaked into runtime asset ${runtimePath}: ${marker}`);
+      }
+    }
+  }
+}
+
+export async function validateCatalogSourceBaseline(repoRoot: string): Promise<void> {
+  const [runtime, reportSource] = await Promise.all([
+    readFile(resolve(repoRoot, "apps/web/src/pdf/pdf-symbol-catalog.generated.ts")),
+    readFile(resolve(repoRoot, "scripts/pdf-symbol-catalog/generated/update-report.json")),
+  ]);
+  const report = JSON.parse(reportSource.toString("utf8")) as {
+    counts?: { records?: number };
+    indexCardinalities?: Record<string, number>;
+    artifactBytes?: Record<string, number>;
+  };
+  const expected = CATALOG_DISTRIBUTION_BASELINE;
+  const artifactBytes = {
+    runtime: report.artifactBytes?.runtime,
+    report: report.artifactBytes?.report,
+  };
+  if (report.counts?.records !== expected.records
+    || JSON.stringify(report.indexCardinalities) !== JSON.stringify(expected.indexCardinalities)
+    || JSON.stringify(artifactBytes) !== JSON.stringify(expected.artifactBytes)
+    || runtime.byteLength !== expected.artifactBytes.runtime
+    || reportSource.byteLength !== expected.artifactBytes.report) {
+    throw new Error("Mathematical symbol catalog record, index-cardinality, or committed artifact-byte baseline changed; review and update the distribution baseline with the generated report");
+  }
+  const actualSha256 = {
+    runtime: createHash("sha256").update(runtime).digest("hex"),
+    report: createHash("sha256").update(reportSource).digest("hex"),
+  };
+  if (actualSha256.runtime !== expected.artifactSha256.runtime
+    || actualSha256.report !== expected.artifactSha256.report) {
+    throw new Error("Mathematical symbol catalog committed artifact digest baseline changed; review and update the distribution baseline with the generated artifacts");
+  }
+  if (/"(?:duration|elapsed|timing|wallClock|milliseconds?|generatedAt|timestamp)[^"]*"\s*:/iu.test(reportSource.toString("utf8"))) {
+    throw new Error("Deterministic catalog report must not contain wall-clock timing fields");
+  }
+}
 
 interface RuntimeAsset {
   readonly id: string;
@@ -569,7 +732,14 @@ async function validateVscodeIdentity(
   }
 }
 
-export async function validateDistributionManifests(repoRoot = process.cwd()): Promise<void> {
+interface DistributionValidationOptions {
+  readonly productionWebRoot?: string;
+}
+
+export async function validateDistributionManifests(
+  repoRoot = process.cwd(),
+  options: DistributionValidationOptions = {},
+): Promise<void> {
   const app = validateAppBundleManifest(JSON.parse(await readFile(resolve(repoRoot, "packaging/macos/app-bundle.json"), "utf8")) as unknown);
   const backend = validateBackendRuntimeManifest(JSON.parse(await readFile(resolve(repoRoot, "packaging/macos/backend-runtime-manifest.json"), "utf8")) as unknown);
   if (app.nodeVersion !== backend.nodeVersion) throw new Error("App and backend Node versions differ");
@@ -590,9 +760,33 @@ export async function validateDistributionManifests(repoRoot = process.cwd()): P
   }
   const pluginRoot = resolve(repoRoot, app.embeddedArtifacts.codexPlugin);
   await validateCodexPlugin(pluginRoot);
+  const noticePath = resolve(repoRoot, "THIRD_PARTY_NOTICES.md");
+  validateCatalogThirdPartyNotices(await readFile(noticePath, "utf8"));
+  await validateCatalogSourceBaseline(repoRoot);
+  const packageManifest = JSON.parse(await readFile(resolve(repoRoot, "package.json"), "utf8")) as {
+    scripts?: Record<string, string>;
+  };
+  if (packageManifest.scripts?.["prebuild:web"] !== "pnpm catalog:check") {
+    throw new Error("Production web builds must run the non-mutating catalog:check gate");
+  }
+  for (const scriptName of ["build", "build:web", "package:macos", "install:local"] as const) {
+    if (/catalog:(?:audit|generate|update)/u.test(packageManifest.scripts?.[scriptName] ?? "")) {
+      throw new Error(`Ordinary ${scriptName} path must not generate or update catalog artifacts`);
+    }
+  }
+  if (options.productionWebRoot !== undefined) {
+    const webRoot = resolve(options.productionWebRoot);
+    await validateCatalogRuntimeDistribution({
+      runtimeRoot: webRoot,
+      webEntry: resolve(webRoot, "app.js"),
+      noticePath,
+    });
+  }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  await validateDistributionManifests();
+  await validateDistributionManifests(process.cwd(), {
+    productionWebRoot: resolve(process.cwd(), "dist/web"),
+  });
   process.stdout.write("Distribution manifests and offline runtime assets are valid.\n");
 }

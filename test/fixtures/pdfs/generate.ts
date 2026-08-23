@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 
 import {
   PDFArray,
+  PDFDict,
   PDFDocument,
   PDFHexString,
   PDFName,
@@ -19,6 +20,76 @@ import { projectReviewItem } from '../../../packages/core/src/annotation-project
 import type { ReviewItem } from '../../../packages/core/src/review-model.js';
 import { createSelectedPdfWriter } from '../../../packages/pdf-backends/src/selected-writer.js';
 
+const reportedMathSymbolInventory = [
+  '·', 'Π', 'α', 'δ', 'θ', 'κ', 'λ', 'ν', 'ξ', 'ρ', 'σ', 'τ', 'ϕ', 'ϵ', '˜',
+  '→', '∂', '∈', '∑', '−', '∗', '∝', '∫', '≡', '≤', '≥', '⏐', '+', '<', '=', '>', '|', '/',
+] as const;
+
+const utf16BeHex = (glyph: string): string => {
+  const codePoint = glyph.codePointAt(0);
+  if (codePoint === undefined) throw new Error('Math symbol fixture requires one scalar');
+  if (codePoint <= 0xffff) return codePoint.toString(16).toUpperCase().padStart(4, '0');
+  const scalar = codePoint - 0x10000;
+  const high = 0xd800 + (scalar >>> 10);
+  const low = 0xdc00 + (scalar & 0x3ff);
+  return `${high.toString(16).toUpperCase()}${low.toString(16).toUpperCase()}`;
+};
+
+function addReportedMathSymbolInventory(document: PDFDocument, page: PDFPage): void {
+  const context = document.context;
+  const glyphNames = reportedMathSymbolInventory.map((_, index) => `math${index + 1}`);
+  const glyphProcedure = context.register(context.flateStream('600 0 0 0 560 650 d1 40 40 480 570 re S'));
+  const charProcs = context.obj(Object.fromEntries(glyphNames.map((name) => [name, glyphProcedure])));
+  const encoding = context.obj({
+    Type: 'Encoding',
+    Differences: [1, ...glyphNames.map((name) => PDFName.of(name))],
+  });
+  const mappings = reportedMathSymbolInventory.map((glyph, index) =>
+    `<${(index + 1).toString(16).toUpperCase().padStart(2, '0')}> <${utf16BeHex(glyph)}>`);
+  const toUnicode = context.register(context.flateStream([
+    '/CIDInit /ProcSet findresource begin',
+    '12 dict begin',
+    'begincmap',
+    '/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def',
+    '/CMapName /PlacekeeperMathSymbols def',
+    '/CMapType 2 def',
+    '1 begincodespacerange',
+    '<01> <FF>',
+    'endcodespacerange',
+    `${mappings.length} beginbfchar`,
+    ...mappings,
+    'endbfchar',
+    'endcmap',
+    'CMapName currentdict /CMap defineresource pop',
+    'end',
+    'end',
+  ].join('\n')));
+  const font = context.register(context.obj({
+    Type: 'Font',
+    Subtype: 'Type3',
+    Name: 'FMathInventory',
+    FontBBox: [0, 0, 600, 700],
+    FontMatrix: [0.001, 0, 0, 0.001, 0, 0],
+    CharProcs: charProcs,
+    Encoding: encoding,
+    FirstChar: 1,
+    LastChar: reportedMathSymbolInventory.length,
+    Widths: reportedMathSymbolInventory.map(() => 600),
+    Resources: {},
+    ToUnicode: toUnicode,
+  }));
+  const resources = page.node.Resources() ?? context.obj({});
+  page.node.set(PDFName.of('Resources'), resources);
+  const fonts = resources.lookupMaybe(PDFName.of('Font'), PDFDict) ?? context.obj({});
+  fonts.set(PDFName.of('FMathInventory'), font);
+  resources.set(PDFName.of('Font'), fonts);
+  const encoded = reportedMathSymbolInventory
+    .map((_, index) => (index + 1).toString(16).toUpperCase().padStart(2, '0'))
+    .join('');
+  page.node.addContentStream(context.register(context.flateStream(
+    `BT /FMathInventory 12 Tf 72 630 Td <${encoded}> Tj ET`,
+  )));
+}
 const outputDirectory = resolve('test/fixtures/pdfs');
 const encryptedNoAnnotationBase64 =
   'JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PAovUHJvZHVjZXIgPGRlOTU0NjMwYzIwMGU1MTc2YmYwNjdhOTAxMWYxNjBjMjZlN2Y5M2NiMDg1YzNmMTc0MzAzYmQ5NmVlYWU5ODU+Cj4+CmVuZG9iagoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwovQ291bnQgMQovS2lkcyBbIDQgMCBSIF0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL0NhdGFsb2cKL1BhZ2VzIDIgMCBSCj4+CmVuZG9iago0IDAgb2JqCjw8Ci9UeXBlIC9QYWdlCi9SZXNvdXJjZXMgPDwKL0ZvbnQgPDwKL0hlbHZldGljYS03MDk4NDgwNzg5IDUgMCBSCi9IZWx2ZXRpY2EtOTc0MjY4MjU2OCA1IDAgUgo+PgovWE9iamVjdCA8PAo+PgovRXh0R1N0YXRlIDw8Cj4+Cj4+Ci9NZWRpYUJveCBbIDAgMCA2MTIgNzkyIF0KL0Fubm90cyBbIF0KL0NvbnRlbnRzIFsgNiAwIFIgXQovUGFyZW50IDIgMCBSCj4+CmVuZG9iago1IDAgb2JqCjw8Ci9UeXBlIC9Gb250Ci9TdWJ0eXBlIC9UeXBlMQovQmFzZUZvbnQgL0hlbHZldGljYQovRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZwo+PgplbmRvYmoKNiAwIG9iago8PAovRmlsdGVyIC9GbGF0ZURlY29kZQovTGVuZ3RoIDI1Ngo+PgpzdHJlYW0K+D741cssH9mtvMVGLzls9Uow/5r8LccUtB9r7Lwh1mStk3Na1fAdvsTJ4jNo7Ar07jFUILdMwU1qaQIQ4cQbQzSkxonj+kiYVngxdZLOUPnASxVGRFuZuTOp9h/+/8Go4xRIoK4IDYF9sTEbyUzr/28knmX1oJtUOV1CENJeHcU4IENHxw3P99W18tTKufF4DrjyKqsVCo3QrbrhvesjJNWiINW3cmTJlPWMMc23UP4nxs3QFqXLSyZXp/6RVTwfSb9w5hNeiaV0rdRuLf0upQ2i9glRC4GT1H3Xq+iqtkShFfjDpJlPX7VFzd/+SBv+PXfRIN7Cui271Ps2WhfnlQplbmRzdHJlYW0KZW5kb2JqCjcgMCBvYmoKPDwKL1YgNQovUiA2Ci9MZW5ndGggMjU2Ci9QIDQKL0ZpbHRlciAvU3RhbmRhcmQKL08gPDUxZGNjOGJmM2FkYjYzNDMwMDc1NTA1ZWI4ODk1ZmVlOWQyMDRhOTg5ZjhjMjZjOWY1ZDQ0OWNiMGI2MjRmZTkwNTJjMGQxNGIzYzhiYzhiNmU5ZGE4NGUzM2UzM2I5ZD4KL1UgPGM1NjJmYTI4YTU3YzE5MTQ3MDE0ZTdkNzA4ZTJjZjJiZjRmN2Y2NjMxMzljMzIxZDM5MmNhNmJhM2M0NzJmZmU3MjVjMjlkNTliODliZWFmMGIyOTJjNWQ0MzJlNGQxZD4KL0NGIDw8Ci9TdGRDRiA8PAovQXV0aEV2ZW50IC9Eb2NPcGVuCi9DRk0gL0FFU1YzCi9MZW5ndGggMzIKPj4KPj4KL1N0bUYgL1N0ZENGCi9TdHJGIC9TdGRDRgovT0UgPGFlOWI4OGVhZDM2MWVlMjUyOTYyZGY2NmNmNWYzMjQ2NDdlMDliNWNhZDMwNzZmYzJlMDI4OGE3MzA0YmY2MTU+Ci9VRSA8ZTQ4NWM4MjNhNTM2MzVkMTdkYmZlZDk4ZTAzNDIxYzEwYTU2MGI5ZWM3NDlkZGM1MzY0ZWNlMGFkY2MyY2UxMj4KL1Blcm1zIDw3MDBlMDE5YmRlNjE4ZGRmMzk0NzNhYjdiMzMxMWMyMz4KPj4KZW5kb2JqCnhyZWYKMCA4CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAxNSAwMDAwMCBuIAowMDAwMDAwMTEzIDAwMDAwIG4gCjAwMDAwMDAxNzIgMDAwMDAgbiAKMDAwMDAwMDIyMSAwMDAwMCBuIAowMDAwMDAwNDQzIDAwMDAwIG4gCjAwMDAwMDA1NDAgMDAwMDAgbiAKMDAwMDAwMDg2OCAwMDAwMCBuIAp0cmFpbGVyCjw8Ci9TaXplIDgKL1Jvb3QgMyAwIFIKL0luZm8gMSAwIFIKL0lEIFsgPDM1MzQzOTMxNjMzOTYxMzczMjY1NjEzOTM5NjMzNDY0MzEzMTMxNjMzNjY1MzQ2MTY0Mzg2NTM0MzE2NjMyMzc+IDwzNTM0MzkzMTYzMzk2MTM3MzI2NTYxMzkzOTYzMzQ2NDMxMzEzMTYzMzY2NTM0NjE2NDM4NjUzNDMxNjYzMjM3PiBdCi9FbmNyeXB0IDcgMCBSCj4+CnN0YXJ0eHJlZgoxNDE0CiUlRU9GCg==';
@@ -178,6 +249,13 @@ async function pdfSearchPdf() {
     size: 14,
     font,
   });
+  first.drawText('Reported extracted mathematical symbol inventory:', {
+    x: 72,
+    y: 650,
+    size: 12,
+    font,
+  });
+  addReportedMathSymbolInventory(document, first);
   const second = document.addPage([612, 792]);
   second.drawText('The model stabilizes after iteration. A stable limit follows.', {
     x: 72,

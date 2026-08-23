@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "unicodeVersion": "17.0.0",
+  "w3cCommit": "ed8b732d7d38112f258e74aadecbb1e409eafdd9",
+  "sources": {
+    "derivedName": {
+      "version": "17.0.0",
+      "file": "sources/DerivedName-17.0.0.txt.gz",
+      "url": "https://www.unicode.org/Public/17.0.0/ucd/extracted/DerivedName.txt",
+      "sha256": "019758bbe6c756c40fca6d505187ea660c5e195533e2ff2c841963a212c9d369",
+      "compressedSha256": "d71732989675a3fa22c25e5d0deee99b98d4c7eda7d1c30e43cfbfb23d36374f",
+      "license": "Unicode License v3"
+    },
+    "derivedGeneralCategory": {
+      "version": "17.0.0",
+      "file": "sources/DerivedGeneralCategory-17.0.0.txt.gz",
+      "url": "https://www.unicode.org/Public/17.0.0/ucd/extracted/DerivedGeneralCategory.txt",
+      "sha256": "d62e5bab70ca74f099343f71224fa051cb1fdd61a1ab45c0488c44cfc0b6102e",
+      "compressedSha256": "f026f8a5a6675e896e588c681f59bf297e8f752fc95641292e5e5980f97bc216",
+      "license": "Unicode License v3"
+    },
+    "derivedCoreProperties": {
+      "version": "17.0.0",
+      "file": "sources/DerivedCoreProperties-17.0.0.txt.gz",
+      "url": "https://www.unicode.org/Public/17.0.0/ucd/DerivedCoreProperties.txt",
+      "sha256": "24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08",
+      "compressedSha256": "d83942e89d576a4ba1ea96a412f7aa82effd96cf9a00613bab639c40b0842bf4",
+      "license": "Unicode License v3"
+    },
+    "unicodeData": {
+      "version": "17.0.0",
+      "file": "sources/UnicodeData-17.0.0.txt.gz",
+      "url": "https://www.unicode.org/Public/17.0.0/ucd/UnicodeData.txt",
+      "sha256": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
+      "compressedSha256": "047d4e85bdb81ac1234ddc2a3977cf167a15e3ea75030f854c0e0861d0213fd7",
+      "license": "Unicode License v3"
+    },
+    "w3cUnicode": {
+      "version": "ed8b732d7d38112f258e74aadecbb1e409eafdd9",
+      "file": "sources/w3c-unicode-ed8b732d7d38112f258e74aadecbb1e409eafdd9.xml.gz",
+      "url": "https://raw.githubusercontent.com/w3c/xml-entities/ed8b732d7d38112f258e74aadecbb1e409eafdd9/unicode.xml",
+      "sha256": "8da3ee6f305ffcdee44a55c2ff36556c93b35c70aa77cb9d8afaa990ae143087",
+      "compressedSha256": "c4b0cac72bc9a390e0ec2d568aae04cc972b8720744f8335b10739128776ebc6",
+      "license": "W3C Software Notice and License (2002); David Carlisle 1999-2025"
+    }
+  },
+  "licenses": {
+    "unicode": {
+      "file": "sources/LICENSE-UNICODE-3.0.txt",
+      "url": "https://www.unicode.org/license.txt",
+      "sha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
+    },
+    "w3c": {
+      "file": "sources/LICENSE-W3C-2002.txt",
+      "url": "https://www.w3.org/copyright/software-license-2002/",
+      "sha256": "e5934b7e44eac6ee293360bd495b421fbd41af6e8cf766cc55d41d30fedd968a"
+    }
+  }
+}

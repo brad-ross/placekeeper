@@ -188,7 +188,7 @@ describe('PDF search controller', () => {
     ]);
   });
 
-  it('matches supplementary-plane symbols without shifting source geometry', async () => {
+  it('matches supplementary-plane symbols by literal and official name without shifting geometry', async () => {
     const controller = createPdfSearchController({
       documentGeneration: 1,
       reader: reader(['Let 𝔼 be positive. stable follows.']),
@@ -201,6 +201,13 @@ describe('PDF search controller', () => {
       symbolResult.excerptMatch.start,
       symbolResult.excerptMatch.start + symbolResult.excerptMatch.length,
     )).toBe('𝔼');
+
+    const named = await controller.search('mathematical double-struck capital e');
+    expect(named.groups[0]?.results[0]).toMatchObject({
+      charIndex: 4,
+      charCount: 1,
+      matchedForm: '𝔼',
+    });
 
     const prose = await controller.search('stable');
     expect(prose.groups[0]?.results[0]?.charIndex).toBe(19);
@@ -247,7 +254,7 @@ describe('PDF search controller', () => {
   it('offers detected symbol alternatives without promoting them to matches', async () => {
     const controller = createPdfSearchController({
       documentGeneration: 1,
-      reader: reader(['Let λ be positive and β be fixed.']),
+      reader: reader(['Let λ be positive and β be fixed']),
     });
     const state = await controller.search('\\theta');
 
@@ -281,10 +288,208 @@ describe('PDF search controller', () => {
     });
   });
 
+  it('recognizes omitted Greek and punctuation-class LaTeX symbols from extracted text', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['κ · κ']),
+    });
+
+    const kappa = await controller.search('\\kappa');
+    expect(kappa.groups[0]?.results).toHaveLength(2);
+    expect(kappa.groups[0]?.results[0]?.matchedForm).toBe('κ');
+
+    const centerDot = await controller.search('\\cdot');
+    expect(centerDot.groups[0]?.results).toHaveLength(1);
+    expect(centerDot.groups[0]?.results[0]?.matchedForm).toBe('·');
+  });
+
+  it('searches every mathematical symbol extracted from the reported PDF', async () => {
+    const extractedSymbols = [
+      ['·', '\\cdot'],
+      ['Π', '\\Pi'],
+      ['α', '\\alpha'],
+      ['δ', '\\delta'],
+      ['θ', '\\theta'],
+      ['κ', '\\kappa'],
+      ['λ', '\\lambda'],
+      ['ν', '\\nu'],
+      ['ξ', '\\xi'],
+      ['ρ', '\\rho'],
+      ['σ', '\\sigma'],
+      ['τ', '\\tau'],
+      ['ϕ', 'varphi'],
+      ['ϵ', 'varepsilon'],
+      ['˜', 'small tilde'],
+      ['→', '\\rightarrow'],
+      ['∂', '\\partial'],
+      ['∈', '\\in'],
+      ['∑', '\\sum'],
+      ['−', 'minus'],
+      ['∗', '\\ast'],
+      ['∝', '\\propto'],
+      ['∫', '\\int'],
+      ['≡', '\\equiv'],
+      ['≤', '\\leq'],
+      ['≥', '\\geq'],
+      ['⏐', 'vertical line extension'],
+      ['+', 'plus sign'],
+      ['<', 'less-than sign'],
+      ['=', 'equals sign'],
+      ['>', 'greater-than sign'],
+      ['|', 'vertical line'],
+      ['/', 'solidus'],
+    ] as const;
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader([extractedSymbols.map(([glyph]) => glyph).join(' ')]),
+    });
+
+    for (const [glyph, query] of extractedSymbols) {
+      const state = await controller.search(query);
+      expect(state.groups.flatMap(({ results }) => results).map(({ matchedForm }) => matchedForm), query)
+        .toContain(glyph);
+    }
+  });
+
+  it('returns every detected glyph in a shared command without inventing other aliases', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['| ⏐ φ ϕ']),
+    });
+
+    const verticalBars = await controller.search('\\vert');
+    expect(verticalBars.groups[0]?.results.map(({ matchedForm }) => matchedForm))
+      .toEqual(['|']);
+
+    const phiVariants = await controller.search('\\phi');
+    expect(phiVariants.groups[0]?.results.map(({ matchedForm }) => matchedForm))
+      .toEqual(['φ', 'ϕ']);
+  });
+
+  it('searches every detected Greek epsilon family member without matching IPA open e', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['ε ϵ 𝛆 𝛜 ɛ']),
+    });
+
+    const epsilon = await controller.search('\\varepsilon');
+
+    expect(epsilon.groups[0]?.results.map(({ matchedForm }) => matchedForm))
+      .toEqual(['ε', 'ϵ', '𝛆', '𝛜']);
+    expect(epsilon.groups[0]?.results.map(({ matchedForm }) => matchedForm))
+      .not.toContain('ɛ');
+  });
+
+  it('keeps ASCII hyphen and Unicode minus searches code-point exact', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['ride-hailing − cost']),
+    });
+
+    const hyphen = await controller.search('-');
+    expect(hyphen.groups[0]?.results.map(({ matchedForm }) => matchedForm)).toEqual(['-']);
+
+    const minus = await controller.search('minus');
+    expect(minus.groups[0]?.results.map(({ matchedForm }) => matchedForm)).toEqual(['−']);
+  });
+
+  it('keeps dangerous lookalike literals code-point exact', async () => {
+    const lookalikes = ['-', '−', '|', '∣', '⏐', '∅', '⌀', '~', '˜', '∼', '×', '∗', '·', '⋅'];
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader([lookalikes.join(' ')]),
+    });
+
+    for (const glyph of lookalikes) {
+      expect((await controller.search(glyph)).groups[0]?.results.map(({ matchedForm }) => matchedForm))
+        .toEqual([glyph]);
+    }
+  });
+
+  it('keeps canonically equivalent-looking symbols code-point exact', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['Ω Ω φ ϕ']),
+    });
+
+    expect((await controller.search('Ω')).groups[0]?.results.map(({ matchedForm }) => matchedForm))
+      .toEqual(['Ω']);
+    expect((await controller.search('Ω')).groups[0]?.results.map(({ matchedForm }) => matchedForm))
+      .toEqual(['Ω']);
+    expect((await controller.search('φ')).groups[0]?.results.map(({ matchedForm }) => matchedForm))
+      .toEqual(['φ']);
+    expect((await controller.search('ϕ')).groups[0]?.results.map(({ matchedForm }) => matchedForm))
+      .toEqual(['ϕ']);
+  });
+
+  it('does not NFC-collapse a missing literal glyph into a detected suggestion', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['Ω']),
+    });
+
+    const state = await controller.search('Ω');
+
+    expect(state.groups).toEqual([]);
+    expect(state.alternatives).toEqual([]);
+  });
+
+  it('removes formula layout whitespace without changing scalar identity or order', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['Ω + Ω']),
+    });
+
+    const result = await controller.search('Ω+Ω');
+    expect(result.groups[0]?.results[0]).toMatchObject({
+      charIndex: 0,
+      charCount: 5,
+      matchedForm: 'Ω+Ω',
+    });
+    expect((await controller.search('Ω+Ω')).groups).toEqual([]);
+  });
+
+  it('searches private-use scalars literally without naming or suggesting them', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['value \u{E000} value']),
+    });
+
+    const prepared = await controller.prepare();
+    expect(prepared.symbolCatalog).toEqual([]);
+    const result = await controller.search('\u{E000}');
+    expect(result.groups[0]?.results).toHaveLength(1);
+    expect(result.groups[0]?.results[0]).toMatchObject({ matchedForm: '\u{E000}', charIndex: 6 });
+  });
+
+  it('does not populate semantic suggestions from ordinary prose letters', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['Café remains stable']),
+    });
+
+    expect((await controller.prepare()).symbolCatalog).toEqual([]);
+  });
+
+  it('includes admitted target punctuation in the detected-symbol catalog', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['/']),
+    });
+
+    expect((await controller.prepare()).symbolCatalog).toEqual([
+      expect.objectContaining({
+        label: '/ solidus',
+        query: '/',
+      }),
+    ]);
+    expect((await controller.search('/')).groups[0]?.results[0]?.matchedForm).toBe('/');
+  });
+
   it('prepares a detected-symbol catalog before a query is entered', async () => {
     const controller = createPdfSearchController({
       documentGeneration: 1,
-      reader: reader(['Let λ be positive and β be fixed.']),
+      reader: reader(['Let λ be positive and β be fixed']),
     });
 
     const state = await controller.prepare();
@@ -292,9 +497,34 @@ describe('PDF search controller', () => {
     expect(state.status).toBe('idle');
     expect(state.symbolCatalog.map(({ query }) => query)).toEqual(['β', 'λ']);
     expect(state.symbolCatalog.map(({ label }) => label)).toEqual([
-      'β beta (\\beta)',
-      'λ lambda (\\lambda)',
+      'β greek small letter beta (\\beta)',
+      'λ greek small letter lamda (\\lambda)',
     ]);
+    expect(state.symbolCatalog[1]).toMatchObject({
+      symbolSearch: {
+        glyph: 'λ',
+        commands: expect.arrayContaining(['\\lambda']),
+        entities: expect.arrayContaining(['lambda']),
+        naturalTerms: expect.arrayContaining(['greek small letter lamda']),
+      },
+    });
+  });
+
+  it('renders sourced command labels and exposes every detected command without inventing one', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['φ ⏐']),
+    });
+
+    const state = await controller.prepare();
+    const phi = state.symbolCatalog.find(({ query }) => query === 'φ');
+    const verticalLineExtension = state.symbolCatalog.find(({ query }) => query === '⏐');
+
+    expect(phi?.label).toBe('φ greek small letter phi (\\phi)');
+    expect(phi?.symbolSearch?.commands).toEqual(expect.arrayContaining(['\\phi', '\\varphi']));
+    expect(verticalLineExtension?.label).toBe('⏐ vertical line extension');
+    expect(verticalLineExtension?.label).not.toContain('()');
+    expect(verticalLineExtension?.symbolSearch?.commands).toEqual([]);
   });
 
   it('does not duplicate an exact substring as a related word occurrence', async () => {

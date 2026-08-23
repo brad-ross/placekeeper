@@ -47,6 +47,13 @@ export interface PdfSearchResultGroup {
 export interface PdfSearchAlternative {
   readonly label: string;
   readonly query: string;
+  /** Structured, runtime-only terms for detected generated symbol suggestions. */
+  readonly symbolSearch?: {
+    readonly glyph: string;
+    readonly commands: readonly string[];
+    readonly entities: readonly string[];
+    readonly naturalTerms: readonly string[];
+  };
 }
 
 export interface PdfSearchState {
@@ -65,7 +72,12 @@ export function canonicalizeProse(value: string): string {
 }
 
 export function canonicalizeFormula(value: string): string {
-  return value.normalize('NFC').replace(/\s+/gu, '');
+  return value.replace(/\s+/gu, '');
+}
+
+export function isSingleUnicodeScalarQuery(value: string): boolean {
+  const query = value.trim();
+  return query.length > 0 && Array.from(query).length === 1;
 }
 
 export function classifyPdfSearchQuery(value: string): PdfSearchQueryKind {

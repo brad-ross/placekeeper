@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "unicodeVersion": "17.0.0",
+  "w3cCommit": "ed8b732d7d38112f258e74aadecbb1e409eafdd9",
+  "catalogSha256": "bbbc7323f3317c8995b0918e1e7e4503379f94b79c58ffdc48a407c6c755cde8",
+  "sourceHashes": {
+    "derivedName": "019758bbe6c756c40fca6d505187ea660c5e195533e2ff2c841963a212c9d369",
+    "derivedGeneralCategory": "d62e5bab70ca74f099343f71224fa051cb1fdd61a1ab45c0488c44cfc0b6102e",
+    "derivedCoreProperties": "24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08",
+    "unicodeData": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
+    "w3cUnicode": "8da3ee6f305ffcdee44a55c2ff36556c93b35c70aa77cb9d8afaa990ae143087"
+  },
+  "counts": {
+    "records": 3060,
+    "category": {
+      "Cf": 6,
+      "Ll": 609,
+      "Lm": 11,
+      "Lo": 150,
+      "Lu": 515,
+      "Me": 4,
+      "Mn": 66,
+      "Nd": 50,
+      "No": 38,
+      "Pc": 2,
+      "Pd": 8,
+      "Pe": 35,
+      "Pf": 4,
+      "Pi": 6,
+      "Po": 49,
+      "Ps": 37,
+      "Sc": 7,
+      "Sk": 17,
+      "Sm": 960,
+      "So": 486
+    },
+    "admission": {
+      "unicode-math": 2322,
+      "w3c-mode": 1951,
+      "w3c-math-class": 1129,
+      "w3c-application": 1413,
+      "w3c-direct-tex": 2588
+    },
+    "provenance": {
+      "unicodeMath": 2322,
+      "w3c": 3060,
+      "overriddenRecords": 101
+    }
+  },
+  "changes": {
+    "added": [],
+    "removed": [],
+    "changed": []
+  },
+  "exclusions": {
+    "multiScalar": {
+      "count": 235,
+      "sha256": "45e3f2b57f2850bb5bc5f5e6e6be85875872b435dc98836ce3d85043de94fc28",
+      "sample": [
+        {
+          "id": "U00021-00021",
+          "scalars": [
+            33,
+            33
+          ]
+        },
+        {
+          "id": "U00021-0003D",
+          "scalars": [
+            33,
+            61
+          ]
+        },
+        {
+          "id": "U00026-00026",
+          "scalars": [
+            38,
+            38
+          ]
+        },
+        {
+          "id": "U0002A-0002A",
+          "scalars": [
+            42,
+            42
+          ]
+        },
+        {
+          "id": "U0002A-0003D",
+          "scalars": [
+            42,
+            61
+          ]
+        }
+      ]
+    },
+    "unassignedW3c": {
+      "count": 24,
+      "sha256": "024f4e2c682964c5ea542e653494b2172bb1566bf8193b47384310c3f5e7b14c",
+      "sample": [
+        "U+1D455",
+        "U+1D49D",
+        "U+1D4A0",
+        "U+1D4A1",
+        "U+1D4A3"
+      ]
+    }
+  },
+  "rejectedTex": {
+    "count": 1990,
+    "sha256": "bb69369c6c7ee4ca117b002bc01907c3513247ce6bf973ccbb01098b203fac6c",
+    "sample": [
+      {
+        "codePoint": 33,
+        "field": "latex",
+        "value": "!",
+        "reason": "not-a-direct-control-token"
+      },
+      {
+        "codePoint": 34,
+        "field": "latex",
+        "value": "\"",
+        "reason": "not-a-direct-control-token"
+      },
+      {
+        "codePoint": 38,
+        "field": "latex",
+        "value": "\\&amp;",
+        "reason": "not-a-direct-control-token"
+      },
+      {
+        "codePoint": 40,
+        "field": "latex",
+        "value": "(",
+        "reason": "not-a-direct-control-token"
+      },
+      {
+        "codePoint": 41,
+        "field": "latex",
+        "value": ")",
+        "reason": "not-a-direct-control-token"
+      }
+    ]
+  },
+  "equivalence": {
+    "families": 52,
+    "edges": 294,
+    "expandingMembers": 66,
+    "styledMembers": 280
+  },
+  "aliasDecisions": {
+    "count": 62,
+    "sha256": "10706704973246053844ffb0eac2c00e7c16baac2d934f7273fe516795bcfe21",
+    "sample": [
+      {
+        "namespace": "command",
+        "alias": "\\AA",
+        "codePoints": [
+          "00C5",
+          "212B"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "00C5",
+          "212B"
+        ],
+        "rationale": "Treat the canonically equivalent letter and compatibility unit sign as glyph variants while literal lookup stays exact.",
+        "upstream": "W3C assigns \\AA to U+00C5 LATIN CAPITAL LETTER A WITH RING ABOVE and U+212B ANGSTROM SIGN."
+      },
+      {
+        "namespace": "command",
+        "alias": "\\Omega",
+        "codePoints": [
+          "03A9",
+          "2126"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "03A9",
+          "2126"
+        ],
+        "rationale": "Treat the canonically equivalent Greek letter and compatibility ohm sign as glyph variants.",
+        "upstream": "W3C assigns \\Omega to U+03A9 GREEK CAPITAL LETTER OMEGA and U+2126 OHM SIGN."
+      },
+      {
+        "namespace": "command",
+        "alias": "\\Upsilon",
+        "codePoints": [
+          "03A5",
+          "03D2"
+        ],
+        "action": "allow",
+        "expectedUpstreamCodePoints": [
+          "03A5",
+          "03D2"
+        ],
+        "rationale": "Preserve generic capital-upsilon input across the letter and hook-shaped symbol variants.",
+        "upstream": "W3C assigns \\Upsilon to U+03A5 GREEK CAPITAL LETTER UPSILON and U+03D2 GREEK UPSILON WITH HOOK SYMBOL."
+      },
+      {
+        "namespace": "command",
+        "alias": "\\ast",
+        "codePoints": [
+          "002A",
+          "2217"
+        ],
+        "action": "prefer",
+        "canonicalCodePoint": "2217",
+        "rationale": "Keep the mathematical operator mapping and prevent command lookup from rewriting to ASCII punctuation.",
+        "upstream": "W3C assigns \\ast to U+002A ASTERISK and U+2217 ASTERISK OPERATOR."
+      },
+      {
+        "namespace": "command",
+        "alias": "\\barwedge",
+        "codePoints": [
+          "22BC",
+          "2305"
+        ],
+        "action": "prefer",
+        "canonicalCodePoint": "22BC",
+        "rationale": "Use the logical NAND relation rather than the unrelated technical projective glyph.",
+        "upstream": "W3C assigns \\barwedge to U+22BC NAND and U+2305 PROJECTIVE."
+      }
+    ]
+  },
+  "aliasCollisions": {
+    "unresolved": {
+      "count": 0,
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "sample": []
+    },
+    "suppressedNaturalNames": {
+      "count": 60,
+      "sha256": "ec963f2838173a2302639a597c6fac9bb70cb92b4bb0900e70c9358574479063",
+      "sample": [
+        {
+          "alias": "/scr a, script letter a",
+          "codePoints": [
+            "U+1D49C",
+            "U+1D4B6"
+          ]
+        },
+        {
+          "alias": "/scr b, script letter b",
+          "codePoints": [
+            "U+212C",
+            "U+1D4B7"
+          ]
+        },
+        {
+          "alias": "/scr c, script letter c",
+          "codePoints": [
+            "U+1D49E",
+            "U+1D4B8"
+          ]
+        },
+        {
+          "alias": "/scr d, script letter d",
+          "codePoints": [
+            "U+1D49F",
+            "U+1D4B9"
+          ]
+        },
+        {
+          "alias": "/scr e, script letter e",
+          "codePoints": [
+            "U+212F",
+            "U+2130"
+          ]
+        }
+      ]
+    }
+  },
+  "overrideCount": 62,
+  "indexCardinalities": {
+    "glyph": 3060,
+    "command": 2795,
+    "entity": 1975,
+    "normalizedName": 4724
+  },
+  "artifactBytes": {
+    "audit": 5037057,
+    "runtime": 400389,
+    "report": 7181
+  }
+}

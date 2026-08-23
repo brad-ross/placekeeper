@@ -30,6 +30,17 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Check generated mathematical symbol catalog
+        run: pnpm catalog:check
+      - name: Generate full mathematical symbol catalog audit
+        run: pnpm catalog:audit
+      - name: Upload mathematical symbol catalog audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: mathematical-symbol-catalog-audit
+          path: scripts/pdf-symbol-catalog/generated/catalog.audit.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Typecheck
         run: pnpm typecheck
       - name: Install Playwright browsers and system dependencies

@@ -7,10 +7,11 @@ import {
   type KeyboardEvent,
 } from 'react';
 
-import type {
-  PdfSearchAlternative,
-  PdfSearchResult,
-  PdfSearchState,
+import {
+  isSingleUnicodeScalarQuery,
+  type PdfSearchAlternative,
+  type PdfSearchResult,
+  type PdfSearchState,
 } from '../pdf/pdf-search-model.js';
 import type { CopyLinkControlProps } from './CopyLinkControl.js';
 import { RowActionGroup, type RowAction } from './RowActionGroup.js';
@@ -53,12 +54,42 @@ export function filterPdfSearchSymbolSuggestions(
   symbols: readonly PdfSearchAlternative[],
   query: string,
 ): readonly PdfSearchAlternative[] {
-  const needle = query.trim().toLocaleLowerCase();
+  const needle = query.trim();
   if (needle.length === 0) return symbols;
-  return symbols.filter((symbol) => (
-    symbol.query.toLocaleLowerCase().includes(needle)
-    || symbol.label.toLocaleLowerCase().includes(needle)
+
+  // Literal glyph filtering must not normalize: compatibility scalars such as
+  // OHM SIGN and GREEK CAPITAL LETTER OMEGA remain distinct suggestions.
+  if (isSingleUnicodeScalarQuery(needle)) {
+    return symbols.filter((symbol) => (symbol.symbolSearch?.glyph ?? symbol.query) === needle);
+  }
+
+  // TeX control sequences are their own case-sensitive namespace.
+  if (needle.startsWith('\\')) {
+    return symbols.filter((symbol) => (
+      symbol.symbolSearch?.commands.some((command) => command.includes(needle))
+      ?? symbol.label.includes(needle)
+    ));
+  }
+
+  // An exact W3C entity ID takes precedence over case-folded natural language,
+  // preserving distinctions such as Alpha versus alpha.
+  const exactEntityMatches = symbols.filter((symbol) => (
+    symbol.symbolSearch?.entities.includes(needle) ?? false
   ));
+  if (exactEntityMatches.length > 0) return exactEntityMatches;
+
+  const naturalNeedle = needle.normalize('NFC').toLowerCase();
+  return symbols.filter((symbol) => {
+    const search = symbol.symbolSearch;
+    if (!search) {
+      return symbol.query.normalize('NFC').toLowerCase().includes(naturalNeedle)
+        || symbol.label.normalize('NFC').toLowerCase().includes(naturalNeedle);
+    }
+    return search.entities.some((entity) => entity.includes(needle))
+      || search.naturalTerms.some((term) => (
+        term.normalize('NFC').toLowerCase().includes(naturalNeedle)
+      ));
+  });
 }
 
 export function PdfSearchWorkspace({

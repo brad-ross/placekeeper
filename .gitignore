@@ -9,6 +9,7 @@ test/fixtures/pdfium/*.wasm
 dist/
 apps/*/dist/
 .local/
+scripts/pdf-symbol-catalog/generated/catalog.audit.json
 
 # Local environment and credential files
 .env
