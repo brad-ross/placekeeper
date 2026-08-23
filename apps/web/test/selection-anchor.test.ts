@@ -535,6 +535,90 @@ describe('selection anchors', () => {
     });
   });
 
+  it('rejects a selection that changes while its page and text are being read', async () => {
+    let finishPageRead: ((value: AnchorPage) => void) | undefined;
+    const pageRead = new Promise<AnchorPage>((resolve) => {
+      finishPageRead = resolve;
+    });
+    let state = {
+      geometry: {},
+      rects: { 2: [naturalRect] },
+      selection: { start: { page: 2, index: 7 }, end: { page: 2, index: 26 } },
+      slices: { 2: { start: 7, count: 20 } },
+      active: true,
+      selecting: false,
+    };
+    const capturing = captureViewerSelection({
+      documentId: 'changing-doc',
+      selection: {
+        getFormattedSelection: () => [
+          { pageIndex: 2, rect: naturalRect, segmentRects: [naturalRect] },
+        ],
+        getSelectedText: () => ({ toPromise: async () => ['<unique equilibrium>'] }),
+        getState: () => state,
+      },
+      pages: { read: () => pageRead },
+    });
+
+    state = {
+      ...state,
+      rects: {
+        2: [{ origin: { x: 320, y: 420 }, size: { width: 80, height: 18 } }],
+      },
+    };
+    finishPageRead?.({
+      ...page(Rotation.Degree0),
+      textRects: [
+        { content: '<unique equilibrium>', rect: { ...naturalRect, origin: { x: 260, y: 36 } } },
+        { content: 'unrelated text', rect: naturalRect },
+      ],
+    });
+
+    await expect(capturing).resolves.toMatchObject({
+      ok: false,
+      diagnostic: 'selection-text-geometry-mismatch',
+    });
+  });
+
+  it('rejects formatted selection geometry that changes during capture', async () => {
+    let finishPageRead: ((value: AnchorPage) => void) | undefined;
+    const pageRead = new Promise<AnchorPage>((resolve) => {
+      finishPageRead = resolve;
+    });
+    const state = {
+      geometry: {},
+      rects: { 2: [naturalRect] },
+      selection: { start: { page: 2, index: 7 }, end: { page: 2, index: 26 } },
+      slices: { 2: { start: 7, count: 20 } },
+      active: true,
+      selecting: false,
+    };
+    let formatted = [
+      { pageIndex: 2, rect: naturalRect, segmentRects: [naturalRect] },
+    ];
+    const capturing = captureViewerSelection({
+      documentId: 'changing-formatted-doc',
+      selection: {
+        getFormattedSelection: () => formatted,
+        getSelectedText: () => ({ toPromise: async () => ['<unique equilibrium>'] }),
+        getState: () => state,
+      },
+      pages: { read: () => pageRead },
+    });
+
+    formatted = [{
+      pageIndex: 2,
+      rect: naturalRect,
+      segmentRects: [{ origin: { x: 320, y: 420 }, size: { width: 80, height: 18 } }],
+    }];
+    finishPageRead?.(page(Rotation.Degree0));
+
+    await expect(capturing).resolves.toMatchObject({
+      ok: false,
+      diagnostic: 'selection-text-geometry-mismatch',
+    });
+  });
+
   it('preserves indexed display-equation text and nonmonotone segment geometry', async () => {
     const quote = 't\r\nk|ij = ν\r\n-1\r\nk\r\n · d';
     const prefix = 'before ';
