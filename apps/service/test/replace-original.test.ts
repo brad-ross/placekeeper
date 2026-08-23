@@ -300,14 +300,22 @@ describe("explicit original replacement", () => {
     });
 
     const restarted = new SessionBroker({ recoveryRoot });
-    await expect(restarted.openReview({ pdfPath: originalPath })).resolves.toEqual({
+    const offered = await restarted.openReview({ pdfPath: originalPath });
+    expect(offered).toEqual({
       kind: "recovery-offered",
       recoverySessionId: opened.launch.sessionId,
       choices: ["resume", "discard", "fork"],
+      recoveryOffer: {
+        id: expect.any(String),
+        expiresAt: expect.any(String),
+      },
     });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
     const resumed = await restarted.openReview({
       pdfPath: originalPath,
       recoveryDecision: "resume",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
     });
     if (resumed.kind !== "opened") throw new Error("Expected resumed review");
     await expect(restarted.openReview({ pdfPath: originalPath })).resolves.toMatchObject({
@@ -404,6 +412,10 @@ describe("explicit original replacement", () => {
       kind: "recovery-offered",
       recoverySessionId: opened.launch.sessionId,
       choices: ["resume", "discard", "fork"],
+      recoveryOffer: {
+        id: expect.any(String),
+        expiresAt: expect.any(String),
+      },
     });
   });
 });
