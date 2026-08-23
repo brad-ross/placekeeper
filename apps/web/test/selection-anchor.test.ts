@@ -535,6 +535,65 @@ describe('selection anchors', () => {
     });
   });
 
+  it('preserves indexed display-equation text and nonmonotone segment geometry', async () => {
+    const quote = 't\r\nk|ij = ν\r\n-1\r\nk\r\n · d';
+    const prefix = 'before ';
+    const segmentRects = [
+      { origin: { x: 190, y: 160 }, size: { width: 4, height: 15 } },
+      { origin: { x: 194, y: 168 }, size: { width: 11, height: 10 } },
+      { origin: { x: 205, y: 158 }, size: { width: 23, height: 18 } },
+      { origin: { x: 228, y: 155 }, size: { width: 7, height: 10 } },
+      { origin: { x: 235, y: 168 }, size: { width: 4, height: 10 } },
+      { origin: { x: 239, y: 160 }, size: { width: 18, height: 15 } },
+    ];
+    const result = await captureViewerSelection({
+      documentId: 'equation-doc',
+      selection: {
+        getFormattedSelection: () => [{
+          pageIndex: 0,
+          rect: { origin: { x: 190, y: 155 }, size: { width: 67, height: 23 } },
+          segmentRects,
+        }],
+        getSelectedText: () => ({ toPromise: async () => [quote] }),
+        getState: () => ({
+          geometry: {},
+          rects: {},
+          selection: { start: { page: 0, index: prefix.length }, end: { page: 0, index: prefix.length + quote.length - 1 } },
+          slices: { 0: { start: prefix.length, count: Array.from(quote).length } },
+          active: true,
+          selecting: false,
+        }),
+      },
+      pages: {
+        read: async () => ({
+          pageIndex: 0,
+          size: { width: 612, height: 792 },
+          rotation: Rotation.Degree0,
+          extractedText: `${prefix}${quote} after`,
+          textRects: [{
+            content: quote,
+            rect: { origin: { x: 180, y: 150 }, size: { width: 90, height: 40 } },
+          }],
+        }),
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      anchor: {
+        quote,
+        prefix,
+        suffix: ' after',
+        segmentRects: segmentRects.map(({ origin, size }) => ({
+          x: origin.x,
+          y: origin.y,
+          width: size.width,
+          height: size.height,
+        })),
+      },
+    });
+  });
+
   it('passes the memory-only session credential through public document request headers', () => {
     const headers = { Authorization: 'Bearer in-memory-only' };
     expect(

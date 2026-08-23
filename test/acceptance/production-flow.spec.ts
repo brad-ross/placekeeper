@@ -18,6 +18,7 @@ let rotatedPdf = "";
 let referencePdf = "";
 let annotatedReferencePdf = "";
 let searchPdf = "";
+let equationPdf = "";
 
 const PRODUCTION_VIEWER_READY_TIMEOUT_MS = 15_000;
 const REFERENCE_READY_TIMEOUT_MS = 15_000;
@@ -72,12 +73,13 @@ async function dragPdfPointer(
   start: { x: number; y: number },
   end: { x: number; y: number },
   whileDragging?: () => Promise<void>,
+  moveOptions?: { steps?: number },
 ): Promise<void> {
   const box = await pdfPage.boundingBox();
   if (!box) throw new Error("Rendered PDF page has no bounds.");
   await page.mouse.move(box.x + start.x, box.y + start.y);
   await page.mouse.down();
-  await page.mouse.move(box.x + end.x, box.y + end.y);
+  await page.mouse.move(box.x + end.x, box.y + end.y, moveOptions);
   await whileDragging?.();
   await page.mouse.up();
 }
@@ -267,6 +269,7 @@ test.beforeAll(async () => {
   referencePdf = join(root, "reference-navigation.pdf");
   annotatedReferencePdf = join(root, "reference-navigation-annotated.pdf");
   searchPdf = join(root, "pdf-search.pdf");
+  equationPdf = join(root, "equation-selection.pdf");
   await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
   await copyFile(resolve("test/fixtures/pdfs/text-native.pdf"), plainTextPdf);
   await copyFile(resolve("test/fixtures/pdfs/mixed-text-image.pdf"), multiPagePdf);
@@ -277,6 +280,7 @@ test.beforeAll(async () => {
     annotatedReferencePdf,
   );
   await copyFile(resolve("test/fixtures/pdfs/pdf-search.pdf"), searchPdf);
+  await copyFile(resolve("test/fixtures/pdfs/equation-selection.pdf"), equationPdf);
   await copyFile(resolve("test/fixtures/latex/paper.tex"), join(sourceRoot, "paper.tex"));
   host = await PlacekeeperHost.start({
     recoveryRoot: join(root, "recovery"),
@@ -4144,6 +4148,78 @@ test("normalizes a real context gesture on a rotated cropped PDF into crop-relat
   await expect(page.locator(
     `[data-owned-mark="pageNote"][data-review-id="${note!.id}"]`,
   )).toHaveCount(1);
+  expect(browserErrors).toEqual([]);
+});
+
+test("anchors highlight and delete annotations across inline and display equations", async ({ page }) => {
+  const launched = await openFreshProductionFixture(
+    page,
+    equationPdf,
+    "Fresh equation-selection production launch failed",
+  );
+  const browserErrors = collectBrowserErrors(page);
+  await chooseFreshCopyDestination(page);
+
+  const pageCanvas = page.locator("[data-page-index='0']").first();
+  await waitForRenderedPageImage(pageCanvas);
+  await dragPdfPointer(
+    page,
+    pageCanvas,
+    { x: 72, y: 98 },
+    { x: 360, y: 98 },
+    undefined,
+    { steps: 8 },
+  );
+
+  let selectionActions = page.getByRole("toolbar", { name: "Selection review actions" });
+  await expect(selectionActions).toBeVisible();
+  await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
+  await selectionActions.getByRole("button", { name: "Highlight", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Highlight Comment" })).toBeVisible();
+  await page.getByRole("button", { name: "Keep", exact: true }).click();
+  await expect(page.locator("[data-owned-mark='highlight']")).toHaveCount(3);
+
+  await dragPdfPointer(
+    page,
+    pageCanvas,
+    { x: 190, y: 168 },
+    { x: 330, y: 168 },
+    undefined,
+    { steps: 8 },
+  );
+  selectionActions = page.getByRole("toolbar", { name: "Selection review actions" });
+  await expect(selectionActions).toBeVisible();
+  await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
+  await selectionActions.getByRole("button", { name: "Delete", exact: true }).click();
+
+  await expect(page.locator("[data-review-item]")).toHaveCount(2);
+  await expect.poll(() => page.locator("[data-owned-mark='delete']").count()).toBeGreaterThan(1);
+  const state = host.broker.state(launched.sessionId);
+  expect(state?.items).toHaveLength(2);
+  expect(state?.items[0]).toMatchObject({
+    kind: "highlight",
+    pageIndex: 0,
+    payload: { reliable: true },
+  });
+  expect(state?.items[1]).toMatchObject({
+    kind: "delete",
+    pageIndex: 0,
+    payload: { reliable: true },
+  });
+  const inlineQuote = state?.items[0]?.payload.quote;
+  const displayQuote = state?.items[1]?.payload.quote;
+  const inlineSegments = state?.items[0]?.payload.segmentRects;
+  const displaySegments = state?.items[1]?.payload.segmentRects;
+  if (
+    typeof inlineQuote !== "string" ||
+    typeof displayQuote !== "string" ||
+    !Array.isArray(inlineSegments) ||
+    !Array.isArray(displaySegments)
+  ) throw new Error("Equation selection anchors are incomplete.");
+  expect(inlineQuote).toContain("distance dij remains");
+  expect(displayQuote.replace(/\s+/gu, "")).toContain("tk|ij=ν-1k·d");
+  expect(inlineSegments).toHaveLength(3);
+  expect(displaySegments.length).toBeGreaterThan(1);
   expect(browserErrors).toEqual([]);
 });
 
