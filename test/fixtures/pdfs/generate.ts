@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
@@ -13,6 +14,10 @@ import {
   degrees,
   rgb,
 } from 'pdf-lib';
+
+import { projectReviewItem } from '../../../packages/core/src/annotation-projection.js';
+import type { ReviewItem } from '../../../packages/core/src/review-model.js';
+import { createSelectedPdfWriter } from '../../../packages/pdf-backends/src/selected-writer.js';
 
 const outputDirectory = resolve('test/fixtures/pdfs');
 const encryptedNoAnnotationBase64 =
@@ -490,6 +495,33 @@ async function referenceNavigationPdf() {
   return document.save({ useObjectStreams: false });
 }
 
+async function annotatedReferenceNavigationPdf(sourcePdf: Uint8Array): Promise<Uint8Array> {
+  const timestamp = '2026-08-23T12:00:00.000Z';
+  const item: ReviewItem = {
+    id: '51000000-0000-4000-8000-000000000051',
+    kind: 'delete',
+    pageIndex: 0,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    payload: {
+      quote: 'Reference navigation fixture',
+      prefix: '',
+      suffix: ' — page 1',
+      rect: { x: 72, y: 46, width: 214, height: 18 },
+      segmentRects: [{ x: 72, y: 46, width: 214, height: 18 }],
+      reliable: true,
+    },
+  };
+  const writer = await createSelectedPdfWriter();
+  const written = await writer.write({
+    sourcePdf,
+    sourceSha256: createHash('sha256').update(sourcePdf).digest('hex'),
+    revision: 1,
+    annotations: [projectReviewItem(item)],
+  });
+  return written.pdfBytes;
+}
+
 async function preservationCorpusPdf() {
   const document = await PDFDocument.load(await textPdf());
   const page = document.getPage(0);
@@ -593,6 +625,7 @@ async function certifiedPdf() {
 
 await mkdir(outputDirectory, { recursive: true });
 await mkdir(resolve('test/fixtures/pdfium'), { recursive: true });
+const referenceNavigation = referenceNavigationPdf();
 await Promise.all([
   writeFile(
     resolve('test/fixtures/pdfium/pdfium.wasm'),
@@ -609,7 +642,11 @@ await Promise.all([
   writeFixture('rotation-180-crop.pdf', await textPdf({ rotation: 180, crop: true })),
   writeFixture('rotation-270-crop.pdf', await textPdf({ rotation: 270, crop: true })),
   writeFixture('hostile-actions.pdf', await hostileActionsPdf()),
-  writeFixture('reference-navigation.pdf', await referenceNavigationPdf()),
+  writeFixture('reference-navigation.pdf', await referenceNavigation),
+  writeFixture(
+    'reference-navigation-annotated.pdf',
+    await annotatedReferenceNavigationPdf(await referenceNavigation),
+  ),
   writeFixture('preservation-corpus.pdf', await preservationCorpusPdf()),
   writeFixture(
     'encrypted-no-annotation.pdf',

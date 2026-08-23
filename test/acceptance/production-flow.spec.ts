@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { access, copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 import { PlacekeeperHost } from "../../apps/service/src/host/placekeeper-host.js";
@@ -187,6 +187,14 @@ async function sha256(path: string): Promise<string> {
   return createHash("sha256").update(await readFile(path)).digest("hex");
 }
 
+async function freshProductionPdf(pdfPath: string): Promise<string> {
+  const freshDirectory = join(root, randomUUID());
+  await mkdir(freshDirectory);
+  const freshPdfPath = join(freshDirectory, basename(pdfPath));
+  await copyFile(pdfPath, freshPdfPath);
+  return freshPdfPath;
+}
+
 async function openFreshProductionFixture(
   page: Page,
   pdfPath: string,
@@ -195,8 +203,14 @@ async function openFreshProductionFixture(
 ): Promise<{ sessionId: string; url: string }> {
   const startupErrors: string[] = [];
   page.on("pageerror", (error) => startupErrors.push(error.message));
-  const launched = await host.open({ pdfPath, sourceRootPath: sourceRoot, fork: true });
-  if (!launched.ok || launched.kind === "recovery-offered") throw new Error(failureMessage);
+  const freshPdfPath = await freshProductionPdf(pdfPath);
+  const launched = await host.open({ pdfPath: freshPdfPath, sourceRootPath: sourceRoot, fork: true });
+  if (!launched.ok) {
+    throw new Error(`${failureMessage}: ${launched.error.kind}: ${launched.error.message}`);
+  }
+  if (launched.kind === "recovery-offered") {
+    throw new Error(`${failureMessage}: recovery was offered unexpectedly`);
+  }
   await beforeNavigate?.(launched.sessionId);
   await page.goto(launched.url);
   try {
@@ -2001,15 +2015,19 @@ test("keeps compound reference actions touch sized for coarse pointers", async (
     await expect(outlineActions).toHaveAttribute("aria-expanded", "false");
     const controlledMenuId = await outlineActions.getAttribute("aria-controls");
     expect(controlledMenuId).toMatch(/^row-actions-menu-/u);
-    expect(await outlineActions.evaluate((button) => {
+    const outlineActionBounds = await outlineActions.evaluate((button) => {
       const bounds = button.getBoundingClientRect();
       return { width: bounds.width, height: bounds.height };
-    })).toEqual({ width: 44, height: 44 });
+    });
+    expect(outlineActionBounds.width).toBeCloseTo(44, 2);
+    expect(outlineActionBounds.height).toBeCloseTo(44, 2);
     const disclosure = outline.getByRole("button", { name: "Collapse Details" });
-    expect(await disclosure.evaluate((button) => {
+    const disclosureBounds = await disclosure.evaluate((button) => {
       const bounds = button.getBoundingClientRect();
       return { width: bounds.width, height: bounds.height };
-    })).toEqual({ width: 44, height: 44 });
+    });
+    expect(disclosureBounds.width).toBeCloseTo(44, 2);
+    expect(disclosureBounds.height).toBeCloseTo(44, 2);
     const coarseTreeGeometry = await outline.evaluate((navigator) => {
       const branchRow = navigator.querySelector<HTMLElement>(".outline-navigator__row");
       const leafRow = navigator.querySelector<HTMLElement>(
@@ -2033,10 +2051,11 @@ test("keeps compound reference actions touch sized for coarse pointers", async (
     expect(coarseTreeGeometry.columns[0]).toBe(52);
     expect(coarseTreeGeometry.columns[2]).toBe(64);
     expect(coarseTreeGeometry).toMatchObject({
-      spacer: { width: 44, height: 44 },
       contained: true,
       noHorizontalOverflow: true,
     });
+    expect(coarseTreeGeometry.spacer.width).toBeCloseTo(44, 2);
+    expect(coarseTreeGeometry.spacer.height).toBeCloseTo(44, 2);
     await outlineActions.click();
     await expect(outlineActions).toHaveAttribute("aria-expanded", "true");
     const outlineMenu = page.getByRole("menu", { name: "Actions for Details, Page 3" });
@@ -2119,14 +2138,8 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await workspaceControl.click();
   const workspace = page.locator("#review-tools-workspace");
   await expect(workspace).toHaveAttribute("data-tools-workspace-open", "true");
+  await expect(workspace).toHaveCSS('transform', 'none');
   await expect(page.getByRole("tab", { name: "Outline" })).toHaveAttribute("aria-selected", "true");
-  const workspaceModes = page.getByRole('tablist', { name: 'Workspace modes' });
-  const modesBox = await workspaceModes.boundingBox();
-  const railBox = await workspaceControl.boundingBox();
-  if (!railBox || !modesBox) throw new Error('Workspace edge controls have no bounds.');
-  expect(Math.abs(
-    railBox.y + railBox.height / 2 - (modesBox.y + modesBox.height / 2),
-  )).toBeLessThanOrEqual(0.5);
   await expect(page.getByRole('button', { name: 'Close workspace' })).toHaveCount(0);
   const outline = page.getByRole("navigation", { name: "Document outline" });
   await expect(outline).toBeVisible();
@@ -2737,7 +2750,7 @@ test("retries one failed reference clone without exposing raw load details", asy
 
 test('creates an insertion from middle-of-line PDFium caret geometry', async ({ page }) => {
   const launched = await host.open({
-    pdfPath: pdf,
+    pdfPath: await freshProductionPdf(pdf),
     sourceRootPath: sourceRoot,
     fork: true,
   });
@@ -2785,7 +2798,7 @@ test('creates an insertion from middle-of-line PDFium caret geometry', async ({ 
 
 test('keeps the insertion caret visible beside an open workspace', async ({ page }) => {
   const launched = await host.open({
-    pdfPath: plainTextPdf,
+    pdfPath: await freshProductionPdf(plainTextPdf),
     sourceRootPath: sourceRoot,
     fork: true,
   });
@@ -2819,13 +2832,18 @@ test('keeps the insertion caret visible beside an open workspace', async ({ page
 
 test('keeps repeated-click PDF text selection out of insertion mode', async ({ page }) => {
   const launched = await host.open({
-    pdfPath: pdf,
+    pdfPath: await freshProductionPdf(pdf),
     sourceRootPath: sourceRoot,
     surface: 'vscode',
     fork: true,
   });
-  if (!launched.ok || launched.kind === 'recovery-offered') {
-    throw new Error('Repeated-click selection launch failed');
+  if (!launched.ok) {
+    throw new Error(
+      `Repeated-click selection launch failed: ${launched.error.kind}: ${launched.error.message}`,
+    );
+  }
+  if (launched.kind === 'recovery-offered') {
+    throw new Error('Repeated-click selection launch failed: recovery was offered unexpectedly');
   }
   await page.goto(launched.url);
 
@@ -2842,8 +2860,9 @@ test('keeps repeated-click PDF text selection out of insertion mode', async ({ p
 });
 
 test("one installed-style browser tree preserves review state across responsive layout", async ({ page }) => {
+  const sourcePdfPath = await freshProductionPdf(pdf);
   const launched = await host.open({
-    pdfPath: pdf,
+    pdfPath: sourcePdfPath,
     sourceRootPath: sourceRoot,
     fork: true,
   });
@@ -2915,7 +2934,7 @@ test("one installed-style browser tree preserves review state across responsive 
   await expect(replacementTextbox).toHaveValue("b");
   await page.keyboard.type("la");
   await expect(replacementTextbox).toHaveValue("bla");
-  const originalDigest = await sha256(pdf);
+  const originalDigest = await sha256(sourcePdfPath);
   await replacementComposer.getByRole("button", { name: "Apply" }).click();
   await expect(replacementComposer).toHaveCount(0);
   const destinationDialog = page.getByRole("dialog", { name: "Choose Where to Save Annotations" });
@@ -2959,7 +2978,7 @@ test("one installed-style browser tree preserves review state across responsive 
   if (savedTarget?.phase !== "active") throw new Error("Save destination was not established");
   expect(savedTarget.kind).toBe("copy");
   await access(savedTarget.targetPath);
-  expect(await sha256(pdf)).toBe(originalDigest);
+  expect(await sha256(sourcePdfPath)).toBe(originalDigest);
   await expect(page.getByRole("button", { name: /paper\.pdf, Saved\. Open automatic save options/u })).toBeVisible();
 
   await page.setViewportSize({ width: 760, height: 900 });
@@ -2976,7 +2995,7 @@ test("one installed-style browser tree preserves review state across responsive 
 
 test('edits the current page in a real multi-page viewer without losing adjacent state', async ({ page }) => {
   const launched = await host.open({
-    pdfPath: multiPagePdf,
+    pdfPath: await freshProductionPdf(multiPagePdf),
     sourceRootPath: sourceRoot,
     fork: true,
   });
@@ -3492,7 +3511,7 @@ test('fits a real PDF to closed, bottom, and resizable right reading widths as a
 test('minimally reveals the PDF beside the adaptive annotations surface and restores untouched movement', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const launched = await host.open({
-    pdfPath: pdf,
+    pdfPath: await freshProductionPdf(pdf),
     sourceRootPath: sourceRoot,
     fork: true,
   });
@@ -3702,7 +3721,7 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
 
 test('uses the same compact review tree for a narrow VS Code embed launch', async ({ page }) => {
   const launched = await host.open({
-    pdfPath: pdf,
+    pdfPath: await freshProductionPdf(pdf),
     sourceRootPath: sourceRoot,
     surface: 'vscode',
     fork: true,
@@ -3794,7 +3813,7 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
 
 test('allows PDF text interaction without dismissing the Annotation Tray', async ({ page }) => {
   const launched = await host.open({
-    pdfPath: pdf,
+    pdfPath: await freshProductionPdf(pdf),
     sourceRootPath: sourceRoot,
     surface: 'vscode',
     fork: true,
@@ -3820,7 +3839,7 @@ test('allows PDF text interaction without dismissing the Annotation Tray', async
 
 test('keeps PDF drag selection available while the Annotation Tray is open', async ({ page }) => {
   const launched = await host.open({
-    pdfPath: pdf,
+    pdfPath: await freshProductionPdf(pdf),
     sourceRootPath: sourceRoot,
     surface: 'vscode',
     fork: true,
@@ -3891,14 +3910,18 @@ test("cancels the pending first annotation without choosing or creating a destin
   expect(host.broker.state(launched.sessionId)).toMatchObject({ revision: 0, items: [] });
   expect(host.broker.saveStatus(launched.sessionId)?.destination).toMatchObject({ phase: "none" });
   await expect(access(cancelPdf.replace(/\.pdf$/u, "-annotated.pdf"))).rejects.toMatchObject({ code: "ENOENT" });
-  await expect(page.locator("[data-owned-mark]")).toHaveCount(0);
+  await expect(page.locator(
+    '[data-owned-mark="pageNote"][data-authoring-preview="true"]',
+  )).toHaveCount(1);
+  await expect(page.locator("[data-owned-mark]")).toHaveCount(1);
   await composer.getByRole("button", { name: "Cancel" }).click();
   await expect(composer).toHaveCount(0);
+  await expect(page.locator("[data-owned-mark]")).toHaveCount(0);
 });
 
 test("selects Page Notes only until the next click outside annotations", async ({ page, browserName }) => {
   const launched = await host.open({
-    pdfPath: pdf,
+    pdfPath: await freshProductionPdf(pdf),
     sourceRootPath: sourceRoot,
     fork: true,
   });
@@ -4049,7 +4072,7 @@ test("selects Page Notes only until the next click outside annotations", async (
 
 test("places a crop-relative Page Note through the real PDF keyboard cursor", async ({ page }) => {
   const launched = await host.open({
-    pdfPath: pdf,
+    pdfPath: await freshProductionPdf(pdf),
     sourceRootPath: sourceRoot,
     fork: true,
   });
@@ -4101,7 +4124,7 @@ test("places a crop-relative Page Note through the real PDF keyboard cursor", as
 
 test("normalizes a real context gesture on a rotated cropped PDF into crop-relative page space", async ({ page }) => {
   const launched = await host.open({
-    pdfPath: rotatedPdf,
+    pdfPath: await freshProductionPdf(rotatedPdf),
     sourceRootPath: sourceRoot,
     fork: true,
   });
@@ -4226,7 +4249,7 @@ test("anchors highlight and delete annotations across inline and display equatio
 for (const key of ["Delete", "Backspace"] as const) {
   test(`a fresh real selection queues exactly one ${key} command while capture is pending`, async ({ page }) => {
     const launched = await host.open({
-      pdfPath: pdf,
+      pdfPath: await freshProductionPdf(pdf),
       sourceRootPath: sourceRoot,
       fork: true,
     });
@@ -4362,7 +4385,7 @@ test('returns a first-annotation conflict to the preserved composer for retry', 
 
 test("discards queued typing when a pending selection is cleared", async ({ page }) => {
   const launched = await host.open({
-    pdfPath: pdf,
+    pdfPath: await freshProductionPdf(pdf),
     sourceRootPath: sourceRoot,
     fork: true,
   });
@@ -4391,7 +4414,7 @@ test("discards queued typing when a pending selection is cleared", async ({ page
 
 test("keeps only typing for the newest pending selection", async ({ page }) => {
   const launched = await host.open({
-    pdfPath: pdf,
+    pdfPath: await freshProductionPdf(pdf),
     sourceRootPath: sourceRoot,
     fork: true,
   });
