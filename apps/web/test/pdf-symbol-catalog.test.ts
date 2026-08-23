@@ -111,6 +111,95 @@ describe('PDF symbol catalog', () => {
       .toEqual(['φ', 'ϕ']);
   });
 
+  it.each([
+    ['\\beta', 'β ϐ', ['β', 'ϐ']],
+    ['\\epsilon', 'ε ϵ', ['ε', 'ϵ']],
+    ['\\theta', 'θ ϑ', ['θ', 'ϑ']],
+    ['\\kappa', 'κ ϰ', ['κ', 'ϰ']],
+    ['\\rho', 'ρ ϱ', ['ρ', 'ϱ']],
+    ['\\phi', 'φ ϕ', ['φ', 'ϕ']],
+    ['\\pi', 'π ϖ', ['π', 'ϖ']],
+    ['\\Theta', 'Θ ϴ', ['Θ', 'ϴ']],
+    ['\\Upsilon', 'Υ ϒ', ['Υ', 'ϒ']],
+    ['\\mu', 'μ µ', ['µ', 'μ']],
+  ] as const)('expands generic Greek-family query %s across detected variants', (
+    query,
+    documentText,
+    expectedGlyphs,
+  ) => {
+    expect(resolveDetectedSymbolQueries(query, detected(documentText)).map(({ glyph }) => glyph))
+      .toEqual(expectedGlyphs);
+  });
+
+  it('expands a canonical query to detected styled members but keeps styled aliases narrow', () => {
+    const ids = detected('β 𝛃');
+
+    expect(resolveDetectedSymbolQueries('\\beta', ids).map(({ glyph }) => glyph))
+      .toEqual(['β', '𝛃']);
+    expect(resolveDetectedSymbolQueries('beta', ids).map(({ glyph }) => glyph))
+      .toEqual(['β', '𝛃']);
+    expect(resolveDetectedSymbolQueries('\\mbfbeta', ids).map(({ glyph }) => glyph))
+      .toEqual(['𝛃']);
+  });
+
+  it('keeps epsilon aliases inside the Greek family and leaves IPA open e independently searchable', () => {
+    const ids = detected('ε ϵ 𝛆 𝛜 ɛ');
+    const greekFamily = ['ε', 'ϵ', '𝛆', '𝛜'];
+
+    expect(resolveDetectedSymbolQueries('\\epsilon', ids).map(({ glyph }) => glyph))
+      .toEqual(greekFamily);
+    expect(resolveDetectedSymbolQueries('\\varepsilon', ids).map(({ glyph }) => glyph))
+      .toEqual(greekFamily);
+    expect(resolveDetectedSymbolQueries('varepsilon', ids).map(({ glyph }) => glyph))
+      .toEqual(greekFamily);
+    expect(resolveDetectedSymbolQueries('\\mbfvarepsilon', ids).map(({ glyph }) => glyph))
+      .toEqual(['𝛆']);
+    expect(resolveDetectedSymbolQueries('latin small letter open e', ids).map(({ glyph }) => glyph))
+      .toEqual(['ɛ']);
+  });
+
+  it('keeps final sigma separate while expanding each sigma family to its styled members', () => {
+    const ids = detected('ς σ 𝛓 𝛔');
+
+    expect(resolveDetectedSymbolQueries('\\sigma', ids).map(({ glyph }) => glyph))
+      .toEqual(['σ', '𝛔']);
+    expect(resolveDetectedSymbolQueries('\\varsigma', ids).map(({ glyph }) => glyph))
+      .toEqual(['ς', '𝛓']);
+    expect(resolveDetectedSymbolQueries('\\mbfvarsigma', ids).map(({ glyph }) => glyph))
+      .toEqual(['𝛓']);
+  });
+
+  it('does not broaden aliases across dangerous mathematical lookalikes', () => {
+    const ids = detected('- − | ∣ ⏐ ∅ ⌀ ~ ˜ ∼ × ∗ · ⋅');
+    const cases = [
+      ['minus', ['−']],
+      ['\\vert', ['|']],
+      ['\\mid', ['∣']],
+      ['vertical line extension', ['⏐']],
+      ['\\varnothing', ['∅']],
+      ['\\diameter', ['⌀']],
+      ['\\textasciitilde', ['~']],
+      ['small tilde', ['˜']],
+      ['\\sim', ['∼']],
+      ['\\times', ['×']],
+      ['\\ast', ['∗']],
+      ['\\cdot', ['·', '⋅']],
+    ] as const;
+
+    for (const [query, expectedGlyphs] of cases) {
+      expect(resolveDetectedSymbolQueries(query, ids).map(({ glyph }) => glyph), query)
+        .toEqual(expectedGlyphs);
+    }
+  });
+
+  it('preserves intentional command exclusions from generated family expansion', () => {
+    const ids = detected('∈ ε ϵ 𝛆 ∂ 𝛛 ı 𝒤');
+
+    expect(resolveDetectedSymbolQueries('\\in', ids).map(({ glyph }) => glyph)).toEqual(['∈']);
+    expect(resolveDetectedSymbolQueries('\\partial', ids).map(({ glyph }) => glyph)).toEqual(['∂']);
+    expect(resolveDetectedSymbolQueries('\\imath', ids).map(({ glyph }) => glyph)).toEqual(['ı']);
+  });
+
   it('does not rewrite ASCII hyphen or invent a command for U+23D0', () => {
     const ids = detected('- − ⏐ |');
 

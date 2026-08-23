@@ -14,7 +14,11 @@ export interface PdfSymbolSuggestion {
   readonly names: readonly string[];
 }
 
-const RECORDS: readonly PdfSymbolSuggestion[] = GENERATED_PDF_SYMBOL_CATALOG.map(([
+interface PdfSymbolRecord extends PdfSymbolSuggestion {
+  readonly semanticFamilyCodePoints: readonly number[];
+}
+
+const RECORDS: readonly PdfSymbolRecord[] = GENERATED_PDF_SYMBOL_CATALOG.map(([
   codePoint,
   glyph,
   name,
@@ -22,6 +26,7 @@ const RECORDS: readonly PdfSymbolSuggestion[] = GENERATED_PDF_SYMBOL_CATALOG.map
   commands,
   entities,
   names,
+  semanticFamilyCodePoints,
 ], recordId) => ({
   recordId,
   codePoint,
@@ -31,9 +36,11 @@ const RECORDS: readonly PdfSymbolSuggestion[] = GENERATED_PDF_SYMBOL_CATALOG.map
   commands,
   entities,
   names,
+  semanticFamilyCodePoints,
 }));
 
 const GLYPH_INDEX = new Map<string, PdfSymbolRecordId>();
+const CODE_POINT_INDEX = new Map<number, PdfSymbolRecordId>();
 const COMMAND_INDEX = new Map<string, PdfSymbolRecordId[]>();
 const ENTITY_INDEX = new Map<string, PdfSymbolRecordId[]>();
 const NAME_INDEX = new Map<string, PdfSymbolRecordId[]>();
@@ -57,6 +64,7 @@ function normalizedNaturalName(value: string): string {
 
 for (const record of RECORDS) {
   GLYPH_INDEX.set(record.glyph, record.recordId);
+  CODE_POINT_INDEX.set(record.codePoint, record.recordId);
   for (const command of record.commands) addIndexEntry(COMMAND_INDEX, command, record.recordId);
   for (const entity of record.entities) addIndexEntry(ENTITY_INDEX, entity, record.recordId);
   for (const name of [record.name, ...record.names]) {
@@ -116,7 +124,21 @@ export function resolveDetectedSymbolQueries(
   query: string,
   detectedRecordIds: ReadonlySet<PdfSymbolRecordId>,
 ): PdfSymbolSuggestion[] {
-  return aliasCandidateIds(query)
+  const expandedRecordIds = new Set<PdfSymbolRecordId>();
+  for (const recordId of aliasCandidateIds(query)) {
+    const record = RECORDS[recordId];
+    if (!record) continue;
+    if (record.semanticFamilyCodePoints.length === 0) {
+      expandedRecordIds.add(recordId);
+      continue;
+    }
+    for (const codePoint of record.semanticFamilyCodePoints) {
+      const familyRecordId = CODE_POINT_INDEX.get(codePoint);
+      if (familyRecordId !== undefined) expandedRecordIds.add(familyRecordId);
+    }
+  }
+  return [...expandedRecordIds]
+    .sort((left, right) => left - right)
     .filter((recordId) => detectedRecordIds.has(recordId))
     .flatMap((recordId) => {
       const record = RECORDS[recordId];

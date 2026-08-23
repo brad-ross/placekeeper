@@ -366,6 +366,20 @@ describe('PDF search controller', () => {
       .toEqual(['φ', 'ϕ']);
   });
 
+  it('searches every detected Greek epsilon family member without matching IPA open e', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['ε ϵ 𝛆 𝛜 ɛ']),
+    });
+
+    const epsilon = await controller.search('\\varepsilon');
+
+    expect(epsilon.groups[0]?.results.map(({ matchedForm }) => matchedForm))
+      .toEqual(['ε', 'ϵ', '𝛆', '𝛜']);
+    expect(epsilon.groups[0]?.results.map(({ matchedForm }) => matchedForm))
+      .not.toContain('ɛ');
+  });
+
   it('keeps ASCII hyphen and Unicode minus searches code-point exact', async () => {
     const controller = createPdfSearchController({
       documentGeneration: 1,
@@ -377,6 +391,19 @@ describe('PDF search controller', () => {
 
     const minus = await controller.search('minus');
     expect(minus.groups[0]?.results.map(({ matchedForm }) => matchedForm)).toEqual(['−']);
+  });
+
+  it('keeps dangerous lookalike literals code-point exact', async () => {
+    const lookalikes = ['-', '−', '|', '∣', '⏐', '∅', '⌀', '~', '˜', '∼', '×', '∗', '·', '⋅'];
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader([lookalikes.join(' ')]),
+    });
+
+    for (const glyph of lookalikes) {
+      expect((await controller.search(glyph)).groups[0]?.results.map(({ matchedForm }) => matchedForm))
+        .toEqual([glyph]);
+    }
   });
 
   it('keeps canonically equivalent-looking symbols code-point exact', async () => {
