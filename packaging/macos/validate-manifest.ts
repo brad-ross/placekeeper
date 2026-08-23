@@ -19,14 +19,14 @@ export const CATALOG_DISTRIBUTION_BASELINE = {
     normalizedName: 4_724,
   },
   artifactBytes: {
-    audit: 4_982_952,
-    runtime: 388_237,
-    report: 352_169,
+    audit: 5_028_567,
+    runtime: 400_389,
+    report: 342_810,
   },
   artifactSha256: {
-    audit: "8c8f9ae58936d1413db73f9e39e53ba7b7efa99c0528c9a3bd67f88ed18706c4",
-    runtime: "e68aabd29edbfcb3f7acc4756f72b6a78264457243a594e3a789b7f1ff621273",
-    report: "6f9e427ffebd69810f8dc15fc30f3950d263fc41c841bc1d7f747d4d9fef7f52",
+    audit: "0f2e10379777aa8e6da96b2fa4750a61cd4807f5fa2b3b3bbadd3c51d8ead248",
+    runtime: "e7d653177705de1acbba73848edc5071779bbdf76be82d2d92bee62ed4fb2fa0",
+    report: "438773d07bd88e44c375cb25dcb6d31be2344e57ca6a29887feb110e321e9672",
     thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
   },
   productionWebJavaScriptBytes: 2_346_255,
@@ -49,6 +49,7 @@ const FORBIDDEN_CATALOG_RUNTIME_MARKERS = [
   "DerivedName.txt",
   "DerivedGeneralCategory.txt",
   "DerivedCoreProperties.txt",
+  "UnicodeData.txt",
   "unicode.xml",
   "# DerivedName-17.0.0.txt",
   "# DerivedGeneralCategory-17.0.0.txt",
@@ -124,7 +125,7 @@ export async function validateCatalogRuntimeDistribution(
   for (const path of await catalogRuntimeFiles(runtimeRoot)) {
     if (path === noticePath) continue;
     const runtimePath = relative(runtimeRoot, path).replaceAll("\\", "/");
-    if (/(?:^|\/)(?:sources|generated)\/|(?:Derived(?:Name|GeneralCategory|CoreProperties)\.txt|unicode\.xml)(?:\.gz)?$|(?:catalog\.audit|update-report|source-manifest)\.json$|(?:^|\/)pdf-symbol-catalog\/(?:compile|generate|update)\.(?:c?js|mjs|ts)$/iu.test(runtimePath)) {
+    if (/(?:^|\/)(?:sources|generated)\/|(?:Derived(?:Name|GeneralCategory|CoreProperties)\.txt|UnicodeData\.txt|unicode\.xml)(?:\.gz)?$|(?:catalog\.audit|update-report|source-manifest)\.json$|(?:^|\/)pdf-symbol-catalog\/(?:compile|generate|update)\.(?:c?js|mjs|ts)$/iu.test(runtimePath)) {
       throw new Error(`Catalog source or audit artifact must not ship in runtime assets: ${runtimePath}`);
     }
     if (!CATALOG_RUNTIME_TEXT_EXTENSIONS.has(extname(path).toLowerCase())) continue;

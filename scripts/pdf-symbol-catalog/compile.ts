@@ -6,6 +6,7 @@ const SOURCE_KEYS = [
   'derivedName',
   'derivedGeneralCategory',
   'derivedCoreProperties',
+  'unicodeData',
   'w3cUnicode',
 ] as const;
 
@@ -33,7 +34,7 @@ export interface AuditedAliasGroup {
   readonly namespace: AliasNamespace;
   readonly alias: string;
   readonly codePoints: readonly string[];
-  readonly action: 'allow' | 'prefer' | 'drop';
+  readonly action: 'allow' | 'prefer' | 'drop' | 'redirect';
   readonly expectedUpstreamCodePoints?: readonly string[];
   readonly canonicalCodePoint?: string;
   readonly rationale: string;
@@ -132,12 +133,26 @@ export interface CatalogCompileReport {
     readonly w3c: string;
   }[];
   readonly auditedAliasGroups: readonly AuditedAliasGroup[];
+  readonly equivalenceEdges: readonly CatalogEquivalenceEdge[];
   readonly recordCount: number;
   readonly admissionCounts: Readonly<Record<AdmissionReason, number>>;
 }
 
+export interface CatalogEquivalenceEdge {
+  readonly sourceCodePoint: number;
+  readonly targetCodePoint: number;
+  readonly kind: 'canonical' | 'compatibility' | 'font';
+}
+
+export interface CatalogEquivalenceFamily {
+  readonly rootCodePoint: number;
+  readonly queryCodePoints: readonly number[];
+  readonly memberCodePoints: readonly number[];
+}
+
 export interface CompiledSymbolCatalog {
   readonly records: readonly CatalogRecord[];
+  readonly equivalenceFamilies: readonly CatalogEquivalenceFamily[];
   readonly report: CatalogCompileReport;
 }
 
@@ -363,6 +378,198 @@ const parseMathScalars = (source: string): ReadonlySet<number> => {
     }
   }
   return math;
+};
+
+interface UnicodeDecomposition {
+  readonly sourceCodePoint: number;
+  readonly targetCodePoint: number;
+  readonly tag: string | null;
+}
+
+const EXPECTED_COMPATIBILITY_MAPPINGS = new Map<number, number>([
+  [0x00b5, 0x03bc],
+  [0x03d0, 0x03b2],
+  [0x03d1, 0x03b8],
+  [0x03d2, 0x03a5],
+  [0x03d5, 0x03c6],
+  [0x03d6, 0x03c0],
+  [0x03f0, 0x03ba],
+  [0x03f1, 0x03c1],
+  [0x03f4, 0x0398],
+  [0x03f5, 0x03b5],
+]);
+
+const GREEK_EQUIVALENCE_TARGETS = new Set<number>([
+  ...Array.from({ length: 0x03a1 - 0x0391 + 1 }, (_, index) => 0x0391 + index),
+  ...Array.from({ length: 0x03a9 - 0x03a3 + 1 }, (_, index) => 0x03a3 + index),
+  ...Array.from({ length: 0x03c9 - 0x03b1 + 1 }, (_, index) => 0x03b1 + index),
+  ...EXPECTED_COMPATIBILITY_MAPPINGS.keys(),
+]);
+
+const UNICODE_DECOMPOSITION_TAGS = new Set([
+  'font', 'noBreak', 'initial', 'medial', 'final', 'isolated', 'circle', 'super', 'sub',
+  'vertical', 'wide', 'narrow', 'small', 'square', 'fraction', 'compat',
+]);
+
+const parseUnicodeData = (source: string): readonly UnicodeDecomposition[] => {
+  const decompositions: UnicodeDecomposition[] = [];
+  const seen = new Set<number>();
+  const lines = source.split(/\r?\n/u);
+  for (let index = 0; index < lines.length; index += 1) {
+    const value = lines[index];
+    if (value === undefined || value.length === 0) continue;
+    const fields = value.split(';');
+    if (fields.length !== 15) {
+      throw new CatalogCompileError(
+        `UnicodeData line ${index + 1} must contain exactly 15 fields, received ${fields.length}`,
+      );
+    }
+    const codePointText = fields[0] ?? '';
+    if (!/^[0-9A-F]{4,6}$/u.test(codePointText)) {
+      throw new CatalogCompileError(`UnicodeData line ${index + 1} has malformed code point ${codePointText}`);
+    }
+    const codePoint = parseHexCodePoint(codePointText, `UnicodeData line ${index + 1}`);
+    if (seen.has(codePoint)) {
+      throw new CatalogCompileError(`duplicate UnicodeData record for ${formatCodePoint(codePoint)}`);
+    }
+    seen.add(codePoint);
+    if ((fields[1] ?? '').length === 0) {
+      throw new CatalogCompileError(`UnicodeData line ${index + 1} has an empty character name`);
+    }
+
+    const decomposition = fields[5] ?? '';
+    if (decomposition.length === 0) continue;
+    assertScalar(codePoint, `UnicodeData line ${index + 1} decomposition source`);
+    const parts = decomposition.split(' ');
+    if (parts.some((part) => part.length === 0)) {
+      throw new CatalogCompileError(`UnicodeData line ${index + 1} has malformed decomposition spacing`);
+    }
+    let tag: string | null = null;
+    let scalarParts = parts;
+    const first = parts[0] ?? '';
+    if (first.startsWith('<')) {
+      if (!/^<[A-Za-z]+>$/u.test(first)
+        || !UNICODE_DECOMPOSITION_TAGS.has(first.slice(1, -1))) {
+        throw new CatalogCompileError(`UnicodeData line ${index + 1} has malformed decomposition tag ${first}`);
+      }
+      tag = first.slice(1, -1);
+      scalarParts = parts.slice(1);
+    }
+    if (scalarParts.length === 0) {
+      throw new CatalogCompileError(`UnicodeData line ${index + 1} has an empty decomposition mapping`);
+    }
+    const scalars = scalarParts.map((part) => {
+      if (!/^[0-9A-F]{4,6}$/u.test(part)) {
+        throw new CatalogCompileError(`UnicodeData line ${index + 1} has malformed decomposition scalar ${part}`);
+      }
+      return parseHexScalar(part, `UnicodeData line ${index + 1} decomposition`);
+    });
+    if (scalars.length !== 1) continue;
+    const targetCodePoint = scalars[0];
+    if (targetCodePoint === undefined) continue;
+    const expectedCompatibilityTarget = EXPECTED_COMPATIBILITY_MAPPINGS.get(codePoint);
+    if (expectedCompatibilityTarget !== undefined
+      && (tag !== 'compat' || targetCodePoint !== expectedCompatibilityTarget)) {
+      throw new CatalogCompileError(
+        `unexpected compatibility mapping for ${formatCodePoint(codePoint)}: expected ${formatCodePoint(expectedCompatibilityTarget)}, received ${formatCodePoint(targetCodePoint)}`,
+      );
+    }
+    decompositions.push({ sourceCodePoint: codePoint, targetCodePoint, tag });
+  }
+  return decompositions;
+};
+
+const compileEquivalenceFamilies = (
+  decompositions: readonly UnicodeDecomposition[],
+  admitted: ReadonlySet<number>,
+): {
+  readonly edges: readonly CatalogEquivalenceEdge[];
+  readonly families: readonly CatalogEquivalenceFamily[];
+} => {
+  const edges: CatalogEquivalenceEdge[] = [];
+  for (const decomposition of decompositions) {
+    const { sourceCodePoint, targetCodePoint, tag } = decomposition;
+    if (!admitted.has(sourceCodePoint) || !admitted.has(targetCodePoint)) continue;
+    let kind: CatalogEquivalenceEdge['kind'] | null = null;
+    if (tag === null) kind = 'canonical';
+    else if (tag === 'compat'
+      && EXPECTED_COMPATIBILITY_MAPPINGS.get(sourceCodePoint) === targetCodePoint) {
+      kind = 'compatibility';
+    } else if (tag === 'font'
+      && sourceCodePoint >= 0x1d400
+      && sourceCodePoint <= 0x1d7ff
+      && GREEK_EQUIVALENCE_TARGETS.has(targetCodePoint)) {
+      kind = 'font';
+    }
+    if (kind === null) continue;
+    if (sourceCodePoint === targetCodePoint) {
+      throw new CatalogCompileError(
+        `unexpected self-referential UnicodeData mapping for ${formatCodePoint(sourceCodePoint)}`,
+      );
+    }
+    edges.push({ sourceCodePoint, targetCodePoint, kind });
+  }
+  edges.sort((left, right) => left.sourceCodePoint - right.sourceCodePoint
+    || left.targetCodePoint - right.targetCodePoint
+    || byteCompare(left.kind, right.kind));
+  const edgeKeys = new Set<string>();
+  for (const edge of edges) {
+    const key = `${edge.sourceCodePoint}\0${edge.targetCodePoint}\0${edge.kind}`;
+    if (edgeKeys.has(key)) {
+      throw new CatalogCompileError(
+        `duplicate UnicodeData equivalence edge for ${formatCodePoint(edge.sourceCodePoint)}`,
+      );
+    }
+    edgeKeys.add(key);
+  }
+
+  const parent = new Map<number, number>();
+  const find = (value: number): number => {
+    const current = parent.get(value) ?? value;
+    if (current === value) {
+      parent.set(value, value);
+      return value;
+    }
+    const root = find(current);
+    parent.set(value, root);
+    return root;
+  };
+  const union = (left: number, right: number): void => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot === rightRoot) return;
+    parent.set(Math.max(leftRoot, rightRoot), Math.min(leftRoot, rightRoot));
+  };
+  const queryMembers = new Set<number>();
+  for (const edge of edges) {
+    union(edge.sourceCodePoint, edge.targetCodePoint);
+    queryMembers.add(edge.targetCodePoint);
+    if (edge.kind !== 'font') queryMembers.add(edge.sourceCodePoint);
+  }
+  const membersByRoot = new Map<number, number[]>();
+  for (const codePoint of parent.keys()) {
+    const root = find(codePoint);
+    const members = membersByRoot.get(root) ?? [];
+    members.push(codePoint);
+    membersByRoot.set(root, members);
+  }
+  const families = [...membersByRoot.values()].map((members): CatalogEquivalenceFamily => {
+    const memberCodePoints = [...members].sort((left, right) => left - right);
+    const sourceCodePoints = new Set(edges.flatMap((edge) => (
+      memberCodePoints.includes(edge.sourceCodePoint)
+        && memberCodePoints.includes(edge.targetCodePoint)
+        ? [edge.sourceCodePoint]
+        : []
+    )));
+    const semanticRoots = memberCodePoints.filter((codePoint) => !sourceCodePoints.has(codePoint));
+    return {
+      rootCodePoint: semanticRoots[0] ?? memberCodePoints[0] ?? 0,
+      queryCodePoints: memberCodePoints.filter((codePoint) => queryMembers.has(codePoint)),
+      memberCodePoints,
+    };
+  }).filter(({ memberCodePoints }) => memberCodePoints.length > 1)
+    .sort((left, right) => left.rootCodePoint - right.rootCodePoint);
+  return { edges, families };
 };
 
 const findRange = <T>(ranges: readonly ScalarRange<T>[], codePoint: number): ScalarRange<T> | null => {
@@ -641,7 +848,7 @@ const validateOverrides = (
 ): readonly {
   readonly group: AuditedAliasGroup;
   readonly codePoints: readonly number[];
-  readonly action: 'allow' | 'prefer' | 'drop';
+  readonly action: 'allow' | 'prefer' | 'drop' | 'redirect';
   readonly canonicalCodePoint: number | null;
   readonly expectedUpstreamCodePoints: readonly number[] | null;
 }[] => {
@@ -654,7 +861,7 @@ const validateOverrides = (
   const parsed: {
     group: AuditedAliasGroup;
     codePoints: readonly number[];
-    action: 'allow' | 'prefer' | 'drop';
+    action: 'allow' | 'prefer' | 'drop' | 'redirect';
     canonicalCodePoint: number | null;
     expectedUpstreamCodePoints: readonly number[] | null;
   }[] = [];
@@ -700,16 +907,16 @@ const validateOverrides = (
       }
     }
     const action = group.action;
-    if (!['allow', 'prefer', 'drop'].includes(action)) {
+    if (!['allow', 'prefer', 'drop', 'redirect'].includes(action)) {
       throw new CatalogCompileError(`override ${group.alias} has unsupported action ${String(action)}`);
     }
     const canonicalCodePoint = group.canonicalCodePoint === undefined
       ? null
       : parseOverrideCodePoint(group.canonicalCodePoint);
-    if (action === 'prefer') {
+    if (action === 'prefer' || action === 'redirect') {
       if (canonicalCodePoint === null || !codePoints.includes(canonicalCodePoint)) {
         throw new CatalogCompileError(
-          `prefer override ${group.alias} requires a canonicalCodePoint from its codePoints`,
+          `${action} override ${group.alias} requires a canonicalCodePoint from its codePoints`,
         );
       }
     } else if (canonicalCodePoint !== null) {
@@ -718,29 +925,40 @@ const validateOverrides = (
       );
     }
     let expectedUpstreamCodePoints: readonly number[] | null = null;
-    if (action === 'allow') {
+    if (action === 'allow' || action === 'redirect') {
       if (!Array.isArray(group.expectedUpstreamCodePoints)) {
         throw new CatalogCompileError(
-          `allow override ${group.alias} requires expectedUpstreamCodePoints`,
+          `${action} override ${group.alias} requires expectedUpstreamCodePoints`,
         );
       }
       const uniqueExpected = uniqueSorted(group.expectedUpstreamCodePoints);
       if (uniqueExpected.length !== group.expectedUpstreamCodePoints.length) {
         throw new CatalogCompileError(
-          `allow override ${group.alias} contains a duplicate expected upstream code point`,
+          `${action} override ${group.alias} contains a duplicate expected upstream code point`,
         );
       }
       expectedUpstreamCodePoints = uniqueExpected.map(parseOverrideCodePoint)
         .sort((left, right) => left - right);
       if (expectedUpstreamCodePoints.some((codePoint) => !codePoints.includes(codePoint))) {
         throw new CatalogCompileError(
-          `allow override ${group.alias} expectedUpstreamCodePoints must be a subset of codePoints`,
+          `${action} override ${group.alias} expectedUpstreamCodePoints must be a subset of codePoints`,
         );
       }
     } else if (group.expectedUpstreamCodePoints !== undefined) {
       throw new CatalogCompileError(
         `override ${group.alias} may specify expectedUpstreamCodePoints only for action allow`,
       );
+    }
+    if (action === 'redirect') {
+      if (group.namespace !== 'command') {
+        throw new CatalogCompileError(`redirect override ${group.alias} is supported only for commands`);
+      }
+      if (expectedUpstreamCodePoints?.length === 0
+        || (canonicalCodePoint !== null && expectedUpstreamCodePoints?.includes(canonicalCodePoint))) {
+        throw new CatalogCompileError(
+          `redirect override ${group.alias} requires non-target expectedUpstreamCodePoints`,
+        );
+      }
     }
     const aliasKey = group.namespace === 'name' ? normalizedName(group.alias) : group.alias;
     const key = `${group.namespace}\0${aliasKey}`;
@@ -763,7 +981,7 @@ const validateAliasCollisions = (
   audited: readonly {
     readonly group: AuditedAliasGroup;
     readonly codePoints: readonly number[];
-    readonly action: 'allow' | 'prefer' | 'drop';
+    readonly action: 'allow' | 'prefer' | 'drop' | 'redirect';
   }[],
 ): void => {
   const allowed = new Map<string, readonly number[]>();
@@ -810,6 +1028,7 @@ export const compileSymbolCatalog = (input: CatalogCompilerInput): CompiledSymbo
   const nameRanges = parseNameRanges(input.sources.derivedName);
   const categoryRanges = parseCategoryRanges(input.sources.derivedGeneralCategory);
   const mathScalars = parseMathScalars(input.sources.derivedCoreProperties);
+  const unicodeDecompositions = parseUnicodeData(input.sources.unicodeData);
   const w3c = parseW3c(
     input.sources.w3cUnicode,
     input.manifest.unicodeVersion.split('.')[0] ?? input.manifest.unicodeVersion,
@@ -877,6 +1096,10 @@ export const compileSymbolCatalog = (input: CatalogCompilerInput): CompiledSymbo
     });
   }
 
+  const equivalence = compileEquivalenceFamilies(
+    unicodeDecompositions,
+    new Set(recordsByCodePoint.keys()),
+  );
   const audited = validateOverrides(input.overrides, recordsByCodePoint);
   for (const {
     group,
@@ -896,14 +1119,14 @@ export const compileSymbolCatalog = (input: CatalogCompilerInput): CompiledSymbo
       return normalizedName(record.name) === normalizedAlias
         || record.nameAliases.some((alias) => normalizedName(alias) === normalizedAlias);
     });
-    if (action === 'allow' && (expectedUpstreamCodePoints === null
+    if ((action === 'allow' || action === 'redirect') && (expectedUpstreamCodePoints === null
       || baseMatches.length !== expectedUpstreamCodePoints.length
       || baseMatches.some((value, index) => value !== expectedUpstreamCodePoints[index]))) {
       throw new CatalogCompileError(
-        `stale allow override ${group.alias}: upstream mappings no longer match expectedUpstreamCodePoints`,
+        `stale ${action} override ${group.alias}: upstream mappings no longer match expectedUpstreamCodePoints`,
       );
     }
-    if (action !== 'allow' && (baseMatches.length !== codePoints.length
+    if (action !== 'allow' && action !== 'redirect' && (baseMatches.length !== codePoints.length
       || baseMatches.some((value, index) => value !== codePoints[index]))) {
       throw new CatalogCompileError(
         `stale ${action} override ${group.alias}: upstream collision no longer matches audited codePoints`,
@@ -912,13 +1135,14 @@ export const compileSymbolCatalog = (input: CatalogCompilerInput): CompiledSymbo
     for (const codePoint of codePoints) {
       const record = recordsByCodePoint.get(codePoint);
       if (!record) throw new CatalogCompileError(`stale override for ${formatCodePoint(codePoint)}`);
-      const keep = action === 'allow' || (action === 'prefer' && codePoint === canonicalCodePoint);
+      const keep = action === 'allow'
+        || ((action === 'prefer' || action === 'redirect') && codePoint === canonicalCodePoint);
       let commands = [...record.commands];
       let entities = [...record.entities];
       let nameAliases = [...record.nameAliases];
       if (group.namespace === 'command') {
         if (!keep) commands = commands.filter(({ token }) => token !== group.alias);
-        else if (action === 'allow') {
+        else if (action === 'allow' || action === 'redirect') {
           commands.push({ token: group.alias, field: 'override', set: null });
         }
       } else if (group.namespace === 'entity') {
@@ -962,6 +1186,7 @@ export const compileSymbolCatalog = (input: CatalogCompilerInput): CompiledSymbo
 
   return {
     records,
+    equivalenceFamilies: equivalence.families,
     report: {
       sourceHashes,
       excludedMultiScalar: w3c.excludedMultiScalar,
@@ -969,6 +1194,7 @@ export const compileSymbolCatalog = (input: CatalogCompilerInput): CompiledSymbo
       excludedUnassignedW3c: excludedUnassignedW3c.sort((left, right) => left - right),
       crossSourceDisagreements,
       auditedAliasGroups: audited.map(({ group }) => group),
+      equivalenceEdges: equivalence.edges,
       recordCount: records.length,
       admissionCounts,
     },

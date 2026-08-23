@@ -34,8 +34,13 @@ describe('PDF symbol catalog artifact generation', () => {
   it('compiles the complete pinned corpus with no unresolved collisions', async () => {
     const artifacts = await buildCatalogArtifacts({ repositoryRoot });
     const audit = JSON.parse(artifacts.audit) as {
-      records: { codePoint: number }[];
-      report: { recordCount: number };
+      records: { codePoint: number; commands: { token: string }[] }[];
+      equivalenceFamilies: {
+        rootCodePoint: number;
+        queryCodePoints: number[];
+        memberCodePoints: number[];
+      }[];
+      report: { recordCount: number; sourceHashes: Record<string, string> };
     };
     const report = JSON.parse(artifacts.report) as {
       aliasCollisions: {
@@ -51,6 +56,53 @@ describe('PDF symbol catalog artifact generation', () => {
 
     expect(audit.records.length).toBeGreaterThan(1_000);
     expect(audit.report.recordCount).toBe(audit.records.length);
+    expect(audit.report.sourceHashes.unicodeData)
+      .toBe('2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c');
+    expect(audit.equivalenceFamilies).toContainEqual(expect.objectContaining({
+      queryCodePoints: expect.arrayContaining([0x03b5, 0x03f5]),
+      memberCodePoints: expect.arrayContaining([0x03b5, 0x03f5, 0x1d6dc]),
+    }));
+    for (const [base, variant] of [
+      [0x03b2, 0x03d0], [0x03b5, 0x03f5], [0x03b8, 0x03d1],
+      [0x03ba, 0x03f0], [0x03c1, 0x03f1], [0x03c6, 0x03d5],
+      [0x03c0, 0x03d6], [0x0398, 0x03f4], [0x03a5, 0x03d2],
+      [0x00b5, 0x03bc],
+    ] as const) {
+      const family = audit.equivalenceFamilies.find(({ memberCodePoints }) => (
+        memberCodePoints.includes(base)
+      ));
+      expect(family?.queryCodePoints, `${base.toString(16)}/${variant.toString(16)}`)
+        .toEqual(expect.arrayContaining([base, variant]));
+    }
+    const finalSigmaFamily = audit.equivalenceFamilies.find(({ memberCodePoints }) => (
+      memberCodePoints.includes(0x03c2)
+    ));
+    expect(finalSigmaFamily?.memberCodePoints).not.toContain(0x03c3);
+    expect(audit.equivalenceFamilies.find(({ memberCodePoints }) => (
+      memberCodePoints.includes(0x1d6c2)
+    ))?.queryCodePoints).not.toContain(0x1d6c2);
+    for (const [left, right] of [
+      [0x002d, 0x2212], [0x007c, 0x2223], [0x2223, 0x23d0],
+      [0x2205, 0x2300], [0x007e, 0x02dc], [0x02dc, 0x223c],
+      [0x00d7, 0x2217],
+    ] as const) {
+      expect(audit.equivalenceFamilies.some(({ memberCodePoints }) => (
+        memberCodePoints.includes(left) && memberCodePoints.includes(right)
+      )), `${left.toString(16)}/${right.toString(16)}`).toBe(false);
+    }
+    for (const distinctGroup of [
+      [0x007c, 0x2223, 0x23d0],
+      [0x007e, 0x02dc, 0x223c],
+      [0x002a, 0x00d7, 0x2217, 0x22c5],
+    ] as const) {
+      expect(audit.equivalenceFamilies.every(({ memberCodePoints }) => (
+        distinctGroup.filter((codePoint) => memberCodePoints.includes(codePoint)).length <= 1
+      ))).toBe(true);
+    }
+    expect(audit.records.find(({ codePoint }) => codePoint === 0x025b)?.commands)
+      .not.toContainEqual(expect.objectContaining({ token: '\\varepsilon' }));
+    expect(audit.records.find(({ codePoint }) => codePoint === 0x03f5)?.commands)
+      .toContainEqual(expect.objectContaining({ token: '\\varepsilon' }));
     expect(report.aliasCollisions.unresolved).toEqual([]);
     expect(report.aliasCollisions.suppressedNaturalNames).toContainEqual({
       alias: 'legacy uppercase name',
@@ -66,6 +118,7 @@ describe('PDF symbol catalog artifact generation', () => {
     expect(audit.records.some(({ codePoint }) => codePoint === 0x0020)).toBe(false);
     expect(audit.records.some(({ codePoint }) => codePoint === 0x00e9)).toBe(false);
     expect(audit.records.some(({ codePoint }) => codePoint === 0x002f)).toBe(true);
+    expect(artifacts.runtime).toContain('semanticFamilyCodePoints: readonly number[]');
   });
 
   it('emits byte-identical UTF-8 LF artifacts across locale and timezone settings', async () => {

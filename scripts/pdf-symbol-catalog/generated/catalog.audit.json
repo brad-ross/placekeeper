@@ -7495,13 +7495,7 @@
         "w3c-mode",
         "w3c-direct-tex"
       ],
-      "commands": [
-        {
-          "token": "\\varepsilon",
-          "field": "latex",
-          "set": null
-        }
-      ],
+      "commands": [],
       "entities": [],
       "descriptions": [
         "LATIN SMALL LETTER OPEN E"
@@ -7530,7 +7524,23 @@
             }
           ]
         },
-        "overrides": []
+        "overrides": [
+          {
+            "namespace": "command",
+            "alias": "\\varepsilon",
+            "codePoints": [
+              "025B",
+              "03F5"
+            ],
+            "action": "redirect",
+            "expectedUpstreamCodePoints": [
+              "025B"
+            ],
+            "canonicalCodePoint": "03F5",
+            "rationale": "Correct the generic TeX variant-epsilon command to the Greek mathematical symbol while leaving the IPA letter exact-only.",
+            "upstream": "W3C unicode.xml assigns \\varepsilon to U+025B LATIN SMALL LETTER OPEN E; UnicodeData identifies U+03F5 as GREEK LUNATE EPSILON SYMBOL."
+          }
+        ]
       }
     },
     {
@@ -19008,6 +19018,11 @@
           "token": "\\mupepsilon",
           "field": "mathlatex",
           "set": "unicode-math"
+        },
+        {
+          "token": "\\varepsilon",
+          "field": "override",
+          "set": null
         }
       ],
       "entities": [
@@ -19080,7 +19095,23 @@
             }
           ]
         },
-        "overrides": []
+        "overrides": [
+          {
+            "namespace": "command",
+            "alias": "\\varepsilon",
+            "codePoints": [
+              "025B",
+              "03F5"
+            ],
+            "action": "redirect",
+            "expectedUpstreamCodePoints": [
+              "025B"
+            ],
+            "canonicalCodePoint": "03F5",
+            "rationale": "Correct the generic TeX variant-epsilon command to the Greek mathematical symbol while leaving the IPA letter exact-only.",
+            "upstream": "W3C unicode.xml assigns \\varepsilon to U+025B LATIN SMALL LETTER OPEN E; UnicodeData identifies U+03F5 as GREEK LUNATE EPSILON SYMBOL."
+          }
+        ]
       }
     },
     {
@@ -187143,11 +187174,790 @@
       }
     }
   ],
+  "equivalenceFamilies": [
+    {
+      "rootCodePoint": 197,
+      "queryCodePoints": [
+        197,
+        8491
+      ],
+      "memberCodePoints": [
+        197,
+        8491
+      ]
+    },
+    {
+      "rootCodePoint": 913,
+      "queryCodePoints": [
+        913
+      ],
+      "memberCodePoints": [
+        913,
+        120488,
+        120546,
+        120604,
+        120662,
+        120720
+      ]
+    },
+    {
+      "rootCodePoint": 914,
+      "queryCodePoints": [
+        914
+      ],
+      "memberCodePoints": [
+        914,
+        120489,
+        120547,
+        120605,
+        120663,
+        120721
+      ]
+    },
+    {
+      "rootCodePoint": 915,
+      "queryCodePoints": [
+        915
+      ],
+      "memberCodePoints": [
+        915,
+        120490,
+        120548,
+        120606,
+        120664,
+        120722
+      ]
+    },
+    {
+      "rootCodePoint": 916,
+      "queryCodePoints": [
+        916
+      ],
+      "memberCodePoints": [
+        916,
+        120491,
+        120549,
+        120607,
+        120665,
+        120723
+      ]
+    },
+    {
+      "rootCodePoint": 917,
+      "queryCodePoints": [
+        917
+      ],
+      "memberCodePoints": [
+        917,
+        120492,
+        120550,
+        120608,
+        120666,
+        120724
+      ]
+    },
+    {
+      "rootCodePoint": 918,
+      "queryCodePoints": [
+        918
+      ],
+      "memberCodePoints": [
+        918,
+        120493,
+        120551,
+        120609,
+        120667,
+        120725
+      ]
+    },
+    {
+      "rootCodePoint": 919,
+      "queryCodePoints": [
+        919
+      ],
+      "memberCodePoints": [
+        919,
+        120494,
+        120552,
+        120610,
+        120668,
+        120726
+      ]
+    },
+    {
+      "rootCodePoint": 920,
+      "queryCodePoints": [
+        920,
+        1012
+      ],
+      "memberCodePoints": [
+        920,
+        1012,
+        120495,
+        120505,
+        120553,
+        120563,
+        120611,
+        120621,
+        120669,
+        120679,
+        120727,
+        120737
+      ]
+    },
+    {
+      "rootCodePoint": 921,
+      "queryCodePoints": [
+        921
+      ],
+      "memberCodePoints": [
+        921,
+        120496,
+        120554,
+        120612,
+        120670,
+        120728
+      ]
+    },
+    {
+      "rootCodePoint": 922,
+      "queryCodePoints": [
+        922
+      ],
+      "memberCodePoints": [
+        922,
+        120497,
+        120555,
+        120613,
+        120671,
+        120729
+      ]
+    },
+    {
+      "rootCodePoint": 923,
+      "queryCodePoints": [
+        923
+      ],
+      "memberCodePoints": [
+        923,
+        120498,
+        120556,
+        120614,
+        120672,
+        120730
+      ]
+    },
+    {
+      "rootCodePoint": 924,
+      "queryCodePoints": [
+        924
+      ],
+      "memberCodePoints": [
+        924,
+        120499,
+        120557,
+        120615,
+        120673,
+        120731
+      ]
+    },
+    {
+      "rootCodePoint": 925,
+      "queryCodePoints": [
+        925
+      ],
+      "memberCodePoints": [
+        925,
+        120500,
+        120558,
+        120616,
+        120674,
+        120732
+      ]
+    },
+    {
+      "rootCodePoint": 926,
+      "queryCodePoints": [
+        926
+      ],
+      "memberCodePoints": [
+        926,
+        120501,
+        120559,
+        120617,
+        120675,
+        120733
+      ]
+    },
+    {
+      "rootCodePoint": 927,
+      "queryCodePoints": [
+        927
+      ],
+      "memberCodePoints": [
+        927,
+        120502,
+        120560,
+        120618,
+        120676,
+        120734
+      ]
+    },
+    {
+      "rootCodePoint": 928,
+      "queryCodePoints": [
+        928
+      ],
+      "memberCodePoints": [
+        928,
+        120503,
+        120561,
+        120619,
+        120677,
+        120735
+      ]
+    },
+    {
+      "rootCodePoint": 929,
+      "queryCodePoints": [
+        929
+      ],
+      "memberCodePoints": [
+        929,
+        120504,
+        120562,
+        120620,
+        120678,
+        120736
+      ]
+    },
+    {
+      "rootCodePoint": 931,
+      "queryCodePoints": [
+        931
+      ],
+      "memberCodePoints": [
+        931,
+        120506,
+        120564,
+        120622,
+        120680,
+        120738
+      ]
+    },
+    {
+      "rootCodePoint": 932,
+      "queryCodePoints": [
+        932
+      ],
+      "memberCodePoints": [
+        932,
+        120507,
+        120565,
+        120623,
+        120681,
+        120739
+      ]
+    },
+    {
+      "rootCodePoint": 933,
+      "queryCodePoints": [
+        933,
+        978
+      ],
+      "memberCodePoints": [
+        933,
+        978,
+        120508,
+        120566,
+        120624,
+        120682,
+        120740
+      ]
+    },
+    {
+      "rootCodePoint": 934,
+      "queryCodePoints": [
+        934
+      ],
+      "memberCodePoints": [
+        934,
+        120509,
+        120567,
+        120625,
+        120683,
+        120741
+      ]
+    },
+    {
+      "rootCodePoint": 935,
+      "queryCodePoints": [
+        935
+      ],
+      "memberCodePoints": [
+        935,
+        120510,
+        120568,
+        120626,
+        120684,
+        120742
+      ]
+    },
+    {
+      "rootCodePoint": 936,
+      "queryCodePoints": [
+        936
+      ],
+      "memberCodePoints": [
+        936,
+        120511,
+        120569,
+        120627,
+        120685,
+        120743
+      ]
+    },
+    {
+      "rootCodePoint": 937,
+      "queryCodePoints": [
+        937,
+        8486
+      ],
+      "memberCodePoints": [
+        937,
+        8486,
+        120512,
+        120570,
+        120628,
+        120686,
+        120744
+      ]
+    },
+    {
+      "rootCodePoint": 945,
+      "queryCodePoints": [
+        945
+      ],
+      "memberCodePoints": [
+        945,
+        120514,
+        120572,
+        120630,
+        120688,
+        120746
+      ]
+    },
+    {
+      "rootCodePoint": 946,
+      "queryCodePoints": [
+        946,
+        976
+      ],
+      "memberCodePoints": [
+        946,
+        976,
+        120515,
+        120573,
+        120631,
+        120689,
+        120747
+      ]
+    },
+    {
+      "rootCodePoint": 947,
+      "queryCodePoints": [
+        947
+      ],
+      "memberCodePoints": [
+        947,
+        120516,
+        120574,
+        120632,
+        120690,
+        120748
+      ]
+    },
+    {
+      "rootCodePoint": 948,
+      "queryCodePoints": [
+        948
+      ],
+      "memberCodePoints": [
+        948,
+        120517,
+        120575,
+        120633,
+        120691,
+        120749
+      ]
+    },
+    {
+      "rootCodePoint": 949,
+      "queryCodePoints": [
+        949,
+        1013
+      ],
+      "memberCodePoints": [
+        949,
+        1013,
+        120518,
+        120540,
+        120576,
+        120598,
+        120634,
+        120656,
+        120692,
+        120714,
+        120750,
+        120772
+      ]
+    },
+    {
+      "rootCodePoint": 950,
+      "queryCodePoints": [
+        950
+      ],
+      "memberCodePoints": [
+        950,
+        120519,
+        120577,
+        120635,
+        120693,
+        120751
+      ]
+    },
+    {
+      "rootCodePoint": 951,
+      "queryCodePoints": [
+        951
+      ],
+      "memberCodePoints": [
+        951,
+        120520,
+        120578,
+        120636,
+        120694,
+        120752
+      ]
+    },
+    {
+      "rootCodePoint": 952,
+      "queryCodePoints": [
+        952,
+        977
+      ],
+      "memberCodePoints": [
+        952,
+        977,
+        120521,
+        120541,
+        120579,
+        120599,
+        120637,
+        120657,
+        120695,
+        120715,
+        120753,
+        120773
+      ]
+    },
+    {
+      "rootCodePoint": 953,
+      "queryCodePoints": [
+        953
+      ],
+      "memberCodePoints": [
+        953,
+        120522,
+        120580,
+        120638,
+        120696,
+        120754
+      ]
+    },
+    {
+      "rootCodePoint": 954,
+      "queryCodePoints": [
+        954,
+        1008
+      ],
+      "memberCodePoints": [
+        954,
+        1008,
+        120523,
+        120542,
+        120581,
+        120600,
+        120639,
+        120658,
+        120697,
+        120716,
+        120755,
+        120774
+      ]
+    },
+    {
+      "rootCodePoint": 955,
+      "queryCodePoints": [
+        955
+      ],
+      "memberCodePoints": [
+        955,
+        120524,
+        120582,
+        120640,
+        120698,
+        120756
+      ]
+    },
+    {
+      "rootCodePoint": 956,
+      "queryCodePoints": [
+        181,
+        956
+      ],
+      "memberCodePoints": [
+        181,
+        956,
+        120525,
+        120583,
+        120641,
+        120699,
+        120757
+      ]
+    },
+    {
+      "rootCodePoint": 957,
+      "queryCodePoints": [
+        957
+      ],
+      "memberCodePoints": [
+        957,
+        120526,
+        120584,
+        120642,
+        120700,
+        120758
+      ]
+    },
+    {
+      "rootCodePoint": 958,
+      "queryCodePoints": [
+        958
+      ],
+      "memberCodePoints": [
+        958,
+        120527,
+        120585,
+        120643,
+        120701,
+        120759
+      ]
+    },
+    {
+      "rootCodePoint": 959,
+      "queryCodePoints": [
+        959
+      ],
+      "memberCodePoints": [
+        959,
+        120528,
+        120586,
+        120644,
+        120702,
+        120760
+      ]
+    },
+    {
+      "rootCodePoint": 960,
+      "queryCodePoints": [
+        960,
+        982
+      ],
+      "memberCodePoints": [
+        960,
+        982,
+        120529,
+        120545,
+        120587,
+        120603,
+        120645,
+        120661,
+        120703,
+        120719,
+        120761,
+        120777
+      ]
+    },
+    {
+      "rootCodePoint": 961,
+      "queryCodePoints": [
+        961,
+        1009
+      ],
+      "memberCodePoints": [
+        961,
+        1009,
+        120530,
+        120544,
+        120588,
+        120602,
+        120646,
+        120660,
+        120704,
+        120718,
+        120762,
+        120776
+      ]
+    },
+    {
+      "rootCodePoint": 962,
+      "queryCodePoints": [
+        962
+      ],
+      "memberCodePoints": [
+        962,
+        120531,
+        120589,
+        120647,
+        120705,
+        120763
+      ]
+    },
+    {
+      "rootCodePoint": 963,
+      "queryCodePoints": [
+        963
+      ],
+      "memberCodePoints": [
+        963,
+        120532,
+        120590,
+        120648,
+        120706,
+        120764
+      ]
+    },
+    {
+      "rootCodePoint": 964,
+      "queryCodePoints": [
+        964
+      ],
+      "memberCodePoints": [
+        964,
+        120533,
+        120591,
+        120649,
+        120707,
+        120765
+      ]
+    },
+    {
+      "rootCodePoint": 965,
+      "queryCodePoints": [
+        965
+      ],
+      "memberCodePoints": [
+        965,
+        120534,
+        120592,
+        120650,
+        120708,
+        120766
+      ]
+    },
+    {
+      "rootCodePoint": 966,
+      "queryCodePoints": [
+        966,
+        981
+      ],
+      "memberCodePoints": [
+        966,
+        981,
+        120535,
+        120543,
+        120593,
+        120601,
+        120651,
+        120659,
+        120709,
+        120717,
+        120767,
+        120775
+      ]
+    },
+    {
+      "rootCodePoint": 967,
+      "queryCodePoints": [
+        967
+      ],
+      "memberCodePoints": [
+        967,
+        120536,
+        120594,
+        120652,
+        120710,
+        120768
+      ]
+    },
+    {
+      "rootCodePoint": 968,
+      "queryCodePoints": [
+        968
+      ],
+      "memberCodePoints": [
+        968,
+        120537,
+        120595,
+        120653,
+        120711,
+        120769
+      ]
+    },
+    {
+      "rootCodePoint": 969,
+      "queryCodePoints": [
+        969
+      ],
+      "memberCodePoints": [
+        969,
+        120538,
+        120596,
+        120654,
+        120712,
+        120770
+      ]
+    },
+    {
+      "rootCodePoint": 12296,
+      "queryCodePoints": [
+        9001,
+        12296
+      ],
+      "memberCodePoints": [
+        9001,
+        12296
+      ]
+    },
+    {
+      "rootCodePoint": 12297,
+      "queryCodePoints": [
+        9002,
+        12297
+      ],
+      "memberCodePoints": [
+        9002,
+        12297
+      ]
+    }
+  ],
   "report": {
     "sourceHashes": {
       "derivedName": "019758bbe6c756c40fca6d505187ea660c5e195533e2ff2c841963a212c9d369",
       "derivedGeneralCategory": "d62e5bab70ca74f099343f71224fa051cb1fdd61a1ab45c0488c44cfc0b6102e",
       "derivedCoreProperties": "24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08",
+      "unicodeData": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
       "w3cUnicode": "8da3ee6f305ffcdee44a55c2ff36556c93b35c70aa77cb9d8afaa990ae143087"
     },
     "excludedMultiScalar": [
@@ -201352,6 +202162,21 @@
         "upstream": "W3C assigns bare \\u to U+02D8 BREVE and U+0306 COMBINING BREVE although TeX uses it with an argument."
       },
       {
+        "namespace": "command",
+        "alias": "\\varepsilon",
+        "codePoints": [
+          "025B",
+          "03F5"
+        ],
+        "action": "redirect",
+        "expectedUpstreamCodePoints": [
+          "025B"
+        ],
+        "canonicalCodePoint": "03F5",
+        "rationale": "Correct the generic TeX variant-epsilon command to the Greek mathematical symbol while leaving the IPA letter exact-only.",
+        "upstream": "W3C unicode.xml assigns \\varepsilon to U+025B LATIN SMALL LETTER OPEN E; UnicodeData identifies U+03F5 as GREEK LUNATE EPSILON SYMBOL."
+      },
+      {
         "namespace": "entity",
         "alias": "Gt",
         "codePoints": [
@@ -201635,6 +202460,1478 @@
         "expectedUpstreamCodePoints": [],
         "rationale": "Preserve an established Placekeeper search input without changing standards-derived admission.",
         "upstream": "Placekeeper 0.x manual symbol catalog compatibility input."
+      }
+    ],
+    "equivalenceEdges": [
+      {
+        "sourceCodePoint": 181,
+        "targetCodePoint": 956,
+        "kind": "compatibility"
+      },
+      {
+        "sourceCodePoint": 976,
+        "targetCodePoint": 946,
+        "kind": "compatibility"
+      },
+      {
+        "sourceCodePoint": 977,
+        "targetCodePoint": 952,
+        "kind": "compatibility"
+      },
+      {
+        "sourceCodePoint": 978,
+        "targetCodePoint": 933,
+        "kind": "compatibility"
+      },
+      {
+        "sourceCodePoint": 981,
+        "targetCodePoint": 966,
+        "kind": "compatibility"
+      },
+      {
+        "sourceCodePoint": 982,
+        "targetCodePoint": 960,
+        "kind": "compatibility"
+      },
+      {
+        "sourceCodePoint": 1008,
+        "targetCodePoint": 954,
+        "kind": "compatibility"
+      },
+      {
+        "sourceCodePoint": 1009,
+        "targetCodePoint": 961,
+        "kind": "compatibility"
+      },
+      {
+        "sourceCodePoint": 1012,
+        "targetCodePoint": 920,
+        "kind": "compatibility"
+      },
+      {
+        "sourceCodePoint": 1013,
+        "targetCodePoint": 949,
+        "kind": "compatibility"
+      },
+      {
+        "sourceCodePoint": 8486,
+        "targetCodePoint": 937,
+        "kind": "canonical"
+      },
+      {
+        "sourceCodePoint": 8491,
+        "targetCodePoint": 197,
+        "kind": "canonical"
+      },
+      {
+        "sourceCodePoint": 9001,
+        "targetCodePoint": 12296,
+        "kind": "canonical"
+      },
+      {
+        "sourceCodePoint": 9002,
+        "targetCodePoint": 12297,
+        "kind": "canonical"
+      },
+      {
+        "sourceCodePoint": 120488,
+        "targetCodePoint": 913,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120489,
+        "targetCodePoint": 914,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120490,
+        "targetCodePoint": 915,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120491,
+        "targetCodePoint": 916,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120492,
+        "targetCodePoint": 917,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120493,
+        "targetCodePoint": 918,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120494,
+        "targetCodePoint": 919,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120495,
+        "targetCodePoint": 920,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120496,
+        "targetCodePoint": 921,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120497,
+        "targetCodePoint": 922,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120498,
+        "targetCodePoint": 923,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120499,
+        "targetCodePoint": 924,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120500,
+        "targetCodePoint": 925,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120501,
+        "targetCodePoint": 926,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120502,
+        "targetCodePoint": 927,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120503,
+        "targetCodePoint": 928,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120504,
+        "targetCodePoint": 929,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120505,
+        "targetCodePoint": 1012,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120506,
+        "targetCodePoint": 931,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120507,
+        "targetCodePoint": 932,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120508,
+        "targetCodePoint": 933,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120509,
+        "targetCodePoint": 934,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120510,
+        "targetCodePoint": 935,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120511,
+        "targetCodePoint": 936,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120512,
+        "targetCodePoint": 937,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120514,
+        "targetCodePoint": 945,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120515,
+        "targetCodePoint": 946,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120516,
+        "targetCodePoint": 947,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120517,
+        "targetCodePoint": 948,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120518,
+        "targetCodePoint": 949,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120519,
+        "targetCodePoint": 950,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120520,
+        "targetCodePoint": 951,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120521,
+        "targetCodePoint": 952,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120522,
+        "targetCodePoint": 953,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120523,
+        "targetCodePoint": 954,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120524,
+        "targetCodePoint": 955,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120525,
+        "targetCodePoint": 956,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120526,
+        "targetCodePoint": 957,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120527,
+        "targetCodePoint": 958,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120528,
+        "targetCodePoint": 959,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120529,
+        "targetCodePoint": 960,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120530,
+        "targetCodePoint": 961,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120531,
+        "targetCodePoint": 962,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120532,
+        "targetCodePoint": 963,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120533,
+        "targetCodePoint": 964,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120534,
+        "targetCodePoint": 965,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120535,
+        "targetCodePoint": 966,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120536,
+        "targetCodePoint": 967,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120537,
+        "targetCodePoint": 968,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120538,
+        "targetCodePoint": 969,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120540,
+        "targetCodePoint": 1013,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120541,
+        "targetCodePoint": 977,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120542,
+        "targetCodePoint": 1008,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120543,
+        "targetCodePoint": 981,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120544,
+        "targetCodePoint": 1009,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120545,
+        "targetCodePoint": 982,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120546,
+        "targetCodePoint": 913,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120547,
+        "targetCodePoint": 914,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120548,
+        "targetCodePoint": 915,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120549,
+        "targetCodePoint": 916,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120550,
+        "targetCodePoint": 917,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120551,
+        "targetCodePoint": 918,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120552,
+        "targetCodePoint": 919,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120553,
+        "targetCodePoint": 920,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120554,
+        "targetCodePoint": 921,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120555,
+        "targetCodePoint": 922,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120556,
+        "targetCodePoint": 923,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120557,
+        "targetCodePoint": 924,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120558,
+        "targetCodePoint": 925,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120559,
+        "targetCodePoint": 926,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120560,
+        "targetCodePoint": 927,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120561,
+        "targetCodePoint": 928,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120562,
+        "targetCodePoint": 929,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120563,
+        "targetCodePoint": 1012,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120564,
+        "targetCodePoint": 931,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120565,
+        "targetCodePoint": 932,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120566,
+        "targetCodePoint": 933,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120567,
+        "targetCodePoint": 934,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120568,
+        "targetCodePoint": 935,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120569,
+        "targetCodePoint": 936,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120570,
+        "targetCodePoint": 937,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120572,
+        "targetCodePoint": 945,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120573,
+        "targetCodePoint": 946,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120574,
+        "targetCodePoint": 947,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120575,
+        "targetCodePoint": 948,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120576,
+        "targetCodePoint": 949,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120577,
+        "targetCodePoint": 950,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120578,
+        "targetCodePoint": 951,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120579,
+        "targetCodePoint": 952,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120580,
+        "targetCodePoint": 953,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120581,
+        "targetCodePoint": 954,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120582,
+        "targetCodePoint": 955,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120583,
+        "targetCodePoint": 956,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120584,
+        "targetCodePoint": 957,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120585,
+        "targetCodePoint": 958,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120586,
+        "targetCodePoint": 959,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120587,
+        "targetCodePoint": 960,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120588,
+        "targetCodePoint": 961,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120589,
+        "targetCodePoint": 962,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120590,
+        "targetCodePoint": 963,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120591,
+        "targetCodePoint": 964,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120592,
+        "targetCodePoint": 965,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120593,
+        "targetCodePoint": 966,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120594,
+        "targetCodePoint": 967,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120595,
+        "targetCodePoint": 968,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120596,
+        "targetCodePoint": 969,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120598,
+        "targetCodePoint": 1013,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120599,
+        "targetCodePoint": 977,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120600,
+        "targetCodePoint": 1008,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120601,
+        "targetCodePoint": 981,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120602,
+        "targetCodePoint": 1009,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120603,
+        "targetCodePoint": 982,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120604,
+        "targetCodePoint": 913,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120605,
+        "targetCodePoint": 914,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120606,
+        "targetCodePoint": 915,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120607,
+        "targetCodePoint": 916,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120608,
+        "targetCodePoint": 917,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120609,
+        "targetCodePoint": 918,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120610,
+        "targetCodePoint": 919,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120611,
+        "targetCodePoint": 920,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120612,
+        "targetCodePoint": 921,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120613,
+        "targetCodePoint": 922,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120614,
+        "targetCodePoint": 923,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120615,
+        "targetCodePoint": 924,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120616,
+        "targetCodePoint": 925,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120617,
+        "targetCodePoint": 926,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120618,
+        "targetCodePoint": 927,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120619,
+        "targetCodePoint": 928,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120620,
+        "targetCodePoint": 929,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120621,
+        "targetCodePoint": 1012,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120622,
+        "targetCodePoint": 931,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120623,
+        "targetCodePoint": 932,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120624,
+        "targetCodePoint": 933,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120625,
+        "targetCodePoint": 934,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120626,
+        "targetCodePoint": 935,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120627,
+        "targetCodePoint": 936,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120628,
+        "targetCodePoint": 937,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120630,
+        "targetCodePoint": 945,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120631,
+        "targetCodePoint": 946,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120632,
+        "targetCodePoint": 947,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120633,
+        "targetCodePoint": 948,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120634,
+        "targetCodePoint": 949,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120635,
+        "targetCodePoint": 950,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120636,
+        "targetCodePoint": 951,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120637,
+        "targetCodePoint": 952,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120638,
+        "targetCodePoint": 953,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120639,
+        "targetCodePoint": 954,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120640,
+        "targetCodePoint": 955,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120641,
+        "targetCodePoint": 956,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120642,
+        "targetCodePoint": 957,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120643,
+        "targetCodePoint": 958,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120644,
+        "targetCodePoint": 959,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120645,
+        "targetCodePoint": 960,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120646,
+        "targetCodePoint": 961,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120647,
+        "targetCodePoint": 962,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120648,
+        "targetCodePoint": 963,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120649,
+        "targetCodePoint": 964,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120650,
+        "targetCodePoint": 965,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120651,
+        "targetCodePoint": 966,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120652,
+        "targetCodePoint": 967,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120653,
+        "targetCodePoint": 968,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120654,
+        "targetCodePoint": 969,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120656,
+        "targetCodePoint": 1013,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120657,
+        "targetCodePoint": 977,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120658,
+        "targetCodePoint": 1008,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120659,
+        "targetCodePoint": 981,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120660,
+        "targetCodePoint": 1009,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120661,
+        "targetCodePoint": 982,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120662,
+        "targetCodePoint": 913,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120663,
+        "targetCodePoint": 914,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120664,
+        "targetCodePoint": 915,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120665,
+        "targetCodePoint": 916,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120666,
+        "targetCodePoint": 917,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120667,
+        "targetCodePoint": 918,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120668,
+        "targetCodePoint": 919,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120669,
+        "targetCodePoint": 920,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120670,
+        "targetCodePoint": 921,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120671,
+        "targetCodePoint": 922,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120672,
+        "targetCodePoint": 923,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120673,
+        "targetCodePoint": 924,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120674,
+        "targetCodePoint": 925,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120675,
+        "targetCodePoint": 926,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120676,
+        "targetCodePoint": 927,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120677,
+        "targetCodePoint": 928,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120678,
+        "targetCodePoint": 929,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120679,
+        "targetCodePoint": 1012,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120680,
+        "targetCodePoint": 931,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120681,
+        "targetCodePoint": 932,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120682,
+        "targetCodePoint": 933,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120683,
+        "targetCodePoint": 934,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120684,
+        "targetCodePoint": 935,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120685,
+        "targetCodePoint": 936,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120686,
+        "targetCodePoint": 937,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120688,
+        "targetCodePoint": 945,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120689,
+        "targetCodePoint": 946,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120690,
+        "targetCodePoint": 947,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120691,
+        "targetCodePoint": 948,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120692,
+        "targetCodePoint": 949,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120693,
+        "targetCodePoint": 950,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120694,
+        "targetCodePoint": 951,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120695,
+        "targetCodePoint": 952,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120696,
+        "targetCodePoint": 953,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120697,
+        "targetCodePoint": 954,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120698,
+        "targetCodePoint": 955,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120699,
+        "targetCodePoint": 956,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120700,
+        "targetCodePoint": 957,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120701,
+        "targetCodePoint": 958,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120702,
+        "targetCodePoint": 959,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120703,
+        "targetCodePoint": 960,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120704,
+        "targetCodePoint": 961,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120705,
+        "targetCodePoint": 962,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120706,
+        "targetCodePoint": 963,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120707,
+        "targetCodePoint": 964,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120708,
+        "targetCodePoint": 965,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120709,
+        "targetCodePoint": 966,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120710,
+        "targetCodePoint": 967,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120711,
+        "targetCodePoint": 968,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120712,
+        "targetCodePoint": 969,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120714,
+        "targetCodePoint": 1013,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120715,
+        "targetCodePoint": 977,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120716,
+        "targetCodePoint": 1008,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120717,
+        "targetCodePoint": 981,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120718,
+        "targetCodePoint": 1009,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120719,
+        "targetCodePoint": 982,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120720,
+        "targetCodePoint": 913,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120721,
+        "targetCodePoint": 914,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120722,
+        "targetCodePoint": 915,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120723,
+        "targetCodePoint": 916,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120724,
+        "targetCodePoint": 917,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120725,
+        "targetCodePoint": 918,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120726,
+        "targetCodePoint": 919,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120727,
+        "targetCodePoint": 920,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120728,
+        "targetCodePoint": 921,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120729,
+        "targetCodePoint": 922,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120730,
+        "targetCodePoint": 923,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120731,
+        "targetCodePoint": 924,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120732,
+        "targetCodePoint": 925,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120733,
+        "targetCodePoint": 926,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120734,
+        "targetCodePoint": 927,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120735,
+        "targetCodePoint": 928,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120736,
+        "targetCodePoint": 929,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120737,
+        "targetCodePoint": 1012,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120738,
+        "targetCodePoint": 931,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120739,
+        "targetCodePoint": 932,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120740,
+        "targetCodePoint": 933,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120741,
+        "targetCodePoint": 934,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120742,
+        "targetCodePoint": 935,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120743,
+        "targetCodePoint": 936,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120744,
+        "targetCodePoint": 937,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120746,
+        "targetCodePoint": 945,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120747,
+        "targetCodePoint": 946,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120748,
+        "targetCodePoint": 947,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120749,
+        "targetCodePoint": 948,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120750,
+        "targetCodePoint": 949,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120751,
+        "targetCodePoint": 950,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120752,
+        "targetCodePoint": 951,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120753,
+        "targetCodePoint": 952,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120754,
+        "targetCodePoint": 953,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120755,
+        "targetCodePoint": 954,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120756,
+        "targetCodePoint": 955,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120757,
+        "targetCodePoint": 956,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120758,
+        "targetCodePoint": 957,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120759,
+        "targetCodePoint": 958,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120760,
+        "targetCodePoint": 959,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120761,
+        "targetCodePoint": 960,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120762,
+        "targetCodePoint": 961,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120763,
+        "targetCodePoint": 962,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120764,
+        "targetCodePoint": 963,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120765,
+        "targetCodePoint": 964,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120766,
+        "targetCodePoint": 965,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120767,
+        "targetCodePoint": 966,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120768,
+        "targetCodePoint": 967,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120769,
+        "targetCodePoint": 968,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120770,
+        "targetCodePoint": 969,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120772,
+        "targetCodePoint": 1013,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120773,
+        "targetCodePoint": 977,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120774,
+        "targetCodePoint": 1008,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120775,
+        "targetCodePoint": 981,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120776,
+        "targetCodePoint": 1009,
+        "kind": "font"
+      },
+      {
+        "sourceCodePoint": 120777,
+        "targetCodePoint": 982,
+        "kind": "font"
       }
     ],
     "recordCount": 3060,

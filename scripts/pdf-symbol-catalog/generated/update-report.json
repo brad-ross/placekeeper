@@ -2,11 +2,12 @@
   "schemaVersion": 1,
   "unicodeVersion": "17.0.0",
   "w3cCommit": "ed8b732d7d38112f258e74aadecbb1e409eafdd9",
-  "catalogSha256": "8c8f9ae58936d1413db73f9e39e53ba7b7efa99c0528c9a3bd67f88ed18706c4",
+  "catalogSha256": "0f2e10379777aa8e6da96b2fa4750a61cd4807f5fa2b3b3bbadd3c51d8ead248",
   "sourceHashes": {
     "derivedName": "019758bbe6c756c40fca6d505187ea660c5e195533e2ff2c841963a212c9d369",
     "derivedGeneralCategory": "d62e5bab70ca74f099343f71224fa051cb1fdd61a1ab45c0488c44cfc0b6102e",
     "derivedCoreProperties": "24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08",
+    "unicodeData": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
     "w3cUnicode": "8da3ee6f305ffcdee44a55c2ff36556c93b35c70aa77cb9d8afaa990ae143087"
   },
   "counts": {
@@ -43,234 +44,13 @@
     "provenance": {
       "unicodeMath": 2322,
       "w3c": 3060,
-      "overriddenRecords": 99
+      "overriddenRecords": 101
     }
   },
   "changes": {
     "added": [],
     "removed": [],
-    "changed": [
-      {
-        "codePoint": "U+00B0",
-        "beforeSha256": "2e04251a3ff1b29f9a3f3ab2ccf23cb4c7fc02ea020e4cbeec3b24db2c99670d",
-        "afterSha256": "01d3d5ba7ee8a62d5ccb0535de8e044f6f3da00cdb0f497eeec03712bddb0f18"
-      },
-      {
-        "codePoint": "U+00B7",
-        "beforeSha256": "171078c4c03456b5fc403f48fe42c9ebdc4fea9b28f505a9937ac626046e477e",
-        "afterSha256": "173bd89af250aef3cacadb7fb95a9e33e65964a09c561b6e21762102b0923826"
-      },
-      {
-        "codePoint": "U+00C5",
-        "beforeSha256": "c913472a5cc2a753586baf4ac7c83c41026af41b42e9632e13730177c765c1e7",
-        "afterSha256": "70fc56196c7b0c622965cbc74e981d83c3bff3c062ef39ccf8843c2762e322be"
-      },
-      {
-        "codePoint": "U+03A5",
-        "beforeSha256": "88de67f255fbbd01d2f98c99558a566bf9bbab26c3f17a7e2ad6142bd485b657",
-        "afterSha256": "812983d4a61cdec263e936526f934a74f2ce869c8084304f857bee595c65f93c"
-      },
-      {
-        "codePoint": "U+03A9",
-        "beforeSha256": "d24e8cea50b5a4c29696168f4d6fc8ddfd4271bbc12b5f9c5b824b10b315d25b",
-        "afterSha256": "8f390f49bb6fe40cffcbac7cb7bad67e73d3bfe7724b1a6f0e7ecb319d6ad87a"
-      },
-      {
-        "codePoint": "U+03C6",
-        "beforeSha256": "1bd6d61f9500b90c9a5e4dd8cebfaf6e501d11c234d7b10f87a45b26965f1d57",
-        "afterSha256": "7f008fac955f42593c2f5da647cd0e59f2e4788e155284f888bd3390d5529ed3"
-      },
-      {
-        "codePoint": "U+03D2",
-        "beforeSha256": "590fcfc27f116abe1bc806451b11fe374133ee28fa7eaa559c49f1d5267fb04e",
-        "afterSha256": "2c6ac56c3ba516aaea306a12c9f09af291b69f6c69ddceef2c8cd2e2ab5a3518"
-      },
-      {
-        "codePoint": "U+03D5",
-        "beforeSha256": "4a9396e56ed0573c82192d34edf2ac7723258c043e2a5adaa99ad56a56a697db",
-        "afterSha256": "9e4c9c7f0f093822d444be4791560e27a083e53c6fd0dfae5835465a1feb8f5d"
-      },
-      {
-        "codePoint": "U+2126",
-        "beforeSha256": "2311c24885af6b4bf44602d4f95c3df0087b10ede67f353c05c4a31a878b2434",
-        "afterSha256": "d5bde8ff9840b8dfc12a0ea6faa2647b9d1a5f155a48e44d78d5c6c17903a6c4"
-      },
-      {
-        "codePoint": "U+212B",
-        "beforeSha256": "01a9f39b368f93797434646fadc434a31ea02a5ad44941b42ec700e3f626567f",
-        "afterSha256": "bfc4cb3dbbb6a780318dfa6dad358ba5a3313a185a931fdcbad33c45f1ca19c0"
-      },
-      {
-        "codePoint": "U+2192",
-        "beforeSha256": "e5d1892051d71dd348f84a463f886e4846f2643815d242d0c5b1d5e764c7be44",
-        "afterSha256": "ef803e56f046f3891f9d42be1dd0ca9bd6d439adeca6f4ee0a1162c6be929d05"
-      },
-      {
-        "codePoint": "U+2202",
-        "beforeSha256": "cc59c1bd8b3a01f3ae42beee71f1bcd036acf52fee2cc5642de8f736957dba80",
-        "afterSha256": "c863c8d23cd38597e1dc165590a720d26bbdaa2eba36795fad0b21c8023db5b0"
-      },
-      {
-        "codePoint": "U+2207",
-        "beforeSha256": "65b7adeabed47f2f6e3607943cda7fe964621671fc872433c3a0d2d758c4a963",
-        "afterSha256": "f345b5c9a53084a4c5c3f42d48af11d5ab341d7803a11fe66cd46bb6ac118d3c"
-      },
-      {
-        "codePoint": "U+220F",
-        "beforeSha256": "7422f24221329b6f09937e4ed0583b3c44095b27f2c1ddd0c0f8dd2cfacd485b",
-        "afterSha256": "a5e7470fcd8d156cb23dc6fafbd6c3b9164f9b06d7dc88c4062d350f21ae07e0"
-      },
-      {
-        "codePoint": "U+2211",
-        "beforeSha256": "f597908b31fcf5b59706ac5e9f90843f5d7c95ecc1a6295dd3f26e4e8f3dbc5b",
-        "afterSha256": "bf4115ee0f21e410eddc4915ebbe70a5867fbd102daa6d98d12517e6f0c6283e"
-      },
-      {
-        "codePoint": "U+2248",
-        "beforeSha256": "a048bd767348bc6b65626a01bf0e48cfda95bb4069cbcdceece3c6d10ae3ca36",
-        "afterSha256": "9d7c8e241db1e4ae9bda01190ec70e277f8261e35349ec5761d4e16fc67e89d8"
-      },
-      {
-        "codePoint": "U+2260",
-        "beforeSha256": "ac34ad4d2d3b5f55416011aa141c680c793c757500581020544ee85636a46bf5",
-        "afterSha256": "6590c975b9d407ddf26167054ca184ead7aa4ea38967be9268a401f52fa877c1"
-      },
-      {
-        "codePoint": "U+2264",
-        "beforeSha256": "ac78b019798114d06c79051075b8919862413f175b267eb53fcb92167e1614a6",
-        "afterSha256": "064d00508a4ab6ed22cce65f2cd9d32838a6109c088255d54ffdb84d1c940933"
-      },
-      {
-        "codePoint": "U+2265",
-        "beforeSha256": "c754eb9a635fe2ea2afee1405249db8d9f910195ba60beee9790df92babc2cfb",
-        "afterSha256": "5de4c8636dd0785d3c48e5e48e8422192e43e2f719d533903b38517222312302"
-      },
-      {
-        "codePoint": "U+2268",
-        "beforeSha256": "f55cf438ccc501bc74b0a46393e569977015432828cb4d9238a7ce7235c1cd03",
-        "afterSha256": "bf38b6cf3ea152c2a7dfaecb8593394d293a7a8bc9a6bf66798a630ec12fa40c"
-      },
-      {
-        "codePoint": "U+2269",
-        "beforeSha256": "e29b9c5f667870336a14ee0d598239b601e7bb1ea3486821895ece64afcaa2e3",
-        "afterSha256": "260dddde2737d4559fa0459ca11920b85b05364a02077650fae8363607d6808a"
-      },
-      {
-        "codePoint": "U+227D",
-        "beforeSha256": "aa9b537a98743ad318a1602d7169faa625a77ec9575d4dd4f434d7afa498da80",
-        "afterSha256": "ba76f7175ebe0cd5c0d4383ffc9f473ae927d168db1a9cffd6583b0eb3f76355"
-      },
-      {
-        "codePoint": "U+227E",
-        "beforeSha256": "cf1e5a72f26a52ab98e5addd22ce461e45510c186c88b247f4bdc4aa853163be",
-        "afterSha256": "1e61c351dd54b24205ace35f364dacdc0b185f5cc66d97a855dcfa547584fe4e"
-      },
-      {
-        "codePoint": "U+227F",
-        "beforeSha256": "550044ab51dcfb0e36e09e036c8c224936158af4fe504e38e7f6bd9e7c7e4070",
-        "afterSha256": "ce42f3a2e6fb9c3038e35208ea933bacb2c19151e207dd16ceaeac2f03dce140"
-      },
-      {
-        "codePoint": "U+2286",
-        "beforeSha256": "0ecd446ab48f1936aadfc98a1d8e106d1922e10295263c6c3dc895c843530742",
-        "afterSha256": "a534e9c9a1113217834387039dab68dd6fe46ee87448444737ce5267fc059b99"
-      },
-      {
-        "codePoint": "U+2287",
-        "beforeSha256": "5fd7ccb1890e904abed80494f423474a3b1f3c01e1e538cada37fd6ff6279977",
-        "afterSha256": "1acc386a05f9d934d9ec38a575bbc1c61987f4eb06498def95b3b3ccb27e43bf"
-      },
-      {
-        "codePoint": "U+228A",
-        "beforeSha256": "38612d11202f1efad772382c811a747e83c51a1c9de1e3675d9eab3379ff7749",
-        "afterSha256": "218d2174f6bbbab1719903aaf58f6ade190d480e792eea73facc01897429af6e"
-      },
-      {
-        "codePoint": "U+228B",
-        "beforeSha256": "782833bf0df521c912f8dc2a74a0fbc09bd87bbb47b5263e0b2eb7f0f0e5dda9",
-        "afterSha256": "e820ab331121f1f3776453b5c18f23d9fcc1f06818433980d8b0c9ddc462691d"
-      },
-      {
-        "codePoint": "U+22C5",
-        "beforeSha256": "c3e30d3c076a7471ffc65ece5758c71b23b69597429091490cb46589d9410af9",
-        "afterSha256": "84653982537c78fb3464eb740503befc29a9bd96509e19fdb48d0b0bba3e901a"
-      },
-      {
-        "codePoint": "U+22DA",
-        "beforeSha256": "26b0e4ba41a37becef356157831ed43e85b0cd94ce6b95c5a353bb290cce61ae",
-        "afterSha256": "a7e1228457c837964abeb8c300360e19829b6a0eb394b8c00cb9d57c1704dfc2"
-      },
-      {
-        "codePoint": "U+22DB",
-        "beforeSha256": "e2f390aaf0ac298c851dff55fa2e635392d28fc0c0dac2997a38fd3ec6af0643",
-        "afterSha256": "de925cb981e6e1b58c7872363b171fcbc3585394854b6952fb3680d199b79622"
-      },
-      {
-        "codePoint": "U+22E9",
-        "beforeSha256": "fd30d4024ed7c646ce22e77a9646f3d348952685f5e3a02597600fa75d5abf87",
-        "afterSha256": "aa525ed8bc308202c0b9191a0f91b4b1435b29da0456d431f6c18f0ad46cea24"
-      },
-      {
-        "codePoint": "U+2A87",
-        "beforeSha256": "33f56b69118c382abb457be70bff51d985dc5ed871ec0ee3d7ff1571d3512fc1",
-        "afterSha256": "73b97526c00e74e6dee89a9652ffafb6e918e7b7a75d458bf8d6adea9939fb24"
-      },
-      {
-        "codePoint": "U+2A88",
-        "beforeSha256": "d1c11cc5bef1053f26a577e08aa9246469dcd78cd7e1b813fed8bbed70297ee0",
-        "afterSha256": "87ff52f9885ed16ef1815922410e80eeeddc5295075a690e60e866f6d166e3e6"
-      },
-      {
-        "codePoint": "U+2A8B",
-        "beforeSha256": "981b5da506ff7496bc82c58b18b71865ca686cd0f72efcb55b234f868b032969",
-        "afterSha256": "948c28f4a6fcb0df029e171ea54bf5c8b0871db708e42c8b1eeedd11f037a295"
-      },
-      {
-        "codePoint": "U+2A8C",
-        "beforeSha256": "cc154f0bbdf529b85b758cc6bd0048e381e4bc9ee6b457247f0f2b8525ff5940",
-        "afterSha256": "1539df7d4f3163624ea9ce2032bd75d4634ca1fccdd125642b0a1cb1573ae298"
-      },
-      {
-        "codePoint": "U+2AB0",
-        "beforeSha256": "967ebd7866840d17766449e8a7bf1b3ffe04b5d8b25c35ddcd6283b7690d9f32",
-        "afterSha256": "cd20de41b7b7ec5849eb1843934b0995dbbad97f04f5256ee7dc604dc1d79b6a"
-      },
-      {
-        "codePoint": "U+2AB7",
-        "beforeSha256": "b7db758df1946e2b9406a01e6454d55cf3b252205c387ea8417419c58268192f",
-        "afterSha256": "2ea8243d02e630bf1eb58b1a9a03f2cbec7a1966fcaea2438c8fd50af9e2300d"
-      },
-      {
-        "codePoint": "U+2AB8",
-        "beforeSha256": "f8e31c3b9095dd1e7f98fd322421d6fdf1b1fd13b3f86863a7a84dd46cd46e1a",
-        "afterSha256": "1df95bfd0a4e00648ece9e8f5c9a1139af406fd00ee6ca7f7813e17edaae4605"
-      },
-      {
-        "codePoint": "U+2ABA",
-        "beforeSha256": "8f22f119176444f325e6ddda3f8bcc3888731b0b57b3b575903dcaa0b863ee6c",
-        "afterSha256": "9e448d036914362561fe7a5eafc85151274d535a83b292db71548e694237b058"
-      },
-      {
-        "codePoint": "U+2AC5",
-        "beforeSha256": "bd68e0b71ed705839354979fb9ce21adbecda4edfdf44b0f3c268963dbe1ff89",
-        "afterSha256": "52236044ccf74c4f01a65f3b5e2fab514874412f27a4014e7976fce4f1abca83"
-      },
-      {
-        "codePoint": "U+2AC6",
-        "beforeSha256": "198b47e0f25b9a1f69a7ec6654791828845f19f78ec51e21da9abed91c52e725",
-        "afterSha256": "04355f54b843795d2b4280d75d8c6d2875fa77a84eec073057715da66d8f0580"
-      },
-      {
-        "codePoint": "U+2ACB",
-        "beforeSha256": "5e803c8f31b362386b0220c4baf372244fbef226ddbae6c871a9c0234b0c7a6f",
-        "afterSha256": "b3691b81967e49f63dc7d5f75b9bbe88938d1272c0fa56c6bb4372839ff18701"
-      },
-      {
-        "codePoint": "U+2ACC",
-        "beforeSha256": "86216d91e90665663f0605eaa3f7df80522e539af18a1003fd64112368d2cd1d",
-        "afterSha256": "7b44f70786db83dd7038a09eabe908a715b84d01896a5d73c0494899bc48f373"
-      }
-    ]
+    "changed": []
   },
   "exclusions": {
     "multiScalar": [
@@ -13989,6 +13769,12 @@
       "reason": "not-a-direct-control-token"
     }
   ],
+  "equivalence": {
+    "families": 52,
+    "edges": 294,
+    "expandingMembers": 66,
+    "styledMembers": 280
+  },
   "aliasDecisions": [
     {
       "namespace": "command",
@@ -14473,6 +14259,21 @@
       "action": "drop",
       "rationale": "Reject an accent command that requires an argument rather than treating it as a one-symbol command.",
       "upstream": "W3C assigns bare \\u to U+02D8 BREVE and U+0306 COMBINING BREVE although TeX uses it with an argument."
+    },
+    {
+      "namespace": "command",
+      "alias": "\\varepsilon",
+      "codePoints": [
+        "025B",
+        "03F5"
+      ],
+      "action": "redirect",
+      "expectedUpstreamCodePoints": [
+        "025B"
+      ],
+      "canonicalCodePoint": "03F5",
+      "rationale": "Correct the generic TeX variant-epsilon command to the Greek mathematical symbol while leaving the IPA letter exact-only.",
+      "upstream": "W3C unicode.xml assigns \\varepsilon to U+025B LATIN SMALL LETTER OPEN E; UnicodeData identifies U+03F5 as GREEK LUNATE EPSILON SYMBOL."
     },
     {
       "namespace": "entity",
@@ -15201,7 +15002,7 @@
       }
     ]
   },
-  "overrideCount": 61,
+  "overrideCount": 62,
   "indexCardinalities": {
     "glyph": 3060,
     "command": 2795,
@@ -15209,8 +15010,8 @@
     "normalizedName": 4724
   },
   "artifactBytes": {
-    "audit": 4982952,
-    "runtime": 388237,
-    "report": 352169
+    "audit": 5028567,
+    "runtime": 400389,
+    "report": 342810
   }
 }

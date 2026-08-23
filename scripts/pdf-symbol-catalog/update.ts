@@ -12,6 +12,7 @@ const sourceKeys = [
   'derivedName',
   'derivedGeneralCategory',
   'derivedCoreProperties',
+  'unicodeData',
   'w3cUnicode',
 ] as const;
 
