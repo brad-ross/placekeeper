@@ -17,6 +17,7 @@ const sha256 = (value: string): string =>
 
 const fixtureSources = {
   derivedName: `# DerivedName-17.0.0.txt
+0020 ; SPACE
 002B ; PLUS SIGN
 0041 ; LATIN CAPITAL LETTER A
 007C ; VERTICAL LINE
@@ -30,6 +31,7 @@ const fixtureSources = {
 1D400..1D401 ; MATHEMATICAL TEST *
 `,
   derivedGeneralCategory: `# DerivedGeneralCategory-17.0.0.txt
+0020 ; Zs
 002B ; Sm
 0041 ; Lu
 007C ; Sm
@@ -50,8 +52,9 @@ const fixtureSources = {
   w3cUnicode: `<?xml version="1.0"?>
 <unicode unicode="17">
   <characters>
+    <character id="U00020" dec="32" mode="text"><unicodedata category="Zs" mathclass="S"/><latex>\\space</latex><description>SPACE</description></character>
     <character id="U0002B" dec="43"><unicodedata category="Sm" mathclass="B"/><latex>+</latex><description>PLUS SIGN</description></character>
-    <character id="U00041" dec="65"><unicodedata category="Lu"/><entity id="Aplain" set="test"><desc>ordinary letter</desc></entity><description>LATIN CAPITAL LETTER A</description></character>
+    <character id="U00041" dec="65" mode="mixed"><unicodedata category="Lu"/><entity id="Aplain" set="test"><desc>ordinary letter</desc></entity><description>LATIN CAPITAL LETTER A</description></character>
     <character id="U0007C" dec="124"><unicodedata category="Sm" mathclass="F"/><latex>\\|</latex><description>VERTICAL LINE</description></character>
     <character id="U000B0" dec="176"><unicodedata category="So"/><latex>^\\circ</latex><description>DEGREE SIGN</description></character>
     <character id="U003B1" dec="945" mode="math" type="alphabetic"><unicodedata category="Lu" mathclass="A"/><latex>\\alpha</latex><entity id="alpha" set="isogrk"><desc>small alpha, Greek</desc></entity><description>GREEK SMALL LETTER ALPHA</description></character>
@@ -122,7 +125,7 @@ describe('PDF symbol catalog compiler', () => {
     });
   });
 
-  it('admits systematic math evidence while excluding category/entity-only prose and emoji', () => {
+  it('admits systematic math evidence while excluding mixed-mode prose and emoji', () => {
     const compiled = compileSymbolCatalog(fixtureInput());
     const admitted = compiled.records.map(({ codePoint }) => codePoint);
 
@@ -130,6 +133,7 @@ describe('PDF symbol catalog compiler', () => {
     expect(admitted).toContain(0x03b1);
     expect(admitted).toContain(0x2202);
     expect(admitted).toContain(0x23d0);
+    expect(admitted).not.toContain(0x0020);
     expect(admitted).not.toContain(0x0041);
     expect(admitted).not.toContain(0x00b0);
     expect(admitted).not.toContain(0x1f600);

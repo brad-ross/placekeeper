@@ -185,6 +185,10 @@ const APPLICATION_MARKERS = new Set([
   'operator-dictionary',
 ]);
 
+const MATHEMATICAL_CLASSES = new Set([
+  'B', 'C', 'D', 'F', 'G', 'L', 'O', 'P', 'R', 'U', 'V', 'X',
+]);
+
 const XML_ARRAY_PATHS = new Set([
   'unicode.characters.character',
   'unicode.characters.character.entity',
@@ -530,10 +534,14 @@ const parseW3c = (source: string, expectedUnicodeMajor: string): ParsedW3c => {
         || byteCompare(left.unicodeVersion ?? '', right.unicodeVersion ?? ''));
 
     const admission = new Set<Exclude<AdmissionReason, 'unicode-math'>>();
-    if (mode === 'math' || mode === 'mixed') admission.add('w3c-mode');
-    if (mathClass !== null && mathClass !== 'A') admission.add('w3c-math-class');
+    if (MATHEMATICAL_CLASSES.has(mathClass ?? '')) admission.add('w3c-math-class');
     if (applicationMarkers.length > 0) admission.add('w3c-application');
     if (commands.length > 0) admission.add('w3c-direct-tex');
+    // W3C uses `mixed` for many ordinary prose letters. It corroborates an
+    // independent mathematical signal but cannot admit a scalar by itself.
+    if (mode === 'math' || (mode === 'mixed' && admission.size > 0)) {
+      admission.add('w3c-mode');
+    }
 
     records.set(codePoint, {
       codePoint,
@@ -799,6 +807,7 @@ export const compileSymbolCatalog = (input: CatalogCompilerInput): CompiledSymbo
       }
       continue;
     }
+    if (!mathScalars.has(codePoint) && category.startsWith('Z')) continue;
     const w3cRecord = w3c.records.get(codePoint) ?? null;
     const w3cCategory = w3cRecord?.provenance.category ?? null;
     if (w3cCategory !== null && w3cCategory !== category) {

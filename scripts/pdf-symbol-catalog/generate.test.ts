@@ -33,7 +33,10 @@ afterEach(async () => {
 describe('PDF symbol catalog artifact generation', () => {
   it('compiles the complete pinned corpus with no unresolved collisions', async () => {
     const artifacts = await buildCatalogArtifacts({ repositoryRoot });
-    const audit = JSON.parse(artifacts.audit) as { records: unknown[]; report: { recordCount: number } };
+    const audit = JSON.parse(artifacts.audit) as {
+      records: { codePoint: number }[];
+      report: { recordCount: number };
+    };
     const report = JSON.parse(artifacts.report) as {
       aliasCollisions: { unresolved: unknown[] };
       indexCardinalities: Record<string, number>;
@@ -43,6 +46,9 @@ describe('PDF symbol catalog artifact generation', () => {
     expect(audit.report.recordCount).toBe(audit.records.length);
     expect(report.aliasCollisions.unresolved).toEqual([]);
     expect(report.indexCardinalities.glyph).toBe(audit.records.length);
+    expect(audit.records.some(({ codePoint }) => codePoint === 0x0020)).toBe(false);
+    expect(audit.records.some(({ codePoint }) => codePoint === 0x00e9)).toBe(false);
+    expect(audit.records.some(({ codePoint }) => codePoint === 0x002f)).toBe(true);
   });
 
   it('emits byte-identical UTF-8 LF artifacts across locale and timezone settings', async () => {

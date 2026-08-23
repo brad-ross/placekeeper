@@ -65,7 +65,12 @@ export function canonicalizeProse(value: string): string {
 }
 
 export function canonicalizeFormula(value: string): string {
-  return value.normalize('NFC').replace(/\s+/gu, '');
+  return value.replace(/\s+/gu, '');
+}
+
+export function isSingleUnicodeScalarQuery(value: string): boolean {
+  const query = value.trim();
+  return query.length > 0 && Array.from(query).length === 1;
 }
 
 export function classifyPdfSearchQuery(value: string): PdfSearchQueryKind {

@@ -17,6 +17,7 @@ import {
   canonicalizeProse,
   classifyPdfSearchQuery,
   initialPdfSearchState,
+  isSingleUnicodeScalarQuery,
   type PdfSearchAlternative,
   type PdfSearchMatchKind,
   type PdfSearchResult,
@@ -24,10 +25,12 @@ import {
 } from './pdf-search-model.js';
 import { relatedPhraseQueries } from './pdf-search-morphology.js';
 import {
+  addDetectedSymbolRecordIds,
   detectedSymbolSuggestions,
-  isKnownSymbolGlyph,
   isSymbolAliasQuery,
   resolveDetectedSymbolQueries,
+  type PdfSymbolRecordId,
+  type PdfSymbolSuggestion,
 } from './pdf-symbol-catalog.js';
 
 export interface PdfSearchPageSnapshot {
@@ -156,16 +159,6 @@ function documentWords(pages: readonly IndexedPage[]): string[] {
   return pages.flatMap(({ text }) => text.match(/\p{L}[\p{L}\p{M}'’-]*/gu) ?? []);
 }
 
-function addDetectedGlyphs(text: string, result: Set<string>): void {
-  for (const character of text) {
-    if (isKnownSymbolGlyph(character)
-      || /[^\p{L}\p{N}\p{M}\p{P}\p{Z}\p{C}]/u.test(character)
-      || /[\u0370-\u03ff\u2190-\u22ff\u27c0-\u27ef\u2980-\u2aff]/u.test(character)) {
-      result.add(character);
-    }
-  }
-}
-
 function canonicalTextWithMap(
   text: string,
   kind: 'prose' | 'formula',
@@ -174,7 +167,8 @@ function canonicalTextWithMap(
   const sourceIndexes: number[] = [];
   let previousWhitespace = false;
   let sourceIndex = 0;
-  for (const character of text.normalize('NFC')) {
+  const sourceText = kind === 'prose' ? text.normalize('NFC') : text;
+  for (const character of sourceText) {
     if (/\s/u.test(character)) {
       if (kind !== 'formula' && !previousWhitespace) {
         canonical.push(' ');
@@ -390,28 +384,36 @@ function ordered(results: readonly PdfSearchResult[]): PdfSearchResult[] {
 
 function alternativesFor(
   query: string,
-  glyphs: ReadonlySet<string>,
+  detectedRecordIds: ReadonlySet<PdfSymbolRecordId>,
 ): PdfSearchAlternative[] {
-  const normalized = query.trim().toLocaleLowerCase();
-  return detectedSymbolSuggestions(glyphs)
+  const normalized = query.normalize('NFC').trim().toLowerCase();
+  return detectedSymbolSuggestions(detectedRecordIds)
     .filter((symbol) => (
       query.includes(symbol.glyph)
       || normalized === symbol.glyph
       || normalized.startsWith('\\')
       || symbol.name.includes(normalized)
-      || symbol.latex.includes(normalized)
+      || symbol.names.some((name) => name.normalize('NFC').toLowerCase().includes(normalized))
       || normalized.length === 0
     ))
     .slice(0, 8)
     .map((symbol) => ({
-      label: `${symbol.glyph} ${symbol.name} (${symbol.latex})`,
+      label: symbolLabel(symbol),
       query: symbol.glyph,
     }));
 }
 
-function catalogFor(glyphs: ReadonlySet<string>): PdfSearchAlternative[] {
-  return detectedSymbolSuggestions(glyphs).map((symbol) => ({
-    label: `${symbol.glyph} ${symbol.name} (${symbol.latex})`,
+function symbolLabel(symbol: PdfSymbolSuggestion): string {
+  return symbol.preferredCommand
+    ? `${symbol.glyph} ${symbol.name} (${symbol.preferredCommand})`
+    : `${symbol.glyph} ${symbol.name}`;
+}
+
+function catalogFor(
+  detectedRecordIds: ReadonlySet<PdfSymbolRecordId>,
+): PdfSearchAlternative[] {
+  return detectedSymbolSuggestions(detectedRecordIds).map((symbol) => ({
+    label: symbolLabel(symbol),
     query: symbol.glyph,
   }));
 }
@@ -429,7 +431,7 @@ export function createPdfSearchController(
     options.maxConcurrentPageReads ?? PDF_SEARCH_MAX_CONCURRENT_PAGE_READS,
   );
   const maxIndexBytes = options.maxIndexBytes ?? PDF_SEARCH_MAX_INDEX_BYTES;
-  const glyphInventory = new Set<string>();
+  const detectedSymbolRecordIds = new Set<PdfSymbolRecordId>();
   let state = initialPdfSearchState(options.reader.pageCount);
   let indexPromise: Promise<void> | null = null;
   let indexComplete = false;
@@ -497,8 +499,9 @@ export function createPdfSearchController(
                   prose: canonicalTextWithMap(page.text, 'prose'),
                   formula: canonicalTextWithMap(page.text, 'formula'),
                 });
-                addDetectedGlyphs(page.text, glyphInventory);
-                symbolCatalog = catalogFor(glyphInventory);
+                if (addDetectedSymbolRecordIds(page.text, detectedSymbolRecordIds)) {
+                  symbolCatalog = catalogFor(detectedSymbolRecordIds);
+                }
               }
             }
           } catch {
@@ -523,13 +526,16 @@ export function createPdfSearchController(
   function publishQueryResults(token: number, query: string, complete: boolean): void {
     if (disposed || token !== queryToken || activeSearch?.token !== token) return;
     const queryKind = classifyPdfSearchQuery(query);
-    const symbolAlias = isSymbolAliasQuery(query);
-    const symbols = resolveDetectedSymbolQueries(query, glyphInventory);
+    const literalScalar = isSingleUnicodeScalarQuery(query);
+    const symbolAlias = !literalScalar && isSymbolAliasQuery(query);
+    const symbols = literalScalar
+      ? []
+      : resolveDetectedSymbolQueries(query, detectedSymbolRecordIds);
     const effectiveQueries = symbols.length > 0 ? symbols.map(({ glyph }) => glyph) : [query];
     const matchKind: PdfSearchMatchKind = symbols.length > 0
       ? 'symbol'
-      : queryKind === 'formula' ? 'formula' : 'exact';
-    const formula = symbols.length > 0 || queryKind === 'formula';
+      : literalScalar || queryKind === 'formula' ? 'formula' : 'exact';
+    const formula = literalScalar || symbols.length > 0 || queryKind === 'formula';
     if (
       progressiveExact?.token !== token
       || progressiveExact.effectiveQueries.length !== effectiveQueries.length
@@ -563,7 +569,7 @@ export function createPdfSearchController(
       progressiveExact.results.map((result) => [result.id, result]),
     ).values()]);
 
-    const relatedQueries = complete && queryKind === 'prose' && !symbolAlias
+    const relatedQueries = complete && queryKind === 'prose' && !symbolAlias && !literalScalar
       ? relatedPhraseQueries(query, documentWords(pages))
       : [];
     const exactIds = new Set(exact.map(({ id }) => id));
@@ -604,7 +610,7 @@ export function createPdfSearchController(
             : hasResults ? 'results' : 'no-results',
       groups,
       coverage: coverage(),
-      alternatives: mathUncertain ? alternativesFor(query, glyphInventory) : [],
+      alternatives: mathUncertain ? alternativesFor(query, detectedSymbolRecordIds) : [],
       symbolCatalog,
       message: !complete
         ? `Searching remaining pages… ${processedPages} of ${options.reader.pageCount} checked.`
