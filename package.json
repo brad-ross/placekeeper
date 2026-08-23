@@ -13,6 +13,7 @@
     "build:web": "vite build --config apps/web/vite.production.config.ts",
     "build:vscode": "pnpm --dir apps/vscode run build",
     "catalog:generate": "tsx scripts/pdf-symbol-catalog/generate.ts",
+    "catalog:audit": "tsx scripts/pdf-symbol-catalog/generate.ts --audit-only",
     "catalog:check": "tsx scripts/pdf-symbol-catalog/generate.ts --check",
     "catalog:update": "tsx scripts/pdf-symbol-catalog/update.ts",
     "fixtures:pdf": "tsx test/fixtures/pdfs/generate.ts",

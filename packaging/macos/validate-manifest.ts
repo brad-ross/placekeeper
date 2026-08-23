@@ -19,12 +19,10 @@ export const CATALOG_DISTRIBUTION_BASELINE = {
     normalizedName: 4_724,
   },
   artifactBytes: {
-    audit: 5_028_567,
     runtime: 400_389,
     report: 342_810,
   },
   artifactSha256: {
-    audit: "0f2e10379777aa8e6da96b2fa4750a61cd4807f5fa2b3b3bbadd3c51d8ead248",
     runtime: "e7d653177705de1acbba73848edc5071779bbdf76be82d2d92bee62ed4fb2fa0",
     report: "438773d07bd88e44c375cb25dcb6d31be2344e57ca6a29887feb110e321e9672",
     thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
@@ -139,8 +137,7 @@ export async function validateCatalogRuntimeDistribution(
 }
 
 export async function validateCatalogSourceBaseline(repoRoot: string): Promise<void> {
-  const [audit, runtime, reportSource] = await Promise.all([
-    readFile(resolve(repoRoot, "scripts/pdf-symbol-catalog/generated/catalog.audit.json")),
+  const [runtime, reportSource] = await Promise.all([
     readFile(resolve(repoRoot, "apps/web/src/pdf/pdf-symbol-catalog.generated.ts")),
     readFile(resolve(repoRoot, "scripts/pdf-symbol-catalog/generated/update-report.json")),
   ]);
@@ -150,23 +147,24 @@ export async function validateCatalogSourceBaseline(repoRoot: string): Promise<v
     artifactBytes?: Record<string, number>;
   };
   const expected = CATALOG_DISTRIBUTION_BASELINE;
+  const artifactBytes = {
+    runtime: report.artifactBytes?.runtime,
+    report: report.artifactBytes?.report,
+  };
   if (report.counts?.records !== expected.records
     || JSON.stringify(report.indexCardinalities) !== JSON.stringify(expected.indexCardinalities)
-    || JSON.stringify(report.artifactBytes) !== JSON.stringify(expected.artifactBytes)
-    || audit.byteLength !== expected.artifactBytes.audit
+    || JSON.stringify(artifactBytes) !== JSON.stringify(expected.artifactBytes)
     || runtime.byteLength !== expected.artifactBytes.runtime
     || reportSource.byteLength !== expected.artifactBytes.report) {
-    throw new Error("Mathematical symbol catalog record, index-cardinality, or artifact-byte baseline changed; review and update the distribution baseline with the generated report");
+    throw new Error("Mathematical symbol catalog record, index-cardinality, or committed artifact-byte baseline changed; review and update the distribution baseline with the generated report");
   }
   const actualSha256 = {
-    audit: createHash("sha256").update(audit).digest("hex"),
     runtime: createHash("sha256").update(runtime).digest("hex"),
     report: createHash("sha256").update(reportSource).digest("hex"),
   };
-  if (actualSha256.audit !== expected.artifactSha256.audit
-    || actualSha256.runtime !== expected.artifactSha256.runtime
+  if (actualSha256.runtime !== expected.artifactSha256.runtime
     || actualSha256.report !== expected.artifactSha256.report) {
-    throw new Error("Mathematical symbol catalog artifact digest baseline changed; review and update the distribution baseline with the generated artifacts");
+    throw new Error("Mathematical symbol catalog committed artifact digest baseline changed; review and update the distribution baseline with the generated artifacts");
   }
   if (/"(?:duration|elapsed|timing|wallClock|milliseconds?|generatedAt|timestamp)[^"]*"\s*:/iu.test(reportSource.toString("utf8"))) {
     throw new Error("Deterministic catalog report must not contain wall-clock timing fields");
@@ -772,8 +770,8 @@ export async function validateDistributionManifests(
     throw new Error("Production web builds must run the non-mutating catalog:check gate");
   }
   for (const scriptName of ["build", "build:web", "package:macos", "install:local"] as const) {
-    if (packageManifest.scripts?.[scriptName]?.includes("catalog:update")) {
-      throw new Error(`Ordinary ${scriptName} path must not fetch or update catalog sources`);
+    if (/catalog:(?:audit|generate|update)/u.test(packageManifest.scripts?.[scriptName] ?? "")) {
+      throw new Error(`Ordinary ${scriptName} path must not generate or update catalog artifacts`);
     }
   }
   if (options.productionWebRoot !== undefined) {

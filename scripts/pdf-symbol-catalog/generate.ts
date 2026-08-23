@@ -26,6 +26,8 @@ const artifactRelativePaths = {
   report: 'scripts/pdf-symbol-catalog/generated/update-report.json',
 } as const;
 
+const committedArtifactKeys = ['runtime', 'report'] as const;
+
 export interface CatalogArtifactSet {
   readonly audit: string;
   readonly runtime: string;
@@ -402,19 +404,30 @@ export const generateCatalogArtifacts = async (
   return artifacts;
 };
 
+export const generateCatalogAudit = async (
+  options: CatalogArtifactOptions,
+): Promise<CatalogArtifactSet> => {
+  const artifacts = await buildCatalogArtifacts(options);
+  await writeAtomically(
+    join(resolve(options.repositoryRoot), artifactRelativePaths.audit),
+    artifacts.audit,
+  );
+  return artifacts;
+};
+
 export const checkCatalogArtifacts = async (
   options: CatalogArtifactOptions,
 ): Promise<CatalogArtifactSet> => {
   const expected = await buildCatalogArtifacts(options);
   const drift: string[] = [];
-  for (const key of ['audit', 'runtime', 'report'] as const) {
+  for (const key of committedArtifactKeys) {
     const path = join(resolve(options.repositoryRoot), artifactRelativePaths[key]);
     const actual = await optionalFile(path);
     if (actual !== expected[key]) drift.push(relative(resolve(options.repositoryRoot), path));
   }
   if (drift.length > 0) {
     throw new Error(
-      `catalog artifact drift in ${drift.join(', ')}; run pnpm catalog:generate and commit the results`,
+      `catalog artifact drift in ${drift.join(', ')}; run pnpm catalog:generate and commit the runtime catalog and update report`,
     );
   }
   return expected;
@@ -424,13 +437,27 @@ const invokedPath = process.argv[1] === undefined ? null : resolve(process.argv[
 if (invokedPath === fileURLToPath(import.meta.url)) {
   const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
   const check = process.argv.includes('--check');
-  const artifacts = await (check ? checkCatalogArtifacts : generateCatalogArtifacts)({ repositoryRoot });
+  const auditOnly = process.argv.includes('--audit-only');
+  if (check && auditOnly) throw new Error('--check and --audit-only cannot be combined');
+  const artifacts = await (check
+    ? checkCatalogArtifacts
+    : auditOnly
+      ? generateCatalogAudit
+      : generateCatalogArtifacts)({ repositoryRoot });
   if (check) {
     const { validateCatalogSourceBaseline } = await import('../../packaging/macos/validate-manifest.js');
     await validateCatalogSourceBaseline(repositoryRoot);
   }
-  const report = JSON.parse(artifacts.report) as { counts: { records: number }; artifactBytes: unknown };
+  const report = JSON.parse(artifacts.report) as {
+    counts: { records: number };
+    artifactBytes: { audit: number; runtime: number; report: number };
+  };
+  const reportedBytes = check
+    ? { runtime: report.artifactBytes.runtime, report: report.artifactBytes.report }
+    : auditOnly
+      ? { audit: report.artifactBytes.audit }
+      : report.artifactBytes;
   process.stdout.write(
-    `${check ? 'Checked' : 'Generated'} ${report.counts.records} mathematical symbol records ${JSON.stringify(report.artifactBytes)}\n`,
+    `${check ? 'Checked committed runtime/report for' : auditOnly ? 'Generated full audit for' : 'Generated'} ${report.counts.records} mathematical symbol records ${JSON.stringify(reportedBytes)}\n`,
   );
 }

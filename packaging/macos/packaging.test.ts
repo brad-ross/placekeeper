@@ -151,12 +151,10 @@ describe("macOS distribution manifests", () => {
         normalizedName: 4_724,
       },
       artifactBytes: {
-        audit: 5_028_567,
         runtime: 400_389,
         report: 342_810,
       },
       artifactSha256: {
-        audit: "0f2e10379777aa8e6da96b2fa4750a61cd4807f5fa2b3b3bbadd3c51d8ead248",
         runtime: "e7d653177705de1acbba73848edc5071779bbdf76be82d2d92bee62ed4fb2fa0",
         report: "438773d07bd88e44c375cb25dcb6d31be2344e57ca6a29887feb110e321e9672",
         thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
@@ -170,7 +168,6 @@ describe("macOS distribution manifests", () => {
       const runtime = resolve(root, "apps/web/src/pdf");
       await mkdir(generated, { recursive: true });
       await mkdir(runtime, { recursive: true });
-      await copyFile(resolve("scripts/pdf-symbol-catalog/generated/catalog.audit.json"), resolve(generated, "catalog.audit.json"));
       await copyFile(resolve("scripts/pdf-symbol-catalog/generated/update-report.json"), resolve(generated, "update-report.json"));
       await copyFile(resolve("apps/web/src/pdf/pdf-symbol-catalog.generated.ts"), resolve(runtime, "pdf-symbol-catalog.generated.ts"));
       await writeFile(resolve(runtime, "pdf-symbol-catalog.generated.ts"), "reviewed baseline regression\n");

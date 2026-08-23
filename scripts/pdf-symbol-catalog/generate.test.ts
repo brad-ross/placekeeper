@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   buildCatalogArtifacts,
   checkCatalogArtifacts,
+  generateCatalogAudit,
   generateCatalogArtifacts,
   type CatalogArtifactSet,
 } from './generate.js';
@@ -139,9 +140,16 @@ describe('PDF symbol catalog artifact generation', () => {
     }
   });
 
-  it('writes validated artifacts and reports focused non-mutating drift', async () => {
+  it('writes a local audit while checking only the committed runtime and report', async () => {
     const root = await temporaryRepository();
     const written = await generateCatalogArtifacts({ repositoryRoot: root });
+    await expect(checkCatalogArtifacts({ repositoryRoot: root })).resolves.toEqual(written);
+
+    const auditPath = join(root, 'scripts/pdf-symbol-catalog/generated/catalog.audit.json');
+    expect(await readFile(auditPath, 'utf8')).toBe(written.audit);
+    await writeFile(auditPath, '{"stale":true}\n', 'utf8');
+    await expect(checkCatalogArtifacts({ repositoryRoot: root })).resolves.toEqual(written);
+    await rm(auditPath);
     await expect(checkCatalogArtifacts({ repositoryRoot: root })).resolves.toEqual(written);
 
     const runtimePath = join(root, 'apps/web/src/pdf/pdf-symbol-catalog.generated.ts');
@@ -150,6 +158,32 @@ describe('PDF symbol catalog artifact generation', () => {
     await expect(checkCatalogArtifacts({ repositoryRoot: root }))
       .rejects.toThrow(/catalog artifact drift.*pdf-symbol-catalog\.generated\.ts.*catalog:generate/isu);
     expect(await readFile(runtimePath, 'utf8')).toBe(`${expected}// drift\n`);
+
+    await writeFile(runtimePath, expected, 'utf8');
+    const reportPath = join(root, 'scripts/pdf-symbol-catalog/generated/update-report.json');
+    const report = await readFile(reportPath, 'utf8');
+    await writeFile(reportPath, `${report} `, 'utf8');
+    await expect(checkCatalogArtifacts({ repositoryRoot: root }))
+      .rejects.toThrow(/catalog artifact drift.*update-report\.json.*catalog:generate/isu);
+  }, 15_000);
+
+  it('can generate only the downloadable full audit for CI', async () => {
+    const root = await temporaryRepository();
+    await rm(join(root, 'scripts/pdf-symbol-catalog/generated'), { recursive: true, force: true });
+    const artifacts = await generateCatalogAudit({ repositoryRoot: root });
+
+    expect(await readFile(
+      join(root, 'scripts/pdf-symbol-catalog/generated/catalog.audit.json'),
+      'utf8',
+    )).toBe(artifacts.audit);
+    await expect(readFile(
+      join(root, 'apps/web/src/pdf/pdf-symbol-catalog.generated.ts'),
+      'utf8',
+    )).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(
+      join(root, 'scripts/pdf-symbol-catalog/generated/update-report.json'),
+      'utf8',
+    )).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('keeps runtime output independent of source, network, and audit modules', async () => {
@@ -189,6 +223,7 @@ describe('PDF symbol catalog artifact generation', () => {
       `${before.runtime}// stale generated projection\n`,
       'utf8',
     );
+    await rm(join(root, 'scripts/pdf-symbol-catalog/generated/catalog.audit.json'));
 
     await updateCatalogSources({
       repositoryRoot: root,
