@@ -152,11 +152,11 @@ describe("macOS distribution manifests", () => {
       },
       artifactBytes: {
         runtime: 400_389,
-        report: 342_810,
+        report: 7_181,
       },
       artifactSha256: {
         runtime: "e7d653177705de1acbba73848edc5071779bbdf76be82d2d92bee62ed4fb2fa0",
-        report: "438773d07bd88e44c375cb25dcb6d31be2344e57ca6a29887feb110e321e9672",
+        report: "98a4eca4e8a546f5302f9a7989c156528f7f5709464a35d61cee5636f2254a36",
         thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
       },
       productionWebJavaScriptBytes: 2_369_939,

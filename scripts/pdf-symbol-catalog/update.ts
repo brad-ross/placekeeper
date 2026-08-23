@@ -10,6 +10,7 @@ import { buildCatalogArtifacts, sha256, writeAtomically } from './generate.js';
 interface UpdateOptions {
   readonly repositoryRoot: string;
   readonly fetch?: typeof globalThis.fetch;
+  readonly nextManifest?: CompleteManifest;
 }
 
 interface CompleteManifest extends SourceManifest {
@@ -32,10 +33,20 @@ export const updateCatalogSources = async (options: UpdateOptions): Promise<void
   const catalogRoot = join(repositoryRoot, 'scripts/pdf-symbol-catalog');
   const manifestPath = join(catalogRoot, 'source-manifest.json');
   const rawManifest = await readFile(manifestPath, 'utf8');
-  const manifest = JSON.parse(rawManifest) as CompleteManifest;
-  if (manifest.schemaVersion !== 1) {
-    throw new Error(`unsupported source manifest schema ${String(manifest.schemaVersion)}`);
+  const currentManifest = JSON.parse(rawManifest) as CompleteManifest;
+  const manifest = options.nextManifest ?? currentManifest;
+  if (currentManifest.schemaVersion !== 1 || manifest.schemaVersion !== 1) {
+    throw new Error(
+      `unsupported source manifest schema ${String(currentManifest.schemaVersion !== 1
+        ? currentManifest.schemaVersion
+        : manifest.schemaVersion)}`,
+    );
   }
+
+  // Compile the checked-in source snapshot before staging any downloads. The
+  // ignored audit is only a convenience artifact and must never be the source
+  // of truth for a maintainer update's semantic delta.
+  const priorArtifacts = await buildCatalogArtifacts({ repositoryRoot });
 
   const stagingRoot = await mkdtemp(join(tmpdir(), 'placekeeper-catalog-update-'));
   try {
@@ -44,16 +55,19 @@ export const updateCatalogSources = async (options: UpdateOptions): Promise<void
       join(catalogRoot, 'overrides.json'),
       join(stagingRoot, 'scripts/pdf-symbol-catalog/overrides.json'),
     );
-    for (const path of [
-      'scripts/pdf-symbol-catalog/generated/catalog.audit.json',
-      'scripts/pdf-symbol-catalog/generated/update-report.json',
-    ]) {
-      try {
-        await mkdir(dirname(join(stagingRoot, path)), { recursive: true });
-        await cp(join(repositoryRoot, path), join(stagingRoot, path));
-      } catch (error) {
-        if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
-      }
+    await mkdir(join(stagingRoot, 'scripts/pdf-symbol-catalog/generated'), { recursive: true });
+    await writeFile(
+      join(stagingRoot, 'scripts/pdf-symbol-catalog/generated/catalog.audit.json'),
+      priorArtifacts.audit,
+      'utf8',
+    );
+    try {
+      await cp(
+        join(repositoryRoot, 'scripts/pdf-symbol-catalog/generated/update-report.json'),
+        join(stagingRoot, 'scripts/pdf-symbol-catalog/generated/update-report.json'),
+      );
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
     }
 
     const stagedManifest = structuredClone(manifest) as CompleteManifest;
@@ -161,6 +175,19 @@ export const updateCatalogSources = async (options: UpdateOptions): Promise<void
 const invokedPath = process.argv[1] === undefined ? null : resolve(process.argv[1]);
 if (invokedPath === fileURLToPath(import.meta.url)) {
   const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-  await updateCatalogSources({ repositoryRoot });
+  const manifestFlagIndex = process.argv.indexOf('--manifest');
+  let nextManifest: CompleteManifest | undefined;
+  if (manifestFlagIndex !== -1) {
+    const nextManifestPath = process.argv[manifestFlagIndex + 1];
+    if (nextManifestPath === undefined) {
+      throw new Error('--manifest requires a path to the next source manifest');
+    }
+    nextManifest = JSON.parse(
+      await readFile(resolve(nextManifestPath), 'utf8'),
+    ) as CompleteManifest;
+  }
+  await updateCatalogSources(nextManifest === undefined
+    ? { repositoryRoot }
+    : { repositoryRoot, nextManifest });
   process.stdout.write('Updated pinned mathematical symbol sources and generated artifacts.\n');
 }

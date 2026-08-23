@@ -6,11 +6,13 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import type { SourceManifest } from './compile.js';
 import {
   buildCatalogArtifacts,
   checkCatalogArtifacts,
   generateCatalogAudit,
   generateCatalogArtifacts,
+  sha256,
   type CatalogArtifactSet,
 } from './generate.js';
 import { updateCatalogSources } from './update.js';
@@ -42,15 +44,18 @@ describe('PDF symbol catalog artifact generation', () => {
         memberCodePoints: number[];
       }[];
       report: { recordCount: number; sourceHashes: Record<string, string> };
-    };
-    const report = JSON.parse(artifacts.report) as {
-      aliasCollisions: {
-        unresolved: unknown[];
+      runtimeProjection: {
         suppressedNaturalNames: {
           alias: string;
           codePoints: string[];
           retainedCodePoint?: string;
         }[];
+      };
+    };
+    const report = JSON.parse(artifacts.report) as {
+      aliasCollisions: {
+        unresolved: { count: number; sample: unknown[] };
+        suppressedNaturalNames: { count: number; sample: unknown[] };
       };
       indexCardinalities: Record<string, number>;
     };
@@ -104,12 +109,14 @@ describe('PDF symbol catalog artifact generation', () => {
       .not.toContainEqual(expect.objectContaining({ token: '\\varepsilon' }));
     expect(audit.records.find(({ codePoint }) => codePoint === 0x03f5)?.commands)
       .toContainEqual(expect.objectContaining({ token: '\\varepsilon' }));
-    expect(report.aliasCollisions.unresolved).toEqual([]);
-    expect(report.aliasCollisions.suppressedNaturalNames).toContainEqual({
+    expect(report.aliasCollisions.unresolved).toMatchObject({ count: 0, sample: [] });
+    expect(report.aliasCollisions.suppressedNaturalNames.count)
+      .toBe(audit.runtimeProjection.suppressedNaturalNames.length);
+    expect(audit.runtimeProjection.suppressedNaturalNames).toContainEqual({
       alias: 'legacy uppercase name',
       codePoints: expect.arrayContaining(['U+0022', 'U+2122']),
     });
-    expect(report.aliasCollisions.suppressedNaturalNames).toContainEqual({
+    expect(audit.runtimeProjection.suppressedNaturalNames).toContainEqual({
       alias: 'ac current',
       codePoints: ['U+223F', 'U+23E6'],
       retainedCodePoint: 'U+23E6',
@@ -120,6 +127,48 @@ describe('PDF symbol catalog artifact generation', () => {
     expect(audit.records.some(({ codePoint }) => codePoint === 0x00e9)).toBe(false);
     expect(audit.records.some(({ codePoint }) => codePoint === 0x002f)).toBe(true);
     expect(artifacts.runtime).toContain('semanticFamilyCodePoints: readonly number[]');
+  });
+
+  it('keeps the committed report concise while retaining exhaustive audit evidence', async () => {
+    const artifacts = await buildCatalogArtifacts({ repositoryRoot });
+    const audit = JSON.parse(artifacts.audit) as {
+      report: {
+        excludedMultiScalar: unknown[];
+        excludedUnassignedW3c: unknown[];
+        rejectedTex: unknown[];
+        auditedAliasGroups: unknown[];
+      };
+      runtimeProjection: { suppressedNaturalNames: unknown[] };
+    };
+    const report = JSON.parse(artifacts.report) as {
+      exclusions: {
+        multiScalar: { count: number; sha256: string; sample: unknown[] };
+        unassignedW3c: { count: number; sha256: string; sample: unknown[] };
+      };
+      rejectedTex: { count: number; sha256: string; sample: unknown[] };
+      aliasDecisions: { count: number; sha256: string; sample: unknown[] };
+      aliasCollisions: {
+        suppressedNaturalNames: { count: number; sha256: string; sample: unknown[] };
+      };
+    };
+
+    expect(Buffer.byteLength(artifacts.report)).toBeLessThan(25_000);
+    const unassignedW3c = audit.report.excludedUnassignedW3c.map((value) => (
+      `U+${String((value as number).toString(16)).toUpperCase().padStart(4, '0')}`
+    ));
+    for (const [summary, exhaustive] of [
+      [report.exclusions.multiScalar, audit.report.excludedMultiScalar],
+      [report.exclusions.unassignedW3c, unassignedW3c],
+      [report.rejectedTex, audit.report.rejectedTex],
+      [report.aliasDecisions, audit.report.auditedAliasGroups],
+      [report.aliasCollisions.suppressedNaturalNames,
+        audit.runtimeProjection.suppressedNaturalNames],
+    ] as const) {
+      expect(summary.count).toBe(exhaustive.length);
+      expect(summary.sha256).toBe(sha256(`${JSON.stringify(exhaustive, null, 2)}\n`));
+      expect(summary.sample).toEqual(exhaustive.slice(0, 5));
+      expect(summary.sample.length).toBeLessThanOrEqual(5);
+    }
   });
 
   it('emits byte-identical UTF-8 LF artifacts across locale and timezone settings', async () => {
@@ -249,6 +298,94 @@ describe('PDF symbol catalog artifact generation', () => {
     });
     expect(await snapshot(root)).toEqual(before);
   });
+
+  it.each(['absent', 'stale'] as const)(
+    'reports precise source deltas when the ignored audit is %s',
+    async (auditState) => {
+      const root = await temporaryRepository();
+      const before = await generateCatalogArtifacts({ repositoryRoot: root });
+      const beforeAudit = JSON.parse(before.audit) as {
+        records: { codePoint: number }[];
+      };
+      const manifestPath = join(root, 'scripts/pdf-symbol-catalog/source-manifest.json');
+      const nextManifest = JSON.parse(await readFile(manifestPath, 'utf8')) as SourceManifest & {
+        licenses?: Record<string, { file: string; url: string; sha256: string }>;
+      };
+      const downloaded = new Map<string, Buffer>();
+      for (const entry of Object.values(nextManifest.sources)) {
+        if (entry.url === undefined || entry.file === undefined) {
+          throw new Error('incomplete catalog test source');
+        }
+        downloaded.set(
+          entry.url,
+          gunzipSync(await readFile(join(root, 'scripts/pdf-symbol-catalog', entry.file))),
+        );
+      }
+      const derivedName = nextManifest.sources.derivedName as {
+        readonly url: string;
+        readonly file: string;
+        sha256: string;
+      };
+      const oldDerivedName = downloaded.get(derivedName.url);
+      if (oldDerivedName === undefined) throw new Error('missing derivedName test download');
+      const newDerivedName = Buffer.from(
+        oldDerivedName.toString('utf8').replace(
+          '2212          ; MINUS SIGN',
+          '2212          ; MINUS SIGN UPDATED',
+        ),
+        'utf8',
+      );
+      expect(newDerivedName).not.toEqual(oldDerivedName);
+      derivedName.sha256 = sha256(newDerivedName);
+      downloaded.set(derivedName.url, newDerivedName);
+
+      const auditPath = join(root, 'scripts/pdf-symbol-catalog/generated/catalog.audit.json');
+      if (auditState === 'absent') await rm(auditPath);
+      else await writeFile(auditPath, '{"records":[{"codePoint":1}]}\n', 'utf8');
+
+      await updateCatalogSources({
+        repositoryRoot: root,
+        nextManifest,
+        fetch: async (input) => {
+          const source = downloaded.get(String(input));
+          return source === undefined
+            ? new Response('missing fixture', { status: 404 })
+            : new Response(Uint8Array.from(source).buffer, { status: 200 });
+        },
+      });
+
+      const afterAuditSource = await readFile(auditPath, 'utf8');
+      const afterAudit = JSON.parse(afterAuditSource) as {
+        records: { codePoint: number }[];
+      };
+      const report = JSON.parse(await readFile(
+        join(root, 'scripts/pdf-symbol-catalog/generated/update-report.json'),
+        'utf8',
+      )) as {
+        changes: {
+          added: string[];
+          removed: string[];
+          changed: { codePoint: string; beforeSha256: string; afterSha256: string }[];
+        };
+      };
+      const beforeRecord = beforeAudit.records.find(({ codePoint }) => codePoint === 0x2212);
+      const afterRecord = afterAudit.records.find(({ codePoint }) => codePoint === 0x2212);
+      if (beforeRecord === undefined || afterRecord === undefined) {
+        throw new Error('missing U+2212 regression record');
+      }
+      expect(report.changes).toEqual({
+        added: [],
+        removed: [],
+        changed: [{
+          codePoint: 'U+2212',
+          beforeSha256: sha256(JSON.stringify(beforeRecord)),
+          afterSha256: sha256(JSON.stringify(afterRecord)),
+        }],
+      });
+      await expect(checkCatalogArtifacts({ repositoryRoot: root })).resolves.toBeDefined();
+    },
+    30_000,
+  );
 });
 
 const snapshot = async (root: string): Promise<CatalogArtifactSet & { manifest: string }> => {

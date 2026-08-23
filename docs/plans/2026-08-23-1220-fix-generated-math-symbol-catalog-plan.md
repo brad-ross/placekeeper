@@ -300,7 +300,7 @@ flowchart TB
 - **Files:** `scripts/pdf-symbol-catalog/generate.ts`, `scripts/pdf-symbol-catalog/update.ts`, ignored local output `scripts/pdf-symbol-catalog/generated/catalog.audit.json`, committed `scripts/pdf-symbol-catalog/generated/update-report.json`, `apps/web/src/pdf/pdf-symbol-catalog.generated.ts`, `scripts/pdf-symbol-catalog/generate.test.ts`, `package.json`.
 - **Approach:**
   1. Serialize full audit records and compact code-point-sorted TypeScript tuples with fixed UTF-8/LF output and byte-order-sorted alias/command arrays.
-  2. Implement offline `generate` and non-mutating byte-for-byte `check` commands plus an explicit network-capable atomic update command. `check` validates the committed runtime/report only; maintainer generation and CI still materialize the ignored full audit.
+  2. Implement offline `generate` and non-mutating byte-for-byte `check` commands plus an explicit network-capable atomic update command that accepts the next source manifest separately from the committed old manifest. `check` validates the committed runtime/report only; maintainer generation and CI still materialize the ignored full audit.
   3. Report source hashes, category/provenance counts, added/removed/changed records, multi-scalar and invalid-TeX exclusions, alias collisions, overrides, index cardinalities, and artifact bytes; keep wall-clock measurements outside deterministic report bytes.
   4. Reference applicable licenses and source revisions from generated headers without importing audit data or snapshots into web code.
 - **Execution note:** Run the generator twice under differing locale/timezone settings and require identical bytes before accepting the first artifact.

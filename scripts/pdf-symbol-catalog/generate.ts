@@ -53,6 +53,14 @@ interface RuntimeNameProjection {
   readonly suppressedNaturalNames: readonly SuppressedNaturalName[];
 }
 
+interface ArraySummary<T> {
+  readonly count: number;
+  readonly sha256: string;
+  readonly sample: readonly T[];
+}
+
+const REPORT_SAMPLE_LIMIT = 5;
+
 const byteCompare = (left: string, right: string): number =>
   Buffer.from(left, 'utf8').compare(Buffer.from(right, 'utf8'));
 
@@ -63,6 +71,12 @@ export const sha256 = (value: string | Uint8Array): string =>
   createHash('sha256').update(value).digest('hex');
 
 const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
+
+const summarizeArray = <T>(values: readonly T[]): ArraySummary<T> => ({
+  count: values.length,
+  sha256: sha256(json(values)),
+  sample: values.slice(0, REPORT_SAMPLE_LIMIT),
+});
 
 const optionalFile = async (path: string): Promise<string | null> => {
   try {
@@ -288,6 +302,9 @@ export const buildCatalogArtifacts = async (
     records: compiled.records,
     equivalenceFamilies: compiled.equivalenceFamilies,
     report: compiled.report,
+    runtimeProjection: {
+      suppressedNaturalNames: runtimeNames.suppressedNaturalNames,
+    },
   });
   const runtime = renderRuntime(
     compiled.records,
@@ -333,10 +350,10 @@ export const buildCatalogArtifacts = async (
     },
     changes,
     exclusions: {
-      multiScalar: compiled.report.excludedMultiScalar,
-      unassignedW3c: compiled.report.excludedUnassignedW3c.map(codePointId),
+      multiScalar: summarizeArray(compiled.report.excludedMultiScalar),
+      unassignedW3c: summarizeArray(compiled.report.excludedUnassignedW3c.map(codePointId)),
     },
-    rejectedTex: compiled.report.rejectedTex,
+    rejectedTex: summarizeArray(compiled.report.rejectedTex),
     equivalence: {
       families: compiled.equivalenceFamilies.length,
       edges: compiled.report.equivalenceEdges.length,
@@ -346,10 +363,10 @@ export const buildCatalogArtifacts = async (
       ),
       styledMembers: compiled.report.equivalenceEdges.filter(({ kind }) => kind === 'font').length,
     },
-    aliasDecisions: compiled.report.auditedAliasGroups,
+    aliasDecisions: summarizeArray(compiled.report.auditedAliasGroups),
     aliasCollisions: {
-      unresolved: [],
-      suppressedNaturalNames: runtimeNames.suppressedNaturalNames,
+      unresolved: summarizeArray([]),
+      suppressedNaturalNames: summarizeArray(runtimeNames.suppressedNaturalNames),
     },
     overrideCount: compiled.report.auditedAliasGroups.length,
     indexCardinalities: {
