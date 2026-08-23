@@ -63,7 +63,7 @@ Adding entries reactively cannot establish coverage or prevent regressions in ot
 - R11. Every override shall identify the affected code point or alias, its rationale, and the upstream behavior it corrects or supplements.
 - R12. Generation shall reject invalid scalars, duplicate records, ambiguous command casing, undocumented alias conflicts, stale overrides, and aliases that would rewrite a literal ASCII query to another Unicode glyph.
 - R13. Updating an upstream version shall be an explicit maintainer action that produces a reviewable report of added and removed code points, changed names or aliases, conflicts, output size, and override count.
-- R14. Repository verification shall fail when the checked-in or build-consumed generated artifact differs from the deterministic generator output.
+- R14. Repository verification shall fail when the checked-in runtime catalog or update report differs from the deterministic generator output; the full audit shall remain reproducible from the same inputs without being part of the checked-in drift contract.
 - R15. The generated artifact and required attribution or license notices shall be source-controlled or otherwise integrity-pinned so a frozen dependency installation is sufficient to reproduce it without an additional live data fetch.
 - R16. The application bundle shall contain only the compact compiled catalog needed by search, not the full upstream XML or Unicode database, and shall require no catalog network access at runtime.
 
@@ -191,7 +191,7 @@ The standards sources own the ordinary repertoire. The exception records alter o
 - KTD1. **Vendor checksum-pinned standards snapshots.** Commit compressed local copies of Unicode 17.0.0 `DerivedName.txt`, `DerivedGeneralCategory.txt`, and `DerivedCoreProperties.txt` plus W3C `unicode.xml` at commit `ed8b732d7d38112f258e74aadecbb1e409eafdd9`. A manifest records immutable URLs, versions, SHA-256 values, and licenses. Ordinary generation, build, install, and runtime paths never fetch data. This resolves the source-transport question under R8, R9, and R15.
 - KTD2. **Keep Unicode and W3C authority separate.** Unicode derived files own assignment, official names, and General Categories. W3C owns entity identifiers, descriptions, TeX fields, math-mode metadata, and their provenance. Generation reports cross-source disagreements instead of letting W3C's duplicated Unicode fields override the UCD. This resolves the authority split under R1-R4 and R12.
 - KTD3. **Admit symbols through a reproducible evidence predicate.** The repertoire is the union of assigned UCD `Math` scalars with assigned single-scalar W3C records that carry explicit mathematical evidence: `mode=math|mixed`, a non-alphabetic mathematical class, a math/science application marker, or a directly typeable single-symbol TeX command. General Category `So`, general entity membership, or a description alone does not admit a scalar. W3C multi-scalar records are excluded and reported. This prevents emoji, pictographs, and ordinary prose letters from becoming suggestions while satisfying R1-R4.
-- KTD4. **Emit separate audit and runtime projections.** The generator writes a deterministic source-side audit JSON with full provenance and a compact TypeScript tuple table containing only fields needed by search. Both are checked in and drift-checked. Only the tuple table is imported into the web bundle. This resolves the representation question under R3, R9, R14, and R16.
+- KTD4. **Emit separate audit and runtime projections.** The generator writes a deterministic source-side audit JSON with full provenance and a compact TypeScript tuple table containing only fields needed by search. The compact runtime table and concise update report are checked in and drift-checked. The full audit is ignored by Git, generated explicitly for maintainer updates and CI, and may be retained as a downloadable CI artifact. Only the tuple table is imported into the web bundle. This resolves the representation question under R3, R9, R14, and R16.
 - KTD5. **Index the standards-sized catalog once.** The runtime adapter builds glyph, exact-command, and normalized-text-alias maps once, then the controller accumulates only newly detected catalog record IDs for semantic suggestions and aliases. Alias lookup intersects indexed candidates with those IDs rather than rescanning the complete catalog after every page. Exact literal search remains independent of catalog membership. This resolves the runtime-structure question under R17-R22.
 - KTD6. **Separate literal, command, entity, and name namespaces.** A trimmed one-scalar query bypasses catalog lookup and searches the extracted scalar directly without normalization. Backslash commands and W3C entity identifiers use exact case. Official names, descriptions, and natural-language overrides use deterministic locale-independent NFC/case normalization and intersect current-document catalog IDs. Every one-to-many alias must name an audited code-point group and rationale; upstream collisions may propose groups but never authorize fan-out by themselves. This implements R5-R7, R12, and R21 without cross-namespace rewriting.
 - KTD7. **Accept only directly typeable TeX tokens.** Trim W3C `latex`, `varlatex`, and `mathlatex` fields, but admit only a whole-field TeX control word or explicitly allowed control symbol that denotes one scalar. Reject and report arguments, braces, whitespace composition, or multiple tokens. Retain package/set provenance and do not present package-specific commands as generic LaTeX. This implements R3, R4, and R12.
@@ -261,7 +261,7 @@ flowchart TB
 ### Sequencing
 
 1. Establish pinned sources, compiler contracts, and validation fixtures before changing runtime behavior.
-2. Generate and drift-check audit/runtime projections before replacing the manual catalog.
+2. Generate the full audit locally, then drift-check the committed runtime/report projections before replacing the manual catalog.
 3. Introduce indexed runtime resolution and incremental document inventory together so standards-scale data never enters the old scan path.
 4. Wire optional-command presentation and the target-PDF behavior through unit and production-flow tests.
 5. Add CI, bundle, notice, and offline distribution gates after the artifacts and runtime imports are stable.
@@ -294,23 +294,23 @@ flowchart TB
 
 ### U2. Generate compact and auditable artifacts
 
-- **Goal:** Replace the hand-maintained repertoire with checked-in deterministic audit/runtime projections and explicit generate/check/update workflows.
+- **Goal:** Replace the hand-maintained repertoire with deterministic audit/runtime projections, a checked-in runtime/report contract, and explicit generate/check/update workflows.
 - **Requirements:** R3, R8-R16; F1, F4; AE5; KTD4, KTD8.
 - **Dependencies:** U1.
-- **Files:** `scripts/pdf-symbol-catalog/generate.ts`, `scripts/pdf-symbol-catalog/update.ts`, `scripts/pdf-symbol-catalog/generated/catalog.audit.json`, `scripts/pdf-symbol-catalog/generated/update-report.json`, `apps/web/src/pdf/pdf-symbol-catalog.generated.ts`, `scripts/pdf-symbol-catalog/generate.test.ts`, `package.json`.
+- **Files:** `scripts/pdf-symbol-catalog/generate.ts`, `scripts/pdf-symbol-catalog/update.ts`, ignored local output `scripts/pdf-symbol-catalog/generated/catalog.audit.json`, committed `scripts/pdf-symbol-catalog/generated/update-report.json`, `apps/web/src/pdf/pdf-symbol-catalog.generated.ts`, `scripts/pdf-symbol-catalog/generate.test.ts`, `package.json`.
 - **Approach:**
   1. Serialize full audit records and compact code-point-sorted TypeScript tuples with fixed UTF-8/LF output and byte-order-sorted alias/command arrays.
-  2. Implement offline `generate` and non-mutating byte-for-byte `check` commands plus an explicit network-capable atomic update command.
+  2. Implement offline `generate` and non-mutating byte-for-byte `check` commands plus an explicit network-capable atomic update command. `check` validates the committed runtime/report only; maintainer generation and CI still materialize the ignored full audit.
   3. Report source hashes, category/provenance counts, added/removed/changed records, multi-scalar and invalid-TeX exclusions, alias collisions, overrides, index cardinalities, and artifact bytes; keep wall-clock measurements outside deterministic report bytes.
   4. Reference applicable licenses and source revisions from generated headers without importing audit data or snapshots into web code.
 - **Execution note:** Run the generator twice under differing locale/timezone settings and require identical bytes before accepting the first artifact.
 - **Patterns to follow:** Existing checked-in build inputs and static Vite module imports; no runtime fetch path.
 - **Test scenarios:**
   - Covers AE5. Identical sources and overrides produce byte-identical audit, runtime, and report artifacts across repeated runs, independent of environment-qualified timing evidence.
-  - `catalog:check` succeeds on committed output and fails with a focused diff after a generated tuple is edited.
+  - `catalog:check` succeeds when the ignored audit is absent or stale, and fails with a focused diff after the committed runtime catalog or report is edited.
   - A failed update leaves the source manifest, snapshots, generated artifacts, and report unchanged.
   - The generated runtime module imports no source snapshot, network client, update helper, or audit-only provenance payload.
-- **Verification:** The committed artifact regenerates cleanly offline, the update report is deterministic, and generated output contains the catalog rather than a hand-authored repertoire.
+- **Verification:** The committed runtime/report regenerate cleanly offline, the full audit is reproducible for maintainer and CI inspection, and generated output contains the catalog rather than a hand-authored repertoire.
 
 ### U3. Replace runtime scans with indexed exact resolution
 
@@ -362,9 +362,10 @@ flowchart TB
 - **Files:** `.github/workflows/ci.yml`, `vitest.ci.config.ts`, `package.json`, `packaging/macos/build-app.ts`, `packaging/macos/validate-manifest.ts`, `packaging/macos/packaging.test.ts`, `test/acceptance/production-flow.spec.ts`.
 - **Approach:**
   1. Run non-mutating catalog drift verification before production web builds and in the explicit CI workflow.
-  2. Include generator tests in the CI allowlist and extend the production search flow with the target inventory and no-command case.
-  3. Inspect executable/runtime assets for the compact catalog behavior while rejecting raw XML/UCD snapshots, catalog-fetch endpoints, and update code.
-  4. Copy `THIRD_PARTY_NOTICES.md` into a stable macOS app resource path before build-identity calculation, require it in packaging/distribution validation, and allow its required attribution URLs.
+  2. Generate the ignored full audit in CI and upload it as a bounded-retention downloadable artifact without making builds or installs generate it.
+  3. Include generator tests in the CI allowlist and extend the production search flow with the target inventory and no-command case.
+  4. Inspect executable/runtime assets for the compact catalog behavior while rejecting raw XML/UCD snapshots, catalog-fetch endpoints, audit data, and update code.
+  5. Copy `THIRD_PARTY_NOTICES.md` into a stable macOS app resource path before build-identity calculation, require it in packaging/distribution validation, and allow its required attribution URLs.
 - **Execution note:** Prefer production-output and installed/offline evidence over source-only assertions for distribution boundaries.
 - **Patterns to follow:** Existing explicit CI test graph, `validate:distribution`, packaging tests, and production-flow browser acceptance.
 - **Test scenarios:**
@@ -381,7 +382,7 @@ flowchart TB
 
 | Gate | Command or evidence | Proves |
 |---|---|---|
-| Generator drift | `pnpm catalog:check` | Pinned local inputs reproduce committed audit/runtime/report bytes without fetching or rewriting. |
+| Generator drift | `pnpm catalog:check` | Pinned local inputs reproduce committed runtime/report bytes without fetching or rewriting; the ignored audit is not required. |
 | Generator and runtime unit tests | `pnpm exec vitest run scripts/pdf-symbol-catalog/compile.test.ts scripts/pdf-symbol-catalog/generate.test.ts apps/web/test/pdf-symbol-catalog.test.ts apps/web/test/pdf-search-controller.test.ts apps/web/test/pdf-search-workspace.test.tsx` | Parsing, admission, validation, exact matching, indexed resolution, optional commands, and current-PDF behavior. |
 | Static correctness | `pnpm typecheck` | Compiler, generated module, runtime adapter, and UI contracts remain type-safe. |
 | CI unit graph | `pnpm test:ci:unit` | New tests are included in the repository's explicit allowlist. |
