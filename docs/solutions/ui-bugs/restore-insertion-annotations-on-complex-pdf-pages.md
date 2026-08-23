@@ -33,7 +33,7 @@ tags:
 
 Insertion annotations could not be created on otherwise ordinary prose in complex PDFs. The caret path maps page text rectangles back to extracted-text offsets and resolves a pointer to an exact text edge, but several reliability checks treated the whole page as one unit of trust (`apps/web/src/pdf/selection-anchor.ts:523-528`).
 
-That scope was too broad. A technical page can combine prose with overlapping subscript or superscript rectangles, right-to-left text, omitted whitespace glyphs, and malformed glyph metadata. Those artifacts should reject a caret only when their geometry can own or alter the clicked text edge. The correction is proposed in [PR #53](https://github.com/brad-ross/placekeeper/pull/53), which was open and unmerged as of 2026-08-23.
+That scope was too broad. A technical page can combine prose with overlapping subscript or superscript rectangles, right-to-left text, omitted whitespace glyphs, and malformed glyph metadata. Those artifacts should reject a caret only when their geometry can own or alter the clicked text edge. The correction merged in [PR #53](https://github.com/brad-ross/placekeeper/pull/53) on 2026-08-23.
 
 ## Symptoms
 
@@ -101,5 +101,6 @@ This does not make every reliability rule local. Extracted page text and text re
 - [Contextual Annotation Composer preserves document context during authoring](../design-patterns/contextual-annotation-composer-preserves-document-context-during-authoring.md) describes the downstream authoring lifecycle after a reliable caret exists.
 - [Portable PDF annotations invisible in external viewers](../integration-issues/portable-pdf-annotations-invisible-in-external-viewers.md) documents the complementary fail-closed geometry boundary for durable PDF writing.
 - [Wait for committed wheel zoom before pointer-selection assertions](../test-failures/wait-for-committed-wheel-zoom-before-pointer-selection.md) covers adjacent real-browser coordinate timing.
-- [PR #47](https://github.com/brad-ross/placekeeper/pull/47) introduced exact indexed-glyph caret alignment; PR #53 narrows its caret-specific reliability scope without weakening local ambiguity checks.
-
+- [Reject stale viewer selection snapshots before creating annotation anchors](reject-stale-viewer-selection-snapshots.md) covers the complementary equation and inline-equation failure caused by text/geometry drift during asynchronous selection capture.
+- [Issue #51](https://github.com/brad-ross/placekeeper/issues/51) tracks equation and inline-equation annotation failures; [PR #56](https://github.com/brad-ross/placekeeper/pull/56) addresses selection capture, while [PR #53](https://github.com/brad-ross/placekeeper/pull/53) addresses caret-local reliability scope.
+- [PR #47](https://github.com/brad-ross/placekeeper/pull/47) introduced exact indexed-glyph caret alignment; PR #53 narrowed its caret-specific reliability scope without weakening local ambiguity checks.
