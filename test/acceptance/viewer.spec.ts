@@ -6,8 +6,10 @@ declare global {
     __htmlPayloadExecuted: boolean;
     viewerAcceptance: {
       ready: boolean;
-      selectionGeometryReady(): boolean;
+      selectionGeometryReady(pageIndex?: number): boolean;
       selectionRectCount(): number;
+      caretAnchorPageIndex(): number | null;
+      caretAnchorLeftContext(): string;
       zoomLevel(): number;
       selectionAnchorStatus(): string;
       goToPage(pageNumber: number): void;
@@ -233,6 +235,29 @@ test.describe('shared viewer foundation', () => {
       'false',
     );
     await expect(page.locator('[data-page-index="1"]')).toBeVisible();
+  });
+
+  test('publishes insertion carets on every text page', async ({ page }) => {
+    await page.goto('/test/acceptance/viewer-harness/index.html?fixture=multi-text');
+    await page.waitForFunction(() => window.viewerAcceptance?.ready === true);
+    const first = page.locator('[data-page-index="0"]');
+    await expect(first).toBeVisible();
+    await page.waitForFunction(() => window.viewerAcceptance.selectionGeometryReady(0));
+    await first.click({ position: { x: 150, y: 130 } });
+    await expect.poll(() => page.evaluate(() => window.viewerAcceptance.caretAnchorPageIndex()))
+      .toBe(0);
+    await expect.poll(() => page.evaluate(() => window.viewerAcceptance.caretAnchorLeftContext()))
+      .toContain('Repeated insertion context.');
+
+    await page.evaluate(() => window.viewerAcceptance.goToPage(2));
+    const second = page.locator('[data-page-index="1"]');
+    await expect(second).toBeVisible();
+    await page.waitForFunction(() => window.viewerAcceptance.selectionGeometryReady(1));
+    await second.click({ position: { x: 150, y: 130 } });
+    await expect.poll(() => page.evaluate(() => window.viewerAcceptance.caretAnchorPageIndex()))
+      .toBe(1);
+    await expect.poll(() => page.evaluate(() => window.viewerAcceptance.caretAnchorLeftContext()))
+      .toContain('Repeated insertion context.');
   });
 
   test('shows the shared recovery path for an unreliable selection', async ({ page }) => {
