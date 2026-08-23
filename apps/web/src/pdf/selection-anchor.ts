@@ -394,10 +394,26 @@ function rectsOverlap(a: Rect, b: Rect): boolean {
   );
 }
 
-function readingOrderSupported(mapped: readonly MappedTextRect[]): boolean {
+function caretPointNearRect(rect: Rect, point: Position): boolean {
+  const centerY = rect.origin.y + rect.size.height / 2;
+  const tolerance = Math.min(6, rect.size.height / 2);
+  return (
+    Math.abs(point.y - centerY) <= tolerance
+    && point.x >= rect.origin.x - tolerance
+    && point.x <= rect.origin.x + rect.size.width + tolerance
+  );
+}
+
+const NON_WHITESPACE = /\S/u;
+
+function readingOrderSupported(
+  mapped: readonly MappedTextRect[],
+  point: Position,
+): boolean {
   for (let index = 1; index < mapped.length; index += 1) {
     const previous = mapped[index - 1]!.rect;
     const current = mapped[index]!.rect;
+    if (!caretPointNearRect(previous, point) && !caretPointNearRect(current, point)) continue;
     const sameLine = Math.abs(current.origin.y - previous.origin.y) <= Math.min(6, previous.size.height / 2);
     if (sameLine && current.origin.x < previous.origin.x) return false;
     if (!sameLine && current.origin.y < previous.origin.y) return false;
@@ -414,14 +430,20 @@ interface CaretCandidate {
 function alignedCaretGlyphs(
   page: AnchorPage,
   mapped: readonly MappedTextRect[],
+  point: Position,
 ): readonly AnchorGlyph[] | null {
   if (!page.glyphs || page.glyphs.length === 0) return null;
-  const requiredOffsets = new Map<number, MappedTextRect>();
+  const localOwners = new Map<number, MappedTextRect>();
+  const requiredOffsets = new Set<number>();
+  // Geometry elsewhere on a page cannot make this pointer's exact text edge ambiguous.
   for (const item of mapped) {
+    if (!caretPointNearRect(item.rect, point)) continue;
     for (let offset = item.start; offset < item.end; offset += 1) {
-      requiredOffsets.set(offset, item);
+      localOwners.set(offset, item);
+      if (NON_WHITESPACE.test(page.extractedText[offset] ?? '')) requiredOffsets.add(offset);
     }
   }
+  if (localOwners.size === 0) return null;
   const seenOffsets = new Set<number>();
   const aligned: AnchorGlyph[] = [];
   for (const glyph of page.glyphs) {
@@ -430,16 +452,23 @@ function alignedCaretGlyphs(
       !Number.isSafeInteger(textOffset)
       || textOffset < 0
       || textOffset >= page.extractedText.length
-    ) return null;
-    const owner = requiredOffsets.get(textOffset);
+    ) {
+      if (isValidTextRect(rect) && caretPointNearRect(rect, point)) return null;
+      continue;
+    }
+    const owner = localOwners.get(textOffset);
     // Text rectangles omit PDF control slots such as line breaks. They cannot
     // be clicked, so they do not participate in the visible-glyph contract.
-    if (!owner) continue;
-    if (
-      seenOffsets.has(textOffset)
-      || !isValidTextRect(rect)
-      || !rectsOverlap(rect, owner.rect)
-    ) return null;
+    if (!owner) {
+      if (isValidTextRect(rect) && caretPointNearRect(rect, point)) return null;
+      continue;
+    }
+    const required = requiredOffsets.has(textOffset);
+    if (!isValidTextRect(rect) || !rectsOverlap(rect, owner.rect)) {
+      if (required) return null;
+      continue;
+    }
+    if (seenOffsets.has(textOffset)) return null;
     seenOffsets.add(textOffset);
     requiredOffsets.delete(textOffset);
     aligned.push(glyph);
@@ -513,19 +542,27 @@ export function createCaretAnchorAtPoint(input: CreateCaretAnchorAtPointInput): 
 
   const mapped = alignTextRects(input.page);
   if (mapped === null) return caretFailure('caret-text-rect-alignment-nonunique');
+  // Subscripts and superscripts commonly overlap; reject only overlaps that can own this point.
   for (let first = 0; first < mapped.length; first += 1) {
     for (let second = first + 1; second < mapped.length; second += 1) {
-      if (mapped[first]!.start !== mapped[second]!.start && rectsOverlap(mapped[first]!.rect, mapped[second]!.rect)) {
+      if (
+        mapped[first]!.start !== mapped[second]!.start
+        && rectsOverlap(mapped[first]!.rect, mapped[second]!.rect)
+        && caretPointNearRect(mapped[first]!.rect, naturalPoint)
+        && caretPointNearRect(mapped[second]!.rect, naturalPoint)
+      ) {
         return caretFailure('caret-text-rects-overlap');
       }
     }
   }
-  if (!readingOrderSupported(mapped)) return caretFailure('caret-reading-order-unsupported');
-  if (mapped.some(({ content }) => hasUnsupportedReadingOrder(content))) {
+  if (!readingOrderSupported(mapped, naturalPoint)) return caretFailure('caret-reading-order-unsupported');
+  if (mapped.some(({ content, rect }) => (
+    caretPointNearRect(rect, naturalPoint) && hasUnsupportedReadingOrder(content)
+  ))) {
     return caretFailure('caret-reading-order-unsupported');
   }
 
-  const exactGlyphs = alignedCaretGlyphs(input.page, mapped);
+  const exactGlyphs = alignedCaretGlyphs(input.page, mapped, naturalPoint);
   const candidates = exactGlyphs === null
     ? []
     : glyphCaretCandidates(exactGlyphs, naturalPoint);

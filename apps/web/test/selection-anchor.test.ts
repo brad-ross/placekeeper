@@ -251,6 +251,94 @@ describe('selection anchors', () => {
       });
   });
 
+  it('allows a prose caret despite unrelated mathematical text geometry', () => {
+    const hitPage = {
+      ...page(Rotation.Degree0),
+      extractedText: 'word \nνkzאב',
+      textRects: [
+        {
+          content: 'word ',
+          rect: { origin: { x: 20, y: 30 }, size: { width: 40, height: 12 } },
+        },
+        {
+          content: 'ν',
+          rect: { origin: { x: 100, y: 80 }, size: { width: 6, height: 6 } },
+        },
+        {
+          content: 'k',
+          rect: { origin: { x: 105, y: 84 }, size: { width: 4, height: 6 } },
+        },
+        {
+          content: 'z',
+          rect: { origin: { x: 110, y: 80 }, size: { width: 6, height: 9 } },
+        },
+        {
+          content: 'אב',
+          rect: { origin: { x: 150, y: 120 }, size: { width: 12, height: 9 } },
+        },
+      ],
+      glyphs: [
+        { textOffset: 0, rect: { origin: { x: 20, y: 30 }, size: { width: 10, height: 12 } } },
+        { textOffset: 1, rect: { origin: { x: 30, y: 30 }, size: { width: 10, height: 12 } } },
+        { textOffset: 2, rect: { origin: { x: 40, y: 30 }, size: { width: 10, height: 12 } } },
+        { textOffset: 3, rect: { origin: { x: 50, y: 30 }, size: { width: 10, height: 12 } } },
+        { textOffset: 4, rect: { origin: { x: 0, y: 0 }, size: { width: 0, height: 0 } } },
+        { textOffset: 6, rect: { origin: { x: 100, y: 80 }, size: { width: 6, height: 6 } } },
+        { textOffset: 7, rect: { origin: { x: 105, y: 84 }, size: { width: 4, height: 6 } } },
+        { textOffset: 8, rect: { origin: { x: 200, y: 80 }, size: { width: 6, height: 9 } } },
+      ],
+    };
+
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 36, y: 36 } }))
+      .toMatchObject({
+        ok: true,
+        anchor: {
+          leftContext: 'wo',
+          rightContext: 'rd \nνkzאב',
+          reliable: true,
+        },
+      });
+  });
+
+  it('uses present whitespace glyph geometry without requiring omitted whitespace slots', () => {
+    const hitPage = {
+      ...page(Rotation.Degree0),
+      extractedText: 'a b',
+      textRects: [{ content: 'a b', rect: { origin: { x: 20, y: 30 }, size: { width: 40, height: 12 } } }],
+      glyphs: [
+        { textOffset: 0, rect: { origin: { x: 20, y: 30 }, size: { width: 10, height: 12 } } },
+        { textOffset: 1, rect: { origin: { x: 30, y: 30 }, size: { width: 20, height: 12 } } },
+        { textOffset: 2, rect: { origin: { x: 50, y: 30 }, size: { width: 10, height: 12 } } },
+      ],
+    };
+
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 35, y: 36 } }))
+      .toMatchObject({
+        ok: true,
+        anchor: {
+          position: { x: 30, y: 30, width: 2, height: 12 },
+          leftContext: 'a',
+          rightContext: ' b',
+        },
+      });
+  });
+
+  it('rejects malformed indexed glyph geometry at the pointer', () => {
+    const hitPage = {
+      ...page(Rotation.Degree0),
+      extractedText: 'ab',
+      textRects: [{ content: 'ab', rect: { origin: { x: 20, y: 30 }, size: { width: 20, height: 12 } } }],
+      glyphs: [
+        { textOffset: 0, rect: { origin: { x: 20, y: 30 }, size: { width: 10, height: 12 } } },
+        { textOffset: 1, rect: { origin: { x: 30, y: 30 }, size: { width: 10, height: 12 } } },
+        { textOffset: 99, rect: { origin: { x: 25, y: 30 }, size: { width: 10, height: 12 } } },
+      ],
+    };
+
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 28, y: 36 } }))
+      .toMatchObject({ ok: false, diagnostic: 'caret-point-inside-multichar-rect' });
+  });
+
   it('does not guess inside a text rect when indexed glyph coverage is incomplete', () => {
     const hitPage = {
       ...page(Rotation.Degree0),
