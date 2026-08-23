@@ -63,17 +63,89 @@ describe('PDF search workspace', () => {
     expect(html).not.toContain('Symbols in this PDF');
   });
 
-  it('filters document symbols by glyph, common name, and LaTeX command', () => {
+  it('filters document symbols by exact glyph, natural name, and case-sensitive commands', () => {
     const symbols = [
-      { label: 'λ lambda (\\lambda)', query: 'λ' },
-      { label: 'θ theta (\\theta)', query: 'θ' },
+      {
+        label: 'λ greek small letter lamda (\\lambda)',
+        query: 'λ',
+        symbolSearch: {
+          glyph: 'λ',
+          commands: ['\\lambda'],
+          entities: ['lambda'],
+          naturalTerms: ['greek small letter lamda', 'lambda'],
+        },
+      },
+      {
+        label: 'θ greek small letter theta (\\theta)',
+        query: 'θ',
+        symbolSearch: {
+          glyph: 'θ',
+          commands: ['\\theta', '\\vartheta'],
+          entities: ['theta'],
+          naturalTerms: ['greek small letter theta'],
+        },
+      },
     ];
 
     expect(filterPdfSearchSymbolSuggestions(symbols, '')).toEqual(symbols);
     expect(filterPdfSearchSymbolSuggestions(symbols, 'lam')).toEqual([symbols[0]]);
     expect(filterPdfSearchSymbolSuggestions(symbols, '\\theta')).toEqual([symbols[1]]);
+    expect(filterPdfSearchSymbolSuggestions(symbols, '\\vart')).toEqual([symbols[1]]);
+    expect(filterPdfSearchSymbolSuggestions(symbols, '\\Theta')).toEqual([]);
+    expect(filterPdfSearchSymbolSuggestions(symbols, 'GREEK SMALL LETTER THETA')).toEqual([symbols[1]]);
     expect(filterPdfSearchSymbolSuggestions(symbols, 'λ')).toEqual([symbols[0]]);
     expect(filterPdfSearchSymbolSuggestions(symbols, 'sigma')).toEqual([]);
+  });
+
+  it('keeps entity IDs and canonically equivalent-looking glyphs distinct', () => {
+    const symbols = [
+      {
+        label: 'Α greek capital letter alpha (\\Alpha)',
+        query: 'Α',
+        symbolSearch: {
+          glyph: 'Α',
+          commands: ['\\Alpha'],
+          entities: ['Alpha'],
+          naturalTerms: ['greek capital letter alpha'],
+        },
+      },
+      {
+        label: 'α greek small letter alpha (\\alpha)',
+        query: 'α',
+        symbolSearch: {
+          glyph: 'α',
+          commands: ['\\alpha'],
+          entities: ['alpha'],
+          naturalTerms: ['greek small letter alpha'],
+        },
+      },
+      {
+        label: 'Ω greek capital letter omega (\\Omega)',
+        query: 'Ω',
+        symbolSearch: {
+          glyph: 'Ω',
+          commands: ['\\Omega'],
+          entities: ['Omega'],
+          naturalTerms: ['greek capital letter omega'],
+        },
+      },
+      {
+        label: 'Ω ohm sign (\\Omega)',
+        query: 'Ω',
+        symbolSearch: {
+          glyph: 'Ω',
+          commands: ['\\Omega'],
+          entities: ['ohm'],
+          naturalTerms: ['ohm sign'],
+        },
+      },
+    ];
+
+    expect(filterPdfSearchSymbolSuggestions(symbols, 'Alpha')).toEqual([symbols[0]]);
+    expect(filterPdfSearchSymbolSuggestions(symbols, 'alpha')).toEqual([symbols[1]]);
+    expect(filterPdfSearchSymbolSuggestions(symbols, 'Ω')).toEqual([symbols[2]]);
+    expect(filterPdfSearchSymbolSuggestions(symbols, 'Ω')).toEqual([symbols[3]]);
+    expect(filterPdfSearchSymbolSuggestions(symbols, 'not detected')).toEqual([]);
   });
 
   it('shows partial coverage only once and omits complete-page coverage', () => {

@@ -47,6 +47,13 @@ export interface PdfSearchResultGroup {
 export interface PdfSearchAlternative {
   readonly label: string;
   readonly query: string;
+  /** Structured, runtime-only terms for detected generated symbol suggestions. */
+  readonly symbolSearch?: {
+    readonly glyph: string;
+    readonly commands: readonly string[];
+    readonly entities: readonly string[];
+    readonly naturalTerms: readonly string[];
+  };
 }
 
 export interface PdfSearchState {

@@ -395,6 +395,18 @@ describe('PDF search controller', () => {
       .toEqual(['ϕ']);
   });
 
+  it('does not NFC-collapse a missing literal glyph into a detected suggestion', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['Ω']),
+    });
+
+    const state = await controller.search('Ω');
+
+    expect(state.groups).toEqual([]);
+    expect(state.alternatives).toEqual([]);
+  });
+
   it('removes formula layout whitespace without changing scalar identity or order', async () => {
     const controller = createPdfSearchController({
       documentGeneration: 1,
@@ -438,10 +450,12 @@ describe('PDF search controller', () => {
       reader: reader(['/']),
     });
 
-    expect((await controller.prepare()).symbolCatalog).toEqual([{
-      label: '/ solidus',
-      query: '/',
-    }]);
+    expect((await controller.prepare()).symbolCatalog).toEqual([
+      expect.objectContaining({
+        label: '/ solidus',
+        query: '/',
+      }),
+    ]);
     expect((await controller.search('/')).groups[0]?.results[0]?.matchedForm).toBe('/');
   });
 
@@ -459,6 +473,31 @@ describe('PDF search controller', () => {
       'β greek small letter beta (\\beta)',
       'λ greek small letter lamda (\\lambda)',
     ]);
+    expect(state.symbolCatalog[1]).toMatchObject({
+      symbolSearch: {
+        glyph: 'λ',
+        commands: expect.arrayContaining(['\\lambda']),
+        entities: expect.arrayContaining(['lambda']),
+        naturalTerms: expect.arrayContaining(['greek small letter lamda']),
+      },
+    });
+  });
+
+  it('renders sourced command labels and exposes every detected command without inventing one', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['φ ⏐']),
+    });
+
+    const state = await controller.prepare();
+    const phi = state.symbolCatalog.find(({ query }) => query === 'φ');
+    const verticalLineExtension = state.symbolCatalog.find(({ query }) => query === '⏐');
+
+    expect(phi?.label).toBe('φ greek small letter phi (\\phi)');
+    expect(phi?.symbolSearch?.commands).toEqual(expect.arrayContaining(['\\phi', '\\varphi']));
+    expect(verticalLineExtension?.label).toBe('⏐ vertical line extension');
+    expect(verticalLineExtension?.label).not.toContain('()');
+    expect(verticalLineExtension?.symbolSearch?.commands).toEqual([]);
   });
 
   it('does not duplicate an exact substring as a related word occurrence', async () => {

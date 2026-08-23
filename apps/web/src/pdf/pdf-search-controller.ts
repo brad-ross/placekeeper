@@ -397,10 +397,7 @@ function alternativesFor(
       || normalized.length === 0
     ))
     .slice(0, 8)
-    .map((symbol) => ({
-      label: symbolLabel(symbol),
-      query: symbol.glyph,
-    }));
+    .map(symbolAlternative);
 }
 
 function symbolLabel(symbol: PdfSymbolSuggestion): string {
@@ -409,13 +406,23 @@ function symbolLabel(symbol: PdfSymbolSuggestion): string {
     : `${symbol.glyph} ${symbol.name}`;
 }
 
+function symbolAlternative(symbol: PdfSymbolSuggestion): PdfSearchAlternative {
+  return {
+    label: symbolLabel(symbol),
+    query: symbol.glyph,
+    symbolSearch: {
+      glyph: symbol.glyph,
+      commands: symbol.commands,
+      entities: symbol.entities,
+      naturalTerms: [symbol.name, ...symbol.names],
+    },
+  };
+}
+
 function catalogFor(
   detectedRecordIds: ReadonlySet<PdfSymbolRecordId>,
 ): PdfSearchAlternative[] {
-  return detectedSymbolSuggestions(detectedRecordIds).map((symbol) => ({
-    label: symbolLabel(symbol),
-    query: symbol.glyph,
-  }));
+  return detectedSymbolSuggestions(detectedRecordIds).map(symbolAlternative);
 }
 
 export function createPdfSearchController(
