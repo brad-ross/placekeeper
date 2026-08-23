@@ -197,6 +197,48 @@ describe('PDF symbol catalog compiler', () => {
       .toThrowError(/undocumented command alias collision.*\\phi.*U\+03C6.*U\+03D5/i);
   });
 
+  it('audits allow, prefer, and drop collision decisions without broad exceptions', () => {
+    const collidingXml = fixtureSources.w3cUnicode
+      .replace('<latex>\\varphi</latex>', '<latex>\\phi</latex>')
+      .replace('<latex>\\alpha</latex>', '<latex>\\partial</latex>')
+      .replace('<character id="U0007C"', '<character id="U1D401" dec="119809"><latex>\\u</latex></character><character id="U0007C"')
+      .replace(
+        '<character id="U02202" dec="8706"><unicodedata category="Sm"/><latex>\\partial</latex>',
+        '<character id="U02202" dec="8706"><unicodedata category="Sm"/><latex>\\partial</latex><varlatex>\\u</varlatex>',
+      );
+    const sources = { ...fixtureSources, w3cUnicode: collidingXml };
+    const compiled = compileSymbolCatalog(fixtureInput({
+      sources,
+      overrides: {
+        schemaVersion: 1,
+        aliasGroups: [
+          { namespace: 'command', alias: '\\phi', codePoints: ['03C6', '03D5'], action: 'allow', rationale: 'Fixture variants.', upstream: 'Fixture collision.' },
+          { namespace: 'command', alias: '\\partial', codePoints: ['03B1', '2202'], action: 'prefer', canonicalCodePoint: '2202', rationale: 'Fixture canonical relation.', upstream: 'Fixture collision.' },
+          { namespace: 'command', alias: '\\u', codePoints: ['2202', '1D401'], action: 'drop', rationale: 'Fixture unsafe accent.', upstream: 'Fixture collision.' },
+        ],
+      },
+    }));
+
+    expect(compiled.records.filter(({ commands }) => commands.some(({ token }) => token === '\\phi'))
+      .map(({ codePoint }) => codePoint)).toEqual([0x03c6, 0x03d5]);
+    expect(compiled.records.filter(({ commands }) => commands.some(({ token }) => token === '\\partial'))
+      .map(({ codePoint }) => codePoint)).toEqual([0x2202]);
+    expect(compiled.records.some(({ commands }) => commands.some(({ token }) => token === '\\u')))
+      .toBe(false);
+  });
+
+  it('rejects stale prefer and drop decisions when the upstream collision changes', () => {
+    expect(() => compileSymbolCatalog(fixtureInput({
+      overrides: {
+        schemaVersion: 1,
+        aliasGroups: [{
+          namespace: 'command', alias: '\\partial', codePoints: ['03B1', '2202'], action: 'drop',
+          rationale: 'Fixture stale decision.', upstream: 'Fixture has no collision.',
+        }],
+      },
+    }))).toThrowError(/stale drop override.*upstream collision no longer matches/i);
+  });
+
   it.each([
     ['checksum mismatch', (input: CatalogCompilerInput) => ({
       ...input,

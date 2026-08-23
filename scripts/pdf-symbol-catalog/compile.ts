@@ -33,6 +33,8 @@ export interface AuditedAliasGroup {
   readonly namespace: AliasNamespace;
   readonly alias: string;
   readonly codePoints: readonly string[];
+  readonly action?: 'allow' | 'prefer' | 'drop';
+  readonly canonicalCodePoint?: string;
   readonly rationale: string;
   readonly upstream: string;
 }
@@ -627,14 +629,24 @@ const validateManifest = (input: CatalogCompilerInput): Readonly<Record<SourceKe
 const validateOverrides = (
   overrides: CatalogOverrides,
   records: ReadonlyMap<number, CatalogRecord>,
-): readonly { readonly group: AuditedAliasGroup; readonly codePoints: readonly number[] }[] => {
+): readonly {
+  readonly group: AuditedAliasGroup;
+  readonly codePoints: readonly number[];
+  readonly action: 'allow' | 'prefer' | 'drop';
+  readonly canonicalCodePoint: number | null;
+}[] => {
   if (overrides.schemaVersion !== 1) {
     throw new CatalogCompileError(`unsupported overrides schema ${String(overrides.schemaVersion)}`);
   }
   if (!Array.isArray(overrides.aliasGroups)) {
     throw new CatalogCompileError('overrides schema mismatch: aliasGroups must be an array');
   }
-  const parsed: { group: AuditedAliasGroup; codePoints: readonly number[] }[] = [];
+  const parsed: {
+    group: AuditedAliasGroup;
+    codePoints: readonly number[];
+    action: 'allow' | 'prefer' | 'drop';
+    canonicalCodePoint: number | null;
+  }[] = [];
   const keys = new Set<string>();
   for (const group of overrides.aliasGroups) {
     if (!['command', 'entity', 'name'].includes(group.namespace)) {
@@ -676,11 +688,34 @@ const validateOverrides = (
         throw new CatalogCompileError(`stale override ${group.alias}: ${formatCodePoint(codePoint)} is not admitted`);
       }
     }
+    const action = group.action ?? 'allow';
+    if (!['allow', 'prefer', 'drop'].includes(action)) {
+      throw new CatalogCompileError(`override ${group.alias} has unsupported action ${String(action)}`);
+    }
+    const canonicalCodePoint = group.canonicalCodePoint === undefined
+      ? null
+      : parseOverrideCodePoint(group.canonicalCodePoint);
+    if (action === 'prefer') {
+      if (canonicalCodePoint === null || !codePoints.includes(canonicalCodePoint)) {
+        throw new CatalogCompileError(
+          `prefer override ${group.alias} requires a canonicalCodePoint from its codePoints`,
+        );
+      }
+    } else if (canonicalCodePoint !== null) {
+      throw new CatalogCompileError(
+        `override ${group.alias} may specify canonicalCodePoint only for action prefer`,
+      );
+    }
     const aliasKey = group.namespace === 'name' ? normalizedName(group.alias) : group.alias;
     const key = `${group.namespace}\0${aliasKey}`;
     if (keys.has(key)) throw new CatalogCompileError(`duplicate audited alias group ${group.alias}`);
     keys.add(key);
-    parsed.push({ group, codePoints: [...codePoints].sort((left, right) => left - right) });
+    parsed.push({
+      group,
+      codePoints: [...codePoints].sort((left, right) => left - right),
+      action,
+      canonicalCodePoint,
+    });
   }
   return parsed.sort((left, right) => byteCompare(left.group.namespace, right.group.namespace)
     || byteCompare(left.group.alias, right.group.alias));
@@ -688,10 +723,15 @@ const validateOverrides = (
 
 const validateAliasCollisions = (
   records: readonly CatalogRecord[],
-  audited: readonly { readonly group: AuditedAliasGroup; readonly codePoints: readonly number[] }[],
+  audited: readonly {
+    readonly group: AuditedAliasGroup;
+    readonly codePoints: readonly number[];
+    readonly action: 'allow' | 'prefer' | 'drop';
+  }[],
 ): void => {
   const allowed = new Map<string, readonly number[]>();
-  for (const { group, codePoints } of audited) {
+  for (const { group, codePoints, action } of audited) {
+    if (action !== 'allow') continue;
     const alias = group.namespace === 'name' ? normalizedName(group.alias) : group.alias;
     allowed.set(`${group.namespace}\0${alias}`, codePoints);
   }
@@ -800,18 +840,45 @@ export const compileSymbolCatalog = (input: CatalogCompilerInput): CompiledSymbo
   }
 
   const audited = validateOverrides(input.overrides, recordsByCodePoint);
-  for (const { group, codePoints } of audited) {
+  for (const { group, codePoints, action, canonicalCodePoint } of audited) {
+    const baseMatches = recordsByCodePoint.size === 0 ? [] : codePoints.filter((codePoint) => {
+      const record = recordsByCodePoint.get(codePoint);
+      if (!record) return false;
+      if (group.namespace === 'command') {
+        return record.commands.some(({ token }) => token === group.alias);
+      }
+      if (group.namespace === 'entity') return record.entities.includes(group.alias);
+      const normalizedAlias = normalizedName(group.alias);
+      return normalizedName(record.name) === normalizedAlias
+        || record.nameAliases.some((alias) => normalizedName(alias) === normalizedAlias);
+    });
+    if (action === 'allow' && baseMatches.length === 0) {
+      throw new CatalogCompileError(`stale allow override ${group.alias}: alias is absent upstream`);
+    }
+    if (action !== 'allow' && (baseMatches.length !== codePoints.length
+      || baseMatches.some((value, index) => value !== codePoints[index]))) {
+      throw new CatalogCompileError(
+        `stale ${action} override ${group.alias}: upstream collision no longer matches audited codePoints`,
+      );
+    }
     for (const codePoint of codePoints) {
       const record = recordsByCodePoint.get(codePoint);
       if (!record) throw new CatalogCompileError(`stale override for ${formatCodePoint(codePoint)}`);
+      const keep = action === 'allow' || (action === 'prefer' && codePoint === canonicalCodePoint);
       const commands = group.namespace === 'command'
-        ? [...record.commands, { token: group.alias, field: 'override' as const, set: null }]
+        ? keep
+          ? [...record.commands, ...(action === 'allow'
+            ? [{ token: group.alias, field: 'override' as const, set: null }]
+            : [])]
+          : record.commands.filter(({ token }) => token !== group.alias)
         : [...record.commands];
       const entities = group.namespace === 'entity'
-        ? uniqueSorted([...record.entities, group.alias])
+        ? keep ? uniqueSorted([...record.entities, group.alias]) : record.entities.filter((id) => id !== group.alias)
         : [...record.entities];
       const nameAliases = group.namespace === 'name'
-        ? uniqueSorted([...record.nameAliases, group.alias])
+        ? keep ? uniqueSorted([...record.nameAliases, group.alias]) : record.nameAliases.filter(
+          (alias) => normalizedName(alias) !== normalizedName(group.alias),
+        )
         : [...record.nameAliases];
       recordsByCodePoint.set(codePoint, {
         ...record,
