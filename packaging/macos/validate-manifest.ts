@@ -27,7 +27,7 @@ export const CATALOG_DISTRIBUTION_BASELINE = {
     report: "98a4eca4e8a546f5302f9a7989c156528f7f5709464a35d61cee5636f2254a36",
     thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
   },
-  productionWebJavaScriptBytes: 2_369_939,
+  productionWebJavaScriptBytes: 2_372_058,
 } as const;
 
 const CATALOG_ATTRIBUTION_URLS = [
