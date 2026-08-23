@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "aliasGroups": [
+    {
+      "namespace": "command",
+      "alias": "\\phi",
+      "codePoints": ["03C6", "03D5"],
+      "rationale": "Preserve the established generic phi input across the two Unicode phi variants.",
+      "upstream": "W3C assigns \\varphi to U+03C6 and \\phi to U+03D5; Placekeeper historically accepted \\phi for both detected variants."
+    }
+  ]
+}
