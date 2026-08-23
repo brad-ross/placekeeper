@@ -581,6 +581,149 @@ describe('selection anchors', () => {
     });
   });
 
+  it('rejects a selection that changes while its page and text are being read', async () => {
+    let finishPageRead: ((value: AnchorPage) => void) | undefined;
+    const pageRead = new Promise<AnchorPage>((resolve) => {
+      finishPageRead = resolve;
+    });
+    let state = {
+      geometry: {},
+      rects: { 2: [naturalRect] },
+      selection: { start: { page: 2, index: 7 }, end: { page: 2, index: 26 } },
+      slices: { 2: { start: 7, count: 20 } },
+      active: true,
+      selecting: false,
+    };
+    const capturing = captureViewerSelection({
+      documentId: 'changing-doc',
+      selection: {
+        getFormattedSelection: () => [
+          { pageIndex: 2, rect: naturalRect, segmentRects: [naturalRect] },
+        ],
+        getSelectedText: () => ({ toPromise: async () => ['<unique equilibrium>'] }),
+        getState: () => state,
+      },
+      pages: { read: () => pageRead },
+    });
+
+    state = {
+      ...state,
+      rects: {
+        2: [{ origin: { x: 320, y: 420 }, size: { width: 80, height: 18 } }],
+      },
+    };
+    finishPageRead?.({
+      ...page(Rotation.Degree0),
+      textRects: [
+        { content: '<unique equilibrium>', rect: { ...naturalRect, origin: { x: 260, y: 36 } } },
+        { content: 'unrelated text', rect: naturalRect },
+      ],
+    });
+
+    await expect(capturing).resolves.toMatchObject({
+      ok: false,
+      diagnostic: 'selection-text-geometry-mismatch',
+    });
+  });
+
+  it('rejects formatted selection geometry that changes during capture', async () => {
+    let finishPageRead: ((value: AnchorPage) => void) | undefined;
+    const pageRead = new Promise<AnchorPage>((resolve) => {
+      finishPageRead = resolve;
+    });
+    const state = {
+      geometry: {},
+      rects: { 2: [naturalRect] },
+      selection: { start: { page: 2, index: 7 }, end: { page: 2, index: 26 } },
+      slices: { 2: { start: 7, count: 20 } },
+      active: true,
+      selecting: false,
+    };
+    let formatted = [
+      { pageIndex: 2, rect: naturalRect, segmentRects: [naturalRect] },
+    ];
+    const capturing = captureViewerSelection({
+      documentId: 'changing-formatted-doc',
+      selection: {
+        getFormattedSelection: () => formatted,
+        getSelectedText: () => ({ toPromise: async () => ['<unique equilibrium>'] }),
+        getState: () => state,
+      },
+      pages: { read: () => pageRead },
+    });
+
+    formatted = [{
+      pageIndex: 2,
+      rect: naturalRect,
+      segmentRects: [{ origin: { x: 320, y: 420 }, size: { width: 80, height: 18 } }],
+    }];
+    finishPageRead?.(page(Rotation.Degree0));
+
+    await expect(capturing).resolves.toMatchObject({
+      ok: false,
+      diagnostic: 'selection-text-geometry-mismatch',
+    });
+  });
+
+  it('preserves indexed display-equation text and nonmonotone segment geometry', async () => {
+    const quote = 't\r\nk|ij = ν\r\n-1\r\nk\r\n · d';
+    const prefix = 'before ';
+    const segmentRects = [
+      { origin: { x: 190, y: 160 }, size: { width: 4, height: 15 } },
+      { origin: { x: 194, y: 168 }, size: { width: 11, height: 10 } },
+      { origin: { x: 205, y: 158 }, size: { width: 23, height: 18 } },
+      { origin: { x: 228, y: 155 }, size: { width: 7, height: 10 } },
+      { origin: { x: 235, y: 168 }, size: { width: 4, height: 10 } },
+      { origin: { x: 239, y: 160 }, size: { width: 18, height: 15 } },
+    ];
+    const result = await captureViewerSelection({
+      documentId: 'equation-doc',
+      selection: {
+        getFormattedSelection: () => [{
+          pageIndex: 0,
+          rect: { origin: { x: 190, y: 155 }, size: { width: 67, height: 23 } },
+          segmentRects,
+        }],
+        getSelectedText: () => ({ toPromise: async () => [quote] }),
+        getState: () => ({
+          geometry: {},
+          rects: {},
+          selection: { start: { page: 0, index: prefix.length }, end: { page: 0, index: prefix.length + quote.length - 1 } },
+          slices: { 0: { start: prefix.length, count: Array.from(quote).length } },
+          active: true,
+          selecting: false,
+        }),
+      },
+      pages: {
+        read: async () => ({
+          pageIndex: 0,
+          size: { width: 612, height: 792 },
+          rotation: Rotation.Degree0,
+          extractedText: `${prefix}${quote} after`,
+          textRects: [{
+            content: quote,
+            rect: { origin: { x: 180, y: 150 }, size: { width: 90, height: 40 } },
+          }],
+        }),
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      anchor: {
+        quote,
+        prefix,
+        suffix: ' after',
+        segmentRects: segmentRects.map(({ origin, size }) => ({
+          x: origin.x,
+          y: origin.y,
+          width: size.width,
+          height: size.height,
+        })),
+      },
+    });
+  });
+
   it('passes the memory-only session credential through public document request headers', () => {
     const headers = { Authorization: 'Bearer in-memory-only' };
     expect(

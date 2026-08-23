@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
@@ -13,6 +14,10 @@ import {
   degrees,
   rgb,
 } from 'pdf-lib';
+
+import { projectReviewItem } from '../../../packages/core/src/annotation-projection.js';
+import type { ReviewItem } from '../../../packages/core/src/review-model.js';
+import { createSelectedPdfWriter } from '../../../packages/pdf-backends/src/selected-writer.js';
 
 const outputDirectory = resolve('test/fixtures/pdfs');
 const encryptedNoAnnotationBase64 =
@@ -112,6 +117,41 @@ async function mixedTextImagePdf() {
   );
   imagePage.drawImage(png, { x: 72, y: 600, width: 300, height: 120 });
   return document.save({ useObjectStreams: false });
+}
+
+async function equationSelectionPdf() {
+  const document = await PDFDocument.create();
+  const page = document.addPage([612, 792]);
+  const roman = await document.embedFont(StandardFonts.TimesRoman);
+  const italic = await document.embedFont(StandardFonts.TimesRomanItalic);
+  const symbol = await document.embedFont(StandardFonts.Symbol);
+
+  let inlineX = 72;
+  const drawInline = (text: string, y: number, size: number, font = roman) => {
+    page.drawText(text, { x: inlineX, y, size, font });
+    inlineX += font.widthOfTextAtSize(text, size);
+  };
+  drawInline('Inline equation: distance ', 690, 14);
+  drawInline('d', 690, 14, italic);
+  drawInline('ij', 686, 9, italic);
+  drawInline(' remains selectable.', 690, 14);
+
+  let displayX = 190;
+  const drawDisplay = (text: string, y: number, size: number, font = roman) => {
+    page.drawText(text, { x: displayX, y, size, font });
+    displayX += font.widthOfTextAtSize(text, size);
+  };
+  drawDisplay('t', 620, 14, italic);
+  drawDisplay('k|ij', 616, 9, italic);
+  drawDisplay(' = ', 620, 14);
+  drawDisplay('ν', 620, 14, symbol);
+  drawDisplay('-1', 629, 9);
+  drawDisplay('k', 616, 9, italic);
+  drawDisplay(' · d', 620, 14);
+  drawDisplay('k|ij', 616, 9, italic);
+  drawDisplay('.', 620, 14);
+
+  return document.save({ useObjectStreams: true });
 }
 
 async function multiPageTextPdf() {
@@ -469,6 +509,33 @@ async function referenceNavigationPdf() {
   return document.save({ useObjectStreams: false });
 }
 
+async function annotatedReferenceNavigationPdf(sourcePdf: Uint8Array): Promise<Uint8Array> {
+  const timestamp = '2026-08-23T12:00:00.000Z';
+  const item: ReviewItem = {
+    id: '51000000-0000-4000-8000-000000000051',
+    kind: 'delete',
+    pageIndex: 0,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    payload: {
+      quote: 'Reference navigation fixture',
+      prefix: '',
+      suffix: ' — page 1',
+      rect: { x: 72, y: 46, width: 214, height: 18 },
+      segmentRects: [{ x: 72, y: 46, width: 214, height: 18 }],
+      reliable: true,
+    },
+  };
+  const writer = await createSelectedPdfWriter();
+  const written = await writer.write({
+    sourcePdf,
+    sourceSha256: createHash('sha256').update(sourcePdf).digest('hex'),
+    revision: 1,
+    annotations: [projectReviewItem(item)],
+  });
+  return written.pdfBytes;
+}
+
 async function preservationCorpusPdf() {
   const document = await PDFDocument.load(await textPdf());
   const page = document.getPage(0);
@@ -572,6 +639,7 @@ async function certifiedPdf() {
 
 await mkdir(outputDirectory, { recursive: true });
 await mkdir(resolve('test/fixtures/pdfium'), { recursive: true });
+const referenceNavigation = referenceNavigationPdf();
 await Promise.all([
   writeFile(
     resolve('test/fixtures/pdfium/pdfium.wasm'),
@@ -581,6 +649,7 @@ await Promise.all([
   writeFixture('text-native-with-annotations.pdf', await textPdf({ annotations: true })),
   writeFixture('image-only.pdf', await imageOnlyPdf()),
   writeFixture('mixed-text-image.pdf', await mixedTextImagePdf()),
+  writeFixture('equation-selection.pdf', await equationSelectionPdf()),
   writeFixture('multi-page-text.pdf', await multiPageTextPdf()),
   writeFixture('pdf-search.pdf', await pdfSearchPdf()),
   writeFixture('rotation-0-crop.pdf', await textPdf({ rotation: 0, crop: true })),
@@ -588,7 +657,11 @@ await Promise.all([
   writeFixture('rotation-180-crop.pdf', await textPdf({ rotation: 180, crop: true })),
   writeFixture('rotation-270-crop.pdf', await textPdf({ rotation: 270, crop: true })),
   writeFixture('hostile-actions.pdf', await hostileActionsPdf()),
-  writeFixture('reference-navigation.pdf', await referenceNavigationPdf()),
+  writeFixture('reference-navigation.pdf', await referenceNavigation),
+  writeFixture(
+    'reference-navigation-annotated.pdf',
+    await annotatedReferenceNavigationPdf(await referenceNavigation),
+  ),
   writeFixture('preservation-corpus.pdf', await preservationCorpusPdf()),
   writeFixture(
     'encrypted-no-annotation.pdf',

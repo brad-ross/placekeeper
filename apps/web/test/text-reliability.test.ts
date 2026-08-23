@@ -116,4 +116,61 @@ describe('text reliability gates', () => {
       }),
     ).toEqual({ reliable: true });
   });
+
+  it('accepts exact indexed selections with TeX superscript and subscript geometry', () => {
+    const quote = 'tk|ij = ν\r\n−1\r\nk\r\n· dk|ij .';
+    const prefix = 'before ';
+    const segmentRects = [
+      rect(264, 200, 4, 12),
+      rect(268, 205, 13, 14),
+      rect(286, 196, 18, 17),
+      rect(305, 198, 6, 14),
+      rect(311, 195, 4, 12),
+      rect(304, 206, 4, 8),
+      rect(319, 200, 12, 21),
+      rect(331, 205, 13, 14),
+      rect(345, 200, 3, 12),
+    ];
+
+    expect(
+      assessSelectionReliability({
+        page: {
+          extractedText: `${prefix}${quote} after`,
+          textRects: [{ content: quote, rect: rect(255, 190, 100, 40) }],
+        },
+        pageIndexes: [0],
+        quote,
+        quoteStart: prefix.length,
+        glyphCount: Array.from(quote).length,
+        segmentRects,
+      }),
+    ).toEqual({ reliable: true });
+  });
+
+  it('still rejects invalid or text-free geometry for exact indexed selections', () => {
+    const page = {
+      extractedText: 'before equation after',
+      textRects: [{ content: 'equation', rect: rect(20, 20) }],
+    };
+    const indexedSelection = {
+      page,
+      pageIndexes: [0],
+      quote: 'equation',
+      quoteStart: 'before '.length,
+      glyphCount: 'equation'.length,
+    };
+
+    expect(
+      assessSelectionReliability({
+        ...indexedSelection,
+        segmentRects: [rect(20, 20, 0, 12)],
+      }),
+    ).toMatchObject({ reliable: false, diagnostic: 'selection-geometry-invalid' });
+    expect(
+      assessSelectionReliability({
+        ...indexedSelection,
+        segmentRects: [rect(300, 300)],
+      }),
+    ).toMatchObject({ reliable: false, diagnostic: 'selection-text-geometry-mismatch' });
+  });
 });

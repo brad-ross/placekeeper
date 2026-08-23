@@ -40,7 +40,7 @@ The first correction, merged in [PR #53](https://github.com/brad-ross/placekeepe
 1. Caret creation still required one unique sequential alignment for every text rectangle on the page before applying pointer-local checks. Repeated text or complex extraction elsewhere could make that global mapping absent or nonunique even when the clicked glyphs identified one exact occurrence (`apps/web/src/pdf/selection-anchor.ts:335-385`).
 2. Reading order used rectangle origins as a proxy for visual lines. Inline subscript or superscript runs may have shifted origins while their vertical spans still overlap, so origin ordering could reject ordinary same-line text.
 
-The follow-up correction is pending in [PR #54](https://github.com/brad-ross/placekeeper/pull/54) as of 2026-08-23. Until it merges, describe the behavior as implemented and verified on that PR branch, not as shipped on the default branch.
+The follow-up correction merged in [PR #54](https://github.com/brad-ross/placekeeper/pull/54) on 2026-08-23.
 
 ## Symptoms
 
@@ -130,6 +130,8 @@ The durable boundary is therefore two-tiered: validate globally that the page is
 - [Contextual Annotation Composer preserves document context during authoring](../design-patterns/contextual-annotation-composer-preserves-document-context-during-authoring.md) describes the downstream authoring lifecycle after a reliable caret exists.
 - [Portable PDF annotations invisible in external viewers](../integration-issues/portable-pdf-annotations-invisible-in-external-viewers.md) documents the complementary fail-closed geometry boundary for durable PDF writing.
 - [Wait for committed wheel zoom before pointer-selection assertions](../test-failures/wait-for-committed-wheel-zoom-before-pointer-selection.md) covers adjacent real-browser coordinate timing.
+- [Reject stale viewer selection snapshots before creating annotation anchors](reject-stale-viewer-selection-snapshots.md) covers the complementary equation and inline-equation failure caused by text/geometry drift during asynchronous selection capture.
+- [Issue #51](https://github.com/brad-ross/placekeeper/issues/51) tracks equation and inline-equation annotation failures; [PR #56](https://github.com/brad-ross/placekeeper/pull/56) addresses selection capture, while [PR #53](https://github.com/brad-ross/placekeeper/pull/53) addresses caret-local reliability scope.
 - [PR #47](https://github.com/brad-ross/placekeeper/pull/47) introduced exact indexed-glyph caret alignment.
 - [PR #53](https://github.com/brad-ross/placekeeper/pull/53) localized click-specific reliability checks and is merged.
-- [PR #54](https://github.com/brad-ross/placekeeper/pull/54) adds pointer-local rectangle mapping, repeated-text glyph disambiguation, baseline-aware reading order, and multi-page browser coverage; it remained open as of 2026-08-23.
+- [PR #54](https://github.com/brad-ross/placekeeper/pull/54) added pointer-local rectangle mapping, repeated-text glyph disambiguation, baseline-aware reading order, and multi-page browser coverage; it merged on 2026-08-23.

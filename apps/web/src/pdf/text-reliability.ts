@@ -189,7 +189,11 @@ export function assessSelectionReliability(input: SelectionReliabilityInput): Re
   }
   if (hasAmbiguousCharacters(input.quote)) return fail('selection-has-ambiguous-characters');
   if (hasUnsupportedReadingOrder(input.quote)) return fail('selection-reading-order-unsupported');
-  if (hasAmbiguousRectOrder(input.segmentRects)) return fail('selection-reading-order-ambiguous');
+  // Exact viewer offsets establish semantic order even when TeX lays out scripts and fractions
+  // above or below the baseline. Fallback quote matching still requires monotone rectangles.
+  if (input.quoteStart === undefined && hasAmbiguousRectOrder(input.segmentRects)) {
+    return fail('selection-reading-order-ambiguous');
+  }
   // Text rectangles are often line- or run-sized, not exact selected substrings.
   // Exact quote/offset validation above establishes the text mapping; this check
   // independently ensures every selection segment lies over extracted text.
