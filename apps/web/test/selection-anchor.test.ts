@@ -251,6 +251,52 @@ describe('selection anchors', () => {
       });
   });
 
+  it('treats inline subscript geometry as part of the same visual line', () => {
+    const hitPage = {
+      ...page(Rotation.Degree0),
+      extractedText: 'ij minutes',
+      textRects: [
+        { content: 'ij ', rect: { origin: { x: 20, y: 34 }, size: { width: 10, height: 7 } } },
+        { content: 'minutes', rect: { origin: { x: 32, y: 29 }, size: { width: 49, height: 11 } } },
+      ],
+      glyphs: [
+        { textOffset: 0, rect: { origin: { x: 20, y: 34 }, size: { width: 4, height: 7 } } },
+        { textOffset: 1, rect: { origin: { x: 24, y: 34 }, size: { width: 4, height: 7 } } },
+        { textOffset: 2, rect: { origin: { x: 28, y: 34 }, size: { width: 4, height: 7 } } },
+        ...Array.from({ length: 7 }, (_, index) => ({
+          textOffset: index + 3,
+          rect: { origin: { x: 32 + index * 7, y: 29 }, size: { width: 7, height: 11 } },
+        })),
+      ],
+    };
+
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 50, y: 34 } }))
+      .toMatchObject({
+        ok: true,
+        anchor: { leftContext: 'ij min', rightContext: 'utes', reliable: true },
+      });
+  });
+
+  it('uses local exact glyph offsets to disambiguate repeated page text', () => {
+    const hitPage = {
+      ...page(Rotation.Degree0),
+      extractedText: 'same x same',
+      textRects: [
+        { content: 'same', rect: { origin: { x: 100, y: 30 }, size: { width: 40, height: 12 } } },
+      ],
+      glyphs: Array.from({ length: 4 }, (_, index) => ({
+        textOffset: index + 7,
+        rect: { origin: { x: 100 + index * 10, y: 30 }, size: { width: 10, height: 12 } },
+      })),
+    };
+
+    expect(createCaretAnchorAtPoint({ page: hitPage, point: { x: 116, y: 36 } }))
+      .toMatchObject({
+        ok: true,
+        anchor: { leftContext: 'same x sa', rightContext: 'me', reliable: true },
+      });
+  });
+
   it('allows a prose caret despite unrelated mathematical text geometry', () => {
     const hitPage = {
       ...page(Rotation.Degree0),

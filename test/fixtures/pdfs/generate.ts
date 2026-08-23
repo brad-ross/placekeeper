@@ -154,6 +154,20 @@ async function equationSelectionPdf() {
   return document.save({ useObjectStreams: true });
 }
 
+async function multiPageTextPdf() {
+  const document = await PDFDocument.create();
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  for (const [index, pageLabel] of ['one', 'two'].entries()) {
+    const page = document.addPage([612, 792]);
+    const repeatedText = 'Repeated insertion context.';
+    page.drawText(repeatedText, { x: 72, y: 690, size: 14, font });
+    page.drawText(repeatedText, { x: 72, y: 660, size: 14, font });
+    page.drawText(`Repeated context for page ${index + 1}.`, { x: 72, y: 630, size: 12, font });
+    page.drawText(`End of page ${pageLabel}.`, { x: 72, y: 600, size: 12, font });
+  }
+  return document.save({ useObjectStreams: false });
+}
+
 async function pdfSearchPdf() {
   const document = await PDFDocument.create();
   const font = await document.embedFont(StandardFonts.Helvetica);
@@ -636,6 +650,7 @@ await Promise.all([
   writeFixture('image-only.pdf', await imageOnlyPdf()),
   writeFixture('mixed-text-image.pdf', await mixedTextImagePdf()),
   writeFixture('equation-selection.pdf', await equationSelectionPdf()),
+  writeFixture('multi-page-text.pdf', await multiPageTextPdf()),
   writeFixture('pdf-search.pdf', await pdfSearchPdf()),
   writeFixture('rotation-0-crop.pdf', await textPdf({ rotation: 0, crop: true })),
   writeFixture('rotation-90-crop.pdf', await textPdf({ rotation: 90, crop: true })),
