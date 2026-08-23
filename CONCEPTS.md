@@ -38,6 +38,11 @@ A durable, user-authored proofread instruction associated with PDF geometry, suc
 
 Review Items are the canonical review state: viewer markings and delivery artifacts are projections of them rather than independent editable records.
 
+### Insertion Caret Anchor
+The reliable PDF insertion target that couples an exact extracted-text boundary with a thin crop-relative page position and the text immediately to either side.
+
+Only geometry capable of owning or changing the pointer's text edge participates in click-specific ambiguity checks; unrelated distant geometry does not veto the anchor, while local ambiguity fails closed.
+
 ### Owned Annotation
 A viewer marking projected from a Review Item and identified by that item's canonical identity.
 
