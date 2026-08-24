@@ -1,6 +1,7 @@
 ---
 title: Contextual Annotation Composer preserves document context during authoring
 date: 2026-08-22
+last_updated: 2026-08-24
 category: design-patterns
 module: PDF review annotation authoring
 problem_type: design_pattern
@@ -44,9 +45,9 @@ The Contextual Annotation Composer applies this pattern to new replacements, ins
 
 ### Freeze authority; keep only the draft mutable
 
-Capture one authoring session when the user begins. The session owns the source identity and document generation, the selection/caret/page anchor or cloned Review Item, the originating control, and a snapshot of the displaced workspace. Clone and freeze nested geometry and payload data so later selection, navigation, responsive layout, or object mutation cannot retarget the draft (`apps/web/src/review/authoring-session.ts:97-125`, `apps/web/src/review/authoring-session.ts:128-200`, `apps/web/src/review/authoring-session.ts:253-262`).
+Capture one authoring session when the user begins. The session owns the source identity and document generation, the selection/caret/page anchor or cloned Review Item, the originating control, and a snapshot of the displaced workspace. Clone and freeze nested geometry and payload data so later selection, navigation, responsive layout, or object mutation cannot retarget the draft (`apps/web/src/review/authoring-session.ts:104-128`, `apps/web/src/review/authoring-session.ts:129-202`, `apps/web/src/review/authoring-session.ts:254-264`).
 
-The textarea value is deliberately outside that immutable authority. Typing publishes a new preview derived from the frozen session, while Apply or Save builds its Review command from the same frozen source (`apps/web/src/app/ReviewShell.tsx:688-715`, `apps/web/src/app/ReviewShell.tsx:1218-1229`). Refuse a second authoring session while one is active, and fail closed if the source identity or document generation changes before or during asynchronous submission (`apps/web/src/app/ReviewShell.tsx:646-681`, `apps/web/src/app/ReviewShell.tsx:817-844`).
+The textarea value is deliberately outside that immutable authority. Typing publishes a new preview derived from the frozen session, while Apply or Save builds its Review command from the same frozen source (`apps/web/src/app/ReviewShell.tsx:1354-1410`, `apps/web/src/app/ReviewShell.tsx:1496-1532`). Refuse a second authoring session while one is active, and fail closed if the source identity or document generation changes before or during asynchronous submission (`apps/web/src/app/ReviewShell.tsx:900-925`, `apps/web/src/app/ReviewShell.tsx:940-960`, `apps/web/src/app/ReviewShell.tsx:1108-1144`).
 
 ```ts
 const session = createAuthoringSession({
@@ -65,11 +66,11 @@ The essential distinction is immutable semantic authority versus mutable prospec
 
 ### Preview through the accepted annotation projection
 
-Build the preview as a temporary Review Item, then call the same `projectReviewItem` function used for accepted state. For an edit, clone the persisted item and replace only its editable field; for a new annotation, construct the corresponding replacement, insertion, highlight, or Page Note payload from the frozen anchor (`apps/web/src/review/authoring-session.ts:311-393`).
+Build the preview as a temporary Review Item, then call the same `projectReviewItem` function used for accepted state. For an edit, clone the persisted item and replace only its editable field; for a new annotation, construct the corresponding replacement, insertion, highlight, or Page Note payload from the frozen anchor (`apps/web/src/review/authoring-session.ts:312-394`).
 
 Pass the resulting annotation into the already-mounted PDF viewer. `PdfWorkspace` merges it into the visible annotation population and replaces a matching persisted annotation by ID during edits (`apps/web/src/pdf/PdfWorkspace.tsx:123-135`). It then renders the preview inside the ordinary Owned Annotation layer with a preview marker (`apps/web/src/pdf/PdfWorkspace.tsx:346-380`). This makes the proposal appear where and how it will appear after acceptance, without inventing a composer-only rendering vocabulary.
 
-Keep preview state visual and provisional. The visible layer includes the preview, but Owned Annotation interaction geometry remains derived from accepted annotations only (`apps/web/src/pdf/PdfWorkspace.tsx:123-139`). Cancel clears the preview without building a Review command; Apply, Save, or Keep commits through the canonical command path and then clears the provisional projection (`apps/web/src/app/ReviewShell.tsx:765-810`).
+Keep preview state visual and provisional. The visible layer includes the preview, but Owned Annotation interaction geometry remains derived from accepted annotations only (`apps/web/src/pdf/PdfWorkspace.tsx:123-139`). Cancel clears the preview without building a Review command; Apply, Save, or Keep commits through the canonical command path and then clears the provisional projection (`apps/web/src/app/ReviewShell.tsx:1010-1095`, `apps/web/src/app/ReviewShell.tsx:1354-1410`).
 
 ### Let the composer take over the existing edge surface
 
@@ -77,19 +78,19 @@ The composer is a labeled `region` and form with no backdrop or modal role (`app
 
 Nonmodal does not mean that every workspace control remains concurrently active. While authoring owns the edge, the References and tools workspaces remain mounted but become inert and hidden from the accessibility tree (`apps/web/src/review/ReferenceWorkspace.tsx:363-378`, `apps/web/src/review/OutlineAnnotationsWorkspace.tsx:116-129`). This avoids competing tray interactions while retaining the displaced workspace's logical mode, active row, scroll, and responsive state. Earlier focused tests failed when the ordinary tray remained live behind the composer and when Save Destination did not inert the composer beneath it (session history).
 
-Do not recreate the displaced workspace after authoring. Snapshot whether it was open, its mode, active item, and Annotation Tray scroll offset. On Apply, Save, Keep, or Cancel, clear the preview, release the takeover, restore the active row and scroll, and return focus to the originating control, restored row edit action, prior workspace, or PDF fallback (`apps/web/src/app/ReviewShell.tsx:688-695`, `apps/web/src/app/ReviewShell.tsx:765-803`). Because the workspace stayed mounted, restoration does not need a synthetic toggle or a PDF reframe.
+Do not recreate the displaced workspace after authoring. Snapshot whether it was open, its mode, active item, and Annotation Tray scroll offset. On Apply, Save, Keep, or Cancel, clear the preview, release the takeover, restore the active row and scroll, and return focus to the originating control, restored row edit action, prior workspace, or PDF fallback (`apps/web/src/app/ReviewShell.tsx:931-960`, `apps/web/src/app/ReviewShell.tsx:1010-1095`). Because the workspace stayed mounted, restoration does not need a synthetic toggle or a PDF reframe.
 
 ### Make anchor recovery conditional and minimal
 
-The frozen session exposes one semantic page point for visibility and return navigation (`apps/web/src/review/authoring-session.ts:282-305`). Measure that point against the usable PDF viewport after subtracting composer occlusion. If it is outside, show one title-adjacent target icon; if it is visible or unavailable, show no recovery control (`apps/web/src/review/CommentComposer.tsx:27-54`, `apps/web/src/app/ProductionReviewApp.tsx:708-780`).
+The frozen session exposes one semantic page point for visibility and return navigation (`apps/web/src/review/authoring-session.ts:283-305`). Measure that point against the usable PDF viewport after subtracting composer occlusion. If it is outside, show one title-adjacent target icon; if it is visible or unavailable, show no recovery control (`apps/web/src/review/CommentComposer.tsx:27-54`, `apps/web/src/app/ProductionReviewApp.tsx:748-788`).
 
 Route the return action through `NavigationCoordinator.navigateMainAnnotation` instead of directly scrolling the viewer. This preserves cancellation, settled-location, focus, and Meaningful Jump semantics. The recovery action may change the viewport, but it never changes the frozen anchor. Avoid permanent status badges, separate “Read Document” or “Return to Editor” modes, and always-visible return controls: the live PDF already supports reading, and recovery chrome is useful only when the anchor leaves view.
 
 ### Keep input semantics and actions local
 
-Place Cancel, optional Keep, and the primary Save or Apply action directly below the textarea (`apps/web/src/review/CommentComposer.tsx:167-218`). Let the title carry single-field context while keeping the field's accessible name in a screen-reader-only label. Preserve the established Compact Editorial verbs: Save creates comments and Page Notes, Apply proposes text or edits a Review Item, Keep retains an uncommented highlight, and Cancel abandons the pending action (`apps/web/src/review/authoring-session.ts:203-250`).
+Place Cancel, optional Keep, and the primary Save or Apply action directly below the textarea (`apps/web/src/review/CommentComposer.tsx:167-218`). Let the title carry single-field context while keeping the field's accessible name in a screen-reader-only label. Preserve the established Compact Editorial verbs: Save creates comments and Page Notes, Apply proposes text or edits a Review Item, Keep retains an uncommented highlight, and Cancel abandons the pending action (`apps/web/src/review/authoring-session.ts:204-251`).
 
-A nested prerequisite such as Save Destination may temporarily supersede the composer, but it must not become draft authority. Keep the frozen authoring session mounted and inert while the true dialog is open. Cancelling destination selection or rejecting the command returns to the same draft; acceptance closes it; source replacement discards it as stale (`apps/web/src/app/ReviewShell.tsx:354-360`, `apps/web/src/app/ProductionReviewApp.tsx:1482-1510`, `apps/web/src/app/ProductionReviewApp.tsx:1682-1702`).
+A nested prerequisite such as Save Destination may temporarily supersede the composer, but it must not become draft authority. Keep the frozen authoring session mounted and inert while the true dialog is open. Cancelling destination selection or rejecting the command returns to the same draft; acceptance closes it; source replacement discards it as stale (`apps/web/src/app/ReviewShell.tsx:409-452`, `apps/web/src/app/ReviewShell.tsx:1496-1532`, `apps/web/src/app/ReviewShell.tsx:1706-1712`, `apps/web/src/app/ProductionReviewApp.tsx:1482-1510`, `apps/web/src/app/ProductionReviewApp.tsx:1682-1702`).
 
 ### Test retained-state combinations, not isolated elements
 
@@ -149,3 +150,4 @@ The unit contract covers this complete projection family in one table-shaped sui
 - [Reject stale viewer selection snapshots before creating annotation anchors](../ui-bugs/reject-stale-viewer-selection-snapshots.md) establishes the same frozen-authority principle one stage earlier, while text and geometry are captured into an anchor.
 - [Portable PDF annotations invisible in external viewers](../integration-issues/portable-pdf-annotations-invisible-in-external-viewers.md) defines the canonical Review Item-to-Owned Annotation projection reused for prospective marks.
 - [Native control tooltip contract](../conventions/native-control-tooltip-contract.md) governs the target icon's visible, hover, and accessible naming.
+- [Full Annotation Reader preserves Annotation Tray context](full-annotation-reader-preserves-tray-context.md) owns measured overflow, reader identity, and reader-specific restoration; this learning remains the authority for frozen authoring sessions and edge-surface takeover.
