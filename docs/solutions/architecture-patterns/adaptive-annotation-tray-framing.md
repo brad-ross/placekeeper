@@ -1,7 +1,7 @@
 ---
 title: Adaptive annotation tray framing without resizing the PDF viewer
 date: 2026-08-08
-last_updated: 2026-08-22
+last_updated: 2026-08-24
 category: architecture-patterns
 module: PDF review annotation tray framing
 problem_type: architecture_pattern
@@ -39,9 +39,9 @@ tags:
 
 An annotation surface over a PDF is not an ordinary drawer. It shares space with a stateful, zoomable document whose reading position is itself user state. Opening the surface must expose annotations without remounting or resizing the viewer, cover as little of the current reading context as possible, and distinguish movement performed by the interface from movement the reviewer performs while the surface is open.
 
-The implementation keeps the PDF full-stage while coordinating two persistent workspace surfaces: `ReferenceWorkspace` owns References and `OutlineAnnotationsWorkspace` owns Outline, Search, and Annotations (`apps/web/src/app/ReviewShell.tsx:1454-1529`, `apps/web/src/review/OutlineAnnotationsWorkspace.tsx:113-200`). Disclosure and presentation remain independent, so right-drawer and bottom-sheet geometry can change without rebuilding the PDF viewer or its review state. Production coverage carries mount probes and zoom state through responsive transitions (`test/acceptance/production-flow.spec.ts:3488-3831`).
+The implementation keeps the PDF full-stage while coordinating two persistent workspace surfaces: `ReferenceWorkspace` owns References and `OutlineAnnotationsWorkspace` owns Outline, Search, and Annotations (`apps/web/src/app/ReviewShell.tsx:1631-1649`, `apps/web/src/app/ReviewShell.tsx:1706-1827`, `apps/web/src/review/OutlineAnnotationsWorkspace.tsx:113-200`). Disclosure and presentation remain independent, so right-drawer and bottom-sheet geometry can change without rebuilding the PDF viewer or its review state. Production coverage carries mount probes and zoom state through responsive transitions (`test/acceptance/production-flow.spec.ts:3488-3831`).
 
-Annotation authoring now adds a temporary presentation to that same edge host without becoming another framing owner. The Contextual Annotation Composer takes over the visible edge while the underlying workspaces remain mounted and inert; its rectangle is published as occlusion for frozen-anchor visibility and Return to annotation, not as animated PDF runway input (`apps/web/src/app/ReviewShell.tsx:1404-1529`, `apps/web/src/app/ProductionReviewApp.tsx:708-780`). Closing authoring restores the displaced workspace snapshot rather than reconstructing or reframing it (`apps/web/src/app/ReviewShell.tsx:688-715`, `apps/web/src/app/ReviewShell.tsx:765-803`).
+Annotation authoring now adds a temporary presentation to that same edge host without becoming another framing owner. The Contextual Annotation Composer takes over the visible edge while the underlying workspaces remain mounted and inert; its rectangle is published as occlusion for frozen-anchor visibility and Return to annotation, not as animated PDF runway input (`apps/web/src/app/ReviewShell.tsx:416-452`, `apps/web/src/app/ReviewShell.tsx:1496-1532`, `apps/web/src/app/ReviewShell.tsx:1706-1827`, `apps/web/src/app/ProductionReviewApp.tsx:748-788`). Closing authoring restores the displaced workspace snapshot rather than reconstructing or reframing it (`apps/web/src/app/ReviewShell.tsx:931-960`, `apps/web/src/app/ReviewShell.tsx:1010-1095`).
 
 Earlier design and validation sessions exposed several tempting approaches that violated that contract (session history):
 
@@ -62,9 +62,9 @@ Keep geometry decisions in pure functions. `chooseAnnotationPresentation` evalua
 
 Keep viewer-library access behind a project-owned adapter. `ViewerFramingControls` exposes only snapshots, temporary runway, scrolling, zoom-event subscription, and disposal (`apps/web/src/pdf/viewer-framing.ts:135-158`). The EmbedPDF adapter obtains scoped viewport, scroll, and zoom capabilities from the registry (`apps/web/src/pdf/viewer-framing-adapter.ts:33-55`) and performs movement through the public viewport API (`apps/web/src/pdf/viewer-framing-adapter.ts:129-143`). Shell code should consume this contract rather than query EmbedPDF internals.
 
-Keep the lifecycle in one framing owner. `useWorkspaceFraming` owns the stage plus both workspace-surface refs, responsive presentation, open-source requests, user-intent transfer, asynchronous authority, and close restoration behind a small shell-facing contract (`apps/web/src/review/use-annotation-tray-framing.ts:66-88`, `apps/web/src/review/use-annotation-tray-framing.ts:134-207`, `apps/web/src/review/use-annotation-tray-framing.ts:287-499`). The shell feeds it the combined occupied geometry instead of asking either workspace to frame the viewer alone (`apps/web/src/app/ReviewShell.tsx:375-414`, `apps/web/src/review/use-annotation-tray-framing.ts:399-412`).
+Keep the lifecycle in one framing owner. `useWorkspaceFraming` owns the stage plus both workspace-surface refs, responsive presentation, open-source requests, user-intent transfer, asynchronous authority, and close restoration behind a small shell-facing contract (`apps/web/src/review/use-annotation-tray-framing.ts:89-103`, `apps/web/src/review/use-annotation-tray-framing.ts:105-234`, `apps/web/src/review/use-annotation-tray-framing.ts:241-303`, `apps/web/src/review/use-annotation-tray-framing.ts:305-511`). The shell feeds it the combined occupied geometry instead of asking either workspace to frame the viewer alone (`apps/web/src/app/ReviewShell.tsx:1631-1649`, `apps/web/src/app/ReviewShell.tsx:1706-1827`, `apps/web/src/review/use-annotation-tray-framing.ts:417-424`).
 
-Keep session validity distinct from geometry settlement. `LatestFrameRequest` coalesces resize, mutation, and transition signals; `ViewerGeometrySettlementAuthority` waits until active surface transitions finish; and geometry revisions plus the shell's `layoutGeneration` retrigger only current framing work (`apps/web/src/pdf/viewer-framing.ts:34-132`, `apps/web/src/review/use-annotation-tray-framing.ts:134-207`, `apps/web/src/review/use-annotation-tray-framing.ts:482-486`). A session token alone cannot prove that the rectangles it is about to consume have settled.
+Keep session validity distinct from geometry settlement. `LatestFrameRequest` coalesces resize, mutation, and transition signals; `ViewerGeometrySettlementAuthority` waits until active surface transitions finish; and geometry revisions plus the shell's `layoutGeneration` retrigger only current framing work (`apps/web/src/pdf/viewer-framing.ts:34-132`, `apps/web/src/review/use-annotation-tray-framing.ts:157-234`, `apps/web/src/review/use-annotation-tray-framing.ts:494-511`). A session token alone cannot prove that the rectangles it is about to consume have settled.
 
 ### Choose the presentation from the actual stage
 
@@ -100,24 +100,24 @@ Reduced Motion removes both halves of the coordinated disclosure. The responsive
 
 Do not center universally.
 
-- On a general Annotations-button open, snapshot before adding runway and intersect the current page rectangle with the pre-open viewport. Reveal only the portion of that already-visible reading context that the occupied right workspace would cover (`apps/web/src/review/use-annotation-tray-framing.ts:287-499`). A general bottom-sheet open makes no vertical correction.
+- On a general Annotations-button open, snapshot before adding runway and intersect the current page rectangle with the pre-open viewport. Reveal only the portion of that already-visible reading context that the occupied right workspace would cover (`apps/web/src/review/use-annotation-tray-framing.ts:305-499`). A general bottom-sheet open makes no vertical correction.
 - On a mark-triggered open, carry the canonical review ID and page index in the request. Measure every rendered segment with that ID, union the rectangles, and reveal the union with a small gutter (`apps/web/src/pdf/viewer-framing-adapter.ts:70-154`, `apps/web/src/review/use-annotation-tray-framing.ts:412-455`).
 
 Clamp each destination to measured limits and skip automatic movement on axes already owned by the user. The production tests derive the exact overlap and require that only this amount moves while page width, vertical position, and zoom remain unchanged (`test/acceptance/production-flow.spec.ts:3337-3427`).
 
 ### Treat each open interval as a framing session
 
-At the first valid open, capture document identity, baseline scroll, zero automatic displacement, unowned axes, presentation, and request token (`apps/web/src/review/use-annotation-tray-framing.ts:354-366`). When presentation or target changes, remove the prior automatic component before adopting a new baseline. Record automatic displacement per axis relative to that baseline (`apps/web/src/review/use-annotation-tray-framing.ts:474-479`).
+At the first valid open, capture document identity, baseline scroll, zero automatic displacement, unowned axes, presentation, and request token (`apps/web/src/review/use-annotation-tray-framing.ts:372-384`). When presentation or target changes, remove the prior automatic component before adopting a new baseline. Record automatic displacement per axis relative to that baseline (`apps/web/src/review/use-annotation-tray-framing.ts:474-487`).
 
-User navigation transfers ownership component by component. The hook marks only the axes implicated by the current user intent, supersedes in-flight automatic work, and stops native smooth scrolling at the current position (`apps/web/src/review/use-annotation-tray-framing.ts:223-271`). Zoom claims both axes because it can reframe both dimensions (`apps/web/src/review/use-annotation-tray-framing.ts:280-285`).
+User navigation transfers ownership component by component. The hook marks only the axes implicated by the current user intent, supersedes in-flight automatic work, and stops native smooth scrolling at the current position (`apps/web/src/review/use-annotation-tray-framing.ts:241-289`). Zoom claims both axes because it can reframe both dimensions (`apps/web/src/review/use-annotation-tray-framing.ts:298-303`).
 
-Every asynchronous operation carries document and session generations. `FramingSessionAuthority` invalidates stale work on new sessions, user navigation, cleanup, or document changes (`apps/web/src/pdf/viewer-framing.ts:299-369`). The hook checks authority after awaited runway layout and during close (`apps/web/src/review/use-annotation-tray-framing.ts:412-418`, `apps/web/src/review/use-annotation-tray-framing.ts:482-486`).
+Every asynchronous operation carries document and session generations. `FramingSessionAuthority` invalidates stale work on new sessions, user navigation, cleanup, or document changes (`apps/web/src/pdf/viewer-framing.ts:299-369`). The hook checks authority after awaited runway layout and during close (`apps/web/src/review/use-annotation-tray-framing.ts:353-370`, `apps/web/src/review/use-annotation-tray-framing.ts:417-430`, `apps/web/src/review/use-annotation-tray-framing.ts:494-498`).
 
-On close, restore the baseline only on untouched axes that received automatic movement. Preserve current positions on user-owned axes. Calculate restoration, remove runway, then clamp against the natural no-runway maximum (`apps/web/src/review/use-annotation-tray-framing.ts:287-499`). The rule is simple to explain: undo only what the interface did.
+On close, restore the baseline only on untouched axes that received automatic movement. Preserve current positions on user-owned axes. Calculate restoration, remove runway, then clamp against the natural no-runway maximum (`apps/web/src/review/use-annotation-tray-framing.ts:322-370`). The rule is simple to explain: undo only what the interface did.
 
 ### Keep document gestures independent from workspace dismissal
 
-Do not make ordinary interaction with the PDF a workspace-dismiss gesture. The current shell keeps the workspace open across PDF clicks, text selection, panning, wheel scrolling, and multi-pointer sequences. Pointer capture records scroll movement only to transfer framing ownership to the reviewer; it does not cancel the target event or close the workspace (`apps/web/src/app/ReviewShell.tsx:887-950`). Closure remains an explicit edge-rail or keyboard action (`apps/web/src/app/ReviewShell.tsx:665-700`, `apps/web/src/app/ReviewShell.tsx:830-847`, `apps/web/src/app/ReviewShell.tsx:1079-1118`).
+Do not make ordinary interaction with the PDF a workspace-dismiss gesture. The current shell keeps the workspace open across PDF clicks, text selection, panning, wheel scrolling, and multi-pointer sequences. Pointer capture records scroll movement only to transfer framing ownership to the reviewer; it does not cancel the target event or close the workspace (`apps/web/src/app/ReviewShell.tsx:1545-1576`). Closure remains an explicit edge-rail or keyboard action (`apps/web/src/app/ReviewShell.tsx:1204-1238`, `apps/web/src/app/ReviewShell.tsx:1414-1432`).
 
 This policy removes an ambiguous gesture classifier from the document surface and preserves native PDF interaction. The installed-viewer tests assert that clicking and dragging in the PDF leave the workspace open, that no synthetic `pointercancel` is dispatched, and that explicit workspace controls close it (`test/acceptance/production-flow.spec.ts:3429-3498`).
 
@@ -175,7 +175,7 @@ If opening automatically moves `left` but not `top`, and the user then scrolls v
 
 ### PDF interaction versus explicit close
 
-A click, drag selection, scrollbar movement, wheel or touch scroll, secondary pointer, or zoom interaction belongs to the viewer and leaves the workspace open. The edge-rail control or Escape closes the workspace. Keeping those intents separate avoids suppressing native document events merely to infer whether a pointer sequence was a dismissal (`apps/web/src/app/ReviewShell.tsx:585-645`, `apps/web/src/app/ReviewShell.tsx:819-883`).
+A click, drag selection, scrollbar movement, wheel or touch scroll, secondary pointer, or zoom interaction belongs to the viewer and leaves the workspace open. The edge-rail control or Escape closes the workspace. Keeping those intents separate avoids suppressing native document events merely to infer whether a pointer sequence was a dismissal (`apps/web/src/app/ReviewShell.tsx:1414-1432`, `apps/web/src/app/ReviewShell.tsx:1545-1576`).
 
 ## Related
 
@@ -184,6 +184,7 @@ A click, drag selection, scrollbar movement, wheel or touch scroll, secondary po
 - [Adaptive annotation tray reflow plan](../../plans/2026-08-08-001-fix-adaptive-annotation-tray-reflow-plan.md) — historical design exploration; its outside-tap dismissal rule was superseded by the explicit-close contract documented here.
 - [Content-aware annotation workspace presentation](../design-patterns/outline-aware-annotation-workspace-presentation.md)
 - [Contextual Annotation Composer preserves document context during authoring](../design-patterns/contextual-annotation-composer-preserves-document-context-during-authoring.md) — reuses the edge host without making its provisional preview or composer occlusion part of the runway authority.
+- [Full Annotation Reader preserves Annotation Tray context](../design-patterns/full-annotation-reader-preserves-tray-context.md) — swaps list content inside this mounted tray and owns reader-specific overflow, identity, and restoration rather than viewer framing.
 - [Selected behavior visual reference](../../plans/assets/2026-08-08-adaptive-annotation-tray/selected-behavior.html)
 - [Behavior alternatives visual reference](../../plans/assets/2026-08-08-adaptive-annotation-tray/behavior-options.html)
 - [Reading-first PDF review interface plan](../../plans/2026-08-07-002-feat-reading-first-pdf-review-interface-plan.md)

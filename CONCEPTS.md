@@ -105,9 +105,9 @@ The nonmodal review surface that lists Review Items and Existing PDF Annotations
 Its presentation may change with available reading space, but disclosure changes do not replace the underlying viewer or discard review state. Its navigation exposes only destinations supported by current document or session state—including informative loading, failure, and pending surfaces—while preserving Search as a safe fallback.
 
 ### Full Annotation Reader
-The transient Annotation Tray detail state that reveals complete authored annotation-specific content when that content is visually truncated in the annotation list.
+The transient Annotation Tray detail state that reveals complete annotation-specific authored content only when that content is visually truncated in the annotation list.
 
-The live PDF remains the source-context surface. Source-only annotations continue to navigate to their highlighted PDF locations without opening the reader.
+Opening retains the annotation's normal PDF navigation, so the live PDF remains the source-context surface rather than being repeated in reader chrome. The reader resolves current Owned Annotation or Existing PDF Annotation identity, keeps Existing PDF Annotations read-only, and returns to the list when content no longer overflows or its document authority becomes stale.
 
 ### Live PDF Context
 The task-scoped, prompt-refreshed view of the PDF, Review Items, Existing PDF Annotations, and Save Sync made available to the agent task bound to the document's review session.
