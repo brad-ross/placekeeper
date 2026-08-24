@@ -180,9 +180,9 @@ Ordinary scrolling, sequential page turns, and zoom changes are not Meaningful J
 ## PDF search
 
 ### Mathematical Symbol Catalog
-The build-generated, standards-derived mapping from Unicode glyphs to authoritative names and standard commands used by Search.
+The build-generated, standards-derived mapping from Unicode glyphs to authoritative names, standard commands, controlled equivalence, and suggestion priority used by Search.
 
-At runtime the Mathematical Symbol Catalog is intersected with symbols reliably detected in the current PDF. Hand-authored entries are limited to documented naming conflicts and compatibility exceptions rather than defining the ordinary repertoire.
+At runtime the Mathematical Symbol Catalog is intersected with symbols reliably detected in the current PDF. Its suggestion priority changes presentation order only; exact matching and semantic expansion remain separate. Hand-authored entries are limited to documented naming conflicts and compatibility exceptions rather than defining the ordinary repertoire or per-symbol rank.
 
 ### Controlled Symbol Family
 A group of Unicode code points related by admitted singleton canonical, reviewed Greek compatibility, or mathematical-font decompositions so a generic catalog alias can reach detected base, variant, and styled forms without broad Unicode normalization.
