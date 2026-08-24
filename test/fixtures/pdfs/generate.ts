@@ -21,7 +21,7 @@ import type { ReviewItem } from '../../../packages/core/src/review-model.js';
 import { createSelectedPdfWriter } from '../../../packages/pdf-backends/src/selected-writer.js';
 
 const reportedMathSymbolInventory = [
-  '·', 'Π', 'α', 'δ', 'θ', 'κ', 'λ', 'ν', 'ξ', 'ρ', 'σ', 'τ', 'ϕ', 'ϵ', '˜',
+  '·', 'Π', 'α', 'δ', 'θ', 'κ', 'λ', 'ν', 'ξ', 'ρ', 'σ', 'τ', 'ϕ', 'ϵ', '𝟘', '˜',
   '→', '∂', '∈', '∑', '−', '∗', '∝', '∫', '≡', '≤', '≥', '⏐', '+', '<', '=', '>', '|', '/',
 ] as const;
 

@@ -498,7 +498,7 @@ test("searches extracted PDF text with variants, history, references, and retain
     ".",
   ]));
   const fullRankedSuggestions = await suggestedGlyphs();
-  const representativePositions = ["Π", "+", "|", "."]
+  const representativePositions = ["Π", "𝟘", "+", "|", "."]
     .map((glyph) => fullRankedSuggestions.indexOf(glyph));
   expect(representativePositions.every((position) => position >= 0)).toBe(true);
   expect(representativePositions).toEqual([...representativePositions].sort((left, right) => left - right));

@@ -769,6 +769,9 @@ export async function validateDistributionManifests(
   if (packageManifest.scripts?.["prebuild:web"] !== "pnpm catalog:check") {
     throw new Error("Production web builds must run the non-mutating catalog:check gate");
   }
+  if (packageManifest.scripts?.["validate:distribution"] !== "pnpm build:web && tsx packaging/macos/validate-manifest.ts") {
+    throw new Error("Distribution validation must rebuild the production web bundle before inspection");
+  }
   for (const scriptName of ["build", "build:web", "package:macos", "install:local"] as const) {
     if (/catalog:(?:audit|generate|update)/u.test(packageManifest.scripts?.[scriptName] ?? "")) {
       throw new Error(`Ordinary ${scriptName} path must not generate or update catalog artifacts`);

@@ -680,8 +680,16 @@ describe("macOS distribution manifests", () => {
     expect(() => validateDoctorEvidence({ ok: true, offline: true, writer: "embedpdf-node-pdfium", nodeVersion: "24.14.0", pdfiumSha256: "a".repeat(64), pages: 0, structurallyValid: true }, "24.14.0", "a".repeat(64))).toThrow(/evidence/u);
   });
 
-  it("packages task-correlated Codex hooks through the installed executable", async () => {
+  it("rebuilds the production web bundle before distribution validation", async () => {
+    const packageManifest = JSON.parse(await readFile(resolve("package.json"), "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+    expect(packageManifest.scripts?.["validate:distribution"])
+      .toBe("pnpm build:web && tsx packaging/macos/validate-manifest.ts");
     await expect(validateDistributionManifests(resolve("."))).resolves.toBeUndefined();
+  });
+
+  it("packages task-correlated Codex hooks through the installed executable", async () => {
     const plugin = JSON.parse(await readFile(resolve("integrations/codex-plugin/.codex-plugin/plugin.json"), "utf8")) as {
       description?: string;
       skills?: string;
