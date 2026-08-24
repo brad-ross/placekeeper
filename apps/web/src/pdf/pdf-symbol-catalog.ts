@@ -1,4 +1,7 @@
-import { GENERATED_PDF_SYMBOL_CATALOG } from './pdf-symbol-catalog.generated.js';
+import {
+  GENERATED_PDF_SYMBOL_CATALOG,
+  type GeneratedPdfSymbolCatalogTuple,
+} from './pdf-symbol-catalog.generated.js';
 import { isSingleUnicodeScalarQuery } from './pdf-search-model.js';
 
 export type PdfSymbolRecordId = number;
@@ -16,7 +19,7 @@ export interface PdfSymbolSuggestion {
 
 interface PdfSymbolRecord extends PdfSymbolSuggestion {
   readonly semanticFamilyCodePoints: readonly number[];
-  readonly suggestionRank: 0 | 1 | 2 | 3 | 4;
+  readonly suggestionRank: GeneratedPdfSymbolCatalogTuple[8];
 }
 
 const RECORDS: readonly PdfSymbolRecord[] = GENERATED_PDF_SYMBOL_CATALOG.map(([

@@ -179,8 +179,9 @@ describe('PDF symbol catalog artifact generation', () => {
       [0x02dc, 3], // ˜: diacritic tier.
       [0x002c, 4], // ,: punctuation tier.
     ]);
+    const recordsByCodePoint = new Map(audit.records.map((record) => [record.codePoint, record]));
     for (const [codePoint, rank] of expectedRanks) {
-      const record = audit.records.find((candidate) => candidate.codePoint === codePoint);
+      const record = recordsByCodePoint.get(codePoint);
       expect(record, `missing ${codePoint.toString(16)}`).toBeDefined();
       expect(classifySuggestionRank(record!)).toBe(rank);
     }
@@ -195,7 +196,7 @@ describe('PDF symbol catalog artifact generation', () => {
     );
     for (const tuple of runtimeTuples) {
       const [codePoint, , , , , , , , rank] = tuple as [number, ...unknown[]];
-      const record = audit.records.find((candidate) => candidate.codePoint === codePoint);
+      const record = recordsByCodePoint.get(codePoint);
       expect(classifySuggestionRank(record!)).toBe(rank);
     }
   });
@@ -209,7 +210,10 @@ describe('PDF symbol catalog artifact generation', () => {
         rejectedTex: unknown[];
         auditedAliasGroups: unknown[];
       };
-      runtimeProjection: { suppressedNaturalNames: unknown[] };
+      runtimeProjection: {
+        suppressedNaturalNames: unknown[];
+        suggestionRankCounts: Record<string, number>;
+      };
     };
     const report = JSON.parse(artifacts.report) as {
       exclusions: {
@@ -225,11 +229,8 @@ describe('PDF symbol catalog artifact generation', () => {
     };
 
     expect(Buffer.byteLength(artifacts.report)).toBeLessThan(25_000);
-    const auditWithRanks = JSON.parse(artifacts.audit) as {
-      runtimeProjection: { suggestionRankCounts: Record<string, number> };
-    };
     expect(report.counts.suggestionRank).toEqual(
-      auditWithRanks.runtimeProjection.suggestionRankCounts,
+      audit.runtimeProjection.suggestionRankCounts,
     );
     expect(Object.values(report.counts.suggestionRank)
       .reduce((sum, count) => sum + count, 0)).toBe(report.counts.records);
