@@ -45,6 +45,14 @@ import type {
 import type { ViewerPdfLinkInvocation } from '../pdf/viewer-interaction-events.js';
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js';
 import { AnnotationList } from '../review/AnnotationList.js';
+import { AnnotationExcerpt } from '../review/AnnotationExcerpt.js';
+import { FullAnnotationReader } from '../review/FullAnnotationReader.js';
+import {
+  projectExistingAnnotationReader,
+  resolveAnnotationReader,
+  type AnnotationReaderIdentity,
+  type AnnotationReaderRecord,
+} from '../review/annotation-reader.js';
 import {
   AnnotationMetadata,
   annotationAccessibleLabel,
@@ -272,6 +280,41 @@ interface PointerScrollGesture {
   readonly scroll: ViewerPosition | null;
 }
 
+interface FullAnnotationReaderSession {
+  readonly identity: AnnotationReaderIdentity;
+  readonly authority: AuthoringAuthority;
+  readonly annotationScrollTop: number;
+  readonly previousActiveItemId?: string;
+  readonly entryFocus?: 'back' | 'edit';
+}
+
+function annotationReaderIdentityMatches(
+  left: AnnotationReaderIdentity,
+  right: AnnotationReaderIdentity,
+): boolean {
+  if (left.origin !== right.origin) return false;
+  if (left.origin === 'owned' && right.origin === 'owned') return left.itemId === right.itemId;
+  return left.origin === 'source'
+    && right.origin === 'source'
+    && left.documentGeneration === right.documentGeneration
+    && left.discoveryGeneration === right.discoveryGeneration
+    && left.annotationKey === right.annotationKey;
+}
+
+function isVisibleFocusTarget(element: HTMLElement | null | undefined): element is HTMLElement {
+  if (
+    element === null
+    || element === undefined
+    || !element.isConnected
+    || element.hidden
+    || element.closest('[hidden], [inert], [aria-hidden="true"]') !== null
+  ) return false;
+  const style = getComputedStyle(element);
+  return style.display !== 'none'
+    && style.visibility !== 'hidden'
+    && style.visibility !== 'collapse';
+}
+
 function mutableField(item: ReviewItem): 'proposedText' | 'comment' | undefined {
   if (item.kind === 'replace' || item.kind === 'insert') return 'proposedText';
   if (item.kind === 'highlight' || item.kind === 'pageNote') return 'comment';
@@ -332,11 +375,23 @@ export function ReviewShell(props: ReviewShellProps) {
     : authoringSession.workspace.activeItemId;
   const [consumedSelectionGeneration, setConsumedSelectionGeneration] = useState<number>();
   const [listActivation, setListActivation] = useState<{ readonly id: string; readonly token: number }>();
+  const [annotationReaderSession, setAnnotationReaderSession] = useState<FullAnnotationReaderSession | null>(null);
+  const pendingReaderResumeRef = useRef<FullAnnotationReaderSession | null>(null);
+  const annotationRestorationTokenRef = useRef(0);
+  const annotationRestorationFramesRef = useRef(new Set<number>());
   const [peekItemId, setPeekItemId] = useState<string>();
   const [searchFocusRequest, setSearchFocusRequest] = useState(0);
   const peekHeldRef = useRef(false);
   const peekTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [announcement, setAnnouncement] = useState(`Review revision ${props.state.revision}.`);
+
+  const cancelAnnotationRestoration = useCallback(() => {
+    annotationRestorationTokenRef.current += 1;
+    for (const frame of annotationRestorationFramesRef.current) cancelAnimationFrame(frame);
+    annotationRestorationFramesRef.current.clear();
+  }, []);
+
+  useEffect(() => cancelAnnotationRestoration, [cancelAnnotationRestoration]);
 
   useEffect(() => {
     props.onAuthoringAnchorChange?.(
@@ -488,6 +543,22 @@ export function ReviewShell(props: ReviewShellProps) {
   ) ? requestedEffectiveWorkspaceMode : rightWorkspaceMode;
   const anyWorkspaceOpen = workspaceOpen || referenceSurfaceOpen || toolsSurfaceOpen;
   const annotationsVisible = anyWorkspaceOpen && effectiveWorkspaceMode === 'annotations';
+  const annotationReaderRecord = annotationReaderSession === null
+    || !authoringAuthorityMatches(annotationReaderSession.authority, currentAuthoringAuthority)
+    ? null
+    : resolveAnnotationReader(annotationReaderSession.identity, {
+        ownedItems: props.state.items,
+        existingAnnotations,
+        documentGeneration: navigation.documentGeneration,
+        ...(!showAnnotationOutlineLabels || props.annotationOutlineLabels === undefined ? {} : {
+          ownedSectionLabels: props.annotationOutlineLabels.owned,
+          sourceSectionLabels: props.annotationOutlineLabels.source,
+        }),
+      });
+  const annotationReaderOwnedItemId = annotationReaderRecord?.identity.origin === 'owned'
+    ? annotationReaderRecord.identity.itemId
+    : undefined;
+  const annotationReaderOpen = annotationReaderRecord !== null;
   const selectionAnchor = reliableSelection(props.selectionUpdate);
   const selectionActionsAvailable = selectionAnchor !== null
     && props.selectionUpdate.generation !== consumedSelectionGeneration;
@@ -506,6 +577,178 @@ export function ReviewShell(props: ReviewShellProps) {
       referenceLayout.bottomReferenceHeight,
     ].join(':'),
   });
+
+  const restoreAnnotationList = useCallback((
+    session: FullAnnotationReaderSession,
+    options?: {
+      readonly activeItemId?: string;
+      readonly preferRowTarget?: boolean;
+    },
+  ) => {
+    const { identity } = session;
+    const sourceDocumentChanged = !authoringAuthorityMatches(
+      session.authority,
+      currentAuthoringAuthority,
+    );
+    const sourceDiscoveryChanged = identity.origin === 'source' && (
+      identity.documentGeneration !== navigation.documentGeneration
+      || existingAnnotations.status !== 'ready'
+      || identity.discoveryGeneration !== existingAnnotations.generation
+    );
+    const staleAuthority = sourceDocumentChanged || sourceDiscoveryChanged;
+    pendingReaderResumeRef.current = null;
+    cancelAnnotationRestoration();
+    const restorationToken = annotationRestorationTokenRef.current;
+    const scheduleRestoration = (callback: () => void) => {
+      const frame = requestAnimationFrame(() => {
+        annotationRestorationFramesRef.current.delete(frame);
+        if (annotationRestorationTokenRef.current === restorationToken) callback();
+      });
+      annotationRestorationFramesRef.current.add(frame);
+    };
+    setAnnotationReaderSession(null);
+    if (staleAuthority) {
+      setActiveItem(undefined);
+    } else {
+      const requestedActiveItemId = options?.activeItemId ?? session.previousActiveItemId;
+      const validActiveItemId = requestedActiveItemId !== undefined
+        && props.state.items.some(({ id }) => id === requestedActiveItemId)
+        ? requestedActiveItemId
+        : undefined;
+      setActiveItem(validActiveItemId);
+    }
+    scheduleRestoration(() => scheduleRestoration(() => {
+      const shell = shellRef.current;
+      if (shell === null) return;
+      const viewport = shell.querySelector<HTMLElement>('[data-annotation-scroll-viewport]');
+      if (!staleAuthority && viewport !== null) viewport.scrollTop = session.annotationScrollTop;
+
+      const row = staleAuthority
+        ? undefined
+        : identity.origin === 'owned'
+          ? [...shell.querySelectorAll<HTMLElement>('[data-review-item]')]
+            .find((element) => element.dataset.reviewItem === identity.itemId)
+          : [...shell.querySelectorAll<HTMLElement>('[data-existing-annotation-key]')]
+            .find((element) => element.dataset.existingAnnotationKey === identity.annotationKey);
+      const openingMore = row?.querySelector<HTMLElement>('[data-read-full-annotation="true"]');
+      const rowTarget = row?.querySelector<HTMLElement>('.annotation-item__navigation');
+      const workspaceFallback = shell.querySelector<HTMLElement>('#workspace-panel-annotations');
+      const pdfFallback = shell.querySelector<HTMLElement>(
+        '.pdf-workspace:not(.pdf-workspace--reference) [data-page-index], [role="application"]',
+      );
+      const restorableMore = !options?.preferRowTarget && isVisibleFocusTarget(openingMore)
+        ? openingMore
+        : null;
+      const focusTarget = restorableMore
+        ?? rowTarget
+        ?? workspaceFallback
+        ?? pdfFallback;
+      focusTarget?.focus({ preventScroll: true });
+      if (!staleAuthority && viewport !== null) {
+        viewport.scrollTop = session.annotationScrollTop;
+        scheduleRestoration(() => {
+          viewport.scrollTop = session.annotationScrollTop;
+        });
+      }
+    }));
+  }, [
+    cancelAnnotationRestoration,
+    currentAuthoringAuthority.documentGeneration,
+    currentAuthoringAuthority.sourceIdentity,
+    existingAnnotations,
+    navigation.documentGeneration,
+    props.state.items,
+  ]);
+
+  useLayoutEffect(() => {
+    if (annotationReaderSession === null || !annotationReaderOpen) return;
+    const viewport = shellRef.current
+      ?.querySelector<HTMLElement>('[data-annotation-scroll-viewport]');
+    if (viewport) viewport.scrollTop = 0;
+  }, [annotationReaderOpen, annotationReaderSession]);
+
+  useLayoutEffect(() => {
+    if (annotationReaderSession === null || !annotationReaderOpen) return;
+    const action = annotationReaderSession.entryFocus ?? 'back';
+    shellRef.current
+      ?.querySelector<HTMLElement>(`[data-full-annotation-action="${action}"]`)
+      ?.focus({ preventScroll: true });
+  }, [annotationReaderOpen, annotationReaderSession]);
+
+  const openOwnedAnnotationReader = (
+    record: AnnotationReaderRecord,
+    _trigger: HTMLButtonElement,
+  ) => {
+    if (authoringSessionRef.current !== null || record.identity.origin !== 'owned') return;
+    cancelAnnotationRestoration();
+    pendingReaderResumeRef.current = null;
+    const { identity } = record;
+    const item = props.state.items.find(({ id }) => id === identity.itemId);
+    if (item === undefined) return;
+    const annotationScrollTop = shellRef.current
+      ?.querySelector<HTMLElement>('[data-annotation-scroll-viewport]')
+      ?.scrollTop ?? 0;
+    const previousActiveItemId = activeItemId;
+    workspaceFraming.markUserIntent();
+    setActiveItem(item.id);
+    props.onNavigate?.(item);
+    setAnnotationReaderSession({
+      identity,
+      authority: currentAuthoringAuthorityRef.current,
+      annotationScrollTop,
+      ...(previousActiveItemId === undefined ? {} : { previousActiveItemId }),
+    });
+  };
+
+  const openExistingAnnotationReader = (
+    annotation: ExistingAnnotation,
+    record: AnnotationReaderRecord,
+    _trigger: HTMLButtonElement,
+  ) => {
+    if (authoringSessionRef.current !== null || record.identity.origin !== 'source') return;
+    cancelAnnotationRestoration();
+    pendingReaderResumeRef.current = null;
+    const annotationScrollTop = shellRef.current
+      ?.querySelector<HTMLElement>('[data-annotation-scroll-viewport]')
+      ?.scrollTop ?? 0;
+    const previousActiveItemId = activeItemId;
+    workspaceFraming.markUserIntent();
+    props.onNavigateExisting?.(annotation);
+    setAnnotationReaderSession({
+      identity: record.identity,
+      authority: currentAuthoringAuthorityRef.current,
+      annotationScrollTop,
+      ...(previousActiveItemId === undefined ? {} : { previousActiveItemId }),
+    });
+  };
+
+  useEffect(() => {
+    if (
+      authoringSessionRef.current === null
+      && annotationReaderSession !== null
+      && annotationReaderRecord === null
+    ) {
+      restoreAnnotationList(annotationReaderSession);
+    }
+  }, [annotationReaderRecord, annotationReaderSession, authoringSession, restoreAnnotationList]);
+
+  const settlePendingReaderResume = (
+    record: AnnotationReaderRecord,
+    overflowing: boolean,
+  ) => {
+    const pending = pendingReaderResumeRef.current;
+    if (pending === null || !annotationReaderIdentityMatches(pending.identity, record.identity)) return;
+    pendingReaderResumeRef.current = null;
+    if (!overflowing) {
+      restoreAnnotationList(pending, {
+        ...(pending.identity.origin === 'owned' ? { activeItemId: pending.identity.itemId } : {}),
+        preferRowTarget: true,
+      });
+      return;
+    }
+    cancelAnnotationRestoration();
+    setAnnotationReaderSession({ ...pending, entryFocus: 'edit' });
+  };
 
   useLayoutEffect(() => {
     const action: ReferenceWorkspaceLayoutAction = {
@@ -700,6 +943,8 @@ export function ReviewShell(props: ReviewShellProps) {
     trigger: HTMLElement | null,
   ): boolean => {
     if (!canStartAuthoringSession(authoringSessionRef.current)) return false;
+    cancelAnnotationRestoration();
+    pendingReaderResumeRef.current = null;
     inputControllerRef.current?.clearDraft();
     const session = createAuthoringSession({
       token: ++authoringSessionTokenRef.current,
@@ -765,9 +1010,13 @@ export function ReviewShell(props: ReviewShellProps) {
   const closeAuthoringSession = (
     token: number,
     reason: 'accepted' | 'cancelled' | 'source-replaced',
+    acceptedState?: ReviewState,
   ) => {
     const current = authoringSessionRef.current;
     if (current === null || current.token !== token) return;
+    const readerOrigin = current.origin.kind === 'reader-edit'
+      ? annotationReaderSession
+      : null;
     authoringSessionRef.current = null;
     props.onAuthoringActiveChange?.(false);
     props.onAuthoringPreviewChange?.(null);
@@ -775,7 +1024,47 @@ export function ReviewShell(props: ReviewShellProps) {
     inputController.clearDraft();
     dispatchSurface({ type: 'close-nested' });
     if (current.source.kind === 'pageNote') props.onPageNoteComposerComplete?.();
-    if (reason === 'source-replaced') return;
+    if (reason === 'source-replaced') {
+      if (readerOrigin !== null) {
+        if (!authoringAuthorityMatches(readerOrigin.authority, currentAuthoringAuthorityRef.current)) {
+          setActiveItem(undefined);
+        }
+        restoreAnnotationList(readerOrigin, { preferRowTarget: true });
+      }
+      return;
+    }
+    if (readerOrigin !== null) {
+      const nextReaderRecord = resolveAnnotationReader(readerOrigin.identity, {
+        ownedItems: (acceptedState ?? props.state).items,
+        existingAnnotations,
+        documentGeneration: navigation.documentGeneration,
+        ...(!showAnnotationOutlineLabels || props.annotationOutlineLabels === undefined ? {} : {
+          ownedSectionLabels: props.annotationOutlineLabels.owned,
+          sourceSectionLabels: props.annotationOutlineLabels.source,
+        }),
+      });
+      if (nextReaderRecord === null) {
+        const readerItemId = readerOrigin.identity.origin === 'owned'
+          ? readerOrigin.identity.itemId
+          : undefined;
+        const readerItemStillExists = readerItemId !== undefined
+          && (acceptedState ?? props.state).items.some(({ id }) => id === readerItemId);
+        restoreAnnotationList(readerOrigin, {
+          ...(readerItemStillExists ? { activeItemId: readerItemId } : {}),
+          preferRowTarget: true,
+        });
+        return;
+      }
+      if (reason === 'accepted') {
+        pendingReaderResumeRef.current = readerOrigin;
+        cancelAnnotationRestoration();
+        setAnnotationReaderSession(null);
+        if (readerOrigin.identity.origin === 'owned') {
+          setActiveItem(readerOrigin.identity.itemId);
+        }
+        return;
+      }
+    }
     setActiveItem(current.workspace.activeItemId);
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const shell = shellRef.current;
@@ -791,6 +1080,8 @@ export function ReviewShell(props: ReviewShellProps) {
         ? originTrigger
         : current.origin.kind === 'tray-edit'
           ? restoredItem?.querySelector<HTMLElement>('[data-annotation-action="edit"]')
+          : current.origin.kind === 'reader-edit'
+            ? restoredItem?.querySelector<HTMLElement>('.annotation-item__navigation')
           : null;
       const workspaceFallback = current.workspace.open
         ? shell.querySelector<HTMLElement>(`#workspace-panel-${current.workspace.mode}`)
@@ -827,6 +1118,15 @@ export function ReviewShell(props: ReviewShellProps) {
     setAnnouncement('This draft belonged to the previous document and was not applied.');
     closeAuthoringSession(current.token, 'source-replaced');
   }, [currentAuthoringAuthority.documentGeneration, currentAuthoringAuthority.sourceIdentity]);
+
+  useLayoutEffect(() => {
+    const current = authoringSessionRef.current;
+    if (current === null || current.source.kind !== 'edit') return;
+    const editedItemId = current.source.item.id;
+    if (props.state.items.some(({ id }) => id === editedItemId)) return;
+    setAnnouncement('This annotation is no longer available and the edit was not applied.');
+    closeAuthoringSession(current.token, 'source-replaced');
+  }, [props.state.items]);
 
   useEffect(() => {
     const resolution = props.authoringSessionResolution;
@@ -1057,7 +1357,7 @@ export function ReviewShell(props: ReviewShellProps) {
     onAccepted?: () => void,
   ) => {
     let accepted = false;
-    await submit(build, {
+    const next = await submit(build, {
       authority: session.authority,
       onAccepted: () => {
         accepted = true;
@@ -1065,7 +1365,7 @@ export function ReviewShell(props: ReviewShellProps) {
       },
       onStale: () => closeAuthoringSession(session.token, 'source-replaced'),
     });
-    if (accepted) closeAuthoringSession(session.token, 'accepted');
+    if (accepted) closeAuthoringSession(session.token, 'accepted', next);
   };
 
   const saveAuthoring = async (session: AuthoringSession, value: string) => {
@@ -1112,6 +1412,8 @@ export function ReviewShell(props: ReviewShellProps) {
   const canUndo = props.state.historyCursor > 0;
   const canRedo = props.state.historyCursor < props.state.history.length;
   const closeWorkspace = () => {
+    cancelAnnotationRestoration();
+    pendingReaderResumeRef.current = null;
     dismissPageNoteAuthority();
     const closingReferences = effectiveWorkspaceMode === 'references';
     const bottomRail = effectiveReferenceLayout.kind === 'narrow-unified'
@@ -1540,7 +1842,23 @@ export function ReviewShell(props: ReviewShellProps) {
               ? {}
               : { copyLinkForOutlineItem: props.copyLinkForOutlineItem })}
             onModeFocusTokenChange={rememberWorkspaceModeFocus}
-            annotations={<div id="review-annotation-list" aria-label="All annotations">
+            annotations={annotationReaderSession !== null && annotationReaderRecord !== null ? (
+              <FullAnnotationReader
+                record={annotationReaderRecord}
+                onBack={() => restoreAnnotationList(annotationReaderSession)}
+                {...(annotationReaderOwnedItemId === undefined ? {} : {
+                  onEdit: (trigger: HTMLButtonElement) => {
+                    if (authoringSessionRef.current !== null) return;
+                    const item = props.state.items.find(({ id }) => id === annotationReaderOwnedItemId);
+                    if (item === undefined) {
+                      restoreAnnotationList(annotationReaderSession, { preferRowTarget: true });
+                      return;
+                    }
+                    beginAuthoring({ kind: 'edit', item }, 'reader-edit', trigger);
+                  },
+                })}
+              />
+            ) : <div id="review-annotation-list" aria-label="All annotations">
             <AnnotationList
               items={props.state.items}
               {...(!showAnnotationOutlineLabels || props.annotationOutlineLabels === undefined
@@ -1557,10 +1875,14 @@ export function ReviewShell(props: ReviewShellProps) {
               {...(props.copyItemLink === undefined ? {} : { copyLinkForItem })}
               onNavigate={(item) => {
                 if (authoringSessionRef.current !== null) return;
+                cancelAnnotationRestoration();
+                pendingReaderResumeRef.current = null;
                 markFramingUserIntent();
                 setActiveItem(item.id);
                 props.onNavigate?.(item);
               }}
+              onReadFull={openOwnedAnnotationReader}
+              onReaderOverflowChange={settlePendingReaderResume}
               onEdit={(item, trigger) => {
                 if (authoringSessionRef.current !== null) return;
                 beginAuthoring({ kind: 'edit', item }, 'tray-edit', trigger);
@@ -1598,31 +1920,50 @@ export function ReviewShell(props: ReviewShellProps) {
                     const sectionLabel = showAnnotationOutlineLabels
                       ? props.annotationOutlineLabels?.source.get(existingAnnotationKey(annotation))
                       : undefined;
+                    const readerRecord = projectExistingAnnotationReader(annotation, {
+                      documentGeneration: navigation.documentGeneration,
+                      discoveryGeneration: existingAnnotations.generation,
+                      ...(sectionLabel === undefined ? {} : { sectionLabel }),
+                    });
                     return <li
                       key={existingAnnotationKey(annotation)}
                       data-existing-annotation={annotation.id}
+                      data-existing-annotation-key={existingAnnotationKey(annotation)}
                       data-annotation-origin="source"
                       data-annotation-kind={annotation.subtype}
                       data-annotation-state="readonly"
                       data-readonly="true"
                     >
-                      <button className="existing-annotation__content" type="button" aria-label={annotationAccessibleLabel({
+                      <div className="existing-annotation__content">
+                      <button className="annotation-item__navigation" type="button" aria-label={annotationAccessibleLabel({
                         kind: annotation.subtype,
                         pageNumber: annotation.pageIndex + 1,
                         ...(sectionLabel === undefined ? {} : { sectionLabel }),
                         ...(annotation.contents ? { excerpt: annotation.contents } : {}),
                       })} title={`Go to ${annotationKindLabel(annotation.subtype)} annotation on page ${annotation.pageIndex + 1}`} onClick={() => {
                         if (authoringSessionRef.current !== null) return;
+                        cancelAnnotationRestoration();
+                        pendingReaderResumeRef.current = null;
                         markFramingUserIntent();
                         props.onNavigateExisting?.(annotation);
                       }}>
-                        <AnnotationMetadata
-                          kind={annotation.subtype}
-                          pageNumber={annotation.pageIndex + 1}
-                          {...(sectionLabel === undefined ? {} : { sectionLabel })}
-                        />
-                        {annotation.contents ? <span className="annotation-item__excerpt">{annotation.contents}</span> : null}
                       </button>
+                      <AnnotationMetadata
+                        kind={annotation.subtype}
+                        pageNumber={annotation.pageIndex + 1}
+                        {...(sectionLabel === undefined ? {} : { sectionLabel })}
+                      />
+                      {annotation.contents ? (
+                        <AnnotationExcerpt
+                          content={annotation.contents}
+                          readerRecord={readerRecord}
+                          onOverflowChange={settlePendingReaderResume}
+                          onReadFull={(record, trigger) => {
+                            openExistingAnnotationReader(annotation, record, trigger);
+                          }}
+                        />
+                      ) : null}
+                      </div>
                     </li>;
                   })}
                 </ol>

@@ -12,6 +12,10 @@ import {
 import { AnnotationList } from '../src/review/AnnotationList.js';
 import { AnnotationPeek } from '../src/review/AnnotationPeek.js';
 import {
+  FullAnnotationReader,
+  FullAnnotationReaderActions,
+} from '../src/review/FullAnnotationReader.js';
+import {
   ReviewChrome,
   resolveZoomDraft,
   validPageNumber,
@@ -70,6 +74,76 @@ const ownedAnnotation: ReviewItem = {
 };
 
 describe('review shell layout and accessibility contract', () => {
+  it('renders full annotation content as a focused tray detail without source text', () => {
+    const html = renderToStaticMarkup(
+      <FullAnnotationReader
+        onBack={() => undefined}
+        record={{
+          identity: { origin: 'owned', itemId: 'owned-highlight' },
+          origin: 'owned',
+          kind: 'highlight',
+          typeLabel: 'Highlight',
+          pageNumber: 4,
+          sectionLabel: 'Identification',
+          contentLabel: 'Comment',
+          content: 'Clarify the identifying variation behind this claim.',
+          mutable: true,
+        }}
+      />,
+    );
+
+    expect(html).toContain('data-full-annotation-reader="true"');
+    expect(html).toContain('aria-label="Full Highlight annotation on page 4"');
+    expect(html).not.toContain('Full annotation — Highlight, page 4');
+    expect(html).toContain('Identification');
+    expect(html).toContain('Comment');
+    expect(html).toContain('Clarify the identifying variation behind this claim.');
+    expect(html).not.toContain('Original text');
+    expect(html).not.toContain('In the document');
+  });
+
+  it('keeps imported full annotations read-only while retaining available author metadata', () => {
+    const html = renderToStaticMarkup(
+      <FullAnnotationReader
+        onBack={() => undefined}
+        record={{
+          identity: {
+            origin: 'source',
+            annotationKey: '1:source-highlight',
+            documentGeneration: 0,
+            discoveryGeneration: 1,
+          },
+          origin: 'source',
+          kind: 'Highlight',
+          typeLabel: 'Highlight',
+          pageNumber: 2,
+          author: 'Reviewer',
+          contentLabel: 'Annotation contents',
+          content: 'A source-owned comment.',
+          mutable: false,
+        }}
+      />,
+    );
+
+    expect(html).toContain('Reviewer');
+    expect(html).toContain('Read only');
+    expect(html).not.toContain('>Edit<');
+  });
+
+  it('exposes Edit only for a mutable owned full annotation', () => {
+    const html = renderToStaticMarkup(
+      <FullAnnotationReaderActions
+        onBack={() => undefined}
+        onEdit={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Back"');
+    expect(html).toContain('aria-label="Edit"');
+    expect(html).not.toContain('>Back<');
+    expect(html).not.toContain('>Edit<');
+  });
+
   it('switches row actions at one shared geometry-derived container boundary', () => {
     const below = ROW_ACTION_DIRECT_BREAKPOINT_PX - 1;
     const above = ROW_ACTION_DIRECT_BREAKPOINT_PX + 1;
@@ -353,6 +427,7 @@ describe('review shell layout and accessibility contract', () => {
         activeId={ownedAnnotation.id}
         correspondingId={ownedAnnotation.id}
         onNavigate={() => undefined}
+        onReadFull={() => undefined}
         onEdit={() => undefined}
         onDelete={() => undefined}
       />,
@@ -380,6 +455,11 @@ describe('review shell layout and accessibility contract', () => {
     expect(listHtml).toContain('<span class="annotation-item__separator">·</span><span class="annotation-item__page">4</span>');
     expect(listHtml).toContain('class="annotation-item__section" title="Methods and data">Methods and data</span>');
     expect(listHtml).toContain('aria-label="Highlight · Page 4 · Methods and data · Clarify the identifying variation behind this claim."');
+    expect(listHtml).toContain('data-read-full-annotation="true"');
+    expect(listHtml).toContain('aria-label="Read full Highlight annotation on page 4"');
+    expect(listHtml).toContain('title="Read full annotation"');
+    expect(listHtml).toContain('hidden=""');
+    expect(listHtml).toMatch(/annotation-item__navigation[\s\S]*<\/button>[\s\S]*annotation-item__more/u);
     expect(listHtml).not.toContain('>Page 4<');
     expect(unsectionedListHtml).not.toContain('annotation-item__section');
     expect(unsectionedListHtml.match(/annotation-item__separator/gu)).toHaveLength(1);
@@ -427,6 +507,9 @@ describe('review shell layout and accessibility contract', () => {
 
     expect(copyableList).toContain('data-item-copy-link="true"');
     expect(copyableList).toContain('aria-label="Copy link to Highlight annotation on page 4"');
+    expect(copyableList).toContain('annotation-item__title-row');
+    expect(copyableList).toContain('annotation-item__title-actions');
+    expect(copyableList).toContain('annotation-item__body-row');
     expect(copyableList.indexOf('data-annotation-action="edit"')).toBeLessThan(
       copyableList.indexOf('data-annotation-action="delete"'),
     );
@@ -788,6 +871,8 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('data-readonly="true"');
     expect(html).toContain('class="annotation-item__section" title="Methods and data">Methods and data</span>');
     expect(html).toContain('aria-label="Highlight · Page 2 · Methods and data · Source-only comment"');
+    expect(html).toContain('aria-label="Read full Highlight annotation on page 2"');
+    expect(html).toContain('data-read-full-annotation="true"');
     expect(html).not.toContain('>Page 2<');
     expect(html).not.toContain('aria-label="Edit Highlight on page 2"');
     expect(html).not.toContain('aria-label="Delete Highlight on page 2"');

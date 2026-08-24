@@ -94,6 +94,32 @@ const seededItems: readonly ReviewItem[] = [
   }),
 ];
 
+const trayItems: readonly ReviewItem[] = [
+  item('owned-highlight', 'highlight', 0, {
+    quote: 'identifying variation is local to the comparison group',
+    prefix: 'Our design compares outcomes within narrowly defined markets. The ',
+    suffix: ', so aggregate shocks are absorbed before the coefficient is estimated.',
+    comment: 'Clarify which comparison group identifies this coefficient, explain why the restriction is credible, and connect the local variation to the appendix robustness design. This deliberately overflowing comment keeps the complete reviewer-authored argument available in the full annotation reader.',
+    rect: { x: 88, y: 126, width: 318, height: 16 },
+    segmentRects: [{ x: 88, y: 126, width: 318, height: 16 }],
+    reliable: true,
+  }),
+  item('owned-replace', 'replace', 1, {
+    quote: 'a unique equilibrium',
+    prefix: 'Under the maintained assumptions, the model admits ',
+    suffix: '. The appendix gives the regularity conditions.',
+    proposedText: 'a locally unique equilibrium',
+    rect: { x: 96, y: 204, width: 176, height: 16 },
+    segmentRects: [{ x: 96, y: 204, width: 176, height: 16 }],
+    reliable: true,
+  }),
+  item('owned-page-note', 'pageNote', 11, {
+    position: { x: 438, y: 612, width: 18, height: 18 },
+    comment: 'This conclusion reaches beyond the evidence presented above. Add the leave-one-market-out result, state which specifications preserve the sign and magnitude, and narrow the causal language if the appendix cannot support the stronger interpretation.',
+    nearbyText: 'Taken together, these estimates establish…',
+  }),
+];
+
 function stateFor(items: readonly ReviewItem[]): ReviewState {
   return {
     schemaVersion: 1,
@@ -124,13 +150,42 @@ const readyAnnotations: ExistingAnnotationsDiscovery = {
   }],
 };
 
+const trayAnnotations: ExistingAnnotationsDiscovery = {
+  status: 'ready',
+  generation: 1,
+  items: [{
+    id: 'source-highlight-short',
+    subtype: 'Highlight',
+    pageIndex: 3,
+    rect: { x: 72, y: 92, width: 180, height: 14 },
+    contents: 'Check Table 4.',
+    author: 'A. Researcher',
+    flags: ['Print'],
+    appearanceModes: ['normal'],
+    supportedAppearance: true,
+  }, {
+    id: 'source-highlight-long',
+    subtype: 'Highlight',
+    pageIndex: 7,
+    rect: { x: 84, y: 214, width: 260, height: 14 },
+    contents: 'Reconcile this mechanism with the appendix specification, identify the maintained assumptions that differ across the two estimators, and explain whether the reported robustness checks isolate the same comparison group. This imported comment is intentionally long enough to require the read-only full annotation reader.',
+    author: 'B. Collaborator',
+    flags: ['Print'],
+    appearanceModes: ['normal'],
+    supportedAppearance: true,
+  }],
+};
+
 const annotationOutlineLabels: AnnotationOutlineLabels = {
   owned: new Map([
     ['owned-highlight', 'Identification strategy and conditional comparison groups'],
     ['owned-replace', 'Local equilibrium'],
     ['owned-page-note', 'Robustness checks'],
   ]),
-  source: new Map([['3:source-highlight', 'Mechanism details']]),
+  source: new Map([
+    ['3:source-highlight-short', 'Mechanism details'],
+    ['7:source-highlight-long', 'Appendix specification'],
+  ]),
 };
 
 const viewerState: ViewerControlsSnapshot = {
@@ -255,7 +310,9 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
   const requested = parameters.get('visual');
   if (!requested || !isVisualSceneName(requested)) return null;
   const name = requested;
-  const state = stateFor(name === 'contextual' || name === 'page-note' ? [] : seededItems);
+  const state = stateFor(name === 'contextual' || name === 'page-note'
+    ? []
+    : name === 'tray' ? trayItems : seededItems);
   const exception = parameters.get('exception');
   const exceptionalAnnotations: ExistingAnnotationsDiscovery = exception === 'loading'
     ? { status: 'loading', generation: 7 }
@@ -268,7 +325,9 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
     state,
     listOpen: name === 'tray' || name === 'outline' || name === 'exceptional',
     pageMenuOpen: name === 'page-note',
-    existingAnnotations: name === 'exceptional' ? exceptionalAnnotations : readyAnnotations,
+    existingAnnotations: name === 'exceptional'
+      ? exceptionalAnnotations
+      : name === 'tray' ? trayAnnotations : readyAnnotations,
     ...(name === 'tray' ? {
       annotationOutlineLabels,
       outlineDiscovery: {

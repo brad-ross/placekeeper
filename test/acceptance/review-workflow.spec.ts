@@ -748,6 +748,289 @@ test.describe('canonical review workflow', () => {
     await expect(originEdit).toBeFocused();
   });
 
+  test('reads a full annotation in the tray and restores list selection, scroll, and More focus', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 760 });
+    await page.getByRole('button', { name: 'Seed annotations' }).click();
+    await page.getByRole('button', { name: 'Seed long annotation' }).click();
+    await openAnnotationsWorkspace(page);
+
+    const panel = page.locator('[data-annotation-scroll-viewport]');
+    const rows = panel.locator('[data-review-item]');
+    const previouslySelected = rows.first();
+    await previouslySelected.locator('.annotation-item__content').click();
+    const previousId = await previouslySelected.getAttribute('data-review-item');
+
+    const openingRow = rows.filter({
+      has: page.getByRole('button', { name: /Read full Page Note annotation on page 3/u }),
+    });
+    const openingId = await openingRow.getAttribute('data-review-item');
+    const more = openingRow.getByRole('button', { name: /Read full Page Note annotation on page 3/u });
+    await openingRow.scrollIntoViewIfNeeded();
+    await expect(more).toBeVisible();
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    });
+    await openingRow.scrollIntoViewIfNeeded();
+    const scrollBefore = await panel.evaluate((element) => element.scrollTop);
+
+    await more.evaluate((button) => (button as HTMLButtonElement).click());
+    const reader = page.getByRole('region', { name: 'Full Page Note annotation on page 3' });
+    const back = page.locator('[data-full-annotation-action="back"]');
+    await expect(reader).toBeVisible();
+    await expect(back).toBeFocused();
+    await expect(reader).toContainText(
+      'This long annotation explains the identification concern',
+    );
+    await expect(reader).not.toContainText('Original text');
+    await expect(reader).not.toContainText('Full annotation —');
+    await expect(page.locator('[data-navigated]')).toHaveAttribute('data-navigated', openingId!);
+    await expect(panel.locator('[data-review-item]')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    await expect(page.locator('[data-full-annotation-reader="true"]')).toHaveCount(0);
+    await expect.poll(() => panel.evaluate((element) => element.scrollTop)).toBe(scrollBefore);
+    await expect(panel.locator(`[data-review-item="${previousId}"]`)).toHaveAttribute('data-active', 'true');
+    await expect(more).toBeFocused();
+  });
+
+  test('cancels reader editing back to the same full annotation', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 760 });
+    await page.getByRole('button', { name: 'Seed long annotation' }).click();
+    await openAnnotationsWorkspace(page);
+
+    const row = page.locator('[data-review-item]').last();
+    await row.getByRole('button', { name: /Read full Page Note annotation/u }).click();
+    const reader = page.locator('[data-full-annotation-reader="true"]');
+    const edit = page.locator('[data-full-annotation-action="edit"]');
+    await edit.click();
+
+    const composer = page.getByRole('region', { name: 'Edit Page Note' });
+    await expect(composer).toBeVisible();
+    await composer.getByRole('button', { name: 'Cancel' }).click();
+
+    await expect(composer).toHaveCount(0);
+    await expect(reader).toContainText('This long annotation explains the identification concern');
+    await expect(edit).toBeFocused();
+  });
+
+  test('applies reader edits and refreshes the live full annotation', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 760 });
+    await page.getByRole('button', { name: 'Seed long annotation' }).click();
+    await openAnnotationsWorkspace(page);
+
+    await page.locator('[data-review-item]').last()
+      .getByRole('button', { name: /Read full Page Note annotation/u }).click();
+    const reader = page.locator('[data-full-annotation-reader="true"]');
+    const edit = page.locator('[data-full-annotation-action="edit"]');
+    await edit.click();
+    const composer = page.getByRole('region', { name: 'Edit Page Note' });
+    const refreshed = 'Applied reader text stays long enough to remain a full annotation. '.repeat(6);
+    await composer.getByRole('textbox', { name: 'Comment' }).fill(refreshed);
+    await composer.getByRole('button', { name: 'Apply', exact: true }).click();
+
+    await expect(composer).toHaveCount(0);
+    await expect(reader).toContainText(refreshed);
+    await expect(edit).toBeFocused();
+  });
+
+  test('returns to the row when an accepted reader edit no longer overflows', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 760 });
+    await page.getByRole('button', { name: 'Seed long annotation' }).click();
+    await openAnnotationsWorkspace(page);
+
+    const row = page.locator('[data-review-item]').filter({
+      has: page.getByRole('button', { name: /Read full Page Note annotation/u }),
+    });
+    const itemId = await row.getAttribute('data-review-item');
+    await row.getByRole('button', { name: /Read full Page Note annotation/u }).click();
+    const reader = page.locator('[data-full-annotation-reader="true"]');
+    await page.locator('[data-full-annotation-action="edit"]').click();
+    const composer = page.getByRole('region', { name: 'Edit Page Note' });
+    await composer.getByRole('textbox', { name: 'Comment' }).fill('Short note.');
+    await composer.getByRole('button', { name: 'Apply', exact: true }).click();
+
+    await expect(reader).toHaveCount(0);
+    const restoredRow = page.locator(`[data-review-item="${itemId}"]`);
+    await expect(restoredRow).toHaveAttribute('data-active', 'true');
+    await expect(restoredRow.locator('[data-read-full-annotation="true"]')).toBeHidden();
+    await expect(restoredRow.locator('.annotation-item__navigation')).toBeFocused();
+  });
+
+  test('keeps newer reader focus when Back restoration frames are superseded', async ({ page }) => {
+    await page.getByRole('button', { name: 'Seed long annotation' }).click();
+    await page.getByRole('button', { name: 'Seed long annotation' }).click();
+    await openAnnotationsWorkspace(page);
+
+    const rows = page.locator('[data-review-item]').filter({
+      has: page.getByRole('button', { name: /Read full Page Note annotation/u }),
+    });
+    const firstId = await rows.first().getAttribute('data-review-item');
+    const secondId = await rows.last().getAttribute('data-review-item');
+    expect(firstId).not.toBe(secondId);
+    await rows.first().getByRole('button', { name: /Read full Page Note annotation/u }).click();
+    await expect(page.locator('[data-full-annotation-reader="true"]')).toBeVisible();
+
+    await page.evaluate(() => {
+      const originalRequest = window.requestAnimationFrame.bind(window);
+      const originalCancel = window.cancelAnimationFrame.bind(window);
+      let nextId = 100_000;
+      const callbacks = new Map<number, FrameRequestCallback>();
+      Object.assign(window, {
+        __heldAnnotationFrames: { callbacks, originalRequest, originalCancel },
+        requestAnimationFrame: (callback: FrameRequestCallback) => {
+          const id = nextId;
+          nextId += 1;
+          callbacks.set(id, callback);
+          return id;
+        },
+        cancelAnimationFrame: (id: number) => callbacks.delete(id),
+      });
+      (document.querySelector('.full-annotation-reader__back') as HTMLButtonElement).click();
+    });
+    await expect(page.locator(`[data-review-item="${secondId}"]`)).toBeVisible();
+    await page.locator(`[data-review-item="${secondId}"]`)
+      .getByRole('button', { name: /Read full Page Note annotation/u })
+      .evaluate((button) => (button as HTMLButtonElement).click());
+
+    await page.evaluate(() => {
+      const held = (window as typeof window & {
+        __heldAnnotationFrames: {
+          callbacks: Map<number, FrameRequestCallback>;
+          originalRequest: typeof window.requestAnimationFrame;
+          originalCancel: typeof window.cancelAnimationFrame;
+        };
+      }).__heldAnnotationFrames;
+      window.requestAnimationFrame = held.originalRequest;
+      window.cancelAnimationFrame = held.originalCancel;
+      for (const callback of held.callbacks.values()) callback(performance.now());
+      delete (window as unknown as { __heldAnnotationFrames?: unknown }).__heldAnnotationFrames;
+    });
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
+
+    await expect(page.locator('[data-full-annotation-action="back"]')).toBeFocused();
+    await expect(page.locator('[data-navigated]')).toHaveAttribute('data-navigated', secondId!);
+    await expect(page.locator('[data-annotation-scroll-viewport]')).toHaveJSProperty('scrollTop', 0);
+  });
+
+  test('opens imported readers through existing PDF navigation', async ({ page }) => {
+    await openAnnotationsWorkspace(page);
+    const existing = page.getByRole('region', { name: 'External Annotations (read only)' });
+    await existing.getByRole('button', {
+      name: /Read full Highlight annotation on page 1/u,
+    }).click();
+
+    await expect(page.locator('[data-navigated]')).toHaveAttribute(
+      'data-navigated',
+      'source:source-highlight',
+    );
+    const reader = page.locator('[data-full-annotation-reader="true"]');
+    await expect(reader).toContainText('Source comment with enough authored detail');
+    await expect(page.locator('[data-full-annotation-action="edit"]')).toHaveCount(0);
+  });
+
+  test('rejects stale document and imported-generation restoration state', async ({ page }) => {
+    await page.getByRole('button', { name: 'Seed annotations' }).click();
+    await page.getByRole('button', { name: 'Seed long annotation' }).click();
+    await openAnnotationsWorkspace(page);
+    const panel = page.locator('[data-annotation-scroll-viewport]');
+    const ownedRow = page.locator('[data-review-item]').filter({
+      has: page.getByRole('button', { name: /Read full Page Note annotation/u }),
+    }).last();
+    await ownedRow.scrollIntoViewIfNeeded();
+    await panel.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    await ownedRow.getByRole('button', { name: /Read full Page Note annotation/u }).click();
+    await page.getByRole('button', { name: 'Replace source authority' }).evaluate((button) => {
+      (button as HTMLButtonElement).click();
+    });
+
+    await expect(page.locator('[data-full-annotation-reader="true"]')).toHaveCount(0);
+    await expect(page.locator('#workspace-panel-annotations')).toBeFocused();
+    await expect.poll(() => panel.evaluate((element) => element.scrollTop)).toBe(0);
+
+    const existing = page.getByRole('region', { name: 'External Annotations (read only)' });
+    await existing.getByRole('button', {
+      name: /Read full Highlight annotation on page 1/u,
+    }).click();
+    await page.getByRole('button', { name: 'Refresh existing annotations' }).evaluate((button) => {
+      (button as HTMLButtonElement).click();
+    });
+    await expect(page.locator('[data-full-annotation-reader="true"]')).toHaveCount(0);
+    await expect(page.locator('#workspace-panel-annotations')).toBeFocused();
+  });
+
+  test('clearing a reader Highlight comment restores its exact source-only row', async ({ page }) => {
+    const longComment = 'This highlight comment is intentionally long enough to overflow the compact annotation card. '.repeat(5);
+    await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+    const composer = page.getByRole('region', { name: 'Highlight Comment' });
+    await composer.getByRole('textbox', { name: 'Comment (optional)' }).fill(longComment);
+    await composer.getByRole('button', { name: 'Save', exact: true }).click();
+    await openAnnotationsWorkspace(page);
+
+    const row = page.locator('[data-review-item][data-annotation-kind="highlight"]');
+    const itemId = await row.getAttribute('data-review-item');
+    await row.getByRole('button', { name: /Read full Highlight annotation/u }).click();
+    const reader = page.locator('[data-full-annotation-reader="true"]');
+    await page.locator('[data-full-annotation-action="edit"]').click();
+    const editor = page.getByRole('region', { name: 'Edit Highlight' });
+    await editor.getByRole('textbox', { name: 'Comment (optional)' }).fill('');
+    await editor.getByRole('button', { name: 'Apply', exact: true }).click();
+
+    await expect(editor).toHaveCount(0);
+    await expect(reader).toHaveCount(0);
+    const restoredRow = page.locator(`[data-review-item="${itemId}"]`);
+    await expect(restoredRow).toHaveAttribute('data-active', 'true');
+    await expect(restoredRow.locator('[data-read-full-annotation="true"]')).toHaveCount(0);
+    await expect(restoredRow.locator('.annotation-item__navigation')).toBeFocused();
+  });
+
+  test('falls back to row navigation when a restored More control is hidden', async ({ page }) => {
+    await page.getByRole('button', { name: 'Seed long annotation' }).click();
+    await openAnnotationsWorkspace(page);
+    const row = page.locator('[data-review-item]').last();
+    await row.getByRole('button', { name: /Read full Page Note annotation/u }).click();
+    await page.addStyleTag({ content: '.annotation-item__more { display: none !important; }' });
+
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
+
+    await expect(row.locator('.annotation-item__navigation')).toBeFocused();
+  });
+
+  test('drops reader editing safely when its document or item authority becomes stale', async ({ page }) => {
+    await page.getByRole('button', { name: 'Seed annotations' }).click();
+    await page.getByRole('button', { name: 'Seed long annotation' }).click();
+    await openAnnotationsWorkspace(page);
+    const row = page.locator('[data-review-item]').filter({
+      has: page.getByRole('button', { name: /Read full Page Note annotation/u }),
+    }).last();
+    const itemId = await row.getAttribute('data-review-item');
+    await row.getByRole('button', { name: /Read full Page Note annotation/u }).click();
+    await page.locator('[data-full-annotation-action="edit"]').click();
+
+    await page.getByRole('button', { name: 'Replace source authority' }).evaluate((button) => {
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await expect(page.getByRole('region', { name: 'Edit Page Note' })).toHaveCount(0);
+    await expect(page.locator('[data-full-annotation-reader="true"]')).toHaveCount(0);
+    await expect(page.locator(`[data-review-item="${itemId}"]`)).toBeVisible();
+
+    await page.locator(`[data-review-item="${itemId}"]`)
+      .locator('.annotation-item__navigation').click();
+    await page.locator(`[data-review-item="${itemId}"]`)
+      .getByRole('button', { name: /Read full Page Note annotation/u }).click();
+    await page.locator('[data-full-annotation-action="edit"]').click();
+    await page.getByRole('button', { name: 'Remove active annotation' }).evaluate((button) => {
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await expect(page.getByRole('region', { name: 'Edit Page Note' })).toHaveCount(0);
+    await expect(page.locator('[data-full-annotation-reader="true"]')).toHaveCount(0);
+    await expect(page.locator(`[data-review-item="${itemId}"]`)).toHaveCount(0);
+    await expect(page.locator('[data-review-item]')).not.toHaveCount(0);
+    await expect(page.locator('[data-review-item][data-active="true"]')).toHaveCount(0);
+  });
+
   test('keeps a closed tray closed and gives Save Destination Escape precedence', async ({ page }) => {
     await page.getByRole('button', { name: 'Seed annotations' }).click();
     const workspace = await currentWorkspaceRail(page);

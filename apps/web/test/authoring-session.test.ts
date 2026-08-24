@@ -223,6 +223,16 @@ describe('frozen authoring-session contract', () => {
     expect(canStartAuthoringSession(null)).toBe(true);
   });
 
+  it('preserves a reader edit as a distinct restoration origin', () => {
+    const session = createAuthoringSession({
+      ...seed({ kind: 'edit', item: editedItem }),
+      origin: { kind: 'reader-edit', trigger: null },
+    });
+
+    expect(session.origin.kind).toBe('reader-edit');
+    expect(Object.isFrozen(session.origin)).toBe(true);
+  });
+
   it('fails closed when either source identity or document generation changes', () => {
     const session = createAuthoringSession(seed({
       kind: 'insert', anchor: caret, initialValue: '',

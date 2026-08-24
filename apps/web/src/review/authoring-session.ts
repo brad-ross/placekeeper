@@ -28,7 +28,8 @@ export type AuthoringOriginKind =
   | 'caret'
   | 'page'
   | 'keyboard'
-  | 'tray-edit';
+  | 'tray-edit'
+  | 'reader-edit';
 
 export interface AuthoringOrigin {
   readonly kind: AuthoringOriginKind;
