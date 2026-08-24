@@ -27,7 +27,7 @@ import {
   type ReferenceNavigationState,
 } from '../../../apps/web/src/review/reference-navigation-state.js';
 import { createReviewState, type ReviewCommand, type ReviewState } from '../../../packages/core/src/review-model.js';
-import { addPageNote } from '../../../packages/core/src/review-commands.js';
+import { addPageNote, removeReviewItem } from '../../../packages/core/src/review-commands.js';
 import { reduceReview } from '../../../packages/core/src/review-reducer.js';
 import { resolveVisualScenario, VisualDocument } from './visual-scenarios.js';
 
@@ -354,6 +354,7 @@ function Harness() {
   const [holdNextCommand, setHoldNextCommand] = useState(false);
   const commandReleaseRef = useRef<(() => void) | null>(null);
   const [navigated, setNavigated] = useState('none');
+  const [existingAnnotationGeneration, setExistingAnnotationGeneration] = useState(1);
   const [pageMenuOpen, setPageMenuOpen] = useState(visualScenario?.pageMenuOpen ?? false);
   const [keyboardPageNoteActive, setKeyboardPageNoteActive] = useState(false);
   const [placedPageNote, setPlacedPageNote] = useState<{ token: number; pageIndex: number; position: { x: number; y: number; width: number; height: number }; nearbyText: string } | null>(null);
@@ -504,13 +505,13 @@ function Harness() {
       onActiveItemChange={setActiveItemId}
       existingAnnotations={visualScenario?.existingAnnotations ?? {
         status: 'ready',
-        generation: 1,
+        generation: existingAnnotationGeneration,
         items: inventoryExistingAnnotations([{
           id: 'source-highlight',
           subtype: 'Highlight',
           pageIndex: 0,
           rect: { x: 72, y: 92, width: 120, height: 14 },
-          contents: 'Source comment',
+          contents: 'Source comment with enough authored detail to overflow the compact annotation row and prove that opening the imported full annotation reader still navigates to the highlighted PDF location before showing its complete read-only contents. '.repeat(5),
         }]),
       }}
       onNavigateExisting={(item) => setNavigated(`source:${item.id}`)}
@@ -539,6 +540,28 @@ function Harness() {
           }
           return seeded;
         })}>Seed annotations</button>
+        <button type="button" onClick={() => setState((current) => reduceReview(current, addPageNote(
+          current,
+          2,
+          { x: 112, y: 228, width: 18, height: 18 },
+          'This long annotation explains the identification concern in enough detail to exceed the compact annotation card. It keeps going so the full annotation reader can present every authored sentence without repeating selected or nearby PDF text, and it gives the workflow harness a stable overflow case for focus and scroll restoration.',
+        )))}>Seed long annotation</button>
+        <button type="button" onClick={() => setState((current) => ({
+          ...current,
+          source: { ...current.source, digest: 'b'.repeat(64) },
+        }))}>Replace source authority</button>
+        <button
+          type="button"
+          onClick={() => setExistingAnnotationGeneration((generation) => generation + 1)}
+        >Refresh existing annotations</button>
+        <button type="button" onClick={() => setState((current) => {
+          const targetItemId = activeItemId
+            ?? (navigated !== 'none' && !navigated.startsWith('source:') ? navigated : undefined);
+          if (targetItemId === undefined || !current.items.some(({ id }) => id === targetItemId)) {
+            return current;
+          }
+          return reduceReview(current, removeReviewItem(current, targetItemId));
+        })}>Remove active annotation</button>
         <button type="button" onClick={() => setPageMenuOpen(true)}>Open page actions</button>
         <button type="button" onClick={() => setOutlineDiscovery({
           status: 'loaded-tree',
