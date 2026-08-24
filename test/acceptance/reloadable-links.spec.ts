@@ -240,6 +240,8 @@ test("copies canonical PDF destinations and reopens them without source UI state
   });
   expect(await outlineCopy.getAttribute("title")).toBeNull();
   await expect(outlineCopy.locator(".lucide-link")).toBeVisible();
+  await outlineCopy.focus();
+  await expect(outlineCopy).toBeFocused();
   await outlineCopy.click();
   const outlineLink = await copiedPlacekeeperLink(page);
   expect(outlineLink).toMatch(/#v=2&page=2&mode=xyz&params=72,640,0$/u);
@@ -252,6 +254,8 @@ test("copies canonical PDF destinations and reopens them without source UI state
   const pageOnlyCopy = outline.getByRole("button", {
     name: "Copy page link for Page-only appendix, Page 4",
   });
+  await pageOnlyCopy.focus();
+  await expect(pageOnlyCopy).toBeFocused();
   await pageOnlyCopy.click();
   expect(await copiedPlacekeeperLink(page)).toMatch(/#v=1&page=4$/u);
 
@@ -264,6 +268,8 @@ test("copies canonical PDF destinations and reopens them without source UI state
   const searchCopy = result.getByRole("button", {
     name: /Copy page link for Search result on page/u,
   });
+  await searchCopy.focus();
+  await expect(searchCopy).toBeFocused();
   await searchCopy.click();
   expect(await copiedPlacekeeperLink(page)).toMatch(/#v=1&page=3$/u);
 

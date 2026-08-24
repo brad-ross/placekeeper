@@ -263,6 +263,20 @@ describe('PDF search controller', () => {
     expect(state.message).toContain('could not be matched confidently');
   });
 
+  it('caps no-match alternatives only after ranking the detected catalog', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader([', ) ( = - + 𝟙 𝟘 λ β α']),
+    });
+
+    const state = await controller.search('\\doesnotexist');
+
+    expect(state.groups).toEqual([]);
+    expect(state.alternatives.map(({ query }) => query)).toEqual([
+      'α', 'β', 'λ', '𝟘', '𝟙', '+', '-', '=',
+    ]);
+  });
+
   it('offers detected constituent symbols for an unmatched formula', async () => {
     const controller = createPdfSearchController({
       documentGeneration: 1,
@@ -354,7 +368,7 @@ describe('PDF search controller', () => {
   it('returns every detected glyph in a shared command without inventing other aliases', async () => {
     const controller = createPdfSearchController({
       documentGeneration: 1,
-      reader: reader(['| ⏐ φ ϕ']),
+      reader: reader(['| ⏐ ϕ φ']),
     });
 
     const verticalBars = await controller.search('\\vert');
@@ -363,7 +377,7 @@ describe('PDF search controller', () => {
 
     const phiVariants = await controller.search('\\phi');
     expect(phiVariants.groups[0]?.results.map(({ matchedForm }) => matchedForm))
-      .toEqual(['φ', 'ϕ']);
+      .toEqual(['ϕ', 'φ']);
   });
 
   it('searches every detected Greek epsilon family member without matching IPA open e', async () => {
@@ -508,6 +522,47 @@ describe('PDF search controller', () => {
         naturalTerms: expect.arrayContaining(['greek small letter lamda']),
       },
     });
+  });
+
+  it('publishes each progressively detected catalog in ranked order', async () => {
+    const releases: Array<(() => void) | undefined> = [];
+    const gates = Array.from({ length: 3 }, (_, pageIndex) => (
+      new Promise<void>((resolve) => { releases[pageIndex] = resolve; })
+    ));
+    const texts = [', value', '+ value', 'α value'];
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      maxConcurrentPageReads: 3,
+      reader: {
+        pageCount: texts.length,
+        async read(pageIndex) {
+          await gates[pageIndex];
+          const text = texts[pageIndex] ?? '';
+          return {
+            text,
+            glyphs: glyphs(text),
+            geometry: PAGE_GEOMETRY,
+            textRects: [{
+              content: text,
+              rect: { origin: { x: 0, y: 10 }, size: { width: text.length * 5, height: 8 } },
+            }],
+          };
+        },
+      },
+    });
+    const completed = controller.search('missing');
+
+    releases[0]?.();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(controller.getState().symbolCatalog.map(({ query }) => query)).toEqual([',']);
+
+    releases[1]?.();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(controller.getState().symbolCatalog.map(({ query }) => query)).toEqual(['+', ',']);
+
+    releases[2]?.();
+    await completed;
+    expect(controller.getState().symbolCatalog.map(({ query }) => query)).toEqual(['α', '+', ',']);
   });
 
   it('renders sourced command labels and exposes every detected command without inventing one', async () => {

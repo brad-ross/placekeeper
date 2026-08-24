@@ -151,15 +151,15 @@ describe("macOS distribution manifests", () => {
         normalizedName: 4_724,
       },
       artifactBytes: {
-        runtime: 400_389,
-        report: 7_181,
+        runtime: 406_546,
+        report: 7_361,
       },
       artifactSha256: {
-        runtime: "e7d653177705de1acbba73848edc5071779bbdf76be82d2d92bee62ed4fb2fa0",
-        report: "98a4eca4e8a546f5302f9a7989c156528f7f5709464a35d61cee5636f2254a36",
+        runtime: "423428687dab0b6049a86d85f879df79f2fee251322d53ad314ae1effd616e3b",
+        report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
         thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
       },
-      productionWebJavaScriptBytes: 2_372_058,
+      productionWebJavaScriptBytes: 2_387_440,
     });
 
     const root = await mkdtemp(resolve(tmpdir(), "placekeeper-catalog-baseline-"));
@@ -680,8 +680,16 @@ describe("macOS distribution manifests", () => {
     expect(() => validateDoctorEvidence({ ok: true, offline: true, writer: "embedpdf-node-pdfium", nodeVersion: "24.14.0", pdfiumSha256: "a".repeat(64), pages: 0, structurallyValid: true }, "24.14.0", "a".repeat(64))).toThrow(/evidence/u);
   });
 
-  it("packages task-correlated Codex hooks through the installed executable", async () => {
+  it("rebuilds the production web bundle before distribution validation", async () => {
+    const packageManifest = JSON.parse(await readFile(resolve("package.json"), "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+    expect(packageManifest.scripts?.["validate:distribution"])
+      .toBe("pnpm build:web && tsx packaging/macos/validate-manifest.ts");
     await expect(validateDistributionManifests(resolve("."))).resolves.toBeUndefined();
+  });
+
+  it("packages task-correlated Codex hooks through the installed executable", async () => {
     const plugin = JSON.parse(await readFile(resolve("integrations/codex-plugin/.codex-plugin/plugin.json"), "utf8")) as {
       description?: string;
       skills?: string;

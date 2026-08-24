@@ -6,10 +6,11 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { SourceManifest } from './compile.js';
+import type { CatalogRecord, SourceManifest } from './compile.js';
 import {
   buildCatalogArtifacts,
   checkCatalogArtifacts,
+  classifySuggestionRank,
   generateCatalogAudit,
   generateCatalogArtifacts,
   sha256,
@@ -34,10 +35,43 @@ afterEach(async () => {
 });
 
 describe('PDF symbol catalog artifact generation', () => {
+  it('classifies suggestion rank by standards-derived precedence', () => {
+    const classify = (
+      category: string,
+      type: string | null = null,
+      mathClass: string | null = null,
+    ) => classifySuggestionRank({ category, provenance: { w3c: { type, mathClass } } });
+
+    expect(classify('Cf', 'binaryop', 'B')).toBe(4);
+    expect(classify('Nd', 'alphabetic', 'A')).toBe(1);
+    expect(classifySuggestionRank({ category: 'Ll', provenance: { w3c: null } })).toBe(0);
+    expect(classify('Po', 'alphabetic')).toBe(0);
+    expect(classify('Po', null, 'A')).toBe(0);
+    for (const type of ['opening', 'closing', 'diacritic']) {
+      expect(classify('Po', type)).toBe(3);
+    }
+    for (const mathClass of ['O', 'C', 'F', 'D', 'G']) {
+      expect(classify('Po', null, mathClass)).toBe(3);
+    }
+    for (const category of ['Mn', 'Mc', 'Me', 'Sk', 'Ps', 'Pe', 'Pi', 'Pf']) {
+      expect(classify(category)).toBe(3);
+    }
+    expect(classify('Po', 'punctuation', 'B')).toBe(4);
+    expect(classify('Po', null, 'P')).toBe(4);
+    for (const type of ['relation', 'binaryop', 'large']) {
+      expect(classify('Po', type)).toBe(2);
+    }
+    for (const mathClass of ['R', 'B', 'L', 'N', 'U', 'V', 'X']) {
+      expect(classify('Po', null, mathClass)).toBe(2);
+    }
+    for (const category of ['Sm', 'Sc', 'So']) expect(classify(category)).toBe(2);
+    expect(classify('Po')).toBe(4);
+  });
+
   it('compiles the complete pinned corpus with no unresolved collisions', async () => {
     const artifacts = await buildCatalogArtifacts({ repositoryRoot });
     const audit = JSON.parse(artifacts.audit) as {
-      records: { codePoint: number; commands: { token: string }[] }[];
+      records: CatalogRecord[];
       equivalenceFamilies: {
         rootCodePoint: number;
         queryCodePoints: number[];
@@ -45,6 +79,7 @@ describe('PDF symbol catalog artifact generation', () => {
       }[];
       report: { recordCount: number; sourceHashes: Record<string, string> };
       runtimeProjection: {
+        suggestionRankCounts: Record<string, number>;
         suppressedNaturalNames: {
           alias: string;
           codePoints: string[];
@@ -58,6 +93,7 @@ describe('PDF symbol catalog artifact generation', () => {
         suppressedNaturalNames: { count: number; sample: unknown[] };
       };
       indexCardinalities: Record<string, number>;
+      counts: { records: number; suggestionRank: Record<string, number> };
     };
 
     expect(audit.records.length).toBeGreaterThan(1_000);
@@ -127,6 +163,42 @@ describe('PDF symbol catalog artifact generation', () => {
     expect(audit.records.some(({ codePoint }) => codePoint === 0x00e9)).toBe(false);
     expect(audit.records.some(({ codePoint }) => codePoint === 0x002f)).toBe(true);
     expect(artifacts.runtime).toContain('semanticFamilyCodePoints: readonly number[]');
+    expect(artifacts.runtime).toContain('suggestionRank: 0 | 1 | 2 | 3 | 4');
+    expect(Object.values(audit.runtimeProjection.suggestionRankCounts)
+      .reduce((sum, count) => sum + count, 0)).toBe(audit.records.length);
+    expect(report.counts.suggestionRank).toEqual(audit.runtimeProjection.suggestionRankCounts);
+
+    const expectedRanks = new Map([
+      [0x1d7d8, 1], // 𝟘: Unicode number wins over W3C alphabetic metadata.
+      [0x2118, 0], // ℘: W3C alphabetic metadata makes it identifier-like.
+      [0x002f, 2], // /: W3C binary operator wins over Unicode punctuation.
+      [0x2061, 4], // ⁡: Unicode format control wins over W3C binary operator.
+      [0x2202, 2], // ∂: operator/relation tier.
+      [0x2207, 2], // ∇: operator/relation tier.
+      [0x0028, 3], // (: delimiter tier.
+      [0x02dc, 3], // ˜: diacritic tier.
+      [0x002c, 4], // ,: punctuation tier.
+    ]);
+    const recordsByCodePoint = new Map(audit.records.map((record) => [record.codePoint, record]));
+    for (const [codePoint, rank] of expectedRanks) {
+      const record = recordsByCodePoint.get(codePoint);
+      expect(record, `missing ${codePoint.toString(16)}`).toBeDefined();
+      expect(classifySuggestionRank(record!)).toBe(rank);
+    }
+
+    const runtimeTuples = JSON.parse(
+      artifacts.runtime.match(/ = (\[.*\]) as const satisfies/su)?.[1] ?? '[]',
+    ) as unknown[][];
+    expect(runtimeTuples).toHaveLength(audit.records.length);
+    expect(runtimeTuples.every((tuple) => tuple.length === 9)).toBe(true);
+    expect(runtimeTuples.map(([codePoint]) => codePoint)).toEqual(
+      [...audit.records.map(({ codePoint }) => codePoint)].sort((left, right) => left - right),
+    );
+    for (const tuple of runtimeTuples) {
+      const [codePoint, , , , , , , , rank] = tuple as [number, ...unknown[]];
+      const record = recordsByCodePoint.get(codePoint);
+      expect(classifySuggestionRank(record!)).toBe(rank);
+    }
   });
 
   it('keeps the committed report concise while retaining exhaustive audit evidence', async () => {
@@ -138,7 +210,10 @@ describe('PDF symbol catalog artifact generation', () => {
         rejectedTex: unknown[];
         auditedAliasGroups: unknown[];
       };
-      runtimeProjection: { suppressedNaturalNames: unknown[] };
+      runtimeProjection: {
+        suppressedNaturalNames: unknown[];
+        suggestionRankCounts: Record<string, number>;
+      };
     };
     const report = JSON.parse(artifacts.report) as {
       exclusions: {
@@ -150,9 +225,15 @@ describe('PDF symbol catalog artifact generation', () => {
       aliasCollisions: {
         suppressedNaturalNames: { count: number; sha256: string; sample: unknown[] };
       };
+      counts: { records: number; suggestionRank: Record<string, number> };
     };
 
     expect(Buffer.byteLength(artifacts.report)).toBeLessThan(25_000);
+    expect(report.counts.suggestionRank).toEqual(
+      audit.runtimeProjection.suggestionRankCounts,
+    );
+    expect(Object.values(report.counts.suggestionRank)
+      .reduce((sum, count) => sum + count, 0)).toBe(report.counts.records);
     const unassignedW3c = audit.report.excludedUnassignedW3c.map((value) => (
       `U+${String((value as number).toString(16)).toUpperCase().padStart(4, '0')}`
     ));

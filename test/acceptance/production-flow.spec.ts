@@ -485,6 +485,31 @@ test("searches extracted PDF text with variants, history, references, and retain
   const symbolSuggestions = page.getByRole("listbox", { name: "Suggested symbols" });
   await expect(symbolSuggestions).toBeVisible();
   await expect(symbolSuggestions.getByRole("option", { name: /degree/u })).toBeVisible();
+  const suggestedGlyphs = async () => symbolSuggestions.getByRole("option").evaluateAll(
+    (options) => options.map((option) => option.getAttribute("data-search-symbol")),
+  );
+  const expectedGreekSuggestions = [
+    "Π", "α", "δ", "θ", "κ", "λ", "ν", "ξ", "ρ", "σ", "τ", "ϕ", "ϵ",
+  ];
+  await expect.poll(suggestedGlyphs).toEqual(expect.arrayContaining([
+    ...expectedGreekSuggestions,
+    "+",
+    "|",
+    ".",
+  ]));
+  const fullRankedSuggestions = await suggestedGlyphs();
+  const representativePositions = ["Π", "𝟘", "+", "|", "."]
+    .map((glyph) => fullRankedSuggestions.indexOf(glyph));
+  expect(representativePositions.every((position) => position >= 0)).toBe(true);
+  expect(representativePositions).toEqual([...representativePositions].sort((left, right) => left - right));
+  expect(fullRankedSuggestions.filter((glyph) => expectedGreekSuggestions.includes(glyph ?? "")))
+    .toEqual(expectedGreekSuggestions);
+  await expect(symbolSuggestions.getByRole("heading")).toHaveCount(0);
+
+  await query.fill("greek");
+  await expect.poll(suggestedGlyphs).toEqual([...expectedGreekSuggestions, "·"]);
+  await query.fill("");
+  await expect.poll(suggestedGlyphs).toEqual(fullRankedSuggestions);
   for (const [glyph, alias] of reportedMathSymbolInventory) {
     await query.fill(alias);
     const results = searchPanel.locator("[data-search-result]");
@@ -518,6 +543,12 @@ test("searches extracted PDF text with variants, history, references, and retain
   await expect(searchPanel).toContainText("could not be matched confidently");
   await expect(searchPanel.locator(".pdf-search__alternatives")
     .getByRole("button", { name: "° degree sign (\\textdegree)", exact: true })).toBeVisible();
+  await query.fill("\\doesnotexist");
+  const rankedAlternatives = searchPanel.locator(".pdf-search__alternatives").getByRole("button");
+  await expect(rankedAlternatives).toHaveCount(8);
+  expect(await rankedAlternatives.evaluateAll((buttons) => buttons.map((button) => (
+    Array.from(button.textContent?.trim() ?? "")[0]
+  )))).toEqual(expectedGreekSuggestions.slice(0, 8));
   await query.fill("stable");
   await expect(exact.locator("[data-search-result]")).toHaveCount(2);
 

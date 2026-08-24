@@ -20,6 +20,30 @@ describe('PDF symbol catalog', () => {
       .map(({ glyph }) => glyph)).toEqual(['β', 'λ', '∑']);
   });
 
+  it('ranks detected suggestions by search likelihood with code-point tie-breaking', () => {
+    expect(detectedSymbolSuggestions(detected(', ( + 𝟘 α'))
+      .map(({ glyph }) => glyph)).toEqual(['α', '𝟘', '+', '(', ',']);
+    expect(detectedSymbolSuggestions(detected('λ β'))
+      .map(({ glyph }) => glyph)).toEqual(['β', 'λ']);
+  });
+
+  it('re-ranks each progressive inventory independently of discovery order', () => {
+    const ids = new Set<PdfSymbolRecordId>();
+
+    addDetectedSymbolRecordIds(',', ids);
+    expect(detectedSymbolSuggestions(ids).map(({ glyph }) => glyph)).toEqual([',']);
+    addDetectedSymbolRecordIds('+', ids);
+    expect(detectedSymbolSuggestions(ids).map(({ glyph }) => glyph)).toEqual(['+', ',']);
+    addDetectedSymbolRecordIds('𝟘', ids);
+    expect(detectedSymbolSuggestions(ids).map(({ glyph }) => glyph)).toEqual(['𝟘', '+', ',']);
+    addDetectedSymbolRecordIds('λ', ids);
+    expect(detectedSymbolSuggestions(ids).map(({ glyph }) => glyph)).toEqual(['λ', '𝟘', '+', ',']);
+    addDetectedSymbolRecordIds('β', ids);
+    expect(detectedSymbolSuggestions(ids).map(({ glyph }) => glyph)).toEqual([
+      'β', 'λ', '𝟘', '+', ',',
+    ]);
+  });
+
   it('resolves authoritative names and commands only through detected record IDs', () => {
     const ids = detected('λ β ∑');
 

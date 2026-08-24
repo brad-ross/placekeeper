@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "unicodeVersion": "17.0.0",
   "w3cCommit": "ed8b732d7d38112f258e74aadecbb1e409eafdd9",
-  "catalogSha256": "bbbc7323f3317c8995b0918e1e7e4503379f94b79c58ffdc48a407c6c755cde8",
+  "catalogSha256": "782646c8b5d520998fb4bcae210b0635cdcaa44124b1ba28f639b92a32b6eb41",
   "sourceHashes": {
     "derivedName": "019758bbe6c756c40fca6d505187ea660c5e195533e2ff2c841963a212c9d369",
     "derivedGeneralCategory": "d62e5bab70ca74f099343f71224fa051cb1fdd61a1ab45c0488c44cfc0b6102e",
@@ -33,6 +33,13 @@
       "Sk": 17,
       "Sm": 960,
       "So": 486
+    },
+    "suggestionRank": {
+      "identifierLike": 1298,
+      "numberLike": 88,
+      "operatorRelation": 1437,
+      "delimiterDiacritic": 206,
+      "punctuationFormat": 31
     },
     "admission": {
       "unicode-math": 2322,
@@ -279,8 +286,8 @@
     "normalizedName": 4724
   },
   "artifactBytes": {
-    "audit": 5037057,
-    "runtime": 400389,
-    "report": 7181
+    "audit": 5037243,
+    "runtime": 406546,
+    "report": 7361
   }
 }

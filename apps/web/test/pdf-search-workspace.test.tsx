@@ -147,6 +147,24 @@ describe('PDF search workspace', () => {
     expect(filterPdfSearchSymbolSuggestions(symbols, 'not detected')).toEqual([]);
   });
 
+  it('preserves ranked order while filtering without capping the full dropdown', () => {
+    const symbols = Array.from({ length: 12 }, (_, index) => ({
+      label: `symbol ${index} shared term`,
+      query: String.fromCodePoint(0x3b1 + index),
+      symbolSearch: {
+        glyph: String.fromCodePoint(0x3b1 + index),
+        commands: [`\\symbol${index}`],
+        entities: [`symbol${index}`],
+        naturalTerms: [index % 2 === 0 ? `shared term ${index}` : `other term ${index}`],
+      },
+    }));
+
+    expect(filterPdfSearchSymbolSuggestions(symbols, '')).toEqual(symbols);
+    expect(filterPdfSearchSymbolSuggestions(symbols, '')).toHaveLength(12);
+    expect(filterPdfSearchSymbolSuggestions(symbols, 'shared').map(({ query }) => query))
+      .toEqual(symbols.filter((_, index) => index % 2 === 0).map(({ query }) => query));
+  });
+
   it('shows partial coverage only once and omits complete-page coverage', () => {
     const render = (searchedPages: number, totalPages: number) => renderToStaticMarkup(
       <PdfSearchWorkspace

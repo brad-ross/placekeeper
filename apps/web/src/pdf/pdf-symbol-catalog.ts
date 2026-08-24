@@ -1,4 +1,7 @@
-import { GENERATED_PDF_SYMBOL_CATALOG } from './pdf-symbol-catalog.generated.js';
+import {
+  GENERATED_PDF_SYMBOL_CATALOG,
+  type GeneratedPdfSymbolCatalogTuple,
+} from './pdf-symbol-catalog.generated.js';
 import { isSingleUnicodeScalarQuery } from './pdf-search-model.js';
 
 export type PdfSymbolRecordId = number;
@@ -16,6 +19,7 @@ export interface PdfSymbolSuggestion {
 
 interface PdfSymbolRecord extends PdfSymbolSuggestion {
   readonly semanticFamilyCodePoints: readonly number[];
+  readonly suggestionRank: GeneratedPdfSymbolCatalogTuple[8];
 }
 
 const RECORDS: readonly PdfSymbolRecord[] = GENERATED_PDF_SYMBOL_CATALOG.map(([
@@ -27,6 +31,7 @@ const RECORDS: readonly PdfSymbolRecord[] = GENERATED_PDF_SYMBOL_CATALOG.map(([
   entities,
   names,
   semanticFamilyCodePoints,
+  suggestionRank,
 ], recordId) => ({
   recordId,
   codePoint,
@@ -37,6 +42,7 @@ const RECORDS: readonly PdfSymbolRecord[] = GENERATED_PDF_SYMBOL_CATALOG.map(([
   entities,
   names,
   semanticFamilyCodePoints,
+  suggestionRank,
 }));
 
 const GLYPH_INDEX = new Map<string, PdfSymbolRecordId>();
@@ -77,11 +83,14 @@ function sortedDetectedRecords(
   detectedRecordIds: ReadonlySet<PdfSymbolRecordId>,
 ): PdfSymbolSuggestion[] {
   return [...detectedRecordIds]
-    .sort((left, right) => left - right)
     .flatMap((recordId) => {
       const record = RECORDS[recordId];
       return record ? [record] : [];
-    });
+    })
+    .sort((left, right) => (
+      left.suggestionRank - right.suggestionRank
+      || left.codePoint - right.codePoint
+    ));
 }
 
 function aliasCandidateIds(query: string): readonly PdfSymbolRecordId[] {

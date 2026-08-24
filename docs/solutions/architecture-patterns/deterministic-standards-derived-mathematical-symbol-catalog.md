@@ -1,6 +1,7 @@
 ---
 title: Deterministic standards-derived mathematical symbol catalogs
 date: 2026-08-23
+last_updated: 2026-08-23
 category: architecture-patterns
 module: PDF mathematical symbol search catalog
 problem_type: architecture_pattern
@@ -8,13 +9,15 @@ component: tooling
 severity: high
 applies_when:
   - "A hand-maintained domain dictionary cannot establish coverage, provenance, or update completeness"
-  - "Standardized code-point relationships should broaden named lookup without changing exact literal matching"
-  - "Ordinary builds and offline installs must consume frozen generated data without fetching or rewriting it"
-  - "A full provenance audit is valuable for maintainers but too large to keep in version control or ship at runtime"
-  - "Generated runtime data and update reports need deterministic drift checks and distribution size gates"
+  - "Authoritative record metadata should drive both searchable repertoire and deterministic presentation priority"
+  - "Reviewer-visible ordering must improve without changing record identity, exact matching, or semantic expansion"
+  - "A full provenance audit is useful to maintainers but too large to commit or ship at runtime"
+  - "Generated runtime data and concise reports need deterministic drift checks and distribution size gates"
 related_components:
   - "Mathematical Symbol Catalog"
   - "PDF Search"
+  - "Controlled Symbol Family"
+  - "symbol suggestion ranking"
   - "UnicodeData compiler"
   - "catalog maintainer update workflow"
   - "distribution validation"
@@ -22,10 +25,10 @@ related_components:
 tags:
   - "unicode-catalog"
   - "mathematical-symbols"
+  - "standards-derived-ranking"
   - "deterministic-generation"
-  - "semantic-families"
-  - "exact-literal-search"
-  - "pinned-snapshots"
+  - "presentation-projection"
+  - "stable-record-identity"
   - "derived-audit"
   - "distribution-boundary"
 ---
@@ -34,87 +37,93 @@ tags:
 
 ## Context
 
-Placekeeper needed a systematic way to search mathematical glyphs extracted from PDFs without maintaining an ever-growing handwritten symbol dictionary. The implementation opened in [PR #55](https://github.com/brad-ross/placekeeper/pull/55) is pending rather than present on current `main`.
+Placekeeper's mathematical-symbol search cannot be made comprehensive or maintainable by extending a handwritten dictionary one glyph at a time. The durable boundary is to treat Unicode and W3C data as authoritative inputs, compile a product-specific repertoire and presentation projection, and reserve handwritten overrides for reviewed semantic exceptions. The catalog implementation landed in [PR #55](https://github.com/brad-ross/placekeeper/pull/55); its standards-derived suggestion-ranking extension is implemented on the [PR #58](https://github.com/brad-ross/placekeeper/pull/58) branch and is not present in the fetched default branch at the time of this update.
 
-The catalog compiler uses pinned, checked-in Unicode 17 and W3C snapshots. The manifest records the exact Unicode version, W3C revision, local compressed files, source hashes, compressed hashes, URLs, and licenses (`scripts/pdf-symbol-catalog/source-manifest.json:1-45`). Generation reads those local files and rejects a compressed snapshot whose checksum differs from the manifest before compiling it (`scripts/pdf-symbol-catalog/generate.ts:265-288`). This makes ordinary generation deterministic and offline; network access is isolated to the explicit maintainer update command, which downloads each declared source and verifies its uncompressed hash (`scripts/pdf-symbol-catalog/update.ts:73-99`).
+The source manifest pins Unicode 17.0.0 and an exact W3C `xml-entities` revision, with local compressed snapshot paths plus compressed and uncompressed SHA-256 values (`scripts/pdf-symbol-catalog/source-manifest.json:1-45`). Ordinary artifact generation reads those local snapshots, verifies each compressed checksum, and then decompresses them, so a normal build does not depend on the network or on whatever upstream publishes that day (`scripts/pdf-symbol-catalog/generate.ts:331-354`).
 
-The important artifact boundary is asymmetric. The generator names three outputs—an exhaustive audit, a compact web runtime catalog, and a concise update report—but declares only the runtime catalog and report as committed artifacts (`scripts/pdf-symbol-catalog/generate.ts:17-24`). The exhaustive audit is ignored by Git (`.gitignore:12`). The checked-in report summarizes exhaustive collections by count, digest, and a five-item sample instead of embedding them wholesale (`scripts/pdf-symbol-catalog/generate.ts:56-79`, `scripts/pdf-symbol-catalog/generate.ts:335-389`). Its reviewed baseline is 3,060 records, a 400,389-byte runtime catalog, and a 7,181-byte report (`packaging/macos/validate-manifest.ts:13-30`).
+The compiler admits assigned, named scalars from systematic mathematical evidence: Unicode's Math property and W3C math class, application markers, direct TeX commands, or corroborating math/mixed mode (`scripts/pdf-symbol-catalog/compile.ts:744-775`, `scripts/pdf-symbol-catalog/compile.ts:1026-1070`). The current generated report records 3,060 admitted symbols and the provenance counts behind that repertoire (`scripts/pdf-symbol-catalog/generated/update-report.json:13-55`).
 
-The design evolved through three instructive failures (session history). Broad alias import attached `\varepsilon` to IPA U+025B rather than Greek U+03F5. Treating exhaustive evidence as the committed report produced roughly 343 KB and 15,000 lines of review noise. Finally, relying on an ignored prior audit as the update baseline made a fresh checkout classify every record as newly added. The final architecture addresses these as semantic-policy, artifact-retention, and baseline-reconstruction problems rather than adding more dictionary entries.
+Several failed approaches define the architecture's boundaries (session history). A hand-maintained ordinary-symbol dictionary offered no credible exhaustiveness story. Treating upstream aliases as unquestioned truth exposed collisions and the `\varepsilon` mapping to IPA open e. Committing the exhaustive audit added roughly 5 MB of deterministic review noise. Validating a previously built web bundle could also give stale packaging evidence after catalog changes. The final design treats these as separate coverage, exception-policy, artifact-retention, and validation concerns rather than adding more handwritten entries.
 
 ## Guidance
 
-Treat standards snapshots, compilation logic, the compact runtime projection, the concise report, and the exhaustive audit as different layers with different retention needs.
+### Keep standards snapshots and the compiler as the ordinary-symbol source of truth
 
-### Pin authoritative inputs and compile offline
+Pin source versions, URLs, licenses, and hashes in the repository manifest, and make the compiler validate source shape and provenance before emitting a catalog (`scripts/pdf-symbol-catalog/source-manifest.json:1-58`, `scripts/pdf-symbol-catalog/compile.ts:1026-1035`). Do not add an ordinary per-code-point symbol dictionary beside this pipeline. When a new standards version is adopted, update the pinned inputs and regenerate the projections; when product semantics intentionally differ from upstream, use the narrow audited override mechanism.
 
-Keep exact source versions and hashes in the manifest, and require the local compressed bytes to match before parsing (`scripts/pdf-symbol-catalog/source-manifest.json:1-45`, `scripts/pdf-symbol-catalog/generate.ts:265-288`). Fetch only in the maintainer-only update workflow, verify downloads before publication, and stage all outputs before changing repository files (`scripts/pdf-symbol-catalog/update.ts:73-118`).
+The exception file is not a second catalog. Its entries must identify a command, entity, or natural-language alias; literal aliases are forbidden, and every entry must include rationale and upstream documentation (`scripts/pdf-symbol-catalog/compile.ts:845-890`). Overrides also fail compilation if they name unadmitted scalars or if the upstream mapping no longer matches the recorded expectation (`scripts/pdf-symbol-catalog/compile.ts:893-960`, `scripts/pdf-symbol-catalog/compile.ts:1111-1133`). This makes exceptional policy visible and self-invalidating when standards data changes. For example, the `\varepsilon` exception redirects W3C's IPA open-e mapping to Greek lunate epsilon and explicitly leaves the IPA scalar exact-only (`scripts/pdf-symbol-catalog/overrides.json:37`).
 
-### Derive controlled semantic families
+### Derive equivalence narrowly; preserve literal identity
 
-Do not substitute broad Unicode normalization or visual-confusable equivalence for a product relation policy. The compiler reads only singleton Unicode decompositions; multi-scalar decompositions do not become edges (`scripts/pdf-symbol-catalog/compile.ts:440-479`). It accepts canonical edges, a reviewed compatibility subset, and mathematical-alphanumeric `font` mappings whose targets are approved Greek scalars; every other decomposition is ignored (`scripts/pdf-symbol-catalog/compile.ts:482-510`). It then builds connected families from those accepted edges (`scripts/pdf-symbol-catalog/compile.ts:526-572`).
+Only singleton Unicode decompositions are candidates for equivalence; multi-scalar decompositions are not compiled into edges (`scripts/pdf-symbol-catalog/compile.ts:440-479`). The accepted graph is deliberately limited to canonical mappings, a checked compatibility set, and mathematical-alphanumeric font mappings whose targets are approved Greek scalars (`scripts/pdf-symbol-catalog/compile.ts:482-510`). Font-source scalars are family members but are not made generic query members solely by their style mapping, so a base command can find a detected styled form without making a style-specific command fan out indiscriminately (`scripts/pdf-symbol-catalog/compile.ts:526-571`).
 
-This is a deliberately narrow graph. It does not claim that visually similar characters or algebraically equivalent expressions are interchangeable.
+At runtime, one-scalar input bypasses the alias indexes, while command, entity, and natural-name lookup remains namespace-aware (`apps/web/src/pdf/pdf-symbol-catalog.ts:96-108`). Family-expanded aliases are filtered against the record IDs actually detected in the open PDF (`apps/web/src/pdf/pdf-symbol-catalog.ts:110-155`). This keeps exact glyph search exact and prevents a comprehensive global catalog from flooding a document with symbols that are not present.
 
-### Expand generic aliases while keeping exact queries exact
+### Compile search-likelihood ranking as a projection, not as identity
 
-A font-mapped source is deliberately excluded from the family's query members, while its semantic target is included (`scripts/pdf-symbol-catalog/compile.ts:543-548`). The runtime projection attaches family members only to those query members (`scripts/pdf-symbol-catalog/generate.ts:170-202`). A generic command attached to the semantic target can therefore find detected styled forms, but a command attached specifically to a styled scalar does not fan out through the family.
+Suggestion ranking belongs in generated runtime metadata, not in the source record model or a handwritten priority table. The pure classifier uses Unicode General Category and W3C `type`/`mathClass` in a fixed precedence to assign five ranks: identifier-like, number-like, operator/relation, delimiter/diacritic, and punctuation/format (`scripts/pdf-symbol-catalog/generate.ts:62-111`). The generator appends that small ordinal to each runtime tuple while leaving tuples in compiler code-point order (`scripts/pdf-symbol-catalog/generate.ts:234-268`, `scripts/pdf-symbol-catalog/compile.ts:1175-1177`).
 
-One-scalar user input never enters alias resolution (`apps/web/src/pdf/pdf-symbol-catalog.ts:87-99`); the search controller uses that literal scalar itself as the effective query (`apps/web/src/pdf/pdf-search-controller.ts:533-545`). Literal aliases are also forbidden in overrides because they could redirect code points (`scripts/pdf-symbol-catalog/compile.ts:869-890`).
+Sort only the reviewer-facing detected-symbol projection by rank and then code point (`apps/web/src/pdf/pdf-symbol-catalog.ts:82-94`). The runtime record ID remains the tuple index, and alias resolution retains its record-ID ordering and does not consult suggestion rank (`apps/web/src/pdf/pdf-symbol-catalog.ts:25-46`, `apps/web/src/pdf/pdf-symbol-catalog.ts:132-155`). Search Results separately remain ordered by page, character, and matched form (`apps/web/src/pdf/pdf-search-controller.ts:377-383`).
 
-### Ground expansion in the current PDF
+This single projection point supplies both the full current-PDF catalog and the no-match alternatives; alternatives are filtered before the existing eight-item cap (`apps/web/src/pdf/pdf-search-controller.ts:385-425`). UI filtering uses order-preserving `Array.filter`, so filtered lists inherit the compiled order without maintaining another ranking implementation (`apps/web/src/review/PdfSearchWorkspace.tsx:53-93`). The report records the full rank distribution—1,298 identifier-like, 88 number-like, 1,437 operator/relation, 206 delimiter/diacritic, and 31 punctuation/format records—and these counts sum to all 3,060 records (`scripts/pdf-symbol-catalog/generated/update-report.json:13-43`).
 
-Extracted text incrementally records catalog IDs by exact glyph (`apps/web/src/pdf/pdf-symbol-catalog.ts:101-115`). Alias resolution may expand a controlled family, but it filters the resulting IDs through `detectedRecordIds` before returning search terms (`apps/web/src/pdf/pdf-symbol-catalog.ts:123-147`). Suggestions and query expansion therefore remain grounded in the open document rather than exposing thousands of irrelevant catalog entries.
+### Commit behavior, not exhaustive evidence
 
-### Rebuild the old baseline before updating sources
+Generate three artifacts but commit only the two needed for review and runtime: the compact TypeScript catalog and the concise update report. The generator explicitly identifies those as the committed artifacts (`scripts/pdf-symbol-catalog/generate.ts:17-24`). The full audit remains reproducible derived data and is ignored by Git (`.gitignore:12`). In the current baseline it is 5,037,243 bytes, versus 406,546 bytes for the runtime catalog and 7,361 bytes for the report (`scripts/pdf-symbol-catalog/generated/update-report.json:288-292`).
 
-Because the audit is intentionally untracked, an absent or stale local audit cannot define the semantic delta. The update command first compiles the currently pinned snapshot and writes that fresh audit into its staging tree, then downloads and compiles the candidate snapshot against it (`scripts/pdf-symbol-catalog/update.ts:30-63`, `scripts/pdf-symbol-catalog/update.ts:73-116`). Only after downloads, checksums, schema validation, compilation, and artifact construction succeed does atomic publication begin (`scripts/pdf-symbol-catalog/update.ts:118-169`).
+`catalog:check` rebuilds all artifacts but drift-checks only the committed runtime catalog and report (`scripts/pdf-symbol-catalog/generate.ts:501-516`). `catalog:audit` regenerates only the full audit locally (`scripts/pdf-symbol-catalog/generate.ts:490-499`, `package.json:15-18`). CI performs the committed-artifact check, regenerates the audit, and uploads it for 14 days instead of storing it in the repository (`.github/workflows/ci.yml:33-43`).
 
-### Separate drift checking from exhaustive evidence generation
+Keep generation out of install and ordinary application build paths. `prebuild:web` runs the non-mutating check, while generation, auditing, and source updates remain explicit maintainer commands (`package.json:10-18`). Distribution validation rejects source snapshots, audits, reports, manifests, and compiler/update modules from runtime assets, and it rejects ordinary build/package/install scripts that invoke generation or updates (`packaging/macos/validate-manifest.ts:101-137`, `packaging/macos/validate-manifest.ts:765-778`).
 
-`catalog:check` rebuilds everything in memory but compares only the committed runtime catalog and report (`scripts/pdf-symbol-catalog/generate.ts:432-448`). `catalog:audit` writes only the full audit (`scripts/pdf-symbol-catalog/generate.ts:421-430`, `package.json:15-18`). CI runs the non-mutating committed-artifact check first, generates the full audit second, and uploads it as a 14-day downloadable artifact (`.github/workflows/ci.yml:33-43`). Maintainers retain complete evidence without imposing its multi-megabyte churn on every clone and review.
+### Make source updates transactional and baseline-aware
 
-### Keep generation out of install and ordinary build paths
+Do not compare a candidate source release with whatever ignored audit happens to exist locally. The updater first recompiles the currently pinned repository inputs to reconstruct the prior baseline (`scripts/pdf-symbol-catalog/update.ts:30-63`). It then downloads declared sources, verifies their uncompressed hashes, preserves identical compressed bytes when possible, and compiles the candidate in a staging tree (`scripts/pdf-symbol-catalog/update.ts:73-116`). Publication begins only after all downloads, checksums, schemas, compilation, and artifact construction succeed, with rollback of already-published files on failure (`scripts/pdf-symbol-catalog/update.ts:118-171`).
 
-The web prebuild runs `catalog:check`, not an updating command (`package.json:10-18`). Distribution validation enforces that `build`, `build:web`, `package:macos`, and `install:local` do not call `catalog:audit`, `catalog:generate`, or `catalog:update` (`packaging/macos/validate-manifest.ts:765-775`). It also rejects compiler sources, source snapshots, reports, and audits from shipped runtime assets (`packaging/macos/validate-manifest.ts:123-135`).
+The maintainer workflow is therefore:
 
-Install-time generation would add network and upstream-availability failure modes, make installed bytes depend on installation date, require shipping maintainer tooling and source data, and bypass review of the committed runtime projection.
+1. Change or supply the candidate pinned manifest and run `pnpm catalog:update`; the updater stages and verifies sources before publishing (`scripts/pdf-symbol-catalog/update.ts:175-192`).
+2. Review and commit the pinned snapshots, manifest, compact runtime catalog, and concise report; do not commit `catalog.audit.json` (`scripts/pdf-symbol-catalog/generate.ts:17-24`, `.gitignore:12`).
+3. Review rank counts, alias decisions, suppressed-name summaries, equivalence counts, and artifact sizes in the report (`scripts/pdf-symbol-catalog/generated/update-report.json:37-55`, `scripts/pdf-symbol-catalog/generated/update-report.json:152-160`, `scripts/pdf-symbol-catalog/generated/update-report.json:233-292`).
+4. Run `pnpm catalog:check`, the relevant tests, and distribution validation. The distribution baseline locks record/index cardinalities, artifact sizes, hashes, and the production JavaScript ceiling to reviewed outputs (`packaging/macos/validate-manifest.ts:13-31`, `packaging/macos/validate-manifest.ts:139-170`).
 
 ## Why This Matters
 
-The generated-data boundary preserves both auditability and repository usability. The compact catalog is the only behavior-bearing projection the app needs, and the concise report makes version, cardinality, hashes, exclusions, and equivalence changes reviewable (`scripts/pdf-symbol-catalog/generated/update-report.json:1-14`, `scripts/pdf-symbol-catalog/generated/update-report.json:145-152`). The exhaustive audit remains reproducible from the same pinned inputs and compiler (`scripts/pdf-symbol-catalog/generate.ts:291-321`) without becoming a source-control liability.
+The architecture separates four concerns that fail when collapsed into a dictionary: authoritative coverage, semantic exception policy, user-facing ranking, and artifact retention. Upstream snapshots can expand the ordinary repertoire systematically; the compiler can reject malformed or semantically unsafe relationships; small overrides can document genuine product choices; and ranking can evolve without changing symbol identity or search matching.
 
-The search boundary protects mathematical meaning. Exact literals are not silently normalized, so compatibility characters can remain distinct when the user types the glyph itself (`apps/web/src/review/PdfSearchWorkspace.tsx:53-69`). Generic aliases can still bridge standards-defined base, variant, and styled forms when useful, but only for family members that the current document actually contains (`apps/web/src/pdf/pdf-symbol-catalog.ts:123-147`). Audited exceptions remain explicit: `\varepsilon` redirects the erroneous upstream IPA open-e mapping to Greek lunate epsilon while leaving the IPA scalar exact-only (`scripts/pdf-symbol-catalog/overrides.json:37`).
+The committed runtime projection is the behavior-bearing artifact and the report is the review surface. The multi-megabyte audit remains available whenever maintainers or CI need exhaustive provenance, but it creates no routine clone or review cost. Because normal builds verify rather than regenerate committed behavior, installed application bytes are reproducible and do not vary with installation date, network availability, or upstream drift (`package.json:10-18`, `scripts/pdf-symbol-catalog/generate.ts:501-516`).
 
-The update process prevents a subtle reporting failure identified during review (session history). If a missing ignored audit were interpreted as an empty old catalog, every update would appear to add every record. Recompiling the checked-in old inputs first creates a trustworthy comparison baseline regardless of a maintainer's local ignored files (`scripts/pdf-symbol-catalog/update.ts:46-63`).
+The tests enforce the boundaries rather than just examples. Generator tests cover classifier precedence, rank completeness, code-point tuple order, concise report summaries, byte-identical output across locale/time-zone settings, and drift checking that is independent of the ignored audit (`scripts/pdf-symbol-catalog/generate.test.ts:37-69`, `scripts/pdf-symbol-catalog/generate.test.ts:167-201`, `scripts/pdf-symbol-catalog/generate.test.ts:204-298`). Runtime tests prove likely-search ordering, deterministic tie-breaking, progressive re-ranking, detected-only alias resolution, epsilon-family handling, and separation of dangerous lookalikes (`apps/web/test/pdf-symbol-catalog.test.ts:17-57`, `apps/web/test/pdf-symbol-catalog.test.ts:169-217`).
 
 ## When to Apply
 
-Use this pattern when a repository has large deterministic evidence that can be regenerated from small, pinned, reviewed inputs, while the product needs only a compact projection. It is especially appropriate when:
+Use this pattern when:
 
-- standards data is versioned and hashable, and application behavior must not vary with live upstream data (`scripts/pdf-symbol-catalog/source-manifest.json:1-45`);
-- a full audit is valuable for maintainers or CI investigation but unnecessary at runtime (`scripts/pdf-symbol-catalog/generate.ts:291-390`);
-- committed generated output must be drift-checked during normal builds without mutating the worktree (`scripts/pdf-symbol-catalog/generate.ts:432-448`); or
-- query equivalence must be narrower than global normalization and grounded in document-local evidence (`scripts/pdf-symbol-catalog/compile.ts:482-510`, `apps/web/src/pdf/pdf-symbol-catalog.ts:123-147`).
+- an application needs broad coverage from versioned, hashable standards data;
+- exhaustive provenance is useful for auditing but too large or irrelevant for runtime distribution;
+- a small number of upstream ambiguities or compatibility inputs require explicit product policy;
+- display priority can be derived from source metadata without mutating stable runtime identity; or
+- ordinary builds and installs must remain offline, deterministic, and non-mutating.
 
-Do not apply the family mechanism to visual confusables, mathematical expressions that are merely algebraically equivalent, or arbitrary compatibility normalization. Also do not omit the exhaustive artifact when it is the only canonical input. This pattern works because the audit is derived from pinned snapshots, overrides, and deterministic compiler behavior (`scripts/pdf-symbol-catalog/generate.ts:265-321`).
+Do not use controlled families for merely visual confusables or mathematically related expressions without a standards-backed scalar relationship. Do not put ordinary per-symbol ranks or aliases in overrides; exceptions are appropriate only when their rationale and expected upstream state can be reviewed and validated. Do not leave the audit uncommitted if it is itself an irreplaceable input; this pattern assumes the audit can be reconstructed from pinned snapshots, overrides, and compiler code (`scripts/pdf-symbol-catalog/generate.ts:331-381`).
 
 ## Examples
 
-### Search variant epsilon safely
+### Greek epsilon variants and IPA open e
 
-The override documents that W3C's `\varepsilon` binding points at U+025B LATIN SMALL LETTER OPEN E and redirects the command to U+03F5 GREEK LUNATE EPSILON SYMBOL, explicitly leaving the IPA character exact-only (`scripts/pdf-symbol-catalog/overrides.json:37`). A `\varepsilon` query resolves through the catalog alias and any controlled family attached to the Greek target, then retains only family records detected in the PDF (`apps/web/src/pdf/pdf-symbol-catalog.ts:123-147`). Typing `ϵ` or `ɛ` directly bypasses alias expansion and searches that one scalar (`apps/web/src/pdf/pdf-symbol-catalog.ts:87-99`, `apps/web/src/pdf/pdf-search-controller.ts:533-545`).
+`\epsilon` and `\varepsilon` can expand across detected base, variant, and mathematical styled Greek epsilon forms, while the IPA character `ɛ` remains searchable only through its own identity or name. The exception redirects only the erroneous command mapping (`scripts/pdf-symbol-catalog/overrides.json:37`), and the runtime regression test checks both the Greek family and the independent IPA lookup (`apps/web/test/pdf-symbol-catalog.test.ts:169-183`).
 
-### Keep style-specific commands narrow
+### Search-likelihood order without changing record IDs
 
-Suppose UnicodeData provides a `<font>` decomposition from a mathematical styled Greek scalar to its base Greek letter. The compiler admits that edge only inside the mathematical-alphanumeric block with an approved Greek target (`scripts/pdf-symbol-catalog/compile.ts:493-503`). It makes the base target query-expandable but does not make the styled source query-expandable solely because of that font edge (`scripts/pdf-symbol-catalog/compile.ts:543-548`). Thus a generic base-letter alias can search detected styled presentations, while a style-specific command remains attached to its own scalar through the runtime command index (`apps/web/src/pdf/pdf-symbol-catalog.ts:65-74`, `scripts/pdf-symbol-catalog/generate.ts:175-202`).
+For the detected set `, ( + 𝟘 α`, the runtime presents `α, 𝟘, +, (, ,`; two identifier-like symbols such as `β` and `λ` are tied by code point (`apps/web/test/pdf-symbol-catalog.test.ts:23-28`). The classifier handles misleading mixed metadata through precedence—for example, number category before alphabetic metadata and format category before operator metadata—and the corpus test verifies representative scalars without per-code-point production overrides (`scripts/pdf-symbol-catalog/generate.test.ts:37-69`, `scripts/pdf-symbol-catalog/generate.test.ts:171-201`).
 
-### Update pinned sources without committing the audit
+### Audit locally, commit compact artifacts
 
-Run the explicit maintainer update command with a candidate manifest. It compiles the old pinned inputs first, stages the resulting old audit, downloads and verifies the candidate inputs, compiles the new artifacts, and publishes the sources, manifest, local audit, runtime catalog, and report only after validation succeeds (`scripts/pdf-symbol-catalog/update.ts:30-63`, `scripts/pdf-symbol-catalog/update.ts:73-169`). Commit the updated source snapshots, manifest, compact runtime catalog, and concise report; leave `catalog.audit.json` ignored (`.gitignore:12`). Locally, `pnpm catalog:audit` recreates the full file, and CI recreates and uploads it independently (`package.json:15-18`, `.github/workflows/ci.yml:33-43`).
+Running `pnpm catalog:generate` writes all three artifacts, including the ignored audit (`scripts/pdf-symbol-catalog/generate.ts:477-487`). Running `pnpm catalog:check` verifies only the committed runtime and report, even if the local audit is stale or missing; the generator test covers all three cases (`scripts/pdf-symbol-catalog/generate.test.ts:273-298`). CI separately creates an audit-only artifact for download (`scripts/pdf-symbol-catalog/generate.test.ts:300-317`, `.github/workflows/ci.yml:35-43`).
 
 ## Related
 
-- [Issue #52: Symbol recognition improvements](https://github.com/brad-ross/placekeeper/issues/52) — the reported search failure that motivated the catalog.
-- [PR #55: derive searchable math symbol catalog](https://github.com/brad-ross/placekeeper/pull/55) — the pending implementation documented here.
-- [Exclude navigation links from existing PDF annotations](../integration-issues/exclude-navigation-links-from-existing-pdf-annotations.md) — a related abstraction-boundary example: a broad low-level catalog is projected into a narrower consumer-facing inventory.
+- [Issue #52: Symbol recognition improvements](https://github.com/brad-ross/placekeeper/issues/52) — the original report that motivated the catalog work.
+- [PR #55: derive searchable math symbol catalog](https://github.com/brad-ross/placekeeper/pull/55) — merged implementation of the standards-derived catalog.
+- [PR #58: rank mathematical symbol suggestions](https://github.com/brad-ross/placekeeper/pull/58) — presentation-order extension implemented on this branch and not present in the fetched default branch at the time this learning was refreshed.
+- [Generated Mathematical Symbol Catalog plan](../../plans/2026-08-23-1220-fix-generated-math-symbol-catalog-plan.md) — the requirements source for repertoire compilation and artifact retention.
+- [Standards-Derived Symbol Suggestion Ranking plan](../../plans/2026-08-23-2006-feat-symbol-suggestion-ranking-plan.md) — the requirements source for ranking without semantic changes.
