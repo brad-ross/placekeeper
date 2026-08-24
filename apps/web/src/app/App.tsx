@@ -33,7 +33,11 @@ import {
   type ReferenceDocumentController,
 } from '../pdf/reference-document.js';
 import { createViewerFramingControls } from '../pdf/viewer-framing-adapter.js';
-import type { ViewerFramingControls, ViewerRunway } from '../pdf/viewer-framing.js';
+import {
+  LatestFrameRequest,
+  type ViewerFramingControls,
+  type ViewerRunway,
+} from '../pdf/viewer-framing.js';
 import { combinePageRotation } from '../pdf/owned-overlay.js';
 import {
   OwnedMarkPointerGesture,
@@ -59,6 +63,7 @@ import {
   VIEWER_POINTER_BUTTON_NONE,
   ViewerPrimaryClickGesture,
   viewerPointerButton,
+  type ViewerCaretUpdate,
   type ViewerClientPlacement,
   type ViewerInteractionEvent,
   type ViewerPagePoint,
@@ -528,6 +533,54 @@ export function App({
       pageReaders.set(documentId, { document, reader });
       return reader;
     };
+    let currentCaret: CaretAnchor | null = null;
+    let currentCaretPlacement: ViewerClientPlacement | null = null;
+    const publishCaret = (value: ViewerCaretUpdate) => {
+      currentCaret = value.anchor;
+      currentCaretPlacement = value.placement;
+      emit({ type: 'caret', value });
+    };
+    const caretPlacement = (anchor: CaretAnchor): ViewerClientPlacement | null => {
+      const active = registry.getStore().getState().core.documents[MAIN_PDF_DOCUMENT_ID];
+      const page = active?.document?.pages[anchor.pageIndex];
+      const element = workspaceElementRef.current
+        ?.querySelector<HTMLElement>(`[data-page-index="${anchor.pageIndex}"]`);
+      return page && element
+        ? caretClientPlacement({
+            anchor,
+            page,
+            documentRotation: active.rotation,
+            pageBounds: element.getBoundingClientRect(),
+          })
+        : null;
+    };
+    const sameCaretPlacement = (
+      first: ViewerClientPlacement | null,
+      second: ViewerClientPlacement | null,
+    ) => first === second || (
+      first !== null
+      && second !== null
+      && first.left === second.left
+      && first.top === second.top
+      && first.width === second.width
+      && first.height === second.height
+      && first.suggestTop === second.suggestTop
+    );
+    const refreshCaretPlacement = () => {
+      if (currentCaret === null) return;
+      const nextPlacement = caretPlacement(currentCaret);
+      if (sameCaretPlacement(currentCaretPlacement, nextPlacement)) return;
+      publishCaret({ anchor: currentCaret, placement: nextPlacement });
+    };
+    let caretPlacementRefreshGeneration = 0;
+    const caretPlacementRefresh = new LatestFrameRequest<number>({
+      schedule: (callback) => requestAnimationFrame(callback),
+      cancel: (handle) => cancelAnimationFrame(handle),
+      commit: refreshCaretPlacement,
+    });
+    const scheduleCaretPlacementRefresh = () => {
+      caretPlacementRefresh.publish(++caretPlacementRefreshGeneration);
+    };
 
     const readPage = async (documentId: string, pageIndex: number) => {
       const generation = ++pageReadGeneration.current;
@@ -663,18 +716,13 @@ export function App({
                       left: click.clientPoint.x,
                       top: click.clientPoint.y,
                     };
-                    const active = registry.getStore().getState().core.documents[documentId];
-                    const element = workspaceElementRef.current
-                      ?.querySelector<HTMLElement>(`[data-page-index="${page.index}"]`);
-                    if (!active || !element) return fallback;
-                    return caretClientPlacement({
-                      anchor,
-                      page,
-                      documentRotation: active.rotation,
-                      pageBounds: element.getBoundingClientRect(),
-                    }) ?? fallback;
+                    return caretPlacement(anchor) ?? fallback;
                   },
-                  emit,
+                  emit: (event) => {
+                    if (event.type !== 'caret') return;
+                    publishCaret(event.value);
+                    if (event.value.anchor !== null) scheduleCaretPlacementRefresh();
+                  },
                 });
               },
               onClick: (position) => {
@@ -765,18 +813,22 @@ export function App({
           if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
           viewportGenerationRef.current += 1;
           initializeKeyboardCursor();
+          scheduleCaretPlacementRefresh();
           void readPage(documentId, pageNumber - 1);
         }),
         scroll.onScroll(({ documentId }) => {
           if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
           viewportGenerationRef.current += 1;
           initializeKeyboardCursor();
+          scheduleCaretPlacementRefresh();
         }),
         scroll.onLayoutChange(({ documentId }) => {
           if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
           viewportGenerationRef.current += 1;
           initializeKeyboardCursor();
+          scheduleCaretPlacementRefresh();
         }),
+        () => caretPlacementRefresh.cancel(),
       );
     }
 
@@ -814,7 +866,7 @@ export function App({
             emit({ type: 'selection-placement', value: null });
           } else {
             caretReadGeneration.current += 1;
-            emit({ type: 'caret', value: { anchor: null, placement: null } });
+            publishCaret({ anchor: null, placement: null });
             beginSelectionRead(documentId);
           }
         }),

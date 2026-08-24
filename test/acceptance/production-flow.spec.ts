@@ -2802,6 +2802,7 @@ test("retries one failed reference clone without exposing raw load details", asy
 });
 
 test('creates an insertion from middle-of-line PDFium caret geometry', async ({ page }) => {
+  await page.setViewportSize({ width: 760, height: 720 });
   const launched = await host.open({
     pdfPath: await freshProductionPdf(pdf),
     sourceRootPath: sourceRoot,
@@ -2826,6 +2827,30 @@ test('creates an insertion from middle-of-line PDFium caret geometry', async ({ 
   if (!pageBox || !caretBox) throw new Error('Insertion caret geometry is unavailable.');
   expect(caretBox.x - pageBox.x).toBeCloseTo(149, 0);
   expect(caretBox.y - pageBox.y).toBeCloseTo(89, 0);
+
+  const mainViewport = page.locator('[data-viewer-framing-viewport]');
+  const scrollBefore = await mainViewport.evaluate((element) => element.scrollTop);
+  await mainViewport.evaluate((element) => { element.scrollTop += 120; });
+  await expect.poll(() => mainViewport.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(scrollBefore);
+  await expect.poll(async () => {
+    const [currentPageBox, currentCaretBox] = await Promise.all([
+      pdfPage.boundingBox(),
+      insertionCaret.boundingBox(),
+    ]);
+    return currentPageBox && currentCaretBox
+      ? currentCaretBox.y - currentPageBox.y
+      : Number.NaN;
+  }).toBeCloseTo(caretBox.y - pageBox.y, 0);
+  const [scrolledPageBox, scrolledCaretBox] = await Promise.all([
+    pdfPage.boundingBox(),
+    insertionCaret.boundingBox(),
+  ]);
+  if (!scrolledPageBox || !scrolledCaretBox) {
+    throw new Error('Scrolled insertion caret geometry is unavailable.');
+  }
+  expect(scrolledCaretBox.x - scrolledPageBox.x).toBeCloseTo(caretBox.x - pageBox.x, 0);
+  expect(scrolledCaretBox.y - scrolledPageBox.y).toBeCloseTo(caretBox.y - pageBox.y, 0);
 
   await page.keyboard.type('P');
   const composer = page.getByRole('region', { name: 'Insertion' });
