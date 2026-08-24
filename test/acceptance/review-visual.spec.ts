@@ -133,6 +133,56 @@ async function expectAnnotationEndcapGeometry(row: Locator, more: Locator): Prom
   await expect(more).toHaveText('More ›');
 }
 
+async function expectAnnotationTitleEndcapGeometry(row: Locator): Promise<void> {
+  const geometry = await row.evaluate((element) => {
+    const title = element.querySelector<HTMLElement>('.annotation-item__title-row');
+    const metadata = element.querySelector<HTMLElement>('.annotation-item__meta');
+    const edit = element.querySelector<HTMLElement>('[data-annotation-action="edit"]');
+    const remove = element.querySelector<HTMLElement>('[data-annotation-action="delete"]');
+    const copy = element.querySelector<HTMLElement>('[data-annotation-action="copy-link"]');
+    const actions = element.querySelector<HTMLElement>('.annotation-item__title-actions');
+    if (!title || !metadata || !edit || !remove || !copy || !actions) {
+      throw new Error('Annotation title endcap geometry is incomplete.');
+    }
+    const titleBounds = title.getBoundingClientRect();
+    const metadataBounds = metadata.getBoundingClientRect();
+    const editBounds = edit.getBoundingClientRect();
+    const removeBounds = remove.getBoundingClientRect();
+    const copyBounds = copy.getBoundingClientRect();
+    const actionsBounds = actions.getBoundingClientRect();
+    return {
+      title: titleBounds.toJSON(),
+      metadata: metadataBounds.toJSON(),
+      edit: editBounds.toJSON(),
+      remove: removeBounds.toJSON(),
+      copy: copyBounds.toJSON(),
+      actions: actionsBounds.toJSON(),
+      editOpacity: Number.parseFloat(getComputedStyle(edit).opacity),
+      removeOpacity: Number.parseFloat(getComputedStyle(remove).opacity),
+      copyOpacity: Number.parseFloat(getComputedStyle(copy).opacity),
+    };
+  });
+  expect(geometry.copy.x).toBeGreaterThanOrEqual(geometry.metadata.x + geometry.metadata.width);
+  expect(geometry.copy.x + geometry.copy.width).toBeLessThanOrEqual(
+    geometry.title.x + geometry.title.width + 0.5,
+  );
+  expect(geometry.title.x + geometry.title.width).toBeGreaterThanOrEqual(
+    geometry.actions.x + geometry.actions.width - 0.5,
+  );
+  expect(Math.abs(
+    geometry.copy.y + geometry.copy.height / 2
+      - (geometry.metadata.y + geometry.metadata.height / 2),
+  )).toBeLessThanOrEqual(4);
+  expect(geometry.edit.width).toBeCloseTo(geometry.remove.width, 1);
+  expect(geometry.remove.width).toBeCloseTo(geometry.copy.width, 1);
+  expect(geometry.edit.height).toBeCloseTo(geometry.remove.height, 1);
+  expect(geometry.remove.height).toBeCloseTo(geometry.copy.height, 1);
+  expect(geometry.edit.width).toBeLessThanOrEqual(24);
+  expect(geometry.editOpacity).toBe(1);
+  expect(geometry.removeOpacity).toBe(1);
+  expect(geometry.copyOpacity).toBe(1);
+}
+
 async function expectCompactAnnotationReader(page: Page): Promise<Locator> {
   const reader = page.locator('[data-full-annotation-reader="true"]');
   await expect(reader).toBeVisible();
@@ -434,6 +484,7 @@ test('wide Annotation Tray', async ({ page }) => {
   await expect(overflowingImported.locator('[data-read-full-annotation="true"]')).toBeVisible();
   await expectAnnotationTrayOverflow(page);
   await expectAnnotationEndcapGeometry(row, more);
+  await expectAnnotationTitleEndcapGeometry(row);
   await expect(page.getByRole('button', { name: /Copy link to Highlight annotation on page 1/u })
     .locator('.lucide-link')).toBeVisible();
   await expect(row.locator('.annotation-item__page')).toHaveText('1');

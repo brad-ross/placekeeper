@@ -1397,11 +1397,7 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
 }
 
 :is(.review-workspace, .review-tools-workspace) li[data-annotation-origin] {
-  grid-template-columns: minmax(0, 1fr) auto auto;
-}
-
-:is(.review-workspace, .review-tools-workspace) li[data-item-copy-link="true"] {
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 :is(.review-workspace, .review-tools-workspace) li[data-item-copy-link="true"]:focus-within {
@@ -1492,6 +1488,51 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   color: inherit;
   background: transparent;
   text-align: left;
+}
+
+.annotation-item__title-row,
+.annotation-item__body-row {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  min-width: 0;
+  pointer-events: none;
+}
+
+.annotation-item__title-row {
+  align-items: center;
+  gap: var(--review-metadata-separator-gap);
+}
+
+.annotation-item__title-row > .annotation-item__meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.annotation-item__title-row .annotation-item__meta > strong {
+  flex: none;
+}
+
+.annotation-item__title-row .annotation-item__section {
+  flex: 1 1 auto;
+  width: auto;
+}
+
+.annotation-item__body-row {
+  align-items: end;
+  gap: var(--review-control-group-gap);
+}
+
+.annotation-item__body-row > .annotation-item__excerpt {
+  flex: 1;
+}
+
+.annotation-item__title-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  pointer-events: auto;
 }
 
 .annotation-item__navigation {
@@ -1717,6 +1758,27 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
 .annotation-item__action {
   opacity: 0;
   transition: color var(--review-motion-fast) ease, border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, opacity var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
+}
+
+.annotation-item__title-actions .annotation-item__action {
+  width: 1.4rem;
+  min-width: 1.4rem;
+  max-width: 1.4rem;
+  height: 1.4rem;
+  min-height: 1.4rem;
+  max-height: 1.4rem;
+  border-radius: var(--review-radius-control);
+  opacity: 1;
+}
+
+.annotation-item__title-actions .copy-link-control--annotation {
+  flex: none;
+  pointer-events: auto;
+}
+
+.annotation-item__title-actions .copy-link-control__trigger--icon-only .review-icon {
+  width: 13px;
+  height: 13px;
 }
 
 .review-shell .annotation-item__navigation:focus-visible,

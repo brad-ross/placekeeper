@@ -164,57 +164,63 @@ export function AnnotationList({
               }}
             >
               <div className="annotation-item__content">
-              <button
-                ref={(node) => {
-                  if (node) entryRefs.current.set(item.id, node);
-                  else entryRefs.current.delete(item.id);
-                }}
-                type="button"
-                className="annotation-item__navigation"
-                aria-label={annotationAccessibleLabel({
-                  kind: item.kind,
-                  pageNumber: item.pageIndex + 1,
-                  ...(sectionLabel === undefined ? {} : { sectionLabel }),
-                  ...(text ? { excerpt: text } : {}),
-                })}
-                title={`Go to ${kindLabel} annotation on page ${item.pageIndex + 1}`}
-                onClick={() => onNavigate(item)}
-              >
-              </button>
-              <AnnotationMetadata
-                kind={item.kind}
-                pageNumber={item.pageIndex + 1}
-                {...(sectionLabel === undefined ? {} : { sectionLabel })}
-              />
-              {text ? (
-                <AnnotationExcerpt
-                  content={text}
-                  readerRecord={readerRecord}
-                  {...(onReadFull === undefined ? {} : { onReadFull })}
-                  {...(onReaderOverflowChange === undefined ? {} : {
-                    onOverflowChange: onReaderOverflowChange,
+                <button
+                  ref={(node) => {
+                    if (node) entryRefs.current.set(item.id, node);
+                    else entryRefs.current.delete(item.id);
+                  }}
+                  type="button"
+                  className="annotation-item__navigation"
+                  aria-label={annotationAccessibleLabel({
+                    kind: item.kind,
+                    pageNumber: item.pageIndex + 1,
+                    ...(sectionLabel === undefined ? {} : { sectionLabel }),
+                    ...(text ? { excerpt: text } : {}),
                   })}
-                />
-              ) : null}
-              </div>
-              {item.kind === 'delete' ? null : (
-                <button type="button" className="annotation-item__action" data-annotation-action="edit" aria-label={`Edit ${kindLabel} annotation on page ${item.pageIndex + 1}`} title="Edit annotation" onClick={(event) => onEdit(item, event.currentTarget)}>
-                  <ReviewIcon name="edit" size={15} />
+                  title={`Go to ${kindLabel} annotation on page ${item.pageIndex + 1}`}
+                  onClick={() => onNavigate(item)}
+                >
                 </button>
-              )}
-              <button type="button" className="annotation-item__action annotation-item__delete" data-annotation-action="delete" aria-label={`Remove ${kindLabel} annotation on page ${item.pageIndex + 1}`} title="Delete annotation" onClick={() => void remove(item)}>
-                <ReviewIcon name="delete" size={15} />
-              </button>
-              {copyLink === undefined ? null : (
-                <CopyLinkControl
-                  {...copyLink}
-                  variant="annotation"
-                  ariaLabel={`Copy link to ${kindLabel} annotation on page ${item.pageIndex + 1}`}
-                  title={copyLink.disabled
-                    ? 'Save annotation before copying its link'
-                    : 'Copy annotation link'}
-                />
-              )}
+                <div className="annotation-item__title-row">
+                  <AnnotationMetadata
+                    kind={item.kind}
+                    pageNumber={item.pageIndex + 1}
+                    {...(sectionLabel === undefined ? {} : { sectionLabel })}
+                  />
+                  <div className="annotation-item__title-actions" role="group" aria-label={`${kindLabel} annotation actions`}>
+                    {item.kind === 'delete' ? null : (
+                      <button type="button" className="annotation-item__action" data-annotation-action="edit" aria-label={`Edit ${kindLabel} annotation on page ${item.pageIndex + 1}`} title="Edit annotation" onClick={(event) => onEdit(item, event.currentTarget)}>
+                        <ReviewIcon name="edit" size={13} />
+                      </button>
+                    )}
+                    <button type="button" className="annotation-item__action annotation-item__delete" data-annotation-action="delete" aria-label={`Remove ${kindLabel} annotation on page ${item.pageIndex + 1}`} title="Delete annotation" onClick={() => void remove(item)}>
+                      <ReviewIcon name="delete" size={13} />
+                    </button>
+                    {copyLink === undefined ? null : (
+                      <CopyLinkControl
+                        {...copyLink}
+                        variant="annotation"
+                        ariaLabel={`Copy link to ${kindLabel} annotation on page ${item.pageIndex + 1}`}
+                        title={copyLink.disabled
+                          ? 'Save annotation before copying its link'
+                          : 'Copy annotation link'}
+                      />
+                    )}
+                  </div>
+                </div>
+                <div className="annotation-item__body-row">
+                  {text ? (
+                    <AnnotationExcerpt
+                      content={text}
+                      readerRecord={readerRecord}
+                      {...(onReadFull === undefined ? {} : { onReadFull })}
+                      {...(onReaderOverflowChange === undefined ? {} : {
+                        onOverflowChange: onReaderOverflowChange,
+                      })}
+                    />
+                  ) : <span />}
+                </div>
+              </div>
             </li>
           );
         })}

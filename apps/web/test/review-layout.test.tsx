@@ -507,6 +507,9 @@ describe('review shell layout and accessibility contract', () => {
 
     expect(copyableList).toContain('data-item-copy-link="true"');
     expect(copyableList).toContain('aria-label="Copy link to Highlight annotation on page 4"');
+    expect(copyableList).toContain('annotation-item__title-row');
+    expect(copyableList).toContain('annotation-item__title-actions');
+    expect(copyableList).toContain('annotation-item__body-row');
     expect(copyableList.indexOf('data-annotation-action="edit"')).toBeLessThan(
       copyableList.indexOf('data-annotation-action="delete"'),
     );
