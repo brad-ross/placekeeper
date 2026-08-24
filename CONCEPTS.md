@@ -53,6 +53,11 @@ A viewer marking projected from a Review Item and identified by that item's cano
 
 One Owned Annotation can appear as several visual segments; interactions treat those segments as one annotation and resolve back to the same Review Item.
 
+### PDF Annotation Catalog
+The complete structural inventory of annotations physically present in a source PDF, kept broad for inspection, navigation, preservation, and reviewer-facing projection.
+
+Catalog membership does not determine editability or reviewer meaning: portable validation identifies Owned Annotations, while Navigational PDF Annotations and owned records remain outside the Existing PDF Annotation population.
+
 ### Existing PDF Annotation
 A reviewer-relevant, display-only annotation discovered in the source PDF, kept separate from Review Items so source-document viewer state cannot become editable review state.
 
@@ -196,4 +201,4 @@ Activating its primary row creates a Meaningful Jump in the Main Reading Thread,
 
 ## Relationships
 
-A Review Item projects to an Owned Annotation using Crop-relative Geometry and may carry Portable Annotation Identity in the saved PDF. Existing PDF Annotations remain a separate read-only population, while Navigational PDF Annotations stay outside that reviewer-facing population. The Annotation Tray presents Review Items and Existing PDF Annotations, while a Framing Session may use Viewer Runway to keep the relevant PDF content reachable. Protected Recovery covers accepted changes until Save Sync proves that the Save Destination has caught up.
+A Review Item projects to an Owned Annotation using Crop-relative Geometry and may carry Portable Annotation Identity in the saved PDF. The PDF Annotation Catalog retains every source annotation; reviewer-facing projections remove owned and Navigational PDF Annotations before forming the separate read-only Existing PDF Annotation population. The Annotation Tray presents Review Items and Existing PDF Annotations, while a Framing Session may use Viewer Runway to keep the relevant PDF content reachable. Protected Recovery covers accepted changes until Save Sync proves that the Save Destination has caught up.

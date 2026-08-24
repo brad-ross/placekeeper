@@ -1,112 +1,169 @@
 ---
-title: Exclude Navigation Links from Existing PDF Annotation Inventories
+title: Exclude Navigation and Owned PDF Annotations from External Inventories
 date: 2026-08-14
+last_updated: 2026-08-24
 category: integration-issues
 module: pdf_annotation_inventory
 problem_type: integration_issue
 component: service_object
 symptoms:
-  - PDF Link annotations appeared as read-only Existing PDF Annotations in the web annotation tray.
-  - PDF Link annotations appeared in Live PDF Context as external reviewer annotations.
+  - PDF Link annotations appeared as read-only Existing PDF Annotations in the web annotation tray and Live PDF Context.
+  - Placekeeper annotations reopened from a saved copy appeared once as editable Review Items and again as read-only Existing PDF Annotations.
+  - The Annotation Tray could present duplicate entries with different editability for the same visible PDF mark.
 root_cause: logic_error
 resolution_type: code_fix
 severity: medium
 related_components:
   - frontend_stimulus
+  - portable annotation codec
+  - testing_framework
 tags:
   - pdf-annotations
   - navigation-links
   - existing-annotations
-  - live-context
-  - embedpdf
+  - portable-annotations
+  - owned-annotations
+  - annotation-inventory
+  - async-discovery
+  - regression-tests
 ---
 
-# Exclude Navigation Links from Existing PDF Annotation Inventories
+# Exclude Navigation and Owned PDF Annotations from External Inventories
 
 ## Problem
 
-PDF Link annotations crossed a semantic boundary they do not belong to. They are navigation affordances, but the web viewer and Live PDF Context treated them like foreign reviewer feedback and surfaced them as read-only Existing PDF Annotations. The correction is pending in [PR #33](https://github.com/brad-ross/placekeeper/pull/33).
+A PDF annotation catalog answers what physically exists in a document; an Existing PDF Annotation inventory answers what should be presented as foreign, read-only reviewer feedback. Treating the broad catalog as presentation-ready caused two related classification bugs:
 
-The low-level annotation catalog and reviewer-facing inventories have different contracts. The catalog is intentionally broad: `inspectPdfAnnotationCatalogWithEmbedPdf` returns every inspected annotation alongside portable Review Items (`packages/pdf-backends/src/embedpdf-adapter.ts:505`). Reviewer-facing inventories are narrower and must exclude navigation-only subtypes.
+- Navigational Link annotations appeared as external reviewer annotations. [PR #33](https://github.com/brad-ross/placekeeper/pull/33), merged on 2026-08-14, established that navigation affordances stay in the PDF catalog but outside reviewer inventories.
+- Placekeeper-owned annotations in a saved copy were correctly reconstructed as editable Review Items and independently rediscovered as read-only Existing PDF Annotations. The correction is open in [PR #59](https://github.com/brad-ross/placekeeper/pull/59) as of 2026-08-24.
+
+The second bug was not a duplicate portable import. On open, validated portable metadata reconstructs Review Items (packages/pdf-backends/src/embedpdf-adapter.ts:355-399), while the web viewer independently maps every non-Link engine annotation into an Existing Annotation candidate (apps/web/src/pdf/existing-annotations.ts:155-180). Before PR #59, that web path did not subtract the already-owned identities, so the same visible PDF object acquired both editable and external/read-only meanings.
 
 ## Symptoms
 
-- Link-heavy PDFs populated the Existing PDF Annotations tray with entries that were links rather than comments, highlights, or other review markup.
-- The service exposed the same links through `existingPdfAnnotations`, allowing downstream live-context consumers to mistake document navigation for external feedback.
-- Link annotations without normal appearance streams could influence reviewer-facing warnings even though those warnings concern displayed external annotations.
-- In the verified 56-page manuscript, the raw catalog retained 461 links and one highlight while the external-annotation inventory correctly contained no items after the fix (verified in the implementation session).
+- Link-heavy PDFs populated reviewer-facing inventories with navigation objects rather than comments, highlights, or other review markup.
+- Reopening a Placekeeper-authored copy populated both the editable annotation list and the Existing PDF Annotations list with the same marks.
+- The duplicate external entry was deliberately display-only because the Existing Annotation DTO has no conversion to canonical Review Items (apps/web/src/pdf/existing-annotations.ts:132-145).
+- Existing focused tests exercised portable import and annotation inventory independently without asserting that their resulting populations were disjoint, so the pre-fix suites passed despite the duplicate presentation (session history).
 
 ## What Didn't Work
 
-There was no discarded implementation attempt. Investigation instead confirmed that the same classification error occurred independently at both reviewer-facing boundaries: the web inventory and the service projection.
+Filtering excluded annotations out of the low-level catalog would conflate “not external reviewer feedback” with “not part of the PDF.” Links remain necessary for navigation. Owned annotations remain necessary for rendering, preservation checks, replacement, and portable reopen verification: the writer identifies validated owned records, preserves foreign records, replaces only changed owned records, and reopens the saved bytes to verify the result (packages/pdf-backends/src/embedpdf-adapter.ts:641-718).
 
-Filtering links out of the low-level catalog would have been the wrong remedy. The adapter deliberately collects all page annotations (`packages/pdf-backends/src/embedpdf-adapter.ts:505`), and the write path treats non-owned annotations as preexisting PDF content whose survival is verified after saving (`packages/pdf-backends/src/embedpdf-adapter.ts:641`, `packages/pdf-backends/src/embedpdf-adapter.ts:686`). Removing links there would conflate “not reviewer feedback” with “not part of the PDF” and weaken preservation checks. The web viewer also renders engine annotations whose type is `LINK` as navigation controls (`apps/web/src/pdf/PdfLinkControl.tsx:151`), so those annotations must remain available outside the review inventory.
+Fixing or deduplicating the imported Review State would target the correct editable entry rather than the erroneous external projection. Portable import occurs once; the duplicate came from a separate viewer inventory path (session history).
+
+Visible fields are also insufficient ownership evidence:
+
+- Author text alone is not ownership evidence: a visible Placekeeper author without a valid portable envelope is classified as foreign.
+- A visible annotation ID alone can collide across pages.
+- Missing private metadata is explicitly foreign, while malformed or mismatched metadata is invalid (packages/core/src/portable-annotation.ts:276-312).
+
+Therefore generic Preview or Acrobat annotations remain read-only Existing PDF Annotations. Making them editable requires a separate import-and-writeback contract rather than a looser ownership heuristic.
+
+Finally, recomputing ownership from the latest editable state on every asynchronous retry would be temporally wrong. Editing or deleting an imported Review Item does not retroactively remove its original visible annotation from the already-open source document. A retry that used later application state could reclassify that source-owned mark as foreign.
 
 ## Solution
 
-### Centralize subtype classification
+### Keep the raw catalog broad and narrow each reviewer projection
 
-The core package provides a small predicate that normalizes subtype strings (`packages/core/src/pdf-annotation-classification.ts:1`):
+Navigation classification remains centralized and representation-tolerant:
 
-```ts
+~~~ts
 export function isNavigationalPdfAnnotationSubtype(subtype: string): boolean {
-  return subtype.trim().toLowerCase() === "link";
+  return subtype.trim().toLowerCase() === 'link';
 }
-```
+~~~
 
-This handles `Link`, `link`, `LINK`, and incidental whitespace consistently across application surfaces.
+The web inventory rejects Link engine values before mapping and rechecks normalized subtype strings during merge (apps/web/src/pdf/existing-annotations.ts:46-61, apps/web/src/pdf/existing-annotations.ts:77-89, apps/web/src/pdf/existing-annotations.ts:155-180). The service likewise inspects the complete catalog, then excludes both portable-owned IDs and navigation subtypes before it creates Live PDF Context records or warnings (apps/service/src/context/live-context-service.ts:141-180).
 
-### Filter at web ingestion and merge boundaries
+### Subtract exact owned identities at the external merge boundary
 
-The web inventory rejects navigational subtype strings before constructing `ExistingAnnotation` records (`apps/web/src/pdf/existing-annotations.ts:46`). Engine-backed discovery rejects `PdfAnnotationSubtype.LINK` before mapping engine objects into source DTOs (`apps/web/src/pdf/existing-annotations.ts:149`).
+PR #59 extends the web merge with the owned projection. The boundary uses the same composite key as inventory deduplication:
 
-The merge path defensively applies the same rule to both discovered and explicitly supplied records (`apps/web/src/pdf/existing-annotations.ts:70`):
+~~~ts
+export function existingAnnotationKey(
+  annotation: Pick<ExistingAnnotation, 'id' | 'pageIndex'>,
+): string {
+  return annotation.pageIndex + ':' + annotation.id;
+}
 
-```ts
+const ownedKeys = new Set(owned.map(existingAnnotationKey));
+~~~
+
+Discovered and explicitly supplied annotations must both pass navigation and owned-key checks (apps/web/src/pdf/existing-annotations.ts:64-90). Filtering both inputs prevents an embedding surface or test harness from bypassing the normal engine-discovery invariant.
+
+~~~ts
 for (const annotation of discovered) {
-  if (!isNavigationalPdfAnnotationSubtype(annotation.subtype)) {
+  if (
+    !ownedKeys.has(existingAnnotationKey(annotation)) &&
+    !isNavigationalPdfAnnotationSubtype(annotation.subtype)
+  ) {
     merged.set(existingAnnotationKey(annotation), annotation);
   }
 }
+
 for (const annotation of explicit) {
   if (isNavigationalPdfAnnotationSubtype(annotation.subtype)) continue;
-  // Deduplicate and merge reviewer-facing annotations.
+  const key = existingAnnotationKey(annotation);
+  if (!ownedKeys.has(key) && !merged.has(key)) merged.set(key, annotation);
 }
-```
+~~~
 
-The second check protects the invariant when a caller bypasses normal engine discovery or supplies already-mapped records.
+ExistingAnnotationDiscoveryAuthority.ready carries the same owned set across asynchronous completion (apps/web/src/pdf/existing-annotations.ts:93-120), and the standalone renderer supplies owned annotations when it assembles the displayed list (apps/web/src/app/App.tsx:1015-1027).
 
-### Filter before service projection and warnings
+### Freeze ownership for the source document across retries
 
-`inspectLivePdf` still inspects the complete catalog and identifies app-owned portable annotations by ID. It then creates a reviewer-facing subset that excludes both owned records and navigational links before mapping `ExistingPdfAnnotation` objects (`apps/service/src/context/live-context-service.ts:141`). The missing-normal-appearance warning is computed from that filtered subset (`apps/service/src/context/live-context-service.ts:174`), preventing excluded links from affecting reviewer-facing state indirectly.
+The viewer stores the source-owned (id, pageIndex) pairs in a WeakMap keyed by the concrete PDF document object. The first inventory read snapshots them; later retries for the same object reuse that snapshot (apps/web/src/app/App.tsx:294-311, apps/web/src/app/App.tsx:329-356, apps/web/src/app/App.tsx:398-403).
 
-### Cover both boundaries with regression tests
+~~~ts
+let owned = sourceOwnedAnnotations.current.get(document);
+if (owned === undefined) {
+  owned = ownedAnnotationsRef.current.map(({ id, pageIndex }) => ({ id, pageIndex }));
+  sourceOwnedAnnotations.current.set(document, owned);
+}
+~~~
 
-The web regression mixes `Link`, `link`, and `LINK` values and verifies that neither discovery nor merging can reintroduce them while an ordinary annotation remains (`apps/web/test/existing-annotations.test.ts:19`). The service regression inspects the hostile-actions PDF fixture and verifies that its navigation links produce no Existing PDF Annotations (`apps/service/test/live-context-service.test.ts:110`).
+This binds classification to the source being inventoried rather than to later React state. A genuinely new document object establishes a new snapshot.
 
-The implementation session verified 16 focused tests, all 201 service tests, and TypeScript typechecking. The supplied manuscript retained its links in the raw catalog while excluding them from the external inventory.
+### Test the semantic exclusions, not just raw deduplication
+
+The web Link regression checks Link, link, and LINK string forms, while a service fixture covers engine-backed catalog filtering (apps/web/test/existing-annotations.test.ts:24-43, apps/service/test/live-context-service.test.ts:246-252). The owned regression supplies an owned annotation on page 0 and a foreign annotation with the same ID on page 1 and author Placekeeper; only the exact owned key is removed, while 1:owned remains (apps/web/test/existing-annotations.test.ts:56-67).
+
+Local validation for PR #59 passed TypeScript typechecking, 244 Vitest tests, and 33 Playwright review workflows. GitHub Actions did not execute any steps because the repository account's billing or spending-limit setting blocked the job, so remote CI was not green at documentation time.
 
 ## Why This Works
 
-The fix encodes the product rule at the correct abstraction boundary: annotation catalogs describe what exists in the PDF, while reviewer inventories describe what should be presented as feedback. A Link belongs in the former but not the latter.
+The fix preserves three distinct authorities:
 
-Keeping the catalog complete preserves navigation handling and structural save verification. Filtering immediately before reviewer-facing DTO construction prevents links from acquiring misleading reviewer-facing semantics such as `origin: "source-pdf"` and `readOnly: true` (`apps/service/src/context/live-context-service.ts:157`). Rechecking during web merging preserves the same invariant for alternate inputs, not only the normal engine-discovery path.
+~~~text
+raw PDF catalog
+  - navigation objects -> navigation and preservation only
+  - validated portable identity -> editable Review Item / Owned Annotation
+  - remaining reviewer-relevant objects -> read-only Existing PDF Annotation
+~~~
 
-The shared predicate prevents the web and service surfaces from drifting in their interpretation of subtype strings. Where the engine exposes a numeric subtype, the web can filter even earlier with `PdfAnnotationSubtype.LINK`; where only a string remains, every consumer uses the same trimmed, case-insensitive rule.
+Portable validation remains the sole authority for recognizing a source-PDF annotation as Placekeeper-owned and reconstructing it as editable Review State. It requires supported private metadata, a valid Review Item and projection, an unambiguous visible ID, and agreement with visible page and projection evidence (packages/core/src/portable-annotation.ts:276-312). The web layer does not attempt to rediscover ownership from author, subtype, appearance, or ID alone; it subtracts exact identities already established by portable import.
+
+The source annotation set stays intact for rendering, navigation, preservation, and serialized-artifact verification. Product semantics are applied only as records cross into reviewer-facing DTOs. Rechecking every aggregation input keeps the invariant independent of the source path.
+
+The per-document snapshot makes asynchronous classification stable: it answers whether a visible annotation was owned in the source PDF when that document object was opened, not whether the latest editable state still contains the item. This mirrors the broader rule that values spanning asynchronous document work must be captured as one semantic snapshot rather than recombined from different moments.
 
 ## Prevention
 
-- Treat low-level PDF catalogs as preservation-oriented structures, not presentation-ready inventories. Apply product semantics while projecting catalog records into user-facing models.
-- Keep navigation subtype recognition centralized. New reviewer-facing inventory surfaces should call `isNavigationalPdfAnnotationSubtype` rather than add local string comparisons.
-- Filter as early as practical, then enforce the invariant again at aggregation boundaries. Early filtering avoids needless mapping; defensive filtering protects callers that supply preconstructed records.
-- Compute warnings, counts, and other derived state from the filtered reviewer subset so excluded navigation objects cannot affect the UI indirectly.
-- Test representation variance: engine enum values plus normalized string forms such as `Link`, `LINK`, and ` LINK `.
-- Retain a link-heavy real-PDF regression with a two-sided assertion: links remain in the raw catalog for navigation and preservation, while reviewer-facing inventories exclude them.
+- Treat low-level PDF catalogs as preservation-oriented structures, never presentation-ready reviewer inventories.
+- Keep portable-envelope validation as the sole authority for recognizing an annotation recovered from a source PDF as Placekeeper-owned. Do not infer ownership from author text, subtype, appearance, or ID alone.
+- Apply product semantics at every reviewer-facing projection: remove navigation-only annotations and exact owned (pageIndex, id) identities.
+- Filter as early as practical, then enforce the invariant again for every aggregation input and for derived warnings or counts.
+- Bind asynchronous classification inputs to the document object being read. Retries reuse the source ownership snapshot; a new source establishes a new snapshot.
+- Test representation variance and identity scope: Link casing/whitespace, the same ID on different pages, and a foreign annotation claiming the Placekeeper author.
+- Retain an end-to-end reopen assertion in addition to focused inventory tests: a saved copy should reopen with one editable entry and no duplicate external entry.
+- Before making foreign annotations editable, define supported subtypes, canonical Review Item reconstruction, unsupported-field preservation, edit/delete writeback, and Preview/Acrobat round-trip behavior.
 
 ## Related Issues
 
-- [PR #33](https://github.com/brad-ross/placekeeper/pull/33) — pending implementation of this fix.
-- [Task-scoped, prompt-refreshed Live PDF Context](../architecture-patterns/task-scoped-prompt-refreshed-live-pdf-context.md) — the service observation boundary affected by the bug.
-- [Recoverable, editable PDF annotation autosave](../architecture-patterns/recoverable-editable-pdf-annotation-autosave.md) — why foreign annotations remain in the preservation catalog.
-- [Outline-aware annotation workspace presentation](../design-patterns/outline-aware-annotation-workspace-presentation.md) — presentation of reviewer-relevant PDF-sourced annotations.
-- [PDF link hit targets and Reference viewer stacking](../ui-bugs/pdf-link-hit-target-escapes-reference-viewer-stacking-context.md) — adjacent Link-annotation behavior with a distinct interaction-layer cause.
+- [PR #59](https://github.com/brad-ross/placekeeper/pull/59) — open implementation of owned-annotation exclusion and source-scoped retry ownership.
+- [PR #33](https://github.com/brad-ross/placekeeper/pull/33) — merged implementation of navigation-link exclusion.
+- [Recoverable, editable PDF annotation autosave](../architecture-patterns/recoverable-editable-pdf-annotation-autosave.md) — portable ownership, fail-closed import, and foreign-annotation preservation.
+- [Portable PDF annotations invisible in external viewers](portable-pdf-annotations-invisible-in-external-viewers.md) — public PDF representation enables external rendering while private portable identity enables Placekeeper editing.
+- [Reject stale viewer selection snapshots](../ui-bugs/reject-stale-viewer-selection-snapshots.md) — the related async-snapshot rule for text and geometry capture.
+- [Outline-aware annotation workspace presentation](../design-patterns/outline-aware-annotation-workspace-presentation.md) — user-facing separation of editable annotations and external PDF annotations.
