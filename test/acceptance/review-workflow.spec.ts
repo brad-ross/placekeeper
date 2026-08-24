@@ -775,15 +775,15 @@ test.describe('canonical review workflow', () => {
     const scrollBefore = await panel.evaluate((element) => element.scrollTop);
 
     await more.evaluate((button) => (button as HTMLButtonElement).click());
-    const heading = page.getByRole('heading', {
-      name: 'Full annotation — Page Note, page 3',
-    });
-    await expect(heading).toBeVisible();
-    await expect(heading).toBeFocused();
-    await expect(page.locator('[data-full-annotation-reader="true"]')).toContainText(
+    const reader = page.getByRole('region', { name: 'Full Page Note annotation on page 3' });
+    const back = page.locator('[data-full-annotation-action="back"]');
+    await expect(reader).toBeVisible();
+    await expect(back).toBeFocused();
+    await expect(reader).toContainText(
       'This long annotation explains the identification concern',
     );
-    await expect(page.locator('[data-full-annotation-reader="true"]')).not.toContainText('Original text');
+    await expect(reader).not.toContainText('Original text');
+    await expect(reader).not.toContainText('Full annotation —');
     await expect(page.locator('[data-navigated]')).toHaveAttribute('data-navigated', openingId!);
     await expect(panel.locator('[data-review-item]')).toHaveCount(0);
 
@@ -802,7 +802,7 @@ test.describe('canonical review workflow', () => {
     const row = page.locator('[data-review-item]').last();
     await row.getByRole('button', { name: /Read full Page Note annotation/u }).click();
     const reader = page.locator('[data-full-annotation-reader="true"]');
-    const edit = reader.getByRole('button', { name: 'Edit', exact: true });
+    const edit = page.locator('[data-full-annotation-action="edit"]');
     await edit.click();
 
     const composer = page.getByRole('region', { name: 'Edit Page Note' });
@@ -822,7 +822,7 @@ test.describe('canonical review workflow', () => {
     await page.locator('[data-review-item]').last()
       .getByRole('button', { name: /Read full Page Note annotation/u }).click();
     const reader = page.locator('[data-full-annotation-reader="true"]');
-    const edit = reader.getByRole('button', { name: 'Edit', exact: true });
+    const edit = page.locator('[data-full-annotation-action="edit"]');
     await edit.click();
     const composer = page.getByRole('region', { name: 'Edit Page Note' });
     const refreshed = 'Applied reader text stays long enough to remain a full annotation. '.repeat(6);
@@ -845,7 +845,7 @@ test.describe('canonical review workflow', () => {
     const itemId = await row.getAttribute('data-review-item');
     await row.getByRole('button', { name: /Read full Page Note annotation/u }).click();
     const reader = page.locator('[data-full-annotation-reader="true"]');
-    await reader.getByRole('button', { name: 'Edit', exact: true }).click();
+    await page.locator('[data-full-annotation-action="edit"]').click();
     const composer = page.getByRole('region', { name: 'Edit Page Note' });
     await composer.getByRole('textbox', { name: 'Comment' }).fill('Short note.');
     await composer.getByRole('button', { name: 'Apply', exact: true }).click();
@@ -910,8 +910,7 @@ test.describe('canonical review workflow', () => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     }));
 
-    const heading = page.getByRole('heading', { name: 'Full annotation — Page Note, page 3' });
-    await expect(heading).toBeFocused();
+    await expect(page.locator('[data-full-annotation-action="back"]')).toBeFocused();
     await expect(page.locator('[data-navigated]')).toHaveAttribute('data-navigated', secondId!);
     await expect(page.locator('[data-annotation-scroll-viewport]')).toHaveJSProperty('scrollTop', 0);
   });
@@ -929,7 +928,7 @@ test.describe('canonical review workflow', () => {
     );
     const reader = page.locator('[data-full-annotation-reader="true"]');
     await expect(reader).toContainText('Source comment with enough authored detail');
-    await expect(reader.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
+    await expect(page.locator('[data-full-annotation-action="edit"]')).toHaveCount(0);
   });
 
   test('rejects stale document and imported-generation restoration state', async ({ page }) => {
@@ -974,7 +973,7 @@ test.describe('canonical review workflow', () => {
     const itemId = await row.getAttribute('data-review-item');
     await row.getByRole('button', { name: /Read full Highlight annotation/u }).click();
     const reader = page.locator('[data-full-annotation-reader="true"]');
-    await reader.getByRole('button', { name: 'Edit', exact: true }).click();
+    await page.locator('[data-full-annotation-action="edit"]').click();
     const editor = page.getByRole('region', { name: 'Edit Highlight' });
     await editor.getByRole('textbox', { name: 'Comment (optional)' }).fill('');
     await editor.getByRole('button', { name: 'Apply', exact: true }).click();
@@ -1008,8 +1007,7 @@ test.describe('canonical review workflow', () => {
     }).last();
     const itemId = await row.getAttribute('data-review-item');
     await row.getByRole('button', { name: /Read full Page Note annotation/u }).click();
-    await page.locator('[data-full-annotation-reader="true"]')
-      .getByRole('button', { name: 'Edit', exact: true }).click();
+    await page.locator('[data-full-annotation-action="edit"]').click();
 
     await page.getByRole('button', { name: 'Replace source authority' }).evaluate((button) => {
       button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -1022,8 +1020,7 @@ test.describe('canonical review workflow', () => {
       .locator('.annotation-item__navigation').click();
     await page.locator(`[data-review-item="${itemId}"]`)
       .getByRole('button', { name: /Read full Page Note annotation/u }).click();
-    await page.locator('[data-full-annotation-reader="true"]')
-      .getByRole('button', { name: 'Edit', exact: true }).click();
+    await page.locator('[data-full-annotation-action="edit"]').click();
     await page.getByRole('button', { name: 'Remove active annotation' }).evaluate((button) => {
       button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });

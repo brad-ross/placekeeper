@@ -139,17 +139,6 @@
     opacity: 1;
   }
 
-  .review-workspace .annotation-item__more {
-    right: 6px;
-    bottom: 2px;
-    min-width: 4.75rem;
-    min-height: var(--review-control-touch);
-  }
-
-  .annotation-item__excerpt[data-full-annotation-eligible="true"] {
-    padding-inline-end: 5.25rem;
-  }
-
   .row-action-group__direct {
     display: none;
   }

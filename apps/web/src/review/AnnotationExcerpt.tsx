@@ -93,14 +93,11 @@ export function AnnotationExcerpt({
   );
 
   return (
-    <>
-      <span
-        ref={excerptRef}
-        className="annotation-item__excerpt"
-        data-full-annotation-eligible={enabled ? 'true' : 'false'}
-      >
-        {content}
-      </span>
+    <span
+      ref={excerptRef}
+      className="annotation-item__excerpt"
+      data-full-annotation-eligible={enabled ? 'true' : 'false'}
+    >
       {enabled ? (
         <button
           type="button"
@@ -117,6 +114,7 @@ export function AnnotationExcerpt({
           More ›
         </button>
       ) : null}
-    </>
+      <span className="annotation-item__excerpt-text">{content}</span>
+    </span>
   );
 }

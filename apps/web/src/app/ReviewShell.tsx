@@ -285,7 +285,7 @@ interface FullAnnotationReaderSession {
   readonly authority: AuthoringAuthority;
   readonly annotationScrollTop: number;
   readonly previousActiveItemId?: string;
-  readonly entryFocus?: 'heading' | 'edit';
+  readonly entryFocus?: 'back' | 'edit';
 }
 
 function annotationReaderIdentityMatches(
@@ -665,6 +665,14 @@ export function ReviewShell(props: ReviewShellProps) {
     const viewport = shellRef.current
       ?.querySelector<HTMLElement>('[data-annotation-scroll-viewport]');
     if (viewport) viewport.scrollTop = 0;
+  }, [annotationReaderOpen, annotationReaderSession]);
+
+  useLayoutEffect(() => {
+    if (annotationReaderSession === null || !annotationReaderOpen) return;
+    const action = annotationReaderSession.entryFocus ?? 'back';
+    shellRef.current
+      ?.querySelector<HTMLElement>(`[data-full-annotation-action="${action}"]`)
+      ?.focus({ preventScroll: true });
   }, [annotationReaderOpen, annotationReaderSession]);
 
   const openOwnedAnnotationReader = (
@@ -1838,15 +1846,10 @@ export function ReviewShell(props: ReviewShellProps) {
               <FullAnnotationReader
                 record={annotationReaderRecord}
                 onBack={() => restoreAnnotationList(annotationReaderSession)}
-                {...(annotationReaderSession.entryFocus === undefined ? {} : {
-                  entryFocus: annotationReaderSession.entryFocus,
-                })}
                 {...(annotationReaderOwnedItemId === undefined ? {} : {
                   onEdit: (trigger: HTMLButtonElement) => {
                     if (authoringSessionRef.current !== null) return;
-                    const item = props.state.items.find(
-                      ({ id }) => id === annotationReaderOwnedItemId,
-                    );
+                    const item = props.state.items.find(({ id }) => id === annotationReaderOwnedItemId);
                     if (item === undefined) {
                       restoreAnnotationList(annotationReaderSession, { preferRowTarget: true });
                       return;

@@ -109,8 +109,12 @@ async function expectAnnotationEndcapGeometry(row: Locator, more: Locator): Prom
         height: endcapBounds.height,
       },
       excerptPaddingInlineEnd: Number.parseFloat(excerptStyle.paddingInlineEnd),
-      backgroundColor: style.backgroundColor,
+      isExcerptChild: endcap.parentElement === excerpt,
+      backgroundImage: style.backgroundImage,
       borderRadius: style.borderRadius,
+      cssFloat: style.cssFloat,
+      paddingInlineStart: Number.parseFloat(style.paddingInlineStart),
+      paddingInlineEnd: Number.parseFloat(style.paddingInlineEnd),
       overlaps,
     };
   });
@@ -118,10 +122,14 @@ async function expectAnnotationEndcapGeometry(row: Locator, more: Locator): Prom
   expect(geometry.endcap.right).toBeLessThanOrEqual(geometry.content.right + 0.5);
   expect(geometry.endcap.top).toBeGreaterThanOrEqual(geometry.content.top);
   expect(geometry.endcap.bottom).toBeLessThanOrEqual(geometry.content.bottom + 0.5);
-  expect(geometry.excerptPaddingInlineEnd).toBeGreaterThanOrEqual(geometry.endcap.width);
+  expect(geometry.excerptPaddingInlineEnd).toBe(0);
+  expect(geometry.isExcerptChild).toBe(true);
   expect(geometry.overlaps).toBe(0);
-  expect(geometry.backgroundColor).toBe('rgba(0, 0, 0, 0)');
+  expect(geometry.backgroundImage).toBe('none');
   expect(geometry.borderRadius).toBe('0px');
+  expect(geometry.cssFloat).toBe('right');
+  expect(geometry.paddingInlineStart).toBe(0);
+  expect(geometry.paddingInlineEnd).toBe(0);
   await expect(more).toHaveText('More ›');
 }
 
@@ -129,23 +137,40 @@ async function expectCompactAnnotationReader(page: Page): Promise<Locator> {
   const reader = page.locator('[data-full-annotation-reader="true"]');
   await expect(reader).toBeVisible();
   const hierarchy = await reader.evaluate((element) => {
-    const heading = element.querySelector<HTMLElement>('.full-annotation-reader__header h2');
     const metadata = element.querySelector<HTMLElement>('.full-annotation-reader__metadata');
     const body = element.querySelector<HTMLElement>('.full-annotation-reader__body p');
-    if (!heading || !metadata || !body) throw new Error('Full annotation reader hierarchy is incomplete.');
+    if (!metadata || !body) throw new Error('Full annotation reader hierarchy is incomplete.');
     return {
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
       gap: Number.parseFloat(getComputedStyle(element).gap),
-      headingSize: Number.parseFloat(getComputedStyle(heading).fontSize),
       metadataSize: Number.parseFloat(getComputedStyle(metadata).fontSize),
       bodySize: Number.parseFloat(getComputedStyle(body).fontSize),
     };
   });
   expect(hierarchy.scrollWidth).toBeLessThanOrEqual(hierarchy.clientWidth + 1);
   expect(hierarchy.gap).toBeLessThanOrEqual(18);
-  expect(hierarchy.headingSize).toBeGreaterThan(hierarchy.bodySize);
   expect(hierarchy.bodySize).toBeGreaterThan(hierarchy.metadataSize);
+  await expect(reader).not.toContainText('Full annotation —');
+
+  const metadataBarBox = await reader.locator('.full-annotation-reader__metadata-bar').boundingBox();
+  const metadataBox = await reader.locator('.full-annotation-reader__metadata').boundingBox();
+  const backBox = await reader.locator('[data-full-annotation-action="back"]').boundingBox();
+  const edit = reader.locator('[data-full-annotation-action="edit"]');
+  const editBox = await edit.count() === 0 ? null : await edit.boundingBox();
+  if (!metadataBarBox || !metadataBox || !backBox) {
+    throw new Error('Reader metadata actions are unavailable.');
+  }
+  expect(backBox.x).toBeGreaterThanOrEqual(metadataBox.x + metadataBox.width);
+  expect(backBox.x + backBox.width).toBeLessThanOrEqual(
+    metadataBarBox.x + metadataBarBox.width + 0.5,
+  );
+  if (editBox !== null) {
+    expect(editBox.x).toBeGreaterThan(backBox.x + backBox.width);
+    expect(editBox.x + editBox.width).toBeLessThanOrEqual(
+      metadataBarBox.x + metadataBarBox.width + 0.5,
+    );
+  }
   return reader;
 }
 
@@ -434,7 +459,7 @@ test('wide Annotation Tray', async ({ page }) => {
   await more.click();
   const reader = await expectCompactAnnotationReader(page);
   await expect(reader).toHaveAttribute('data-annotation-origin', 'owned');
-  await expect(reader.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
+  await expect(page.locator('[data-full-annotation-action="edit"]')).toBeVisible();
   await expect(reader).toContainText('complete reviewer-authored argument');
   await expect(reader).not.toContainText('identifying variation is local to the comparison group');
   await expectScene(product, 'wide-full-annotation-reader-owned.png');
@@ -481,7 +506,11 @@ test('narrow Annotation Tray', async ({ page }) => {
   await expectAnnotationEndcapGeometry(imported, more);
   const endcapTarget = await more.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
-    return { width: bounds.width, height: bounds.height };
+    const hitArea = getComputedStyle(element, '::before');
+    return {
+      width: bounds.width - Number.parseFloat(hitArea.left) - Number.parseFloat(hitArea.right),
+      height: bounds.height - Number.parseFloat(hitArea.top) - Number.parseFloat(hitArea.bottom),
+    };
   });
   expect(endcapTarget.width).toBeGreaterThanOrEqual(44);
   expect(endcapTarget.height).toBeGreaterThanOrEqual(28);
@@ -497,10 +526,10 @@ test('narrow Annotation Tray', async ({ page }) => {
   await expect(reader).toContainText('B. Collaborator');
   await expect(reader).toContainText('Read only');
   await expect(reader).toContainText('reported robustness checks isolate the same comparison group');
-  await expect(reader.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
+  await expect(page.locator('[data-full-annotation-action="edit"]')).toHaveCount(0);
   await expectScene(product, 'narrow-full-annotation-reader-imported.png');
 
-  await reader.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.locator('[data-full-annotation-action="back"]').click();
   await expect(more).toBeFocused();
   await expect.poll(() => scrollViewport.evaluate((element) => element.scrollTop)).toBe(scrollBefore);
 });

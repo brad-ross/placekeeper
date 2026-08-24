@@ -11,7 +11,10 @@ import {
 } from '../src/app/ReviewShell.js';
 import { AnnotationList } from '../src/review/AnnotationList.js';
 import { AnnotationPeek } from '../src/review/AnnotationPeek.js';
-import { FullAnnotationReader } from '../src/review/FullAnnotationReader.js';
+import {
+  FullAnnotationReader,
+  FullAnnotationReaderActions,
+} from '../src/review/FullAnnotationReader.js';
 import {
   ReviewChrome,
   resolveZoomDraft,
@@ -74,6 +77,7 @@ describe('review shell layout and accessibility contract', () => {
   it('renders full annotation content as a focused tray detail without source text', () => {
     const html = renderToStaticMarkup(
       <FullAnnotationReader
+        onBack={() => undefined}
         record={{
           identity: { origin: 'owned', itemId: 'owned-highlight' },
           origin: 'owned',
@@ -85,12 +89,12 @@ describe('review shell layout and accessibility contract', () => {
           content: 'Clarify the identifying variation behind this claim.',
           mutable: true,
         }}
-        onBack={() => undefined}
       />,
     );
 
     expect(html).toContain('data-full-annotation-reader="true"');
-    expect(html).toContain('tabindex="-1">Full annotation — Highlight, page 4</h2>');
+    expect(html).toContain('aria-label="Full Highlight annotation on page 4"');
+    expect(html).not.toContain('Full annotation — Highlight, page 4');
     expect(html).toContain('Identification');
     expect(html).toContain('Comment');
     expect(html).toContain('Clarify the identifying variation behind this claim.');
@@ -99,9 +103,9 @@ describe('review shell layout and accessibility contract', () => {
   });
 
   it('keeps imported full annotations read-only while retaining available author metadata', () => {
-    const onEdit = vi.fn();
     const html = renderToStaticMarkup(
       <FullAnnotationReader
+        onBack={() => undefined}
         record={{
           identity: {
             origin: 'source',
@@ -118,8 +122,6 @@ describe('review shell layout and accessibility contract', () => {
           content: 'A source-owned comment.',
           mutable: false,
         }}
-        onBack={() => undefined}
-        onEdit={onEdit}
       />,
     );
 
@@ -130,23 +132,16 @@ describe('review shell layout and accessibility contract', () => {
 
   it('exposes Edit only for a mutable owned full annotation', () => {
     const html = renderToStaticMarkup(
-      <FullAnnotationReader
-        record={{
-          identity: { origin: 'owned', itemId: 'owned-highlight' },
-          origin: 'owned',
-          kind: 'highlight',
-          typeLabel: 'Highlight',
-          pageNumber: 4,
-          contentLabel: 'Comment',
-          content: 'Clarify the identifying variation behind this claim.',
-          mutable: true,
-        }}
+      <FullAnnotationReaderActions
         onBack={() => undefined}
         onEdit={() => undefined}
       />,
     );
 
-    expect(html).toContain('>Edit<');
+    expect(html).toContain('aria-label="Back"');
+    expect(html).toContain('aria-label="Edit"');
+    expect(html).not.toContain('>Back<');
+    expect(html).not.toContain('>Edit<');
   });
 
   it('switches row actions at one shared geometry-derived container boundary', () => {
