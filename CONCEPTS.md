@@ -43,6 +43,8 @@ The reliable PDF insertion target that couples an exact extracted-text boundary 
 
 Only geometry capable of owning or changing the pointer's text edge participates in click-specific ambiguity checks; unrelated distant geometry does not veto the anchor, while local ambiguity fails closed.
 
+The anchor remains the durable authority after placement. Its browser-space caret coordinates are a transient projection that must be recomputed when rendered page geometry changes.
+
 ### Selection Snapshot
 The temporally consistent combination of selected text, extracted-text offsets, and page-space rectangles used to create a PDF text annotation anchor.
 
@@ -73,7 +75,7 @@ Identity is ownership and editability evidence, not the annotation's visual appe
 ### Crop-relative Geometry
 The coordinate contract for Review Item rectangles: positions are measured from the visible page canvas inside the page crop boundary, before viewer rotation or scale.
 
-Rotation and scale are presentation transforms. Persistent annotations and viewer projections do not add the crop origin; legacy offset coordinates are migrated once before use.
+Rotation, scale, and viewport offsets are presentation transforms. Persistent annotations and viewer projections do not add the crop origin; browser-space coordinates are derived from current page geometry, while legacy offset coordinates are migrated once before use.
 
 ### Save Destination
 The PDF selected to receive automatic annotation changes, either the safely validated opened document or a distinct copy.
