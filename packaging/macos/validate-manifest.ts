@@ -19,15 +19,15 @@ export const CATALOG_DISTRIBUTION_BASELINE = {
     normalizedName: 4_724,
   },
   artifactBytes: {
-    runtime: 400_389,
-    report: 7_181,
+    runtime: 406_546,
+    report: 7_361,
   },
   artifactSha256: {
-    runtime: "e7d653177705de1acbba73848edc5071779bbdf76be82d2d92bee62ed4fb2fa0",
-    report: "98a4eca4e8a546f5302f9a7989c156528f7f5709464a35d61cee5636f2254a36",
+    runtime: "423428687dab0b6049a86d85f879df79f2fee251322d53ad314ae1effd616e3b",
+    report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
     thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
   },
-  productionWebJavaScriptBytes: 2_369_939,
+  productionWebJavaScriptBytes: 2_387_440,
 } as const;
 
 const CATALOG_ATTRIBUTION_URLS = [
