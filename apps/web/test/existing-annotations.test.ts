@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ExistingAnnotationDiscoveryAuthority,
+  existingAnnotationKey,
   inventoryExistingAnnotations,
   mergeExistingAnnotations,
 } from '../src/pdf/existing-annotations.js';
@@ -49,6 +50,19 @@ describe('existing annotation discovery state', () => {
       ['same', 'discovered'],
       ['discovered', 'discovered'],
       ['explicit', 'explicit'],
+    ]);
+  });
+
+  it('excludes editable owned annotations while preserving foreign annotations', () => {
+    const owned = inventoryExistingAnnotations([source('owned')])[0]!;
+    const foreign = {
+      ...inventoryExistingAnnotations([source('owned')])[0]!,
+      pageIndex: 1,
+      author: 'Placekeeper',
+    };
+
+    expect(mergeExistingAnnotations([owned, foreign], [], [owned]).map(existingAnnotationKey)).toEqual([
+      '1:owned',
     ]);
   });
 

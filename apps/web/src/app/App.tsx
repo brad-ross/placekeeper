@@ -303,6 +303,12 @@ export function App({
   } | null>(null);
   const explicitAnnotationsRef = useRef(existingAnnotations);
   explicitAnnotationsRef.current = existingAnnotations;
+  const ownedAnnotationsRef = useRef(ownedAnnotations);
+  ownedAnnotationsRef.current = ownedAnnotations;
+  const sourceOwnedAnnotations = useRef(new WeakMap<
+    object,
+    readonly Pick<ExistingAnnotation, 'id' | 'pageIndex'>[]
+  >());
   const ownedGeometryByPage = useMemo(
     () => groupOwnedMarkGeometryByPage(ownedAnnotations),
     [ownedAnnotations],
@@ -325,6 +331,11 @@ export function App({
     document: Parameters<typeof inventoryDocumentAnnotations>[1],
   ) => {
     currentInventoryDocument.current = { id: documentId, document };
+    let owned = sourceOwnedAnnotations.current.get(document);
+    if (owned === undefined) {
+      owned = ownedAnnotationsRef.current.map(({ id, pageIndex }) => ({ id, pageIndex }));
+      sourceOwnedAnnotations.current.set(document, owned);
+    }
     const token = inventoryAuthority.current.begin(documentId);
     publishInventory({ status: 'loading', generation: token.generation });
     void inventoryDocumentAnnotations(viewer.engine, document).then(
@@ -333,6 +344,7 @@ export function App({
           token,
           discovered,
           explicitAnnotationsRef.current,
+          owned,
         );
         if (result) publishInventory(result);
       },
@@ -1006,7 +1018,7 @@ export function App({
         {inventoryState.status === 'error' ? <p role="alert">Existing annotations unavailable.</p> : null}
         {inventoryState.status === 'empty' ? <p>None</p> : null}
         <ol>
-          {mergeExistingAnnotations(sourceAnnotations, existingAnnotations).map((annotation, index) => (
+          {mergeExistingAnnotations(sourceAnnotations, existingAnnotations, ownedAnnotations).map((annotation, index) => (
             <li key={`${annotation.pageIndex}:${annotation.id}:${index}`}>
               <span>{annotation.subtype}</span>{' '}
               <span>{`Page ${annotation.pageIndex + 1}`}</span>{' '}

@@ -70,17 +70,22 @@ export function existingAnnotationKey(
 export function mergeExistingAnnotations(
   discovered: readonly ExistingAnnotation[],
   explicit: readonly ExistingAnnotation[],
+  owned: readonly Pick<ExistingAnnotation, 'id' | 'pageIndex'>[] = [],
 ): readonly ExistingAnnotation[] {
   const merged = new Map<string, ExistingAnnotation>();
+  const ownedKeys = new Set(owned.map(existingAnnotationKey));
   for (const annotation of discovered) {
-    if (!isNavigationalPdfAnnotationSubtype(annotation.subtype)) {
+    if (
+      !ownedKeys.has(existingAnnotationKey(annotation)) &&
+      !isNavigationalPdfAnnotationSubtype(annotation.subtype)
+    ) {
       merged.set(existingAnnotationKey(annotation), annotation);
     }
   }
   for (const annotation of explicit) {
     if (isNavigationalPdfAnnotationSubtype(annotation.subtype)) continue;
     const key = existingAnnotationKey(annotation);
-    if (!merged.has(key)) merged.set(key, annotation);
+    if (!ownedKeys.has(key) && !merged.has(key)) merged.set(key, annotation);
   }
   return [...merged.values()];
 }
@@ -105,9 +110,10 @@ export class ExistingAnnotationDiscoveryAuthority {
     token: ExistingAnnotationDiscoveryToken,
     discovered: readonly ExistingAnnotation[],
     explicit: readonly ExistingAnnotation[],
+    owned: readonly Pick<ExistingAnnotation, 'id' | 'pageIndex'>[] = [],
   ): ExistingAnnotationsDiscovery | null {
     if (!this.isCurrent(token)) return null;
-    const items = mergeExistingAnnotations(discovered, explicit);
+    const items = mergeExistingAnnotations(discovered, explicit, owned);
     return items.length === 0
       ? { status: 'empty', generation: token.generation, items: [] }
       : { status: 'ready', generation: token.generation, items };
