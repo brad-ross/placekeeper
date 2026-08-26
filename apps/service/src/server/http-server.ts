@@ -8,6 +8,7 @@ import {
   validateRequestSecurity,
 } from "../../../../packages/core/src/session-security.js";
 import type { ReviewCommand } from "../../../../packages/core/src/review-model.js";
+import { InvalidReviewCommandError } from "../../../../packages/core/src/review-reducer.js";
 import { isContained } from "../files/file-capabilities.js";
 import {
   isRecoveryDecision,
@@ -666,7 +667,12 @@ export async function startHttpServer(
       }
       send(response, 404, "Not found");
     } catch (error) {
-      if (error instanceof RangeError) {
+      if (error instanceof InvalidReviewCommandError) {
+        sendJson(response, 422, {
+          ok: false,
+          error: { kind: "invalid-review-command", message: error.message },
+        });
+      } else if (error instanceof RangeError) {
         send(response, 413, "Request rejected");
       } else if (error instanceof SyntaxError) {
         send(response, 400, "Invalid request");

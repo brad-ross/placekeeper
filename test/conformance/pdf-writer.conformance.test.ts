@@ -215,6 +215,72 @@ describe('EmbedPDF writer gate', () => {
     );
   });
 
+  it('round-trips a 33-segment highlight with prior Placekeeper marks and source links intact', async () => {
+    const timestamp = '2026-08-25T12:00:00.000Z';
+    const priorHighlight: ReviewItem = {
+      id: '80000000-0000-4000-8000-000000000008',
+      kind: 'highlight',
+      pageIndex: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      payload: {
+        quote: 'prior highlight',
+        prefix: '',
+        suffix: '',
+        rect: { x: 72, y: 72, width: 90, height: 8 },
+        segmentRects: [{ x: 72, y: 72, width: 90, height: 8 }],
+        reliable: true,
+      },
+    };
+    const segmentRects = Array.from({ length: 33 }, (_, index) => ({
+      x: 72,
+      y: 92 + index * 8,
+      width: 120,
+      height: 8,
+    }));
+    const longHighlight: ReviewItem = {
+      id: '90000000-0000-4000-8000-000000000009',
+      kind: 'highlight',
+      pageIndex: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      payload: {
+        quote: 'legitimate long selection',
+        prefix: '',
+        suffix: '',
+        rect: { x: 72, y: 92, width: 120, height: 264 },
+        segmentRects,
+        reliable: true,
+      },
+    };
+    const first = await runPdfBackend(
+      await createEmbedPdfWriter(),
+      await requestFor('preservation-corpus.pdf', [projectReviewItem(priorHighlight)]),
+    );
+    const second = await runPdfBackend(await createEmbedPdfWriter(), {
+      sourcePdf: first.pdfBytes,
+      sourceSha256: sha256(first.pdfBytes),
+      revision: 7,
+      annotations: [projectReviewItem(priorHighlight), projectReviewItem(longHighlight)],
+    });
+    const reopened = await inspectPdfWithEmbedPdf(second.pdfBytes);
+
+    expect(reopened.portableItems).toEqual(
+      expect.arrayContaining([priorHighlight, longHighlight]),
+    );
+    expect(reopened.portableItems).toHaveLength(2);
+    expect(reopened.annotations.map(({ id }) => id)).toEqual(expect.arrayContaining([
+      'preserved-link',
+      priorHighlight.id,
+      longHighlight.id,
+    ]));
+    expect(reopened.annotations.find(({ id }) => id === longHighlight.id)?.segmentRects)
+      .toEqual(segmentRects.map(({ x, y, width, height }) => ({
+        origin: { x, y },
+        size: { width, height },
+      })));
+  });
+
   it('writes all five standard mappings, reopens, and preserves the source and existing annotations', async () => {
     const request = await requestFor('text-native-with-annotations.pdf');
     const original = request.sourcePdf.slice();

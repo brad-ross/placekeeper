@@ -16,6 +16,10 @@ import type {
 } from "../../../../packages/core/src/save-status.js";
 export type { SaveFailureReason } from "../../../../packages/core/src/save-status.js";
 import { ensurePrivateDirectory } from "./source-snapshot.js";
+import {
+  isRecoveryTemporaryPathActive,
+  trackRecoveryTemporaryPath,
+} from "./temporary-path-registry.js";
 
 export interface LegacyRecoverableDraft {
   readonly schemaVersion: 1;
@@ -138,7 +142,9 @@ export class DraftSnapshotStore {
       entries
         .filter(
           (entry) =>
-            entry.isFile() && /^\.(?:draft|source)-.*\.tmp$/u.test(entry.name),
+            entry.isFile() &&
+            /^\.(?:draft|source)-.*\.tmp$/u.test(entry.name) &&
+            !isRecoveryTemporaryPathActive(join(this.directory, entry.name)),
         )
         .map((entry) => rm(join(this.directory, entry.name), { force: true })),
     );
@@ -148,16 +154,16 @@ export class DraftSnapshotStore {
     await this.initialize();
     signal?.throwIfAborted();
     const temporaryPath = join(this.directory, `.draft-${randomUUID()}.tmp`);
-    const handle = await open(temporaryPath, "wx", 0o600);
+    const stopTracking = trackRecoveryTemporaryPath(temporaryPath);
     try {
-      await handle.chmod(0o600);
-      await handle.writeFile(serialize(draft), "utf8");
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-
-    try {
+      const handle = await open(temporaryPath, "wx", 0o600);
+      try {
+        await handle.chmod(0o600);
+        await handle.writeFile(serialize(draft), "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
       await this.#hooks.afterTemporarySync?.();
       signal?.throwIfAborted();
       try {
@@ -180,6 +186,8 @@ export class DraftSnapshotStore {
     } catch (error) {
       await rm(temporaryPath, { force: true });
       throw error;
+    } finally {
+      stopTracking();
     }
   }
 

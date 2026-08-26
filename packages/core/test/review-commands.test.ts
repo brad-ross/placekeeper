@@ -11,7 +11,11 @@ import {
   type ReviewCommandFactory,
 } from '../src/review-commands.js';
 import { createReviewState, type ReviewState } from '../src/review-model.js';
-import { InvalidReviewCommandError, reduceReview } from '../src/review-reducer.js';
+import {
+  InvalidReviewCommandError,
+  MAX_REVIEW_SELECTION_SEGMENTS,
+  reduceReview,
+} from '../src/review-reducer.js';
 
 const source = { fileId: 'source-file', digest: 'a'.repeat(64), byteLength: 10 };
 const selection = {
@@ -154,5 +158,23 @@ describe('canonical review commands', () => {
       ...deleteCommand,
       item: { ...deleteCommand.item, payload: untrustedPayload },
     })).toThrow(InvalidReviewCommandError);
+  });
+
+  it('accepts bounded long selections and rejects larger ones with an actionable error', () => {
+    const { state, commands } = setup();
+    const segment = { x: 72, y: 92, width: 12, height: 8 };
+    const maximum = {
+      ...selection,
+      segmentRects: Array.from({ length: MAX_REVIEW_SELECTION_SEGMENTS }, () => ({ ...segment })),
+    };
+    expect(() => reduceReview(state, addHighlight(state, maximum, undefined, commands)))
+      .not.toThrow();
+
+    const tooLong = {
+      ...selection,
+      segmentRects: [...maximum.segmentRects, { ...segment }],
+    };
+    expect(() => reduceReview(state, addHighlight(state, tooLong, undefined, commands)))
+      .toThrow(`Selections can contain at most ${MAX_REVIEW_SELECTION_SEGMENTS} text segments. Shorten the selection and try again.`);
   });
 });
