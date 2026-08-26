@@ -24,6 +24,7 @@ import {
   type RecoverableDraft,
 } from "../src/recovery/draft-snapshot.js";
 import { enforceRetention } from "../src/recovery/retention.js";
+import { createSourceSnapshot } from "../src/recovery/source-snapshot.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
 import { hashFile } from "../src/files/file-capabilities.js";
 
@@ -67,6 +68,25 @@ function addCommand(expectedRevision: number, comment = "remember this"): Review
     },
   };
 }
+
+describe("source snapshot creation", () => {
+  it("uses collision-resistant temporary files for concurrent snapshots", async () => {
+    const directory = await temporaryDirectory();
+    const source = join(directory, "paper.pdf");
+    const sessionDirectory = join(directory, "recovery", randomUUID());
+    const bytes = "%PDF-1.7\nconcurrent snapshot\n%%EOF";
+    await writeFile(source, bytes);
+    vi.spyOn(Date, "now").mockReturnValue(1_777_777_777_777);
+
+    const snapshots = await Promise.all([
+      createSourceSnapshot(source, sessionDirectory),
+      createSourceSnapshot(source, sessionDirectory),
+    ]);
+
+    expect(snapshots[0]).toEqual(snapshots[1]);
+    expect(await readFile(snapshots[0]!.path, "utf8")).toBe(bytes);
+  });
+});
 
 function draft(revision: number): RecoverableDraft {
   const base = createReviewState({
@@ -112,6 +132,29 @@ describe("atomic recovery generations", () => {
     });
     await expect(failing.persist(draft(2))).rejects.toThrow("temporary sync");
     await expect(stable.recover()).resolves.toMatchObject({ state: { revision: 1 } });
+  });
+
+  it("does not clean an in-flight draft temporary file owned by another store", async () => {
+    const directory = await temporaryDirectory();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const writer = new DraftSnapshotStore(directory, {
+      afterTemporarySync: async () => {
+        entered.resolve();
+        await release.promise;
+      },
+    });
+    const persistence = writer.persist(draft(1));
+    await entered.promise;
+
+    try {
+      await new DraftSnapshotStore(directory).initialize();
+    } finally {
+      release.resolve();
+    }
+
+    await expect(persistence).resolves.toBeUndefined();
+    await expect(writer.recover()).resolves.toMatchObject({ state: { revision: 1 } });
   });
 
   it("ignores a torn current file, retains the previous checksum-valid generation, and cleans staging files", async () => {

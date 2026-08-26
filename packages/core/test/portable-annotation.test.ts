@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import { projectReviewItem } from "../src/annotation-projection.js";
 import {
+  assertPortableAnnotationWritable,
   createImportedReviewState,
   createPortableAnnotationCustom,
   decodePortableAnnotationJson,
   inspectPortableAnnotation,
+  inspectProjectedPortableAnnotation,
   PORTABLE_ANNOTATION_MAX_BYTES,
 } from "../src/portable-annotation.js";
 import type { ReviewItem } from "../src/review-model.js";
+import { MAX_REVIEW_SELECTION_SEGMENTS } from "../src/review-reducer.js";
 
 const item: ReviewItem = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -136,6 +139,74 @@ describe("portable annotation codec", () => {
     })).toMatchObject({ status: "invalid", reason: "projection-mismatch" });
   });
 
+  it("round-trips a legitimate highlight with 33 text segments", () => {
+    const segmentRects = Array.from({ length: 33 }, (_, index) => ({
+      x: 72 + index,
+      y: 92 + index * 8,
+      width: 90,
+      height: 8,
+    }));
+    const longHighlight: ReviewItem = {
+      ...item,
+      kind: "highlight",
+      pageIndex: 25,
+      payload: {
+        quote: "A legitimate selection spanning many lines",
+        prefix: "",
+        suffix: "",
+        rect: { x: 72, y: 92, width: 122, height: 264 },
+        segmentRects,
+        reliable: true,
+      },
+    };
+
+    expect(inspectProjectedPortableAnnotation(projectReviewItem(longHighlight))).toEqual({
+      status: "owned",
+      item: longHighlight,
+    });
+  });
+
+  it("keeps the command-level segment ceiling within the portable metadata bounds", () => {
+    const maximumHighlight: ReviewItem = {
+      ...item,
+      kind: "highlight",
+      payload: {
+        quote: "A selection at the supported geometry limit",
+        prefix: "",
+        suffix: "",
+        rect: { x: 72, y: 92, width: 122, height: 1_024 },
+        segmentRects: Array.from({ length: MAX_REVIEW_SELECTION_SEGMENTS }, (_, index) => ({
+          x: 72,
+          y: 92 + index * 8,
+          width: 90,
+          height: 8,
+        })),
+        reliable: true,
+      },
+    };
+
+    const maximumAnnotation = projectReviewItem(maximumHighlight);
+    expect(inspectProjectedPortableAnnotation(maximumAnnotation))
+      .toMatchObject({ status: "owned" });
+    expect(() => assertPortableAnnotationWritable(maximumAnnotation)).not.toThrow();
+
+    const overLimit: ReviewItem = {
+      ...maximumHighlight,
+      payload: {
+        ...maximumHighlight.payload,
+        segmentRects: [
+          ...(maximumHighlight.payload.segmentRects as readonly Record<string, number>[]),
+          { x: 72, y: 92 + MAX_REVIEW_SELECTION_SEGMENTS * 8, width: 90, height: 8 },
+        ],
+      },
+    };
+    const overLimitAnnotation = projectReviewItem(overLimit);
+    expect(inspectProjectedPortableAnnotation(overLimitAnnotation))
+      .toMatchObject({ status: "invalid", reason: "unsafe-shape" });
+    expect(() => assertPortableAnnotationWritable(overLimitAnnotation))
+      .toThrow(/too complex to preserve as editable metadata/u);
+  });
+
   it("bounds raw JSON before parsing and does not include rejected input in errors", () => {
     const secret = "PRIVATE-SECRET";
     const oversized = JSON.stringify({
@@ -145,6 +216,20 @@ describe("portable annotation codec", () => {
 
     expect(result).toMatchObject({ status: "invalid", reason: "too-large" });
     expect(JSON.stringify(result)).not.toContain(secret);
+  });
+
+  it("retains bounded traversal for hostile nested containers", () => {
+    const hostile = {
+      placekeeper: Array.from(
+        { length: 128 },
+        () => Array.from({ length: 128 }, () => null),
+      ),
+    };
+
+    expect(inspectPortableAnnotation(hostile, visible)).toEqual({
+      status: "invalid",
+      reason: "unsafe-shape",
+    });
   });
 
   it("creates a fresh imported review state with empty undo history", () => {

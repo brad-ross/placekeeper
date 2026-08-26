@@ -217,6 +217,23 @@ export async function loadProductionSession(session: ProductionSession): Promise
             message: "Another review window changed this draft. The latest saved revision is shown; retry your command.",
           };
         }
+        if (response.status === 422) {
+          const rejected: unknown = await response.json().catch(() => undefined);
+          if (
+            isObject(rejected) && rejected.ok === false &&
+            isObject(rejected.error) &&
+            rejected.error.kind === "invalid-review-command" &&
+            typeof rejected.error.message === "string" &&
+            rejected.error.message.length > 0 && rejected.error.message.length <= 512
+          ) {
+            return {
+              accepted: false,
+              state: await request<ReviewState>("/state"),
+              message: rejected.error.message,
+              reason: "rejected",
+            };
+          }
+        }
         if (!response.ok) throw new Error(`The local review action failed safely (${response.status}).`);
         return response.json() as Promise<ReviewState>;
       },

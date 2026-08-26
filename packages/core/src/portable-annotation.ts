@@ -5,13 +5,19 @@ import type {
   ReviewSourceIdentity,
   ReviewState,
 } from "./review-model.js";
-import { assertReviewItem } from "./review-reducer.js";
+import {
+  assertReviewItem,
+  InvalidReviewCommandError,
+  MAX_REVIEW_SELECTION_SEGMENTS,
+} from "./review-reducer.js";
 
 export const PORTABLE_ANNOTATION_MAX_BYTES = 32 * 1024;
 export const PORTABLE_ANNOTATION_AUTHOR = "Placekeeper";
 const PORTABLE_ANNOTATION_OWNER = "placekeeper";
 const MAX_DEPTH = 12;
-const MAX_KEYS = 128;
+const MAX_PORTABLE_ARRAY_ENTRIES = MAX_REVIEW_SELECTION_SEGMENTS;
+const MAX_OBJECT_ENTRIES = 128;
+const MAX_NODES = 4_096;
 const MAX_STRING_LENGTH = 16 * 1024;
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const KINDS = new Set<ReviewItemKind>([
@@ -75,18 +81,21 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function hasSafeShape(value: unknown, depth = 0, budget = { keys: 0 }): boolean {
-  if (depth > MAX_DEPTH) return false;
+function hasSafeShape(value: unknown, depth = 0, budget = { nodes: 0 }): boolean {
+  budget.nodes += 1;
+  if (depth > MAX_DEPTH || budget.nodes > MAX_NODES) return false;
   if (typeof value === "string") return value.length <= MAX_STRING_LENGTH;
   if (value === null || typeof value === "boolean" || isFiniteNumber(value)) return true;
   if (Array.isArray(value)) {
-    if (value.length > MAX_KEYS) return false;
+    if (value.length > MAX_PORTABLE_ARRAY_ENTRIES) return false;
     return value.every((entry) => hasSafeShape(entry, depth + 1, budget));
   }
   if (!isRecord(value)) return false;
   const keys = Object.keys(value);
-  budget.keys += keys.length;
-  if (budget.keys > MAX_KEYS || keys.some((key) => FORBIDDEN_KEYS.has(key))) return false;
+  if (
+    keys.length > MAX_OBJECT_ENTRIES ||
+    keys.some((key) => FORBIDDEN_KEYS.has(key))
+  ) return false;
   return keys.every((key) => hasSafeShape(value[key], depth + 1, budget));
 }
 
@@ -109,7 +118,7 @@ function isRect(value: unknown): value is EngineRect {
 }
 
 function isReviewItem(value: unknown): value is ReviewItem {
-  if (!isRecord(value) || !hasSafeShape(value)) return false;
+  if (!isRecord(value)) return false;
   const shallowlyValid = (
     typeof value.id === "string" &&
     value.id.length > 0 &&
@@ -123,7 +132,9 @@ function isReviewItem(value: unknown): value is ReviewItem {
   );
   if (!shallowlyValid) return false;
   try {
-    assertReviewItem(value as unknown as ReviewItem);
+    assertReviewItem(value as unknown as ReviewItem, {
+      maxSelectionSegments: MAX_PORTABLE_ARRAY_ENTRIES,
+    });
     return true;
   } catch {
     return false;
@@ -271,6 +282,22 @@ export function createPortableAnnotationCustom(
       projection: projectionFor(item, annotation),
     },
   };
+}
+
+export function assertPortableAnnotationWritable(annotation: ReviewAnnotation): void {
+  if (!hasSafeShape(annotation.custom)) {
+    throw new InvalidReviewCommandError(
+      "This annotation is too complex to preserve as editable metadata. Shorten the selection and try again.",
+    );
+  }
+  if (
+    new TextEncoder().encode(JSON.stringify(annotation.custom)).byteLength >
+      PORTABLE_ANNOTATION_MAX_BYTES
+  ) {
+    throw new InvalidReviewCommandError(
+      "This annotation contains too much text or geometry to preserve as editable metadata. Shorten it and try again.",
+    );
+  }
 }
 
 export function inspectPortableAnnotation(

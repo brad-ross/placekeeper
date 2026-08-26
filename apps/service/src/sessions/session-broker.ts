@@ -17,7 +17,10 @@ import {
   type PlacekeeperLinkLocation,
 } from "../../../../packages/core/src/placekeeper-link.js";
 import { createReviewState } from "../../../../packages/core/src/review-model.js";
-import { createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
+import {
+  assertPortableAnnotationWritable,
+  createImportedReviewState,
+} from "../../../../packages/core/src/portable-annotation.js";
 import { reduceReview } from "../../../../packages/core/src/review-reducer.js";
 import { reviewSemanticDigest } from "../../../../packages/core/src/live-context.js";
 import {
@@ -1630,6 +1633,7 @@ export class SessionBroker {
     try {
       write.signal.throwIfAborted();
       const nextState = reduceReview(session.state, command);
+      projectReviewItems(nextState.items).forEach(assertPortableAnnotationWritable);
       const desiredDigest = reviewStateDigest(nextState);
       const nextSync: DurableSaveSync = {
         phase: session.destination.phase === "active" ? "saving" : "not-saved",

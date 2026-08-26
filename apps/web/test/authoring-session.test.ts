@@ -215,6 +215,27 @@ describe('frozen authoring-session contract', () => {
     });
   });
 
+  it('keeps an over-limit selection previewable until command validation can explain the limit', () => {
+    const longSelection = {
+      ...selection,
+      rect: { x: 10, y: 20, width: 30, height: 1_548 },
+      segmentRects: Array.from({ length: 257 }, (_, index) => ({
+        x: 10,
+        y: 20 + index * 12,
+        width: 30,
+        height: 12,
+      })),
+    };
+    const session = createAuthoringSession(seed({
+      kind: 'highlight',
+      anchor: longSelection,
+      selectionGeneration: 13,
+    }));
+
+    expect(() => authoringPreviewAnnotation(session, 'New comment')).not.toThrow();
+    expect(authoringPreviewAnnotation(session, 'New comment')?.quadPoints).toHaveLength(257);
+  });
+
   it('keeps the first session authoritative when another entry point fires', () => {
     const first = createAuthoringSession(seed({
       kind: 'replace', anchor: selection, initialValue: 'draft', selectionGeneration: 11,

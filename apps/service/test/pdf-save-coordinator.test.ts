@@ -5,10 +5,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { PdfWriterError, type PdfWriter } from "../../../packages/core/src/pdf-writer.js";
-import type { ReviewCommand } from "../../../packages/core/src/review-model.js";
+import { inspectProjectedPortableAnnotation } from "../../../packages/core/src/portable-annotation.js";
+import type { ReviewCommand, ReviewItem, ReviewState } from "../../../packages/core/src/review-model.js";
 import { PdfSaveCoordinator } from "../src/saving/pdf-save-coordinator.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
 import type { DestinationPicker } from "../src/host/destination-picker.js";
+import type { PdfExportVerifier } from "../src/export/pdf-verifier.js";
+import { DraftSnapshotStore, reviewStateDigest } from "../src/recovery/draft-snapshot.js";
 
 const roots: string[] = [];
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -50,6 +53,11 @@ function fakeWriter(beforeWrite: (writeNumber: number) => Promise<void> = async 
   };
 }
 
+const verifyIds: PdfExportVerifier = async ({ annotations }) => ({
+  pageCount: 1,
+  annotationIds: annotations.map(({ id }) => id),
+});
+
 async function setup(
   picker?: DestinationPicker,
   options: {
@@ -75,10 +83,7 @@ async function setup(
   const coordinator = new PdfSaveCoordinator({
     broker,
     writer: options.writer ?? fakeWriter(),
-    verify: async ({ annotations }) => ({
-      pageCount: 1,
-      annotationIds: annotations.map(({ id }) => id),
-    }),
+    verify: verifyIds,
     ...(picker === undefined ? {} : { picker }),
   });
   return { root, source, original, broker, coordinator, sessionId: opened.launch.sessionId };
@@ -108,7 +113,218 @@ function add(expectedRevision: number): ReviewCommand {
   };
 }
 
+function addLongHighlight(expectedRevision: number): ReviewCommand {
+  const command = add(expectedRevision);
+  if (command.type !== "add") throw new Error("Expected an add command");
+  return {
+    ...command,
+    item: {
+      ...command.item,
+      payload: {
+        ...command.item.payload,
+        rect: { x: 1, y: 1, width: 2, height: 264 },
+        segmentRects: Array.from({ length: 33 }, (_, index) => ({
+          x: 1,
+          y: 1 + index * 8,
+          width: 2,
+          height: 8,
+        })),
+      },
+    },
+  };
+}
+
+function withSegmentCount(item: ReviewItem, count: number): ReviewItem {
+  return {
+    ...item,
+    payload: {
+      ...item.payload,
+      rect: { x: 1, y: 1, width: 2, height: count * 8 },
+      segmentRects: Array.from({ length: count }, (_, index) => ({
+        x: 1,
+        y: 1 + index * 8,
+        width: 2,
+        height: 8,
+      })),
+    },
+  };
+}
+
+async function persistRecoveredState(root: string, sessionId: string, state: ReviewState): Promise<void> {
+  const store = new DraftSnapshotStore(join(root, "recovery", sessionId));
+  const recovered = await store.recover();
+  if (recovered === undefined) throw new Error("Expected persisted recovery draft");
+  await store.persist({
+    ...recovered,
+    state,
+    sync: {
+      ...recovered.sync,
+      desiredRevision: state.revision,
+      desiredDigest: reviewStateDigest(state),
+    },
+  });
+}
+
+function portableCheckingWriter(): PdfWriter {
+  const delegate = fakeWriter();
+  return {
+    ...delegate,
+    write: async (request) => {
+      for (const annotation of request.annotations) {
+        expect(inspectProjectedPortableAnnotation(annotation)).toMatchObject({ status: "owned" });
+      }
+      return delegate.write(request);
+    },
+  };
+}
+
 describe("coalescing PDF autosave", () => {
+  it.each(["copy", "original"] as const)(
+    "saves a 33-segment editable highlight to the %s destination",
+    async (destination) => {
+      const { root, source, broker, coordinator, sessionId } = await setup(undefined, {
+        writer: portableCheckingWriter(),
+      });
+      const copy = join(root, "paper-annotated.pdf");
+      if (destination === "copy") await coordinator.chooseCopy(sessionId, copy);
+      else await coordinator.chooseOriginal(sessionId);
+
+      await broker.acceptMutation(sessionId, addLongHighlight(0));
+      await coordinator.requestSave(sessionId);
+
+      const item = broker.state(sessionId)!.items[0]!;
+      expect(await readFile(destination === "copy" ? copy : source, "utf8")).toContain(item.id);
+      expect(item.payload.segmentRects).toHaveLength(33);
+      expect(broker.saveStatus(sessionId)?.sync).toMatchObject({
+        phase: "clean",
+        savedRevision: 1,
+      });
+    },
+  );
+
+  it("resumes and saves a recovery draft that already contains a 33-segment highlight", async () => {
+    const { root, source, broker, coordinator, sessionId } = await setup(undefined, {
+      writer: portableCheckingWriter(),
+    });
+    const copy = join(root, "paper-annotated.pdf");
+    await coordinator.chooseCopy(sessionId, copy);
+    await broker.acceptMutation(sessionId, addLongHighlight(0));
+
+    const restarted = new SessionBroker({
+      recoveryRoot: join(root, "recovery"),
+      portableReader: async () => [],
+    });
+    const offered = await restarted.openReview({ pdfPath: source });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
+    const resumed = await restarted.openReview({
+      pdfPath: source,
+      recoveryDecision: "resume",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
+    });
+    if (resumed.kind !== "opened") throw new Error("Expected resumed review");
+    const resumedCoordinator = new PdfSaveCoordinator({
+      broker: restarted,
+      writer: portableCheckingWriter(),
+      verify: verifyIds,
+    });
+
+    expect(restarted.state(resumed.launch.sessionId)?.items[0]?.payload.segmentRects)
+      .toHaveLength(33);
+    await resumedCoordinator.requestSave(resumed.launch.sessionId);
+
+    const item = restarted.state(resumed.launch.sessionId)!.items[0]!;
+    expect(await readFile(copy, "utf8")).toContain(item.id);
+    expect(restarted.saveStatus(resumed.launch.sessionId)?.sync).toMatchObject({
+      phase: "clean",
+      savedRevision: 1,
+    });
+  });
+
+  it("resumes and saves a recovery draft at the shared segment limit", async () => {
+    const { root, source, broker, coordinator, sessionId } = await setup(undefined, {
+      writer: portableCheckingWriter(),
+    });
+    const copy = join(root, "paper-annotated.pdf");
+    await coordinator.chooseCopy(sessionId, copy);
+    await broker.acceptMutation(sessionId, addLongHighlight(0));
+    const current = broker.state(sessionId)!;
+    const legacyItem = withSegmentCount(current.items[0]!, 256);
+    const legacyState: ReviewState = {
+      ...current,
+      revision: 7,
+      items: [legacyItem],
+      history: [{ beforeItems: [], afterItems: [legacyItem] }],
+      historyCursor: 1,
+    };
+    await persistRecoveredState(root, sessionId, legacyState);
+
+    const restarted = new SessionBroker({
+      recoveryRoot: join(root, "recovery"),
+      portableReader: async () => [],
+    });
+    const offered = await restarted.openReview({ pdfPath: source });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
+    const resumed = await restarted.openReview({
+      pdfPath: source,
+      recoveryDecision: "resume",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
+    });
+    if (resumed.kind !== "opened") throw new Error("Expected resumed review");
+    const resumedCoordinator = new PdfSaveCoordinator({
+      broker: restarted,
+      writer: portableCheckingWriter(),
+      verify: verifyIds,
+    });
+
+    expect(restarted.state(sessionId)?.items[0]?.payload.segmentRects).toHaveLength(256);
+    await resumedCoordinator.requestSave(sessionId);
+
+    expect(await readFile(copy, "utf8")).toContain(legacyItem.id);
+    expect(restarted.saveStatus(sessionId)?.sync).toMatchObject({
+      phase: "clean",
+      savedRevision: 7,
+    });
+  });
+
+  it("rejects redo when recovered history would restore unsupported editable metadata", async () => {
+    const { root, source, broker, sessionId } = await setup();
+    await broker.acceptMutation(sessionId, addLongHighlight(0));
+    const current = broker.state(sessionId)!;
+    const unsupportedItem = withSegmentCount(current.items[0]!, 257);
+    const recoveredState: ReviewState = {
+      ...current,
+      revision: 7,
+      items: [],
+      history: [{ beforeItems: [], afterItems: [unsupportedItem] }],
+      historyCursor: 0,
+    };
+    await persistRecoveredState(root, sessionId, recoveredState);
+
+    const restarted = new SessionBroker({
+      recoveryRoot: join(root, "recovery"),
+      portableReader: async () => [],
+    });
+    const offered = await restarted.openReview({ pdfPath: source });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
+    const resumed = await restarted.openReview({
+      pdfPath: source,
+      recoveryDecision: "resume",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: randomUUID(),
+    });
+    if (resumed.kind !== "opened") throw new Error("Expected resumed review");
+
+    await expect(restarted.acceptMutation(sessionId, {
+      type: "redo",
+      expectedRevision: 7,
+    })).rejects.toThrow(
+      "This annotation is too complex to preserve as editable metadata. Shorten the selection and try again.",
+    );
+    expect(restarted.state(sessionId)).toMatchObject({ revision: 7, items: [], historyCursor: 0 });
+  });
+
   it("creates a proactive copy, then persists the complete accepted state", async () => {
     const { root, broker, coordinator, sessionId } = await setup();
     const target = join(root, "paper-annotated.pdf");

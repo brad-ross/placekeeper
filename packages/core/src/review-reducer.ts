@@ -1,5 +1,11 @@
 import type { ReviewCommand, ReviewItem, ReviewState } from "./review-model.js";
 
+export const MAX_REVIEW_SELECTION_SEGMENTS = 256;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 export class ReviewConflictError extends Error {
   readonly code = "REVISION_CONFLICT";
 
@@ -27,7 +33,10 @@ function assertMutable(state: ReviewState, command: ReviewCommand): void {
   }
 }
 
-export function assertReviewItem(item: ReviewItem): void {
+export function assertReviewItem(
+  item: ReviewItem,
+  options: { readonly maxSelectionSegments?: number } = {},
+): void {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(item.id)) {
     throw new InvalidReviewCommandError("Review item IDs must be UUIDs");
   }
@@ -55,6 +64,16 @@ export function assertReviewItem(item: ReviewItem): void {
   };
   if (keys.some((key) => !allowedByKind[item.kind].includes(key))) {
     throw new InvalidReviewCommandError("Review item payload has unsupported fields");
+  }
+  if (
+    Array.isArray(item.payload.segmentRects) &&
+    item.payload.segmentRects.length >
+      (options.maxSelectionSegments ?? MAX_REVIEW_SELECTION_SEGMENTS)
+  ) {
+    const maximum = options.maxSelectionSegments ?? MAX_REVIEW_SELECTION_SEGMENTS;
+    throw new InvalidReviewCommandError(
+      `Selections can contain at most ${maximum} text segments. Shorten the selection and try again.`,
+    );
   }
   const text = (field: string, allowEmpty = true) =>
     typeof item.payload[field] === 'string' && (allowEmpty || item.payload[field] !== '');
@@ -88,10 +107,47 @@ export function assertReviewItem(item: ReviewItem): void {
   if (!valid) throw new InvalidReviewCommandError("Review item payload does not match its kind");
 }
 
+export function assertReviewCommand(command: unknown): asserts command is ReviewCommand {
+  if (
+    !isRecord(command) ||
+    !Number.isSafeInteger(command.expectedRevision) ||
+    (command.expectedRevision as number) < 0
+  ) {
+    throw new InvalidReviewCommandError("Review command is malformed");
+  }
+  switch (command.type) {
+    case "add":
+      if (!isRecord(command.item) || !isRecord(command.item.payload)) {
+        throw new InvalidReviewCommandError("Review command is malformed");
+      }
+      return;
+    case "edit":
+      if (
+        typeof command.id !== "string" ||
+        typeof command.updatedAt !== "string" ||
+        !isRecord(command.payload)
+      ) {
+        throw new InvalidReviewCommandError("Review command is malformed");
+      }
+      return;
+    case "remove":
+      if (typeof command.id !== "string") {
+        throw new InvalidReviewCommandError("Review command is malformed");
+      }
+      return;
+    case "undo":
+    case "redo":
+      return;
+    default:
+      throw new InvalidReviewCommandError("Review command type is not supported");
+  }
+}
+
 export function reduceReview(
   state: ReviewState,
   command: ReviewCommand,
 ): ReviewState {
+  assertReviewCommand(command);
   assertMutable(state, command);
 
   const history = state.history;

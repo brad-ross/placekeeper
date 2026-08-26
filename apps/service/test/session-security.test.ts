@@ -693,7 +693,98 @@ describe("loopback HTTP boundary", () => {
         { type: "unknown", expectedRevision: 0 },
         auth,
       )).status,
-    ).toBe(409);
+    ).toBe(422);
+    for (const malformed of [null, [], { type: "add" }]) {
+      const response = await postJson(commandUrl, malformed, auth);
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toEqual({
+        ok: false,
+        error: {
+          kind: "invalid-review-command",
+          message: "Review command is malformed",
+        },
+      });
+    }
+    expect(broker.state(launch.sessionId)?.revision).toBe(0);
+  });
+
+  it("returns an actionable command error before an oversized selection reaches saving", async () => {
+    const { broker, launch, server } = await openBroker();
+    const exchange = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability: launch.fragment.slice("#cap=".length) },
+    );
+    const { credential } = await exchange.json() as { credential: string };
+    const timestamp = "2026-08-25T12:00:00.000Z";
+    const segment = { x: 72, y: 92, width: 12, height: 8 };
+    const response = await postJson(`${server.origin}/s/${launch.sessionId}/commands`, {
+      type: "add",
+      expectedRevision: 0,
+      item: {
+        id: randomUUID(),
+        kind: "highlight",
+        pageIndex: 0,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        payload: {
+          quote: "selection",
+          prefix: "",
+          suffix: "",
+          rect: { x: 72, y: 92, width: 120, height: 40 },
+          segmentRects: Array.from({ length: 257 }, () => ({ ...segment })),
+          reliable: true,
+        },
+      },
+    }, { authorization: `Bearer ${credential}` });
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error: {
+        kind: "invalid-review-command",
+        message: "Selections can contain at most 256 text segments. Shorten the selection and try again.",
+      },
+    });
+    expect(broker.state(launch.sessionId)?.revision).toBe(0);
+  });
+
+  it("rejects an oversized editable metadata envelope before accepting the command", async () => {
+    const { broker, launch, server } = await openBroker();
+    const exchange = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability: launch.fragment.slice("#cap=".length) },
+    );
+    const { credential } = await exchange.json() as { credential: string };
+    const timestamp = "2026-08-25T12:00:00.000Z";
+    const response = await postJson(`${server.origin}/s/${launch.sessionId}/commands`, {
+      type: "add",
+      expectedRevision: 0,
+      item: {
+        id: randomUUID(),
+        kind: "highlight",
+        pageIndex: 0,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        payload: {
+          quote: "q".repeat(16 * 1024),
+          prefix: "",
+          suffix: "",
+          rect: { x: 72, y: 92, width: 120, height: 8 },
+          segmentRects: [{ x: 72, y: 92, width: 120, height: 8 }],
+          reliable: true,
+          comment: "c".repeat(16 * 1024),
+        },
+      },
+    }, { authorization: `Bearer ${credential}` });
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error: {
+        kind: "invalid-review-command",
+        message: "This annotation contains too much text or geometry to preserve as editable metadata. Shorten it and try again.",
+      },
+    });
     expect(broker.state(launch.sessionId)?.revision).toBe(0);
   });
 

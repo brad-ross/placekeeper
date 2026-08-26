@@ -1,6 +1,7 @@
-import { createHash } from "node:crypto";
-import { chmod, mkdir, open, readFile, rename, stat } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { chmod, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { trackRecoveryTemporaryPath } from "./temporary-path-registry.js";
 
 export interface SourceSnapshot {
   readonly path: string;
@@ -21,23 +22,31 @@ export async function createSourceSnapshot(
   const bytes = await readFile(sourcePath);
   const digest = createHash("sha256").update(bytes).digest("hex");
   const finalPath = join(sessionDirectory, "source.pdf");
-  const temporaryPath = join(sessionDirectory, `.source-${process.pid}-${Date.now()}.tmp`);
-  const handle = await open(temporaryPath, "wx", 0o600);
+  const temporaryPath = join(sessionDirectory, `.source-${randomUUID()}.tmp`);
+  const stopTracking = trackRecoveryTemporaryPath(temporaryPath);
   try {
-    await handle.chmod(0o600);
-    await handle.writeFile(bytes);
-    await handle.sync();
+    const handle = await open(temporaryPath, "wx", 0o600);
+    try {
+      await handle.chmod(0o600);
+      await handle.writeFile(bytes);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporaryPath, finalPath);
+    await chmod(finalPath, 0o600);
+    const directoryHandle = await open(sessionDirectory, "r");
+    try {
+      await directoryHandle.sync();
+    } finally {
+      await directoryHandle.close();
+    }
+    const info = await stat(finalPath);
+    return { path: finalPath, digest, byteLength: info.size };
+  } catch (error) {
+    await rm(temporaryPath, { force: true });
+    throw error;
   } finally {
-    await handle.close();
+    stopTracking();
   }
-  await rename(temporaryPath, finalPath);
-  await chmod(finalPath, 0o600);
-  const directoryHandle = await open(sessionDirectory, "r");
-  try {
-    await directoryHandle.sync();
-  } finally {
-    await directoryHandle.close();
-  }
-  const info = await stat(finalPath);
-  return { path: finalPath, digest, byteLength: info.size };
 }

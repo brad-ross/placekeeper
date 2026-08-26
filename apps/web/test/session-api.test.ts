@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { reopenProductionSession } from "../src/app/session-api.js";
+import { createReviewState } from "../../../packages/core/src/review-model.js";
+import { loadProductionSession, reopenProductionSession } from "../src/app/session-api.js";
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -126,5 +127,52 @@ describe("stale production-session reopen", () => {
       viewId,
       "placekeeper:///tmp/Paper.pdf#v=1&page=1",
     )).rejects.toThrow("reopen address is invalid");
+  });
+});
+
+describe("production review commands", () => {
+  it("surfaces an actionable invalid-command response without advancing local state", async () => {
+    const state = createReviewState({
+      sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      source: { fileId: "source", digest: "a".repeat(64), byteLength: 100 },
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const path = String(input);
+      if (path.endsWith("/state")) return jsonResponse(state);
+      if (path.endsWith("/scope")) return jsonResponse({ documentTitle: "Paper.pdf" });
+      if (path.endsWith("/save/status")) {
+        return jsonResponse({
+          destination: { phase: "none", generation: 0 },
+          sync: {
+            phase: "clean",
+            desiredRevision: 0,
+            desiredDigest: "b".repeat(64),
+            savedRevision: 0,
+            savedDigest: "b".repeat(64),
+          },
+        });
+      }
+      if (path.endsWith("/commands")) {
+        return jsonResponse({
+          ok: false,
+          error: {
+            kind: "invalid-review-command",
+            message: "Selections can contain at most 256 text segments. Shorten the selection and try again.",
+          },
+        }, 422);
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+    const loaded = await loadProductionSession({
+      sessionId: state.sessionId,
+      credential: "credential",
+    });
+
+    await expect(loaded.api.command({ type: "undo", expectedRevision: 0 })).resolves.toEqual({
+      accepted: false,
+      state,
+      message: "Selections can contain at most 256 text segments. Shorten the selection and try again.",
+      reason: "rejected",
+    });
   });
 });
