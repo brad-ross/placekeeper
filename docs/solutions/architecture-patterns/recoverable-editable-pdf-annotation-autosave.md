@@ -1,7 +1,7 @@
 ---
 title: Recoverable autosave for editable PDF annotations
 date: 2026-08-11
-last_updated: 2026-08-21
+last_updated: 2026-08-26
 category: architecture-patterns
 module: PDF annotation persistence
 problem_type: architecture_pattern
@@ -75,7 +75,9 @@ Each physical save is a full-state projection. The coordinator reads the private
 
 Every app annotation carries ordinary visible PDF properties plus a namespaced, versioned `placekeeper` envelope containing the stable item ID, the semantic Review Item, and redundant visible projection evidence (`packages/core/src/annotation-projection.ts:47-70`, `packages/core/src/portable-annotation.ts:25-45`, `packages/core/src/portable-annotation.ts:261-273`). The pinned EmbedPDF path persists the annotation ID through `/NM` and custom metadata through `/EPDFCustom`; the checked-in engine patch bounds custom metadata before parsing (`packages/pdf-backends/src/embedpdf-adapter.ts:110-122`, `patches/@embedpdf__engines@2.14.4.patch:7-32`).
 
-Ownership requires redundant agreement. Import accepts an annotation only when its envelope has the supported owner and schema, contains a valid item and projection, has a unique visible ID, and matches the visible page, subtype, contents, author, and geometry (`packages/core/src/portable-annotation.ts:276-312`). Missing metadata is foreign. Malformed or mismatched metadata is invalid, never owned. Size, depth, key-count, string-length, and prototype-key limits bound untrusted metadata (`packages/core/src/portable-annotation.ts:10-16`, `packages/core/src/portable-annotation.ts:78-90`, `packages/core/src/portable-annotation.ts:331-344`).
+Ownership requires redundant agreement. Import accepts an annotation only when its envelope has the supported owner and schema, contains a valid item and projection, has a unique visible ID, and matches the visible page, subtype, contents, author, and geometry (`packages/core/src/portable-annotation.ts:303-339`). Missing metadata is foreign. Malformed or mismatched metadata is invalid, never owned. Independent byte, depth, aggregate-node, per-array, per-object, string-length, and prototype-key limits bound untrusted metadata without treating repeated legitimate highlight geometry as one flat key budget (`packages/core/src/portable-annotation.ts:14-22`, `packages/core/src/portable-annotation.ts:84-100`, `packages/core/src/portable-annotation.ts:287-300`).
+
+Validate that final portable projection before acknowledging a mutation. The shared 256-segment authoring and portable ceiling rejects an unsupported highlight as a specific invalid command, while the writable-envelope check catches byte or shape excess before the next recovery revision becomes authoritative (`packages/core/src/review-reducer.ts:3-76`, `packages/core/src/portable-annotation.ts:287-300`, `apps/service/src/sessions/session-broker.ts:1632-1659`). This preserves the recovery-first contract: accepted work must be representable as editable metadata, not merely semantically valid in memory.
 
 On rewrite, the backend removes only annotations that pass this ownership test, creates the complete current owned set, and leaves Existing PDF Annotations in place (`packages/pdf-backends/src/embedpdf-adapter.ts:641-680`). It then reopens the candidate and rejects it if foreign annotations changed, requested marks are missing, normal appearances are absent, or portable metadata does not reconstruct the requested items (`packages/pdf-backends/src/embedpdf-adapter.ts:681-718`). The independent verifier also checks page fingerprints, foreign inventory, owned identities, geometry, appearances, and writer evidence before a filesystem commit (`apps/service/src/export/pdf-verifier.ts:114-221`).
 
@@ -165,4 +167,5 @@ When an annotated PDF is reopened without private recovery data, valid portable 
 - [Content-aware annotation workspace presentation](../design-patterns/outline-aware-annotation-workspace-presentation.md) shows the same fail-closed generation principle for document-derived UI state.
 - [Compact Editorial language for review task surfaces](../design-patterns/compact-editorial-language-for-annotation-modals.md) defines the recovery dialog's presentation and action language while preserving these persistence transitions.
 - [Portable PDF annotations invisible in external viewers](../integration-issues/portable-pdf-annotations-invisible-in-external-viewers.md) documents the narrower appearance and crop-relative geometry failure that PR #21 corrected without changing this broader autosave architecture.
+- [Valid long highlights rejected by the portable annotation shape limit](../integration-issues/valid-long-highlights-rejected-by-portable-shape-limit.md) documents why portable resource accounting is dimensional, why authoring and decoding share the 256-segment ceiling, and why portability is checked before mutation acknowledgement.
 - PR #19 contains the implementation described here and merged into `main` on 2026-08-11 (America/New_York).
