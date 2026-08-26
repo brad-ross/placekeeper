@@ -241,7 +241,7 @@ describe("coalescing PDF autosave", () => {
     });
   });
 
-  it("resumes and saves a legacy recovery draft above the new-authoring segment limit", async () => {
+  it("resumes and saves a recovery draft at the shared segment limit", async () => {
     const { root, source, broker, coordinator, sessionId } = await setup(undefined, {
       writer: portableCheckingWriter(),
     });
@@ -249,7 +249,7 @@ describe("coalescing PDF autosave", () => {
     await coordinator.chooseCopy(sessionId, copy);
     await broker.acceptMutation(sessionId, addLongHighlight(0));
     const current = broker.state(sessionId)!;
-    const legacyItem = withSegmentCount(current.items[0]!, 129);
+    const legacyItem = withSegmentCount(current.items[0]!, 256);
     const legacyState: ReviewState = {
       ...current,
       revision: 7,
@@ -278,7 +278,7 @@ describe("coalescing PDF autosave", () => {
       verify: verifyIds,
     });
 
-    expect(restarted.state(sessionId)?.items[0]?.payload.segmentRects).toHaveLength(129);
+    expect(restarted.state(sessionId)?.items[0]?.payload.segmentRects).toHaveLength(256);
     await resumedCoordinator.requestSave(sessionId);
 
     expect(await readFile(copy, "utf8")).toContain(legacyItem.id);

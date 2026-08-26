@@ -219,7 +219,7 @@ describe('frozen authoring-session contract', () => {
     const longSelection = {
       ...selection,
       rect: { x: 10, y: 20, width: 30, height: 1_548 },
-      segmentRects: Array.from({ length: 129 }, (_, index) => ({
+      segmentRects: Array.from({ length: 257 }, (_, index) => ({
         x: 10,
         y: 20 + index * 12,
         width: 30,
@@ -233,7 +233,7 @@ describe('frozen authoring-session contract', () => {
     }));
 
     expect(() => authoringPreviewAnnotation(session, 'New comment')).not.toThrow();
-    expect(authoringPreviewAnnotation(session, 'New comment')?.quadPoints).toHaveLength(129);
+    expect(authoringPreviewAnnotation(session, 'New comment')?.quadPoints).toHaveLength(257);
   });
 
   it('keeps the first session authoritative when another entry point fires', () => {

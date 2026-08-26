@@ -163,6 +163,7 @@ describe('canonical review commands', () => {
   it('accepts bounded long selections and rejects larger ones with an actionable error', () => {
     const { state, commands } = setup();
     const segment = { x: 72, y: 92, width: 12, height: 8 };
+    expect(MAX_REVIEW_SELECTION_SEGMENTS).toBe(256);
     const maximum = {
       ...selection,
       segmentRects: Array.from({ length: MAX_REVIEW_SELECTION_SEGMENTS }, () => ({ ...segment })),

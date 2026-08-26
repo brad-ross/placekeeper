@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { PdfWriteRequest, ReviewAnnotation } from '../../packages/core/src/pdf-writer.js';
 import { PdfWriterError } from '../../packages/core/src/pdf-writer.js';
 import { documentOrderedItems, projectReviewItem } from '../../packages/core/src/annotation-projection.js';
+import { MAX_REVIEW_SELECTION_SEGMENTS } from '../../packages/core/src/review-reducer.js';
 import type { ReviewItem, ReviewState } from '../../packages/core/src/review-model.js';
 import {
   createEmbedPdfWriter,
@@ -275,6 +276,44 @@ describe('EmbedPDF writer gate', () => {
       longHighlight.id,
     ]));
     expect(reopened.annotations.find(({ id }) => id === longHighlight.id)?.segmentRects)
+      .toEqual(segmentRects.map(({ x, y, width, height }) => ({
+        origin: { x, y },
+        size: { width, height },
+      })));
+  });
+
+  it('round-trips editable metadata for a highlight at the shared segment limit', async () => {
+    const timestamp = '2026-08-25T12:00:00.000Z';
+    const segmentRects = Array.from({ length: MAX_REVIEW_SELECTION_SEGMENTS }, (_, index) => ({
+      x: 72,
+      y: 92 + index * 2,
+      width: 120,
+      height: 2,
+    }));
+    const highlight: ReviewItem = {
+      id: 'a0000000-0000-4000-8000-00000000000a',
+      kind: 'highlight',
+      pageIndex: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      payload: {
+        quote: 'maximum legitimate selection',
+        prefix: '',
+        suffix: '',
+        rect: { x: 72, y: 92, width: 120, height: MAX_REVIEW_SELECTION_SEGMENTS * 2 },
+        segmentRects,
+        reliable: true,
+      },
+    };
+    const result = await runPdfBackend(
+      await createEmbedPdfWriter(),
+      await requestFor('preservation-corpus.pdf', [projectReviewItem(highlight)]),
+    );
+
+    expect(await readPortableReviewItems(result.pdfBytes)).toEqual([highlight]);
+    const reopened = await inspectPdfWithEmbedPdf(result.pdfBytes);
+    expect(reopened.portableItems).toEqual([highlight]);
+    expect(reopened.annotations.find(({ id }) => id === highlight.id)?.segmentRects)
       .toEqual(segmentRects.map(({ x, y, width, height }) => ({
         origin: { x, y },
         size: { width, height },

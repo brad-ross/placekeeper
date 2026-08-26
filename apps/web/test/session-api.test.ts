@@ -157,7 +157,7 @@ describe("production review commands", () => {
           ok: false,
           error: {
             kind: "invalid-review-command",
-            message: "Selections can contain at most 128 text segments. Shorten the selection and try again.",
+            message: "Selections can contain at most 256 text segments. Shorten the selection and try again.",
           },
         }, 422);
       }
@@ -171,7 +171,7 @@ describe("production review commands", () => {
     await expect(loaded.api.command({ type: "undo", expectedRevision: 0 })).resolves.toEqual({
       accepted: false,
       state,
-      message: "Selections can contain at most 128 text segments. Shorten the selection and try again.",
+      message: "Selections can contain at most 256 text segments. Shorten the selection and try again.",
       reason: "rejected",
     });
   });

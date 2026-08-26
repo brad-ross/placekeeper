@@ -731,7 +731,7 @@ describe("loopback HTTP boundary", () => {
           prefix: "",
           suffix: "",
           rect: { x: 72, y: 92, width: 120, height: 40 },
-          segmentRects: Array.from({ length: 129 }, () => ({ ...segment })),
+          segmentRects: Array.from({ length: 257 }, () => ({ ...segment })),
           reliable: true,
         },
       },
@@ -742,7 +742,7 @@ describe("loopback HTTP boundary", () => {
       ok: false,
       error: {
         kind: "invalid-review-command",
-        message: "Selections can contain at most 128 text segments. Shorten the selection and try again.",
+        message: "Selections can contain at most 256 text segments. Shorten the selection and try again.",
       },
     });
     expect(broker.state(launch.sessionId)?.revision).toBe(0);

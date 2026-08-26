@@ -1,6 +1,6 @@
 import type { ReviewCommand, ReviewItem, ReviewState } from "./review-model.js";
 
-export const MAX_REVIEW_SELECTION_SEGMENTS = 128;
+export const MAX_REVIEW_SELECTION_SEGMENTS = 256;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
