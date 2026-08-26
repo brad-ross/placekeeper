@@ -1,9 +1,8 @@
 name: CI
 
+# Temporarily manual-only. Restore the pull_request and push triggers to re-enable CI.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
