@@ -33,6 +33,11 @@ Completion requires both exclusivity in source and built artifacts and separate 
 
 ## PDF review
 
+### Temporary Browser Source
+The private local PDF source acquired from a browser navigation solely to back a Placekeeper review session.
+
+Viewing a Temporary Browser Source does not establish a durable Save Destination, and the source is never eligible for Modify Original. It remains available while an active session or Protected Recovery depends on it; durable annotation begins only after the reader chooses a separate filename and location.
+
 ### Review Item
 A durable, user-authored proofread instruction associated with PDF geometry, such as a replacement, deletion, insertion, highlight, or page note.
 
