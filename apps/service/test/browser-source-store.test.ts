@@ -98,6 +98,12 @@ describe("temporary browser source ownership", () => {
     expect(JSON.stringify(scope)).not.toContain(value.root);
     const capability = new URLSearchParams(first.launch.fragment.slice(1)).get("cap")!;
     const exchange = broker.exchangeBootstrapForHttp(first.launch.sessionId, capability);
+    expect(await broker.sessionScope(first.launch.sessionId, exchange?.credential)).toMatchObject({
+      sourceDisposition: "remote-temporary",
+      launchSurface: "browser",
+    });
+    expect(await broker.sessionScope(first.launch.sessionId, exchange?.credential))
+      .not.toHaveProperty("codexContext");
     expect(exchange?.view?.pathname).toContain("/Placekeeper%20Browser/");
     expect(exchange?.view?.pathname).not.toContain(encodeURIComponent(value.root));
 

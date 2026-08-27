@@ -4,13 +4,14 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 export interface DestinationPicker {
-  chooseFolder(defaultFolder: string): Promise<string | undefined>;
+  chooseFolder(defaultFolder?: string): Promise<string | undefined>;
   locatePdf(defaultFolder: string): Promise<string | undefined>;
 }
 
-async function osascript(script: string, argument: string): Promise<string | undefined> {
+async function osascript(script: string, argument?: string): Promise<string | undefined> {
   try {
-    const { stdout } = await execFileAsync("/usr/bin/osascript", ["-e", script, "--", argument], {
+    const args = argument === undefined ? ["-e", script] : ["-e", script, "--", argument];
+    const { stdout } = await execFileAsync("/usr/bin/osascript", args, {
       timeout: 5 * 60_000,
       maxBuffer: 16 * 1024,
     });
@@ -23,9 +24,11 @@ async function osascript(script: string, argument: string): Promise<string | und
 }
 
 export class MacOsDestinationPicker implements DestinationPicker {
-  chooseFolder(defaultFolder: string): Promise<string | undefined> {
+  chooseFolder(defaultFolder?: string): Promise<string | undefined> {
     return osascript(
-      'on run argv\nset chosen to choose folder with prompt "Choose where to save the annotated PDF" default location POSIX file (item 1 of argv)\nreturn POSIX path of chosen\nend run',
+      defaultFolder === undefined
+        ? 'set chosen to choose folder with prompt "Choose where to save the annotated PDF"\nreturn POSIX path of chosen'
+        : 'on run argv\nset chosen to choose folder with prompt "Choose where to save the annotated PDF" default location POSIX file (item 1 of argv)\nreturn POSIX path of chosen\nend run',
       defaultFolder,
     );
   }

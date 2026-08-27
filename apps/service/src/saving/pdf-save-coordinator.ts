@@ -68,6 +68,14 @@ interface QueueState {
   running?: Promise<void>;
 }
 
+export type SaveCopyProposal =
+  | {
+      readonly sourceDisposition: "local";
+      readonly filename: string;
+      readonly folder: string;
+    }
+  | { readonly sourceDisposition: "remote-temporary" };
+
 export class PdfSaveCoordinator {
   readonly #broker: SessionBroker;
   readonly #writer: PdfWriter;
@@ -97,12 +105,19 @@ export class PdfSaveCoordinator {
     }
   }
 
-  proposal(sessionId: string): { readonly filename: string; readonly folder: string } {
+  proposal(sessionId: string): SaveCopyProposal {
     const state = this.#broker.state(sessionId);
     if (state === undefined) throw new Error("Review session is not active");
+    if (this.#broker.sourceDisposition(sessionId) === "remote-temporary") {
+      return { sourceDisposition: "remote-temporary" };
+    }
     const sourcePath = this.#capabilities.getFilePath(state.source.fileId);
     if (sourcePath === undefined) throw new Error("Original PDF capability is unavailable");
-    return { filename: defaultAnnotatedFilename(sourcePath), folder: dirname(sourcePath) };
+    return {
+      sourceDisposition: "local",
+      filename: defaultAnnotatedFilename(sourcePath),
+      folder: dirname(sourcePath),
+    };
   }
 
   async chooseCopyFilename(
@@ -112,22 +127,39 @@ export class PdfSaveCoordinator {
   ): Promise<void> {
     const state = this.#broker.state(sessionId);
     if (state === undefined) throw new Error("Review session is not active");
+    const remote = this.#broker.sourceDisposition(sessionId) === "remote-temporary";
     const sourcePath = this.#capabilities.getFilePath(state.source.fileId);
     if (sourcePath === undefined) throw new Error("Original PDF capability is unavailable");
     const selected = folderSelectionId === undefined
       ? undefined
       : this.#folderSelections.get(folderSelectionId);
-    if (folderSelectionId !== undefined) this.#folderSelections.delete(folderSelectionId);
     if (selected !== undefined && selected.sessionId !== sessionId) {
+      this.#folderSelections.delete(folderSelectionId!);
       throw new FileCapabilityError("INVALID_PATH", "Folder selection belongs to another session");
+    }
+    if (remote && selected === undefined) {
+      throw new FileCapabilityError(
+        "INVALID_PATH",
+        "Choose a new location for this remote browser PDF",
+      );
     }
     const target = selected === undefined
       ? proposedCopyPath(sourcePath, filename)
-      : join(
-          selected.path,
-          validatePdfFilename(filename ?? defaultAnnotatedFilename(sourcePath)),
-        );
-    await this.chooseCopy(sessionId, target);
+      : join(selected.path, validatePdfFilename(
+          remote ? filename ?? "" : filename ?? defaultAnnotatedFilename(sourcePath),
+        ));
+    // Claim the opaque selection before crossing an async boundary so it
+    // cannot be replayed concurrently. Restore it on a destination error so
+    // the dialog can preserve the user's location while they correct input.
+    if (folderSelectionId !== undefined) this.#folderSelections.delete(folderSelectionId);
+    try {
+      await this.chooseCopy(sessionId, target);
+    } catch (error) {
+      if (folderSelectionId !== undefined && selected !== undefined) {
+        this.#folderSelections.set(folderSelectionId, selected);
+      }
+      throw error;
+    }
   }
 
   async chooseFolder(sessionId: string): Promise<
@@ -136,7 +168,9 @@ export class PdfSaveCoordinator {
   > {
     if (this.#picker === undefined) throw new Error("Native destination picker is unavailable");
     const proposal = this.proposal(sessionId);
-    const path = await this.#picker.chooseFolder(proposal.folder);
+    const path = await this.#picker.chooseFolder(
+      proposal.sourceDisposition === "local" ? proposal.folder : undefined,
+    );
     if (path === undefined) return { cancelled: true };
     const selectionId = randomUUID();
     this.#folderSelections.set(selectionId, { sessionId, path });
@@ -194,20 +228,27 @@ export class PdfSaveCoordinator {
   async chooseCopy(sessionId: string, targetPath: string): Promise<void> {
     this.#assertRewriteEligible(sessionId);
     const capability = await this.#capabilities.preauthorizeDestination(targetPath);
-    if (capability.existingTarget !== undefined) {
+    try {
+      if (capability.existingTarget !== undefined) {
+        throw new FileCapabilityError("TARGET_CHANGED", "A file already exists at that location");
+      }
+      await this.#broker.establishSaveDestination(sessionId, {
+        kind: "copy",
+        targetPath: join(capability.parentPath, capability.filename),
+        capabilityId: capability.id,
+      });
+    } catch (error) {
       this.#capabilities.revokeDestination(capability.id);
-      throw new FileCapabilityError("TARGET_CHANGED", "A file already exists at that location");
+      throw error;
     }
-    await this.#broker.establishSaveDestination(sessionId, {
-      kind: "copy",
-      targetPath: join(capability.parentPath, capability.filename),
-      capabilityId: capability.id,
-    });
     await this.requestSave(sessionId);
   }
 
   async chooseOriginal(sessionId: string): Promise<void> {
     this.#assertRewriteEligible(sessionId);
+    if (this.#broker.sourceDisposition(sessionId) === "remote-temporary") {
+      throw new Error("A remote browser PDF cannot modify its private temporary source");
+    }
     const state = this.#broker.state(sessionId);
     if (state === undefined) throw new Error("Review session is not active");
     const targetPath = this.#capabilities.getFilePath(state.source.fileId);

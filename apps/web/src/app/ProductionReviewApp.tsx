@@ -113,6 +113,8 @@ export interface ProductionSession {
 
 export interface ProductionScope {
   readonly documentTitle: string;
+  readonly sourceDisposition?: 'local' | 'remote-temporary';
+  readonly sourceDisplayName?: string;
   readonly sourceRootPath?: string;
   readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode';
   /** A restarted browser is awaiting task-scoped Codex reattachment. */
@@ -130,10 +132,16 @@ function referenceFocusRailSurface(
 
 export type ProductionSaveStatus = SaveStatus;
 
-export interface SaveCopyProposal {
-  readonly filename: string;
-  readonly folder: string;
-}
+export type SaveCopyProposal =
+  | {
+      readonly sourceDisposition: 'local';
+      readonly filename: string;
+      readonly folder: string;
+    }
+  | {
+      readonly sourceDisposition: 'remote-temporary';
+      readonly folder?: string;
+    };
 
 interface AuthoringAnchorNavigationState {
   readonly token: number;
@@ -550,7 +558,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setFolderSelectionId(undefined);
     void props.api.saveProposal()
       .then((proposal) => {
-        if (!cancelled) setCopyProposal(proposal);
+        if (!cancelled) setCopyProposal((current) =>
+          current?.sourceDisposition === 'remote-temporary' && current.folder !== undefined
+            ? current
+            : proposal);
       })
       .catch(() => {
         if (!cancelled) setDestinationError("Save options could not be prepared safely.");
@@ -1258,6 +1269,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         documentTitle={scope.documentTitle}
         savedLabel="Saved"
         savePhase={saveStatus.sync.phase}
+        savePendingDestination={
+          scope.sourceDisposition === 'remote-temporary'
+          && saveStatus.destination.phase === 'none'
+          && saveStatus.sync.phase === 'not-saved'
+        }
         saveOptionsOpen={destinationDialog !== null}
         onSaveOptions={() => openCopyDialog("menu")}
         {...(viewerControlsRef.current === undefined ? {} : { viewerControls: viewerControlsRef.current })}
@@ -1496,7 +1512,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
               reason: 'stale-authoring',
             };
           }
-          const gated = gateReviewCommand(currentState, saveStatus, command);
+          const gated = gateReviewCommand(
+            currentState,
+            saveStatus,
+            command,
+            scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local',
+          );
           if (gated.kind === "choose-destination") {
             openCopyDialog("first-annotation", {
               command,
@@ -1527,7 +1548,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           const next = "accepted" in result ? result.state : result;
           setState(next);
           if (!("accepted" in result)) {
-            setSaveStatus(await props.api.saveStatus());
+            const nextSaveStatus = await props.api.saveStatus();
+            setSaveStatus(nextSaveStatus);
+            if (gated.kind === 'submit-and-choose-destination') {
+              openCopyDialog("first-annotation");
+            }
           }
           setCommandError("accepted" in result ? result.message : null);
           return result;
@@ -1555,6 +1580,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       </ReviewShell>
       <SaveDestinationDialog
         open={destinationDialog !== null}
+        sourceDisposition={scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local'}
+        protectedRecovery={
+          scope.sourceDisposition === 'remote-temporary'
+          && saveStatus.destination.phase === 'none'
+          && saveStatus.sync.phase === 'not-saved'
+        }
         {...(copyProposal === undefined ? {} : { proposal: copyProposal })}
         establishing={destinationEstablishing}
         {...(saveStatus.rewriteEligibility === undefined
@@ -1600,10 +1631,15 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             const selected = await props.api.chooseFolder();
             if (!selected.cancelled && selected.selectionId && selected.folder) {
               setFolderSelectionId(selected.selectionId);
-              setCopyProposal((current) => ({
-                filename: current?.filename ?? "annotated.pdf",
-                folder: selected.folder!,
-              }));
+              setCopyProposal((current) => scope.sourceDisposition === 'remote-temporary'
+                ? { sourceDisposition: 'remote-temporary', folder: selected.folder! }
+                : {
+                    sourceDisposition: 'local',
+                    filename: current?.sourceDisposition === 'local'
+                      ? current.filename
+                      : "annotated.pdf",
+                    folder: selected.folder!,
+                  });
             }
           } catch {
             setDestinationError("A new location could not be authorized.");

@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { readdir, readFile, realpath } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join, relative } from "node:path";
 import {
   documentOrderedItems,
   projectReviewItems,
@@ -284,6 +284,7 @@ export class SessionBroker {
   readonly #pendingRestartReconnects = new Map<string, PendingRestartReconnect>();
   readonly #restartReconnectWaiters = new Map<string, Set<() => void>>();
   readonly #sessionEndListeners = new Set<(sessionId: string) => void>();
+  readonly #privateSourceRoots = new Set<string>();
   #canonicalRecoveryRoot: string;
 
   constructor(options: SessionBrokerOptions) {
@@ -323,6 +324,7 @@ export class SessionBroker {
   async initialize(): Promise<void> {
     await ensurePrivateDirectory(this.recoveryRoot);
     this.#canonicalRecoveryRoot = await realpath(this.recoveryRoot);
+    this.#privateSourceRoots.add(this.#canonicalRecoveryRoot);
     await this.restartReconnects.initialize();
     const entries = await readdir(this.recoveryRoot, { withFileTypes: true });
     await Promise.all(
@@ -502,6 +504,7 @@ export class SessionBroker {
     browserSources: BrowserSourceStore,
   ): Promise<OpenReviewResult> {
     await this.initialize();
+    this.#privateSourceRoots.add(browserSources.root);
     const sessionId = randomUUID();
     const sessionDirectory = join(this.recoveryRoot, sessionId);
     let approvedFile: { readonly id: string; readonly canonicalPath: string } | undefined;
@@ -1365,6 +1368,31 @@ export class SessionBroker {
         };
   }
 
+  sourceDisposition(sessionId: string): SourceDisposition | undefined {
+    return this.#activeById.get(sessionId)?.sourceOwnership.disposition;
+  }
+
+  #assertSaveDestinationAllowed(
+    session: ActiveSession,
+    input: { readonly kind: "original" | "copy"; readonly targetPath: string },
+  ): void {
+    if (session.sourceOwnership.disposition !== "remote-temporary") return;
+    if (input.kind === "original") {
+      throw new Error("A remote browser PDF cannot modify its private temporary source");
+    }
+    const insidePrivateSourceRoot = [...this.#privateSourceRoots].some((root) => {
+      const suffix = relative(root, input.targetPath);
+      return suffix === "" || (!suffix.startsWith("..") && !isAbsolute(suffix));
+    });
+    if (
+      insidePrivateSourceRoot ||
+      input.targetPath === session.canonicalSourcePath ||
+      input.targetPath === session.sourceSnapshotPath
+    ) {
+      throw new Error("A durable save destination cannot use the private temporary source");
+    }
+  }
+
   async #withSessionTail<T>(
     session: ActiveSession,
     work: () => Promise<T>,
@@ -1436,6 +1464,7 @@ export class SessionBroker {
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     return this.#withSessionTail(session, async () => {
       if (session.ending) throw new Error("Review session is ending");
+      this.#assertSaveDestinationAllowed(session, input);
       const generation = session.destination.generation + 1;
       const destination: DurableSaveDestination = {
         phase: "active",
@@ -1471,6 +1500,7 @@ export class SessionBroker {
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     return this.#withSessionTail(session, async () => {
       if (session.ending) throw new Error("Review session is ending");
+      this.#assertSaveDestinationAllowed(session, { kind: "original", targetPath: input.targetPath });
       const destination: DurableSaveDestination = {
         phase: "active",
         generation: session.destination.generation + 1,

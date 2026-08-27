@@ -406,7 +406,7 @@ describe("one production review tree", () => {
   it("uses one clear automatic-save choice surface with the original first", () => {
     const html = renderToStaticMarkup(<SaveDestinationDialog
       open
-      proposal={{ filename: "paper-annotated.pdf", folder: "/tmp" }}
+      proposal={{ sourceDisposition: "local", filename: "paper-annotated.pdf", folder: "/tmp" }}
       onConfirm={vi.fn()}
       onCancel={vi.fn()}
     />);
@@ -425,10 +425,83 @@ describe("one production review tree", () => {
     expect(html).not.toContain("Keep the original unchanged.");
   });
 
+  it("asks remote browser PDFs for a fresh name and location without exposing an original", () => {
+    const html = renderToStaticMarkup(<SaveDestinationDialog
+      open
+      sourceDisposition="remote-temporary"
+      proposal={{ sourceDisposition: "remote-temporary" }}
+      protectedRecovery
+      onChooseLocation={vi.fn()}
+      onConfirm={vi.fn()}
+      onCancel={vi.fn()}
+    />);
+
+    expect(html).toContain("Protected Recovery");
+    expect(html).toContain("Your annotation is protected while you choose where to save it.");
+    expect(html).not.toContain("Modify the original PDF");
+    expect(html).toContain("PDF name");
+    expect(html).toContain("Choose a location…");
+    expect(html).not.toContain("Private paper.pdf");
+    expect(html).not.toContain("recovery/");
+  });
+
+  it("shows a cancelled remote annotation as Protected Recovery with Save available to retry", () => {
+    const state = {
+      ...createReviewState({
+        sessionId: "00000000-0000-4000-8000-000000000041",
+        source: {
+          fileId: "00000000-0000-4000-8000-000000000042",
+          digest: "d".repeat(64),
+          byteLength: 12,
+        },
+      }),
+      revision: 1,
+      items: [{
+        id: "00000000-0000-4000-8000-000000000043",
+        kind: "pageNote" as const,
+        pageIndex: 0,
+        createdAt: "2026-08-27T00:00:00.000Z",
+        updatedAt: "2026-08-27T00:00:00.000Z",
+        payload: { position: { x: 1, y: 2, width: 3, height: 4 }, comment: "Protected" },
+      }],
+    };
+    const html = renderToStaticMarkup(<ProductionReviewApp
+      session={{ sessionId: state.sessionId, credential: "secret" }}
+      initialState={state}
+      initialSaveStatus={{
+        destination: { phase: "none", generation: 0 },
+        sync: {
+          phase: "not-saved",
+          desiredRevision: 1,
+          savedRevision: 0,
+          failure: "destination-unconfigured",
+        },
+      }}
+      scope={{
+        documentTitle: "Private paper.pdf",
+        sourceDisposition: "remote-temporary",
+        sourceDisplayName: "Private paper.pdf",
+        launchSurface: "browser",
+      }}
+      api={{
+        command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+        chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
+        scope: vi.fn(),
+      }}
+      viewer={<div>Viewer</div>}
+    />);
+
+    expect(html).toContain("Protected Recovery");
+    expect(html).toContain("Private paper.pdf, protected recovery, choose where to save");
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).toContain('data-review-item="00000000-0000-4000-8000-000000000043"');
+    expect(html).not.toContain("Codex");
+  });
+
   it("keeps recovery actions in the same automatic-save surface", () => {
     const html = renderToStaticMarkup(<SaveDestinationDialog
       open
-      proposal={{ filename: "paper-annotated.pdf", folder: "/tmp" }}
+      proposal={{ sourceDisposition: "local", filename: "paper-annotated.pdf", folder: "/tmp" }}
       recoveryTarget="paper-annotated.pdf"
       onRetry={vi.fn()}
       onLocate={vi.fn()}
@@ -447,7 +520,7 @@ describe("one production review tree", () => {
   it("routes invalid geometry back to annotation correction instead of generic retry", () => {
     const html = renderToStaticMarkup(<SaveDestinationDialog
       open
-      proposal={{ filename: "paper-annotated.pdf", folder: "/tmp" }}
+      proposal={{ sourceDisposition: "local", filename: "paper-annotated.pdf", folder: "/tmp" }}
       recoveryTarget="paper-annotated.pdf"
       recoveryFailure="invalid-annotation-geometry"
       onRetry={vi.fn()}

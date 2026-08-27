@@ -680,7 +680,7 @@ function Harness() {
     {shell}
     <SaveDestinationDialog
       open={saveDestinationOpen}
-      proposal={{ filename: 'acceptance-annotated.pdf', folder: '/tmp' }}
+      proposal={{ sourceDisposition: 'local', filename: 'acceptance-annotated.pdf', folder: '/tmp' }}
       onConfirm={async () => setSaveDestinationOpen(false)}
       onCancel={() => setSaveDestinationOpen(false)}
       onChooseLocation={async () => undefined}
@@ -696,6 +696,7 @@ function Harness() {
           open
           establishing={saveEstablishing}
           proposal={{
+            sourceDisposition: 'local',
             filename: 'Identification Strategy — annotated.pdf',
             folder: '/Users/reviewer/Documents/Working Papers',
           }}
