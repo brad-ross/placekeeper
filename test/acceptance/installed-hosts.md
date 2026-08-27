@@ -59,6 +59,18 @@ The 2026-08-07 acceptance record predates the clean-break identity and no longer
 - Manual installation and visual smoke tests for Codex desktop and VS Code desktop are still recommended for users who choose those integrations. This source-tree run does not claim that the current Codex desktop rendered or trusted the plugin; disabled or untrusted hooks are represented by the provider's explicit `unavailable` behavior.
 - VS Code Remote SSH, containers, Codespaces, web, virtual, and non-file workspaces remain intentionally refused.
 
+## Chrome PDF handoff evidence
+
+`pnpm test:chrome-handoff` is the deterministic gate. It uses a disposable persistent Chromium profile and a private loopback fixture; the profile directory is removed after the run. The fixture counts only named outcome categories. It does not retain request URLs, cookies, form bodies, local PDF paths, capabilities, or native-host messages. The focused unit portion proves exact-once stream consumption and drain-before-fallback, local-path reuse, origin and quota enforcement, temporary-source ownership and cleanup, remote save restrictions, Protected Recovery, and the absence of new Codex authority.
+
+Playwright support for unpacked extensions does not guarantee that its managed Chromium exposes or can drive Google Chrome's public PDF MIME-handler integration. The acceptance spec detects the four required `chrome.mimeHandler` methods and reports an explicit skip when they are unavailable. A skip is expected infrastructure evidence, not a release pass. Release still requires one fresh-profile check in the actual installed Google Chrome stable 151+ binary; do not use the everyday Chrome profile and do not install over active Placekeeper work.
+
+| Date | App build identity | Chrome version | Extension ID | MIME API | Host manifest hash/path verified | Starts paused | Enabled same-tab + Back | Bypass + unavailable-host fallback | Authenticated one-use response | No Downloads copy / authority secret | Result |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Pending | Pending | Pending | `cgegjjjhbhnfgcoipeffhogoojfoekgg` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Pending |
+
+For the installed row, use a fresh Chrome profile, a disposable PDF fixture, and the installed extension path. Record the literal installed host-manifest path and its SHA-256 hash, but never copy the manifest contents into this document. Confirm that Back returns to the fixture landing page; history contains no `#cap=`, bind proof, task identifier, cookie, or private staging path; reading and closing creates no Downloads PDF; and removing/reinstalling registration leaves the disposable PDF and Protected Recovery data untouched. Upgrade/rollback and removal remain covered deterministically by the packaging transaction suites.
+
 ## Reading-first interface evidence
 
 Automated release-candidate coverage exercises the same production review tree in an ordinary Chromium launch and a narrow 320-CSS-pixel `vscode` embed launch. The checks record one mounted viewer, one compact chrome, page `1 / 1`, unchanged page bounds and viewer mount identity through disclosure, preserved review state through breakpoint changes, visible workspace close controls, and deterministic focus restoration. The WebKit gate runs both the joined review workflow and installed-style production flow. The Codex lifecycle fixture exercises the private control socket rather than an installed Codex UI. Capability URLs, proofs, task IDs, and local paths are deliberately excluded from prompt-output assertions and this record.
