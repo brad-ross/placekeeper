@@ -1,0 +1,513 @@
+import { createHash, randomBytes } from "node:crypto";
+import {
+  constants,
+  link,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  unlink,
+  type FileHandle,
+} from "node:fs/promises";
+import { basename, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import {
+  decodeBase64Chunk,
+  parseExtensionMessage,
+  type NativeHostMessage,
+  type NativeStartMessage,
+} from "./native-messaging.js";
+
+export const CHROME_EXTENSION_ID = "cgegjjjhbhnfgcoipeffhogoojfoekgg";
+export const CHROME_EXTENSION_ORIGIN = `chrome-extension://${CHROME_EXTENSION_ID}/`;
+export const CHROME_NATIVE_PROTOCOL_VERSION = 1;
+
+const DEFAULT_MAX_TRANSFER_BYTES = 256 * 1024 * 1024;
+const DEFAULT_MAX_AGGREGATE_BYTES = 512 * 1024 * 1024;
+const DEFAULT_MAX_CONCURRENT_TRANSFERS = 2;
+const DEFAULT_TRANSFER_DURATION_MS = 30_000;
+const HANDLE = /^[A-Za-z0-9_-]{32}$/u;
+
+declare const sealedBrowserSource: unique symbol;
+export type SealedBrowserSourceHandle = string & { readonly [sealedBrowserSource]: true };
+
+export interface SealedBrowserSourceInspection {
+  readonly disposition: "remote-temporary";
+  readonly path: string;
+  readonly displayName?: string;
+  readonly byteLength: number;
+  readonly sha256: string;
+}
+
+interface StagedTransfer {
+  readonly id: string;
+  readonly path: string;
+  readonly file: FileHandle;
+  readonly digest: ReturnType<typeof createHash>;
+  readonly displayName?: string;
+  byteLength: number;
+  closed: boolean;
+}
+
+export interface ChromeTransferStoreOptions {
+  readonly root: string;
+  readonly validate: (path: string) => Promise<void>;
+  readonly maxConcurrentTransfers?: number;
+  readonly maxAggregateBytes?: number;
+}
+
+function sanitizedDisplayName(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const sanitized = basename(value).replace(/[\u0000-\u001f\u007f]/gu, "").trim().slice(0, 120);
+  return sanitized === "" ? undefined : sanitized;
+}
+
+/**
+ * The store is the U2/U3 seam: callers receive only an opaque handle after
+ * bytes are durable and structurally valid. U3 will attach durable ownership
+ * to that handle; browser transport never receives the private path.
+ */
+export class ChromeTransferStore {
+  readonly root: string;
+  readonly #validate: (path: string) => Promise<void>;
+  readonly #maxConcurrentTransfers: number;
+  readonly #maxAggregateBytes: number;
+  readonly #sealed = new Map<SealedBrowserSourceHandle, SealedBrowserSourceInspection>();
+
+  private constructor(options: ChromeTransferStoreOptions) {
+    this.root = resolve(options.root);
+    this.#validate = options.validate;
+    this.#maxConcurrentTransfers = options.maxConcurrentTransfers ?? DEFAULT_MAX_CONCURRENT_TRANSFERS;
+    this.#maxAggregateBytes = options.maxAggregateBytes ?? DEFAULT_MAX_AGGREGATE_BYTES;
+  }
+
+  static async create(options: ChromeTransferStoreOptions): Promise<ChromeTransferStore> {
+    const root = resolve(options.root);
+    await mkdir(root, { recursive: true, mode: 0o700 });
+    const metadata = await lstat(root);
+    const canonical = await realpath(root);
+    if (
+      !metadata.isDirectory() || metadata.isSymbolicLink() ||
+      (metadata.mode & 0o077) !== 0
+    ) throw new Error("Browser source root must be a secure directory");
+    return new ChromeTransferStore({ ...options, root: canonical });
+  }
+
+  async begin(transferId: string, displayName?: string): Promise<StagedTransfer> {
+    const safeDisplayName = sanitizedDisplayName(displayName);
+    const { path, file } = await this.#withAdmissionLock(async () => {
+      const partials = (await readdir(this.root)).filter((name) => name.endsWith(".partial"));
+      if (partials.length >= this.#maxConcurrentTransfers) throw new Error("host-busy");
+      const path = resolve(this.root, `.${randomBytes(24).toString("base64url")}.partial`);
+      const file = await open(
+        path,
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
+        0o600,
+      );
+      return { path, file };
+    });
+    return {
+      id: transferId,
+      path,
+      file,
+      digest: createHash("sha256"),
+      ...(safeDisplayName === undefined ? {} : { displayName: safeDisplayName }),
+      byteLength: 0,
+      closed: false,
+    };
+  }
+
+  async append(staged: StagedTransfer, bytes: Uint8Array): Promise<void> {
+    if (staged.closed) throw new Error("staged-transfer-closed");
+    await this.#withAdmissionLock(async () => {
+      // Count both transfers in flight and sealed sources awaiting broker
+      // adoption. Otherwise repeatedly completed handoffs can evade the
+      // aggregate disk budget while their sessions remain recoverable.
+      const sources = (await readdir(this.root)).filter((name) =>
+        name.endsWith(".partial") || name.endsWith(".pdf")
+      );
+      const sizes = await Promise.all(sources.map(async (name) => {
+        const metadata = await lstat(resolve(this.root, name));
+        if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error("host-byte-budget");
+        return metadata.size;
+      }));
+      if (sizes.reduce((sum, size) => sum + size, 0) + bytes.byteLength > this.#maxAggregateBytes) {
+        throw new Error("host-byte-budget");
+      }
+      // FileHandle.write() is allowed to complete with a short write. writeFile()
+      // consumes the full buffer before the chunk is acknowledged.
+      await staged.file.writeFile(bytes);
+    });
+    staged.digest.update(bytes);
+    staged.byteLength += bytes.byteLength;
+  }
+
+  async cancel(staged: StagedTransfer): Promise<void> {
+    if (!staged.closed) {
+      staged.closed = true;
+      await staged.file.close().catch(() => undefined);
+    }
+    await unlink(staged.path).catch(() => undefined);
+  }
+
+  async seal(staged: StagedTransfer): Promise<SealedBrowserSourceHandle> {
+    if (staged.closed) throw new Error("staged-transfer-closed");
+    staged.closed = true;
+    let committedPath: string | undefined;
+    try {
+      await staged.file.sync();
+      await staged.file.close();
+      await this.#validate(staged.path);
+      const handle = randomBytes(24).toString("base64url") as SealedBrowserSourceHandle;
+      const sealedPath = resolve(this.root, `${handle}.pdf`);
+      // link() is the no-clobber commit; unlinking the partial name leaves the
+      // same durable inode owned by the opaque handle.
+      await link(staged.path, sealedPath);
+      committedPath = sealedPath;
+      await unlink(staged.path);
+      this.#sealed.set(handle, {
+        disposition: "remote-temporary",
+        path: sealedPath,
+        ...(staged.displayName === undefined ? {} : { displayName: staged.displayName }),
+        byteLength: staged.byteLength,
+        sha256: staged.digest.digest("hex"),
+      });
+      return handle;
+    } catch (error) {
+      await staged.file.close().catch(() => undefined);
+      await unlink(staged.path).catch(() => undefined);
+      if (committedPath !== undefined) await unlink(committedPath).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async inspect(handle: SealedBrowserSourceHandle): Promise<SealedBrowserSourceInspection> {
+    if (!HANDLE.test(handle)) throw new Error("Unknown sealed browser source");
+    const source = this.#sealed.get(handle);
+    if (source === undefined) throw new Error("Unknown sealed browser source");
+    return source;
+  }
+
+  async remove(handle: SealedBrowserSourceHandle): Promise<void> {
+    const source = this.#sealed.get(handle);
+    if (source === undefined) return;
+    this.#sealed.delete(handle);
+    await unlink(source.path).catch(() => undefined);
+  }
+
+  async canonicalizeLocal(fileUrl: string): Promise<string> {
+    let url: URL;
+    try {
+      url = new URL(fileUrl);
+    } catch {
+      throw new Error("invalid-local-source");
+    }
+    if (
+      url.protocol !== "file:" || url.hostname !== "" || url.username !== "" ||
+      url.password !== "" || url.port !== "" || url.search !== "" || url.hash !== ""
+    ) throw new Error("invalid-local-source");
+    let requested: string;
+    try {
+      requested = fileURLToPath(url);
+    } catch {
+      throw new Error("invalid-local-source");
+    }
+    try {
+      const canonical = await realpath(requested);
+      const metadata = await stat(canonical);
+      if (!metadata.isFile()) throw new Error("invalid-local-source");
+      const file = await open(canonical, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        const header = Buffer.alloc(5);
+        const { bytesRead } = await file.read(header, 0, header.length, 0);
+        if (bytesRead !== header.length || !header.equals(Buffer.from("%PDF-"))) {
+          throw new Error("invalid-local-source");
+        }
+      } finally {
+        await file.close();
+      }
+      return canonical;
+    } catch {
+      throw new Error("invalid-local-source");
+    }
+  }
+
+  async #withAdmissionLock<T>(operation: () => Promise<T>): Promise<T> {
+    const lockPath = resolve(this.root, ".quota-lock");
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      try {
+        await mkdir(lockPath, { mode: 0o700 });
+        try {
+          return await operation();
+        } finally {
+          await rm(lockPath, { recursive: true, force: true });
+        }
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EEXIST") throw error;
+        const lock = await lstat(lockPath).catch(() => undefined);
+        if (lock !== undefined && (!lock.isDirectory() || lock.isSymbolicLink())) {
+          throw new Error("Browser source quota lock is invalid");
+        }
+        if (lock !== undefined && Date.now() - lock.mtimeMs > 60_000) {
+          await rm(lockPath, { recursive: true, force: true });
+          continue;
+        }
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+      }
+    }
+    throw new Error("host-busy");
+  }
+}
+
+export interface ChromeTransferQuotaOptions {
+  readonly maxConcurrentTransfers?: number;
+  readonly maxAggregateBytes?: number;
+}
+
+export class ChromeTransferQuota {
+  readonly #maxConcurrentTransfers: number;
+  readonly #maxAggregateBytes: number;
+  readonly #bytes = new Map<string, number>();
+
+  constructor(options: ChromeTransferQuotaOptions = {}) {
+    this.#maxConcurrentTransfers = options.maxConcurrentTransfers ?? DEFAULT_MAX_CONCURRENT_TRANSFERS;
+    this.#maxAggregateBytes = options.maxAggregateBytes ?? DEFAULT_MAX_AGGREGATE_BYTES;
+  }
+
+  acquire(transferId: string): boolean {
+    if (this.#bytes.has(transferId) || this.#bytes.size >= this.#maxConcurrentTransfers) return false;
+    this.#bytes.set(transferId, 0);
+    return true;
+  }
+
+  add(transferId: string, byteLength: number): boolean {
+    const current = this.#bytes.get(transferId);
+    if (current === undefined) return false;
+    const aggregate = [...this.#bytes.values()].reduce((sum, value) => sum + value, 0);
+    if (aggregate + byteLength > this.#maxAggregateBytes) return false;
+    this.#bytes.set(transferId, current + byteLength);
+    return true;
+  }
+
+  release(transferId: string): void {
+    this.#bytes.delete(transferId);
+  }
+}
+
+export interface ChromeBrowserReviewOpener {
+  openLocal(canonicalPath: string): Promise<string>;
+  openSealed(handle: SealedBrowserSourceHandle): Promise<string>;
+}
+
+export interface ChromeHandoffSessionOptions {
+  readonly callerOrigin: string;
+  readonly store: ChromeTransferStore;
+  readonly opener: ChromeBrowserReviewOpener;
+  readonly quota?: ChromeTransferQuota;
+  readonly maxTransferBytes?: number;
+  readonly maxDurationMs?: number;
+  readonly now?: () => number;
+}
+
+type SessionState =
+  | { readonly kind: "idle" }
+  | {
+      readonly kind: "remote";
+      readonly start: NativeStartMessage & { readonly disposition: "remote-temporary" };
+      readonly staged: StagedTransfer;
+      readonly deadline: number;
+      sequence: number;
+      byteLength: number;
+    }
+  | {
+      readonly kind: "local";
+      readonly start: NativeStartMessage & { readonly disposition: "local" };
+      readonly deadline: number;
+    }
+  | { readonly kind: "terminal"; readonly transferId?: string };
+
+function validDestination(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return url.protocol === "http:" && url.hostname === "127.0.0.1" && url.port === "43179" &&
+    url.username === "" && url.password === "" && url.search === "" &&
+    /^\/s\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/bootstrap$/u.test(url.pathname) &&
+    /^#cap=[A-Za-z0-9_-]{43}$/u.test(url.hash);
+}
+
+export class ChromeHandoffSession {
+  readonly #store: ChromeTransferStore;
+  readonly #opener: ChromeBrowserReviewOpener;
+  readonly #quota: ChromeTransferQuota;
+  readonly #maxTransferBytes: number;
+  readonly #maxDurationMs: number;
+  readonly #now: () => number;
+  #state: SessionState = { kind: "idle" };
+
+  constructor(options: ChromeHandoffSessionOptions) {
+    if (options.callerOrigin !== CHROME_EXTENSION_ORIGIN) throw new Error("unauthorized-origin");
+    this.#store = options.store;
+    this.#opener = options.opener;
+    this.#quota = options.quota ?? new ChromeTransferQuota();
+    this.#maxTransferBytes = options.maxTransferBytes ?? DEFAULT_MAX_TRANSFER_BYTES;
+    this.#maxDurationMs = options.maxDurationMs ?? DEFAULT_TRANSFER_DURATION_MS;
+    this.#now = options.now ?? Date.now;
+  }
+
+  async handle(raw: unknown): Promise<NativeHostMessage | undefined> {
+    const message = parseExtensionMessage(raw);
+    if (message === undefined) return this.#fail("invalid-message");
+    if (this.#state.kind === "terminal") {
+      return { type: "failure", transferId: message.transferId, reason: "transfer-closed" };
+    }
+    if (this.#state.kind !== "idle" && this.#now() > this.#state.deadline) {
+      return this.#fail("transfer-timeout");
+    }
+    if (message.type === "start") return this.#start(message);
+    if (this.#state.kind === "idle" || message.transferId !== this.#state.start.transferId) {
+      return this.#fail("invalid-state", message.transferId);
+    }
+    if (message.type === "cancel") {
+      await this.#cleanup();
+      this.#state = { kind: "terminal", transferId: message.transferId };
+      return undefined;
+    }
+    if (message.type === "chunk") return this.#chunk(message.sequence, message.data);
+    return this.#finish(message.sequence);
+  }
+
+  async disconnect(): Promise<void> {
+    await this.#cleanup();
+    const transferId = this.#state.kind === "idle" || this.#state.kind === "terminal"
+      ? undefined
+      : this.#state.start.transferId;
+    this.#state = transferId === undefined ? { kind: "terminal" } : { kind: "terminal", transferId };
+  }
+
+  async #start(message: NativeStartMessage): Promise<NativeHostMessage> {
+    if (this.#state.kind !== "idle") return this.#fail("invalid-state", message.transferId);
+    if (message.protocolVersion !== CHROME_NATIVE_PROTOCOL_VERSION) {
+      this.#state = { kind: "terminal", transferId: message.transferId };
+      return { type: "failure", transferId: message.transferId, reason: "protocol-mismatch" };
+    }
+    if (!this.#quota.acquire(message.transferId)) {
+      this.#state = { kind: "terminal", transferId: message.transferId };
+      return { type: "failure", transferId: message.transferId, reason: "host-busy" };
+    }
+    const deadline = this.#now() + this.#maxDurationMs;
+    try {
+      if (message.disposition === "local") {
+        this.#state = { kind: "local", start: message, deadline };
+      } else {
+        this.#state = {
+          kind: "remote",
+          start: message,
+          staged: await this.#store.begin(message.transferId, message.displayName),
+          deadline,
+          sequence: 0,
+          byteLength: 0,
+        };
+      }
+      return { type: "ack", transferId: message.transferId, phase: "start" };
+    } catch (error) {
+      this.#quota.release(message.transferId);
+      this.#state = { kind: "terminal", transferId: message.transferId };
+      return {
+        type: "failure",
+        transferId: message.transferId,
+        reason: error instanceof Error && error.message === "host-busy"
+          ? "host-busy"
+          : "staging-unavailable",
+      };
+    }
+  }
+
+  async #chunk(sequence: number, data: string): Promise<NativeHostMessage> {
+    if (this.#state.kind !== "remote" || sequence !== this.#state.sequence) {
+      return this.#fail("out-of-order");
+    }
+    const bytes = decodeBase64Chunk(data);
+    if (bytes === undefined) return this.#fail("invalid-chunk");
+    if (this.#state.byteLength + bytes.length > this.#maxTransferBytes) {
+      return this.#fail("transfer-too-large");
+    }
+    if (!this.#quota.add(this.#state.start.transferId, bytes.length)) {
+      return this.#fail("host-byte-budget");
+    }
+    try {
+      await this.#store.append(this.#state.staged, bytes);
+      this.#state.byteLength += bytes.length;
+      this.#state.sequence += 1;
+      return {
+        type: "ack",
+        transferId: this.#state.start.transferId,
+        phase: "chunk",
+        sequence,
+      };
+    } catch (error) {
+      return this.#fail(
+        error instanceof Error && error.message === "host-byte-budget"
+          ? "host-byte-budget"
+          : "staging-unavailable",
+      );
+    }
+  }
+
+  async #finish(sequence: number): Promise<NativeHostMessage> {
+    const state = this.#state;
+    if (state.kind === "remote" && sequence !== state.sequence) return this.#fail("out-of-order");
+    if (state.kind === "local" && sequence !== 0) return this.#fail("out-of-order");
+    if (state.kind !== "remote" && state.kind !== "local") return this.#fail("invalid-state");
+    const transferId = state.start.transferId;
+    let sealed: SealedBrowserSourceHandle | undefined;
+    try {
+      let destination: string;
+      if (state.kind === "local") {
+        destination = await this.#opener.openLocal(await this.#store.canonicalizeLocal(state.start.fileUrl));
+      } else {
+        if (state.byteLength === 0) throw new Error("invalid-pdf");
+        sealed = await this.#store.seal(state.staged);
+        destination = await this.#opener.openSealed(sealed);
+      }
+      if (!validDestination(destination)) throw new Error("service-unavailable");
+      this.#quota.release(transferId);
+      this.#state = { kind: "terminal", transferId };
+      return { type: "success", transferId, destination };
+    } catch (error) {
+      if (sealed !== undefined) await this.#store.remove(sealed);
+      const reason = error instanceof Error && error.message === "invalid-local-source"
+        ? "invalid-local-source"
+        : error instanceof Error && error.message === "invalid-pdf"
+          ? "invalid-pdf"
+          : state.kind === "remote" && sealed === undefined
+            ? "invalid-pdf"
+            : "service-unavailable";
+      return this.#fail(reason, transferId);
+    }
+  }
+
+  async #cleanup(): Promise<void> {
+    const state = this.#state;
+    if (state.kind === "remote") await this.#store.cancel(state.staged);
+    if (state.kind === "remote" || state.kind === "local") this.#quota.release(state.start.transferId);
+  }
+
+  async #fail(reason: string, fallbackTransferId?: string): Promise<NativeHostMessage> {
+    const state = this.#state;
+    const transferId = state.kind === "remote" || state.kind === "local"
+      ? state.start.transferId
+      : fallbackTransferId ?? "unknown-transfer";
+    await this.#cleanup();
+    this.#state = { kind: "terminal", transferId };
+    return { type: "failure", transferId, reason };
+  }
+}
