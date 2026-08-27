@@ -4,7 +4,9 @@ import type {
   ReviewItemKind,
   ReviewSourceIdentity,
   ReviewState,
+  ReviewWorkflowMode,
 } from "./review-model.js";
+import { canonicalizeReviewItem } from "./review-model.js";
 import {
   assertReviewItem,
   InvalidReviewCommandError,
@@ -375,7 +377,11 @@ export function createImportedReviewState(input: {
   readonly source: ReviewSourceIdentity;
   readonly sourceRootId?: string;
   readonly items: readonly ReviewItem[];
+  readonly workflowMode?: ReviewWorkflowMode;
+  readonly documentGeneration?: number;
 }): ReviewState {
+  const mode = input.workflowMode ?? "standard";
+  const documentGeneration = input.documentGeneration ?? 1;
   return {
     schemaVersion: 2,
     sessionId: input.sessionId,
@@ -383,7 +389,22 @@ export function createImportedReviewState(input: {
     ...(input.sourceRootId === undefined ? {} : { sourceRootId: input.sourceRootId }),
     revision: 0,
     lifecycle: "active",
-    items: [...input.items],
+    items: mode === "generated-output"
+      ? input.items.map((item) => canonicalizeReviewItem(item, {
+          ownerViewId: item.reconciliation?.ownerViewId ?? "portable-import",
+          baseGeneration: item.reconciliation?.baseGeneration ?? documentGeneration,
+        }))
+      : [...input.items],
+    workflow: {
+      schemaVersion: 1,
+      mode,
+      documentRole: mode === "generated-output" ? "generated-output" : "source-pdf",
+      documentGeneration,
+      freshness: "current",
+      historyBoundary: 0,
+    },
+    pendingDrafts: [],
+    discardAudit: [],
     history: [],
     historyCursor: 0,
   };

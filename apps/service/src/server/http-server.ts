@@ -18,6 +18,7 @@ import {
 } from "../sessions/session-broker.js";
 import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { DaemonLifecycleCoordinator } from "../host/daemon-lifecycle.js";
+import { ExportCoordinatorError, type ExportCoordinator } from "../export/export-coordinator.js";
 import { openPlacekeeperLink, parsePlacekeeperReadableViewRoute } from "../links/placekeeper-link.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -239,6 +240,7 @@ export interface LocalHttpServerOptions {
     PdfSaveCoordinator,
     "proposal" | "chooseCopyFilename" | "chooseFolder" | "chooseOriginal" | "requestSave" | "retry" | "locate"
   >;
+  readonly exporting?: Pick<ExportCoordinator, "exportReviewedCopy">;
   readonly lifecycle?: Pick<DaemonLifecycleCoordinator, "enterActivity">;
 }
 
@@ -296,7 +298,9 @@ export async function startHttpServer(
         `^/s/(${UUID})/save/(status|proposal|copy|folder|original|retry|locate)$`,
         "u",
       ).exec(pathname);
+      const exportMatch = new RegExp(`^/s/(${UUID})/export$`, "u").exec(pathname);
       const mutates = exchangeMatch !== null || resumeMatch !== null || reopenMatch || commandMatch !== null ||
+        exportMatch !== null ||
         (saveMatch !== null && saveMatch[2] !== "status" && saveMatch[2] !== "proposal");
       const expectsJson = mutates;
       const contentLength = Number(request.headers["content-length"] ?? 0);
@@ -563,7 +567,7 @@ export async function startHttpServer(
       const documentMatch = new RegExp(`^/s/(${UUID})/document/(${UUID})$`, "u").exec(pathname);
       const authenticatedSessionId =
         stateMatch?.[1] ?? scopeMatch?.[1] ?? documentMatch?.[1] ?? commandMatch?.[1] ??
-        saveMatch?.[1];
+        saveMatch?.[1] ?? exportMatch?.[1];
       if (authenticatedSessionId !== undefined) {
         const credential = bearerCredential(request);
         if (
@@ -631,6 +635,28 @@ export async function startHttpServer(
         sendJson(response, 200, publicSaveStatus(broker.saveStatus(sessionId)));
         return;
       }
+      if (exportMatch !== null) {
+        if (request.method !== "POST") {
+          send(response, 405, "Method not allowed");
+          return;
+        }
+        if (options.exporting === undefined) {
+          send(response, 503, "Export service is unavailable");
+          return;
+        }
+        const body = await readJson(request) as { confirmPossiblyStale?: unknown };
+        if (body.confirmPossiblyStale !== undefined && body.confirmPossiblyStale !== true) {
+          send(response, 400, "Invalid request");
+          return;
+        }
+        const frozen = await broker.freezeDelivery(exportMatch[1]!);
+        const result = await options.exporting.exportReviewedCopy({
+          ...frozen,
+          ...(body.confirmPossiblyStale === true ? { staleConfirmed: true as const } : {}),
+        });
+        sendJson(response, 200, result);
+        return;
+      }
       if (documentMatch !== null && request.method === "GET") {
         const state = broker.state(documentMatch[1]!);
         if (state?.source.fileId !== documentMatch[2]) {
@@ -680,6 +706,11 @@ export async function startHttpServer(
         sendJson(response, 409, {
           ok: false,
           error: { kind: "recovery-offer-unavailable" },
+        });
+      } else if (error instanceof ExportCoordinatorError) {
+        sendJson(response, 409, {
+          ok: false,
+          error: { kind: "export-rejected", code: error.code, message: error.message },
         });
       } else {
         send(response, 409, "Request could not be applied");

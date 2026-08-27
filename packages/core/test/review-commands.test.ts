@@ -10,7 +10,12 @@ import {
   removeReviewItem,
   type ReviewCommandFactory,
 } from '../src/review-commands.js';
-import { createReviewState, type ReviewState } from '../src/review-model.js';
+import {
+  anchorEvidenceFromReviewItem,
+  createReviewState,
+  startReviewGeneration,
+  type ReviewState,
+} from '../src/review-model.js';
 import {
   InvalidReviewCommandError,
   MAX_REVIEW_SELECTION_SEGMENTS,
@@ -53,6 +58,97 @@ function setup(): { state: ReviewState; commands: ReviewCommandFactory } {
 }
 
 describe('canonical review commands', () => {
+  it('keeps generated-output items and pending authoring generation-bound and revisioned', () => {
+    let state = createReviewState({
+      sessionId: 'session',
+      source,
+      workflowMode: 'generated-output',
+      documentGeneration: 4,
+    });
+    const commands = setup().commands;
+    const addCommand = addReplace(state, selection, 'locally unique equilibrium', commands);
+    if (addCommand.type !== 'add') throw new Error('Expected add');
+    state = reduceReview(state, {
+      ...addCommand,
+      authoring: { ownerViewId: 'panel-a', baseGeneration: 4 },
+    });
+
+    expect(state.workflow).toMatchObject({
+      mode: 'generated-output',
+      documentRole: 'generated-output',
+      documentGeneration: 4,
+    });
+    expect(state.items[0]?.reconciliation).toMatchObject({
+      ownerViewId: 'panel-a',
+      baseGeneration: 4,
+      revision: 0,
+      disposition: { kind: 'resolved', generation: 4 },
+    });
+
+    state = reduceReview(state, {
+      type: 'put-draft',
+      expectedRevision: state.revision,
+      expectedDraftRevision: -1,
+      draft: {
+        id: '00000000-0000-4000-8000-000000000099',
+        ownerViewId: 'panel-a',
+        baseGeneration: 4,
+        revision: 0,
+        kind: 'replace',
+        pageIndex: 0,
+        text: 'draft replacement',
+        anchor: anchorEvidenceFromReviewItem(state.items[0]!),
+        disposition: { kind: 'resolved', generation: 4 },
+        status: 'protected',
+        createdAt: '2026-08-07T12:00:00.000Z',
+        updatedAt: '2026-08-07T12:00:00.000Z',
+      },
+    });
+    expect(state.pendingDrafts[0]).toMatchObject({ revision: 0, status: 'protected' });
+
+    expect(() => reduceReview(state, {
+      type: 'put-draft',
+      expectedRevision: state.revision,
+      expectedDraftRevision: -1,
+      draft: { ...state.pendingDrafts[0]!, text: 'racing update' },
+    })).toThrow(/draft revision/iu);
+  });
+
+  it('reattaches without changing semantic payload and fences undo at a rebuild boundary', () => {
+    let { state, commands } = setup();
+    state = reduceReview(state, addReplace(state, selection, 'same semantics', commands));
+    const before = state.items[0]!;
+    state = startReviewGeneration(state, { documentGeneration: 2 });
+    expect(state.items[0]?.reconciliation?.disposition.kind).toBe('missing');
+
+    const nextAnchor = {
+      ...anchorEvidenceFromReviewItem(before),
+      pageIndex: 2,
+      rect: { x: 20, y: 30, width: 40, height: 10 },
+      segmentRects: [{ x: 20, y: 30, width: 40, height: 10 }],
+    };
+    state = reduceReview(state, {
+      type: 'reattach',
+      expectedRevision: state.revision,
+      id: before.id,
+      expectedReconciliationRevision: 1,
+      ownerViewId: 'panel-b',
+      anchor: nextAnchor,
+      updatedAt: '2026-08-07T12:05:00.000Z',
+    });
+    expect(state.items[0]?.payload).toEqual(before.payload);
+    expect(state.items[0]?.reconciliation).toMatchObject({
+      revision: 2,
+      disposition: { kind: 'resolved', generation: 2 },
+      anchor: { pageIndex: 2 },
+    });
+
+    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    expect(state.items[0]?.reconciliation?.disposition.kind).toBe('missing');
+    expect(() => reduceReview(state, { type: 'undo', expectedRevision: state.revision }))
+      .toThrow(/rebuild history boundary/iu);
+  });
+
   it('creates all five v1 tools as stable semantic items and advances one revision each', () => {
     let { state, commands } = setup();
     const commandBuilders = [

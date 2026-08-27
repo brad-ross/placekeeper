@@ -129,6 +129,9 @@ function stateFor(items: readonly ReviewItem[]): ReviewState {
     revision: items.length,
     lifecycle: 'active',
     items,
+    workflow: { schemaVersion: 1, mode: 'standard', documentRole: 'source-pdf', documentGeneration: 1, freshness: 'current', historyBoundary: 0 },
+    pendingDrafts: [],
+    discardAudit: [],
     history: [],
     historyCursor: 0,
   };

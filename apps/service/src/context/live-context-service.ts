@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   createAtomicLiveContextObservation,
   createReviewSnapshot,
+  createReviewStateSummary,
   createUnavailableLiveContextObservation,
   diffReviewSnapshots,
   type ExistingPdfAnnotation,
@@ -373,6 +374,7 @@ export class LiveContextService {
             warnings: inspection.warnings,
           },
           evidence: catalog,
+          reviewState: createReviewStateSummary(snapshot.state),
         });
         projected = { status: "projected", observation, snapshot: current };
         break;

@@ -135,6 +135,14 @@ export interface SaveCopyProposal {
   readonly folder: string;
 }
 
+export interface ProductionExportResult {
+  readonly kind: "reviewed-copy";
+  readonly path: string;
+  readonly revision: number;
+  readonly digest: string;
+  readonly warning?: string;
+}
+
 interface AuthoringAnchorNavigationState {
   readonly token: number;
   readonly visibility: PdfTargetVisibility;
@@ -151,6 +159,7 @@ export interface ProductionSessionApi {
   chooseOriginal(): Promise<ProductionSaveStatus>;
   retrySave(): Promise<ProductionSaveStatus>;
   locateSave(): Promise<ProductionSaveStatus>;
+  exportReviewedCopy?(confirmPossiblyStale?: true): Promise<ProductionExportResult>;
   scope(signal?: AbortSignal): Promise<ProductionScope>;
 }
 

@@ -98,11 +98,55 @@ async function exportFixture() {
       revision,
       sourceSnapshotPath: snapshotPath,
       annotations,
+      workflowMode: "standard" as const,
+      documentGeneration: 1,
+      dispositionDigest: "d".repeat(64),
+      exportEligibility: { eligible: true as const, requiresStaleConfirmation: false as const },
     }),
   };
 }
 
 describe("reviewed PDF export transaction", () => {
+  it("fails closed for unresolved generated output and never allows Replace Original", async () => {
+    const fixture = await exportFixture();
+    const coordinator = new ExportCoordinator({
+      writer: { write: async () => fixture.result },
+      capabilities: fixture.capabilities,
+    });
+    const generated = {
+      ...fixture.delivery(),
+      workflowMode: "generated-output" as const,
+      exportEligibility: {
+        eligible: false as const,
+        requiresStaleConfirmation: false,
+        reasons: ["unresolved-items" as const],
+      },
+    };
+
+    expect(() => coordinator.exportReviewedCopy(generated)).toThrow(/reconciliation/iu);
+    expect(() => coordinator.replaceOriginal({
+      ...generated,
+      exportEligibility: { eligible: true as const, requiresStaleConfirmation: false },
+    })).toThrow(/generated output/iu);
+    expect(await readFile(fixture.originalPath)).toEqual(fixture.original);
+  });
+
+  it("does not reuse one export result across generations with the same review revision", async () => {
+    const fixture = await exportFixture();
+    let writes = 0;
+    const coordinator = new ExportCoordinator({
+      writer: { write: async () => { writes += 1; return fixture.result; } },
+      capabilities: fixture.capabilities,
+      verify: async () => ({ pageCount: 1, annotationIds: [fixture.item.id] }),
+    });
+    await coordinator.exportReviewedCopy(fixture.delivery(7));
+    await coordinator.exportReviewedCopy({
+      ...fixture.delivery(7),
+      documentGeneration: 2,
+      dispositionDigest: "e".repeat(64),
+    });
+    expect(writes).toBe(2);
+  });
   it("atomically saves a reviewed copy without changing the original", async () => {
     const directory = await temporaryDirectory();
     const originalPath = join(directory, "paper.pdf");

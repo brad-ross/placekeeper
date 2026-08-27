@@ -21,6 +21,7 @@ import {
 } from "../../../packages/core/src/review-model.js";
 import {
   DraftSnapshotStore,
+  reviewStateDigest,
   type RecoverableDraft,
 } from "../src/recovery/draft-snapshot.js";
 import { enforceRetention } from "../src/recovery/retention.js";
@@ -108,6 +109,32 @@ function draft(revision: number): RecoverableDraft {
 }
 
 describe("atomic recovery generations", () => {
+  it("protects generated-output pending authoring and hashes it as canonical state", async () => {
+    const directory = await temporaryDirectory();
+    const store = new DraftSnapshotStore(directory);
+    const state = createReviewState({
+      sessionId: randomUUID(),
+      source: { fileId: randomUUID(), digest: "a".repeat(64), byteLength: 10 },
+      workflowMode: "generated-output",
+      documentGeneration: 2,
+    });
+    const protectedState: ReviewState = {
+      ...state,
+      revision: 1,
+      pendingDrafts: [{
+        id: randomUUID(), ownerViewId: "panel-a", baseGeneration: 2, revision: 0,
+        kind: "pageNote", pageIndex: 0, text: "finish this note",
+        anchor: { kind: "page", pageIndex: 0, rect: { x: 1, y: 2, width: 3, height: 4 } },
+        disposition: { kind: "resolved", generation: 2 }, status: "protected",
+        createdAt: "2026-08-27T12:00:00.000Z", updatedAt: "2026-08-27T12:00:00.000Z",
+      }],
+    };
+    await store.persist({ ...draft(0), state: protectedState });
+
+    const recovered = await store.recover();
+    expect(recovered?.state.pendingDrafts).toEqual(protectedState.pendingDrafts);
+    expect(reviewStateDigest(protectedState)).not.toBe(reviewStateDigest(state));
+  });
   it("recovers the previous complete generation after failure between rotation and final rename", async () => {
     const directory = await temporaryDirectory();
     const stable = new DraftSnapshotStore(directory);
@@ -189,6 +216,30 @@ describe("atomic recovery generations", () => {
 });
 
 describe("broker acknowledgement and restart recovery", () => {
+  it("keeps generated-output mode canonical across browser, VS Code, and Codex joins", async () => {
+    const directory = await temporaryDirectory();
+    const pdf = join(directory, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\ngenerated\n%%EOF");
+    const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
+    const opened = await broker.openReview({
+      pdfPath: pdf,
+      surface: "vscode",
+      workflowMode: "generated-output",
+    });
+    if (opened.kind !== "opened") throw new Error("Expected opened review");
+
+    for (const surface of ["browser", "codex"] as const) {
+      const joined = await broker.openReview({ pdfPath: pdf, surface });
+      expect(joined.kind).toBe("focused");
+      expect(broker.state(opened.launch.sessionId)?.workflow.mode).toBe("generated-output");
+    }
+    await expect(broker.openReview({
+      pdfPath: pdf,
+      surface: "browser",
+      workflowMode: "standard",
+    })).rejects.toThrow(/cannot be downgraded/iu);
+  });
+
   it("removes verified-clean recovery at shutdown but retains dirty protected recovery", async () => {
     const directory = await temporaryDirectory();
     const cleanPdf = join(directory, "clean.pdf");

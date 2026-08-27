@@ -9,7 +9,8 @@ import {
   stat,
 } from "node:fs/promises";
 import { join } from "node:path";
-import type { ReviewState } from "../../../../packages/core/src/review-model.js";
+import { normalizeReviewState, type ReviewState } from "../../../../packages/core/src/review-model.js";
+import { canonicalSha256 } from "../../../../packages/core/src/live-context.js";
 import type {
   SaveDestination,
   SaveSync,
@@ -67,18 +68,37 @@ function serialize(draft: RecoverableDraft): string {
   return JSON.stringify(envelope);
 }
 
-export function reviewStateDigest(state: Pick<ReviewState, "items">): string {
+export function reviewStateDigest(
+  state: Pick<ReviewState, "items"> & Partial<Pick<ReviewState, "workflow" | "pendingDrafts" | "discardAudit">>,
+): string {
   const ordered = [...state.items].sort((left, right) => left.id.localeCompare(right.id));
-  return createHash("sha256").update(JSON.stringify(ordered)).digest("hex");
+  return canonicalSha256({
+    items: ordered,
+    workflow: state.workflow,
+    pendingDrafts: state.pendingDrafts ?? [],
+    discardAudit: state.discardAudit ?? [],
+  });
 }
 
 export function migrateRecoverableDraft(draft: RecoverableDraft): RecoverableDraftV2 {
-  if (draft.schemaVersion === 2) return draft;
-  const desiredDigest = reviewStateDigest(draft.state);
+  const state = normalizeReviewState(draft.state);
+  if (draft.schemaVersion === 2) {
+    const desiredDigest = reviewStateDigest(state);
+    return {
+      ...draft,
+      state,
+      sync: {
+        ...draft.sync,
+        desiredDigest,
+      },
+    };
+  }
+  const desiredDigest = reviewStateDigest(state);
   const hasChanges = draft.state.revision > 0 || draft.state.items.length > 0;
   return {
     ...draft,
     schemaVersion: 2,
+    state,
     destination: { phase: "none", generation: 0 },
     sync: {
       phase: hasChanges ? "not-saved" : "clean",

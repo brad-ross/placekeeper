@@ -19,6 +19,8 @@ import type { TaskBindingRegistry } from "../context/task-binding-registry.js";
 import { DaemonLifecycleCoordinator } from "./daemon-lifecycle.js";
 import { decodePlacekeeperLink } from "../../../../packages/core/src/placekeeper-link.js";
 import { openPlacekeeperLink } from "../links/placekeeper-link.js";
+import type { ReviewWorkflowMode } from "../../../../packages/core/src/review-model.js";
+import { ExportCoordinator, type FrozenReviewDelivery } from "../export/export-coordinator.js";
 
 export type LaunchSurface = BrokerLaunchSurface;
 
@@ -30,6 +32,7 @@ export interface LaunchRequest {
   readonly recoveryOffer?: RecoveryOfferIdentity;
   readonly recoveryOperationId?: string;
   readonly surface?: LaunchSurface;
+  readonly workflowMode?: ReviewWorkflowMode;
 }
 
 export interface LaunchFailure {
@@ -142,6 +145,7 @@ export class PlacekeeperHost {
   readonly reconciliation: SourceReconciliationService;
   readonly sourceWorkflow: LiveSourceWorkflowService;
   readonly saving: PdfSaveCoordinator;
+  readonly exporting: ExportCoordinator;
   readonly lifecycle: DaemonLifecycleCoordinator;
   #closePromise?: Promise<void>;
 
@@ -152,6 +156,7 @@ export class PlacekeeperHost {
     reconciliation: SourceReconciliationService,
     sourceWorkflow: LiveSourceWorkflowService,
     saving: PdfSaveCoordinator,
+    exporting: ExportCoordinator,
     lifecycle: DaemonLifecycleCoordinator,
   ) {
     this.broker = broker;
@@ -160,6 +165,7 @@ export class PlacekeeperHost {
     this.reconciliation = reconciliation;
     this.sourceWorkflow = sourceWorkflow;
     this.saving = saving;
+    this.exporting = exporting;
     this.lifecycle = lifecycle;
   }
 
@@ -169,10 +175,18 @@ export class PlacekeeperHost {
       ...(options.taskBindings === undefined ? {} : { taskBindings: options.taskBindings }),
     });
     await broker.initialize();
+    const writer = await createSelectedPdfWriter();
     const saving = new PdfSaveCoordinator({
       broker,
-      writer: await createSelectedPdfWriter(),
+      writer,
       ...(process.platform === "darwin" ? { picker: new MacOsDestinationPicker() } : {}),
+    });
+    const exporting = new ExportCoordinator({
+      writer,
+      capabilities: broker.capabilities,
+      controls: broker.controls,
+      recordSuccessfulExport: (sessionId) => broker.recordSuccessfulExport(sessionId),
+      validateFrozenDelivery: (delivery) => broker.isFrozenDeliveryCurrent(delivery as FrozenReviewDelivery),
     });
     const lifecycle = new DaemonLifecycleCoordinator({
       activity: () => {
@@ -191,6 +205,7 @@ export class PlacekeeperHost {
       ...(options.port === undefined ? {} : { port: options.port }),
       ...(options.webAssets === undefined ? {} : { webAssets: options.webAssets }),
       saving,
+      exporting,
       lifecycle,
     });
     const context = new LiveContextService({ broker });
@@ -202,6 +217,7 @@ export class PlacekeeperHost {
       reconciliation,
       new LiveSourceWorkflowService({ broker, context, reconciliation }),
       saving,
+      exporting,
       lifecycle,
     );
   }
@@ -300,6 +316,7 @@ export class PlacekeeperHost {
           ? {}
           : { recoveryOperationId: request.recoveryOperationId }),
         surface,
+        ...(request.workflowMode === undefined ? {} : { workflowMode: request.workflowMode }),
       });
       if (opened.kind === "recovery-offered") {
         return {

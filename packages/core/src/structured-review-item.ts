@@ -1,4 +1,5 @@
-import type { JsonValue, ReviewItem } from "./review-model.js";
+import type { JsonValue, ReviewAnchorDisposition, ReviewItem } from "./review-model.js";
+import { anchorEvidenceFromReviewItem } from "./review-model.js";
 
 export interface SourceHint {
   readonly path: string;
@@ -22,13 +23,11 @@ export interface StructuredReviewItem {
     | { readonly kind: "page"; readonly nearbyText?: string };
   readonly payload: Readonly<Record<string, JsonValue>>;
   readonly sourceHint?: SourceHint;
-}
-
-function object(value: JsonValue | undefined): Record<string, JsonValue> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Canonical review geometry is missing");
-  }
-  return value;
+  readonly reconciliation?: {
+    readonly baseGeneration: number;
+    readonly revision: number;
+    readonly disposition: ReviewAnchorDisposition;
+  };
 }
 
 function string(item: ReviewItem, key: string): string {
@@ -57,13 +56,12 @@ export function projectStructuredReviewItem(
   item: ReviewItem,
   sourceHint?: SourceHint,
 ): StructuredReviewItem {
-  const geometry = object(item.payload[item.kind === "insert" || item.kind === "pageNote" ? "position" : "rect"]);
-  const segmentRects = Array.isArray(item.payload.segmentRects)
-    ? item.payload.segmentRects.map((value) => object(value))
-    : undefined;
+  const evidence = anchorEvidenceFromReviewItem(item);
+  const geometry = evidence.rect;
+  const segmentRects = evidence.kind === "selection" ? evidence.segmentRects : undefined;
   const coordinates = {
-    rect: geometry as Record<string, number>,
-    ...(segmentRects === undefined ? {} : { segmentRects: segmentRects as Record<string, number>[] }),
+    rect: { ...geometry },
+    ...(segmentRects === undefined ? {} : { segmentRects: segmentRects.map((rect) => ({ ...rect })) }),
   };
   const anchor: StructuredReviewItem["anchor"] = item.kind === "insert"
     ? { kind: "caret", leftContext: string(item, "leftContext"), rightContext: string(item, "rightContext") }
@@ -73,10 +71,17 @@ export function projectStructuredReviewItem(
   return {
     id: item.id,
     intent: item.kind,
-    pageIndex: item.pageIndex,
+    pageIndex: evidence.pageIndex,
     coordinates,
     anchor,
     payload: payload(item),
+    ...(item.reconciliation === undefined ? {} : {
+      reconciliation: {
+        baseGeneration: item.reconciliation.baseGeneration,
+        revision: item.reconciliation.revision,
+        disposition: item.reconciliation.disposition,
+      },
+    }),
     ...(sourceHint === undefined ? {} : { sourceHint }),
   };
 }

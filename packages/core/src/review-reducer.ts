@@ -1,4 +1,12 @@
-import type { ReviewCommand, ReviewItem, ReviewState } from "./review-model.js";
+import {
+  canonicalizeReviewItem,
+  type PendingReviewDraftV1,
+  type ReviewAnchorEvidenceV1,
+  type ReviewCommand,
+  type ReviewDiscardAuditV1,
+  type ReviewItem,
+  type ReviewState,
+} from "./review-model.js";
 
 export const MAX_REVIEW_SELECTION_SEGMENTS = 256;
 
@@ -12,6 +20,15 @@ export class ReviewConflictError extends Error {
   constructor(expected: number, actual: number) {
     super(`Expected review revision ${expected}, but current revision is ${actual}`);
     this.name = "ReviewConflictError";
+  }
+}
+
+export class ReviewDraftConflictError extends Error {
+  readonly code = "DRAFT_REVISION_CONFLICT";
+
+  constructor(expected: number, actual: number) {
+    super(`Expected draft revision ${expected}, but current draft revision is ${actual}`);
+    this.name = "ReviewDraftConflictError";
   }
 }
 
@@ -105,6 +122,61 @@ export function assertReviewItem(
     (item.kind === 'highlight' && selection() && (item.payload.comment === undefined || text('comment'))) ||
     (item.kind === 'pageNote' && geometry('position') && text('comment', false) && (item.payload.nearbyText === undefined || text('nearbyText')));
   if (!valid) throw new InvalidReviewCommandError("Review item payload does not match its kind");
+  if (item.reconciliation !== undefined) {
+    const reconciliation = item.reconciliation;
+    if (
+      reconciliation.schemaVersion !== 1 ||
+      reconciliation.ownerViewId.length === 0 ||
+      !Number.isSafeInteger(reconciliation.baseGeneration) || reconciliation.baseGeneration < 0 ||
+      !Number.isSafeInteger(reconciliation.revision) || reconciliation.revision < 0
+    ) throw new InvalidReviewCommandError("Review item reconciliation is malformed");
+    assertReviewAnchorEvidence(reconciliation.anchor);
+    assertDisposition(reconciliation.disposition);
+  }
+}
+
+function assertDisposition(value: { readonly kind: string; readonly generation?: number; readonly reason?: string }): void {
+  if (value.kind === "resolved") {
+    if (!Number.isSafeInteger(value.generation) || (value.generation ?? -1) < 0) {
+      throw new InvalidReviewCommandError("Resolved review anchors require a generation");
+    }
+    return;
+  }
+  if (!["ambiguous", "missing", "unsupported"].includes(value.kind) || typeof value.reason !== "string" || value.reason.length === 0) {
+    throw new InvalidReviewCommandError("Review anchor disposition is malformed");
+  }
+}
+
+function assertRect(value: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }): void {
+  if (![value.x, value.y, value.width, value.height].every(Number.isFinite) || value.width <= 0 || value.height <= 0) {
+    throw new InvalidReviewCommandError("Review anchor geometry is malformed");
+  }
+}
+
+function assertReviewAnchorEvidence(anchor: ReviewAnchorEvidenceV1): void {
+  if (!Number.isSafeInteger(anchor.pageIndex) || anchor.pageIndex < 0) {
+    throw new InvalidReviewCommandError("Review anchor pageIndex must be non-negative");
+  }
+  assertRect(anchor.rect);
+  if (anchor.kind === "selection") {
+    if (anchor.quote.length === 0 || anchor.segmentRects.length === 0) {
+      throw new InvalidReviewCommandError("Selection reconciliation evidence is incomplete");
+    }
+    anchor.segmentRects.forEach(assertRect);
+  }
+}
+
+function assertDraft(draft: PendingReviewDraftV1): void {
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(draft.id) ||
+    draft.ownerViewId.length === 0 ||
+    !Number.isSafeInteger(draft.baseGeneration) || draft.baseGeneration < 0 ||
+    !Number.isSafeInteger(draft.revision) || draft.revision < 0 ||
+    !Number.isFinite(Date.parse(draft.createdAt)) || !Number.isFinite(Date.parse(draft.updatedAt)) ||
+    draft.text.length === 0
+  ) throw new InvalidReviewCommandError("Pending review draft is malformed");
+  assertReviewAnchorEvidence(draft.anchor);
+  assertDisposition(draft.disposition);
 }
 
 export function assertReviewCommand(command: unknown): asserts command is ReviewCommand {
@@ -120,6 +192,28 @@ export function assertReviewCommand(command: unknown): asserts command is Review
       if (!isRecord(command.item) || !isRecord(command.item.payload)) {
         throw new InvalidReviewCommandError("Review command is malformed");
       }
+      return;
+    case "put-draft":
+      if (!isRecord(command.draft)) throw new InvalidReviewCommandError("Review command is malformed");
+      return;
+    case "reattach":
+      if (
+        typeof command.id !== "string" ||
+        !Number.isSafeInteger(command.expectedReconciliationRevision) ||
+        typeof command.ownerViewId !== "string" ||
+        typeof command.updatedAt !== "string" ||
+        !isRecord(command.anchor)
+      ) throw new InvalidReviewCommandError("Review command is malformed");
+      return;
+    case "discard-reconciliation":
+      if (
+        (command.target !== "item" && command.target !== "draft") ||
+        typeof command.id !== "string" ||
+        !Number.isSafeInteger(command.expectedTargetRevision) ||
+        typeof command.ownerViewId !== "string" ||
+        typeof command.reason !== "string" ||
+        typeof command.discardedAt !== "string"
+      ) throw new InvalidReviewCommandError("Review command is malformed");
       return;
     case "edit":
       if (
@@ -154,7 +248,10 @@ export function reduceReview(
   const historyCursor = state.historyCursor;
 
   if (command.type === "undo") {
-    if (historyCursor <= 0) {
+    if (historyCursor <= state.workflow.historyBoundary) {
+      if (state.workflow.historyBoundary > 0) {
+        throw new InvalidReviewCommandError("Undo cannot cross the rebuild history boundary");
+      }
       throw new InvalidReviewCommandError("There is no review command to undo");
     }
     const entry = history[historyCursor - 1]!;
@@ -162,6 +259,8 @@ export function reduceReview(
       ...state,
       revision: state.revision + 1,
       items: entry.beforeItems,
+      pendingDrafts: entry.beforePendingDrafts ?? state.pendingDrafts,
+      discardAudit: entry.beforeDiscardAudit ?? state.discardAudit,
       history,
       historyCursor: historyCursor - 1,
     };
@@ -175,19 +274,108 @@ export function reduceReview(
       ...state,
       revision: state.revision + 1,
       items: entry.afterItems,
+      pendingDrafts: entry.afterPendingDrafts ?? state.pendingDrafts,
+      discardAudit: entry.afterDiscardAudit ?? state.discardAudit,
       history,
       historyCursor: historyCursor + 1,
     };
   }
 
-  let items: readonly ReviewItem[];
+  let items: readonly ReviewItem[] = state.items;
+  let pendingDrafts: readonly PendingReviewDraftV1[] = state.pendingDrafts;
+  let discardAudit: readonly ReviewDiscardAuditV1[] = state.discardAudit;
   switch (command.type) {
     case "add": {
       assertReviewItem(command.item);
       if (state.items.some((item) => item.id === command.item.id)) {
         throw new InvalidReviewCommandError("Review item ID already exists");
       }
-      items = [...state.items, command.item];
+      const authoring = command.authoring ?? {
+        ownerViewId: "legacy-view",
+        baseGeneration: state.workflow.documentGeneration,
+      };
+      if (authoring.baseGeneration !== state.workflow.documentGeneration) {
+        throw new InvalidReviewCommandError("Review item authoring belongs to a stale document generation");
+      }
+      items = [
+        ...state.items,
+        state.workflow.mode === "generated-output"
+          ? canonicalizeReviewItem(command.item, authoring)
+          : command.item,
+      ];
+      break;
+    }
+    case "put-draft": {
+      assertDraft(command.draft);
+      if (command.draft.baseGeneration !== state.workflow.documentGeneration || command.draft.status !== "protected") {
+        throw new InvalidReviewCommandError("Pending authoring belongs to a stale document generation");
+      }
+      const index = state.pendingDrafts.findIndex(({ id }) => id === command.draft.id);
+      const currentRevision = index < 0 ? -1 : state.pendingDrafts[index]!.revision;
+      if (currentRevision !== command.expectedDraftRevision) {
+        throw new ReviewDraftConflictError(command.expectedDraftRevision, currentRevision);
+      }
+      const nextDraft = index < 0
+        ? command.draft
+        : { ...command.draft, revision: currentRevision + 1 };
+      pendingDrafts = index < 0
+        ? [...state.pendingDrafts, nextDraft]
+        : state.pendingDrafts.map((draft, draftIndex) => draftIndex === index ? nextDraft : draft);
+      break;
+    }
+    case "reattach": {
+      const index = state.items.findIndex(({ id }) => id === command.id);
+      if (index < 0) throw new InvalidReviewCommandError("Review item does not exist");
+      const existing = canonicalizeReviewItem(state.items[index]!, {
+        ownerViewId: command.ownerViewId,
+        baseGeneration: state.workflow.documentGeneration,
+      });
+      const reconciliation = existing.reconciliation!;
+      if (reconciliation.revision !== command.expectedReconciliationRevision) {
+        throw new ReviewDraftConflictError(command.expectedReconciliationRevision, reconciliation.revision);
+      }
+      assertReviewAnchorEvidence(command.anchor);
+      const reattached: ReviewItem = {
+        ...existing,
+        updatedAt: command.updatedAt,
+        reconciliation: {
+          ...reconciliation,
+          ownerViewId: command.ownerViewId,
+          revision: reconciliation.revision + 1,
+          anchor: command.anchor,
+          disposition: { kind: "resolved", generation: state.workflow.documentGeneration },
+        },
+      };
+      items = state.items.map((item, itemIndex) => itemIndex === index ? reattached : item);
+      break;
+    }
+    case "discard-reconciliation": {
+      if (command.reason.trim().length === 0 || !Number.isFinite(Date.parse(command.discardedAt))) {
+        throw new InvalidReviewCommandError("Discard audit metadata is malformed");
+      }
+      const collection = command.target === "item" ? state.items : state.pendingDrafts;
+      const target = collection.find(({ id }) => id === command.id);
+      if (target === undefined) throw new InvalidReviewCommandError("Review reconciliation target does not exist");
+      const targetRevision = command.target === "item"
+        ? canonicalizeReviewItem(target as ReviewItem, {
+            ownerViewId: command.ownerViewId,
+            baseGeneration: state.workflow.documentGeneration,
+          }).reconciliation!.revision
+        : (target as PendingReviewDraftV1).revision;
+      if (targetRevision !== command.expectedTargetRevision) {
+        throw new ReviewDraftConflictError(command.expectedTargetRevision, targetRevision);
+      }
+      if (command.target === "item") items = state.items.filter(({ id }) => id !== command.id);
+      else pendingDrafts = state.pendingDrafts.filter(({ id }) => id !== command.id);
+      discardAudit = [...state.discardAudit, {
+        target: command.target,
+        id: command.id,
+        generation: state.workflow.documentGeneration,
+        revision: state.revision + 1,
+        ownerViewId: command.ownerViewId,
+        reason: command.reason,
+        discardedAt: command.discardedAt,
+      }];
       break;
     }
     case "edit": {
@@ -229,7 +417,17 @@ export function reduceReview(
     ...state,
     revision: state.revision + 1,
     items,
-    history: [...retainedHistory, { beforeItems: state.items, afterItems: items }],
+    pendingDrafts,
+    discardAudit,
+    history: [...retainedHistory, {
+      beforeItems: state.items,
+      afterItems: items,
+      generation: state.workflow.documentGeneration,
+      beforePendingDrafts: state.pendingDrafts,
+      afterPendingDrafts: pendingDrafts,
+      beforeDiscardAudit: state.discardAudit,
+      afterDiscardAudit: discardAudit,
+    }],
     historyCursor: retainedHistory.length + 1,
   };
 }

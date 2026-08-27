@@ -4,6 +4,7 @@ import type {
   ProductionSessionApi,
   ProductionScope,
   ProductionSaveStatus,
+  ProductionExportResult,
   SaveCopyProposal,
 } from "./ProductionReviewApp.js";
 import type { RejectedReviewCommand } from "./ReviewShell.js";
@@ -250,6 +251,10 @@ export async function loadProductionSession(session: ProductionSession): Promise
       chooseOriginal: () => post<ProductionSaveStatus>("/save/original"),
       retrySave: () => post<ProductionSaveStatus>("/save/retry"),
       locateSave: () => post<ProductionSaveStatus>("/save/locate"),
+      exportReviewedCopy: (confirmPossiblyStale) => post<ProductionExportResult>(
+        "/export",
+        confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {},
+      ),
       scope: (signal) => request<ProductionScope>(
         "/scope",
         signal === undefined ? {} : { signal },

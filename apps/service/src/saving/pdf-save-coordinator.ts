@@ -91,6 +91,13 @@ export class PdfSaveCoordinator {
   }
 
   #assertRewriteEligible(sessionId: string): void {
+    const state = this.#broker.state(sessionId);
+    if (state?.workflow.mode === "generated-output") {
+      throw new PdfWriterError(
+        "permission-denied",
+        "Generated output is immutable. Use explicit export to create a reviewed copy.",
+      );
+    }
     const eligibility = this.#broker.saveStatus(sessionId)?.rewriteEligibility;
     if (eligibility?.eligible === false) {
       throw new PdfWriterError(eligibility.code, eligibility.message);
@@ -236,6 +243,9 @@ export class PdfSaveCoordinator {
   }
 
   requestSave(sessionId: string): Promise<void> {
+    if (this.#broker.state(sessionId)?.workflow.mode === "generated-output") {
+      return Promise.resolve();
+    }
     const queue = this.#queues.get(sessionId) ?? { requested: false };
     queue.requested = true;
     if (queue.running === undefined) {
@@ -275,7 +285,7 @@ export class PdfSaveCoordinator {
       const generation = destination.generation;
       try {
         const delivery = await this.#broker.freezeDelivery(sessionId);
-        const stateDigest = reviewStateDigest({ items: delivery.items ?? [] });
+        const stateDigest = delivery.stateDigest ?? reviewStateDigest({ items: delivery.items ?? [] });
         await withTargetLock(destination.targetPath, async () => {
           const sourcePdf = new Uint8Array(await readFile(delivery.sourceSnapshotPath));
           const written = await runPdfBackend(this.#writer, {

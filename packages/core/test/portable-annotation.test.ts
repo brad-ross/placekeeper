@@ -10,7 +10,7 @@ import {
   inspectProjectedPortableAnnotation,
   PORTABLE_ANNOTATION_MAX_BYTES,
 } from "../src/portable-annotation.js";
-import type { ReviewItem } from "../src/review-model.js";
+import { anchorEvidenceFromReviewItem, type ReviewItem } from "../src/review-model.js";
 import { MAX_REVIEW_SELECTION_SEGMENTS } from "../src/review-reducer.js";
 
 const item: ReviewItem = {
@@ -233,13 +233,31 @@ describe("portable annotation codec", () => {
   });
 
   it("creates a fresh imported review state with empty undo history", () => {
+    const unresolved: ReviewItem = {
+      ...item,
+      reconciliation: {
+        schemaVersion: 1,
+        ownerViewId: "panel-a",
+        baseGeneration: 2,
+        revision: 3,
+        anchor: anchorEvidenceFromReviewItem(item),
+        disposition: { kind: "ambiguous", reason: "multiple-quote-matches" },
+        previousAnchors: [],
+      },
+    };
     const state = createImportedReviewState({
       sessionId: "session",
       source: { fileId: "file", digest: "a".repeat(64), byteLength: 100 },
-      items: [item],
+      items: [unresolved],
+      workflowMode: "generated-output",
+      documentGeneration: 3,
     });
 
-    expect(state.items).toEqual([item]);
+    expect(state.items).toEqual([unresolved]);
+    expect(inspectProjectedPortableAnnotation(projectReviewItem(unresolved))).toMatchObject({
+      status: "owned",
+      item: { id: unresolved.id, reconciliation: { disposition: { kind: "ambiguous" } } },
+    });
     expect(state.revision).toBe(0);
     expect(state.history).toEqual([]);
     expect(state.historyCursor).toBe(0);

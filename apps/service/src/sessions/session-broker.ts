@@ -9,6 +9,7 @@ import type {
   ReviewCommand,
   ReviewItem,
   ReviewState,
+  ReviewWorkflowMode,
 } from "../../../../packages/core/src/review-model.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import {
@@ -22,7 +23,10 @@ import {
   createImportedReviewState,
 } from "../../../../packages/core/src/portable-annotation.js";
 import { reduceReview } from "../../../../packages/core/src/review-reducer.js";
-import { reviewSemanticDigest } from "../../../../packages/core/src/live-context.js";
+import {
+  createReviewStateSummary,
+  reviewSemanticDigest,
+} from "../../../../packages/core/src/live-context.js";
 import {
   digestSecretHex,
   SessionCredentialStore,
@@ -89,6 +93,7 @@ export interface OpenReviewRequest {
   readonly recoveryOperationId?: string;
   readonly surface?: LaunchSurface;
   readonly requestedLocation?: PlacekeeperLinkLocation;
+  readonly workflowMode?: ReviewWorkflowMode;
 }
 
 export interface SessionLaunch {
@@ -465,6 +470,9 @@ export class SessionBroker {
       this.capabilities.revokeFile(approvedFile.id);
       const session = this.#activeById.get(existingSessionId);
       if (session === undefined) throw new Error("Active session index is inconsistent");
+      if (request.workflowMode !== undefined && request.workflowMode !== session.state.workflow.mode) {
+        throw new Error("A review session workflow mode cannot be downgraded or changed");
+      }
       if (request.sourceRootPath !== undefined) {
         await this.#attachSourceRoot(session, request.sourceRootPath);
       }
@@ -608,6 +616,12 @@ export class SessionBroker {
         source: { ...migratedState.source, fileId: approvedFile.id },
         ...(approvedRoot === undefined ? {} : { sourceRootId: approvedRoot.id }),
       };
+      if (
+        request.workflowMode !== undefined &&
+        resumedState.workflow.mode !== request.workflowMode
+      ) {
+        throw new Error("A review session workflow mode cannot be downgraded or changed");
+      }
       if (approvedRoot === undefined) delete (resumedState as { sourceRootId?: string }).sourceRootId;
       let destination = matchingDraft.destination;
       let sync = matchingDraft.sync.phase === "saving"
@@ -623,7 +637,20 @@ export class SessionBroker {
             : "write-failed",
         };
       }
-      if (destination.phase === "active" && destination.kind === "original") {
+      if (resumedState.workflow.mode === "generated-output") {
+        destination = { phase: "none", generation: 0 };
+        sync = {
+          phase: resumedState.revision === 0 && resumedState.items.length === 0 && resumedState.pendingDrafts.length === 0
+            ? "clean"
+            : "not-saved",
+          desiredRevision: resumedState.revision,
+          desiredDigest: reviewStateDigest(resumedState),
+          savedRevision: -1,
+          ...(resumedState.revision === 0 && resumedState.items.length === 0 && resumedState.pendingDrafts.length === 0
+            ? { savedDigest: reviewStateDigest(resumedState) }
+            : { failure: "destination-unconfigured" as const }),
+        };
+      } else if (destination.phase === "active" && destination.kind === "original") {
         destination = {
           ...destination,
           targetPath: approvedFile.canonicalPath,
@@ -713,15 +740,17 @@ export class SessionBroker {
           sessionId,
           source,
           ...(approvedRoot === undefined ? {} : { sourceRootId: approvedRoot.id }),
+          ...(request.workflowMode === undefined ? {} : { workflowMode: request.workflowMode }),
         })
       : createImportedReviewState({
           sessionId,
           source,
           ...(approvedRoot === undefined ? {} : { sourceRootId: approvedRoot.id }),
           items: importedItems,
+          ...(request.workflowMode === undefined ? {} : { workflowMode: request.workflowMode }),
         });
     const digest = reviewStateDigest(state);
-    const destination: DurableSaveDestination = importedItems.length === 0 || !rewriteEligibility.eligible
+    const destination: DurableSaveDestination = state.workflow.mode === "generated-output" || importedItems.length === 0 || !rewriteEligibility.eligible
       ? { phase: "none", generation: 0 }
       : {
           phase: "active",
@@ -1596,6 +1625,7 @@ export class SessionBroker {
       const sourceRootPath = session.rootId === undefined
         ? undefined
         : this.capabilities.getRootPath(session.rootId);
+      const summary = createReviewStateSummary(state);
       return {
         sessionId: session.id,
         source: { ...state.source },
@@ -1604,12 +1634,27 @@ export class SessionBroker {
         sourceSnapshotPath: session.sourceSnapshotPath,
         annotations: projectReviewItems(state.items),
         items: documentOrderedItems(state.items),
+        workflowMode: state.workflow.mode,
+        documentGeneration: state.workflow.documentGeneration,
+        dispositionDigest: summary.reconciliation.dispositionDigest,
+        stateDigest: reviewStateDigest(state),
+        exportEligibility: summary.export,
         ...(session.rootId === undefined ? {} : { sourceRootId: session.rootId }),
         ...(sourceRootPath === undefined ? {} : { sourceRootPath }),
       };
     } finally {
       release();
     }
+  }
+
+  isFrozenDeliveryCurrent(delivery: FrozenReviewDelivery): boolean {
+    const session = this.#activeById.get(delivery.sessionId);
+    if (session === undefined || session.ending) return false;
+    const summary = createReviewStateSummary(session.state);
+    return session.state.revision === delivery.revision &&
+      session.state.workflow.documentGeneration === delivery.documentGeneration &&
+      summary.reconciliation.dispositionDigest === delivery.dispositionDigest &&
+      reviewStateDigest(session.state) === delivery.stateDigest;
   }
 
   async acceptMutation(
