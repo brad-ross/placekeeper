@@ -32,7 +32,7 @@ describe("first annotation save gate", () => {
           payload: {},
         },
       };
-      expect(gateReviewCommand(state, unselected, command, "local")).toEqual({
+      expect(gateReviewCommand(unselected, command, "local")).toEqual({
         kind: "choose-destination",
         pending: command,
       });
@@ -50,7 +50,7 @@ describe("first annotation save gate", () => {
       },
       sync: { phase: "clean" as const, desiredRevision: 0, savedRevision: 0 },
     };
-    expect(gateReviewCommand(state, active, command, "local").kind).toBe("submit");
+    expect(gateReviewCommand(active, command, "local").kind).toBe("submit");
   });
 
   it("keeps protected imported edits behind the destination gate", () => {
@@ -69,12 +69,12 @@ describe("first annotation save gate", () => {
       updatedAt: "2026-08-11T12:01:00.000Z",
       payload: { comment: "Changed" },
     };
-    expect(gateReviewCommand(imported, unselected, edit, "local").kind).toBe("choose-destination");
+    expect(gateReviewCommand(unselected, edit, "local").kind).toBe("choose-destination");
   });
 
   it("accepts a remote annotation into Protected Recovery before choosing a destination", () => {
     const command: ReviewCommand = { type: "undo", expectedRevision: 0 };
-    expect(gateReviewCommand(state, unselected, command, "remote-temporary")).toEqual({
+    expect(gateReviewCommand(unselected, command, "remote-temporary")).toEqual({
       kind: "submit-and-choose-destination",
       command,
     });

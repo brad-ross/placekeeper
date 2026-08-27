@@ -6,7 +6,6 @@ export interface PdfStreamInfo {
 }
 
 export interface HandoffResult {
-  readonly transferId: string;
   readonly destination: string;
 }
 

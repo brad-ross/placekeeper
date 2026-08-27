@@ -32,7 +32,7 @@ describe("Chrome PDF handler controller", () => {
     const controller = createHandlerController({
       isOptedIn: async () => true,
       getStreamInfo: async () => streamInfo,
-      handoff: async () => ({ transferId: "transfer-1", destination }),
+      handoff: async () => ({ destination }),
       fallback,
       replace,
     });
@@ -55,7 +55,7 @@ describe("Chrome PDF handler controller", () => {
     const controller = createHandlerController({
       isOptedIn: async () => true,
       getStreamInfo: async () => streamInfo,
-      handoff: async () => ({ transferId: "transfer-1", destination }),
+      handoff: async () => ({ destination }),
       fallback,
       replace,
     });
@@ -67,8 +67,8 @@ describe("Chrome PDF handler controller", () => {
   });
 
   it("makes bypass terminal and discards a late success", async () => {
-    let resolveHandoff!: (value: { transferId: string; destination: string }) => void;
-    const handoff = new Promise<{ transferId: string; destination: string }>((resolve) => {
+    let resolveHandoff!: (value: { destination: string }) => void;
+    const handoff = new Promise<{ destination: string }>((resolve) => {
       resolveHandoff = resolve;
     });
     const fallback = vi.fn();
@@ -85,7 +85,6 @@ describe("Chrome PDF handler controller", () => {
     await vi.waitFor(() => expect(controller.state()).toBe("pending"));
     controller.bypass();
     resolveHandoff({
-      transferId: "transfer-1",
       destination:
         "http://127.0.0.1:43179/s/779e1d9d-58c1-4b12-8dc2-3449dad132c1/bootstrap#cap=1234567890123456789012345678901234567890123",
     });

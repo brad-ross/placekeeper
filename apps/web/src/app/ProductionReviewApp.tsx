@@ -1513,7 +1513,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             };
           }
           const gated = gateReviewCommand(
-            currentState,
             saveStatus,
             command,
             scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local',

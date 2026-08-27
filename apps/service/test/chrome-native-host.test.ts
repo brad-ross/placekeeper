@@ -34,6 +34,8 @@ async function storeFixture(): Promise<ChromeTransferStore> {
 describe("Chrome native host entry", () => {
   it("integrates native framing with the bounded remote handoff", async () => {
     const input = new PassThrough();
+    const pause = vi.spyOn(input, "pause");
+    const resume = vi.spyOn(input, "resume");
     const output = new PassThrough();
     const frames: Buffer[] = [];
     output.on("data", (chunk: Buffer) => frames.push(chunk));
@@ -70,6 +72,8 @@ describe("Chrome native host entry", () => {
       { type: "ack", transferId: "transfer-1", phase: "chunk", sequence: 0 },
       { type: "success", transferId: "transfer-1", destination },
     ]);
+    expect(pause).toHaveBeenCalled();
+    expect(resume).toHaveBeenCalled();
   });
 
   it("constructs only browser-surface launches and rejects a bind proof", async () => {
@@ -93,7 +97,7 @@ describe("Chrome native host entry", () => {
 
   it("opens sealed bytes through the fixed narrow daemon request without forwarding a path", async () => {
     const store = await storeFixture();
-    const staged = await store.begin("transfer-opaque", "Opaque.pdf");
+    const staged = await store.begin("Opaque.pdf");
     const bytes = Buffer.from("%PDF-1.7\nopaque\n%%EOF");
     await store.append(staged, bytes);
     const handle = await store.seal(staged);

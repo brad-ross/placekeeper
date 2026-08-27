@@ -1,4 +1,4 @@
-import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
+import type { ReviewCommand } from "../../../../packages/core/src/review-model.js";
 import type { ProductionSaveStatus } from "../app/ProductionReviewApp.js";
 
 export type SaveGatedCommand =
@@ -7,12 +7,10 @@ export type SaveGatedCommand =
   | { readonly kind: "choose-destination"; readonly pending: ReviewCommand };
 
 export function gateReviewCommand(
-  state: ReviewState,
   status: ProductionSaveStatus,
   command: ReviewCommand,
   sourceDisposition: "local" | "remote-temporary",
 ): SaveGatedCommand {
-  void state;
   if (status.destination.phase !== "none") return { kind: "submit", command };
   return sourceDisposition === "remote-temporary"
     ? { kind: "submit-and-choose-destination", command }

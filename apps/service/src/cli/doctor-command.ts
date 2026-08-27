@@ -4,7 +4,11 @@ import { isAbsolute } from "node:path";
 
 import { inspectPdfWithEmbedPdf } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import type { ChromeInstallationEvidence } from "../../../../packaging/macos/chrome-integration.js";
-import { inspectChromeInstallation } from "../../../../packaging/macos/chrome-integration.js";
+import {
+  CHROME_EXTENSION_ID,
+  CHROME_NATIVE_PROTOCOL_RANGE,
+  inspectChromeInstallation,
+} from "../../../../packaging/macos/chrome-integration.js";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 
@@ -55,8 +59,8 @@ export async function runDoctorCommand(
         ok: false,
         status: "app-incomplete",
         action: "reinstall-placekeeper",
-        extensionId: "cgegjjjhbhnfgcoipeffhogoojfoekgg",
-        protocol: 1,
+        extensionId: CHROME_EXTENSION_ID,
+        protocol: CHROME_NATIVE_PROTOCOL_RANGE.maximum,
       })}\n`);
       return 2;
     }

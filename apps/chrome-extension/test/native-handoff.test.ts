@@ -58,7 +58,7 @@ describe("native PDF handoff", () => {
     await expect(handoff({
       originalUrl: "https://papers.example.test/download?id=42",
       streamUrl: "blob:authorized-response",
-    })).resolves.toEqual({ transferId: "transfer-1", destination });
+    })).resolves.toEqual({ destination });
 
     expect(fetchStream).toHaveBeenCalledExactlyOnceWith("blob:authorized-response");
     expect(port.sent).toContainEqual(expect.objectContaining({

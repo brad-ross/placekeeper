@@ -119,21 +119,18 @@ export async function runChromeNativeHostCommand(
   });
   const handleChunk = (chunk: Buffer): void => {
     if (protocolFailure) return;
-    let messages: unknown[];
-    try {
-      messages = decoder.push(chunk);
-    } catch {
-      protocolFailure = true;
-      return;
-    }
-    for (const message of messages) {
-      queue = queue.then(async () => {
+    input.pause();
+    queue = queue.then(async () => {
+      for (const message of decoder.push(chunk)) {
         const response = await session.handle(message);
         if (response !== undefined) await write(response);
-      }).catch(() => {
-        protocolFailure = true;
-      });
-    }
+      }
+    }).catch(() => {
+      protocolFailure = true;
+    }).finally(() => {
+      if (protocolFailure) input.destroy();
+      else input.resume();
+    });
   };
   input.on("data", handleChunk);
   const termination = await new Promise<"end" | "close" | "error" | "timeout">((resolveEnd) => {

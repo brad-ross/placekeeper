@@ -101,11 +101,15 @@ export function renderChromeNativeHostManifest(appPath: string): ChromeNativeHos
   };
 }
 
-function validateNativeHostManifest(value: unknown, appPath: string): ChromeNativeHostManifest {
+function assertNativeHostManifestShape(value: unknown): asserts value is Record<string, unknown> {
   if (!isRecord(value) || Object.keys(value).sort().join("\0") !==
     ["allowed_origins", "description", "name", "path", "type"].join("\0")) {
     throw new Error("Chrome native host manifest has unexpected fields");
   }
+}
+
+function validateNativeHostManifest(value: unknown, appPath: string): ChromeNativeHostManifest {
+  assertNativeHostManifestShape(value);
   const expected = renderChromeNativeHostManifest(appPath);
   if (JSON.stringify(value) !== JSON.stringify(expected)) {
     throw new Error("Chrome native host manifest does not match the packaged endpoint");
@@ -117,10 +121,7 @@ async function validateInstalledNativeHostManifest(
   value: unknown,
   appPath: string,
 ): Promise<void> {
-  if (!isRecord(value) || Object.keys(value).sort().join("\0") !==
-    ["allowed_origins", "description", "name", "path", "type"].join("\0")) {
-    throw new Error("Chrome native host manifest has unexpected fields");
-  }
+  assertNativeHostManifestShape(value);
   const expected = renderChromeNativeHostManifest(appPath);
   if (typeof value.path === "string" && isAbsolute(value.path)) {
     await assertSecureEntry(value.path, "file");

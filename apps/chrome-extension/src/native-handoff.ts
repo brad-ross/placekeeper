@@ -202,7 +202,7 @@ export function createNativeHandoff(
       if (reply.type !== "success" || validatePlacekeeperDestination(reply.destination) === undefined) {
         throw new HandoffError("invalid-destination");
       }
-      return { transferId, destination: reply.destination };
+      return { destination: reply.destination };
     } catch (error) {
       if (port !== undefined) {
         try {

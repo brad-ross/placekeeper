@@ -25,6 +25,16 @@ describe("Chrome native-message framing", () => {
     expect(() => decoder.end()).not.toThrow();
   });
 
+  it("decodes a maximum-size frame fragmented one byte at a time", () => {
+    const data = "x".repeat(1024 * 1024 - 15);
+    const frame = encodeNativeMessage({ data });
+    const decoder = new NativeMessageDecoder();
+
+    for (const byte of frame) decoder.push(Uint8Array.of(byte));
+
+    expect(() => decoder.end()).not.toThrow();
+  });
+
   it("rejects oversized, truncated, malformed, and schema-expanded input", () => {
     const oversized = Buffer.alloc(4);
     oversized.writeUInt32LE(2 * 1024 * 1024, 0);

@@ -166,31 +166,49 @@ export function encodeNativeMessage(value: unknown): Buffer {
 }
 
 export class NativeMessageDecoder {
-  #buffer = Buffer.alloc(0);
+  readonly #buffer = Buffer.allocUnsafe(MAX_NATIVE_MESSAGE_BYTES + 4);
+  #start = 0;
+  #end = 0;
 
-  push(chunk: Uint8Array): unknown[] {
-    if (chunk.byteLength > 0) this.#buffer = Buffer.concat([this.#buffer, Buffer.from(chunk)]);
-    const messages: unknown[] = [];
-    while (this.#buffer.length >= 4) {
-      const length = this.#buffer.readUInt32LE(0);
+  #decodeAvailable(messages: unknown[]): void {
+    while (this.#end - this.#start >= 4) {
+      const length = this.#buffer.readUInt32LE(this.#start);
       if (length === 0) throw new NativeMessagingProtocolError("malformed");
       if (length > MAX_NATIVE_MESSAGE_BYTES) throw new NativeMessagingProtocolError("oversized");
-      if (this.#buffer.length < length + 4) break;
-      const body = this.#buffer.subarray(4, length + 4);
-      this.#buffer = this.#buffer.subarray(length + 4);
+      if (this.#end - this.#start < length + 4) return;
+      const body = this.#buffer.subarray(this.#start + 4, this.#start + length + 4);
+      this.#start += length + 4;
       try {
         messages.push(JSON.parse(body.toString("utf8")) as unknown);
       } catch {
         throw new NativeMessagingProtocolError("malformed");
       }
     }
-    if (this.#buffer.length > MAX_NATIVE_MESSAGE_BYTES + 4) {
-      throw new NativeMessagingProtocolError("oversized");
+    if (this.#start === this.#end) this.#start = this.#end = 0;
+  }
+
+  push(chunk: Uint8Array): unknown[] {
+    const messages: unknown[] = [];
+    const bytes = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+    let offset = 0;
+    while (offset < bytes.length) {
+      if (this.#end === this.#buffer.length) {
+        if (this.#start === 0) throw new NativeMessagingProtocolError("oversized");
+        this.#buffer.copyWithin(0, this.#start, this.#end);
+        this.#end -= this.#start;
+        this.#start = 0;
+      }
+      const length = Math.min(bytes.length - offset, this.#buffer.length - this.#end);
+      bytes.copy(this.#buffer, this.#end, offset, offset + length);
+      this.#end += length;
+      offset += length;
+      this.#decodeAvailable(messages);
     }
+    this.#decodeAvailable(messages);
     return messages;
   }
 
   end(): void {
-    if (this.#buffer.length !== 0) throw new NativeMessagingProtocolError("truncated");
+    if (this.#end !== this.#start) throw new NativeMessagingProtocolError("truncated");
   }
 }

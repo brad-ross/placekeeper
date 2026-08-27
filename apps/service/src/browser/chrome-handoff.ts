@@ -44,7 +44,6 @@ export interface SealedBrowserSourceInspection {
 }
 
 interface StagedTransfer {
-  readonly id: string;
   readonly path: string;
   readonly file: FileHandle;
   readonly digest: ReturnType<typeof createHash>;
@@ -97,7 +96,7 @@ export class ChromeTransferStore {
     return new ChromeTransferStore({ ...options, root: canonical });
   }
 
-  async begin(transferId: string, displayName?: string): Promise<StagedTransfer> {
+  async begin(displayName?: string): Promise<StagedTransfer> {
     const safeDisplayName = sanitizedDisplayName(displayName);
     const { path, file } = await this.#withAdmissionLock(async () => {
       const partials = (await readdir(this.root)).filter((name) => name.endsWith(".partial"));
@@ -111,7 +110,6 @@ export class ChromeTransferStore {
       return { path, file };
     });
     return {
-      id: transferId,
       path,
       file,
       digest: createHash("sha256"),
@@ -411,7 +409,7 @@ export class ChromeHandoffSession {
         this.#state = {
           kind: "remote",
           start: message,
-          staged: await this.#store.begin(message.transferId, message.displayName),
+          staged: await this.#store.begin(message.displayName),
           deadline,
           sequence: 0,
           byteLength: 0,
