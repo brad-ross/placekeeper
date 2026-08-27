@@ -3,6 +3,10 @@ import { readFile, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
 import { inspectPdfWithEmbedPdf } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
+import type { ChromeInstallationEvidence } from "../../../../packaging/macos/chrome-integration.js";
+import { inspectChromeInstallation } from "../../../../packaging/macos/chrome-integration.js";
+import { homedir } from "node:os";
+import { dirname } from "node:path";
 
 const EXPECTED_PDFIUM_SHA256 = "c0af5a6aca30d7e54a149c3a68e317116ca906d6edc28fd3318b12c7d9478ac8";
 const MAX_FIXTURE_BYTES = 128 * 1024 * 1024;
@@ -27,7 +31,36 @@ function pdfArgument(args: readonly string[]): string {
 export async function runDoctorCommand(
   args: readonly string[],
   write: (text: string) => void = (text) => process.stdout.write(text),
+  options: {
+    readonly inspectChrome?: () => Promise<ChromeInstallationEvidence>;
+  } = {},
 ): Promise<number> {
+  if (args.length === 3 && args[0] === "doctor" && args[1] === "--json" && args[2] === "--chrome") {
+    try {
+      const inspect = options.inspectChrome ?? (async () => {
+        const resources = process.env.PLACEKEEPER_APP_RESOURCES;
+        if (resources === undefined || !isAbsolute(resources)) {
+          throw new Error("Installed app resources unavailable");
+        }
+        return inspectChromeInstallation({
+          appPath: dirname(dirname(resources)),
+          userHome: homedir(),
+        });
+      });
+      const result = await inspect();
+      write(`${JSON.stringify(result)}\n`);
+      return result.ok ? 0 : 2;
+    } catch {
+      write(`${JSON.stringify({
+        ok: false,
+        status: "app-incomplete",
+        action: "reinstall-placekeeper",
+        extensionId: "cgegjjjhbhnfgcoipeffhogoojfoekgg",
+        protocol: 1,
+      })}\n`);
+      return 2;
+    }
+  }
   try {
     const pdfPath = pdfArgument(args);
     const wasmPath = process.env.PLACEKEEPER_PDFIUM_WASM;

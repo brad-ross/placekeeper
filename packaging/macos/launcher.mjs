@@ -235,6 +235,7 @@ export async function main(args = process.argv.slice(2)) {
     PLACEKEEPER_DAEMON_IDENTITY: buildIdentity.daemonIdentity,
     PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY: buildIdentity.installArtifactIdentity,
     PLACEKEEPER_WEB_ASSETS: resolve(resources, "web"),
+    PLACEKEEPER_APP_RESOURCES: resources,
   };
   if (args.length === 1 && args[0].startsWith("placekeeper:")) {
     await openLinkedPdf(nodePath, serviceEntry, args[0], serviceEnvironment);
@@ -245,10 +246,11 @@ export async function main(args = process.argv.slice(2)) {
     return;
   }
   const child = spawn(nodePath, [serviceEntry, ...args], { shell: false, stdio: "inherit", env: serviceEnvironment });
-  await new Promise((resolvePromise, reject) => {
+  const code = await new Promise((resolvePromise, reject) => {
     child.once("error", reject);
-    child.once("exit", (code) => code === 0 ? resolvePromise() : reject(new Error(`Service exited ${code ?? "unknown"}`)));
+    child.once("exit", (childCode) => resolvePromise(childCode ?? 1));
   });
+  if (code !== 0) process.exitCode = code;
 }
 
 function isMainModule() {

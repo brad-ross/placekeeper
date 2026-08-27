@@ -14,6 +14,11 @@ import {
   validateMacIconSet,
 } from "./validate-manifest.js";
 import { MANAGEMENT_PROTOCOL_VERSION } from "../../apps/service/src/host/launch-control.js";
+import {
+  CHROME_EXTENSION_BUNDLE_PATH,
+  CHROME_NATIVE_WRAPPER_BUNDLE_PATH,
+  validateChromeIntegrationBundle,
+} from "./chrome-integration.js";
 
 export const BUILD_IDENTITY_FILENAME = "build-identity.json";
 
@@ -262,6 +267,8 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   const vscodeExtension = resolve(repoRoot, appManifest.embeddedArtifacts.vscodeExtension);
   const vscodeDist = resolve(vscodeExtension, "dist");
   const codexPlugin = resolve(repoRoot, appManifest.embeddedArtifacts.codexPlugin);
+  const chromeExtension = resolve(repoRoot, appManifest.embeddedArtifacts.chromeExtension);
+  const chromeNativeWrapper = resolve(repoRoot, appManifest.embeddedArtifacts.chromeNativeWrapper);
   const iconMaster = resolve(repoRoot, appManifest.icon.master);
   const iconset = resolve(repoRoot, appManifest.icon.source);
   for (const required of [
@@ -277,6 +284,11 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
     resolve(codexPlugin, "skills/placekeeper/SKILL.md"),
     resolve(codexPlugin, "skills/placekeeper/assets/placekeeper.svg"),
     resolve(codexPlugin, "skills/placekeeper/agents/openai.yaml"),
+    resolve(chromeExtension, "manifest.json"),
+    resolve(chromeExtension, "handler.html"),
+    resolve(chromeExtension, "popup.html"),
+    resolve(chromeExtension, "background.js"),
+    chromeNativeWrapper,
     iconMaster,
   ]) await access(required);
   await validateMacIconSet(iconset);
@@ -310,6 +322,13 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   await copyFile(resolve(vscodeExtension, "package.json"), resolve(vscodeInstall, "package.json"));
   await cp(vscodeDist, resolve(vscodeInstall, "dist"), { recursive: true, errorOnExist: true });
   await cp(resolve(vscodeExtension, "assets"), resolve(vscodeInstall, "assets"), { recursive: true, errorOnExist: true });
+  await cp(chromeExtension, resolve(appPath, CHROME_EXTENSION_BUNDLE_PATH), {
+    recursive: true,
+    errorOnExist: true,
+  });
+  const chromeWrapperInstall = resolve(appPath, CHROME_NATIVE_WRAPPER_BUNDLE_PATH);
+  await copyFile(chromeNativeWrapper, chromeWrapperInstall);
+  await chmod(chromeWrapperInstall, 0o755);
   for (const asset of backendManifest.assets) {
     const destination = resolve(contents, asset.installPath);
     await mkdir(dirname(destination), { recursive: true, mode: 0o755 });
@@ -326,6 +345,7 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   );
   await copyFile(resolve(repoRoot, "packaging/macos/launcher.mjs"), resolve(resources, "launcher.mjs"));
   await writeFile(launcherPath, launcherScript(), { mode: 0o755 });
+  await validateChromeIntegrationBundle(appPath);
   await validateCatalogRuntimeDistribution({
     runtimeRoot: resources,
     webEntry: resolve(resources, "web/app.js"),

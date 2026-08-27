@@ -23,7 +23,12 @@ case "$installed_smoke_port" in
   ;;
 esac
 
-if [ ! -x "$built_app/Contents/MacOS/placekeeper" ] || [ ! -x "$built_app/Contents/MacOS/droplet" ]; then
+if [ ! -x "$built_app/Contents/MacOS/placekeeper" ] || \
+   [ ! -x "$built_app/Contents/MacOS/droplet" ] || \
+   [ ! -x "$built_app/Contents/MacOS/placekeeper-chrome-host" ] || \
+   [ ! -x "$built_app/Contents/Resources/node/bin/node" ] || \
+   [ ! -f "$built_app/Contents/Resources/service/main.js" ] || \
+   [ ! -f "$built_app/Contents/Resources/integrations/chrome-extension/manifest.json" ]; then
   printf '%s\n' "The built app is incomplete; live destinations were not changed." >&2
   exit 1
 fi
@@ -36,7 +41,12 @@ committed=0
 had_app=0
 app_touched=0
 readiness_started=0
+had_chrome_manifest=0
+chrome_manifest_touched=0
 readiness_receipt="$transaction_dir/candidate-ready.json"
+user_home=${PLACEKEEPER_USER_HOME:-"$HOME"}
+chrome_manifest_dir="$user_home/Library/Application Support/Google/Chrome/NativeMessagingHosts"
+chrome_manifest_path="$chrome_manifest_dir/com.placekeeper.chrome.json"
 
 cleanup() {
   status=$?
@@ -67,6 +77,12 @@ cleanup() {
       if [ "$had_app" -eq 1 ] && [ -e "$transaction_dir/previous.app" ]; then
         /bin/mv "$transaction_dir/previous.app" "$app_path" || status=1
       fi
+      if [ "$chrome_manifest_touched" -eq 1 ]; then
+        if [ -e "$chrome_manifest_path" ]; then /bin/rm -f "$chrome_manifest_path" || status=1; fi
+        if [ "$had_chrome_manifest" -eq 1 ] && [ -e "$transaction_dir/previous-chrome-manifest.json" ]; then
+          /bin/mv "$transaction_dir/previous-chrome-manifest.json" "$chrome_manifest_path" || status=1
+        fi
+      fi
     fi
   fi
   if [ "$rollback_safe" -eq 1 ]; then
@@ -87,6 +103,15 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# The candidate itself validates the coupled extension, wrapper, identity,
+# origin and protocol range before either installed endpoint changes.
+"$built_app/Contents/Resources/node/bin/node" \
+  "$built_app/Contents/Resources/service/main.js" \
+  chrome-registration render \
+  --candidate-app "$built_app" \
+  --installed-app "$app_path" \
+  --output "$transaction_dir/staged-chrome-manifest.json"
+
 /bin/mkdir -p "$(/usr/bin/dirname -- "$app_path")"
 /usr/bin/ditto "$built_app" "$transaction_dir/staged.app"
 if [ -e "$app_path" ]; then
@@ -95,6 +120,14 @@ if [ -e "$app_path" ]; then
 fi
 app_touched=1
 /bin/mv "$transaction_dir/staged.app" "$app_path"
+
+/bin/mkdir -p "$chrome_manifest_dir"
+if [ -e "$chrome_manifest_path" ]; then
+  had_chrome_manifest=1
+  /bin/mv "$chrome_manifest_path" "$transaction_dir/previous-chrome-manifest.json"
+fi
+chrome_manifest_touched=1
+/bin/mv "$transaction_dir/staged-chrome-manifest.json" "$chrome_manifest_path"
 
 # Keep the previous bundle inside the transaction until the newly installed
 # launcher has started and handshaken with its exact daemon build. A readiness

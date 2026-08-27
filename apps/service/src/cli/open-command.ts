@@ -28,6 +28,7 @@ import { runDaemonCommand } from "./daemon-command.js";
 import { PLACEKEEPER_LINK_MAX_LENGTH } from "../../../../packages/core/src/placekeeper-link.js";
 import { runChromeNativeHostCommand } from "../browser/chrome-native-host.js";
 import { runChromePdfValidationCommand } from "../browser/chrome-pdf-validator.js";
+import { runChromeRegistrationCommand } from "./chrome-registration-command.js";
 import {
   isLaunchSurface,
   isRecoveryDecision,
@@ -346,6 +347,9 @@ export async function runOpenCommand(
 }
 
 async function main(): Promise<number> {
+  if (process.argv[2] === "chrome-registration") {
+    return runChromeRegistrationCommand(process.argv.slice(2));
+  }
   if (process.argv[2] === "chrome-native-host") {
     return runChromeNativeHostCommand(process.argv.slice(3));
   }

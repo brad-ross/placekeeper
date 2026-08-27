@@ -18,14 +18,14 @@ node_bin="$node_root/bin/node"
 case "$#" in
   0) install_mode=install ;;
   1)
-    if [ "$1" != "--dry-run" ]; then
-      printf 'Usage: %s [--dry-run]\n' "$0" >&2
-      exit 2
-    fi
-    install_mode=dry-run
+    case "$1" in
+      --dry-run) install_mode=dry-run ;;
+      --uninstall) install_mode=uninstall ;;
+      *) printf 'Usage: %s [--dry-run|--uninstall]\n' "$0" >&2; exit 2 ;;
+    esac
     ;;
   *)
-    printf 'Usage: %s [--dry-run]\n' "$0" >&2
+    printf 'Usage: %s [--dry-run|--uninstall]\n' "$0" >&2
     exit 2
     ;;
 esac
@@ -46,7 +46,27 @@ if [ "$install_mode" = "dry-run" ]; then
     "Toolchain: Node ${NODE_VERSION}, pnpm ${PNPM_VERSION}" \
     "App destination: ${app_path}" \
     "Finder entry point: native Open With document handler" \
+    "Chrome extension: packaged but paused until you load and enable it" \
     "No files were changed"
+  exit 0
+fi
+
+if [ "$install_mode" = "uninstall" ]; then
+  chrome_manifest="$user_home/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.placekeeper.chrome.json"
+  if [ -e "$chrome_manifest" ]; then /bin/rm -f "$chrome_manifest"; fi
+  if [ -e "$app_path" ]; then
+    trash_root="$user_home/.Trash"
+    /bin/mkdir -p "$trash_root"
+    trash_path="$trash_root/Placekeeper.app"
+    if [ -e "$trash_path" ]; then
+      trash_path="$trash_root/Placekeeper-$(/bin/date +%Y%m%d-%H%M%S).app"
+    fi
+    /bin/mv "$app_path" "$trash_path"
+    printf 'Moved Placekeeper to Trash: %s\n' "$trash_path"
+  fi
+  printf '%s\n' \
+    "Placekeeper Chrome registration is removed." \
+    "PDFs, exports, and Protected Recovery data were not deleted."
   exit 0
 fi
 
@@ -143,5 +163,6 @@ fi
 printf '\nPlacekeeper installed successfully.\n'
 printf 'App: %s\n' "$app_path"
 printf 'Finder: select one PDF, then use Open With -> Placekeeper.\n'
+printf 'Chrome: load the packaged extension, then explicitly turn on automatic PDF opening.\n'
 printf 'You can also open Placekeeper from Applications and choose a PDF.\n'
 printf 'If macOS warns on first launch, Control-click the app in Finder and choose Open.\n'

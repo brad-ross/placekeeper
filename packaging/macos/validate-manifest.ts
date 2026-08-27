@@ -3,6 +3,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { extname, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { inflateSync } from "node:zlib";
+import { validateChromeSourceContract } from "./chrome-integration.js";
 
 const CODEX_INSTALLED_LAUNCHER_COMMAND =
   '"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper"';
@@ -27,7 +28,7 @@ export const CATALOG_DISTRIBUTION_BASELINE = {
     report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
     thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
   },
-  productionWebJavaScriptBytes: 2_404_269,
+  productionWebJavaScriptBytes: 2_406_340,
 } as const;
 
 const CATALOG_ATTRIBUTION_URLS = [
@@ -216,6 +217,8 @@ export interface AppBundleManifest {
   readonly embeddedArtifacts: {
     readonly codexPlugin: string;
     readonly vscodeExtension: string;
+    readonly chromeExtension: string;
+    readonly chromeNativeWrapper: string;
   };
   readonly distribution: { readonly mode: "source-first"; readonly signingRequired: false };
   readonly signing: { readonly hardenedRuntime: true; readonly secureTimestamp: true; readonly entitlements: string };
@@ -462,9 +465,12 @@ export function validateAppBundleManifest(value: unknown): AppBundleManifest {
   const embeddedArtifacts = {
     codexPlugin: boundedString(rawEmbeddedArtifacts.codexPlugin, "Codex plugin artifact"),
     vscodeExtension: boundedString(rawEmbeddedArtifacts.vscodeExtension, "VS Code extension artifact"),
+    chromeExtension: boundedString(rawEmbeddedArtifacts.chromeExtension, "Chrome extension artifact"),
+    chromeNativeWrapper: boundedString(rawEmbeddedArtifacts.chromeNativeWrapper, "Chrome native wrapper artifact"),
   };
-  if (Object.keys(rawEmbeddedArtifacts).some((name) => !["codexPlugin", "vscodeExtension"].includes(name))) {
-    throw new Error("Only the Codex plugin and VS Code extension may be embedded integrations");
+  if (Object.keys(rawEmbeddedArtifacts).some((name) =>
+    !["codexPlugin", "vscodeExtension", "chromeExtension", "chromeNativeWrapper"].includes(name))) {
+    throw new Error("Only the reviewed Codex, VS Code, and Chrome integration artifacts may be embedded");
   }
   requiredValue(root.finderExecutable, "droplet", "Finder executable");
   if (Object.values(embeddedArtifacts).some((path) => path.startsWith("/") || path.split("/").includes(".."))) {
@@ -760,6 +766,12 @@ export async function validateDistributionManifests(
   }
   const pluginRoot = resolve(repoRoot, app.embeddedArtifacts.codexPlugin);
   await validateCodexPlugin(pluginRoot);
+  const chromeManifest = JSON.parse(await readFile(
+    resolve(repoRoot, "apps/chrome-extension/manifest.json"),
+    "utf8",
+  )) as unknown;
+  validateChromeSourceContract(chromeManifest as Parameters<typeof validateChromeSourceContract>[0]);
+  await readFile(resolve(repoRoot, app.embeddedArtifacts.chromeNativeWrapper), "utf8");
   const noticePath = resolve(repoRoot, "THIRD_PARTY_NOTICES.md");
   validateCatalogThirdPartyNotices(await readFile(noticePath, "utf8"));
   await validateCatalogSourceBaseline(repoRoot);
@@ -769,8 +781,8 @@ export async function validateDistributionManifests(
   if (packageManifest.scripts?.["prebuild:web"] !== "pnpm catalog:check") {
     throw new Error("Production web builds must run the non-mutating catalog:check gate");
   }
-  if (packageManifest.scripts?.["validate:distribution"] !== "pnpm build:web && tsx packaging/macos/validate-manifest.ts") {
-    throw new Error("Distribution validation must rebuild the production web bundle before inspection");
+  if (packageManifest.scripts?.["validate:distribution"] !== "pnpm build:web && pnpm build:chrome && tsx packaging/macos/validate-manifest.ts") {
+    throw new Error("Distribution validation must rebuild the production web and Chrome bundles before inspection");
   }
   for (const scriptName of ["build", "build:web", "package:macos", "install:local"] as const) {
     if (/catalog:(?:audit|generate|update)/u.test(packageManifest.scripts?.[scriptName] ?? "")) {
