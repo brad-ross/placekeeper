@@ -37,6 +37,10 @@ import type {
 import type { ConditionalShutdownResult } from "./daemon-lifecycle.js";
 import { PLACEKEEPER_LINK_MAX_LENGTH } from "../../../../packages/core/src/placekeeper-link.js";
 import { isLaunchSurface, isRecoveryDecision } from "../sessions/session-broker.js";
+import {
+  isChromeBrowserSourceOpenRequest,
+  type ChromeBrowserSourceOpenRequest,
+} from "../browser/browser-source-store.js";
 
 // Both directions are explicitly bounded. Evidence requests use a stricter
 // byte budget before base64 expansion, so a document can never turn this
@@ -139,6 +143,7 @@ export type PlacekeeperControlRequest =
       readonly operation: "shutdown-if-idle";
     }
   | { readonly kind: "launch"; readonly request: LaunchRequest }
+  | { readonly kind: "chrome-open"; readonly request: ChromeBrowserSourceOpenRequest }
   | { readonly kind: "link-preflight"; readonly link: string }
   | { readonly kind: "link-open"; readonly request: LinkOpenRequest }
   | {
@@ -234,6 +239,7 @@ export type PlacekeeperControlResponse =
           };
     }
   | { readonly kind: "launch"; readonly response: LaunchResponse }
+  | { readonly kind: "chrome-open"; readonly response: LaunchResponse }
   | { readonly kind: "link-preflight"; readonly response: LinkPreflightResponse }
   | { readonly kind: "link-open"; readonly response: LinkLaunchResponse }
   | { readonly kind: "binding"; readonly result: TaskBindingClaimResult }
@@ -305,6 +311,10 @@ function isControlRequest(value: unknown): value is PlacekeeperControlRequest {
         value.operation === "shutdown-if-idle");
   }
   if (value.kind === "launch") return isObject(value.request);
+  if (value.kind === "chrome-open") {
+    return Object.keys(value).length === 2 && Object.hasOwn(value, "request") &&
+      isChromeBrowserSourceOpenRequest(value.request);
+  }
   if (value.kind === "link-preflight") {
     return typeof value.link === "string" && value.link.length <= PLACEKEEPER_LINK_MAX_LENGTH;
   }
@@ -398,6 +408,9 @@ async function dispatch(
   }
   if (request.kind === "launch") {
     return { kind: "launch", response: await host.open(request.request) };
+  }
+  if (request.kind === "chrome-open") {
+    return { kind: "chrome-open", response: await host.openChromeBrowserSource(request.request) };
   }
   if (request.kind === "link-preflight") {
     return { kind: "link-preflight", response: await host.preflightLink(request.link) };

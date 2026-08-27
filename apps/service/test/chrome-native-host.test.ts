@@ -91,6 +91,35 @@ describe("Chrome native host entry", () => {
     });
   });
 
+  it("opens sealed bytes through the fixed narrow daemon request without forwarding a path", async () => {
+    const store = await storeFixture();
+    const staged = await store.begin("transfer-opaque", "Opaque.pdf");
+    const bytes = Buffer.from("%PDF-1.7\nopaque\n%%EOF");
+    await store.append(staged, bytes);
+    const handle = await store.seal(staged);
+    const localLaunch = vi.fn();
+    const remoteLaunch = vi.fn(async () => ({
+      ok: true as const,
+      kind: "opened" as const,
+      url: "http://127.0.0.1:43179/s/779e1d9d-58c1-4b12-8dc2-3449dad132c1/bootstrap#cap=1234567890123456789012345678901234567890123",
+      sessionId: "779e1d9d-58c1-4b12-8dc2-3449dad132c1",
+      documentGeneration: 1,
+    }));
+    const opener = createDaemonChromeBrowserOpener(store, localLaunch, remoteLaunch);
+
+    await expect(opener.openSealed(handle)).resolves.toContain("/bootstrap#cap=");
+    expect(localLaunch).not.toHaveBeenCalled();
+    expect(remoteLaunch).toHaveBeenCalledExactlyOnceWith({
+      protocolVersion: 1,
+      sourceHandle: handle,
+      byteLength: bytes.byteLength,
+      sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      displayName: "Opaque.pdf",
+    });
+    expect(JSON.stringify(remoteLaunch.mock.calls)).not.toContain(store.root);
+    await expect(store.inspect(handle)).rejects.toThrow("Unknown sealed browser source");
+  });
+
   it("rejects unauthorized callers before handoff and bounds a slow native connection", async () => {
     const unauthorizedInput = new PassThrough();
     unauthorizedInput.end();

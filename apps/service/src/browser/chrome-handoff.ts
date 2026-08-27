@@ -67,9 +67,9 @@ function sanitizedDisplayName(value: string | undefined): string | undefined {
 }
 
 /**
- * The store is the U2/U3 seam: callers receive only an opaque handle after
- * bytes are durable and structurally valid. U3 will attach durable ownership
- * to that handle; browser transport never receives the private path.
+ * Callers receive only an opaque handle after bytes are durable and
+ * structurally valid. The daemon attaches recovery ownership to that handle;
+ * browser transport never receives the private path.
  */
 export class ChromeTransferStore {
   readonly root: string;

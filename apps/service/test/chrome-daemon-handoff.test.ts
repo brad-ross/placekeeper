@@ -1,0 +1,79 @@
+import { createHash, randomBytes } from "node:crypto";
+import { access, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import {
+  requestControl,
+  startLaunchControlServer,
+  type LaunchControlServer,
+  type PlacekeeperControlRequest,
+} from "../src/host/launch-control.js";
+import { PlacekeeperHost } from "../src/host/placekeeper-host.js";
+
+const roots: string[] = [];
+const hosts: PlacekeeperHost[] = [];
+const controls: LaunchControlServer[] = [];
+
+afterEach(async () => {
+  await Promise.all(controls.splice(0).map((control) => control.close()));
+  await Promise.all(hosts.splice(0).map((host) => host.close()));
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+describe("Chrome daemon handoff", () => {
+  it("admits only the fixed opaque request and transfers ownership without a path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-chrome-daemon-"));
+    roots.push(root);
+    const recoveryRoot = join(root, "recovery");
+    const browserSourceRoot = join(root, "browser-sources");
+    const assets = join(root, "assets");
+    await Promise.all([mkdir(browserSourceRoot), mkdir(assets)]);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    const bytes = Buffer.from("%PDF-1.7\ndaemon handoff\n%%EOF");
+    const sourceHandle = randomBytes(24).toString("base64url");
+    const sealedPath = join(browserSourceRoot, `${sourceHandle}.pdf`);
+    await writeFile(sealedPath, bytes, { mode: 0o600 });
+    const request = {
+      protocolVersion: 1 as const,
+      sourceHandle,
+      byteLength: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      displayName: "Daemon.pdf",
+    };
+    const host = await PlacekeeperHost.start({
+      recoveryRoot,
+      browserSourceRoot,
+      webAssets: { root: assets },
+      port: 0,
+    });
+    hosts.push(host);
+    const socketPath = join(root, "control.sock");
+    controls.push(await startLaunchControlServer(host, socketPath));
+
+    const response = await requestControl(socketPath, { kind: "chrome-open", request });
+    expect(response).toMatchObject({
+      kind: "chrome-open",
+      response: { ok: true, kind: "opened" },
+    });
+    if (response.kind !== "chrome-open" || !response.response.ok ||
+      response.response.kind === "recovery-offered") throw new Error("Expected open");
+    expect("bindProof" in response.response).toBe(false);
+    expect(await host.broker.sessionScope(response.response.sessionId)).toMatchObject({
+      sourceDisposition: "remote-temporary",
+      sourceDisplayName: "Daemon.pdf",
+    });
+    await expect(access(sealedPath)).rejects.toMatchObject({ code: "ENOENT" });
+
+    const malformed = {
+      kind: "chrome-open",
+      request: { ...request, pdfPath: "/private/forbidden.pdf" },
+    } as unknown as PlacekeeperControlRequest;
+    await expect(requestControl(socketPath, malformed)).resolves.toEqual({
+      kind: "error",
+      reason: "invalid-request",
+    });
+  });
+});

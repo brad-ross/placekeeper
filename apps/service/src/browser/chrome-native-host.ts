@@ -1,7 +1,10 @@
 import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 
-import { launchThroughDaemon } from "../host/service-daemon.js";
+import {
+  launchThroughDaemon,
+  openChromeBrowserSourceThroughDaemon,
+} from "../host/service-daemon.js";
 import { defaultDaemonPaths } from "../host/service-daemon.js";
 import type { LaunchRequest, LaunchResponse } from "../host/placekeeper-host.js";
 import {
@@ -17,6 +20,7 @@ import {
   encodeNativeMessage,
   NativeMessageDecoder,
 } from "./native-messaging.js";
+import type { ChromeBrowserSourceOpenRequest } from "./browser-source-store.js";
 
 export interface ChromeNativeHostCommandOptions {
   readonly input?: Readable;
@@ -30,13 +34,16 @@ export interface ChromeNativeHostCommandOptions {
 const DEFAULT_NATIVE_HOST_DURATION_MS = 30_000;
 
 export type ChromeBrowserLaunchClient = (request: LaunchRequest) => Promise<LaunchResponse>;
+export type ChromeBrowserSourceLaunchClient = (
+  request: ChromeBrowserSourceOpenRequest,
+) => Promise<LaunchResponse>;
 
 export function createDaemonChromeBrowserOpener(
   store: ChromeTransferStore,
   launch: ChromeBrowserLaunchClient = launchThroughDaemon,
+  openBrowserSource: ChromeBrowserSourceLaunchClient = openChromeBrowserSourceThroughDaemon,
 ): ChromeBrowserReviewOpener {
-  const browserDestination = async (pdfPath: string): Promise<string> => {
-    const response = await launch({ pdfPath, surface: "browser" });
+  const browserDestination = async (response: LaunchResponse): Promise<string> => {
     if (
       !response.ok || response.kind === "recovery-offered" ||
       response.bindProof !== undefined ||
@@ -45,10 +52,22 @@ export function createDaemonChromeBrowserOpener(
     return response.url;
   };
   return {
-    openLocal: browserDestination,
+    async openLocal(pdfPath: string) {
+      return browserDestination(await launch({ pdfPath, surface: "browser" }));
+    },
     async openSealed(handle: SealedBrowserSourceHandle) {
       const source = await store.inspect(handle);
-      return browserDestination(source.path);
+      const destination = await browserDestination(await openBrowserSource({
+        protocolVersion: 1,
+        sourceHandle: handle,
+        byteLength: source.byteLength,
+        sha256: source.sha256,
+        ...(source.displayName === undefined ? {} : { displayName: source.displayName }),
+      }));
+      // The daemon atomically moved this inode into recovery ownership. Drop
+      // the native process's transient handle without deleting owned bytes.
+      await store.remove(handle);
+      return destination;
     },
   };
 }
