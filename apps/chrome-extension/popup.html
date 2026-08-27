@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Placekeeper PDF settings</title>
+    <link rel="stylesheet" href="/src/extension.css">
+  </head>
+  <body class="popup">
+    <main aria-labelledby="title">
+      <h1 id="title">Placekeeper PDFs</h1>
+      <p>Choose whether top-level PDFs open automatically in Placekeeper.</p>
+      <button id="automatic-open" type="button" role="switch" aria-checked="false">
+        <span>Automatically open PDFs</span>
+        <span id="automatic-open-state" class="switch__state" aria-hidden="true">Paused</span>
+      </button>
+      <p id="status" class="status" role="status" aria-live="polite">Reading Chrome’s PDF setting…</p>
+    </main>
+    <script type="module" src="/src/popup-entry.ts"></script>
+  </body>
+</html>

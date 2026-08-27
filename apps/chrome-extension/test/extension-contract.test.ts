@@ -1,0 +1,33 @@
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+const extensionRoot = resolve(import.meta.dirname, "..");
+
+describe("Chrome extension static contract", () => {
+  it("registers only top-level PDFs on Chrome 151+ with a stable identity", async () => {
+    const manifest = JSON.parse(await readFile(resolve(extensionRoot, "manifest.json"), "utf8")) as Record<string, unknown>;
+    expect(manifest.manifest_version).toBe(3);
+    expect(manifest.minimum_chrome_version).toBe("151");
+    expect(manifest.permissions).toEqual(["nativeMessaging", "storage"]);
+    expect(manifest.host_permissions).toBeUndefined();
+    expect(manifest.key).toMatch(/^[A-Za-z0-9+/]+=*$/u);
+    expect(manifest.mime_types_handler).toEqual({
+      "application/pdf": {
+        handler_url: "handler.html",
+      },
+    });
+  });
+
+  it("uses native keyboard controls and announced status regions", async () => {
+    const [handler, popup] = await Promise.all([
+      readFile(resolve(extensionRoot, "handler.html"), "utf8"),
+      readFile(resolve(extensionRoot, "popup.html"), "utf8"),
+    ]);
+    expect(handler).toContain('<button id="bypass" type="button">Use Chrome viewer</button>');
+    expect(handler).toContain('role="status"');
+    expect(popup).toContain('<button id="automatic-open" type="button" role="switch"');
+    expect(popup).toContain('aria-checked="false"');
+    expect(popup).toContain('role="status"');
+  });
+});

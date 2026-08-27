@@ -3,6 +3,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: [
+      'apps/chrome-extension/test/*.test.ts',
       'test/conformance/pdf-writer.conformance.test.ts',
       'test/conformance/reviewed-pdf.test.ts',
       'apps/service/test/session-security.test.ts',
