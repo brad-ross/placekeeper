@@ -210,12 +210,21 @@ export class PlacekeeperHost {
     });
     const context = new LiveContextService({ broker });
     const reconciliation = new SourceReconciliationService({ broker });
+    const sourceWorkflow = new LiveSourceWorkflowService({ broker, context, reconciliation });
+    broker.onGenerationAdvance((event) => {
+      // Observation cursors, evidence handles, source hints, and source-work
+      // baselines are generation-bound even when the exact task lease migrates.
+      context.discardSession(event.sessionId);
+      if (event.migratedTaskSessionId !== undefined) {
+        sourceWorkflow.discardTask(event.migratedTaskSessionId);
+      }
+    });
     return new PlacekeeperHost(
       broker,
       server,
       context,
       reconciliation,
-      new LiveSourceWorkflowService({ broker, context, reconciliation }),
+      sourceWorkflow,
       saving,
       exporting,
       lifecycle,

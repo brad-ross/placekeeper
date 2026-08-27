@@ -29,7 +29,7 @@ interface PendingBinding {
 interface ActiveBinding {
   readonly taskSessionId: string;
   readonly reviewSessionId: string;
-  readonly documentGeneration: number;
+  documentGeneration: number;
   readonly browserCapabilityHashes: Set<string>;
   leaseExpiresAtMs: number;
   lastVerified?: LiveObservationIdentity;
@@ -64,6 +64,10 @@ export type TaskBindingClaimResult =
 export type BrowserActivationResult =
   | { readonly status: "active"; readonly leaseExpiresAt: string }
   | { readonly status: "ignored" };
+
+type GenerationMigrationResult =
+  | { readonly status: "migrated"; readonly taskSessionId: string }
+  | { readonly status: "revoked" | "unbound" };
 
 function validId(value: string): boolean {
   return value.length > 0 && value.length <= MAX_ID_LENGTH;
@@ -368,6 +372,12 @@ export class TaskBindingRegistry {
         };
   }
 
+  taskForGeneration(reviewSessionId: string, documentGeneration: number): string | undefined {
+    this.#sweep();
+    const active = this.#activeByReview.get(reviewSessionId);
+    return active?.documentGeneration === documentGeneration ? active.taskSessionId : undefined;
+  }
+
   unavailableReasonForTask(taskSessionId: string): "pending" | "expired" | "unbound" {
     this.#sweep();
     if (this.#pendingByTask.has(taskSessionId)) return "pending";
@@ -468,6 +478,36 @@ export class TaskBindingRegistry {
     if (active !== undefined && active.documentGeneration !== currentGeneration) {
       this.#removeActive(active);
     }
+  }
+
+  /** Advances only the exact active lease already owning this review. Pending,
+   * expired, foreign-generation, and proof-only authority is revoked. */
+  migrateGeneration(input: {
+    readonly reviewSessionId: string;
+    readonly previousGeneration: number;
+    readonly successorGeneration: number;
+  }): GenerationMigrationResult {
+    this.#sweep();
+    if (
+      !validId(input.reviewSessionId) ||
+      !validGeneration(input.previousGeneration) ||
+      !validGeneration(input.successorGeneration) ||
+      input.successorGeneration <= input.previousGeneration
+    ) return { status: "revoked" };
+    for (const proof of [...this.#proofsByHash.values()]) {
+      if (proof.reviewSessionId === input.reviewSessionId) this.#consumeProof(proof);
+    }
+    const pending = this.#pendingByReview.get(input.reviewSessionId);
+    if (pending !== undefined) this.#removePending(pending);
+    const active = this.#activeByReview.get(input.reviewSessionId);
+    if (active === undefined) return { status: "unbound" };
+    if (active.documentGeneration !== input.previousGeneration) {
+      this.#removeActive(active);
+      return { status: "revoked" };
+    }
+    active.documentGeneration = input.successorGeneration;
+    delete active.lastVerified;
+    return { status: "migrated", taskSessionId: active.taskSessionId };
   }
 
   revokeAll(): void {

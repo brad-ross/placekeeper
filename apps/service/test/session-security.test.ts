@@ -125,6 +125,16 @@ describe("one-use document-scoped session credentials", () => {
     credentials.revokeSession("session-a");
     expect(credentials.authenticate("session-a", credential!)).toBe(false);
   });
+
+  it("invalidates predecessor bootstraps without revoking authenticated successor views", () => {
+    const credentials = new SessionCredentialStore();
+    const activeCapability = credentials.issueBootstrap("session-a");
+    const activeCredential = credentials.exchangeBootstrap("session-a", activeCapability)!;
+    const staleCapability = credentials.issueBootstrap("session-a");
+    credentials.revokePendingBootstraps("session-a");
+    expect(credentials.exchangeBootstrap("session-a", staleCapability)).toBeUndefined();
+    expect(credentials.authenticate("session-a", activeCredential)).toBe(true);
+  });
 });
 
 describe("authenticated review presence", () => {

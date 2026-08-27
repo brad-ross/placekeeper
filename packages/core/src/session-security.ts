@@ -207,8 +207,12 @@ export class SessionCredentialStore {
     return count;
   }
 
-  revokeSession(sessionId: string): void {
+  revokePendingBootstraps(sessionId: string): void {
     this.#bootstraps.delete(sessionId);
+  }
+
+  revokeSession(sessionId: string): void {
+    this.revokePendingBootstraps(sessionId);
     for (const record of this.#credentials.values()) {
       if (record.sessionId === sessionId) {
         record.revoked = true;

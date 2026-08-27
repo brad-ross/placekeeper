@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   documentOrderedItems,
@@ -11,6 +11,7 @@ import type {
   ReviewState,
   ReviewWorkflowMode,
 } from "../../../../packages/core/src/review-model.js";
+import { startReviewGeneration } from "../../../../packages/core/src/review-model.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import {
   encodePlacekeeperLinkFragment,
@@ -43,16 +44,22 @@ import {
   type RecoverableDraftV2,
   type SaveFailureReason,
   type SnapshotHooks,
+  type DurableGenerationRecordV1,
+  type DurableSourceWorkInterruptionV1,
 } from "../recovery/draft-snapshot.js";
 import {
+  commitGenerationSnapshot,
   createSourceSnapshot,
   ensurePrivateDirectory,
+  stageGenerationSnapshot,
+  type StagedGenerationSnapshot,
 } from "../recovery/source-snapshot.js";
 import type { FrozenReviewDelivery } from "../export/export-coordinator.js";
 import {
   assessPdfRewriteEligibility,
   migrateLegacyReviewStateGeometry,
   readPortableReviewItems,
+  inspectPdfWithEmbedPdf,
 } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { SessionControlRegistry } from "./control-socket.js";
 import { TaskBindingRegistry } from "../context/task-binding-registry.js";
@@ -60,6 +67,12 @@ import {
   RestartReconnectStore,
   type MatchedRestartReconnectTicket,
 } from "../context/restart-reconnect-store.js";
+import { inspectPdfPageTexts } from "../pdf/inspect-pdf.js";
+import {
+  reconcilePdfAnchorState,
+  type PdfAnchorPage,
+} from "../reconciliation/pdf-anchor-reconciler.js";
+import { assessGenerationRetention } from "../recovery/retention.js";
 
 export const RECOVERY_DECISIONS = ["resume", "discard", "fork"] as const;
 export type RecoveryDecision = typeof RECOVERY_DECISIONS[number];
@@ -138,7 +151,7 @@ interface RecoveryOperationRecord {
 interface ActiveSession {
   readonly id: string;
   canonicalSourcePath: string;
-  readonly sourceSnapshotPath: string;
+  sourceSnapshotPath: string;
   readonly store: DraftSnapshotStore;
   readonly fileId: string;
   rootId?: string;
@@ -151,12 +164,14 @@ interface ActiveSession {
   destination: DurableSaveDestination;
   sync: DurableSaveSync;
   rewriteEligibility: PdfRewriteEligibility;
-  readonly documentGeneration: number;
+  generationLineage: DurableGenerationRecordV1[];
+  latestObservationEpoch: number;
+  sourceWorkInterruptions: DurableSourceWorkInterruptionV1[];
 }
 
 interface BrowserLaunchScope {
   readonly sessionId: string;
-  readonly documentGeneration: number;
+  documentGeneration: number;
   readonly surface: LaunchSurface;
   readonly browserCapabilityHash: string;
   readonly requestedLocation?: PlacekeeperLinkLocation;
@@ -168,7 +183,7 @@ interface BrowserViewRecord {
   readonly id: string;
   readonly cookieHash: string;
   readonly sessionId: string;
-  readonly documentGeneration: number;
+  documentGeneration: number;
   readonly credential: string;
   readonly pathname: string;
 }
@@ -227,6 +242,36 @@ export interface SessionBrokerOptions {
   readonly rewriteAssessor?: (bytes: Uint8Array) => Promise<PdfRewriteEligibility>;
   readonly taskBindings?: TaskBindingRegistry;
   readonly restartReconnectStore?: RestartReconnectStore;
+  readonly maxGenerationBytes?: number;
+  readonly maxGenerationCount?: number;
+  readonly inspectGeneration?: (
+    bytes: Uint8Array,
+  ) => Promise<{ readonly pageCount: number; readonly pages: readonly PdfAnchorPage[] }>;
+}
+
+export type LiveDocumentReplacementResult =
+  | {
+      readonly status: "committed";
+      readonly sessionId: string;
+      readonly previousGeneration: number;
+      readonly documentGeneration: number;
+      readonly digest: string;
+      readonly reviewRevision: number;
+      readonly migratedTaskSessionId?: string;
+    }
+  | {
+      readonly status: "same-digest" | "invalid" | "superseded" | "generation-conflict" |
+        "retention-rejected";
+      readonly sessionId: string;
+      readonly documentGeneration: number;
+      readonly reason: string;
+    };
+
+export interface DocumentGenerationEvent {
+  readonly sessionId: string;
+  readonly previousGeneration: number;
+  readonly documentGeneration: number;
+  readonly migratedTaskSessionId?: string;
 }
 
 /**
@@ -267,8 +312,12 @@ export class SessionBroker {
   readonly #snapshotHooks: SnapshotHooks;
   readonly #portableReader: (bytes: Uint8Array) => Promise<readonly ReviewItem[]>;
   readonly #rewriteAssessor: (bytes: Uint8Array) => Promise<PdfRewriteEligibility>;
+  readonly #maxGenerationBytes: number;
+  readonly #maxGenerationCount: number;
+  readonly #inspectGeneration: NonNullable<SessionBrokerOptions["inspectGeneration"]>;
   readonly #activeById = new Map<string, ActiveSession>();
   readonly #activeBySource = new Map<string, string>();
+  readonly #activeByOutputPath = new Map<string, string>();
   readonly #bootstrapScopes = new Map<string, BrowserLaunchScope>();
   readonly #credentialScopes = new Map<string, BrowserLaunchScope>();
   readonly #viewsById = new Map<string, BrowserViewRecord>();
@@ -282,6 +331,7 @@ export class SessionBroker {
   readonly #pendingRestartReconnects = new Map<string, PendingRestartReconnect>();
   readonly #restartReconnectWaiters = new Map<string, Set<() => void>>();
   readonly #sessionEndListeners = new Set<(sessionId: string) => void>();
+  readonly #generationListeners = new Set<(event: DocumentGenerationEvent) => void>();
 
   constructor(options: SessionBrokerOptions) {
     this.recoveryRoot = options.recoveryRoot;
@@ -302,11 +352,29 @@ export class SessionBroker {
       (options.portableReader === undefined
         ? assessPdfRewriteEligibility
         : async () => ({ eligible: true }));
+    this.#maxGenerationBytes = options.maxGenerationBytes ?? 512 * 1024 * 1024;
+    this.#maxGenerationCount = options.maxGenerationCount ?? 32;
+    if (!Number.isSafeInteger(this.#maxGenerationBytes) || this.#maxGenerationBytes <= 0) {
+      throw new RangeError("maxGenerationBytes must be a positive safe integer");
+    }
+    if (!Number.isSafeInteger(this.#maxGenerationCount) || this.#maxGenerationCount <= 0) {
+      throw new RangeError("maxGenerationCount must be a positive safe integer");
+    }
+    this.#inspectGeneration = options.inspectGeneration ?? (async (bytes) => {
+      const inspected = await inspectPdfWithEmbedPdf(bytes);
+      const pages = await inspectPdfPageTexts(bytes);
+      return { pageCount: inspected.pageCount, pages };
+    });
   }
 
   onSessionEnd(listener: (sessionId: string) => void): () => void {
     this.#sessionEndListeners.add(listener);
     return () => this.#sessionEndListeners.delete(listener);
+  }
+
+  onGenerationAdvance(listener: (event: DocumentGenerationEvent) => void): () => void {
+    this.#generationListeners.add(listener);
+    return () => this.#generationListeners.delete(listener);
   }
 
   #store(sessionId: string): DraftSnapshotStore {
@@ -355,7 +423,7 @@ export class SessionBroker {
       : undefined;
     const launchScope: BrowserLaunchScope = {
       sessionId: session.id,
-      documentGeneration: session.documentGeneration,
+      documentGeneration: session.state.workflow.documentGeneration,
       surface,
       browserCapabilityHash: digestSecretHex(capability),
       ...(requestedLocation === undefined ? {} : { requestedLocation }),
@@ -366,7 +434,7 @@ export class SessionBroker {
     const bindProof = surface === "codex"
       ? this.taskBindings.issueBindProof({
           reviewSessionId: session.id,
-          documentGeneration: session.documentGeneration,
+          documentGeneration: session.state.workflow.documentGeneration,
           browserCapability: capability,
         })
       : undefined;
@@ -374,7 +442,7 @@ export class SessionBroker {
       this.#reconnectByBindProofHash.set(digestSecretHex(bindProof), {
         browserToken: reconnectBrowserToken,
         reviewSessionId: session.id,
-        documentGeneration: session.documentGeneration,
+        documentGeneration: session.state.workflow.documentGeneration,
         browserCapabilityHash: launchScope.browserCapabilityHash,
         canonicalSourcePath: session.canonicalSourcePath,
         sourceDigest: session.state.source.digest,
@@ -388,7 +456,7 @@ export class SessionBroker {
       launchPath: `/s/${session.id}/bootstrap`,
       fragment: `#cap=${capability}`,
       surface,
-      documentGeneration: session.documentGeneration,
+      documentGeneration: session.state.workflow.documentGeneration,
       ...(bindProof === undefined ? {} : { bindProof }),
     };
   }
@@ -464,6 +532,20 @@ export class SessionBroker {
     approvedFile: { readonly id: string; readonly canonicalPath: string },
     sourceDigest: string,
   ): Promise<OpenReviewResult> {
+    const existingLineageSessionId = this.#activeByOutputPath.get(approvedFile.canonicalPath);
+    if (existingLineageSessionId !== undefined && request.recoveryDecision === undefined) {
+      this.capabilities.revokeFile(approvedFile.id);
+      const session = this.#activeById.get(existingLineageSessionId);
+      if (session === undefined) throw new Error("Active output lineage index is inconsistent");
+      if (request.workflowMode !== undefined && request.workflowMode !== session.state.workflow.mode) {
+        throw new Error("A review session workflow mode cannot be downgraded or changed");
+      }
+      if (request.sourceRootPath !== undefined) await this.#attachSourceRoot(session, request.sourceRootPath);
+      return {
+        kind: "focused",
+        launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
+      };
+    }
     const key = activeKey(approvedFile.canonicalPath, sourceDigest);
     const existingSessionId = this.#activeBySource.get(key);
     if (existingSessionId !== undefined && request.recoveryDecision === undefined) {
@@ -490,7 +572,9 @@ export class SessionBroker {
     const identityMatches = drafts.filter(
       (draft) =>
         draft.sync.phase !== "clean" &&
-        (draft.state.source.digest === sourceDigest ||
+        ((draft.state.workflow.mode === "generated-output" &&
+          draft.canonicalSourcePath === approvedFile.canonicalPath) ||
+          draft.state.source.digest === sourceDigest ||
           draft.acceptedOriginalDigests?.includes(sourceDigest) === true ||
           (draft.destination.phase === "active" &&
             draft.destination.kind === "original" &&
@@ -688,6 +772,26 @@ export class SessionBroker {
           };
         }
       }
+      const recoveredSnapshotInfo = await stat(matchingDraft.sourceSnapshotPath);
+      const recoveredGeneration = resumedState.workflow.documentGeneration;
+      const generationLineage = matchingDraft.generationLineage === undefined
+        ? [{
+            schemaVersion: 1 as const,
+            generation: recoveredGeneration,
+            digest: resumedState.source.digest,
+            byteLength: resumedState.source.byteLength,
+            snapshotPath: matchingDraft.sourceSnapshotPath,
+            outputIdentity: {
+              canonicalPath: approvedFile.canonicalPath,
+              device: recoveredSnapshotInfo.dev,
+              inode: recoveredSnapshotInfo.ino,
+              byteLength: recoveredSnapshotInfo.size,
+              modifiedAtMs: recoveredSnapshotInfo.mtimeMs,
+            },
+            observationEpoch: matchingDraft.latestObservationEpoch ?? 0,
+            committedAt: matchingDraft.acknowledgedAt,
+          }]
+        : [...matchingDraft.generationLineage];
       const session: ActiveSession = {
         id: matchingDraft.state.sessionId,
         canonicalSourcePath: approvedFile.canonicalPath,
@@ -699,14 +803,18 @@ export class SessionBroker {
         ...(matchingDraft.lastExportAt === undefined
           ? {}
           : { lastExportAt: matchingDraft.lastExportAt }),
-        currentOriginalDigest: sourceDigest,
+        currentOriginalDigest: resumedState.workflow.mode === "generated-output"
+          ? resumedState.source.digest
+          : sourceDigest,
         acceptedOriginalDigests: [...(matchingDraft.acceptedOriginalDigests ?? [])],
         writeTail: Promise.resolve(),
         ending: false,
         destination,
         sync,
         rewriteEligibility,
-        documentGeneration: 1,
+        generationLineage,
+        latestObservationEpoch: matchingDraft.latestObservationEpoch ?? 0,
+        sourceWorkInterruptions: [...(matchingDraft.sourceWorkInterruptions ?? [])],
       };
       await session.store.persist(this.#draft(session));
       this.#activate(session);
@@ -727,6 +835,7 @@ export class SessionBroker {
       digest: sourceSnapshot.digest,
       byteLength: sourceSnapshot.byteLength,
     };
+    const initialOutputInfo = await stat(approvedFile.canonicalPath);
     let importedItems: readonly ReviewItem[] = [];
     try {
       importedItems = await this.#portableReader(
@@ -782,7 +891,24 @@ export class SessionBroker {
       destination,
       sync,
       rewriteEligibility,
-      documentGeneration: 1,
+      generationLineage: [{
+        schemaVersion: 1,
+        generation: 1,
+        digest: sourceSnapshot.digest,
+        byteLength: sourceSnapshot.byteLength,
+        snapshotPath: sourceSnapshot.path,
+        outputIdentity: {
+          canonicalPath: approvedFile.canonicalPath,
+          device: initialOutputInfo.dev,
+          inode: initialOutputInfo.ino,
+          byteLength: initialOutputInfo.size,
+          modifiedAtMs: initialOutputInfo.mtimeMs,
+        },
+        observationEpoch: 0,
+        committedAt: this.#now().toISOString(),
+      }],
+      latestObservationEpoch: 0,
+      sourceWorkInterruptions: [],
     };
     await session.store.persist(this.#draft(session));
     this.#activate(session);
@@ -839,6 +965,9 @@ export class SessionBroker {
       activeKey(session.canonicalSourcePath, session.currentOriginalDigest),
       session.id,
     );
+    if (session.state.workflow.mode === "generated-output") {
+      this.#activeByOutputPath.set(session.canonicalSourcePath, session.id);
+    }
   }
 
   #draft(session: ActiveSession): RecoverableDraftV2 {
@@ -856,6 +985,9 @@ export class SessionBroker {
         : { acceptedOriginalDigests: [...session.acceptedOriginalDigests] }),
       destination: session.destination,
       sync: session.sync,
+      generationLineage: [...session.generationLineage],
+      latestObservationEpoch: session.latestObservationEpoch,
+      sourceWorkInterruptions: [...session.sourceWorkInterruptions],
     };
   }
 
@@ -888,7 +1020,7 @@ export class SessionBroker {
     if (
       session === undefined ||
       session.ending ||
-      session.documentGeneration !== scope.documentGeneration
+      session.state.workflow.documentGeneration !== scope.documentGeneration
     ) return undefined;
     const id = randomUUID();
     const cookie = randomBytes(32).toString("base64url");
@@ -966,7 +1098,7 @@ export class SessionBroker {
     if (
       session === undefined ||
       session.ending ||
-      session.documentGeneration !== input.launch.documentGeneration
+      session.state.workflow.documentGeneration !== input.launch.documentGeneration
     ) return false;
     const ticket = await this.restartReconnects.matchBrowser({
       browserToken: input.browserToken,
@@ -981,7 +1113,7 @@ export class SessionBroker {
     if (
       scope === undefined ||
       scope.sessionId !== session.id ||
-      scope.documentGeneration !== session.documentGeneration ||
+      scope.documentGeneration !== session.state.workflow.documentGeneration ||
       scope.browserCapabilityHash !== scopeKey
     ) return false;
     this.#bootstrapScopes.set(scopeKey, { ...scope, reconnectBrowserToken: input.browserToken });
@@ -989,7 +1121,7 @@ export class SessionBroker {
       ticket,
       browserToken: input.browserToken,
       reviewSessionId: session.id,
-      documentGeneration: session.documentGeneration,
+      documentGeneration: session.state.workflow.documentGeneration,
       browserCapabilityHash: scopeKey,
       canonicalSourcePath: session.canonicalSourcePath,
       sourceDigest: session.state.source.digest,
@@ -1141,7 +1273,7 @@ export class SessionBroker {
     const live =
       session !== undefined &&
       !session.ending &&
-      session.documentGeneration === view.documentGeneration &&
+      session.state.workflow.documentGeneration === view.documentGeneration &&
       this.credentials.authenticate(view.sessionId, view.credential);
     if (!live) this.#viewsById.delete(viewId);
     return live ? view : undefined;
@@ -1487,13 +1619,13 @@ export class SessionBroker {
       : undefined;
     const trustedCodexScope =
       trustedLaunchScope?.surface === "codex" &&
-      trustedLaunchScope.documentGeneration === session.documentGeneration
+      trustedLaunchScope.documentGeneration === session.state.workflow.documentGeneration
         ? trustedLaunchScope
         : undefined;
     if (trustedCodexScope !== undefined) {
       const heartbeat = this.taskBindings.renewBrowserHeartbeat({
         reviewSessionId: sessionId,
-        documentGeneration: session.documentGeneration,
+        documentGeneration: session.state.workflow.documentGeneration,
         browserCapabilityHash: trustedCodexScope.browserCapabilityHash,
       });
       const reconnectBinding = this.#reconnectBindingsByCapabilityHash.get(
@@ -1502,7 +1634,7 @@ export class SessionBroker {
       if (
         heartbeat.status === "active" &&
         reconnectBinding?.reviewSessionId === sessionId &&
-        reconnectBinding.documentGeneration === session.documentGeneration &&
+        reconnectBinding.documentGeneration === session.state.workflow.documentGeneration &&
         reconnectBinding.canonicalSourcePath === session.canonicalSourcePath &&
         reconnectBinding.sourceDigest === session.state.source.digest
       ) {
@@ -1527,7 +1659,7 @@ export class SessionBroker {
             codexContext: this.taskBindings.statusForReview(
               sessionId,
               {
-                documentGeneration: session.documentGeneration,
+                documentGeneration: session.state.workflow.documentGeneration,
                 reviewRevision: session.state.revision,
                 sourceDigest: session.state.source.digest,
                 stateDigest: reviewSemanticDigest(session.state.items),
@@ -1537,6 +1669,301 @@ export class SessionBroker {
           }
         : {}),
     };
+  }
+
+  async replaceLiveDocument(input: {
+    readonly sessionId: string;
+    readonly outputPath: string;
+    readonly observationEpoch: number;
+  }): Promise<LiveDocumentReplacementResult> {
+    const session = this.#activeById.get(input.sessionId);
+    if (session === undefined || session.ending) throw new Error("Review session is not active");
+    if (session.state.workflow.mode !== "generated-output") {
+      throw new Error("Live document replacement requires generated-output review mode");
+    }
+    const canonicalOutputPath = await realpath(input.outputPath).catch(() => undefined);
+    if (canonicalOutputPath !== session.canonicalSourcePath) {
+      this.taskBindings.revokeSession(session.id);
+      throw new Error("A rebuild candidate cannot retarget an output-path lineage");
+    }
+    if (!Number.isSafeInteger(input.observationEpoch) || input.observationEpoch <= 0) {
+      throw new RangeError("observationEpoch must be a positive safe integer");
+    }
+
+    const expected = await this.#withSessionTail(session, async () => {
+      if (input.observationEpoch <= session.latestObservationEpoch) return undefined;
+      session.latestObservationEpoch = input.observationEpoch;
+      return {
+        documentGeneration: session.state.workflow.documentGeneration,
+        sourceDigest: session.state.source.digest,
+        reviewRevision: session.state.revision,
+      };
+    });
+    if (expected === undefined) {
+      return {
+        status: "superseded",
+        sessionId: session.id,
+        documentGeneration: session.state.workflow.documentGeneration,
+        reason: "observation-epoch-is-not-newer",
+      };
+    }
+
+    const successorGeneration = expected.documentGeneration + 1;
+    let staged: StagedGenerationSnapshot | undefined;
+    const markInvalid = async (reason: string): Promise<LiveDocumentReplacementResult> => {
+      if (staged !== undefined) await rm(staged.path, { force: true }).catch(() => undefined);
+      let superseded = false;
+      await this.#withSessionTail(session, async () => {
+        if (
+          session.ending || session.latestObservationEpoch !== input.observationEpoch ||
+          session.state.workflow.documentGeneration !== expected.documentGeneration
+        ) {
+          superseded = true;
+          return;
+        }
+        if (session.state.workflow.freshness === "possibly-stale") {
+          await session.store.persist(this.#draft(session));
+          return;
+        }
+        const state: ReviewState = {
+          ...session.state,
+          revision: session.state.revision + 1,
+          workflow: { ...session.state.workflow, freshness: "possibly-stale" },
+        };
+        const sync: DurableSaveSync = {
+          phase: "not-saved",
+          desiredRevision: state.revision,
+          desiredDigest: reviewStateDigest(state),
+          savedRevision: session.sync.savedRevision,
+          ...(session.sync.savedDigest === undefined ? {} : { savedDigest: session.sync.savedDigest }),
+          failure: "destination-unconfigured",
+        };
+        await session.store.persist({ ...this.#draft(session), state, sync });
+        session.state = state;
+        session.sync = sync;
+      });
+      return {
+        status: superseded ? "superseded" : "invalid",
+        sessionId: session.id,
+        documentGeneration: session.state.workflow.documentGeneration,
+        reason,
+      };
+    };
+
+    try {
+      staged = await stageGenerationSnapshot({
+        sourcePath: canonicalOutputPath,
+        canonicalPath: session.canonicalSourcePath,
+        sessionDirectory: session.store.directory,
+        generation: successorGeneration,
+        maxBytes: this.#maxGenerationBytes,
+      });
+    } catch (error) {
+      return markInvalid(error instanceof Error ? error.message : "candidate-copy-failed");
+    }
+    if (staged.digest === expected.sourceDigest) {
+      await rm(staged.path, { force: true });
+      return {
+        status: "same-digest",
+        sessionId: session.id,
+        documentGeneration: session.state.workflow.documentGeneration,
+        reason: "candidate-digest-matches-current-generation",
+      };
+    }
+
+    let inspected: { readonly pageCount: number; readonly pages: readonly PdfAnchorPage[] };
+    let candidateBytes: Buffer;
+    try {
+      candidateBytes = await readFile(staged.path);
+      if (
+        candidateBytes.byteLength !== staged.byteLength ||
+        createHash("sha256").update(candidateBytes).digest("hex") !== staged.digest
+      ) throw new Error("The private generation snapshot failed digest validation");
+      inspected = await this.#inspectGeneration(candidateBytes);
+      if (
+        !Number.isSafeInteger(inspected.pageCount) || inspected.pageCount <= 0 ||
+        inspected.pages.some(({ pageIndex }) =>
+          !Number.isSafeInteger(pageIndex) || pageIndex < 0 || pageIndex >= inspected.pageCount
+        )
+      ) throw new Error("The private generation snapshot failed structural PDF validation");
+    } catch (error) {
+      return markInvalid(error instanceof Error ? error.message : "candidate-validation-failed");
+    }
+
+    const retention = assessGenerationRetention(session.generationLineage, staged.byteLength, {
+      maxBytes: this.#maxGenerationBytes,
+      maxCount: this.#maxGenerationCount,
+    });
+    if (!retention.accepted) {
+      await rm(staged.path, { force: true });
+      const rejected = await markInvalid("The successor would exceed protected generation retention");
+      if (rejected.status === "superseded") return rejected;
+      return {
+        status: "retention-rejected",
+        sessionId: session.id,
+        documentGeneration: session.state.workflow.documentGeneration,
+        reason: "referenced-predecessor-retention-budget-exceeded",
+      };
+    }
+
+    let event: DocumentGenerationEvent | undefined;
+    let result: LiveDocumentReplacementResult;
+    try {
+      result = await this.#withSessionTail(session, async () => {
+        if (session.latestObservationEpoch !== input.observationEpoch) {
+          await rm(staged!.path, { force: true });
+          return {
+            status: "superseded" as const,
+            sessionId: session.id,
+            documentGeneration: session.state.workflow.documentGeneration,
+            reason: "newer-observation-superseded-candidate",
+          };
+        }
+        if (
+          session.state.workflow.documentGeneration !== expected.documentGeneration ||
+          session.state.source.digest !== expected.sourceDigest ||
+          session.state.revision !== expected.reviewRevision
+        ) {
+          await rm(staged!.path, { force: true });
+          return {
+            status: "generation-conflict" as const,
+            sessionId: session.id,
+            documentGeneration: session.state.workflow.documentGeneration,
+            reason: "generation-digest-or-review-revision-fence-changed",
+          };
+        }
+
+        let nextState = startReviewGeneration(session.state, {
+          documentGeneration: successorGeneration,
+        });
+        nextState = reconcilePdfAnchorState(nextState, {
+          generation: successorGeneration,
+          pages: inspected.pages,
+        });
+        nextState = {
+          ...nextState,
+          source: {
+            fileId: session.fileId,
+            digest: staged!.digest,
+            byteLength: staged!.byteLength,
+          },
+          workflow: { ...nextState.workflow, freshness: "current" },
+        };
+        const committedAt = this.#now().toISOString();
+        const snapshotPath = await commitGenerationSnapshot(staged!);
+        const record: DurableGenerationRecordV1 = {
+          schemaVersion: 1,
+          generation: successorGeneration,
+          digest: staged!.digest,
+          byteLength: staged!.byteLength,
+          snapshotPath,
+          outputIdentity: staged!.outputIdentity,
+          observationEpoch: input.observationEpoch,
+          committedAt,
+        };
+        const taskSessionId = this.taskBindings.taskForGeneration(
+          session.id,
+          expected.documentGeneration,
+        );
+        const interruption = taskSessionId === undefined
+          ? undefined
+          : {
+              schemaVersion: 1 as const,
+              taskSessionId,
+              previousGeneration: expected.documentGeneration,
+              successorGeneration,
+              disposition: "interrupted-by-generation" as const,
+              interruptedAt: committedAt,
+            };
+        const generationLineage = [...session.generationLineage, record];
+        const sourceWorkInterruptions = interruption === undefined
+          ? session.sourceWorkInterruptions
+          : [...session.sourceWorkInterruptions, interruption];
+        const nextSync: DurableSaveSync = {
+          phase: "not-saved",
+          desiredRevision: nextState.revision,
+          desiredDigest: reviewStateDigest(nextState),
+          savedRevision: session.sync.savedRevision,
+          ...(session.sync.savedDigest === undefined ? {} : { savedDigest: session.sync.savedDigest }),
+          failure: "destination-unconfigured",
+        };
+        await session.store.persist({
+          ...this.#draft(session),
+          sourceSnapshotPath: snapshotPath,
+          state: nextState,
+          sync: nextSync,
+          generationLineage,
+          latestObservationEpoch: input.observationEpoch,
+          sourceWorkInterruptions,
+        });
+        await this.capabilities.refreshApprovedPdf(session.fileId, staged!.digest);
+
+        for (const [key, owner] of this.#activeBySource) {
+          if (owner === session.id) this.#activeBySource.delete(key);
+        }
+        session.sourceSnapshotPath = snapshotPath;
+        session.state = nextState;
+        session.sync = nextSync;
+        session.currentOriginalDigest = staged!.digest;
+        session.generationLineage = generationLineage;
+        session.sourceWorkInterruptions = sourceWorkInterruptions;
+        this.#activate(session);
+        this.credentials.revokePendingBootstraps(session.id);
+        for (const [key, scope] of this.#bootstrapScopes) {
+          if (scope.sessionId === session.id) this.#bootstrapScopes.delete(key);
+        }
+        for (const [proofHash, metadata] of this.#reconnectByBindProofHash) {
+          if (metadata.reviewSessionId === session.id) this.#reconnectByBindProofHash.delete(proofHash);
+        }
+        for (const scope of this.#credentialScopes.values()) {
+          if (scope.sessionId === session.id) scope.documentGeneration = successorGeneration;
+        }
+        for (const view of this.#viewsById.values()) {
+          if (view.sessionId === session.id) view.documentGeneration = successorGeneration;
+        }
+        const migration = this.taskBindings.migrateGeneration({
+          reviewSessionId: session.id,
+          previousGeneration: expected.documentGeneration,
+          successorGeneration,
+        });
+        const migratedTaskSessionId = migration.status === "migrated"
+          ? migration.taskSessionId
+          : undefined;
+        event = {
+          sessionId: session.id,
+          previousGeneration: expected.documentGeneration,
+          documentGeneration: successorGeneration,
+          ...(migratedTaskSessionId === undefined ? {} : { migratedTaskSessionId }),
+        };
+        return {
+          status: "committed" as const,
+          sessionId: session.id,
+          previousGeneration: expected.documentGeneration,
+          documentGeneration: successorGeneration,
+          digest: staged!.digest,
+          reviewRevision: nextState.revision,
+          ...(migratedTaskSessionId === undefined ? {} : { migratedTaskSessionId }),
+        };
+      });
+    } catch (error) {
+      if (staged !== undefined) {
+        await rm(staged.path, { force: true }).catch(() => undefined);
+        await rm(staged.finalPath, { force: true }).catch(() => undefined);
+      }
+      return markInvalid(error instanceof Error ? error.message : "generation-commit-failed");
+    }
+    if (event !== undefined) {
+      this.controls.publishSuccessor(event.sessionId, event);
+      for (const listener of this.#generationListeners) {
+        try {
+          listener(event);
+        } catch {
+          // The durable generation already committed. A consumer that missed
+          // the bounded event rehydrates through the successor handshake.
+        }
+      }
+    }
+    return result;
   }
 
   async documentBytes(sessionId: string): Promise<Buffer | undefined> {
@@ -1557,7 +1984,7 @@ export class SessionBroker {
         : this.capabilities.getRootPath(session.rootId);
       return {
         sessionId: session.id,
-        documentGeneration: session.documentGeneration,
+        documentGeneration: session.state.workflow.documentGeneration,
         state: structuredClone(session.state),
         destination: structuredClone(session.destination),
         sync: structuredClone(session.sync),
@@ -1845,6 +2272,7 @@ export class SessionBroker {
     }
     this.#activeById.clear();
     this.#activeBySource.clear();
+    this.#activeByOutputPath.clear();
     this.#bootstrapScopes.clear();
     this.#credentialScopes.clear();
     this.#viewsById.clear();
@@ -1873,6 +2301,9 @@ export class SessionBroker {
     session.ending = true;
     this.#clearRecoveryRecordsForSession(sessionId);
     this.#activeById.delete(sessionId);
+    if (this.#activeByOutputPath.get(session.canonicalSourcePath) === sessionId) {
+      this.#activeByOutputPath.delete(session.canonicalSourcePath);
+    }
     for (const [key, owner] of this.#activeBySource) {
       if (owner === sessionId) this.#activeBySource.delete(key);
     }
@@ -1882,6 +2313,9 @@ export class SessionBroker {
           activeKey(candidate.canonicalSourcePath, candidate.currentOriginalDigest),
           candidate.id,
         );
+        if (candidate.state.workflow.mode === "generated-output") {
+          this.#activeByOutputPath.set(candidate.canonicalSourcePath, candidate.id);
+        }
       }
     }
     this.controls.cancel(sessionId);

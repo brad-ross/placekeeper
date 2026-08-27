@@ -24,7 +24,7 @@ import {
   reviewStateDigest,
   type RecoverableDraft,
 } from "../src/recovery/draft-snapshot.js";
-import { enforceRetention } from "../src/recovery/retention.js";
+import { assessGenerationRetention, enforceRetention } from "../src/recovery/retention.js";
 import { createSourceSnapshot } from "../src/recovery/source-snapshot.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
 import { hashFile } from "../src/files/file-capabilities.js";
@@ -968,6 +968,24 @@ describe("save-aware recovery migration", () => {
 });
 
 describe("retention", () => {
+  it("rejects an over-budget successor instead of evicting referenced generations", () => {
+    expect(assessGenerationRetention(
+      [{ byteLength: 60 }, { byteLength: 30 }],
+      20,
+      { maxBytes: 100, maxCount: 3 },
+    )).toMatchObject({
+      accepted: false,
+      retainedBytes: 90,
+      retainedCount: 2,
+      reason: "byte-budget-exceeded",
+    });
+    expect(assessGenerationRetention(
+      [{ byteLength: 10 }, { byteLength: 10 }],
+      10,
+      { maxBytes: 100, maxCount: 2 },
+    )).toMatchObject({ accepted: false, reason: "generation-count-exceeded" });
+  });
+
   it("never age- or storage-evicts active drafts and deterministically removes oldest inactive data", async () => {
     const root = await temporaryDirectory();
     const activeId = "active";

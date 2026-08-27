@@ -17,6 +17,7 @@ import type {
 } from "../../../../packages/core/src/save-status.js";
 export type { SaveFailureReason } from "../../../../packages/core/src/save-status.js";
 import { ensurePrivateDirectory } from "./source-snapshot.js";
+import type { GenerationOutputIdentity } from "./source-snapshot.js";
 import {
   isRecoveryTemporaryPathActive,
   trackRecoveryTemporaryPath,
@@ -35,6 +36,26 @@ export interface LegacyRecoverableDraft {
 export type DurableSaveDestination = SaveDestination;
 export type DurableSaveSync = SaveSync;
 
+export interface DurableGenerationRecordV1 {
+  readonly schemaVersion: 1;
+  readonly generation: number;
+  readonly digest: string;
+  readonly byteLength: number;
+  readonly snapshotPath: string;
+  readonly outputIdentity: GenerationOutputIdentity;
+  readonly observationEpoch: number;
+  readonly committedAt: string;
+}
+
+export interface DurableSourceWorkInterruptionV1 {
+  readonly schemaVersion: 1;
+  readonly taskSessionId: string;
+  readonly previousGeneration: number;
+  readonly successorGeneration: number;
+  readonly disposition: "interrupted-by-generation";
+  readonly interruptedAt: string;
+}
+
 export interface RecoverableDraftV2 {
   readonly schemaVersion: 2;
   readonly canonicalSourcePath: string;
@@ -45,6 +66,9 @@ export interface RecoverableDraftV2 {
   readonly acceptedOriginalDigests?: readonly string[];
   readonly destination: DurableSaveDestination;
   readonly sync: DurableSaveSync;
+  readonly generationLineage?: readonly DurableGenerationRecordV1[];
+  readonly latestObservationEpoch?: number;
+  readonly sourceWorkInterruptions?: readonly DurableSourceWorkInterruptionV1[];
 }
 
 export type RecoverableDraft = LegacyRecoverableDraft | RecoverableDraftV2;
