@@ -51,8 +51,11 @@ import {
   commitGenerationSnapshot,
   createSourceSnapshot,
   ensurePrivateDirectory,
+  snapshotGenerationSyncTexSidecar,
   stageGenerationSnapshot,
+  type GenerationSyncTexSnapshotResult,
   type StagedGenerationSnapshot,
+  type SyncTexSidecarFingerprint,
 } from "../recovery/source-snapshot.js";
 import type { FrozenReviewDelivery } from "../export/export-coordinator.js";
 import {
@@ -73,6 +76,15 @@ import {
   type PdfAnchorPage,
 } from "../reconciliation/pdf-anchor-reconciler.js";
 import { assessGenerationRetention } from "../recovery/retention.js";
+import {
+  queryForwardSyncTex,
+  queryReverseSyncTex,
+  type ForwardSyncTexResult,
+  type GenerationSyncTexBinding,
+  type ReverseSyncTexResult,
+  type SyncTexNavigationStatus,
+  type SyncTexRunner,
+} from "../synctex/query.js";
 
 export const RECOVERY_DECISIONS = ["resume", "discard", "fork"] as const;
 export type RecoveryDecision = typeof RECOVERY_DECISIONS[number];
@@ -167,6 +179,7 @@ interface ActiveSession {
   generationLineage: DurableGenerationRecordV1[];
   latestObservationEpoch: number;
   sourceWorkInterruptions: DurableSourceWorkInterruptionV1[];
+  syncTexOperationToken?: string;
 }
 
 interface BrowserLaunchScope {
@@ -295,6 +308,30 @@ export interface VerifiedSourceSnapshot {
   readonly documentGeneration: number;
   readonly sourceDigest: string;
   readonly bytes: Buffer;
+}
+
+export interface SyncTexUnavailableResult {
+  readonly status: Exclude<SyncTexNavigationStatus, "ok">;
+  readonly operationToken: string;
+  readonly documentGeneration?: number;
+  readonly pdfDigest?: string;
+  readonly reason: string;
+}
+
+export type BrokerForwardSyncTexResult = ForwardSyncTexResult | SyncTexUnavailableResult;
+export type BrokerReverseSyncTexResult = ReverseSyncTexResult | SyncTexUnavailableResult;
+
+function latestSyncTexFingerprintBefore(
+  lineage: readonly DurableGenerationRecordV1[],
+  generation: number,
+): SyncTexSidecarFingerprint | undefined {
+  for (let index = lineage.length - 1; index >= 0; index -= 1) {
+    const record = lineage[index];
+    if (record !== undefined && record.generation < generation && record.syncTex !== undefined) {
+      return record.syncTex.fingerprint;
+    }
+  }
+  return undefined;
 }
 
 function activeKey(path: string, digest: string): string {
@@ -844,6 +881,21 @@ export class SessionBroker {
     } catch {
       importedItems = [];
     }
+    const initialOutputIdentity = {
+      canonicalPath: approvedFile.canonicalPath,
+      device: initialOutputInfo.dev,
+      inode: initialOutputInfo.ino,
+      byteLength: initialOutputInfo.size,
+      modifiedAtMs: initialOutputInfo.mtimeMs,
+    };
+    const initialSyncTex = request.workflowMode === "generated-output"
+      ? await snapshotGenerationSyncTexSidecar({
+          outputPath: approvedFile.canonicalPath,
+          privatePdfPath: sourceSnapshot.path,
+          outputIdentity: initialOutputIdentity,
+          pdfDigest: sourceSnapshot.digest,
+        }).catch(() => undefined)
+      : undefined;
     const state = importedItems.length === 0
       ? createReviewState({
           sessionId,
@@ -897,15 +949,10 @@ export class SessionBroker {
         digest: sourceSnapshot.digest,
         byteLength: sourceSnapshot.byteLength,
         snapshotPath: sourceSnapshot.path,
-        outputIdentity: {
-          canonicalPath: approvedFile.canonicalPath,
-          device: initialOutputInfo.dev,
-          inode: initialOutputInfo.ino,
-          byteLength: initialOutputInfo.size,
-          modifiedAtMs: initialOutputInfo.mtimeMs,
-        },
+        outputIdentity: initialOutputIdentity,
         observationEpoch: 0,
         committedAt: this.#now().toISOString(),
+        ...(initialSyncTex?.status === "ready" ? { syncTex: initialSyncTex.snapshot } : {}),
       }],
       latestObservationEpoch: 0,
       sourceWorkInterruptions: [],
@@ -946,6 +993,7 @@ export class SessionBroker {
       await session.store.persist(nextDraft);
       session.rootId = approvedRoot.id;
       session.state = nextState;
+      delete session.syncTexOperationToken;
       if (previousRootId !== undefined) this.capabilities.revokeRoot(previousRootId);
     } catch (error) {
       this.capabilities.revokeRoot(approvedRoot.id);
@@ -1710,6 +1758,7 @@ export class SessionBroker {
 
     const successorGeneration = expected.documentGeneration + 1;
     let staged: StagedGenerationSnapshot | undefined;
+    let stagedSyncTex: GenerationSyncTexSnapshotResult | undefined;
     const markInvalid = async (reason: string): Promise<LiveDocumentReplacementResult> => {
       if (staged !== undefined) await rm(staged.path, { force: true }).catch(() => undefined);
       let superseded = false;
@@ -1806,12 +1855,29 @@ export class SessionBroker {
       };
     }
 
+    const previousSyncTexFingerprint = latestSyncTexFingerprintBefore(
+      session.generationLineage,
+      successorGeneration,
+    );
+    stagedSyncTex = await snapshotGenerationSyncTexSidecar({
+      outputPath: session.canonicalSourcePath,
+      privatePdfPath: staged.finalPath,
+      outputIdentity: staged.outputIdentity,
+      pdfDigest: staged.digest,
+      ...(previousSyncTexFingerprint === undefined ? {} : {
+        previousFingerprint: previousSyncTexFingerprint,
+      }),
+    }).catch(() => undefined);
+
     let event: DocumentGenerationEvent | undefined;
     let result: LiveDocumentReplacementResult;
     try {
       result = await this.#withSessionTail(session, async () => {
         if (session.latestObservationEpoch !== input.observationEpoch) {
           await rm(staged!.path, { force: true });
+          if (stagedSyncTex?.status === "ready") {
+            await rm(stagedSyncTex.snapshot.snapshotPath, { force: true });
+          }
           return {
             status: "superseded" as const,
             sessionId: session.id,
@@ -1825,6 +1891,9 @@ export class SessionBroker {
           session.state.revision !== expected.reviewRevision
         ) {
           await rm(staged!.path, { force: true });
+          if (stagedSyncTex?.status === "ready") {
+            await rm(stagedSyncTex.snapshot.snapshotPath, { force: true });
+          }
           return {
             status: "generation-conflict" as const,
             sessionId: session.id,
@@ -1860,6 +1929,7 @@ export class SessionBroker {
           outputIdentity: staged!.outputIdentity,
           observationEpoch: input.observationEpoch,
           committedAt,
+          ...(stagedSyncTex?.status === "ready" ? { syncTex: stagedSyncTex.snapshot } : {}),
         };
         const taskSessionId = this.taskBindings.taskForGeneration(
           session.id,
@@ -1907,6 +1977,7 @@ export class SessionBroker {
         session.currentOriginalDigest = staged!.digest;
         session.generationLineage = generationLineage;
         session.sourceWorkInterruptions = sourceWorkInterruptions;
+        delete session.syncTexOperationToken;
         this.#activate(session);
         this.credentials.revokePendingBootstraps(session.id);
         for (const [key, scope] of this.#bootstrapScopes) {
@@ -1950,6 +2021,9 @@ export class SessionBroker {
         await rm(staged.path, { force: true }).catch(() => undefined);
         await rm(staged.finalPath, { force: true }).catch(() => undefined);
       }
+      if (stagedSyncTex?.status === "ready") {
+        await rm(stagedSyncTex.snapshot.snapshotPath, { force: true }).catch(() => undefined);
+      }
       return markInvalid(error instanceof Error ? error.message : "generation-commit-failed");
     }
     if (event !== undefined) {
@@ -1964,6 +2038,160 @@ export class SessionBroker {
       }
     }
     return result;
+  }
+
+  async #prepareSyncTexBinding(
+    sessionId: string,
+    operationToken: string,
+  ): Promise<GenerationSyncTexBinding | SyncTexUnavailableResult> {
+    const session = this.#activeById.get(sessionId);
+    if (session === undefined || session.ending) {
+      return { status: "stale", operationToken, reason: "review-session-is-not-active" };
+    }
+    return this.#withSessionTail(session, async () => {
+      const current = session.generationLineage.at(-1);
+      if (
+        session.ending || current === undefined ||
+        current.generation !== session.state.workflow.documentGeneration ||
+        current.digest !== session.state.source.digest
+      ) return { status: "stale", operationToken, reason: "generation-lineage-is-not-current" };
+      if (
+        operationToken.length === 0 || operationToken.length > 256 || operationToken.includes("\0")
+      ) {
+        return {
+          status: "malformed",
+          operationToken,
+          documentGeneration: current.generation,
+          pdfDigest: current.digest,
+          reason: "invalid-synctex-operation-token",
+        };
+      }
+      const sourceRoot = session.rootId === undefined
+        ? undefined
+        : this.capabilities.getRootPath(session.rootId);
+      if (sourceRoot === undefined) {
+        return {
+          status: "out-of-root",
+          operationToken,
+          documentGeneration: current.generation,
+          pdfDigest: current.digest,
+          reason: "no-approved-source-root",
+        };
+      }
+      let syncTex = current.syncTex;
+      if (syncTex === undefined) {
+        const previousFingerprint = latestSyncTexFingerprintBefore(
+          session.generationLineage,
+          current.generation,
+        );
+        let sidecar: GenerationSyncTexSnapshotResult;
+        try {
+          sidecar = await snapshotGenerationSyncTexSidecar({
+            outputPath: session.canonicalSourcePath,
+            privatePdfPath: current.snapshotPath,
+            outputIdentity: current.outputIdentity,
+            pdfDigest: current.digest,
+            ...(previousFingerprint === undefined ? {} : { previousFingerprint }),
+          });
+        } catch {
+          sidecar = { status: "stale", reason: "sidecar-private-copy-failed" };
+        }
+        if (sidecar.status !== "ready") {
+          return {
+            status: sidecar.status === "missing"
+              ? current.generation === 1 ? "missing" : "pending"
+              : sidecar.status,
+            operationToken,
+            documentGeneration: current.generation,
+            pdfDigest: current.digest,
+            reason: sidecar.reason,
+          };
+        }
+        const attachedSyncTex = sidecar.snapshot;
+        syncTex = attachedSyncTex;
+        const generationLineage = session.generationLineage.map((record) =>
+          record.generation === current.generation ? { ...record, syncTex: attachedSyncTex } : record
+        );
+        await session.store.persist({ ...this.#draft(session), generationLineage });
+        session.generationLineage = generationLineage;
+      }
+      session.syncTexOperationToken = operationToken;
+      return {
+        outputIdentity: current.outputIdentity,
+        documentGeneration: current.generation,
+        pdfDigest: current.digest,
+        privatePdfPath: current.snapshotPath,
+        sidecar: syncTex,
+        sourceRoot,
+        operationToken,
+      };
+    });
+  }
+
+  #isSyncTexBindingCurrent(sessionId: string, binding: GenerationSyncTexBinding): boolean {
+    const session = this.#activeById.get(sessionId);
+    if (
+      session === undefined || session.ending ||
+      session.syncTexOperationToken !== binding.operationToken
+    ) return false;
+    const current = session.generationLineage.at(-1);
+    const sourceRoot = session.rootId === undefined
+      ? undefined
+      : this.capabilities.getRootPath(session.rootId);
+    return current !== undefined && current.syncTex !== undefined &&
+      current.generation === binding.documentGeneration &&
+      current.digest === binding.pdfDigest &&
+      current.snapshotPath === binding.privatePdfPath &&
+      current.outputIdentity.canonicalPath === binding.outputIdentity.canonicalPath &&
+      current.outputIdentity.device === binding.outputIdentity.device &&
+      current.outputIdentity.inode === binding.outputIdentity.inode &&
+      current.outputIdentity.byteLength === binding.outputIdentity.byteLength &&
+      current.outputIdentity.modifiedAtMs === binding.outputIdentity.modifiedAtMs &&
+      current.syncTex.snapshotPath === binding.sidecar.snapshotPath &&
+      current.syncTex.fingerprint.digest === binding.sidecar.fingerprint.digest &&
+      sourceRoot === binding.sourceRoot;
+  }
+
+  async forwardSyncTex(input: {
+    readonly sessionId: string;
+    readonly operationToken: string;
+    readonly sourcePath: string;
+    readonly line: number;
+    readonly column?: number;
+    readonly run?: SyncTexRunner;
+    readonly timeoutMs?: number;
+  }): Promise<BrokerForwardSyncTexResult> {
+    const binding = await this.#prepareSyncTexBinding(input.sessionId, input.operationToken);
+    if (!("privatePdfPath" in binding)) return binding;
+    return queryForwardSyncTex({
+      binding,
+      sourcePath: input.sourcePath,
+      line: input.line,
+      ...(input.column === undefined ? {} : { column: input.column }),
+      ...(input.run === undefined ? {} : { run: input.run }),
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+      isCurrent: (candidate) => this.#isSyncTexBindingCurrent(input.sessionId, candidate),
+    });
+  }
+
+  async reverseSyncTex(input: {
+    readonly sessionId: string;
+    readonly operationToken: string;
+    readonly pageIndex: number;
+    readonly point: { readonly x: number; readonly y: number };
+    readonly run?: SyncTexRunner;
+    readonly timeoutMs?: number;
+  }): Promise<BrokerReverseSyncTexResult> {
+    const binding = await this.#prepareSyncTexBinding(input.sessionId, input.operationToken);
+    if (!("privatePdfPath" in binding)) return binding;
+    return queryReverseSyncTex({
+      binding,
+      pageIndex: input.pageIndex,
+      point: input.point,
+      ...(input.run === undefined ? {} : { run: input.run }),
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+      isCurrent: (candidate) => this.#isSyncTexBindingCurrent(input.sessionId, candidate),
+    });
   }
 
   async documentBytes(sessionId: string): Promise<Buffer | undefined> {

@@ -17,7 +17,10 @@ import type {
 } from "../../../../packages/core/src/save-status.js";
 export type { SaveFailureReason } from "../../../../packages/core/src/save-status.js";
 import { ensurePrivateDirectory } from "./source-snapshot.js";
-import type { GenerationOutputIdentity } from "./source-snapshot.js";
+import type {
+  GenerationOutputIdentity,
+  GenerationSyncTexSnapshot,
+} from "./source-snapshot.js";
 import {
   isRecoveryTemporaryPathActive,
   trackRecoveryTemporaryPath,
@@ -45,6 +48,7 @@ export interface DurableGenerationRecordV1 {
   readonly outputIdentity: GenerationOutputIdentity;
   readonly observationEpoch: number;
   readonly committedAt: string;
+  readonly syncTex?: GenerationSyncTexSnapshot;
 }
 
 export interface DurableSourceWorkInterruptionV1 {
@@ -187,7 +191,7 @@ export class DraftSnapshotStore {
         .filter(
           (entry) =>
             entry.isFile() &&
-            /^\.(?:draft|source)-.*\.tmp$/u.test(entry.name) &&
+            /^\.(?:draft|source|synctex)-.*\.tmp$/u.test(entry.name) &&
             !isRecoveryTemporaryPathActive(join(this.directory, entry.name)),
         )
         .map((entry) => rm(join(this.directory, entry.name), { force: true })),
