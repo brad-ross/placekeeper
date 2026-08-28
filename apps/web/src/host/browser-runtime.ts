@@ -65,7 +65,7 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
     pdfiumWasm: currentSession.appLinkBase === undefined
       ? `/s/${currentSession.sessionId}/assets/pdfium.wasm`
       : "/assets/pdfium.wasm",
-    documentUrl: `/s/${currentSession.sessionId}/document/${state.source.fileId}`,
+    documentUrl: `/s/${currentSession.sessionId}/document/${state.source.fileId}?generation=${state.workflow.documentGeneration}`,
     ...(currentSession.credential === undefined
       ? {}
       : { requestHeaders: { authorization: `Bearer ${currentSession.credential}` } }),

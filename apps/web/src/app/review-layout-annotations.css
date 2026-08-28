@@ -1972,3 +1972,75 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   outline-offset: 2px;
   filter: saturate(.8);
 }
+
+.reconciliation-workspace {
+  display: grid;
+  gap: .75rem;
+  padding: .9rem;
+  border-bottom: 1px solid var(--review-border);
+  background: color-mix(in srgb, var(--review-warning) 8%, var(--review-surface-panel));
+}
+
+.review-generation-status {
+  margin: 0;
+  padding: .45rem .8rem;
+  border-bottom: 1px solid var(--review-border);
+  color: var(--review-ink-primary);
+  background: color-mix(in srgb, var(--review-warning) 14%, var(--review-surface-panel));
+  font-size: .8rem;
+}
+
+.review-shell--generation-status {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.reconciliation-workspace > header,
+.reconciliation-workspace > footer,
+.reconciliation-workspace article,
+.reconciliation-workspace [data-reattachment-selection-mode],
+.reconciliation-workspace [data-discard-confirmation] {
+  display: grid;
+  gap: .45rem;
+}
+
+.reconciliation-workspace h2,
+.reconciliation-workspace h3,
+.reconciliation-workspace p,
+.reconciliation-workspace blockquote {
+  margin: 0;
+}
+
+.reconciliation-workspace article,
+.reconciliation-workspace [data-reattachment-selection-mode],
+.reconciliation-workspace [data-discard-confirmation] {
+  padding: .7rem;
+  border: 1px solid var(--review-border);
+  border-radius: var(--review-radius-control);
+  background: var(--review-surface-panel);
+}
+
+.reconciliation-workspace blockquote {
+  padding-left: .6rem;
+  border-left: 2px solid var(--review-warning);
+  color: var(--review-ink-muted);
+}
+
+.reconciliation-workspace button {
+  justify-self: start;
+  min-height: 2rem;
+  padding: .3rem .65rem;
+  border: 1px solid var(--review-border);
+  border-radius: var(--review-radius-control);
+  color: var(--review-ink-primary);
+  background: var(--review-surface-subtle);
+  font: inherit;
+}
+
+.reconciliation-workspace button:disabled {
+  opacity: .55;
+}
+
+.reconciliation-workspace [data-export-eligibility="eligible"] {
+  padding-top: .7rem;
+  border-top: 1px solid var(--review-border);
+}

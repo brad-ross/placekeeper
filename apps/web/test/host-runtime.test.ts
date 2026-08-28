@@ -2,6 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createReviewState } from "../../../packages/core/src/review-model.js";
 import { createBrowserHostRuntime } from "../src/host/browser-runtime.js";
+import { subscribeRuntimeDocumentSource } from "../src/host/runtime-document-source.js";
+import type {
+  HostRuntime,
+  HostRuntimeBootstrap,
+  HostRuntimeInvalidation,
+} from "../src/host/runtime.js";
 import {
   HOST_RUNTIME_PROTOCOL,
   HOST_RUNTIME_VERSION,
@@ -38,7 +44,7 @@ describe("host-neutral review runtime", () => {
 
     const bootstrap = await runtime.bootstrap();
     expect(bootstrap.viewerAssets).toMatchObject({
-      documentUrl: `/s/${state.sessionId}/document/${state.source.fileId}`,
+      documentUrl: `/s/${state.sessionId}/document/${state.source.fileId}?generation=1`,
       requestHeaders: { authorization: "Bearer memory-only" },
     });
     expect(bootstrap.resourcePolicy).toEqual({ host: "browser", origin: "http://127.0.0.1:43179" });
@@ -47,6 +53,75 @@ describe("host-neutral review runtime", () => {
       protocols: ["placekeeper", "placekeeper-auth.memory-only"],
     });
     runtime.dispose();
+  });
+
+  it("publishes only the newest complete successor and retains the last PDF on failure", async () => {
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const loaded = (generation: number, revision: number): HostRuntimeBootstrap => ({
+      sessionId,
+      generation,
+      revision,
+      session: { sessionId },
+      state: createReviewState({
+        sessionId,
+        source: {
+          fileId: `file-${generation}`,
+          digest: String(generation).repeat(64),
+          byteLength: generation,
+        },
+        workflowMode: "generated-output",
+        documentGeneration: generation,
+      }),
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: {
+        destination: { phase: "none", generation: 0 },
+        sync: { phase: "clean", desiredRevision: revision, savedRevision: revision },
+      },
+      viewerAssets: { documentUrl: `snapshot-${generation}.pdf`, pdfiumWasm: "pdfium.wasm" },
+      resourcePolicy: { host: "vscode", issued: new Set([`snapshot-${generation}.pdf`, "pdfium.wasm"]) },
+    });
+    const completions: Array<{
+      resolve: (value: HostRuntimeBootstrap) => void;
+      reject: (error: Error) => void;
+    }> = [];
+    let listener: ((event: HostRuntimeInvalidation) => void) | undefined;
+    const runtime = {
+      bootstrap: vi.fn(() => new Promise<HostRuntimeBootstrap>((resolve, reject) => {
+        completions.push({ resolve, reject });
+      })),
+      subscribeInvalidations: vi.fn((next: (event: HostRuntimeInvalidation) => void) => {
+        listener = next;
+        return () => { listener = undefined; };
+      }),
+    } as unknown as HostRuntime;
+    const published: Array<{ loaded: HostRuntimeBootstrap; refreshStatus: string }> = [];
+    const initial = loaded(1, 0);
+    const unsubscribe = subscribeRuntimeDocumentSource(runtime, initial, (snapshot) => published.push(snapshot));
+    const event = (generation: number, previousGeneration: number, revision: number): HostRuntimeInvalidation => ({
+      sessionId,
+      generation,
+      previousGeneration,
+      revision,
+      viewerAssets: loaded(generation, revision).viewerAssets,
+      resourcePolicy: loaded(generation, revision).resourcePolicy,
+    });
+
+    listener?.(event(2, 1, 2));
+    listener?.(event(3, 2, 3));
+    expect(published.map(({ refreshStatus }) => refreshStatus)).toEqual(["reconciling", "reconciling"]);
+    completions[0]!.resolve(loaded(2, 2));
+    await Promise.resolve();
+    expect(published.at(-1)?.refreshStatus).toBe("reconciling");
+    completions[1]!.resolve(loaded(3, 3));
+    await Promise.resolve();
+    expect(published.at(-1)).toMatchObject({ refreshStatus: "idle", loaded: { generation: 3 } });
+
+    listener?.(event(4, 3, 4));
+    completions[2]!.reject(new Error("invalid successor"));
+    await vi.waitFor(() => {
+      expect(published.at(-1)).toMatchObject({ refreshStatus: "failed", loaded: { generation: 3 } });
+    });
+    unsubscribe();
   });
 
   it("bootstraps and dispatches through a versioned VS Code RPC without credentials", async () => {

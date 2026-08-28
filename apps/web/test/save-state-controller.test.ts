@@ -71,6 +71,21 @@ describe("first annotation save gate", () => {
     };
     expect(gateReviewCommand(imported, unselected, edit).kind).toBe("choose-destination");
   });
+
+  it("submits generated-output review commands without an ordinary save destination", () => {
+    const generated = createReviewState({
+      sessionId: "generated-session",
+      source: { fileId: "generated-file", digest: "b".repeat(64), byteLength: 2 },
+      workflowMode: "generated-output",
+      documentGeneration: 7,
+    });
+    const command: ReviewCommand = { type: "undo", expectedRevision: 0 };
+
+    expect(gateReviewCommand(generated, unselected, command)).toEqual({
+      kind: "submit",
+      command,
+    });
+  });
 });
 
 describe("save status polling", () => {

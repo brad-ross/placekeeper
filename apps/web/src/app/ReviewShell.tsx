@@ -131,6 +131,11 @@ import {
   type AuthoringSession,
   type AuthoringSource,
 } from '../review/authoring-session.js';
+import {
+  ReconciliationWorkspace,
+} from '../review/ReconciliationWorkspace.js';
+import type { GenerationRefreshStatus, LocationRestoreStatus } from '../generation-status.js';
+import { reviewItemIsResolvedForGeneration } from '../../../../packages/core/src/annotation-projection.js';
 import './review-layout.css';
 
 function ignoreReferenceViewportHost(_element: HTMLDivElement | null): void {}
@@ -142,6 +147,9 @@ export interface ReviewShellProps {
   savePhase?: 'clean' | 'saving' | 'not-saved';
   saveOptionsOpen?: boolean;
   onSaveOptions?(): void;
+  generationRefreshStatus?: GenerationRefreshStatus;
+  locationRestoreStatus?: LocationRestoreStatus;
+  onExportReviewedCopy?(confirmPossiblyStale?: true): Promise<unknown>;
   listOpen?: boolean;
   selectionUpdate: SelectionUpdate;
   selectionPlacement?: ContextPlacement | null;
@@ -489,7 +497,28 @@ export function ReviewShell(props: ReviewShellProps) {
   const outlineAbsent = visibleOutlineDiscovery.status === 'loaded-empty';
   const showAnnotationOutlineLabels = visibleOutlineDiscovery.status === 'loaded-tree';
   const existingAnnotations = props.existingAnnotations ?? { status: 'loading', generation: 0 };
-  const annotationsAvailable = props.state.items.length > 0
+  const visibleOwnedItems = props.state.workflow.mode === 'generated-output'
+    ? props.state.items.filter((item) => reviewItemIsResolvedForGeneration(
+        item,
+        props.state.workflow.documentGeneration,
+      ))
+    : props.state.items;
+  const generatedStatusMessages = props.state.workflow.mode !== 'generated-output' ? [] : [
+    props.generationRefreshStatus === 'reconciling'
+      ? 'A rebuilt PDF is loading and Review Items are reconciling.'
+      : props.generationRefreshStatus === 'failed'
+        ? 'The rebuilt PDF could not be loaded safely. The last successful PDF remains reviewable.'
+        : props.state.workflow.freshness === 'possibly-stale'
+          ? 'The last successful PDF may be stale.'
+          : '',
+    props.locationRestoreStatus === 'restoring'
+      ? 'Restoring the prior reading position.'
+      : props.locationRestoreStatus === 'fallback'
+        ? 'The prior reading position could not be restored; review remains available.'
+        : '',
+  ].filter(Boolean);
+  const annotationsAvailable = props.state.workflow.mode === 'generated-output'
+    || props.state.items.length > 0
     || (existingAnnotations.status === 'ready' && existingAnnotations.items.length > 0);
   const workspaceRequestedOpen = props.workspaceOpen ?? surface.baseSurface === 'workspace';
   const workspaceOpen = workspaceIsVisible(workspaceRequestedOpen, surface.baseSurface);
@@ -1533,7 +1562,7 @@ export function ReviewShell(props: ReviewShellProps) {
   })();
   return (
     <section
-      className="review-shell"
+      className={`review-shell${generatedStatusMessages.length > 0 ? ' review-shell--generation-status' : ''}`}
       onBeforeInputCapture={beforeInput}
       onKeyDownCapture={keyDown}
       onFocusCapture={(event) => {
@@ -1602,6 +1631,7 @@ export function ReviewShell(props: ReviewShellProps) {
         {...(props.savePhase === undefined ? {} : { savePhase: props.savePhase })}
         saveOptionsOpen={props.saveOptionsOpen ?? false}
         onSaveOptions={() => props.onSaveOptions?.()}
+        saveOptionsAvailable={props.onSaveOptions !== undefined}
         {...(props.viewerControls === undefined ? {} : { controls: props.viewerControls })}
         viewerState={props.viewerState ?? unavailableViewerControls()}
         fitWidthReady={props.viewerNavigation?.fitToWidthReady() ?? false}
@@ -1628,6 +1658,11 @@ export function ReviewShell(props: ReviewShellProps) {
         onNavigateBack={() => props.onNavigateBack?.()}
         onNavigateForward={() => props.onNavigateForward?.()}
       />
+      {generatedStatusMessages.length > 0 ? <p
+        className="review-generation-status"
+        data-generation-status={props.generationRefreshStatus ?? 'idle'}
+        role={props.generationRefreshStatus === 'failed' ? 'alert' : 'status'}
+      >{generatedStatusMessages.join(' ')}</p> : null}
       <div
         ref={workspaceFraming.stageRef}
         className="review-layout"
@@ -1859,8 +1894,16 @@ export function ReviewShell(props: ReviewShellProps) {
                 })}
               />
             ) : <div id="review-annotation-list" aria-label="All annotations">
+            {props.state.workflow.mode === 'generated-output' ? <ReconciliationWorkspace
+              state={props.state}
+              selectionUpdate={props.selectionUpdate}
+              {...(props.caretAnchor === undefined ? {} : { caretAnchor: props.caretAnchor })}
+              refreshStatus={props.generationRefreshStatus ?? 'idle'}
+              onCommand={(command) => props.onCommand(command)}
+              onExport={props.onExportReviewedCopy ?? (() => Promise.reject(new Error('Reviewed export is unavailable.')))}
+            /> : null}
             <AnnotationList
-              items={props.state.items}
+              items={visibleOwnedItems}
               {...(!showAnnotationOutlineLabels || props.annotationOutlineLabels === undefined
                 ? {}
                 : { sectionLabels: props.annotationOutlineLabels.owned })}

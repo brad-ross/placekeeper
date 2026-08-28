@@ -74,6 +74,7 @@ export interface ReviewChromeProps {
   readonly onNavigateBack?: () => void;
   readonly onNavigateForward?: () => void;
   readonly onSaveOptions?: () => void;
+  readonly saveOptionsAvailable?: boolean;
 }
 
 export function ReviewChrome({
@@ -97,6 +98,7 @@ export function ReviewChrome({
   onNavigateBack = () => undefined,
   onNavigateForward = () => undefined,
   onSaveOptions = () => undefined,
+  saveOptionsAvailable = true,
 }: ReviewChromeProps) {
   const [editingPage, setEditingPage] = useState(false);
   const [pageDraft, setPageDraft] = useState('');
@@ -257,7 +259,7 @@ export function ReviewChrome({
   return (
     <header className="review-chrome" data-review-chrome>
       <div className="review-chrome__identity">
-        <button
+        {saveOptionsAvailable ? <button
           type="button"
           className="review-chrome__save-identity"
           aria-label={saveControlLabel}
@@ -271,7 +273,14 @@ export function ReviewChrome({
           <span className="sr-only" data-review-saved-status>
             {saveStatusDisplay}
           </span>
-        </button>
+        </button> : <div
+          className="review-chrome__save-identity"
+          aria-label={`${documentTitle}, ${saveStatusText}`}
+        >
+          <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />
+          <strong>{documentTitle}</strong>
+          <span className="sr-only" data-review-saved-status>{saveStatusDisplay}</span>
+        </div>}
         {copyLink === undefined ? null : (
           <div className="review-chrome__link" data-review-copy-link>
             <CopyLinkControl {...copyLink} />

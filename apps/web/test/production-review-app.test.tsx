@@ -3,6 +3,7 @@ import { PdfZoomMode } from "@embedpdf/models";
 import { describe, expect, it, vi } from "vitest";
 
 import { createReviewState } from "../../../packages/core/src/review-model.js";
+import { createReviewStateSummary } from "../../../packages/core/src/live-context.js";
 import {
   initiallyPortableItemIds,
   ProductionReviewApp,
@@ -14,8 +15,251 @@ import {
   canDeriveAnnotationOutlineLabels,
   deriveAnnotationOutlineLabels,
 } from "../src/review/annotation-outline-context.js";
+import {
+  buildReattachmentCommand,
+  cancelledReattachmentPresentation,
+  reconciliationCommandPresentation,
+  reattachmentCandidateFor,
+  reattachmentGenerationIsCurrent,
+  reconciliationExportPresentation,
+  ReconciliationWorkspace,
+} from "../src/review/ReconciliationWorkspace.js";
 
 describe("one production review tree", () => {
+  it("renders canonical unresolved work, frozen drafts, freshness, and export gates", () => {
+    const base = createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000071",
+      source: { fileId: "00000000-0000-4000-8000-000000000072", digest: "d".repeat(64), byteLength: 10 },
+      workflowMode: "generated-output",
+      documentGeneration: 4,
+    });
+    const anchor = {
+      kind: "selection" as const,
+      pageIndex: 0,
+      quote: "old sentence",
+      prefix: "before ",
+      suffix: " after",
+      rect: { x: 1, y: 2, width: 30, height: 8 },
+      segmentRects: [{ x: 1, y: 2, width: 30, height: 8 }],
+    };
+    const state = {
+      ...base,
+      workflow: { ...base.workflow, freshness: "possibly-stale" as const },
+      items: [{
+        id: "00000000-0000-4000-8000-000000000073",
+        kind: "replace" as const,
+        pageIndex: 0,
+        createdAt: "2026-08-27T00:00:00.000Z",
+        updatedAt: "2026-08-27T00:00:00.000Z",
+        payload: { ...anchor, reliable: true, proposedText: "new sentence" },
+        reconciliation: {
+          schemaVersion: 1 as const,
+          ownerViewId: "view-1",
+          baseGeneration: 3,
+          revision: 2,
+          anchor,
+          disposition: { kind: "ambiguous" as const, reason: "two matching passages" },
+          previousAnchors: [],
+        },
+      }],
+      pendingDrafts: [{
+        id: "00000000-0000-4000-8000-000000000074",
+        ownerViewId: "view-1",
+        baseGeneration: 3,
+        revision: 1,
+        kind: "replace" as const,
+        pageIndex: 0,
+        text: "unfinished wording",
+        anchor,
+        disposition: { kind: "missing" as const, reason: "draft-frozen-on-predecessor-generation" },
+        status: "frozen" as const,
+        createdAt: "2026-08-27T00:00:00.000Z",
+        updatedAt: "2026-08-27T00:00:00.000Z",
+      }],
+    };
+
+    const html = renderToStaticMarkup(<ReconciliationWorkspace
+      state={state}
+      selectionUpdate={{ kind: "cleared", generation: 1 }}
+      caretAnchor={null}
+      refreshStatus="idle"
+      onCommand={vi.fn()}
+      onExport={vi.fn()}
+    />);
+
+    expect(html).toContain('data-reconciliation-workspace');
+    expect(html).toContain("old sentence");
+    expect(html).toContain("two matching passages");
+    expect(html).toContain("unfinished wording");
+    expect(html).toContain("Frozen draft");
+    expect(html).toContain("possibly stale");
+    expect(html).toContain("Resolve 1 Review Item and 1 pending draft before export");
+  });
+
+  it("builds revision-fenced reattachment commands without changing semantic identity", () => {
+    const anchor = {
+      kind: "selection" as const,
+      pageIndex: 2,
+      quote: "replacement target",
+      prefix: "left",
+      suffix: "right",
+      rect: { x: 2, y: 3, width: 40, height: 9 },
+      segmentRects: [{ x: 2, y: 3, width: 40, height: 9 }],
+    };
+    expect(buildReattachmentCommand({
+      target: { kind: "item", id: "item-1", revision: 5, ownerViewId: "view-1" },
+      stateRevision: 9,
+      documentGeneration: 7,
+      anchor,
+      updatedAt: "2026-08-27T01:00:00.000Z",
+    })).toMatchObject({
+      type: "reattach",
+      expectedRevision: 9,
+      id: "item-1",
+      expectedReconciliationRevision: 5,
+      ownerViewId: "view-1",
+      anchor,
+    });
+
+    const draft = {
+      id: "draft-1",
+      ownerViewId: "view-1",
+      baseGeneration: 6,
+      revision: 3,
+      kind: "replace" as const,
+      pageIndex: 0,
+      text: "do not lose this text",
+      anchor,
+      disposition: { kind: "missing" as const, reason: "predecessor" },
+      status: "frozen" as const,
+      createdAt: "2026-08-27T00:00:00.000Z",
+      updatedAt: "2026-08-27T00:00:00.000Z",
+    };
+    expect(buildReattachmentCommand({
+      target: { kind: "draft", draft },
+      stateRevision: 9,
+      documentGeneration: 7,
+      anchor,
+      updatedAt: "2026-08-27T01:00:00.000Z",
+    })).toMatchObject({
+      type: "put-draft",
+      expectedRevision: 9,
+      expectedDraftRevision: 3,
+      draft: {
+        id: "draft-1",
+        text: "do not lose this text",
+        baseGeneration: 7,
+        status: "protected",
+        disposition: { kind: "resolved", generation: 7 },
+      },
+    });
+    expect(reattachmentGenerationIsCurrent(7, 8)).toBe(false);
+  });
+
+  it("keeps invalid or ambiguous replacement evidence unconfirmable", () => {
+    expect(reattachmentCandidateFor("selection", {
+      kind: "unreliable",
+      generation: 4,
+      userMessage: "The selection matches more than one passage.",
+      diagnostic: "selection-quote-not-unique",
+    }, null)).toEqual({
+      anchor: null,
+      message: "The selection matches more than one passage.",
+    });
+    expect(reattachmentCandidateFor("caret", { kind: "cleared", generation: 4 }, null).anchor).toBeNull();
+    expect(cancelledReattachmentPresentation()).toEqual({
+      unresolved: true,
+      message: "Reattachment cancelled. The item remains unresolved.",
+    });
+    expect(reconciliationCommandPresentation({
+      accepted: false,
+      message: "Another review window changed this draft.",
+    }, "Reattachment saved.")).toEqual({
+      accepted: false,
+      message: "Another review window changed this draft.",
+    });
+    expect(reconciliationCommandPresentation({}, "Reattachment saved.")).toEqual({
+      accepted: true,
+      message: "Reattachment saved.",
+    });
+  });
+
+  it("explains reconciling, unresolved, stale-confirmation, and eligible export states", () => {
+    const summary = (unresolvedItems: number, pendingDrafts: number, freshness: "current" | "possibly-stale") => ({
+      ...createReviewStateSummary({
+        ...createReviewState({
+          sessionId: "00000000-0000-4000-8000-000000000099",
+          source: { fileId: "00000000-0000-4000-8000-000000000098", digest: "f".repeat(64), byteLength: 1 },
+          workflowMode: "generated-output",
+          documentGeneration: 1,
+        }),
+        workflow: {
+          ...createReviewState({
+            sessionId: "00000000-0000-4000-8000-000000000099",
+            source: { fileId: "00000000-0000-4000-8000-000000000098", digest: "f".repeat(64), byteLength: 1 },
+            workflowMode: "generated-output",
+            documentGeneration: 1,
+          }).workflow,
+          freshness,
+        },
+      }),
+      reconciliation: {
+        complete: unresolvedItems === 0 && pendingDrafts === 0,
+        dispositionDigest: "0".repeat(64),
+        unresolvedItemIds: Array.from({ length: unresolvedItems }, (_, index) => `item-${index}`),
+        pendingDraftIds: Array.from({ length: pendingDrafts }, (_, index) => `draft-${index}`),
+      },
+      export: unresolvedItems > 0 || pendingDrafts > 0
+        ? { eligible: false as const, requiresStaleConfirmation: false as const, reasons: [unresolvedItems > 0 ? "unresolved-items" as const : "pending-drafts" as const] }
+        : freshness === "possibly-stale"
+          ? { eligible: false as const, requiresStaleConfirmation: true as const, reasons: ["possibly-stale" as const] }
+          : { eligible: true as const, requiresStaleConfirmation: false as const },
+    });
+    expect(reconciliationExportPresentation({
+      refreshStatus: "reconciling",
+      summary: summary(0, 0, "current"),
+    }).message).toContain("reconciliation finishes");
+    expect(reconciliationExportPresentation({
+      refreshStatus: "idle",
+      summary: summary(2, 0, "current"),
+    }).message).toContain("Resolve 2 Review Items");
+    expect(reconciliationExportPresentation({
+      refreshStatus: "idle",
+      summary: summary(0, 0, "possibly-stale"),
+    })).toMatchObject({ canExport: true, requiresStaleConfirmation: true });
+    expect(reconciliationExportPresentation({
+      refreshStatus: "idle",
+      summary: summary(0, 0, "current"),
+    })).toMatchObject({ canExport: true, requiresStaleConfirmation: false });
+  });
+
+  it("integrates generated-output reconciliation and export without automatic-save controls", () => {
+    const state = createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000081",
+      source: { fileId: "00000000-0000-4000-8000-000000000082", digest: "e".repeat(64), byteLength: 20 },
+      workflowMode: "generated-output",
+      documentGeneration: 8,
+    });
+    const html = renderToStaticMarkup(<ProductionReviewApp
+      session={{ sessionId: state.sessionId }}
+      initialState={state}
+      scope={{ documentTitle: "paper.pdf", launchSurface: "vscode" }}
+      api={{
+        command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+        chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
+        exportReviewedCopy: vi.fn(), scope: vi.fn(),
+      }}
+      viewer={<div>Generation 8 viewer</div>}
+    />);
+
+    expect(html).toContain("Generation 8 viewer");
+    expect(html).toContain('data-reconciliation-workspace');
+    expect(html).toContain('data-export-eligibility="eligible"');
+    expect(html).toContain("Protected review state");
+    expect(html).not.toContain("Open automatic save options");
+    expect(html).not.toContain('aria-haspopup="dialog"');
+  });
+
   it("exposes Reference return state only for the current tab and document generation", () => {
     const presentation = {
       tabIdentity: "reference-a",

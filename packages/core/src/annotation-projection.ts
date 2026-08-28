@@ -57,8 +57,20 @@ export function projectReviewItem(
 
 export function projectReviewItems(
   items: readonly ReviewItem[],
+  documentGeneration?: number,
 ): ReviewAnnotation[] {
-  return documentOrderedItems(items).map((item) => projectReviewItem(item));
+  return documentOrderedItems(items)
+    .filter((item) => documentGeneration === undefined || reviewItemIsResolvedForGeneration(item, documentGeneration))
+    .map((item) => projectReviewItem(item));
+}
+
+export function reviewItemIsResolvedForGeneration(
+  item: ReviewItem,
+  documentGeneration: number,
+): boolean {
+  if (item.reconciliation === undefined) return true;
+  const disposition = item.reconciliation.disposition;
+  return disposition.kind === "resolved" && disposition.generation === documentGeneration;
 }
 
 export function documentOrderedItems(

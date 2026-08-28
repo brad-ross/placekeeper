@@ -10,10 +10,9 @@ export function gateReviewCommand(
   status: ProductionSaveStatus,
   command: ReviewCommand,
 ): SaveGatedCommand {
-  void state;
-  return status.destination.phase === "none"
-    ? { kind: "choose-destination", pending: command }
-    : { kind: "submit", command };
+  return state.workflow.mode === "generated-output" || status.destination.phase !== "none"
+    ? { kind: "submit", command }
+    : { kind: "choose-destination", pending: command };
 }
 
 function delay(ms: number, signal: AbortSignal): Promise<void> {

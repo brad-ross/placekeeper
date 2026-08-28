@@ -104,6 +104,7 @@ import {
   type AuthoringAnchorSnapshot,
 } from '../review/authoring-session.js';
 import type { ViewerAssetUrls, ViewerResourcePolicy } from '../pdf/embedpdf-viewer.js';
+import type { GenerationRefreshStatus, LocationRestoreStatus } from '../generation-status.js';
 
 export interface ProductionSession {
   readonly sessionId: string;
@@ -174,6 +175,7 @@ export interface ProductionReviewAppProps {
   readonly viewerAssets?: ViewerAssetUrls;
   readonly resourcePolicy?: ViewerResourcePolicy;
   readonly viewer?: ReactNode;
+  readonly generationRefreshStatus?: GenerationRefreshStatus;
 }
 
 export function referenceReturnForActiveTab(
@@ -306,7 +308,16 @@ function updateCodexContext(
 }
 
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
-  const [state, setState] = useState(props.initialState);
+  const [localState, setState] = useState(props.initialState);
+  // A runtime successor arrives as one state/assets render. Prefer that canonical
+  // generation immediately so the viewer URL and semantic authority never split.
+  const state = props.initialState.workflow.documentGeneration > localState.workflow.documentGeneration
+    || (
+      props.initialState.workflow.documentGeneration === localState.workflow.documentGeneration
+      && props.initialState.revision > localState.revision
+    )
+    ? props.initialState
+    : localState;
   // A restart successor begins as an ordinary browser view, then its next
   // task prompt promotes this same authenticated page to the Codex surface.
   const [scope, setScope] = useState(props.scope);
@@ -349,6 +360,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const selectionUpdateRef = useRef(selectionUpdate);
   selectionUpdateRef.current = selectionUpdate;
   const [commandError, setCommandError] = useState<string | null>(null);
+  const [locationRestoreStatus, setLocationRestoreStatus] = useState<LocationRestoreStatus>('idle');
   const [codexContext, setCodexContext] = useState(scope.codexContext);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -408,8 +420,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     readonly resolve: (navigation: PdfViewerNavigation | null) => void;
     timeout: ReturnType<typeof setTimeout> | null;
   }>>([]);
-  const documentGenerationRef = useRef(0);
-  const navigationStateRef = useRef(createReferenceNavigationState(0));
+  const documentGenerationRef = useRef(props.initialState.workflow.documentGeneration);
+  const navigationStateRef = useRef(createReferenceNavigationState(documentGenerationRef.current));
   const [navigationState, setNavigationState] = useState(navigationStateRef.current);
   const [referenceLayoutState, dispatchReferenceLayout] = useReducer(
     reduceReferenceWorkspaceLayout,
@@ -427,7 +439,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [navigationAnnouncement, setNavigationAnnouncement] = useState('');
   const outlineDiscoveryRef = useRef<PdfOutlineDiscovery>({
     status: 'loading',
-    documentGeneration: 0,
+    documentGeneration: documentGenerationRef.current,
   });
   const [outlineDiscovery, setOutlineDiscovery] = useState<PdfOutlineDiscovery>(
     outlineDiscoveryRef.current,
@@ -464,7 +476,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     pdfiumWasm: props.session.appLinkBase === undefined
       ? `/s/${props.session.sessionId}/assets/pdfium.wasm`
       : '/assets/pdfium.wasm',
-    documentUrl: `/s/${props.session.sessionId}/document/${state.source.fileId}`,
+    documentUrl: `/s/${props.session.sessionId}/document/${state.source.fileId}?generation=${state.workflow.documentGeneration}`,
     ...(props.session.credential === undefined
       ? {}
       : { requestHeaders: { authorization: `Bearer ${props.session.credential}` } }),
@@ -474,11 +486,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     props.session.credential,
     props.session.sessionId,
     state.source.fileId,
+    state.workflow.documentGeneration,
   ]);
   useEffect(() => props.api.presence?.(), [props.api]);
   const ownedAnnotations = useMemo(
-    () => projectReviewItems(state.items),
-    [state.items],
+    () => projectReviewItems(state.items, state.workflow.documentGeneration),
+    [state.items, state.workflow.documentGeneration],
   );
   useEffect(() => {
     if (scope.launchSurface !== 'codex' && scope.reconnectPending !== true) return;
@@ -827,20 +840,25 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   ]);
   const sourceIdentity = `${state.source.fileId}:${state.source.digest}`;
   const sourceIdentityRef = useRef(sourceIdentity);
+  const pendingPresentationLocationRef = useRef<ReturnType<PdfViewerNavigation['captureLocation']>>(null);
+  if (sourceIdentity !== sourceIdentityRef.current && pendingPresentationLocationRef.current === null) {
+    pendingPresentationLocationRef.current = mainNavigationRef.current?.captureLocation() ?? null;
+  }
   const restoredLocationGenerationRef = useRef<number | null>(null);
   const restoringLocationGenerationRef = useRef<number | null>(null);
-  const initialSourceIdentityRef = useRef(
-    `${props.initialState.source.fileId}:${props.initialState.source.digest}`,
+  const initialStateKeyRef = useRef(
+    `${props.initialState.workflow.documentGeneration}:${props.initialState.revision}:${props.initialState.source.fileId}:${props.initialState.source.digest}`,
   );
   useEffect(() => {
-    const next = `${props.initialState.source.fileId}:${props.initialState.source.digest}`;
-    if (next === initialSourceIdentityRef.current) return;
-    initialSourceIdentityRef.current = next;
+    const next = `${props.initialState.workflow.documentGeneration}:${props.initialState.revision}:${props.initialState.source.fileId}:${props.initialState.source.digest}`;
+    if (next === initialStateKeyRef.current) return;
+    initialStateKeyRef.current = next;
     portableItemIdsRef.current = initiallyPortableItemIds(
       props.initialState,
       props.initialSaveStatus,
     );
     setState(props.initialState);
+    if (props.initialSaveStatus !== undefined) setSaveStatus(props.initialSaveStatus);
   }, [props.initialState]);
   useEffect(() => {
     if (sourceIdentity === sourceIdentityRef.current) return;
@@ -849,8 +867,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     portableItemIdsRef.current = new Set();
     restoredLocationGenerationRef.current = null;
     restoringLocationGenerationRef.current = null;
-    const nextGeneration = documentGenerationRef.current + 1;
+    const nextGeneration = state.workflow.documentGeneration;
+    if (nextGeneration <= documentGenerationRef.current) return;
     documentGenerationRef.current = nextGeneration;
+    setLocationRestoreStatus('restoring');
     for (const waiter of referenceNavigationWaiters.current.splice(0)) {
       if (waiter.timeout !== null) clearTimeout(waiter.timeout);
       waiter.resolve(null);
@@ -861,7 +881,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setExistingAnnotationsSourceIdentity(sourceIdentity);
     setMainNavigationReadyGeneration(null);
     setMainDocumentReadyGeneration(null);
-    navigationCoordinator.replaceDocument(nextGeneration);
+    navigationCoordinator.replaceDocument(nextGeneration, { preservePresentation: true });
     searchControllerRef.current?.dispose();
     searchControllerRef.current = null;
     searchDocumentRef.current = null;
@@ -871,9 +891,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     submittedSearchQueryRef.current = '';
     searchRequestedRef.current = false;
     setSearchState(initialPdfSearchState());
-    dispatchLayout({ type: 'replace-document' });
-    setRightWorkspaceMode('outline');
-  }, [mainLocationRefresh, navigationCoordinator, sourceIdentity]);
+    setSelectionUpdate((current) => ({ kind: 'cleared', generation: current.generation + 1 }));
+    setCaret(null);
+    setSelectionPlacement(null);
+    setCaretPlacement(null);
+    setActiveItemId(undefined);
+    setCorrespondingItemId(undefined);
+  }, [mainLocationRefresh, navigationCoordinator, sourceIdentity, state.workflow.documentGeneration]);
   useEffect(() => {
     const pending = destinationDialog?.pending;
     if (
@@ -900,8 +924,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [navigationCoordinator, referenceLayoutState]);
   useEffect(() => {
     if (
-      locationHistory === undefined
-      || mainNavigationReadyGeneration !== documentGenerationRef.current
+      mainNavigationReadyGeneration !== documentGenerationRef.current
       || mainDocumentReadyGeneration !== documentGenerationRef.current
       || restoredLocationGenerationRef.current === documentGenerationRef.current
       || restoringLocationGenerationRef.current === documentGenerationRef.current
@@ -918,12 +941,22 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         if (restoringLocationGenerationRef.current === generation) {
           restoringLocationGenerationRef.current = null;
         }
+        if (!cancelled && generation === documentGenerationRef.current) {
+          setLocationRestoreStatus('fallback');
+        }
         return;
       }
       navigationCoordinator.startLocationHistory();
-      await navigationCoordinator.restoreCurrentLocation();
+      const presentation = pendingPresentationLocationRef.current;
+      const restored = locationHistory === undefined
+        ? presentation === null
+          ? true
+          : await navigationCoordinator.restorePresentationLocation(presentation, generation)
+        : await navigationCoordinator.restoreCurrentLocation();
       if (!cancelled && generation === documentGenerationRef.current) {
         restoredLocationGenerationRef.current = generation;
+        pendingPresentationLocationRef.current = null;
+        setLocationRestoreStatus(restored ? 'idle' : 'fallback');
       }
       if (restoringLocationGenerationRef.current === generation) {
         restoringLocationGenerationRef.current = null;
@@ -1273,10 +1306,17 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       <ReviewShell
         state={state}
         documentTitle={scope.documentTitle}
-        savedLabel="Saved"
-        savePhase={saveStatus.sync.phase}
-        saveOptionsOpen={destinationDialog !== null}
-        onSaveOptions={() => openCopyDialog("menu")}
+        savedLabel={state.workflow.mode === 'generated-output' ? 'Protected review state' : 'Saved'}
+        savePhase={state.workflow.mode === 'generated-output' ? 'clean' : saveStatus.sync.phase}
+        saveOptionsOpen={state.workflow.mode === 'generated-output' ? false : destinationDialog !== null}
+        {...(state.workflow.mode === 'generated-output' ? {} : { onSaveOptions: () => openCopyDialog("menu") })}
+        generationRefreshStatus={props.generationRefreshStatus ?? 'idle'}
+        locationRestoreStatus={locationRestoreStatus}
+        onExportReviewedCopy={(confirmPossiblyStale) => {
+          const method = props.api.exportReviewedCopy;
+          if (method === undefined) return Promise.reject(new Error('Reviewed export is unavailable.'));
+          return method(confirmPossiblyStale);
+        }}
         {...(viewerControlsRef.current === undefined ? {} : { viewerControls: viewerControlsRef.current })}
         {...(viewerFraming === undefined ? {} : { viewerFraming })}
         {...(mainNavigation === null ? {} : { viewerNavigation: mainNavigation })}

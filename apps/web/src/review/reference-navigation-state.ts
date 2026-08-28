@@ -170,7 +170,11 @@ export type ReferenceNavigationAction =
       readonly token: number;
       readonly documentGeneration: number;
     } & (CompletionFailure | SendCompletionSuccess))
-  | { readonly type: 'replace-document'; readonly documentGeneration: number };
+  | {
+      readonly type: 'replace-document';
+      readonly documentGeneration: number;
+      readonly preserveWorkspace?: boolean;
+    };
 
 const EMPTY_MODE_MEMORY: WorkspaceModeMemory = Object.freeze({
   logicalScrollToken: null,
@@ -532,6 +536,9 @@ export function reduceReferenceNavigation(
       };
     }
     case 'replace-document':
-      return createReferenceNavigationState(action.documentGeneration);
+      return {
+        ...createReferenceNavigationState(action.documentGeneration),
+        ...(action.preserveWorkspace ? { workspace: state.workspace } : {}),
+      };
   }
 }

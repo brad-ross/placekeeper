@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { useEffect, useState } from "react";
 
 import {
   decodePlacekeeperLink,
@@ -18,7 +19,8 @@ import {
 import { ReviewIcon, type ReviewIconName } from "./review/ReviewIcon.js";
 import { createBrowserHostRuntime } from "./host/browser-runtime.js";
 import { createRpcHostRuntime, createVscodeMessagePort } from "./host/vscode-runtime.js";
-import type { HostRuntime } from "./host/runtime.js";
+import type { HostRuntime, HostRuntimeBootstrap } from "./host/runtime.js";
+import { subscribeRuntimeDocumentSource } from "./host/runtime-document-source.js";
 
 export async function resume(viewId: string, pathname: string): Promise<void> {
   await start(await resumeProductionSession(viewId, pathname));
@@ -350,16 +352,32 @@ export async function startRuntime(runtime: HostRuntime): Promise<void> {
   root.dataset.productionRoot = "true";
   const loaded = await runtime.bootstrap();
   createRoot(root).render(
-    <ProductionReviewApp
-      session={loaded.session}
-      initialState={loaded.state}
-      initialSaveStatus={loaded.saveStatus}
-      scope={loaded.scope}
-      api={runtime}
-      viewerAssets={loaded.viewerAssets}
-      resourcePolicy={loaded.resourcePolicy}
-    />,
+    <RuntimeProductionReviewApp runtime={runtime} initial={loaded} />,
   );
+}
+
+function RuntimeProductionReviewApp(props: {
+  readonly runtime: HostRuntime;
+  readonly initial: HostRuntimeBootstrap;
+}) {
+  const [loaded, setLoaded] = useState(props.initial);
+  const [refreshStatus, setRefreshStatus] = useState<"idle" | "reconciling" | "failed">("idle");
+
+  useEffect(() => subscribeRuntimeDocumentSource(props.runtime, props.initial, (snapshot) => {
+    setLoaded(snapshot.loaded);
+    setRefreshStatus(snapshot.refreshStatus);
+  }), [props.initial, props.runtime]);
+
+  return <ProductionReviewApp
+    session={loaded.session}
+    initialState={loaded.state}
+    initialSaveStatus={loaded.saveStatus}
+    scope={loaded.scope}
+    api={props.runtime}
+    viewerAssets={loaded.viewerAssets}
+    resourcePolicy={loaded.resourcePolicy}
+    generationRefreshStatus={refreshStatus}
+  />;
 }
 
 export async function startVscode(options: {

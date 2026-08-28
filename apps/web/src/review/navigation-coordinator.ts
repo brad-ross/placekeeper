@@ -1217,7 +1217,24 @@ export class NavigationCoordinator {
     }));
   }
 
-  replaceDocument(documentGeneration: number): void {
+  /** Restores view-local page/zoom state without publishing navigation history. */
+  async restorePresentationLocation(
+    location: PdfViewerLocation,
+    documentGeneration = this.documentGeneration,
+  ): Promise<boolean> {
+    const operation = this.begin(documentGeneration);
+    const main = this.dependencies.getMainNavigation();
+    if (operation === null || main === null) return false;
+    const applied = await main.applyLocation(location);
+    if (!this.isCurrent(operation) || !applied) return false;
+    this.refreshCurrentOutline(main.captureLocation() ?? location);
+    return true;
+  }
+
+  replaceDocument(
+    documentGeneration: number,
+    options: { readonly preservePresentation?: boolean } = {},
+  ): void {
     if (!Number.isSafeInteger(documentGeneration) || documentGeneration < 0) return;
     this.dependencies.resetReferenceManualScrollIntent();
     this.clearReferenceReturnState();
@@ -1234,10 +1251,14 @@ export class NavigationCoordinator {
     this.dependencies.getMainNavigation()?.replaceDocument(documentGeneration);
     this.dependencies.getReferenceNavigation()?.replaceDocument(documentGeneration);
     void this.dependencies.getReferenceController()?.replaceDocument(documentGeneration);
-    this.dependencies.dispatch({ type: 'replace-document', documentGeneration });
+    this.dependencies.dispatch({
+      type: 'replace-document',
+      documentGeneration,
+      ...(options.preservePresentation ? { preserveWorkspace: true } : {}),
+    });
     this.dependencies.setLinkActionRequest(null);
     this.dependencies.setPendingReference(null);
-    this.dependencies.layout.hideReferences();
+    if (!options.preservePresentation) this.dependencies.layout.hideReferences();
     this.dependencies.setCurrentOutlineItemId(null);
     this.dependencies.setAnnouncement('');
   }
