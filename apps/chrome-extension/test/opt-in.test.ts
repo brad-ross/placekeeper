@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  AUTO_OPEN_OPERATION_TIMEOUT_MS,
   initializeFreshInstall,
   readAutoOpenState,
   setAutoOpenEnabled,
@@ -48,6 +49,22 @@ describe("automatic-open opt-in", () => {
     });
   });
 
+  it("rejects a Chrome setting read that never settles instead of freezing the popup", async () => {
+    vi.useFakeTimers();
+    const state = ports(true, true);
+    state.readMimeEnabled = () => new Promise(() => undefined);
+
+    try {
+      const reading = expect(readAutoOpenState(state)).rejects.toThrow(
+        "Chrome PDF setting operation timed out",
+      );
+      await vi.advanceTimersByTimeAsync(AUTO_OPEN_OPERATION_TIMEOUT_MS);
+      await reading;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("enables and pauses through synchronized browser-owned state", async () => {
     const state = ports(false, false);
 
@@ -58,6 +75,22 @@ describe("automatic-open opt-in", () => {
     await setAutoOpenEnabled(state, false);
     expect(state.sentinel()).toBe(false);
     expect(state.mimeEnabled()).toBe(false);
+  });
+
+  it("rejects a Chrome setting write that never settles instead of freezing the toggle", async () => {
+    vi.useFakeTimers();
+    const state = ports(true, true);
+    state.writeMimeEnabled = () => new Promise(() => undefined);
+
+    try {
+      const writing = expect(setAutoOpenEnabled(state, false)).rejects.toThrow(
+        "Chrome PDF setting operation timed out",
+      );
+      await vi.advanceTimersByTimeAsync(AUTO_OPEN_OPERATION_TIMEOUT_MS);
+      await writing;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rolls back the sentinel if enabling the MIME handler fails", async () => {

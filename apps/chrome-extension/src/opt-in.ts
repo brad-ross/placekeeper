@@ -1,5 +1,24 @@
 export const AUTO_OPEN_SENTINEL_KEY = "automaticOpenExplicitlyEnabled";
 export const PDF_MIME_TYPE = "application/pdf";
+export const AUTO_OPEN_OPERATION_TIMEOUT_MS = 2_000;
+
+function boundedAutoOpenOperation<T>(operation: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error("Chrome PDF setting operation timed out"));
+    }, AUTO_OPEN_OPERATION_TIMEOUT_MS);
+    operation.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+}
 
 export interface AutoOpenPorts {
   readSentinel(): Promise<boolean | undefined>;
@@ -15,8 +34,8 @@ export interface AutoOpenState {
 
 export async function readAutoOpenState(ports: AutoOpenPorts): Promise<AutoOpenState> {
   const [sentinel, mimeEnabled] = await Promise.all([
-    ports.readSentinel(),
-    ports.readMimeEnabled(),
+    boundedAutoOpenOperation(ports.readSentinel()),
+    boundedAutoOpenOperation(ports.readMimeEnabled()),
   ]);
   return {
     enabled: sentinel === true && mimeEnabled,
@@ -31,16 +50,16 @@ export async function initializeFreshInstall(ports: AutoOpenPorts): Promise<void
 
 export async function setAutoOpenEnabled(ports: AutoOpenPorts, enabled: boolean): Promise<void> {
   if (!enabled) {
-    await ports.writeSentinel(false);
-    await ports.writeMimeEnabled(false);
+    await boundedAutoOpenOperation(ports.writeSentinel(false));
+    await boundedAutoOpenOperation(ports.writeMimeEnabled(false));
     return;
   }
 
-  await ports.writeSentinel(true);
+  await boundedAutoOpenOperation(ports.writeSentinel(true));
   try {
-    await ports.writeMimeEnabled(true);
+    await boundedAutoOpenOperation(ports.writeMimeEnabled(true));
   } catch (error) {
-    await ports.writeSentinel(false);
+    await boundedAutoOpenOperation(ports.writeSentinel(false));
     throw error;
   }
 }
