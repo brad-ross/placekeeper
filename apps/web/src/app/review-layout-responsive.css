@@ -136,9 +136,9 @@
   }
 
   .review-workspace__outline-toggle {
-    width: var(--review-control-touch);
-    min-width: var(--review-control-touch);
-    min-height: var(--review-control-touch);
+    width: calc(var(--review-control-touch) + 4px);
+    min-width: calc(var(--review-control-touch) + 4px);
+    height: calc(var(--review-control-touch) + 4px);
   }
 
   .annotation-item__action {

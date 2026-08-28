@@ -114,6 +114,9 @@ describe('review shell layout and accessibility contract', () => {
     expect(annotationStyles).toMatch(
       /\.review-workspace__outline-toggle\s*\{[^}]*margin-left:\s*auto;[^}]*border:\s*1px solid var\(--review-border-subtle\);[^}]*box-shadow:\s*0 1px 2px/u,
     );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__outline-toggle\s*>\s*\.review-icon\s*\{[^}]*margin:\s*auto;[^}]*transform:\s*translate\(\.5px, 1px\);/u,
+    );
   });
 
   it('renders full annotation content as a focused tray detail without source text', () => {
@@ -762,7 +765,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('shares simple annotation section headers and keeps the activity strip intrinsic', () => {
     expect(annotationStyles).toMatch(
-      /\.review-workspace__header\s*\{[^}]*height:\s*var\(--review-workspace-header-height, 44px\);[^}]*align-items:\s*center;[^}]*padding:\s*8px 6px 2px 7\.5px;/u,
+      /\.review-workspace__header\s*\{[^}]*height:\s*var\(--review-workspace-header-height, 44px\);[^}]*align-items:\s*center;[^}]*padding:\s*8px 7\.5px 2px;/u,
     );
     expect(annotationStyles).toMatch(
       /\.annotation-drawer__header h2,\s*\.existing-annotations__header h2\s*\{[^}]*font-size:\s*15px;[^}]*font-weight:\s*760;/u,

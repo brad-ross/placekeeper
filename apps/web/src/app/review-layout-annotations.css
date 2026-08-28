@@ -281,15 +281,15 @@
   height: var(--review-workspace-header-height, 44px);
   flex: none;
   align-items: center;
-  padding: 8px 6px 2px 7.5px;
+  padding: 8px 7.5px 2px;
   background: var(--review-surface-panel);
 }
 
 .review-workspace__outline-toggle {
   display: grid;
-  width: var(--review-control-compact);
-  min-width: var(--review-control-compact);
-  min-height: var(--review-control-compact);
+  width: calc(var(--review-control-compact) + 4px);
+  min-width: calc(var(--review-control-compact) + 4px);
+  height: calc(var(--review-control-compact) + 4px);
   margin-left: auto;
   padding: 0;
   flex: none;
@@ -299,6 +299,11 @@
   color: var(--review-ink-muted);
   background: color-mix(in srgb, var(--review-surface-panel) 62%, transparent);
   box-shadow: 0 1px 2px rgb(24 26 23 / 8%);
+}
+
+.review-workspace__outline-toggle > .review-icon {
+  margin: auto;
+  transform: translate(.5px, 1px);
 }
 
 .review-workspace__outline-toggle:hover:not(:disabled) {
