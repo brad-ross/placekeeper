@@ -48,6 +48,27 @@ user_home=${PLACEKEEPER_USER_HOME:-"$HOME"}
 chrome_manifest_dir="$user_home/Library/Application Support/Google/Chrome/NativeMessagingHosts"
 chrome_manifest_path="$chrome_manifest_dir/com.placekeeper.chrome.json"
 
+ensure_secure_directory() {
+  directory=$1
+  if [ -L "$directory" ]; then
+    printf 'Refusing symbolic-link Chrome registration directory: %s\n' "$directory" >&2
+    exit 1
+  fi
+  if [ ! -e "$directory" ]; then
+    /bin/mkdir -m 700 "$directory"
+  fi
+  if [ ! -d "$directory" ] || [ -L "$directory" ]; then
+    printf 'Refusing invalid Chrome registration directory: %s\n' "$directory" >&2
+    exit 1
+  fi
+  directory_owner=$(/usr/bin/stat -f '%u' "$directory")
+  directory_mode=$(/usr/bin/stat -f '%Lp' "$directory")
+  if [ "$directory_owner" -ne "$(/usr/bin/id -u)" ] || [ $((0$directory_mode & 022)) -ne 0 ]; then
+    printf 'Refusing insecure Chrome registration directory: %s\n' "$directory" >&2
+    exit 1
+  fi
+}
+
 cleanup() {
   status=$?
   trap - EXIT HUP INT TERM
@@ -121,13 +142,20 @@ fi
 app_touched=1
 /bin/mv "$transaction_dir/staged.app" "$app_path"
 
-/bin/mkdir -p "$chrome_manifest_dir"
+ensure_secure_directory "$user_home"
+chrome_parent=$user_home
+for chrome_component in "Library" "Application Support" "Google" "Chrome" "NativeMessagingHosts"; do
+  chrome_parent="$chrome_parent/$chrome_component"
+  ensure_secure_directory "$chrome_parent"
+done
+/bin/chmod 700 "$chrome_manifest_dir"
 if [ -e "$chrome_manifest_path" ]; then
   had_chrome_manifest=1
   /bin/mv "$chrome_manifest_path" "$transaction_dir/previous-chrome-manifest.json"
 fi
 chrome_manifest_touched=1
 /bin/mv "$transaction_dir/staged-chrome-manifest.json" "$chrome_manifest_path"
+/bin/chmod 600 "$chrome_manifest_path"
 
 # Keep the previous bundle inside the transaction until the newly installed
 # launcher has started and handshaken with its exact daemon build. A readiness

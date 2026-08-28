@@ -133,6 +133,15 @@ describe("Chrome distribution integration", () => {
     await rm(hostPath);
     await writeFile(hostPath, `${JSON.stringify(renderChromeNativeHostManifest(app))}\n`, { mode: 0o600 });
 
+    const googleDirectory = join(userHome, "Library/Application Support/Google");
+    await chmod(googleDirectory, 0o777);
+    await expect(inspectChromeInstallation({ appPath: app, userHome })).resolves.toMatchObject({
+      ok: false,
+      status: "native-host-mismatch",
+      action: "reinstall-placekeeper",
+    });
+    await chmod(googleDirectory, 0o755);
+
     await writeFile(join(profile, "Preferences"), JSON.stringify({ extensions: { settings: {} } }));
     await expect(inspectChromeInstallation({ appPath: app, userHome })).resolves.toMatchObject({
       ok: false,

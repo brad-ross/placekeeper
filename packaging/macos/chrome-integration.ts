@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile, readdir, realpath } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   NATIVE_HOST_NAME as EXTENSION_NATIVE_HOST_NAME,
   NATIVE_PROTOCOL_VERSION as EXTENSION_NATIVE_PROTOCOL_VERSION,
@@ -145,6 +145,34 @@ async function assertSecureEntry(path: string, kind: "directory" | "file"): Prom
   }
 }
 
+async function assertSecureRegistrationEntry(
+  path: string,
+  kind: "directory" | "file",
+): Promise<void> {
+  await assertSecureEntry(path, kind);
+  const info = await lstat(path);
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  if (uid !== undefined && info.uid !== uid) {
+    throw new Error("Chrome registration path must be owned by the current user");
+  }
+}
+
+async function assertSecureRegistrationPath(userHome: string, hostPath: string): Promise<void> {
+  const root = resolve(userHome);
+  const parent = dirname(hostPath);
+  const suffix = relative(root, parent);
+  if (suffix.startsWith("..") || isAbsolute(suffix)) {
+    throw new Error("Chrome registration path must remain below the user home");
+  }
+  let current = root;
+  await assertSecureRegistrationEntry(current, "directory");
+  for (const component of suffix.split("/").filter(Boolean)) {
+    current = join(current, component);
+    await assertSecureRegistrationEntry(current, "directory");
+  }
+  await assertSecureRegistrationEntry(hostPath, "file");
+}
+
 async function assertSecureTree(root: string): Promise<void> {
   await assertSecureEntry(root, "directory");
   const visit = async (directory: string): Promise<void> => {
@@ -253,7 +281,7 @@ export async function inspectChromeInstallation(
     `${CHROME_NATIVE_HOST_NAME}.json`,
   );
   try {
-    await assertSecureEntry(hostPath, "file");
+    await assertSecureRegistrationPath(options.userHome, hostPath);
     await validateInstalledNativeHostManifest(
       JSON.parse(await readFile(hostPath, "utf8")) as unknown,
       options.appPath,

@@ -1,4 +1,4 @@
-import { copyFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -485,6 +485,39 @@ describe("macOS distribution manifests", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it.runIf(process.platform === "darwin")(
+    "refuses writable or symbolic-link Chrome registration ancestors",
+    async () => {
+      for (const condition of ["writable", "symlink"] as const) {
+        const root = await mkdtemp(resolve(tmpdir(), `placekeeper-insecure-chrome-${condition}-`));
+        const built = resolve(root, "built/Placekeeper.app");
+        const userHome = resolve(root, "home");
+        const app = resolve(userHome, "Applications/Placekeeper.app");
+        try {
+          await mkdir(resolve(built, "Contents/MacOS"), { recursive: true });
+          await prepareChromeInstallFixture(built);
+          await writeFile(resolve(built, "Contents/MacOS/placekeeper"), "launcher", { mode: 0o755 });
+          await writeFile(resolve(built, "Contents/MacOS/droplet"), "bridge", { mode: 0o755 });
+          await mkdir(userHome, { mode: condition === "writable" ? 0o777 : 0o700 });
+          if (condition === "symlink") {
+            const outside = resolve(root, "outside-library");
+            await mkdir(outside, { mode: 0o700 });
+            await symlink(outside, resolve(userHome, "Library"));
+          } else {
+            await chmod(userHome, 0o777);
+          }
+
+          await expect(execFileAsync("/bin/sh", [resolve("packaging/macos/install-built-app.sh"), built, app], {
+            env: { ...process.env, PLACEKEEPER_USER_HOME: userHome },
+          })).rejects.toThrow();
+          await expect(readFile(app, "utf8")).rejects.toThrow();
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
+      }
+    },
+  );
 
   it("keeps the previous app available until candidate daemon readiness succeeds", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "placekeeper-readiness-test-"));
