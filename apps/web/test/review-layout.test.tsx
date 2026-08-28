@@ -787,6 +787,27 @@ describe('review shell layout and accessibility contract', () => {
     expect(annotationStyles).not.toContain('.existing-annotations__readonly');
   });
 
+  it('keeps Search result actions on the workspace tray control rhythm', () => {
+    expect(annotationStyles).toMatch(
+      /\.pdf-search \.row-action-group\s*\{[^}]*align-self:\s*center;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.pdf-search \.row-action-group__action,\s*\.pdf-search \.copy-link-control__trigger--row,\s*\.pdf-search \.row-action-group__trigger\s*\{[^}]*height:\s*var\(--review-control-compact\);[^}]*min-height:\s*var\(--review-control-compact\);/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.pdf-search \.row-action-group__trigger\s*\{[^}]*width:\s*var\(--review-control-compact\);[^}]*min-width:\s*var\(--review-control-compact\);/u,
+    );
+    const coarsePointerRules = responsiveStyles.match(
+      /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*?)\n\}/u,
+    )?.[1];
+    expect(coarsePointerRules).toMatch(
+      /\.pdf-search \.row-action-group__action,\s*\.pdf-search \.copy-link-control__trigger--row,\s*\.pdf-search \.row-action-group__trigger\s*\{[^}]*height:\s*var\(--review-control-touch\);[^}]*min-height:\s*var\(--review-control-touch\);/u,
+    );
+    expect(coarsePointerRules).toMatch(
+      /\.pdf-search \.row-action-group__trigger\s*\{[^}]*width:\s*var\(--review-control-touch\);[^}]*min-width:\s*var\(--review-control-touch\);/u,
+    );
+  });
+
   it('keeps Outline interaction rings separated across rows and branches', () => {
     expect(annotationStyles).toMatch(
       /\.outline-navigator\s*\{[^}]*--outline-tree-row-gap:\s*6px;[^}]*--outline-tree-branch-gap:\s*8px;/u,

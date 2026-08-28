@@ -1222,11 +1222,26 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   display: none;
 }
 
-.outline-navigator .row-action-group__trigger,
-.pdf-search .row-action-group__trigger {
+.outline-navigator .row-action-group__trigger {
   width: var(--review-control-touch);
   min-width: var(--review-control-touch);
   min-height: var(--review-control-touch);
+}
+
+.pdf-search .row-action-group {
+  align-self: center;
+}
+
+.pdf-search .row-action-group__action,
+.pdf-search .copy-link-control__trigger--row,
+.pdf-search .row-action-group__trigger {
+  height: var(--review-control-compact);
+  min-height: var(--review-control-compact);
+}
+
+.pdf-search .row-action-group__trigger {
+  width: var(--review-control-compact);
+  min-width: var(--review-control-compact);
 }
 
 .row-action-group__menu {

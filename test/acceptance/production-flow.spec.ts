@@ -465,6 +465,34 @@ test("searches extracted PDF text with variants, history, references, and retain
   await expect(firstResultCard).toHaveCSS("border-style", "solid");
   await expect(firstResultCard).toHaveCSS("border-radius", "11px");
   await expect(firstResultCard).toHaveCSS("padding", "4px");
+  await firstResultCard.hover();
+  const directSearchAction = firstResultCard.getByRole("button", {
+    name: "Open result on page 1 in References",
+  });
+  const [searchTabControlBounds, directSearchActionBounds] = await Promise.all([
+    page.getByRole("tab", { name: "Search", exact: true }).boundingBox(),
+    directSearchAction.boundingBox(),
+  ]);
+  if (!searchTabControlBounds || !directSearchActionBounds) {
+    throw new Error("Direct Search result and tray controls did not render measurable bounds.");
+  }
+  expect(directSearchActionBounds.width).toBeCloseTo(searchTabControlBounds.height, 2);
+  expect(directSearchActionBounds.height).toBeCloseTo(searchTabControlBounds.height, 2);
+  await firstResultCard.evaluate((element) => { element.style.width = "250px"; });
+  const compactSearchActions = firstResultCard.getByRole("button", {
+    name: "Secondary actions for Search result on page 1",
+  });
+  await expect(compactSearchActions).toBeVisible();
+  const [searchTabBounds, compactSearchActionBounds] = await Promise.all([
+    page.getByRole("tab", { name: "Search", exact: true }).boundingBox(),
+    compactSearchActions.boundingBox(),
+  ]);
+  if (!searchTabBounds || !compactSearchActionBounds) {
+    throw new Error("Search result and tray controls did not render measurable bounds.");
+  }
+  expect(compactSearchActionBounds.width).toBeCloseTo(searchTabBounds.height, 2);
+  expect(compactSearchActionBounds.height).toBeCloseTo(searchTabBounds.height, 2);
+  await firstResultCard.evaluate((element) => { element.style.removeProperty("width"); });
   const [pageNumberBox, separatorBox, snippetBox] = await Promise.all([
     firstResultExcerpt.locator(".pdf-search__result-page").boundingBox(),
     firstResultExcerpt.locator(".pdf-search__result-separator").boundingBox(),
