@@ -74,6 +74,51 @@ const ownedAnnotation: ReviewItem = {
 };
 
 describe('review shell layout and accessibility contract', () => {
+  it('floats a reversible outline expansion toggle opposite the active workspace navbar', () => {
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        workspaceOpen
+        navigationState={createReferenceNavigationState(0)}
+        outlineDiscovery={{
+          status: 'loaded-tree',
+          documentGeneration: 0,
+          items: [{
+            id: 'intro',
+            label: 'Introduction',
+            pageContext: null,
+            target: null,
+            children: [{
+              id: 'motivation',
+              label: 'Motivation',
+              pageContext: null,
+              target: null,
+              children: [],
+            }],
+          }],
+        }}
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        onCommand={async () => state}
+      >
+        <div>Document canvas</div>
+      </ReviewShell>,
+    );
+
+    expect(html.match(/data-outline-expansion-toggle/g)).toHaveLength(1);
+    expect(html).toContain('aria-label="Collapse all outline entries"');
+    expect(html).toContain('aria-pressed="false"');
+    expect(html).toContain('lucide-chevrons-down-up');
+    expect(html).toMatch(
+      /class="review-workspace__activity-strip[^"]*"[\s\S]*data-outline-expansion-toggle/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__outline-toggle\s*\{[^}]*margin-left:\s*auto;[^}]*border:\s*1px solid var\(--review-border-subtle\);[^}]*box-shadow:\s*0 1px 2px/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__outline-toggle\s*>\s*\.review-icon\s*\{[^}]*margin:\s*auto;[^}]*transform:\s*translate\(\.5px, 1px\);/u,
+    );
+  });
+
   it('renders full annotation content as a focused tray detail without source text', () => {
     const html = renderToStaticMarkup(
       <FullAnnotationReader
@@ -720,7 +765,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('shares simple annotation section headers and keeps the activity strip intrinsic', () => {
     expect(annotationStyles).toMatch(
-      /\.review-workspace__header\s*\{[^}]*height:\s*var\(--review-workspace-header-height, 44px\);[^}]*align-items:\s*center;[^}]*padding:\s*8px 6px 2px 7\.5px;/u,
+      /\.review-workspace__header\s*\{[^}]*height:\s*var\(--review-workspace-header-height, 44px\);[^}]*align-items:\s*center;[^}]*padding:\s*8px 7\.5px 2px;/u,
     );
     expect(annotationStyles).toMatch(
       /\.annotation-drawer__header h2,\s*\.existing-annotations__header h2\s*\{[^}]*font-size:\s*15px;[^}]*font-weight:\s*760;/u,

@@ -53,6 +53,12 @@ async function currentWorkspaceRail(page: Page) {
     : page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
 }
 
+function outlineDisclosure(page: Page, itemId: string) {
+  return page.locator(
+    `[data-outline-item="${itemId}"] > .outline-navigator__row > .outline-navigator__disclosure`,
+  );
+}
+
 test.describe('canonical review workflow', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/test/acceptance/review-harness/index.html');
@@ -122,6 +128,70 @@ test.describe('canonical review workflow', () => {
     );
     await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toHaveCount(0);
     await expect(references).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('restores the exact branch set through the wired outline expansion control', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.getByRole('button', { name: 'Set outline tree' }).click();
+    await page.getByRole('button', { name: 'Open right workspace' }).click();
+
+    const harness = outlineDisclosure(page, 'harness-outline');
+    const nested = outlineDisclosure(page, 'harness-outline-nested');
+    const supplemental = outlineDisclosure(page, 'supplemental-outline');
+    await expect(harness).toHaveAttribute('aria-expanded', 'true');
+    await expect(nested).toHaveAttribute('aria-expanded', 'true');
+    await expect(supplemental).toHaveAttribute('aria-expanded', 'true');
+
+    await supplemental.click();
+    await expect(supplemental).toHaveAttribute('aria-expanded', 'false');
+    await page.getByRole('button', { name: 'Collapse all outline entries' }).click();
+    await expect(page.getByRole('button', {
+      name: 'Restore previous outline expansion',
+    })).toHaveAttribute('aria-pressed', 'true');
+    await expect(harness).toHaveAttribute('aria-expanded', 'false');
+    await expect(nested).toHaveAttribute('aria-expanded', 'false');
+    await expect(supplemental).toHaveAttribute('aria-expanded', 'false');
+
+    await supplemental.click();
+    await expect(supplemental).toHaveAttribute('aria-expanded', 'true');
+    await page.getByRole('button', { name: 'Restore previous outline expansion' }).click();
+    await expect(harness).toHaveAttribute('aria-expanded', 'true');
+    await expect(nested).toHaveAttribute('aria-expanded', 'true');
+    await expect(supplemental).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByRole('button', {
+      name: 'Collapse all outline entries',
+    })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('resets a pending outline restore when the document generation changes', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.getByRole('button', { name: 'Set outline tree' }).click();
+    await page.getByRole('button', { name: 'Open right workspace' }).click();
+    await page.getByRole('button', { name: 'Collapse all outline entries' }).click();
+    await expect(page.getByRole('button', {
+      name: 'Restore previous outline expansion',
+    })).toHaveAttribute('aria-pressed', 'true');
+
+    await page.getByRole('button', { name: 'Begin outline replacement' }).click();
+    await expect(page.locator('[data-outline-state="loading"]')).toHaveText('Outline is loading…');
+    await expect(page.getByRole('button', {
+      name: 'Restore previous outline expansion',
+    })).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Load replacement outline tree' }).evaluate((button) => (
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    ));
+    await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(outlineDisclosure(page, 'replacement-outline')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    await expect(page.getByRole('button', {
+      name: 'Collapse all outline entries',
+    })).toHaveAttribute('aria-pressed', 'false');
   });
 
   test('commits all five tools once through keyboard and toolbar paths', async ({ page }) => {

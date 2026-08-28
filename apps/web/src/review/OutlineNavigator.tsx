@@ -1,5 +1,3 @@
-import { useEffect, useRef, useState } from 'react';
-
 import type {
   PdfOutlineDiscovery,
   PdfOutlineItem,
@@ -8,18 +6,13 @@ import type { PdfDestinationCopyLink } from './copy-link-model.js';
 import { RowActionGroup, type RowAction } from './RowActionGroup.js';
 import { ReviewIcon } from './ReviewIcon.js';
 
-function branchIds(items: readonly PdfOutlineItem[]): string[] {
-  return items.flatMap((item) => [
-    ...(item.children.length > 0 ? [item.id] : []),
-    ...branchIds(item.children),
-  ]);
-}
-
 export interface OutlineNavigatorProps {
   readonly discovery: PdfOutlineDiscovery;
   readonly currentItemId: string | null;
   readonly onActivate: (item: PdfOutlineItem) => void;
   readonly onOpenReference: (item: PdfOutlineItem) => void;
+  readonly expandedItemIds: ReadonlySet<string>;
+  readonly onExpandedItemIdsChange: (expandedItemIds: ReadonlySet<string>) => void;
   readonly copyLinkForItem?: (item: PdfOutlineItem) => PdfDestinationCopyLink | undefined;
   readonly onFocusTokenChange?: (token: string) => void;
 }
@@ -29,29 +22,11 @@ export function OutlineNavigator({
   currentItemId,
   onActivate,
   onOpenReference,
+  expandedItemIds,
+  onExpandedItemIdsChange,
   copyLinkForItem,
   onFocusTokenChange,
 }: OutlineNavigatorProps) {
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(
-    discovery.status === 'loaded-tree' ? branchIds(discovery.items) : [],
-  ));
-  const expansionDocument = useRef<number | null>(
-    discovery.status === 'loaded-tree' ? discovery.documentGeneration : null,
-  );
-
-  useEffect(() => {
-    if (discovery.status !== 'loaded-tree') {
-      if (expansionDocument.current !== discovery.documentGeneration) {
-        expansionDocument.current = null;
-        setExpanded(new Set());
-      }
-      return;
-    }
-    if (expansionDocument.current === discovery.documentGeneration) return;
-    expansionDocument.current = discovery.documentGeneration;
-    setExpanded(new Set(branchIds(discovery.items)));
-  }, [discovery]);
-
   if (discovery.status === 'loading') {
     return <p className="workspace-state" data-outline-state="loading">Outline is loading…</p>;
   }
@@ -63,18 +38,16 @@ export function OutlineNavigator({
   }
 
   const toggle = (id: string) => {
-    setExpanded((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    const next = new Set(expandedItemIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onExpandedItemIdsChange(next);
   };
   const renderItems = (items: readonly PdfOutlineItem[]) => (
     <ul>
       {items.map((item) => {
         const hasChildren = item.children.length > 0;
-        const isExpanded = hasChildren && expanded.has(item.id);
+        const isExpanded = hasChildren && expandedItemIds.has(item.id);
         const childrenId = `outline-children-${item.id}`;
         const destinationLabel = item.pageContext && item.label !== item.pageContext
           ? `${item.label}, ${item.pageContext}`

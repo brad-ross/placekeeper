@@ -135,6 +135,12 @@
     padding-block: 2px;
   }
 
+  .review-workspace__outline-toggle {
+    width: calc(var(--review-control-touch) + 4px);
+    min-width: calc(var(--review-control-touch) + 4px);
+    height: calc(var(--review-control-touch) + 4px);
+  }
+
   .annotation-item__action {
     opacity: 1;
   }

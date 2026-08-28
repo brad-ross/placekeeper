@@ -129,6 +129,11 @@ The document-scoped capability result that distinguishes confirmed absence of a 
 
 Only confirmed absence removes outline-dependent modes and metadata; stale results from a previously mounted document are treated as unknown until the current document resolves.
 
+### Outline Expansion Snapshot
+The document-scoped set of open outline branches captured immediately before a bulk collapse so the reader's exact disclosure context can be restored.
+
+It remains unchanged while the reader individually opens or closes branches after collapse, is consumed by restoration, and is discarded when document generation changes.
+
 ## Viewer framing
 
 ### Committed Zoom
