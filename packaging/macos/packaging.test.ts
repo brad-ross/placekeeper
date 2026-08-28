@@ -263,7 +263,7 @@ describe("macOS distribution manifests", () => {
         report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
         thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
       },
-      productionWebJavaScriptBytes: 2_406_340,
+      productionWebJavaScriptBytes: 2_407_059,
     });
 
     const root = await mkdtemp(resolve(tmpdir(), "placekeeper-catalog-baseline-"));
