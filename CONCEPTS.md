@@ -21,6 +21,11 @@ While its owning daemon and review session remain live, a Loopback Review URL ma
 
 After daemon replacement, a separate Restart Reconnect Ticket may let the freshly authenticated successor view regain the exact owning Codex task association. The URL remains descriptive: the ticket requires independent browser-side continuity and task-side prompt proofs, and durable review-state recovery remains a separate flow.
 
+### Browser Bootstrap
+The one-time browser handoff that converts a fragment-held capability into an in-memory browser credential and a capability-free Loopback Review URL.
+
+A Browser Bootstrap may begin through a narrowly admitted read-only cross-site navigation, but its capability exchange and all mutation or control authority remain same-origin and scoped. The bootstrap itself grants no Codex task authority.
+
 ### Restart Reconnect Ticket
 A short-lived, single-use correlation record that lets a freshly reopened successor review regain Codex scope only after browser continuity and the exact owning task's next prompt independently prove their halves of the relationship.
 

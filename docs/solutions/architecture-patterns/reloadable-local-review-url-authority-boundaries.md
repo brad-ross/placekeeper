@@ -1,7 +1,7 @@
 ---
 title: Authority boundaries for reloadable local-review URLs
 date: 2026-08-17
-last_updated: 2026-08-21
+last_updated: 2026-08-28
 category: architecture-patterns
 module: Reloadable review link lifecycle
 problem_type: architecture_pattern
@@ -13,6 +13,7 @@ applies_when:
   - "A replacement daemon can reuse the old origin but must not infer old credentials or task authority from reachability"
   - "Document continuity should preserve only a path and a safe page, portable-item, or normalized author destination"
   - "Copy Link actions sit beside navigation controls and must not change selection, focus correspondence, or reading position"
+  - "A browser extension MIME handler must replace its owning tab before entering the loopback bootstrap"
 related_components:
   - "task binding registry"
   - "shared daemon lifecycle"
@@ -21,6 +22,8 @@ related_components:
   - "PDF navigation targets"
   - "Copy Link controls"
   - "macOS application bundle"
+  - "Chrome MIME handler"
+  - "Fetch Metadata"
 tags:
   - "reloadable-links"
   - "live-resume"
@@ -63,6 +66,8 @@ Several other tempting designs fail the same boundary:
 - Automatically opening a filesystem path from an unauthenticated `GET` lets ordinary page loads trigger native UI and file access.
 - Encoding selection, search state, open panels, live target identity, or document generation turns a location link into durable viewer state. The typed location is intentionally limited to a coarse page, a portable item with page fallback, or normalized PDF-authored destination semantics with page fallback (`packages/core/src/placekeeper-link.ts:9-33`).
 
+The Chrome PDF handoff exposed two more forms of the same mistake. Navigating with `window.location.replace` from a MIME-handler child frame targeted the frame rather than the tab that owned the PDF, producing Chrome's blocked-page outcome. After the navigation moved to the owning tab, the extension-initiated bootstrap reached the loopback server with `Sec-Fetch-Site: cross-site`, so the otherwise-correct generic Fetch Metadata guard rejected it before routing. Live Chrome trials revealed these two boundaries sequentially after the narrower unit path was already green (session history).
+
 ## Guidance
 
 ### Separate live resume from successor reopen
@@ -88,6 +93,39 @@ Keep the authority in memory. `SessionCredentialStore` holds bootstrap and crede
 Apply loopback request protections independently of the view cookie. The server accepts only loopback peers, the exact numeric-loopback Host, no forwarding headers, and same-origin mutation requests (`packages/core/src/session-security.ts:58-117`). Numeric `127.0.0.1` is intentional: `localhost` aliases are rejected even with an otherwise valid cookie (`apps/service/test/session-security.test.ts:451-464`).
 
 The fixed production port is only a reachability contract. The packaged daemon binds `127.0.0.1:43179`, and production configuration does not accept an environment-selected port (`apps/service/src/server/http-server.ts:24-25`, `apps/service/src/server/http-server.ts:717-735`, `apps/service/src/host/service-daemon.ts:55-78`). A replacement daemon can therefore answer the same literal URL, but the old URL remains unauthorized unless that same live daemon still owns its exact view record. If no daemon is listening, refresh can fail normally until Placekeeper is started; stable origin does not imply an always-running or durable session.
+
+### Move a MIME handoff through its owning tab without widening loopback authority
+
+In the installed Chrome flow tested for this integration, the PDF MIME handler ran in a child frame rather than the top-level browsing context it represented (session history). Treat `chrome.mimeHandler.getStreamInfo()` as runtime-untrusted input at the controller boundary. Before it can grant tab-navigation authority, require non-empty stream and original URLs, a safe non-negative integer `tabId`, and the literal `embedded === false` (`apps/chrome-extension/src/handler-controller.ts:21-27`, `apps/chrome-extension/src/handler-controller.ts:36-49`). Invalid or embedded contexts must take the one-shot Chrome fallback before streaming or navigating (`apps/chrome-extension/src/handler-controller.ts:57-63`, `apps/chrome-extension/src/handler-controller.ts:85-89`).
+
+Navigate the validated owning tab through the browser API, not through frame-local location state:
+
+```ts
+// Wrong in a MIME-handler child frame.
+window.location.replace(destination);
+
+// Moves the tab that owns the intercepted PDF response.
+await chrome.tabs.update(tabId, { url: destination });
+```
+
+The entry point now awaits `chrome.tabs.update` with the validated tab ID (`apps/chrome-extension/src/handler-entry.ts:16-25`). The controller enters an explicit `replacing` state before awaiting that operation. A bypass becomes inert once replacement starts, a rejected update still reaches fallback, and a successful update becomes the only terminal navigation (`apps/chrome-extension/src/handler-controller.ts:67-75`, `apps/chrome-extension/src/handler-controller.ts:98-115`). This prevents a late bypass from asking Chrome to restore its viewer after the Placekeeper navigation has already succeeded.
+
+When Chrome classifies the extension-initiated loopback navigation as `Sec-Fetch-Site: cross-site`, the generic Fetch Metadata guard sees it as cross-site even though the destination is numeric loopback; that was the classification observed in the installed-Chrome trial (session history). Do not disable the cross-site guard globally. Match the exact `/s/<UUID>/bootstrap` route before security validation, opt in only its `GET`, and keep the shared exception limited to non-mutating `GET` or `HEAD` requests (`apps/service/src/server/http-server.ts:288-318`, `packages/core/src/session-security.ts:87-106`). The handoff deliberately places the capability in the URL fragment, and the bootstrap script reads it from `location.hash` before presenting it to `/exchange` under the normal same-origin mutation policy (`apps/service/src/sessions/session-broker.ts:464-473`, `apps/service/src/server/http-server.ts:155-160`). The regression test proves the bootstrap HTML does not contain the capability, a cross-site exchange remains `403`, and the pending bootstrap is not consumed (`apps/service/test/session-security.test.ts:327-344`).
+
+The safe sequence is therefore:
+
+```text
+MIME handler receives stream context
+  -> validate top-level owner tab
+  -> complete narrow native handoff
+  -> validate the Placekeeper bootstrap destination
+  -> await chrome.tabs.update(owner tab)
+  -> allow only the exact read-only cross-site bootstrap GET
+  -> exchange the fragment capability under same-origin mutation rules
+  -> continue on the cap-free readable route
+```
+
+Do not collapse these checks into one broad “extension is trusted” exception. The extension owns one intercepted response and one originating tab; it does not receive ambient authority over embedded PDFs, arbitrary tabs, loopback mutations, task bindings, or document state.
 
 ### Reattach Codex scope only through two independent proofs
 
@@ -120,6 +158,8 @@ Selection styling must represent navigation state, not nested-action focus. Acti
 ### Test each layer of the contract
 
 No one test level proves the whole pattern.
+
+- **Chrome handoff units and live proof:** controller tests cover fractional, `NaN`, negative, embedded, and false-like malformed context values; rejected `tabs.update`; and bypass during a deferred replacement (`apps/chrome-extension/test/handler-controller.test.ts:48-117`). A static contract test prevents the handler entry from returning to frame-local `window.location.replace` (`apps/chrome-extension/test/extension-contract.test.ts:42-46`). The HTTP boundary separately proves that only the cross-site bootstrap GET is admitted while exchange remains rejected (`apps/service/test/session-security.test.ts:327-344`). Because browser frame ownership and Fetch Metadata classification are platform behavior, finish with a real installed Chrome PDF navigation rather than treating unit success as the final acceptance gate.
 
 - **Codec and history units:** `Placekeeper link codec` proves special-character and Unicode path round trips, strict readable-route parsing, byte-compatible v1 fragments, canonical fixed-arity v2 destinations, and rejection of authority-bearing or session-like fields (`packages/core/test/placekeeper-link.test.ts`). `browser review location history` proves replace-versus-push behavior, Back/Forward restoration, reload in the middle of history, and malformed-fragment convergence (`apps/web/test/review-location-history.test.ts:64-121`).
 - **HTTP and security integration:** `resumes a live readable view repeatedly with only its scoped HttpOnly cookie` proves repeated exact resume, missing or wrong cookie denial, path and origin binding, revocation, cookie clearing, inert unknown-view recovery, and the absence of automatic fetch or redirect behavior (`apps/service/test/session-security.test.ts:449-580`). `exchanges the fragment once, scrubs it before protected assets, and scopes all bytes` proves one-time capability exchange and bearer-gated document access (`apps/service/test/session-security.test.ts:398-448`).
