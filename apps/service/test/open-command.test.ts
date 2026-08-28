@@ -580,6 +580,7 @@ describe("open command", () => {
       operation: "shutdown-if-idle",
       result: { status: "accepted" },
     });
+    await control.closed;
     await expect(lstat(socketPath)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(fetch(host.server.origin)).rejects.toThrow();
     await control.close();
