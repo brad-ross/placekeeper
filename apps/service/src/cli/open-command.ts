@@ -82,12 +82,18 @@ export function parseOpenArguments(args: readonly string[]): LaunchRequest {
   let recoveryOfferExpiresAt: string | undefined;
   let recoveryOperationId: string | undefined;
   let surface: LaunchSurface | undefined;
+  let generatedOutput = false;
   for (let index = 1; index < args.length; index += 1) {
     const argument = args[index]!;
     if (argument === "--json") continue;
     if (argument === "--fork") {
       if (fork) throw new Error("--fork may be specified once");
       fork = true;
+      continue;
+    }
+    if (argument === "--generated-output") {
+      if (generatedOutput) throw new Error("--generated-output may be specified once");
+      generatedOutput = true;
       continue;
     }
     if (argument === "--recovery") {
@@ -172,6 +178,7 @@ export function parseOpenArguments(args: readonly string[]): LaunchRequest {
       : { recoveryOffer: { id: recoveryOfferId, expiresAt: recoveryOfferExpiresAt } }),
     ...(recoveryOperationId === undefined ? {} : { recoveryOperationId }),
     ...(surface === undefined ? {} : { surface }),
+    ...(generatedOutput ? { workflowMode: "generated-output" as const } : {}),
   };
 }
 

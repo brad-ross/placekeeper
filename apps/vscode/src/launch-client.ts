@@ -54,9 +54,11 @@ export async function runLaunchClient(
     readonly offer: RecoveryLaunch["recoveryOffer"];
     readonly operationId: string;
   },
+  workflowMode?: "generated-output",
 ): Promise<SuccessfulLaunch | RecoveryLaunch | FailedLaunch> {
   const args = ["open", "--json", "--surface", "vscode", "--pdf", pdfPath];
   if (sourceRoot !== undefined) args.push("--source-root", sourceRoot);
+  if (workflowMode === "generated-output") args.push("--generated-output");
   if (recovery !== undefined) {
     args.push("--recovery", recovery.decision);
     args.push("--recovery-offer-id", recovery.offer.id);
@@ -69,6 +71,41 @@ export async function runLaunchClient(
     maxOutputBytes: 65_536,
   });
   return parseLaunchResponse(stdout.trim());
+}
+
+async function brokerMutation(
+  launch: ExchangedVscodeLaunch,
+  route: string,
+  body: unknown,
+  fetchImpl: typeof fetch,
+): Promise<unknown> {
+  const response = await fetchImpl(`${launch.origin}/s/${launch.sessionId}${route}`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${launch.credential}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`Placekeeper broker rejected ${route}`);
+  const text = await response.text();
+  if (Buffer.byteLength(text) > 65_536) throw new Error("Placekeeper broker response was oversized");
+  return text.length === 0 ? {} : JSON.parse(text) as unknown;
+}
+
+export function observeLiveDocument(
+  launch: ExchangedVscodeLaunch,
+  input: { readonly outputPath: string; readonly observationEpoch: number },
+  fetchImpl: typeof fetch = fetch,
+): Promise<unknown> {
+  return brokerMutation(launch, "/observe", input, fetchImpl);
+}
+
+export function markLiveDocumentPossiblyStale(
+  launch: ExchangedVscodeLaunch,
+  fetchImpl: typeof fetch = fetch,
+): Promise<unknown> {
+  return brokerMutation(launch, "/stale", {}, fetchImpl);
 }
 
 export interface ExchangedVscodeLaunch {

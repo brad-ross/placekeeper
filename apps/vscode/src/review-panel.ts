@@ -72,6 +72,7 @@ function escapeHtml(value: string): string {
 export interface ReviewWebviewHtmlOptions {
   readonly nonce: string;
   readonly panelId: string;
+  readonly panelKey?: string;
   readonly scriptUri: string;
   readonly styleUri: string;
   readonly cspSource: string;
@@ -98,6 +99,9 @@ export function parseSharedAssetManifest(value: unknown): SharedAssetManifest {
 export function buildReviewWebviewHtml(options: ReviewWebviewHtmlOptions): string {
   if (!/^[A-Za-z0-9_-]{8,128}$/u.test(options.nonce)) throw new Error("A safe nonce is required");
   if (!/^[A-Za-z0-9_-]{16,128}$/u.test(options.panelId)) throw new Error("A safe panel identity is required");
+  if (options.panelKey !== undefined && !/^[A-Za-z0-9_-]{8,128}$/u.test(options.panelKey)) {
+    throw new Error("A safe panel key is required");
+  }
   const extensionResource = (uri: string) => uri.startsWith("vscode-webview://") ||
     /^https:\/\/[^/\s]+\.vscode-cdn\.net(?:\/|$)/u.test(uri);
   for (const uri of [options.scriptUri, options.styleUri]) {
@@ -109,6 +113,9 @@ export function buildReviewWebviewHtml(options: ReviewWebviewHtmlOptions): strin
   const nonce = escapeHtml(options.nonce);
   const csp = escapeHtml(options.cspSource);
   const panelId = JSON.stringify(options.panelId).replaceAll("<", "\\u003c");
+  const panelKey = options.panelKey === undefined
+    ? undefined
+    : JSON.stringify(options.panelKey).replaceAll("<", "\\u003c");
   const scriptUri = JSON.stringify(options.scriptUri).replaceAll("<", "\\u003c");
   return `<!doctype html>
 <html><head><meta charset="utf-8">
@@ -118,6 +125,7 @@ export function buildReviewWebviewHtml(options: ReviewWebviewHtmlOptions): strin
 <title>Placekeeper</title></head><body><div id="root"></div>
 <script type="module" nonce="${nonce}">
 const vscode = acquireVsCodeApi();
+${panelKey === undefined ? "" : `vscode.setState({ ...(vscode.getState() ?? {}), panelKey: ${panelKey} });`}
 const app = await import(${scriptUri});
 await app.startVscode({ panelId: ${panelId}, vscode });
 </script></body></html>`;

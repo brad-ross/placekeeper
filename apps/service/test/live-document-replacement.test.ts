@@ -69,6 +69,15 @@ function selectionItem(id: string, quote: string, prefix = "", suffix = ""): Rev
 }
 
 describe("atomic live document replacement", () => {
+  it("marks a bound source save possibly stale without replacing the last successful PDF", async () => {
+    const value = await fixture();
+    await expect(value.broker.markLiveDocumentPossiblyStale(value.launch.sessionId))
+      .resolves.toMatchObject({ status: "possibly-stale", documentGeneration: 1 });
+    expect(value.broker.state(value.launch.sessionId)?.workflow.freshness).toBe("possibly-stale");
+    expect(value.broker.state(value.launch.sessionId)?.revision).toBe(0);
+    await expect(value.broker.documentBytes(value.launch.sessionId)).resolves.toEqual(value.original);
+  });
+
   it("advances the existing output-path lineage instead of reopening by digest", async () => {
     const value = await fixture();
     await writeFile(value.pdfPath, value.successor);

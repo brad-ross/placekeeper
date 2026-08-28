@@ -1776,7 +1776,6 @@ export class SessionBroker {
         }
         const state: ReviewState = {
           ...session.state,
-          revision: session.state.revision + 1,
           workflow: { ...session.state.workflow, freshness: "possibly-stale" },
         };
         const sync: DurableSaveSync = {
@@ -2038,6 +2037,43 @@ export class SessionBroker {
       }
     }
     return result;
+  }
+
+  async markLiveDocumentPossiblyStale(sessionId: string): Promise<{
+    readonly status: "possibly-stale";
+    readonly sessionId: string;
+    readonly documentGeneration: number;
+  }> {
+    const session = this.#activeById.get(sessionId);
+    if (session === undefined || session.ending) throw new Error("Review session is not active");
+    if (session.state.workflow.mode !== "generated-output") {
+      throw new Error("Freshness observation requires generated-output review mode");
+    }
+    return this.#withSessionTail(session, async () => {
+      if (session.ending) throw new Error("Review session is ending");
+      if (session.state.workflow.freshness !== "possibly-stale") {
+        const state: ReviewState = {
+          ...session.state,
+          workflow: { ...session.state.workflow, freshness: "possibly-stale" },
+        };
+        const sync: DurableSaveSync = {
+          phase: "not-saved",
+          desiredRevision: state.revision,
+          desiredDigest: reviewStateDigest(state),
+          savedRevision: session.sync.savedRevision,
+          ...(session.sync.savedDigest === undefined ? {} : { savedDigest: session.sync.savedDigest }),
+          failure: "destination-unconfigured",
+        };
+        await session.store.persist({ ...this.#draft(session), state, sync });
+        session.state = state;
+        session.sync = sync;
+      }
+      return {
+        status: "possibly-stale" as const,
+        sessionId: session.id,
+        documentGeneration: session.state.workflow.documentGeneration,
+      };
+    });
   }
 
   async #prepareSyncTexBinding(

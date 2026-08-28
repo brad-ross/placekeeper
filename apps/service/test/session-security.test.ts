@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { request as httpRequest } from "node:http";
 import { createConnection, createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -294,7 +294,7 @@ describe("opaque file and root capabilities", () => {
   });
 });
 
-async function openBroker(): Promise<{
+async function openBroker(generatedOutput = false): Promise<{
   directory: string;
   pdf: string;
   broker: SessionBroker;
@@ -308,7 +308,10 @@ async function openBroker(): Promise<{
   await writeFile(join(assets, "app.js"), "export function start() {}\n");
   await writeFile(pdf, "%PDF-1.7\nprivate document text\n%%EOF");
   const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
-  const opened = await broker.openReview({ pdfPath: pdf });
+  const opened = await broker.openReview({
+    pdfPath: pdf,
+    ...(generatedOutput ? { workflowMode: "generated-output" as const } : {}),
+  });
   if (opened.kind !== "opened") throw new Error("Expected a new review");
   const server = await startHttpServer(broker, { webAssets: { root: assets } });
   servers.push(server);
@@ -334,6 +337,41 @@ function postJson(
 }
 
 describe("loopback HTTP boundary", () => {
+  it("authenticates generated-output stale and observation mutations", async () => {
+    const { broker, launch, pdf, server } = await openBroker(true);
+    const exchanged = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability: launch.fragment.slice("#cap=".length) },
+    );
+    const { credential } = await exchanged.json() as { credential: string };
+    const staleUrl = `${server.origin}/s/${launch.sessionId}/stale`;
+    const observeUrl = `${server.origin}/s/${launch.sessionId}/observe`;
+    const forwardUrl = `${server.origin}/s/${launch.sessionId}/synctex/forward`;
+    expect((await postJson(staleUrl, {})).status).toBe(401);
+    expect((await postJson(observeUrl, { outputPath: pdf, observationEpoch: 1 })).status).toBe(401);
+    expect((await postJson(forwardUrl, {
+      operationToken: "operation_identifier_1234",
+      sourcePath: join(dirname(pdf), "paper.tex"),
+      line: 1,
+    })).status).toBe(401);
+    expect((await postJson(staleUrl, {}, { authorization: `Bearer ${credential}` })).status).toBe(200);
+    const observed = await postJson(
+      observeUrl,
+      { outputPath: pdf, observationEpoch: 1 },
+      { authorization: `Bearer ${credential}` },
+    );
+    expect(observed.status).toBe(200);
+    expect(await observed.json()).toMatchObject({ status: "same-digest", documentGeneration: 1 });
+    const forward = await postJson(forwardUrl, {
+      operationToken: "operation_identifier_1234",
+      sourcePath: join(dirname(pdf), "paper.tex"),
+      line: 1,
+    }, { authorization: `Bearer ${credential}` });
+    expect(forward.status).toBe(200);
+    expect(await forward.json()).toMatchObject({ status: "out-of-root" });
+    expect(broker.state(launch.sessionId)?.workflow.freshness).toBe("possibly-stale");
+  });
+
   it("keeps a stale readable GET outside every local-file and authority boundary", async () => {
     const directory = await temporaryDirectory();
     const assets = join(directory, "assets");

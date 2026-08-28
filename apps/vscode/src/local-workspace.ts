@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 
 export interface LaunchErrorPresentation {
   readonly kind: "input-unavailable" | "unsupported-context" | "upgrade-required";
@@ -86,4 +86,31 @@ export function localSourceRoot(
   return workspaceFolder?.scheme === "file" && pdf.scheme === "file"
     ? workspaceFolder.fsPath
     : undefined;
+}
+
+export type SourceOutputBinding =
+  | { readonly kind: "bound"; readonly uri: UriLike }
+  | { readonly kind: "choose"; readonly candidates: readonly UriLike[] }
+  | { readonly kind: "unavailable" };
+
+/** Deliberately avoids reproducing LaTeX Workshop project/recipe discovery. */
+export function resolveSourceOutputBinding(input: {
+  readonly explicitPdf?: UriLike;
+  readonly activeSource?: UriLike;
+  readonly candidates: readonly UriLike[];
+}): SourceOutputBinding {
+  if (isLocalPdf(input.explicitPdf)) return { kind: "bound", uri: input.explicitPdf };
+  const localCandidates = input.candidates.filter(isLocalPdf);
+  if (localCandidates.length === 0) return { kind: "unavailable" };
+  if (localCandidates.length === 1) return { kind: "bound", uri: localCandidates[0]! };
+  if (input.activeSource?.scheme === "file") {
+    const sourceExtension = extname(input.activeSource.fsPath);
+    const sourceStem = basename(input.activeSource.fsPath, sourceExtension).toLowerCase();
+    const besideSource = localCandidates.filter((candidate) =>
+      dirname(candidate.fsPath) === dirname(input.activeSource!.fsPath) &&
+      basename(candidate.fsPath, extname(candidate.fsPath)).toLowerCase() === sourceStem
+    );
+    if (besideSource.length === 1) return { kind: "bound", uri: besideSource[0]! };
+  }
+  return { kind: "choose", candidates: localCandidates };
 }

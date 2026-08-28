@@ -9,6 +9,7 @@ import {
   choosePdfInput,
   classifyWorkspace,
   localSourceRoot,
+  resolveSourceOutputBinding,
   resolveLauncherPath,
 } from "../src/local-workspace.js";
 import {
@@ -21,11 +22,14 @@ import {
   createPrivateSnapshotDirectory,
   exchangeVscodeLaunch,
   materializePrivatePdfSnapshot,
+  markLiveDocumentPossiblyStale,
+  observeLiveDocument,
   runLaunchClient,
 } from "../src/launch-client.js";
 import {
   WEBVIEW_RPC_PROTOCOL,
   WEBVIEW_RPC_VERSION,
+  createLoopbackRuntimeClient,
   parseWebviewRequest,
 } from "../src/webview-bridge.js";
 
@@ -58,16 +62,19 @@ describe("VS Code local host adapter", () => {
       displayName: "Placekeeper",
       publisher: "placekeeper-local",
       icon: "assets/placekeeper.png",
-      activationEvents: ["onCommand:placekeeper.open"],
+      activationEvents: expect.arrayContaining([
+        "onCommand:placekeeper.viewPdf",
+        "onWebviewPanel:placekeeper.review",
+      ]),
       contributes: {
-        commands: [{
-          command: "placekeeper.open",
-          title: "Placekeeper: Open Local PDF",
-          icon: {
-            light: "assets/placekeeper.svg",
-            dark: "assets/placekeeper.svg",
-          },
-        }],
+        commands: expect.arrayContaining([
+          expect.objectContaining({ command: "placekeeper.viewPdf", title: "Placekeeper: View PDF" }),
+          expect.objectContaining({ command: "placekeeper.forwardSyncTex" }),
+          expect.objectContaining({ command: "placekeeper.goToSource" }),
+          expect.objectContaining({ command: "placekeeper.reattach" }),
+          expect.objectContaining({ command: "placekeeper.exportReviewedPdf" }),
+          expect.objectContaining({ command: "placekeeper.configureLatexWorkshop" }),
+        ]),
         configuration: {
           title: "Placekeeper",
           properties: {
@@ -237,6 +244,26 @@ describe("VS Code local host adapter", () => {
     expect(localSourceRoot(pdf, { scheme: "vscode-vfs", fsPath: "/tmp/project" })).toBeUndefined();
   });
 
+  it("binds an explicit output, one conservative candidate, or asks the user to choose", () => {
+    const source = { scheme: "file", fsPath: "/work/paper.tex" };
+    expect(resolveSourceOutputBinding({
+      activeSource: source,
+      explicitPdf: { scheme: "file", fsPath: "/other/result.pdf" },
+      candidates: [],
+    })).toEqual({ kind: "bound", uri: { scheme: "file", fsPath: "/other/result.pdf" } });
+    expect(resolveSourceOutputBinding({
+      activeSource: source,
+      candidates: [{ scheme: "file", fsPath: "/work/paper.pdf" }],
+    })).toMatchObject({ kind: "bound" });
+    expect(resolveSourceOutputBinding({
+      activeSource: source,
+      candidates: [
+        { scheme: "file", fsPath: "/work/build-a/paper.pdf" },
+        { scheme: "file", fsPath: "/work/build-b/paper.pdf" },
+      ],
+    })).toMatchObject({ kind: "choose", candidates: expect.any(Array) });
+  });
+
   it("accepts only the exact recovery choice contract", () => {
     const recoveryOffer = {
       id: "opaque_recovery_offer_1234",
@@ -265,6 +292,71 @@ describe("VS Code local host adapter", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected a successful launch");
     expect(result.kind).toBe("opened");
+  });
+
+  it("requests generated-output mode and sends observation only to the authenticated broker", async () => {
+    const invoke = vi.fn(async (
+      _executable: string,
+      _args: readonly string[],
+      _options: { readonly shell: false; readonly timeoutMs: number; readonly maxOutputBytes: number },
+    ) => ({
+      stdout: JSON.stringify({ ok: true, kind: "opened", url: "http://127.0.0.1:49152/s/id/bootstrap?embed=vscode#cap=secret" }),
+      stderr: "",
+    }));
+    await runLaunchClient("/placekeeper", "/tmp/paper.pdf", "/tmp", invoke, undefined, "generated-output");
+    expect(invoke.mock.calls[0]![1]).toContain("--generated-output");
+
+    const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({ status: "same-digest" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    const launch = {
+      origin: "http://127.0.0.1:49152",
+      sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      credential: "c".repeat(43),
+    };
+    await observeLiveDocument(launch, { outputPath: "/tmp/paper.pdf", observationEpoch: 4 }, fetch);
+    await markLiveDocumentPossiblyStale(launch, fetch);
+    expect(fetch.mock.calls[0]![0]).toBe(`${launch.origin}/s/${launch.sessionId}/observe`);
+    expect(fetch.mock.calls[0]![1]).toMatchObject({
+      method: "POST",
+      headers: expect.objectContaining({ authorization: `Bearer ${launch.credential}` }),
+    });
+    expect(fetch.mock.calls[1]![0]).toBe(`${launch.origin}/s/${launch.sessionId}/stale`);
+  });
+
+  it("keeps absolute SyncTeX source paths in the trusted extension host", async () => {
+    const opened = vi.fn(async () => undefined);
+    const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      if (path.endsWith("/synctex/forward")) {
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          sourcePath: "/work/paper.tex", line: 12, column: 4,
+        });
+        return new Response(JSON.stringify({ status: "ok", pageIndex: 0, point: { x: 1, y: 2 } }));
+      }
+      return new Response(JSON.stringify({
+        status: "ok", sourcePath: "/work/paper.tex", line: 12, column: 4,
+      }));
+    });
+    const client = createLoopbackRuntimeClient({
+      panelId: "panel_identifier_1234",
+      launch: {
+        origin: "http://127.0.0.1:49152",
+        sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        credential: "c".repeat(43),
+      },
+      assets: { pdfiumWasm: "vscode-webview://authority/pdfium.wasm" },
+      materializeDocument: async () => "vscode-webview://authority/paper.pdf",
+      forwardSourceLocation: () => ({ sourcePath: "/work/paper.tex", line: 12, column: 4 }),
+      openSourceLocation: opened,
+      fetch,
+    });
+    await expect(client.invoke("forwardSyncTex", {}, new AbortController().signal))
+      .resolves.toMatchObject({ status: "ok", pageIndex: 0 });
+    await expect(client.invoke("reverseSyncTex", { pageIndex: 0, point: { x: 1, y: 2 } }, new AbortController().signal))
+      .resolves.not.toHaveProperty("sourcePath");
+    expect(opened).toHaveBeenCalledWith({ sourcePath: "/work/paper.tex", line: 12, column: 4 });
   });
 
   it("exchanges the one-use launch capability only in the extension host", async () => {

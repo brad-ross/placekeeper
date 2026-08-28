@@ -1,7 +1,7 @@
 {
   "name": "placekeeper-vscode",
   "displayName": "Placekeeper",
-  "description": "Open one local PDF in the installed Placekeeper service.",
+  "description": "Review generated LaTeX PDFs with Placekeeper inside VS Code.",
   "version": "0.1.0",
   "publisher": "placekeeper-local",
   "icon": "assets/placekeeper.png",
@@ -9,7 +9,17 @@
   "engines": { "vscode": ">=1.95.0" },
   "extensionKind": ["ui"],
   "main": "./dist/extension.js",
-  "activationEvents": ["onCommand:placekeeper.open"],
+  "activationEvents": [
+    "onCommand:placekeeper.open",
+    "onCommand:placekeeper.viewPdf",
+    "onCommand:placekeeper.forwardSyncTex",
+    "onCommand:placekeeper.goToSource",
+    "onCommand:placekeeper.reattach",
+    "onCommand:placekeeper.exportReviewedPdf",
+    "onCommand:placekeeper.configureLatexWorkshop",
+    "onCommand:placekeeper.restoreLatexWorkshop",
+    "onWebviewPanel:placekeeper.review"
+  ],
   "contributes": {
     "commands": [
       {
@@ -19,6 +29,35 @@
           "light": "assets/placekeeper.svg",
           "dark": "assets/placekeeper.svg"
         }
+      },
+      {
+        "command": "placekeeper.viewPdf",
+        "title": "Placekeeper: View PDF",
+        "icon": { "light": "assets/placekeeper.svg", "dark": "assets/placekeeper.svg" }
+      },
+      {
+        "command": "placekeeper.forwardSyncTex",
+        "title": "Placekeeper: Forward SyncTeX"
+      },
+      {
+        "command": "placekeeper.goToSource",
+        "title": "Placekeeper: Go to Source"
+      },
+      {
+        "command": "placekeeper.reattach",
+        "title": "Placekeeper: Reattach Review Item"
+      },
+      {
+        "command": "placekeeper.exportReviewedPdf",
+        "title": "Placekeeper: Export Reviewed PDF"
+      },
+      {
+        "command": "placekeeper.configureLatexWorkshop",
+        "title": "Placekeeper: Configure LaTeX Workshop"
+      },
+      {
+        "command": "placekeeper.restoreLatexWorkshop",
+        "title": "Placekeeper: Restore LaTeX Workshop Settings"
       }
     ],
     "menus": {
@@ -26,15 +65,28 @@
         { "command": "placekeeper.open", "when": "resourceExtname == .pdf", "group": "navigation" }
       ],
       "editor/title": [
-        { "command": "placekeeper.open", "when": "resourceExtname == .pdf", "group": "navigation" }
+        { "command": "placekeeper.viewPdf", "when": "resourceExtname == .pdf || editorLangId == latex", "group": "navigation" },
+        { "command": "placekeeper.forwardSyncTex", "when": "editorLangId == latex", "group": "navigation" }
+      ],
+      "webview/context": [
+        { "command": "placekeeper.goToSource", "when": "webviewId == 'placekeeper.review'", "group": "navigation" },
+        { "command": "placekeeper.exportReviewedPdf", "when": "webviewId == 'placekeeper.review'", "group": "navigation" }
       ]
     },
+    "keybindings": [
+      { "command": "placekeeper.forwardSyncTex", "key": "ctrl+alt+f", "mac": "cmd+alt+f", "when": "editorLangId == latex" },
+      { "command": "placekeeper.goToSource", "key": "ctrl+alt+j", "mac": "cmd+alt+j", "when": "activeWebviewPanelId == 'placekeeper.review'" }
+    ],
     "configuration": {
       "title": "Placekeeper",
       "properties": {
         "placekeeper.launcherPath": {
           "type": "string",
           "description": "Absolute path to the installed Placekeeper launcher."
+        },
+        "placekeeper.externalLauncherPath": {
+          "type": "string",
+          "description": "Absolute path to the installed scoped VS Code compatibility launcher. Placekeeper commands remain available when unset."
         }
       }
     }

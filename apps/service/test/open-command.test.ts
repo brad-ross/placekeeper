@@ -177,6 +177,7 @@ describe("open command", () => {
     expect(parseOpenArguments([
       "open", "--json", "--pdf", "/tmp/paper.pdf",
       "--source-root", "/tmp/source", "--recovery", "resume", "--surface", "vscode",
+      "--generated-output",
       "--recovery-offer-id", recoveryOffer.id,
       "--recovery-offer-expires-at", recoveryOffer.expiresAt,
       "--recovery-operation-id", "operation_identifier_1234",
@@ -187,6 +188,7 @@ describe("open command", () => {
       recoveryOffer,
       recoveryOperationId: "operation_identifier_1234",
       surface: "vscode",
+      workflowMode: "generated-output",
     });
     expect(() => parseOpenArguments(["open", "--json", "--pdf", "relative.pdf"]))
       .toThrow("absolute");

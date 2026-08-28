@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 export const WEBVIEW_RPC_PROTOCOL = "placekeeper.review-runtime" as const;
 export const WEBVIEW_RPC_VERSION = 1 as const;
 
@@ -192,6 +194,16 @@ export interface LoopbackRuntimeClientOptions {
     readonly generation: number;
   }) => Promise<string>;
   readonly fetch?: typeof fetch;
+  readonly forwardSourceLocation?: () => {
+    readonly sourcePath: string;
+    readonly line: number;
+    readonly column?: number;
+  } | undefined;
+  readonly openSourceLocation?: (location: {
+    readonly sourcePath: string;
+    readonly line: number;
+    readonly column?: number;
+  }) => Promise<void>;
 }
 
 function safeScope(value: unknown): unknown {
@@ -318,9 +330,33 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
       if (method === "detach") return {};
       const route = routes[method];
       if (route === undefined) throw new Error("Runtime method is not allowlisted");
+      let trustedPayload = payload;
+      if (method === "forwardSyncTex") {
+        const location = options.forwardSourceLocation?.();
+        if (location === undefined) throw new Error("An active local LaTeX source location is required");
+        trustedPayload = {
+          ...location,
+          operationToken: randomBytes(18).toString("base64url"),
+        };
+      } else if (method === "reverseSyncTex") {
+        trustedPayload = {
+          ...(isObject(payload) ? payload : {}),
+          operationToken: randomBytes(18).toString("base64url"),
+        };
+      }
       const value = route.method === "GET"
         ? await json(route.path, {}, signal)
-        : await post(route.path, payload, signal);
+        : await post(route.path, trustedPayload, signal);
+      if (method === "reverseSyncTex" && isObject(value) && value.status === "ok" &&
+        typeof value.sourcePath === "string" && Number.isSafeInteger(value.line)) {
+        await options.openSourceLocation?.({
+          sourcePath: value.sourcePath,
+          line: value.line as number,
+          ...(Number.isSafeInteger(value.column) ? { column: value.column as number } : {}),
+        });
+        const { sourcePath: _sourcePath, ...safe } = value;
+        return safe;
+      }
       if (method === "command" && isObject(value) && Number.isSafeInteger(value.revision)) {
         identity.revision = value.revision as number;
       }
