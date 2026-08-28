@@ -59,6 +59,7 @@ export function showTerminalRecovery(viewId: string): void {
   const fragment = terminalRecoveryLocationFragment(window.location.hash);
   const link = `${appLinkBase}#${fragment}`;
   const identity = terminalRecoveryDocumentIdentity(appLinkBase);
+  document.title = identity.filename;
   fallback.href = link;
   if (document.head.querySelector('link[data-placekeeper-terminal-style]') === null) {
     const stylesheet = document.createElement('link');

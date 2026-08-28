@@ -541,7 +541,7 @@ describe("persistent launch host", () => {
   });
 
   it("serves public top-level assets and only enables authenticated VS Code assets and framing explicitly", async () => {
-    const { pdf, host } = await fixture();
+    const { root, pdf, host } = await fixture();
     const launched = await host.open({ pdfPath: pdf });
     if (!launched.ok || launched.kind === "recovery-offered") throw new Error("Expected launch");
     const launch = new URL(launched.url);
@@ -552,8 +552,19 @@ describe("persistent launch host", () => {
     const ordinaryHtml = await ordinary.text();
     expect(ordinary.headers.get("x-frame-options")).toBe("DENY");
     expect(ordinaryHtml).toContain("type=\"module\"");
-    expect(ordinaryHtml).toContain("<title>Placekeeper</title>");
+    expect(ordinaryHtml).toContain("<title>paper.pdf</title>");
     expect(ordinaryHtml).not.toContain("URL.createObjectURL");
+
+    const hostilePdf = join(root, "<script>alert(1).pdf");
+    await copyFile(pdf, hostilePdf);
+    const hostileLaunch = await host.open({ pdfPath: hostilePdf });
+    if (!hostileLaunch.ok || hostileLaunch.kind === "recovery-offered") {
+      throw new Error("Expected hostile-filename launch");
+    }
+    const hostileUrl = new URL(hostileLaunch.url);
+    const hostileHtml = await (await fetch(`${hostileUrl.origin}${hostileUrl.pathname}`)).text();
+    expect(hostileHtml).toContain("<title>&lt;script&gt;alert(1).pdf</title>");
+    expect(hostileHtml).not.toContain("<script>alert(1)");
 
     const exchanged = await fetch(`${launch.origin}/s/${launched.sessionId}/exchange`, {
       method: "POST",
@@ -565,8 +576,15 @@ describe("persistent launch host", () => {
       body: JSON.stringify({ capability }),
     });
     const cookie = exchanged.headers.get("set-cookie")?.split(";", 1)[0];
-    const { credential } = await exchanged.json() as { credential: string };
+    const { credential, view } = await exchanged.json() as {
+      credential: string;
+      view: { readonly pathname: string };
+    };
     expect(cookie).toContain("placekeeper_view=");
+    const readable = await fetch(`${launch.origin}${view.pathname}`, {
+      headers: { cookie: cookie! },
+    });
+    expect(await readable.text()).toContain("<title>paper.pdf</title>");
     const app = await fetch(`${launch.origin}/s/${launched.sessionId}/assets/app.js`, {
       headers: { cookie: cookie! },
     });

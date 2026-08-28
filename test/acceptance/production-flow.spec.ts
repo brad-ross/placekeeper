@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { access, copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { PDFDocument } from "pdf-lib";
 
 import { PlacekeeperHost } from "../../apps/service/src/host/placekeeper-host.js";
 import { TaskBindingRegistry } from "../../apps/service/src/context/task-binding-registry.js";
@@ -19,6 +20,7 @@ let referencePdf = "";
 let annotatedReferencePdf = "";
 let searchPdf = "";
 let equationPdf = "";
+let metadataTitlePdf = "";
 
 const reportedMathSymbolInventory = [
   ['·', '\\cdot'], ['Π', '\\Pi'], ['α', '\\alpha'], ['δ', '\\delta'],
@@ -296,6 +298,7 @@ test.beforeAll(async () => {
   annotatedReferencePdf = join(root, "reference-navigation-annotated.pdf");
   searchPdf = join(root, "pdf-search.pdf");
   equationPdf = join(root, "equation-selection.pdf");
+  metadataTitlePdf = join(root, "fallback-filename.pdf");
   await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
   await copyFile(resolve("test/fixtures/pdfs/text-native.pdf"), plainTextPdf);
   await copyFile(resolve("test/fixtures/pdfs/mixed-text-image.pdf"), multiPagePdf);
@@ -307,6 +310,10 @@ test.beforeAll(async () => {
   );
   await copyFile(resolve("test/fixtures/pdfs/pdf-search.pdf"), searchPdf);
   await copyFile(resolve("test/fixtures/pdfs/equation-selection.pdf"), equationPdf);
+  const titledDocument = await PDFDocument.create();
+  titledDocument.setTitle("Identification Strategy");
+  titledDocument.addPage([612, 792]);
+  await writeFile(metadataTitlePdf, await titledDocument.save());
   await copyFile(resolve("test/fixtures/latex/paper.tex"), join(sourceRoot, "paper.tex"));
   host = await PlacekeeperHost.start({
     recoveryRoot: join(root, "recovery"),
@@ -317,6 +324,14 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await host?.close();
   if (root) await rm(root, { recursive: true, force: true });
+});
+
+test("uses PDF metadata for the tab title and the filename when metadata is absent", async ({ page }) => {
+  await openFreshProductionFixture(page, metadataTitlePdf, "Metadata-title launch failed");
+  await expect(page).toHaveTitle("Identification Strategy");
+
+  await openFreshProductionFixture(page, plainTextPdf, "Filename-title launch failed");
+  await expect(page).toHaveTitle("plain-text.pdf");
 });
 
 test("keeps mounted Codex context through refresh, then fails closed on a hung scope poll", async ({ page }) => {

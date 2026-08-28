@@ -873,7 +873,7 @@ describe("macOS distribution manifests", () => {
     ]);
 
     expect(app).toContain("<h1>Placekeeper</h1>");
-    expect(server).toContain("<title>Placekeeper</title>");
+    expect(server).toContain("<title>${htmlAttribute(pageTitle)}</title>");
     expect(launcher).toContain("Recover Placekeeper draft");
     expect(bridge).toContain('display alert "Placekeeper could not open this file"');
     expect(bridge).toContain('message "Placekeeper opens one local PDF at a time."');

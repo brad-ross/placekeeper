@@ -30,6 +30,11 @@ import type {
   PdfTargetVisibility,
   PdfViewportQuery,
 } from '../pdf/viewer-navigation.js';
+import {
+  pdfDocumentTitleForSource,
+  resolvePdfMetadataTitle,
+  type PdfMetadataPageTitle,
+} from '../pdf/pdf-document-title.js';
 import type { ReferenceDocumentController } from "../pdf/reference-document.js";
 import type { PdfOutlineDiscovery } from "../pdf/pdf-outline.js";
 import {
@@ -305,6 +310,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   // A restart successor begins as an ordinary browser view, then its next
   // task prompt promotes this same authenticated page to the Codex surface.
   const [scope, setScope] = useState(props.scope);
+  const [metadataPageTitle, setMetadataPageTitle] = useState<PdfMetadataPageTitle | null>(null);
   const portableItemIdsRef = useRef(initiallyPortableItemIds(
     props.initialState,
     props.initialSaveStatus,
@@ -827,6 +833,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const initialSourceIdentityRef = useRef(
     `${props.initialState.source.fileId}:${props.initialState.source.digest}`,
   );
+  const pageTitle = pdfDocumentTitleForSource(
+    metadataPageTitle,
+    sourceIdentity,
+    scope.documentTitle,
+  );
+  useEffect(() => {
+    document.title = pageTitle;
+  }, [pageTitle]);
   useEffect(() => {
     const next = `${props.initialState.source.fileId}:${props.initialState.source.digest}`;
     if (next === initialSourceIdentityRef.current) return;
@@ -1058,11 +1072,23 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [mainLocationRefresh]);
   const onMainDocumentReady = useCallback((engine: PdfEngine, document: PdfDocumentObject) => {
     if (searchDocumentRef.current === document && searchControllerRef.current) return;
-    setMainDocumentReadyGeneration(documentGenerationRef.current);
+    const documentGeneration = documentGenerationRef.current;
+    const documentSourceIdentity = sourceIdentity;
+    setMainDocumentReadyGeneration(documentGeneration);
     searchControllerRef.current?.dispose();
     searchDocumentRef.current = document;
+    void resolvePdfMetadataTitle(engine, document).then((title) => {
+      if (
+        documentGenerationRef.current === documentGeneration &&
+        searchDocumentRef.current === document
+      ) {
+        setMetadataPageTitle(title === undefined
+          ? null
+          : { sourceIdentity: documentSourceIdentity, title });
+      }
+    });
     const search = createPdfSearchController({
-      documentGeneration: documentGenerationRef.current,
+      documentGeneration,
       reader: createEnginePdfSearchPageReader(engine, document),
     });
     searchControllerRef.current = search;
@@ -1089,7 +1115,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       void search.search(pendingQuery);
     }
     else if (searchRequestedRef.current) void search.prepare();
-  }, []);
+  }, [sourceIdentity]);
   const onViewerFramingInitialized = useCallback((controls: ViewerFramingControls) => {
     setViewerFraming(controls);
   }, []);
