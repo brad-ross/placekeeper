@@ -6,6 +6,8 @@ import { createReviewState } from "../../../packages/core/src/review-model.js";
 import { createReviewStateSummary } from "../../../packages/core/src/live-context.js";
 import {
   initiallyPortableItemIds,
+  canonicalStateSupersedes,
+  firstUnresolvedReviewItemId,
   ProductionReviewApp,
   referenceReturnForActiveTab,
   visibleCodexContext,
@@ -26,6 +28,21 @@ import {
 } from "../src/review/ReconciliationWorkspace.js";
 
 describe("one production review tree", () => {
+  it("routes the VS Code reattach command to the first canonical unresolved item", () => {
+    const resolved = { id: "resolved", reconciliation: { disposition: { kind: "resolved" } } };
+    const ambiguous = { id: "ambiguous", reconciliation: { disposition: { kind: "ambiguous" } } };
+    const missing = { id: "missing", reconciliation: { disposition: { kind: "missing" } } };
+    expect(firstUnresolvedReviewItemId([resolved, ambiguous, missing])).toBe("ambiguous");
+    expect(firstUnresolvedReviewItemId([resolved])).toBeUndefined();
+  });
+
+  it("adopts same-generation canonical freshness without requiring a review revision", () => {
+    const current = { revision: 2, workflow: { documentGeneration: 3, freshness: "current" as const } };
+    const stale = { revision: 2, workflow: { documentGeneration: 3, freshness: "possibly-stale" as const } };
+    expect(canonicalStateSupersedes(current, stale)).toBe(true);
+    expect(canonicalStateSupersedes(stale, current)).toBe(false);
+    expect(canonicalStateSupersedes(current, current)).toBe(false);
+  });
   it("renders canonical unresolved work, frozen drafts, freshness, and export gates", () => {
     const base = createReviewState({
       sessionId: "00000000-0000-4000-8000-000000000071",

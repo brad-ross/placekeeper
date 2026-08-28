@@ -8,11 +8,16 @@ import {
   validateRequestSecurity,
 } from "../../../../packages/core/src/session-security.js";
 import type { ReviewCommand } from "../../../../packages/core/src/review-model.js";
-import { InvalidReviewCommandError } from "../../../../packages/core/src/review-reducer.js";
+import {
+  InvalidReviewCommandError,
+  ReviewConflictError,
+  ReviewDraftConflictError,
+} from "../../../../packages/core/src/review-reducer.js";
 import { isContained } from "../files/file-capabilities.js";
 import {
   isRecoveryDecision,
   RecoveryOfferUnavailableError,
+  ReviewGenerationConflictError,
   type RecoveryOfferIdentity,
   type SessionBroker,
 } from "../sessions/session-broker.js";
@@ -748,9 +753,21 @@ export async function startHttpServer(
           send(response, 405, "Method not allowed");
           return;
         }
+        const generationHeader = request.headers["x-placekeeper-generation"];
+        const expectedGeneration = typeof generationHeader === "string" && /^\d+$/u.test(generationHeader)
+          ? Number(generationHeader)
+          : undefined;
+        if (
+          generationHeader !== undefined &&
+          (expectedGeneration === undefined || !Number.isSafeInteger(expectedGeneration))
+        ) {
+          send(response, 400, "Invalid request");
+          return;
+        }
         const next = await broker.acceptMutation(
           commandMatch[1]!,
           (await readJson(request)) as ReviewCommand,
+          expectedGeneration === undefined ? {} : { expectedGeneration },
         );
         if (broker.saveStatus(commandMatch[1]!)?.destination.phase === "active") {
           void options.saving?.requestSave(commandMatch[1]!);
@@ -760,7 +777,21 @@ export async function startHttpServer(
       }
       send(response, 404, "Not found");
     } catch (error) {
-      if (error instanceof InvalidReviewCommandError) {
+      if (error instanceof ReviewGenerationConflictError) {
+        sendJson(response, 409, {
+          ok: false,
+          error: {
+            kind: "generation-conflict",
+            documentGeneration: error.currentGeneration,
+            reviewRevision: error.currentRevision,
+          },
+        });
+      } else if (error instanceof ReviewConflictError || error instanceof ReviewDraftConflictError) {
+        sendJson(response, 409, {
+          ok: false,
+          error: { kind: "review-revision-conflict" },
+        });
+      } else if (error instanceof InvalidReviewCommandError) {
         sendJson(response, 422, {
           ok: false,
           error: { kind: "invalid-review-command", message: error.message },

@@ -362,11 +362,15 @@ function RuntimeProductionReviewApp(props: {
 }) {
   const [loaded, setLoaded] = useState(props.initial);
   const [refreshStatus, setRefreshStatus] = useState<"idle" | "reconciling" | "failed">("idle");
+  const [hostReattachRequestToken, setHostReattachRequestToken] = useState(0);
 
   useEffect(() => subscribeRuntimeDocumentSource(props.runtime, props.initial, (snapshot) => {
     setLoaded(snapshot.loaded);
     setRefreshStatus(snapshot.refreshStatus);
   }), [props.initial, props.runtime]);
+  useEffect(() => props.runtime.subscribeHostCommands?.((command) => {
+    if (command === "reattach") setHostReattachRequestToken((token) => token + 1);
+  }), [props.runtime]);
 
   return <ProductionReviewApp
     session={loaded.session}
@@ -377,6 +381,7 @@ function RuntimeProductionReviewApp(props: {
     viewerAssets={loaded.viewerAssets}
     resourcePolicy={loaded.resourcePolicy}
     generationRefreshStatus={refreshStatus}
+    hostReattachRequestToken={hostReattachRequestToken}
   />;
 }
 

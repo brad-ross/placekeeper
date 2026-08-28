@@ -301,6 +301,7 @@ export function formatPromptContext(
       stateDigest: result.identity.stateDigest,
     },
     saveSync: result.saveStatus,
+    ...(result.reviewState === undefined ? {} : { reviewState: result.reviewState }),
     reviewItems: compactReviewChanges(result),
     existingPdfAnnotations: {
       dataClassification: "untrusted-data",
@@ -337,6 +338,7 @@ export function formatPromptContext(
       stateDigest: result.identity.stateDigest,
     },
     saveSync: result.saveStatus,
+    ...(result.reviewState === undefined ? {} : { reviewState: result.reviewState }),
     reviewItems: {
       dataClassification: "untrusted-data",
       sourceHintClassification: "untrusted-data",

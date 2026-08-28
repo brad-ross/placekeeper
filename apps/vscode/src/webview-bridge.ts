@@ -128,7 +128,7 @@ export class VersionedWebviewBridge {
         protocol: WEBVIEW_RPC_PROTOCOL,
         version: WEBVIEW_RPC_VERSION,
         kind: "event",
-        event: "document-successor",
+        event: "session-invalidated",
         panelId: this.#client.identity.panelId,
         payload,
       });
@@ -148,6 +148,14 @@ export class VersionedWebviewBridge {
     }
     const controller = new AbortController();
     this.#active.set(request.requestId, controller);
+    const requestIdentity = request.method === "bootstrap"
+      ? undefined
+      : {
+          panelId: request.panelId,
+          sessionId: request.sessionId!,
+          generation: request.generation!,
+          revision: request.revision!,
+        };
     try {
       const payload = request.method === "bootstrap"
         ? await this.#client.bootstrap(controller.signal)
@@ -155,12 +163,12 @@ export class VersionedWebviewBridge {
       if (controller.signal.aborted) return;
       this.#postMessage({
         protocol: WEBVIEW_RPC_PROTOCOL, version: WEBVIEW_RPC_VERSION, kind: "response",
-        ...this.#client.identity, requestId: request.requestId, ok: true, payload,
+        ...(requestIdentity ?? this.#client.identity), requestId: request.requestId, ok: true, payload,
       });
     } catch {
       if (!controller.signal.aborted) this.#postMessage({
         protocol: WEBVIEW_RPC_PROTOCOL, version: WEBVIEW_RPC_VERSION, kind: "response",
-        ...this.#client.identity, requestId: request.requestId, ok: false,
+        ...(requestIdentity ?? this.#client.identity), requestId: request.requestId, ok: false,
         error: { kind: "rejected" },
       });
     } finally { this.#active.delete(request.requestId); }
@@ -250,7 +258,12 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
   let socket: WebSocket | undefined;
   let socketRetry: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
-  const request = async (path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<Response> => {
+  const request = async (
+    path: string,
+    init: RequestInit = {},
+    signal?: AbortSignal,
+    acceptedStatuses: readonly number[] = [],
+  ): Promise<Response> => {
     const response = await fetchImpl(`${options.launch.origin}/s/${options.launch.sessionId}${path}`, {
       ...init,
       ...(signal === undefined ? {} : { signal }),
@@ -260,7 +273,9 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
         ...init.headers,
       },
     });
-    if (!response.ok) throw new Error(`Trusted broker request failed (${response.status})`);
+    if (!response.ok && !acceptedStatuses.includes(response.status)) {
+      throw new Error(`Trusted broker request failed (${response.status})`);
+    }
     return response;
   };
   const json = async (path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<unknown> => {
@@ -344,9 +359,38 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
           operationToken: randomBytes(18).toString("base64url"),
         };
       }
-      const value = route.method === "GET"
-        ? await json(route.path, {}, signal)
-        : await post(route.path, trustedPayload, signal);
+      let value: unknown;
+      if (method === "command") {
+        const response = await request(route.path, {
+          method: "POST",
+          body: JSON.stringify(trustedPayload),
+          headers: { "x-placekeeper-generation": String(identity.generation) },
+        }, signal, [409]);
+        const responseText = await response.text();
+        if (Buffer.byteLength(responseText) > 1_048_576) {
+          throw new Error("Trusted broker response exceeded the limit");
+        }
+        const responseValue = JSON.parse(responseText) as unknown;
+        if (response.status === 409) {
+          const currentState = await json("/state", {}, signal);
+          const generationConflict = isObject(responseValue) && responseValue.ok === false &&
+            isObject(responseValue.error) && responseValue.error.kind === "generation-conflict";
+          value = {
+            accepted: false,
+            state: safeState(currentState),
+            message: generationConflict
+              ? "The PDF was rebuilt before this command could be applied. Review the current generation and retry explicitly."
+              : "Another review window changed this draft. Review the current revision and retry explicitly.",
+            ...(generationConflict ? { reason: "generation-conflict" } : {}),
+          };
+        } else {
+          value = responseValue;
+        }
+      } else {
+        value = route.method === "GET"
+          ? await json(route.path, {}, signal)
+          : await post(route.path, trustedPayload, signal);
+      }
       if (method === "reverseSyncTex" && isObject(value) && value.status === "ok" &&
         typeof value.sourcePath === "string" && Number.isSafeInteger(value.line)) {
         await options.openSourceLocation?.({
@@ -357,8 +401,14 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
         const { sourcePath: _sourcePath, ...safe } = value;
         return safe;
       }
-      if (method === "command" && isObject(value) && Number.isSafeInteger(value.revision)) {
-        identity.revision = value.revision as number;
+      if (method === "command" && isObject(value)) {
+        const state = value.accepted === false ? value.state : value;
+        if (isObject(state) && isObject(state.workflow) &&
+          Number.isSafeInteger(state.workflow.documentGeneration) &&
+          Number.isSafeInteger(state.revision)) {
+          identity.generation = state.workflow.documentGeneration as number;
+          identity.revision = state.revision as number;
+        }
       }
       return safeResult(method, value);
     },
@@ -386,16 +436,24 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
     socket.addEventListener("message", (event) => {
       try {
         const value: unknown = JSON.parse(String(event.data));
-        if (!isObject(value) || value.kind !== "document-successor" ||
-          !Number.isSafeInteger(value.previousGeneration) ||
-          !Number.isSafeInteger(value.documentGeneration) ||
-          value.previousGeneration !== identity.generation) return;
-        const controller = new AbortController();
-        void client.bootstrap(controller.signal).then((bootstrap) => {
-          if (!isObject(bootstrap) || bootstrap.generation !== value.documentGeneration) return;
-          const payload = { ...bootstrap, previousGeneration: value.previousGeneration };
-          for (const listener of invalidationListeners) listener(payload);
-        }).catch(() => undefined);
+        if (!isObject(value)) return;
+        const successor = value.kind === "document-successor" &&
+          Number.isSafeInteger(value.previousGeneration) &&
+          Number.isSafeInteger(value.documentGeneration) &&
+          Number.isSafeInteger(value.reviewRevision);
+        const sameGeneration = value.kind === "session-invalidated" &&
+          Number.isSafeInteger(value.documentGeneration) &&
+          Number.isSafeInteger(value.reviewRevision) &&
+          (value.reason === "revision" || value.reason === "freshness");
+        if (!successor && !sameGeneration) return;
+        const payload = {
+          sessionId: identity.sessionId,
+          generation: value.documentGeneration as number,
+          revision: value.reviewRevision as number,
+          reason: successor ? "generation" : value.reason,
+          ...(successor ? { previousGeneration: value.previousGeneration } : {}),
+        };
+        for (const listener of invalidationListeners) listener(payload);
       } catch {
         // The next ready/resubscribe handshake replays current state.
       }

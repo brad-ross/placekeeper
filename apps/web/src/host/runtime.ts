@@ -29,15 +29,15 @@ export interface HostRuntimeBootstrap extends HostRuntimeIdentity {
 }
 
 export interface HostRuntimeInvalidation extends HostRuntimeIdentity {
-  readonly previousGeneration: number;
-  readonly viewerAssets: ViewerAssetUrls;
-  readonly resourcePolicy: ViewerResourcePolicy;
+  readonly reason: "generation" | "revision" | "freshness";
+  readonly previousGeneration?: number;
 }
 
 export interface HostRuntime extends ProductionSessionApi {
   readonly host: "browser" | "vscode";
   bootstrap(signal?: AbortSignal): Promise<HostRuntimeBootstrap>;
   subscribeInvalidations(listener: (event: HostRuntimeInvalidation) => void): () => void;
+  subscribeHostCommands?(listener: (command: "reattach") => void): () => void;
   exportReviewedCopy(confirmPossiblyStale?: true): Promise<ProductionExportResult>;
   forwardSyncTex(input: unknown): Promise<unknown>;
   reverseSyncTex(input: unknown): Promise<unknown>;

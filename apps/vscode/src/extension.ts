@@ -40,6 +40,8 @@ import { RebuildObserver } from "./rebuild-observer.js";
 import { ReviewPanelController, type ReviewBinding } from "./review-panel-controller.js";
 import { buildReviewWebviewHtml, parseSharedAssetManifest, reviewPanelOptions } from "./review-panel.js";
 import {
+  WEBVIEW_RPC_PROTOCOL,
+  WEBVIEW_RPC_VERSION,
   VersionedWebviewBridge,
   createLoopbackRuntimeClient,
   type TrustedRuntimeClient,
@@ -345,7 +347,16 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("placekeeper.reattach", async () => {
       if (activePanel === undefined) return;
-      await activePanel.webview.postMessage({ kind: "host-command", command: "reattach" });
+      const runtime = runtimes.get(activePanel);
+      if (runtime === undefined) return;
+      await activePanel.webview.postMessage({
+        protocol: WEBVIEW_RPC_PROTOCOL,
+        version: WEBVIEW_RPC_VERSION,
+        kind: "event",
+        event: "host-command",
+        panelId: runtime.client.identity.panelId,
+        payload: { command: "reattach" },
+      });
     }),
     vscode.commands.registerCommand("placekeeper.exportReviewedPdf", async () => {
       const runtime = activePanel === undefined ? undefined : runtimes.get(activePanel);

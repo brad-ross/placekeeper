@@ -27,6 +27,7 @@ export interface VscodeMessagePort {
 
 interface PendingRequest {
   readonly method: string;
+  readonly identity?: HostRuntimeIdentity;
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: Error) => void;
   readonly abort?: () => void;
@@ -54,36 +55,34 @@ export function createRpcHostRuntime(port: VscodeMessagePort & { readonly panelI
   if (!ID.test(port.panelId)) throw new Error("A safe panel identity is required.");
   const pending = new Map<string, PendingRequest>();
   const invalidations = new Set<(event: HostRuntimeInvalidation) => void>();
+  const hostCommands = new Set<(command: "reattach") => void>();
   let identity: HostRuntimeIdentity | undefined;
   let disposed = false;
 
   const unsubscribe = port.subscribe((message) => {
     if (!isObject(message) || message.protocol !== HOST_RUNTIME_PROTOCOL ||
       message.version !== HOST_RUNTIME_VERSION || message.panelId !== port.panelId) return;
-    if (message.kind === "event" && message.event === "document-successor") {
+    if (message.kind === "event" && message.event === "host-command") {
+      if (!isObject(message.payload) || Object.keys(message.payload).length !== 1 ||
+        message.payload.command !== "reattach") return;
+      for (const listener of hostCommands) listener("reattach");
+      return;
+    }
+    if (message.kind === "event" && message.event === "session-invalidated") {
       if (!validIdentity(message.payload) || !isObject(message.payload) ||
-        !Number.isSafeInteger(message.payload.previousGeneration) ||
-        !isObject(message.payload.resources) ||
-        typeof message.payload.resources.document !== "string" ||
-        typeof message.payload.resources.pdfiumWasm !== "string") return;
-      identity = message.payload;
-      const issued = new Set<string>([
-        message.payload.resources.document,
-        message.payload.resources.pdfiumWasm,
-        ...(typeof message.payload.resources.worker === "string" ? [message.payload.resources.worker] : []),
-      ]);
+        (message.payload.reason !== "generation" && message.payload.reason !== "revision" &&
+          message.payload.reason !== "freshness") ||
+        (message.payload.previousGeneration !== undefined &&
+          !Number.isSafeInteger(message.payload.previousGeneration))) return;
       const event: HostRuntimeInvalidation = {
-        ...message.payload,
-        previousGeneration: message.payload.previousGeneration as number,
-        viewerAssets: {
-          documentUrl: message.payload.resources.document,
-          pdfiumWasm: message.payload.resources.pdfiumWasm,
-          ...(typeof message.payload.resources.worker === "string"
-            ? { workerUrl: message.payload.resources.worker }
-            : {}),
-        },
-        resourcePolicy: { host: "vscode", issued },
-      } as HostRuntimeInvalidation;
+        sessionId: message.payload.sessionId,
+        generation: message.payload.generation,
+        revision: message.payload.revision,
+        reason: message.payload.reason,
+        ...(message.payload.previousGeneration === undefined
+          ? {}
+          : { previousGeneration: message.payload.previousGeneration as number }),
+      };
       for (const listener of invalidations) listener(event);
       return;
     }
@@ -94,8 +93,8 @@ export function createRpcHostRuntime(port: VscodeMessagePort & { readonly panelI
     if (current.method === "bootstrap") {
       if (!isObject(message.payload) || message.payload.sessionId !== message.sessionId ||
         message.payload.generation !== message.generation || message.payload.revision !== message.revision) return;
-    } else if (identity === undefined || message.sessionId !== identity.sessionId ||
-      message.generation !== identity.generation || message.revision !== identity.revision) return;
+    } else if (current.identity === undefined || message.sessionId !== current.identity.sessionId ||
+      message.generation !== current.identity.generation || message.revision !== current.identity.revision) return;
     pending.delete(message.requestId);
     current.abort?.();
     if (message.ok === true) current.resolve(message.payload);
@@ -106,6 +105,7 @@ export function createRpcHostRuntime(port: VscodeMessagePort & { readonly panelI
     if (disposed) return Promise.reject(new Error("The review runtime is disposed."));
     if (signal?.aborted === true) return Promise.reject(abortError());
     const id = requestId();
+    const requestIdentity = identity === undefined ? undefined : { ...identity };
     return new Promise<T>((resolve, reject) => {
       const onAbort = signal === undefined ? undefined : () => {
         if (!pending.delete(id)) return;
@@ -121,6 +121,7 @@ export function createRpcHostRuntime(port: VscodeMessagePort & { readonly panelI
       if (onAbort !== undefined) signal!.addEventListener("abort", onAbort, { once: true });
       pending.set(id, {
         method,
+        ...(requestIdentity === undefined ? {} : { identity: requestIdentity }),
         resolve: resolve as (value: unknown) => void,
         reject,
         ...(onAbort === undefined ? {} : { abort: () => signal!.removeEventListener("abort", onAbort) }),
@@ -131,18 +132,33 @@ export function createRpcHostRuntime(port: VscodeMessagePort & { readonly panelI
         kind: "request",
         panelId: port.panelId,
         requestId: id,
-        ...(identity === undefined ? {} : identity),
+        ...(requestIdentity === undefined ? {} : requestIdentity),
         method,
         payload,
       });
     });
   };
 
-  const updateIdentityFromState = (value: unknown): void => {
+  const updateIdentityFromState = (value: unknown): HostRuntimeInvalidation | undefined => {
     if (identity === undefined || !isObject(value)) return;
     const state = value.accepted === false ? value.state : value;
-    if (!isObject(state) || !Number.isSafeInteger(state.revision)) return;
-    identity = { ...identity, revision: state.revision as number };
+    if (!isObject(state) || !isObject(state.workflow) ||
+      !Number.isSafeInteger(state.workflow.documentGeneration) ||
+      !Number.isSafeInteger(state.revision)) return;
+    const previous = identity;
+    identity = {
+      ...identity,
+      generation: state.workflow.documentGeneration as number,
+      revision: state.revision as number,
+    };
+    if (value.accepted !== false || identity.generation === previous.generation) return;
+    return {
+      sessionId: identity.sessionId,
+      generation: identity.generation,
+      revision: identity.revision,
+      reason: "generation",
+      previousGeneration: previous.generation,
+    };
   };
 
   return {
@@ -181,7 +197,10 @@ export function createRpcHostRuntime(port: VscodeMessagePort & { readonly panelI
     },
     async command(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> {
       const value = await invoke<ReviewState | RejectedReviewCommand>("command", command);
-      updateIdentityFromState(value);
+      const conflictInvalidation = updateIdentityFromState(value);
+      if (conflictInvalidation !== undefined) {
+        for (const listener of invalidations) listener(conflictInvalidation);
+      }
       return value;
     },
     saveStatus: () => invoke<ProductionSaveStatus>("saveStatus"),
@@ -205,6 +224,10 @@ export function createRpcHostRuntime(port: VscodeMessagePort & { readonly panelI
       invalidations.add(listener);
       return () => invalidations.delete(listener);
     },
+    subscribeHostCommands(listener) {
+      hostCommands.add(listener);
+      return () => hostCommands.delete(listener);
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -212,6 +235,7 @@ export function createRpcHostRuntime(port: VscodeMessagePort & { readonly panelI
       for (const request of pending.values()) request.reject(new Error("The review runtime was disposed."));
       pending.clear();
       invalidations.clear();
+      hostCommands.clear();
     },
   };
 }

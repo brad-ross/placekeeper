@@ -58,6 +58,16 @@ export interface DurableSourceWorkInterruptionV1 {
   readonly successorGeneration: number;
   readonly disposition: "interrupted-by-generation";
   readonly interruptedAt: string;
+  readonly appliedChanges?: readonly DurableInterruptedSourceChangeV1[];
+}
+
+export interface DurableInterruptedSourceChangeV1 {
+  readonly schemaVersion: 1;
+  readonly executionId: string;
+  readonly itemId: string;
+  readonly path: string;
+  readonly guardSha256: string;
+  readonly observedSha256: string;
 }
 
 export interface RecoverableDraftV2 {

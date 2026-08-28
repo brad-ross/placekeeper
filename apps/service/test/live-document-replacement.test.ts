@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { PDFDocument, StandardFonts } from "pdf-lib";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionBroker } from "../src/sessions/session-broker.js";
 import type { SessionBrokerOptions } from "../src/sessions/session-broker.js";
@@ -11,6 +11,7 @@ import type { ReviewItem } from "../../../packages/core/src/review-model.js";
 import { reviewSemanticDigest } from "../../../packages/core/src/live-context.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 import { PdfEvidenceService } from "../src/context/pdf-evidence-service.js";
+import { SessionControlRegistry } from "../src/sessions/control-socket.js";
 
 const temporaryDirectories: string[] = [];
 const ITEM_IDS = {
@@ -70,12 +71,37 @@ function selectionItem(id: string, quote: string, prefix = "", suffix = ""): Rev
 
 describe("atomic live document replacement", () => {
   it("marks a bound source save possibly stale without replacing the last successful PDF", async () => {
-    const value = await fixture();
+    const controls = new SessionControlRegistry({ heartbeat: false });
+    const invalidated = vi.spyOn(controls, "publishStateInvalidation");
+    const value = await fixture({ controls });
     await expect(value.broker.markLiveDocumentPossiblyStale(value.launch.sessionId))
       .resolves.toMatchObject({ status: "possibly-stale", documentGeneration: 1 });
     expect(value.broker.state(value.launch.sessionId)?.workflow.freshness).toBe("possibly-stale");
     expect(value.broker.state(value.launch.sessionId)?.revision).toBe(0);
     await expect(value.broker.documentBytes(value.launch.sessionId)).resolves.toEqual(value.original);
+    expect(invalidated).toHaveBeenCalledWith(value.launch.sessionId, {
+      documentGeneration: 1,
+      reviewRevision: 0,
+      reason: "freshness",
+    });
+  });
+
+  it("publishes a bounded same-generation revision invalidation after a human review command", async () => {
+    const controls = new SessionControlRegistry({ heartbeat: false });
+    const invalidated = vi.spyOn(controls, "publishStateInvalidation");
+    const value = await fixture({ controls });
+
+    await value.broker.acceptMutation(value.launch.sessionId, {
+      type: "add",
+      expectedRevision: 0,
+      item: selectionItem(ITEM_IDS.stable, "Original generated output"),
+    }, { expectedGeneration: 1 });
+
+    expect(invalidated).toHaveBeenCalledWith(value.launch.sessionId, {
+      documentGeneration: 1,
+      reviewRevision: 1,
+      reason: "revision",
+    });
   });
 
   it("advances the existing output-path lineage instead of reopening by digest", async () => {

@@ -102,8 +102,7 @@ describe("host-neutral review runtime", () => {
       generation,
       previousGeneration,
       revision,
-      viewerAssets: loaded(generation, revision).viewerAssets,
-      resourcePolicy: loaded(generation, revision).resourcePolicy,
+      reason: "generation",
     });
 
     listener?.(event(2, 1, 2));
@@ -122,6 +121,121 @@ describe("host-neutral review runtime", () => {
       expect(published.at(-1)).toMatchObject({ refreshStatus: "failed", loaded: { generation: 3 } });
     });
     unsubscribe();
+  });
+
+  it("rehydrates same-generation freshness invalidations and fences racing refreshes", async () => {
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const loaded = (revision: number, freshness: "current" | "possibly-stale"): HostRuntimeBootstrap => ({
+      sessionId,
+      generation: 1,
+      revision,
+      session: { sessionId },
+      state: {
+        ...createReviewState({
+          sessionId,
+          source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
+          workflowMode: "generated-output",
+          documentGeneration: 1,
+        }),
+        revision,
+        workflow: {
+          ...createReviewState({
+            sessionId,
+            source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
+            workflowMode: "generated-output",
+            documentGeneration: 1,
+          }).workflow,
+          freshness,
+        },
+      },
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: { destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: revision, savedRevision: revision } },
+      viewerAssets: { documentUrl: "snapshot-1.pdf", pdfiumWasm: "pdfium.wasm" },
+      resourcePolicy: { host: "vscode", issued: new Set(["snapshot-1.pdf", "pdfium.wasm"]) },
+    });
+    const completions: Array<(value: HostRuntimeBootstrap) => void> = [];
+    let listener: ((event: HostRuntimeInvalidation) => void) | undefined;
+    const runtime = {
+      bootstrap: vi.fn(() => new Promise<HostRuntimeBootstrap>((resolve) => completions.push(resolve))),
+      subscribeInvalidations: vi.fn((next: (event: HostRuntimeInvalidation) => void) => {
+        listener = next;
+        return () => { listener = undefined; };
+      }),
+    } as unknown as HostRuntime;
+    const published: Array<{ loaded: HostRuntimeBootstrap; refreshStatus: string }> = [];
+    subscribeRuntimeDocumentSource(runtime, loaded(0, "current"), (snapshot) => published.push(snapshot));
+
+    listener?.({ sessionId, generation: 1, revision: 0, reason: "freshness" });
+    listener?.({ sessionId, generation: 1, revision: 1, reason: "revision" });
+    completions[0]!(loaded(0, "possibly-stale"));
+    await Promise.resolve();
+    expect(published.at(-1)?.refreshStatus).toBe("reconciling");
+    completions[1]!(loaded(1, "possibly-stale"));
+    await Promise.resolve();
+    expect(published.at(-1)).toMatchObject({
+      refreshStatus: "idle",
+      loaded: { generation: 1, revision: 1, state: { workflow: { freshness: "possibly-stale" } } },
+    });
+  });
+
+  it("rehydrates concurrent browser and VS Code views from one successor identity", async () => {
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const loaded = (generation: number, host: "browser" | "vscode"): HostRuntimeBootstrap => ({
+      sessionId,
+      generation,
+      revision: generation,
+      session: { sessionId },
+      state: createReviewState({
+        sessionId,
+        source: {
+          fileId: `file-${generation}`,
+          digest: String(generation).repeat(64),
+          byteLength: generation,
+        },
+        workflowMode: "generated-output",
+        documentGeneration: generation,
+      }),
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: {
+        destination: { phase: "none", generation: 0 },
+        sync: { phase: "clean", desiredRevision: generation, savedRevision: generation },
+      },
+      viewerAssets: { documentUrl: `snapshot-${generation}.pdf`, pdfiumWasm: "pdfium.wasm" },
+      resourcePolicy: host === "browser"
+        ? { host, origin: "http://127.0.0.1:43179" }
+        : { host, issued: new Set([`snapshot-${generation}.pdf`, "pdfium.wasm"]) },
+    });
+    const surface = (host: "browser" | "vscode") => {
+      let listener: ((event: HostRuntimeInvalidation) => void) | undefined;
+      const runtime = {
+        bootstrap: vi.fn(async () => loaded(2, host)),
+        subscribeInvalidations: vi.fn((next: (event: HostRuntimeInvalidation) => void) => {
+          listener = next;
+          return () => { listener = undefined; };
+        }),
+      } as unknown as HostRuntime;
+      const published: Array<{ loaded: HostRuntimeBootstrap; refreshStatus: string }> = [];
+      subscribeRuntimeDocumentSource(runtime, loaded(1, host), (snapshot) => published.push(snapshot));
+      return { runtime, published, invalidate: (event: HostRuntimeInvalidation) => listener?.(event) };
+    };
+    const browser = surface("browser");
+    const vscode = surface("vscode");
+    const event: HostRuntimeInvalidation = {
+      sessionId,
+      generation: 2,
+      previousGeneration: 1,
+      revision: 2,
+      reason: "generation",
+    };
+
+    browser.invalidate(event);
+    vscode.invalidate(event);
+    await vi.waitFor(() => {
+      expect(browser.published.at(-1)).toMatchObject({ refreshStatus: "idle", loaded: { generation: 2 } });
+      expect(vscode.published.at(-1)).toMatchObject({ refreshStatus: "idle", loaded: { generation: 2 } });
+    });
+    expect(browser.runtime.bootstrap).toHaveBeenCalledOnce();
+    expect(vscode.runtime.bootstrap).toHaveBeenCalledOnce();
   });
 
   it("bootstraps and dispatches through a versioned VS Code RPC without credentials", async () => {
@@ -171,6 +285,68 @@ describe("host-neutral review runtime", () => {
     runtime.dispose();
   });
 
+  it("settles an older VS Code command response after a concurrent rehydrate advances the panel", async () => {
+    const listeners = new Set<(message: unknown) => void>();
+    const requests: Record<string, unknown>[] = [];
+    const runtime = createRpcHostRuntime({
+      panelId: "panel_identifier_1234",
+      postMessage(message) {
+        if (typeof message === "object" && message !== null) requests.push(message as Record<string, unknown>);
+      },
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    });
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const state = createReviewState({
+      sessionId,
+      source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
+      workflowMode: "generated-output",
+      documentGeneration: 1,
+    });
+    const respond = (request: Record<string, unknown>, revision: number, payload: unknown) => {
+      const message = {
+        protocol: HOST_RUNTIME_PROTOCOL,
+        version: HOST_RUNTIME_VERSION,
+        kind: "response",
+        panelId: "panel_identifier_1234",
+        sessionId,
+        generation: 1,
+        revision,
+        requestId: request.requestId,
+        ok: true,
+        payload,
+      };
+      listeners.forEach((listener) => listener(message));
+    };
+    const bootstrapPayload = (revision: number) => ({
+      sessionId,
+      generation: 1,
+      revision,
+      state: { ...state, revision },
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: {},
+      resources: {
+        document: "vscode-webview://authority/snapshots/digest.pdf",
+        pdfiumWasm: "vscode-webview://authority/assets/pdfium.wasm",
+      },
+    });
+
+    const initial = runtime.bootstrap();
+    respond(requests.at(-1)!, 0, bootstrapPayload(0));
+    await initial;
+    const command = runtime.command({ type: "undo", expectedRevision: 0 });
+    const commandRequest = requests.at(-1)!;
+    const refresh = runtime.bootstrap();
+    respond(requests.at(-1)!, 1, bootstrapPayload(1));
+    await refresh;
+    respond(commandRequest, 0, { ...state, revision: 1 });
+
+    await expect(command).resolves.toMatchObject({ revision: 1 });
+    runtime.dispose();
+  });
+
   it("cancels an in-flight request with the same bounded request identity", async () => {
     const listeners = new Set<(message: unknown) => void>();
     const postMessage = vi.fn();
@@ -187,6 +363,50 @@ describe("host-neutral review runtime", () => {
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     expect(postMessage.mock.calls[1]?.[0]).toMatchObject({ kind: "cancel" });
+    runtime.dispose();
+  });
+
+  it("accepts a bounded VS Code reattach event for its exact panel only", () => {
+    const listeners = new Set<(message: unknown) => void>();
+    const runtime = createRpcHostRuntime({
+      panelId: "panel_identifier_1234",
+      postMessage: vi.fn(),
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    });
+    const commands: string[] = [];
+    const unsubscribe = runtime.subscribeHostCommands?.((command) => commands.push(command));
+    const publish = (message: unknown) => listeners.forEach((listener) => listener(message));
+
+    publish({
+      protocol: HOST_RUNTIME_PROTOCOL,
+      version: HOST_RUNTIME_VERSION,
+      kind: "event",
+      event: "host-command",
+      panelId: "other_panel_identifier",
+      payload: { command: "reattach" },
+    });
+    publish({
+      protocol: HOST_RUNTIME_PROTOCOL,
+      version: HOST_RUNTIME_VERSION,
+      kind: "event",
+      event: "host-command",
+      panelId: "panel_identifier_1234",
+      payload: { command: "reattach", path: "/Users/reader/paper.tex" },
+    });
+    publish({
+      protocol: HOST_RUNTIME_PROTOCOL,
+      version: HOST_RUNTIME_VERSION,
+      kind: "event",
+      event: "host-command",
+      panelId: "panel_identifier_1234",
+      payload: { command: "reattach" },
+    });
+
+    expect(commands).toEqual(["reattach"]);
+    unsubscribe?.();
     runtime.dispose();
   });
 });

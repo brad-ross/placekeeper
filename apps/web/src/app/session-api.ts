@@ -196,6 +196,7 @@ export async function loadProductionSession(session: ProductionSession): Promise
     request<ProductionScope>("/scope"),
     request<ProductionSaveStatus>("/save/status"),
   ]);
+  let commandGeneration = state.workflow.documentGeneration;
   return {
     state,
     scope,
@@ -208,14 +209,23 @@ export async function loadProductionSession(session: ProductionSession): Promise
           headers: {
             authorization: `Bearer ${session.credential}`,
             "content-type": "application/json",
+            "x-placekeeper-generation": String(commandGeneration),
           },
           body: JSON.stringify(command),
         });
         if (response.status === 409) {
+          const rejected: unknown = await response.json().catch(() => undefined);
+          const generationConflict = isObject(rejected) && rejected.ok === false &&
+            isObject(rejected.error) && rejected.error.kind === "generation-conflict";
+          const currentState = await request<ReviewState>("/state");
+          commandGeneration = currentState.workflow.documentGeneration;
           return {
             accepted: false,
-            state: await request<ReviewState>("/state"),
-            message: "Another review window changed this draft. The latest saved revision is shown; retry your command.",
+            state: currentState,
+            message: generationConflict
+              ? "The PDF was rebuilt before this command could be applied. The current generation is shown; review it and retry explicitly."
+              : "Another review window changed this draft. The latest saved revision is shown; retry your command.",
+            ...(generationConflict ? { reason: "generation-conflict" as const } : {}),
           };
         }
         if (response.status === 422) {
@@ -236,7 +246,9 @@ export async function loadProductionSession(session: ProductionSession): Promise
           }
         }
         if (!response.ok) throw new Error(`The local review action failed safely (${response.status}).`);
-        return response.json() as Promise<ReviewState>;
+        const nextState = await response.json() as ReviewState;
+        commandGeneration = nextState.workflow.documentGeneration;
+        return nextState;
       },
       saveStatus: () => request<ProductionSaveStatus>("/save/status"),
       saveProposal: () => request<SaveCopyProposal>("/save/proposal"),

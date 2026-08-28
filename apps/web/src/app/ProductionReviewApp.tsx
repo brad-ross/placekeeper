@@ -176,6 +176,37 @@ export interface ProductionReviewAppProps {
   readonly resourcePolicy?: ViewerResourcePolicy;
   readonly viewer?: ReactNode;
   readonly generationRefreshStatus?: GenerationRefreshStatus;
+  readonly hostReattachRequestToken?: number;
+}
+
+export function firstUnresolvedReviewItemId(
+  items: readonly {
+    readonly id: string;
+    readonly reconciliation?: { readonly disposition: { readonly kind: string } };
+  }[],
+): string | undefined {
+  return items.find((item) =>
+    item.reconciliation !== undefined && item.reconciliation.disposition.kind !== "resolved"
+  )?.id;
+}
+
+export function canonicalStateSupersedes(
+  current: { readonly revision: number; readonly workflow: {
+    readonly documentGeneration: number;
+    readonly freshness: "current" | "possibly-stale";
+  } },
+  canonical: { readonly revision: number; readonly workflow: {
+    readonly documentGeneration: number;
+    readonly freshness: "current" | "possibly-stale";
+  } },
+): boolean {
+  return canonical.workflow.documentGeneration > current.workflow.documentGeneration ||
+    canonical.workflow.documentGeneration === current.workflow.documentGeneration && (
+      canonical.revision > current.revision ||
+      canonical.revision === current.revision &&
+        canonical.workflow.freshness === "possibly-stale" &&
+        current.workflow.freshness === "current"
+    );
 }
 
 export function referenceReturnForActiveTab(
@@ -311,11 +342,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [localState, setState] = useState(props.initialState);
   // A runtime successor arrives as one state/assets render. Prefer that canonical
   // generation immediately so the viewer URL and semantic authority never split.
-  const state = props.initialState.workflow.documentGeneration > localState.workflow.documentGeneration
-    || (
-      props.initialState.workflow.documentGeneration === localState.workflow.documentGeneration
-      && props.initialState.revision > localState.revision
-    )
+  const state = canonicalStateSupersedes(localState, props.initialState)
     ? props.initialState
     : localState;
   // A restart successor begins as an ordinary browser view, then its next
@@ -471,6 +498,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const markFocusRef = useRef<string | undefined>(undefined);
   const rowCorrespondenceRef = useRef<string | undefined>(undefined);
   const activationTokenRef = useRef(0);
+  useEffect(() => {
+    if (props.hostReattachRequestToken === undefined || props.hostReattachRequestToken <= 0) return;
+    const id = firstUnresolvedReviewItemId(stateRef.current.items);
+    if (id === undefined) return;
+    setActiveItemId(id);
+    setActivationRequest({ id, token: ++activationTokenRef.current });
+  }, [props.hostReattachRequestToken]);
   const [viewerState, setViewerState] = useState<ViewerControlsSnapshot>(unavailableViewerControls);
   const viewerAssets = useMemo(() => props.viewerAssets ?? ({
     pdfiumWasm: props.session.appLinkBase === undefined
@@ -847,10 +881,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const restoredLocationGenerationRef = useRef<number | null>(null);
   const restoringLocationGenerationRef = useRef<number | null>(null);
   const initialStateKeyRef = useRef(
-    `${props.initialState.workflow.documentGeneration}:${props.initialState.revision}:${props.initialState.source.fileId}:${props.initialState.source.digest}`,
+    `${props.initialState.workflow.documentGeneration}:${props.initialState.revision}:${props.initialState.workflow.freshness}:${props.initialState.source.fileId}:${props.initialState.source.digest}`,
   );
   useEffect(() => {
-    const next = `${props.initialState.workflow.documentGeneration}:${props.initialState.revision}:${props.initialState.source.fileId}:${props.initialState.source.digest}`;
+    const next = `${props.initialState.workflow.documentGeneration}:${props.initialState.revision}:${props.initialState.workflow.freshness}:${props.initialState.source.fileId}:${props.initialState.source.digest}`;
     if (next === initialStateKeyRef.current) return;
     initialStateKeyRef.current = next;
     portableItemIdsRef.current = initiallyPortableItemIds(

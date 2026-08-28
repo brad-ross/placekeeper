@@ -45,6 +45,7 @@ import {
   type SaveFailureReason,
   type SnapshotHooks,
   type DurableGenerationRecordV1,
+  type DurableInterruptedSourceChangeV1,
   type DurableSourceWorkInterruptionV1,
 } from "../recovery/draft-snapshot.js";
 import {
@@ -97,6 +98,17 @@ export class RecoveryOfferUnavailableError extends Error {
   constructor(message = "Recovery choices are no longer current") {
     super(message);
     this.name = "RecoveryOfferUnavailableError";
+  }
+}
+
+export class ReviewGenerationConflictError extends Error {
+  constructor(
+    readonly expectedGeneration: number,
+    readonly currentGeneration: number,
+    readonly currentRevision: number,
+  ) {
+    super(`Review generation ${expectedGeneration} is stale; current generation is ${currentGeneration}`);
+    this.name = "ReviewGenerationConflictError";
   }
 }
 export const LAUNCH_SURFACES = ["browser", "finder", "codex", "vscode"] as const;
@@ -284,8 +296,18 @@ export interface DocumentGenerationEvent {
   readonly sessionId: string;
   readonly previousGeneration: number;
   readonly documentGeneration: number;
+  readonly reviewRevision: number;
   readonly migratedTaskSessionId?: string;
 }
+
+export interface SourceWorkInterruptionCollection {
+  readonly taskSessionId: string;
+  readonly previousGeneration: number;
+}
+
+export type SourceWorkInterruptionCollector = (
+  input: SourceWorkInterruptionCollection,
+) => Promise<readonly DurableInterruptedSourceChangeV1[]>;
 
 /**
  * Internal-only material used to build one atomic model-facing observation.
@@ -369,6 +391,7 @@ export class SessionBroker {
   readonly #restartReconnectWaiters = new Map<string, Set<() => void>>();
   readonly #sessionEndListeners = new Set<(sessionId: string) => void>();
   readonly #generationListeners = new Set<(event: DocumentGenerationEvent) => void>();
+  #sourceWorkInterruptionCollector: SourceWorkInterruptionCollector | undefined;
 
   constructor(options: SessionBrokerOptions) {
     this.recoveryRoot = options.recoveryRoot;
@@ -412,6 +435,20 @@ export class SessionBroker {
   onGenerationAdvance(listener: (event: DocumentGenerationEvent) => void): () => void {
     this.#generationListeners.add(listener);
     return () => this.#generationListeners.delete(listener);
+  }
+
+  registerSourceWorkInterruptionCollector(
+    collector: SourceWorkInterruptionCollector,
+  ): () => void {
+    if (this.#sourceWorkInterruptionCollector !== undefined) {
+      throw new Error("A source-work interruption collector is already registered");
+    }
+    this.#sourceWorkInterruptionCollector = collector;
+    return () => {
+      if (this.#sourceWorkInterruptionCollector === collector) {
+        this.#sourceWorkInterruptionCollector = undefined;
+      }
+    };
   }
 
   #store(sessionId: string): DraftSnapshotStore {
@@ -1918,6 +1955,16 @@ export class SessionBroker {
           workflow: { ...nextState.workflow, freshness: "current" },
         };
         const committedAt = this.#now().toISOString();
+        const taskSessionId = this.taskBindings.taskForGeneration(
+          session.id,
+          expected.documentGeneration,
+        );
+        const appliedChanges = taskSessionId === undefined || this.#sourceWorkInterruptionCollector === undefined
+          ? []
+          : await this.#sourceWorkInterruptionCollector({
+              taskSessionId,
+              previousGeneration: expected.documentGeneration,
+            });
         const snapshotPath = await commitGenerationSnapshot(staged!);
         const record: DurableGenerationRecordV1 = {
           schemaVersion: 1,
@@ -1930,10 +1977,6 @@ export class SessionBroker {
           committedAt,
           ...(stagedSyncTex?.status === "ready" ? { syncTex: stagedSyncTex.snapshot } : {}),
         };
-        const taskSessionId = this.taskBindings.taskForGeneration(
-          session.id,
-          expected.documentGeneration,
-        );
         const interruption = taskSessionId === undefined
           ? undefined
           : {
@@ -1943,6 +1986,7 @@ export class SessionBroker {
               successorGeneration,
               disposition: "interrupted-by-generation" as const,
               interruptedAt: committedAt,
+              ...(appliedChanges.length === 0 ? {} : { appliedChanges }),
             };
         const generationLineage = [...session.generationLineage, record];
         const sourceWorkInterruptions = interruption === undefined
@@ -2003,6 +2047,7 @@ export class SessionBroker {
           sessionId: session.id,
           previousGeneration: expected.documentGeneration,
           documentGeneration: successorGeneration,
+          reviewRevision: nextState.revision,
           ...(migratedTaskSessionId === undefined ? {} : { migratedTaskSessionId }),
         };
         return {
@@ -2049,7 +2094,8 @@ export class SessionBroker {
     if (session.state.workflow.mode !== "generated-output") {
       throw new Error("Freshness observation requires generated-output review mode");
     }
-    return this.#withSessionTail(session, async () => {
+    let invalidation: { readonly documentGeneration: number; readonly reviewRevision: number } | undefined;
+    const result = await this.#withSessionTail(session, async () => {
       if (session.ending) throw new Error("Review session is ending");
       if (session.state.workflow.freshness !== "possibly-stale") {
         const state: ReviewState = {
@@ -2067,6 +2113,10 @@ export class SessionBroker {
         await session.store.persist({ ...this.#draft(session), state, sync });
         session.state = state;
         session.sync = sync;
+        invalidation = {
+          documentGeneration: state.workflow.documentGeneration,
+          reviewRevision: state.revision,
+        };
       }
       return {
         status: "possibly-stale" as const,
@@ -2074,6 +2124,14 @@ export class SessionBroker {
         documentGeneration: session.state.workflow.documentGeneration,
       };
     });
+    if (invalidation !== undefined) {
+      this.controls.publishStateInvalidation(session.id, {
+        documentGeneration: invalidation.documentGeneration,
+        reviewRevision: invalidation.reviewRevision,
+        reason: "freshness",
+      });
+    }
+    return result;
   }
 
   async #prepareSyncTexBinding(
@@ -2351,6 +2409,7 @@ export class SessionBroker {
   async acceptMutation(
     sessionId: string,
     command: ReviewCommand,
+    options: { readonly expectedGeneration?: number } = {},
   ): Promise<ReviewState> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) {
@@ -2368,6 +2427,16 @@ export class SessionBroker {
     const write = this.controls.beginWrite(sessionId);
     try {
       write.signal.throwIfAborted();
+      if (
+        options.expectedGeneration !== undefined &&
+        options.expectedGeneration !== session.state.workflow.documentGeneration
+      ) {
+        throw new ReviewGenerationConflictError(
+          options.expectedGeneration,
+          session.state.workflow.documentGeneration,
+          session.state.revision,
+        );
+      }
       const nextState = reduceReview(session.state, command);
       projectReviewItems(nextState.items).forEach(assertPortableAnnotationWritable);
       const desiredDigest = reviewStateDigest(nextState);
@@ -2393,6 +2462,11 @@ export class SessionBroker {
       write.signal.throwIfAborted();
       session.state = nextState;
       session.sync = nextSync;
+      this.controls.publishStateInvalidation(sessionId, {
+        documentGeneration: nextState.workflow.documentGeneration,
+        reviewRevision: nextState.revision,
+        reason: "revision",
+      });
       return nextState;
     } finally {
       write.complete();

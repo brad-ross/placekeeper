@@ -31,26 +31,27 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
           kind?: unknown;
           previousGeneration?: unknown;
           documentGeneration?: unknown;
+          reviewRevision?: unknown;
+          reason?: unknown;
         };
-        if (
-          value.kind !== "document-successor" ||
-          !Number.isSafeInteger(value.previousGeneration) ||
-          !Number.isSafeInteger(value.documentGeneration)
-        ) return;
-        void loadProductionSession(session).then((current) => {
-          const reviewState = current.state;
-          loaded = current;
-          const viewerAssets = browserViewerAssets(session, reviewState);
-          const next: HostRuntimeInvalidation = {
-            sessionId: session.sessionId,
-            generation: value.documentGeneration as number,
-            previousGeneration: value.previousGeneration as number,
-            revision: reviewState.revision,
-            viewerAssets,
-            resourcePolicy: { host: "browser", origin: globalThis.location.origin },
-          };
-          for (const listener of invalidationListeners) listener(next);
-        }).catch(() => undefined);
+        const successor = value.kind === "document-successor" &&
+          Number.isSafeInteger(value.previousGeneration) &&
+          Number.isSafeInteger(value.documentGeneration) &&
+          Number.isSafeInteger(value.reviewRevision);
+        const sameGeneration = value.kind === "session-invalidated" &&
+          Number.isSafeInteger(value.documentGeneration) &&
+          Number.isSafeInteger(value.reviewRevision) &&
+          (value.reason === "revision" || value.reason === "freshness");
+        if (!successor && !sameGeneration) return;
+        loaded = undefined;
+        const next: HostRuntimeInvalidation = {
+          sessionId: session.sessionId,
+          generation: value.documentGeneration as number,
+          revision: value.reviewRevision as number,
+          reason: successor ? "generation" : value.reason as "revision" | "freshness",
+          ...(successor ? { previousGeneration: value.previousGeneration as number } : {}),
+        };
+        for (const listener of invalidationListeners) listener(next);
       } catch {
         // Untrusted control messages are ignored; the next bootstrap rehydrates.
       }

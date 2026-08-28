@@ -260,7 +260,7 @@ export interface RejectedReviewCommand {
   readonly accepted: false;
   readonly state: ReviewState;
   readonly message: string;
-  readonly reason?: 'rejected' | 'save-destination' | 'stale-authoring';
+  readonly reason?: 'rejected' | 'save-destination' | 'stale-authoring' | 'generation-conflict';
 }
 
 export function controlledWorkspaceSurfaceAction(input: {

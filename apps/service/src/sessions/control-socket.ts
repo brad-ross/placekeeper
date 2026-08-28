@@ -21,6 +21,8 @@ export interface SessionControlRegistryOptions {
   readonly heartbeat?: boolean;
 }
 
+export type SessionStateInvalidationReason = "revision" | "freshness";
+
 function serverFrame(opcode: number, payload = Buffer.alloc(0)): Buffer {
   if (payload.byteLength <= 125) {
     return Buffer.concat([Buffer.from([0x80 | opcode, payload.byteLength]), payload]);
@@ -188,15 +190,35 @@ export class SessionControlRegistry {
 
   publishSuccessor(
     sessionId: string,
-    event: { readonly previousGeneration: number; readonly documentGeneration: number },
+    event: {
+      readonly previousGeneration: number;
+      readonly documentGeneration: number;
+      readonly reviewRevision: number;
+    },
   ): void {
-    const payload = Buffer.from(JSON.stringify({
+    this.#publish(sessionId, {
       kind: "document-successor",
       previousGeneration: event.previousGeneration,
       documentGeneration: event.documentGeneration,
-    }), "utf8");
+      reviewRevision: event.reviewRevision,
+    });
+  }
+
+  publishStateInvalidation(
+    sessionId: string,
+    event: {
+      readonly documentGeneration: number;
+      readonly reviewRevision: number;
+      readonly reason: SessionStateInvalidationReason;
+    },
+  ): void {
+    this.#publish(sessionId, { kind: "session-invalidated", ...event });
+  }
+
+  #publish(sessionId: string, event: Readonly<Record<string, unknown>>): void {
+    const payload = Buffer.from(JSON.stringify(event), "utf8");
     if (payload.byteLength > MAX_APPLICATION_FRAME_BYTES) {
-      throw new RangeError("Document successor invalidation exceeds the control-frame limit");
+      throw new RangeError("Session invalidation exceeds the control-frame limit");
     }
     const frame = serverFrame(0x1, payload);
     for (const client of this.#clients.get(sessionId) ?? []) {

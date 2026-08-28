@@ -7,6 +7,7 @@ import type { LiveDispositionItemV1 } from "../../../packages/core/src/dispositi
 import type { ReviewItem } from "../../../packages/core/src/review-model.js";
 import { LiveContextService } from "../src/context/live-context-service.js";
 import { LiveSourceWorkflowService } from "../src/context/live-source-workflow-service.js";
+import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 import {
   SourceReconciliationService,
   type SourceReplacementProposalV1,
@@ -44,6 +45,7 @@ function item(suffix: number): ReviewItem {
 
 interface Fixture {
   readonly root: string;
+  readonly pdfPath: string;
   readonly sourcePath: string;
   readonly broker: SessionBroker;
   readonly launch: SessionLaunch;
@@ -68,8 +70,17 @@ async function fixture(options: {
     recoveryRoot: join(root, "recovery"),
     portableReader: async () => [],
     rewriteAssessor: async () => ({ eligible: true }),
+    inspectGeneration: async () => ({
+      pageCount: 1,
+      pages: [{ pageIndex: 0, text: "rebuilt" }],
+    }),
   });
-  const opened = await broker.openReview({ pdfPath, sourceRootPath: root, surface: "codex" });
+  const opened = await broker.openReview({
+    pdfPath,
+    sourceRootPath: root,
+    surface: "codex",
+    workflowMode: "generated-output",
+  });
   if (opened.kind !== "opened" || opened.launch.bindProof === undefined) throw new Error("Expected Codex launch");
   const launch = opened.launch;
   const bindProof = opened.launch.bindProof;
@@ -108,7 +119,16 @@ async function fixture(options: {
   });
   const observation = await context.refresh({ taskSessionId });
   if (observation.status !== "current") throw new Error("Expected current context");
-  return { root, sourcePath, broker, launch, context, workflow, handle: observation.evidence.handle.value };
+  return {
+    root,
+    pdfPath,
+    sourcePath,
+    broker,
+    launch,
+    context,
+    workflow,
+    handle: observation.evidence.handle.value,
+  };
 }
 
 function proposal(): SourceReplacementProposalV1 {
@@ -199,6 +219,61 @@ describe("same-task live source workflow", () => {
     expect(preserved.result.outcomes[0]?.outcome).toMatchObject({
       classification: "conflict", action: "skip", authority: "manual",
     });
+  });
+
+  it("durably records guarded source changes before a generation interrupts the old execution", async () => {
+    const value = await fixture();
+    const begun = await value.workflow.begin({ handle: value.handle, sourcePaths: ["paper.tex"] });
+    const proposed = await value.workflow.propose({
+      handle: begun.freshness.evidenceHandle,
+      executionId: begun.result.executionId,
+      proposal: proposal(),
+    });
+    const observed = await value.workflow.reconcile({
+      handle: proposed.freshness.evidenceHandle,
+      executionId: begun.result.executionId,
+    });
+    const guard = observed.result.outcomes[0]?.applyGuardSha256;
+    if (guard === undefined) throw new Error("Expected guarded source apply");
+    const guarded = await value.workflow.reconcile({
+      handle: observed.freshness.evidenceHandle,
+      executionId: begun.result.executionId,
+      expectedSourceSha256ByProposal: { "proposal-1": guard },
+    });
+    await writeFile(value.sourcePath, "prefix new suffix\n");
+    await writeFile(value.pdfPath, await readFile(resolve("test/fixtures/pdfs/image-only.pdf")));
+
+    await expect(value.broker.replaceLiveDocument({
+      sessionId: value.launch.sessionId,
+      outputPath: value.pdfPath,
+      observationEpoch: 1,
+    })).resolves.toMatchObject({ status: "committed", documentGeneration: 2 });
+    await expect(new DraftSnapshotStore(
+      join(value.root, "recovery", value.launch.sessionId),
+    ).recover()).resolves.toMatchObject({
+      sourceWorkInterruptions: [{
+        taskSessionId,
+        previousGeneration: 1,
+        successorGeneration: 2,
+        disposition: "interrupted-by-generation",
+        appliedChanges: [{
+          executionId: begun.result.executionId,
+          itemId: id(1),
+          path: "paper.tex",
+          guardSha256: guard,
+        }],
+      }],
+    });
+    await expect(value.workflow.complete({
+      handle: guarded.freshness.evidenceHandle,
+      executionId: begun.result.executionId,
+      items: [{
+        itemId: id(1),
+        status: "applied",
+        explanation: "Applied before the generation advanced.",
+        changedPaths: ["paper.tex"],
+      }],
+    })).rejects.toThrow(/handle|generation|unavailable/iu);
   });
 
   it("keeps the build command outside the service and verifies an observable clean structural PDF", async () => {
