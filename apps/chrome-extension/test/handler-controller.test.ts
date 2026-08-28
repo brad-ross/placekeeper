@@ -4,6 +4,8 @@ import { createHandlerController, HandoffError } from "../src/handler-controller
 const streamInfo = {
   originalUrl: "https://papers.example.test/download?id=42",
   streamUrl: "blob:chrome-extension-stream",
+  tabId: 42,
+  embedded: false,
 };
 
 describe("Chrome PDF handler controller", () => {
@@ -39,8 +41,80 @@ describe("Chrome PDF handler controller", () => {
 
     await controller.run();
 
-    expect(replace).toHaveBeenCalledExactlyOnceWith(destination);
+    expect(replace).toHaveBeenCalledExactlyOnceWith(streamInfo.tabId, destination);
     expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { tabId: -1, embedded: false },
+    { tabId: 1.5, embedded: false },
+    { tabId: Number.NaN, embedded: false },
+    { tabId: 42, embedded: true },
+    { tabId: 42, embedded: undefined },
+    { tabId: 42, embedded: null },
+    { tabId: 42, embedded: 0 },
+  ])("falls back instead of navigating a non-top-level MIME handler: %o", async (context) => {
+    const fallback = vi.fn();
+    const replace = vi.fn();
+    const controller = createHandlerController({
+      isOptedIn: async () => true,
+      getStreamInfo: async () => ({ ...streamInfo, ...context }),
+      handoff: vi.fn(),
+      fallback,
+      replace,
+    });
+
+    await controller.run();
+
+    expect(replace).not.toHaveBeenCalled();
+    expect(fallback).toHaveBeenCalledOnce();
+  });
+
+  it("falls back when Chrome rejects the top-level tab navigation", async () => {
+    const fallback = vi.fn();
+    const controller = createHandlerController({
+      isOptedIn: async () => true,
+      getStreamInfo: async () => streamInfo,
+      handoff: async () => ({
+        destination:
+          "http://127.0.0.1:43179/s/779e1d9d-58c1-4b12-8dc2-3449dad132c1/bootstrap#cap=1234567890123456789012345678901234567890123",
+      }),
+      fallback,
+      replace: async () => { throw new Error("tab-navigation-rejected"); },
+    });
+
+    await controller.run();
+
+    expect(fallback).toHaveBeenCalledOnce();
+    expect(controller.state()).toBe("fallback");
+  });
+
+  it("ignores bypass after top-level tab navigation starts", async () => {
+    let resolveReplace!: () => void;
+    const replace = vi.fn(async () => new Promise<void>((resolve) => {
+      resolveReplace = resolve;
+    }));
+    const fallback = vi.fn();
+    const controller = createHandlerController({
+      isOptedIn: async () => true,
+      getStreamInfo: async () => streamInfo,
+      handoff: async () => ({
+        destination:
+          "http://127.0.0.1:43179/s/779e1d9d-58c1-4b12-8dc2-3449dad132c1/bootstrap#cap=1234567890123456789012345678901234567890123",
+      }),
+      fallback,
+      replace,
+    });
+
+    const run = controller.run();
+    await vi.waitFor(() => expect(controller.state()).toBe("replacing"));
+    controller.bypass();
+    resolveReplace();
+    await run;
+
+    expect(replace).toHaveBeenCalledOnce();
+    expect(fallback).not.toHaveBeenCalled();
+    expect(controller.state()).toBe("replaced");
   });
 
   it.each([

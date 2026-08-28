@@ -16,8 +16,16 @@ export interface ChromeApi {
   readonly mimeHandler: {
     getMimeHandlerOptions(mimeType: string): Promise<{ enabled: boolean }>;
     setMimeHandlerOptions(mimeType: string, options: { enabled: boolean }): Promise<void>;
-    getStreamInfo(): Promise<{ originalUrl: string; streamUrl: string } | undefined>;
+    getStreamInfo(): Promise<{
+      originalUrl: string;
+      streamUrl: string;
+      tabId: number;
+      embedded: boolean;
+    } | undefined>;
     abortAndFallbackToNativeHandler(): Promise<void>;
+  };
+  readonly tabs: {
+    update(tabId: number, properties: { url: string }): Promise<unknown>;
   };
   readonly runtime: {
     connectNative(application: string): NativePort;

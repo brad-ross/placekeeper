@@ -20,7 +20,9 @@ const controller = createHandlerController({
   fallback: () => {
     void chrome.mimeHandler.abortAndFallbackToNativeHandler();
   },
-  replace: (destination) => window.location.replace(destination),
+  replace: async (tabId, destination) => {
+    await chrome.tabs.update(tabId, { url: destination });
+  },
   status: (message) => {
     status.textContent = message;
   },

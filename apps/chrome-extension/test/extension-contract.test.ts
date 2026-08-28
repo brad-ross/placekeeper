@@ -38,4 +38,10 @@ describe("Chrome extension static contract", () => {
     );
     expect(popupEntry).toContain("const nextEnabled = !enabled;");
   });
+
+  it("navigates the MIME handler's owning tab instead of its child frame", async () => {
+    const handlerEntry = await readFile(resolve(extensionRoot, "src/handler-entry.ts"), "utf8");
+    expect(handlerEntry).toContain("chrome.tabs.update(tabId, { url: destination })");
+    expect(handlerEntry).not.toContain("window.location.replace");
+  });
 });

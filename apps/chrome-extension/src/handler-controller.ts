@@ -5,20 +5,25 @@ export interface PdfStreamInfo {
   readonly streamUrl: string;
 }
 
+export interface MimeHandlerContext extends PdfStreamInfo {
+  readonly tabId: number;
+  readonly embedded: boolean;
+}
+
 export interface HandoffResult {
   readonly destination: string;
 }
 
-export type HandlerState = "idle" | "inspecting" | "pending" | "fallback" | "replaced";
+export type HandlerState = "idle" | "inspecting" | "pending" | "replacing" | "fallback" | "replaced";
 
 export class HandoffError extends Error {}
 
 export interface HandlerPorts {
   isOptedIn(): Promise<boolean>;
-  getStreamInfo(): Promise<PdfStreamInfo | undefined>;
+  getStreamInfo(): Promise<unknown>;
   handoff(info: PdfStreamInfo, signal: AbortSignal): Promise<HandoffResult>;
   fallback(): void;
-  replace(destination: string): void;
+  replace(tabId: number, destination: string): Promise<void>;
   status?(message: string): void;
 }
 
@@ -26,6 +31,21 @@ export interface HandlerController {
   run(): Promise<void>;
   bypass(): void;
   state(): HandlerState;
+}
+
+function isTopLevelMimeHandlerContext(value: unknown): value is MimeHandlerContext {
+  if (typeof value !== "object" || value === null) return false;
+  const info = value as Record<string, unknown>;
+  return (
+    typeof info.originalUrl === "string" &&
+    info.originalUrl.length > 0 &&
+    typeof info.streamUrl === "string" &&
+    info.streamUrl.length > 0 &&
+    typeof info.tabId === "number" &&
+    Number.isSafeInteger(info.tabId) &&
+    info.tabId >= 0 &&
+    info.embedded === false
+  );
 }
 
 export function createHandlerController(ports: HandlerPorts): HandlerController {
@@ -45,6 +65,7 @@ export function createHandlerController(ports: HandlerPorts): HandlerController 
   return {
     state: () => current,
     bypass: () => {
+      if (current === "replacing") return;
       bypassRequested = true;
       abort.abort();
       if (current === "pending") {
@@ -62,7 +83,7 @@ export function createHandlerController(ports: HandlerPorts): HandlerController 
           return;
         }
         const info = await ports.getStreamInfo();
-        if (info === undefined || info.streamUrl.length === 0 || info.originalUrl.length === 0) {
+        if (!isTopLevelMimeHandlerContext(info)) {
           fallbackOnce();
           return;
         }
@@ -79,10 +100,12 @@ export function createHandlerController(ports: HandlerPorts): HandlerController 
           fallbackOnce();
           return;
         }
+        ports.status?.("Opening Placekeeper.");
+        current = "replacing";
+        await ports.replace(info.tabId, destination);
+        if (terminal) return;
         terminal = true;
         current = "replaced";
-        ports.status?.("Opening Placekeeper.");
-        ports.replace(destination);
       } catch (error) {
         if (terminal) return;
         if (bypassRequested) {
