@@ -1,4 +1,7 @@
 import { execFile } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
+import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import {
   parseLaunchResponse,
@@ -66,4 +69,87 @@ export async function runLaunchClient(
     maxOutputBytes: 65_536,
   });
   return parseLaunchResponse(stdout.trim());
+}
+
+export interface ExchangedVscodeLaunch {
+  readonly origin: string;
+  readonly sessionId: string;
+  readonly credential: string;
+}
+
+export async function exchangeVscodeLaunch(
+  launchUrl: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ExchangedVscodeLaunch> {
+  const url = new URL(launchUrl);
+  if (
+    url.protocol !== "http:" || url.hostname !== "127.0.0.1" || url.port.length === 0 ||
+    url.search !== "?embed=vscode" || !/^\/s\/([0-9a-f-]{36})\/bootstrap$/u.test(url.pathname) ||
+    !/^#cap=[A-Za-z0-9_-]+$/u.test(url.hash) || url.username !== "" || url.password !== ""
+  ) throw new Error("A scoped VS Code launch is required");
+  const sessionId = /^\/s\/([0-9a-f-]{36})\/bootstrap$/u.exec(url.pathname)![1]!;
+  const capability = new URLSearchParams(url.hash.slice(1)).get("cap");
+  if (capability === null) throw new Error("The launch capability is missing");
+  const response = await fetchImpl(`${url.origin}/s/${sessionId}/exchange`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ capability }),
+  });
+  if (!response.ok) throw new Error("The launch capability was rejected");
+  const value: unknown = await response.json();
+  if (typeof value !== "object" || value === null ||
+    typeof (value as { credential?: unknown }).credential !== "string" ||
+    !/^[A-Za-z0-9_-]{43}$/u.test((value as { credential: string }).credential)) {
+    throw new Error("The launch exchange was invalid");
+  }
+  return { origin: url.origin, sessionId, credential: (value as { credential: string }).credential };
+}
+
+export async function createPrivateSnapshotDirectory(storageRoot: string): Promise<string> {
+  await mkdir(storageRoot, { recursive: true, mode: 0o700 });
+  const directory = join(storageRoot, `review-${randomBytes(18).toString("base64url")}`);
+  await mkdir(directory, { mode: 0o700 });
+  await chmod(directory, 0o700);
+  const stat = await lstat(directory);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Private snapshot root is unsafe");
+  return directory;
+}
+
+export async function materializePrivatePdfSnapshot(input: {
+  readonly directory: string;
+  readonly bytes: Uint8Array;
+  readonly digest: string;
+  readonly byteLength: number;
+}): Promise<string> {
+  if (!/^[0-9a-f]{64}$/u.test(input.digest) || input.bytes.byteLength !== input.byteLength ||
+    createHash("sha256").update(input.bytes).digest("hex") !== input.digest) {
+    throw new Error("The broker-approved PDF snapshot did not match its identity");
+  }
+  const directoryStat = await lstat(input.directory);
+  if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+    throw new Error("Private snapshot root is unsafe");
+  }
+  const destination = join(input.directory, `${input.digest}.pdf`);
+  const existing = await lstat(destination).catch(() => undefined);
+  if (existing !== undefined) {
+    if (!existing.isFile() || existing.isSymbolicLink() || existing.size !== input.byteLength ||
+      createHash("sha256").update(await readFile(destination)).digest("hex") !== input.digest) {
+      throw new Error("Existing PDF snapshot is unsafe");
+    }
+    return destination;
+  }
+  const temporary = join(input.directory, `.snapshot-${randomBytes(18).toString("base64url")}.tmp`);
+  try {
+    await writeFile(temporary, input.bytes, { flag: "wx", mode: 0o600 });
+    await chmod(temporary, 0o600);
+    await rename(temporary, destination);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  }
+  const created = await lstat(destination);
+  if (!created.isFile() || created.isSymbolicLink() || (created.mode & 0o777) !== 0o600) {
+    throw new Error("Materialized PDF snapshot is unsafe");
+  }
+  return destination;
 }

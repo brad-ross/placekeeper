@@ -21,7 +21,11 @@ import {
   type ExistingAnnotation,
   type ExistingAnnotationsDiscovery,
 } from '../pdf/existing-annotations.js';
-import { createLocalPdfiumViewer, type ViewerAssetUrls } from '../pdf/embedpdf-viewer.js';
+import {
+  createLocalPdfiumViewer,
+  type ViewerAssetUrls,
+  type ViewerResourcePolicy,
+} from '../pdf/embedpdf-viewer.js';
 import { PdfWorkspace, type PageContextMenuRequest } from '../pdf/PdfWorkspace.js';
 import {
   PdfOutlineDiscoveryAuthority,
@@ -183,6 +187,7 @@ export async function publishViewerCaretRead(input: {
 
 export interface AppProps {
   assets: ViewerAssetUrls;
+  resourcePolicy?: ViewerResourcePolicy;
   existingAnnotations?: readonly ExistingAnnotation[];
   pageSemanticReliable?: boolean;
   selectionSemanticReliable?: boolean;
@@ -236,6 +241,7 @@ export class ViewerInitializationAuthority {
 
 export function App({
   assets,
+  resourcePolicy,
   existingAnnotations = [],
   pageSemanticReliable,
   selectionSemanticReliable,
@@ -323,7 +329,10 @@ export function App({
   const ownedPointerGesture = useRef(new OwnedMarkPointerGesture());
   const primaryClickGesture = useRef(new ViewerPrimaryClickGesture());
   const hoveredOwnedId = useRef<string | undefined>(undefined);
-  const viewer = useMemo(() => createLocalPdfiumViewer(assets), [assets]);
+  const viewer = useMemo(
+    () => createLocalPdfiumViewer(assets, resourcePolicy),
+    [assets, resourcePolicy],
+  );
   const emit = useCallback((event: ViewerInteractionEvent) => onViewerInteraction?.(event), [onViewerInteraction]);
   const publishInventory = useCallback((result: ExistingAnnotationsDiscovery) => {
     setInventoryState(result);

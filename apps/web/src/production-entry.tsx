@@ -7,7 +7,6 @@ import {
 } from "../../../packages/core/src/placekeeper-link.js";
 import { ProductionReviewApp, type ProductionSession } from "./app/ProductionReviewApp.js";
 import {
-  loadProductionSession,
   reopenProductionSession,
   resumeProductionSession,
   type ReopenRecoveryChoice,
@@ -17,6 +16,9 @@ import {
   type CopyLinkStatus,
 } from "./review/CopyLinkControl.js";
 import { ReviewIcon, type ReviewIconName } from "./review/ReviewIcon.js";
+import { createBrowserHostRuntime } from "./host/browser-runtime.js";
+import { createRpcHostRuntime, createVscodeMessagePort } from "./host/vscode-runtime.js";
+import type { HostRuntime } from "./host/runtime.js";
 
 export async function resume(viewId: string, pathname: string): Promise<void> {
   await start(await resumeProductionSession(viewId, pathname));
@@ -339,17 +341,32 @@ export function showTerminalRecovery(viewId: string): void {
 }
 
 export async function start(session: ProductionSession): Promise<void> {
+  await startRuntime(createBrowserHostRuntime(session));
+}
+
+export async function startRuntime(runtime: HostRuntime): Promise<void> {
   const root = document.querySelector("#root");
   if (!(root instanceof HTMLElement)) throw new Error("Production review root is unavailable");
   root.dataset.productionRoot = "true";
-  const loaded = await loadProductionSession(session);
+  const loaded = await runtime.bootstrap();
   createRoot(root).render(
     <ProductionReviewApp
-      session={session}
+      session={loaded.session}
       initialState={loaded.state}
       initialSaveStatus={loaded.saveStatus}
       scope={loaded.scope}
-      api={loaded.api}
+      api={runtime}
+      viewerAssets={loaded.viewerAssets}
+      resourcePolicy={loaded.resourcePolicy}
     />,
   );
+}
+
+export async function startVscode(options: {
+  readonly panelId: string;
+  readonly vscode: { postMessage(message: unknown): unknown };
+}): Promise<void> {
+  const runtime = createRpcHostRuntime(createVscodeMessagePort(options.panelId, options.vscode));
+  globalThis.addEventListener("pagehide", () => runtime.dispose(), { once: true });
+  await startRuntime(runtime);
 }

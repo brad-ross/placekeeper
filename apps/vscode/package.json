@@ -40,6 +40,6 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json && node ./copy-web-assets.mjs"
   }
 }

@@ -1,9 +1,11 @@
 declare module "vscode" {
   export enum UIKind { Desktop = 1, Web = 2 }
-  export interface Uri { readonly scheme: string; readonly fsPath: string }
+  export interface Uri { readonly scheme: string; readonly fsPath: string; toString(): string }
+  export const Uri: { file(path: string): Uri; joinPath(base: Uri, ...segments: string[]): Uri };
   export interface Disposable { dispose(): unknown }
   export interface ExtensionContext {
     readonly subscriptions: Disposable[];
+    readonly globalStorageUri: Uri;
     asAbsolutePath(path: string): string;
   }
   export const env: { readonly remoteName?: string; readonly uiKind: UIKind };
@@ -20,6 +22,8 @@ declare module "vscode" {
     createWebviewPanel(viewType: string, title: string, column: number, options: unknown): {
       readonly webview: {
         html: string;
+        readonly cspSource: string;
+        asWebviewUri(uri: Uri): Uri;
         onDidReceiveMessage(listener: (message: unknown) => unknown): Disposable;
         postMessage(message: unknown): Promise<boolean>;
       };

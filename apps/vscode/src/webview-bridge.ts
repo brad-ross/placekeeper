@@ -1,0 +1,373 @@
+export const WEBVIEW_RPC_PROTOCOL = "placekeeper.review-runtime" as const;
+export const WEBVIEW_RPC_VERSION = 1 as const;
+
+const SAFE_ID = /^[A-Za-z0-9_-]{16,128}$/u;
+const MAX_MESSAGE_BYTES = 65_536;
+const METHODS = new Set([
+  "bootstrap", "presence", "detach", "command", "saveStatus", "saveProposal",
+  "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave",
+  "scope", "forwardSyncTex", "reverseSyncTex", "exportReviewedCopy",
+]);
+
+export interface WebviewRpcIdentity {
+  readonly panelId: string;
+  readonly sessionId: string;
+  readonly generation: number;
+  readonly revision: number;
+}
+
+export interface WebviewRpcRequest {
+  readonly protocol: typeof WEBVIEW_RPC_PROTOCOL;
+  readonly version: typeof WEBVIEW_RPC_VERSION;
+  readonly kind: "request";
+  readonly panelId: string;
+  readonly requestId: string;
+  readonly sessionId?: string;
+  readonly generation?: number;
+  readonly revision?: number;
+  readonly method: string;
+  readonly payload: unknown;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function bounded(value: unknown): boolean {
+  try { return Buffer.byteLength(JSON.stringify(value)) <= MAX_MESSAGE_BYTES; }
+  catch { return false; }
+}
+
+function containsCapabilityPrimitive(value: unknown, depth = 0): boolean {
+  if (depth > 8) return true;
+  if (Array.isArray(value)) return value.some((item) => containsCapabilityPrimitive(item, depth + 1));
+  if (!isObject(value)) return false;
+  const forbidden = /^(?:url|uri|path|credential|authorization|headers|executable|commandId)$/iu;
+  return Object.entries(value).some(([key, item]) => (
+    forbidden.test(key) || containsCapabilityPrimitive(item, depth + 1)
+  ));
+}
+
+function validPayload(method: string, payload: unknown): boolean {
+  if (!isObject(payload) || containsCapabilityPrimitive(payload)) return false;
+  const keys = Object.keys(payload);
+  if (["bootstrap", "presence", "detach", "saveStatus", "saveProposal", "chooseFolder",
+    "chooseOriginal", "retrySave", "locateSave", "scope", "forwardSyncTex"].includes(method)) {
+    return keys.length === 0;
+  }
+  if (method === "chooseCopy") {
+    return keys.every((key) => key === "filename" || key === "folderSelectionId") &&
+      (payload.filename === undefined || (typeof payload.filename === "string" && payload.filename.length <= 255)) &&
+      (payload.folderSelectionId === undefined || (typeof payload.folderSelectionId === "string" && SAFE_ID.test(payload.folderSelectionId)));
+  }
+  if (method === "exportReviewedCopy") {
+    return keys.length <= 1 && keys.every((key) => key === "confirmPossiblyStale") &&
+      (payload.confirmPossiblyStale === undefined || payload.confirmPossiblyStale === true);
+  }
+  if (method === "reverseSyncTex") {
+    return keys.length === 2 && Number.isSafeInteger(payload.pageIndex) && (payload.pageIndex as number) >= 0 &&
+      isObject(payload.point) && Object.keys(payload.point).length === 2 &&
+      Number.isFinite(payload.point.x) && Number.isFinite(payload.point.y);
+  }
+  return method === "command";
+}
+
+export function parseWebviewRequest(
+  value: unknown,
+  expected: WebviewRpcIdentity,
+  replayedRequestIds: ReadonlySet<string>,
+): WebviewRpcRequest | undefined {
+  if (!isObject(value) || !bounded(value) || value.protocol !== WEBVIEW_RPC_PROTOCOL ||
+    value.version !== WEBVIEW_RPC_VERSION || value.kind !== "request" ||
+    value.panelId !== expected.panelId || typeof value.requestId !== "string" ||
+    !SAFE_ID.test(value.requestId) || replayedRequestIds.has(value.requestId) ||
+    typeof value.method !== "string" || !METHODS.has(value.method) || !("payload" in value) ||
+    !validPayload(value.method, value.payload)) return undefined;
+  if (value.method !== "bootstrap" && (
+    value.sessionId !== expected.sessionId || value.generation !== expected.generation || value.revision !== expected.revision
+  )) return undefined;
+  if (value.method === "bootstrap" && (
+    value.sessionId !== undefined || value.generation !== undefined || value.revision !== undefined
+  )) return undefined;
+  return value as unknown as WebviewRpcRequest;
+}
+
+export function parseWebviewCancel(
+  value: unknown,
+  expectedPanelId: string,
+): { readonly requestId: string } | undefined {
+  if (!isObject(value) || !bounded(value) || value.protocol !== WEBVIEW_RPC_PROTOCOL ||
+    value.version !== WEBVIEW_RPC_VERSION || value.kind !== "cancel" ||
+    value.panelId !== expectedPanelId || typeof value.requestId !== "string" || !SAFE_ID.test(value.requestId)) return undefined;
+  return { requestId: value.requestId };
+}
+
+export interface TrustedRuntimeClient {
+  readonly identity: WebviewRpcIdentity;
+  bootstrap(signal: AbortSignal): Promise<unknown>;
+  invoke(method: string, payload: unknown, signal: AbortSignal): Promise<unknown>;
+  subscribeInvalidations?(listener: (payload: unknown) => void): () => void;
+  dispose(): void;
+}
+
+export class VersionedWebviewBridge {
+  readonly #client: TrustedRuntimeClient;
+  readonly #postMessage: (message: unknown) => unknown;
+  readonly #seen = new Set<string>();
+  readonly #active = new Map<string, AbortController>();
+  readonly #unsubscribeInvalidations: () => void;
+  #disposed = false;
+
+  constructor(client: TrustedRuntimeClient, postMessage: (message: unknown) => unknown) {
+    this.#client = client;
+    this.#postMessage = postMessage;
+    this.#unsubscribeInvalidations = client.subscribeInvalidations?.((payload) => {
+      this.#postMessage({
+        protocol: WEBVIEW_RPC_PROTOCOL,
+        version: WEBVIEW_RPC_VERSION,
+        kind: "event",
+        event: "document-successor",
+        panelId: this.#client.identity.panelId,
+        payload,
+      });
+    }) ?? (() => undefined);
+  }
+
+  async receive(value: unknown): Promise<void> {
+    if (this.#disposed) return;
+    const cancelled = parseWebviewCancel(value, this.#client.identity.panelId);
+    if (cancelled !== undefined) { this.#active.get(cancelled.requestId)?.abort(); return; }
+    const request = parseWebviewRequest(value, this.#client.identity, this.#seen);
+    if (request === undefined) return;
+    this.#seen.add(request.requestId);
+    if (this.#seen.size > 512) {
+      const oldest = this.#seen.values().next().value;
+      if (oldest !== undefined) this.#seen.delete(oldest);
+    }
+    const controller = new AbortController();
+    this.#active.set(request.requestId, controller);
+    try {
+      const payload = request.method === "bootstrap"
+        ? await this.#client.bootstrap(controller.signal)
+        : await this.#client.invoke(request.method, request.payload, controller.signal);
+      if (controller.signal.aborted) return;
+      this.#postMessage({
+        protocol: WEBVIEW_RPC_PROTOCOL, version: WEBVIEW_RPC_VERSION, kind: "response",
+        ...this.#client.identity, requestId: request.requestId, ok: true, payload,
+      });
+    } catch {
+      if (!controller.signal.aborted) this.#postMessage({
+        protocol: WEBVIEW_RPC_PROTOCOL, version: WEBVIEW_RPC_VERSION, kind: "response",
+        ...this.#client.identity, requestId: request.requestId, ok: false,
+        error: { kind: "rejected" },
+      });
+    } finally { this.#active.delete(request.requestId); }
+  }
+
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.#unsubscribeInvalidations();
+    for (const controller of this.#active.values()) controller.abort();
+    this.#active.clear();
+    this.#client.dispose();
+  }
+}
+
+export interface LoopbackRuntimeClientOptions {
+  readonly panelId: string;
+  readonly launch: {
+    readonly origin: string;
+    readonly sessionId: string;
+    readonly credential: string;
+  };
+  readonly assets: {
+    readonly pdfiumWasm: string;
+    readonly worker?: string;
+  };
+  readonly materializeDocument: (input: {
+    readonly bytes: Uint8Array;
+    readonly digest: string;
+    readonly byteLength: number;
+    readonly generation: number;
+  }) => Promise<string>;
+  readonly fetch?: typeof fetch;
+}
+
+function safeScope(value: unknown): unknown {
+  if (!isObject(value)) return value;
+  const { sourceRootPath: _sourceRootPath, ...safe } = value;
+  return safe;
+}
+
+function safeState(value: unknown): unknown {
+  if (!isObject(value)) return value;
+  const { sourceRootId: _sourceRootId, ...safe } = value;
+  return safe;
+}
+
+function safeSaveStatus(value: unknown): unknown {
+  if (!isObject(value) || !isObject(value.destination) || value.destination.phase !== "active") return value;
+  const { targetPath: _targetPath, capabilityId: _capabilityId, fingerprint: _fingerprint, ...destination } = value.destination;
+  return { ...value, destination: { ...destination, targetPath: "Reviewed PDF" } };
+}
+
+function safeResult(method: string, value: unknown): unknown {
+  if (method === "scope") return safeScope(value);
+  if (["saveStatus", "chooseCopy", "chooseOriginal", "retrySave", "locateSave"].includes(method)) {
+    return safeSaveStatus(value);
+  }
+  if (method === "saveProposal" && isObject(value)) return { ...value, folder: "Local folder" };
+  if (method === "chooseFolder" && isObject(value)) {
+    const { folder: _folder, ...safe } = value;
+    return safe;
+  }
+  if (method === "exportReviewedCopy" && isObject(value)) return { ...value, path: "Reviewed PDF" };
+  return value;
+}
+
+export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOptions): TrustedRuntimeClient {
+  const fetchImpl = options.fetch ?? fetch;
+  const identity: { panelId: string; sessionId: string; generation: number; revision: number } = {
+    panelId: options.panelId,
+    sessionId: options.launch.sessionId,
+    generation: 0,
+    revision: 0,
+  };
+  const invalidationListeners = new Set<(payload: unknown) => void>();
+  let socket: WebSocket | undefined;
+  let socketRetry: ReturnType<typeof setTimeout> | undefined;
+  let disposed = false;
+  const request = async (path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<Response> => {
+    const response = await fetchImpl(`${options.launch.origin}/s/${options.launch.sessionId}${path}`, {
+      ...init,
+      ...(signal === undefined ? {} : { signal }),
+      headers: {
+        authorization: `Bearer ${options.launch.credential}`,
+        ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+        ...init.headers,
+      },
+    });
+    if (!response.ok) throw new Error(`Trusted broker request failed (${response.status})`);
+    return response;
+  };
+  const json = async (path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<unknown> => {
+    const response = await request(path, init, signal);
+    const text = await response.text();
+    if (Buffer.byteLength(text) > 1_048_576) throw new Error("Trusted broker response exceeded the limit");
+    return JSON.parse(text) as unknown;
+  };
+  const post = (path: string, payload: unknown, signal: AbortSignal) => json(path, {
+    method: "POST", body: JSON.stringify(payload),
+  }, signal);
+  const routes: Readonly<Record<string, { readonly method: "GET" | "POST"; readonly path: string }>> = {
+    scope: { method: "GET", path: "/scope" },
+    saveStatus: { method: "GET", path: "/save/status" },
+    saveProposal: { method: "GET", path: "/save/proposal" },
+    command: { method: "POST", path: "/commands" },
+    chooseCopy: { method: "POST", path: "/save/copy" },
+    chooseFolder: { method: "POST", path: "/save/folder" },
+    chooseOriginal: { method: "POST", path: "/save/original" },
+    retrySave: { method: "POST", path: "/save/retry" },
+    locateSave: { method: "POST", path: "/save/locate" },
+    forwardSyncTex: { method: "POST", path: "/synctex/forward" },
+    reverseSyncTex: { method: "POST", path: "/synctex/reverse" },
+    exportReviewedCopy: { method: "POST", path: "/export" },
+  };
+  const client: TrustedRuntimeClient = {
+    get identity() { return identity; },
+    async bootstrap(signal) {
+      const [stateValue, scopeValue, saveStatus] = await Promise.all([
+        json("/state", {}, signal), json("/scope", {}, signal), json("/save/status", {}, signal),
+      ]);
+      if (!isObject(stateValue) || !isObject(stateValue.source) || !isObject(stateValue.workflow) ||
+        typeof stateValue.source.fileId !== "string" || typeof stateValue.source.digest !== "string" ||
+        !Number.isSafeInteger(stateValue.source.byteLength) ||
+        !Number.isSafeInteger(stateValue.workflow.documentGeneration) || !Number.isSafeInteger(stateValue.revision)) {
+        throw new Error("Trusted broker state was invalid");
+      }
+      const document = await request(`/document/${stateValue.source.fileId}`, {}, signal);
+      const bytes = new Uint8Array(await document.arrayBuffer());
+      const generation = stateValue.workflow.documentGeneration as number;
+      const documentUri = await options.materializeDocument({
+        bytes,
+        digest: stateValue.source.digest,
+        byteLength: stateValue.source.byteLength as number,
+        generation,
+      });
+      identity.generation = generation;
+      identity.revision = stateValue.revision as number;
+      const bootstrap = {
+        sessionId: identity.sessionId,
+        generation: identity.generation,
+        revision: identity.revision,
+        state: safeState(stateValue),
+        scope: safeScope(scopeValue),
+        saveStatus: safeSaveStatus(saveStatus),
+        resources: {
+          document: documentUri,
+          pdfiumWasm: options.assets.pdfiumWasm,
+          ...(options.assets.worker === undefined ? {} : { worker: options.assets.worker }),
+        },
+      };
+      connectInvalidations();
+      return bootstrap;
+    },
+    async invoke(method, payload, signal) {
+      if (method === "presence") { connectInvalidations(); return {}; }
+      if (method === "detach") return {};
+      const route = routes[method];
+      if (route === undefined) throw new Error("Runtime method is not allowlisted");
+      const value = route.method === "GET"
+        ? await json(route.path, {}, signal)
+        : await post(route.path, payload, signal);
+      if (method === "command" && isObject(value) && Number.isSafeInteger(value.revision)) {
+        identity.revision = value.revision as number;
+      }
+      return safeResult(method, value);
+    },
+    subscribeInvalidations(listener) {
+      invalidationListeners.add(listener);
+      connectInvalidations();
+      return () => invalidationListeners.delete(listener);
+    },
+    dispose() {
+      disposed = true;
+      if (socketRetry !== undefined) clearTimeout(socketRetry);
+      socket?.close();
+      socket = undefined;
+      invalidationListeners.clear();
+    },
+  };
+  function connectInvalidations(): void {
+    if (disposed || socket !== undefined || typeof WebSocket === "undefined") return;
+    const controlUrl = new URL(`/s/${options.launch.sessionId}/control`, options.launch.origin);
+    controlUrl.protocol = controlUrl.protocol === "https:" ? "wss:" : "ws:";
+    socket = new WebSocket(controlUrl, [
+      "placekeeper",
+      `placekeeper-auth.${options.launch.credential}`,
+    ]);
+    socket.addEventListener("message", (event) => {
+      try {
+        const value: unknown = JSON.parse(String(event.data));
+        if (!isObject(value) || value.kind !== "document-successor" ||
+          !Number.isSafeInteger(value.previousGeneration) ||
+          !Number.isSafeInteger(value.documentGeneration) ||
+          value.previousGeneration !== identity.generation) return;
+        const controller = new AbortController();
+        void client.bootstrap(controller.signal).then((bootstrap) => {
+          if (!isObject(bootstrap) || bootstrap.generation !== value.documentGeneration) return;
+          const payload = { ...bootstrap, previousGeneration: value.previousGeneration };
+          for (const listener of invalidationListeners) listener(payload);
+        }).catch(() => undefined);
+      } catch {
+        // The next ready/resubscribe handshake replays current state.
+      }
+    });
+    socket.addEventListener("close", () => {
+      socket = undefined;
+      if (!disposed) socketRetry = setTimeout(connectInvalidations, 1_000);
+    });
+  }
+  return client;
+}

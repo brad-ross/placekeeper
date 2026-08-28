@@ -77,6 +77,21 @@ test("VS Code manifest is desktop-local and exposes one PDF command", async () =
   expect(manifest.contributes.configuration.properties).toHaveProperty(["placekeeper.launcherPath"]);
 });
 
+test("VS Code review loads the shared client directly without a localhost frame", async () => {
+  const panel = await readFile(resolve("apps/vscode/src/review-panel.ts"), "utf8");
+  const extension = await readFile(resolve("apps/vscode/src/extension.ts"), "utf8");
+  const productionEntry = await readFile(resolve("apps/web/src/production-entry.tsx"), "utf8");
+  expect(panel).toContain("app.startVscode");
+  expect(panel).toContain("worker-src blob:");
+  expect(panel).toContain("frame-src 'none'");
+  expect(panel).not.toContain("<iframe");
+  expect(panel).not.toContain("launch-url");
+  expect(extension).toContain("exchangeVscodeLaunch(result.url)");
+  expect(panel).toContain("localResourceRoots");
+  expect(extension).not.toContain("postMessage({ type: \"launch-url\"");
+  expect(productionEntry).toContain("export async function startVscode");
+});
+
 test("only the Codex adapter requests the Codex launch surface", async () => {
   const finder = await readFile(resolve("packaging/macos/launcher.mjs"), "utf8");
   const vscode = await readFile(resolve("apps/vscode/src/launch-client.ts"), "utf8");

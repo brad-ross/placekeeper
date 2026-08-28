@@ -15,8 +15,26 @@ function offlinePdfium(): Plugin {
   };
 }
 
+function sharedAssetManifest(): Plugin {
+  return {
+    name: "shared-asset-manifest",
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: "asset-manifest.json",
+        source: JSON.stringify({
+          schemaVersion: 1,
+          app: "app.js",
+          stylesheet: "app.css",
+          pdfiumWasm: "pdfium.wasm",
+        }),
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [offlinePdfium()],
+  plugins: [offlinePdfium(), sharedAssetManifest()],
   resolve: {
     dedupe: ["react", "react-dom"],
   },

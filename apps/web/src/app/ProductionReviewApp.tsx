@@ -103,10 +103,12 @@ import {
   type AuthoringAuthority,
   type AuthoringAnchorSnapshot,
 } from '../review/authoring-session.js';
+import type { ViewerAssetUrls, ViewerResourcePolicy } from '../pdf/embedpdf-viewer.js';
 
 export interface ProductionSession {
   readonly sessionId: string;
-  readonly credential: string;
+  /** Browser-only memory credential. VS Code keeps this in the extension host. */
+  readonly credential?: string;
   /** Present for top-level readable views; embedded bootstrap sessions omit it. */
   readonly appLinkBase?: string;
 }
@@ -169,6 +171,8 @@ export interface ProductionReviewAppProps {
   readonly initialSaveStatus?: ProductionSaveStatus;
   readonly scope: ProductionScope;
   readonly api: ProductionSessionApi;
+  readonly viewerAssets?: ViewerAssetUrls;
+  readonly resourcePolicy?: ViewerResourcePolicy;
   readonly viewer?: ReactNode;
 }
 
@@ -456,13 +460,16 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const rowCorrespondenceRef = useRef<string | undefined>(undefined);
   const activationTokenRef = useRef(0);
   const [viewerState, setViewerState] = useState<ViewerControlsSnapshot>(unavailableViewerControls);
-  const viewerAssets = useMemo(() => ({
+  const viewerAssets = useMemo(() => props.viewerAssets ?? ({
     pdfiumWasm: props.session.appLinkBase === undefined
       ? `/s/${props.session.sessionId}/assets/pdfium.wasm`
       : '/assets/pdfium.wasm',
     documentUrl: `/s/${props.session.sessionId}/document/${state.source.fileId}`,
-    requestHeaders: { authorization: `Bearer ${props.session.credential}` },
+    ...(props.session.credential === undefined
+      ? {}
+      : { requestHeaders: { authorization: `Bearer ${props.session.credential}` } }),
   }), [
+    props.viewerAssets,
     props.session.appLinkBase,
     props.session.credential,
     props.session.sessionId,
@@ -1095,6 +1102,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     <App
       embeddedInReviewShell
       assets={viewerAssets}
+      {...(props.resourcePolicy === undefined ? {} : { resourcePolicy: props.resourcePolicy })}
       documentTitle={scope.documentTitle}
       toolError={commandError}
       onSelectionUpdate={onSelectionUpdate}

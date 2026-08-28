@@ -1,7 +1,15 @@
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
+import { readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
+import { resolve } from "node:path";
 import * as vscode from "vscode";
-import { runLaunchClient } from "./launch-client.js";
+import {
+  createPrivateSnapshotDirectory,
+  exchangeVscodeLaunch,
+  materializePrivatePdfSnapshot,
+  runLaunchClient,
+} from "./launch-client.js";
 import {
   INPUT_UNAVAILABLE,
   choosePdfUriInput,
@@ -11,7 +19,12 @@ import {
   type LaunchErrorPresentation,
   type UriLike,
 } from "./local-workspace.js";
-import { buildReviewWebviewHtml, reviewPanelOptions } from "./review-panel.js";
+import {
+  buildReviewWebviewHtml,
+  parseSharedAssetManifest,
+  reviewPanelOptions,
+} from "./review-panel.js";
+import { VersionedWebviewBridge, createLoopbackRuntimeClient } from "./webview-bridge.js";
 
 const COMMAND = "placekeeper.open";
 
@@ -96,25 +109,56 @@ export function activate(context: vscode.ExtensionContext): void {
           await showSharedError(result.error);
           return;
         }
+        const exchanged = await exchangeVscodeLaunch(result.url);
+        const snapshotRoot = await createPrivateSnapshotDirectory(context.globalStorageUri.fsPath);
+        const installedWebRoot = context.asAbsolutePath("dist/web");
+        const developmentWebRoot = resolve(context.asAbsolutePath("."), "../../dist/web");
+        const webRoot = existsSync(installedWebRoot) ? installedWebRoot : developmentWebRoot;
+        const assetManifest = parseSharedAssetManifest(JSON.parse(
+          await readFile(resolve(webRoot, "asset-manifest.json"), "utf8"),
+        ) as unknown);
+        const webRootUri = vscode.Uri.file(webRoot);
+        const snapshotRootUri = vscode.Uri.file(snapshotRoot);
+        const panelId = randomBytes(18).toString("base64url");
         const panel = vscode.window.createWebviewPanel(
           "placekeeper.review",
           "Placekeeper",
           vscode.ViewColumn.Active,
-          reviewPanelOptions,
+          reviewPanelOptions([webRootUri, snapshotRootUri]),
         );
-        panel.webview.onDidReceiveMessage(async (message: unknown) => {
-          if (
-            typeof message === "object" &&
-            message !== null &&
-            (message as { type?: unknown }).type === "ready"
-          ) {
-            await panel.webview.postMessage({ type: "launch-url", url: result.url });
-          }
+        const resourceUri = (name: string) => panel.webview.asWebviewUri(
+          vscode.Uri.file(resolve(webRoot, name)),
+        ).toString();
+        const client = createLoopbackRuntimeClient({
+          panelId,
+          launch: exchanged,
+          assets: { pdfiumWasm: resourceUri(assetManifest.pdfiumWasm) },
+          materializeDocument: async ({ bytes, digest, byteLength }) => {
+            const path = await materializePrivatePdfSnapshot({
+              directory: snapshotRoot,
+              bytes,
+              digest,
+              byteLength,
+            });
+            return panel.webview.asWebviewUri(vscode.Uri.file(path)).toString();
+          },
         });
-        panel.webview.html = buildReviewWebviewHtml(
-          result.url,
-          randomBytes(18).toString("base64url"),
+        const bridge = new VersionedWebviewBridge(
+          client,
+          (message) => panel.webview.postMessage(message),
         );
+        panel.webview.onDidReceiveMessage((message) => bridge.receive(message));
+        panel.onDidDispose(() => {
+          bridge.dispose();
+          void rm(snapshotRoot, { recursive: true, force: true });
+        });
+        panel.webview.html = buildReviewWebviewHtml({
+          nonce: randomBytes(18).toString("base64url"),
+          panelId,
+          scriptUri: resourceUri(assetManifest.app),
+          styleUri: resourceUri(assetManifest.stylesheet),
+          cspSource: panel.webview.cspSource,
+        });
       } catch {
         await showSharedError(INPUT_UNAVAILABLE);
       }
