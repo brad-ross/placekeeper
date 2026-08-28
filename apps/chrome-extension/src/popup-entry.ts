@@ -8,7 +8,6 @@ function requiredElement<T extends Element>(selector: string): T {
 }
 
 const control = requiredElement<HTMLButtonElement>("#automatic-open");
-const stateLabel = requiredElement<HTMLElement>("#automatic-open-state");
 const status = requiredElement<HTMLElement>("#status");
 
 const ports = chromeAutoOpenPorts(chrome);
@@ -19,7 +18,6 @@ function render(nextEnabled: boolean): void {
   enabled = nextEnabled;
   control.setAttribute("aria-checked", String(nextEnabled));
   control.classList.toggle("is-enabled", nextEnabled);
-  stateLabel.textContent = nextEnabled ? "On" : "Paused";
 }
 
 async function refresh(): Promise<void> {
@@ -27,7 +25,7 @@ async function refresh(): Promise<void> {
   if (!state.synchronized) {
     await setAutoOpenEnabled(ports, false);
     render(false);
-    status.textContent = "Automatic opening is paused.";
+    status.textContent = "Automatic opening paused.";
     return;
   }
   render(state.enabled);
@@ -35,17 +33,17 @@ async function refresh(): Promise<void> {
 
 control.addEventListener("click", async () => {
   control.disabled = true;
-  status.textContent = enabled ? "Pausing automatic opening…" : "Enabling automatic opening…";
+  status.textContent = enabled ? "Pausing…" : "Enabling…";
   const nextEnabled = !enabled;
   try {
     await setAutoOpenEnabled(ports, nextEnabled);
     render(nextEnabled);
     status.textContent = enabled
-      ? "PDFs will open automatically in Placekeeper."
-      : "Automatic opening is paused.";
+      ? "PDFs open in Placekeeper."
+      : "Automatic opening paused.";
   } catch {
     await refresh().catch(() => render(false));
-    status.textContent = "Chrome could not update the PDF setting. Try again.";
+    status.textContent = "Couldn’t update Chrome’s PDF setting. Try again.";
   } finally {
     control.disabled = false;
     control.focus();
@@ -55,7 +53,7 @@ control.addEventListener("click", async () => {
 void refresh()
   .catch(() => {
     render(false);
-    status.textContent = "The PDF setting is unavailable. Automatic opening remains paused.";
+    status.textContent = "Chrome’s PDF setting is unavailable.";
   })
   .finally(() => {
     control.disabled = false;

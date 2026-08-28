@@ -26,9 +26,21 @@ describe("Chrome extension static contract", () => {
     ]);
     expect(handler).toContain('<button id="bypass" type="button">Use Chrome viewer</button>');
     expect(handler).toContain('role="status"');
-    expect(popup).toContain('<button id="automatic-open" type="button" role="switch"');
+    expect(popup).toContain('<button id="automatic-open" class="switch" type="button" role="switch"');
     expect(popup).toContain('aria-checked="false"');
     expect(popup).toContain('role="status"');
+  });
+
+  it("uses the compact Placekeeper popup hierarchy without transient loading copy", async () => {
+    const popup = await readFile(resolve(extensionRoot, "popup.html"), "utf8");
+
+    expect(popup).toContain("<title>Placekeeper</title>");
+    expect(popup).toContain('<h1 id="title">Placekeeper</h1>');
+    expect(popup).toContain('class="switch"');
+    expect(popup).toContain('<span class="switch__label">Open PDFs automatically</span>');
+    expect(popup).toContain('<span class="switch__control" aria-hidden="true">');
+    expect(popup).not.toContain("Choose whether");
+    expect(popup).not.toContain("Reading Chrome");
   });
 
   it("keeps the popup toggle inert until its saved state is known", async () => {

@@ -27,12 +27,26 @@ body {
 
 .popup {
   width: 20rem;
-  padding: 1rem;
+  box-sizing: border-box;
+  padding: 1rem 1.125rem 1.125rem;
+  color-scheme: only light;
+  color: #181a17;
+  background: #fffefa;
+  font-size: 0.875rem;
+  line-height: 1.4;
 }
 
-h1 {
-  margin: 0 0 0.5rem;
-  font-size: 1.15rem;
+.popup main {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.popup h1 {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 730;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
 }
 
 p {
@@ -52,7 +66,7 @@ button {
 }
 
 button:focus-visible {
-  outline: 3px solid Highlight;
+  outline: 3px solid #245c9c;
   outline-offset: 2px;
 }
 
@@ -61,31 +75,78 @@ button:disabled {
   opacity: 0.65;
 }
 
-.switch {
+.popup .switch {
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.75rem;
+  min-height: 2.75rem;
+  padding: 0.5rem 0;
+  border: 0;
+  border-radius: 0.5625rem;
+  color: inherit;
+  background: transparent;
   text-align: left;
 }
 
-.switch__state {
-  min-width: 3.75rem;
-  padding: 0.2rem 0.45rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, CanvasText 10%, transparent);
-  text-align: center;
-  font-size: 0.8rem;
-  font-weight: 650;
+.popup .switch:hover:not(:disabled) .switch__control {
+  border-color: #aeb6aa;
+  background: #e5e6e1;
 }
 
-.switch.is-enabled .switch__state {
-  background: color-mix(in srgb, #2ca45c 25%, Canvas);
+.switch__label {
+  font-weight: 600;
+}
+
+.switch__control {
+  position: relative;
+  flex: 0 0 auto;
+  width: 2.375rem;
+  height: 1.375rem;
+  box-sizing: border-box;
+  border: 1px solid #d1d5cc;
+  border-radius: 999px;
+  background: #f1f2ed;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.switch__thumb {
+  position: absolute;
+  top: 0.125rem;
+  left: 0.125rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  background: #676a63;
+  box-shadow: 0 1px 2px rgb(24 27 23 / 18%);
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.switch.is-enabled .switch__control {
+  border-color: #2d684d;
+  background: #2d684d;
+}
+
+.switch.is-enabled .switch__thumb {
+  background: #fffefa;
+  transform: translateX(1rem);
 }
 
 .status {
-  min-height: 1.4rem;
-  margin-bottom: 0;
-  font-size: 0.85rem;
+  margin: -0.125rem 0 0;
+  color: #676a63;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.status:empty {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch__control,
+  .switch__thumb {
+    transition: none;
+  }
 }
