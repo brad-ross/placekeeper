@@ -576,13 +576,65 @@ function Harness() {
               zoom: { mode: PdfZoomMode.FitPage, params: [] },
               identity: 'harness-outline-target',
             },
-            children: [],
+            children: [{
+              id: 'harness-outline-nested',
+              label: 'Harness subsection',
+              pageContext: 'Page 2',
+              target: null,
+              children: [{
+                id: 'harness-outline-leaf',
+                label: 'Harness detail',
+                pageContext: 'Page 3',
+                target: null,
+                children: [],
+              }],
+            }],
+          }, {
+            id: 'supplemental-outline',
+            label: 'Supplemental section',
+            pageContext: 'Page 4',
+            target: null,
+            children: [{
+              id: 'supplemental-outline-leaf',
+              label: 'Supplemental detail',
+              pageContext: 'Page 5',
+              target: null,
+              children: [],
+            }],
           }],
         })}>Set outline tree</button>
         <button type="button" onClick={() => setOutlineDiscovery({
           status: 'loaded-empty',
           documentGeneration: 0,
         })}>Set outline empty</button>
+        <button type="button" onClick={() => {
+          const documentGeneration = harnessReferenceNavigation.documentGeneration + 1;
+          setHarnessReferenceNavigation((current) => reduceReferenceNavigation(current, {
+            type: 'replace-document',
+            documentGeneration,
+          }));
+          setOutlineDiscovery({ status: 'loading', documentGeneration });
+        }}>Begin outline replacement</button>
+        <button type="button" onClick={() => {
+          const { documentGeneration } = harnessReferenceNavigation;
+          setOutlineDiscovery({
+            status: 'loaded-tree',
+            documentGeneration,
+            items: [{
+              id: 'replacement-outline',
+              label: 'Replacement section',
+              pageContext: 'Page 1',
+              target: null,
+              children: [{
+                id: 'replacement-outline-leaf',
+                label: 'Replacement detail',
+                pageContext: 'Page 2',
+                target: null,
+                children: [],
+              }],
+            }],
+          });
+        }}>Load replacement outline tree</button>
         <button type="button" onClick={() => setHarnessReferenceNavigation((current) => (
           reduceReferenceNavigation(current, {
             type: 'open-reference',

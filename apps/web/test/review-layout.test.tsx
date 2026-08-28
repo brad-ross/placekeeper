@@ -74,6 +74,51 @@ const ownedAnnotation: ReviewItem = {
 };
 
 describe('review shell layout and accessibility contract', () => {
+  it('floats a reversible outline expansion toggle opposite the active workspace navbar', () => {
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        workspaceOpen
+        navigationState={createReferenceNavigationState(0)}
+        outlineDiscovery={{
+          status: 'loaded-tree',
+          documentGeneration: 0,
+          items: [{
+            id: 'intro',
+            label: 'Introduction',
+            pageContext: null,
+            target: null,
+            children: [{
+              id: 'motivation',
+              label: 'Motivation',
+              pageContext: null,
+              target: null,
+              children: [],
+            }],
+          }],
+        }}
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        onCommand={async () => state}
+      >
+        <div>Document canvas</div>
+      </ReviewShell>,
+    );
+
+    expect(html.match(/data-outline-expansion-toggle/g)).toHaveLength(1);
+    expect(html).toContain('aria-label="Collapse all outline entries"');
+    expect(html).toContain('aria-pressed="false"');
+    expect(html).toContain('lucide-chevrons-down-up');
+    expect(html).toMatch(
+      /class="review-workspace__activity-strip[^"]*"[\s\S]*data-outline-expansion-toggle/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__outline-toggle\s*\{[^}]*margin-left:\s*auto;[^}]*border:\s*1px solid var\(--review-border-subtle\);[^}]*box-shadow:\s*0 1px 2px/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__outline-toggle\s*>\s*\.review-icon\s*\{[^}]*margin:\s*auto;[^}]*transform:\s*translate\(\.5px, 1px\);/u,
+    );
+  });
+
   it('renders full annotation content as a focused tray detail without source text', () => {
     const html = renderToStaticMarkup(
       <FullAnnotationReader
@@ -720,7 +765,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('shares simple annotation section headers and keeps the activity strip intrinsic', () => {
     expect(annotationStyles).toMatch(
-      /\.review-workspace__header\s*\{[^}]*height:\s*var\(--review-workspace-header-height, 44px\);[^}]*align-items:\s*center;[^}]*padding:\s*8px 6px 2px 7\.5px;/u,
+      /\.review-workspace__header\s*\{[^}]*height:\s*var\(--review-workspace-header-height, 44px\);[^}]*align-items:\s*center;[^}]*padding:\s*8px 7\.5px 2px;/u,
     );
     expect(annotationStyles).toMatch(
       /\.annotation-drawer__header h2,\s*\.existing-annotations__header h2\s*\{[^}]*font-size:\s*15px;[^}]*font-weight:\s*760;/u,
@@ -785,6 +830,27 @@ describe('review shell layout and accessibility contract', () => {
     expect(annotationStyles).not.toContain('margin-top: 53px');
     expect(annotationStyles).not.toContain('review-workspace__tab-segment--compound');
     expect(annotationStyles).not.toContain('.existing-annotations__readonly');
+  });
+
+  it('keeps Search result actions on the workspace tray control rhythm', () => {
+    expect(annotationStyles).toMatch(
+      /\.pdf-search \.row-action-group\s*\{[^}]*align-self:\s*center;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.pdf-search \.row-action-group__action,\s*\.pdf-search \.copy-link-control__trigger--row,\s*\.pdf-search \.row-action-group__trigger\s*\{[^}]*height:\s*var\(--review-control-compact\);[^}]*min-height:\s*var\(--review-control-compact\);/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.pdf-search \.row-action-group__trigger\s*\{[^}]*width:\s*var\(--review-control-compact\);[^}]*min-width:\s*var\(--review-control-compact\);/u,
+    );
+    const coarsePointerRules = responsiveStyles.match(
+      /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*?)\n\}/u,
+    )?.[1];
+    expect(coarsePointerRules).toMatch(
+      /\.pdf-search \.row-action-group__action,\s*\.pdf-search \.copy-link-control__trigger--row,\s*\.pdf-search \.row-action-group__trigger\s*\{[^}]*height:\s*var\(--review-control-touch\);[^}]*min-height:\s*var\(--review-control-touch\);/u,
+    );
+    expect(coarsePointerRules).toMatch(
+      /\.pdf-search \.row-action-group__trigger\s*\{[^}]*width:\s*var\(--review-control-touch\);[^}]*min-width:\s*var\(--review-control-touch\);/u,
+    );
   });
 
   it('keeps Outline interaction rings separated across rows and branches', () => {

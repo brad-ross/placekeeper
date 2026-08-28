@@ -1,7 +1,7 @@
 ---
 title: Exclude Navigation and Owned PDF Annotations from External Inventories
 date: 2026-08-14
-last_updated: 2026-08-24
+last_updated: 2026-08-26
 category: integration-issues
 module: pdf_annotation_inventory
 problem_type: integration_issue
@@ -35,7 +35,7 @@ tags:
 A PDF annotation catalog answers what physically exists in a document; an Existing PDF Annotation inventory answers what should be presented as foreign, read-only reviewer feedback. Treating the broad catalog as presentation-ready caused two related classification bugs:
 
 - Navigational Link annotations appeared as external reviewer annotations. [PR #33](https://github.com/brad-ross/placekeeper/pull/33), merged on 2026-08-14, established that navigation affordances stay in the PDF catalog but outside reviewer inventories.
-- Placekeeper-owned annotations in a saved copy were correctly reconstructed as editable Review Items and independently rediscovered as read-only Existing PDF Annotations. The correction is open in [PR #59](https://github.com/brad-ross/placekeeper/pull/59) as of 2026-08-24.
+- Placekeeper-owned annotations in a saved copy were correctly reconstructed as editable Review Items and independently rediscovered as read-only Existing PDF Annotations. [PR #59](https://github.com/brad-ross/placekeeper/pull/59), merged on 2026-08-24, corrected that second classification path.
 
 The second bug was not a duplicate portable import. On open, validated portable metadata reconstructs Review Items (packages/pdf-backends/src/embedpdf-adapter.ts:355-399), while the web viewer independently maps every non-Link engine annotation into an Existing Annotation candidate (apps/web/src/pdf/existing-annotations.ts:155-180). Before PR #59, that web path did not subtract the already-owned identities, so the same visible PDF object acquired both editable and external/read-only meanings.
 
@@ -78,7 +78,7 @@ The web inventory rejects Link engine values before mapping and rechecks normali
 
 ### Subtract exact owned identities at the external merge boundary
 
-PR #59 extends the web merge with the owned projection. The boundary uses the same composite key as inventory deduplication:
+PR #59 extended the web merge with the owned projection. The boundary uses the same composite key as inventory deduplication:
 
 ~~~ts
 export function existingAnnotationKey(
@@ -161,9 +161,10 @@ The per-document snapshot makes asynchronous classification stable: it answers w
 
 ## Related Issues
 
-- [PR #59](https://github.com/brad-ross/placekeeper/pull/59) — open implementation of owned-annotation exclusion and source-scoped retry ownership.
+- [PR #59](https://github.com/brad-ross/placekeeper/pull/59) — merged implementation of owned-annotation exclusion and source-scoped retry ownership.
 - [PR #33](https://github.com/brad-ross/placekeeper/pull/33) — merged implementation of navigation-link exclusion.
 - [Recoverable, editable PDF annotation autosave](../architecture-patterns/recoverable-editable-pdf-annotation-autosave.md) — portable ownership, fail-closed import, and foreign-annotation preservation.
 - [Portable PDF annotations invisible in external viewers](portable-pdf-annotations-invisible-in-external-viewers.md) — public PDF representation enables external rendering while private portable identity enables Placekeeper editing.
+- [Valid long highlights rejected by the portable annotation shape limit](valid-long-highlights-rejected-by-portable-shape-limit.md) — independent portable resource budgets and exact geometry preservation at the authoring boundary.
 - [Reject stale viewer selection snapshots](../ui-bugs/reject-stale-viewer-selection-snapshots.md) — the related async-snapshot rule for text and geometry capture.
 - [Outline-aware annotation workspace presentation](../design-patterns/outline-aware-annotation-workspace-presentation.md) — user-facing separation of editable annotations and external PDF annotations.
