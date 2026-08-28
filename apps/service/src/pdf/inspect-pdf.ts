@@ -17,6 +17,19 @@ export interface InspectedPdfPageEvidence {
 export interface InspectedPdfPageText {
   readonly pageIndex: number;
   readonly text: string;
+  readonly geometry: readonly InspectedPdfTextGeometryRun[];
+}
+
+export interface InspectedPdfGlyphGeometry {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface InspectedPdfTextGeometryRun {
+  readonly charStart: number;
+  readonly glyphs: readonly InspectedPdfGlyphGeometry[];
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -128,9 +141,23 @@ export async function inspectPdfPageTexts(bytes: Uint8Array): Promise<readonly I
     }).toPromise();
     const pages: InspectedPdfPageText[] = [];
     for (let pageIndex = 0; pageIndex < document.pageCount; pageIndex += 1) {
+      const page = pageAt(document, pageIndex);
+      const [text, geometry] = await Promise.all([
+        engine.extractText(document, [pageIndex]).toPromise(),
+        engine.getPageGeometry(document, page).toPromise(),
+      ]);
       pages.push({
         pageIndex,
-        text: await engine.extractText(document, [pageIndex]).toPromise(),
+        text,
+        geometry: geometry.runs.map((run) => ({
+          charStart: run.charStart,
+          glyphs: run.glyphs.map((glyph) => ({
+            x: glyph.x,
+            y: glyph.y,
+            width: glyph.width,
+            height: glyph.height,
+          })),
+        })),
       });
     }
     return pages;

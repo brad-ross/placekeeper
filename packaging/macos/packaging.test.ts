@@ -21,6 +21,7 @@ import {
   validateCodexPlugin,
   validateDistributionManifests,
   validateMacIconSet,
+  validateSharedWebDistribution,
 } from "./validate-manifest.js";
 import {
   finderServiceArgs,
@@ -159,7 +160,7 @@ describe("macOS distribution manifests", () => {
         report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
         thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
       },
-      productionWebJavaScriptBytes: 2_404_269,
+      productionWebJavaScriptBytes: 2_448_255,
     });
 
     const root = await mkdtemp(resolve(tmpdir(), "placekeeper-catalog-baseline-"));
@@ -336,15 +337,23 @@ describe("macOS distribution manifests", () => {
       name: "placekeeper-vscode",
       publisher: "placekeeper-local",
       icon: "assets/placekeeper.png",
-      activationEvents: ["onCommand:placekeeper.open"],
+      activationEvents: expect.arrayContaining([
+        "onCommand:placekeeper.open",
+        "onWebviewPanel:placekeeper.review",
+        "onUri",
+      ]),
       contributes: {
-        commands: [{
-          command: "placekeeper.open",
-          icon: {
-            light: "assets/placekeeper.svg",
-            dark: "assets/placekeeper.svg",
-          },
-        }],
+        commands: expect.arrayContaining([
+          expect.objectContaining({
+            command: "placekeeper.open",
+            icon: {
+              light: "assets/placekeeper.svg",
+              dark: "assets/placekeeper.svg",
+            },
+          }),
+          expect.objectContaining({ command: "placekeeper.forwardSyncTex" }),
+          expect.objectContaining({ command: "placekeeper.exportReviewedPdf" }),
+        ]),
         configuration: { properties: { "placekeeper.launcherPath": expect.any(Object) } },
       },
     });
@@ -432,7 +441,7 @@ describe("macOS distribution manifests", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it.each(["during-readiness", "at-readiness-exit"] as const)(
     "retires the exact candidate before rollback when interrupted %s",
@@ -594,7 +603,7 @@ describe("macOS distribution manifests", () => {
       },
     );
     expect(stdout.trim()).toBe("ready");
-  });
+  }, 15_000);
 
   it.runIf(process.platform === "darwin")("compiles every installed native AppleScript interaction", async () => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-native-scripts-"));
@@ -685,8 +694,50 @@ describe("macOS distribution manifests", () => {
       scripts?: Record<string, string>;
     };
     expect(packageManifest.scripts?.["validate:distribution"])
-      .toBe("pnpm build:web && tsx packaging/macos/validate-manifest.ts");
+      .toBe("pnpm build:web && pnpm build:vscode && tsx packaging/macos/validate-manifest.ts");
     await expect(validateDistributionManifests(resolve("."))).resolves.toBeUndefined();
+  });
+
+  it("pins one complete, offline shared client payload for the app and VS Code extension", async () => {
+    const packageManifest = JSON.parse(await readFile(resolve("package.json"), "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+    expect(packageManifest.scripts?.["validate:distribution"])
+      .toBe("pnpm build:web && pnpm build:vscode && tsx packaging/macos/validate-manifest.ts");
+    const web = await validateSharedWebDistribution(resolve("dist/web"));
+    const vscodeWeb = await validateSharedWebDistribution(resolve("apps/vscode/dist/web"));
+    expect(vscodeWeb).toEqual(web);
+    expect(web.worker).toEqual({ kind: "inline-blob", container: web.app });
+    expect(Object.keys(web.integrity).sort()).toEqual([
+      web.app,
+      web.pdfiumWasm,
+      web.stylesheet,
+    ].sort());
+  });
+
+  it("rejects missing, duplicate, external, and stale shared-client assets", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-web-manifest-"));
+    try {
+      await cp(resolve("dist/web"), root, { recursive: true });
+      await rm(join(root, "pdfium.wasm"));
+      await expect(validateSharedWebDistribution(root)).rejects.toThrow(/missing|pdfium/iu);
+
+      await rm(root, { recursive: true, force: true });
+      await cp(resolve("dist/web"), root, { recursive: true });
+      const manifestPath = join(root, "asset-manifest.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+      await writeFile(manifestPath, JSON.stringify({ ...manifest, stylesheet: manifest.app }));
+      await expect(validateSharedWebDistribution(root)).rejects.toThrow(/duplicate/iu);
+
+      await writeFile(manifestPath, JSON.stringify({ ...manifest, app: "https://example.invalid/app.js" }));
+      await expect(validateSharedWebDistribution(root)).rejects.toThrow(/local|asset|manifest/iu);
+
+      await writeFile(manifestPath, JSON.stringify(manifest));
+      await writeFile(join(root, "stale.js"), "stale");
+      await expect(validateSharedWebDistribution(root)).rejects.toThrow(/stale|unexpected/iu);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("packages task-correlated Codex hooks through the installed executable", async () => {
@@ -728,6 +779,8 @@ describe("macOS distribution manifests", () => {
     expect(build).toContain("appManifest.embeddedArtifacts.codexPlugin");
     expect(build).toContain('resolve(resources, "integrations/codex-plugin")');
     expect(build).toContain('resolve(vscodeInstall, "assets")');
+    expect(build).toContain('resolve(contents, "MacOS/placekeeper-vscode")');
+    expect(build).toContain('resolve(resources, "vscode-launcher.mjs")');
     expect(build).toContain('resolve(codexPlugin, "hooks/hooks.json")');
     const appManifest = JSON.parse(await readFile(resolve("packaging/macos/app-bundle.json"), "utf8"));
     expect(() => validateAppBundleManifest({

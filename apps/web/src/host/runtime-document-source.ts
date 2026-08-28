@@ -15,6 +15,7 @@ export function subscribeRuntimeDocumentSource(
   let latestGeneration = initial.generation;
   let latestRevision = initial.revision;
   let refreshToken = 0;
+  let refreshController: AbortController | undefined;
   let loaded = initial;
   let disposed = false;
   const unsubscribe = runtime.subscribeInvalidations((event) => {
@@ -27,8 +28,11 @@ export function subscribeRuntimeDocumentSource(
     latestGeneration = event.generation;
     latestRevision = event.revision;
     const token = ++refreshToken;
+    refreshController?.abort();
+    const controller = new AbortController();
+    refreshController = controller;
     publish({ loaded, refreshStatus: "reconciling" });
-    void runtime.bootstrap().then((successor) => {
+    void runtime.bootstrap(controller.signal).then((successor) => {
       if (
         disposed
         || token !== refreshToken
@@ -48,6 +52,7 @@ export function subscribeRuntimeDocumentSource(
   });
   return () => {
     disposed = true;
+    refreshController?.abort();
     unsubscribe();
   };
 }

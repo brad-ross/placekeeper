@@ -15,6 +15,7 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
   const invalidationListeners = new Set<(event: HostRuntimeInvalidation) => void>();
   let socket: WebSocket | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
+  let retryDelayMs = 1_000;
   let stopped = false;
 
   const ensureLoaded = async () => loaded ??= await loadProductionSession(session);
@@ -25,6 +26,7 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
       `${scheme}//${window.location.host}/s/${session.sessionId}/control`,
       ["placekeeper", `placekeeper-auth.${session.credential}`],
     );
+    socket.addEventListener("open", () => { retryDelayMs = 1_000; });
     socket.addEventListener("message", (event) => {
       try {
         const value = JSON.parse(String(event.data)) as {
@@ -58,7 +60,10 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
     });
     socket.addEventListener("close", () => {
       socket = undefined;
-      if (!stopped) retry = setTimeout(connectInvalidations, 1_000);
+      if (!stopped) {
+        retry = setTimeout(connectInvalidations, retryDelayMs);
+        retryDelayMs = Math.min(retryDelayMs * 2, 30_000);
+      }
     });
   };
 

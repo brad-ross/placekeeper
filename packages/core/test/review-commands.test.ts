@@ -112,6 +112,22 @@ describe('canonical review commands', () => {
       expectedDraftRevision: -1,
       draft: { ...state.pendingDrafts[0]!, text: 'racing update' },
     })).toThrow(/draft revision/iu);
+
+    state = reduceReview(state, {
+      type: 'apply-draft',
+      expectedRevision: state.revision,
+      id: state.pendingDrafts[0]!.id,
+      expectedDraftRevision: state.pendingDrafts[0]!.revision,
+      ownerViewId: 'panel-a',
+      updatedAt: '2026-08-07T12:01:00.000Z',
+    });
+    expect(state.pendingDrafts).toEqual([]);
+    expect(state.items[1]).toMatchObject({
+      id: '00000000-0000-4000-8000-000000000099',
+      kind: 'replace',
+      payload: { proposedText: 'draft replacement' },
+      reconciliation: { disposition: { kind: 'resolved', generation: 4 } },
+    });
   });
 
   it('reattaches without changing semantic payload and fences undo at a rebuild boundary', () => {
@@ -137,6 +153,7 @@ describe('canonical review commands', () => {
       updatedAt: '2026-08-07T12:05:00.000Z',
     });
     expect(state.items[0]?.payload).toEqual(before.payload);
+    expect(state.items[0]?.pageIndex).toBe(2);
     expect(state.items[0]?.reconciliation).toMatchObject({
       revision: 2,
       disposition: { kind: 'resolved', generation: 2 },
@@ -147,6 +164,22 @@ describe('canonical review commands', () => {
     expect(state.items[0]?.reconciliation?.disposition.kind).toBe('missing');
     expect(() => reduceReview(state, { type: 'undo', expectedRevision: state.revision }))
       .toThrow(/rebuild history boundary/iu);
+  });
+
+  it('drops predecessor redo entries when a rebuild starts', () => {
+    let { state, commands } = setup();
+    state = reduceReview(state, addReplace(state, selection, 'first', commands));
+    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    expect(state.historyCursor).toBe(0);
+    expect(state.history).toHaveLength(1);
+
+    state = startReviewGeneration(state, { documentGeneration: 2 });
+
+    expect(state.history).toHaveLength(0);
+    expect(state.historyCursor).toBe(0);
+    expect(state.workflow.historyBoundary).toBe(0);
+    expect(() => reduceReview(state, { type: 'redo', expectedRevision: state.revision }))
+      .toThrow(/no review command to redo/iu);
   });
 
   it('creates all five v1 tools as stable semantic items and advances one revision each', () => {

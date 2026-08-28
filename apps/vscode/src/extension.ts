@@ -5,7 +5,10 @@ import { basename, dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import * as vscode from "vscode";
 
-import { ScopedExternalLaunchRegistrations } from "./external-launch-registration.js";
+import {
+  ScopedExternalLaunchRegistrations,
+  parseScopedExternalLaunchUri,
+} from "./external-launch-registration.js";
 import {
   createPrivateSnapshotDirectory,
   exchangeVscodeLaunch,
@@ -15,12 +18,14 @@ import {
   runLaunchClient,
 } from "./launch-client.js";
 import {
+  containedSourcePath,
   isLatexSourcePath,
   isPathInside,
   sidecarWatchPattern,
 } from "./latex-project.js";
 import {
   LATEX_WORKSHOP_OWNED_SETTINGS,
+  compatibilityPrior,
   compatibilityStatus,
   previewCompatibilitySetup,
   restoreCompatibilitySettings,
@@ -32,7 +37,10 @@ import {
   choosePdfUriInput,
   classifyWorkspace,
   resolveLauncherPath,
+  resolveExternalLauncherPath,
   resolveSourceOutputBinding,
+  selectedUriArguments,
+  tabResourceUri,
   type LaunchErrorPresentation,
   type UriLike,
 } from "./local-workspace.js";
@@ -44,6 +52,10 @@ import {
   WEBVIEW_RPC_VERSION,
   VersionedWebviewBridge,
   createLoopbackRuntimeClient,
+  forwardSyncTexRetryable,
+  forwardSyncTexStatus,
+  forwardSyncTexTarget,
+  type ForwardSyncTexStatus,
   type TrustedRuntimeClient,
 } from "./webview-bridge.js";
 
@@ -53,22 +65,49 @@ const PANEL_BINDINGS_KEY = "placekeeper.panel-bindings.v1";
 const COMPATIBILITY_SETUP_KEY = "placekeeper.latex-workshop-setup.v1";
 const REVALIDATE_INTERVAL_MS = 30_000;
 
-interface PanelRuntime {
-  readonly binding: ReviewBinding;
-  readonly panelKey: string;
-  readonly client: TrustedRuntimeClient;
-  readonly observer: RebuildObserver<unknown>;
-  readonly registrationId: string;
-  readonly disposables: vscode.Disposable[];
-  readonly snapshotRoot: string;
-  flushTimer?: ReturnType<typeof setTimeout>;
-  lastSourceLocation?: { readonly sourcePath: string; readonly line: number; readonly column?: number };
+type PanelAttachStage = "launch" | "exchange" | "storage" | "assets" | "runtime" | "webview";
+
+class PresentedLaunchError extends Error {
+  constructor(readonly presentation: LaunchErrorPresentation) {
+    super("Placekeeper launch was rejected");
+  }
 }
 
-function selectedUris(first: unknown, many: unknown): UriLike[] {
-  if (Array.isArray(many)) return many as UriLike[];
-  if (typeof first === "object" && first !== null) return [first as UriLike];
-  return [];
+class PanelAttachError extends Error {
+  constructor(readonly stage: PanelAttachStage, readonly safeReason?: string) {
+    super(`Placekeeper embedded panel failed during ${stage}`);
+  }
+}
+
+function safeAttachReason(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const allowed = [
+    "Only extension-issued webview resources are allowed",
+    "Only the webview CSP source is allowed",
+    "A safe nonce is required",
+    "A safe panel identity is required",
+    "A safe panel key is required",
+  ];
+  return allowed.includes(error.message) ? error.message : undefined;
+}
+
+async function attachStage<T>(
+  stage: PanelAttachStage,
+  operation: () => T | Promise<T>,
+): Promise<T> {
+  try { return await operation(); }
+  catch (error) {
+    if (error instanceof PresentedLaunchError || error instanceof PanelAttachError) throw error;
+    throw new PanelAttachError(stage, safeAttachReason(error));
+  }
+}
+
+interface PanelRuntime {
+  readonly binding: ReviewBinding;
+  readonly client: TrustedRuntimeClient;
+  readonly registrationId: string;
+  flushTimer?: ReturnType<typeof setTimeout>;
+  lastSourceLocation?: { readonly sourcePath: string; readonly line: number; readonly column?: number };
 }
 
 function workspaceError(): LaunchErrorPresentation | undefined {
@@ -96,8 +135,9 @@ async function showSharedError(error: LaunchErrorPresentation): Promise<void> {
 }
 
 async function chooseBinding(commandArgs: readonly unknown[]): Promise<ReviewBinding | undefined> {
-  const active = vscode.window.activeTextEditor?.document.uri;
-  const selected = selectedUris(commandArgs[0], commandArgs[1]);
+  const active = vscode.window.activeTextEditor?.document.uri ??
+    tabResourceUri(vscode.window.tabGroups.activeTabGroup.activeTab?.input);
+  const selected = selectedUriArguments(commandArgs[0], commandArgs[1]);
   const direct = choosePdfUriInput({
     ...(active === undefined ? {} : { active }),
     selected,
@@ -148,14 +188,42 @@ async function openSourceLocation(
   binding: ReviewBinding,
   location: { readonly sourcePath: string; readonly line: number; readonly column?: number },
 ): Promise<void> {
-  if (!vscode.workspace.isTrusted || binding.sourceRoot === undefined ||
-    !isPathInside(binding.sourceRoot, location.sourcePath)) {
+  const sourcePath = binding.sourceRoot === undefined
+    ? undefined
+    : containedSourcePath(binding.sourceRoot, location.sourcePath);
+  if (!vscode.workspace.isTrusted || sourcePath === undefined) {
     throw new Error("Source navigation is unavailable in this workspace");
   }
-  const document = await vscode.workspace.openTextDocument(vscode.Uri.file(location.sourcePath));
+  const document = await vscode.workspace.openTextDocument(vscode.Uri.file(sourcePath));
   const editor = await vscode.window.showTextDocument(document, { preview: true, preserveFocus: false });
   const position = new vscode.Position(Math.max(0, location.line - 1), Math.max(0, (location.column ?? 1) - 1));
+  editor.selection = new vscode.Selection(position, position);
   editor.revealRange(new vscode.Range(position, position));
+}
+
+async function revealForwardSyncTexTarget(
+  panel: vscode.WebviewPanel,
+  runtime: PanelRuntime,
+): Promise<ForwardSyncTexStatus> {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const result = await runtime.client.invoke("forwardSyncTex", {}, new AbortController().signal);
+    const target = forwardSyncTexTarget(result);
+    if (target !== undefined) {
+      await panel.webview.postMessage({
+        protocol: WEBVIEW_RPC_PROTOCOL,
+        version: WEBVIEW_RPC_VERSION,
+        kind: "event",
+        event: "host-command",
+        panelId: runtime.client.identity.panelId,
+        payload: { command: "forward-synctex", ...target },
+      });
+      return "ok";
+    }
+    const status = forwardSyncTexStatus(result) ?? "failed";
+    if (!forwardSyncTexRetryable(result) || attempt === 5) return status;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+  }
+  return "failed";
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -176,39 +244,58 @@ export function activate(context: vscode.ExtensionContext): void {
     binding: ReviewBinding,
     panelKey = randomBytes(18).toString("base64url"),
   ): Promise<void> => {
+    let panelDisposed = false;
+    const earlyDispose = panel.onDidDispose(() => { panelDisposed = true; });
+    const requireOpenPanel = (): void => {
+      if (panelDisposed) throw new Error("The Placekeeper panel was closed during attachment");
+    };
     const error = workspaceError();
     if (error !== undefined) throw new Error(error.message);
     const configured = vscode.workspace.getConfiguration("placekeeper").get<string>("launcherPath");
     const executable = resolveLauncherPath(configured, homedir());
-    let launched = await runLaunchClient(executable, binding.outputPath, binding.sourceRoot, undefined, undefined, "generated-output");
+    let launched = await attachStage("launch", () =>
+      runLaunchClient(executable, binding.outputPath, binding.sourceRoot, undefined, undefined, "generated-output"));
+    requireOpenPanel();
     while (launched.ok && launched.kind === "recovery-offered") {
-      const decision = await vscode.window.showQuickPick(launched.choices, {
+      const recoveryLaunch = launched;
+      const decision = await vscode.window.showQuickPick(recoveryLaunch.choices, {
         title: "Recover Placekeeper draft",
         placeHolder: "Resume, discard, or start an independent review",
       });
       if (decision !== "resume" && decision !== "discard" && decision !== "fork") throw new Error("Recovery was cancelled");
-      launched = await runLaunchClient(executable, binding.outputPath, binding.sourceRoot, undefined, {
+      launched = await attachStage("launch", () => runLaunchClient(executable, binding.outputPath, binding.sourceRoot, undefined, {
         decision,
-        offer: launched.recoveryOffer,
+        offer: recoveryLaunch.recoveryOffer,
         operationId: randomBytes(18).toString("base64url"),
-      }, "generated-output");
+      }, "generated-output"));
+      requireOpenPanel();
     }
-    if (!launched.ok) throw new Error(launched.error.message);
-    const exchanged = await exchangeVscodeLaunch(launched.url);
-    const snapshotRoot = await createPrivateSnapshotDirectory(context.globalStorageUri.fsPath);
+    if (!launched.ok) throw new PresentedLaunchError(launched.error);
+    const exchanged = await attachStage("exchange", () => exchangeVscodeLaunch(launched.url));
+    requireOpenPanel();
+    const snapshotRoot = await attachStage("storage", () =>
+      createPrivateSnapshotDirectory(context.globalStorageUri.fsPath));
+    if (panelDisposed) {
+      await rm(snapshotRoot, { recursive: true, force: true });
+      requireOpenPanel();
+    }
     const installedWebRoot = context.asAbsolutePath("dist/web");
     const developmentWebRoot = resolve(context.asAbsolutePath("."), "../../dist/web");
     const webRoot = existsSync(installedWebRoot) ? installedWebRoot : developmentWebRoot;
-    const assetManifest = parseSharedAssetManifest(JSON.parse(
+    const assetManifest = await attachStage("assets", async () => parseSharedAssetManifest(JSON.parse(
       await readFile(resolve(webRoot, "asset-manifest.json"), "utf8"),
-    ) as unknown);
+    ) as unknown));
+    if (panelDisposed) {
+      await rm(snapshotRoot, { recursive: true, force: true });
+      requireOpenPanel();
+    }
     const webRootUri = vscode.Uri.file(webRoot);
     const snapshotRootUri = vscode.Uri.file(snapshotRoot);
     panel.webview.options = reviewPanelOptions([webRootUri, snapshotRootUri]);
     const resourceUri = (name: string) => panel.webview.asWebviewUri(vscode.Uri.file(resolve(webRoot, name))).toString();
     const panelId = randomBytes(18).toString("base64url");
     let runtime: PanelRuntime;
-    const client = createLoopbackRuntimeClient({
+    const client = await attachStage("runtime", () => createLoopbackRuntimeClient({
       panelId,
       launch: exchanged,
       assets: { pdfiumWasm: resourceUri(assetManifest.pdfiumWasm) },
@@ -221,13 +308,19 @@ export function activate(context: vscode.ExtensionContext): void {
         runtime.lastSourceLocation = location;
         await openSourceLocation(binding, location);
       },
-    });
+    }));
+    if (panelDisposed) {
+      client.dispose();
+      await rm(snapshotRoot, { recursive: true, force: true });
+      requireOpenPanel();
+    }
     const bridge = new VersionedWebviewBridge(client, (message) => panel.webview.postMessage(message));
     const observer = new RebuildObserver({
       outputPath: binding.outputPath,
       initialEpoch: Date.now() * 1_000,
       validate: ({ outputPath, observationEpoch }) => observeLiveDocument(exchanged, { outputPath, observationEpoch }),
-      markPossiblyStale: () => markLiveDocumentPossiblyStale(exchanged).then(() => undefined),
+      markPossiblyStale: ({ observationEpoch }) =>
+        markLiveDocumentPossiblyStale(exchanged, { observationEpoch }).then(() => undefined),
       onCurrentResult: (result) => {
         if (typeof result === "object" && result !== null && (result as { status?: unknown }).status === "committed") {
           observer.noteCurrent();
@@ -245,13 +338,13 @@ export function activate(context: vscode.ExtensionContext): void {
     };
     const disposables: vscode.Disposable[] = [
       watcher,
-      watcher.onDidCreate((uri) => { observer.noteFileEvent("create", uri.fsPath); scheduleFlush(); }),
-      watcher.onDidChange((uri) => { observer.noteFileEvent("change", uri.fsPath); scheduleFlush(); }),
-      watcher.onDidDelete((uri) => { observer.noteFileEvent("delete", uri.fsPath); scheduleFlush(); }),
+      watcher.onDidCreate((uri) => { observer.noteFileEvent(uri.fsPath); scheduleFlush(); }),
+      watcher.onDidChange((uri) => { observer.noteFileEvent(uri.fsPath); scheduleFlush(); }),
+      watcher.onDidDelete((uri) => { observer.noteFileEvent(uri.fsPath); scheduleFlush(); }),
       vscode.workspace.onDidSaveTextDocument((document) => {
         if (document.uri.scheme === "file" && binding.sourceRoot !== undefined &&
           isLatexSourcePath(document.uri.fsPath) && isPathInside(binding.sourceRoot, document.uri.fsPath)) {
-          void observer.noteSourceSaved(document.uri.fsPath);
+          void observer.noteSourceSaved();
         }
       }),
       panel.webview.onDidReceiveMessage((message) => bridge.receive(message)),
@@ -264,9 +357,10 @@ export function activate(context: vscode.ExtensionContext): void {
     const interval = setInterval(() => { void observer.tick(); }, REVALIDATE_INTERVAL_MS);
     interval.unref?.();
     disposables.push({ dispose: () => clearInterval(interval) });
-    runtime = { binding, panelKey, client, observer, registrationId, disposables, snapshotRoot };
+    runtime = { binding, client, registrationId };
     runtimes.set(panel, runtime);
     activePanel = panel;
+    earlyDispose.dispose();
     panel.onDidDispose(() => {
       observer.dispose();
       bridge.dispose();
@@ -276,13 +370,15 @@ export function activate(context: vscode.ExtensionContext): void {
       if (activePanel === panel) activePanel = undefined;
       void rm(snapshotRoot, { recursive: true, force: true });
     });
-    panel.webview.html = buildReviewWebviewHtml({
-      nonce: randomBytes(18).toString("base64url"),
-      panelId,
-      panelKey,
-      scriptUri: resourceUri(assetManifest.app),
-      styleUri: resourceUri(assetManifest.stylesheet),
-      cspSource: panel.webview.cspSource,
+    await attachStage("webview", () => {
+      panel.webview.html = buildReviewWebviewHtml({
+        nonce: randomBytes(18).toString("base64url"),
+        panelId,
+        panelKey,
+        scriptUri: resourceUri(assetManifest.app),
+        styleUri: resourceUri(assetManifest.stylesheet),
+        cspSource: panel.webview.cspSource,
+      });
     });
     await persistPanelBinding(panelKey, binding);
   };
@@ -313,28 +409,69 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   });
 
+  const openPanel = async (
+    binding: ReviewBinding,
+    revealExisting: boolean,
+  ): Promise<vscode.WebviewPanel | undefined> => {
+    try {
+      if (!revealExisting) {
+        const existing = await controller.panelFor(binding.outputPath);
+        if (existing !== undefined) return existing;
+      }
+      return await controller.open(binding);
+    }
+    catch (error) {
+      if (error instanceof PresentedLaunchError) await showSharedError(error.presentation);
+      else {
+        const stage = error instanceof PanelAttachError ? error.stage : "unknown";
+        const reason = error instanceof PanelAttachError && error.safeReason !== undefined
+          ? `: ${error.safeReason}`
+          : "";
+        console.error(`[Placekeeper] embedded panel attach failed during ${stage}${reason}`);
+        await showSharedError(INPUT_UNAVAILABLE);
+      }
+      return undefined;
+    }
+  };
+
   const view = async (...args: unknown[]): Promise<vscode.WebviewPanel | undefined> => {
     const error = workspaceError();
     if (error !== undefined) { await showSharedError(error); return undefined; }
     const binding = await chooseBinding(args);
     if (binding === undefined) return undefined;
-    try {
-      const panel = await controller.open(binding);
-      await runtimes.get(panel)?.observer.revalidate("reveal");
-      return panel;
-    }
-    catch { await showSharedError(INPUT_UNAVAILABLE); return undefined; }
+    return openPanel(binding, true);
   };
 
   for (const command of VIEW_COMMANDS) context.subscriptions.push(vscode.commands.registerCommand(command, view));
   context.subscriptions.push(
     vscode.commands.registerCommand("placekeeper.forwardSyncTex", async (...args: unknown[]) => {
-      if (!vscode.workspace.isTrusted) { await vscode.window.showWarningMessage("Trust this workspace to run SyncTeX."); return; }
-      const panel = await view(...args);
+      if (!vscode.workspace.isTrusted) {
+        void vscode.window.showWarningMessage("Trust this workspace to run SyncTeX.");
+        return false;
+      }
+      const error = workspaceError();
+      if (error !== undefined) { await showSharedError(error); return false; }
+      const binding = await chooseBinding(args);
+      if (binding === undefined) return false;
+      // Reuse without revealing first: revealing activates rebuild validation,
+      // which must not queue ahead of a source-to-PDF navigation request.
+      const panel = await openPanel(binding, false);
       const runtime = panel === undefined ? undefined : runtimes.get(panel);
-      if (runtime === undefined) return;
-      try { await runtime.client.invoke("forwardSyncTex", {}, new AbortController().signal); }
-      catch { await vscode.window.showWarningMessage("Forward SyncTeX is unavailable. PDF review remains available."); }
+      if (panel === undefined || runtime === undefined) return false;
+      try {
+        const status = await revealForwardSyncTexTarget(panel, runtime);
+        if (status !== "ok") {
+          void vscode.window.showWarningMessage("Forward SyncTeX could not find this source location. PDF review remains available.");
+          return status;
+        }
+        panel.reveal(panel.viewColumn, false);
+        activePanel = panel;
+        return status;
+      }
+      catch {
+        void vscode.window.showWarningMessage("Forward SyncTeX is unavailable. PDF review remains available.");
+        return "failed";
+      }
     }),
     vscode.commands.registerCommand("placekeeper.goToSource", async () => {
       const runtime = activePanel === undefined ? undefined : runtimes.get(activePanel);
@@ -375,11 +512,18 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       const configuration = vscode.workspace.getConfiguration();
-      const prior = Object.fromEntries(LATEX_WORKSHOP_OWNED_SETTINGS.map((key) => [
+      const current = Object.fromEntries(LATEX_WORKSHOP_OWNED_SETTINGS.map((key) => [
         key, configuration.inspect(key)?.workspaceValue,
       ])) as unknown as WorkspaceSettingValues;
-      const launcher = vscode.workspace.getConfiguration("placekeeper").get<string>("externalLauncherPath");
-      if (launcher === undefined || launcher.length === 0 || !existsSync(launcher)) {
+      const prior = compatibilityPrior(
+        current,
+        context.workspaceState.get<CompatibilitySetupRecord>(COMPATIBILITY_SETUP_KEY),
+      );
+      const launcher = resolveExternalLauncherPath(
+        vscode.workspace.getConfiguration("placekeeper").get<string>("externalLauncherPath"),
+        homedir(),
+      );
+      if (!existsSync(launcher)) {
         await vscode.window.showWarningMessage("The scoped LaTeX Workshop compatibility launcher is not installed. Placekeeper View PDF and Forward SyncTeX remain available.");
         return;
       }
@@ -407,6 +551,28 @@ export function activate(context: vscode.ExtensionContext): void {
         await configuration.update(key, value, vscode.ConfigurationTarget.Workspace);
       }
       await context.workspaceState.update(COMPATIBILITY_SETUP_KEY, undefined);
+    }),
+    vscode.window.registerUriHandler({
+      async handleUri(uri) {
+        try {
+          const route = parseScopedExternalLaunchUri(uri);
+          const registration = registrations.resolve(route);
+          const panel = await controller.panelFor(registration.canonicalOutputPath);
+          const runtime = panel === undefined ? undefined : runtimes.get(panel);
+          if (panel === undefined || runtime === undefined) throw new Error("The scoped panel registration is stale");
+          panel.reveal(panel.viewColumn, false);
+          activePanel = panel;
+          if (sourceLocation(runtime.binding) !== undefined) {
+            if (await revealForwardSyncTexTarget(panel, runtime) !== "ok") {
+              throw new Error("Forward SyncTeX did not return a target");
+            }
+          }
+        } catch {
+          await vscode.window.showWarningMessage(
+            "The scoped LaTeX Workshop route is unavailable. Use Placekeeper: View PDF or Placekeeper: Forward SyncTeX.",
+          );
+        }
+      },
     }),
     vscode.window.registerWebviewPanelSerializer(PANEL_TYPE, {
       async deserializeWebviewPanel(panel, state) {

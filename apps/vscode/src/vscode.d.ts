@@ -1,7 +1,7 @@
 declare module "vscode" {
   export enum UIKind { Desktop = 1, Web = 2 }
   export enum ConfigurationTarget { Global = 1, Workspace = 2, WorkspaceFolder = 3 }
-  export interface Uri { readonly scheme: string; readonly fsPath: string; readonly path: string; toString(): string }
+  export interface Uri { readonly scheme: string; readonly fsPath: string; readonly path: string; readonly query: string; toString(): string }
   export const Uri: { file(path: string): Uri; joinPath(base: Uri, ...segments: string[]): Uri };
   export interface Disposable { dispose(): unknown }
   export interface Memento { get<T>(key: string): T | undefined; update(key: string, value: unknown): Promise<void> }
@@ -18,7 +18,9 @@ declare module "vscode" {
   export const Position: new (line: number, character: number) => Position;
   export interface Range { readonly start: Position; readonly end: Position }
   export const Range: new (start: Position, end: Position) => Range;
-  export interface TextEditor { readonly document: TextDocument; readonly selection: { readonly active: Position }; revealRange(range: Range): void }
+  export interface Selection { readonly anchor: Position; readonly active: Position }
+  export const Selection: new (anchor: Position, active: Position) => Selection;
+  export interface TextEditor { readonly document: TextDocument; selection: Selection; revealRange(range: Range): void }
   export interface WorkspaceFolder { readonly uri: Uri }
   export interface WorkspaceConfiguration {
     get<T>(key: string): T | undefined;
@@ -59,8 +61,13 @@ declare module "vscode" {
     onDidChangeViewState(listener: (event: { readonly webviewPanel: WebviewPanel }) => unknown): Disposable;
   }
   export interface WebviewPanelSerializer { deserializeWebviewPanel(webviewPanel: WebviewPanel, state: unknown): Promise<void> }
+  export interface UriHandler { handleUri(uri: Uri): unknown }
+  export interface Tab { readonly input: unknown }
+  export interface TabGroup { readonly activeTab?: Tab }
+  export interface TabGroups { readonly activeTabGroup: TabGroup }
   export const window: {
     readonly activeTextEditor?: TextEditor;
+    readonly tabGroups: TabGroups;
     showErrorMessage(message: string, ...actions: string[]): Promise<string | undefined>;
     showWarningMessage(message: string, ...actions: string[]): Promise<string | undefined>;
     showInformationMessage(message: string, ...actions: string[]): Promise<string | undefined>;
@@ -68,6 +75,7 @@ declare module "vscode" {
     showOpenDialog(options: { readonly canSelectMany: false; readonly canSelectFiles: true; readonly canSelectFolders: false; readonly filters: Readonly<Record<string, readonly string[]>> }): Promise<readonly Uri[] | undefined>;
     createWebviewPanel(viewType: string, title: string, column: number, options: unknown): WebviewPanel;
     registerWebviewPanelSerializer(viewType: string, serializer: WebviewPanelSerializer): Disposable;
+    registerUriHandler(handler: UriHandler): Disposable;
     showTextDocument(document: TextDocument, options?: { readonly preview?: boolean; readonly preserveFocus?: boolean }): Promise<TextEditor>;
   };
   export const commands: {

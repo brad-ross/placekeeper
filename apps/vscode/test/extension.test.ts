@@ -3,6 +3,8 @@ import { mkdtemp, readFile, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { createReviewState } from "../../../packages/core/src/review-model.js";
+import { createRpcHostRuntime } from "../../web/src/host/vscode-runtime.js";
 import {
   INPUT_UNAVAILABLE,
   UNSUPPORTED_CONTEXT,
@@ -10,7 +12,10 @@ import {
   classifyWorkspace,
   localSourceRoot,
   resolveSourceOutputBinding,
+  resolveExternalLauncherPath,
   resolveLauncherPath,
+  selectedUriArguments,
+  tabResourceUri,
 } from "../src/local-workspace.js";
 import {
   buildReviewWebviewHtml,
@@ -30,10 +35,23 @@ import {
   WEBVIEW_RPC_PROTOCOL,
   WEBVIEW_RPC_VERSION,
   createLoopbackRuntimeClient,
+  forwardSyncTexRetryable,
+  forwardSyncTexStatus,
+  forwardSyncTexTarget,
   parseWebviewRequest,
+  VersionedWebviewBridge,
 } from "../src/webview-bridge.js";
+import { containedSourcePath } from "../src/latex-project.js";
 
 describe("VS Code local host adapter", () => {
+  it("resolves broker-relative SyncTeX sources only inside the approved root", () => {
+    expect(containedSourcePath("/work/project", "chapters/one.tex"))
+      .toBe("/work/project/chapters/one.tex");
+    expect(containedSourcePath("/work/project", "/work/project/paper.tex"))
+      .toBe("/work/project/paper.tex");
+    expect(containedSourcePath("/work/project", "../secret.tex")).toBeUndefined();
+  });
+
   it("uses Placekeeper for every VS Code identity", async () => {
     const manifest = JSON.parse(
       await readFile(resolve("apps/vscode/package.json"), "utf8"),
@@ -92,16 +110,24 @@ describe("VS Code local host adapter", () => {
 
   it("accepts only the shared production asset manifest", () => {
     expect(parseSharedAssetManifest({
-      schemaVersion: 1,
+      schemaVersion: 2,
       app: "app.js",
       stylesheet: "app.css",
       pdfiumWasm: "pdfium.wasm",
-    })).toMatchObject({ schemaVersion: 1, app: "app.js" });
+      worker: { kind: "inline-blob", container: "app.js" },
+      integrity: {
+        "app.js": "a".repeat(64),
+        "app.css": "b".repeat(64),
+        "pdfium.wasm": "c".repeat(64),
+      },
+    })).toMatchObject({ schemaVersion: 2, app: "app.js" });
     expect(() => parseSharedAssetManifest({
-      schemaVersion: 1,
+      schemaVersion: 2,
       app: "../../secret.js",
       stylesheet: "app.css",
       pdfiumWasm: "pdfium.wasm",
+      worker: { kind: "inline-blob", container: "../../secret.js" },
+      integrity: {},
     })).toThrow(/manifest/u);
   });
 
@@ -110,6 +136,9 @@ describe("VS Code local host adapter", () => {
       .toBe("/custom/Placekeeper.app/placekeeper");
     expect(resolveLauncherPath(undefined, "/Users/reader")).toBe(
       "/Users/reader/Applications/Placekeeper.app/Contents/MacOS/placekeeper",
+    );
+    expect(resolveExternalLauncherPath(undefined, "/Users/reader")).toBe(
+      "/Users/reader/Applications/Placekeeper.app/Contents/MacOS/placekeeper-vscode",
     );
   });
 
@@ -126,6 +155,21 @@ describe("VS Code local host adapter", () => {
     expect(choosePdfInput({ selected: [] })).toEqual(INPUT_UNAVAILABLE);
     expect(choosePdfInput({ selected: [{ scheme: "file", fsPath: "/tmp/a.pdf" }, { scheme: "file", fsPath: "/tmp/b.pdf" }] })).toEqual(INPUT_UNAVAILABLE);
     expect(choosePdfInput({ selected: [{ scheme: "https", fsPath: "/tmp/paper.pdf" }] })).toEqual(INPUT_UNAVAILABLE);
+  });
+
+  it("reads the active resource from custom editor tabs", () => {
+    const uri = { scheme: "file", fsPath: "/tmp/paper.pdf" };
+    expect(tabResourceUri({ uri })).toEqual(uri);
+    expect(tabResourceUri({ uri: { scheme: "file" } })).toBeUndefined();
+    expect(tabResourceUri({ modified: uri })).toBeUndefined();
+    expect(tabResourceUri(null)).toBeUndefined();
+  });
+
+  it("ignores internal command values so the active resource remains usable", () => {
+    const pdf = { scheme: "file", fsPath: "/work/paper.pdf" };
+    expect(selectedUriArguments({ command: "placekeeper.viewPdf" }, undefined)).toEqual([]);
+    expect(selectedUriArguments(pdf, undefined)).toEqual([pdf]);
+    expect(selectedUriArguments(undefined, [{ id: "internal" }, pdf])).toEqual([pdf]);
   });
 
   it("accepts only structured loopback launch results and emits a direct, network-denying webview", () => {
@@ -150,6 +194,20 @@ describe("VS Code local host adapter", () => {
     expect(html).not.toContain("127.0.0.1");
     expect(html).not.toContain("localhost");
     expect(html).not.toContain("cap=secret");
+    expect(() => buildReviewWebviewHtml({
+      nonce: "nonce-value",
+      panelId: "panel_identifier_1234",
+      scriptUri: "https://file+.vscode-resource.vscode-cdn.net/assets/app.js",
+      styleUri: "https://file+.vscode-resource.vscode-cdn.net/assets/app.css",
+      cspSource: "'self' https://*.vscode-cdn.net",
+    })).not.toThrow();
+    expect(() => buildReviewWebviewHtml({
+      nonce: "nonce-value",
+      panelId: "panel_identifier_1234",
+      scriptUri: "vscode-webview://authority/assets/app.js",
+      styleUri: "vscode-webview://authority/assets/app.css",
+      cspSource: "'self' https://*.vscode-cdn.net https://example.com",
+    })).toThrow(/CSP source/u);
     const options = reviewPanelOptions([]);
     expect(options.localResourceRoots).toEqual([]);
     expect(options.enableScripts).toBe(true);
@@ -178,6 +236,60 @@ describe("VS Code local host adapter", () => {
       payload: {},
     };
     expect(parseWebviewRequest(request, expected, new Set())).toEqual(request);
+  });
+
+  it("rehydrates through the real bridge with an identity-free successor bootstrap", async () => {
+    const panelId = "panel_identifier_1234";
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const identity = { panelId, sessionId, generation: 1, revision: 0 };
+    const listeners = new Set<(message: unknown) => void>();
+    const bootstrap = vi.fn(async () => {
+      const state = createReviewState({
+        sessionId,
+        source: {
+          fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          digest: String(identity.generation).repeat(64),
+          byteLength: identity.generation,
+        },
+        workflowMode: "generated-output",
+        documentGeneration: identity.generation,
+      });
+      return {
+        sessionId,
+        generation: identity.generation,
+        revision: identity.revision,
+        state: { ...state, revision: identity.revision },
+        scope: { documentTitle: "paper.pdf", launchSurface: "vscode" },
+        saveStatus: {},
+        resources: {
+          document: `vscode-webview://authority/snapshot-${identity.generation}.pdf`,
+          pdfiumWasm: "vscode-webview://authority/pdfium.wasm",
+        },
+      };
+    });
+    const bridge = new VersionedWebviewBridge({
+      identity,
+      bootstrap,
+      invoke: vi.fn(async () => ({})),
+      dispose: vi.fn(),
+    }, (message) => listeners.forEach((listener) => listener(message)));
+    const runtime = createRpcHostRuntime({
+      panelId,
+      postMessage: (message) => { void bridge.receive(message); },
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    });
+
+    await expect(runtime.bootstrap()).resolves.toMatchObject({ generation: 1 });
+    identity.generation = 2;
+    identity.revision = 3;
+    await expect(runtime.bootstrap()).resolves.toMatchObject({ generation: 2, revision: 3 });
+    expect(bootstrap).toHaveBeenCalledTimes(2);
+
+    runtime.dispose();
+    bridge.dispose();
   });
 
   it.each([
@@ -316,27 +428,35 @@ describe("VS Code local host adapter", () => {
       credential: "c".repeat(43),
     };
     await observeLiveDocument(launch, { outputPath: "/tmp/paper.pdf", observationEpoch: 4 }, fetch);
-    await markLiveDocumentPossiblyStale(launch, fetch);
+    await markLiveDocumentPossiblyStale(launch, { observationEpoch: 5 }, fetch);
     expect(fetch.mock.calls[0]![0]).toBe(`${launch.origin}/s/${launch.sessionId}/observe`);
     expect(fetch.mock.calls[0]![1]).toMatchObject({
       method: "POST",
-      headers: expect.objectContaining({ authorization: `Bearer ${launch.credential}` }),
+      headers: expect.objectContaining({
+        authorization: `Bearer ${launch.credential}`,
+        origin: launch.origin,
+      }),
     });
     expect(fetch.mock.calls[1]![0]).toBe(`${launch.origin}/s/${launch.sessionId}/stale`);
+    expect(fetch.mock.calls[1]![1]).toMatchObject({ body: JSON.stringify({ observationEpoch: 5 }) });
   });
 
   it("keeps absolute SyncTeX source paths in the trusted extension host", async () => {
     const opened = vi.fn(async () => undefined);
     const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.headers).toEqual(expect.objectContaining({ origin: "http://127.0.0.1:49152" }));
       const path = new URL(String(url)).pathname;
       if (path.endsWith("/synctex/forward")) {
         expect(JSON.parse(String(init?.body))).toMatchObject({
           sourcePath: "/work/paper.tex", line: 12, column: 4,
         });
-        return new Response(JSON.stringify({ status: "ok", pageIndex: 0, point: { x: 1, y: 2 } }));
+        return new Response(JSON.stringify({ status: "ok", target: { pageIndex: 0, x: 1, y: 2 } }));
       }
       return new Response(JSON.stringify({
-        status: "ok", sourcePath: "/work/paper.tex", line: 12, column: 4,
+        status: "ok",
+        target: {
+          path: "/work/paper.tex", line: 12, column: 4, confidence: "high", provenance: "synctex",
+        },
       }));
     });
     const client = createLoopbackRuntimeClient({
@@ -353,10 +473,20 @@ describe("VS Code local host adapter", () => {
       fetch,
     });
     await expect(client.invoke("forwardSyncTex", {}, new AbortController().signal))
-      .resolves.toMatchObject({ status: "ok", pageIndex: 0 });
-    await expect(client.invoke("reverseSyncTex", { pageIndex: 0, point: { x: 1, y: 2 } }, new AbortController().signal))
-      .resolves.not.toHaveProperty("sourcePath");
+      .resolves.toMatchObject({ status: "ok", target: { pageIndex: 0, x: 1, y: 2 } });
+    const reverse = await client.invoke("reverseSyncTex", { pageIndex: 0, point: { x: 1, y: 2 } }, new AbortController().signal);
+    expect(reverse).toMatchObject({ target: { line: 12, column: 4 } });
+    expect(reverse).not.toHaveProperty("target.path");
     expect(opened).toHaveBeenCalledWith({ sourcePath: "/work/paper.tex", line: 12, column: 4 });
+    expect(forwardSyncTexTarget({ status: "ok", target: { pageIndex: 2, x: 10, y: 20 } }))
+      .toEqual({ pageIndex: 2, point: { x: 10, y: 20 } });
+    expect(forwardSyncTexTarget({ status: "ok", target: { pageIndex: -1, x: 10, y: 20 } }))
+      .toBeUndefined();
+    expect(forwardSyncTexRetryable({ status: "pending" })).toBe(true);
+    expect(forwardSyncTexRetryable({ status: "stale" })).toBe(true);
+    expect(forwardSyncTexRetryable({ status: "missing" })).toBe(false);
+    expect(forwardSyncTexStatus({ status: "out-of-root" })).toBe("out-of-root");
+    expect(forwardSyncTexStatus({ status: "other" })).toBeUndefined();
   });
 
   it("exchanges the one-use launch capability only in the extension host", async () => {
@@ -374,7 +504,10 @@ describe("VS Code local host adapter", () => {
     });
     expect(fetch).toHaveBeenCalledWith(
       "http://127.0.0.1:49152/s/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/exchange",
-      expect.objectContaining({ body: JSON.stringify({ capability: "one_use_capability" }) }),
+      expect.objectContaining({
+        body: JSON.stringify({ capability: "one_use_capability" }),
+        headers: expect.objectContaining({ origin: "http://127.0.0.1:49152" }),
+      }),
     );
   });
 

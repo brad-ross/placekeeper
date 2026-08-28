@@ -48,6 +48,24 @@ describe("review panel controller", () => {
     expect(detach).toHaveBeenCalledWith("/a/paper.pdf");
   });
 
+  it("shares one in-flight panel creation across concurrent opens", async () => {
+    const pending = Promise.withResolvers<ReturnType<typeof fakePanel>>();
+    const create = vi.fn(() => pending.promise);
+    const controller = new ReviewPanelController({
+      canonicalize: async (path) => path.toLowerCase(),
+      create,
+    });
+
+    const first = controller.open({ outputPath: "/Work/Paper.pdf" });
+    const second = controller.open({ outputPath: "/work/paper.pdf" });
+    await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
+    const panel = fakePanel();
+    pending.resolve(panel);
+
+    await expect(Promise.all([first, second])).resolves.toEqual([panel, panel]);
+    expect(create).toHaveBeenCalledOnce();
+  });
+
   it("restores from an opaque panel key through a fresh attachment", async () => {
     const attachRestored = vi.fn(async () => undefined);
     const controller = new ReviewPanelController({
@@ -60,5 +78,26 @@ describe("review panel controller", () => {
     await expect(controller.restore(panel, { panelKey: "opaque-panel-key", pageIndex: 8, zoom: 1.25 }))
       .resolves.toEqual({ status: "restored", outputPath: "/work/paper.pdf" });
     expect(attachRestored).toHaveBeenCalledWith(panel, { outputPath: "/work/paper.pdf" }, { pageIndex: 8, zoom: 1.25 });
+  });
+
+  it("fails closed for malformed, unavailable, and rejected restoration state", async () => {
+    const attachRestored = vi.fn(async () => { throw new Error("attachment failed"); });
+    const controller = new ReviewPanelController({
+      canonicalize: async (path) => path,
+      create: async () => fakePanel(),
+      resolvePanelKey: async (key) => key === "available-panel-key"
+        ? { outputPath: "/work/paper.pdf" }
+        : undefined,
+      attachRestored,
+    });
+    const panel = fakePanel();
+
+    await expect(controller.restore(panel, { panelKey: "bad", pageIndex: -1 }))
+      .resolves.toEqual({ status: "retry", reason: "panel-state-is-unavailable" });
+    await expect(controller.restore(panel, { panelKey: "missing-panel-key" }))
+      .resolves.toEqual({ status: "retry", reason: "panel-output-is-unavailable" });
+    await expect(controller.restore(panel, { panelKey: "available-panel-key" }))
+      .resolves.toEqual({ status: "retry", reason: "panel-reattachment-failed" });
+    await expect(controller.panelFor("/work/paper.pdf")).resolves.toBeUndefined();
   });
 });

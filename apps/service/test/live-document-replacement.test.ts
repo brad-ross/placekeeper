@@ -70,6 +70,29 @@ function selectionItem(id: string, quote: string, prefix = "", suffix = ""): Rev
 }
 
 describe("atomic live document replacement", () => {
+  it("shares one canonical lineage across concurrent opens", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "placekeeper-concurrent-open-"));
+    temporaryDirectories.push(directory);
+    const pdfPath = join(directory, "paper.pdf");
+    await writeFile(pdfPath, "%PDF-1.7\ngenerated\n%%EOF");
+    const broker = new SessionBroker({
+      recoveryRoot: join(directory, "recovery"),
+      portableReader: async () => [],
+      rewriteAssessor: async () => ({ eligible: true }),
+    });
+
+    const [first, second] = await Promise.all([
+      broker.openReview({ pdfPath, surface: "vscode", workflowMode: "generated-output" }),
+      broker.openReview({ pdfPath, surface: "browser", workflowMode: "generated-output" }),
+    ]);
+
+    if (first.kind === "recovery-offered" || second.kind === "recovery-offered") {
+      throw new Error("Concurrent clean opens must not offer recovery");
+    }
+    expect(new Set([first.launch.sessionId, second.launch.sessionId]).size).toBe(1);
+    expect([first.kind, second.kind].toSorted()).toEqual(["focused", "opened"]);
+  });
+
   it("marks a bound source save possibly stale without replacing the last successful PDF", async () => {
     const controls = new SessionControlRegistry({ heartbeat: false });
     const invalidated = vi.spyOn(controls, "publishStateInvalidation");
@@ -84,6 +107,32 @@ describe("atomic live document replacement", () => {
       reviewRevision: 0,
       reason: "freshness",
     });
+  });
+
+  it("lets a newer source-save epoch supersede an older rebuild candidate", async () => {
+    const inspection = Promise.withResolvers<{
+      pageCount: number;
+      pages: readonly { pageIndex: number; text: string }[];
+    }>();
+    const inspectGeneration = vi.fn(() => inspection.promise);
+    const value = await fixture({ inspectGeneration });
+    await writeFile(value.pdfPath, value.successor);
+
+    const replacement = value.broker.replaceLiveDocument({
+      sessionId: value.launch.sessionId,
+      outputPath: value.pdfPath,
+      observationEpoch: 1,
+    });
+    await vi.waitFor(() => expect(inspectGeneration).toHaveBeenCalledOnce());
+    await value.broker.markLiveDocumentPossiblyStale(value.launch.sessionId, 2);
+    inspection.resolve({ pageCount: 1, pages: [{ pageIndex: 0, text: "new" }] });
+
+    await expect(replacement).resolves.toMatchObject({ status: "superseded" });
+    expect(value.broker.state(value.launch.sessionId)?.workflow).toMatchObject({
+      documentGeneration: 1,
+      freshness: "possibly-stale",
+    });
+    await expect(value.broker.documentBytes(value.launch.sessionId)).resolves.toEqual(value.original);
   });
 
   it("publishes a bounded same-generation revision invalidation after a human review command", async () => {
@@ -130,6 +179,9 @@ describe("atomic live document replacement", () => {
       value.launch.fragment.slice("#cap=".length),
     )).toBeUndefined();
     await expect(value.broker.documentBytes(value.launch.sessionId)).resolves.toEqual(value.successor);
+    await expect(value.broker.documentBytes(value.launch.sessionId, 1)).resolves.toEqual(value.original);
+    await expect(value.broker.documentBytes(value.launch.sessionId, 2)).resolves.toEqual(value.successor);
+    await expect(value.broker.documentBytes(value.launch.sessionId, 3)).resolves.toBeUndefined();
     await expect(readFile(value.pdfPath)).resolves.toEqual(value.successor);
   });
 
@@ -138,8 +190,28 @@ describe("atomic live document replacement", () => {
       inspectGeneration: async () => ({
         pageCount: 2,
         pages: [
-          { pageIndex: 0, text: "before stable claim after; repeated claim repeated claim" },
-          { pageIndex: 1, text: "other content" },
+          {
+            pageIndex: 0,
+            text: "before stable claim after; repeated claim repeated claim",
+            geometry: [{
+              charStart: 0,
+              glyphs: Array.from(
+                "before stable claim after; repeated claim repeated claim",
+                (_, index) => ({ x: 40 + index * 5, y: 72, width: 5, height: 9 }),
+              ),
+            }],
+          },
+          {
+            pageIndex: 1,
+            text: "other content",
+            geometry: [{
+              charStart: 0,
+              glyphs: Array.from(
+                "other content",
+                (_, index) => ({ x: 40 + index * 5, y: 72, width: 5, height: 9 }),
+              ),
+            }],
+          },
         ],
       }),
     });
@@ -171,6 +243,10 @@ describe("atomic live document replacement", () => {
     ]);
     expect(items[0]?.reconciliation).toMatchObject({
       disposition: { kind: "resolved", generation: 2 },
+      anchor: {
+        rect: { x: 75, y: 72, width: 60, height: 9 },
+        segmentRects: [{ x: 75, y: 72, width: 60, height: 9 }],
+      },
       previousAnchors: [{ generation: 1, disposition: { kind: "resolved", generation: 1 } }],
     });
     expect(items[1]?.reconciliation?.anchor).toMatchObject({ quote: "repeated claim", pageIndex: 0 });

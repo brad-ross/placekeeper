@@ -354,10 +354,10 @@ describe("loopback HTTP boundary", () => {
       sourcePath: join(dirname(pdf), "paper.tex"),
       line: 1,
     })).status).toBe(401);
-    expect((await postJson(staleUrl, {}, { authorization: `Bearer ${credential}` })).status).toBe(200);
+    expect((await postJson(staleUrl, { observationEpoch: 1 }, { authorization: `Bearer ${credential}` })).status).toBe(200);
     const observed = await postJson(
       observeUrl,
-      { outputPath: pdf, observationEpoch: 1 },
+      { outputPath: pdf, observationEpoch: 2 },
       { authorization: `Bearer ${credential}` },
     );
     expect(observed.status).toBe(200);
@@ -543,11 +543,15 @@ describe("loopback HTTP boundary", () => {
     expect(asset.status).toBe(401);
     expect((await fetch(`${server.origin}/assets/app.js`)).status).toBe(200);
     const document = await fetch(
-      `${server.origin}/s/${launch.sessionId}/document/${launch.fileId}`,
+      `${server.origin}/s/${launch.sessionId}/document/${launch.fileId}?generation=1`,
       { headers: authorization },
     );
     expect(document.status).toBe(200);
     expect(await document.text()).toContain("private document text");
+    expect((await fetch(
+      `${server.origin}/s/${launch.sessionId}/document/${launch.fileId}?generation=2`,
+      { headers: authorization },
+    )).status).toBe(404);
     const arbitrary = await fetch(
       `${server.origin}/s/${launch.sessionId}/document/${randomUUID()}`,
       { headers: authorization },

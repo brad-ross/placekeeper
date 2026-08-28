@@ -63,7 +63,6 @@ import {
   assessPdfRewriteEligibility,
   migrateLegacyReviewStateGeometry,
   readPortableReviewItems,
-  inspectPdfWithEmbedPdf,
 } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { SessionControlRegistry } from "./control-socket.js";
 import { TaskBindingRegistry } from "../context/task-binding-registry.js";
@@ -377,6 +376,7 @@ export class SessionBroker {
   readonly #activeById = new Map<string, ActiveSession>();
   readonly #activeBySource = new Map<string, string>();
   readonly #activeByOutputPath = new Map<string, string>();
+  readonly #openingByOutputPath = new Map<string, Promise<void>>();
   readonly #bootstrapScopes = new Map<string, BrowserLaunchScope>();
   readonly #credentialScopes = new Map<string, BrowserLaunchScope>();
   readonly #viewsById = new Map<string, BrowserViewRecord>();
@@ -421,9 +421,8 @@ export class SessionBroker {
       throw new RangeError("maxGenerationCount must be a positive safe integer");
     }
     this.#inspectGeneration = options.inspectGeneration ?? (async (bytes) => {
-      const inspected = await inspectPdfWithEmbedPdf(bytes);
       const pages = await inspectPdfPageTexts(bytes);
-      return { pageCount: inspected.pageCount, pages };
+      return { pageCount: pages.length, pages };
     });
   }
 
@@ -545,7 +544,7 @@ export class SessionBroker {
         this.capabilities.revokeFile(approvedFile.id);
         throw new Error("Recovery identity requires an exact recovery choice");
       }
-      return this.#openApprovedReview(request, approvedFile, sourceDigest);
+      return this.#openApprovedReviewSingleFlight(request, approvedFile, sourceDigest);
     }
     const boundRecovery = request.recoveryOffer !== undefined &&
       request.recoveryOperationId !== undefined;
@@ -1008,6 +1007,28 @@ export class SessionBroker {
       kind: "opened",
       launch: this.#launch(session, request.surface ?? "browser", request.requestedLocation),
     };
+  }
+
+  async #openApprovedReviewSingleFlight(
+    request: OpenReviewRequest,
+    approvedFile: { readonly id: string; readonly canonicalPath: string },
+    sourceDigest: string,
+  ): Promise<OpenReviewResult> {
+    const current = this.#openingByOutputPath.get(approvedFile.canonicalPath);
+    if (current !== undefined) {
+      await current;
+      return this.#openApprovedReview(request, approvedFile, sourceDigest);
+    }
+    const opened = this.#openApprovedReview(request, approvedFile, sourceDigest);
+    const completion = opened.then(() => undefined, () => undefined);
+    this.#openingByOutputPath.set(approvedFile.canonicalPath, completion);
+    try {
+      return await opened;
+    } finally {
+      if (this.#openingByOutputPath.get(approvedFile.canonicalPath) === completion) {
+        this.#openingByOutputPath.delete(approvedFile.canonicalPath);
+      }
+    }
   }
 
   async #attachSourceRoot(session: ActiveSession, sourceRootPath: string): Promise<void> {
@@ -2084,7 +2105,7 @@ export class SessionBroker {
     return result;
   }
 
-  async markLiveDocumentPossiblyStale(sessionId: string): Promise<{
+  async markLiveDocumentPossiblyStale(sessionId: string, observationEpoch?: number): Promise<{
     readonly status: "possibly-stale";
     readonly sessionId: string;
     readonly documentGeneration: number;
@@ -2094,9 +2115,22 @@ export class SessionBroker {
     if (session.state.workflow.mode !== "generated-output") {
       throw new Error("Freshness observation requires generated-output review mode");
     }
+    if (observationEpoch !== undefined &&
+      (!Number.isSafeInteger(observationEpoch) || observationEpoch <= 0)) {
+      throw new RangeError("observationEpoch must be a positive safe integer");
+    }
     let invalidation: { readonly documentGeneration: number; readonly reviewRevision: number } | undefined;
     const result = await this.#withSessionTail(session, async () => {
       if (session.ending) throw new Error("Review session is ending");
+      const epoch = observationEpoch ?? session.latestObservationEpoch + 1;
+      if (epoch < session.latestObservationEpoch) {
+        return {
+          status: "possibly-stale" as const,
+          sessionId: session.id,
+          documentGeneration: session.state.workflow.documentGeneration,
+        };
+      }
+      session.latestObservationEpoch = Math.max(session.latestObservationEpoch, epoch);
       if (session.state.workflow.freshness !== "possibly-stale") {
         const state: ReviewState = {
           ...session.state,
@@ -2288,10 +2322,13 @@ export class SessionBroker {
     });
   }
 
-  async documentBytes(sessionId: string): Promise<Buffer | undefined> {
+  async documentBytes(sessionId: string, generation?: number): Promise<Buffer | undefined> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined) return undefined;
-    return readFile(session.sourceSnapshotPath);
+    if (generation === undefined) return readFile(session.sourceSnapshotPath);
+    if (!Number.isSafeInteger(generation) || generation <= 0) return undefined;
+    const record = session.generationLineage.find((candidate) => candidate.generation === generation);
+    return record === undefined ? undefined : readFile(record.snapshotPath).catch(() => undefined);
   }
 
   /** Capture a lightweight, internally consistent session snapshot. The write

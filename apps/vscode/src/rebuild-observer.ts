@@ -1,6 +1,5 @@
 import { dirname, extname, resolve } from "node:path";
 
-export type ObservedFileEvent = "create" | "change" | "delete";
 export type ValidationReason = "watcher" | "reveal" | "activation" | "interval";
 
 export interface RebuildValidationInput {
@@ -12,7 +11,7 @@ export interface RebuildValidationInput {
 export interface RebuildObserverOptions<Result> {
   readonly outputPath: string;
   readonly validate: (input: RebuildValidationInput) => Promise<Result>;
-  readonly markPossiblyStale: () => Promise<void>;
+  readonly markPossiblyStale: (input: { readonly observationEpoch: number }) => Promise<void>;
   readonly onCurrentResult?: (result: Result) => void;
   readonly initialEpoch?: number;
 }
@@ -48,7 +47,7 @@ export class RebuildObserver<Result> {
   get directory(): string { return dirname(this.#outputPath); }
   get possiblyStale(): boolean { return this.#possiblyStale; }
 
-  noteFileEvent(_kind: ObservedFileEvent, path: string): number | undefined {
+  noteFileEvent(path: string): number | undefined {
     if (this.#disposed || !this.#watchedPaths.has(resolve(path))) return undefined;
     this.#latestEpoch += 1;
     this.#pendingWatcherEpoch = this.#latestEpoch;
@@ -62,10 +61,11 @@ export class RebuildObserver<Result> {
     await this.#run(epoch, "watcher");
   }
 
-  async noteSourceSaved(_sourcePath: string): Promise<void> {
+  async noteSourceSaved(): Promise<void> {
     if (this.#disposed) return;
+    this.#latestEpoch += 1;
     this.#possiblyStale = true;
-    await this.#markPossiblyStale();
+    await this.#markStale(this.#latestEpoch);
   }
 
   async revalidate(reason: Extract<ValidationReason, "reveal" | "activation">): Promise<void> {
@@ -84,8 +84,25 @@ export class RebuildObserver<Result> {
   dispose(): void { this.#disposed = true; }
 
   async #run(epoch: number, reason: ValidationReason): Promise<void> {
-    const result = await this.#validate({ outputPath: this.#outputPath, observationEpoch: epoch, reason });
+    let result: Result;
+    try {
+      result = await this.#validate({ outputPath: this.#outputPath, observationEpoch: epoch, reason });
+    } catch {
+      if (!this.#disposed && epoch === this.#latestEpoch) {
+        this.#possiblyStale = true;
+        await this.#markStale(epoch);
+      }
+      return;
+    }
     if (this.#disposed || epoch !== this.#latestEpoch) return;
     this.#onCurrentResult?.(result);
+  }
+
+  async #markStale(observationEpoch: number): Promise<void> {
+    try {
+      await this.#markPossiblyStale({ observationEpoch });
+    } catch {
+      // Local stale state remains authoritative until a later validation succeeds.
+    }
   }
 }

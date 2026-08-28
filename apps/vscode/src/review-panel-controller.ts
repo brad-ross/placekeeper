@@ -31,6 +31,7 @@ export interface ReviewPanelControllerOptions<Panel extends ReviewPanelLike> {
 export class ReviewPanelController<Panel extends ReviewPanelLike> {
   readonly #options: ReviewPanelControllerOptions<Panel>;
   readonly #panels = new Map<string, Panel>();
+  readonly #opening = new Map<string, Promise<Panel>>();
 
   constructor(options: ReviewPanelControllerOptions<Panel>) {
     this.#options = options;
@@ -43,10 +44,21 @@ export class ReviewPanelController<Panel extends ReviewPanelLike> {
       existing.reveal(existing.viewColumn, options.preserveFocus ?? false);
       return existing;
     }
+    const opening = this.#opening.get(canonicalOutputPath);
+    if (opening !== undefined) return opening;
     const canonicalBinding = { ...binding, outputPath: canonicalOutputPath };
-    const panel = await this.#options.create(canonicalBinding, "beside");
-    this.#bind(canonicalOutputPath, panel);
-    return panel;
+    const created = this.#options.create(canonicalBinding, "beside").then((panel) => {
+      this.#bind(canonicalOutputPath, panel);
+      return panel;
+    });
+    this.#opening.set(canonicalOutputPath, created);
+    try {
+      return await created;
+    } finally {
+      if (this.#opening.get(canonicalOutputPath) === created) {
+        this.#opening.delete(canonicalOutputPath);
+      }
+    }
   }
 
   async restore(

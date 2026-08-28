@@ -3,6 +3,7 @@
   "displayName": "Placekeeper",
   "description": "Review generated LaTeX PDFs with Placekeeper inside VS Code.",
   "version": "0.1.0",
+  "type": "module",
   "publisher": "placekeeper-local",
   "icon": "assets/placekeeper.png",
   "private": true,
@@ -18,7 +19,8 @@
     "onCommand:placekeeper.exportReviewedPdf",
     "onCommand:placekeeper.configureLatexWorkshop",
     "onCommand:placekeeper.restoreLatexWorkshop",
-    "onWebviewPanel:placekeeper.review"
+    "onWebviewPanel:placekeeper.review",
+    "onUri"
   ],
   "contributes": {
     "commands": [

@@ -31,8 +31,50 @@ export interface WebviewRpcRequest {
   readonly payload: unknown;
 }
 
+export interface ForwardSyncTexTarget {
+  readonly pageIndex: number;
+  readonly point: { readonly x: number; readonly y: number };
+}
+
+const FORWARD_SYNC_TEX_STATUS_VALUES = [
+  "ok", "missing", "pending", "stale", "ambiguous", "out-of-root",
+  "unavailable-tool", "timeout", "oversized", "malformed", "failed",
+] as const;
+
+export type ForwardSyncTexStatus = typeof FORWARD_SYNC_TEX_STATUS_VALUES[number];
+
+const FORWARD_SYNC_TEX_STATUSES = new Set<string>(FORWARD_SYNC_TEX_STATUS_VALUES);
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function safeRuntimeRequestFailure(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown";
+  if (/^Trusted broker request failed \([1-5][0-9]{2}\)$/u.test(error.message) ||
+    error.message === "Source navigation is unavailable in this workspace") return error.message;
+  return error.name;
+}
+
+export function forwardSyncTexTarget(value: unknown): ForwardSyncTexTarget | undefined {
+  if (!isObject(value) || value.status !== "ok" || !isObject(value.target) ||
+    !Number.isSafeInteger(value.target.pageIndex) || (value.target.pageIndex as number) < 0 ||
+    !Number.isFinite(value.target.x) || !Number.isFinite(value.target.y)) return undefined;
+  return {
+    pageIndex: value.target.pageIndex as number,
+    point: { x: value.target.x as number, y: value.target.y as number },
+  };
+}
+
+export function forwardSyncTexRetryable(value: unknown): boolean {
+  return isObject(value) && (value.status === "pending" || value.status === "stale");
+}
+
+export function forwardSyncTexStatus(value: unknown): ForwardSyncTexStatus | undefined {
+  if (!isObject(value) || typeof value.status !== "string") return undefined;
+  return FORWARD_SYNC_TEX_STATUSES.has(value.status)
+    ? value.status as ForwardSyncTexStatus
+    : undefined;
 }
 
 function bounded(value: unknown): boolean {
@@ -165,7 +207,10 @@ export class VersionedWebviewBridge {
         protocol: WEBVIEW_RPC_PROTOCOL, version: WEBVIEW_RPC_VERSION, kind: "response",
         ...(requestIdentity ?? this.#client.identity), requestId: request.requestId, ok: true, payload,
       });
-    } catch {
+    } catch (error) {
+      console.error(
+        `[Placekeeper] trusted runtime request failed: ${request.method} (${safeRuntimeRequestFailure(error)})`,
+      );
       if (!controller.signal.aborted) this.#postMessage({
         protocol: WEBVIEW_RPC_PROTOCOL, version: WEBVIEW_RPC_VERSION, kind: "response",
         ...(requestIdentity ?? this.#client.identity), requestId: request.requestId, ok: false,
@@ -257,6 +302,7 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
   const invalidationListeners = new Set<(payload: unknown) => void>();
   let socket: WebSocket | undefined;
   let socketRetry: ReturnType<typeof setTimeout> | undefined;
+  let socketRetryDelayMs = 1_000;
   let disposed = false;
   const request = async (
     path: string,
@@ -268,9 +314,10 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
       ...init,
       ...(signal === undefined ? {} : { signal }),
       headers: {
-        authorization: `Bearer ${options.launch.credential}`,
-        ...(init.body === undefined ? {} : { "content-type": "application/json" }),
         ...init.headers,
+        authorization: `Bearer ${options.launch.credential}`,
+        origin: options.launch.origin,
+        ...(init.body === undefined ? {} : { "content-type": "application/json" }),
       },
     });
     if (!response.ok && !acceptedStatuses.includes(response.status)) {
@@ -392,14 +439,17 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
           : await post(route.path, trustedPayload, signal);
       }
       if (method === "reverseSyncTex" && isObject(value) && value.status === "ok" &&
-        typeof value.sourcePath === "string" && Number.isSafeInteger(value.line)) {
+        isObject(value.target) && typeof value.target.path === "string" &&
+        Number.isSafeInteger(value.target.line)) {
+        const target = value.target;
+        const sourcePath = target.path as string;
         await options.openSourceLocation?.({
-          sourcePath: value.sourcePath,
-          line: value.line as number,
-          ...(Number.isSafeInteger(value.column) ? { column: value.column as number } : {}),
+          sourcePath,
+          line: target.line as number,
+          ...(Number.isSafeInteger(target.column) ? { column: target.column as number } : {}),
         });
-        const { sourcePath: _sourcePath, ...safe } = value;
-        return safe;
+        const { path: _path, ...safeTarget } = target;
+        return { ...value, target: safeTarget };
       }
       if (method === "command" && isObject(value)) {
         const state = value.accepted === false ? value.state : value;
@@ -433,6 +483,7 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
       "placekeeper",
       `placekeeper-auth.${options.launch.credential}`,
     ]);
+    socket.addEventListener("open", () => { socketRetryDelayMs = 1_000; });
     socket.addEventListener("message", (event) => {
       try {
         const value: unknown = JSON.parse(String(event.data));
@@ -460,7 +511,10 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
     });
     socket.addEventListener("close", () => {
       socket = undefined;
-      if (!disposed) socketRetry = setTimeout(connectInvalidations, 1_000);
+      if (!disposed) {
+        socketRetry = setTimeout(connectInvalidations, socketRetryDelayMs);
+        socketRetryDelayMs = Math.min(socketRetryDelayMs * 2, 30_000);
+      }
     });
   }
   return client;

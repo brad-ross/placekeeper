@@ -5,7 +5,10 @@ import { lstat, open, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 
 import type { SourceHint } from "../../../../packages/core/src/structured-review-item.js";
-import type { ReviewItem } from "../../../../packages/core/src/review-model.js";
+import {
+  anchorEvidenceFromReviewItem,
+  type ReviewItem,
+} from "../../../../packages/core/src/review-model.js";
 import type { FrozenReviewDelivery } from "../export/export-coordinator.js";
 import { isContained } from "../files/file-capabilities.js";
 import {
@@ -38,13 +41,24 @@ export interface SyncTexRunResult {
 
 export type SyncTexRunner = (request: SyncTexRunRequest) => Promise<SyncTexRunResult>;
 
+export function syncTexProcessPath(
+  platform: NodeJS.Platform = process.platform,
+  inheritedPath: string | undefined = process.env.PATH,
+): string {
+  const entries = (inheritedPath ?? "/usr/bin:/bin").split(":").filter(Boolean);
+  if (platform === "darwin" && !entries.includes("/Library/TeX/texbin")) {
+    entries.unshift("/Library/TeX/texbin");
+  }
+  return entries.join(":");
+}
+
 export const runSyncTex: SyncTexRunner = (request) =>
   new Promise((resolveRun) => {
     const child = spawn(request.executable, [...request.argv], {
       cwd: request.cwd,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LC_ALL: "C", LANG: "C" },
+      env: { PATH: syncTexProcessPath(), LC_ALL: "C", LANG: "C" },
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
@@ -153,13 +167,12 @@ export async function querySyncTex(input: QuerySyncTexInput): Promise<SourceHint
 }
 
 function geometryPoint(item: ReviewItem): { x: number; y: number } | undefined {
-  const value = item.payload[item.kind === "insert" || item.kind === "pageNote" ? "position" : "rect"];
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const record = value as Record<string, unknown>;
-  const { x, y, width, height } = record;
-  return [x, y, width, height].every((part) => typeof part === "number" && Number.isFinite(part))
-    ? { x: (x as number) + (width as number) / 2, y: (y as number) + (height as number) / 2 }
-    : undefined;
+  try {
+    const { rect } = anchorEvidenceFromReviewItem(item);
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  } catch {
+    return undefined;
+  }
 }
 
 export async function querySyncTexHints(input: {
@@ -187,10 +200,15 @@ export async function querySyncTexHintsForItems(input: {
   for (const item of input.items) {
     const point = geometryPoint(item);
     if (point === undefined) continue;
+    const pageIndex = (() => {
+      try { return anchorEvidenceFromReviewItem(item).pageIndex; }
+      catch { return undefined; }
+    })();
+    if (pageIndex === undefined) continue;
     const hint = await querySyncTex({
       sourceRoot: input.sourceRoot,
       pdfPath: input.pdfPath,
-      pageIndex: item.pageIndex,
+      pageIndex,
       point,
       ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
       ...(input.run === undefined ? {} : { run: input.run }),

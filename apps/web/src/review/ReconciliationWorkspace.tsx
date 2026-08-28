@@ -11,7 +11,7 @@ import type {
 } from "../../../../packages/core/src/review-model.js";
 import type { GenerationRefreshStatus } from "../generation-status.js";
 import type { CaretAnchor } from "../pdf/selection-anchor.js";
-import type { SelectionUpdate } from "../pdf/selection-state.js";
+import { reliableSelection, type SelectionUpdate } from "../pdf/selection-state.js";
 
 export type ReattachmentTarget =
   | {
@@ -114,8 +114,9 @@ function targetAnchor(target: ReviewItem | PendingReviewDraftV1): ReviewAnchorEv
 function selectionEvidence(
   update: SelectionUpdate,
 ): Extract<ReviewAnchorEvidenceV1, { readonly kind: "selection" }> | null {
-  if (update.kind !== "reliable") return null;
-  const { reliable: _reliable, ...anchor } = update.anchor;
+  const selection = reliableSelection(update);
+  if (selection === null) return null;
+  const { reliable: _reliable, ...anchor } = selection;
   return { kind: "selection", ...anchor };
 }
 
@@ -274,6 +275,18 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       setPending(false);
     }
   };
+  const exportReviewedPdf = async (confirmPossiblyStale?: true) => {
+    setPending(true);
+    try {
+      await props.onExport(confirmPossiblyStale);
+      setMessage("Reviewed PDF exported.");
+      if (confirmPossiblyStale) setStaleConfirmation(false);
+    } catch {
+      setMessage("Export failed safely; generated output was not changed.");
+    } finally {
+      setPending(false);
+    }
+  };
   const discardCommand = (target: ReattachmentTarget): ReviewCommand => ({
     type: "discard-reconciliation",
     expectedRevision: props.state.revision,
@@ -306,8 +319,8 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
         <h3>Unresolved Review Item</h3>
         <blockquote>{quote(item)}</blockquote>
         <p>{reason(item)}</p>
-        <button type="button" onClick={() => begin(item, target)}>Reattach</button>
-        <button type="button" onClick={() => { setActive(null); setDiscard(target); }}>Discard</button>
+        <button type="button" title="Choose a replacement anchor in the current PDF" onClick={() => begin(item, target)}>Reattach</button>
+        <button type="button" title="Remove this unresolved Review Item with an audit record" onClick={() => { setActive(null); setDiscard(target); }}>Discard</button>
       </article>;
     })}
     {props.state.pendingDrafts.map((draft) => {
@@ -317,8 +330,21 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
         <p>{draft.text}</p>
         <blockquote>{quote(draft)}</blockquote>
         <p>{reason(draft)}</p>
-        <button type="button" onClick={() => begin(draft, target)}>Reattach</button>
-        <button type="button" onClick={() => { setActive(null); setDiscard(target); }}>Discard</button>
+        {draft.status === "protected" && draft.disposition.kind === "resolved" ? <button
+          type="button"
+          title="Apply this protected draft as a Review Item"
+          disabled={pending}
+          onClick={() => void submit({
+            type: "apply-draft",
+            expectedRevision: props.state.revision,
+            id: draft.id,
+            expectedDraftRevision: draft.revision,
+            ownerViewId: draft.ownerViewId,
+            updatedAt: new Date().toISOString(),
+          }, "Draft applied as a Review Item.")}
+        >Apply</button> : null}
+        <button type="button" title="Choose a replacement anchor in the current PDF" onClick={() => begin(draft, target)}>Reattach</button>
+        <button type="button" title="Remove this protected draft with an audit record" onClick={() => { setActive(null); setDiscard(target); }}>Discard</button>
       </article>;
     })}
 
@@ -328,7 +354,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       {candidate.anchor !== null ? <p data-reattachment-preview>
         Preview: page {candidate.anchor.pageIndex + 1}, x {Math.round(candidate.anchor.rect.x)}, y {Math.round(candidate.anchor.rect.y)}.
       </p> : null}
-      <button type="button" disabled={pending || candidate.anchor === null} onClick={() => {
+      <button type="button" title="Save the selected replacement anchor" disabled={pending || candidate.anchor === null} onClick={() => {
         if (candidate.anchor === null) return;
         if (!reattachmentGenerationIsCurrent(active.generation, props.state.workflow.documentGeneration)) {
           setMessage("The PDF generation changed. Select replacement evidence again.");
@@ -342,7 +368,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
           updatedAt: new Date().toISOString(),
         }), "Reattachment saved.");
       }}>Confirm reattachment</button>
-      <button type="button" disabled={pending} onClick={() => {
+      <button type="button" title="Keep the work unresolved and leave selection mode" disabled={pending} onClick={() => {
         setActive(null);
         setMessage(cancelledReattachmentPresentation().message);
       }}>Cancel</button>
@@ -350,8 +376,8 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
 
     {discard !== null ? <section data-discard-confirmation>
       <p>Discard this unresolved work? This audited action removes it from export.</p>
-      <button type="button" disabled={pending} onClick={() => void submit(discardCommand(discard), "Discard recorded.")}>Confirm discard</button>
-      <button type="button" disabled={pending} onClick={() => setDiscard(null)}>Cancel</button>
+      <button type="button" title="Confirm the audited removal" disabled={pending} onClick={() => void submit(discardCommand(discard), "Discard recorded.")}>Confirm discard</button>
+      <button type="button" title="Keep this unresolved work" disabled={pending} onClick={() => setDiscard(null)}>Cancel</button>
     </section> : null}
 
     {message ? <p role="status">{message}</p> : null}
@@ -359,24 +385,14 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       <p>{exportState.message}</p>
       {staleConfirmation ? <div data-stale-export-confirmation>
         <p>Export the last successful, possibly stale generation?</p>
-        <button type="button" disabled={pending} onClick={() => {
-          setPending(true);
-          void props.onExport(true).then(() => {
-            setMessage("Reviewed PDF exported.");
-            setStaleConfirmation(false);
-          }).catch(() => setMessage("Export failed safely; generated output was not changed."))
-            .finally(() => setPending(false));
-        }}>Confirm export</button>
-        <button type="button" disabled={pending} onClick={() => setStaleConfirmation(false)}>Cancel</button>
-      </div> : <button type="button" disabled={!exportState.canExport || pending} onClick={() => {
+        <button type="button" title="Export the last successful PDF generation" disabled={pending} onClick={() => void exportReviewedPdf(true)}>Confirm export</button>
+        <button type="button" title="Return without exporting" disabled={pending} onClick={() => setStaleConfirmation(false)}>Cancel</button>
+      </div> : <button type="button" title="Create a distinct reviewed PDF copy" disabled={!exportState.canExport || pending} onClick={() => {
         if (exportState.requiresStaleConfirmation) {
           setStaleConfirmation(true);
           return;
         }
-        setPending(true);
-        void props.onExport().then(() => setMessage("Reviewed PDF exported."))
-          .catch(() => setMessage("Export failed safely; generated output was not changed."))
-          .finally(() => setPending(false));
+        void exportReviewedPdf();
       }}>Export reviewed PDF</button>}
     </footer>
   </section>;

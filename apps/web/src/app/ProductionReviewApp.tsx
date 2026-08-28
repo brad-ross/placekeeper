@@ -177,6 +177,39 @@ export interface ProductionReviewAppProps {
   readonly viewer?: ReactNode;
   readonly generationRefreshStatus?: GenerationRefreshStatus;
   readonly hostReattachRequestToken?: number;
+  readonly hostForwardSyncTexRequest?: {
+    readonly token: number;
+    readonly pageIndex: number;
+    readonly point: { readonly x: number; readonly y: number };
+  };
+  readonly onReverseSyncTex?: (input: {
+    readonly pageIndex: number;
+    readonly point: { readonly x: number; readonly y: number };
+  }) => Promise<unknown>;
+  readonly initialPresentation?: { readonly pageIndex?: number; readonly zoom?: number };
+  readonly onPresentationChange?: (presentation: { readonly pageIndex: number; readonly zoom: number }) => void;
+}
+
+export async function applyHostForwardSyncTex(
+  navigation: Pick<PdfViewerNavigation, 'captureLocation' | 'applyLocation' | 'focusAtDestination'>,
+  request: {
+    readonly pageIndex: number;
+    readonly point: { readonly x: number; readonly y: number };
+  },
+): Promise<boolean> {
+  if (!Number.isSafeInteger(request.pageIndex) || request.pageIndex < 0 ||
+    !Number.isFinite(request.point.x) || request.point.x < 0 ||
+    !Number.isFinite(request.point.y) || request.point.y < 0) return false;
+  const current = navigation.captureLocation();
+  if (current === null) return false;
+  const applied = await navigation.applyLocation({
+    ...current,
+    pageIndex: request.pageIndex,
+    anchor: request.point,
+    alignment: { xPercent: 50, yPercent: 50 },
+  });
+  if (applied) navigation.focusAtDestination(request.pageIndex);
+  return applied;
 }
 
 export function firstUnresolvedReviewItemId(
@@ -430,6 +463,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [mainNavigationReadyGeneration, setMainNavigationReadyGeneration] = useState<number | null>(null);
   const [mainDocumentReadyGeneration, setMainDocumentReadyGeneration] = useState<number | null>(null);
   const [mainNavigation, setMainNavigation] = useState<PdfViewerNavigation | null>(null);
+  const handledForwardSyncTexTokenRef = useRef(0);
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
   const referenceManualScrollObserverRef = useRef(new ReferenceManualScrollObserver());
@@ -506,6 +540,16 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setActivationRequest({ id, token: ++activationTokenRef.current });
   }, [props.hostReattachRequestToken]);
   const [viewerState, setViewerState] = useState<ViewerControlsSnapshot>(unavailableViewerControls);
+  const initialPresentationAppliedRef = useRef(false);
+  useEffect(() => {
+    const request = props.hostForwardSyncTexRequest;
+    if (request === undefined || mainNavigation === null ||
+      request.token <= handledForwardSyncTexTokenRef.current) return;
+    handledForwardSyncTexTokenRef.current = request.token;
+    void applyHostForwardSyncTex(mainNavigation, request).then((applied) => {
+      if (!applied) setCommandError('Forward SyncTeX could not reveal this PDF location.');
+    });
+  }, [mainNavigation, props.hostForwardSyncTexRequest]);
   const viewerAssets = useMemo(() => props.viewerAssets ?? ({
     pdfiumWasm: props.session.appLinkBase === undefined
       ? `/s/${props.session.sessionId}/assets/pdfium.wasm`
@@ -1123,11 +1167,27 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     const controls = createViewerControls(registry);
     viewerControlsRef.current = controls;
     setViewerState(controls.snapshot());
+    if (!initialPresentationAppliedRef.current) {
+      initialPresentationAppliedRef.current = true;
+      if (props.initialPresentation?.pageIndex !== undefined) {
+        controls.goToPage(props.initialPresentation.pageIndex + 1);
+      }
+      if (props.initialPresentation?.zoom !== undefined) {
+        controls.zoomToPercent(props.initialPresentation.zoom * 100);
+      }
+    }
     controls.subscribe(() => {
       setViewerState(controls.snapshot());
       mainLocationRefresh.schedule();
     });
-  }, [mainLocationRefresh]);
+  }, [mainLocationRefresh, props.initialPresentation]);
+  useEffect(() => {
+    if (!viewerState.ready || props.onPresentationChange === undefined) return;
+    props.onPresentationChange({
+      pageIndex: viewerState.currentPage,
+      zoom: viewerState.zoomPercent / 100,
+    });
+  }, [props.onPresentationChange, viewerState]);
   const onMainDocumentReady = useCallback((engine: PdfEngine, document: PdfDocumentObject) => {
     if (searchDocumentRef.current === document && searchControllerRef.current) return;
     setMainDocumentReadyGeneration(documentGenerationRef.current);
@@ -1507,6 +1567,18 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           pageIndex: pageMenu.point.pageIndex,
           position: { x: pageMenu.point.x, y: pageMenu.point.y, width: 18, height: 18 },
         }}
+        {...(props.onReverseSyncTex === undefined ? {} : {
+          onGoToSource: (menu: {
+            readonly pageIndex: number;
+            readonly position: { readonly x: number; readonly y: number };
+          }) => {
+            setCommandError(null);
+            void props.onReverseSyncTex?.({
+              pageIndex: menu.pageIndex,
+              point: { x: menu.position.x, y: menu.position.y },
+            }).catch(() => setCommandError('Reverse SyncTeX could not find a LaTeX source location.'));
+          },
+        })}
         placedPageNote={placedPageNote}
         keyboardPageNoteActive={keyboardPageNoteActive}
         existingAnnotations={existingAnnotations}

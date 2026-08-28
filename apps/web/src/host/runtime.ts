@@ -1,13 +1,11 @@
-import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
+import type { ReviewState } from "../../../../packages/core/src/review-model.js";
 import type {
   ProductionExportResult,
   ProductionSaveStatus,
   ProductionScope,
   ProductionSession,
   ProductionSessionApi,
-  SaveCopyProposal,
 } from "../app/ProductionReviewApp.js";
-import type { RejectedReviewCommand } from "../app/ReviewShell.js";
 import type { ViewerAssetUrls, ViewerResourcePolicy } from "../pdf/embedpdf-viewer.js";
 
 export const HOST_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
@@ -33,23 +31,21 @@ export interface HostRuntimeInvalidation extends HostRuntimeIdentity {
   readonly previousGeneration?: number;
 }
 
+export type HostRuntimeCommand =
+  | { readonly command: "reattach" }
+  | {
+      readonly command: "forward-synctex";
+      readonly pageIndex: number;
+      readonly point: { readonly x: number; readonly y: number };
+    };
+
 export interface HostRuntime extends ProductionSessionApi {
   readonly host: "browser" | "vscode";
   bootstrap(signal?: AbortSignal): Promise<HostRuntimeBootstrap>;
   subscribeInvalidations(listener: (event: HostRuntimeInvalidation) => void): () => void;
-  subscribeHostCommands?(listener: (command: "reattach") => void): () => void;
+  subscribeHostCommands?(listener: (command: HostRuntimeCommand) => void): () => void;
   exportReviewedCopy(confirmPossiblyStale?: true): Promise<ProductionExportResult>;
   forwardSyncTex(input: unknown): Promise<unknown>;
   reverseSyncTex(input: unknown): Promise<unknown>;
   dispose(): void;
-}
-
-export type HostRuntimeCommandResult = ReviewState | RejectedReviewCommand;
-
-export interface RuntimeConformanceSurface {
-  command(command: ReviewCommand): Promise<HostRuntimeCommandResult>;
-  saveStatus(): Promise<ProductionSaveStatus>;
-  saveProposal(): Promise<SaveCopyProposal>;
-  exportReviewedCopy(confirmPossiblyStale?: true): Promise<ProductionExportResult>;
-  scope(signal?: AbortSignal): Promise<ProductionScope>;
 }

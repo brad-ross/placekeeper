@@ -18,7 +18,11 @@ import {
 } from "./review/CopyLinkControl.js";
 import { ReviewIcon, type ReviewIconName } from "./review/ReviewIcon.js";
 import { createBrowserHostRuntime } from "./host/browser-runtime.js";
-import { createRpcHostRuntime, createVscodeMessagePort } from "./host/vscode-runtime.js";
+import {
+  createRpcHostRuntime,
+  createVscodeMessagePort,
+  materializeVscodeWasmResource,
+} from "./host/vscode-runtime.js";
 import type { HostRuntime, HostRuntimeBootstrap } from "./host/runtime.js";
 import { subscribeRuntimeDocumentSource } from "./host/runtime-document-source.js";
 
@@ -346,30 +350,68 @@ export async function start(session: ProductionSession): Promise<void> {
   await startRuntime(createBrowserHostRuntime(session));
 }
 
-export async function startRuntime(runtime: HostRuntime): Promise<void> {
+export interface VscodePresentationState {
+  readonly pageIndex?: number;
+  readonly zoom?: number;
+}
+
+export function parseVscodePresentationState(value: unknown): VscodePresentationState | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  if (input.pageIndex !== undefined && (!Number.isSafeInteger(input.pageIndex) || (input.pageIndex as number) < 0)) return undefined;
+  if (input.zoom !== undefined && (typeof input.zoom !== "number" || !Number.isFinite(input.zoom) || input.zoom < 0.2 || input.zoom > 60)) return undefined;
+  if (input.pageIndex === undefined && input.zoom === undefined) return undefined;
+  return {
+    ...(input.pageIndex === undefined ? {} : { pageIndex: input.pageIndex as number }),
+    ...(input.zoom === undefined ? {} : { zoom: input.zoom as number }),
+  };
+}
+
+export async function startRuntime(
+  runtime: HostRuntime,
+  options: {
+    readonly initialPresentation?: VscodePresentationState;
+    readonly onPresentationChange?: (presentation: { readonly pageIndex: number; readonly zoom: number }) => void;
+  } = {},
+): Promise<void> {
   const root = document.querySelector("#root");
   if (!(root instanceof HTMLElement)) throw new Error("Production review root is unavailable");
   root.dataset.productionRoot = "true";
   const loaded = await runtime.bootstrap();
   createRoot(root).render(
-    <RuntimeProductionReviewApp runtime={runtime} initial={loaded} />,
+    <RuntimeProductionReviewApp runtime={runtime} initial={loaded} {...options} />,
   );
 }
 
 function RuntimeProductionReviewApp(props: {
   readonly runtime: HostRuntime;
   readonly initial: HostRuntimeBootstrap;
+  readonly initialPresentation?: VscodePresentationState;
+  readonly onPresentationChange?: (presentation: { readonly pageIndex: number; readonly zoom: number }) => void;
 }) {
   const [loaded, setLoaded] = useState(props.initial);
   const [refreshStatus, setRefreshStatus] = useState<"idle" | "reconciling" | "failed">("idle");
   const [hostReattachRequestToken, setHostReattachRequestToken] = useState(0);
+  const [hostForwardSyncTexRequest, setHostForwardSyncTexRequest] = useState<{
+    readonly token: number;
+    readonly pageIndex: number;
+    readonly point: { readonly x: number; readonly y: number };
+  }>();
 
   useEffect(() => subscribeRuntimeDocumentSource(props.runtime, props.initial, (snapshot) => {
     setLoaded(snapshot.loaded);
     setRefreshStatus(snapshot.refreshStatus);
   }), [props.initial, props.runtime]);
   useEffect(() => props.runtime.subscribeHostCommands?.((command) => {
-    if (command === "reattach") setHostReattachRequestToken((token) => token + 1);
+    if (command.command === "reattach") {
+      setHostReattachRequestToken((token) => token + 1);
+      return;
+    }
+    setHostForwardSyncTexRequest((current) => ({
+      token: (current?.token ?? 0) + 1,
+      pageIndex: command.pageIndex,
+      point: command.point,
+    }));
   }), [props.runtime]);
 
   return <ProductionReviewApp
@@ -382,14 +424,46 @@ function RuntimeProductionReviewApp(props: {
     resourcePolicy={loaded.resourcePolicy}
     generationRefreshStatus={refreshStatus}
     hostReattachRequestToken={hostReattachRequestToken}
+    {...(hostForwardSyncTexRequest === undefined ? {} : { hostForwardSyncTexRequest })}
+    {...(props.runtime.host === "vscode"
+      ? { onReverseSyncTex: (input: unknown) => props.runtime.reverseSyncTex(input) }
+      : {})}
+    {...(props.initialPresentation === undefined ? {} : { initialPresentation: props.initialPresentation })}
+    {...(props.onPresentationChange === undefined ? {} : { onPresentationChange: props.onPresentationChange })}
   />;
 }
 
 export async function startVscode(options: {
   readonly panelId: string;
-  readonly vscode: { postMessage(message: unknown): unknown };
+  readonly vscode: {
+    postMessage(message: unknown): unknown;
+    getState(): unknown;
+    setState(state: unknown): unknown;
+  };
 }): Promise<void> {
-  const runtime = createRpcHostRuntime(createVscodeMessagePort(options.panelId, options.vscode));
+  const runtime = createRpcHostRuntime(createVscodeMessagePort(options.panelId, options.vscode), {
+    materializePdfiumWasm: materializeVscodeWasmResource,
+  });
   globalThis.addEventListener("pagehide", () => runtime.dispose(), { once: true });
-  await startRuntime(runtime);
+  const rawState = options.vscode.getState();
+  const panelKey = typeof rawState === "object" && rawState !== null &&
+    typeof (rawState as { panelKey?: unknown }).panelKey === "string" &&
+    /^[A-Za-z0-9_-]{8,128}$/u.test((rawState as { panelKey: string }).panelKey)
+    ? (rawState as { panelKey: string }).panelKey
+    : undefined;
+  const initialPresentation = parseVscodePresentationState(rawState);
+  const persist = (presentation: { readonly pageIndex: number; readonly zoom: number }) => {
+    options.vscode.setState({
+      ...(panelKey === undefined ? {} : { panelKey }),
+      ...presentation,
+    });
+  };
+  options.vscode.setState({
+    ...(panelKey === undefined ? {} : { panelKey }),
+    ...initialPresentation,
+  });
+  await startRuntime(runtime, {
+    ...(initialPresentation === undefined ? {} : { initialPresentation }),
+    onPresentationChange: persist,
+  });
 }

@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto";
-
 import { documentOrderedItems } from "./annotation-projection.js";
+import { sha256Hex } from "./sha256.js";
 import {
   projectStructuredReviewItem,
   type SourceHint,
@@ -297,7 +296,7 @@ function canonicalJson(value: unknown): string {
 }
 
 export function canonicalSha256(value: unknown): string {
-  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+  return sha256Hex(canonicalJson(value));
 }
 
 const sha256 = canonicalSha256;

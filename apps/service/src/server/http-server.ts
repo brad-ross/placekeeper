@@ -688,8 +688,15 @@ export async function startHttpServer(
           send(response, 405, "Method not allowed");
           return;
         }
-        await readJson(request);
-        sendJson(response, 200, await broker.markLiveDocumentPossiblyStale(staleMatch[1]!));
+        const body = await readJson(request) as Record<string, unknown>;
+        if (!Number.isSafeInteger(body.observationEpoch) || (body.observationEpoch as number) <= 0) {
+          send(response, 400, "Invalid request");
+          return;
+        }
+        sendJson(response, 200, await broker.markLiveDocumentPossiblyStale(
+          staleMatch[1]!,
+          body.observationEpoch as number,
+        ));
         return;
       }
       if (syncTexMatch !== null) {
@@ -735,7 +742,16 @@ export async function startHttpServer(
           send(response, 404, "Not found");
           return;
         }
-        const bytes = await broker.documentBytes(documentMatch[1]!);
+        const generationValue = requestUrl.searchParams.get("generation");
+        const generation = generationValue === null || !/^\d+$/u.test(generationValue)
+          ? undefined
+          : Number(generationValue);
+        if (generationValue !== null &&
+          (generation === undefined || !Number.isSafeInteger(generation) || generation <= 0)) {
+          send(response, 400, "Invalid request");
+          return;
+        }
+        const bytes = await broker.documentBytes(documentMatch[1]!, generation);
         if (bytes === undefined) {
           send(response, 404, "Not found");
           return;

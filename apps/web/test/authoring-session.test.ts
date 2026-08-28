@@ -8,6 +8,7 @@ import {
   authoringSessionIsCurrent,
   canStartAuthoringSession,
   createAuthoringSession,
+  pendingDraftForAuthoring,
   type AuthoringSessionSeed,
 } from '../src/review/authoring-session.js';
 import {
@@ -54,7 +55,11 @@ const editedItem: ReviewItem = {
   updatedAt: '2026-08-21T12:00:00.000Z',
   payload: {
     quote: 'persisted passage',
+    prefix: '',
+    suffix: '',
     rect: { x: 1, y: 2, width: 3, height: 4 },
+    segmentRects: [{ x: 1, y: 2, width: 3, height: 4 }],
+    reliable: true,
     comment: 'Existing comment',
   },
 };
@@ -71,6 +76,30 @@ const seed = (
 });
 
 describe('frozen authoring-session contract', () => {
+  it('projects in-progress authoring into a protected generation-bound draft', () => {
+    const session = createAuthoringSession({
+      ...seed({ kind: 'replace', anchor: selection, initialValue: '', selectionGeneration: 11 }),
+      draftId: '00000000-0000-4000-8000-000000000099',
+    });
+    expect(pendingDraftForAuthoring({
+      session,
+      ownerViewId: 'panel-a',
+      text: 'protected replacement',
+      revision: 0,
+      createdAt: '2026-08-27T12:00:00.000Z',
+      updatedAt: '2026-08-27T12:00:01.000Z',
+    })).toMatchObject({
+      id: '00000000-0000-4000-8000-000000000099',
+      ownerViewId: 'panel-a',
+      baseGeneration: 7,
+      kind: 'replace',
+      text: 'protected replacement',
+      status: 'protected',
+      disposition: { kind: 'resolved', generation: 7 },
+      anchor: { kind: 'selection', quote: 'the original passage' },
+    });
+  });
+
   it.each([
     [
       'replacement',

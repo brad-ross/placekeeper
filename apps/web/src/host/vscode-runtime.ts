@@ -11,6 +11,7 @@ import {
   HOST_RUNTIME_VERSION,
   type HostRuntime,
   type HostRuntimeBootstrap,
+  type HostRuntimeCommand,
   type HostRuntimeIdentity,
   type HostRuntimeInvalidation,
 } from "./runtime.js";
@@ -23,6 +24,39 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 export interface VscodeMessagePort {
   postMessage(message: unknown): unknown;
   subscribe(listener: (message: unknown) => void): () => void;
+}
+
+export interface MaterializedViewerResource {
+  readonly url: string;
+  dispose(): void;
+}
+
+export interface RpcHostRuntimeOptions {
+  readonly materializePdfiumWasm?: (sourceUrl: string) => Promise<MaterializedViewerResource>;
+}
+
+const MAX_PDFIUM_WASM_BYTES = 16 * 1024 * 1024;
+
+export async function materializeVscodeWasmResource(
+  sourceUrl: string,
+  environment: {
+    readonly fetch?: typeof fetch;
+    readonly createObjectURL?: (blob: Blob) => string;
+    readonly revokeObjectURL?: (url: string) => void;
+  } = {},
+): Promise<MaterializedViewerResource> {
+  const fetchImpl = environment.fetch ?? fetch;
+  const response = await fetchImpl(sourceUrl, { credentials: "omit" });
+  if (!response.ok) throw new Error("The packaged PDF engine could not be loaded.");
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_PDFIUM_WASM_BYTES ||
+    bytes[0] !== 0x00 || bytes[1] !== 0x61 || bytes[2] !== 0x73 || bytes[3] !== 0x6d) {
+    throw new Error("The packaged PDF engine was invalid.");
+  }
+  const createObjectURL = environment.createObjectURL ?? URL.createObjectURL.bind(URL);
+  const revokeObjectURL = environment.revokeObjectURL ?? URL.revokeObjectURL.bind(URL);
+  const url = createObjectURL(new Blob([bytes], { type: "application/wasm" }));
+  return { url, dispose: () => revokeObjectURL(url) };
 }
 
 interface PendingRequest {
@@ -47,25 +81,52 @@ function validIdentity(value: unknown): value is HostRuntimeIdentity {
     Number.isSafeInteger(value.revision) && (value.revision as number) >= 0;
 }
 
+function validHostCommand(value: unknown): value is HostRuntimeCommand {
+  if (!isObject(value) || typeof value.command !== "string") return false;
+  if (value.command === "reattach") return Object.keys(value).length === 1;
+  return value.command === "forward-synctex" && Object.keys(value).length === 3 &&
+    Number.isSafeInteger(value.pageIndex) && (value.pageIndex as number) >= 0 &&
+    isObject(value.point) && Object.keys(value.point).length === 2 &&
+    Number.isFinite(value.point.x) && Number.isFinite(value.point.y);
+}
+
 function abortError(): Error {
   return new DOMException("The runtime request was cancelled.", "AbortError");
 }
 
-export function createRpcHostRuntime(port: VscodeMessagePort & { readonly panelId: string }): HostRuntime {
+export function createRpcHostRuntime(
+  port: VscodeMessagePort & { readonly panelId: string },
+  options: RpcHostRuntimeOptions = {},
+): HostRuntime {
   if (!ID.test(port.panelId)) throw new Error("A safe panel identity is required.");
   const pending = new Map<string, PendingRequest>();
   const invalidations = new Set<(event: HostRuntimeInvalidation) => void>();
-  const hostCommands = new Set<(command: "reattach") => void>();
+  const hostCommands = new Set<(command: HostRuntimeCommand) => void>();
   let identity: HostRuntimeIdentity | undefined;
   let disposed = false;
+  const materializedPdfium = new Map<string, Promise<MaterializedViewerResource>>();
+
+  const pdfiumResource = async (sourceUrl: string): Promise<MaterializedViewerResource> => {
+    if (options.materializePdfiumWasm === undefined) return { url: sourceUrl, dispose() {} };
+    let pending = materializedPdfium.get(sourceUrl);
+    if (pending === undefined) {
+      pending = options.materializePdfiumWasm(sourceUrl);
+      materializedPdfium.set(sourceUrl, pending);
+    }
+    const resource = await pending;
+    if (disposed) {
+      resource.dispose();
+      throw new Error("The review runtime is disposed.");
+    }
+    return resource;
+  };
 
   const unsubscribe = port.subscribe((message) => {
     if (!isObject(message) || message.protocol !== HOST_RUNTIME_PROTOCOL ||
       message.version !== HOST_RUNTIME_VERSION || message.panelId !== port.panelId) return;
     if (message.kind === "event" && message.event === "host-command") {
-      if (!isObject(message.payload) || Object.keys(message.payload).length !== 1 ||
-        message.payload.command !== "reattach") return;
-      for (const listener of hostCommands) listener("reattach");
+      if (!validHostCommand(message.payload)) return;
+      for (const listener of hostCommands) listener(message.payload);
       return;
     }
     if (message.kind === "event" && message.event === "session-invalidated") {
@@ -105,7 +166,9 @@ export function createRpcHostRuntime(port: VscodeMessagePort & { readonly panelI
     if (disposed) return Promise.reject(new Error("The review runtime is disposed."));
     if (signal?.aborted === true) return Promise.reject(abortError());
     const id = requestId();
-    const requestIdentity = identity === undefined ? undefined : { ...identity };
+    const requestIdentity = method === "bootstrap" || identity === undefined
+      ? undefined
+      : { ...identity };
     return new Promise<T>((resolve, reject) => {
       const onAbort = signal === undefined ? undefined : () => {
         if (!pending.delete(id)) return;
@@ -172,9 +235,11 @@ export function createRpcHostRuntime(port: VscodeMessagePort & { readonly panelI
         throw new Error("The trusted host returned an invalid bootstrap.");
       }
       identity = value;
+      const pdfium = await pdfiumResource(value.resources.pdfiumWasm);
       const issued = new Set<string>([
         value.resources.document,
         value.resources.pdfiumWasm,
+        pdfium.url,
         ...(typeof value.resources.worker === "string" ? [value.resources.worker] : []),
       ]);
       return {
@@ -185,7 +250,7 @@ export function createRpcHostRuntime(port: VscodeMessagePort & { readonly panelI
         saveStatus: value.saveStatus as unknown as ProductionSaveStatus,
         viewerAssets: {
           documentUrl: value.resources.document,
-          pdfiumWasm: value.resources.pdfiumWasm,
+          pdfiumWasm: pdfium.url,
           ...(typeof value.resources.worker === "string" ? { workerUrl: value.resources.worker } : {}),
         },
         resourcePolicy: { host: "vscode", issued },
@@ -233,6 +298,8 @@ export function createRpcHostRuntime(port: VscodeMessagePort & { readonly panelI
       disposed = true;
       unsubscribe();
       for (const request of pending.values()) request.reject(new Error("The review runtime was disposed."));
+      for (const resource of materializedPdfium.values()) void resource.then((value) => value.dispose());
+      materializedPdfium.clear();
       pending.clear();
       invalidations.clear();
       hostCommands.clear();

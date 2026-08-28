@@ -1,5 +1,6 @@
 import {
   canonicalizeReviewItem,
+  type JsonValue,
   type PendingReviewDraftV1,
   type ReviewAnchorEvidenceV1,
   type ReviewCommand,
@@ -173,7 +174,7 @@ function assertDraft(draft: PendingReviewDraftV1): void {
     !Number.isSafeInteger(draft.baseGeneration) || draft.baseGeneration < 0 ||
     !Number.isSafeInteger(draft.revision) || draft.revision < 0 ||
     !Number.isFinite(Date.parse(draft.createdAt)) || !Number.isFinite(Date.parse(draft.updatedAt)) ||
-    draft.text.length === 0
+    (draft.targetItemId !== undefined && draft.targetItemId.length === 0)
   ) throw new InvalidReviewCommandError("Pending review draft is malformed");
   assertReviewAnchorEvidence(draft.anchor);
   assertDisposition(draft.disposition);
@@ -195,6 +196,14 @@ export function assertReviewCommand(command: unknown): asserts command is Review
       return;
     case "put-draft":
       if (!isRecord(command.draft)) throw new InvalidReviewCommandError("Review command is malformed");
+      return;
+    case "apply-draft":
+      if (
+        typeof command.id !== "string" ||
+        !Number.isSafeInteger(command.expectedDraftRevision) ||
+        typeof command.ownerViewId !== "string" ||
+        typeof command.updatedAt !== "string"
+      ) throw new InvalidReviewCommandError("Review command is malformed");
       return;
     case "reattach":
       if (
@@ -323,6 +332,100 @@ export function reduceReview(
         : state.pendingDrafts.map((draft, draftIndex) => draftIndex === index ? nextDraft : draft);
       break;
     }
+    case "apply-draft": {
+      const draft = state.pendingDrafts.find(({ id }) => id === command.id);
+      if (draft === undefined) throw new InvalidReviewCommandError("Pending review draft does not exist");
+      if (
+        draft.revision !== command.expectedDraftRevision ||
+        draft.ownerViewId !== command.ownerViewId
+      ) {
+        throw new ReviewDraftConflictError(command.expectedDraftRevision, draft.revision);
+      }
+      if (
+        draft.baseGeneration !== state.workflow.documentGeneration ||
+        draft.status !== "protected" ||
+        draft.disposition.kind !== "resolved" ||
+        draft.disposition.generation !== state.workflow.documentGeneration
+      ) {
+        throw new InvalidReviewCommandError("Pending review draft must be reattached before Apply");
+      }
+      const anchorPayload: Readonly<Record<string, JsonValue>> = draft.anchor.kind === "selection"
+        ? {
+            quote: draft.anchor.quote,
+            prefix: draft.anchor.prefix,
+            suffix: draft.anchor.suffix,
+            rect: { ...draft.anchor.rect },
+            segmentRects: draft.anchor.segmentRects.map((rect) => ({ ...rect })),
+            reliable: true,
+          }
+        : draft.anchor.kind === "caret"
+          ? {
+              position: { ...draft.anchor.rect },
+              leftContext: draft.anchor.leftContext,
+              rightContext: draft.anchor.rightContext,
+              reliable: true,
+            }
+          : {
+              position: { ...draft.anchor.rect },
+              ...(draft.anchor.nearbyText === undefined ? {} : { nearbyText: draft.anchor.nearbyText }),
+            };
+      const textField = draft.kind === "replace" || draft.kind === "insert"
+        ? "proposedText"
+        : "comment";
+      if (draft.targetItemId === undefined) {
+        if (draft.kind === "delete") {
+          throw new InvalidReviewCommandError("Deletion cannot be applied from a text draft");
+        }
+        const item: ReviewItem = {
+          id: draft.id,
+          kind: draft.kind,
+          pageIndex: draft.anchor.pageIndex,
+          createdAt: draft.createdAt,
+          updatedAt: command.updatedAt,
+          payload: { ...anchorPayload, [textField]: draft.text },
+          reconciliation: {
+            schemaVersion: 1,
+            ownerViewId: draft.ownerViewId,
+            baseGeneration: draft.baseGeneration,
+            revision: draft.revision,
+            anchor: draft.anchor,
+            disposition: draft.disposition,
+            previousAnchors: [],
+          },
+        };
+        assertReviewItem(item);
+        if (state.items.some(({ id }) => id === item.id)) {
+          throw new InvalidReviewCommandError("Review item ID already exists");
+        }
+        items = [...state.items, item];
+      } else {
+        const itemIndex = state.items.findIndex(({ id }) => id === draft.targetItemId);
+        if (itemIndex < 0) throw new InvalidReviewCommandError("Edited Review Item no longer exists");
+        const existing = state.items[itemIndex]!;
+        if (existing.kind !== draft.kind || existing.kind === "delete") {
+          throw new InvalidReviewCommandError("Pending review draft kind does not match its Review Item");
+        }
+        items = state.items.map((item, index) => index === itemIndex
+          ? {
+              ...item,
+              pageIndex: draft.anchor.pageIndex,
+              updatedAt: command.updatedAt,
+              payload: { ...item.payload, ...anchorPayload, [textField]: draft.text },
+              ...(item.reconciliation === undefined ? {} : {
+                reconciliation: {
+                  ...item.reconciliation,
+                  ownerViewId: draft.ownerViewId,
+                  revision: item.reconciliation.revision + 1,
+                  anchor: draft.anchor,
+                  disposition: draft.disposition,
+                },
+              }),
+            }
+          : item);
+      }
+      pendingDrafts = state.pendingDrafts.filter(({ id }) => id !== draft.id);
+      break;
+    }
     case "reattach": {
       const index = state.items.findIndex(({ id }) => id === command.id);
       if (index < 0) throw new InvalidReviewCommandError("Review item does not exist");
@@ -337,6 +440,7 @@ export function reduceReview(
       assertReviewAnchorEvidence(command.anchor);
       const reattached: ReviewItem = {
         ...existing,
+        pageIndex: command.anchor.pageIndex,
         updatedAt: command.updatedAt,
         reconciliation: {
           ...reconciliation,

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createReviewState } from "../../../packages/core/src/review-model.js";
 import { createReviewStateSummary } from "../../../packages/core/src/live-context.js";
 import {
+  applyHostForwardSyncTex,
   initiallyPortableItemIds,
   canonicalStateSupersedes,
   firstUnresolvedReviewItemId,
@@ -28,6 +29,37 @@ import {
 } from "../src/review/ReconciliationWorkspace.js";
 
 describe("one production review tree", () => {
+  it("centers a trusted forward SyncTeX point without changing the current zoom", async () => {
+    const applyLocation = vi.fn(async () => true);
+    const focusAtDestination = vi.fn(() => true);
+    const navigation = {
+      captureLocation: vi.fn(() => ({
+        pageIndex: 0,
+        anchor: { x: 0, y: 0 },
+        alignment: { xPercent: 10, yPercent: 20 },
+        zoom: 1.25,
+      })),
+      applyLocation,
+      focusAtDestination,
+    };
+
+    await expect(applyHostForwardSyncTex(navigation, {
+      pageIndex: 2,
+      point: { x: 72, y: 144 },
+    })).resolves.toBe(true);
+    expect(applyLocation).toHaveBeenCalledWith({
+      pageIndex: 2,
+      anchor: { x: 72, y: 144 },
+      alignment: { xPercent: 50, yPercent: 50 },
+      zoom: 1.25,
+    });
+    expect(focusAtDestination).toHaveBeenCalledWith(2);
+    await expect(applyHostForwardSyncTex(navigation, {
+      pageIndex: -1,
+      point: { x: 72, y: 144 },
+    })).resolves.toBe(false);
+  });
+
   it("routes the VS Code reattach command to the first canonical unresolved item", () => {
     const resolved = { id: "resolved", reconciliation: { disposition: { kind: "resolved" } } };
     const ambiguous = { id: "ambiguous", reconciliation: { disposition: { kind: "ambiguous" } } };
@@ -109,6 +141,7 @@ describe("one production review tree", () => {
     expect(html).toContain("two matching passages");
     expect(html).toContain("unfinished wording");
     expect(html).toContain("Frozen draft");
+    expect(html).not.toContain(">Apply</button>");
     expect(html).toContain("possibly stale");
     expect(html).toContain("Resolve 1 Review Item and 1 pending draft before export");
   });

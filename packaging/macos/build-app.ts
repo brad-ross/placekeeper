@@ -12,6 +12,7 @@ import {
   validateAppBundleManifest,
   validateBackendRuntimeManifest,
   validateMacIconSet,
+  validateSharedWebDistribution,
 } from "./validate-manifest.js";
 import { MANAGEMENT_PROTOCOL_VERSION } from "../../apps/service/src/host/launch-control.js";
 
@@ -219,6 +220,14 @@ exec "$contents_dir/Resources/node/bin/node" "$contents_dir/Resources/launcher.m
 `;
 }
 
+function vscodeLauncherScript(): string {
+  return `#!/bin/sh
+set -eu
+contents_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+exec "$contents_dir/Resources/node/bin/node" "$contents_dir/Resources/vscode-launcher.mjs" "$@"
+`;
+}
+
 export async function assertSelfContainedService(entryPath: string): Promise<void> {
   // Bundled dependencies retain JSDoc type imports; they are comments, not
   // runtime module edges, and must not be mistaken for external imports.
@@ -239,10 +248,11 @@ export async function assertSelfContainedService(entryPath: string): Promise<voi
   }
 }
 
-async function signBundle(appPath: string, nodePath: string, launcherPath: string, identity: string, entitlements: string): Promise<void> {
+async function signBundle(appPath: string, nodePath: string, launcherPath: string, vscodeLauncherPath: string, identity: string, entitlements: string): Promise<void> {
   const common = ["--force", "--options", "runtime", "--timestamp", "--sign", identity];
   await run("codesign", [...common, "--entitlements", entitlements, nodePath]);
   await run("codesign", [...common, launcherPath]);
+  await run("codesign", [...common, vscodeLauncherPath]);
   await run("codesign", [...common, "--entitlements", entitlements, appPath]);
   await run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
 }
@@ -297,6 +307,7 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   const resources = resolve(contents, "Resources");
   const nodePath = resolve(resources, "node/bin/node");
   const launcherPath = resolve(contents, `MacOS/${appManifest.executable}`);
+  const vscodeLauncherPath = resolve(contents, "MacOS/placekeeper-vscode");
   await mkdir(dirname(nodePath), { recursive: true, mode: 0o755 });
   await mkdir(dirname(launcherPath), { recursive: true, mode: 0o755 });
   await copyFile(options.nodeRuntime, nodePath);
@@ -310,6 +321,11 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   await copyFile(resolve(vscodeExtension, "package.json"), resolve(vscodeInstall, "package.json"));
   await cp(vscodeDist, resolve(vscodeInstall, "dist"), { recursive: true, errorOnExist: true });
   await cp(resolve(vscodeExtension, "assets"), resolve(vscodeInstall, "assets"), { recursive: true, errorOnExist: true });
+  const sharedWebManifest = await validateSharedWebDistribution(options.webDist);
+  const vscodeWebManifest = await validateSharedWebDistribution(resolve(vscodeDist, "web"));
+  if (JSON.stringify(vscodeWebManifest) !== JSON.stringify(sharedWebManifest)) {
+    throw new Error("The VS Code extension web assets differ from the shared production payload");
+  }
   for (const asset of backendManifest.assets) {
     const destination = resolve(contents, asset.installPath);
     await mkdir(dirname(destination), { recursive: true, mode: 0o755 });
@@ -325,7 +341,9 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
     resolve(contents, CATALOG_NOTICE_RESOURCE_PATH),
   );
   await copyFile(resolve(repoRoot, "packaging/macos/launcher.mjs"), resolve(resources, "launcher.mjs"));
+  await copyFile(resolve(repoRoot, "packaging/macos/vscode-launcher.mjs"), resolve(resources, "vscode-launcher.mjs"));
   await writeFile(launcherPath, launcherScript(), { mode: 0o755 });
+  await writeFile(vscodeLauncherPath, vscodeLauncherScript(), { mode: 0o755 });
   await validateCatalogRuntimeDistribution({
     runtimeRoot: resources,
     webEntry: resolve(resources, "web/app.js"),
@@ -342,7 +360,7 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
     { mode: 0o644 },
   );
   if (options.signingIdentity !== undefined) {
-    await signBundle(appPath, nodePath, launcherPath, options.signingIdentity, resolve(repoRoot, appManifest.signing.entitlements));
+    await signBundle(appPath, nodePath, launcherPath, vscodeLauncherPath, options.signingIdentity, resolve(repoRoot, appManifest.signing.entitlements));
   } else {
     await signAdHocBundle(appPath);
   }

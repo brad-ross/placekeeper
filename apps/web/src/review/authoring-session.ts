@@ -1,8 +1,10 @@
 import type {
   JsonValue,
+  PendingReviewDraftV1,
   ReviewItem,
   ReviewState,
 } from '../../../../packages/core/src/review-model.js';
+import { anchorEvidenceFromReviewItem } from '../../../../packages/core/src/review-model.js';
 import { projectReviewItem } from '../../../../packages/core/src/annotation-projection.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { ReviewRect } from '../../../../packages/core/src/review-commands.js';
@@ -73,6 +75,7 @@ export interface AuthoringSemantics {
 
 export interface AuthoringSessionSeed {
   readonly token: number;
+  readonly draftId?: string;
   readonly authority: AuthoringAuthority;
   readonly source: AuthoringSource;
   readonly origin: AuthoringOrigin;
@@ -81,6 +84,7 @@ export interface AuthoringSessionSeed {
 
 export interface AuthoringSession {
   readonly token: number;
+  readonly draftId: string;
   readonly authority: AuthoringAuthority;
   readonly source: AuthoringSource;
   readonly origin: AuthoringOrigin;
@@ -255,11 +259,65 @@ export function createAuthoringSession(seed: AuthoringSessionSeed): AuthoringSes
   const source = cloneSource(seed.source);
   return Object.freeze({
     token: seed.token,
+    draftId: seed.draftId ?? crypto.randomUUID(),
     authority: Object.freeze({ ...seed.authority }),
     source,
     origin: Object.freeze({ ...seed.origin }),
     workspace: Object.freeze({ ...seed.workspace }),
     semantics: semanticsFor(source),
+  });
+}
+
+export function pendingDraftForAuthoring(input: {
+  readonly session: AuthoringSession;
+  readonly ownerViewId: string;
+  readonly text: string;
+  readonly revision: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}): PendingReviewDraftV1 {
+  const { session } = input;
+  const source = session.source;
+  const anchor = source.kind === 'replace' || source.kind === 'highlight'
+    ? {
+        kind: 'selection' as const,
+        pageIndex: source.anchor.pageIndex,
+        quote: source.anchor.quote,
+        prefix: source.anchor.prefix,
+        suffix: source.anchor.suffix,
+        rect: source.anchor.rect,
+        segmentRects: source.anchor.segmentRects,
+      }
+    : source.kind === 'insert'
+      ? {
+          kind: 'caret' as const,
+          pageIndex: source.anchor.pageIndex,
+          leftContext: source.anchor.leftContext,
+          rightContext: source.anchor.rightContext,
+          rect: source.anchor.position,
+        }
+      : source.kind === 'pageNote'
+        ? {
+            kind: 'page' as const,
+            pageIndex: source.pageIndex,
+            ...(source.nearbyText === undefined ? {} : { nearbyText: source.nearbyText }),
+            rect: source.position,
+          }
+        : anchorEvidenceFromReviewItem(source.item);
+  return Object.freeze({
+    id: session.draftId,
+    ownerViewId: input.ownerViewId,
+    baseGeneration: session.authority.documentGeneration,
+    revision: input.revision,
+    kind: source.kind === 'edit' ? source.item.kind : source.kind,
+    ...(source.kind === 'edit' ? { targetItemId: source.item.id } : {}),
+    pageIndex: anchor.pageIndex,
+    text: input.text,
+    anchor,
+    disposition: { kind: 'resolved' as const, generation: session.authority.documentGeneration },
+    status: 'protected',
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
   });
 }
 

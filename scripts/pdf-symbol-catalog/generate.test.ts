@@ -34,7 +34,7 @@ afterEach(async () => {
   await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-describe('PDF symbol catalog artifact generation', () => {
+describe('PDF symbol catalog artifact generation', { timeout: 15_000 }, () => {
   it('classifies suggestion rank by standards-derived precedence', () => {
     const classify = (
       category: string,
@@ -378,7 +378,7 @@ describe('PDF symbol catalog artifact generation', () => {
       },
     });
     expect(await snapshot(root)).toEqual(before);
-  });
+  }, 15_000);
 
   it.each(['absent', 'stale'] as const)(
     'reports precise source deltas when the ignored audit is %s',

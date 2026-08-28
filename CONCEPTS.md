@@ -124,6 +124,11 @@ The reconciliation rule that preserves a person's source edit or annotation over
 
 Manual Precedence applies to work created after the agent captures an execution baseline as well as work that existed before the request.
 
+### Rebuild Reconciliation
+The source-linked review process that carries Review Items from one generated PDF build to its replacement without changing their intended targets.
+
+Confidently matching anchors carry forward. Missing or ambiguous anchors remain unresolved, are never silently retargeted, and must be reattached or discarded before reviewed-PDF export.
+
 ### Outline Discovery
 The document-scoped capability result that distinguishes confirmed absence of a PDF outline from an outline still loading, available outline structure, or discovery failure.
 

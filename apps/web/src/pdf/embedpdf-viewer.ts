@@ -32,7 +32,8 @@ export type ViewerResourcePolicy =
 export function validateViewerResourceUrl(rawUrl: string, policy: ViewerResourcePolicy): string {
   if (policy.host === 'vscode') {
     const extensionResource = rawUrl.startsWith('vscode-webview://') ||
-      /^https:\/\/[^/\s]+\.vscode-cdn\.net(?:\/|$)/u.test(rawUrl);
+      /^https:\/\/[^/\s]+\.vscode-cdn\.net(?:\/|$)/u.test(rawUrl) ||
+      /^blob:vscode-webview:\/\/[A-Za-z0-9._~-]+\/[0-9a-f-]{36}$/iu.test(rawUrl);
     if (!policy.issued.has(rawUrl) || !extensionResource) {
       throw new Error('Viewer resources must be extension-issued.');
     }

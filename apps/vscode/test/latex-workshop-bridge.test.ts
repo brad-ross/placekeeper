@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   LATEX_WORKSHOP_OWNED_SETTINGS,
+  compatibilityPrior,
   compatibilityStatus,
   previewCompatibilitySetup,
   restoreCompatibilitySettings,
@@ -48,6 +49,26 @@ describe("LaTeX Workshop compatibility bridge", () => {
     expect(restoreCompatibilitySettings(current, setup)).toEqual({
       "latex-workshop.view.pdf.external.viewer.command": undefined,
       "latex-workshop.view.pdf.external.viewer.args": undefined,
+    });
+  });
+
+  it("preserves original fallbacks when a scoped registration is refreshed", () => {
+    const prior = {
+      "latex-workshop.view.pdf.viewer": "tab",
+      "latex-workshop.view.pdf.external.viewer.command": "/manual/viewer",
+      "latex-workshop.view.pdf.external.viewer.args": ["%PDF%"],
+    };
+    const original = previewCompatibilitySetup(prior, {
+      command: "/Applications/Placekeeper.app/Contents/MacOS/placekeeper-vscode",
+      registrationId: "registration_identifier_1234",
+    });
+    expect(compatibilityPrior({
+      ...original.next,
+      "latex-workshop.view.pdf.external.viewer.args": ["user-changed"],
+    }, original)).toEqual({
+      "latex-workshop.view.pdf.viewer": "tab",
+      "latex-workshop.view.pdf.external.viewer.command": "/manual/viewer",
+      "latex-workshop.view.pdf.external.viewer.args": ["user-changed"],
     });
   });
 });

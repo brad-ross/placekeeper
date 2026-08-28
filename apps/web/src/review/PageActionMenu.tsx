@@ -7,6 +7,7 @@ import { shortcutForReviewAction } from './review-actions.js';
 export interface PageActionMenuProps {
   readonly placement: ContextPlacement;
   readonly triggerRef: RefObject<HTMLButtonElement | null>;
+  onGoToSource?(): void;
   onAddPageNote(): void;
   onDismiss(): void;
 }
@@ -27,11 +28,22 @@ export function PageActionMenu(props: PageActionMenuProps) {
   }, [props.onDismiss]);
   return (
     <div ref={menuRef} role="menu" aria-label="Page actions" className="review-page-menu" data-review-contextual-ui style={style}>
+      {props.onGoToSource ? (
+        <button
+          type="button"
+          role="menuitem"
+          autoFocus
+          title="Go to LaTeX Source"
+          onClick={props.onGoToSource}
+        >
+          <ReviewIcon name="locate" />Go to Source
+        </button>
+      ) : null}
       <button
         ref={props.triggerRef}
         type="button"
         role="menuitem"
-        autoFocus
+        autoFocus={props.onGoToSource === undefined}
         aria-keyshortcuts={shortcutForReviewAction('pageNote')}
         title="Add Page Note"
         onClick={props.onAddPageNote}

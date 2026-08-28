@@ -65,6 +65,11 @@ describe('EmbedPDF registry configuration', () => {
       host: 'vscode',
       issued: new Set([desktopUri]),
     })).toBe(desktopUri);
+    const blobUri = 'blob:vscode-webview://authority/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    expect(validateViewerResourceUrl(blobUri, {
+      host: 'vscode',
+      issued: new Set([blobUri]),
+    })).toBe(blobUri);
     expect(() => validateViewerResourceUrl('vscode-webview://authority/snapshots/other.pdf', {
       host: 'vscode',
       issued,

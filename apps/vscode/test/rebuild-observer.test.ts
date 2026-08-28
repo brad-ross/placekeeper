@@ -9,10 +9,10 @@ describe("rebuild observer", () => {
       validate,
       markPossiblyStale: vi.fn(async () => undefined),
     });
-    expect(observer.noteFileEvent("change", "/work/unrelated.pdf")).toBeUndefined();
-    expect(observer.noteFileEvent("change", "/work/paper.pdf")).toBe(1);
-    expect(observer.noteFileEvent("delete", "/work/paper.pdf")).toBe(2);
-    expect(observer.noteFileEvent("create", "/work/paper.synctex.gz")).toBe(3);
+    expect(observer.noteFileEvent("/work/unrelated.pdf")).toBeUndefined();
+    expect(observer.noteFileEvent("/work/paper.pdf")).toBe(1);
+    expect(observer.noteFileEvent("/work/paper.pdf")).toBe(2);
+    expect(observer.noteFileEvent("/work/paper.synctex.gz")).toBe(3);
     await observer.flush();
     expect(validate).toHaveBeenCalledTimes(1);
     expect(validate).toHaveBeenCalledWith({ outputPath: "/work/paper.pdf", observationEpoch: 3, reason: "watcher" });
@@ -26,7 +26,7 @@ describe("rebuild observer", () => {
       validate,
       markPossiblyStale: vi.fn(async () => undefined),
     });
-    expect(observer.noteFileEvent("change", "/work/paper.pdf")).toBe(2_000_001);
+    expect(observer.noteFileEvent("/work/paper.pdf")).toBe(2_000_001);
     await observer.flush();
     expect(validate).toHaveBeenCalledWith(expect.objectContaining({ observationEpoch: 2_000_001 }));
   });
@@ -43,9 +43,9 @@ describe("rebuild observer", () => {
       markPossiblyStale: vi.fn(async () => undefined),
       onCurrentResult: (result) => results.push(result),
     });
-    observer.noteFileEvent("change", "/work/paper.pdf");
+    observer.noteFileEvent("/work/paper.pdf");
     const pending = observer.flush();
-    observer.noteFileEvent("change", "/work/paper.pdf");
+    observer.noteFileEvent("/work/paper.pdf");
     first.resolve({ status: "committed" });
     await pending;
     await observer.flush();
@@ -56,12 +56,46 @@ describe("rebuild observer", () => {
     const validate = vi.fn(async (_input: { readonly reason: string }) => ({ status: "same-digest" as const }));
     const markPossiblyStale = vi.fn(async () => undefined);
     const observer = new RebuildObserver({ outputPath: "/work/paper.pdf", validate, markPossiblyStale });
-    await observer.noteSourceSaved("/work/paper.tex");
+    await observer.noteSourceSaved();
     await observer.revalidate("reveal");
     await observer.tick();
     observer.noteCurrent();
     await observer.tick();
     expect(markPossiblyStale).toHaveBeenCalledTimes(1);
+    expect(markPossiblyStale).toHaveBeenCalledWith({ observationEpoch: 1 });
     expect(validate.mock.calls.map(([input]) => input.reason)).toEqual(["reveal", "interval"]);
+  });
+
+  it("keeps an older output observation from clearing a newer source save", async () => {
+    const pending = Promise.withResolvers<{ status: "committed" }>();
+    const results: unknown[] = [];
+    const markPossiblyStale = vi.fn(async () => undefined);
+    const observer = new RebuildObserver({
+      outputPath: "/work/paper.pdf",
+      validate: vi.fn(() => pending.promise),
+      markPossiblyStale,
+      onCurrentResult: (result) => results.push(result),
+    });
+    observer.noteFileEvent("/work/paper.pdf");
+    const validation = observer.flush();
+    await observer.noteSourceSaved();
+    pending.resolve({ status: "committed" });
+    await validation;
+
+    expect(observer.possiblyStale).toBe(true);
+    expect(results).toEqual([]);
+    expect(markPossiblyStale).toHaveBeenCalledWith({ observationEpoch: 2 });
+  });
+
+  it("contains validation and stale-marking failures while remaining stale", async () => {
+    const observer = new RebuildObserver({
+      outputPath: "/work/paper.pdf",
+      validate: vi.fn(async () => { throw new Error("broker unavailable"); }),
+      markPossiblyStale: vi.fn(async () => { throw new Error("broker unavailable"); }),
+    });
+    observer.noteFileEvent("/work/paper.pdf");
+    await expect(observer.flush()).resolves.toBeUndefined();
+    expect(observer.possiblyStale).toBe(true);
+    await expect(observer.tick()).resolves.toBeUndefined();
   });
 });

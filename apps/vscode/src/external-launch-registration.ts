@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 
 const SAFE_ID = /^[A-Za-z0-9_-]{16,128}$/u;
 
@@ -6,6 +6,25 @@ export interface ExternalLaunchRegistration {
   readonly registrationId: string;
   readonly canonicalOutputPath: string;
   readonly windowId: string;
+}
+
+export function parseScopedExternalLaunchUri(input: {
+  readonly path: string;
+  readonly query: string;
+}): { readonly registrationId: string; readonly outputPath: string } {
+  if (input.path !== "/placekeeper/external") throw new Error("The external launch route is invalid");
+  const query = new URLSearchParams(input.query);
+  if ([...query.keys()].sort().join("\n") !== "pdf\nregistration" ||
+    query.getAll("pdf").length !== 1 || query.getAll("registration").length !== 1) {
+    throw new Error("The external launch route is invalid");
+  }
+  const registrationId = query.get("registration") ?? "";
+  const outputPath = query.get("pdf") ?? "";
+  if (!SAFE_ID.test(registrationId) || !isAbsolute(outputPath) || !outputPath.toLowerCase().endsWith(".pdf") ||
+    outputPath.includes("\0") || outputPath.includes("\n") || outputPath.includes("\r")) {
+    throw new Error("The external launch route must name one registered local PDF");
+  }
+  return { registrationId, outputPath: resolve(outputPath) };
 }
 
 /** Exact in-host routing table. Cross-process registration is intentionally

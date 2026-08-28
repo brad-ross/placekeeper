@@ -1,4 +1,7 @@
-import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
+import {
+  anchorEvidenceFromReviewItem,
+  type ReviewItem,
+} from '../../../../packages/core/src/review-model.js';
 import { existingAnnotationKey, type ExistingAnnotation } from '../pdf/existing-annotations.js';
 import {
   createPdfAnnotationOrderLocation,
@@ -29,11 +32,12 @@ export function canDeriveAnnotationOutlineLabels(input: {
 }
 
 export function reviewItemPoint(item: ReviewItem): { readonly x: number; readonly y: number } | null {
-  const value = item.payload[item.kind === 'insert' || item.kind === 'pageNote' ? 'position' : 'rect'];
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
-  const x = value.x;
-  const y = value.y;
-  return typeof x === 'number' && typeof y === 'number' ? { x, y } : null;
+  try {
+    const { rect } = anchorEvidenceFromReviewItem(item);
+    return { x: rect.x, y: rect.y };
+  } catch {
+    return null;
+  }
 }
 
 function annotationLabel(input: {

@@ -12,11 +12,41 @@ import {
   HOST_RUNTIME_PROTOCOL,
   HOST_RUNTIME_VERSION,
   createRpcHostRuntime,
+  materializeVscodeWasmResource,
 } from "../src/host/vscode-runtime.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("host-neutral review runtime", () => {
+  it("materializes extension-issued PDFium bytes into a worker-readable blob", async () => {
+    const createObjectURL = vi.fn(() => "blob:vscode-webview://authority/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    const revokeObjectURL = vi.fn();
+    const resource = await materializeVscodeWasmResource("vscode-webview://authority/pdfium.wasm", {
+      fetch: vi.fn(async () => new Response(Uint8Array.of(0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0))),
+      createObjectURL,
+      revokeObjectURL,
+    });
+    expect(resource.url).toMatch(/^blob:vscode-webview:/u);
+    resource.dispose();
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith(resource.url);
+  });
+
+  it.each([
+    ["rejected response", new Response("missing", { status: 404 })],
+    ["empty response", new Response(new Uint8Array())],
+    ["invalid magic", new Response(Uint8Array.of(1, 2, 3, 4))],
+    ["oversized response", new Response(new Uint8Array(16 * 1024 * 1024 + 1))],
+  ])("rejects a %s before creating a PDFium blob URL", async (_label, response) => {
+    const createObjectURL = vi.fn(() => "blob:invalid");
+    await expect(materializeVscodeWasmResource("vscode-webview://authority/pdfium.wasm", {
+      fetch: vi.fn(async () => response),
+      createObjectURL,
+      revokeObjectURL: vi.fn(),
+    })).rejects.toThrow(/packaged PDF engine/iu);
+    expect(createObjectURL).not.toHaveBeenCalled();
+  });
+
   it("keeps browser bootstrap, scope, assets, presence, and export on authenticated HTTP/WebSocket", async () => {
     const state = createReviewState({
       sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -339,7 +369,11 @@ describe("host-neutral review runtime", () => {
     const command = runtime.command({ type: "undo", expectedRevision: 0 });
     const commandRequest = requests.at(-1)!;
     const refresh = runtime.bootstrap();
-    respond(requests.at(-1)!, 1, bootstrapPayload(1));
+    const refreshRequest = requests.at(-1)!;
+    expect(refreshRequest).not.toHaveProperty("sessionId");
+    expect(refreshRequest).not.toHaveProperty("generation");
+    expect(refreshRequest).not.toHaveProperty("revision");
+    respond(refreshRequest, 1, bootstrapPayload(1));
     await refresh;
     respond(commandRequest, 0, { ...state, revision: 1 });
 
@@ -376,7 +410,7 @@ describe("host-neutral review runtime", () => {
         return () => listeners.delete(listener);
       },
     });
-    const commands: string[] = [];
+    const commands: unknown[] = [];
     const unsubscribe = runtime.subscribeHostCommands?.((command) => commands.push(command));
     const publish = (message: unknown) => listeners.forEach((listener) => listener(message));
 
@@ -405,7 +439,27 @@ describe("host-neutral review runtime", () => {
       payload: { command: "reattach" },
     });
 
-    expect(commands).toEqual(["reattach"]);
+    publish({
+      protocol: HOST_RUNTIME_PROTOCOL,
+      version: HOST_RUNTIME_VERSION,
+      kind: "event",
+      event: "host-command",
+      panelId: "panel_identifier_1234",
+      payload: { command: "forward-synctex", pageIndex: 2, point: { x: 72, y: 144 } },
+    });
+    publish({
+      protocol: HOST_RUNTIME_PROTOCOL,
+      version: HOST_RUNTIME_VERSION,
+      kind: "event",
+      event: "host-command",
+      panelId: "panel_identifier_1234",
+      payload: { command: "forward-synctex", pageIndex: -1, point: { x: 72, y: 144 } },
+    });
+
+    expect(commands).toEqual([
+      { command: "reattach" },
+      { command: "forward-synctex", pageIndex: 2, point: { x: 72, y: 144 } },
+    ]);
     unsubscribe?.();
     runtime.dispose();
   });

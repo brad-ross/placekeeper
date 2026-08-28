@@ -79,18 +79,28 @@ export interface ReviewWebviewHtmlOptions {
 }
 
 export interface SharedAssetManifest {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly app: string;
   readonly stylesheet: string;
   readonly pdfiumWasm: string;
+  readonly worker: { readonly kind: "inline-blob"; readonly container: string };
+  readonly integrity: Readonly<Record<string, string>>;
 }
 
 export function parseSharedAssetManifest(value: unknown): SharedAssetManifest {
   if (typeof value !== "object" || value === null) throw new Error("The shared asset manifest is invalid");
   const candidate = value as Partial<SharedAssetManifest>;
   const safeAsset = (asset: unknown) => typeof asset === "string" && /^[A-Za-z0-9._-]+$/u.test(asset);
-  if (candidate.schemaVersion !== 1 || !safeAsset(candidate.app) ||
+  if (candidate.schemaVersion !== 2 || !safeAsset(candidate.app) ||
     !safeAsset(candidate.stylesheet) || !safeAsset(candidate.pdfiumWasm)) {
+    throw new Error("The shared asset manifest is invalid");
+  }
+  const assets = [candidate.app, candidate.stylesheet, candidate.pdfiumWasm] as string[];
+  if (new Set(assets).size !== assets.length || typeof candidate.worker !== "object" ||
+    candidate.worker === null || candidate.worker.kind !== "inline-blob" ||
+    candidate.worker.container !== candidate.app || typeof candidate.integrity !== "object" ||
+    candidate.integrity === null || Object.keys(candidate.integrity).sort().join("\n") !== assets.sort().join("\n") ||
+    Object.values(candidate.integrity).some((digest) => !/^[0-9a-f]{64}$/u.test(digest))) {
     throw new Error("The shared asset manifest is invalid");
   }
   return candidate as SharedAssetManifest;
@@ -107,7 +117,9 @@ export function buildReviewWebviewHtml(options: ReviewWebviewHtmlOptions): strin
   for (const uri of [options.scriptUri, options.styleUri]) {
     if (!extensionResource(uri)) throw new Error("Only extension-issued webview resources are allowed");
   }
-  if (!extensionResource(options.cspSource) && !/^https:\/\/\*\.vscode-cdn\.net$/u.test(options.cspSource)) {
+  const cspMatch = /^(?:'self' )?(\S+)$/u.exec(options.cspSource);
+  if (cspMatch === null ||
+    (!extensionResource(cspMatch[1]!) && !/^https:\/\/\*\.vscode-cdn\.net$/u.test(cspMatch[1]!))) {
     throw new Error("Only the webview CSP source is allowed");
   }
   const nonce = escapeHtml(options.nonce);
@@ -119,13 +131,14 @@ export function buildReviewWebviewHtml(options: ReviewWebviewHtmlOptions): strin
   const scriptUri = JSON.stringify(options.scriptUri).replaceAll("<", "\\u003c");
   return `<!doctype html>
 <html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; connect-src ${csp}; img-src blob: data: ${csp}; font-src ${csp}; style-src ${csp} 'nonce-${nonce}' 'unsafe-inline'; script-src ${csp} 'nonce-${nonce}' 'wasm-unsafe-eval'; worker-src blob:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; connect-src ${csp} blob:; img-src blob: data: ${csp}; font-src ${csp}; style-src ${csp} 'nonce-${nonce}' 'unsafe-inline'; script-src ${csp} 'nonce-${nonce}' 'wasm-unsafe-eval'; worker-src blob:;">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="${escapeHtml(options.styleUri)}">
 <title>Placekeeper</title></head><body><div id="root"></div>
 <script type="module" nonce="${nonce}">
 const vscode = acquireVsCodeApi();
-${panelKey === undefined ? "" : `vscode.setState({ ...(vscode.getState() ?? {}), panelKey: ${panelKey} });`}
+${panelKey === undefined ? "" : `const savedState = vscode.getState() ?? {};
+vscode.setState({ panelKey: ${panelKey}, ...(Number.isSafeInteger(savedState.pageIndex) && savedState.pageIndex >= 0 ? { pageIndex: savedState.pageIndex } : {}), ...(typeof savedState.zoom === "number" && Number.isFinite(savedState.zoom) && savedState.zoom >= 0.2 && savedState.zoom <= 60 ? { zoom: savedState.zoom } : {}) });`}
 const app = await import(${scriptUri});
 await app.startVscode({ panelId: ${panelId}, vscode });
 </script></body></html>`;

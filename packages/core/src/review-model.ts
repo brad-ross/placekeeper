@@ -81,6 +81,8 @@ export interface PendingReviewDraftV1 {
   readonly baseGeneration: number;
   readonly revision: number;
   readonly kind: ReviewItemKind;
+  /** Present when the draft edits an existing Review Item instead of creating one. */
+  readonly targetItemId?: string;
   readonly pageIndex: number;
   readonly text: string;
   readonly anchor: ReviewAnchorEvidenceV1;
@@ -186,6 +188,14 @@ export type ReviewCommand =
       readonly expectedReconciliationRevision: number;
       readonly ownerViewId: string;
       readonly anchor: ReviewAnchorEvidenceV1;
+      readonly updatedAt: string;
+    }
+  | {
+      readonly type: "apply-draft";
+      readonly expectedRevision: number;
+      readonly id: string;
+      readonly expectedDraftRevision: number;
+      readonly ownerViewId: string;
       readonly updatedAt: string;
     }
   | {
@@ -366,6 +376,7 @@ export function startReviewGeneration(
       },
     };
   });
+  const history = state.history.slice(0, state.historyCursor);
   return {
     ...state,
     revision: state.revision + 1,
@@ -380,7 +391,9 @@ export function startReviewGeneration(
       ...state.workflow,
       documentGeneration: input.documentGeneration,
       freshness: input.freshness ?? "current",
-      historyBoundary: state.historyCursor,
+      historyBoundary: history.length,
     },
+    history,
+    historyCursor: history.length,
   };
 }

@@ -9,6 +9,15 @@ import type {
 export interface PdfAnchorPage {
   readonly pageIndex: number;
   readonly text: string;
+  readonly geometry?: readonly {
+    readonly charStart: number;
+    readonly glyphs: readonly {
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+    }[];
+  }[];
 }
 
 interface AnchorResolution {
@@ -16,8 +25,13 @@ interface AnchorResolution {
   readonly disposition: ReviewAnchorDisposition;
 }
 
-function candidateAnchors(anchor: ReviewAnchorEvidenceV1, pages: readonly PdfAnchorPage[]) {
-  const candidates: ReviewAnchorEvidenceV1[] = [];
+interface SemanticMatch {
+  readonly page: PdfAnchorPage;
+  readonly offset: number;
+}
+
+function candidateMatches(anchor: ReviewAnchorEvidenceV1, pages: readonly PdfAnchorPage[]) {
+  const candidates: SemanticMatch[] = [];
   if (anchor.kind === "page" && anchor.nearbyText === undefined) return candidates;
   for (const page of pages) {
     const needle = anchor.kind === "selection"
@@ -36,13 +50,88 @@ function candidateAnchors(anchor: ReviewAnchorEvidenceV1, pages: readonly PdfAnc
         page.text.startsWith(anchor.suffix, found + anchor.quote.length)
       );
       if (contextMatches) {
-        candidates.push({ ...anchor, pageIndex: page.pageIndex });
+        candidates.push({ page, offset: found });
         if (candidates.length === 2) return candidates;
       }
       offset = found + Math.max(1, needle.length);
     }
   }
   return candidates;
+}
+
+type Rect = ReviewAnchorEvidenceV1["rect"];
+
+function unionRects(rects: readonly Rect[]): Rect | undefined {
+  if (rects.length === 0) return undefined;
+  const left = Math.min(...rects.map(({ x }) => x));
+  const top = Math.min(...rects.map(({ y }) => y));
+  const right = Math.max(...rects.map(({ x, width }) => x + width));
+  const bottom = Math.max(...rects.map(({ y, height }) => y + height));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function geometryForRange(
+  page: PdfAnchorPage,
+  start: number,
+  length: number,
+): readonly Rect[] | undefined {
+  if (page.geometry === undefined) return undefined;
+  const end = start + length;
+  const segments: Rect[] = [];
+  for (const run of page.geometry) {
+    const glyphs = run.glyphs.flatMap((glyph, index) => {
+      const charIndex = run.charStart + index;
+      return charIndex >= start && charIndex < end && glyph.width > 0 && glyph.height > 0
+        ? [{ x: glyph.x, y: glyph.y, width: glyph.width, height: glyph.height }]
+        : [];
+    });
+    const rect = unionRects(glyphs);
+    if (rect !== undefined) segments.push(rect);
+  }
+  return segments.length === 0 ? undefined : segments;
+}
+
+function caretGeometry(page: PdfAnchorPage, offset: number): Rect | undefined {
+  if (page.geometry === undefined) return undefined;
+  let before: { readonly index: number; readonly rect: Rect } | undefined;
+  let after: { readonly index: number; readonly rect: Rect } | undefined;
+  for (const run of page.geometry) {
+    run.glyphs.forEach((glyph, glyphIndex) => {
+      if (glyph.width <= 0 || glyph.height <= 0) return;
+      const index = run.charStart + glyphIndex;
+      const rect = { x: glyph.x, y: glyph.y, width: glyph.width, height: glyph.height };
+      if (index < offset && (before === undefined || index > before.index)) before = { index, rect };
+      if (index >= offset && (after === undefined || index < after.index)) after = { index, rect };
+    });
+  }
+  if (after !== undefined) return { x: after.rect.x, y: after.rect.y, width: 1, height: after.rect.height };
+  if (before !== undefined) {
+    return {
+      x: before.rect.x + before.rect.width,
+      y: before.rect.y,
+      width: 1,
+      height: before.rect.height,
+    };
+  }
+  return undefined;
+}
+
+function anchorForMatch(
+  anchor: ReviewAnchorEvidenceV1,
+  match: SemanticMatch,
+): ReviewAnchorEvidenceV1 | undefined {
+  if (anchor.kind === "caret") {
+    const rect = caretGeometry(match.page, match.offset + anchor.leftContext.length);
+    return rect === undefined ? undefined : { ...anchor, pageIndex: match.page.pageIndex, rect };
+  }
+  const needle = anchor.kind === "selection" ? anchor.quote : anchor.nearbyText!;
+  const segmentRects = geometryForRange(match.page, match.offset, needle.length);
+  if (segmentRects === undefined) return undefined;
+  const rect = unionRects(segmentRects);
+  if (rect === undefined) return undefined;
+  return anchor.kind === "selection"
+    ? { ...anchor, pageIndex: match.page.pageIndex, rect, segmentRects }
+    : { ...anchor, pageIndex: match.page.pageIndex, rect };
 }
 
 export function reconcilePdfAnchor(
@@ -59,10 +148,20 @@ export function reconcilePdfAnchor(
       },
     };
   }
-  const candidates = candidateAnchors(anchor, pages);
+  const candidates = candidateMatches(anchor, pages);
   if (candidates.length === 1) {
+    const resolvedAnchor = anchorForMatch(anchor, candidates[0]!);
+    if (resolvedAnchor === undefined) {
+      return {
+        anchor,
+        disposition: {
+          kind: "unsupported",
+          reason: "current-generation-anchor-geometry-unavailable",
+        },
+      };
+    }
     return {
-      anchor: candidates[0]!,
+      anchor: resolvedAnchor,
       disposition: { kind: "resolved", generation },
     };
   }

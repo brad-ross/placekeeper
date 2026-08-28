@@ -125,6 +125,7 @@ import {
   authoringSessionIsCurrent,
   canStartAuthoringSession,
   createAuthoringSession,
+  pendingDraftForAuthoring,
   type AuthoringAuthority,
   type AuthoringAnchorSnapshot,
   type AuthoringOriginKind,
@@ -173,6 +174,7 @@ export interface ReviewShellProps {
   onCancelKeyboardPageNote?(): void;
   onPageMenuDismiss?(invocationId: string): void;
   onPageMenuConsumed?(invocationId: string): void;
+  onGoToSource?(menu: NonNullable<ReviewShellProps['pageMenu']>): void;
   onPlacedPageNoteConsumed?(token: number): void;
   onPageNoteComposerComplete?(): void;
   onSelectionConsumed?(generation: number): void;
@@ -392,6 +394,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const peekHeldRef = useRef(false);
   const peekTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [announcement, setAnnouncement] = useState(`Review revision ${props.state.revision}.`);
+  const authoringOwnerViewIdRef = useRef(crypto.randomUUID());
 
   const cancelAnnotationRestoration = useCallback(() => {
     annotationRestorationTokenRef.current += 1;
@@ -986,6 +989,9 @@ export function ReviewShell(props: ReviewShellProps) {
     props.onAuthoringActiveChange?.(true);
     setAuthoringSession(session);
     dispatchSurface({ type: 'open-nested' });
+    if (props.state.workflow.mode === 'generated-output') {
+      void protectAuthoringDraft(session, initialAuthoringValue(session));
+    }
     return true;
   };
 
@@ -1127,6 +1133,9 @@ export function ReviewShell(props: ReviewShellProps) {
       props.authoringAnchorNavigation?.token === session.token
       && props.authoringAnchorNavigation.pending
     ) await props.authoringAnchorNavigation.onCancelReturn?.();
+    if (props.state.workflow.mode === 'generated-output') {
+      await discardProtectedAuthoringDraft(session);
+    }
     closeAuthoringSession(session.token, 'cancelled');
   };
   const closeNested = async () => {
@@ -1397,8 +1406,82 @@ export function ReviewShell(props: ReviewShellProps) {
     if (accepted) closeAuthoringSession(session.token, 'accepted', next);
   };
 
+  const protectAuthoringDraft = (
+    session: AuthoringSession,
+    value: string,
+  ): Promise<ReviewState> => submit((state) => {
+    const existing = state.pendingDrafts.find(({ id }) => id === session.draftId);
+    const updatedAt = new Date().toISOString();
+    return {
+      type: 'put-draft',
+      expectedRevision: state.revision,
+      expectedDraftRevision: existing?.revision ?? -1,
+      draft: pendingDraftForAuthoring({
+        session,
+        ownerViewId: authoringOwnerViewIdRef.current,
+        text: value,
+        revision: existing?.revision ?? 0,
+        createdAt: existing?.createdAt ?? updatedAt,
+        updatedAt,
+      }),
+    };
+  }, {
+    authority: session.authority,
+    onStale: () => closeAuthoringSession(session.token, 'source-replaced'),
+  });
+
+  const discardProtectedAuthoringDraft = async (session: AuthoringSession): Promise<void> => {
+    await commandTailRef.current;
+    const existing = acknowledgedRef.current.pendingDrafts.find(({ id }) => id === session.draftId);
+    if (existing === undefined) return;
+    await submit((state) => {
+      const current = state.pendingDrafts.find(({ id }) => id === session.draftId);
+      if (current === undefined) throw new Error('The protected authoring draft is unavailable.');
+      return {
+        type: 'discard-reconciliation',
+        expectedRevision: state.revision,
+        target: 'draft',
+        id: current.id,
+        expectedTargetRevision: current.revision,
+        ownerViewId: current.ownerViewId,
+        reason: 'cancelled-by-author-before-apply',
+        discardedAt: new Date().toISOString(),
+      };
+    }, { authority: session.authority });
+  };
+
+  const applyProtectedAuthoring = async (
+    session: AuthoringSession,
+    value: string,
+    onAccepted?: () => void,
+  ) => {
+    await protectAuthoringDraft(session, value);
+    await submitAuthoring(session, (state) => {
+      const draft = state.pendingDrafts.find(({ id }) => id === session.draftId);
+      if (draft === undefined) throw new Error('The protected authoring draft is unavailable.');
+      return {
+        type: 'apply-draft',
+        expectedRevision: state.revision,
+        id: draft.id,
+        expectedDraftRevision: draft.revision,
+        ownerViewId: draft.ownerViewId,
+        updatedAt: new Date().toISOString(),
+      };
+    }, onAccepted);
+  };
+
   const saveAuthoring = async (session: AuthoringSession, value: string) => {
     const source = session.source;
+    if (props.state.workflow.mode === 'generated-output') {
+      await applyProtectedAuthoring(
+        session,
+        value,
+        source.kind === 'replace' || source.kind === 'highlight'
+          ? () => consumeSelectionActions(source.selectionGeneration)
+          : undefined,
+      );
+      return;
+    }
     if (source.kind === 'replace') {
       await submitAuthoring(
         session,
@@ -1552,6 +1635,9 @@ export function ReviewShell(props: ReviewShellProps) {
       onValueChange={(value) => {
         if (authoringSessionRef.current?.token !== authoringSession.token) return;
         props.onAuthoringPreviewChange?.(authoringPreviewAnnotation(authoringSession, value));
+        if (props.state.workflow.mode === 'generated-output') {
+          void protectAuthoringDraft(authoringSession, value);
+        }
       }}
       onDismiss={() => dismissAuthoring(authoringSession)}
       {...(source.kind !== 'highlight'
@@ -1705,6 +1791,15 @@ export function ReviewShell(props: ReviewShellProps) {
             <PageActionMenu
               placement={props.pageMenu.placement}
               triggerRef={pageNoteTriggerRef}
+              {...(props.onGoToSource === undefined ? {} : {
+                onGoToSource: () => {
+                  const menu = props.pageMenu;
+                  if (!menu) return;
+                  props.onPageMenuConsumed?.(menu.invocationId);
+                  props.onGoToSource?.(menu);
+                  dispatchSurface({ type: 'close-transient' });
+                },
+              })}
               onAddPageNote={() => {
                 const menu = props.pageMenu;
                 if (!menu) return;

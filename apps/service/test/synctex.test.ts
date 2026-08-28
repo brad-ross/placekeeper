@@ -7,7 +7,7 @@ import { PDFDocument } from "pdf-lib";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { parseSyncTexOutput, parseSyncTexViewOutput } from "../src/synctex/parser.js";
-import { querySyncTex, runSyncTex } from "../src/synctex/query.js";
+import { querySyncTex, runSyncTex, syncTexProcessPath } from "../src/synctex/query.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
 
 const roots: string[] = [];
@@ -123,6 +123,15 @@ describe("SyncTeX advisory hints", () => {
 });
 
 describe("generation-bound SyncTeX navigation", () => {
+  it("adds the stable MacTeX shim when a GUI host omits it from PATH", () => {
+    expect(syncTexProcessPath("darwin", "/usr/bin:/bin"))
+      .toBe("/Library/TeX/texbin:/usr/bin:/bin");
+    expect(syncTexProcessPath("darwin", "/Library/TeX/texbin:/usr/bin"))
+      .toBe("/Library/TeX/texbin:/usr/bin");
+    expect(syncTexProcessPath("linux", "/usr/local/bin:/usr/bin"))
+      .toBe("/usr/local/bin:/usr/bin");
+  });
+
   it("enforces subprocess timeout, output, and unavailable-tool bounds", async () => {
     const root = await fixture();
     const [timedOut, oversized, unavailable] = await Promise.all([

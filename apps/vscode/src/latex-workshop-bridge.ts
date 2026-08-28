@@ -62,6 +62,19 @@ export function restoreCompatibilitySettings(
   return restoration;
 }
 
+export function compatibilityPrior(
+  current: WorkspaceSettingValues,
+  existing: CompatibilitySetupRecord | undefined,
+): WorkspaceSettingValues {
+  if (existing === undefined) return structuredClone(current);
+  return Object.fromEntries(LATEX_WORKSHOP_OWNED_SETTINGS.map((setting) => [
+    setting,
+    sameValue(current[setting], existing.next[setting])
+      ? existing.prior[setting]
+      : current[setting],
+  ])) as unknown as WorkspaceSettingValues;
+}
+
 function sameValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }

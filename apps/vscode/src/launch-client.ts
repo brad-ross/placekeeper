@@ -78,34 +78,49 @@ async function brokerMutation(
   route: string,
   body: unknown,
   fetchImpl: typeof fetch,
+  signal?: AbortSignal,
 ): Promise<unknown> {
-  const response = await fetchImpl(`${launch.origin}/s/${launch.sessionId}${route}`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${launch.credential}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) throw new Error(`Placekeeper broker rejected ${route}`);
-  const text = await response.text();
-  if (Buffer.byteLength(text) > 65_536) throw new Error("Placekeeper broker response was oversized");
-  return text.length === 0 ? {} : JSON.parse(text) as unknown;
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal?.reason);
+  signal?.addEventListener("abort", abort, { once: true });
+  const timeout = setTimeout(() => controller.abort(new Error("Placekeeper broker request timed out")), 10_000);
+  try {
+    const response = await fetchImpl(`${launch.origin}/s/${launch.sessionId}${route}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${launch.credential}`,
+        "content-type": "application/json",
+        origin: launch.origin,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`Placekeeper broker rejected ${route}`);
+    const text = await response.text();
+    if (Buffer.byteLength(text) > 65_536) throw new Error("Placekeeper broker response was oversized");
+    return text.length === 0 ? {} : JSON.parse(text) as unknown;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener("abort", abort);
+  }
 }
 
 export function observeLiveDocument(
   launch: ExchangedVscodeLaunch,
   input: { readonly outputPath: string; readonly observationEpoch: number },
   fetchImpl: typeof fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<unknown> {
-  return brokerMutation(launch, "/observe", input, fetchImpl);
+  return brokerMutation(launch, "/observe", input, fetchImpl, signal);
 }
 
 export function markLiveDocumentPossiblyStale(
   launch: ExchangedVscodeLaunch,
+  input: { readonly observationEpoch: number },
   fetchImpl: typeof fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<unknown> {
-  return brokerMutation(launch, "/stale", {}, fetchImpl);
+  return brokerMutation(launch, "/stale", input, fetchImpl, signal);
 }
 
 export interface ExchangedVscodeLaunch {
@@ -129,7 +144,7 @@ export async function exchangeVscodeLaunch(
   if (capability === null) throw new Error("The launch capability is missing");
   const response = await fetchImpl(`${url.origin}/s/${sessionId}/exchange`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", origin: url.origin },
     body: JSON.stringify({ capability }),
   });
   if (!response.ok) throw new Error("The launch capability was rejected");
