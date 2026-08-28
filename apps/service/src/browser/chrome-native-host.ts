@@ -129,8 +129,29 @@ export async function runChromeNativeHostCommand(
   const handleOutputError = (): void => { protocolFailure = true; };
   output.on("error", handleOutputError);
   const write = (value: unknown): Promise<void> => new Promise((resolveWrite, reject) => {
+    if (lifetime.signal.aborted) {
+      reject(lifetime.signal.reason);
+      return;
+    }
+    let settled = false;
+    const cleanup = (): void => lifetime.signal.removeEventListener("abort", onAbort);
+    const finish = (error?: Error | null): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error === null || error === undefined) resolveWrite();
+      else reject(error);
+    };
+    const onAbort = (): void => {
+      const error = lifetime.signal.reason instanceof Error
+        ? lifetime.signal.reason
+        : new Error("native-host-timeout");
+      output.destroy(error);
+      finish(error);
+    };
+    lifetime.signal.addEventListener("abort", onAbort, { once: true });
     const frame = encodeNativeMessage(value);
-    output.write(frame, (error) => error === null || error === undefined ? resolveWrite() : reject(error));
+    output.write(frame, finish);
   });
   const handleChunk = (chunk: Buffer): void => {
     if (protocolFailure) return;

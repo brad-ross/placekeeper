@@ -563,15 +563,25 @@ function writeResponse(socket: Socket, response: PlacekeeperControlResponse): Pr
     ? `${JSON.stringify({ kind: "error", reason: "unavailable" })}\n`
     : serialized;
   return new Promise((resolve, reject) => {
+    let settled = false;
     const cleanup = (): void => {
       socket.off("error", onError);
       socket.off("close", onClose);
     };
-    const onError = (error: Error): void => { cleanup(); reject(error); };
-    const onClose = (): void => { cleanup(); reject(new Error("control-client-closed")); };
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error === undefined) resolve();
+      else reject(error);
+    };
+    const onError = (error: Error): void => finish(error);
+    const onClose = (hadError: boolean): void => finish(
+      hadError ? new Error("control-client-closed") : undefined,
+    );
     socket.once("error", onError);
     socket.once("close", onClose);
-    socket.end(output, () => { cleanup(); resolve(); });
+    socket.end(output);
   });
 }
 
@@ -616,10 +626,15 @@ export async function startLaunchControlServer(
             requestLifetime.signal.throwIfAborted();
             await writeResponse(socket, response);
           } catch {
-            if (
-              response.kind === "chrome-open" && response.response.ok &&
-              response.response.kind !== "recovery-offered"
-            ) await host.broker.discard(response.response.sessionId);
+            const openedSessionId = response.kind === "chrome-open" && response.response.ok &&
+                response.response.kind !== "recovery-offered"
+              ? response.response.sessionId
+              : response.kind === "launch" && response.response.ok &&
+                  response.response.kind === "opened" && parsed.kind === "launch" &&
+                  parsed.request.surface === "browser"
+                ? response.response.sessionId
+                : undefined;
+            if (openedSessionId !== undefined) await host.broker.discard(openedSessionId);
             return;
           }
           if (

@@ -3,7 +3,7 @@ import { access, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   requestControl,
@@ -126,5 +126,42 @@ describe("Chrome daemon handoff", () => {
       const entries = await import("node:fs/promises").then(({ readdir }) => readdir(recoveryRoot));
       return entries.filter((name) => !name.startsWith(".")).length;
     }).toBe(0);
+  });
+
+  it("rolls back a newly opened local browser review when its reply is not delivered", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-local-cancel-"));
+    roots.push(root);
+    const socketPath = join(root, "control.sock");
+    const openStarted = Promise.withResolvers<void>();
+    const finishOpen = Promise.withResolvers<void>();
+    const discard = vi.fn(async () => undefined);
+    const host = {
+      broker: { discard },
+      open: async () => {
+        openStarted.resolve();
+        await finishOpen.promise;
+        return {
+          ok: true as const,
+          kind: "opened" as const,
+          url: "http://127.0.0.1:43179/s/779e1d9d-58c1-4b12-8dc2-3449dad132c1/bootstrap#cap=1234567890123456789012345678901234567890123",
+          sessionId: "779e1d9d-58c1-4b12-8dc2-3449dad132c1",
+          documentGeneration: 1,
+        };
+      },
+    } as unknown as PlacekeeperHost;
+    controls.push(await startLaunchControlServer(host, socketPath));
+    const controller = new AbortController();
+    const response = requestControl(socketPath, {
+      kind: "launch",
+      request: { pdfPath: "/private/local.pdf", surface: "browser" },
+    }, { signal: controller.signal });
+    await openStarted.promise;
+    controller.abort(new Error("bypassed"));
+    finishOpen.resolve();
+
+    await expect(response).rejects.toThrow("bypassed");
+    await vi.waitFor(() => expect(discard).toHaveBeenCalledExactlyOnceWith(
+      "779e1d9d-58c1-4b12-8dc2-3449dad132c1",
+    ));
   });
 });

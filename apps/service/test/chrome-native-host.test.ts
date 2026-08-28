@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PassThrough } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -185,7 +185,31 @@ describe("Chrome native host entry", () => {
       encodeNativeMessage({ type: "finish", transferId: "transfer-stalled-open", sequence: 1 }),
     ]));
 
-    await expect(run).resolves.toBe(0);
+    await expect(run).resolves.toBe(2);
     expect(await readdir(store.root)).toEqual([]);
+  });
+
+  it("ends at its deadline when Chrome stops reading native-host output", async () => {
+    const input = new PassThrough();
+    const output = new Writable({
+      write(_chunk, _encoding, _callback) {
+        // Deliberately leave Chrome's simulated stdout backpressured forever.
+      },
+    });
+    const run = runChromeNativeHostCommand([CHROME_EXTENSION_ORIGIN], {
+      input,
+      output,
+      store: await storeFixture(),
+      opener: { openLocal: vi.fn(), openSealed: vi.fn() },
+      maxDurationMs: 25,
+    });
+    input.end(encodeNativeMessage({
+      type: "start",
+      protocolVersion: 1,
+      transferId: "transfer-blocked-output",
+      disposition: "remote-temporary",
+    }));
+
+    await expect(run).resolves.toBe(2);
   });
 });
