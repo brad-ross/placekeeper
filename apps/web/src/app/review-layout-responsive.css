@@ -147,6 +147,18 @@
     display: block;
   }
 
+  .pdf-search .row-action-group__action,
+  .pdf-search .copy-link-control__trigger--row,
+  .pdf-search .row-action-group__trigger {
+    height: var(--review-control-touch);
+    min-height: var(--review-control-touch);
+  }
+
+  .pdf-search .row-action-group__trigger {
+    width: var(--review-control-touch);
+    min-width: var(--review-control-touch);
+  }
+
   .outline-navigator {
     --outline-tree-control-size: var(--review-control-touch);
   }
