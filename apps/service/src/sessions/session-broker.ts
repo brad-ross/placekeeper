@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { readdir, readFile, realpath } from "node:fs/promises";
+import { basename, isAbsolute, join, relative } from "node:path";
 import {
   documentOrderedItems,
   projectReviewItems,
@@ -36,8 +36,10 @@ import {
   reviewStateDigest,
   type DurableSaveDestination,
   type DurableSaveSync,
-  type RecoverableDraftV2,
+  type RecoverableDraftV3,
+  type RecoverableSourceOwnership,
   type SaveFailureReason,
+  type SourceDisposition,
   type SnapshotHooks,
 } from "../recovery/draft-snapshot.js";
 import {
@@ -56,6 +58,14 @@ import {
   RestartReconnectStore,
   type MatchedRestartReconnectTicket,
 } from "../context/restart-reconnect-store.js";
+import {
+  type BrowserSourceStore,
+  type ChromeBrowserSourceOpenRequest,
+} from "../browser/browser-source-store.js";
+import {
+  inspectPdfInSubprocess,
+  type ChromePdfInspection,
+} from "../browser/chrome-pdf-validator.js";
 
 export const RECOVERY_DECISIONS = ["resume", "discard", "fork"] as const;
 export type RecoveryDecision = typeof RECOVERY_DECISIONS[number];
@@ -147,6 +157,7 @@ interface ActiveSession {
   sync: DurableSaveSync;
   rewriteEligibility: PdfRewriteEligibility;
   readonly documentGeneration: number;
+  sourceOwnership: RecoverableSourceOwnership;
 }
 
 interface BrowserLaunchScope {
@@ -220,6 +231,10 @@ export interface SessionBrokerOptions {
   readonly snapshotHooks?: SnapshotHooks;
   readonly portableReader?: (bytes: Uint8Array) => Promise<readonly ReviewItem[]>;
   readonly rewriteAssessor?: (bytes: Uint8Array) => Promise<PdfRewriteEligibility>;
+  readonly browserSourceInspector?: (
+    path: string,
+    signal?: AbortSignal,
+  ) => Promise<ChromePdfInspection>;
   readonly taskBindings?: TaskBindingRegistry;
   readonly restartReconnectStore?: RestartReconnectStore;
 }
@@ -251,6 +266,18 @@ function activeKey(path: string, digest: string): string {
   return `${path}\0${digest}`;
 }
 
+function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) return operation;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise((resolveOperation, reject) => {
+    const onAbort = (): void => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    void operation.then(resolveOperation, reject).finally(() => {
+      signal.removeEventListener("abort", onAbort);
+    });
+  });
+}
+
 export class SessionBroker {
   readonly recoveryRoot: string;
   readonly capabilities: FileCapabilityRegistry;
@@ -262,6 +289,10 @@ export class SessionBroker {
   readonly #snapshotHooks: SnapshotHooks;
   readonly #portableReader: (bytes: Uint8Array) => Promise<readonly ReviewItem[]>;
   readonly #rewriteAssessor: (bytes: Uint8Array) => Promise<PdfRewriteEligibility>;
+  readonly #browserSourceInspector: (
+    path: string,
+    signal?: AbortSignal,
+  ) => Promise<ChromePdfInspection>;
   readonly #activeById = new Map<string, ActiveSession>();
   readonly #activeBySource = new Map<string, string>();
   readonly #bootstrapScopes = new Map<string, BrowserLaunchScope>();
@@ -277,9 +308,12 @@ export class SessionBroker {
   readonly #pendingRestartReconnects = new Map<string, PendingRestartReconnect>();
   readonly #restartReconnectWaiters = new Map<string, Set<() => void>>();
   readonly #sessionEndListeners = new Set<(sessionId: string) => void>();
+  readonly #privateSourceRoots = new Set<string>();
+  #canonicalRecoveryRoot: string;
 
   constructor(options: SessionBrokerOptions) {
     this.recoveryRoot = options.recoveryRoot;
+    this.#canonicalRecoveryRoot = options.recoveryRoot;
     this.capabilities = options.capabilities ?? new FileCapabilityRegistry();
     this.credentials = options.credentials ?? new SessionCredentialStore();
     this.controls = options.controls ?? new SessionControlRegistry();
@@ -297,6 +331,25 @@ export class SessionBroker {
       (options.portableReader === undefined
         ? assessPdfRewriteEligibility
         : async () => ({ eligible: true }));
+    this.#browserSourceInspector = options.browserSourceInspector ?? (
+      options.portableReader === undefined && options.rewriteAssessor === undefined
+        ? (path, signal) => inspectPdfInSubprocess(
+            path,
+            signal === undefined ? {} : { signal },
+          )
+        : async (path, signal) => {
+            const bytes = new Uint8Array(await readFile(path));
+            signal?.throwIfAborted();
+            const rewriteEligibility = await abortable(this.#rewriteAssessor(bytes), signal);
+            let importedItems: readonly ReviewItem[] = [];
+            try {
+              importedItems = await abortable(this.#portableReader(bytes), signal);
+            } catch {
+              signal?.throwIfAborted();
+            }
+            return { rewriteEligibility, importedItems };
+          }
+    );
   }
 
   onSessionEnd(listener: (sessionId: string) => void): () => void {
@@ -313,6 +366,8 @@ export class SessionBroker {
 
   async initialize(): Promise<void> {
     await ensurePrivateDirectory(this.recoveryRoot);
+    this.#canonicalRecoveryRoot = await realpath(this.recoveryRoot);
+    this.#privateSourceRoots.add(this.#canonicalRecoveryRoot);
     await this.restartReconnects.initialize();
     const entries = await readdir(this.recoveryRoot, { withFileTypes: true });
     await Promise.all(
@@ -324,7 +379,7 @@ export class SessionBroker {
     );
   }
 
-  async #recoverableDrafts(): Promise<RecoverableDraftV2[]> {
+  async #recoverableDrafts(): Promise<RecoverableDraftV3[]> {
     await this.initialize();
     const entries = await readdir(this.recoveryRoot, { withFileTypes: true });
     const recovered = await Promise.all(
@@ -335,8 +390,38 @@ export class SessionBroker {
         ),
     );
     return recovered.filter(
-      (draft): draft is RecoverableDraftV2 => draft !== undefined,
+      (draft): draft is RecoverableDraftV3 => draft !== undefined,
     );
+  }
+
+  #draftSnapshotPath(draft: RecoverableDraftV3): string {
+    return draft.source.disposition === "local"
+      ? draft.source.sourceSnapshotPath
+      : join(this.#canonicalRecoveryRoot, draft.state.sessionId, "source.pdf");
+  }
+
+  #draftCanonicalPath(draft: RecoverableDraftV3): string {
+    return draft.source.disposition === "local"
+      ? draft.source.canonicalSourcePath
+      : this.#draftSnapshotPath(draft);
+  }
+
+  #readableSourcePath(source: RecoverableSourceOwnership): string {
+    return source.disposition === "local"
+      ? source.canonicalSourcePath
+      : `/Placekeeper Browser/${source.acquisitionId}/${source.displayName}`;
+  }
+
+  async resolveReadableSourcePath(path: string): Promise<string> {
+    for (const session of this.#activeById.values()) {
+      if (!session.ending && this.#readableSourcePath(session.sourceOwnership) === path) {
+        return session.canonicalSourcePath;
+      }
+    }
+    const drafts = await this.#recoverableDrafts();
+    const matches = drafts.filter((draft) => this.#readableSourcePath(draft.source) === path);
+    if (matches.length > 1) throw new Error("Recovery target is ambiguous");
+    return matches[0] === undefined ? path : this.#draftCanonicalPath(matches[0]);
   }
 
   #launch(
@@ -454,6 +539,93 @@ export class SessionBroker {
     }
   }
 
+  /** Opens one independently acquired Chrome response. The sealed handle is
+   * resolved only by the fixed browser-source store and is never converted to
+   * a caller-supplied filesystem path. */
+  async openChromeBrowserSource(
+    request: ChromeBrowserSourceOpenRequest,
+    browserSources: BrowserSourceStore,
+    signal?: AbortSignal,
+  ): Promise<OpenReviewResult> {
+    signal?.throwIfAborted();
+    await this.initialize();
+    this.#privateSourceRoots.add(browserSources.root);
+    const sessionId = randomUUID();
+    const sessionDirectory = join(this.recoveryRoot, sessionId);
+    let approvedFile: { readonly id: string; readonly canonicalPath: string } | undefined;
+    let activated = false;
+    try {
+      const adopted = await browserSources.adopt(request, sessionDirectory);
+      signal?.throwIfAborted();
+      approvedFile = await this.capabilities.approvePdf(adopted.path);
+      if (
+        (await realpath(adopted.path)) !== approvedFile.canonicalPath ||
+        await hashFile(adopted.path) !== adopted.sha256
+      ) throw new Error("Adopted browser source changed");
+      signal?.throwIfAborted();
+      const { rewriteEligibility, importedItems } = await this.#browserSourceInspector(
+        adopted.path,
+        signal,
+      );
+      signal?.throwIfAborted();
+      const source = {
+        fileId: approvedFile.id,
+        digest: adopted.sha256,
+        byteLength: adopted.byteLength,
+      };
+      const state = importedItems.length === 0
+        ? createReviewState({ sessionId, source })
+        : createImportedReviewState({ sessionId, source, items: importedItems });
+      const stateDigest = reviewStateDigest(state);
+      const sourceOwnership: RecoverableSourceOwnership = {
+        disposition: "remote-temporary",
+        acquisitionId: adopted.acquisitionId,
+        leaseId: adopted.leaseId,
+        displayName: adopted.displayName,
+        digest: adopted.sha256,
+        byteLength: adopted.byteLength,
+      };
+      const session: ActiveSession = {
+        id: sessionId,
+        canonicalSourcePath: adopted.path,
+        sourceSnapshotPath: adopted.path,
+        store: this.#store(sessionId),
+        fileId: approvedFile.id,
+        state,
+        currentOriginalDigest: adopted.sha256,
+        acceptedOriginalDigests: [],
+        ending: false,
+        writeTail: Promise.resolve(),
+        destination: { phase: "none", generation: 0 },
+        sync: {
+          phase: "clean",
+          desiredRevision: state.revision,
+          desiredDigest: stateDigest,
+          savedRevision: state.revision,
+          savedDigest: stateDigest,
+        },
+        rewriteEligibility,
+        documentGeneration: 1,
+        sourceOwnership,
+      };
+      // Persisting the lease is the ownership acknowledgement. No second
+      // snapshot is created: the adopted source.pdf is the recovery source.
+      await session.store.persist(this.#draft(session));
+      signal?.throwIfAborted();
+      this.#activate(session);
+      activated = true;
+      signal?.throwIfAborted();
+      return { kind: "opened", launch: this.#launch(session, "browser") };
+    } catch (error) {
+      if (activated) await this.#end(sessionId);
+      else {
+        if (approvedFile !== undefined) this.capabilities.revokeFile(approvedFile.id);
+        await this.#store(sessionId).remove().catch(() => undefined);
+      }
+      throw error;
+    }
+  }
+
   async #openApprovedReview(
     request: OpenReviewRequest,
     approvedFile: { readonly id: string; readonly canonicalPath: string },
@@ -482,6 +654,8 @@ export class SessionBroker {
     const identityMatches = drafts.filter(
       (draft) =>
         draft.sync.phase !== "clean" &&
+        (draft.source.disposition === "local" ||
+          this.#draftCanonicalPath(draft) === approvedFile.canonicalPath) &&
         (draft.state.source.digest === sourceDigest ||
           draft.acceptedOriginalDigests?.includes(sourceDigest) === true ||
           (draft.destination.phase === "active" &&
@@ -489,7 +663,7 @@ export class SessionBroker {
             draft.destination.fingerprint === sourceDigest)),
     );
     const pathMatches = identityMatches.filter(
-      (draft) => draft.canonicalSourcePath === approvedFile.canonicalPath,
+      (draft) => this.#draftCanonicalPath(draft) === approvedFile.canonicalPath,
     );
     const movedOriginalMatches = identityMatches.filter(
       (draft) =>
@@ -590,9 +764,10 @@ export class SessionBroker {
     }
 
     if (matchingDraft !== undefined && request.recoveryDecision === "resume") {
-      const sourceSnapshotBytes = new Uint8Array(await readFile(matchingDraft.sourceSnapshotPath));
+      const recoveredSnapshotPath = this.#draftSnapshotPath(matchingDraft);
+      const sourceSnapshotBytes = new Uint8Array(await readFile(recoveredSnapshotPath));
       if (
-        (await hashFile(matchingDraft.sourceSnapshotPath)) !==
+        (await hashFile(recoveredSnapshotPath)) !==
           matchingDraft.state.source.digest ||
         sourceSnapshotBytes.byteLength !== matchingDraft.state.source.byteLength
       ) {
@@ -664,7 +839,7 @@ export class SessionBroker {
       const session: ActiveSession = {
         id: matchingDraft.state.sessionId,
         canonicalSourcePath: approvedFile.canonicalPath,
-        sourceSnapshotPath: matchingDraft.sourceSnapshotPath,
+        sourceSnapshotPath: recoveredSnapshotPath,
         store: this.#store(matchingDraft.state.sessionId),
         fileId: approvedFile.id,
         ...(approvedRoot === undefined ? {} : { rootId: approvedRoot.id }),
@@ -680,6 +855,14 @@ export class SessionBroker {
         sync,
         rewriteEligibility,
         documentGeneration: 1,
+        sourceOwnership: matchingDraft.source.disposition === "local"
+          ? {
+              ...matchingDraft.source,
+              canonicalSourcePath: approvedFile.canonicalPath,
+              sourceSnapshotPath: recoveredSnapshotPath,
+              displayName: basename(approvedFile.canonicalPath),
+            }
+          : matchingDraft.source,
       };
       await session.store.persist(this.#draft(session));
       this.#activate(session);
@@ -754,6 +937,12 @@ export class SessionBroker {
       sync,
       rewriteEligibility,
       documentGeneration: 1,
+      sourceOwnership: {
+        disposition: "local",
+        canonicalSourcePath: approvedFile.canonicalPath,
+        sourceSnapshotPath: sourceSnapshot.path,
+        displayName: basename(approvedFile.canonicalPath),
+      },
     };
     await session.store.persist(this.#draft(session));
     this.#activate(session);
@@ -784,7 +973,7 @@ export class SessionBroker {
         ...session.state,
         sourceRootId: approvedRoot.id,
       };
-      const nextDraft: RecoverableDraftV2 = {
+      const nextDraft: RecoverableDraftV3 = {
         ...this.#draft(session),
         state: nextState,
       };
@@ -802,6 +991,7 @@ export class SessionBroker {
 
   #activate(session: ActiveSession): void {
     this.#activeById.set(session.id, session);
+    if (session.sourceOwnership.disposition === "remote-temporary") return;
     this.#activeBySource.set(
       activeKey(session.canonicalSourcePath, session.state.source.digest),
       session.id,
@@ -812,11 +1002,10 @@ export class SessionBroker {
     );
   }
 
-  #draft(session: ActiveSession): RecoverableDraftV2 {
+  #draft(session: ActiveSession): RecoverableDraftV3 {
     return {
-      schemaVersion: 2,
-      canonicalSourcePath: session.canonicalSourcePath,
-      sourceSnapshotPath: session.sourceSnapshotPath,
+      schemaVersion: 3,
+      source: session.sourceOwnership,
       state: session.state,
       acknowledgedAt: this.#now().toISOString(),
       ...(session.lastExportAt === undefined
@@ -866,7 +1055,7 @@ export class SessionBroker {
     const location = scope.requestedLocation ?? { kind: "page" as const, page: 1 };
     const pathname = encodePlacekeeperReadableViewPathname({
       viewId: id,
-      path: session.canonicalSourcePath,
+      path: this.#readableSourcePath(session.sourceOwnership),
     });
     this.#viewsById.set(id, {
       id,
@@ -1151,15 +1340,35 @@ export class SessionBroker {
    * custom-scheme link. It intentionally performs no path resolution or I/O. */
   activeReviewOwnsPath(path: string): boolean {
     for (const session of this.#activeById.values()) {
-      if (!session.ending && session.canonicalSourcePath === path) return true;
+      if (
+        !session.ending &&
+        (session.canonicalSourcePath === path || this.#readableSourcePath(session.sourceOwnership) === path)
+      ) return true;
     }
     return false;
   }
 
   #sweepBootstrapScopes(): void {
     const now = this.#now().getTime();
+    const expiredSessions = new Set<string>();
     for (const [key, scope] of this.#bootstrapScopes) {
-      if (scope.expiresAtMs <= now) this.#bootstrapScopes.delete(key);
+      if (scope.expiresAtMs <= now) {
+        this.#bootstrapScopes.delete(key);
+        expiredSessions.add(scope.sessionId);
+      }
+    }
+    // A browser handoff is committed only when its bootstrap is exchanged.
+    // If Chrome falls back after the native success reply, expire the clean,
+    // unclaimed remote session instead of retaining an invisible review.
+    for (const sessionId of expiredSessions) {
+      const session = this.#activeById.get(sessionId);
+      const stillScoped = [...this.#bootstrapScopes.values(), ...this.#credentialScopes.values()]
+        .some((scope) => scope.sessionId === sessionId);
+      const hasView = [...this.#viewsById.values()].some((view) => view.sessionId === sessionId);
+      if (
+        session?.sourceOwnership.disposition === "remote-temporary" &&
+        session.sync.phase === "clean" && !stillScoped && !hasView
+      ) void this.#end(sessionId).catch(() => undefined);
     }
     for (const [proofHash, metadata] of this.#reconnectByBindProofHash) {
       if (metadata.expiresAtMs <= now) this.#reconnectByBindProofHash.delete(proofHash);
@@ -1225,6 +1434,31 @@ export class SessionBroker {
           sync: session.sync,
           rewriteEligibility: session.rewriteEligibility,
         };
+  }
+
+  sourceDisposition(sessionId: string): SourceDisposition | undefined {
+    return this.#activeById.get(sessionId)?.sourceOwnership.disposition;
+  }
+
+  #assertSaveDestinationAllowed(
+    session: ActiveSession,
+    input: { readonly kind: "original" | "copy"; readonly targetPath: string },
+  ): void {
+    if (session.sourceOwnership.disposition !== "remote-temporary") return;
+    if (input.kind === "original") {
+      throw new Error("A remote browser PDF cannot modify its private temporary source");
+    }
+    const insidePrivateSourceRoot = [...this.#privateSourceRoots].some((root) => {
+      const suffix = relative(root, input.targetPath);
+      return suffix === "" || (!suffix.startsWith("..") && !isAbsolute(suffix));
+    });
+    if (
+      insidePrivateSourceRoot ||
+      input.targetPath === session.canonicalSourcePath ||
+      input.targetPath === session.sourceSnapshotPath
+    ) {
+      throw new Error("A durable save destination cannot use the private temporary source");
+    }
   }
 
   async #withSessionTail<T>(
@@ -1298,6 +1532,7 @@ export class SessionBroker {
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     return this.#withSessionTail(session, async () => {
       if (session.ending) throw new Error("Review session is ending");
+      this.#assertSaveDestinationAllowed(session, input);
       const generation = session.destination.generation + 1;
       const destination: DurableSaveDestination = {
         phase: "active",
@@ -1333,6 +1568,7 @@ export class SessionBroker {
     if (session === undefined || session.ending) throw new Error("Review session is not active");
     return this.#withSessionTail(session, async () => {
       if (session.ending) throw new Error("Review session is ending");
+      this.#assertSaveDestinationAllowed(session, { kind: "original", targetPath: input.targetPath });
       const destination: DurableSaveDestination = {
         phase: "active",
         generation: session.destination.generation + 1,
@@ -1348,9 +1584,17 @@ export class SessionBroker {
         savedRevision: session.sync.savedRevision,
         ...(session.sync.savedDigest === undefined ? {} : { savedDigest: session.sync.savedDigest }),
       };
+      const sourceOwnership: RecoverableSourceOwnership =
+        session.sourceOwnership.disposition === "local"
+          ? {
+              ...session.sourceOwnership,
+              canonicalSourcePath: input.targetPath,
+              displayName: basename(input.targetPath),
+            }
+          : session.sourceOwnership;
       await session.store.persist({
         ...this.#draft(session),
-        canonicalSourcePath: input.targetPath,
+        source: sourceOwnership,
         destination,
         sync,
       });
@@ -1358,6 +1602,7 @@ export class SessionBroker {
         if (owner === sessionId) this.#activeBySource.delete(key);
       }
       session.canonicalSourcePath = input.targetPath;
+      session.sourceOwnership = sourceOwnership;
       session.destination = destination;
       session.sync = sync;
       this.#activate(session);
@@ -1435,6 +1680,8 @@ export class SessionBroker {
   async sessionScope(sessionId: string, credential?: string): Promise<
     | {
         readonly documentTitle: string;
+        readonly sourceDisposition: SourceDisposition;
+        readonly sourceDisplayName: string;
         readonly sourceRootPath?: string;
         readonly launchSurface?: LaunchSurface;
         /** A browser-authenticated restart successor is waiting for its
@@ -1481,7 +1728,9 @@ export class SessionBroker {
       }
     }
     return {
-      documentTitle: basename(session.canonicalSourcePath),
+      documentTitle: session.sourceOwnership.displayName,
+      sourceDisposition: session.sourceOwnership.disposition,
+      sourceDisplayName: session.sourceOwnership.displayName,
       ...(sourceRootPath === undefined ? {} : { sourceRootPath }),
       ...(trustedLaunchScope === undefined
         ? {}
@@ -1647,7 +1896,7 @@ export class SessionBroker {
           ? {}
           : { failure: "destination-unconfigured" as const }),
       };
-      const nextDraft: RecoverableDraftV2 = {
+      const nextDraft: RecoverableDraftV3 = {
         ...this.#draft(session),
         state: nextState,
         sync: nextSync,
@@ -1726,10 +1975,12 @@ export class SessionBroker {
       session.lastExportAt = lastExportAt;
       session.currentOriginalDigest = replacementDigest;
       session.acceptedOriginalDigests = acceptedOriginalDigests;
-      this.#activeBySource.set(
-        activeKey(session.canonicalSourcePath, replacementDigest),
-        session.id,
-      );
+      if (session.sourceOwnership.disposition === "local") {
+        this.#activeBySource.set(
+          activeKey(session.canonicalSourcePath, replacementDigest),
+          session.id,
+        );
+      }
     } finally {
       write.complete();
       release();

@@ -36,4 +36,45 @@ describe("installed writer doctor", () => {
     ], (text) => output.push(text))).toBe(2);
     expect(JSON.parse(output.join(""))).toEqual({ ok: false, error: "writer-unavailable" });
   });
+
+  it("reports path-free actionable Chrome integration health", async () => {
+    const healthy: Parameters<typeof runDoctorCommand>[2] = {
+      inspectChrome: async () => ({
+        ok: true,
+        status: "healthy",
+        action: "none",
+        extensionId: "cgegjjjhbhnfgcoipeffhogoojfoekgg",
+        protocol: 1,
+      }),
+    };
+    const output: string[] = [];
+    expect(await runDoctorCommand(
+      ["doctor", "--json", "--chrome"],
+      (text) => output.push(text),
+      healthy,
+    )).toBe(0);
+    expect(JSON.parse(output.join(""))).toEqual({
+      ok: true,
+      status: "healthy",
+      action: "none",
+      extensionId: "cgegjjjhbhnfgcoipeffhogoojfoekgg",
+      protocol: 1,
+    });
+
+    const mismatchOutput: string[] = [];
+    expect(await runDoctorCommand(
+      ["doctor", "--json", "--chrome"],
+      (text) => mismatchOutput.push(text),
+      {
+        inspectChrome: async () => ({
+          ok: false,
+          status: "native-host-mismatch",
+          action: "reinstall-placekeeper",
+          extensionId: "cgegjjjhbhnfgcoipeffhogoojfoekgg",
+          protocol: 1,
+        }),
+      },
+    )).toBe(2);
+    expect(JSON.stringify(JSON.parse(mismatchOutput.join("")))).not.toMatch(/Users|Library|cap=/u);
+  });
 });

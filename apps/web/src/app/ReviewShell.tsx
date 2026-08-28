@@ -144,6 +144,7 @@ export interface ReviewShellProps {
   documentTitle?: string;
   savedLabel?: string;
   savePhase?: 'clean' | 'saving' | 'not-saved';
+  savePendingDestination?: boolean;
   saveOptionsOpen?: boolean;
   onSaveOptions?(): void;
   listOpen?: boolean;
@@ -1605,6 +1606,7 @@ export function ReviewShell(props: ReviewShellProps) {
         documentTitle={props.documentTitle ?? 'Local PDF'}
         {...(props.savedLabel === undefined ? {} : { savedLabel: props.savedLabel })}
         {...(props.savePhase === undefined ? {} : { savePhase: props.savePhase })}
+        savePendingDestination={props.savePendingDestination ?? false}
         saveOptionsOpen={props.saveOptionsOpen ?? false}
         onSaveOptions={() => props.onSaveOptions?.()}
         {...(props.viewerControls === undefined ? {} : { controls: props.viewerControls })}

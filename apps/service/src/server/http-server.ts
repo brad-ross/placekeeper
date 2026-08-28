@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
-import { extname, join } from "node:path";
+import { basename, extname, join } from "node:path";
 import {
   RESTRICTIVE_CSP,
   validateRequestSecurity,
@@ -136,7 +136,12 @@ function clearViewCookie(response: ServerResponse, viewId: string): void {
   );
 }
 
-function bootstrapHtml(sessionId: string, nonce: string, embedded: boolean): string {
+function bootstrapHtml(
+  sessionId: string,
+  nonce: string,
+  embedded: boolean,
+  pageTitle: string,
+): string {
   const start = embedded
     ? `
   history.replaceState(null, "", location.pathname + location.search);
@@ -162,7 +167,7 @@ function bootstrapHtml(sessionId: string, nonce: string, embedded: boolean): str
   if (!response.ok) throw new Error("Launch capability was rejected");
   const { credential, view } = await response.json();${start}
 })().catch(() => { document.body.textContent = "Unable to open this review session."; });`;
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Placekeeper</title></head><body><div id="root"></div><script type="module" nonce="${nonce}">${script}</script></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${htmlAttribute(pageTitle)}</title></head><body><div id="root"></div><script type="module" nonce="${nonce}">${script}</script></body></html>`;
 }
 
 function htmlAttribute(value: string): string {
@@ -185,7 +190,12 @@ const terminalRecoveryFallbackScript = `
     reopen.removeAttribute("aria-disabled");
   }`;
 
-function readableViewHtml(nonce: string, appLinkBase: string, viewId: string): string {
+function readableViewHtml(
+  nonce: string,
+  appLinkBase: string,
+  viewId: string,
+  pageTitle: string,
+): string {
   const script = `
 let app;
 (async () => {
@@ -206,15 +216,20 @@ let app;
     app.showTerminalRecovery("${viewId}");
   }
 });`;
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Placekeeper</title></head><body><div id="root"></div>${terminalRecoveryMarkup(appLinkBase, true)}<script type="module" nonce="${nonce}">${script}</script></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${htmlAttribute(pageTitle)}</title></head><body><div id="root"></div>${terminalRecoveryMarkup(appLinkBase, true)}<script type="module" nonce="${nonce}">${script}</script></body></html>`;
 }
 
-function terminalRecoveryHtml(nonce: string, appLinkBase: string, viewId: string): string {
+function terminalRecoveryHtml(
+  nonce: string,
+  appLinkBase: string,
+  viewId: string,
+  pageTitle: string,
+): string {
   const script = `import("/assets/app.js")
     .then((app) => app.showTerminalRecovery("${viewId}"))
     .catch(() => {${terminalRecoveryFallbackScript}
     });`;
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Placekeeper</title></head><body>${terminalRecoveryMarkup(appLinkBase)}<script type="module" nonce="${nonce}">${script}</script></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${htmlAttribute(pageTitle)}</title></head><body>${terminalRecoveryMarkup(appLinkBase)}<script type="module" nonce="${nonce}">${script}</script></body></html>`;
 }
 
 function assetContentType(path: string): string {
@@ -287,6 +302,7 @@ export async function startHttpServer(
     try {
       const requestUrl = new URL(request.url ?? "/", origin);
       const pathname = requestUrl.pathname;
+      const bootstrapMatch = new RegExp(`^/s/(${UUID})/bootstrap$`, "u").exec(pathname);
       const exchangeMatch = new RegExp(`^/s/(${UUID})/exchange$`, "u").exec(pathname);
       const resumeMatch = new RegExp(`^/r/(${VIEW_UUID})/resume$`, "u").exec(pathname);
       const scopedReopenMatch = new RegExp(`^/r/(${VIEW_UUID})/reopen$`, "u").exec(pathname);
@@ -312,6 +328,7 @@ export async function startHttpServer(
           mutates,
           expectsJson,
           bodyLength: Number.isFinite(contentLength) ? contentLength : bodyLimit + 1,
+          allowCrossSiteRead: bootstrapMatch !== null && request.method === "GET",
         },
         { host: hostHeader, origin, maxBodyBytes: bodyLimit },
       );
@@ -320,7 +337,6 @@ export async function startHttpServer(
         return;
       }
 
-      const bootstrapMatch = new RegExp(`^/s/(${UUID})/bootstrap$`, "u").exec(pathname);
       if (bootstrapMatch !== null) {
         if (request.method !== "GET") {
           send(response, 405, "Method not allowed");
@@ -345,7 +361,12 @@ export async function startHttpServer(
         send(
           response,
           200,
-          bootstrapHtml(sessionId, nonce, embedded),
+          bootstrapHtml(
+            sessionId,
+            nonce,
+            embedded,
+            (await broker.sessionScope(sessionId))?.documentTitle ?? "Placekeeper",
+          ),
           "text/html; charset=utf-8",
           csp,
           embedded,
@@ -521,8 +542,18 @@ export async function startHttpServer(
           response,
           200,
           live
-            ? readableViewHtml(nonce, readableView.appLinkBase, readableView.viewId)
-            : terminalRecoveryHtml(nonce, readableView.appLinkBase, readableView.viewId),
+            ? readableViewHtml(
+                nonce,
+                readableView.appLinkBase,
+                readableView.viewId,
+                basename(readableView.pdfPath),
+              )
+            : terminalRecoveryHtml(
+                nonce,
+                readableView.appLinkBase,
+                readableView.viewId,
+                basename(readableView.pdfPath),
+              ),
           "text/html; charset=utf-8",
           csp,
         );

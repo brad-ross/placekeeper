@@ -8,7 +8,7 @@ import {
   rm,
   stat,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { ReviewState } from "../../../../packages/core/src/review-model.js";
 import type {
   SaveDestination,
@@ -46,7 +46,40 @@ export interface RecoverableDraftV2 {
   readonly sync: DurableSaveSync;
 }
 
-export type RecoverableDraft = LegacyRecoverableDraft | RecoverableDraftV2;
+export type SourceDisposition = "local" | "remote-temporary";
+
+export interface LocalSourceOwnership {
+  readonly disposition: "local";
+  readonly canonicalSourcePath: string;
+  readonly sourceSnapshotPath: string;
+  readonly displayName: string;
+}
+
+export interface RemoteTemporarySourceOwnership {
+  readonly disposition: "remote-temporary";
+  readonly acquisitionId: string;
+  readonly leaseId: string;
+  readonly displayName: string;
+  readonly digest: string;
+  readonly byteLength: number;
+}
+
+export type RecoverableSourceOwnership =
+  | LocalSourceOwnership
+  | RemoteTemporarySourceOwnership;
+
+export interface RecoverableDraftV3 {
+  readonly schemaVersion: 3;
+  readonly source: RecoverableSourceOwnership;
+  readonly state: ReviewState;
+  readonly acknowledgedAt: string;
+  readonly lastExportAt?: string;
+  readonly acceptedOriginalDigests?: readonly string[];
+  readonly destination: DurableSaveDestination;
+  readonly sync: DurableSaveSync;
+}
+
+export type RecoverableDraft = LegacyRecoverableDraft | RecoverableDraftV2 | RecoverableDraftV3;
 
 interface SnapshotEnvelope {
   readonly checksum: string;
@@ -72,32 +105,73 @@ export function reviewStateDigest(state: Pick<ReviewState, "items">): string {
   return createHash("sha256").update(JSON.stringify(ordered)).digest("hex");
 }
 
-export function migrateRecoverableDraft(draft: RecoverableDraft): RecoverableDraftV2 {
-  if (draft.schemaVersion === 2) return draft;
-  const desiredDigest = reviewStateDigest(draft.state);
-  const hasChanges = draft.state.revision > 0 || draft.state.items.length > 0;
+export function migrateRecoverableDraft(draft: RecoverableDraft): RecoverableDraftV3 {
+  if (draft.schemaVersion === 3) return draft;
+  const v2: RecoverableDraftV2 = draft.schemaVersion === 2
+    ? draft
+    : {
+        ...draft,
+        schemaVersion: 2,
+        destination: { phase: "none", generation: 0 },
+        sync: (() => {
+          const desiredDigest = reviewStateDigest(draft.state);
+          const hasChanges = draft.state.revision > 0 || draft.state.items.length > 0;
+          return {
+            phase: hasChanges ? "not-saved" as const : "clean" as const,
+            desiredRevision: draft.state.revision,
+            desiredDigest,
+            savedRevision: hasChanges ? -1 : draft.state.revision,
+            ...(hasChanges ? { failure: "destination-unconfigured" as const } : { savedDigest: desiredDigest }),
+          };
+        })(),
+      };
+  const {
+    canonicalSourcePath,
+    sourceSnapshotPath,
+    schemaVersion: _schemaVersion,
+    ...rest
+  } = v2;
   return {
-    ...draft,
-    schemaVersion: 2,
-    destination: { phase: "none", generation: 0 },
-    sync: {
-      phase: hasChanges ? "not-saved" : "clean",
-      desiredRevision: draft.state.revision,
-      desiredDigest,
-      savedRevision: hasChanges ? -1 : draft.state.revision,
-      ...(hasChanges ? { failure: "destination-unconfigured" } : { savedDigest: desiredDigest }),
+    ...rest,
+    schemaVersion: 3,
+    source: {
+      disposition: "local",
+      canonicalSourcePath,
+      sourceSnapshotPath,
+      displayName: basename(canonicalSourcePath),
     },
   };
 }
 
-function parse(contents: string): RecoverableDraftV2 | undefined {
+function validV3Source(source: RecoverableSourceOwnership): boolean {
+  if (source.disposition === "local") {
+    return source.canonicalSourcePath.length > 0 && source.sourceSnapshotPath.length > 0 &&
+      source.displayName.length > 0;
+  }
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+      .test(source.acquisitionId) &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+      .test(source.leaseId) && source.displayName.length > 0 && source.displayName.length <= 120 &&
+    !/[\\/\u0000-\u001f\u007f]/u.test(source.displayName) &&
+    /^[a-f0-9]{64}$/u.test(source.digest) && Number.isSafeInteger(source.byteLength) &&
+    source.byteLength > 0;
+}
+
+function parse(contents: string): RecoverableDraftV3 | undefined {
   try {
     const envelope = JSON.parse(contents) as SnapshotEnvelope;
     const payload = JSON.stringify(envelope.payload);
     const checksum = createHash("sha256").update(payload).digest("hex");
     if (
       checksum !== envelope.checksum ||
-      (envelope.payload.schemaVersion !== 1 && envelope.payload.schemaVersion !== 2)
+      ![1, 2, 3].includes(envelope.payload.schemaVersion) ||
+      (envelope.payload.schemaVersion === 3 && (
+        !validV3Source(envelope.payload.source) ||
+        (envelope.payload.source.disposition === "remote-temporary" && (
+          envelope.payload.source.digest !== envelope.payload.state.source.digest ||
+          envelope.payload.source.byteLength !== envelope.payload.state.source.byteLength
+        ))
+      ))
     ) {
       return undefined;
     }
@@ -107,7 +181,7 @@ function parse(contents: string): RecoverableDraftV2 | undefined {
   }
 }
 
-async function readValid(path: string): Promise<RecoverableDraftV2 | undefined> {
+async function readValid(path: string): Promise<RecoverableDraftV3 | undefined> {
   try {
     return parse(await readFile(path, "utf8"));
   } catch (error) {
@@ -191,14 +265,14 @@ export class DraftSnapshotStore {
     }
   }
 
-  async recover(): Promise<RecoverableDraftV2 | undefined> {
+  async recover(): Promise<RecoverableDraftV3 | undefined> {
     await this.initialize();
     const candidates = await Promise.all([
       readValid(this.currentPath),
       readValid(this.previousPath),
     ]);
     return candidates
-      .filter((draft): draft is RecoverableDraftV2 => draft !== undefined)
+      .filter((draft): draft is RecoverableDraftV3 => draft !== undefined)
       .sort((left, right) => right.state.revision - left.state.revision)[0];
   }
 

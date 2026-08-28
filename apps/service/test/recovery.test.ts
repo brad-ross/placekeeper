@@ -897,12 +897,38 @@ describe("save-aware recovery migration", () => {
     await store.persist(draft(1));
     const migrated = await store.recover();
     expect(migrated).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
+      source: {
+        disposition: "local",
+        canonicalSourcePath: "/private/example/paper.pdf",
+        sourceSnapshotPath: "/private/example/source.pdf",
+        displayName: "paper.pdf",
+      },
       destination: { phase: "none", generation: 0 },
       sync: { phase: "not-saved", desiredRevision: 1, failure: "destination-unconfigured" },
     });
     await store.persist(migrated!);
     await expect(store.recover()).resolves.toEqual(migrated);
+
+    const legacyV2 = draft(0);
+    if (legacyV2.schemaVersion !== 1) throw new Error("Expected v1 fixture");
+    const v2Store = new DraftSnapshotStore(join(directory, "legacy-v2"));
+    await v2Store.persist({
+      ...legacyV2,
+      schemaVersion: 2,
+      destination: { phase: "none", generation: 0 },
+      sync: {
+        phase: "clean",
+        desiredRevision: 0,
+        desiredDigest: "0".repeat(64),
+        savedRevision: 0,
+        savedDigest: "0".repeat(64),
+      },
+    });
+    await expect(v2Store.recover()).resolves.toMatchObject({
+      schemaVersion: 3,
+      source: { disposition: "local", displayName: "paper.pdf" },
+    });
 
     const pdf = join(directory, "viewer.pdf");
     await writeFile(pdf, "%PDF-1.7\nviewer only\n%%EOF");
