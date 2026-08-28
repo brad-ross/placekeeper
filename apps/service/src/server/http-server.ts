@@ -287,6 +287,7 @@ export async function startHttpServer(
     try {
       const requestUrl = new URL(request.url ?? "/", origin);
       const pathname = requestUrl.pathname;
+      const bootstrapMatch = new RegExp(`^/s/(${UUID})/bootstrap$`, "u").exec(pathname);
       const exchangeMatch = new RegExp(`^/s/(${UUID})/exchange$`, "u").exec(pathname);
       const resumeMatch = new RegExp(`^/r/(${VIEW_UUID})/resume$`, "u").exec(pathname);
       const scopedReopenMatch = new RegExp(`^/r/(${VIEW_UUID})/reopen$`, "u").exec(pathname);
@@ -312,6 +313,7 @@ export async function startHttpServer(
           mutates,
           expectsJson,
           bodyLength: Number.isFinite(contentLength) ? contentLength : bodyLimit + 1,
+          allowCrossSiteRead: bootstrapMatch !== null && request.method === "GET",
         },
         { host: hostHeader, origin, maxBodyBytes: bodyLimit },
       );
@@ -320,7 +322,6 @@ export async function startHttpServer(
         return;
       }
 
-      const bootstrapMatch = new RegExp(`^/s/(${UUID})/bootstrap$`, "u").exec(pathname);
       if (bootstrapMatch !== null) {
         if (request.method !== "GET") {
           send(response, 405, "Method not allowed");

@@ -324,6 +324,25 @@ function postJson(
 }
 
 describe("loopback HTTP boundary", () => {
+  it("accepts a cross-site top-level bootstrap without weakening same-origin mutations", async () => {
+    const { broker, launch, server } = await openBroker();
+    const bootstrap = await fetch(
+      `${server.origin}${launch.launchPath}${launch.fragment}`,
+      { headers: { "sec-fetch-site": "cross-site" } },
+    );
+
+    expect(bootstrap.status).toBe(200);
+    expect(await bootstrap.text()).not.toContain(launch.fragment.slice("#cap=".length));
+
+    const exchange = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability: launch.fragment.slice("#cap=".length) },
+      { "sec-fetch-site": "cross-site" },
+    );
+    expect(exchange.status).toBe(403);
+    expect(broker.credentials.pendingBootstrapCount()).toBe(1);
+  });
+
   it("keeps a stale readable GET outside every local-file and authority boundary", async () => {
     const directory = await temporaryDirectory();
     const assets = join(directory, "assets");
