@@ -18,7 +18,15 @@ export const CHROME_NATIVE_PROTOCOL_RANGE = {
   maximum: SERVICE_NATIVE_PROTOCOL_VERSION,
 } as const;
 export const CHROME_EXTENSION_BUNDLE_PATH = "Contents/Resources/integrations/chrome-extension";
+export const CHROME_EXTENSION_INSTALL_DIRECTORY_NAME = "Placekeeper Chrome Extension";
 export const CHROME_NATIVE_WRAPPER_BUNDLE_PATH = "Contents/MacOS/placekeeper-chrome-host";
+
+export function chromeExtensionInstallPath(appPath: string): string {
+  if (!isAbsolute(appPath) || !appPath.endsWith("/Placekeeper.app")) {
+    throw new Error("Chrome extension app path must be an absolute Placekeeper.app path");
+  }
+  return join(dirname(appPath), CHROME_EXTENSION_INSTALL_DIRECTORY_NAME);
+}
 
 interface ChromeManifest {
   readonly manifest_version?: unknown;
@@ -190,22 +198,29 @@ async function assertSecureTree(root: string): Promise<void> {
   await visit(root);
 }
 
-export async function validateChromeIntegrationBundle(appPath: string): Promise<ChromeSourceContract> {
-  if (!isAbsolute(appPath)) throw new Error("Chrome integration app path must be absolute");
-  await assertSecureEntry(appPath, "directory");
-  const canonicalAppPath = await realpath(appPath);
-  const extensionPath = join(appPath, CHROME_EXTENSION_BUNDLE_PATH);
-  const wrapperPath = join(appPath, CHROME_NATIVE_WRAPPER_BUNDLE_PATH);
+export async function validateChromeExtensionDirectory(
+  extensionPath: string,
+): Promise<ChromeSourceContract> {
   await assertSecureTree(extensionPath);
-  await assertSecureEntry(wrapperPath, "file");
-  const wrapper = await lstat(wrapperPath);
-  if ((wrapper.mode & 0o111) === 0) throw new Error("Chrome native wrapper must be executable");
   const contract = validateChromeSourceContract(
     JSON.parse(await readFile(join(extensionPath, "manifest.json"), "utf8")) as ChromeManifest,
   );
   for (const entry of ["handler.html", "popup.html", "background.js"] as const) {
     await assertSecureEntry(join(extensionPath, entry), "file");
   }
+  return contract;
+}
+
+export async function validateChromeIntegrationBundle(appPath: string): Promise<ChromeSourceContract> {
+  if (!isAbsolute(appPath)) throw new Error("Chrome integration app path must be absolute");
+  await assertSecureEntry(appPath, "directory");
+  const canonicalAppPath = await realpath(appPath);
+  const extensionPath = join(appPath, CHROME_EXTENSION_BUNDLE_PATH);
+  const wrapperPath = join(appPath, CHROME_NATIVE_WRAPPER_BUNDLE_PATH);
+  const contract = await validateChromeExtensionDirectory(extensionPath);
+  await assertSecureEntry(wrapperPath, "file");
+  const wrapper = await lstat(wrapperPath);
+  if ((wrapper.mode & 0o111) === 0) throw new Error("Chrome native wrapper must be executable");
   if (
     await realpath(extensionPath) !== join(canonicalAppPath, CHROME_EXTENSION_BUNDLE_PATH) ||
     await realpath(wrapperPath) !== join(canonicalAppPath, CHROME_NATIVE_WRAPPER_BUNDLE_PATH)
@@ -295,7 +310,12 @@ export async function inspectChromeInstallation(
     );
   }
 
-  const expectedPath = join(options.appPath, CHROME_EXTENSION_BUNDLE_PATH);
+  const expectedPath = chromeExtensionInstallPath(options.appPath);
+  try {
+    await validateChromeExtensionDirectory(expectedPath);
+  } catch {
+    return evidence("app-incomplete", "reinstall-placekeeper");
+  }
   let expectedIdAtWrongPath = false;
   let expectedPathAtWrongId = false;
   for (const path of await chromePreferenceFiles(options.userHome)) {

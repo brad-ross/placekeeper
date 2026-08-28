@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import sourceManifest from "../../apps/chrome-extension/manifest.json" with { type: "json" };
 import {
   CHROME_EXTENSION_ID,
+  chromeExtensionInstallPath,
   CHROME_EXTENSION_ORIGIN,
   CHROME_NATIVE_HOST_NAME,
   inspectChromeInstallation,
@@ -91,8 +92,12 @@ describe("Chrome distribution integration", () => {
     await mkdir(profile, { recursive: true });
     await mkdir(hostDirectory, { recursive: true });
     const extensionPath = join(app, "Contents/Resources/integrations/chrome-extension");
+    const installedExtensionPath = chromeExtensionInstallPath(app);
+    await cp(extensionPath, installedExtensionPath, {
+      recursive: true,
+    });
     await writeFile(join(profile, "Preferences"), JSON.stringify({
-      extensions: { settings: { [CHROME_EXTENSION_ID]: { path: extensionPath } } },
+      extensions: { settings: { [CHROME_EXTENSION_ID]: { path: installedExtensionPath } } },
     }));
     await writeFile(
       join(hostDirectory, `${CHROME_NATIVE_HOST_NAME}.json`),
@@ -108,7 +113,7 @@ describe("Chrome distribution integration", () => {
     });
 
     await writeFile(join(profile, "Preferences"), JSON.stringify({
-      extensions: { settings: { wrongid: { path: extensionPath } } },
+      extensions: { settings: { wrongid: { path: installedExtensionPath } } },
     }));
     const mismatch = await inspectChromeInstallation({ appPath: app, userHome });
     expect(mismatch).toEqual({
@@ -148,6 +153,69 @@ describe("Chrome distribution integration", () => {
       status: "extension-not-loaded",
       action: "load-packaged-extension",
     });
+  });
+
+  it.each(["handler.html", "popup.html", "background.js"])(
+    "reports an installed extension missing %s as incomplete",
+    async (entry) => {
+      const root = await mkdtemp(join(tmpdir(), "placekeeper-chrome-incomplete-"));
+      try {
+        const app = await fixtureBundle(root);
+        const userHome = join(root, "home");
+        const hostDirectory = join(
+          userHome,
+          "Library/Application Support/Google/Chrome/NativeMessagingHosts",
+        );
+        const installedExtensionPath = chromeExtensionInstallPath(app);
+        await cp(join(app, "Contents/Resources/integrations/chrome-extension"), installedExtensionPath, {
+          recursive: true,
+        });
+        await rm(join(installedExtensionPath, entry));
+        await mkdir(hostDirectory, { recursive: true });
+        await writeFile(
+          join(hostDirectory, `${CHROME_NATIVE_HOST_NAME}.json`),
+          `${JSON.stringify(renderChromeNativeHostManifest(app))}\n`,
+        );
+
+        await expect(inspectChromeInstallation({ appPath: app, userHome })).resolves.toMatchObject({
+          ok: false,
+          status: "app-incomplete",
+          action: "reinstall-placekeeper",
+        });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("reports an insecure installed extension tree as incomplete", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-chrome-insecure-installed-"));
+    try {
+      const app = await fixtureBundle(root);
+      const userHome = join(root, "home");
+      const hostDirectory = join(
+        userHome,
+        "Library/Application Support/Google/Chrome/NativeMessagingHosts",
+      );
+      const installedExtensionPath = chromeExtensionInstallPath(app);
+      await cp(join(app, "Contents/Resources/integrations/chrome-extension"), installedExtensionPath, {
+        recursive: true,
+      });
+      await chmod(join(installedExtensionPath, "background.js"), 0o666);
+      await mkdir(hostDirectory, { recursive: true });
+      await writeFile(
+        join(hostDirectory, `${CHROME_NATIVE_HOST_NAME}.json`),
+        `${JSON.stringify(renderChromeNativeHostManifest(app))}\n`,
+      );
+
+      await expect(inspectChromeInstallation({ appPath: app, userHome })).resolves.toMatchObject({
+        ok: false,
+        status: "app-incomplete",
+        action: "reinstall-placekeeper",
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("never carries installer state that can enable interception", async () => {

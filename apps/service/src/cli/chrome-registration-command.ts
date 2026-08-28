@@ -3,6 +3,7 @@ import { dirname, isAbsolute } from "node:path";
 
 import {
   renderChromeNativeHostManifest,
+  validateChromeExtensionDirectory,
   validateChromeIntegrationBundle,
 } from "../../../../packaging/macos/chrome-integration.js";
 
@@ -13,9 +14,18 @@ function valueAfter(args: readonly string[], flag: string): string {
   return value;
 }
 
-/** Internal installer operation: validate the candidate pair, then create one
- * no-clobber manifest that names the eventual installed wrapper path. */
+/** Internal installer operations for validating managed extension trees and
+ * rendering a no-clobber manifest for the eventual installed wrapper path. */
 export async function runChromeRegistrationCommand(args: readonly string[]): Promise<number> {
+  if (
+    args.length === 4 &&
+    args[0] === "chrome-registration" &&
+    args[1] === "validate-extension" &&
+    args[2] === "--extension"
+  ) {
+    await validateChromeExtensionDirectory(valueAfter(args, "--extension"));
+    return 0;
+  }
   if (
     args.length !== 8 ||
     args[0] !== "chrome-registration" ||
