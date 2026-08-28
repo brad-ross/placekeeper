@@ -154,4 +154,49 @@ describe("temporary browser source ownership", () => {
       sourceDisplayName: "Restart.pdf",
     });
   });
+
+  it("rolls back an adopted source when its control request is cancelled during inspection", async () => {
+    const value = await fixture();
+    const inspectionStarted = Promise.withResolvers<void>();
+    const never = new Promise<never>(() => undefined);
+    const broker = new SessionBroker({
+      recoveryRoot: value.recoveryRoot,
+      rewriteAssessor: async () => {
+        inspectionStarted.resolve();
+        return never;
+      },
+    });
+    const controller = new AbortController();
+    const opening = broker.openChromeBrowserSource(
+      await value.request("Cancelled.pdf"),
+      value.store,
+      controller.signal,
+    );
+    await inspectionStarted.promise;
+    controller.abort(new Error("control-client-closed"));
+
+    await expect(opening).rejects.toThrow("control-client-closed");
+    expect((await readdir(value.recoveryRoot)).filter((name) => !name.startsWith("."))).toEqual([]);
+    expect(await readdir(value.browserRoot)).toEqual([]);
+  });
+
+  it("retires a clean remote review whose browser bootstrap is never claimed", async () => {
+    const value = await fixture();
+    let now = new Date("2026-08-27T20:00:00.000Z");
+    const broker = new SessionBroker({
+      recoveryRoot: value.recoveryRoot,
+      portableReader: async () => [],
+      now: () => now,
+    });
+    const opened = await broker.openChromeBrowserSource(await value.request("Unclaimed.pdf"), value.store);
+    if (opened.kind !== "opened") throw new Error("Expected open");
+    const sessionPath = join(value.recoveryRoot, opened.launch.sessionId);
+    expect(await access(sessionPath).then(() => true)).toBe(true);
+
+    now = new Date(now.getTime() + 60_001);
+    broker.activity();
+
+    await expect.poll(async () => access(sessionPath).then(() => true, () => false)).toBe(false);
+    expect(broker.state(opened.launch.sessionId)).toBeUndefined();
+  });
 });

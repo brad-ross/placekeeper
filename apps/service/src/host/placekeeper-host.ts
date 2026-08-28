@@ -23,6 +23,7 @@ import {
   BrowserSourceStore,
   type ChromeBrowserSourceOpenRequest,
 } from "../browser/browser-source-store.js";
+import type { ChromePdfInspection } from "../browser/chrome-pdf-validator.js";
 import { dirname, join } from "node:path";
 
 export type LaunchSurface = BrokerLaunchSurface;
@@ -91,6 +92,10 @@ export interface PlacekeeperHostOptions {
   readonly webAssets?: WebAssetOptions;
   readonly taskBindings?: TaskBindingRegistry;
   readonly port?: number;
+  readonly browserSourceInspector?: (
+    path: string,
+    signal?: AbortSignal,
+  ) => Promise<ChromePdfInspection>;
 }
 
 function failure(
@@ -176,6 +181,9 @@ export class PlacekeeperHost {
     const broker = new SessionBroker({
       recoveryRoot: options.recoveryRoot,
       ...(options.taskBindings === undefined ? {} : { taskBindings: options.taskBindings }),
+      ...(options.browserSourceInspector === undefined
+        ? {}
+        : { browserSourceInspector: options.browserSourceInspector }),
     });
     await broker.initialize();
     const browserSources = await BrowserSourceStore.create(
@@ -226,10 +234,11 @@ export class PlacekeeperHost {
 
   async openChromeBrowserSource(
     request: ChromeBrowserSourceOpenRequest,
+    signal?: AbortSignal,
   ): Promise<LaunchResponse> {
     const response = await this.lifecycle.runActivity(async () => {
       try {
-        const opened = await this.broker.openChromeBrowserSource(request, this.browserSources);
+        const opened = await this.broker.openChromeBrowserSource(request, this.browserSources, signal);
         if (opened.kind === "recovery-offered") {
           throw new Error("Remote acquisitions cannot reuse protected recovery");
         }

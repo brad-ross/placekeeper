@@ -60,7 +60,7 @@ describe("native PDF handoff", () => {
       streamUrl: "blob:authorized-response",
     })).resolves.toEqual({ destination });
 
-    expect(fetchStream).toHaveBeenCalledExactlyOnceWith("blob:authorized-response");
+    expect(fetchStream).toHaveBeenCalledExactlyOnceWith("blob:authorized-response", undefined);
     expect(port.sent).toContainEqual(expect.objectContaining({
       type: "start",
       disposition: "remote-temporary",
@@ -132,5 +132,28 @@ describe("native PDF handoff", () => {
     })).rejects.toThrow("host-unavailable");
 
     expect(reads.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("cancels a stalled MIME stream immediately when the user bypasses Placekeeper", async () => {
+    const port = acknowledgingPort(destination);
+    const cancelled = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({ cancel: cancelled });
+    const controller = new AbortController();
+    const handoff = createNativeHandoff({
+      connectNative: () => port,
+      fetchStream: async () => new Response(stream),
+      createTransferId: () => "transfer-bypass",
+    });
+
+    const result = handoff({
+      originalUrl: "https://papers.example.test/stalled.pdf",
+      streamUrl: "blob:stalled-response",
+    }, controller.signal);
+    await vi.waitFor(() => expect(port.sent).toContainEqual(expect.objectContaining({ type: "start" })));
+    controller.abort();
+
+    await expect(result).rejects.toThrow("bypassed");
+    expect(cancelled).toHaveBeenCalled();
+    expect(port.sent).toContainEqual(expect.objectContaining({ type: "cancel" }));
   });
 });

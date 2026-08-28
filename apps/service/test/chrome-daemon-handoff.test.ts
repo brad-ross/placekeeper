@@ -48,6 +48,10 @@ describe("Chrome daemon handoff", () => {
       browserSourceRoot,
       webAssets: { root: assets },
       port: 0,
+      browserSourceInspector: async () => ({
+        rewriteEligibility: { eligible: true },
+        importedItems: [],
+      }),
     });
     hosts.push(host);
     const socketPath = join(root, "control.sock");
@@ -75,5 +79,52 @@ describe("Chrome daemon handoff", () => {
       kind: "error",
       reason: "invalid-request",
     });
+  });
+
+  it("cancels inspection and removes adopted bytes when the native client disconnects", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-chrome-cancel-"));
+    roots.push(root);
+    const recoveryRoot = join(root, "recovery");
+    const browserSourceRoot = join(root, "browser-sources");
+    const assets = join(root, "assets");
+    await Promise.all([mkdir(browserSourceRoot), mkdir(assets)]);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    const bytes = Buffer.from("%PDF-1.7\ncancelled daemon handoff\n%%EOF");
+    const sourceHandle = randomBytes(24).toString("base64url");
+    await writeFile(join(browserSourceRoot, `${sourceHandle}.pdf`), bytes, { mode: 0o600 });
+    const inspectionStarted = Promise.withResolvers<void>();
+    const host = await PlacekeeperHost.start({
+      recoveryRoot,
+      browserSourceRoot,
+      webAssets: { root: assets },
+      port: 0,
+      browserSourceInspector: async (_path, signal) => {
+        inspectionStarted.resolve();
+        return new Promise((_resolveInspection, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      },
+    });
+    hosts.push(host);
+    const socketPath = join(root, "control.sock");
+    controls.push(await startLaunchControlServer(host, socketPath));
+    const controller = new AbortController();
+    const response = requestControl(socketPath, {
+      kind: "chrome-open",
+      request: {
+        protocolVersion: 1,
+        sourceHandle,
+        byteLength: bytes.byteLength,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+      },
+    }, { signal: controller.signal });
+    await inspectionStarted.promise;
+    controller.abort(new Error("native-host-timeout"));
+
+    await expect(response).rejects.toThrow("native-host-timeout");
+    await expect.poll(async () => {
+      const entries = await import("node:fs/promises").then(({ readdir }) => readdir(recoveryRoot));
+      return entries.filter((name) => !name.startsWith(".")).length;
+    }).toBe(0);
   });
 });

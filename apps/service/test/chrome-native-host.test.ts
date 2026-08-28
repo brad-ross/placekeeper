@@ -158,4 +158,34 @@ describe("Chrome native host entry", () => {
     ]);
     expect(await readdir(store.root)).toEqual([]);
   });
+
+  it("ends at its deadline even when the review opener never settles", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const store = await storeFixture();
+    const run = runChromeNativeHostCommand([CHROME_EXTENSION_ORIGIN], {
+      input,
+      output,
+      store,
+      opener: {
+        openLocal: vi.fn(),
+        openSealed: vi.fn(() => new Promise<string>(() => undefined)),
+      },
+      maxDurationMs: 25,
+    });
+    input.end(Buffer.concat([
+      encodeNativeMessage({
+        type: "start", protocolVersion: 1, transferId: "transfer-stalled-open",
+        disposition: "remote-temporary",
+      }),
+      encodeNativeMessage({
+        type: "chunk", transferId: "transfer-stalled-open", sequence: 0,
+        data: Buffer.from("%PDF-1.7\n%%EOF").toString("base64"),
+      }),
+      encodeNativeMessage({ type: "finish", transferId: "transfer-stalled-open", sequence: 1 }),
+    ]));
+
+    await expect(run).resolves.toBe(0);
+    expect(await readdir(store.root)).toEqual([]);
+  });
 });

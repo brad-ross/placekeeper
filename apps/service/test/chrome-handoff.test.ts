@@ -1,4 +1,4 @@
-import { lstat, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -47,6 +47,9 @@ async function fixture(options: {
     ...(options.maxAggregateBytes === undefined
       ? {}
       : { maxAggregateBytes: options.maxAggregateBytes }),
+    ...(options.maxTransferBytes === undefined
+      ? {}
+      : { maxTransferBytes: options.maxTransferBytes }),
   });
   const session = new ChromeHandoffSession({
     callerOrigin: CHROME_EXTENSION_ORIGIN,
@@ -175,8 +178,8 @@ describe("bounded Chrome handoff", () => {
     })).resolves.toMatchObject({ type: "failure", reason: "protocol-mismatch" });
   });
 
-  it("counts sealed sources against the persistent aggregate disk budget", async () => {
-    const { store, session } = await fixture({ maxAggregateBytes: 12 });
+  it("reserves space for active transfers and counts sealed sources against the disk budget", async () => {
+    const { store, session } = await fixture({ maxTransferBytes: 8, maxAggregateBytes: 12 });
     await session.handle({
       type: "start", protocolVersion: 1, transferId: "transfer-1", disposition: "remote-temporary",
     });
@@ -191,12 +194,8 @@ describe("bounded Chrome handoff", () => {
       store,
       opener: { async openLocal() { throw new Error("unused"); }, async openSealed() { throw new Error("unused"); } },
     });
-    await next.handle({
-      type: "start", protocolVersion: 1, transferId: "transfer-2", disposition: "remote-temporary",
-    });
     await expect(next.handle({
-      type: "chunk", transferId: "transfer-2", sequence: 0,
-      data: Buffer.from("%PDF-").toString("base64"),
+      type: "start", protocolVersion: 1, transferId: "transfer-2", disposition: "remote-temporary",
     })).resolves.toMatchObject({ type: "failure", reason: "host-byte-budget" });
   });
 
@@ -281,21 +280,36 @@ describe("bounded Chrome handoff", () => {
     const outside = join(root, "outside.partial");
     await writeFile(outside, "not transfer state");
     await symlink(outside, join(store.root, "hostile.partial"));
-    await session.handle({
+    await expect(session.handle({
       type: "start",
       protocolVersion: 1,
       transferId: "transfer-1",
       disposition: "remote-temporary",
-    });
-
-    await expect(session.handle({
-      type: "chunk",
-      transferId: "transfer-1",
-      sequence: 0,
-      data: Buffer.from("%PDF-").toString("base64"),
     })).resolves.toMatchObject({ type: "failure", reason: "host-byte-budget" });
     expect(await readFile(outside, "utf8")).toBe("not transfer state");
     expect(await readdir(store.root)).toEqual(["hostile.partial"]);
+  });
+
+  it("reclaims only expired, well-formed transfer remnants after a host crash", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-stale-transfer-"));
+    roots.push(root);
+    const sourceRoot = join(root, "browser-sources");
+    await mkdir(sourceRoot, { mode: 0o700 });
+    const partial = join(sourceRoot, `.${"a".repeat(32)}.partial`);
+    const sealed = join(sourceRoot, `${"b".repeat(32)}.pdf`);
+    await writeFile(partial, "%PDF-", { mode: 0o600 });
+    await writeFile(sealed, "%PDF-", { mode: 0o600 });
+    await utimes(partial, new Date(1_000), new Date(1_000));
+    await utimes(sealed, new Date(1_000), new Date(1_000));
+
+    const store = await ChromeTransferStore.create({
+      root: sourceRoot,
+      validate: async () => undefined,
+      staleTransferMs: 1_000,
+      now: () => 10_000,
+    });
+
+    expect(await readdir(store.root)).toEqual([]);
   });
 
   it("kills a stalled structural validator without stalling the caller", async () => {

@@ -10,7 +10,7 @@ if (bypass === null || status === null) throw new Error("Incomplete Placekeeper 
 const autoOpen = chromeAutoOpenPorts(chrome);
 const handoff = createNativeHandoff({
   connectNative: () => connectPlacekeeper(chrome),
-  fetchStream: async (url) => fetch(url),
+  fetchStream: async (url, signal) => signal === undefined ? fetch(url) : fetch(url, { signal }),
   createTransferId: () => crypto.randomUUID(),
 });
 const controller = createHandlerController({

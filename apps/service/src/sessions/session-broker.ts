@@ -62,6 +62,10 @@ import {
   type BrowserSourceStore,
   type ChromeBrowserSourceOpenRequest,
 } from "../browser/browser-source-store.js";
+import {
+  inspectPdfInSubprocess,
+  type ChromePdfInspection,
+} from "../browser/chrome-pdf-validator.js";
 
 export const RECOVERY_DECISIONS = ["resume", "discard", "fork"] as const;
 export type RecoveryDecision = typeof RECOVERY_DECISIONS[number];
@@ -227,6 +231,10 @@ export interface SessionBrokerOptions {
   readonly snapshotHooks?: SnapshotHooks;
   readonly portableReader?: (bytes: Uint8Array) => Promise<readonly ReviewItem[]>;
   readonly rewriteAssessor?: (bytes: Uint8Array) => Promise<PdfRewriteEligibility>;
+  readonly browserSourceInspector?: (
+    path: string,
+    signal?: AbortSignal,
+  ) => Promise<ChromePdfInspection>;
   readonly taskBindings?: TaskBindingRegistry;
   readonly restartReconnectStore?: RestartReconnectStore;
 }
@@ -258,6 +266,18 @@ function activeKey(path: string, digest: string): string {
   return `${path}\0${digest}`;
 }
 
+function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) return operation;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise((resolveOperation, reject) => {
+    const onAbort = (): void => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    void operation.then(resolveOperation, reject).finally(() => {
+      signal.removeEventListener("abort", onAbort);
+    });
+  });
+}
+
 export class SessionBroker {
   readonly recoveryRoot: string;
   readonly capabilities: FileCapabilityRegistry;
@@ -269,6 +289,10 @@ export class SessionBroker {
   readonly #snapshotHooks: SnapshotHooks;
   readonly #portableReader: (bytes: Uint8Array) => Promise<readonly ReviewItem[]>;
   readonly #rewriteAssessor: (bytes: Uint8Array) => Promise<PdfRewriteEligibility>;
+  readonly #browserSourceInspector: (
+    path: string,
+    signal?: AbortSignal,
+  ) => Promise<ChromePdfInspection>;
   readonly #activeById = new Map<string, ActiveSession>();
   readonly #activeBySource = new Map<string, string>();
   readonly #bootstrapScopes = new Map<string, BrowserLaunchScope>();
@@ -307,6 +331,25 @@ export class SessionBroker {
       (options.portableReader === undefined
         ? assessPdfRewriteEligibility
         : async () => ({ eligible: true }));
+    this.#browserSourceInspector = options.browserSourceInspector ?? (
+      options.portableReader === undefined && options.rewriteAssessor === undefined
+        ? (path, signal) => inspectPdfInSubprocess(
+            path,
+            signal === undefined ? {} : { signal },
+          )
+        : async (path, signal) => {
+            const bytes = new Uint8Array(await readFile(path));
+            signal?.throwIfAborted();
+            const rewriteEligibility = await abortable(this.#rewriteAssessor(bytes), signal);
+            let importedItems: readonly ReviewItem[] = [];
+            try {
+              importedItems = await abortable(this.#portableReader(bytes), signal);
+            } catch {
+              signal?.throwIfAborted();
+            }
+            return { rewriteEligibility, importedItems };
+          }
+    );
   }
 
   onSessionEnd(listener: (sessionId: string) => void): () => void {
@@ -502,27 +545,29 @@ export class SessionBroker {
   async openChromeBrowserSource(
     request: ChromeBrowserSourceOpenRequest,
     browserSources: BrowserSourceStore,
+    signal?: AbortSignal,
   ): Promise<OpenReviewResult> {
+    signal?.throwIfAborted();
     await this.initialize();
     this.#privateSourceRoots.add(browserSources.root);
     const sessionId = randomUUID();
     const sessionDirectory = join(this.recoveryRoot, sessionId);
     let approvedFile: { readonly id: string; readonly canonicalPath: string } | undefined;
+    let activated = false;
     try {
       const adopted = await browserSources.adopt(request, sessionDirectory);
+      signal?.throwIfAborted();
       approvedFile = await this.capabilities.approvePdf(adopted.path);
-      const bytes = new Uint8Array(await readFile(adopted.path));
       if (
-        bytes.byteLength !== adopted.byteLength ||
-        createHash("sha256").update(bytes).digest("hex") !== adopted.sha256
+        (await realpath(adopted.path)) !== approvedFile.canonicalPath ||
+        await hashFile(adopted.path) !== adopted.sha256
       ) throw new Error("Adopted browser source changed");
-      const rewriteEligibility = await this.#rewriteAssessor(bytes);
-      let importedItems: readonly ReviewItem[] = [];
-      try {
-        importedItems = await this.#portableReader(bytes);
-      } catch {
-        importedItems = [];
-      }
+      signal?.throwIfAborted();
+      const { rewriteEligibility, importedItems } = await this.#browserSourceInspector(
+        adopted.path,
+        signal,
+      );
+      signal?.throwIfAborted();
       const source = {
         fileId: approvedFile.id,
         digest: adopted.sha256,
@@ -566,11 +611,17 @@ export class SessionBroker {
       // Persisting the lease is the ownership acknowledgement. No second
       // snapshot is created: the adopted source.pdf is the recovery source.
       await session.store.persist(this.#draft(session));
+      signal?.throwIfAborted();
       this.#activate(session);
+      activated = true;
+      signal?.throwIfAborted();
       return { kind: "opened", launch: this.#launch(session, "browser") };
     } catch (error) {
-      if (approvedFile !== undefined) this.capabilities.revokeFile(approvedFile.id);
-      await this.#store(sessionId).remove().catch(() => undefined);
+      if (activated) await this.#end(sessionId);
+      else {
+        if (approvedFile !== undefined) this.capabilities.revokeFile(approvedFile.id);
+        await this.#store(sessionId).remove().catch(() => undefined);
+      }
       throw error;
     }
   }
@@ -1299,8 +1350,25 @@ export class SessionBroker {
 
   #sweepBootstrapScopes(): void {
     const now = this.#now().getTime();
+    const expiredSessions = new Set<string>();
     for (const [key, scope] of this.#bootstrapScopes) {
-      if (scope.expiresAtMs <= now) this.#bootstrapScopes.delete(key);
+      if (scope.expiresAtMs <= now) {
+        this.#bootstrapScopes.delete(key);
+        expiredSessions.add(scope.sessionId);
+      }
+    }
+    // A browser handoff is committed only when its bootstrap is exchanged.
+    // If Chrome falls back after the native success reply, expire the clean,
+    // unclaimed remote session instead of retaining an invisible review.
+    for (const sessionId of expiredSessions) {
+      const session = this.#activeById.get(sessionId);
+      const stillScoped = [...this.#bootstrapScopes.values(), ...this.#credentialScopes.values()]
+        .some((scope) => scope.sessionId === sessionId);
+      const hasView = [...this.#viewsById.values()].some((view) => view.sessionId === sessionId);
+      if (
+        session?.sourceOwnership.disposition === "remote-temporary" &&
+        session.sync.phase === "clean" && !stillScoped && !hasView
+      ) void this.#end(sessionId).catch(() => undefined);
     }
     for (const [proofHash, metadata] of this.#reconnectByBindProofHash) {
       if (metadata.expiresAtMs <= now) this.#reconnectByBindProofHash.delete(proofHash);

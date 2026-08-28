@@ -30,4 +30,12 @@ describe("Chrome extension static contract", () => {
     expect(popup).toContain('aria-checked="false"');
     expect(popup).toContain('role="status"');
   });
+
+  it("keeps the popup toggle inert until its saved state is known", async () => {
+    const popupEntry = await readFile(resolve(extensionRoot, "src/popup-entry.ts"), "utf8");
+    expect(popupEntry.indexOf("control.disabled = true;")).toBeLessThan(
+      popupEntry.indexOf("void refresh()"),
+    );
+    expect(popupEntry).toContain("const nextEnabled = !enabled;");
+  });
 });

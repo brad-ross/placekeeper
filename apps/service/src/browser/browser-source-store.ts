@@ -3,12 +3,12 @@ import { chmod, lstat, open, realpath, rename, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { ensurePrivateDirectory } from "../recovery/source-snapshot.js";
+import { MAX_CHROME_PDF_BYTES } from "./chrome-pdf-limits.js";
 
 export const CHROME_BROWSER_SOURCE_PROTOCOL_VERSION = 1;
 
 const SEALED_HANDLE = /^[A-Za-z0-9_-]{32}$/u;
 const DIGEST = /^[a-f0-9]{64}$/u;
-const MAX_BROWSER_SOURCE_BYTES = 256 * 1024 * 1024;
 
 export interface ChromeBrowserSourceOpenRequest {
   readonly protocolVersion: typeof CHROME_BROWSER_SOURCE_PROTOCOL_VERSION;
@@ -83,7 +83,7 @@ export class BrowserSourceStore {
       request.protocolVersion !== CHROME_BROWSER_SOURCE_PROTOCOL_VERSION ||
       !SEALED_HANDLE.test(request.sourceHandle) ||
       !Number.isSafeInteger(request.byteLength) ||
-      request.byteLength <= 0 || request.byteLength > MAX_BROWSER_SOURCE_BYTES ||
+      request.byteLength <= 0 || request.byteLength > MAX_CHROME_PDF_BYTES ||
       !DIGEST.test(request.sha256)
     ) throw new Error("Invalid browser source claim");
 
@@ -134,7 +134,7 @@ export function isChromeBrowserSourceOpenRequest(
   return record.protocolVersion === CHROME_BROWSER_SOURCE_PROTOCOL_VERSION &&
     typeof record.sourceHandle === "string" && SEALED_HANDLE.test(record.sourceHandle) &&
     Number.isSafeInteger(record.byteLength) && (record.byteLength as number) > 0 &&
-    (record.byteLength as number) <= MAX_BROWSER_SOURCE_BYTES &&
+    (record.byteLength as number) <= MAX_CHROME_PDF_BYTES &&
     typeof record.sha256 === "string" && DIGEST.test(record.sha256) &&
     (record.displayName === undefined ||
       (typeof record.displayName === "string" && record.displayName.length > 0 &&

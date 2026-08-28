@@ -13,6 +13,7 @@ const status = requiredElement<HTMLElement>("#status");
 
 const ports = chromeAutoOpenPorts(chrome);
 let enabled = false;
+control.disabled = true;
 
 function render(nextEnabled: boolean): void {
   enabled = nextEnabled;
@@ -35,9 +36,10 @@ async function refresh(): Promise<void> {
 control.addEventListener("click", async () => {
   control.disabled = true;
   status.textContent = enabled ? "Pausing automatic opening…" : "Enabling automatic opening…";
+  const nextEnabled = !enabled;
   try {
-    await setAutoOpenEnabled(ports, !enabled);
-    render(!enabled);
+    await setAutoOpenEnabled(ports, nextEnabled);
+    render(nextEnabled);
     status.textContent = enabled
       ? "PDFs will open automatically in Placekeeper."
       : "Automatic opening is paused.";
@@ -55,4 +57,7 @@ void refresh()
     render(false);
     status.textContent = "The PDF setting is unavailable. Automatic opening remains paused.";
   })
-  .finally(() => control.focus());
+  .finally(() => {
+    control.disabled = false;
+    control.focus();
+  });

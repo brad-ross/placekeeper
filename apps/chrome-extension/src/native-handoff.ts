@@ -24,7 +24,7 @@ export interface NativePort {
 
 export interface NativeHandoffPorts {
   connectNative(): NativePort;
-  fetchStream(url: string): Promise<Response>;
+  fetchStream(url: string, signal?: AbortSignal): Promise<Response>;
   createTransferId(): string;
   timeoutMs?: number;
 }
@@ -97,11 +97,41 @@ async function postAndWait(
   return reply;
 }
 
-async function drain(reader: ReadableStreamDefaultReader<Uint8Array> | undefined): Promise<void> {
+async function readWithAbort(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal: AbortSignal | undefined,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  if (isAborted(signal)) throw new HandoffError("bypassed");
+  if (signal === undefined) return reader.read();
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => {
+      void reader.cancel("bypassed").catch(() => undefined);
+      reject(new HandoffError("bypassed"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void reader.read().then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", onAbort);
+    });
+  });
+}
+
+async function drain(
+  reader: ReadableStreamDefaultReader<Uint8Array> | undefined,
+  timeoutMs = 1_000,
+): Promise<void> {
   if (reader === undefined) return;
+  const timeout = new Promise<"timeout">((resolve) => {
+    setTimeout(() => resolve("timeout"), timeoutMs);
+  });
   try {
-    while (!(await reader.read()).done) {
-      // Chrome's MIME stream is single-use; draining preserves native fallback.
+    while (true) {
+      const result = await Promise.race([reader.read(), timeout]);
+      if (result === "timeout") {
+        await reader.cancel("fallback-drain-timeout").catch(() => undefined);
+        return;
+      }
+      if (result.done) return;
+      // Chrome's MIME stream is single-use; bounded draining preserves native fallback.
     }
   } catch {
     // Chrome owns the resulting network error surface.
@@ -139,7 +169,7 @@ export function createNativeHandoff(
       } else {
         let response: Response;
         try {
-          response = await ports.fetchStream(info.streamUrl);
+          response = await ports.fetchStream(info.streamUrl, signal);
         } catch {
           throw new HandoffError("stream-network-error");
         }
@@ -171,8 +201,9 @@ export function createNativeHandoff(
         while (true) {
           let read: ReadableStreamReadResult<Uint8Array>;
           try {
-            read = await reader.read();
-          } catch {
+            read = await readWithAbort(reader, signal);
+          } catch (error) {
+            if (error instanceof HandoffError) throw error;
             throw new HandoffError("stream-network-error");
           }
           if (read.done) break;
@@ -216,7 +247,8 @@ export function createNativeHandoff(
           // The disconnected host cannot retain a transfer through this port.
         }
       }
-      await drain(reader);
+      if (isAborted(signal)) await reader?.cancel("bypassed").catch(() => undefined);
+      else await drain(reader);
       throw error;
     } finally {
       port?.disconnect();

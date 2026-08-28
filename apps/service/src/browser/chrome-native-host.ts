@@ -33,9 +33,13 @@ export interface ChromeNativeHostCommandOptions {
 
 const DEFAULT_NATIVE_HOST_DURATION_MS = 30_000;
 
-export type ChromeBrowserLaunchClient = (request: LaunchRequest) => Promise<LaunchResponse>;
+export type ChromeBrowserLaunchClient = (
+  request: LaunchRequest,
+  signal?: AbortSignal,
+) => Promise<LaunchResponse>;
 export type ChromeBrowserSourceLaunchClient = (
   request: ChromeBrowserSourceOpenRequest,
+  signal?: AbortSignal,
 ) => Promise<LaunchResponse>;
 
 export function createDaemonChromeBrowserOpener(
@@ -52,18 +56,22 @@ export function createDaemonChromeBrowserOpener(
     return response.url;
   };
   return {
-    async openLocal(pdfPath: string) {
-      return browserDestination(await launch({ pdfPath, surface: "browser" }));
+    async openLocal(pdfPath: string, signal?: AbortSignal) {
+      const request = { pdfPath, surface: "browser" as const };
+      return browserDestination(await (signal === undefined ? launch(request) : launch(request, signal)));
     },
-    async openSealed(handle: SealedBrowserSourceHandle) {
+    async openSealed(handle: SealedBrowserSourceHandle, signal?: AbortSignal) {
       const source = await store.inspect(handle);
-      const destination = await browserDestination(await openBrowserSource({
+      const request = {
         protocolVersion: 1,
         sourceHandle: handle,
         byteLength: source.byteLength,
         sha256: source.sha256,
         ...(source.displayName === undefined ? {} : { displayName: source.displayName }),
-      }));
+      } as const;
+      const destination = await browserDestination(await (
+        signal === undefined ? openBrowserSource(request) : openBrowserSource(request, signal)
+      ));
       // The daemon atomically moved this inode into recovery ownership. Drop
       // the native process's transient handle without deleting owned bytes.
       await store.remove(handle);
@@ -96,6 +104,11 @@ export async function runChromeNativeHostCommand(
     return 2;
   }
   let session: ChromeHandoffSession;
+  const lifetime = new AbortController();
+  const lifetimeTimer = setTimeout(
+    () => lifetime.abort(new Error("native-host-timeout")),
+    options.maxDurationMs ?? DEFAULT_NATIVE_HOST_DURATION_MS,
+  );
   try {
     session = new ChromeHandoffSession({
       callerOrigin: args[0]!,
@@ -103,8 +116,10 @@ export async function runChromeNativeHostCommand(
       opener: options.opener ?? createDaemonChromeBrowserOpener(store),
       quota: options.quota ?? new ChromeTransferQuota(),
       maxDurationMs: options.maxDurationMs ?? DEFAULT_NATIVE_HOST_DURATION_MS,
+      signal: lifetime.signal,
     });
   } catch {
+    clearTimeout(lifetimeTimer);
     return 2;
   }
 
@@ -159,6 +174,7 @@ export async function runChromeNativeHostCommand(
   input.off("data", handleChunk);
   if (termination !== "end") {
     protocolFailure = true;
+    lifetime.abort(new Error("native-host-terminated"));
     input.destroy();
   }
   try {
@@ -168,6 +184,7 @@ export async function runChromeNativeHostCommand(
   }
   await queue;
   await session.disconnect();
+  clearTimeout(lifetimeTimer);
   output.off("error", handleOutputError);
   return protocolFailure ? 2 : 0;
 }
