@@ -3,6 +3,7 @@ import {
   useRef,
   type FocusEvent,
   type KeyboardEvent,
+  type ReactNode,
   type Ref,
 } from 'react';
 
@@ -107,6 +108,7 @@ export interface ReferenceWorkspaceProps {
   readonly onReferenceReturn?: (identity: string) => void;
   readonly modes?: readonly WorkspaceMode[];
   readonly headerVariant?: 'tabs' | 'references';
+  readonly headerAction?: ReactNode;
   readonly onMoveReferencesRight?: () => void;
   readonly onMoveReferencesBottom?: () => void;
   readonly onReferenceViewportHost: (element: HTMLDivElement | null) => void;
@@ -168,6 +170,7 @@ export function ReferenceWorkspace({
   onReferenceReturn,
   modes = WORKSPACE_MODES,
   headerVariant = 'tabs',
+  headerAction,
   onMoveReferencesRight,
   onMoveReferencesBottom,
   onReferenceViewportHost,
@@ -396,6 +399,7 @@ export function ReferenceWorkspace({
           quietSingleMode={quietSingleMode}
           {...(dockAction ? { dockAction } : {})}
         />
+        {headerAction}
       </header> : null}
 
       {modes.includes('references') ? <section

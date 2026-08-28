@@ -34,6 +34,13 @@ import {
 } from '../src/review/OutlineAnnotationsWorkspace.js';
 import type { PdfOutlineItem } from '../src/pdf/pdf-outline.js';
 import { RIGHT_WORKSPACE_MODES } from '../src/review/reference-navigation-state.js';
+import {
+  createOutlineExpansionState,
+  setOutlineExpandedItemIds,
+  toggleOutlineExpansionState,
+} from '../src/review/outline-expansion-state.js';
+import { OutlineExpansionToggle } from '../src/review/OutlineExpansionToggle.js';
+import { OutlineExpansionProvider } from '../src/review/OutlineExpansionController.js';
 
 const target = (identity: string, pageIndex: number) => ({
   documentGeneration: 3,
@@ -188,20 +195,22 @@ describe('shared reference workspace', () => {
 
   it('falls back to Search when the selected Outline mode is unavailable', () => {
     const html = renderToStaticMarkup(
-      <OutlineAnnotationsWorkspace
-        open
-        mode="outline"
-        modes={RIGHT_WORKSPACE_MODES.filter((mode) => mode !== 'outline')}
-        presentation="right"
-        headerVariant="tools"
-        outline={{ status: 'loaded-empty', documentGeneration: 1 }}
-        currentOutlineItemId={null}
-        annotations={<div>Owned annotation rows</div>}
-        search={<div>PDF search</div>}
-        onModeChange={() => undefined}
-        onOutlineActivate={() => undefined}
-        onOutlineReference={() => undefined}
-      />,
+      <OutlineExpansionProvider discovery={{ status: 'loaded-empty', documentGeneration: 1 }}>
+        <OutlineAnnotationsWorkspace
+          open
+          mode="outline"
+          modes={RIGHT_WORKSPACE_MODES.filter((mode) => mode !== 'outline')}
+          presentation="right"
+          headerVariant="tools"
+          outline={{ status: 'loaded-empty', documentGeneration: 1 }}
+          currentOutlineItemId={null}
+          annotations={<div>Owned annotation rows</div>}
+          search={<div>PDF search</div>}
+          onModeChange={() => undefined}
+          onOutlineActivate={() => undefined}
+          onOutlineReference={() => undefined}
+        />
+      </OutlineExpansionProvider>,
     );
 
     expect(html).toContain('id="review-tools-workspace"');
@@ -222,19 +231,21 @@ describe('shared reference workspace', () => {
 
   it('keeps Outline available while discovery is unavailable', () => {
     const html = renderToStaticMarkup(
-      <OutlineAnnotationsWorkspace
-        open
-        mode="outline"
-        modes={RIGHT_WORKSPACE_MODES}
-        presentation="right"
-        headerVariant="tools"
-        outline={{ status: 'unavailable', documentGeneration: 1 }}
-        currentOutlineItemId={null}
-        annotations={<div>Owned annotation rows</div>}
-        onModeChange={() => undefined}
-        onOutlineActivate={() => undefined}
-        onOutlineReference={() => undefined}
-      />,
+      <OutlineExpansionProvider discovery={{ status: 'unavailable', documentGeneration: 1 }}>
+        <OutlineAnnotationsWorkspace
+          open
+          mode="outline"
+          modes={RIGHT_WORKSPACE_MODES}
+          presentation="right"
+          headerVariant="tools"
+          outline={{ status: 'unavailable', documentGeneration: 1 }}
+          currentOutlineItemId={null}
+          annotations={<div>Owned annotation rows</div>}
+          onModeChange={() => undefined}
+          onOutlineActivate={() => undefined}
+          onOutlineReference={() => undefined}
+        />
+      </OutlineExpansionProvider>,
     );
 
     expect(html).toContain('id="workspace-mode-outline"');
@@ -808,6 +819,8 @@ describe('outline navigator', () => {
         currentItemId="setup"
         onActivate={() => undefined}
         onOpenReference={() => undefined}
+        expandedItemIds={new Set(['intro'])}
+        onExpandedItemIdsChange={() => undefined}
       />,
     );
 
@@ -838,6 +851,8 @@ describe('outline navigator', () => {
         currentItemId="results"
         onActivate={() => undefined}
         onOpenReference={() => undefined}
+        expandedItemIds={new Set(['group', 'intro'])}
+        onExpandedItemIdsChange={() => undefined}
         copyLinkForItem={(item) => item.target === null ? undefined : {
           precision: item.id === 'results' ? 'exact' : 'page',
           getLink: () => item.id === 'results'
@@ -883,11 +898,59 @@ describe('outline navigator', () => {
         currentItemId={null}
         onActivate={() => undefined}
         onOpenReference={() => undefined}
+        expandedItemIds={new Set()}
+        onExpandedItemIdsChange={() => undefined}
       />,
     );
     expect(render('loading')).toContain('Outline is loading');
     expect(render('loaded-empty')).toContain('This PDF has no embedded outline.');
     expect(render('unavailable')).toContain('Outline unavailable.');
     expect(render('unavailable')).not.toContain('role="alert"');
+  });
+});
+
+describe('outline expansion toggle', () => {
+  it('restores the exact expansion set captured before a bulk collapse', () => {
+    const initial = createOutlineExpansionState(new Set(['intro', 'results']));
+    const collapsed = toggleOutlineExpansionState(initial);
+
+    expect([...collapsed.expandedItemIds]).toEqual([]);
+    expect([...collapsed.restoreItemIds!]).toEqual(['intro', 'results']);
+
+    const restored = toggleOutlineExpansionState(collapsed);
+    expect([...restored.expandedItemIds]).toEqual(['intro', 'results']);
+    expect(restored.restoreItemIds).toBeNull();
+  });
+
+  it('does not enter restore mode when every branch is already collapsed manually', () => {
+    const initial = createOutlineExpansionState(new Set());
+    expect(toggleOutlineExpansionState(initial)).toBe(initial);
+  });
+
+  it('keeps the captured restore set while individual branches are used', () => {
+    const collapsed = toggleOutlineExpansionState(
+      createOutlineExpansionState(new Set(['intro', 'results'])),
+    );
+    const manuallyExpanded = setOutlineExpandedItemIds(collapsed, new Set(['methods']));
+
+    expect([...manuallyExpanded.expandedItemIds]).toEqual(['methods']);
+    expect([...manuallyExpanded.restoreItemIds!]).toEqual(['intro', 'results']);
+    expect([
+      ...toggleOutlineExpansionState(manuallyExpanded).expandedItemIds,
+    ]).toEqual(['intro', 'results']);
+  });
+
+  it('flips inward collapse carets outward while restore is pending', () => {
+    const collapse = renderToStaticMarkup(
+      <OutlineExpansionToggle restorePending={false} disabled={false} onToggle={() => undefined} />,
+    );
+    const restore = renderToStaticMarkup(
+      <OutlineExpansionToggle restorePending disabled={false} onToggle={() => undefined} />,
+    );
+
+    expect(collapse).toContain('aria-label="Collapse all outline entries"');
+    expect(collapse).toContain('lucide-chevrons-down-up');
+    expect(restore).toContain('aria-label="Restore previous outline expansion"');
+    expect(restore).toContain('lucide-chevrons-up-down');
   });
 });

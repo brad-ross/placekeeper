@@ -10,6 +10,7 @@ import type { PdfOutlineDiscovery, PdfOutlineItem } from '../pdf/pdf-outline.js'
 import type { AnnotationPresentation } from '../pdf/viewer-framing.js';
 import type { PdfDestinationCopyLink } from './copy-link-model.js';
 import { horizontalTabFocusIndex } from './menu-focus.js';
+import { useOutlineExpansionController } from './OutlineExpansionController.js';
 import { OutlineNavigator } from './OutlineNavigator.js';
 import type { WorkspaceMode } from './reference-navigation-state.js';
 import type { RightWorkspaceMode } from './reference-workspace-layout.js';
@@ -28,6 +29,7 @@ export interface OutlineAnnotationsWorkspaceProps {
   readonly currentOutlineItemId: string | null;
   readonly annotations: ReactNode;
   readonly search?: ReactNode;
+  readonly headerAction?: ReactNode;
   readonly onModeChange: (mode: RightWorkspaceMode) => void;
   readonly onOutlineActivate: (item: PdfOutlineItem) => void;
   readonly onOutlineReference: (item: PdfOutlineItem) => void;
@@ -58,12 +60,14 @@ export function OutlineAnnotationsWorkspace({
   currentOutlineItemId,
   annotations,
   search,
+  headerAction,
   onModeChange,
   onOutlineActivate,
   onOutlineReference,
   copyLinkForOutlineItem,
   onModeFocusTokenChange,
 }: OutlineAnnotationsWorkspaceProps) {
+  const outlineExpansion = useOutlineExpansionController();
   const outlineAvailable = modes.includes('outline');
   const annotationsAvailable = modes.includes('annotations');
   const toolModes = modes;
@@ -145,6 +149,7 @@ export function OutlineAnnotationsWorkspace({
               else tabRefs.current.delete(toolMode);
             }}
           />
+          {headerAction}
         </header>
       ) : null}
 
@@ -184,6 +189,8 @@ export function OutlineAnnotationsWorkspace({
           currentItemId={currentOutlineItemId}
           onActivate={onOutlineActivate}
           onOpenReference={onOutlineReference}
+          expandedItemIds={outlineExpansion.expandedItemIds}
+          onExpandedItemIdsChange={outlineExpansion.setExpandedItemIds}
           {...(copyLinkForOutlineItem === undefined ? {} : { copyLinkForItem: copyLinkForOutlineItem })}
           onFocusTokenChange={(token) => onModeFocusTokenChange?.('outline', token)}
         />
