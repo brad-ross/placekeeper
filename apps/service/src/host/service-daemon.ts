@@ -23,6 +23,7 @@ import { PlacekeeperHost } from "./placekeeper-host.js";
 import { acquireLifecycleLock, LifecycleLockTimeoutError } from "./lifecycle-lock.js";
 import { upgradeReason } from "./upgrade-coordinator.js";
 import { PLACEKEEPER_HTTP_PORT } from "../server/http-server.js";
+import type { ChromeBrowserSourceOpenRequest } from "../browser/browser-source-store.js";
 
 export interface DaemonPaths {
   readonly appSupportRoot: string;
@@ -126,6 +127,7 @@ export async function startServiceDaemon(paths = defaultDaemonPaths()): Promise<
     await removeConfirmedStaleSocket(paths.socketPath);
     host = await PlacekeeperHost.start({
       recoveryRoot: paths.recoveryRoot,
+      browserSourceRoot: join(paths.appSupportRoot, "browser-sources"),
       webAssets: { root: paths.webAssetsRoot },
       port: paths.httpPort ?? PLACEKEEPER_HTTP_PORT,
     });
@@ -187,10 +189,21 @@ function spawnServiceDaemon(
 
 export async function launchThroughDaemon(
   request: LaunchRequest,
+  signal?: AbortSignal,
   paths = defaultDaemonPaths(),
 ): Promise<LaunchResponse> {
-  const response = await demandStartedControl({ kind: "launch", request }, paths);
+  const response = await demandStartedControl({ kind: "launch", request }, paths, signal);
   if (response.kind !== "launch") throw new DaemonUpgradeRequiredError("malformed");
+  return response.response;
+}
+
+export async function openChromeBrowserSourceThroughDaemon(
+  request: ChromeBrowserSourceOpenRequest,
+  signal?: AbortSignal,
+  paths = defaultDaemonPaths(),
+): Promise<LaunchResponse> {
+  const response = await demandStartedControl({ kind: "chrome-open", request }, paths, signal);
+  if (response.kind !== "chrome-open") throw new DaemonUpgradeRequiredError("malformed");
   return response.response;
 }
 
@@ -215,7 +228,9 @@ export async function openLinkThroughDaemon(
 async function demandStartedControl(
   request: PlacekeeperControlRequest,
   paths: DaemonPaths,
+  signal?: AbortSignal,
 ): Promise<PlacekeeperControlResponse> {
+  signal?.throwIfAborted();
   const lockPath = paths.lifecycleLockPath ?? join(paths.appSupportRoot, "lifecycle.lock");
   let lifecycleLock;
   try {
@@ -227,7 +242,7 @@ async function demandStartedControl(
     throw error;
   }
   try {
-    return await controlWhileLocked(request, paths, lifecycleLock.token);
+    return await controlWhileLocked(request, paths, lifecycleLock.token, signal);
   } finally {
     await lifecycleLock.release();
   }
@@ -237,6 +252,7 @@ async function controlWhileLocked(
   request: PlacekeeperControlRequest,
   paths: DaemonPaths,
   lifecycleToken: string,
+  signal?: AbortSignal,
 ): Promise<PlacekeeperControlResponse> {
   try {
     const compatibility = await waitForAcceptingCompatibility(paths.socketPath, currentDaemonIdentity());
@@ -247,7 +263,7 @@ async function controlWhileLocked(
           : compatibility.reason,
       );
     }
-    return await requestControl(paths.socketPath, request);
+    return await requestControl(paths.socketPath, request, signal === undefined ? {} : { signal });
   } catch (error) {
     if (!daemonUnavailable(error)) throw error;
   }
@@ -255,6 +271,7 @@ async function controlWhileLocked(
   if (entry === undefined) throw new Error("The placekeeper launcher entry point is unavailable");
   spawnServiceDaemon(entry, paths, lifecycleToken);
   for (let attempt = 0; attempt < 60; attempt += 1) {
+    signal?.throwIfAborted();
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
     try {
       const compatibility = await waitForAcceptingCompatibility(paths.socketPath, currentDaemonIdentity());
@@ -265,7 +282,7 @@ async function controlWhileLocked(
             : compatibility.reason,
         );
       }
-      return await requestControl(paths.socketPath, request);
+      return await requestControl(paths.socketPath, request, signal === undefined ? {} : { signal });
     } catch (error) {
       if (!daemonUnavailable(error)) throw error;
     }

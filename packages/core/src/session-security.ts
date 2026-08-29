@@ -24,6 +24,7 @@ export interface RequestSecurityContext {
   readonly mutates?: boolean;
   readonly expectsJson?: boolean;
   readonly bodyLength?: number;
+  readonly allowCrossSiteRead?: boolean;
 }
 
 export type RequestSecurityFailure =
@@ -84,10 +85,14 @@ export function validateRequestSecurity(
   }
 
   const fetchSite = request.headers["sec-fetch-site"];
+  const crossSiteReadAllowed = request.allowCrossSiteRead === true &&
+    request.mutates !== true &&
+    (request.method === "GET" || request.method === "HEAD");
   if (
     typeof fetchSite === "string" &&
     fetchSite !== "same-origin" &&
-    fetchSite !== "none"
+    fetchSite !== "none" &&
+    !crossSiteReadAllowed
   ) {
     return "cross-site";
   }

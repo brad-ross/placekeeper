@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Placekeeper</title>
+    <link rel="stylesheet" href="/src/extension.css">
+  </head>
+  <body class="popup">
+    <main aria-labelledby="title">
+      <h1 id="title">Placekeeper</h1>
+      <button id="automatic-open" class="switch" type="button" role="switch" aria-checked="false">
+        <span class="switch__label">Open PDFs automatically</span>
+        <span class="switch__control" aria-hidden="true">
+          <span class="switch__thumb"></span>
+        </span>
+      </button>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </main>
+    <script type="module" src="/src/popup-entry.ts"></script>
+  </body>
+</html>

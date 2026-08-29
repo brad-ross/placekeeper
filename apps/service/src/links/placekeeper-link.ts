@@ -119,7 +119,10 @@ export async function openPlacekeeperLink(
   if (request.confirmed !== true && !broker.activeReviewOwnsPath(decoded.path)) {
     return { kind: "confirmation-required", path: decoded.path };
   }
-  const prepared = await createPlacekeeperLinkForPdf(decoded.path, decoded.location);
+  const prepared = await createPlacekeeperLinkForPdf(
+    await broker.resolveReadableSourcePath(decoded.path),
+    decoded.location,
+  );
   return broker.openReview({
     pdfPath: prepared.pdfPath,
     ...(request.recovery === undefined ? {} : { recoveryDecision: request.recovery }),

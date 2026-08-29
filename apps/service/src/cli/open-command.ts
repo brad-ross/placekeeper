@@ -26,6 +26,12 @@ import { readHookStdin, runHookCommand } from "./hook-command.js";
 import { runContextCommand } from "./context-command.js";
 import { runDaemonCommand } from "./daemon-command.js";
 import { PLACEKEEPER_LINK_MAX_LENGTH } from "../../../../packages/core/src/placekeeper-link.js";
+import { runChromeNativeHostCommand } from "../browser/chrome-native-host.js";
+import {
+  runChromePdfInspectionCommand,
+  runChromePdfValidationCommand,
+} from "../browser/chrome-pdf-validator.js";
+import { runChromeRegistrationCommand } from "./chrome-registration-command.js";
 import {
   isLaunchSurface,
   isRecoveryDecision,
@@ -351,6 +357,18 @@ export async function runOpenCommand(
 }
 
 async function main(): Promise<number> {
+  if (process.argv[2] === "chrome-registration") {
+    return runChromeRegistrationCommand(process.argv.slice(2));
+  }
+  if (process.argv[2] === "chrome-native-host") {
+    return runChromeNativeHostCommand(process.argv.slice(3));
+  }
+  if (process.argv[2] === "chrome-validate-pdf") {
+    return runChromePdfValidationCommand(process.argv.slice(3));
+  }
+  if (process.argv[2] === "chrome-inspect-pdf") {
+    return runChromePdfInspectionCommand(process.argv.slice(3));
+  }
   if (process.argv[2] === "open-link") {
     return runOpenLinkCommand(process.argv.slice(2), async (request) =>
       request.operation === "preflight"

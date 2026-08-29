@@ -21,6 +21,12 @@ import { decodePlacekeeperLink } from "../../../../packages/core/src/placekeeper
 import { openPlacekeeperLink } from "../links/placekeeper-link.js";
 import type { ReviewWorkflowMode } from "../../../../packages/core/src/review-model.js";
 import { ExportCoordinator, type FrozenReviewDelivery } from "../export/export-coordinator.js";
+import {
+  BrowserSourceStore,
+  type ChromeBrowserSourceOpenRequest,
+} from "../browser/browser-source-store.js";
+import type { ChromePdfInspection } from "../browser/chrome-pdf-validator.js";
+import { dirname, join } from "node:path";
 
 export type LaunchSurface = BrokerLaunchSurface;
 
@@ -85,9 +91,14 @@ export type LaunchResponse =
 
 export interface PlacekeeperHostOptions {
   readonly recoveryRoot: string;
+  readonly browserSourceRoot?: string;
   readonly webAssets?: WebAssetOptions;
   readonly taskBindings?: TaskBindingRegistry;
   readonly port?: number;
+  readonly browserSourceInspector?: (
+    path: string,
+    signal?: AbortSignal,
+  ) => Promise<ChromePdfInspection>;
 }
 
 function failure(
@@ -147,6 +158,7 @@ export class PlacekeeperHost {
   readonly saving: PdfSaveCoordinator;
   readonly exporting: ExportCoordinator;
   readonly lifecycle: DaemonLifecycleCoordinator;
+  readonly browserSources: BrowserSourceStore;
   #closePromise?: Promise<void>;
 
   private constructor(
@@ -158,6 +170,7 @@ export class PlacekeeperHost {
     saving: PdfSaveCoordinator,
     exporting: ExportCoordinator,
     lifecycle: DaemonLifecycleCoordinator,
+    browserSources: BrowserSourceStore,
   ) {
     this.broker = broker;
     this.server = server;
@@ -167,15 +180,22 @@ export class PlacekeeperHost {
     this.saving = saving;
     this.exporting = exporting;
     this.lifecycle = lifecycle;
+    this.browserSources = browserSources;
   }
 
   static async start(options: PlacekeeperHostOptions): Promise<PlacekeeperHost> {
     const broker = new SessionBroker({
       recoveryRoot: options.recoveryRoot,
       ...(options.taskBindings === undefined ? {} : { taskBindings: options.taskBindings }),
+      ...(options.browserSourceInspector === undefined
+        ? {}
+        : { browserSourceInspector: options.browserSourceInspector }),
     });
     await broker.initialize();
     const writer = await createSelectedPdfWriter();
+    const browserSources = await BrowserSourceStore.create(
+      options.browserSourceRoot ?? join(dirname(options.recoveryRoot), "browser-sources"),
+    );
     const saving = new PdfSaveCoordinator({
       broker,
       writer,
@@ -228,11 +248,36 @@ export class PlacekeeperHost {
       saving,
       exporting,
       lifecycle,
+      browserSources,
     );
   }
 
   async open(request: LaunchRequest): Promise<LaunchResponse> {
     const response = await this.lifecycle.runActivity(() => this.#open(request));
+    return response ?? upgradeFailure();
+  }
+
+  async openChromeBrowserSource(
+    request: ChromeBrowserSourceOpenRequest,
+    signal?: AbortSignal,
+  ): Promise<LaunchResponse> {
+    const response = await this.lifecycle.runActivity(async () => {
+      try {
+        const opened = await this.broker.openChromeBrowserSource(request, this.browserSources, signal);
+        if (opened.kind === "recovery-offered") {
+          throw new Error("Remote acquisitions cannot reuse protected recovery");
+        }
+        return {
+          ok: true as const,
+          kind: opened.kind,
+          url: launchUrl(this.server.origin, opened.launch, "browser"),
+          sessionId: opened.launch.sessionId,
+          documentGeneration: opened.launch.documentGeneration,
+        };
+      } catch {
+        return failure("input-unavailable", "The browser PDF could not be opened.");
+      }
+    });
     return response ?? upgradeFailure();
   }
 

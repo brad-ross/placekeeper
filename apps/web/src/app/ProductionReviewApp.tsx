@@ -30,6 +30,11 @@ import type {
   PdfTargetVisibility,
   PdfViewportQuery,
 } from '../pdf/viewer-navigation.js';
+import {
+  pdfDocumentTitleForSource,
+  resolvePdfMetadataTitle,
+  type PdfMetadataPageTitle,
+} from '../pdf/pdf-document-title.js';
 import type { ReferenceDocumentController } from "../pdf/reference-document.js";
 import type { PdfOutlineDiscovery } from "../pdf/pdf-outline.js";
 import {
@@ -116,6 +121,8 @@ export interface ProductionSession {
 
 export interface ProductionScope {
   readonly documentTitle: string;
+  readonly sourceDisposition?: 'local' | 'remote-temporary';
+  readonly sourceDisplayName?: string;
   readonly sourceRootPath?: string;
   readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode';
   /** A restarted browser is awaiting task-scoped Codex reattachment. */
@@ -133,10 +140,16 @@ function referenceFocusRailSurface(
 
 export type ProductionSaveStatus = SaveStatus;
 
-export interface SaveCopyProposal {
-  readonly filename: string;
-  readonly folder: string;
-}
+export type SaveCopyProposal =
+  | {
+      readonly sourceDisposition: 'local';
+      readonly filename: string;
+      readonly folder: string;
+    }
+  | {
+      readonly sourceDisposition: 'remote-temporary';
+      readonly folder?: string;
+    };
 
 export interface ProductionExportResult {
   readonly kind: "reviewed-copy";
@@ -381,6 +394,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   // A restart successor begins as an ordinary browser view, then its next
   // task prompt promotes this same authenticated page to the Codex surface.
   const [scope, setScope] = useState(props.scope);
+  const [metadataPageTitle, setMetadataPageTitle] = useState<PdfMetadataPageTitle | null>(null);
   const portableItemIdsRef = useRef(initiallyPortableItemIds(
     props.initialState,
     props.initialSaveStatus,
@@ -657,7 +671,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setFolderSelectionId(undefined);
     void props.api.saveProposal()
       .then((proposal) => {
-        if (!cancelled) setCopyProposal(proposal);
+        if (!cancelled) setCopyProposal((current) =>
+          current?.sourceDisposition === 'remote-temporary' && current.folder !== undefined
+            ? current
+            : proposal);
       })
       .catch(() => {
         if (!cancelled) setDestinationError("Save options could not be prepared safely.");
@@ -927,6 +944,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const initialStateKeyRef = useRef(
     `${props.initialState.workflow.documentGeneration}:${props.initialState.revision}:${props.initialState.workflow.freshness}:${props.initialState.source.fileId}:${props.initialState.source.digest}`,
   );
+  const pageTitle = pdfDocumentTitleForSource(
+    metadataPageTitle,
+    sourceIdentity,
+    scope.documentTitle,
+  );
+  useEffect(() => {
+    document.title = pageTitle;
+  }, [pageTitle]);
   useEffect(() => {
     const next = `${props.initialState.workflow.documentGeneration}:${props.initialState.revision}:${props.initialState.workflow.freshness}:${props.initialState.source.fileId}:${props.initialState.source.digest}`;
     if (next === initialStateKeyRef.current) return;
@@ -1190,11 +1215,23 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [props.onPresentationChange, viewerState]);
   const onMainDocumentReady = useCallback((engine: PdfEngine, document: PdfDocumentObject) => {
     if (searchDocumentRef.current === document && searchControllerRef.current) return;
-    setMainDocumentReadyGeneration(documentGenerationRef.current);
+    const documentGeneration = documentGenerationRef.current;
+    const documentSourceIdentity = sourceIdentity;
+    setMainDocumentReadyGeneration(documentGeneration);
     searchControllerRef.current?.dispose();
     searchDocumentRef.current = document;
+    void resolvePdfMetadataTitle(engine, document).then((title) => {
+      if (
+        documentGenerationRef.current === documentGeneration &&
+        searchDocumentRef.current === document
+      ) {
+        setMetadataPageTitle(title === undefined
+          ? null
+          : { sourceIdentity: documentSourceIdentity, title });
+      }
+    });
     const search = createPdfSearchController({
-      documentGeneration: documentGenerationRef.current,
+      documentGeneration,
       reader: createEnginePdfSearchPageReader(engine, document),
     });
     searchControllerRef.current = search;
@@ -1221,7 +1258,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       void search.search(pendingQuery);
     }
     else if (searchRequestedRef.current) void search.prepare();
-  }, []);
+  }, [sourceIdentity]);
   const onViewerFramingInitialized = useCallback((controls: ViewerFramingControls) => {
     setViewerFraming(controls);
   }, []);
@@ -1402,6 +1439,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         documentTitle={scope.documentTitle}
         savedLabel={state.workflow.mode === 'generated-output' ? 'Protected review state' : 'Saved'}
         savePhase={state.workflow.mode === 'generated-output' ? 'clean' : saveStatus.sync.phase}
+        savePendingDestination={
+          state.workflow.mode !== 'generated-output'
+          && scope.sourceDisposition === 'remote-temporary'
+          && saveStatus.destination.phase === 'none'
+          && saveStatus.sync.phase === 'not-saved'
+        }
         saveOptionsOpen={state.workflow.mode === 'generated-output' ? false : destinationDialog !== null}
         {...(state.workflow.mode === 'generated-output' ? {} : { onSaveOptions: () => openCopyDialog("menu") })}
         generationRefreshStatus={props.generationRefreshStatus ?? 'idle'}
@@ -1659,7 +1702,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
               reason: 'stale-authoring',
             };
           }
-          const gated = gateReviewCommand(currentState, saveStatus, command);
+          const gated = gateReviewCommand(
+            currentState,
+            saveStatus,
+            command,
+            scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local',
+          );
           if (gated.kind === "choose-destination") {
             openCopyDialog("first-annotation", {
               command,
@@ -1690,7 +1738,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           const next = "accepted" in result ? result.state : result;
           setState(next);
           if (!("accepted" in result)) {
-            setSaveStatus(await props.api.saveStatus());
+            const nextSaveStatus = await props.api.saveStatus();
+            setSaveStatus(nextSaveStatus);
+            if (gated.kind === 'submit-and-choose-destination') {
+              openCopyDialog("first-annotation");
+            }
           }
           setCommandError("accepted" in result ? result.message : null);
           return result;
@@ -1718,6 +1770,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       </ReviewShell>
       <SaveDestinationDialog
         open={destinationDialog !== null}
+        sourceDisposition={scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local'}
+        protectedRecovery={
+          scope.sourceDisposition === 'remote-temporary'
+          && saveStatus.destination.phase === 'none'
+          && saveStatus.sync.phase === 'not-saved'
+        }
         {...(copyProposal === undefined ? {} : { proposal: copyProposal })}
         establishing={destinationEstablishing}
         {...(saveStatus.rewriteEligibility === undefined
@@ -1763,10 +1821,15 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             const selected = await props.api.chooseFolder();
             if (!selected.cancelled && selected.selectionId && selected.folder) {
               setFolderSelectionId(selected.selectionId);
-              setCopyProposal((current) => ({
-                filename: current?.filename ?? "annotated.pdf",
-                folder: selected.folder!,
-              }));
+              setCopyProposal((current) => scope.sourceDisposition === 'remote-temporary'
+                ? { sourceDisposition: 'remote-temporary', folder: selected.folder! }
+                : {
+                    sourceDisposition: 'local',
+                    filename: current?.sourceDisposition === 'local'
+                      ? current.filename
+                      : "annotated.pdf",
+                    folder: selected.folder!,
+                  });
             }
           } catch {
             setDestinationError("A new location could not be authorized.");

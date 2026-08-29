@@ -37,6 +37,10 @@ import type {
 import type { ConditionalShutdownResult } from "./daemon-lifecycle.js";
 import { PLACEKEEPER_LINK_MAX_LENGTH } from "../../../../packages/core/src/placekeeper-link.js";
 import { isLaunchSurface, isRecoveryDecision } from "../sessions/session-broker.js";
+import {
+  isChromeBrowserSourceOpenRequest,
+  type ChromeBrowserSourceOpenRequest,
+} from "../browser/browser-source-store.js";
 
 // Both directions are explicitly bounded. Evidence requests use a stricter
 // byte budget before base64 expansion, so a document can never turn this
@@ -139,6 +143,7 @@ export type PlacekeeperControlRequest =
       readonly operation: "shutdown-if-idle";
     }
   | { readonly kind: "launch"; readonly request: LaunchRequest }
+  | { readonly kind: "chrome-open"; readonly request: ChromeBrowserSourceOpenRequest }
   | { readonly kind: "link-preflight"; readonly link: string }
   | { readonly kind: "link-open"; readonly request: LinkOpenRequest }
   | {
@@ -234,6 +239,7 @@ export type PlacekeeperControlResponse =
           };
     }
   | { readonly kind: "launch"; readonly response: LaunchResponse }
+  | { readonly kind: "chrome-open"; readonly response: LaunchResponse }
   | { readonly kind: "link-preflight"; readonly response: LinkPreflightResponse }
   | { readonly kind: "link-open"; readonly response: LinkLaunchResponse }
   | { readonly kind: "binding"; readonly result: TaskBindingClaimResult }
@@ -305,6 +311,10 @@ function isControlRequest(value: unknown): value is PlacekeeperControlRequest {
         value.operation === "shutdown-if-idle");
   }
   if (value.kind === "launch") return isObject(value.request);
+  if (value.kind === "chrome-open") {
+    return Object.keys(value).length === 2 && Object.hasOwn(value, "request") &&
+      isChromeBrowserSourceOpenRequest(value.request);
+  }
   if (value.kind === "link-preflight") {
     return typeof value.link === "string" && value.link.length <= PLACEKEEPER_LINK_MAX_LENGTH;
   }
@@ -370,6 +380,7 @@ async function dispatch(
   host: PlacekeeperHost,
   request: PlacekeeperControlRequest,
   management: { readonly daemonIdentity: string; readonly readinessToken?: string },
+  signal?: AbortSignal,
 ): Promise<PlacekeeperControlResponse> {
   if (request.kind === "management") {
     if (request.operation === "shutdown-if-idle") {
@@ -398,6 +409,9 @@ async function dispatch(
   }
   if (request.kind === "launch") {
     return { kind: "launch", response: await host.open(request.request) };
+  }
+  if (request.kind === "chrome-open") {
+    return { kind: "chrome-open", response: await host.openChromeBrowserSource(request.request, signal) };
   }
   if (request.kind === "link-preflight") {
     return { kind: "link-preflight", response: await host.preflightLink(request.link) };
@@ -548,7 +562,27 @@ function writeResponse(socket: Socket, response: PlacekeeperControlResponse): Pr
   const output = Buffer.byteLength(serialized) > MAX_MESSAGE_BYTES
     ? `${JSON.stringify({ kind: "error", reason: "unavailable" })}\n`
     : serialized;
-  return new Promise((resolve) => socket.end(output, resolve));
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = (): void => {
+      socket.off("error", onError);
+      socket.off("close", onClose);
+    };
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error === undefined) resolve();
+      else reject(error);
+    };
+    const onError = (error: Error): void => finish(error);
+    const onClose = (hadError: boolean): void => finish(
+      hadError ? new Error("control-client-closed") : undefined,
+    );
+    socket.once("error", onError);
+    socket.once("close", onClose);
+    socket.end(output);
+  });
 }
 
 export async function startLaunchControlServer(
@@ -562,6 +596,8 @@ export async function startLaunchControlServer(
   const closed = Promise.withResolvers<void>();
   let closePromise: Promise<void> | undefined;
   const server = createServer((socket) => {
+    const requestLifetime = new AbortController();
+    socket.once("close", () => requestLifetime.abort(new Error("control-client-closed")));
     let raw = "";
     socket.setEncoding("utf8");
     socket.on("data", (chunk: string) => {
@@ -577,16 +613,30 @@ export async function startLaunchControlServer(
       try {
         parsed = JSON.parse(raw.slice(0, newline)) as unknown;
       } catch {
-        void writeResponse(socket, { kind: "error", reason: "invalid-request" });
+        void writeResponse(socket, { kind: "error", reason: "invalid-request" }).catch(() => undefined);
         return;
       }
       if (!isControlRequest(parsed)) {
-        void writeResponse(socket, { kind: "error", reason: "invalid-request" });
+        void writeResponse(socket, { kind: "error", reason: "invalid-request" }).catch(() => undefined);
         return;
       }
-      void dispatch(host, parsed, management).then(
+      void dispatch(host, parsed, management, requestLifetime.signal).then(
         async (response) => {
-          await writeResponse(socket, response);
+          try {
+            requestLifetime.signal.throwIfAborted();
+            await writeResponse(socket, response);
+          } catch {
+            const openedSessionId = response.kind === "chrome-open" && response.response.ok &&
+                response.response.kind !== "recovery-offered"
+              ? response.response.sessionId
+              : response.kind === "launch" && response.response.ok &&
+                  response.response.kind === "opened" && parsed.kind === "launch" &&
+                  parsed.request.surface === "browser"
+                ? response.response.sessionId
+                : undefined;
+            if (openedSessionId !== undefined) await host.broker.discard(openedSessionId);
+            return;
+          }
           if (
             response.kind === "management" &&
             response.operation === "shutdown-if-idle" &&
@@ -596,7 +646,7 @@ export async function startLaunchControlServer(
             await closeControl();
           }
         },
-        () => void writeResponse(socket, { kind: "error", reason: "unavailable" }),
+        () => void writeResponse(socket, { kind: "error", reason: "unavailable" }).catch(() => undefined),
       );
     });
   });
@@ -643,10 +693,21 @@ function closeServer(server: Server): Promise<void> {
 export function requestControl(
   socketPath: string,
   request: PlacekeeperControlRequest,
-  options: { readonly timeoutMs?: number; readonly maxMessageBytes?: number } = {},
+  options: {
+    readonly timeoutMs?: number;
+    readonly maxMessageBytes?: number;
+    readonly signal?: AbortSignal;
+  } = {},
 ): Promise<PlacekeeperControlResponse> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(socketPath);
+    const onAbort = (): void => { socket.destroy(options.signal?.reason); };
+    if (options.signal?.aborted === true) {
+      socket.destroy();
+      reject(options.signal.reason);
+      return;
+    }
+    options.signal?.addEventListener("abort", onAbort, { once: true });
     let raw = "";
     socket.setEncoding("utf8");
     socket.setTimeout(options.timeoutMs ?? CONTROL_REQUEST_TIMEOUT_MS, () =>
@@ -658,8 +719,12 @@ export function requestControl(
         socket.destroy(new PlacekeeperControlProtocolError("oversized"));
       }
     });
-    socket.once("error", reject);
+    socket.once("error", (error) => {
+      options.signal?.removeEventListener("abort", onAbort);
+      reject(error);
+    });
     socket.once("end", () => {
+      options.signal?.removeEventListener("abort", onAbort);
       socket.destroy();
       if (raw.length === 0) {
         reject(new PlacekeeperControlProtocolError("early-close"));

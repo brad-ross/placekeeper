@@ -1,0 +1,152 @@
+:root {
+  color-scheme: light dark;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: Canvas;
+  color: CanvasText;
+}
+
+body {
+  margin: 0;
+}
+
+.handler {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+.card {
+  box-sizing: border-box;
+  width: min(28rem, calc(100vw - 2rem));
+  padding: 1.5rem;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border-radius: 0.75rem;
+  background: Canvas;
+  box-shadow: 0 0.5rem 2rem color-mix(in srgb, CanvasText 10%, transparent);
+}
+
+.popup {
+  width: 20rem;
+  box-sizing: border-box;
+  padding: 1rem 1.125rem 1.125rem;
+  color-scheme: only light;
+  color: #181a17;
+  background: #fffefa;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.popup main {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.popup h1 {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 730;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+
+p {
+  margin: 0.5rem 0 1rem;
+  line-height: 1.45;
+}
+
+button {
+  min-height: 2.75rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid color-mix(in srgb, CanvasText 30%, transparent);
+  border-radius: 0.5rem;
+  background: ButtonFace;
+  color: ButtonText;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:focus-visible {
+  outline: 3px solid #245c9c;
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.popup .switch {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 2.75rem;
+  padding: 0.5rem 0;
+  border: 0;
+  border-radius: 0.5625rem;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+.popup .switch:hover:not(:disabled) .switch__control {
+  border-color: #aeb6aa;
+  background: #e5e6e1;
+}
+
+.switch__label {
+  font-weight: 600;
+}
+
+.switch__control {
+  position: relative;
+  flex: 0 0 auto;
+  width: 2.375rem;
+  height: 1.375rem;
+  box-sizing: border-box;
+  border: 1px solid #d1d5cc;
+  border-radius: 999px;
+  background: #f1f2ed;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.switch__thumb {
+  position: absolute;
+  top: 0.125rem;
+  left: 0.125rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  background: #676a63;
+  box-shadow: 0 1px 2px rgb(24 27 23 / 18%);
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.switch.is-enabled .switch__control {
+  border-color: #2d684d;
+  background: #2d684d;
+}
+
+.switch.is-enabled .switch__thumb {
+  background: #fffefa;
+  transform: translateX(1rem);
+}
+
+.status {
+  margin: -0.125rem 0 0;
+  color: #676a63;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.status:empty {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch__control,
+  .switch__thumb {
+    transition: none;
+  }
+}

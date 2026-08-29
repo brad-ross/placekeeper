@@ -3,15 +3,19 @@ import type { ProductionSaveStatus } from "../app/ProductionReviewApp.js";
 
 export type SaveGatedCommand =
   | { readonly kind: "submit"; readonly command: ReviewCommand }
+  | { readonly kind: "submit-and-choose-destination"; readonly command: ReviewCommand }
   | { readonly kind: "choose-destination"; readonly pending: ReviewCommand };
 
 export function gateReviewCommand(
-  state: ReviewState,
+  state: Pick<ReviewState, "workflow">,
   status: ProductionSaveStatus,
   command: ReviewCommand,
+  sourceDisposition: "local" | "remote-temporary" = "local",
 ): SaveGatedCommand {
-  return state.workflow.mode === "generated-output" || status.destination.phase !== "none"
-    ? { kind: "submit", command }
+  if (state.workflow.mode === "generated-output") return { kind: "submit", command };
+  if (status.destination.phase !== "none") return { kind: "submit", command };
+  return sourceDisposition === "remote-temporary"
+    ? { kind: "submit-and-choose-destination", command }
     : { kind: "choose-destination", pending: command };
 }
 

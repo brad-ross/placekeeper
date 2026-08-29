@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { access, copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { PDFDocument } from "pdf-lib";
 
 import { PlacekeeperHost } from "../../apps/service/src/host/placekeeper-host.js";
 import { TaskBindingRegistry } from "../../apps/service/src/context/task-binding-registry.js";
@@ -19,6 +20,7 @@ let referencePdf = "";
 let annotatedReferencePdf = "";
 let searchPdf = "";
 let equationPdf = "";
+let metadataTitlePdf = "";
 
 const reportedMathSymbolInventory = [
   ['·', '\\cdot'], ['Π', '\\Pi'], ['α', '\\alpha'], ['δ', '\\delta'],
@@ -296,6 +298,7 @@ test.beforeAll(async () => {
   annotatedReferencePdf = join(root, "reference-navigation-annotated.pdf");
   searchPdf = join(root, "pdf-search.pdf");
   equationPdf = join(root, "equation-selection.pdf");
+  metadataTitlePdf = join(root, "fallback-filename.pdf");
   await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
   await copyFile(resolve("test/fixtures/pdfs/text-native.pdf"), plainTextPdf);
   await copyFile(resolve("test/fixtures/pdfs/mixed-text-image.pdf"), multiPagePdf);
@@ -307,6 +310,10 @@ test.beforeAll(async () => {
   );
   await copyFile(resolve("test/fixtures/pdfs/pdf-search.pdf"), searchPdf);
   await copyFile(resolve("test/fixtures/pdfs/equation-selection.pdf"), equationPdf);
+  const titledDocument = await PDFDocument.create();
+  titledDocument.setTitle("Identification Strategy");
+  titledDocument.addPage([612, 792]);
+  await writeFile(metadataTitlePdf, await titledDocument.save());
   await copyFile(resolve("test/fixtures/latex/paper.tex"), join(sourceRoot, "paper.tex"));
   host = await PlacekeeperHost.start({
     recoveryRoot: join(root, "recovery"),
@@ -317,6 +324,14 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await host?.close();
   if (root) await rm(root, { recursive: true, force: true });
+});
+
+test("uses PDF metadata for the tab title and the filename when metadata is absent", async ({ page }) => {
+  await openFreshProductionFixture(page, metadataTitlePdf, "Metadata-title launch failed");
+  await expect(page).toHaveTitle("Identification Strategy");
+
+  await openFreshProductionFixture(page, plainTextPdf, "Filename-title launch failed");
+  await expect(page).toHaveTitle("plain-text.pdf");
 });
 
 test("keeps mounted Codex context through refresh, then fails closed on a hung scope poll", async ({ page }) => {
@@ -465,6 +480,34 @@ test("searches extracted PDF text with variants, history, references, and retain
   await expect(firstResultCard).toHaveCSS("border-style", "solid");
   await expect(firstResultCard).toHaveCSS("border-radius", "11px");
   await expect(firstResultCard).toHaveCSS("padding", "4px");
+  await firstResultCard.hover();
+  const directSearchAction = firstResultCard.getByRole("button", {
+    name: "Open result on page 1 in References",
+  });
+  const [searchTabControlBounds, directSearchActionBounds] = await Promise.all([
+    page.getByRole("tab", { name: "Search", exact: true }).boundingBox(),
+    directSearchAction.boundingBox(),
+  ]);
+  if (!searchTabControlBounds || !directSearchActionBounds) {
+    throw new Error("Direct Search result and tray controls did not render measurable bounds.");
+  }
+  expect(directSearchActionBounds.width).toBeCloseTo(searchTabControlBounds.height, 2);
+  expect(directSearchActionBounds.height).toBeCloseTo(searchTabControlBounds.height, 2);
+  await firstResultCard.evaluate((element) => { element.style.width = "250px"; });
+  const compactSearchActions = firstResultCard.getByRole("button", {
+    name: "Secondary actions for Search result on page 1",
+  });
+  await expect(compactSearchActions).toBeVisible();
+  const [searchTabBounds, compactSearchActionBounds] = await Promise.all([
+    page.getByRole("tab", { name: "Search", exact: true }).boundingBox(),
+    compactSearchActions.boundingBox(),
+  ]);
+  if (!searchTabBounds || !compactSearchActionBounds) {
+    throw new Error("Search result and tray controls did not render measurable bounds.");
+  }
+  expect(compactSearchActionBounds.width).toBeCloseTo(searchTabBounds.height, 2);
+  expect(compactSearchActionBounds.height).toBeCloseTo(searchTabBounds.height, 2);
+  await firstResultCard.evaluate((element) => { element.style.removeProperty("width"); });
   const [pageNumberBox, separatorBox, snippetBox] = await Promise.all([
     firstResultExcerpt.locator(".pdf-search__result-page").boundingBox(),
     firstResultExcerpt.locator(".pdf-search__result-separator").boundingBox(),

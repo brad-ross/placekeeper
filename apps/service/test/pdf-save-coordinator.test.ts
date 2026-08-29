@@ -1,7 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
-import { chmod, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { PdfWriterError, type PdfWriter } from "../../../packages/core/src/pdf-writer.js";
@@ -9,6 +9,7 @@ import { inspectProjectedPortableAnnotation } from "../../../packages/core/src/p
 import type { ReviewCommand, ReviewItem, ReviewState } from "../../../packages/core/src/review-model.js";
 import { PdfSaveCoordinator } from "../src/saving/pdf-save-coordinator.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
+import { BrowserSourceStore } from "../src/browser/browser-source-store.js";
 import type { DestinationPicker } from "../src/host/destination-picker.js";
 import type { PdfExportVerifier } from "../src/export/pdf-verifier.js";
 import { DraftSnapshotStore, reviewStateDigest } from "../src/recovery/draft-snapshot.js";
@@ -91,6 +92,44 @@ async function setup(
     ...(picker === undefined ? {} : { picker }),
   });
   return { root, source, original, broker, coordinator, sessionId: opened.launch.sessionId };
+}
+
+async function setupRemote(picker?: DestinationPicker) {
+  const root = await mkdtemp(join(tmpdir(), "placekeeper-remote-save-"));
+  roots.push(root);
+  const browserRoot = join(root, "browser-sources");
+  const recoveryRoot = join(root, "recovery");
+  const durableRoot = join(root, "documents");
+  await mkdir(durableRoot);
+  const bytes = Buffer.from("%PDF-1.7\nremote source\n%%EOF");
+  const sourceHandle = randomBytes(24).toString("base64url");
+  await mkdir(browserRoot);
+  await writeFile(join(browserRoot, `${sourceHandle}.pdf`), bytes, { mode: 0o600 });
+  const browserSources = await BrowserSourceStore.create(browserRoot);
+  const broker = new SessionBroker({ recoveryRoot, portableReader: async () => [] });
+  const opened = await broker.openChromeBrowserSource({
+    protocolVersion: 1,
+    sourceHandle,
+    byteLength: bytes.byteLength,
+    sha256: sha(bytes),
+    displayName: "Private paper.pdf",
+  }, browserSources);
+  if (opened.kind !== "opened") throw new Error("expected opened remote session");
+  const coordinator = new PdfSaveCoordinator({
+    broker,
+    writer: fakeWriter(),
+    verify: verifyIds,
+    ...(picker === undefined ? {} : { picker }),
+  });
+  return {
+    root,
+    browserRoot,
+    recoveryRoot,
+    durableRoot,
+    broker,
+    coordinator,
+    sessionId: opened.launch.sessionId,
+  };
 }
 
 function add(expectedRevision: number): ReviewCommand {
@@ -196,6 +235,72 @@ describe("coalescing PDF autosave", () => {
     expect(recovered?.state.items).toEqual(broker.state(sessionId)?.items);
     expect(await readFile(source)).toEqual(Buffer.from(original));
     expect(broker.saveStatus(sessionId)?.destination.phase).toBe("none");
+  });
+
+  it("rejects original, implicit-source, and private recovery destinations for remote sources", async () => {
+    const { browserRoot, durableRoot, recoveryRoot, broker, coordinator, sessionId } = await setupRemote();
+
+    expect(coordinator.proposal(sessionId)).toEqual({
+      sourceDisposition: "remote-temporary",
+    });
+    await expect(coordinator.chooseOriginal(sessionId)).rejects.toThrow(/remote browser PDF/u);
+    await expect(coordinator.chooseCopyFilename(sessionId, "private-annotated.pdf"))
+      .rejects.toThrow(/new location/u);
+    await expect(coordinator.chooseCopy(sessionId, join(recoveryRoot, "private.pdf")))
+      .rejects.toThrow(/private temporary source/u);
+    await expect(coordinator.chooseCopy(sessionId, join(browserRoot, "private.pdf")))
+      .rejects.toThrow(/private temporary source/u);
+    const forged = await broker.capabilities.preauthorizeDestination(
+      join(durableRoot, "forged-original.pdf"),
+    );
+    await expect(broker.establishSaveDestination(sessionId, {
+      kind: "original",
+      targetPath: join(forged.parentPath, forged.filename),
+      capabilityId: forged.id,
+    })).rejects.toThrow(/remote browser PDF/u);
+    broker.capabilities.revokeDestination(forged.id);
+    expect(broker.saveStatus(sessionId)?.destination).toMatchObject({ phase: "none" });
+  });
+
+  it("requires a fresh remote filename and location, then resumes protected autosave", async () => {
+    let defaultFolder: string | undefined = "not-called";
+    const { durableRoot, broker, coordinator, sessionId } = await setupRemote({
+      chooseFolder: async (folder) => {
+        defaultFolder = folder;
+        return durableRoot;
+      },
+      locatePdf: async () => undefined,
+    });
+    await broker.acceptMutation(sessionId, add(0));
+    expect(broker.saveStatus(sessionId)?.sync).toMatchObject({
+      phase: "not-saved",
+      failure: "destination-unconfigured",
+    });
+
+    const selected = await coordinator.chooseFolder(sessionId);
+    expect(defaultFolder).toBeUndefined();
+    if (selected.cancelled) throw new Error("expected remote folder selection");
+    await expect(coordinator.chooseCopyFilename(sessionId, "", selected.selectionId))
+      .rejects.toThrow(/filename/u);
+    await coordinator.chooseCopyFilename(sessionId, "Browser notes.pdf", selected.selectionId);
+
+    expect(await readFile(join(durableRoot, "Browser notes.pdf"), "utf8"))
+      .toContain(broker.state(sessionId)!.items[0]!.id);
+    expect(broker.saveStatus(sessionId)).toMatchObject({
+      destination: { phase: "active", kind: "copy" },
+      sync: { phase: "clean", savedRevision: 1 },
+    });
+  });
+
+  it("retains the existing source-folder proposal and original option for local PDFs", async () => {
+    const { root, source, coordinator, sessionId } = await setup();
+    expect(coordinator.proposal(sessionId)).toEqual({
+      sourceDisposition: "local",
+      filename: "paper-annotated.pdf",
+      folder: await realpath(dirname(source)),
+    });
+    await expect(coordinator.chooseOriginal(sessionId)).resolves.toBeUndefined();
+    expect(source).toBe(join(root, "paper.pdf"));
   });
   it.each(["copy", "original"] as const)(
     "saves a 33-segment editable highlight to the %s destination",

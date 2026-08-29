@@ -24,7 +24,9 @@
   ],
   "embeddedArtifacts": {
     "codexPlugin": "integrations/codex-plugin",
-    "vscodeExtension": "apps/vscode"
+    "vscodeExtension": "apps/vscode",
+    "chromeExtension": "apps/chrome-extension/dist",
+    "chromeNativeWrapper": "packaging/macos/chrome-native-host.sh"
   },
   "distribution": {
     "mode": "source-first",

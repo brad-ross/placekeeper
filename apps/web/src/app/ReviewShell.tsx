@@ -78,6 +78,10 @@ import {
 import { ReviewChrome } from '../review/ReviewChrome.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
 import { OutlineAnnotationsWorkspace } from '../review/OutlineAnnotationsWorkspace.js';
+import {
+  OutlineExpansionProvider,
+  OutlineExpansionToggleSlot,
+} from '../review/OutlineExpansionController.js';
 import { ReferenceResizeHandle } from '../review/ReferenceResizeHandle.js';
 import { WorkspaceEdgeRail } from '../review/WorkspaceEdgeRail.js';
 import {
@@ -146,6 +150,7 @@ export interface ReviewShellProps {
   documentTitle?: string;
   savedLabel?: string;
   savePhase?: 'clean' | 'saving' | 'not-saved';
+  savePendingDestination?: boolean;
   saveOptionsOpen?: boolean;
   onSaveOptions?(): void;
   generationRefreshStatus?: GenerationRefreshStatus;
@@ -575,6 +580,7 @@ export function ReviewShell(props: ReviewShellProps) {
   ) ? requestedEffectiveWorkspaceMode : rightWorkspaceMode;
   const anyWorkspaceOpen = workspaceOpen || referenceSurfaceOpen || toolsSurfaceOpen;
   const annotationsVisible = anyWorkspaceOpen && effectiveWorkspaceMode === 'annotations';
+  const outlineExpansionToggleVisible = toolsSurfaceOpen && effectiveWorkspaceMode === 'outline';
   const annotationReaderRecord = annotationReaderSession === null
     || !authoringAuthorityMatches(annotationReaderSession.authority, currentAuthoringAuthority)
     ? null
@@ -1715,6 +1721,7 @@ export function ReviewShell(props: ReviewShellProps) {
         documentTitle={props.documentTitle ?? 'Local PDF'}
         {...(props.savedLabel === undefined ? {} : { savedLabel: props.savedLabel })}
         {...(props.savePhase === undefined ? {} : { savePhase: props.savePhase })}
+        savePendingDestination={props.savePendingDestination ?? false}
         saveOptionsOpen={props.saveOptionsOpen ?? false}
         onSaveOptions={() => props.onSaveOptions?.()}
         saveOptionsAvailable={props.onSaveOptions !== undefined}
@@ -1883,6 +1890,7 @@ export function ReviewShell(props: ReviewShellProps) {
               /> : null}
             </>
           )) : null}
+          <OutlineExpansionProvider discovery={visibleOutlineDiscovery}>
           <ReferenceWorkspace
             workspaceRef={workspaceFraming.referenceSurfaceRef}
             open={referenceSurfaceOpen}
@@ -1950,6 +1958,9 @@ export function ReviewShell(props: ReviewShellProps) {
                 } })}
             onReferenceViewportHost={props.onReferenceViewportHost ?? ignoreReferenceViewportHost}
             onModeFocusTokenChange={rememberWorkspaceModeFocus}
+            headerAction={sharedWorkspace ? (
+              <OutlineExpansionToggleSlot visible={outlineExpansionToggleVisible} />
+            ) : null}
           />
           <OutlineAnnotationsWorkspace
             workspaceRef={workspaceFraming.toolsSurfaceRef}
@@ -1961,6 +1972,9 @@ export function ReviewShell(props: ReviewShellProps) {
             headerVariant={sharedWorkspace ? 'shared' : 'tools'}
             outline={visibleOutlineDiscovery}
             currentOutlineItemId={props.currentOutlineItemId ?? null}
+            headerAction={(
+              <OutlineExpansionToggleSlot visible={outlineExpansionToggleVisible} />
+            )}
             onModeChange={selectWorkspaceMode}
             onOutlineActivate={(item) => {
               if (authoringSessionRef.current === null) props.onOutlineActivate?.(item);
@@ -2115,6 +2129,7 @@ export function ReviewShell(props: ReviewShellProps) {
               </div>
             )}
           />
+          </OutlineExpansionProvider>
           {authoringSession === null
             && referenceSurfaceOpen
             && effectiveReferenceLayout.referenceResizable ? (

@@ -420,6 +420,25 @@ describe("loopback HTTP boundary", () => {
     expect(broker.state(launch.sessionId)?.workflow.freshness).toBe("possibly-stale");
   });
 
+  it("accepts a cross-site top-level bootstrap without weakening same-origin mutations", async () => {
+    const { broker, launch, server } = await openBroker();
+    const bootstrap = await fetch(
+      `${server.origin}${launch.launchPath}${launch.fragment}`,
+      { headers: { "sec-fetch-site": "cross-site" } },
+    );
+
+    expect(bootstrap.status).toBe(200);
+    expect(await bootstrap.text()).not.toContain(launch.fragment.slice("#cap=".length));
+
+    const exchange = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability: launch.fragment.slice("#cap=".length) },
+      { "sec-fetch-site": "cross-site" },
+    );
+    expect(exchange.status).toBe(403);
+    expect(broker.credentials.pendingBootstrapCount()).toBe(1);
+  });
+
   it("keeps a stale readable GET outside every local-file and authority boundary", async () => {
     const directory = await temporaryDirectory();
     const assets = join(directory, "assets");
@@ -691,6 +710,7 @@ describe("loopback HTTP boundary", () => {
     const revokedHtml = await revokedRoute.text();
     expect(revokedRoute.status).toBe(200);
     expect(revokedRoute.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(revokedHtml).toContain("<title>paper.pdf</title>");
     expect(revokedHtml).toContain("data-terminal-recovery");
     expect(revokedHtml).toContain("placekeeper:///");
     expect(revokedHtml).toContain('href="#" aria-disabled="true"');
@@ -710,10 +730,12 @@ describe("loopback HTTP boundary", () => {
     expect(unknown.status).toBe(200);
     expect(unknown.headers.get("set-cookie")).toContain(`Path=/r/${unknownViewId}/`);
     expect(unknown.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(unknownHtml).toContain("<title>Unknown Paper.pdf</title>");
     expect(unknownHtml).toContain('data-app-link-base="placekeeper:///private/tmp/Unknown%20Paper.pdf"');
     expect(unknownHtml).toContain('href="#" aria-disabled="true"');
     expect(unknownHtml).not.toContain("fetch(");
     expect(unknownHtml).not.toContain("location.assign");
+
     expect(unknownHtml).not.toContain("location.replace");
     expect(unknownHtml).not.toContain(launch.sessionId);
     expect(unknownHtml).not.toContain(exchangeBody.credential);

@@ -57,6 +57,7 @@ export interface ReviewChromeProps {
   readonly documentTitle: string;
   readonly savedLabel?: string;
   readonly savePhase?: 'clean' | 'saving' | 'not-saved';
+  readonly savePendingDestination?: boolean;
   readonly saveOptionsOpen?: boolean;
   readonly controls?: ViewerControls;
   readonly viewerState: ViewerControlsSnapshot;
@@ -81,6 +82,7 @@ export function ReviewChrome({
   documentTitle,
   savedLabel = 'Saved',
   savePhase = 'clean',
+  savePendingDestination = false,
   saveOptionsOpen = false,
   controls,
   viewerState,
@@ -118,12 +120,18 @@ export function ReviewChrome({
   const restoreZoomTriggerFocus = useRef(false);
   const zoomActionIntent = useRef(false);
   const zoomErrorId = useId();
-  const saveStatusText = savePhase === 'not-saved'
+  const saveTriggerRef = useRef<HTMLButtonElement>(null);
+  const saveOptionsWereOpen = useRef(saveOptionsOpen);
+  const saveStatusText = savePendingDestination
+    ? 'protected recovery, choose where to save'
+    : savePhase === 'not-saved'
     ? 'not saved'
     : savePhase === 'saving'
       ? 'saving changes'
       : savedLabel;
-  const saveStatusDisplay = savePhase === 'not-saved'
+  const saveStatusDisplay = savePendingDestination
+    ? 'Protected Recovery'
+    : savePhase === 'not-saved'
     ? 'Not saved'
     : savePhase === 'saving'
       ? 'Saving changes'
@@ -141,6 +149,13 @@ export function ReviewChrome({
   const runViewerAction = (action: () => void) => {
     void runViewerActionAsync(action);
   };
+
+  useLayoutEffect(() => {
+    if (saveOptionsWereOpen.current && !saveOptionsOpen) {
+      saveTriggerRef.current?.focus({ preventScroll: true });
+    }
+    saveOptionsWereOpen.current = saveOptionsOpen;
+  }, [saveOptionsOpen]);
 
   useLayoutEffect(() => {
     if (editingPage) {
@@ -260,6 +275,7 @@ export function ReviewChrome({
     <header className="review-chrome" data-review-chrome>
       <div className="review-chrome__identity">
         {saveOptionsAvailable ? <button
+          ref={saveTriggerRef}
           type="button"
           className="review-chrome__save-identity"
           aria-label={saveControlLabel}
@@ -270,6 +286,9 @@ export function ReviewChrome({
         >
           <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />
           <strong>{documentTitle}</strong>
+          {savePendingDestination ? (
+            <span className="review-chrome__save-recovery">Protected Recovery</span>
+          ) : null}
           <span className="sr-only" data-review-saved-status>
             {saveStatusDisplay}
           </span>

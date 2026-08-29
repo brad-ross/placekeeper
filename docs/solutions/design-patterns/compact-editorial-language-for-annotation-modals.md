@@ -1,20 +1,18 @@
 ---
 title: Compact Editorial language for review task and recovery surfaces
 date: 2026-08-21
-last_updated: 2026-08-22
+last_updated: 2026-08-28
 category: design-patterns
 module: PDF review task and recovery surface presentation
 problem_type: design_pattern
 component: frontend_stimulus
 severity: medium
 applies_when:
-  - "Several related task surfaces have drifted in hierarchy, terminology, or action styling"
-  - "Create and edit flows need concise but distinct action semantics"
-  - "Visible field labels repeat an already-specific task title while accessible field names must remain intact"
-  - "A modal dialog and a nonmodal composer should share Warm Neutral presentation without sharing lifecycle ownership"
-  - "Live polish needs deterministic previews for every task-surface variant before approval"
-  - "A dedicated recovery page should reuse modal structure without claiming dialog semantics or owning lifecycle authority"
-  - "Ordinary and conditional states need content-fitting geometry plus deterministic semantic and visual validation"
+  - "Related task or setting surfaces have drifted in hierarchy, terminology, or action styling"
+  - "A title already supplies context that nearby labels or supporting copy would only repeat"
+  - "Dialogs, nonmodal composers, recovery pages, and browser popups should share Warm Neutral presentation without sharing lifecycle ownership"
+  - "Create, edit, recovery, and preference flows need concise but distinct action semantics"
+  - "Ordinary, conditional, and asynchronous states need content-fitting geometry plus deterministic semantic and visual validation"
 related_components:
   - "CommentComposer"
   - "SaveDestinationDialog"
@@ -25,13 +23,12 @@ related_components:
   - "testing_framework"
 tags:
   - "compact-editorial"
-  - "modal-language"
   - "annotation-composer"
   - "save-destination"
+  - "chrome-extension-popup"
   - "action-semantics"
   - "accessible-labels"
   - "visual-consistency"
-  - "deterministic-previews"
   - "content-fitting-layout"
 ---
 
@@ -44,6 +41,8 @@ Placekeeper has task surfaces that should feel related but do different jobs. `C
 The durable solution is a shared presentation grammar, not a shared lifecycle or stateful modal component. Both surfaces retain the historically named `compact-editorial-modal` presentation hooks, but only Save Destination uses the footer and modal interaction contract; the composer keeps its actions local to the input and delegates authoring-session restoration to `ReviewShell` (`apps/web/src/review/CommentComposer.tsx:151-218`, `apps/web/src/save/SaveDestinationDialog.tsx:52-75`, `apps/web/src/save/SaveDestinationDialog.tsx:184-209`, `apps/web/src/app/ReviewShell.tsx:765-803`). The initial grammar merged in [PR #46](https://github.com/brad-ross/placekeeper/pull/46) on 2026-08-21 and later became the presentation vocabulary for the nonmodal Contextual Annotation Composer.
 
 The same grammar now also covers a structurally different surface: the successor-daemon page that reopens an interrupted Placekeeper session. That page is centered on an otherwise inert document canvas and explicitly remains a page rather than a dialog over an interactive review (`apps/web/src/app/review-layout.css:6-39`). It reuses the visual hierarchy without moving the gesture-gated reopen, protected-draft choices, or Codex task reattachment into presentation code. Earlier versions required two reopen confirmations, exposed internal-looking identifiers, used review-oriented copy, and reserved empty layout rows; the settled surface uses one **Reopen** action, a filename-led title, session terminology, and content-driven height (session history). [PR #48](https://github.com/brad-ross/placekeeper/pull/48), merged on 2026-08-22, extended the grammar to this recovery surface.
+
+The Chrome extension's automatic-PDF preference exposed the same presentation boundary at popup scale. Its underlying setting persisted and PDF handoff worked, but every short-lived popup document recreated a static “Reading Chrome's PDF setting…” sentence and repeated the control's purpose across a long title, explanatory copy, toggle label, and state pill (session history). The current popup keeps only a direct **Placekeeper** title, one semantic **Open PDFs automatically** switch, and an initially empty live status region (`apps/chrome-extension/popup.html:6-18`). Runtime code owns synchronization, mutation, and failure copy while an ordinary successful read remains quiet (`apps/chrome-extension/src/popup-entry.ts:15-31`, `apps/chrome-extension/src/popup-entry.ts:34-60`).
 
 Planning exposed one especially useful boundary: an early acceptance rule required a visible Cancel action while also prohibiting any change to the optional-highlight action set. That was inconsistent because keeping a highlight without a comment and cancelling the annotation are distinct outcomes. The final grammar exposes both instead of overloading one control (session history).
 
@@ -75,6 +74,14 @@ Removing visible repetition must not remove the field's accessible name. `Commen
 
 Retain visible labels when the body has several controls or the field would otherwise be ambiguous. Save Destination correctly keeps “Copy name” beside its filename input (`apps/web/src/save/SaveDestinationDialog.tsx:149-176`).
 
+### Keep short-lived preference hydration quiet
+
+A browser popup is reconstructed every time it opens, so transient progress text in static HTML is replayed even when the browser has already persisted the preference. Static markup should express only stable structure: product title, semantic control, and an empty live region. Disable the control while authoritative state resolves, then update the switch without announcing an ordinary successful read (`apps/chrome-extension/popup.html:10-18`, `apps/chrome-extension/src/popup-entry.ts:15-31`).
+
+Populate status only when it changes what the person needs to understand: synchronization was repaired by pausing automatic opening, an explicit mutation is pending or complete, or the browser setting could not be read or changed (`apps/chrome-extension/src/popup-entry.ts:23-60`). Keep the underlying operations bounded so quiet startup cannot become an indefinitely inert control; Placekeeper's automatic-open reads and writes reject after their operation timeout. If enabling Chrome's MIME handler then fails after the sentinel write succeeds, Placekeeper attempts to roll the sentinel back (`apps/chrome-extension/src/opt-in.ts:3-20`, `apps/chrome-extension/src/opt-in.ts:58-64`).
+
+Use one inline `role="switch"` rather than a generic button plus a separate state pill. Synchronize `aria-checked` from the same state that drives the visual thumb, keep the row touch-sized, hide the empty status node from layout, and reuse the app's ink, surface, border, focus, success, and motion values (`apps/chrome-extension/src/popup-entry.ts:17-21`, `apps/chrome-extension/src/extension.css:28-50`, `apps/chrome-extension/src/extension.css:68-150`). This shares Compact Editorial presentation without importing the web app's lifecycle or stylesheet ownership into the extension.
+
 ### Make action labels describe the transition
 
 Use verbs consistently:
@@ -98,9 +105,11 @@ Use three complementary layers:
 
 1. Semantic component and workflow tests assert accessible names, action labels, cancellation, submission, focus, and draft preservation.
 2. Production flows prove that the same wording works through real annotation and Save Destination lifecycles.
-3. Visual and geometry tests cover contextual-composer snapshots, narrow containment, touch target height, local action placement, anchor recovery, modal layering, and reduced motion (`test/acceptance/review-visual.spec.ts:576-719`).
+3. Visual and geometry tests cover contextual-composer snapshots, narrow containment, touch target height, local action placement, anchor recovery, modal layering, and reduced motion (`test/acceptance/review-visual.spec.ts:817-990`).
 
 For a lifecycle-owned recovery page, add state-coupled geometry assertions rather than relying on a screenshot alone. The ordinary successor flow measures that empty status and action regions contribute no height and that the footer equals its control row plus padding and border (`test/acceptance/reloadable-links.spec.ts:375-418`). The protected-draft flow proves that discovered choices make the same card taller, while the touch-viewport flow proves containment and controls of at least 44 pixels (`test/acceptance/reloadable-links.spec.ts:538-555`, `test/acceptance/reloadable-links.spec.ts:663-698`). Run these lifecycle assertions in both Chromium and WebKit because a visually correct static shell does not prove the reopen state machine.
+
+For a browser popup, protect the smallest stable contract directly. The extension test asserts the concise document and visible titles, semantic switch structure, absence of redundant explanation and startup-reading copy, and inert control before saved state is known (`apps/chrome-extension/test/extension-contract.test.ts:22-52`). Pair that semantic check with a rendered popup-width preview and a production extension build; earlier attempts to rely on an isolated extension service worker timed out, so they did not provide dependable popup evidence (session history).
 
 Keep responsive and motion behavior in the shared grammar. The nonmodal composer becomes a contained bottom surface on small screens, controls receive touch height, and pending animation is disabled under Reduced Motion (`apps/web/src/app/review-layout-responsive.css:17-48`, `apps/web/src/app/review-layout-responsive.css:234-248`).
 
@@ -114,6 +123,8 @@ That boundary matters even more for interrupted-session recovery. A stale page m
 
 The test split prevents three different kinds of drift. Semantic assertions catch language and accessibility mistakes. Production flows catch lifecycle regressions. Visual and geometry checks catch spacing, containment, alignment, and motion regressions. A stylesheet-shape assertion alone cannot provide all three.
 
+Quiet ordinary preference hydration is part of the same truthfulness. A loading sentence that appears on every popup open makes persisted state look uncertain, while removing all status would hide repairs and failures. Stable markup plus runtime-owned exceptional feedback keeps the common path calm without suppressing actionable information.
+
 ## When to Apply
 
 Apply this pattern when:
@@ -126,6 +137,7 @@ Apply this pattern when:
 - copy and layout must be reviewed across desktop, narrow, recovery, disabled, and reduced-motion states;
 - a dedicated recovery page should look related to application dialogs while remaining outside the interactive application mount;
 - conditional risk or protected work should expand one bounded card instead of reserving empty space in the ordinary state.
+- a short-lived browser popup reads a persisted preference asynchronously and should stay quiet unless synchronization, mutation, or failure needs explanation.
 
 Do not use it to collapse distinct workflows into one conditional component, remove labels from multi-field forms, or force task-specific recovery actions into generic verbs. Retry, Locate PDF…, and Return to annotations remain specific because they perform different recovery transitions (`apps/web/src/save/SaveDestinationDialog.tsx:76-121`).
 
@@ -142,6 +154,7 @@ Do not use shared modal language to make a stale route act like a live dialog. T
 | Add highlight without a comment | One overloaded keep/dismiss action | **Cancel**, **Keep**, and **Save** |
 | Reopen an ordinary interrupted session | **Reopen review**, then a second open confirmation | Filename-led title with **Copy Link** and one primary **Reopen** |
 | Reopen with protected work | Always-visible or client-invented draft controls | Expand only after the service returns **Resume draft**, **Discard draft**, and **Open separate copy** |
+| Read an automatic-open preference | Static “Reading…” copy, repeated explanation, and a separate state pill | **Placekeeper**, one inline **Open PDFs automatically** switch, and status only for repairs, mutations, or failures |
 
 ```tsx
 // Share presentation hooks and action vocabulary.
@@ -160,14 +173,22 @@ Do not use shared modal language to make a stale route act like a live dialog. T
   <section>{serviceOwnedRecoveryState}</section>
   <footer>{copyLink}{reopen}</footer>
 </main>
+
+<!-- A browser popup keeps transient work out of static markup. -->
+<main aria-labelledby="title">
+  <h1 id="title">Placekeeper</h1>
+  <button role="switch" aria-checked="false">Open PDFs automatically</button>
+  <p role="status" aria-live="polite"></p>
+</main>
 ```
 
-This is the useful abstraction level: shared visual structure and language rules, separate components or pages for save-domain, annotation-domain, and successor-recovery behavior.
+This is the useful abstraction level: shared visual structure and language rules, separate components or pages for save-domain, annotation-domain, successor-recovery, and browser-preference behavior.
 
 ## Related
 
 - [Content-aware annotation workspace presentation](outline-aware-annotation-workspace-presentation.md) supplies the compact tray-entry precedent reused by Save Destination choices.
 - [Native control tooltip contract](../conventions/native-control-tooltip-contract.md) distinguishes visible control copy, accessible names, and tooltip ownership.
+- [Truthful compact status for live agent context](truthful-compact-agent-context-status.md) supplies the complementary rule that stable ordinary state stays quiet while transitions and failures communicate precise meaning.
 - [Recoverable autosave for editable PDF annotations](../architecture-patterns/recoverable-editable-pdf-annotation-autosave.md) owns the Save Destination and recovery lifecycle that this presentation pattern must preserve.
 - [Adaptive annotation tray framing](../architecture-patterns/adaptive-annotation-tray-framing.md) applies the same presentation-versus-lifecycle ownership boundary to the workspace.
 - [Reliable compact right-docked Reference Tabs](../ui-bugs/reliable-compact-right-docked-reference-tabs.md) shows the complementary browser-validation pattern for compact control reuse.
