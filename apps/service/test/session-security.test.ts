@@ -20,7 +20,7 @@ import {
   type LocalHttpServer,
 } from "../src/server/http-server.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
-import type { SessionLaunch } from "../src/sessions/session-broker.js";
+import type { LaunchSurface, SessionLaunch } from "../src/sessions/session-broker.js";
 import { SessionControlRegistry } from "../src/sessions/control-socket.js";
 
 const temporaryDirectories: string[] = [];
@@ -294,7 +294,10 @@ describe("opaque file and root capabilities", () => {
   });
 });
 
-async function openBroker(generatedOutput = false): Promise<{
+async function openBroker(options: {
+  readonly generatedOutput?: boolean;
+  readonly surface?: LaunchSurface;
+} = {}): Promise<{
   directory: string;
   pdf: string;
   broker: SessionBroker;
@@ -310,12 +313,57 @@ async function openBroker(generatedOutput = false): Promise<{
   const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
   const opened = await broker.openReview({
     pdfPath: pdf,
-    ...(generatedOutput ? { workflowMode: "generated-output" as const } : {}),
+    surface: options.surface ?? "browser",
+    ...(options.generatedOutput ? { workflowMode: "generated-output" as const } : {}),
   });
   if (opened.kind !== "opened") throw new Error("Expected a new review");
   const server = await startHttpServer(broker, { webAssets: { root: assets } });
   servers.push(server);
   return { directory, pdf, broker, launch: opened.launch, server };
+}
+
+async function attemptControlUpgrade(input: {
+  readonly server: LocalHttpServer;
+  readonly sessionId: string;
+  readonly credential?: string;
+  readonly origin?: string;
+}): Promise<{
+  readonly accepted: false;
+} | {
+  readonly accepted: true;
+  readonly protocol: string | undefined;
+  readonly rawHeaders: readonly string[];
+  readonly close: Promise<void>;
+}> {
+  return new Promise((resolve) => {
+    const request = httpRequest({
+      host: "127.0.0.1",
+      port: input.server.port,
+      path: `/s/${input.sessionId}/control`,
+      headers: {
+        host: `127.0.0.1:${input.server.port}`,
+        ...(input.origin === undefined ? {} : { origin: input.origin }),
+        connection: "Upgrade",
+        upgrade: "websocket",
+        "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+        "sec-websocket-version": "13",
+        ...(input.credential === undefined
+          ? {}
+          : { "sec-websocket-protocol": `placekeeper, placekeeper-auth.${input.credential}` }),
+      },
+    });
+    request.on("upgrade", (response, socket) => {
+      resolve({
+        accepted: true,
+        protocol: response.headers["sec-websocket-protocol"],
+        rawHeaders: response.rawHeaders,
+        close: new Promise<void>((closed) => socket.once("close", closed)),
+      });
+    });
+    request.on("error", () => resolve({ accepted: false }));
+    request.on("close", () => resolve({ accepted: false }));
+    request.end();
+  });
 }
 
 function postJson(
@@ -338,7 +386,7 @@ function postJson(
 
 describe("loopback HTTP boundary", () => {
   it("authenticates generated-output stale and observation mutations", async () => {
-    const { broker, launch, pdf, server } = await openBroker(true);
+    const { broker, launch, pdf, server } = await openBroker({ generatedOutput: true });
     const exchanged = await postJson(
       `${server.origin}/s/${launch.sessionId}/exchange`,
       { capability: launch.fragment.slice("#cap=".length) },
@@ -860,26 +908,11 @@ describe("loopback HTTP boundary", () => {
     });
     expect(rawStatus).toBe(403);
 
-    const upgradeClosed = await new Promise<boolean>((resolve) => {
-      const request = httpRequest({
-        host: "127.0.0.1",
-        port: server.port,
-        path: `/s/${launch.sessionId}/control`,
-        headers: {
-          host: `127.0.0.1:${server.port}`,
-          origin: server.origin,
-          connection: "Upgrade",
-          upgrade: "websocket",
-          "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
-          "sec-websocket-version": "13",
-        },
-      });
-      request.on("upgrade", () => resolve(false));
-      request.on("error", () => resolve(true));
-      request.on("close", () => resolve(true));
-      request.end();
-    });
-    expect(upgradeClosed).toBe(true);
+    await expect(attemptControlUpgrade({
+      server,
+      sessionId: launch.sessionId,
+      origin: server.origin,
+    })).resolves.toEqual({ accepted: false });
   });
 
   it("authenticates upgraded connections without reflecting the credential", async () => {
@@ -889,38 +922,49 @@ describe("loopback HTTP boundary", () => {
       { capability: launch.fragment.slice("#cap=".length) },
     );
     const { credential } = (await exchange.json()) as { credential: string };
-    const upgraded = await new Promise<{
-      protocol: string | undefined;
-      rawHeaders: readonly string[];
-      close: Promise<void>;
-    }>((resolve, reject) => {
-      const request = httpRequest({
-        host: "127.0.0.1",
-        port: server.port,
-        path: `/s/${launch.sessionId}/control`,
-        headers: {
-          host: `127.0.0.1:${server.port}`,
-          origin: server.origin,
-          connection: "Upgrade",
-          upgrade: "websocket",
-          "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
-          "sec-websocket-version": "13",
-          "sec-websocket-protocol": `placekeeper, placekeeper-auth.${credential}`,
-        },
-      });
-      request.on("upgrade", (response, socket) => {
-        resolve({
-          protocol: response.headers["sec-websocket-protocol"],
-          rawHeaders: response.rawHeaders,
-          close: new Promise<void>((closed) => socket.once("close", closed)),
-        });
-      });
-      request.on("error", reject);
-      request.end();
+    const upgraded = await attemptControlUpgrade({
+      server,
+      sessionId: launch.sessionId,
+      credential,
+      origin: server.origin,
     });
+    if (!upgraded.accepted) throw new Error("Expected authenticated control upgrade");
     expect(upgraded.protocol).toBe("placekeeper");
     expect(upgraded.rawHeaders.join("\n")).not.toContain(credential);
     await broker.finish(launch.sessionId);
     await upgraded.close;
+  });
+
+  it("accepts originless control upgrades only for VS Code-scoped credentials", async () => {
+    const { broker, launch, server } = await openBroker({ surface: "vscode" });
+    const exchange = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability: launch.fragment.slice("#cap=".length) },
+    );
+    const { credential } = (await exchange.json()) as { credential: string };
+    const upgraded = await attemptControlUpgrade({
+      server,
+      sessionId: launch.sessionId,
+      credential,
+    });
+    if (!upgraded.accepted) throw new Error("VS Code control upgrade was rejected");
+    expect(upgraded.protocol).toBe("placekeeper");
+    await broker.finish(launch.sessionId);
+    await upgraded.close;
+  });
+
+  it("rejects originless control upgrades for browser-scoped credentials", async () => {
+    const { broker, launch, server } = await openBroker();
+    const exchange = await postJson(
+      `${server.origin}/s/${launch.sessionId}/exchange`,
+      { capability: launch.fragment.slice("#cap=".length) },
+    );
+    const { credential } = (await exchange.json()) as { credential: string };
+    await expect(attemptControlUpgrade({
+      server,
+      sessionId: launch.sessionId,
+      credential,
+    })).resolves.toEqual({ accepted: false });
+    await broker.finish(launch.sessionId);
   });
 });

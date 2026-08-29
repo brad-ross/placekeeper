@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import WebSocket from "ws";
 
 export const WEBVIEW_RPC_PROTOCOL = "placekeeper.review-runtime" as const;
 export const WEBVIEW_RPC_VERSION = 1 as const;
@@ -303,6 +304,7 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
   let socket: WebSocket | undefined;
   let socketRetry: ReturnType<typeof setTimeout> | undefined;
   let socketRetryDelayMs = 1_000;
+  let observedFreshness: string | undefined;
   let disposed = false;
   const request = async (
     path: string,
@@ -371,6 +373,9 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
       });
       identity.generation = generation;
       identity.revision = stateValue.revision as number;
+      observedFreshness = typeof stateValue.workflow.freshness === "string"
+        ? stateValue.workflow.freshness
+        : undefined;
       const bootstrap = {
         sessionId: identity.sessionId,
         generation: identity.generation,
@@ -464,7 +469,6 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
     },
     subscribeInvalidations(listener) {
       invalidationListeners.add(listener);
-      connectInvalidations();
       return () => invalidationListeners.delete(listener);
     },
     dispose() {
@@ -475,15 +479,47 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
       invalidationListeners.clear();
     },
   };
+  async function reconcileInvalidations(): Promise<void> {
+    try {
+      const value = await json("/state");
+      if (!isObject(value) || !isObject(value.workflow) ||
+        !Number.isSafeInteger(value.workflow.documentGeneration) ||
+        !Number.isSafeInteger(value.revision)) return;
+      const generation = value.workflow.documentGeneration as number;
+      const revision = value.revision as number;
+      const freshness = typeof value.workflow.freshness === "string"
+        ? value.workflow.freshness
+        : undefined;
+      if (generation === identity.generation && revision === identity.revision &&
+        freshness === observedFreshness) return;
+      const payload = {
+        sessionId: identity.sessionId,
+        generation,
+        revision,
+        reason: generation !== identity.generation
+          ? "generation"
+          : revision !== identity.revision ? "revision" : "freshness",
+        ...(generation === identity.generation
+          ? {}
+          : { previousGeneration: identity.generation }),
+      };
+      for (const listener of invalidationListeners) listener(payload);
+    } catch {
+      // A later control reconnect or explicit bootstrap will retry canonical state.
+    }
+  }
   function connectInvalidations(): void {
-    if (disposed || socket !== undefined || typeof WebSocket === "undefined") return;
+    if (disposed || socket !== undefined) return;
     const controlUrl = new URL(`/s/${options.launch.sessionId}/control`, options.launch.origin);
     controlUrl.protocol = controlUrl.protocol === "https:" ? "wss:" : "ws:";
     socket = new WebSocket(controlUrl, [
       "placekeeper",
       `placekeeper-auth.${options.launch.credential}`,
     ]);
-    socket.addEventListener("open", () => { socketRetryDelayMs = 1_000; });
+    socket.addEventListener("open", () => {
+      socketRetryDelayMs = 1_000;
+      void reconcileInvalidations();
+    });
     socket.addEventListener("message", (event) => {
       try {
         const value: unknown = JSON.parse(String(event.data));

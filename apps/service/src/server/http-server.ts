@@ -863,7 +863,6 @@ export async function startHttpServer(
         .map((value) => value.trim().toLowerCase());
       if (
         failure !== undefined ||
-        request.headers.origin !== origin ||
         request.headers.upgrade?.toLowerCase() !== "websocket" ||
         !connectionTokens?.includes("upgrade") ||
         request.headers["sec-websocket-version"] !== "13"
@@ -876,13 +875,14 @@ export async function startHttpServer(
       const credential = protocols
         ?.find((value) => value.startsWith("placekeeper-auth."))
         ?.slice("placekeeper-auth.".length);
-      if (!protocols?.includes("placekeeper")) {
+      if (!protocols?.includes("placekeeper") || credential === undefined) {
         return reject();
       }
-      if (
-        credential === undefined ||
-        !broker.authenticate(match[1]!, credential)
-      ) {
+      const authenticated = request.headers.origin === origin
+        ? broker.authenticate(match[1]!, credential)
+        : request.headers.origin === undefined &&
+          broker.authenticateSurface(match[1]!, credential, "vscode");
+      if (!authenticated) {
         return reject();
       }
       const key = request.headers["sec-websocket-key"];

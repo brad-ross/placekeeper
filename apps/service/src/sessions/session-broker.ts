@@ -1400,6 +1400,12 @@ export class SessionBroker {
     );
   }
 
+  authenticateSurface(sessionId: string, credential: string, surface: LaunchSurface): boolean {
+    if (!this.authenticate(sessionId, credential)) return false;
+    const scope = this.#credentialScopes.get(digestSecretHex(credential));
+    return scope?.sessionId === sessionId && scope.surface === surface;
+  }
+
   activity(): {
     readonly reviewPresence: number;
     readonly codexTasks: number;

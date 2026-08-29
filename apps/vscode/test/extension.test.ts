@@ -1,9 +1,13 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, stat, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { PDFDocument } from "pdf-lib";
 import { createReviewState } from "../../../packages/core/src/review-model.js";
+import { startHttpServer } from "../../service/src/server/http-server.js";
+import { SessionBroker } from "../../service/src/sessions/session-broker.js";
+import { subscribeRuntimeDocumentSource } from "../../web/src/host/runtime-document-source.js";
 import { createRpcHostRuntime } from "../../web/src/host/vscode-runtime.js";
 import {
   INPUT_UNAVAILABLE,
@@ -61,12 +65,19 @@ describe("VS Code local host adapter", () => {
       description: string;
       publisher: string;
       icon: string;
+      main: string;
       activationEvents: string[];
       contributes: {
         commands: Array<{
           command: string;
           title: string;
           icon: { light: string; dark: string };
+        }>;
+        keybindings: Array<{
+          command: string;
+          key: string;
+          mac: string;
+          when: string;
         }>;
         configuration: {
           title: string;
@@ -80,6 +91,7 @@ describe("VS Code local host adapter", () => {
       displayName: "Placekeeper",
       publisher: "placekeeper-local",
       icon: "assets/placekeeper.png",
+      main: "./dist/extension.cjs",
       activationEvents: expect.arrayContaining([
         "onCommand:placekeeper.viewPdf",
         "onWebviewPanel:placekeeper.review",
@@ -104,6 +116,20 @@ describe("VS Code local host adapter", () => {
       },
     });
     expect(manifest.description).toContain("Placekeeper");
+    expect(manifest.contributes.keybindings).toEqual([
+      {
+        command: "placekeeper.forwardSyncTex",
+        key: "ctrl+alt+shift+j",
+        mac: "cmd+alt+shift+j",
+        when: "editorLangId == latex",
+      },
+      {
+        command: "placekeeper.goToSource",
+        key: "ctrl+alt+shift+j",
+        mac: "cmd+alt+shift+j",
+        when: "activeWebviewPanelId == 'placekeeper.review'",
+      },
+    ]);
     expect((manifest as unknown as { scripts: { build: string } }).scripts.build)
       .toContain("copy-web-assets.mjs");
   });
@@ -487,6 +513,137 @@ describe("VS Code local host adapter", () => {
     expect(forwardSyncTexRetryable({ status: "missing" })).toBe(false);
     expect(forwardSyncTexStatus({ status: "out-of-root" })).toBe("out-of-root");
     expect(forwardSyncTexStatus({ status: "other" })).toBeUndefined();
+  });
+
+  it("materializes a rebuilt PDF after an originless VS Code control notification", async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), "placekeeper-vscode-control-"));
+    let server: Awaited<ReturnType<typeof startHttpServer>> | undefined;
+    let client: ReturnType<typeof createLoopbackRuntimeClient> | undefined;
+    let bridge: VersionedWebviewBridge | undefined;
+    let runtime: ReturnType<typeof createRpcHostRuntime> | undefined;
+    let broker: SessionBroker | undefined;
+    let sessionId: string | undefined;
+    try {
+      const assets = resolve(temporary, "assets");
+      await mkdir(assets);
+      await writeFile(resolve(assets, "app.js"), "export function start() {}\n");
+      const pdfPath = resolve(temporary, "paper.pdf");
+      const original = await PDFDocument.create();
+      original.addPage([320, 240]);
+      await writeFile(pdfPath, await original.save({ useObjectStreams: false }));
+      broker = new SessionBroker({
+        recoveryRoot: resolve(temporary, "recovery"),
+        portableReader: async () => [],
+        rewriteAssessor: async () => ({ eligible: true }),
+        inspectGeneration: async () => ({ pageCount: 1, pages: [{ pageIndex: 0, text: "successor" }] }),
+      });
+      const opened = await broker.openReview({
+        pdfPath,
+        surface: "vscode",
+        workflowMode: "generated-output",
+      });
+      if (opened.kind !== "opened") throw new Error("Expected a new VS Code review");
+      sessionId = opened.launch.sessionId;
+      server = await startHttpServer(broker, { webAssets: { root: assets } });
+      const exchange = await fetch(`${server.origin}/s/${opened.launch.sessionId}/exchange`, {
+        method: "POST",
+        headers: { origin: server.origin, "content-type": "application/json" },
+        body: JSON.stringify({ capability: opened.launch.fragment.slice("#cap=".length) }),
+      });
+      const { credential } = await exchange.json() as { credential: string };
+      const materialized: string[] = [];
+      const registeredSocket = vi.spyOn(broker.controls, "registerSocket");
+      const authenticatedSurface = vi.spyOn(broker, "authenticateSurface");
+      client = createLoopbackRuntimeClient({
+        panelId: "panel_identifier_1234",
+        launch: { origin: server.origin, sessionId: opened.launch.sessionId, credential },
+        assets: { pdfiumWasm: "vscode-webview://authority/pdfium.wasm" },
+        materializeDocument: async ({ digest }) => {
+          materialized.push(digest);
+          return `vscode-webview://authority/${digest}.pdf`;
+        },
+        fetch: (input, init) => String(input).endsWith("/save/status")
+          ? Promise.resolve(new Response(JSON.stringify({ destination: { phase: "none", generation: 0 } })))
+          : fetch(input, init),
+      });
+      const messages = new Set<(message: unknown) => void>();
+      bridge = new VersionedWebviewBridge(client, (message) => {
+        for (const listener of messages) listener(message);
+      });
+      runtime = createRpcHostRuntime({
+        panelId: "panel_identifier_1234",
+        postMessage: (message) => { void bridge!.receive(message); },
+        subscribe(listener) {
+          messages.add(listener);
+          return () => messages.delete(listener);
+        },
+      });
+      const initial = await runtime.bootstrap();
+      await vi.waitFor(() => expect(registeredSocket).toHaveBeenCalledTimes(1));
+      expect(authenticatedSurface).toHaveBeenCalledWith(
+        opened.launch.sessionId,
+        credential,
+        "vscode",
+      );
+      const published: Array<{ generation: number; freshness: string; refreshStatus: string }> = [];
+      const unsubscribe = subscribeRuntimeDocumentSource(runtime, initial, ({ loaded, refreshStatus }) => {
+        published.push({
+          generation: loaded.generation,
+          freshness: loaded.state.workflow.freshness,
+          refreshStatus,
+        });
+      });
+
+      const successor = await PDFDocument.create();
+      successor.setTitle("rebuilt");
+      successor.addPage([320, 240]);
+      await writeFile(pdfPath, await successor.save({ useObjectStreams: false }));
+      const committed = await broker.replaceLiveDocument({
+        sessionId: opened.launch.sessionId,
+        outputPath: pdfPath,
+        observationEpoch: 1,
+      });
+      expect(committed).toMatchObject({ status: "committed", documentGeneration: 2 });
+
+      await vi.waitFor(() => {
+        expect(published.at(-1)).toEqual({
+          generation: 2,
+          freshness: "current",
+          refreshStatus: "idle",
+        });
+      }, { timeout: 2_000 });
+
+      broker.controls.closeAllSockets();
+      const disconnectedSuccessor = await PDFDocument.create();
+      disconnectedSuccessor.setTitle("rebuilt while disconnected");
+      disconnectedSuccessor.addPage([320, 240]);
+      await writeFile(pdfPath, await disconnectedSuccessor.save({ useObjectStreams: false }));
+      const disconnectedCommit = await broker.replaceLiveDocument({
+        sessionId: opened.launch.sessionId,
+        outputPath: pdfPath,
+        observationEpoch: 2,
+      });
+      expect(disconnectedCommit).toMatchObject({ status: "committed", documentGeneration: 3 });
+      await vi.waitFor(() => expect(registeredSocket).toHaveBeenCalledTimes(2), { timeout: 3_000 });
+      await vi.waitFor(() => {
+        expect(published.at(-1)).toEqual({
+          generation: 3,
+          freshness: "current",
+          refreshStatus: "idle",
+        });
+      }, { timeout: 3_000 });
+      unsubscribe();
+      expect(materialized).toHaveLength(3);
+      expect(materialized[1]).not.toBe(materialized[0]);
+      expect(materialized[2]).not.toBe(materialized[1]);
+    } finally {
+      runtime?.dispose();
+      bridge?.dispose();
+      if (bridge === undefined) client?.dispose();
+      if (broker !== undefined && sessionId !== undefined) await broker.finish(sessionId);
+      await server?.close();
+      await rm(temporary, { recursive: true, force: true });
+    }
   });
 
   it("exchanges the one-use launch capability only in the extension host", async () => {

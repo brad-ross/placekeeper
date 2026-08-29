@@ -103,6 +103,7 @@ export function createRpcHostRuntime(
   const invalidations = new Set<(event: HostRuntimeInvalidation) => void>();
   const hostCommands = new Set<(command: HostRuntimeCommand) => void>();
   let identity: HostRuntimeIdentity | undefined;
+  let pendingInvalidation: HostRuntimeInvalidation | undefined;
   let disposed = false;
   const materializedPdfium = new Map<string, Promise<MaterializedViewerResource>>();
 
@@ -144,7 +145,8 @@ export function createRpcHostRuntime(
           ? {}
           : { previousGeneration: message.payload.previousGeneration as number }),
       };
-      for (const listener of invalidations) listener(event);
+      if (invalidations.size === 0) pendingInvalidation = event;
+      else for (const listener of invalidations) listener(event);
       return;
     }
     if (message.kind !== "response" || typeof message.requestId !== "string") return;
@@ -287,6 +289,11 @@ export function createRpcHostRuntime(
     reverseSyncTex: (input) => invoke("reverseSyncTex", input),
     subscribeInvalidations(listener) {
       invalidations.add(listener);
+      if (pendingInvalidation !== undefined) {
+        const event = pendingInvalidation;
+        pendingInvalidation = undefined;
+        listener(event);
+      }
       return () => invalidations.delete(listener);
     },
     subscribeHostCommands(listener) {
@@ -302,6 +309,7 @@ export function createRpcHostRuntime(
       materializedPdfium.clear();
       pending.clear();
       invalidations.clear();
+      pendingInvalidation = undefined;
       hostCommands.clear();
     },
   };

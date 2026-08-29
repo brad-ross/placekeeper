@@ -2,14 +2,18 @@
   "name": "placekeeper-vscode",
   "displayName": "Placekeeper",
   "description": "Review generated LaTeX PDFs with Placekeeper inside VS Code.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "publisher": "placekeeper-local",
   "icon": "assets/placekeeper.png",
   "private": true,
-  "engines": { "vscode": ">=1.95.0" },
-  "extensionKind": ["ui"],
-  "main": "./dist/extension.js",
+  "engines": {
+    "vscode": ">=1.95.0"
+  },
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./dist/extension.cjs",
   "activationEvents": [
     "onCommand:placekeeper.open",
     "onCommand:placekeeper.viewPdf",
@@ -35,7 +39,10 @@
       {
         "command": "placekeeper.viewPdf",
         "title": "Placekeeper: View PDF",
-        "icon": { "light": "assets/placekeeper.svg", "dark": "assets/placekeeper.svg" }
+        "icon": {
+          "light": "assets/placekeeper.svg",
+          "dark": "assets/placekeeper.svg"
+        }
       },
       {
         "command": "placekeeper.forwardSyncTex",
@@ -64,20 +71,50 @@
     ],
     "menus": {
       "explorer/context": [
-        { "command": "placekeeper.open", "when": "resourceExtname == .pdf", "group": "navigation" }
+        {
+          "command": "placekeeper.open",
+          "when": "resourceExtname == .pdf",
+          "group": "navigation"
+        }
       ],
       "editor/title": [
-        { "command": "placekeeper.viewPdf", "when": "resourceExtname == .pdf || editorLangId == latex", "group": "navigation" },
-        { "command": "placekeeper.forwardSyncTex", "when": "editorLangId == latex", "group": "navigation" }
+        {
+          "command": "placekeeper.viewPdf",
+          "when": "resourceExtname == .pdf || editorLangId == latex",
+          "group": "navigation"
+        },
+        {
+          "command": "placekeeper.forwardSyncTex",
+          "when": "editorLangId == latex",
+          "group": "navigation"
+        }
       ],
       "webview/context": [
-        { "command": "placekeeper.goToSource", "when": "webviewId == 'placekeeper.review'", "group": "navigation" },
-        { "command": "placekeeper.exportReviewedPdf", "when": "webviewId == 'placekeeper.review'", "group": "navigation" }
+        {
+          "command": "placekeeper.goToSource",
+          "when": "webviewId == 'placekeeper.review'",
+          "group": "navigation"
+        },
+        {
+          "command": "placekeeper.exportReviewedPdf",
+          "when": "webviewId == 'placekeeper.review'",
+          "group": "navigation"
+        }
       ]
     },
     "keybindings": [
-      { "command": "placekeeper.forwardSyncTex", "key": "ctrl+alt+f", "mac": "cmd+alt+f", "when": "editorLangId == latex" },
-      { "command": "placekeeper.goToSource", "key": "ctrl+alt+j", "mac": "cmd+alt+j", "when": "activeWebviewPanelId == 'placekeeper.review'" }
+      {
+        "command": "placekeeper.forwardSyncTex",
+        "key": "ctrl+alt+shift+j",
+        "mac": "cmd+alt+shift+j",
+        "when": "editorLangId == latex"
+      },
+      {
+        "command": "placekeeper.goToSource",
+        "key": "ctrl+alt+shift+j",
+        "mac": "cmd+alt+shift+j",
+        "when": "activeWebviewPanelId == 'placekeeper.review'"
+      }
     ],
     "configuration": {
       "title": "Placekeeper",
@@ -94,6 +131,13 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node ./copy-web-assets.mjs"
+    "build": "tsc -p tsconfig.json --noEmit && esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --outfile=dist/extension.cjs && node ./copy-web-assets.mjs"
+  },
+  "dependencies": {
+    "ws": "8.18.3"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.1",
+    "esbuild": "0.25.12"
   }
 }

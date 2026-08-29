@@ -463,4 +463,36 @@ describe("host-neutral review runtime", () => {
     unsubscribe?.();
     runtime.dispose();
   });
+
+  it("replays a VS Code invalidation that arrives before the webview subscribes", () => {
+    const listeners = new Set<(message: unknown) => void>();
+    const runtime = createRpcHostRuntime({
+      panelId: "panel_identifier_1234",
+      postMessage: vi.fn(),
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    });
+    const event = {
+      sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      generation: 2,
+      revision: 0,
+      reason: "generation",
+      previousGeneration: 1,
+    } as const;
+    for (const listener of listeners) listener({
+      protocol: HOST_RUNTIME_PROTOCOL,
+      version: HOST_RUNTIME_VERSION,
+      kind: "event",
+      event: "session-invalidated",
+      panelId: "panel_identifier_1234",
+      payload: event,
+    });
+
+    const received: HostRuntimeInvalidation[] = [];
+    runtime.subscribeInvalidations((value) => received.push(value));
+    expect(received).toEqual([event]);
+    runtime.dispose();
+  });
 });
