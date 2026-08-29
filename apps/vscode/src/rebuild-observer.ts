@@ -12,7 +12,7 @@ export interface RebuildObserverOptions<Result> {
   readonly outputPath: string;
   readonly validate: (input: RebuildValidationInput) => Promise<Result>;
   readonly markPossiblyStale: (input: { readonly observationEpoch: number }) => Promise<void>;
-  readonly onCurrentResult?: (result: Result) => void;
+  readonly onCurrentResult?: (result: Result, input: RebuildValidationInput) => void;
   readonly initialEpoch?: number;
 }
 
@@ -95,7 +95,11 @@ export class RebuildObserver<Result> {
       return;
     }
     if (this.#disposed || epoch !== this.#latestEpoch) return;
-    this.#onCurrentResult?.(result);
+    this.#onCurrentResult?.(result, {
+      outputPath: this.#outputPath,
+      observationEpoch: epoch,
+      reason,
+    });
   }
 
   async #markStale(observationEpoch: number): Promise<void> {

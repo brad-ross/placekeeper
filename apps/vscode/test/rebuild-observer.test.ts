@@ -4,10 +4,12 @@ import { RebuildObserver } from "../src/rebuild-observer.js";
 describe("rebuild observer", () => {
   it("coalesces output event varieties into latest-only candidate epochs", async () => {
     const validate = vi.fn(async () => ({ status: "committed" as const }));
+    const results: unknown[] = [];
     const observer = new RebuildObserver({
       outputPath: "/work/paper.pdf",
       validate,
       markPossiblyStale: vi.fn(async () => undefined),
+      onCurrentResult: (result, input) => results.push({ result, input }),
     });
     expect(observer.noteFileEvent("/work/unrelated.pdf")).toBeUndefined();
     expect(observer.noteFileEvent("/work/paper.pdf")).toBe(1);
@@ -16,6 +18,10 @@ describe("rebuild observer", () => {
     await observer.flush();
     expect(validate).toHaveBeenCalledTimes(1);
     expect(validate).toHaveBeenCalledWith({ outputPath: "/work/paper.pdf", observationEpoch: 3, reason: "watcher" });
+    expect(results).toEqual([{
+      result: { status: "committed" },
+      input: { outputPath: "/work/paper.pdf", observationEpoch: 3, reason: "watcher" },
+    }]);
   });
 
   it("starts after a persisted broker epoch on a fresh extension host", async () => {

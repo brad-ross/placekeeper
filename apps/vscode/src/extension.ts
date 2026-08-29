@@ -45,6 +45,12 @@ import {
   type UriLike,
 } from "./local-workspace.js";
 import { RebuildObserver } from "./rebuild-observer.js";
+import {
+  RebuildNavigationCoordinator,
+  preferredSavedEditor,
+  rebuildNavigationAction,
+  type SourceCursorLocation,
+} from "./rebuild-navigation.js";
 import { ReviewPanelController, type ReviewBinding } from "./review-panel-controller.js";
 import { buildReviewWebviewHtml, parseSharedAssetManifest, reviewPanelOptions } from "./review-panel.js";
 import { openSourceEditor, sourceLineNumber, sourceLineReveal } from "./source-navigation.js";
@@ -174,13 +180,11 @@ async function chooseBinding(commandArgs: readonly unknown[]): Promise<ReviewBin
   };
 }
 
-function sourceLocation(binding: ReviewBinding): {
-  readonly sourcePath: string;
-  readonly line: number;
-  readonly column: number;
-} | undefined {
+function editorSourceLocation(
+  binding: ReviewBinding,
+  editor: vscode.TextEditor | undefined,
+): SourceCursorLocation | undefined {
   if (!vscode.workspace.isTrusted) return undefined;
-  const editor = vscode.window.activeTextEditor;
   if (editor?.document.uri.scheme !== "file" || !isLatexSourcePath(editor.document.uri.fsPath) ||
     (binding.sourceRoot !== undefined && !isPathInside(binding.sourceRoot, editor.document.uri.fsPath))) return undefined;
   return {
@@ -188,6 +192,21 @@ function sourceLocation(binding: ReviewBinding): {
     line: editor.selection.active.line + 1,
     column: editor.selection.active.character + 1,
   };
+}
+
+function sourceLocation(binding: ReviewBinding): SourceCursorLocation | undefined {
+  return editorSourceLocation(binding, vscode.window.activeTextEditor);
+}
+
+function savedSourceLocation(
+  binding: ReviewBinding,
+  document: vscode.TextDocument,
+): SourceCursorLocation | undefined {
+  return editorSourceLocation(binding, preferredSavedEditor(
+    vscode.window.activeTextEditor,
+    vscode.window.visibleTextEditors,
+    document.uri.toString(),
+  ));
 }
 
 async function openSourceLocation(
@@ -351,6 +370,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const resourceUri = (name: string) => panel.webview.asWebviewUri(vscode.Uri.file(resolve(webRoot, name))).toString();
     const panelId = randomBytes(18).toString("base64url");
     let runtime: PanelRuntime;
+    const rebuildNavigation = new RebuildNavigationCoordinator();
     const client = await attachStage("runtime", () => createLoopbackRuntimeClient({
       panelId,
       launch: exchanged,
@@ -359,7 +379,7 @@ export function activate(context: vscode.ExtensionContext): void {
         const path = await materializePrivatePdfSnapshot({ directory: snapshotRoot, bytes, digest, byteLength });
         return panel.webview.asWebviewUri(vscode.Uri.file(path)).toString();
       },
-      forwardSourceLocation: () => sourceLocation(binding),
+      forwardSourceLocation: () => rebuildNavigation.forwardSourceLocation(() => sourceLocation(binding)),
       sourceNavigationAllowed: () => vscode.workspace.isTrusted,
       openSourceLocation: async (location) =>
         openSourceLocation(binding, location, sourceHighlight, panel.viewColumn),
@@ -376,10 +396,25 @@ export function activate(context: vscode.ExtensionContext): void {
       validate: ({ outputPath, observationEpoch }) => observeLiveDocument(exchanged, { outputPath, observationEpoch }),
       markPossiblyStale: ({ observationEpoch }) =>
         markLiveDocumentPossiblyStale(exchanged, { observationEpoch }).then(() => undefined),
-      onCurrentResult: (result) => {
-        if (typeof result === "object" && result !== null && (result as { status?: unknown }).status === "committed") {
-          observer.noteCurrent();
-        }
+      onCurrentResult: (result, input) => {
+        if (typeof result !== "object" || result === null) return;
+        const status = (result as { status?: unknown }).status;
+        const action = rebuildNavigationAction(status, input.reason, rebuildNavigation.canRetryCurrent);
+        if (action === "ignore") return;
+        if (!rebuildNavigation.hasPending) { observer.noteCurrent(); return; }
+        void rebuildNavigation.revealAfterRebuild(async () => {
+          const navigationStatus = await revealForwardSyncTexTarget(panel, runtime);
+          if (navigationStatus === "ok") {
+            panel.reveal(panel.viewColumn, false);
+            activePanel = panel;
+            return "revealed";
+          }
+          return forwardSyncTexRetryable({ status: navigationStatus }) ? "retry" : "terminal";
+        }).then((outcome) => {
+          if (outcome !== "retry" && !rebuildNavigation.hasPending) observer.noteCurrent();
+        }, () => {
+          // Keep the source cursor pending; a later watcher event or stale tick can retry.
+        });
       },
     });
     const registrationId = randomBytes(18).toString("base64url");
@@ -399,6 +434,8 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.workspace.onDidSaveTextDocument((document) => {
         if (document.uri.scheme === "file" && binding.sourceRoot !== undefined &&
           isLatexSourcePath(document.uri.fsPath) && isPathInside(binding.sourceRoot, document.uri.fsPath)) {
+          const location = savedSourceLocation(binding, document);
+          if (location !== undefined) rebuildNavigation.noteSourceSaved(location);
           void observer.noteSourceSaved();
         }
       }),
