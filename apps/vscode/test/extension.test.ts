@@ -46,8 +46,98 @@ import {
   VersionedWebviewBridge,
 } from "../src/webview-bridge.js";
 import { containedSourcePath } from "../src/latex-project.js";
+import {
+  openSourceEditor,
+  preferredVisibleSourceEditor,
+  sourceLineNumber,
+  sourceLineReveal,
+} from "../src/source-navigation.js";
 
 describe("VS Code local host adapter", () => {
+  it("reuses the editor group where the reverse SyncTeX source is already visible", () => {
+    const sourceDocument = { uri: { toString: () => "file:///work/paper.tex" } };
+    expect(preferredVisibleSourceEditor([
+      { document: { uri: { toString: () => "file:///work/notes.tex" } }, viewColumn: 2 },
+      { document: sourceDocument, viewColumn: 1 },
+    ], sourceDocument.uri)?.viewColumn).toBe(1);
+  });
+
+  it("opens a hidden source tab in its existing group instead of beside the PDF", async () => {
+    const sourceDocument = { uri: { toString: () => "file:///work/paper.tex" } };
+    const openTextDocument = vi.fn(async () => sourceDocument);
+    const showTextDocument = vi.fn(async (document, options) => ({ document, viewColumn: options.viewColumn }));
+
+    const editor = await openSourceEditor({
+      sourceUri: sourceDocument.uri,
+      visibleEditors: [{
+        document: { uri: { toString: () => "file:///work/notes.tex" } },
+        viewColumn: 1,
+      }],
+      tabGroups: [
+        { viewColumn: 1, tabs: [{ input: { uri: sourceDocument.uri } }] },
+        { viewColumn: 2, tabs: [{ input: { uri: { toString: () => "file:///work/paper.pdf" } } }] },
+      ],
+      avoidViewColumn: 2,
+      tabResourceUri: (input) => (input as { uri?: typeof sourceDocument.uri }).uri,
+      openTextDocument,
+      showTextDocument,
+    });
+
+    expect(openTextDocument).toHaveBeenCalledOnce();
+    expect(showTextDocument).toHaveBeenCalledWith(sourceDocument, {
+      viewColumn: 1,
+      preview: true,
+      preserveFocus: false,
+    });
+    expect(editor.viewColumn).toBe(1);
+  });
+
+  it("does not reopen a source document that is already visible", async () => {
+    const sourceDocument = { uri: { toString: () => "file:///work/paper.tex" } };
+    const visibleEditor = { document: sourceDocument, viewColumn: 1 };
+    const openTextDocument = vi.fn(async () => sourceDocument);
+    const showTextDocument = vi.fn(async (document, options) => ({ document, viewColumn: options.viewColumn }));
+
+    await openSourceEditor({
+      sourceUri: sourceDocument.uri,
+      visibleEditors: [visibleEditor],
+      tabGroups: [],
+      avoidViewColumn: 2,
+      tabResourceUri: () => undefined,
+      openTextDocument,
+      showTextDocument,
+    });
+
+    expect(openTextDocument).not.toHaveBeenCalled();
+    expect(showTextDocument).toHaveBeenCalledWith(sourceDocument, {
+      viewColumn: 1,
+      preview: true,
+      preserveFocus: false,
+    });
+  });
+
+  it("reveals an exact SyncTeX column and highlights its source character", () => {
+    expect(sourceLineReveal("This is the source line.", 8)).toEqual({
+      character: 8,
+      highlightStart: 8,
+      highlightEnd: 9,
+    });
+  });
+
+  it("highlights the mapped source line when SyncTeX has no column", () => {
+    expect(sourceLineReveal("  This is the source line.")).toEqual({
+      character: 2,
+      highlightStart: 0,
+      highlightEnd: 26,
+    });
+  });
+
+  it("rejects stale SyncTeX lines and exact columns instead of clamping them", () => {
+    expect(sourceLineNumber(20, 21)).toBeUndefined();
+    expect(sourceLineNumber(20, 0)).toBeUndefined();
+    expect(sourceLineReveal("short", 6)).toBeUndefined();
+  });
+
   it("resolves broker-relative SyncTeX sources only inside the approved root", () => {
     expect(containedSourcePath("/work/project", "chapters/one.tex"))
       .toBe("/work/project/chapters/one.tex");

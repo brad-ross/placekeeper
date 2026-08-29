@@ -31,7 +31,8 @@ export function parseSyncTexOutput(output: string): SyncTexCandidate[] {
         const value = Number(current[key]);
         return Number.isFinite(value) ? value : undefined;
       };
-      const column = optionalInteger("Column");
+      const parsedColumn = optionalInteger("Column");
+      const column = parsedColumn !== undefined && parsedColumn >= 0 ? parsedColumn : undefined;
       const page = optionalInteger("Page");
       const x = optionalNumber("x");
       const y = optionalNumber("y");

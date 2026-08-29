@@ -13,14 +13,16 @@ declare module "vscode" {
     asAbsolutePath(path: string): string;
   }
   export const env: { readonly remoteName?: string; readonly uiKind: UIKind };
-  export interface TextDocument { readonly uri: Uri; readonly languageId: string }
+  export interface TextLine { readonly text: string; readonly range: Range }
+  export interface TextDocument { readonly uri: Uri; readonly languageId: string; readonly lineCount: number; lineAt(line: number): TextLine }
   export interface Position { readonly line: number; readonly character: number }
   export const Position: new (line: number, character: number) => Position;
   export interface Range { readonly start: Position; readonly end: Position }
   export const Range: new (start: Position, end: Position) => Range;
   export interface Selection { readonly anchor: Position; readonly active: Position }
   export const Selection: new (anchor: Position, active: Position) => Selection;
-  export interface TextEditor { readonly document: TextDocument; selection: Selection; revealRange(range: Range): void }
+  export interface TextEditorDecorationType extends Disposable {}
+  export interface TextEditor { readonly document: TextDocument; readonly viewColumn?: number; selection: Selection; revealRange(range: Range, revealType?: number): void; setDecorations(decorationType: TextEditorDecorationType, ranges: readonly Range[]): void }
   export interface WorkspaceFolder { readonly uri: Uri }
   export interface WorkspaceConfiguration {
     get<T>(key: string): T | undefined;
@@ -63,20 +65,22 @@ declare module "vscode" {
   export interface WebviewPanelSerializer { deserializeWebviewPanel(webviewPanel: WebviewPanel, state: unknown): Promise<void> }
   export interface UriHandler { handleUri(uri: Uri): unknown }
   export interface Tab { readonly input: unknown }
-  export interface TabGroup { readonly activeTab?: Tab }
-  export interface TabGroups { readonly activeTabGroup: TabGroup }
+  export interface TabGroup { readonly activeTab?: Tab; readonly viewColumn: number; readonly tabs: readonly Tab[] }
+  export interface TabGroups { readonly activeTabGroup: TabGroup; readonly all: readonly TabGroup[] }
   export const window: {
     readonly activeTextEditor?: TextEditor;
+    readonly visibleTextEditors: readonly TextEditor[];
     readonly tabGroups: TabGroups;
     showErrorMessage(message: string, ...actions: string[]): Promise<string | undefined>;
     showWarningMessage(message: string, ...actions: string[]): Promise<string | undefined>;
     showInformationMessage(message: string, ...actions: string[]): Promise<string | undefined>;
     showQuickPick(items: readonly string[], options: { readonly title: string; readonly placeHolder: string }): Promise<string | undefined>;
     showOpenDialog(options: { readonly canSelectMany: false; readonly canSelectFiles: true; readonly canSelectFolders: false; readonly filters: Readonly<Record<string, readonly string[]>> }): Promise<readonly Uri[] | undefined>;
+    createTextEditorDecorationType(options: { readonly backgroundColor?: ThemeColor; readonly borderRadius?: string }): TextEditorDecorationType;
     createWebviewPanel(viewType: string, title: string, column: number, options: unknown): WebviewPanel;
     registerWebviewPanelSerializer(viewType: string, serializer: WebviewPanelSerializer): Disposable;
     registerUriHandler(handler: UriHandler): Disposable;
-    showTextDocument(document: TextDocument, options?: { readonly preview?: boolean; readonly preserveFocus?: boolean }): Promise<TextEditor>;
+    showTextDocument(document: TextDocument, options?: { readonly viewColumn?: number; readonly preview?: boolean; readonly preserveFocus?: boolean }): Promise<TextEditor>;
   };
   export const commands: {
     registerCommand(command: string, callback: (...args: unknown[]) => unknown): Disposable;
@@ -86,4 +90,6 @@ declare module "vscode" {
   export interface Extension<T = unknown> { readonly packageJSON: { readonly version?: string }; activate(): Promise<T> }
   export const extensions: { getExtension<T = unknown>(id: string): Extension<T> | undefined };
   export const ViewColumn: { readonly Active: number; readonly Beside: number };
+  export class ThemeColor { constructor(id: string) }
+  export const TextEditorRevealType: { readonly InCenterIfOutsideViewport: number };
 }

@@ -51,6 +51,12 @@ async function generatedOutputFixture(
 }
 
 describe("SyncTeX advisory hints", () => {
+  it("treats SyncTeX's negative column sentinel as unknown", () => {
+    expect(parseSyncTexOutput(
+      "Output:/work/paper.pdf\nInput:/work/paper.tex\nLine:7\nColumn:-1\n",
+    )).toEqual([{ path: "/work/paper.tex", line: 7 }]);
+  });
+
   it("parses multiple candidates and safely returns the contained relative source hint", async () => {
     const root = await fixture();
     const output = `SyncTeX result begin\nOutput:${join(root, "paper.tex")}\nLine:3\nColumn:1\nPage:1\nx:72\ny:144\nSyncTeX result end\n`;

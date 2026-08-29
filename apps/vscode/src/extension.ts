@@ -47,6 +47,7 @@ import {
 import { RebuildObserver } from "./rebuild-observer.js";
 import { ReviewPanelController, type ReviewBinding } from "./review-panel-controller.js";
 import { buildReviewWebviewHtml, parseSharedAssetManifest, reviewPanelOptions } from "./review-panel.js";
+import { openSourceEditor, sourceLineNumber, sourceLineReveal } from "./source-navigation.js";
 import {
   WEBVIEW_RPC_PROTOCOL,
   WEBVIEW_RPC_VERSION,
@@ -64,6 +65,12 @@ const PANEL_TYPE = "placekeeper.review";
 const PANEL_BINDINGS_KEY = "placekeeper.panel-bindings.v1";
 const COMPATIBILITY_SETUP_KEY = "placekeeper.latex-workshop-setup.v1";
 const REVALIDATE_INTERVAL_MS = 30_000;
+const SOURCE_HIGHLIGHT_MS = 2_000;
+
+interface SourceHighlightState {
+  readonly decoration: vscode.TextEditorDecorationType;
+  readonly timers: Map<vscode.TextEditor, ReturnType<typeof setTimeout>>;
+}
 
 type PanelAttachStage = "launch" | "exchange" | "storage" | "assets" | "runtime" | "webview";
 
@@ -186,6 +193,8 @@ function sourceLocation(binding: ReviewBinding): {
 async function openSourceLocation(
   binding: ReviewBinding,
   location: { readonly sourcePath: string; readonly line: number; readonly column?: number },
+  highlight: SourceHighlightState,
+  avoidViewColumn?: number,
 ): Promise<void> {
   const sourcePath = binding.sourceRoot === undefined
     ? undefined
@@ -193,11 +202,45 @@ async function openSourceLocation(
   if (!vscode.workspace.isTrusted || sourcePath === undefined) {
     throw new Error("Source navigation is unavailable in this workspace");
   }
-  const document = await vscode.workspace.openTextDocument(vscode.Uri.file(sourcePath));
-  const editor = await vscode.window.showTextDocument(document, { preview: true, preserveFocus: false });
-  const position = new vscode.Position(Math.max(0, location.line - 1), Math.max(0, (location.column ?? 1) - 1));
+  const sourceUri = vscode.Uri.file(sourcePath);
+  const editor = await openSourceEditor({
+    sourceUri,
+    visibleEditors: vscode.window.visibleTextEditors,
+    tabGroups: vscode.window.tabGroups.all,
+    ...(avoidViewColumn === undefined ? {} : { avoidViewColumn }),
+    tabResourceUri,
+    openTextDocument: () => vscode.workspace.openTextDocument(sourceUri),
+    showTextDocument: (document, options) => vscode.window.showTextDocument(document, options),
+  });
+  const lineNumber = sourceLineNumber(editor.document.lineCount, location.line);
+  if (lineNumber === undefined) {
+    void vscode.window.showWarningMessage(
+      "This SyncTeX location no longer matches the current source. Rebuild the PDF and try again.",
+    );
+    return;
+  }
+  const line = editor.document.lineAt(lineNumber);
+  const reveal = sourceLineReveal(line.text, location.column);
+  if (reveal === undefined) {
+    void vscode.window.showWarningMessage(
+      "This SyncTeX location no longer matches the current source. Rebuild the PDF and try again.",
+    );
+    return;
+  }
+  const position = new vscode.Position(lineNumber, reveal.character);
+  const highlightRange = new vscode.Range(
+    new vscode.Position(lineNumber, reveal.highlightStart),
+    new vscode.Position(lineNumber, reveal.highlightEnd),
+  );
   editor.selection = new vscode.Selection(position, position);
-  editor.revealRange(new vscode.Range(position, position));
+  editor.revealRange(highlightRange, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+  const existingTimer = highlight.timers.get(editor);
+  if (existingTimer !== undefined) clearTimeout(existingTimer);
+  editor.setDecorations(highlight.decoration, [highlightRange]);
+  highlight.timers.set(editor, setTimeout(() => {
+    editor.setDecorations(highlight.decoration, []);
+    highlight.timers.delete(editor);
+  }, SOURCE_HIGHLIGHT_MS));
 }
 
 async function revealForwardSyncTexTarget(
@@ -228,6 +271,20 @@ async function revealForwardSyncTexTarget(
 export function activate(context: vscode.ExtensionContext): void {
   const runtimes = new WeakMap<vscode.WebviewPanel, PanelRuntime>();
   const registrations = new ScopedExternalLaunchRegistrations();
+  const sourceHighlight: SourceHighlightState = {
+    decoration: vscode.window.createTextEditorDecorationType({
+      backgroundColor: new vscode.ThemeColor("editor.rangeHighlightBackground"),
+      borderRadius: "2px",
+    }),
+    timers: new Map(),
+  };
+  context.subscriptions.push({
+    dispose: () => {
+      for (const timer of sourceHighlight.timers.values()) clearTimeout(timer);
+      sourceHighlight.timers.clear();
+      sourceHighlight.decoration.dispose();
+    },
+  });
   const windowId = randomBytes(18).toString("base64url");
   let activePanel: vscode.WebviewPanel | undefined;
 
@@ -304,7 +361,8 @@ export function activate(context: vscode.ExtensionContext): void {
       },
       forwardSourceLocation: () => sourceLocation(binding),
       sourceNavigationAllowed: () => vscode.workspace.isTrusted,
-      openSourceLocation: async (location) => openSourceLocation(binding, location),
+      openSourceLocation: async (location) =>
+        openSourceLocation(binding, location, sourceHighlight, panel.viewColumn),
     }));
     if (panelDisposed) {
       client.dispose();
