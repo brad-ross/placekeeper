@@ -107,7 +107,6 @@ interface PanelRuntime {
   readonly client: TrustedRuntimeClient;
   readonly registrationId: string;
   flushTimer?: ReturnType<typeof setTimeout>;
-  lastSourceLocation?: { readonly sourcePath: string; readonly line: number; readonly column?: number };
 }
 
 function workspaceError(): LaunchErrorPresentation | undefined {
@@ -304,10 +303,8 @@ export function activate(context: vscode.ExtensionContext): void {
         return panel.webview.asWebviewUri(vscode.Uri.file(path)).toString();
       },
       forwardSourceLocation: () => sourceLocation(binding),
-      openSourceLocation: async (location) => {
-        runtime.lastSourceLocation = location;
-        await openSourceLocation(binding, location);
-      },
+      sourceNavigationAllowed: () => vscode.workspace.isTrusted,
+      openSourceLocation: async (location) => openSourceLocation(binding, location),
     }));
     if (panelDisposed) {
       client.dispose();
@@ -476,11 +473,18 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("placekeeper.goToSource", async () => {
       const runtime = activePanel === undefined ? undefined : runtimes.get(activePanel);
       if (!vscode.workspace.isTrusted) { await vscode.window.showWarningMessage("Trust this workspace to open LaTeX source."); return; }
-      if (runtime?.lastSourceLocation === undefined) {
-        await vscode.window.showInformationMessage("Choose Go to Source from a PDF location first.");
+      if (activePanel === undefined || runtime === undefined) {
+        await vscode.window.showInformationMessage("Open a generated PDF in Placekeeper first.");
         return;
       }
-      await openSourceLocation(runtime.binding, runtime.lastSourceLocation);
+      await activePanel.webview.postMessage({
+        protocol: WEBVIEW_RPC_PROTOCOL,
+        version: WEBVIEW_RPC_VERSION,
+        kind: "event",
+        event: "host-command",
+        panelId: runtime.client.identity.panelId,
+        payload: { command: "reverse-synctex" },
+      });
     }),
     vscode.commands.registerCommand("placekeeper.reattach", async () => {
       if (activePanel === undefined) return;

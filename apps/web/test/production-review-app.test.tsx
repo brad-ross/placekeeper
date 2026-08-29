@@ -6,6 +6,9 @@ import { createReviewState } from "../../../packages/core/src/review-model.js";
 import { createReviewStateSummary } from "../../../packages/core/src/live-context.js";
 import {
   applyHostForwardSyncTex,
+  ReverseSyncTexRequestCoordinator,
+  reverseSyncTexError,
+  reverseSyncTexAtCurrentLocation,
   initiallyPortableItemIds,
   canonicalStateSupersedes,
   firstUnresolvedReviewItemId,
@@ -58,6 +61,60 @@ describe("one production review tree", () => {
       pageIndex: -1,
       point: { x: 72, y: 144 },
     })).resolves.toBe(false);
+  });
+
+  it("starts reverse SyncTeX from the current visible PDF anchor", async () => {
+    const reverseSyncTex = vi.fn(async () => ({ status: "ok" }));
+    const navigation = {
+      captureLocation: vi.fn(() => ({
+        pageIndex: 2,
+        anchor: { x: 72, y: 144 },
+        alignment: { xPercent: 50, yPercent: 50 },
+        zoom: 1.25,
+      })),
+    };
+
+    await expect(reverseSyncTexAtCurrentLocation(navigation, reverseSyncTex)).resolves.toBe(true);
+    expect(reverseSyncTex).toHaveBeenCalledWith({
+      pageIndex: 2,
+      point: { x: 72, y: 144 },
+    });
+    await expect(reverseSyncTexAtCurrentLocation(
+      { captureLocation: () => null },
+      reverseSyncTex,
+    )).resolves.toBe(false);
+    await expect(reverseSyncTexAtCurrentLocation(
+      navigation,
+      async () => ({ status: "missing" }),
+    )).resolves.toBe(false);
+  });
+
+  it("keeps a newer successful reverse SyncTeX result when an older request fails later", async () => {
+    const coordinator = new ReverseSyncTexRequestCoordinator();
+    const errors: Array<string | null> = [];
+    let resolveOlder: ((value: unknown) => void) | undefined;
+    const older = coordinator.run(
+      () => new Promise((resolve) => { resolveOlder = resolve; }),
+      { pageIndex: 0, point: { x: 10, y: 20 } },
+      (error) => errors.push(error),
+    );
+    await coordinator.run(
+      async () => ({ status: 'ok' }),
+      { pageIndex: 1, point: { x: 30, y: 40 } },
+      (error) => errors.push(error),
+    );
+    resolveOlder?.({ status: 'missing' });
+    await older;
+
+    expect(errors.at(-1)).toBeNull();
+  });
+
+  it("explains actionable reverse SyncTeX failures", () => {
+    expect(reverseSyncTexError({ status: 'missing' })).toContain('Rebuild');
+    expect(reverseSyncTexError({ status: 'stale' })).toContain('stale');
+    expect(reverseSyncTexError({ status: 'unavailable-tool' })).toContain('unavailable');
+    expect(reverseSyncTexError({ status: 'failed', reason: 'workspace-untrusted' })).toContain('Trust');
+    expect(reverseSyncTexError({ status: 'ok' })).toBeNull();
   });
 
   it("routes the VS Code reattach command to the first canonical unresolved item", () => {

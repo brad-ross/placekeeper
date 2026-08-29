@@ -398,6 +398,7 @@ function RuntimeProductionReviewApp(props: {
     readonly pageIndex: number;
     readonly point: { readonly x: number; readonly y: number };
   }>();
+  const [hostReverseSyncTexRequestToken, setHostReverseSyncTexRequestToken] = useState(0);
 
   useEffect(() => subscribeRuntimeDocumentSource(props.runtime, props.initial, (snapshot) => {
     setLoaded(snapshot.loaded);
@@ -406,6 +407,10 @@ function RuntimeProductionReviewApp(props: {
   useEffect(() => props.runtime.subscribeHostCommands?.((command) => {
     if (command.command === "reattach") {
       setHostReattachRequestToken((token) => token + 1);
+      return;
+    }
+    if (command.command === "reverse-synctex") {
+      setHostReverseSyncTexRequestToken((token) => token + 1);
       return;
     }
     setHostForwardSyncTexRequest((current) => ({
@@ -425,6 +430,7 @@ function RuntimeProductionReviewApp(props: {
     resourcePolicy={loaded.resourcePolicy}
     generationRefreshStatus={refreshStatus}
     hostReattachRequestToken={hostReattachRequestToken}
+    hostReverseSyncTexRequestToken={hostReverseSyncTexRequestToken}
     {...(hostForwardSyncTexRequest === undefined ? {} : { hostForwardSyncTexRequest })}
     {...(props.runtime.host === "vscode"
       ? { onReverseSyncTex: (input: unknown) => props.runtime.reverseSyncTex(input) }

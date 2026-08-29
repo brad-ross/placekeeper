@@ -253,6 +253,7 @@ export interface LoopbackRuntimeClientOptions {
     readonly line: number;
     readonly column?: number;
   } | undefined;
+  readonly sourceNavigationAllowed?: () => boolean;
   readonly openSourceLocation?: (location: {
     readonly sourcePath: string;
     readonly line: number;
@@ -406,6 +407,9 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
           operationToken: randomBytes(18).toString("base64url"),
         };
       } else if (method === "reverseSyncTex") {
+        if (options.sourceNavigationAllowed?.() === false) {
+          return { status: "failed", reason: "workspace-untrusted" };
+        }
         trustedPayload = {
           ...(isObject(payload) ? payload : {}),
           operationToken: randomBytes(18).toString("base64url"),

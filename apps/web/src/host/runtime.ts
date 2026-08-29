@@ -33,6 +33,7 @@ export interface HostRuntimeInvalidation extends HostRuntimeIdentity {
 
 export type HostRuntimeCommand =
   | { readonly command: "reattach" }
+  | { readonly command: "reverse-synctex" }
   | {
       readonly command: "forward-synctex";
       readonly pageIndex: number;

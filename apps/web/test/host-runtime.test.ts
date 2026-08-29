@@ -455,10 +455,19 @@ describe("host-neutral review runtime", () => {
       panelId: "panel_identifier_1234",
       payload: { command: "forward-synctex", pageIndex: -1, point: { x: 72, y: 144 } },
     });
+    publish({
+      protocol: HOST_RUNTIME_PROTOCOL,
+      version: HOST_RUNTIME_VERSION,
+      kind: "event",
+      event: "host-command",
+      panelId: "panel_identifier_1234",
+      payload: { command: "reverse-synctex" },
+    });
 
     expect(commands).toEqual([
       { command: "reattach" },
       { command: "forward-synctex", pageIndex: 2, point: { x: 72, y: 144 } },
+      { command: "reverse-synctex" },
     ]);
     unsubscribe?.();
     runtime.dispose();
@@ -493,6 +502,31 @@ describe("host-neutral review runtime", () => {
     const received: HostRuntimeInvalidation[] = [];
     runtime.subscribeInvalidations((value) => received.push(value));
     expect(received).toEqual([event]);
+    runtime.dispose();
+  });
+
+  it("replays a VS Code host command that arrives before the webview subscribes", () => {
+    const listeners = new Set<(message: unknown) => void>();
+    const runtime = createRpcHostRuntime({
+      panelId: "panel_identifier_1234",
+      postMessage: vi.fn(),
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    });
+    for (const listener of listeners) listener({
+      protocol: HOST_RUNTIME_PROTOCOL,
+      version: HOST_RUNTIME_VERSION,
+      kind: "event",
+      event: "host-command",
+      panelId: "panel_identifier_1234",
+      payload: { command: "reverse-synctex" },
+    });
+
+    const commands: unknown[] = [];
+    runtime.subscribeHostCommands?.((command) => commands.push(command));
+    expect(commands).toEqual([{ command: "reverse-synctex" }]);
     runtime.dispose();
   });
 });

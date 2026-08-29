@@ -515,6 +515,33 @@ describe("VS Code local host adapter", () => {
     expect(forwardSyncTexStatus({ status: "other" })).toBeUndefined();
   });
 
+  it("does not run reverse SyncTeX for an untrusted workspace", async () => {
+    const fetch = vi.fn();
+    const opened = vi.fn(async () => undefined);
+    const client = createLoopbackRuntimeClient({
+      panelId: "panel_identifier_1234",
+      launch: {
+        origin: "http://127.0.0.1:49152",
+        sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        credential: "c".repeat(43),
+      },
+      assets: { pdfiumWasm: "vscode-webview://authority/pdfium.wasm" },
+      materializeDocument: async () => "vscode-webview://authority/paper.pdf",
+      sourceNavigationAllowed: () => false,
+      openSourceLocation: opened,
+      fetch,
+    });
+
+    await expect(client.invoke(
+      "reverseSyncTex",
+      { pageIndex: 0, point: { x: 1, y: 2 } },
+      new AbortController().signal,
+    )).resolves.toEqual({ status: "failed", reason: "workspace-untrusted" });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(opened).not.toHaveBeenCalled();
+    client.dispose();
+  });
+
   it("materializes a rebuilt PDF after an originless VS Code control notification", async () => {
     const temporary = await mkdtemp(resolve(tmpdir(), "placekeeper-vscode-control-"));
     let server: Awaited<ReturnType<typeof startHttpServer>> | undefined;

@@ -13,13 +13,39 @@ import {
 } from '../src/pdf/viewer-document-ids.js';
 import {
   fixedViewerClientRect,
+  isReverseSyncTexPointerGesture,
   normalizePageClientPoint,
   recordViewerPointerButton,
+  ReverseSyncTexPointerGesture,
   ViewerPrimaryClickGesture,
   viewerPointerButton,
 } from '../src/pdf/viewer-interaction-events.js';
 
 describe('viewer page interaction coordinates', () => {
+  it('recognizes the platform reverse-SyncTeX modifier without stealing macOS context-click', () => {
+    expect(isReverseSyncTexPointerGesture({ button: 0, metaKey: true, ctrlKey: false }, 'MacIntel')).toBe(true);
+    expect(isReverseSyncTexPointerGesture({ button: 0, metaKey: false, ctrlKey: true }, 'MacIntel')).toBe(false);
+    expect(isReverseSyncTexPointerGesture({ button: 0, metaKey: false, ctrlKey: true }, 'Win32')).toBe(true);
+    expect(isReverseSyncTexPointerGesture({ button: 0, metaKey: false, ctrlKey: false }, 'Win32')).toBe(false);
+    expect(isReverseSyncTexPointerGesture({ button: 2, metaKey: true, ctrlKey: false }, 'MacIntel')).toBe(false);
+  });
+
+  it('captures reverse SyncTeX clicks while rejecting drags and clearing cancelled pointers', () => {
+    const gesture = new ReverseSyncTexPointerGesture();
+    gesture.pointerDown(1, 100, 100);
+    expect(gesture.pointerUp(1, 103, 102)).toEqual({ activate: true });
+
+    gesture.pointerDown(2, 100, 100);
+    gesture.pointerMove(2, 110, 100);
+    expect(gesture.pointerUp(2, 101, 100)).toEqual({ activate: false });
+
+    gesture.pointerDown(3, 100, 100);
+    gesture.cancel(3);
+    expect(gesture.pointerUp(3, 100, 100)).toBeUndefined();
+    gesture.pointerDown(3, 200, 200);
+    expect(gesture.pointerUp(3, 200, 200)).toEqual({ activate: true });
+  });
+
   it('normalizes client points with intrinsic and document rotation combined exactly once', () => {
     const pageSize = { width: 100, height: 200 };
     const rotation = combinePageRotation(Rotation.Degree90, Rotation.Degree180);

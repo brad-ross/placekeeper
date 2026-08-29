@@ -179,6 +179,11 @@ export interface ProductionSessionApi {
   scope(signal?: AbortSignal): Promise<ProductionScope>;
 }
 
+interface ReverseSyncTexRequest {
+  readonly pageIndex: number;
+  readonly point: { readonly x: number; readonly y: number };
+}
+
 export interface ProductionReviewAppProps {
   readonly session: ProductionSession;
   readonly initialState: ReviewState;
@@ -195,10 +200,8 @@ export interface ProductionReviewAppProps {
     readonly pageIndex: number;
     readonly point: { readonly x: number; readonly y: number };
   };
-  readonly onReverseSyncTex?: (input: {
-    readonly pageIndex: number;
-    readonly point: { readonly x: number; readonly y: number };
-  }) => Promise<unknown>;
+  readonly hostReverseSyncTexRequestToken?: number;
+  readonly onReverseSyncTex?: (input: ReverseSyncTexRequest) => Promise<unknown>;
   readonly initialPresentation?: { readonly pageIndex?: number; readonly zoom?: number };
   readonly onPresentationChange?: (presentation: { readonly pageIndex: number; readonly zoom: number }) => void;
 }
@@ -223,6 +226,77 @@ export async function applyHostForwardSyncTex(
   });
   if (applied) navigation.focusAtDestination(request.pageIndex);
   return applied;
+}
+
+function reverseSyncTexSucceeded(value: unknown): boolean {
+  return typeof value === 'object' && value !== null &&
+    (value as { readonly status?: unknown }).status === 'ok';
+}
+
+const REVERSE_SYNCTEX_GENERIC_ERROR = 'Reverse SyncTeX could not find a LaTeX source location.';
+
+export function reverseSyncTexError(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null) return REVERSE_SYNCTEX_GENERIC_ERROR;
+  const result = value as { readonly status?: unknown; readonly reason?: unknown };
+  if (result.status === 'ok') return null;
+  if (result.reason === 'workspace-untrusted') {
+    return 'Trust this workspace before using Reverse SyncTeX.';
+  }
+  switch (result.status) {
+    case 'missing':
+      return 'SyncTeX data is missing. Rebuild the PDF with SyncTeX enabled.';
+    case 'pending':
+      return 'SyncTeX data for this PDF is still being prepared. Try again shortly.';
+    case 'stale':
+      return 'SyncTeX data is stale. Rebuild the PDF before going to source.';
+    case 'ambiguous':
+      return 'SyncTeX found more than one LaTeX source location for this PDF point.';
+    case 'out-of-root':
+      return 'The SyncTeX source location is outside the approved workspace.';
+    case 'unavailable-tool':
+      return 'The SyncTeX tool is unavailable. Install or configure SyncTeX and retry.';
+    case 'timeout':
+      return 'The SyncTeX query timed out. Try again.';
+    case 'oversized':
+      return 'The SyncTeX result was too large to use safely.';
+    case 'malformed':
+      return 'The SyncTeX data was malformed. Rebuild the PDF and retry.';
+    default:
+      return REVERSE_SYNCTEX_GENERIC_ERROR;
+  }
+}
+
+export class ReverseSyncTexRequestCoordinator {
+  #latestRequest = 0;
+
+  async run(
+    reverseSyncTex: (input: ReverseSyncTexRequest) => Promise<unknown>,
+    request: ReverseSyncTexRequest,
+    publishError: (message: string | null) => void,
+  ): Promise<unknown> {
+    const requestId = ++this.#latestRequest;
+    publishError(null);
+    try {
+      const value = await reverseSyncTex(request);
+      if (requestId === this.#latestRequest) publishError(reverseSyncTexError(value));
+      return value;
+    } catch {
+      if (requestId === this.#latestRequest) publishError(REVERSE_SYNCTEX_GENERIC_ERROR);
+      return { status: 'failed' };
+    }
+  }
+}
+
+export async function reverseSyncTexAtCurrentLocation(
+  navigation: Pick<PdfViewerNavigation, 'captureLocation'>,
+  reverseSyncTex: (input: ReverseSyncTexRequest) => Promise<unknown>,
+): Promise<boolean> {
+  const location = navigation.captureLocation();
+  if (location === null) return false;
+  return reverseSyncTexSucceeded(await reverseSyncTex({
+    pageIndex: location.pageIndex,
+    point: location.anchor,
+  }));
 }
 
 export function firstUnresolvedReviewItemId(
@@ -478,6 +552,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [mainDocumentReadyGeneration, setMainDocumentReadyGeneration] = useState<number | null>(null);
   const [mainNavigation, setMainNavigation] = useState<PdfViewerNavigation | null>(null);
   const handledForwardSyncTexTokenRef = useRef(0);
+  const handledReverseSyncTexTokenRef = useRef(0);
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
   const referenceManualScrollObserverRef = useRef(new ReferenceManualScrollObserver());
@@ -554,6 +629,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setActivationRequest({ id, token: ++activationTokenRef.current });
   }, [props.hostReattachRequestToken]);
   const [viewerState, setViewerState] = useState<ViewerControlsSnapshot>(unavailableViewerControls);
+  const reverseSyncTexCoordinatorRef = useRef(new ReverseSyncTexRequestCoordinator());
+  const requestReverseSyncTex = useCallback((request: ReverseSyncTexRequest): Promise<unknown> => {
+    const reverseSyncTex = props.onReverseSyncTex;
+    if (reverseSyncTex === undefined) return Promise.resolve({ status: 'failed' });
+    return reverseSyncTexCoordinatorRef.current.run(reverseSyncTex, request, setCommandError);
+  }, [props.onReverseSyncTex]);
   const initialPresentationAppliedRef = useRef(false);
   useEffect(() => {
     const request = props.hostForwardSyncTexRequest;
@@ -564,6 +645,18 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       if (!applied) setCommandError('Forward SyncTeX could not reveal this PDF location.');
     });
   }, [mainNavigation, props.hostForwardSyncTexRequest]);
+  useEffect(() => {
+    const token = props.hostReverseSyncTexRequestToken;
+    if (token === undefined || token <= 0 || mainNavigation === null ||
+      token <= handledReverseSyncTexTokenRef.current || props.onReverseSyncTex === undefined) return;
+    handledReverseSyncTexTokenRef.current = token;
+    const location = mainNavigation.captureLocation();
+    if (location === null) {
+      setCommandError(REVERSE_SYNCTEX_GENERIC_ERROR);
+      return;
+    }
+    void requestReverseSyncTex({ pageIndex: location.pageIndex, point: location.anchor });
+  }, [mainNavigation, props.hostReverseSyncTexRequestToken, props.onReverseSyncTex, requestReverseSyncTex]);
   const viewerAssets = useMemo(() => props.viewerAssets ?? ({
     pdfiumWasm: props.session.appLinkBase === undefined
       ? `/s/${props.session.sessionId}/assets/pdfium.wasm`
@@ -1083,6 +1176,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     portableItemIdsRef.current = new Set(state.items.map((item) => item.id));
   }, [navigationCoordinator, saveStatus, state]);
   const onViewerInteraction = useCallback((event: ViewerInteractionEvent) => {
+    if (event.type === 'reverse-synctex') {
+      requestReverseSyncTex(event.value);
+      return;
+    }
     if (event.type === 'pdf-link') {
       navigationCoordinator.requestLink(event.value);
       return;
@@ -1146,7 +1243,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       }
       publishCorrespondence();
     }
-  }, [authoringAnchorRefresh, mainLocationRefresh, navigationCoordinator]);
+  }, [authoringAnchorRefresh, mainLocationRefresh, navigationCoordinator, requestReverseSyncTex]);
   const onReferenceDocumentControls = useCallback((controls: ReferenceDocumentController | null) => {
     referenceControllerRef.current = controls;
     if (controls === null) navigationCoordinator.referenceNavigationUnavailable();
@@ -1274,6 +1371,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       authoringPreview={authoringPreview}
       keyboardPageNoteActive={keyboardPageNoteActive}
       onViewerInteraction={onViewerInteraction}
+      reverseSyncTexEnabled={props.onReverseSyncTex !== undefined}
       {...(activeItemId === undefined ? {} : { activeOwnedAnnotationId: activeItemId })}
       {...(correspondingItemId === undefined ? {} : { correspondingOwnedAnnotationId: correspondingItemId })}
       onExistingAnnotationsDiscovery={onExistingAnnotationsDiscovery}
@@ -1615,11 +1713,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             readonly pageIndex: number;
             readonly position: { readonly x: number; readonly y: number };
           }) => {
-            setCommandError(null);
-            void props.onReverseSyncTex?.({
+            requestReverseSyncTex({
               pageIndex: menu.pageIndex,
               point: { x: menu.position.x, y: menu.position.y },
-            }).catch(() => setCommandError('Reverse SyncTeX could not find a LaTeX source location.'));
+            });
           },
         })}
         placedPageNote={placedPageNote}

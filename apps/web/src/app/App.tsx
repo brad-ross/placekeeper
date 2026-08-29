@@ -201,6 +201,7 @@ export interface AppProps {
   ownedAnnotations?: readonly ReviewAnnotation[];
   authoringPreview?: ReviewAnnotation | null;
   onViewerInteraction?: (event: ViewerInteractionEvent) => void;
+  reverseSyncTexEnabled?: boolean;
   keyboardPageNoteActive?: boolean;
   activeOwnedAnnotationId?: string;
   correspondingOwnedAnnotationId?: string;
@@ -254,6 +255,7 @@ export function App({
   ownedAnnotations = [],
   authoringPreview = null,
   onViewerInteraction,
+  reverseSyncTexEnabled = false,
   keyboardPageNoteActive = false,
   activeOwnedAnnotationId,
   correspondingOwnedAnnotationId,
@@ -1037,6 +1039,7 @@ export function App({
       onWorkspaceElement={setWorkspaceElement}
       documentGeneration={documentGeneration}
       onViewerInteraction={emit}
+      reverseSyncTexEnabled={reverseSyncTexEnabled}
       referenceViewportHost={referenceViewportHost}
       onReferenceViewportElement={setReferenceWorkspaceElement}
       onReferenceScrollIntent={(position) => referenceManualScrollObserver.arm(position)}

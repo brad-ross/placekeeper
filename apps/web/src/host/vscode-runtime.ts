@@ -83,7 +83,9 @@ function validIdentity(value: unknown): value is HostRuntimeIdentity {
 
 function validHostCommand(value: unknown): value is HostRuntimeCommand {
   if (!isObject(value) || typeof value.command !== "string") return false;
-  if (value.command === "reattach") return Object.keys(value).length === 1;
+  if (value.command === "reattach" || value.command === "reverse-synctex") {
+    return Object.keys(value).length === 1;
+  }
   return value.command === "forward-synctex" && Object.keys(value).length === 3 &&
     Number.isSafeInteger(value.pageIndex) && (value.pageIndex as number) >= 0 &&
     isObject(value.point) && Object.keys(value.point).length === 2 &&
@@ -104,6 +106,7 @@ export function createRpcHostRuntime(
   const hostCommands = new Set<(command: HostRuntimeCommand) => void>();
   let identity: HostRuntimeIdentity | undefined;
   let pendingInvalidation: HostRuntimeInvalidation | undefined;
+  let pendingHostCommand: HostRuntimeCommand | undefined;
   let disposed = false;
   const materializedPdfium = new Map<string, Promise<MaterializedViewerResource>>();
 
@@ -127,7 +130,8 @@ export function createRpcHostRuntime(
       message.version !== HOST_RUNTIME_VERSION || message.panelId !== port.panelId) return;
     if (message.kind === "event" && message.event === "host-command") {
       if (!validHostCommand(message.payload)) return;
-      for (const listener of hostCommands) listener(message.payload);
+      if (hostCommands.size === 0) pendingHostCommand = message.payload;
+      else for (const listener of hostCommands) listener(message.payload);
       return;
     }
     if (message.kind === "event" && message.event === "session-invalidated") {
@@ -298,6 +302,11 @@ export function createRpcHostRuntime(
     },
     subscribeHostCommands(listener) {
       hostCommands.add(listener);
+      if (pendingHostCommand !== undefined) {
+        const command = pendingHostCommand;
+        pendingHostCommand = undefined;
+        listener(command);
+      }
       return () => hostCommands.delete(listener);
     },
     dispose() {
@@ -310,6 +319,7 @@ export function createRpcHostRuntime(
       pending.clear();
       invalidations.clear();
       pendingInvalidation = undefined;
+      pendingHostCommand = undefined;
       hostCommands.clear();
     },
   };
