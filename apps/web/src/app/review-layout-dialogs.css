@@ -127,6 +127,8 @@
 }
 
 .comment-composer {
+  --comment-composer-anchor-size: var(--review-control-default);
+  --comment-composer-header-padding-block: 12px;
   z-index: 5;
   grid-area: 1 / 1;
   grid-template-rows: auto minmax(0, 1fr);
@@ -150,7 +152,13 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding-block: 12px;
+  min-height: calc(
+    var(--comment-composer-anchor-size)
+    + var(--comment-composer-header-padding-block)
+    + var(--comment-composer-header-padding-block)
+    + 1px
+  );
+  padding-block: var(--comment-composer-header-padding-block);
 }
 
 .comment-composer__header h2 {
@@ -158,8 +166,11 @@
 }
 
 .comment-composer__anchor {
-  flex: none;
-  width: var(--review-control-default);
+  width: var(--comment-composer-anchor-size);
+  min-width: var(--comment-composer-anchor-size);
+  height: var(--comment-composer-anchor-size);
+  min-height: var(--comment-composer-anchor-size);
+  flex: 0 0 var(--comment-composer-anchor-size);
   padding: 0;
 }
 

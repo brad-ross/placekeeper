@@ -221,6 +221,7 @@ export function PdfWorkspace({
                       data-page-index={layout.pageIndex}
                       tabIndex={-1}
                       onPointerDownCapture={(event) => {
+                        reverseSyncTexPointers.current.cancel(event.pointerId);
                         const reverseSyncTexGesture = reverseSyncTexEnabled &&
                           isReverseSyncTexPointerGesture(event);
                         const contextGesture = isContextPointerGesture(event);
@@ -235,7 +236,6 @@ export function PdfWorkspace({
                             event.clientX,
                             event.clientY,
                           );
-                          event.currentTarget.setPointerCapture(event.pointerId);
                           event.preventDefault();
                           event.stopPropagation();
                           return;
@@ -251,6 +251,10 @@ export function PdfWorkspace({
                       }}
                       onPointerMoveCapture={(event) => {
                         if (reverseSyncTexPointers.current.has(event.pointerId)) {
+                          if (event.buttons === 0) {
+                            reverseSyncTexPointers.current.cancel(event.pointerId);
+                            return;
+                          }
                           reverseSyncTexPointers.current.pointerMove(
                             event.pointerId,
                             event.clientX,

@@ -1641,7 +1641,6 @@ export function ReviewShell(props: ReviewShellProps) {
       anchorNavigation={anchorNavigation}
       onValueChange={(value) => {
         if (authoringSessionRef.current?.token !== authoringSession.token) return;
-        props.onAuthoringPreviewChange?.(authoringPreviewAnnotation(authoringSession, value));
         if (props.state.workflow.mode === 'generated-output') {
           void protectAuthoringDraft(authoringSession, value);
         }

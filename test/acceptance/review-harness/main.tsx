@@ -33,6 +33,8 @@ import { resolveVisualScenario, VisualDocument } from './visual-scenarios.js';
 
 const root = document.querySelector('#root');
 if (!root) throw new Error('Review harness root is missing');
+const rootElement = root;
+rootElement.setAttribute('data-authoring-preview-updates', '0');
 const visualScenario = resolveVisualScenario(window.location.search);
 const previewParameters = new URLSearchParams(window.location.search);
 const saveEstablishing = previewParameters.has('establishing');
@@ -498,6 +500,12 @@ function Harness() {
       }}
       onCommand={accept}
       onAuthoringActiveChange={(active) => { authoringActiveRef.current = active; }}
+      onAuthoringPreviewChange={() => {
+        rootElement.setAttribute(
+          'data-authoring-preview-updates',
+          String(Number(rootElement.getAttribute('data-authoring-preview-updates') ?? '0') + 1),
+        );
+      }}
       onNavigate={(item) => setNavigated(item.id)}
       {...(correspondingItemId === undefined ? {} : { correspondingItemId })}
       {...(activationRequest === undefined ? {} : { activationRequest })}

@@ -925,6 +925,70 @@ test('the out-of-view anchor uses one icon button and keeps actions beneath the 
   expect(actionsBox!.y).toBeGreaterThanOrEqual(inputBox!.y + inputBox!.height);
   expect(await composer.boundingBox()).toEqual(before);
   await expectScene(product, 'wide-contextual-long-source.png');
+
+  const measureAnchorLayout = async () => composer.evaluate((element) => {
+    const header = element.querySelector<HTMLElement>('.comment-composer__header');
+    const body = element.querySelector<HTMLElement>('.comment-composer__body');
+    const returnControl = element.querySelector<HTMLElement>('.comment-composer__anchor');
+    const cancel = element.querySelector<HTMLElement>('.comment-composer__actions button');
+    if (!header || !body || !cancel) throw new Error('Composer geometry is incomplete.');
+    return {
+      header: header.getBoundingClientRect().toJSON(),
+      body: body.getBoundingClientRect().toJSON(),
+      anchor: returnControl?.getBoundingClientRect().toJSON() ?? null,
+      cancel: cancel.getBoundingClientRect().toJSON(),
+    };
+  });
+  const wideOutside = await measureAnchorLayout();
+  await openScene(page, 'reading&composer=replacement&context=long&return=visible');
+  const wideVisible = await measureAnchorLayout();
+  expect(wideOutside.anchor).not.toBeNull();
+  expect(wideOutside.anchor!.width).toBeCloseTo(wideOutside.anchor!.height, 0);
+  expect(wideOutside.anchor!.height).toBeCloseTo(wideOutside.cancel.height, 0);
+  expect(wideOutside.header.height).toBeCloseTo(wideVisible.header.height, 0);
+  expect(wideOutside.body.y).toBeCloseTo(wideVisible.body.y, 0);
+
+  const mediumViewport = { width: 840, height: 720 };
+  await openScene(
+    page,
+    'reading&composer=replacement&context=long&return=outside',
+    mediumViewport,
+  );
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+    'data-annotation-presentation',
+    'bottom',
+  );
+  const mediumOutside = await measureAnchorLayout();
+  await openScene(
+    page,
+    'reading&composer=replacement&context=long&return=visible',
+    mediumViewport,
+  );
+  const mediumVisible = await measureAnchorLayout();
+  expect(mediumOutside.anchor).not.toBeNull();
+  expect(mediumOutside.anchor!.width).toBeCloseTo(mediumOutside.anchor!.height, 0);
+  expect(mediumOutside.anchor!.height).toBeCloseTo(mediumOutside.cancel.height, 0);
+  expect(mediumOutside.header.height).toBeCloseTo(mediumVisible.header.height, 0);
+  expect(mediumOutside.body.y).toBeCloseTo(mediumVisible.body.y, 0);
+
+  const narrowViewport = { width: 520, height: 720 };
+  await openScene(
+    page,
+    'reading&composer=replacement&context=long&return=outside',
+    narrowViewport,
+  );
+  const narrowOutside = await measureAnchorLayout();
+  await openScene(
+    page,
+    'reading&composer=replacement&context=long&return=visible',
+    narrowViewport,
+  );
+  const narrowVisible = await measureAnchorLayout();
+  expect(narrowOutside.anchor).not.toBeNull();
+  expect(narrowOutside.anchor!.width).toBeCloseTo(narrowOutside.anchor!.height, 0);
+  expect(narrowOutside.anchor!.height).toBeCloseTo(narrowOutside.cancel.height, 0);
+  expect(narrowOutside.header.height).toBeCloseTo(narrowVisible.header.height, 0);
+  expect(narrowOutside.body.y).toBeCloseTo(narrowVisible.body.y, 0);
 });
 
 test('no anchor control is shown when its location is unavailable', async ({ page }) => {

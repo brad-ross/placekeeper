@@ -1420,6 +1420,24 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
 
+  test('keeps annotation preview geometry stable while typing a highlight comment', async ({ page }) => {
+    await page.getByRole('button', { name: 'Use selection' }).click();
+    await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+    const composer = page.getByRole('region', { name: 'Highlight Comment' });
+    const editor = composer.getByRole('textbox', { name: 'Comment (optional)' });
+    await expect(composer).toBeVisible();
+    const updatesBeforeTyping = await page.locator('#root').getAttribute(
+      'data-authoring-preview-updates',
+    );
+
+    await editor.fill('Comment text should not refresh unchanged PDF geometry.');
+
+    await expect(page.locator('#root')).toHaveAttribute(
+      'data-authoring-preview-updates',
+      updatesBeforeTyping ?? '',
+    );
+  });
+
   test('invokes action shortcuts while insertion remains typing-only', async ({ page }) => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.focus();

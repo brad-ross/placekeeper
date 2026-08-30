@@ -15,6 +15,7 @@
 }
 
 .review-layout[data-annotation-presentation="bottom"] .comment-composer {
+  --comment-composer-header-padding-block: 10px;
   align-self: end;
   justify-self: stretch;
   width: 100%;
@@ -29,7 +30,7 @@
 }
 
 .review-layout[data-annotation-presentation="bottom"] .comment-composer__header {
-  padding: 10px 12px;
+  padding: var(--comment-composer-header-padding-block) 12px;
 }
 
 .review-layout[data-annotation-presentation="bottom"] .comment-composer__body {
@@ -48,6 +49,10 @@
 }
 
 @media (max-width: 820px) {
+  .comment-composer {
+    --comment-composer-anchor-size: var(--review-control-touch);
+  }
+
   .review-chrome {
     height: auto;
     min-height: var(--review-chrome-height);
@@ -127,6 +132,10 @@
 }
 
 @media (hover: none), (pointer: coarse) {
+  .comment-composer {
+    --comment-composer-anchor-size: var(--review-control-touch);
+  }
+
   #root[data-production-root="true"] {
     --review-workspace-header-height: 53px;
   }
