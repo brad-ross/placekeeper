@@ -107,6 +107,7 @@ export function createRpcHostRuntime(
   const hostCommands = new Set<(command: HostRuntimeCommand) => void>();
   let identity: HostRuntimeIdentity | undefined;
   let pendingInvalidation: HostRuntimeInvalidation | undefined;
+  let deferredCommandInvalidation: HostRuntimeInvalidation | undefined;
   let pendingHostCommand: HostRuntimeCommand | undefined;
   let disposed = false;
   const materializedPdfium = new Map<string, Promise<MaterializedViewerResource>>();
@@ -124,6 +125,29 @@ export function createRpcHostRuntime(
       throw new Error("The review runtime is disposed.");
     }
     return resource;
+  };
+
+  const publishInvalidation = (event: HostRuntimeInvalidation) => {
+    if (invalidations.size === 0) pendingInvalidation = event;
+    else for (const listener of invalidations) listener(event);
+  };
+
+  const revisionAlreadyObserved = (event: HostRuntimeInvalidation) => (
+    event.reason === "revision"
+    && identity !== undefined
+    && event.sessionId === identity.sessionId
+    && event.generation === identity.generation
+    && event.revision <= identity.revision
+  );
+
+  const releaseDeferredCommandInvalidation = () => {
+    if (
+      deferredCommandInvalidation === undefined
+      || [...pending.values()].some((request) => request.method === "command")
+    ) return;
+    const deferred = deferredCommandInvalidation;
+    deferredCommandInvalidation = undefined;
+    if (!revisionAlreadyObserved(deferred)) publishInvalidation(deferred);
   };
 
   const unsubscribe = port.subscribe((message) => {
@@ -150,8 +174,20 @@ export function createRpcHostRuntime(
           ? {}
           : { previousGeneration: message.payload.previousGeneration as number }),
       };
-      if (invalidations.size === 0) pendingInvalidation = event;
-      else for (const listener of invalidations) listener(event);
+      if (revisionAlreadyObserved(event)) return;
+      if (
+        event.reason === "revision"
+        && [...pending.values()].some((request) => request.method === "command")
+      ) {
+        if (
+          deferredCommandInvalidation === undefined
+          || event.generation > deferredCommandInvalidation.generation
+          || (event.generation === deferredCommandInvalidation.generation
+            && event.revision > deferredCommandInvalidation.revision)
+        ) deferredCommandInvalidation = event;
+        return;
+      }
+      publishInvalidation(event);
       return;
     }
     if (message.kind !== "response" || typeof message.requestId !== "string") return;
@@ -268,12 +304,16 @@ export function createRpcHostRuntime(
       return () => { void invoke("detach").catch(() => undefined); };
     },
     async command(command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> {
-      const value = await invoke<ReviewState | RejectedReviewCommand>("command", command);
-      const conflictInvalidation = updateIdentityFromState(value);
-      if (conflictInvalidation !== undefined) {
-        for (const listener of invalidations) listener(conflictInvalidation);
+      try {
+        const value = await invoke<ReviewState | RejectedReviewCommand>("command", command);
+        const conflictInvalidation = updateIdentityFromState(value);
+        if (conflictInvalidation !== undefined) {
+          publishInvalidation(conflictInvalidation);
+        }
+        return value;
+      } finally {
+        releaseDeferredCommandInvalidation();
       }
-      return value;
     },
     saveStatus: () => invoke<ProductionSaveStatus>("saveStatus"),
     saveProposal: () => invoke<SaveCopyProposal>("saveProposal"),
@@ -320,6 +360,7 @@ export function createRpcHostRuntime(
       pending.clear();
       invalidations.clear();
       pendingInvalidation = undefined;
+      deferredCommandInvalidation = undefined;
       pendingHostCommand = undefined;
       hostCommands.clear();
     },

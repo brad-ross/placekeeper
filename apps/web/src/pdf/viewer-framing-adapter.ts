@@ -68,6 +68,13 @@ export function createViewerFramingControls(
   }
 
   const snapshot = (target?: ViewerFramingTarget): ViewerFramingSnapshot => {
+    if (disposed) {
+      return {
+        ready: false,
+        scroll: { left: 0, top: 0 },
+        maximum: { left: 0, top: 0 },
+      };
+    }
     const root = options.root();
     const metrics = viewport?.getMetrics();
     const currentPage = scroll?.getCurrentPage() ?? 0;

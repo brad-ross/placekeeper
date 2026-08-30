@@ -381,6 +381,156 @@ describe("host-neutral review runtime", () => {
     runtime.dispose();
   });
 
+  it("does not rehydrate the VS Code PDF for the revision returned by its own command", async () => {
+    const listeners = new Set<(message: unknown) => void>();
+    const requests: Record<string, unknown>[] = [];
+    const runtime = createRpcHostRuntime({
+      panelId: "panel_identifier_1234",
+      postMessage(message) {
+        if (typeof message === "object" && message !== null) requests.push(message as Record<string, unknown>);
+      },
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    });
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const state = createReviewState({
+      sessionId,
+      source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
+      workflowMode: "generated-output",
+      documentGeneration: 1,
+    });
+    const respond = (request: Record<string, unknown>, revision: number, payload: unknown) => {
+      const message = {
+        protocol: HOST_RUNTIME_PROTOCOL,
+        version: HOST_RUNTIME_VERSION,
+        kind: "response",
+        panelId: "panel_identifier_1234",
+        sessionId,
+        generation: 1,
+        revision,
+        requestId: request.requestId,
+        ok: true,
+        payload,
+      };
+      listeners.forEach((listener) => listener(message));
+    };
+    const initial = runtime.bootstrap();
+    respond(requests.at(-1)!, 0, {
+      sessionId,
+      generation: 1,
+      revision: 0,
+      state,
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: {},
+      resources: {
+        document: "vscode-webview://authority/snapshots/digest.pdf",
+        pdfiumWasm: "vscode-webview://authority/assets/pdfium.wasm",
+      },
+    });
+    await initial;
+    const invalidations: HostRuntimeInvalidation[] = [];
+    runtime.subscribeInvalidations((event) => invalidations.push(event));
+
+    const command = runtime.command({ type: "undo", expectedRevision: 0 });
+    const commandRequest = requests.at(-1)!;
+    const ownRevision = {
+      protocol: HOST_RUNTIME_PROTOCOL,
+      version: HOST_RUNTIME_VERSION,
+      kind: "event",
+      event: "session-invalidated",
+      panelId: "panel_identifier_1234",
+      payload: { sessionId, generation: 1, revision: 1, reason: "revision" },
+    };
+    listeners.forEach((listener) => listener(ownRevision));
+
+    expect(invalidations).toEqual([]);
+    respond(commandRequest, 0, { ...state, revision: 1 });
+    await expect(command).resolves.toMatchObject({ revision: 1 });
+    expect(invalidations).toEqual([]);
+
+    listeners.forEach((listener) => listener({
+      ...ownRevision,
+      payload: { sessionId, generation: 1, revision: 2, reason: "revision" },
+    }));
+    expect(invalidations).toEqual([
+      { sessionId, generation: 1, revision: 2, reason: "revision" },
+    ]);
+    runtime.dispose();
+  });
+
+  it("releases a deferred revision invalidation when its command fails", async () => {
+    const listeners = new Set<(message: unknown) => void>();
+    const requests: Record<string, unknown>[] = [];
+    const runtime = createRpcHostRuntime({
+      panelId: "panel_identifier_1234",
+      postMessage(message) {
+        if (typeof message === "object" && message !== null) requests.push(message as Record<string, unknown>);
+      },
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    });
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const state = createReviewState({
+      sessionId,
+      source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
+      workflowMode: "generated-output",
+      documentGeneration: 1,
+    });
+    const respond = (request: Record<string, unknown>, ok: boolean, payload: unknown) => {
+      listeners.forEach((listener) => listener({
+        protocol: HOST_RUNTIME_PROTOCOL,
+        version: HOST_RUNTIME_VERSION,
+        kind: "response",
+        panelId: "panel_identifier_1234",
+        sessionId,
+        generation: 1,
+        revision: 0,
+        requestId: request.requestId,
+        ok,
+        payload,
+      }));
+    };
+    const initial = runtime.bootstrap();
+    respond(requests.at(-1)!, true, {
+      sessionId,
+      generation: 1,
+      revision: 0,
+      state,
+      scope: { documentTitle: "paper.pdf" },
+      saveStatus: {},
+      resources: {
+        document: "vscode-webview://authority/snapshots/digest.pdf",
+        pdfiumWasm: "vscode-webview://authority/assets/pdfium.wasm",
+      },
+    });
+    await initial;
+    const invalidations: HostRuntimeInvalidation[] = [];
+    runtime.subscribeInvalidations((event) => invalidations.push(event));
+
+    const command = runtime.command({ type: "undo", expectedRevision: 0 });
+    const commandRequest = requests.at(-1)!;
+    listeners.forEach((listener) => listener({
+      protocol: HOST_RUNTIME_PROTOCOL,
+      version: HOST_RUNTIME_VERSION,
+      kind: "event",
+      event: "session-invalidated",
+      panelId: "panel_identifier_1234",
+      payload: { sessionId, generation: 1, revision: 1, reason: "revision" },
+    }));
+    expect(invalidations).toEqual([]);
+
+    respond(commandRequest, false, {});
+    await expect(command).rejects.toThrow("trusted host rejected");
+    expect(invalidations).toEqual([
+      { sessionId, generation: 1, revision: 1, reason: "revision" },
+    ]);
+    runtime.dispose();
+  });
+
   it("cancels an in-flight request with the same bounded request identity", async () => {
     const listeners = new Set<(message: unknown) => void>();
     const postMessage = vi.fn();
