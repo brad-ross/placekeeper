@@ -290,7 +290,8 @@
   .workspace-state .review-icon,
   .compact-editorial-modal .lucide-loader-circle,
   .comment-composer__anchor[data-return-state="pending"] .review-icon,
-  .pdf-workspace__loading .review-icon {
+  .pdf-workspace__loading .review-icon,
+  .review-toast[data-generation-status="reconciling"] .review-icon {
     transition: none;
     animation: none;
   }

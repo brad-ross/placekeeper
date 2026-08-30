@@ -155,6 +155,7 @@ export interface ReviewShellProps {
   onSaveOptions?(): void;
   generationRefreshStatus?: GenerationRefreshStatus;
   locationRestoreStatus?: LocationRestoreStatus;
+  toolError?: string | null;
   onExportReviewedCopy?(confirmPossiblyStale?: true): Promise<unknown>;
   listOpen?: boolean;
   selectionUpdate: SelectionUpdate;
@@ -1654,7 +1655,7 @@ export function ReviewShell(props: ReviewShellProps) {
   })();
   return (
     <section
-      className={`review-shell${generatedStatusMessages.length > 0 ? ' review-shell--generation-status' : ''}`}
+      className="review-shell"
       onBeforeInputCapture={beforeInput}
       onKeyDownCapture={keyDown}
       onFocusCapture={(event) => {
@@ -1751,11 +1752,6 @@ export function ReviewShell(props: ReviewShellProps) {
         onNavigateBack={() => props.onNavigateBack?.()}
         onNavigateForward={() => props.onNavigateForward?.()}
       />
-      {generatedStatusMessages.length > 0 ? <p
-        className="review-generation-status"
-        data-generation-status={props.generationRefreshStatus ?? 'idle'}
-        role={props.generationRefreshStatus === 'failed' ? 'alert' : 'status'}
-      >{generatedStatusMessages.join(' ')}</p> : null}
       <div
         ref={workspaceFraming.stageRef}
         className="review-layout"
@@ -1776,6 +1772,23 @@ export function ReviewShell(props: ReviewShellProps) {
             ? effectiveReferenceLayout.bottomHeight : referenceLayout.bottomReferenceHeight}px`,
         } as CSSProperties}
       >
+        {props.toolError || generatedStatusMessages.length > 0 ? <div
+          className="review-toast-stack"
+          data-review-toast-stack
+        >
+          {props.toolError ? <p
+            className="review-toast review-toast--error"
+            role="alert"
+            data-viewer-status
+          ><ReviewIcon name="alert" />{props.toolError}</p> : null}
+          {generatedStatusMessages.length > 0 ? <p
+            className="review-toast review-toast--status"
+            data-generation-status={props.generationRefreshStatus ?? 'idle'}
+            role={props.generationRefreshStatus === 'failed' ? 'alert' : 'status'}
+          ><ReviewIcon name={props.generationRefreshStatus === 'failed' ? 'alert' : 'loading'} />{
+            generatedStatusMessages.join(' ')
+          }</p> : null}
+        </div> : null}
         <div className="review-document">{props.children}</div>
         <div className="review-contextual-host" data-review-contextual-host>
           {selectionActionsAvailable && props.selectionPlacement ? (

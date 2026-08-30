@@ -6,7 +6,11 @@ import {
   decodePlacekeeperLinkFragment,
   encodePlacekeeperLinkFragment,
 } from "../../../packages/core/src/placekeeper-link.js";
-import { ProductionReviewApp, type ProductionSession } from "./app/ProductionReviewApp.js";
+import {
+  ProductionReviewApp,
+  type HostForwardSyncTexRequest,
+  type ProductionSession,
+} from "./app/ProductionReviewApp.js";
 import {
   reopenProductionSession,
   resumeProductionSession,
@@ -393,11 +397,7 @@ function RuntimeProductionReviewApp(props: {
   const [loaded, setLoaded] = useState(props.initial);
   const [refreshStatus, setRefreshStatus] = useState<"idle" | "reconciling" | "failed">("idle");
   const [hostReattachRequestToken, setHostReattachRequestToken] = useState(0);
-  const [hostForwardSyncTexRequest, setHostForwardSyncTexRequest] = useState<{
-    readonly token: number;
-    readonly pageIndex: number;
-    readonly point: { readonly x: number; readonly y: number };
-  }>();
+  const [hostForwardSyncTexRequest, setHostForwardSyncTexRequest] = useState<HostForwardSyncTexRequest>();
   const [hostReverseSyncTexRequestToken, setHostReverseSyncTexRequestToken] = useState(0);
 
   useEffect(() => subscribeRuntimeDocumentSource(props.runtime, props.initial, (snapshot) => {
@@ -415,6 +415,7 @@ function RuntimeProductionReviewApp(props: {
     }
     setHostForwardSyncTexRequest((current) => ({
       token: (current?.token ?? 0) + 1,
+      documentGeneration: command.documentGeneration,
       pageIndex: command.pageIndex,
       point: command.point,
     }));

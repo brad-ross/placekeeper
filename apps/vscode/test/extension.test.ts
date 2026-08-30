@@ -566,7 +566,9 @@ describe("VS Code local host adapter", () => {
         expect(JSON.parse(String(init?.body))).toMatchObject({
           sourcePath: "/work/paper.tex", line: 12, column: 4,
         });
-        return new Response(JSON.stringify({ status: "ok", target: { pageIndex: 0, x: 1, y: 2 } }));
+        return new Response(JSON.stringify({
+          status: "ok", documentGeneration: 4, target: { pageIndex: 0, x: 1, y: 2 },
+        }));
       }
       return new Response(JSON.stringify({
         status: "ok",
@@ -589,19 +591,30 @@ describe("VS Code local host adapter", () => {
       fetch,
     });
     await expect(client.invoke("forwardSyncTex", {}, new AbortController().signal))
-      .resolves.toMatchObject({ status: "ok", target: { pageIndex: 0, x: 1, y: 2 } });
+      .resolves.toMatchObject({ status: "ok", documentGeneration: 4, target: { pageIndex: 0, x: 1, y: 2 } });
     const reverse = await client.invoke("reverseSyncTex", { pageIndex: 0, point: { x: 1, y: 2 } }, new AbortController().signal);
     expect(reverse).toMatchObject({ target: { line: 12, column: 4 } });
     expect(reverse).not.toHaveProperty("target.path");
     expect(opened).toHaveBeenCalledWith({ sourcePath: "/work/paper.tex", line: 12, column: 4 });
+    expect(forwardSyncTexTarget({ status: "ok", documentGeneration: 4, target: { pageIndex: 2, x: 10, y: 20 } }))
+      .toEqual({ documentGeneration: 4, pageIndex: 2, point: { x: 10, y: 20 } });
     expect(forwardSyncTexTarget({ status: "ok", target: { pageIndex: 2, x: 10, y: 20 } }))
-      .toEqual({ pageIndex: 2, point: { x: 10, y: 20 } });
-    expect(forwardSyncTexTarget({ status: "ok", target: { pageIndex: -1, x: 10, y: 20 } }))
+      .toBeUndefined();
+    for (const documentGeneration of [-1, 1.5, "4", Number.MAX_SAFE_INTEGER + 1]) {
+      expect(forwardSyncTexTarget({
+        status: "ok",
+        documentGeneration,
+        target: { pageIndex: 2, x: 10, y: 20 },
+      })).toBeUndefined();
+    }
+    expect(forwardSyncTexTarget({ status: "ok", documentGeneration: 4, target: { pageIndex: -1, x: 10, y: 20 } }))
       .toBeUndefined();
     expect(forwardSyncTexRetryable({ status: "pending" })).toBe(true);
     expect(forwardSyncTexRetryable({ status: "stale" })).toBe(true);
     expect(forwardSyncTexRetryable({ status: "missing" })).toBe(false);
     expect(forwardSyncTexStatus({ status: "out-of-root" })).toBe("out-of-root");
+    expect(forwardSyncTexStatus({ status: "ok", target: { pageIndex: 2, x: 10, y: 20 } }))
+      .toBeUndefined();
     expect(forwardSyncTexStatus({ status: "other" })).toBeUndefined();
   });
 

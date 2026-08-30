@@ -1,5 +1,6 @@
 import type { ReviewState } from "../../../../packages/core/src/review-model.js";
 import type {
+  ForwardSyncTexRequest,
   ProductionExportResult,
   ProductionSaveStatus,
   ProductionScope,
@@ -34,11 +35,7 @@ export interface HostRuntimeInvalidation extends HostRuntimeIdentity {
 export type HostRuntimeCommand =
   | { readonly command: "reattach" }
   | { readonly command: "reverse-synctex" }
-  | {
-      readonly command: "forward-synctex";
-      readonly pageIndex: number;
-      readonly point: { readonly x: number; readonly y: number };
-    };
+  | ({ readonly command: "forward-synctex" } & ForwardSyncTexRequest);
 
 export interface HostRuntime extends ProductionSessionApi {
   readonly host: "browser" | "vscode";

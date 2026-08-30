@@ -184,6 +184,16 @@ interface ReverseSyncTexRequest {
   readonly point: { readonly x: number; readonly y: number };
 }
 
+export interface ForwardSyncTexRequest {
+  readonly documentGeneration: number;
+  readonly pageIndex: number;
+  readonly point: { readonly x: number; readonly y: number };
+}
+
+export type HostForwardSyncTexRequest = ForwardSyncTexRequest & {
+  readonly token: number;
+};
+
 export interface ProductionReviewAppProps {
   readonly session: ProductionSession;
   readonly initialState: ReviewState;
@@ -195,15 +205,36 @@ export interface ProductionReviewAppProps {
   readonly viewer?: ReactNode;
   readonly generationRefreshStatus?: GenerationRefreshStatus;
   readonly hostReattachRequestToken?: number;
-  readonly hostForwardSyncTexRequest?: {
-    readonly token: number;
-    readonly pageIndex: number;
-    readonly point: { readonly x: number; readonly y: number };
-  };
+  readonly hostForwardSyncTexRequest?: HostForwardSyncTexRequest;
   readonly hostReverseSyncTexRequestToken?: number;
   readonly onReverseSyncTex?: (input: ReverseSyncTexRequest) => Promise<unknown>;
   readonly initialPresentation?: { readonly pageIndex?: number; readonly zoom?: number };
   readonly onPresentationChange?: (presentation: { readonly pageIndex: number; readonly zoom: number }) => void;
+}
+
+export function forwardSyncTexRequestReady(input: {
+  readonly requestGeneration: number;
+  readonly documentGeneration: number;
+  readonly navigationReadyGeneration: number | null;
+  readonly documentReadyGeneration: number | null;
+  readonly locationRestoreStatus: LocationRestoreStatus;
+}): boolean {
+  return input.requestGeneration === input.documentGeneration &&
+    input.navigationReadyGeneration === input.documentGeneration &&
+    input.documentReadyGeneration === input.documentGeneration &&
+    input.locationRestoreStatus !== 'restoring';
+}
+
+export function forwardSyncTexCompletionIsCurrent(input: {
+  readonly requestToken: number;
+  readonly latestRequestToken: number;
+  readonly requestGeneration: number;
+  readonly documentGeneration: number;
+  readonly navigationMatches: boolean;
+}): boolean {
+  return input.requestToken === input.latestRequestToken &&
+    input.requestGeneration === input.documentGeneration &&
+    input.navigationMatches;
 }
 
 export async function applyHostForwardSyncTex(
@@ -226,6 +257,21 @@ export async function applyHostForwardSyncTex(
   });
   if (applied) navigation.focusAtDestination(request.pageIndex);
   return applied;
+}
+
+export async function runHostForwardSyncTexRequest(
+  navigation: Pick<PdfViewerNavigation, 'captureLocation' | 'applyLocation' | 'focusAtDestination'>,
+  request: { readonly pageIndex: number; readonly point: { readonly x: number; readonly y: number } },
+  isCurrent: () => boolean,
+  publishResult: (applied: boolean) => void,
+): Promise<void> {
+  let applied = false;
+  try {
+    applied = await applyHostForwardSyncTex(navigation, request);
+  } catch {
+    // A rejected viewer navigation is the same user-visible failure as a false result.
+  }
+  if (isCurrent()) publishResult(applied);
 }
 
 function reverseSyncTexSucceeded(value: unknown): boolean {
@@ -551,6 +597,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [mainNavigationReadyGeneration, setMainNavigationReadyGeneration] = useState<number | null>(null);
   const [mainDocumentReadyGeneration, setMainDocumentReadyGeneration] = useState<number | null>(null);
   const [mainNavigation, setMainNavigation] = useState<PdfViewerNavigation | null>(null);
+  const latestForwardSyncTexTokenRef = useRef(0);
   const handledForwardSyncTexTokenRef = useRef(0);
   const handledReverseSyncTexTokenRef = useRef(0);
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
@@ -636,15 +683,48 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     return reverseSyncTexCoordinatorRef.current.run(reverseSyncTex, request, setCommandError);
   }, [props.onReverseSyncTex]);
   const initialPresentationAppliedRef = useRef(false);
+  latestForwardSyncTexTokenRef.current = Math.max(
+    latestForwardSyncTexTokenRef.current,
+    props.hostForwardSyncTexRequest?.token ?? 0,
+  );
   useEffect(() => {
     const request = props.hostForwardSyncTexRequest;
     if (request === undefined || mainNavigation === null ||
       request.token <= handledForwardSyncTexTokenRef.current) return;
+    if (request.documentGeneration < state.workflow.documentGeneration) {
+      handledForwardSyncTexTokenRef.current = request.token;
+      return;
+    }
+    if (!forwardSyncTexRequestReady({
+      requestGeneration: request.documentGeneration,
+      documentGeneration: state.workflow.documentGeneration,
+      navigationReadyGeneration: mainNavigationReadyGeneration,
+      documentReadyGeneration: mainDocumentReadyGeneration,
+      locationRestoreStatus,
+    })) return;
     handledForwardSyncTexTokenRef.current = request.token;
-    void applyHostForwardSyncTex(mainNavigation, request).then((applied) => {
-      if (!applied) setCommandError('Forward SyncTeX could not reveal this PDF location.');
-    });
-  }, [mainNavigation, props.hostForwardSyncTexRequest]);
+    void runHostForwardSyncTexRequest(
+      mainNavigation,
+      request,
+      () => forwardSyncTexCompletionIsCurrent({
+        requestToken: request.token,
+        latestRequestToken: latestForwardSyncTexTokenRef.current,
+        requestGeneration: request.documentGeneration,
+        documentGeneration: stateRef.current.workflow.documentGeneration,
+        navigationMatches: mainNavigationRef.current === mainNavigation,
+      }),
+      (applied) => setCommandError(
+        applied ? null : 'Forward SyncTeX could not reveal this PDF location.',
+      ),
+    );
+  }, [
+    locationRestoreStatus,
+    mainDocumentReadyGeneration,
+    mainNavigation,
+    mainNavigationReadyGeneration,
+    props.hostForwardSyncTexRequest,
+    state.workflow.documentGeneration,
+  ]);
   useEffect(() => {
     const token = props.hostReverseSyncTexRequestToken;
     if (token === undefined || token <= 0 || mainNavigation === null ||
@@ -1365,7 +1445,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       assets={viewerAssets}
       {...(props.resourcePolicy === undefined ? {} : { resourcePolicy: props.resourcePolicy })}
       documentTitle={scope.documentTitle}
-      toolError={commandError}
       onSelectionUpdate={onSelectionUpdate}
       ownedAnnotations={ownedAnnotations}
       authoringPreview={authoringPreview}
@@ -1547,6 +1626,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         {...(state.workflow.mode === 'generated-output' ? {} : { onSaveOptions: () => openCopyDialog("menu") })}
         generationRefreshStatus={props.generationRefreshStatus ?? 'idle'}
         locationRestoreStatus={locationRestoreStatus}
+        toolError={commandError}
         onExportReviewedCopy={(confirmPossiblyStale) => {
           const method = props.api.exportReviewedCopy;
           if (method === undefined) return Promise.reject(new Error('Reviewed export is unavailable.'));

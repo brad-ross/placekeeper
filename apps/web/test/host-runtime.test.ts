@@ -453,6 +453,14 @@ describe("host-neutral review runtime", () => {
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
+      payload: { command: "forward-synctex", documentGeneration: 4, pageIndex: 2, point: { x: 72, y: 144 } },
+    });
+    publish({
+      protocol: HOST_RUNTIME_PROTOCOL,
+      version: HOST_RUNTIME_VERSION,
+      kind: "event",
+      event: "host-command",
+      panelId: "panel_identifier_1234",
       payload: { command: "forward-synctex", pageIndex: -1, point: { x: 72, y: 144 } },
     });
     publish({
@@ -466,7 +474,7 @@ describe("host-neutral review runtime", () => {
 
     expect(commands).toEqual([
       { command: "reattach" },
-      { command: "forward-synctex", pageIndex: 2, point: { x: 72, y: 144 } },
+      { command: "forward-synctex", documentGeneration: 4, pageIndex: 2, point: { x: 72, y: 144 } },
       { command: "reverse-synctex" },
     ]);
     unsubscribe?.();

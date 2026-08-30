@@ -9,9 +9,12 @@ import {
   ReverseSyncTexRequestCoordinator,
   reverseSyncTexError,
   reverseSyncTexAtCurrentLocation,
+  runHostForwardSyncTexRequest,
   initiallyPortableItemIds,
   canonicalStateSupersedes,
   firstUnresolvedReviewItemId,
+  forwardSyncTexCompletionIsCurrent,
+  forwardSyncTexRequestReady,
   ProductionReviewApp,
   referenceReturnForActiveTab,
   visibleCodexContext,
@@ -32,6 +35,86 @@ import {
 } from "../src/review/ReconciliationWorkspace.js";
 
 describe("one production review tree", () => {
+  it("defers a host forward SyncTeX request until its PDF generation and restoration are ready", () => {
+    expect(forwardSyncTexRequestReady({
+      requestGeneration: 4,
+      documentGeneration: 3,
+      navigationReadyGeneration: 3,
+      documentReadyGeneration: 3,
+      locationRestoreStatus: "idle",
+    })).toBe(false);
+    expect(forwardSyncTexRequestReady({
+      requestGeneration: 4,
+      documentGeneration: 4,
+      navigationReadyGeneration: 4,
+      documentReadyGeneration: 4,
+      locationRestoreStatus: "restoring",
+    })).toBe(false);
+    expect(forwardSyncTexRequestReady({
+      requestGeneration: 4,
+      documentGeneration: 4,
+      navigationReadyGeneration: 4,
+      documentReadyGeneration: 4,
+      locationRestoreStatus: "idle",
+    })).toBe(true);
+    expect(forwardSyncTexRequestReady({
+      requestGeneration: 4,
+      documentGeneration: 4,
+      navigationReadyGeneration: 4,
+      documentReadyGeneration: 4,
+      locationRestoreStatus: "fallback",
+    })).toBe(true);
+  });
+
+  it("ignores a forward SyncTeX completion after its request, generation, or navigation is superseded", () => {
+    const current = {
+      requestToken: 2,
+      latestRequestToken: 2,
+      requestGeneration: 4,
+      documentGeneration: 4,
+      navigationMatches: true,
+    };
+    expect(forwardSyncTexCompletionIsCurrent(current)).toBe(true);
+    expect(forwardSyncTexCompletionIsCurrent({ ...current, latestRequestToken: 3 })).toBe(false);
+    expect(forwardSyncTexCompletionIsCurrent({ ...current, documentGeneration: 5 })).toBe(false);
+    expect(forwardSyncTexCompletionIsCurrent({ ...current, navigationMatches: false })).toBe(false);
+  });
+
+  it("publishes only the current forward SyncTeX completion and converts rejection to failure", async () => {
+    let resolveApply!: (applied: boolean) => void;
+    const applyLocation = vi.fn(() => new Promise<boolean>((resolve) => { resolveApply = resolve; }));
+    const navigation = {
+      captureLocation: vi.fn(() => ({
+        pageIndex: 0,
+        anchor: { x: 0, y: 0 },
+        alignment: { xPercent: 50, yPercent: 50 },
+        zoom: 1,
+      })),
+      applyLocation,
+      focusAtDestination: vi.fn(),
+    };
+    const publishResult = vi.fn();
+    let current = true;
+    const request = runHostForwardSyncTexRequest(
+      navigation,
+      { pageIndex: 2, point: { x: 72, y: 144 } },
+      () => current,
+      publishResult,
+    );
+    current = false;
+    resolveApply(false);
+    await request;
+    expect(publishResult).not.toHaveBeenCalled();
+
+    await runHostForwardSyncTexRequest(
+      { ...navigation, applyLocation: vi.fn(async () => { throw new Error("viewer replaced"); }) },
+      { pageIndex: 2, point: { x: 72, y: 144 } },
+      () => true,
+      publishResult,
+    );
+    expect(publishResult).toHaveBeenCalledWith(false);
+  });
+
   it("centers a trusted forward SyncTeX point without changing the current zoom", async () => {
     const applyLocation = vi.fn(async () => true);
     const focusAtDestination = vi.fn(() => true);

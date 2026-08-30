@@ -2027,19 +2027,6 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   background: color-mix(in srgb, var(--review-warning) 8%, var(--review-surface-panel));
 }
 
-.review-generation-status {
-  margin: 0;
-  padding: .45rem .8rem;
-  border-bottom: 1px solid var(--review-border);
-  color: var(--review-ink-primary);
-  background: color-mix(in srgb, var(--review-warning) 14%, var(--review-surface-panel));
-  font-size: .8rem;
-}
-
-.review-shell--generation-status {
-  grid-template-rows: auto auto minmax(0, 1fr);
-}
-
 .reconciliation-workspace > header,
 .reconciliation-workspace > footer,
 .reconciliation-workspace article,

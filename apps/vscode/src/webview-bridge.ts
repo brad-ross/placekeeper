@@ -33,6 +33,7 @@ export interface WebviewRpcRequest {
 }
 
 export interface ForwardSyncTexTarget {
+  readonly documentGeneration: number;
   readonly pageIndex: number;
   readonly point: { readonly x: number; readonly y: number };
 }
@@ -58,10 +59,13 @@ function safeRuntimeRequestFailure(error: unknown): string {
 }
 
 export function forwardSyncTexTarget(value: unknown): ForwardSyncTexTarget | undefined {
-  if (!isObject(value) || value.status !== "ok" || !isObject(value.target) ||
+  if (!isObject(value) || value.status !== "ok" ||
+    !Number.isSafeInteger(value.documentGeneration) || (value.documentGeneration as number) < 0 ||
+    !isObject(value.target) ||
     !Number.isSafeInteger(value.target.pageIndex) || (value.target.pageIndex as number) < 0 ||
     !Number.isFinite(value.target.x) || !Number.isFinite(value.target.y)) return undefined;
   return {
+    documentGeneration: value.documentGeneration as number,
     pageIndex: value.target.pageIndex as number,
     point: { x: value.target.x as number, y: value.target.y as number },
   };
@@ -73,6 +77,7 @@ export function forwardSyncTexRetryable(value: unknown): boolean {
 
 export function forwardSyncTexStatus(value: unknown): ForwardSyncTexStatus | undefined {
   if (!isObject(value) || typeof value.status !== "string") return undefined;
+  if (value.status === "ok" && forwardSyncTexTarget(value) === undefined) return undefined;
   return FORWARD_SYNC_TEX_STATUSES.has(value.status)
     ? value.status as ForwardSyncTexStatus
     : undefined;

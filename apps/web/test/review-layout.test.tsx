@@ -51,6 +51,13 @@ const state = createReviewState({
   source: { fileId: 'file', digest: 'a'.repeat(64), byteLength: 10 },
 });
 
+const generatedState = createReviewState({
+  sessionId: 'generated-layout-test',
+  source: { fileId: 'generated-file', digest: 'b'.repeat(64), byteLength: 10 },
+  workflowMode: 'generated-output',
+  documentGeneration: 4,
+});
+
 const responsiveStyles = readFileSync(
   new URL('../src/app/review-layout-responsive.css', import.meta.url),
   'utf8',
@@ -74,6 +81,38 @@ const ownedAnnotation: ReviewItem = {
 };
 
 describe('review shell layout and accessibility contract', () => {
+  it('stacks generated-PDF status and command errors as top-left viewer toasts', () => {
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={generatedState}
+        generationRefreshStatus="reconciling"
+        locationRestoreStatus="restoring"
+        toolError="Forward SyncTeX could not reveal this PDF location."
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        onCommand={async () => generatedState}
+      >
+        <div>Document canvas</div>
+      </ReviewShell>,
+    );
+
+    expect(html).toContain('data-review-toast-stack');
+    expect(html).toContain('data-viewer-status');
+    expect(html).toContain('data-generation-status="reconciling"');
+    expect(html.indexOf('data-review-stage')).toBeLessThan(html.indexOf('data-review-toast-stack'));
+    expect(html.indexOf('data-review-toast-stack')).toBeLessThan(html.indexOf('Document canvas'));
+    expect(html).not.toContain('review-shell--generation-status');
+    expect(foundationStyles).toMatch(
+      /\.review-toast-stack\s*\{[^}]*position:\s*absolute;[^}]*top:\s*\.5rem;[^}]*left:\s*\.5rem;/u,
+    );
+    expect(foundationStyles).toMatch(
+      /\.pdf-workspace__status\s*\{[^}]*left:\s*\.5rem;/u,
+    );
+    expect(foundationStyles).not.toMatch(/\.pdf-workspace__status\s*\{[^}]*right:/u);
+    expect(responsiveStyles).toMatch(
+      /\.review-toast\[data-generation-status="reconciling"\] \.review-icon\s*\{[^}]*animation:\s*none;/u,
+    );
+  });
+
   it('floats a reversible outline expansion toggle opposite the active workspace navbar', () => {
     const html = renderToStaticMarkup(
       <ReviewShell

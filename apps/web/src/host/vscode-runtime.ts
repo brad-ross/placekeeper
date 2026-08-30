@@ -86,7 +86,8 @@ function validHostCommand(value: unknown): value is HostRuntimeCommand {
   if (value.command === "reattach" || value.command === "reverse-synctex") {
     return Object.keys(value).length === 1;
   }
-  return value.command === "forward-synctex" && Object.keys(value).length === 3 &&
+  return value.command === "forward-synctex" && Object.keys(value).length === 4 &&
+    Number.isSafeInteger(value.documentGeneration) && (value.documentGeneration as number) >= 0 &&
     Number.isSafeInteger(value.pageIndex) && (value.pageIndex as number) >= 0 &&
     isObject(value.point) && Object.keys(value.point).length === 2 &&
     Number.isFinite(value.point.x) && Number.isFinite(value.point.y);
