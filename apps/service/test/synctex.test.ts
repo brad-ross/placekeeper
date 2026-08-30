@@ -220,6 +220,65 @@ describe("generation-bound SyncTeX navigation", () => {
     });
   });
 
+  it("selects the last forward rectangle when SyncTeX returns multiple targets on one page", async () => {
+    const value = await generatedOutputFixture();
+    const result = await value.broker.forwardSyncTex({
+      sessionId: value.launch.sessionId,
+      operationToken: "forward-same-page-rectangles",
+      sourcePath: "paper.tex",
+      line: 3,
+      column: 17,
+      run: async (request) => ({
+        stdout: [
+          `Output:${request.argv.at(-1)}`,
+          "Page:3",
+          "x:167.669067",
+          "y:156.585541",
+          `Output:${request.argv.at(-1)}`,
+          "Page:3",
+          "x:191.745514",
+          "y:168.540710",
+        ].join("\n"),
+        stderr: "",
+        exitCode: 0,
+      }),
+    });
+    expect(result).toMatchObject({
+      status: "ok",
+      operationToken: "forward-same-page-rectangles",
+      target: { pageIndex: 2, x: 191.745514, y: 168.540710 },
+    });
+  });
+
+  it("keeps forward targets on different PDF pages ambiguous", async () => {
+    const value = await generatedOutputFixture();
+    const result = await value.broker.forwardSyncTex({
+      sessionId: value.launch.sessionId,
+      operationToken: "forward-conflicting-pages",
+      sourcePath: "paper.tex",
+      line: 3,
+      run: async (request) => ({
+        stdout: [
+          `Output:${request.argv.at(-1)}`,
+          "Page:2",
+          "x:72",
+          "y:144",
+          `Output:${request.argv.at(-1)}`,
+          "Page:3",
+          "x:72",
+          "y:144",
+        ].join("\n"),
+        stderr: "",
+        exitCode: 0,
+      }),
+    });
+    expect(result).toMatchObject({
+      status: "ambiguous",
+      operationToken: "forward-conflicting-pages",
+      reason: "multiple-forward-pages",
+    });
+  });
+
   it("requires one unique contained reverse target", async () => {
     const value = await generatedOutputFixture();
     await writeFile(join(value.root, "other.tex"), "other");

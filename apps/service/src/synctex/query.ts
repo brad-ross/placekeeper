@@ -427,15 +427,15 @@ export async function queryForwardSyncTex(input: {
     forwardOutputMatches(binding.privatePdfPath, candidate.output)
   );
   if (candidates.length === 0) return navigationResult(binding, "malformed", "no-bound-forward-target");
-  const unique = new Map(candidates.map((candidate) => [
-    `${candidate.page}:${candidate.x}:${candidate.y}`,
-    candidate,
-  ]));
-  if (unique.size !== 1) return navigationResult(binding, "ambiguous", "multiple-forward-targets");
+  if (new Set(candidates.map((candidate) => candidate.page)).size !== 1) {
+    return navigationResult(binding, "ambiguous", "multiple-forward-pages");
+  }
   if (input.isCurrent !== undefined && !await input.isCurrent(binding)) {
     return navigationResult(binding, "stale", "operation-binding-changed-before-forward-result");
   }
-  const candidate = [...unique.values()][0]!;
+  // SyncTeX commonly emits several rectangles for one source position. Its
+  // ordinary forward-view contract resolves that list to the final record.
+  const candidate = candidates.at(-1)!;
   return {
     ...navigationResult(binding, "ok"),
     target: { pageIndex: candidate.page - 1, x: candidate.x, y: candidate.y },
