@@ -14,6 +14,7 @@ import {
   anchorEvidenceFromReviewItem,
   createReviewState,
   startReviewGeneration,
+  type ReviewCommand,
   type ReviewState,
 } from '../src/review-model.js';
 import {
@@ -164,6 +165,41 @@ describe('canonical review commands', () => {
     expect(state.items[0]?.reconciliation?.disposition.kind).toBe('missing');
     expect(() => reduceReview(state, { type: 'undo', expectedRevision: state.revision }))
       .toThrow(/rebuild history boundary/iu);
+  });
+
+  it('rejects unknown and item-incompatible reattachment anchors', () => {
+    let { state, commands } = setup();
+    state = reduceReview(state, addReplace(state, selection, 'same semantics', commands));
+    state = startReviewGeneration(state, { documentGeneration: 2 });
+    const item = state.items[0]!;
+    const command = {
+      type: 'reattach',
+      expectedRevision: state.revision,
+      id: item.id,
+      expectedReconciliationRevision: item.reconciliation!.revision,
+      ownerViewId: 'panel-b',
+      updatedAt: '2026-08-07T12:05:00.000Z',
+    } as const;
+
+    expect(() => reduceReview(state, {
+      ...command,
+      anchor: {
+        kind: 'unknown',
+        pageIndex: 0,
+        rect: { x: 20, y: 30, width: 40, height: 10 },
+      },
+    } as unknown as ReviewCommand)).toThrow(/anchor kind/iu);
+
+    expect(() => reduceReview(state, {
+      ...command,
+      anchor: {
+        kind: 'caret',
+        pageIndex: 0,
+        leftContext: 'before',
+        rightContext: 'after',
+        rect: { x: 20, y: 30, width: 2, height: 10 },
+      },
+    })).toThrow(/requires a selection anchor/iu);
   });
 
   it('drops predecessor redo entries when a rebuild starts', () => {

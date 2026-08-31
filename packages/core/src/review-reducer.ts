@@ -159,11 +159,38 @@ function assertReviewAnchorEvidence(anchor: ReviewAnchorEvidenceV1): void {
     throw new InvalidReviewCommandError("Review anchor pageIndex must be non-negative");
   }
   assertRect(anchor.rect);
-  if (anchor.kind === "selection") {
-    if (anchor.quote.length === 0 || anchor.segmentRects.length === 0) {
-      throw new InvalidReviewCommandError("Selection reconciliation evidence is incomplete");
-    }
-    anchor.segmentRects.forEach(assertRect);
+  switch (anchor.kind) {
+    case "selection":
+      if (
+        typeof anchor.quote !== "string" || anchor.quote.length === 0 ||
+        typeof anchor.prefix !== "string" || typeof anchor.suffix !== "string" ||
+        !Array.isArray(anchor.segmentRects) || anchor.segmentRects.length === 0
+      ) throw new InvalidReviewCommandError("Selection reconciliation evidence is incomplete");
+      anchor.segmentRects.forEach(assertRect);
+      return;
+    case "caret":
+      if (typeof anchor.leftContext !== "string" || typeof anchor.rightContext !== "string") {
+        throw new InvalidReviewCommandError("Caret reconciliation evidence is incomplete");
+      }
+      return;
+    case "page":
+      if (anchor.nearbyText !== undefined && typeof anchor.nearbyText !== "string") {
+        throw new InvalidReviewCommandError("Page reconciliation evidence is incomplete");
+      }
+      return;
+    default:
+      throw new InvalidReviewCommandError("Review anchor kind is not supported");
+  }
+}
+
+function assertAnchorMatchesReviewItem(item: ReviewItem, anchor: ReviewAnchorEvidenceV1): void {
+  const expectedKind = item.kind === "insert"
+    ? "caret"
+    : item.kind === "pageNote"
+      ? "page"
+      : "selection";
+  if (anchor.kind !== expectedKind) {
+    throw new InvalidReviewCommandError(`Review item ${item.kind} requires a ${expectedKind} anchor`);
   }
 }
 
@@ -438,6 +465,7 @@ export function reduceReview(
         throw new ReviewDraftConflictError(command.expectedReconciliationRevision, reconciliation.revision);
       }
       assertReviewAnchorEvidence(command.anchor);
+      assertAnchorMatchesReviewItem(existing, command.anchor);
       const reattached: ReviewItem = {
         ...existing,
         pageIndex: command.anchor.pageIndex,

@@ -53,7 +53,7 @@ function candidateMatches(anchor: ReviewAnchorEvidenceV1, pages: readonly PdfAnc
         candidates.push({ page, offset: found });
         if (candidates.length === 2) return candidates;
       }
-      offset = found + Math.max(1, needle.length);
+      offset = found + 1;
     }
   }
   return candidates;

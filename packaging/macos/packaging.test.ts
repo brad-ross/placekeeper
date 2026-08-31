@@ -1029,6 +1029,8 @@ describe("macOS distribution manifests", () => {
       reviewSessionId: "package-contract",
     });
     const build = await readFile(resolve("packaging/macos/build-app.ts"), "utf8");
+    expect(build).toContain('resolve(vscodeDist, "extension.cjs")');
+    expect(build).not.toContain('resolve(vscodeDist, "extension.js")');
     expect(build).toContain("appManifest.embeddedArtifacts.codexPlugin");
     expect(build).toContain('resolve(resources, "integrations/codex-plugin")');
     expect(build).toContain('resolve(vscodeInstall, "assets")');

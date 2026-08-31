@@ -285,7 +285,7 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
     options.nodeRuntime,
     serviceEntry,
     options.webDist,
-    resolve(vscodeDist, "extension.js"),
+    resolve(vscodeDist, "extension.cjs"),
     resolve(vscodeExtension, "assets/placekeeper.png"),
     resolve(vscodeExtension, "assets/placekeeper.svg"),
     resolve(codexPlugin, ".codex-plugin/plugin.json"),

@@ -368,9 +368,13 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
         !Number.isSafeInteger(stateValue.workflow.documentGeneration) || !Number.isSafeInteger(stateValue.revision)) {
         throw new Error("Trusted broker state was invalid");
       }
-      const document = await request(`/document/${stateValue.source.fileId}`, {}, signal);
-      const bytes = new Uint8Array(await document.arrayBuffer());
       const generation = stateValue.workflow.documentGeneration as number;
+      const document = await request(
+        `/document/${stateValue.source.fileId}?generation=${generation}`,
+        {},
+        signal,
+      );
+      const bytes = new Uint8Array(await document.arrayBuffer());
       const documentUri = await options.materializeDocument({
         bytes,
         digest: stateValue.source.digest,
@@ -553,6 +557,9 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
       } catch {
         // The next ready/resubscribe handshake replays current state.
       }
+    });
+    socket.addEventListener("error", () => {
+      // The close event owns reconnect scheduling; errors must not escape the host.
     });
     socket.addEventListener("close", () => {
       socket = undefined;

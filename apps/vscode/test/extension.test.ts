@@ -557,6 +557,44 @@ describe("VS Code local host adapter", () => {
     expect(fetch.mock.calls[1]![1]).toMatchObject({ body: JSON.stringify({ observationEpoch: 5 }) });
   });
 
+  it("pins bootstrap document bytes to the state generation", async () => {
+    const state = createReviewState({
+      sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      source: {
+        fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        digest: "d".repeat(64),
+        byteLength: 3,
+      },
+      workflowMode: "generated-output",
+      documentGeneration: 4,
+    });
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/state")) return new Response(JSON.stringify(state));
+      if (url.pathname.endsWith("/scope")) return new Response(JSON.stringify({ documentTitle: "paper.pdf" }));
+      if (url.pathname.endsWith("/save/status")) return new Response(JSON.stringify({}));
+      expect(url.pathname).toMatch(/\/document\/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb$/u);
+      expect(url.searchParams.get("generation")).toBe("4");
+      return new Response(new Uint8Array([1, 2, 3]));
+    });
+    const materializeDocument = vi.fn(async () => "vscode-webview://authority/paper.pdf");
+    const client = createLoopbackRuntimeClient({
+      panelId: "panel_identifier_1234",
+      launch: {
+        origin: "http://127.0.0.1:49152",
+        sessionId: state.sessionId,
+        credential: "c".repeat(43),
+      },
+      assets: { pdfiumWasm: "vscode-webview://authority/pdfium.wasm" },
+      materializeDocument,
+      fetch,
+    });
+
+    await expect(client.bootstrap(new AbortController().signal)).resolves.toMatchObject({ generation: 4 });
+    expect(materializeDocument).toHaveBeenCalledWith(expect.objectContaining({ generation: 4 }));
+    client.dispose();
+  });
+
   it("keeps absolute SyncTeX source paths in the trusted extension host", async () => {
     const opened = vi.fn(async () => undefined);
     const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {

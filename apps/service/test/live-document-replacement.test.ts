@@ -11,6 +11,7 @@ import type { ReviewItem } from "../../../packages/core/src/review-model.js";
 import { reviewSemanticDigest } from "../../../packages/core/src/live-context.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 import { PdfEvidenceService } from "../src/context/pdf-evidence-service.js";
+import { reconcilePdfAnchor } from "../src/reconciliation/pdf-anchor-reconciler.js";
 import { SessionControlRegistry } from "../src/sessions/control-socket.js";
 
 const temporaryDirectories: string[] = [];
@@ -70,6 +71,23 @@ function selectionItem(id: string, quote: string, prefix = "", suffix = ""): Rev
 }
 
 describe("atomic live document replacement", () => {
+  it("keeps overlapping semantic matches ambiguous", () => {
+    const resolved = reconcilePdfAnchor({
+      kind: "selection",
+      pageIndex: 0,
+      quote: "ana",
+      prefix: "",
+      suffix: "",
+      rect: { x: 1, y: 1, width: 1, height: 1 },
+      segmentRects: [{ x: 1, y: 1, width: 1, height: 1 }],
+    }, [{ pageIndex: 0, text: "banana" }], 2);
+
+    expect(resolved.disposition).toEqual({
+      kind: "ambiguous",
+      reason: "semantic-anchor-matched-more-than-once",
+    });
+  });
+
   it("shares one canonical lineage across concurrent opens", async () => {
     const directory = await mkdtemp(join(tmpdir(), "placekeeper-concurrent-open-"));
     temporaryDirectories.push(directory);
