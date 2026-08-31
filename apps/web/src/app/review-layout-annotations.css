@@ -2021,59 +2021,201 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
 
 .reconciliation-workspace {
   display: grid;
-  gap: .75rem;
-  padding: .9rem;
-  border-bottom: 1px solid var(--review-border);
-  background: color-mix(in srgb, var(--review-warning) 8%, var(--review-surface-panel));
-}
-
-.reconciliation-workspace > header,
-.reconciliation-workspace > footer,
-.reconciliation-workspace article,
-.reconciliation-workspace [data-reattachment-selection-mode],
-.reconciliation-workspace [data-discard-confirmation] {
-  display: grid;
-  gap: .45rem;
-}
-
-.reconciliation-workspace h2,
-.reconciliation-workspace h3,
-.reconciliation-workspace p,
-.reconciliation-workspace blockquote {
-  margin: 0;
-}
-
-.reconciliation-workspace article,
-.reconciliation-workspace [data-reattachment-selection-mode],
-.reconciliation-workspace [data-discard-confirmation] {
-  padding: .7rem;
-  border: 1px solid var(--review-border);
-  border-radius: var(--review-radius-control);
+  gap: 10px;
+  min-width: 0;
+  padding: 13px;
+  border-bottom: 1px solid var(--review-border-subtle);
   background: var(--review-surface-panel);
 }
 
-.reconciliation-workspace blockquote {
-  padding-left: .6rem;
-  border-left: 2px solid var(--review-warning);
-  color: var(--review-ink-muted);
+.reconciliation-workspace--detail.full-annotation-reader {
+  gap: 14px;
+  border-bottom: 0;
 }
 
-.reconciliation-workspace button {
-  justify-self: start;
-  min-height: 2rem;
-  padding: .3rem .65rem;
-  border: 1px solid var(--review-border);
+.reconciliation-workspace__detail-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--review-border-subtle);
+}
+
+.reconciliation-workspace__detail-header h2 {
+  min-width: 0;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 760;
+  line-height: 1.3;
+  letter-spacing: -.02em;
+  overflow-wrap: anywhere;
+}
+
+.reconciliation-workspace__state-pill {
+  display: inline-flex;
+  min-height: 23px;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 7px;
+  border-radius: var(--review-radius-round);
+  color: color-mix(in srgb, var(--review-warning) 58%, var(--review-ink-primary));
+  background: color-mix(in srgb, var(--review-warning) 20%, var(--review-surface-panel));
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.reconciliation-workspace__header-spacer {
+  width: var(--review-control-compact);
+  height: var(--review-control-compact);
+}
+
+.reconciliation-workspace__header {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 0;
+}
+
+.reconciliation-workspace__header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 760;
+  line-height: 1.3;
+  letter-spacing: -.02em;
+}
+
+.reconciliation-workspace__header p,
+.reconciliation-workspace__notice,
+.reconciliation-workspace__message,
+.reconciliation-workspace__footer p,
+.reconciliation-workspace__instruction {
+  margin: 0;
+  color: var(--review-ink-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.reconciliation-workspace__notice,
+.reconciliation-workspace__message {
+  padding: 7px 9px;
+  border: 1px solid var(--review-border-subtle);
   border-radius: var(--review-radius-control);
-  color: var(--review-ink-primary);
   background: var(--review-surface-subtle);
-  font: inherit;
+}
+
+.reconciliation-workspace__list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reconciliation-workspace li[data-annotation-origin="previous"] .annotation-item__section {
+  flex: 1 1 auto;
+  width: auto;
+}
+
+.reconciliation-workspace__footer {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--review-border-subtle);
+}
+
+.reconciliation-workspace__footer > .review-button {
+  justify-self: start;
 }
 
 .reconciliation-workspace button:disabled {
   opacity: .55;
 }
 
-.reconciliation-workspace [data-export-eligibility="eligible"] {
-  padding-top: .7rem;
-  border-top: 1px solid var(--review-border);
+.reconciliation-workspace__discard,
+.reconciliation-workspace__destructive {
+  color: var(--review-danger);
+}
+
+.reconciliation-workspace__discard:hover,
+.reconciliation-workspace__destructive:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--review-danger) 55%, var(--review-border-strong));
+  color: var(--review-danger);
+  background: color-mix(in srgb, var(--review-danger) 8%, var(--review-surface-panel));
+}
+
+.reconciliation-workspace__export-confirmation {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--review-border-subtle);
+  border-radius: var(--review-radius-row);
+  background: var(--review-workspace-card-surface);
+}
+
+.reconciliation-workspace__resolution {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.reconciliation-workspace--detail .full-annotation-reader__body {
+  gap: 14px;
+}
+
+.reconciliation-workspace__intent {
+  display: grid;
+  gap: 5px;
+}
+
+.reconciliation-workspace--detail .reconciliation-workspace__kicker {
+  margin: 0;
+  color: var(--review-ink-quiet);
+  font-size: 10px;
+  font-weight: 780;
+  line-height: 1.3;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.reconciliation-workspace--detail .reconciliation-workspace__annotation-text {
+  font-size: 15px;
+  font-weight: 680;
+  line-height: 1.42;
+}
+
+.reconciliation-workspace__prior-context {
+  display: grid;
+  gap: 5px;
+  padding: 11px 12px;
+  border-left: 3px solid color-mix(in srgb, var(--review-warning) 58%, var(--review-border-strong));
+  border-radius: 0 var(--review-radius-control) var(--review-radius-control) 0;
+  background: color-mix(in srgb, var(--review-warning) 8%, var(--review-surface-panel));
+}
+
+.reconciliation-workspace--detail .reconciliation-workspace__source-text {
+  color: color-mix(in srgb, var(--review-ink-primary) 76%, var(--review-ink-muted));
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 14px;
+  font-style: italic;
+  line-height: 1.5;
+}
+
+.reconciliation-workspace--detail .reconciliation-workspace__instruction {
+  font-size: 12px;
+  line-height: 1.48;
+}
+
+.reconciliation-workspace__editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--review-action-group-gap);
+}
+
+.reconciliation-workspace__editor-actions .review-button {
+  flex: none;
 }

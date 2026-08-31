@@ -49,6 +49,59 @@ async function expectScene(locator: Locator, name: string): Promise<void> {
   });
 }
 
+async function openFocusedReattachment(
+  page: Page,
+  viewport: { readonly width: number; readonly height: number },
+): Promise<Locator> {
+  await page.setViewportSize(viewport);
+  await page.goto('/test/acceptance/review-harness/index.html?visual=tray&reconciliation=1');
+  const product = page.locator('.review-shell');
+  await expect(product).toBeVisible();
+  const workspace = viewport.width < 900
+    ? page.getByRole('button', { name: /^(?:Open|Close) References tray$/u })
+    : page.getByRole('button', { name: /^(?:Open|Close) right workspace$/u });
+  if (await workspace.getAttribute('aria-expanded') !== 'true') await workspace.click();
+  const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
+  if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
+  await page.getByRole('button', {
+    name: 'Reattach previous Highlight annotation on page 1',
+  }).click();
+  const detail = page.locator('[data-reconciliation-detail="reattach"]');
+  await expect(detail).toBeVisible();
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
+  return detail;
+}
+
+async function expectFocusedReattachmentGeometry(detail: Locator): Promise<void> {
+  const geometry = await detail.evaluate((element) => {
+    const header = element.querySelector<HTMLElement>('.reconciliation-workspace__detail-header');
+    const title = header?.querySelector<HTMLElement>('h2');
+    const pill = header?.querySelector<HTMLElement>('.reconciliation-workspace__state-pill');
+    const back = header?.querySelector<HTMLElement>('.full-annotation-reader__back');
+    const discard = header?.querySelector<HTMLElement>('.full-annotation-reader__edit');
+    if (!header || !title || !pill || !back || !discard) throw new Error('Focused reattachment header is incomplete.');
+    return {
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      title: title.getBoundingClientRect().toJSON(),
+      pill: pill.getBoundingClientRect().toJSON(),
+      back: back.getBoundingClientRect().toJSON(),
+      discard: discard.getBoundingClientRect().toJSON(),
+    };
+  });
+  expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
+  expect(geometry.pill.x).toBeGreaterThanOrEqual(geometry.title.x + geometry.title.width - 0.5);
+  expect(geometry.pill.y).toBeGreaterThanOrEqual(geometry.title.y - 8);
+  expect(geometry.pill.y + geometry.pill.height).toBeLessThanOrEqual(
+    geometry.title.y + geometry.title.height + 8,
+  );
+  expect(geometry.back.width).toBeCloseTo(geometry.discard.width, 1);
+  expect(geometry.back.height).toBeCloseTo(geometry.discard.height, 1);
+}
+
 async function expectAnnotationTrayOverflow(
   page: Page,
   { verticallyScrollable = false }: { readonly verticallyScrollable?: boolean } = {},
@@ -514,6 +567,16 @@ test('wide Annotation Tray', async ({ page }) => {
   await expect(reader).toContainText('complete reviewer-authored argument');
   await expect(reader).not.toContainText('identifying variation is local to the comparison group');
   await expectScene(product, 'wide-full-annotation-reader-owned.png');
+});
+
+test('focused reattachment hierarchy', async ({ page }) => {
+  const wide = await openFocusedReattachment(page, { width: 1280, height: 900 });
+  await expectFocusedReattachmentGeometry(wide);
+  await expectScene(wide, 'wide-focused-reattachment.png');
+
+  const narrow = await openFocusedReattachment(page, { width: 320, height: 900 });
+  await expectFocusedReattachmentGeometry(narrow);
+  await expectScene(narrow, 'narrow-focused-reattachment.png');
 });
 
 test('narrow Annotation Tray', async ({ page }) => {

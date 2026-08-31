@@ -392,6 +392,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const [consumedSelectionGeneration, setConsumedSelectionGeneration] = useState<number>();
   const [listActivation, setListActivation] = useState<{ readonly id: string; readonly token: number }>();
   const [annotationReaderSession, setAnnotationReaderSession] = useState<FullAnnotationReaderSession | null>(null);
+  const [reconciliationDetailOpen, setReconciliationDetailOpen] = useState(false);
   const pendingReaderResumeRef = useRef<FullAnnotationReaderSession | null>(null);
   const annotationRestorationTokenRef = useRef(0);
   const annotationRestorationFramesRef = useRef(new Set<number>());
@@ -2022,7 +2023,9 @@ export function ReviewShell(props: ReviewShellProps) {
               refreshStatus={props.generationRefreshStatus ?? 'idle'}
               onCommand={(command) => props.onCommand(command)}
               onExport={props.onExportReviewedCopy ?? (() => Promise.reject(new Error('Reviewed export is unavailable.')))}
+              onDetailOpenChange={setReconciliationDetailOpen}
             /> : null}
+            {reconciliationDetailOpen ? null : <>
             <AnnotationList
               items={visibleOwnedItems}
               {...(!showAnnotationOutlineLabels || props.annotationOutlineLabels === undefined
@@ -2134,6 +2137,7 @@ export function ReviewShell(props: ReviewShellProps) {
               ) : null}
               </section>
             )}
+            </>}
             </div>}
             search={props.search ?? (
               <div className="workspace-state" data-workspace-focus-token="search:unavailable" tabIndex={-1}>

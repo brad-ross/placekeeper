@@ -30,6 +30,7 @@ import {
   reconciliationCommandPresentation,
   reattachmentCandidateFor,
   reattachmentGenerationIsCurrent,
+  reattachmentTitle,
   reconciliationExportPresentation,
   ReconciliationWorkspace,
 } from "../src/review/ReconciliationWorkspace.js";
@@ -277,10 +278,17 @@ describe("one production review tree", () => {
     />);
 
     expect(html).toContain('data-reconciliation-workspace');
-    expect(html).toContain("old sentence");
-    expect(html).toContain("two matching passages");
+    expect(html).toContain("Previous Annotations to Resolve");
+    expect(html).toContain("new sentence");
     expect(html).toContain("unfinished wording");
-    expect(html).toContain("Frozen draft");
+    expect(html).toContain("Multiple matches");
+    expect(html).toContain("Needs new location");
+    expect(html).not.toContain('data-reconciliation-action="reattach"');
+    expect(html).toContain('data-reconciliation-action="discard"');
+    expect(html).toContain('aria-label="Reattach previous Replace annotation on page 1"');
+    expect(html).not.toContain("Ambiguous anchor");
+    expect(html).not.toContain("Frozen draft");
+    expect(html).not.toContain("two matching passages");
     expect(html).not.toContain(">Apply</button>");
     expect(html).toContain("possibly stale");
     expect(html).toContain("Resolve 1 Review Item and 1 pending draft before export");
@@ -374,6 +382,22 @@ describe("one production review tree", () => {
     });
   });
 
+  it("names each focused reattachment task with its annotation intent", () => {
+    expect(([
+      "highlight",
+      "delete",
+      "insert",
+      "replace",
+      "pageNote",
+    ] as const).map(reattachmentTitle)).toEqual([
+      "Reattach highlight",
+      "Reattach deletion",
+      "Reattach insertion",
+      "Reattach replacement",
+      "Reattach page note",
+    ]);
+  });
+
   it("explains reconciling, unresolved, stale-confirmation, and eligible export states", () => {
     const summary = (unresolvedItems: number, pendingDrafts: number, freshness: "current" | "possibly-stale") => ({
       ...createReviewStateSummary({
@@ -443,6 +467,7 @@ describe("one production review tree", () => {
     />);
 
     expect(html).toContain("Generation 8 viewer");
+    expect(html).toContain('data-launch-surface="vscode"');
     expect(html).toContain('data-reconciliation-workspace');
     expect(html).toContain('data-export-eligibility="eligible"');
     expect(html).toContain("Protected review state");

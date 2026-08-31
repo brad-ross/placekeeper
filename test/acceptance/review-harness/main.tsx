@@ -38,6 +38,7 @@ rootElement.setAttribute('data-authoring-preview-updates', '0');
 const visualScenario = resolveVisualScenario(window.location.search);
 const previewParameters = new URLSearchParams(window.location.search);
 const saveEstablishing = previewParameters.has('establishing');
+const reconciliationPreview = previewParameters.get('reconciliation');
 const composerPreview = previewParameters.get('composer');
 const requestedComposerReturn = previewParameters.get('return');
 const composerReturnPreview = requestedComposerReturn === 'outside'
@@ -111,6 +112,112 @@ const caret: CaretAnchor = {
   rightContext: ' exists',
   reliable: true,
 };
+
+function createReconciliationPreviewState(variant = 'default'): ReviewState {
+  const state = createReviewState({
+    sessionId: '00000000-0000-4000-8000-000000000201',
+    source: {
+      fileId: '00000000-0000-4000-8000-000000000202',
+      digest: 'c'.repeat(64),
+      byteLength: 120,
+    },
+    workflowMode: 'generated-output',
+    documentGeneration: 2,
+  });
+  const anchor = {
+    kind: 'selection' as const,
+    pageIndex: 0,
+    quote: 'the previous identification argument',
+    prefix: 'Review ',
+    suffix: ' carefully.',
+    rect: { x: 72, y: 92, width: 180, height: 14 },
+    segmentRects: [{ x: 72, y: 92, width: 180, height: 14 }],
+  };
+  if (variant === 'page-notes') {
+    const pageAnchor = {
+      kind: 'page' as const,
+      pageIndex: 2,
+      rect: { x: 420, y: 620, width: 24, height: 24 },
+    };
+    return {
+      ...state,
+      items: [{
+        id: '00000000-0000-4000-8000-000000000205',
+        kind: 'pageNote',
+        pageIndex: 2,
+        createdAt: '2026-08-30T00:00:00.000Z',
+        updatedAt: '2026-08-30T00:00:00.000Z',
+        payload: { ...pageAnchor, position: pageAnchor.rect, comment: 'Check the full-page comparison.' },
+        reconciliation: {
+          schemaVersion: 1,
+          ownerViewId: 'harness-view',
+          baseGeneration: 1,
+          revision: 1,
+          anchor: pageAnchor,
+          disposition: { kind: 'missing', reason: 'The prior page context is unavailable.' },
+          previousAnchors: [],
+        },
+      }, {
+        id: '00000000-0000-4000-8000-000000000206',
+        kind: 'pageNote',
+        pageIndex: 3,
+        createdAt: '2026-08-30T00:00:00.000Z',
+        updatedAt: '2026-08-30T00:00:00.000Z',
+        payload: { ...pageAnchor, pageIndex: 3, position: pageAnchor.rect, comment: 'Verify the appendix transition.' },
+        reconciliation: {
+          schemaVersion: 1,
+          ownerViewId: 'harness-view',
+          baseGeneration: 1,
+          revision: 1,
+          anchor: { ...pageAnchor, pageIndex: 3, nearbyText: 'The appendix extends the comparison.' },
+          disposition: { kind: 'missing', reason: 'The prior page context is unavailable.' },
+          previousAnchors: [],
+        },
+      }],
+    };
+  }
+  return {
+    ...state,
+    items: [{
+      id: '00000000-0000-4000-8000-000000000203',
+      kind: 'highlight',
+      pageIndex: 0,
+      createdAt: '2026-08-30T00:00:00.000Z',
+      updatedAt: '2026-08-30T00:00:00.000Z',
+      payload: { ...anchor, reliable: true, comment: 'Check the identifying variation.' },
+      reconciliation: {
+        schemaVersion: 1,
+        ownerViewId: 'harness-view',
+        baseGeneration: 1,
+        revision: 1,
+        anchor,
+        disposition: { kind: 'ambiguous', reason: 'Two passages match this previous annotation.' },
+        previousAnchors: [],
+      },
+    }, {
+      id: '00000000-0000-4000-8000-000000000204',
+      kind: 'delete',
+      pageIndex: 1,
+      createdAt: '2026-08-30T00:00:00.000Z',
+      updatedAt: '2026-08-30T00:00:00.000Z',
+      payload: {
+        ...anchor,
+        pageIndex: 1,
+        quote: 'obsolete robustness sentence',
+        reliable: true,
+      },
+      reconciliation: {
+        schemaVersion: 1,
+        ownerViewId: 'harness-view',
+        baseGeneration: 1,
+        revision: 1,
+        anchor: { ...anchor, pageIndex: 1, quote: 'obsolete robustness sentence' },
+        disposition: { kind: 'missing', reason: 'The previous passage is not present in this PDF.' },
+        previousAnchors: [],
+      },
+    }],
+  };
+}
 
 interface HarnessViewerControls extends ViewerControls {
   readonly pageCommands: string[];
@@ -331,10 +438,12 @@ function activateVisualReference(
 }
 
 function Harness() {
-  const [state, setState] = useState(() => visualScenario?.state ?? createReviewState({
-    sessionId: 'acceptance',
-    source: { fileId: 'source', digest: 'a'.repeat(64), byteLength: 100 },
-  }));
+  const [state, setState] = useState(() => reconciliationPreview !== null
+    ? createReconciliationPreviewState(reconciliationPreview)
+    : (visualScenario?.state ?? createReviewState({
+      sessionId: 'acceptance',
+      source: { fileId: 'source', digest: 'a'.repeat(64), byteLength: 100 },
+    })));
   const [anchorKind, setAnchorKind] = useState<'selection' | 'caret' | 'none'>(
     visualScenario ? (visualScenario.name === 'contextual' ? 'selection' : 'none') : 'selection',
   );

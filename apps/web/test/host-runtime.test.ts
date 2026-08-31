@@ -310,6 +310,21 @@ describe("host-neutral review runtime", () => {
     const bootstrap = await runtime.bootstrap();
     expect(bootstrap.scope.launchSurface).toBe("vscode");
     await expect(runtime.scope()).resolves.toMatchObject({ documentTitle: "paper.pdf" });
+    const scopeRequest = postMessage.mock.calls
+      .map(([message]) => message as Record<string, unknown>)
+      .find((message) => message.method === "scope");
+    expect(scopeRequest).toEqual({
+      protocol: HOST_RUNTIME_PROTOCOL,
+      version: HOST_RUNTIME_VERSION,
+      kind: "request",
+      panelId: "panel_identifier_1234",
+      requestId: expect.any(String),
+      sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      generation: 1,
+      revision: 0,
+      method: "scope",
+      payload: {},
+    });
     expect(JSON.stringify(postMessage.mock.calls)).not.toContain("credential");
     expect(JSON.stringify(postMessage.mock.calls)).not.toContain("/Users/");
     runtime.dispose();

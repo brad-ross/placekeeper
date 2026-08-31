@@ -65,6 +65,97 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('button', { name: 'Proofread mode' })).toHaveCount(0);
   });
 
+  test('resolves previous annotations through focused, annotation-native detail views', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=1');
+    await openAnnotationsWorkspace(page);
+
+    const reconciliation = page.getByRole('region', { name: 'Previous Annotations to Resolve' });
+    await expect(reconciliation.getByRole('heading', {
+      name: 'Previous Annotations to Resolve',
+    })).toBeVisible();
+    await expect(reconciliation.locator('[data-reconciliation-entry]')).toHaveCount(2);
+    await expect(reconciliation.locator('[data-reconciliation-action="reattach"]')).toHaveCount(0);
+    await expect(reconciliation.getByRole('button', {
+      name: 'Discard Delete annotation on page 2',
+    })).toBeVisible();
+
+    await reconciliation.getByRole('button', {
+      name: 'Reattach previous Highlight annotation on page 1',
+    }).click();
+    const reattachDetail = page.locator('[data-reconciliation-detail="reattach"]');
+    await expect(reattachDetail).toHaveAttribute(
+      'aria-label',
+      'Resolve previous Highlight annotation on page 1',
+    );
+    await expect(reattachDetail.getByRole('heading', { name: 'Reattach highlight' })).toBeVisible();
+    await expect(reattachDetail.getByText('Your annotation')).toBeVisible();
+    await expect(reattachDetail.getByText('Check the identifying variation.')).toBeVisible();
+    await expect(reattachDetail.getByText('Multiple matches')).toHaveCount(1);
+    await expect(reattachDetail.getByText('Previously attached to · Page 1')).toBeVisible();
+    await expect(reattachDetail.getByText('the previous identification argument')).toBeVisible();
+    await expect(reattachDetail.getByText('Select the intended text in the PDF, then confirm.')).toBeVisible();
+    await expect(reattachDetail.locator('.full-annotation-reader__metadata')).toHaveCount(0);
+    await expect(reattachDetail.locator('[data-reattachment-preview]')).toHaveCount(0);
+    await expect(reattachDetail.locator('.reconciliation-workspace__editor')).toHaveCount(0);
+    await reattachDetail.getByRole('button', { name: 'Back' }).click();
+    await expect(page.getByRole('button', {
+      name: 'Reattach previous Highlight annotation on page 1',
+    })).toBeFocused();
+
+    await reconciliation.getByRole('button', {
+      name: 'Reattach previous Highlight annotation on page 1',
+    }).click();
+    await expect(page.getByRole('region', { name: 'Owned annotations' })).toHaveCount(0);
+    await expect(reattachDetail.getByRole('button', { name: 'Confirm' })).toBeEnabled();
+
+    await reattachDetail.getByRole('button', { name: 'Confirm' }).click();
+    await expect(page.locator('[data-reconciliation-detail]')).toHaveCount(0);
+    await expect(page.locator('[data-reconciliation-entry]')).toHaveCount(1);
+    await expect(page.getByRole('region', { name: 'Owned annotations' })).toContainText(
+      'Check the identifying variation.',
+    );
+
+    await page.getByRole('button', {
+      name: 'Discard Delete annotation on page 2',
+    }).click();
+    const discardDetail = page.locator('[data-reconciliation-detail="discard"]');
+    await expect(discardDetail).toHaveAttribute(
+      'aria-label',
+      'Resolve previous Delete annotation on page 2',
+    );
+    await expect(discardDetail.getByText('obsolete robustness sentence')).toBeVisible();
+    await expect(discardDetail.getByText('Missing text')).toHaveCount(1);
+    await expect(discardDetail.getByText('The original text is no longer present. Select its new location.')).toHaveCount(0);
+    await discardDetail.getByRole('button', { name: 'Discard', exact: true }).click();
+
+    await expect(page.locator('[data-reconciliation-entry]')).toHaveCount(0);
+    await expect(page.getByText('No previous annotations need attention.')).toBeVisible();
+    await expect(page.getByText('Discard recorded.')).toBeVisible();
+  });
+
+  test('shows Page Note source context only when it identifies the prior location', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=page-notes');
+    await openAnnotationsWorkspace(page);
+
+    await page.getByRole('button', {
+      name: 'Reattach previous Page Note annotation on page 3',
+    }).click();
+    const detail = page.locator('[data-reconciliation-detail="reattach"]');
+    await expect(detail.getByRole('heading', { name: 'Reattach page note' })).toBeVisible();
+    await expect(detail.getByText('Previously attached to · Page 3')).toBeVisible();
+    await expect(detail.getByText('Original PDF text:')).toHaveCount(0);
+    await expect(detail.getByText('Page 3', { exact: true })).toHaveCount(0);
+    await detail.getByRole('button', { name: 'Back' }).click();
+
+    await page.getByRole('button', {
+      name: 'Reattach previous Page Note annotation on page 4',
+    }).click();
+    await expect(detail.getByText('Previously attached to · Page 4')).toBeVisible();
+    await expect(detail.getByText('The appendix extends the comparison.')).toBeVisible();
+  });
+
   test('keeps focus and References coherent when a live outline disappears and returns', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole('button', { name: 'Set outline tree' }).click();

@@ -1610,7 +1610,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     commitMainFramingPositionRef.current = commit ?? (() => undefined);
   }, []);
   return (
-    <main data-production-review ref={productionRootRef}>
+    <main
+      data-production-review
+      data-launch-surface={scope.launchSurface ?? 'browser'}
+      ref={productionRootRef}
+    >
       <ReviewShell
         state={state}
         documentTitle={scope.documentTitle}

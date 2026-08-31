@@ -277,7 +277,11 @@ export function createRpcHostRuntime(
         typeof value.resources.pdfiumWasm !== "string") {
         throw new Error("The trusted host returned an invalid bootstrap.");
       }
-      identity = value;
+      identity = {
+        sessionId: value.sessionId,
+        generation: value.generation,
+        revision: value.revision,
+      };
       const pdfium = await pdfiumResource(value.resources.pdfiumWasm);
       const issued = new Set<string>([
         value.resources.document,

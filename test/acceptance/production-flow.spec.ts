@@ -3244,6 +3244,58 @@ test('returns a live PDF annotation preview through document history without ret
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
 });
 
+test('keeps VS Code composer controls aligned with the web desktop control size', async ({ page }) => {
+  const launched = await host.open({
+    pdfPath: await freshProductionPdf(multiPagePdf),
+    sourceRootPath: sourceRoot,
+    surface: 'vscode',
+    fork: true,
+  });
+  if (!launched.ok || launched.kind === 'recovery-offered') {
+    throw new Error('VS Code composer sizing launch failed.');
+  }
+  await page.setViewportSize({ width: 760, height: 900 });
+  await page.goto(launched.url);
+
+  const review = page.locator('[data-production-review]');
+  await expect(review).toHaveAttribute('data-launch-surface', 'vscode');
+  const firstPage = page.locator("[data-page-index='0']").first();
+  await waitForRenderedPageImage(firstPage);
+  const firstPageBox = await firstPage.boundingBox();
+  if (!firstPageBox) throw new Error('VS Code composer page has no bounds.');
+  await firstPage.click({
+    button: 'right',
+    position: { x: firstPageBox.width * 0.75, y: firstPageBox.height * 0.65 },
+  });
+  await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
+
+  const composer = page.getByRole('region', { name: 'Page Note' });
+  const actionHeights = await composer.locator('.comment-composer__actions button')
+    .evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height));
+  expect(actionHeights).not.toHaveLength(0);
+  expect(actionHeights.every((height) => Math.abs(height - 34) < 0.5)).toBe(true);
+
+  const currentPage = page.getByRole('button', {
+    name: 'Current page 1 of 2. Enter a page number',
+  });
+  await currentPage.click();
+  const pageNumber = page.getByRole('spinbutton', { name: 'Page number' });
+  await pageNumber.fill('2');
+  await pageNumber.press('Enter');
+
+  const returnToAnchor = composer.getByRole('button', { name: 'Return to annotation' });
+  await expect(returnToAnchor).toBeVisible();
+  const [anchorBox, cancelBox] = await Promise.all([
+    returnToAnchor.boundingBox(),
+    composer.getByRole('button', { name: 'Cancel' }).boundingBox(),
+  ]);
+  expect(anchorBox).not.toBeNull();
+  expect(cancelBox).not.toBeNull();
+  expect(anchorBox!.width).toBeCloseTo(34, 0);
+  expect(anchorBox!.height).toBeCloseTo(34, 0);
+  expect(anchorBox!.height).toBeCloseTo(cancelBox!.height, 0);
+});
+
 test('keeps the workspace and its toggle moving together without relaying animated tray widths into the PDF runway', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1280, height: 900 });

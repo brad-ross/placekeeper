@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { createReviewStateSummary, type ReviewStateSummaryV1 } from "../../../../packages/core/src/live-context.js";
 import { anchorEvidenceFromReviewItem } from "../../../../packages/core/src/review-model.js";
@@ -7,11 +7,14 @@ import type {
   ReviewAnchorEvidenceV1,
   ReviewCommand,
   ReviewItem,
+  ReviewItemKind,
   ReviewState,
 } from "../../../../packages/core/src/review-model.js";
 import type { GenerationRefreshStatus } from "../generation-status.js";
 import type { CaretAnchor } from "../pdf/selection-anchor.js";
 import { reliableSelection, type SelectionUpdate } from "../pdf/selection-state.js";
+import { AnnotationMetadata, annotationKindLabel } from "./AnnotationMetadata.js";
+import { ReviewIcon } from "./ReviewIcon.js";
 
 export type ReattachmentTarget =
   | {
@@ -24,6 +27,8 @@ export type ReattachmentTarget =
       readonly kind: "draft";
       readonly draft: PendingReviewDraftV1;
     };
+
+const DEFAULT_SELECTION_REATTACHMENT_MESSAGE = "Select one reliable replacement passage in the current PDF.";
 
 export function buildReattachmentCommand(input: {
   readonly target: ReattachmentTarget;
@@ -146,7 +151,7 @@ export function reattachmentCandidateFor(
       anchor: null,
       message: selectionUpdate.kind === "unreliable"
         ? selectionUpdate.userMessage
-        : "Select one reliable replacement passage in the current PDF.",
+        : DEFAULT_SELECTION_REATTACHMENT_MESSAGE,
     };
   }
   if (expected === "caret") {
@@ -202,16 +207,50 @@ export function cancelledReattachmentPresentation(): {
   };
 }
 
-function reason(target: ReviewItem | PendingReviewDraftV1): string {
-  const disposition = "payload" in target ? target.reconciliation?.disposition : target.disposition;
-  return disposition?.kind === "resolved" ? "Pending authoring must be completed." : disposition?.reason ?? "Anchor unresolved.";
-}
-
 function quote(target: ReviewItem | PendingReviewDraftV1): string {
   const anchor = targetAnchor(target);
   if (anchor.kind === "selection") return anchor.quote;
   if (anchor.kind === "caret") return `${anchor.leftContext}▏${anchor.rightContext}`;
   return anchor.nearbyText ?? `Page ${anchor.pageIndex + 1}`;
+}
+
+const REATTACHMENT_TITLES: Readonly<Record<ReviewItemKind, string>> = {
+  delete: "Reattach deletion",
+  highlight: "Reattach highlight",
+  insert: "Reattach insertion",
+  pageNote: "Reattach page note",
+  replace: "Reattach replacement",
+};
+
+export function reattachmentTitle(kind: ReviewItemKind): string {
+  return REATTACHMENT_TITLES[kind];
+}
+
+function meaningfulPriorSourceText(
+  target: ReviewItem | PendingReviewDraftV1,
+  authored: string,
+): string | undefined {
+  const anchor = targetAnchor(target);
+  const source = anchor.kind === "selection"
+    ? anchor.quote
+    : anchor.kind === "caret"
+      ? `${anchor.leftContext}▏${anchor.rightContext}`
+      : anchor.nearbyText;
+  const normalizedSource = source?.trim();
+  if (!normalizedSource || normalizedSource === `Page ${anchor.pageIndex + 1}`) return undefined;
+  return normalizedSource === authored.trim() ? undefined : normalizedSource;
+}
+
+function reattachmentInstruction(
+  expected: ReviewAnchorEvidenceV1["kind"],
+  candidate: { readonly anchor: ReviewAnchorEvidenceV1 | null; readonly message: string },
+): string {
+  if (candidate.anchor === null && candidate.message !== DEFAULT_SELECTION_REATTACHMENT_MESSAGE) {
+    return candidate.message;
+  }
+  if (expected === "caret") return "Place the caret at the intended insertion point in the PDF, then confirm.";
+  if (expected === "page") return "Select text or place the caret on the intended page in the PDF, then confirm.";
+  return "Select the intended text in the PDF, then confirm.";
 }
 
 export interface ReconciliationWorkspaceProps {
@@ -221,40 +260,137 @@ export interface ReconciliationWorkspaceProps {
   readonly refreshStatus: GenerationRefreshStatus;
   readonly onCommand: (command: ReviewCommand) => Promise<unknown>;
   readonly onExport: (confirmPossiblyStale?: true) => Promise<unknown>;
+  readonly onDetailOpenChange?: (open: boolean) => void;
+}
+
+type ResolutionMode = "apply" | "reattach" | "discard";
+
+interface ResolutionDetail {
+  readonly key: string;
+  readonly mode: ResolutionMode;
+  readonly generation: number;
+}
+
+interface ResolutionRecord {
+  readonly key: string;
+  readonly target: ReattachmentTarget;
+  readonly value: ReviewItem | PendingReviewDraftV1;
+  readonly kind: ReviewItem["kind"] | PendingReviewDraftV1["kind"];
+  readonly pageNumber: number;
+  readonly priorSourceText: string | undefined;
+  readonly authoredText: string;
+  readonly stateLabel: string;
+}
+
+function authoredText(target: ReviewItem | PendingReviewDraftV1): string {
+  if (!("payload" in target)) return target.text;
+  const fields = ["proposedText", "comment", "quote"] as const;
+  return fields
+    .map((field) => target.payload[field])
+    .find((value): value is string => typeof value === "string" && value.length > 0) ?? quote(target);
+}
+
+function resolutionStateLabel(target: ReviewItem | PendingReviewDraftV1): string {
+  if (!("payload" in target)) {
+    if (target.status === "protected" && target.disposition.kind === "resolved") return "Ready to apply";
+    return target.status === "frozen" ? "Needs new location" : "Needs review";
+  }
+  const disposition = target.reconciliation?.disposition;
+  if (disposition?.kind === "ambiguous") return "Multiple matches";
+  if (disposition?.kind === "missing") return "Missing text";
+  return "Needs review";
 }
 
 export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
-  const unresolvedItems = props.state.items.filter(
-    (item) => item.reconciliation !== undefined && item.reconciliation.disposition.kind !== "resolved",
+  const records = useMemo<readonly ResolutionRecord[]>(() => [
+    ...props.state.items.filter(
+      (item) => item.reconciliation !== undefined && item.reconciliation.disposition.kind !== "resolved",
+    ).map((item): ResolutionRecord => ({
+      key: `item:${item.id}`,
+      target: {
+        kind: "item",
+        id: item.id,
+        revision: item.reconciliation!.revision,
+        ownerViewId: item.reconciliation!.ownerViewId,
+      },
+      value: item,
+      kind: item.kind,
+      pageNumber: item.pageIndex + 1,
+      authoredText: authoredText(item),
+      priorSourceText: meaningfulPriorSourceText(item, authoredText(item)),
+      stateLabel: resolutionStateLabel(item),
+    })),
+    ...props.state.pendingDrafts.map((draft): ResolutionRecord => ({
+      key: `draft:${draft.id}`,
+      target: { kind: "draft", draft },
+      value: draft,
+      kind: draft.kind,
+      pageNumber: draft.pageIndex + 1,
+      authoredText: authoredText(draft),
+      priorSourceText: meaningfulPriorSourceText(draft, authoredText(draft)),
+      stateLabel: resolutionStateLabel(draft),
+    })),
+  ], [props.state.items, props.state.pendingDrafts]);
+  const recordsByKey = useMemo(
+    () => new Map(records.map((record) => [record.key, record] as const)),
+    [records],
   );
-  const [active, setActive] = useState<{
-    readonly target: ReattachmentTarget;
-    readonly expectedKind: ReviewAnchorEvidenceV1["kind"];
-    readonly generation: number;
-  } | null>(null);
-  const [discard, setDiscard] = useState<ReattachmentTarget | null>(null);
+  const [detail, setDetail] = useState<ResolutionDetail | null>(null);
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
   const [staleConfirmation, setStaleConfirmation] = useState(false);
-  const exportState = reconciliationExportPresentation({
+  const entryRefs = useRef(new Map<string, HTMLButtonElement>());
+  const detailBackRef = useRef<HTMLButtonElement>(null);
+  const returnFocusKeyRef = useRef<string | null>(null);
+  const exportState = useMemo(() => reconciliationExportPresentation({
     refreshStatus: props.refreshStatus,
     summary: createReviewStateSummary(props.state),
-  });
-  const candidate = useMemo(() => active === null
+  }), [props.refreshStatus, props.state]);
+  const activeRecord = detail === null
+    ? undefined
+    : recordsByKey.get(detail.key);
+  const candidate = useMemo(() => detail?.mode !== "reattach" || activeRecord === undefined
     ? null
-    : reattachmentCandidateFor(active.expectedKind, props.selectionUpdate, props.caretAnchor), [
-      active,
+    : reattachmentCandidateFor(
+      targetAnchor(activeRecord.value).kind,
+      props.selectionUpdate,
+      props.caretAnchor,
+    ), [
+      activeRecord,
+      detail?.mode,
       props.caretAnchor,
       props.selectionUpdate,
     ]);
-  const begin = (target: ReviewItem | PendingReviewDraftV1, commandTarget: ReattachmentTarget) => {
-    setDiscard(null);
+
+  useEffect(() => {
+    props.onDetailOpenChange?.(activeRecord !== undefined);
+  }, [activeRecord !== undefined, props.onDetailOpenChange]);
+
+  useEffect(() => () => props.onDetailOpenChange?.(false), [props.onDetailOpenChange]);
+
+  useLayoutEffect(() => {
+    if (activeRecord !== undefined) {
+      detailBackRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    const returnFocusKey = returnFocusKeyRef.current;
+    if (returnFocusKey === null) return;
+    entryRefs.current.get(returnFocusKey)?.focus({ preventScroll: true });
+    returnFocusKeyRef.current = null;
+  }, [activeRecord]);
+
+  const openDetail = (record: ResolutionRecord, mode: ResolutionMode) => {
     setMessage("");
-    setActive({
-      target: commandTarget,
-      expectedKind: targetAnchor(target).kind,
+    returnFocusKeyRef.current = null;
+    setDetail({
+      key: record.key,
+      mode,
       generation: props.state.workflow.documentGeneration,
     });
+  };
+  const closeDetail = () => {
+    if (detail !== null) returnFocusKeyRef.current = detail.key;
+    setDetail(null);
   };
   const submit = async (command: ReviewCommand, success: string) => {
     setPending(true);
@@ -266,8 +402,8 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
         setMessage(presentation.message);
         return;
       }
-      setActive(null);
-      setDiscard(null);
+      setDetail(null);
+      returnFocusKeyRef.current = null;
       setMessage(presentation.message);
     } catch {
       setMessage("The review state changed or the command was rejected. Nothing was moved.");
@@ -298,102 +434,180 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     discardedAt: new Date().toISOString(),
   });
 
-  return <section className="reconciliation-workspace" data-reconciliation-workspace aria-label="Reconciliation">
-    <header>
-      <h2>Reconciliation</h2>
-      <p data-document-freshness={props.state.workflow.freshness}>
-        Generation {props.state.workflow.documentGeneration} is {props.state.workflow.freshness === "current" ? "current" : "possibly stale"}.
-      </p>
-    </header>
-    {props.refreshStatus === "reconciling" ? <p role="status">A rebuilt PDF is loading and Review Items are reconciling.</p> : null}
-    {props.refreshStatus === "failed" ? <p role="alert">The rebuilt PDF could not be validated. The last successful PDF remains reviewable and may be stale.</p> : null}
-    {unresolvedItems.map((item) => {
-      const reconciliation = item.reconciliation!;
-      const target: ReattachmentTarget = {
-        kind: "item",
-        id: item.id,
-        revision: reconciliation.revision,
-        ownerViewId: reconciliation.ownerViewId,
-      };
-      return <article key={item.id} data-reconciliation-item={item.id}>
-        <h3>Unresolved Review Item</h3>
-        <blockquote>{quote(item)}</blockquote>
-        <p>{reason(item)}</p>
-        <button type="button" title="Choose a replacement anchor in the current PDF" onClick={() => begin(item, target)}>Reattach</button>
-        <button type="button" title="Remove this unresolved Review Item with an audit record" onClick={() => { setActive(null); setDiscard(target); }}>Discard</button>
-      </article>;
-    })}
-    {props.state.pendingDrafts.map((draft) => {
-      const target: ReattachmentTarget = { kind: "draft", draft };
-      return <article key={draft.id} data-reconciliation-draft={draft.id}>
-        <h3>{draft.status === "frozen" ? "Frozen draft" : "Pending draft"}</h3>
-        <p>{draft.text}</p>
-        <blockquote>{quote(draft)}</blockquote>
-        <p>{reason(draft)}</p>
-        {draft.status === "protected" && draft.disposition.kind === "resolved" ? <button
+  if (activeRecord !== undefined && detail !== null) {
+    const typeLabel = annotationKindLabel(activeRecord.kind);
+    const draft = "payload" in activeRecord.value ? undefined : activeRecord.value;
+    const canApplyDraft = draft?.status === "protected" && draft.disposition.kind === "resolved";
+    return <section
+      className="reconciliation-workspace reconciliation-workspace--detail full-annotation-reader"
+      data-reconciliation-workspace
+      data-reconciliation-detail={detail.mode}
+      aria-label={`Resolve previous ${typeLabel} annotation on page ${activeRecord.pageNumber}`}
+    >
+      <header className="reconciliation-workspace__detail-header">
+        <button
+          ref={detailBackRef}
           type="button"
-          title="Apply this protected draft as a Review Item"
+          className="full-annotation-reader__back"
+          aria-label="Back"
+          title="Back to previous annotations"
           disabled={pending}
-          onClick={() => void submit({
+          onClick={closeDetail}
+        ><ReviewIcon name="arrow-left" size={15} /></button>
+        <h2>{detail.mode === "reattach" ? reattachmentTitle(activeRecord.kind) : `${detail.mode === "apply" ? "Apply" : "Discard"} ${typeLabel.toLocaleLowerCase()}`}</h2>
+        <span className="reconciliation-workspace__state-pill" data-reconciliation-status={activeRecord.stateLabel}>{activeRecord.stateLabel}</span>
+        {detail.mode === "discard" ? <span className="reconciliation-workspace__header-spacer" /> : <button
+          type="button"
+          className="full-annotation-reader__edit reconciliation-workspace__discard"
+          data-reconciliation-action="discard"
+          aria-label={`Discard ${typeLabel} annotation on page ${activeRecord.pageNumber}`}
+          title="Discard annotation"
+          disabled={pending}
+          onClick={() => openDetail(activeRecord, "discard")}
+        ><ReviewIcon name="delete" size={15} /></button>}
+      </header>
+
+      <div className="full-annotation-reader__body">
+        <section className="reconciliation-workspace__intent">
+          <p className="reconciliation-workspace__kicker">Your annotation</p>
+          <p className="reconciliation-workspace__annotation-text">{activeRecord.authoredText}</p>
+        </section>
+        <section className="reconciliation-workspace__prior-context">
+          <p className="reconciliation-workspace__kicker">Previously attached to <span aria-hidden="true">·</span> Page {activeRecord.pageNumber}</p>
+          {activeRecord.priorSourceText === undefined ? null : <p className="reconciliation-workspace__source-text">
+            <span className="sr-only">Original PDF text: </span>{activeRecord.priorSourceText}
+          </p>}
+        </section>
+      </div>
+
+      {detail.mode === "reattach" && candidate !== null ? <section className="reconciliation-workspace__resolution" data-reattachment-selection-mode>
+        <p className="reconciliation-workspace__instruction" role={candidate.anchor === null ? "alert" : "status"}>
+          {reattachmentInstruction(targetAnchor(activeRecord.value).kind, candidate)}
+        </p>
+        <div className="reconciliation-workspace__editor-actions">
+          <button className="review-button review-button--secondary" type="button" title="Keep this annotation unresolved" disabled={pending} onClick={() => {
+            setMessage(cancelledReattachmentPresentation().message);
+            closeDetail();
+          }}><ReviewIcon name="close" size={15} /><span>Cancel</span></button>
+          <button className="review-button review-button--primary" type="button" title="Attach this annotation to the selected text" disabled={pending || candidate.anchor === null} onClick={() => {
+            if (candidate.anchor === null) return;
+            if (!reattachmentGenerationIsCurrent(detail.generation, props.state.workflow.documentGeneration)) {
+              setMessage("The PDF changed. Select the text again.");
+              return;
+            }
+            void submit(buildReattachmentCommand({
+              target: activeRecord.target,
+              stateRevision: props.state.revision,
+              documentGeneration: props.state.workflow.documentGeneration,
+              anchor: candidate.anchor,
+              updatedAt: new Date().toISOString(),
+            }), "Reattachment saved.");
+          }}><ReviewIcon name="check" size={15} /><span>Confirm</span></button>
+        </div>
+      </section> : null}
+
+      {detail.mode === "apply" && canApplyDraft ? <section className="reconciliation-workspace__resolution" data-apply-confirmation>
+        <div className="reconciliation-workspace__editor-actions">
+          <button className="review-button review-button--secondary" type="button" title="Keep this draft pending" disabled={pending} onClick={closeDetail}><ReviewIcon name="close" size={15} /><span>Cancel</span></button>
+          <button className="review-button review-button--primary" type="button" title="Add this draft to the current PDF" disabled={pending} onClick={() => void submit({
             type: "apply-draft",
             expectedRevision: props.state.revision,
             id: draft.id,
             expectedDraftRevision: draft.revision,
             ownerViewId: draft.ownerViewId,
             updatedAt: new Date().toISOString(),
-          }, "Draft applied as a Review Item.")}
-        >Apply</button> : null}
-        <button type="button" title="Choose a replacement anchor in the current PDF" onClick={() => begin(draft, target)}>Reattach</button>
-        <button type="button" title="Remove this protected draft with an audit record" onClick={() => { setActive(null); setDiscard(target); }}>Discard</button>
-      </article>;
-    })}
+          }, "Draft applied as a Review Item.")}><ReviewIcon name="check" size={15} /><span>Apply</span></button>
+        </div>
+      </section> : null}
 
-    {active !== null && candidate !== null ? <section data-reattachment-selection-mode>
-      <h3>Select replacement evidence</h3>
-      <p role={candidate.anchor === null ? "alert" : "status"}>{candidate.message}</p>
-      {candidate.anchor !== null ? <p data-reattachment-preview>
-        Preview: page {candidate.anchor.pageIndex + 1}, x {Math.round(candidate.anchor.rect.x)}, y {Math.round(candidate.anchor.rect.y)}.
-      </p> : null}
-      <button type="button" title="Save the selected replacement anchor" disabled={pending || candidate.anchor === null} onClick={() => {
-        if (candidate.anchor === null) return;
-        if (!reattachmentGenerationIsCurrent(active.generation, props.state.workflow.documentGeneration)) {
-          setMessage("The PDF generation changed. Select replacement evidence again.");
-          return;
-        }
-        void submit(buildReattachmentCommand({
-          target: active.target,
-          stateRevision: props.state.revision,
-          documentGeneration: props.state.workflow.documentGeneration,
-          anchor: candidate.anchor,
-          updatedAt: new Date().toISOString(),
-        }), "Reattachment saved.");
-      }}>Confirm reattachment</button>
-      <button type="button" title="Keep the work unresolved and leave selection mode" disabled={pending} onClick={() => {
-        setActive(null);
-        setMessage(cancelledReattachmentPresentation().message);
-      }}>Cancel</button>
-    </section> : null}
+      {detail.mode === "discard" ? <section className="reconciliation-workspace__resolution" data-discard-confirmation>
+        <p className="reconciliation-workspace__instruction">Discard this annotation from the reviewed PDF?</p>
+        <div className="reconciliation-workspace__editor-actions">
+          <button className="review-button review-button--secondary" type="button" title="Keep this annotation" disabled={pending} onClick={closeDetail}><ReviewIcon name="close" size={15} /><span>Cancel</span></button>
+          <button className="review-button review-button--secondary reconciliation-workspace__destructive" type="button" title="Discard this annotation" disabled={pending} onClick={() => void submit(discardCommand(activeRecord.target), "Discard recorded.")}><ReviewIcon name="delete" size={15} /><span>Discard</span></button>
+        </div>
+      </section> : null}
 
-    {discard !== null ? <section data-discard-confirmation>
-      <p>Discard this unresolved work? This audited action removes it from export.</p>
-      <button type="button" title="Confirm the audited removal" disabled={pending} onClick={() => void submit(discardCommand(discard), "Discard recorded.")}>Confirm discard</button>
-      <button type="button" title="Keep this unresolved work" disabled={pending} onClick={() => setDiscard(null)}>Cancel</button>
-    </section> : null}
+      {message ? <p className="reconciliation-workspace__message" role="status">{message}</p> : null}
+    </section>;
+  }
 
-    {message ? <p role="status">{message}</p> : null}
-    <footer data-export-eligibility={exportState.canExport ? "eligible" : "blocked"}>
+  return <section className="reconciliation-workspace" data-reconciliation-workspace aria-label="Previous Annotations to Resolve">
+    <header className="reconciliation-workspace__header annotation-drawer__header">
+      <h2>Previous Annotations to Resolve</h2>
+      <p data-document-freshness={props.state.workflow.freshness}>
+        Generation {props.state.workflow.documentGeneration} is {props.state.workflow.freshness === "current" ? "current" : "possibly stale"}.
+      </p>
+    </header>
+    {props.refreshStatus === "reconciling" ? <p className="reconciliation-workspace__notice" role="status">A rebuilt PDF is loading and previous annotations are reconciling.</p> : null}
+    {props.refreshStatus === "failed" ? <p className="reconciliation-workspace__notice" role="alert">The rebuilt PDF could not be validated. The last successful PDF remains reviewable and may be stale.</p> : null}
+    {records.length === 0 ? <p className="annotation-empty" data-reconciliation-status="empty">No previous annotations need attention.</p> : <ol className="reconciliation-workspace__list" aria-label="Previous annotations needing resolution">
+      {records.map((record) => {
+        const typeLabel = annotationKindLabel(record.kind);
+        const canApplyDraft = !("payload" in record.value)
+          && record.value.status === "protected"
+          && record.value.disposition.kind === "resolved";
+        return <li
+          key={record.key}
+          data-reconciliation-entry={record.key}
+          {...(record.target.kind === "item"
+            ? { "data-reconciliation-item": record.target.id }
+            : { "data-reconciliation-draft": record.target.draft.id })}
+          data-annotation-origin="previous"
+          data-annotation-kind={record.kind}
+          data-active="false"
+          data-corresponding="false"
+          data-item-copy-link="false"
+        >
+          <div className="annotation-item__content">
+            <button
+              ref={(node) => {
+                if (node) entryRefs.current.set(record.key, node);
+                else entryRefs.current.delete(record.key);
+              }}
+              type="button"
+              className="annotation-item__navigation"
+              aria-label={`${canApplyDraft ? "Apply" : "Reattach"} previous ${typeLabel} annotation on page ${record.pageNumber}`}
+              title={canApplyDraft ? "Apply annotation" : "Reattach annotation"}
+              onClick={() => openDetail(record, canApplyDraft ? "apply" : "reattach")}
+            />
+            <div className="annotation-item__title-row">
+              <AnnotationMetadata kind={record.kind} pageNumber={record.pageNumber} sectionLabel={record.stateLabel} />
+              <div className="annotation-item__title-actions" role="group" aria-label={`${typeLabel} resolution actions`}>
+                <button
+                  type="button"
+                  className="annotation-item__action annotation-item__delete"
+                  data-reconciliation-action="discard"
+                  aria-label={`Discard ${typeLabel} annotation on page ${record.pageNumber}`}
+                  title="Discard annotation"
+                  onClick={() => openDetail(record, "discard")}
+                ><ReviewIcon name="delete" size={13} /></button>
+              </div>
+            </div>
+            <div className="annotation-item__body-row">
+              <span className="annotation-item__excerpt">{record.authoredText}</span>
+            </div>
+          </div>
+        </li>;
+      })}
+    </ol>}
+
+    {message ? <p className="reconciliation-workspace__message" role="status">{message}</p> : null}
+    <footer className="reconciliation-workspace__footer" data-export-eligibility={exportState.canExport ? "eligible" : "blocked"}>
       <p>{exportState.message}</p>
-      {staleConfirmation ? <div data-stale-export-confirmation>
+      {staleConfirmation ? <div className="reconciliation-workspace__export-confirmation" data-stale-export-confirmation>
         <p>Export the last successful, possibly stale generation?</p>
-        <button type="button" title="Export the last successful PDF generation" disabled={pending} onClick={() => void exportReviewedPdf(true)}>Confirm export</button>
-        <button type="button" title="Return without exporting" disabled={pending} onClick={() => setStaleConfirmation(false)}>Cancel</button>
-      </div> : <button type="button" title="Create a distinct reviewed PDF copy" disabled={!exportState.canExport || pending} onClick={() => {
+        <div className="reconciliation-workspace__editor-actions">
+          <button className="review-button review-button--secondary" type="button" title="Return without exporting" disabled={pending} onClick={() => setStaleConfirmation(false)}><ReviewIcon name="close" size={15} /><span>Cancel</span></button>
+          <button className="review-button review-button--primary" type="button" title="Export the last successful PDF generation" disabled={pending} onClick={() => void exportReviewedPdf(true)}><ReviewIcon name="download" size={15} /><span>Confirm export</span></button>
+        </div>
+      </div> : <button className="review-button review-button--secondary" type="button" title="Create a distinct reviewed PDF copy" disabled={!exportState.canExport || pending} onClick={() => {
         if (exportState.requiresStaleConfirmation) {
           setStaleConfirmation(true);
           return;
         }
         void exportReviewedPdf();
-      }}>Export reviewed PDF</button>}
+      }}><ReviewIcon name="download" size={15} /><span>Export reviewed PDF</span></button>}
     </footer>
   </section>;
 }
