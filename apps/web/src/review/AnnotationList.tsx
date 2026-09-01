@@ -112,7 +112,14 @@ export function AnnotationList({
   };
 
   return (
-    <section className="annotation-drawer__owned" data-annotation-origin="owned" aria-label="Owned annotations">
+    <section
+      className="annotation-drawer__owned"
+      data-annotation-origin="owned"
+      data-annotations-section
+      data-workspace-focus-token="annotations:section"
+      aria-label="Owned annotations"
+      tabIndex={-1}
+    >
       <header className="annotation-drawer__header">
         <h2>Annotations</h2>
       </header>

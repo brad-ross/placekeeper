@@ -211,6 +211,8 @@ export interface ReconciliationWorkspaceProps {
   readonly refreshStatus: GenerationRefreshStatus;
   readonly onCommand: (command: ReviewCommand) => Promise<unknown>;
   readonly onDetailOpenChange?: (open: boolean) => void;
+  readonly focusRequestToken?: number;
+  readonly onFocusFallback?: () => void;
 }
 
 type ResolutionMode = "apply" | "reattach" | "discard";
@@ -230,6 +232,15 @@ interface ResolutionRecord {
   readonly priorSourceText: string | undefined;
   readonly authoredText: string;
   readonly stateLabel: string;
+}
+
+export function reconciliationFocusKeyAfterRemoval(
+  keys: readonly string[],
+  removedKey: string,
+): string | null {
+  const index = keys.indexOf(removedKey);
+  if (index < 0) return null;
+  return keys[index + 1] ?? keys[index - 1] ?? null;
 }
 
 function authoredText(target: ReviewItem | PendingReviewDraftV1): string {
@@ -291,6 +302,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   const entryRefs = useRef(new Map<string, HTMLButtonElement>());
   const detailBackRef = useRef<HTMLButtonElement>(null);
   const returnFocusKeyRef = useRef<string | null>(null);
+  const acceptedFocusKeyRef = useRef<string | null>(null);
   const activeRecord = detail === null
     ? undefined
     : recordsByKey.get(detail.key);
@@ -324,6 +336,16 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     returnFocusKeyRef.current = null;
   }, [activeRecord]);
 
+  useLayoutEffect(() => {
+    if (props.focusRequestToken === undefined || props.focusRequestToken === 0) return;
+    const frame = requestAnimationFrame(() => {
+      const first = records[0];
+      if (first === undefined) props.onFocusFallback?.();
+      else entryRefs.current.get(first.key)?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [props.focusRequestToken]);
+
   const openDetail = (record: ResolutionRecord, mode: ResolutionMode) => {
     setMessage("");
     returnFocusKeyRef.current = null;
@@ -338,19 +360,30 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     setDetail(null);
   };
   const submit = async (command: ReviewCommand, success: string) => {
+    acceptedFocusKeyRef.current = detail === null
+      ? null
+      : reconciliationFocusKeyAfterRemoval(records.map(({ key }) => key), detail.key);
     setPending(true);
     setMessage("");
     try {
       const result = await props.onCommand(command);
       const presentation = reconciliationCommandPresentation(result, success);
       if (!presentation.accepted) {
+        acceptedFocusKeyRef.current = null;
         setMessage(presentation.message);
         return;
       }
       setDetail(null);
       returnFocusKeyRef.current = null;
       setMessage(presentation.message);
+      requestAnimationFrame(() => {
+        const acceptedFocusKey = acceptedFocusKeyRef.current;
+        acceptedFocusKeyRef.current = null;
+        if (acceptedFocusKey === null) props.onFocusFallback?.();
+        else entryRefs.current.get(acceptedFocusKey)?.focus({ preventScroll: true });
+      });
     } catch {
+      acceptedFocusKeyRef.current = null;
       setMessage("The review state changed or the command was rejected. Nothing was moved.");
     } finally {
       setPending(false);
@@ -500,6 +533,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
               }}
               type="button"
               className="annotation-item__navigation"
+              data-workspace-focus-token={`reconciliation:${record.key}`}
               aria-label={`${canApplyDraft ? "Apply" : "Reattach"} previous ${typeLabel} annotation on page ${record.pageNumber}`}
               title={canApplyDraft ? "Apply annotation" : "Reattach annotation"}
               onClick={() => openDetail(record, canApplyDraft ? "apply" : "reattach")}

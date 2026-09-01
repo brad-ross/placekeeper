@@ -397,6 +397,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const [listActivation, setListActivation] = useState<{ readonly id: string; readonly token: number }>();
   const [annotationReaderSession, setAnnotationReaderSession] = useState<FullAnnotationReaderSession | null>(null);
   const [reconciliationDetailOpen, setReconciliationDetailOpen] = useState(false);
+  const [reconciliationFocusRequest, setReconciliationFocusRequest] = useState(0);
   const pendingReaderResumeRef = useRef<FullAnnotationReaderSession | null>(null);
   const annotationRestorationTokenRef = useRef(0);
   const annotationRestorationFramesRef = useRef(new Set<number>());
@@ -918,6 +919,25 @@ export function ReviewShell(props: ReviewShellProps) {
       surface: mode === 'references' ? 'references' : 'right',
     });
     props.onWorkspaceModeChange?.(mode);
+  };
+  const focusAnnotationsFallback = () => {
+    requestAnimationFrame(() => {
+      const shell = shellRef.current;
+      const target = shell?.querySelector<HTMLElement>('[data-annotations-section]')
+        ?? shell?.querySelector<HTMLElement>('#workspace-panel-annotations');
+      target?.focus({ preventScroll: true });
+    });
+  };
+  const openAnnotationsFromDocumentActions = () => {
+    if (authoringSessionRef.current !== null) {
+      requestAnimationFrame(() => authoringEditorRef.current?.focus({ preventScroll: true }));
+      return;
+    }
+    setWorkspaceRequest({ kind: 'reading', token: ++annotationRequestTokenRef.current });
+    setReconciliationFocusRequest((token) => token + 1);
+    dispatchSurface({ type: 'open-workspace', mode: 'annotations' });
+    dispatchReferenceLayout({ type: 'show-right-workspace' });
+    selectWorkspaceMode('annotations');
   };
   const acknowledgedAuthority = authoringAuthorityFor(
     acknowledgedRef.current,
@@ -1738,7 +1758,7 @@ export function ReviewShell(props: ReviewShellProps) {
             }),
             onExport: props.onExportReviewedCopy
               ?? (() => Promise.reject(new Error('Reviewed export is unavailable.'))),
-            onOpenAnnotations: () => selectWorkspaceMode('annotations'),
+            onOpenAnnotations: openAnnotationsFromDocumentActions,
           },
         } : {})}
         {...(props.viewerControls === undefined ? {} : { controls: props.viewerControls })}
@@ -2038,6 +2058,8 @@ export function ReviewShell(props: ReviewShellProps) {
               refreshStatus={props.generationRefreshStatus ?? 'idle'}
               onCommand={(command) => props.onCommand(command)}
               onDetailOpenChange={setReconciliationDetailOpen}
+              focusRequestToken={reconciliationFocusRequest}
+              onFocusFallback={focusAnnotationsFallback}
             /> : null}
             {reconciliationDetailOpen ? null : <>
             <AnnotationList

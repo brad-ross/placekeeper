@@ -73,16 +73,19 @@ test.describe('canonical review workflow', () => {
     const exportAction = page.getByRole('menuitem', { name: 'Export reviewed PDF' });
     await expect(exportAction).toHaveAttribute('aria-disabled', 'true');
     await expect(page.getByText('Resolve 2 Review Items before export.')).toBeVisible();
-    await expect(page.getByRole('menuitem', { name: 'Open Annotations' })).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(documentActionsTrigger).toBeFocused();
-    await openAnnotationsWorkspace(page);
+    const openAnnotations = page.getByRole('menuitem', { name: 'Open Annotations' });
+    await expect(openAnnotations).toBeVisible();
+    await openAnnotations.click();
 
     const reconciliation = page.getByRole('region', { name: 'Previous Annotations to Resolve' });
     await expect(reconciliation.getByRole('heading', {
       name: 'Previous Annotations to Resolve',
     })).toBeVisible();
     await expect(reconciliation.locator('[data-reconciliation-entry]')).toHaveCount(2);
+    await expect(reconciliation.getByRole('button', {
+      name: 'Reattach previous Highlight annotation on page 1',
+    })).toBeFocused();
+    await expect(documentActionsTrigger).not.toBeFocused();
     await expect(reconciliation.locator('[data-reconciliation-action="reattach"]')).toHaveCount(0);
     await expect(reconciliation.getByRole('button', {
       name: 'Discard Delete annotation on page 2',
@@ -120,6 +123,9 @@ test.describe('canonical review workflow', () => {
     await reattachDetail.getByRole('button', { name: 'Confirm' }).click();
     await expect(page.locator('[data-reconciliation-detail]')).toHaveCount(0);
     await expect(page.locator('[data-reconciliation-entry]')).toHaveCount(1);
+    await expect(page.getByRole('button', {
+      name: 'Reattach previous Delete annotation on page 2',
+    })).toBeFocused();
     await expect(page.getByRole('region', { name: 'Owned annotations' })).toContainText(
       'Check the identifying variation.',
     );
@@ -140,6 +146,7 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-reconciliation-entry]')).toHaveCount(0);
     await expect(page.getByText('No previous annotations need attention.')).toBeVisible();
     await expect(page.getByText('Discard recorded.')).toBeVisible();
+    await expect(page.locator('[data-annotations-section]')).toBeFocused();
 
     await documentActionsTrigger.click();
     await expect(exportAction).toHaveAttribute('aria-disabled', 'false');
@@ -149,6 +156,39 @@ test.describe('canonical review workflow', () => {
     await expect(exportAction).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(documentActionsTrigger).toBeFocused();
+  });
+
+  test('routes a blocked export back to the active protected draft without discarding it', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready');
+    await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+    const composer = page.getByRole('region', { name: 'Highlight Comment' });
+    const editor = composer.getByRole('textbox', { name: 'Comment (optional)' });
+    await editor.fill('Keep this protected draft exactly as written.');
+    await expect(page.locator('[data-pending-drafts]')).toHaveAttribute('data-pending-drafts', '1');
+
+    const documentActionsTrigger = page.getByRole('button', { name: /Open document actions/u });
+    await documentActionsTrigger.click();
+    await expect(page.getByRole('menuitem', { name: 'Export reviewed PDF' }))
+      .toHaveAttribute('aria-disabled', 'true');
+    await page.getByRole('menuitem', { name: 'Open Annotations' }).click();
+
+    await expect(composer).toBeVisible();
+    await expect(editor).toHaveValue('Keep this protected draft exactly as written.');
+    await expect(editor).toBeFocused();
+    await expect(page.locator('[data-pending-drafts]')).toHaveAttribute('data-pending-drafts', '1');
+    await expect(page.getByRole('menu')).toHaveCount(0);
+  });
+
+  test('routes a pending draft without an active composer to its attention row', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=pending-draft');
+    await page.getByRole('button', { name: /Open document actions/u }).click();
+    await page.getByRole('menuitem', { name: 'Open Annotations' }).click();
+
+    await expect(page.getByRole('button', {
+      name: 'Reattach previous Highlight annotation on page 1',
+    })).toBeFocused();
   });
 
   test('shows Page Note source context only when it identifies the prior location', async ({ page }) => {

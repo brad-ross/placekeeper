@@ -28,6 +28,7 @@ import {
   buildReattachmentCommand,
   cancelledReattachmentPresentation,
   reconciliationCommandPresentation,
+  reconciliationFocusKeyAfterRemoval,
   reattachmentCandidateFor,
   reattachmentGenerationIsCurrent,
   reattachmentTitle,
@@ -39,6 +40,14 @@ import {
 } from "../src/review/DocumentActionsMenu.js";
 
 describe("one production review tree", () => {
+  it("chooses the next, previous, or section fallback after attention rows disappear", () => {
+    const keys = ["first", "middle", "final"];
+    expect(reconciliationFocusKeyAfterRemoval(keys, "first")).toBe("middle");
+    expect(reconciliationFocusKeyAfterRemoval(keys, "middle")).toBe("final");
+    expect(reconciliationFocusKeyAfterRemoval(keys, "final")).toBe("middle");
+    expect(reconciliationFocusKeyAfterRemoval(["only"], "only")).toBeNull();
+  });
+
   it("defers a host forward SyncTeX request until its PDF generation and restoration are ready", () => {
     expect(forwardSyncTexRequestReady({
       requestGeneration: 4,

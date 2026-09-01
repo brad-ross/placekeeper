@@ -110,6 +110,13 @@ export function DocumentActionsMenu({
     requestAnimationFrame(() => triggerRef.current?.focus({ preventScroll: true }));
   };
 
+  const closeForAction = () => {
+    if (pending) return;
+    setOpen(false);
+    setStaleConfirmation(false);
+    setOutcome('idle');
+  };
+
   useLayoutEffect(() => {
     if (!open) return;
     const target = staleConfirmation ? confirmationRef.current : exportRef.current;
@@ -266,8 +273,8 @@ export function DocumentActionsMenu({
           role="menuitem"
           className="document-actions__annotations-link"
           onClick={() => {
-            closeAndRestore();
-            onOpenAnnotations();
+            closeForAction();
+            requestAnimationFrame(onOpenAnnotations);
           }}
         ><ReviewIcon name="annotations" size={15} /><span>Open Annotations</span></button> : null}
         {resultMessage ? <p

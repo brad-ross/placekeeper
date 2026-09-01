@@ -141,6 +141,25 @@ function createReconciliationPreviewState(variant = 'default'): ReviewState {
     rect: { x: 72, y: 92, width: 180, height: 14 },
     segmentRects: [{ x: 72, y: 92, width: 180, height: 14 }],
   };
+  if (variant === 'pending-draft') {
+    return {
+      ...state,
+      pendingDrafts: [{
+        id: '00000000-0000-4000-8000-000000000207',
+        ownerViewId: 'harness-view',
+        baseGeneration: 2,
+        revision: 0,
+        kind: 'highlight',
+        pageIndex: 0,
+        text: 'Keep this pending annotation for review.',
+        anchor,
+        disposition: { kind: 'missing', reason: 'The previous passage is not present in this PDF.' },
+        status: 'frozen',
+        createdAt: '2026-08-30T00:00:00.000Z',
+        updatedAt: '2026-08-30T00:00:00.000Z',
+      }],
+    };
+  }
   if (variant === 'page-notes') {
     const pageAnchor = {
       kind: 'page' as const,
@@ -463,7 +482,7 @@ function Harness() {
     visualScenario?.referenceReturn ?? null,
   );
   const [harnessReferenceNavigation, setHarnessReferenceNavigation] = useState(
-    () => createReferenceNavigationState(0),
+    () => createReferenceNavigationState(reconciliationPreview === null ? 0 : 2),
   );
   const anchorKindRef = useRef(anchorKind);
   anchorKindRef.current = anchorKind;
@@ -860,6 +879,7 @@ function Harness() {
           data-viewer-page-requests={directPageRequests}
           data-viewer-zoom-requests={zoomRequests}
           data-export-count={exportCount}
+          data-pending-drafts={state.pendingDrafts.length}
         >
           Revision {state.revision}
         </output>
