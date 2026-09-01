@@ -2090,7 +2090,6 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
 .reconciliation-workspace__header p,
 .reconciliation-workspace__notice,
 .reconciliation-workspace__message,
-.reconciliation-workspace__footer p,
 .reconciliation-workspace__instruction {
   margin: 0;
   color: var(--review-ink-muted);
@@ -2119,17 +2118,6 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   width: auto;
 }
 
-.reconciliation-workspace__footer {
-  display: grid;
-  gap: 8px;
-  padding-top: 10px;
-  border-top: 1px solid var(--review-border-subtle);
-}
-
-.reconciliation-workspace__footer > .review-button {
-  justify-self: start;
-}
-
 .reconciliation-workspace button:disabled {
   opacity: .55;
 }
@@ -2144,15 +2132,6 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   border-color: color-mix(in srgb, var(--review-danger) 55%, var(--review-border-strong));
   color: var(--review-danger);
   background: color-mix(in srgb, var(--review-danger) 8%, var(--review-surface-panel));
-}
-
-.reconciliation-workspace__export-confirmation {
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--review-border-subtle);
-  border-radius: var(--review-radius-row);
-  background: var(--review-workspace-card-surface);
 }
 
 .reconciliation-workspace__resolution {

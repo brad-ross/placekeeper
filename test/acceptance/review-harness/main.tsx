@@ -39,6 +39,7 @@ const visualScenario = resolveVisualScenario(window.location.search);
 const previewParameters = new URLSearchParams(window.location.search);
 const saveEstablishing = previewParameters.has('establishing');
 const reconciliationPreview = previewParameters.get('reconciliation');
+const exportPreview = previewParameters.get('export');
 const composerPreview = previewParameters.get('composer');
 const requestedComposerReturn = previewParameters.get('return');
 const composerReturnPreview = requestedComposerReturn === 'outside'
@@ -124,6 +125,13 @@ function createReconciliationPreviewState(variant = 'default'): ReviewState {
     workflowMode: 'generated-output',
     documentGeneration: 2,
   });
+  if (variant === 'ready') return state;
+  if (variant === 'stale') {
+    return {
+      ...state,
+      workflow: { ...state.workflow, freshness: 'possibly-stale' },
+    };
+  }
   const anchor = {
     kind: 'selection' as const,
     pageIndex: 0,
@@ -474,6 +482,8 @@ function Harness() {
   const [activationRequest, setActivationRequest] = useState<{ id: string; token: number }>();
   const authoringActiveRef = useRef(false);
   const [saveDestinationOpen, setSaveDestinationOpen] = useState(false);
+  const [exportCount, setExportCount] = useState(0);
+  const failNextExportRef = useRef(exportPreview === 'fail-once');
   const [outlineDiscovery, setOutlineDiscovery] = useState<PdfOutlineDiscovery>({
     status: 'loading',
     documentGeneration: 0,
@@ -608,6 +618,17 @@ function Harness() {
         }
       }}
       onCommand={accept}
+      onExportReviewedCopy={async () => {
+        setExportCount((count) => count + 1);
+        if (exportPreview === 'delayed') {
+          await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        }
+        if (failNextExportRef.current) {
+          failNextExportRef.current = false;
+          throw new Error('Harness export failure');
+        }
+        return { kind: 'reviewed-copy' };
+      }}
       onAuthoringActiveChange={(active) => { authoringActiveRef.current = active; }}
       onAuthoringPreviewChange={() => {
         rootElement.setAttribute(
@@ -838,6 +859,7 @@ function Harness() {
           data-viewer-page-commands={viewerControls.pageCommands.join(',')}
           data-viewer-page-requests={directPageRequests}
           data-viewer-zoom-requests={zoomRequests}
+          data-export-count={exportCount}
         >
           Revision {state.revision}
         </output>

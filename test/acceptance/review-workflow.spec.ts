@@ -68,6 +68,14 @@ test.describe('canonical review workflow', () => {
   test('resolves previous annotations through focused, annotation-native detail views', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=1');
+    const documentActionsTrigger = page.getByRole('button', { name: /Open document actions/u });
+    await documentActionsTrigger.click();
+    const exportAction = page.getByRole('menuitem', { name: 'Export reviewed PDF' });
+    await expect(exportAction).toHaveAttribute('aria-disabled', 'true');
+    await expect(page.getByText('Resolve 2 Review Items before export.')).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Open Annotations' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(documentActionsTrigger).toBeFocused();
     await openAnnotationsWorkspace(page);
 
     const reconciliation = page.getByRole('region', { name: 'Previous Annotations to Resolve' });
@@ -132,6 +140,15 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-reconciliation-entry]')).toHaveCount(0);
     await expect(page.getByText('No previous annotations need attention.')).toBeVisible();
     await expect(page.getByText('Discard recorded.')).toBeVisible();
+
+    await documentActionsTrigger.click();
+    await expect(exportAction).toHaveAttribute('aria-disabled', 'false');
+    await exportAction.click();
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
+    await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
+    await expect(exportAction).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(documentActionsTrigger).toBeFocused();
   });
 
   test('shows Page Note source context only when it identifies the prior location', async ({ page }) => {
@@ -154,6 +171,43 @@ test.describe('canonical review workflow', () => {
     }).click();
     await expect(detail.getByText('Previously attached to · Page 4')).toBeVisible();
     await expect(detail.getByText('The appendix extends the comparison.')).toBeVisible();
+  });
+
+  test('keeps stale confirmation, pending export, and retry feedback inside document actions', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=stale');
+    const trigger = page.getByRole('button', { name: /Open document actions/u });
+    await trigger.click();
+    let exportAction = page.getByRole('menuitem', { name: 'Export reviewed PDF' });
+    await exportAction.click();
+    await expect(page.getByText('Export the last successful PDF?')).toBeVisible();
+    const cancel = page.getByRole('menuitem', { name: 'Cancel' });
+    await expect(cancel).toBeFocused();
+    await cancel.click();
+    await expect(exportAction).toBeFocused();
+    await exportAction.click();
+    await page.getByRole('menuitem', { name: 'Confirm export' }).click();
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
+    await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
+
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&export=delayed');
+    await page.getByRole('button', { name: /Open document actions/u }).click();
+    exportAction = page.getByRole('menuitem', { name: 'Export reviewed PDF' });
+    await exportAction.click();
+    await expect(page.getByText('Exporting reviewed PDF…')).toBeVisible();
+    await exportAction.click({ force: true });
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
+    await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
+    await expect(exportAction).toBeFocused();
+
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&export=fail-once');
+    await page.getByRole('button', { name: /Open document actions/u }).click();
+    await page.getByRole('menuitem', { name: 'Export reviewed PDF' }).click();
+    const retry = page.getByRole('menuitem', { name: 'Retry export' });
+    await expect(page.getByText('Export failed safely. Try again.')).toBeVisible();
+    await expect(retry).toBeFocused();
+    await retry.click();
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '2');
+    await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
   });
 
   test('keeps focus and References coherent when a live outline disappears and returns', async ({ page }) => {

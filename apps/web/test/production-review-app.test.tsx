@@ -31,9 +31,12 @@ import {
   reattachmentCandidateFor,
   reattachmentGenerationIsCurrent,
   reattachmentTitle,
-  reconciliationExportPresentation,
   ReconciliationWorkspace,
 } from "../src/review/ReconciliationWorkspace.js";
+import {
+  DocumentActionsMenu,
+  reviewExportPresentation,
+} from "../src/review/DocumentActionsMenu.js";
 
 describe("one production review tree", () => {
   it("defers a host forward SyncTeX request until its PDF generation and restoration are ready", () => {
@@ -274,7 +277,6 @@ describe("one production review tree", () => {
       caretAnchor={null}
       refreshStatus="idle"
       onCommand={vi.fn()}
-      onExport={vi.fn()}
     />);
 
     expect(html).toContain('data-reconciliation-workspace');
@@ -291,7 +293,7 @@ describe("one production review tree", () => {
     expect(html).not.toContain("two matching passages");
     expect(html).not.toContain(">Apply</button>");
     expect(html).toContain("possibly stale");
-    expect(html).toContain("Resolve 1 Review Item and 1 pending draft before export");
+    expect(html).not.toContain("Export reviewed PDF");
   });
 
   it("builds revision-fenced reattachment commands without changing semantic identity", () => {
@@ -429,22 +431,102 @@ describe("one production review tree", () => {
           ? { eligible: false as const, requiresStaleConfirmation: true as const, reasons: ["possibly-stale" as const] }
           : { eligible: true as const, requiresStaleConfirmation: false as const },
     });
-    expect(reconciliationExportPresentation({
+    expect(reviewExportPresentation({
       refreshStatus: "reconciling",
       summary: summary(0, 0, "current"),
     }).message).toContain("reconciliation finishes");
-    expect(reconciliationExportPresentation({
+    expect(reviewExportPresentation({
       refreshStatus: "idle",
       summary: summary(2, 0, "current"),
     }).message).toContain("Resolve 2 Review Items");
-    expect(reconciliationExportPresentation({
+    expect(reviewExportPresentation({
       refreshStatus: "idle",
       summary: summary(0, 0, "possibly-stale"),
     })).toMatchObject({ canExport: true, requiresStaleConfirmation: true });
-    expect(reconciliationExportPresentation({
+    expect(reviewExportPresentation({
       refreshStatus: "idle",
       summary: summary(0, 0, "current"),
     })).toMatchObject({ canExport: true, requiresStaleConfirmation: false });
+  });
+
+  it("presents generated-output export as an accessible PDF-title menu", () => {
+    const summary = createReviewStateSummary(createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000091",
+      source: { fileId: "00000000-0000-4000-8000-000000000092", digest: "9".repeat(64), byteLength: 1 },
+      workflowMode: "generated-output",
+      documentGeneration: 2,
+    }));
+    const html = renderToStaticMarkup(<DocumentActionsMenu
+      documentTitle="paper.pdf"
+      savedLabel="Protected review state"
+      presentation={reviewExportPresentation({ refreshStatus: "idle", summary })}
+      onExport={vi.fn()}
+      defaultOpen
+    />);
+
+    expect(html).toContain('aria-haspopup="menu"');
+    expect(html).toContain('role="menu"');
+    expect(html).toContain("Export reviewed PDF");
+    expect(html).toContain('data-export-eligibility="eligible"');
+  });
+
+  it("keeps blocked export keyboard-reachable and associates its concise reason", () => {
+    const base = createReviewStateSummary(createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000093",
+      source: { fileId: "00000000-0000-4000-8000-000000000094", digest: "8".repeat(64), byteLength: 1 },
+      workflowMode: "generated-output",
+      documentGeneration: 2,
+    }));
+    const blocked = {
+      ...base,
+      reconciliation: {
+        ...base.reconciliation,
+        complete: false,
+        unresolvedItemIds: ["item-1"],
+      },
+      export: {
+        eligible: false as const,
+        requiresStaleConfirmation: false as const,
+        reasons: ["unresolved-items" as const],
+      },
+    };
+    const html = renderToStaticMarkup(<DocumentActionsMenu
+      documentTitle="paper.pdf"
+      savedLabel="Protected review state"
+      presentation={reviewExportPresentation({ refreshStatus: "idle", summary: blocked })}
+      onExport={vi.fn()}
+      onOpenAnnotations={vi.fn()}
+      defaultOpen
+    />);
+    const reasonId = html.match(/<p id="(document-export-reason-[^"]+)"/u)?.[1];
+
+    expect(reasonId).toBeDefined();
+    expect(html).toContain('role="menuitem"');
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).toContain(`aria-describedby="${reasonId}"`);
+    expect(html).toContain("Resolve 1 Review Item before export.");
+    expect(html).toContain("Open Annotations");
+  });
+
+  it("does not offer an annotation route for a transient reconciliation blocker", () => {
+    const summary = createReviewStateSummary(createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000095",
+      source: { fileId: "00000000-0000-4000-8000-000000000096", digest: "7".repeat(64), byteLength: 1 },
+      workflowMode: "generated-output",
+      documentGeneration: 2,
+    }));
+    const html = renderToStaticMarkup(<DocumentActionsMenu
+      documentTitle="paper.pdf"
+      savedLabel="Protected review state"
+      presentation={reviewExportPresentation({ refreshStatus: "reconciling", summary })}
+      onExport={vi.fn()}
+      onOpenAnnotations={vi.fn()}
+      defaultOpen
+    />);
+
+    expect(html).toContain("reconciliation finishes");
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).not.toContain("Open Annotations");
   });
 
   it("integrates generated-output reconciliation and export without automatic-save controls", () => {
@@ -454,25 +536,34 @@ describe("one production review tree", () => {
       workflowMode: "generated-output",
       documentGeneration: 8,
     });
-    const html = renderToStaticMarkup(<ProductionReviewApp
-      session={{ sessionId: state.sessionId }}
-      initialState={state}
-      scope={{ documentTitle: "paper.pdf", launchSurface: "vscode" }}
-      api={{
-        command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
-        chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
-        exportReviewedCopy: vi.fn(), scope: vi.fn(),
-      }}
-      viewer={<div>Generation 8 viewer</div>}
-    />);
+    const renderSurface = (launchSurface: "browser" | "vscode") => renderToStaticMarkup(
+      <ProductionReviewApp
+        session={{ sessionId: state.sessionId }}
+        initialState={state}
+        scope={{ documentTitle: "paper.pdf", launchSurface }}
+        api={{
+          command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+          chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
+          exportReviewedCopy: vi.fn(), scope: vi.fn(),
+        }}
+        viewer={<div>Generation 8 viewer</div>}
+      />,
+    );
+    const html = renderSurface("vscode");
+    const browserHtml = renderSurface("browser");
 
     expect(html).toContain("Generation 8 viewer");
     expect(html).toContain('data-launch-surface="vscode"');
     expect(html).toContain('data-reconciliation-workspace');
-    expect(html).toContain('data-export-eligibility="eligible"');
+    expect(html).toContain('data-document-actions-trigger');
+    expect(html).toContain('aria-haspopup="menu"');
+    expect(html).not.toContain('class="reconciliation-workspace__footer"');
     expect(html).toContain("Protected review state");
     expect(html).not.toContain("Open automatic save options");
     expect(html).not.toContain('aria-haspopup="dialog"');
+    expect(browserHtml).toContain('data-launch-surface="browser"');
+    expect(browserHtml).toContain('data-document-actions-trigger');
+    expect(browserHtml).toContain('aria-haspopup="menu"');
   });
 
   it("exposes Reference return state only for the current tab and document generation", () => {

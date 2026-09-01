@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { createReviewStateSummary, type ReviewStateSummaryV1 } from "../../../../packages/core/src/live-context.js";
 import { anchorEvidenceFromReviewItem } from "../../../../packages/core/src/review-model.js";
 import type {
   PendingReviewDraftV1,
@@ -61,54 +60,6 @@ export function buildReattachmentCommand(input: {
       status: "protected",
       updatedAt: input.updatedAt,
     },
-  };
-}
-
-export interface ReconciliationExportPresentation {
-  readonly canExport: boolean;
-  readonly requiresStaleConfirmation: boolean;
-  readonly message: string;
-}
-
-export function reconciliationExportPresentation(input: {
-  readonly refreshStatus: GenerationRefreshStatus;
-  readonly summary: ReviewStateSummaryV1;
-}): ReconciliationExportPresentation {
-  if (input.refreshStatus === "reconciling") {
-    return {
-      canExport: false,
-      requiresStaleConfirmation: false,
-      message: "Export becomes available after document reconciliation finishes.",
-    };
-  }
-  const unresolvedItems = input.summary.reconciliation.unresolvedItemIds.length;
-  const pendingDrafts = input.summary.reconciliation.pendingDraftIds.length;
-  if (unresolvedItems > 0 || pendingDrafts > 0) {
-    const parts = [
-      unresolvedItems > 0
-        ? `${unresolvedItems} Review Item${unresolvedItems === 1 ? "" : "s"}`
-        : "",
-      pendingDrafts > 0
-        ? `${pendingDrafts} pending draft${pendingDrafts === 1 ? "" : "s"}`
-        : "",
-    ].filter(Boolean);
-    return {
-      canExport: false,
-      requiresStaleConfirmation: false,
-      message: `Resolve ${parts.join(" and ")} before export.`,
-    };
-  }
-  if (input.summary.export.requiresStaleConfirmation || input.refreshStatus === "failed") {
-    return {
-      canExport: true,
-      requiresStaleConfirmation: true,
-      message: "The last successful PDF may be stale. Confirm before exporting this generation.",
-    };
-  }
-  return {
-    canExport: input.summary.export.eligible,
-    requiresStaleConfirmation: false,
-    message: "All Review Items are reconciled. The latest generation is ready to export.",
   };
 }
 
@@ -259,7 +210,6 @@ export interface ReconciliationWorkspaceProps {
   readonly caretAnchor?: CaretAnchor | null;
   readonly refreshStatus: GenerationRefreshStatus;
   readonly onCommand: (command: ReviewCommand) => Promise<unknown>;
-  readonly onExport: (confirmPossiblyStale?: true) => Promise<unknown>;
   readonly onDetailOpenChange?: (open: boolean) => void;
 }
 
@@ -338,14 +288,9 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   const [detail, setDetail] = useState<ResolutionDetail | null>(null);
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
-  const [staleConfirmation, setStaleConfirmation] = useState(false);
   const entryRefs = useRef(new Map<string, HTMLButtonElement>());
   const detailBackRef = useRef<HTMLButtonElement>(null);
   const returnFocusKeyRef = useRef<string | null>(null);
-  const exportState = useMemo(() => reconciliationExportPresentation({
-    refreshStatus: props.refreshStatus,
-    summary: createReviewStateSummary(props.state),
-  }), [props.refreshStatus, props.state]);
   const activeRecord = detail === null
     ? undefined
     : recordsByKey.get(detail.key);
@@ -407,18 +352,6 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       setMessage(presentation.message);
     } catch {
       setMessage("The review state changed or the command was rejected. Nothing was moved.");
-    } finally {
-      setPending(false);
-    }
-  };
-  const exportReviewedPdf = async (confirmPossiblyStale?: true) => {
-    setPending(true);
-    try {
-      await props.onExport(confirmPossiblyStale);
-      setMessage("Reviewed PDF exported.");
-      if (confirmPossiblyStale) setStaleConfirmation(false);
-    } catch {
-      setMessage("Export failed safely; generated output was not changed.");
     } finally {
       setPending(false);
     }
@@ -593,21 +526,5 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     </ol>}
 
     {message ? <p className="reconciliation-workspace__message" role="status">{message}</p> : null}
-    <footer className="reconciliation-workspace__footer" data-export-eligibility={exportState.canExport ? "eligible" : "blocked"}>
-      <p>{exportState.message}</p>
-      {staleConfirmation ? <div className="reconciliation-workspace__export-confirmation" data-stale-export-confirmation>
-        <p>Export the last successful, possibly stale generation?</p>
-        <div className="reconciliation-workspace__editor-actions">
-          <button className="review-button review-button--secondary" type="button" title="Return without exporting" disabled={pending} onClick={() => setStaleConfirmation(false)}><ReviewIcon name="close" size={15} /><span>Cancel</span></button>
-          <button className="review-button review-button--primary" type="button" title="Export the last successful PDF generation" disabled={pending} onClick={() => void exportReviewedPdf(true)}><ReviewIcon name="download" size={15} /><span>Confirm export</span></button>
-        </div>
-      </div> : <button className="review-button review-button--secondary" type="button" title="Create a distinct reviewed PDF copy" disabled={!exportState.canExport || pending} onClick={() => {
-        if (exportState.requiresStaleConfirmation) {
-          setStaleConfirmation(true);
-          return;
-        }
-        void exportReviewedPdf();
-      }}><ReviewIcon name="download" size={15} /><span>Export reviewed PDF</span></button>}
-    </footer>
   </section>;
 }

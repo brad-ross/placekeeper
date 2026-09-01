@@ -98,7 +98,10 @@ import {
   type ReferenceWorkspaceLayoutState,
   type RightWorkspaceMode,
 } from '../review/reference-workspace-layout.js';
-import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
+import {
+  createReviewStateSummary,
+  type LiveContextBindingStatus,
+} from '../../../../packages/core/src/live-context.js';
 import type { CopyLinkControlProps } from '../review/CopyLinkControl.js';
 import type { PdfDestinationCopyLink } from '../review/copy-link-model.js';
 import {
@@ -139,6 +142,7 @@ import {
 import {
   ReconciliationWorkspace,
 } from '../review/ReconciliationWorkspace.js';
+import { reviewExportPresentation } from '../review/DocumentActionsMenu.js';
 import type { GenerationRefreshStatus, LocationRestoreStatus } from '../generation-status.js';
 import { reviewItemIsResolvedForGeneration } from '../../../../packages/core/src/annotation-projection.js';
 import './review-layout.css';
@@ -1726,6 +1730,17 @@ export function ReviewShell(props: ReviewShellProps) {
         saveOptionsOpen={props.saveOptionsOpen ?? false}
         onSaveOptions={() => props.onSaveOptions?.()}
         saveOptionsAvailable={props.onSaveOptions !== undefined}
+        {...(props.state.workflow.mode === 'generated-output' ? {
+          documentActions: {
+            presentation: reviewExportPresentation({
+              refreshStatus: props.generationRefreshStatus ?? 'idle',
+              summary: createReviewStateSummary(props.state),
+            }),
+            onExport: props.onExportReviewedCopy
+              ?? (() => Promise.reject(new Error('Reviewed export is unavailable.'))),
+            onOpenAnnotations: () => selectWorkspaceMode('annotations'),
+          },
+        } : {})}
         {...(props.viewerControls === undefined ? {} : { controls: props.viewerControls })}
         viewerState={props.viewerState ?? unavailableViewerControls()}
         fitWidthReady={props.viewerNavigation?.fitToWidthReady() ?? false}
@@ -2022,7 +2037,6 @@ export function ReviewShell(props: ReviewShellProps) {
               {...(props.caretAnchor === undefined ? {} : { caretAnchor: props.caretAnchor })}
               refreshStatus={props.generationRefreshStatus ?? 'idle'}
               onCommand={(command) => props.onCommand(command)}
-              onExport={props.onExportReviewedCopy ?? (() => Promise.reject(new Error('Reviewed export is unavailable.')))}
               onDetailOpenChange={setReconciliationDetailOpen}
             /> : null}
             {reconciliationDetailOpen ? null : <>
