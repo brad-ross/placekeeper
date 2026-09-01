@@ -400,6 +400,10 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     discardedAt: new Date().toISOString(),
   });
 
+  if (activeRecord === undefined && records.length === 0 && props.refreshStatus === "idle") {
+    return null;
+  }
+
   if (activeRecord !== undefined && detail !== null) {
     const typeLabel = annotationKindLabel(activeRecord.kind);
     const draft = "payload" in activeRecord.value ? undefined : activeRecord.value;
@@ -498,16 +502,13 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     </section>;
   }
 
-  return <section className="reconciliation-workspace" data-reconciliation-workspace aria-label="Previous Annotations to Resolve">
+  return <section className="reconciliation-workspace" data-reconciliation-workspace aria-label="Needs attention">
     <header className="reconciliation-workspace__header annotation-drawer__header">
-      <h2>Previous Annotations to Resolve</h2>
-      <p data-document-freshness={props.state.workflow.freshness}>
-        Generation {props.state.workflow.documentGeneration} is {props.state.workflow.freshness === "current" ? "current" : "possibly stale"}.
-      </p>
+      <h2>Needs attention</h2>
     </header>
     {props.refreshStatus === "reconciling" ? <p className="reconciliation-workspace__notice" role="status">A rebuilt PDF is loading and previous annotations are reconciling.</p> : null}
     {props.refreshStatus === "failed" ? <p className="reconciliation-workspace__notice" role="alert">The rebuilt PDF could not be validated. The last successful PDF remains reviewable and may be stale.</p> : null}
-    {records.length === 0 ? <p className="annotation-empty" data-reconciliation-status="empty">No previous annotations need attention.</p> : <ol className="reconciliation-workspace__list" aria-label="Previous annotations needing resolution">
+    {records.length === 0 ? null : <ol className="reconciliation-workspace__list" aria-label="Annotations needing attention">
       {records.map((record) => {
         const typeLabel = annotationKindLabel(record.kind);
         const canApplyDraft = !("payload" in record.value)

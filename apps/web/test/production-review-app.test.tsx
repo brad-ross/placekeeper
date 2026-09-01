@@ -289,7 +289,7 @@ describe("one production review tree", () => {
     />);
 
     expect(html).toContain('data-reconciliation-workspace');
-    expect(html).toContain("Previous Annotations to Resolve");
+    expect(html).toContain("Needs attention");
     expect(html).toContain("new sentence");
     expect(html).toContain("unfinished wording");
     expect(html).toContain("Multiple matches");
@@ -301,7 +301,7 @@ describe("one production review tree", () => {
     expect(html).not.toContain("Frozen draft");
     expect(html).not.toContain("two matching passages");
     expect(html).not.toContain(">Apply</button>");
-    expect(html).toContain("possibly stale");
+    expect(html).not.toContain("Generation 4 is possibly stale");
     expect(html).not.toContain("Export reviewed PDF");
   });
 
@@ -563,7 +563,9 @@ describe("one production review tree", () => {
 
     expect(html).toContain("Generation 8 viewer");
     expect(html).toContain('data-launch-surface="vscode"');
-    expect(html).toContain('data-reconciliation-workspace');
+    expect(html).not.toContain('data-reconciliation-workspace');
+    expect(html).toContain('<h2>Annotations</h2>');
+    expect(html).toContain('Select text in the PDF to add an annotation.');
     expect(html).toContain('data-document-actions-trigger');
     expect(html).toContain('aria-haspopup="menu"');
     expect(html).not.toContain('class="reconciliation-workspace__footer"');

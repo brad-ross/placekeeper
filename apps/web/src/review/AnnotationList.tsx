@@ -232,7 +232,7 @@ export function AnnotationList({
           );
         })}
       </ol>
-      {ordered.length === 0 ? <p className="annotation-empty" data-annotation-status="empty">No annotations yet.</p> : null}
+      {ordered.length === 0 ? <p className="annotation-empty" data-annotation-status="empty">Select text in the PDF to add an annotation.</p> : null}
     </section>
   );
 }

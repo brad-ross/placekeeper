@@ -1851,6 +1851,16 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   color: var(--review-danger);
 }
 
+.annotation-item__kind-icon {
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  align-self: center;
+  place-items: center;
+  color: var(--review-ink-muted);
+}
+
 .annotation-direction-cue {
   position: sticky;
   z-index: 1;

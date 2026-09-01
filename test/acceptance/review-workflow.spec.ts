@@ -77,9 +77,9 @@ test.describe('canonical review workflow', () => {
     await expect(openAnnotations).toBeVisible();
     await openAnnotations.click();
 
-    const reconciliation = page.getByRole('region', { name: 'Previous Annotations to Resolve' });
+    const reconciliation = page.getByRole('region', { name: 'Needs attention' });
     await expect(reconciliation.getByRole('heading', {
-      name: 'Previous Annotations to Resolve',
+      name: 'Needs attention',
     })).toBeVisible();
     await expect(reconciliation.locator('[data-reconciliation-entry]')).toHaveCount(2);
     await expect(reconciliation.getByRole('button', {
@@ -144,8 +144,9 @@ test.describe('canonical review workflow', () => {
     await discardDetail.getByRole('button', { name: 'Discard', exact: true }).click();
 
     await expect(page.locator('[data-reconciliation-entry]')).toHaveCount(0);
-    await expect(page.getByText('No previous annotations need attention.')).toBeVisible();
-    await expect(page.getByText('Discard recorded.')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Needs attention' })).toHaveCount(0);
+    await expect(page.getByText('No previous annotations need attention.')).toHaveCount(0);
+    await expect(page.getByText('Discard recorded.')).toHaveCount(0);
     await expect(page.locator('[data-annotations-section]')).toBeFocused();
 
     await documentActionsTrigger.click();
@@ -1172,7 +1173,7 @@ test.describe('canonical review workflow', () => {
 
   test('opens imported readers through existing PDF navigation', async ({ page }) => {
     await openAnnotationsWorkspace(page);
-    const existing = page.getByRole('region', { name: 'External Annotations (read only)' });
+    const existing = page.getByRole('region', { name: 'From this PDF' });
     await existing.getByRole('button', {
       name: /Read full Highlight annotation on page 1/u,
     }).click();
@@ -1205,7 +1206,7 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('#workspace-panel-annotations')).toBeFocused();
     await expect.poll(() => panel.evaluate((element) => element.scrollTop)).toBe(0);
 
-    const existing = page.getByRole('region', { name: 'External Annotations (read only)' });
+    const existing = page.getByRole('region', { name: 'From this PDF' });
     await existing.getByRole('button', {
       name: /Read full Highlight annotation on page 1/u,
     }).click();
@@ -1716,7 +1717,7 @@ test.describe('canonical review workflow', () => {
     await expect(row.getByRole('button', { name: /Highlight · Page 1/ })).toBeFocused();
     expect(await canvas.boundingBox()).toEqual(beforeActivation);
 
-    const existing = page.getByRole('region', { name: 'External Annotations (read only)' });
+    const existing = page.getByRole('region', { name: 'From this PDF' });
     await expect(existing.getByRole('button', { name: /Highlight · Page 1 · Source comment/ })).toBeVisible();
     await expect(existing.getByRole('button', { name: /^Edit/ })).toHaveCount(0);
     await expect(existing.getByRole('button', { name: /^Delete/ })).toHaveCount(0);

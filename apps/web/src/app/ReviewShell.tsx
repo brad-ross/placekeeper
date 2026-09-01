@@ -532,16 +532,12 @@ export function ReviewShell(props: ReviewShellProps) {
         ? 'The prior reading position could not be restored; review remains available.'
         : '',
   ].filter(Boolean);
-  const annotationsAvailable = props.state.workflow.mode === 'generated-output'
-    || props.state.items.length > 0
-    || (existingAnnotations.status === 'ready' && existingAnnotations.items.length > 0);
   const workspaceRequestedOpen = props.workspaceOpen ?? surface.baseSurface === 'workspace';
   const workspaceOpen = workspaceIsVisible(workspaceRequestedOpen, surface.baseSurface);
   const workspaceMode = navigation.workspace.lastMode;
   const visibleWorkspaceModes = WORKSPACE_MODES.filter((mode) => (
     (referencesAvailable || mode !== 'references')
     && (!outlineAbsent || mode !== 'outline')
-    && (annotationsAvailable || mode !== 'annotations')
   ));
   const visibleRightWorkspaceModes = visibleWorkspaceModes.filter(
     (mode): mode is RightWorkspaceMode => mode !== 'references',
@@ -2100,9 +2096,9 @@ export function ReviewShell(props: ReviewShellProps) {
               }}
             />
             {existingAnnotations.status === 'empty' ? null : (
-              <section className="existing-annotations" data-existing-annotations-state={existingAnnotations.status} aria-label="External Annotations (read only)">
+              <section className="existing-annotations" data-existing-annotations-state={existingAnnotations.status} aria-label="From this PDF">
               <header className="existing-annotations__header">
-                <h2>External Annotations (read only)</h2>
+                <h2>From this PDF</h2>
               </header>
               {existingAnnotations.status === 'loading' ? (
                 <p className="annotation-status" data-annotation-status="loading" role="status">
@@ -2137,7 +2133,7 @@ export function ReviewShell(props: ReviewShellProps) {
                       data-annotation-state="readonly"
                       data-readonly="true"
                     >
-                      <div className="existing-annotation__content">
+                      <div className="annotation-item__content existing-annotation__content">
                       <button className="annotation-item__navigation" type="button" aria-label={annotationAccessibleLabel({
                         kind: annotation.subtype,
                         pageNumber: annotation.pageIndex + 1,
@@ -2151,21 +2147,25 @@ export function ReviewShell(props: ReviewShellProps) {
                         props.onNavigateExisting?.(annotation);
                       }}>
                       </button>
-                      <AnnotationMetadata
-                        kind={annotation.subtype}
-                        pageNumber={annotation.pageIndex + 1}
-                        {...(sectionLabel === undefined ? {} : { sectionLabel })}
-                      />
-                      {annotation.contents ? (
-                        <AnnotationExcerpt
-                          content={annotation.contents}
-                          readerRecord={readerRecord}
-                          onOverflowChange={settlePendingReaderResume}
-                          onReadFull={(record, trigger) => {
-                            openExistingAnnotationReader(annotation, record, trigger);
-                          }}
+                      <div className="annotation-item__title-row">
+                        <AnnotationMetadata
+                          kind={annotation.subtype}
+                          pageNumber={annotation.pageIndex + 1}
+                          {...(sectionLabel === undefined ? {} : { sectionLabel })}
                         />
-                      ) : null}
+                      </div>
+                      <div className="annotation-item__body-row">
+                        {annotation.contents ? (
+                          <AnnotationExcerpt
+                            content={annotation.contents}
+                            readerRecord={readerRecord}
+                            onOverflowChange={settlePendingReaderResume}
+                            onReadFull={(record, trigger) => {
+                              openExistingAnnotationReader(annotation, record, trigger);
+                            }}
+                          />
+                        ) : <span />}
+                      </div>
                       </div>
                     </li>;
                   })}
