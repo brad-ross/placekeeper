@@ -255,6 +255,105 @@ body:has(.terminal-recovery) {
   white-space: nowrap;
 }
 
+.document-actions {
+  position: relative;
+  min-width: 0;
+}
+
+.document-actions__trigger .review-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--review-ink-muted);
+}
+
+.document-actions__menu {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  width: min(20rem, calc(100vw - 2rem));
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid var(--review-border);
+  border-radius: var(--review-radius-float);
+  color: var(--review-ink-primary);
+  background: var(--review-surface-panel);
+  box-shadow: var(--review-shadow-float);
+}
+
+.document-actions__menu > button,
+.document-actions__confirmation > button {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--review-control-touch);
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--review-radius-control);
+  color: var(--review-ink-primary);
+  background: transparent;
+  text-align: left;
+}
+
+.document-actions__menu > button:hover,
+.document-actions__menu > button:focus-visible,
+.document-actions__confirmation > button:hover,
+.document-actions__confirmation > button:focus-visible {
+  border-color: var(--review-border-strong);
+  background: var(--review-surface-interactive);
+}
+
+.document-actions__menu button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: .52;
+}
+
+.document-actions__message,
+.document-actions__result,
+.document-actions__heading {
+  margin: 0;
+  padding: 3px 9px 5px;
+  color: var(--review-ink-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.document-actions__heading {
+  padding-top: 7px;
+  color: var(--review-ink-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.document-actions__result[data-export-result="success"] {
+  color: var(--review-success);
+}
+
+.document-actions__result[data-export-result="failure"] {
+  color: var(--review-danger);
+}
+
+.document-actions__confirmation {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--review-control-group-gap);
+}
+
+.document-actions__menu > .document-actions__annotations-link {
+  border-top-color: var(--review-border-subtle);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.document-actions__loading {
+  animation: review-loader-spin .8s linear infinite;
+}
+
 .review-chrome__save-recovery {
   flex: none;
   color: var(--review-warning-ink, var(--review-ink-muted));
@@ -294,4 +393,5 @@ body:has(.terminal-recovery) {
 
 @media (prefers-reduced-motion: reduce) {
   .review-chrome__save-dot[data-save-phase="saving"] { animation: none; }
+  .document-actions__loading { animation: none; }
 }

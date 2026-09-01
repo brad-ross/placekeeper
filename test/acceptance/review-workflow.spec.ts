@@ -65,16 +65,133 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('button', { name: 'Proofread mode' })).toHaveCount(0);
   });
 
+  test('discloses mounted annotation actions at intent without activating their row', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 760 });
+    await page.getByRole('button', { name: 'Seed annotations' }).click();
+    await openAnnotationsWorkspace(page);
+
+    const candidate = page.locator(
+      '[data-review-item][data-active="false"]:has([data-annotation-action="edit"])',
+    ).first();
+    const itemId = await candidate.getAttribute('data-review-item');
+    if (itemId === null) throw new Error('No inactive editable annotation row is available.');
+    const row = page.locator(`[data-review-item="${itemId}"]`);
+    const navigation = row.locator('.annotation-item__navigation');
+    const edit = row.locator('[data-annotation-action="edit"]');
+    const remove = row.locator('[data-annotation-action="delete"]');
+    await expect(row).toBeVisible();
+    await expect(edit).toHaveCount(1);
+    await expect(remove).toHaveCount(1);
+    await expect(edit).toHaveCSS('opacity', '0');
+
+    await row.hover();
+    await expect(edit).toHaveCSS('opacity', '1');
+    await page.mouse.move(0, 0);
+    await expect(edit).toHaveCSS('opacity', '0');
+
+    await navigation.focus();
+    await page.keyboard.press('Tab');
+    await expect(edit).toBeFocused();
+    await expect(edit).toHaveCSS('opacity', '1');
+
+    await edit.click();
+    await expect(row).toHaveAttribute('data-active', 'false');
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await expect(row).toHaveAttribute('data-active', 'false');
+
+    await navigation.click();
+    await expect(row).toHaveAttribute('data-active', 'true');
+    await page.getByRole('application', { name: 'PDF review canvas' }).focus();
+    await page.mouse.move(0, 0);
+    await expect(edit).toHaveCSS('opacity', '1');
+  });
+
+  test('keeps coarse-pointer annotation actions visible, touch-sized, and layout-stable', async ({ browser }) => {
+    const context = await browser.newContext({
+      hasTouch: true,
+      viewport: { width: 390, height: 720 },
+    });
+    const touchPage = await context.newPage();
+    try {
+      await touchPage.goto('/test/acceptance/review-harness/index.html');
+      await touchPage.locator('#root').evaluate((element) => {
+        element.setAttribute('data-production-root', 'true');
+      });
+      await touchPage.getByRole('button', { name: 'Seed annotations' }).click();
+      await openAnnotationsWorkspace(touchPage);
+      expect(await touchPage.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+
+      const row = touchPage.locator(
+        '[data-review-item]:has([data-annotation-action="edit"])',
+      ).first();
+      const edit = row.locator('[data-annotation-action="edit"]');
+      const remove = row.locator('[data-annotation-action="delete"]');
+      const scrollViewport = touchPage.locator('[data-annotation-scroll-viewport]');
+      const before = await Promise.all([
+        row.evaluate((element) => element.getBoundingClientRect().height),
+        scrollViewport.evaluate((element) => element.scrollHeight),
+      ]);
+      await expect(edit).toHaveCSS('opacity', '1');
+      for (const action of [edit, remove]) {
+        const geometry = await action.evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return {
+            boundsWidth: bounds.width,
+            boundsHeight: bounds.height,
+            computedWidth: style.width,
+            computedHeight: style.height,
+            minWidth: style.minWidth,
+            maxWidth: style.maxWidth,
+            touchSize: style.getPropertyValue('--review-control-touch'),
+          };
+        });
+        expect(geometry).toMatchObject({
+          computedWidth: '44px',
+          computedHeight: '44px',
+          minWidth: '44px',
+          maxWidth: '44px',
+          touchSize: '44px',
+        });
+        expect(geometry.boundsWidth).toBeGreaterThanOrEqual(44);
+        expect(geometry.boundsHeight).toBeGreaterThanOrEqual(44);
+      }
+
+      await edit.focus();
+      const after = await Promise.all([
+        row.evaluate((element) => element.getBoundingClientRect().height),
+        scrollViewport.evaluate((element) => element.scrollHeight),
+      ]);
+      expect(after).toEqual(before);
+    } finally {
+      await context.close();
+    }
+  });
+
   test('resolves previous annotations through focused, annotation-native detail views', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=1');
-    await openAnnotationsWorkspace(page);
+    const documentActionsTrigger = page.getByRole('button', { name: /Open document actions/u });
+    await documentActionsTrigger.click();
+    const exportAction = page.getByRole('menuitem', { name: 'Export reviewed PDF' });
+    await expect(exportAction).toHaveAttribute('aria-disabled', 'true');
+    const blockerDescription = await exportAction.getAttribute('aria-describedby');
+    expect(blockerDescription).toMatch(/^document-export-reason-/u);
+    await expect(page.locator(`#${blockerDescription}`)).toHaveText('Resolve 2 Review Items before export.');
+    await expect(page.getByText('Resolve 2 Review Items before export.')).toBeVisible();
+    const openAnnotations = page.getByRole('menuitem', { name: 'Open Annotations' });
+    await expect(openAnnotations).toBeVisible();
+    await openAnnotations.click();
 
-    const reconciliation = page.getByRole('region', { name: 'Previous Annotations to Resolve' });
+    const reconciliation = page.getByRole('region', { name: 'Needs attention' });
     await expect(reconciliation.getByRole('heading', {
-      name: 'Previous Annotations to Resolve',
+      name: 'Needs attention',
     })).toBeVisible();
     await expect(reconciliation.locator('[data-reconciliation-entry]')).toHaveCount(2);
+    await expect(reconciliation.getByRole('button', {
+      name: 'Reattach previous Highlight annotation on page 1',
+    })).toBeFocused();
+    await expect(documentActionsTrigger).not.toBeFocused();
     await expect(reconciliation.locator('[data-reconciliation-action="reattach"]')).toHaveCount(0);
     await expect(reconciliation.getByRole('button', {
       name: 'Discard Delete annotation on page 2',
@@ -112,6 +229,9 @@ test.describe('canonical review workflow', () => {
     await reattachDetail.getByRole('button', { name: 'Confirm' }).click();
     await expect(page.locator('[data-reconciliation-detail]')).toHaveCount(0);
     await expect(page.locator('[data-reconciliation-entry]')).toHaveCount(1);
+    await expect(page.getByRole('button', {
+      name: 'Reattach previous Delete annotation on page 2',
+    })).toBeFocused();
     await expect(page.getByRole('region', { name: 'Owned annotations' })).toContainText(
       'Check the identifying variation.',
     );
@@ -130,8 +250,52 @@ test.describe('canonical review workflow', () => {
     await discardDetail.getByRole('button', { name: 'Discard', exact: true }).click();
 
     await expect(page.locator('[data-reconciliation-entry]')).toHaveCount(0);
-    await expect(page.getByText('No previous annotations need attention.')).toBeVisible();
-    await expect(page.getByText('Discard recorded.')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Needs attention' })).toHaveCount(0);
+    await expect(page.getByText('No previous annotations need attention.')).toHaveCount(0);
+    await expect(page.getByText('Discard recorded.')).toHaveCount(0);
+    await expect(page.locator('[data-workspace-focus-token="annotations:section"]')).toBeFocused();
+
+    await documentActionsTrigger.click();
+    await expect(exportAction).toHaveAttribute('aria-disabled', 'false');
+    await exportAction.click();
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
+    await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
+    await expect(exportAction).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(documentActionsTrigger).toBeFocused();
+  });
+
+  test('routes a blocked export back to the active protected draft without discarding it', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready');
+    await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+    const composer = page.getByRole('region', { name: 'Highlight Comment' });
+    const editor = composer.getByRole('textbox', { name: 'Comment (optional)' });
+    await editor.fill('Keep this protected draft exactly as written.');
+    await expect(page.locator('[data-pending-drafts]')).toHaveAttribute('data-pending-drafts', '1');
+
+    const documentActionsTrigger = page.getByRole('button', { name: /Open document actions/u });
+    await documentActionsTrigger.click();
+    await expect(page.getByRole('menuitem', { name: 'Export reviewed PDF' }))
+      .toHaveAttribute('aria-disabled', 'true');
+    await page.getByRole('menuitem', { name: 'Open Annotations' }).click();
+
+    await expect(composer).toBeVisible();
+    await expect(editor).toHaveValue('Keep this protected draft exactly as written.');
+    await expect(editor).toBeFocused();
+    await expect(page.locator('[data-pending-drafts]')).toHaveAttribute('data-pending-drafts', '1');
+    await expect(page.getByRole('menu')).toHaveCount(0);
+  });
+
+  test('routes a pending draft without an active composer to its attention row', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=pending-draft');
+    await page.getByRole('button', { name: /Open document actions/u }).click();
+    await page.getByRole('menuitem', { name: 'Open Annotations' }).click();
+
+    await expect(page.getByRole('button', {
+      name: 'Reattach previous Highlight annotation on page 1',
+    })).toBeFocused();
   });
 
   test('shows Page Note source context only when it identifies the prior location', async ({ page }) => {
@@ -154,6 +318,66 @@ test.describe('canonical review workflow', () => {
     }).click();
     await expect(detail.getByText('Previously attached to · Page 4')).toBeVisible();
     await expect(detail.getByText('The appendix extends the comparison.')).toBeVisible();
+  });
+
+  test('keeps stale confirmation, pending export, and retry feedback inside document actions', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=stale');
+    const trigger = page.getByRole('button', { name: /Open document actions/u });
+    await trigger.click();
+    let exportAction = page.getByRole('menuitem', { name: 'Export reviewed PDF' });
+    await exportAction.click();
+    await expect(page.getByText('Export the last successful PDF?')).toBeVisible();
+    const cancel = page.getByRole('menuitem', { name: 'Cancel' });
+    await expect(cancel).toBeFocused();
+    await cancel.click();
+    await expect(exportAction).toBeFocused();
+    await exportAction.click();
+    await page.getByRole('menuitem', { name: 'Confirm export' }).click();
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
+    await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
+
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&export=delayed');
+    await page.getByRole('button', { name: /Open document actions/u }).click();
+    exportAction = page.getByRole('menuitem', { name: 'Export reviewed PDF' });
+    await exportAction.click();
+    await expect(page.getByText('Exporting reviewed PDF…')).toBeVisible();
+    await exportAction.click({ force: true });
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
+    await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
+    await expect(exportAction).toBeFocused();
+
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&export=fail-once');
+    await page.getByRole('button', { name: /Open document actions/u }).click();
+    await page.getByRole('menuitem', { name: 'Export reviewed PDF' }).click();
+    const retry = page.getByRole('menuitem', { name: 'Retry export' });
+    await expect(page.getByText('Export failed safely. Try again.')).toBeVisible();
+    await expect(retry).toBeFocused();
+    await retry.click();
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '2');
+    await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
+  });
+
+  test('presents reconciling and failed refresh export states from the document title', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&refresh=reconciling');
+    await page.getByRole('button', { name: /Open document actions/u }).click();
+    let menu = page.getByRole('menu', { name: /Actions for/u });
+    await expect(menu).toHaveAttribute('data-export-eligibility', 'blocked');
+    await expect(menu.getByRole('menuitem', { name: 'Export reviewed PDF' }))
+      .toHaveAttribute('aria-disabled', 'true');
+    await expect(menu.getByText(
+      'Export becomes available after document reconciliation finishes.',
+    )).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: 'Open Annotations' })).toHaveCount(0);
+
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&refresh=failed');
+    await page.getByRole('button', { name: /Open document actions/u }).click();
+    menu = page.getByRole('menu', { name: /Actions for/u });
+    await expect(menu).toHaveAttribute('data-export-eligibility', 'eligible');
+    await expect(menu.getByText(
+      'The last successful PDF may be stale. Confirm before exporting this generation.',
+    )).toBeVisible();
+    await menu.getByRole('menuitem', { name: 'Export reviewed PDF' }).click();
+    await expect(menu.getByText('Export the last successful PDF?')).toBeVisible();
   });
 
   test('keeps focus and References coherent when a live outline disappears and returns', async ({ page }) => {
@@ -1078,7 +1302,7 @@ test.describe('canonical review workflow', () => {
 
   test('opens imported readers through existing PDF navigation', async ({ page }) => {
     await openAnnotationsWorkspace(page);
-    const existing = page.getByRole('region', { name: 'External Annotations (read only)' });
+    const existing = page.getByRole('region', { name: 'From this PDF' });
     await existing.getByRole('button', {
       name: /Read full Highlight annotation on page 1/u,
     }).click();
@@ -1111,7 +1335,7 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('#workspace-panel-annotations')).toBeFocused();
     await expect.poll(() => panel.evaluate((element) => element.scrollTop)).toBe(0);
 
-    const existing = page.getByRole('region', { name: 'External Annotations (read only)' });
+    const existing = page.getByRole('region', { name: 'From this PDF' });
     await existing.getByRole('button', {
       name: /Read full Highlight annotation on page 1/u,
     }).click();
@@ -1622,7 +1846,7 @@ test.describe('canonical review workflow', () => {
     await expect(row.getByRole('button', { name: /Highlight · Page 1/ })).toBeFocused();
     expect(await canvas.boundingBox()).toEqual(beforeActivation);
 
-    const existing = page.getByRole('region', { name: 'External Annotations (read only)' });
+    const existing = page.getByRole('region', { name: 'From this PDF' });
     await expect(existing.getByRole('button', { name: /Highlight · Page 1 · Source comment/ })).toBeVisible();
     await expect(existing.getByRole('button', { name: /^Edit/ })).toHaveCount(0);
     await expect(existing.getByRole('button', { name: /^Delete/ })).toHaveCount(0);

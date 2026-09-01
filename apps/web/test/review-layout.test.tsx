@@ -80,6 +80,32 @@ const ownedAnnotation: ReviewItem = {
   payload: { comment: 'Clarify the identifying variation behind this claim.' },
 };
 
+const unresolvedAnnotation: ReviewItem = {
+  id: 'unresolved-highlight',
+  kind: 'highlight',
+  pageIndex: 0,
+  createdAt: '2026-08-09T00:00:00.000Z',
+  updatedAt: '2026-08-09T00:00:00.000Z',
+  payload: { comment: 'Reconnect this annotation after the rebuild.' },
+  reconciliation: {
+    schemaVersion: 1,
+    ownerViewId: 'view-1',
+    baseGeneration: 3,
+    revision: 1,
+    anchor: {
+      kind: 'selection',
+      pageIndex: 0,
+      quote: 'previous source text',
+      prefix: '',
+      suffix: '',
+      rect: { x: 10, y: 10, width: 20, height: 10 },
+      segmentRects: [{ x: 10, y: 10, width: 20, height: 10 }],
+    },
+    disposition: { kind: 'missing', reason: 'not found after rebuild' },
+    previousAnchors: [],
+  },
+};
+
 describe('review shell layout and accessibility contract', () => {
   it('stacks generated-PDF status and command errors as top-left viewer toasts', () => {
     const html = renderToStaticMarkup(
@@ -535,6 +561,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(listHtml).toContain('<h2>Annotations</h2>');
     expect(listHtml).not.toContain('annotation-drawer__count');
     expect(listHtml).toContain('data-annotation-kind="highlight"');
+    expect(listHtml).toContain('data-annotation-kind-icon="highlight"');
     expect(listHtml).toContain('data-annotation-state="active-corresponding"');
     expect(listHtml).toContain('<span class="annotation-item__separator">·</span><span class="annotation-item__page">4</span>');
     expect(listHtml).toContain('class="annotation-item__section" title="Methods and data">Methods and data</span>');
@@ -552,9 +579,11 @@ describe('review shell layout and accessibility contract', () => {
     expect(peekHtml).toContain('Clarify the identifying variation behind this claim.');
     expect(peekHtml).not.toContain('Page 4');
     expect(peekHtml).not.toContain('<button');
+    expect(listHtml).toContain('data-workspace-focus-token="annotations:section"');
+    expect(listHtml).toContain('tabindex="-1"');
   });
 
-  it('keeps the annotation Copy Link affordance visible and right-most while durability is pending', () => {
+  it('keeps the annotation Copy Link affordance mounted and right-most while durability is pending', () => {
     const copyLink = {
       getLink: () => 'placekeeper:///tmp/Paper.pdf#v=1&page=4&item=00000000-0000-4000-8000-000000000004',
       writeText: async () => undefined,
@@ -608,6 +637,30 @@ describe('review shell layout and accessibility contract', () => {
     expect(pageOnlyList).not.toContain('data-annotation-action="copy-link"');
   });
 
+  it('reveals mounted annotation actions only at mouse intent and keeps them visible for touch', () => {
+    expect(annotationStyles).toMatch(
+      /\.annotation-item__action\s*\{[^}]*opacity:\s*0;/u,
+    );
+    expect(annotationStyles).not.toMatch(
+      /\.annotation-item__title-actions \.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /li:hover \.annotation-item__action,\s*:is\(\.review-workspace, \.review-tools-workspace\) li:focus-within \.annotation-item__action,\s*:is\(\.review-workspace, \.review-tools-workspace\) li\[data-active="true"\] \.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
+    );
+    const coarsePointerRules = responsiveStyles.match(
+      /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*?)\n\}/u,
+    )?.[1];
+    expect(coarsePointerRules).toMatch(
+      /\.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
+    );
+    expect(coarsePointerRules).toMatch(
+      /\.annotation-item__title-actions \.annotation-item__action\s*\{[^}]*width:\s*var\(--review-control-touch\);[^}]*min-width:\s*var\(--review-control-touch\);[^}]*max-width:\s*var\(--review-control-touch\);[^}]*max-height:\s*var\(--review-control-touch\);/u,
+    );
+    expect(coarsePointerRules).not.toMatch(
+      /\.annotation-item__title-actions\s*\{[^}]*(?:height|min-height|padding)/u,
+    );
+  });
+
   it('exposes keyboard-equivalent controls, live status, and state-preserving drawer semantics', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
@@ -636,7 +689,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('role="toolbar"');
     expect(html).toContain('aria-label="Selection review actions"');
     expect(html).toContain('aria-keyshortcuts="Alt+Shift+H"');
-    expect(html).not.toContain('aria-label="All annotations"');
+    expect(html).toContain('aria-label="All annotations"');
     expect(html).toContain('aria-live="polite"');
     expect(html).toContain('data-workspace-open="false"');
     expect(html).toContain('data-review-chrome');
@@ -661,21 +714,21 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('data-workspace-edge-rail="right"');
     expect(html).not.toContain('data-workspace-edge-rail="bottom"');
     expect(html).toContain('class="review-workspace__activity-strip"');
-    expect(html).toContain('data-workspace-mode-count="2"');
+    expect(html).toContain('data-workspace-mode-count="3"');
     expect(html).not.toContain('data-workspace-mode-label="references"');
     expect(html).not.toContain('aria-label="Move References to right"');
     expect(html).not.toContain('id="workspace-panel-references"');
-    expect(html).not.toContain('id="workspace-panel-annotations"');
-    expect(html).not.toContain('id="review-annotation-list"');
+    expect(html).toContain('id="workspace-panel-annotations"');
+    expect(html).toContain('id="review-annotation-list"');
     expect(html).toContain('data-review-workspace');
     expect(html).toContain('data-annotation-drawer');
     expect(html).not.toContain('aria-label="Close annotations"');
     expect(html).not.toContain('aria-label="Close workspace"');
-    expect(html).not.toContain('class="annotation-drawer__header"');
-    expect(html).not.toContain('aria-label="Owned annotations"');
-    expect(html).not.toContain('aria-label="External Annotations (read only)"');
-    expect(html).not.toContain('data-existing-annotations-state="loading"');
-    expect(html).not.toContain('data-annotation-status="loading"');
+    expect(html).toContain('class="annotation-drawer__header"');
+    expect(html).toContain('aria-label="Owned annotations"');
+    expect(html).toContain('aria-label="From this PDF"');
+    expect(html).toContain('data-existing-annotations-state="loading"');
+    expect(html).toContain('data-annotation-status="loading"');
     for (const tool of ['Replace', 'Delete', 'Highlight']) {
       expect(html).toContain(`aria-label="${tool}"`);
       expect(html).toContain(`title="${tool}"`);
@@ -704,7 +757,7 @@ describe('review shell layout and accessibility contract', () => {
       ><div>Document canvas</div></ReviewShell>,
     );
     expect(html).toContain('data-reference-layout="wide-split"');
-    expect(html).toContain('aria-label="Outline and search"');
+    expect(html).toContain('aria-label="Outline, search, and annotations"');
     expect(html).toContain('aria-label="References"');
     expect(html.match(/data-reference-viewport-host/g)).toHaveLength(1);
     expect(html.match(/id="workspace-panel-references"/g)).toHaveLength(1);
@@ -927,7 +980,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-controls="review-workspace review-tools-workspace"');
   });
 
-  it('keeps source annotations explicitly read-only and distinct from owned rows', () => {
+  it('keeps annotations task-first and source annotations explicitly read-only', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
@@ -970,6 +1023,7 @@ describe('review shell layout and accessibility contract', () => {
     );
 
     expect(html).toContain('data-existing-annotations-state="ready"');
+    expect(html).toContain('<h2>From this PDF</h2>');
     expect(html).toContain('data-annotation-origin="source"');
     expect(html).toContain('data-annotation-kind="Highlight"');
     expect(html).toContain('data-annotation-state="readonly"');
@@ -981,10 +1035,49 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('>Page 2<');
     expect(html).not.toContain('aria-label="Edit Highlight on page 2"');
     expect(html).not.toContain('aria-label="Delete Highlight on page 2"');
+    expect(html).not.toContain('data-annotation-action=');
     expect(html).toContain('id="workspace-mode-annotations"');
   });
 
-  it('omits the Annotations mode and panel when owned and source annotations are empty', () => {
+  it('orders attention, owned, and read-only populations without duplicating unresolved items', () => {
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={{ ...generatedState, items: [ownedAnnotation, unresolvedAnnotation] }}
+        documentTitle="paper.pdf"
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        existingAnnotations={{
+          status: 'ready',
+          generation: 4,
+          items: [{
+            id: 'source-highlight',
+            subtype: 'Highlight',
+            pageIndex: 1,
+            rect: { x: 1, y: 2, width: 3, height: 4 },
+            contents: 'Source-only comment',
+            author: 'Reviewer',
+            flags: [],
+            appearanceModes: ['normal'],
+            supportedAppearance: true,
+          }],
+        }}
+        onCommand={async () => generatedState}
+      >
+        <div>Document canvas</div>
+      </ReviewShell>,
+    );
+
+    const attention = html.indexOf('<h2>Needs attention</h2>');
+    const owned = html.indexOf('<h2>Annotations</h2>');
+    const existing = html.indexOf('<h2>From this PDF</h2>');
+    expect(attention).toBeGreaterThan(-1);
+    expect(owned).toBeGreaterThan(attention);
+    expect(existing).toBeGreaterThan(owned);
+    expect(html.match(/data-reconciliation-item="unresolved-highlight"/gu)).toHaveLength(1);
+    expect(html).not.toContain('data-review-item="unresolved-highlight"');
+    expect(html).toContain('data-review-item="owned-highlight"');
+  });
+
+  it('keeps Annotations as the stable empty core and omits optional sections', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
@@ -1000,13 +1093,15 @@ describe('review shell layout and accessibility contract', () => {
       </ReviewShell>,
     );
 
-    expect(html).not.toContain('aria-label="Owned annotations"');
-    expect(html).not.toContain('aria-label="External Annotations (read only)"');
+    expect(html).toContain('aria-label="Owned annotations"');
+    expect(html).toContain('Select text in the PDF to add an annotation.');
+    expect(html.match(/Select text in the PDF to add an annotation\./gu)).toHaveLength(1);
+    expect(html).not.toContain('aria-label="From this PDF"');
     expect(html).not.toContain('data-existing-annotations-state');
     expect(html).not.toContain('No existing annotations.');
-    expect(html).not.toContain('id="workspace-mode-annotations"');
-    expect(html).not.toContain('id="workspace-panel-annotations"');
-    expect(html).toMatch(/id="workspace-mode-search"[^>]*aria-selected="true"/u);
+    expect(html).toContain('id="workspace-mode-annotations"');
+    expect(html).toContain('id="workspace-panel-annotations"');
+    expect(html).toMatch(/id="workspace-mode-annotations"[^>]*aria-selected="true"/u);
   });
 
   it('keeps populated Annotations available and suppresses injected outline context for an empty outline', () => {
@@ -1048,7 +1143,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toMatch(/id="workspace-mode-search"[^>]*aria-selected="true"/u);
     expect(html).not.toContain('Methods and data');
     expect(html).toContain('<h2>Annotations</h2>');
-    expect(html).toContain('<h2>External Annotations (read only)</h2>');
+    expect(html).toContain('<h2>From this PDF</h2>');
     expect(html).not.toContain('Review comments');
     expect(html).not.toContain('Source PDF');
     expect(html).not.toContain('existing-annotations__readonly');

@@ -98,7 +98,10 @@ import {
   type ReferenceWorkspaceLayoutState,
   type RightWorkspaceMode,
 } from '../review/reference-workspace-layout.js';
-import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
+import {
+  createReviewStateSummary,
+  type LiveContextBindingStatus,
+} from '../../../../packages/core/src/live-context.js';
 import type { CopyLinkControlProps } from '../review/CopyLinkControl.js';
 import type { PdfDestinationCopyLink } from '../review/copy-link-model.js';
 import {
@@ -139,6 +142,7 @@ import {
 import {
   ReconciliationWorkspace,
 } from '../review/ReconciliationWorkspace.js';
+import { reviewExportPresentation } from '../review/DocumentActionsMenu.js';
 import type { GenerationRefreshStatus, LocationRestoreStatus } from '../generation-status.js';
 import { reviewItemIsResolvedForGeneration } from '../../../../packages/core/src/annotation-projection.js';
 import './review-layout.css';
@@ -393,6 +397,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const [listActivation, setListActivation] = useState<{ readonly id: string; readonly token: number }>();
   const [annotationReaderSession, setAnnotationReaderSession] = useState<FullAnnotationReaderSession | null>(null);
   const [reconciliationDetailOpen, setReconciliationDetailOpen] = useState(false);
+  const [reconciliationFocusRequest, setReconciliationFocusRequest] = useState(0);
   const pendingReaderResumeRef = useRef<FullAnnotationReaderSession | null>(null);
   const annotationRestorationTokenRef = useRef(0);
   const annotationRestorationFramesRef = useRef(new Set<number>());
@@ -527,20 +532,24 @@ export function ReviewShell(props: ReviewShellProps) {
         ? 'The prior reading position could not be restored; review remains available.'
         : '',
   ].filter(Boolean);
-  const annotationsAvailable = props.state.workflow.mode === 'generated-output'
-    || props.state.items.length > 0
-    || (existingAnnotations.status === 'ready' && existingAnnotations.items.length > 0);
   const workspaceRequestedOpen = props.workspaceOpen ?? surface.baseSurface === 'workspace';
   const workspaceOpen = workspaceIsVisible(workspaceRequestedOpen, surface.baseSurface);
   const workspaceMode = navigation.workspace.lastMode;
   const visibleWorkspaceModes = WORKSPACE_MODES.filter((mode) => (
     (referencesAvailable || mode !== 'references')
     && (!outlineAbsent || mode !== 'outline')
-    && (annotationsAvailable || mode !== 'annotations')
   ));
   const visibleRightWorkspaceModes = visibleWorkspaceModes.filter(
     (mode): mode is RightWorkspaceMode => mode !== 'references',
   );
+  const documentActionsPresentation = useMemo(() => (
+    props.state.workflow.mode === 'generated-output'
+      ? reviewExportPresentation({
+          refreshStatus: props.generationRefreshStatus ?? 'idle',
+          summary: createReviewStateSummary(props.state),
+        })
+      : undefined
+  ), [props.generationRefreshStatus, props.state]);
   const requestedRightWorkspaceMode: RightWorkspaceMode = props.rightWorkspaceMode
     ?? (workspaceMode === 'references' ? 'outline' : workspaceMode);
   const rightWorkspaceMode: RightWorkspaceMode = visibleRightWorkspaceModes.includes(
@@ -914,6 +923,25 @@ export function ReviewShell(props: ReviewShellProps) {
       surface: mode === 'references' ? 'references' : 'right',
     });
     props.onWorkspaceModeChange?.(mode);
+  };
+  const focusAnnotationsFallback = () => {
+    requestAnimationFrame(() => {
+      const shell = shellRef.current;
+      const target = shell?.querySelector<HTMLElement>('[data-workspace-focus-token="annotations:section"]')
+        ?? shell?.querySelector<HTMLElement>('#workspace-panel-annotations');
+      target?.focus({ preventScroll: true });
+    });
+  };
+  const openAnnotationsFromDocumentActions = () => {
+    if (authoringSessionRef.current !== null) {
+      requestAnimationFrame(() => authoringEditorRef.current?.focus({ preventScroll: true }));
+      return;
+    }
+    setWorkspaceRequest({ kind: 'reading', token: ++annotationRequestTokenRef.current });
+    setReconciliationFocusRequest((token) => token + 1);
+    dispatchSurface({ type: 'open-workspace', mode: 'annotations' });
+    dispatchReferenceLayout({ type: 'show-right-workspace' });
+    selectWorkspaceMode('annotations');
   };
   const acknowledgedAuthority = authoringAuthorityFor(
     acknowledgedRef.current,
@@ -1726,6 +1754,14 @@ export function ReviewShell(props: ReviewShellProps) {
         saveOptionsOpen={props.saveOptionsOpen ?? false}
         onSaveOptions={() => props.onSaveOptions?.()}
         saveOptionsAvailable={props.onSaveOptions !== undefined}
+        {...(documentActionsPresentation === undefined ? {} : {
+          documentActions: {
+            presentation: documentActionsPresentation,
+            onExport: props.onExportReviewedCopy
+              ?? (() => Promise.reject(new Error('Reviewed export is unavailable.'))),
+            onOpenAnnotations: openAnnotationsFromDocumentActions,
+          },
+        })}
         {...(props.viewerControls === undefined ? {} : { controls: props.viewerControls })}
         viewerState={props.viewerState ?? unavailableViewerControls()}
         fitWidthReady={props.viewerNavigation?.fitToWidthReady() ?? false}
@@ -2022,8 +2058,9 @@ export function ReviewShell(props: ReviewShellProps) {
               {...(props.caretAnchor === undefined ? {} : { caretAnchor: props.caretAnchor })}
               refreshStatus={props.generationRefreshStatus ?? 'idle'}
               onCommand={(command) => props.onCommand(command)}
-              onExport={props.onExportReviewedCopy ?? (() => Promise.reject(new Error('Reviewed export is unavailable.')))}
               onDetailOpenChange={setReconciliationDetailOpen}
+              focusRequestToken={reconciliationFocusRequest}
+              onFocusFallback={focusAnnotationsFallback}
             /> : null}
             {reconciliationDetailOpen ? null : <>
             <AnnotationList
@@ -2064,9 +2101,9 @@ export function ReviewShell(props: ReviewShellProps) {
               }}
             />
             {existingAnnotations.status === 'empty' ? null : (
-              <section className="existing-annotations" data-existing-annotations-state={existingAnnotations.status} aria-label="External Annotations (read only)">
+              <section className="existing-annotations" data-existing-annotations-state={existingAnnotations.status} aria-label="From this PDF">
               <header className="existing-annotations__header">
-                <h2>External Annotations (read only)</h2>
+                <h2>From this PDF</h2>
               </header>
               {existingAnnotations.status === 'loading' ? (
                 <p className="annotation-status" data-annotation-status="loading" role="status">
@@ -2101,7 +2138,7 @@ export function ReviewShell(props: ReviewShellProps) {
                       data-annotation-state="readonly"
                       data-readonly="true"
                     >
-                      <div className="existing-annotation__content">
+                      <div className="annotation-item__content existing-annotation__content">
                       <button className="annotation-item__navigation" type="button" aria-label={annotationAccessibleLabel({
                         kind: annotation.subtype,
                         pageNumber: annotation.pageIndex + 1,
@@ -2115,21 +2152,25 @@ export function ReviewShell(props: ReviewShellProps) {
                         props.onNavigateExisting?.(annotation);
                       }}>
                       </button>
-                      <AnnotationMetadata
-                        kind={annotation.subtype}
-                        pageNumber={annotation.pageIndex + 1}
-                        {...(sectionLabel === undefined ? {} : { sectionLabel })}
-                      />
-                      {annotation.contents ? (
-                        <AnnotationExcerpt
-                          content={annotation.contents}
-                          readerRecord={readerRecord}
-                          onOverflowChange={settlePendingReaderResume}
-                          onReadFull={(record, trigger) => {
-                            openExistingAnnotationReader(annotation, record, trigger);
-                          }}
+                      <div className="annotation-item__title-row">
+                        <AnnotationMetadata
+                          kind={annotation.subtype}
+                          pageNumber={annotation.pageIndex + 1}
+                          {...(sectionLabel === undefined ? {} : { sectionLabel })}
                         />
-                      ) : null}
+                      </div>
+                      <div className="annotation-item__body-row">
+                        {annotation.contents ? (
+                          <AnnotationExcerpt
+                            content={annotation.contents}
+                            readerRecord={readerRecord}
+                            onOverflowChange={settlePendingReaderResume}
+                            onReadFull={(record, trigger) => {
+                              openExistingAnnotationReader(annotation, record, trigger);
+                            }}
+                          />
+                        ) : <span />}
+                      </div>
                       </div>
                     </li>;
                   })}

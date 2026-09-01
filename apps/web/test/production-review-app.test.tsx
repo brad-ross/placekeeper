@@ -28,14 +28,25 @@ import {
   buildReattachmentCommand,
   cancelledReattachmentPresentation,
   reconciliationCommandPresentation,
+  reconciliationFocusKeyAfterRemoval,
   reattachmentCandidateFor,
   reattachmentGenerationIsCurrent,
   reattachmentTitle,
-  reconciliationExportPresentation,
   ReconciliationWorkspace,
 } from "../src/review/ReconciliationWorkspace.js";
+import {
+  reviewExportPresentation,
+} from "../src/review/DocumentActionsMenu.js";
 
 describe("one production review tree", () => {
+  it("chooses the next, previous, or section fallback after attention rows disappear", () => {
+    const keys = ["first", "middle", "final"];
+    expect(reconciliationFocusKeyAfterRemoval(keys, "first")).toBe("middle");
+    expect(reconciliationFocusKeyAfterRemoval(keys, "middle")).toBe("final");
+    expect(reconciliationFocusKeyAfterRemoval(keys, "final")).toBe("middle");
+    expect(reconciliationFocusKeyAfterRemoval(["only"], "only")).toBeNull();
+  });
+
   it("defers a host forward SyncTeX request until its PDF generation and restoration are ready", () => {
     expect(forwardSyncTexRequestReady({
       requestGeneration: 4,
@@ -274,11 +285,10 @@ describe("one production review tree", () => {
       caretAnchor={null}
       refreshStatus="idle"
       onCommand={vi.fn()}
-      onExport={vi.fn()}
     />);
 
     expect(html).toContain('data-reconciliation-workspace');
-    expect(html).toContain("Previous Annotations to Resolve");
+    expect(html).toContain("Needs attention");
     expect(html).toContain("new sentence");
     expect(html).toContain("unfinished wording");
     expect(html).toContain("Multiple matches");
@@ -290,8 +300,8 @@ describe("one production review tree", () => {
     expect(html).not.toContain("Frozen draft");
     expect(html).not.toContain("two matching passages");
     expect(html).not.toContain(">Apply</button>");
-    expect(html).toContain("possibly stale");
-    expect(html).toContain("Resolve 1 Review Item and 1 pending draft before export");
+    expect(html).not.toContain("Generation 4 is possibly stale");
+    expect(html).not.toContain("Export reviewed PDF");
   });
 
   it("builds revision-fenced reattachment commands without changing semantic identity", () => {
@@ -429,19 +439,19 @@ describe("one production review tree", () => {
           ? { eligible: false as const, requiresStaleConfirmation: true as const, reasons: ["possibly-stale" as const] }
           : { eligible: true as const, requiresStaleConfirmation: false as const },
     });
-    expect(reconciliationExportPresentation({
+    expect(reviewExportPresentation({
       refreshStatus: "reconciling",
       summary: summary(0, 0, "current"),
     }).message).toContain("reconciliation finishes");
-    expect(reconciliationExportPresentation({
+    expect(reviewExportPresentation({
       refreshStatus: "idle",
       summary: summary(2, 0, "current"),
     }).message).toContain("Resolve 2 Review Items");
-    expect(reconciliationExportPresentation({
+    expect(reviewExportPresentation({
       refreshStatus: "idle",
       summary: summary(0, 0, "possibly-stale"),
     })).toMatchObject({ canExport: true, requiresStaleConfirmation: true });
-    expect(reconciliationExportPresentation({
+    expect(reviewExportPresentation({
       refreshStatus: "idle",
       summary: summary(0, 0, "current"),
     })).toMatchObject({ canExport: true, requiresStaleConfirmation: false });
@@ -454,25 +464,57 @@ describe("one production review tree", () => {
       workflowMode: "generated-output",
       documentGeneration: 8,
     });
-    const html = renderToStaticMarkup(<ProductionReviewApp
-      session={{ sessionId: state.sessionId }}
-      initialState={state}
-      scope={{ documentTitle: "paper.pdf", launchSurface: "vscode" }}
-      api={{
-        command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
-        chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
-        exportReviewedCopy: vi.fn(), scope: vi.fn(),
-      }}
-      viewer={<div>Generation 8 viewer</div>}
-    />);
+    const renderSurface = (launchSurface: "browser" | "vscode") => renderToStaticMarkup(
+      <ProductionReviewApp
+        session={{ sessionId: state.sessionId }}
+        initialState={state}
+        scope={{ documentTitle: "paper.pdf", launchSurface }}
+        api={{
+          command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+          chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
+          exportReviewedCopy: vi.fn(), scope: vi.fn(),
+        }}
+        viewer={<div>Generation 8 viewer</div>}
+      />,
+    );
+    const html = renderSurface("vscode");
+    const browserHtml = renderSurface("browser");
 
     expect(html).toContain("Generation 8 viewer");
     expect(html).toContain('data-launch-surface="vscode"');
-    expect(html).toContain('data-reconciliation-workspace');
-    expect(html).toContain('data-export-eligibility="eligible"');
+    expect(html).not.toContain('data-reconciliation-workspace');
+    expect(html).toContain('<h2>Annotations</h2>');
+    expect(html).toContain('Select text in the PDF to add an annotation.');
+    expect(html).toContain('data-document-actions-trigger');
+    expect(html).toContain('aria-haspopup="menu"');
+    expect(html).not.toContain('class="reconciliation-workspace__footer"');
     expect(html).toContain("Protected review state");
     expect(html).not.toContain("Open automatic save options");
     expect(html).not.toContain('aria-haspopup="dialog"');
+    expect(browserHtml).toContain('data-launch-surface="browser"');
+    expect(browserHtml).toContain('data-document-actions-trigger');
+    expect(browserHtml).toContain('aria-haspopup="menu"');
+  });
+
+  it("omits an empty attention section during rebuild progress and failure", () => {
+    const state = createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000091",
+      source: { fileId: "00000000-0000-4000-8000-000000000092", digest: "d".repeat(64), byteLength: 1 },
+      workflowMode: "generated-output",
+      documentGeneration: 2,
+    });
+
+    for (const refreshStatus of ["reconciling", "failed"] as const) {
+      const html = renderToStaticMarkup(<ReconciliationWorkspace
+        state={state}
+        selectionUpdate={{ kind: "cleared", generation: 2 }}
+        caretAnchor={null}
+        refreshStatus={refreshStatus}
+        onCommand={vi.fn()}
+      />);
+      expect(html).not.toContain("Needs attention");
+      expect(html).not.toContain("reconciliation-workspace");
+    }
   });
 
   it("exposes Reference return state only for the current tab and document generation", () => {

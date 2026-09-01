@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { createReviewStateSummary, type ReviewStateSummaryV1 } from "../../../../packages/core/src/live-context.js";
 import { anchorEvidenceFromReviewItem } from "../../../../packages/core/src/review-model.js";
 import type {
   PendingReviewDraftV1,
@@ -61,54 +60,6 @@ export function buildReattachmentCommand(input: {
       status: "protected",
       updatedAt: input.updatedAt,
     },
-  };
-}
-
-export interface ReconciliationExportPresentation {
-  readonly canExport: boolean;
-  readonly requiresStaleConfirmation: boolean;
-  readonly message: string;
-}
-
-export function reconciliationExportPresentation(input: {
-  readonly refreshStatus: GenerationRefreshStatus;
-  readonly summary: ReviewStateSummaryV1;
-}): ReconciliationExportPresentation {
-  if (input.refreshStatus === "reconciling") {
-    return {
-      canExport: false,
-      requiresStaleConfirmation: false,
-      message: "Export becomes available after document reconciliation finishes.",
-    };
-  }
-  const unresolvedItems = input.summary.reconciliation.unresolvedItemIds.length;
-  const pendingDrafts = input.summary.reconciliation.pendingDraftIds.length;
-  if (unresolvedItems > 0 || pendingDrafts > 0) {
-    const parts = [
-      unresolvedItems > 0
-        ? `${unresolvedItems} Review Item${unresolvedItems === 1 ? "" : "s"}`
-        : "",
-      pendingDrafts > 0
-        ? `${pendingDrafts} pending draft${pendingDrafts === 1 ? "" : "s"}`
-        : "",
-    ].filter(Boolean);
-    return {
-      canExport: false,
-      requiresStaleConfirmation: false,
-      message: `Resolve ${parts.join(" and ")} before export.`,
-    };
-  }
-  if (input.summary.export.requiresStaleConfirmation || input.refreshStatus === "failed") {
-    return {
-      canExport: true,
-      requiresStaleConfirmation: true,
-      message: "The last successful PDF may be stale. Confirm before exporting this generation.",
-    };
-  }
-  return {
-    canExport: input.summary.export.eligible,
-    requiresStaleConfirmation: false,
-    message: "All Review Items are reconciled. The latest generation is ready to export.",
   };
 }
 
@@ -259,8 +210,9 @@ export interface ReconciliationWorkspaceProps {
   readonly caretAnchor?: CaretAnchor | null;
   readonly refreshStatus: GenerationRefreshStatus;
   readonly onCommand: (command: ReviewCommand) => Promise<unknown>;
-  readonly onExport: (confirmPossiblyStale?: true) => Promise<unknown>;
   readonly onDetailOpenChange?: (open: boolean) => void;
+  readonly focusRequestToken?: number;
+  readonly onFocusFallback?: () => void;
 }
 
 type ResolutionMode = "apply" | "reattach" | "discard";
@@ -280,6 +232,15 @@ interface ResolutionRecord {
   readonly priorSourceText: string | undefined;
   readonly authoredText: string;
   readonly stateLabel: string;
+}
+
+export function reconciliationFocusKeyAfterRemoval(
+  keys: readonly string[],
+  removedKey: string,
+): string | null {
+  const index = keys.indexOf(removedKey);
+  if (index < 0) return null;
+  return keys[index + 1] ?? keys[index - 1] ?? null;
 }
 
 function authoredText(target: ReviewItem | PendingReviewDraftV1): string {
@@ -305,31 +266,37 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   const records = useMemo<readonly ResolutionRecord[]>(() => [
     ...props.state.items.filter(
       (item) => item.reconciliation !== undefined && item.reconciliation.disposition.kind !== "resolved",
-    ).map((item): ResolutionRecord => ({
-      key: `item:${item.id}`,
-      target: {
-        kind: "item",
-        id: item.id,
-        revision: item.reconciliation!.revision,
-        ownerViewId: item.reconciliation!.ownerViewId,
-      },
-      value: item,
-      kind: item.kind,
-      pageNumber: item.pageIndex + 1,
-      authoredText: authoredText(item),
-      priorSourceText: meaningfulPriorSourceText(item, authoredText(item)),
-      stateLabel: resolutionStateLabel(item),
-    })),
-    ...props.state.pendingDrafts.map((draft): ResolutionRecord => ({
-      key: `draft:${draft.id}`,
-      target: { kind: "draft", draft },
-      value: draft,
-      kind: draft.kind,
-      pageNumber: draft.pageIndex + 1,
-      authoredText: authoredText(draft),
-      priorSourceText: meaningfulPriorSourceText(draft, authoredText(draft)),
-      stateLabel: resolutionStateLabel(draft),
-    })),
+    ).map((item): ResolutionRecord => {
+      const text = authoredText(item);
+      return {
+        key: `item:${item.id}`,
+        target: {
+          kind: "item",
+          id: item.id,
+          revision: item.reconciliation!.revision,
+          ownerViewId: item.reconciliation!.ownerViewId,
+        },
+        value: item,
+        kind: item.kind,
+        pageNumber: item.pageIndex + 1,
+        authoredText: text,
+        priorSourceText: meaningfulPriorSourceText(item, text),
+        stateLabel: resolutionStateLabel(item),
+      };
+    }),
+    ...props.state.pendingDrafts.map((draft): ResolutionRecord => {
+      const text = authoredText(draft);
+      return {
+        key: `draft:${draft.id}`,
+        target: { kind: "draft", draft },
+        value: draft,
+        kind: draft.kind,
+        pageNumber: draft.pageIndex + 1,
+        authoredText: text,
+        priorSourceText: meaningfulPriorSourceText(draft, text),
+        stateLabel: resolutionStateLabel(draft),
+      };
+    }),
   ], [props.state.items, props.state.pendingDrafts]);
   const recordsByKey = useMemo(
     () => new Map(records.map((record) => [record.key, record] as const)),
@@ -338,14 +305,10 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   const [detail, setDetail] = useState<ResolutionDetail | null>(null);
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
-  const [staleConfirmation, setStaleConfirmation] = useState(false);
   const entryRefs = useRef(new Map<string, HTMLButtonElement>());
   const detailBackRef = useRef<HTMLButtonElement>(null);
   const returnFocusKeyRef = useRef<string | null>(null);
-  const exportState = useMemo(() => reconciliationExportPresentation({
-    refreshStatus: props.refreshStatus,
-    summary: createReviewStateSummary(props.state),
-  }), [props.refreshStatus, props.state]);
+  const acceptedFocusKeyRef = useRef<string | null>(null);
   const activeRecord = detail === null
     ? undefined
     : recordsByKey.get(detail.key);
@@ -379,6 +342,16 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     returnFocusKeyRef.current = null;
   }, [activeRecord]);
 
+  useLayoutEffect(() => {
+    if (props.focusRequestToken === undefined || props.focusRequestToken === 0) return;
+    const frame = requestAnimationFrame(() => {
+      const first = records[0];
+      if (first === undefined) props.onFocusFallback?.();
+      else entryRefs.current.get(first.key)?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [props.focusRequestToken]);
+
   const openDetail = (record: ResolutionRecord, mode: ResolutionMode) => {
     setMessage("");
     returnFocusKeyRef.current = null;
@@ -393,32 +366,31 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     setDetail(null);
   };
   const submit = async (command: ReviewCommand, success: string) => {
+    acceptedFocusKeyRef.current = detail === null
+      ? null
+      : reconciliationFocusKeyAfterRemoval(records.map(({ key }) => key), detail.key);
     setPending(true);
     setMessage("");
     try {
       const result = await props.onCommand(command);
       const presentation = reconciliationCommandPresentation(result, success);
       if (!presentation.accepted) {
+        acceptedFocusKeyRef.current = null;
         setMessage(presentation.message);
         return;
       }
       setDetail(null);
       returnFocusKeyRef.current = null;
       setMessage(presentation.message);
+      requestAnimationFrame(() => {
+        const acceptedFocusKey = acceptedFocusKeyRef.current;
+        acceptedFocusKeyRef.current = null;
+        if (acceptedFocusKey === null) props.onFocusFallback?.();
+        else entryRefs.current.get(acceptedFocusKey)?.focus({ preventScroll: true });
+      });
     } catch {
+      acceptedFocusKeyRef.current = null;
       setMessage("The review state changed or the command was rejected. Nothing was moved.");
-    } finally {
-      setPending(false);
-    }
-  };
-  const exportReviewedPdf = async (confirmPossiblyStale?: true) => {
-    setPending(true);
-    try {
-      await props.onExport(confirmPossiblyStale);
-      setMessage("Reviewed PDF exported.");
-      if (confirmPossiblyStale) setStaleConfirmation(false);
-    } catch {
-      setMessage("Export failed safely; generated output was not changed.");
     } finally {
       setPending(false);
     }
@@ -433,6 +405,10 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     reason: "discarded-by-reviewer-during-reconciliation",
     discardedAt: new Date().toISOString(),
   });
+
+  if (activeRecord === undefined && records.length === 0) {
+    return null;
+  }
 
   if (activeRecord !== undefined && detail !== null) {
     const typeLabel = annotationKindLabel(activeRecord.kind);
@@ -532,16 +508,13 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     </section>;
   }
 
-  return <section className="reconciliation-workspace" data-reconciliation-workspace aria-label="Previous Annotations to Resolve">
+  return <section className="reconciliation-workspace" data-reconciliation-workspace aria-label="Needs attention">
     <header className="reconciliation-workspace__header annotation-drawer__header">
-      <h2>Previous Annotations to Resolve</h2>
-      <p data-document-freshness={props.state.workflow.freshness}>
-        Generation {props.state.workflow.documentGeneration} is {props.state.workflow.freshness === "current" ? "current" : "possibly stale"}.
-      </p>
+      <h2>Needs attention</h2>
     </header>
     {props.refreshStatus === "reconciling" ? <p className="reconciliation-workspace__notice" role="status">A rebuilt PDF is loading and previous annotations are reconciling.</p> : null}
     {props.refreshStatus === "failed" ? <p className="reconciliation-workspace__notice" role="alert">The rebuilt PDF could not be validated. The last successful PDF remains reviewable and may be stale.</p> : null}
-    {records.length === 0 ? <p className="annotation-empty" data-reconciliation-status="empty">No previous annotations need attention.</p> : <ol className="reconciliation-workspace__list" aria-label="Previous annotations needing resolution">
+    {records.length === 0 ? null : <ol className="reconciliation-workspace__list" aria-label="Annotations needing attention">
       {records.map((record) => {
         const typeLabel = annotationKindLabel(record.kind);
         const canApplyDraft = !("payload" in record.value)
@@ -567,6 +540,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
               }}
               type="button"
               className="annotation-item__navigation"
+              data-workspace-focus-token={`reconciliation:${record.key}`}
               aria-label={`${canApplyDraft ? "Apply" : "Reattach"} previous ${typeLabel} annotation on page ${record.pageNumber}`}
               title={canApplyDraft ? "Apply annotation" : "Reattach annotation"}
               onClick={() => openDetail(record, canApplyDraft ? "apply" : "reattach")}
@@ -593,21 +567,5 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     </ol>}
 
     {message ? <p className="reconciliation-workspace__message" role="status">{message}</p> : null}
-    <footer className="reconciliation-workspace__footer" data-export-eligibility={exportState.canExport ? "eligible" : "blocked"}>
-      <p>{exportState.message}</p>
-      {staleConfirmation ? <div className="reconciliation-workspace__export-confirmation" data-stale-export-confirmation>
-        <p>Export the last successful, possibly stale generation?</p>
-        <div className="reconciliation-workspace__editor-actions">
-          <button className="review-button review-button--secondary" type="button" title="Return without exporting" disabled={pending} onClick={() => setStaleConfirmation(false)}><ReviewIcon name="close" size={15} /><span>Cancel</span></button>
-          <button className="review-button review-button--primary" type="button" title="Export the last successful PDF generation" disabled={pending} onClick={() => void exportReviewedPdf(true)}><ReviewIcon name="download" size={15} /><span>Confirm export</span></button>
-        </div>
-      </div> : <button className="review-button review-button--secondary" type="button" title="Create a distinct reviewed PDF copy" disabled={!exportState.canExport || pending} onClick={() => {
-        if (exportState.requiresStaleConfirmation) {
-          setStaleConfirmation(true);
-          return;
-        }
-        void exportReviewedPdf();
-      }}><ReviewIcon name="download" size={15} /><span>Export reviewed PDF</span></button>}
-    </footer>
   </section>;
 }

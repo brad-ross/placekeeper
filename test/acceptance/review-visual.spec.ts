@@ -231,9 +231,8 @@ async function expectAnnotationTitleEndcapGeometry(row: Locator): Promise<void> 
   expect(geometry.edit.height).toBeCloseTo(geometry.remove.height, 1);
   expect(geometry.remove.height).toBeCloseTo(geometry.copy.height, 1);
   expect(geometry.edit.width).toBeLessThanOrEqual(24);
-  expect(geometry.editOpacity).toBe(1);
-  expect(geometry.removeOpacity).toBe(1);
-  expect(geometry.copyOpacity).toBe(1);
+  expect(geometry.editOpacity).toBe(geometry.removeOpacity);
+  expect(geometry.removeOpacity).toBe(geometry.copyOpacity);
 }
 
 async function expectCompactAnnotationReader(page: Page): Promise<Locator> {
@@ -577,6 +576,85 @@ test('focused reattachment hierarchy', async ({ page }) => {
   const narrow = await openFocusedReattachment(page, { width: 320, height: 900 });
   await expectFocusedReattachmentGeometry(narrow);
   await expectScene(narrow, 'narrow-focused-reattachment.png');
+});
+
+test('task-first generated Annotation Tray and blocked document menu', async ({ page }) => {
+  const product = await openScene(page, 'tray&reconciliation=mixed');
+  const workspace = page.getByRole('button', { name: /^(?:Open|Close) right workspace$/u });
+  if (await workspace.getAttribute('aria-expanded') !== 'true') await workspace.click();
+  const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
+  if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
+
+  const headings = page.locator('#workspace-panel-annotations h2');
+  await expect(headings).toHaveText(['Needs attention', 'Annotations', 'From this PDF']);
+  const resolved = page.locator('[data-review-item="00000000-0000-4000-8000-000000000208"]');
+  await resolved.locator('.annotation-item__navigation').focus();
+  await expect(resolved.locator('[data-annotation-action]').first()).toHaveCSS('opacity', '1');
+  await expectScene(product, 'wide-generated-annotation-tray.png');
+
+  await page.getByRole('button', { name: /Open document actions$/u }).click();
+  const menu = page.getByRole('menu', { name: /Actions for/u });
+  await expect(menu).toHaveAttribute('data-export-eligibility', 'blocked');
+  await expect(menu.getByRole('menuitem', { name: 'Export reviewed PDF' }))
+    .toHaveAttribute('aria-disabled', 'true');
+  await expect(menu.getByRole('menuitem', { name: 'Open Annotations' })).toBeVisible();
+  await expectScene(product, 'wide-generated-document-actions.png');
+});
+
+test('height-constrained generated Annotation Tray stays contained', async ({ page }) => {
+  const viewport = { width: 320, height: 560 };
+  const product = await openScene(page, 'tray&reconciliation=mixed', viewport);
+  const rail = page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
+  if (await rail.getAttribute('aria-expanded') !== 'true') await rail.click();
+  const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
+  if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
+  const panel = page.locator('#workspace-panel-annotations');
+  const geometry = await panel.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return {
+      top: bounds.top,
+      right: bounds.right,
+      bottom: bounds.bottom,
+      left: bounds.left,
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    };
+  });
+  expect(geometry.top).toBeGreaterThanOrEqual(0);
+  expect(geometry.left).toBeGreaterThanOrEqual(0);
+  expect(geometry.right).toBeLessThanOrEqual(viewport.width + 1);
+  expect(geometry.bottom).toBeLessThanOrEqual(viewport.height + 1);
+  expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
+  await expect(page.locator('[data-annotation-scroll-viewport]')).toHaveCSS('overflow-y', 'auto');
+  await expectScene(product, 'height-constrained-generated-annotation-tray.png');
+});
+
+test('coarse-pointer generated Annotation Tray keeps contextual controls visible', async ({ browser }) => {
+  const context = await browser.newContext({
+    hasTouch: true,
+    viewport: { width: 390, height: 720 },
+    deviceScaleFactor: 1,
+    colorScheme: 'light',
+  });
+  const page = await context.newPage();
+  try {
+    const product = await openScene(page, 'tray&reconciliation=mixed', { width: 390, height: 720 });
+    const rail = page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
+    if (await rail.getAttribute('aria-expanded') !== 'true') await rail.click();
+    const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
+    if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
+    expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+    const action = page.locator('[data-review-item="00000000-0000-4000-8000-000000000208"]')
+      .locator('[data-annotation-action]').first();
+    await expect(action).toHaveCSS('opacity', '1');
+    const bounds = await action.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.width).toBeGreaterThanOrEqual(44);
+    expect(bounds!.height).toBeGreaterThanOrEqual(44);
+    await expectScene(product, 'coarse-generated-annotation-tray.png');
+  } finally {
+    await context.close();
+  }
 });
 
 test('narrow Annotation Tray', async ({ page }) => {

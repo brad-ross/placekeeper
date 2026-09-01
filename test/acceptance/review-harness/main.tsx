@@ -39,6 +39,11 @@ const visualScenario = resolveVisualScenario(window.location.search);
 const previewParameters = new URLSearchParams(window.location.search);
 const saveEstablishing = previewParameters.has('establishing');
 const reconciliationPreview = previewParameters.get('reconciliation');
+const exportPreview = previewParameters.get('export');
+const requestedRefreshPreview = previewParameters.get('refresh');
+const refreshPreview = requestedRefreshPreview === 'reconciling' || requestedRefreshPreview === 'failed'
+  ? requestedRefreshPreview
+  : 'idle';
 const composerPreview = previewParameters.get('composer');
 const requestedComposerReturn = previewParameters.get('return');
 const composerReturnPreview = requestedComposerReturn === 'outside'
@@ -124,6 +129,13 @@ function createReconciliationPreviewState(variant = 'default'): ReviewState {
     workflowMode: 'generated-output',
     documentGeneration: 2,
   });
+  if (variant === 'ready') return state;
+  if (variant === 'stale') {
+    return {
+      ...state,
+      workflow: { ...state.workflow, freshness: 'possibly-stale' },
+    };
+  }
   const anchor = {
     kind: 'selection' as const,
     pageIndex: 0,
@@ -133,6 +145,25 @@ function createReconciliationPreviewState(variant = 'default'): ReviewState {
     rect: { x: 72, y: 92, width: 180, height: 14 },
     segmentRects: [{ x: 72, y: 92, width: 180, height: 14 }],
   };
+  if (variant === 'pending-draft') {
+    return {
+      ...state,
+      pendingDrafts: [{
+        id: '00000000-0000-4000-8000-000000000207',
+        ownerViewId: 'harness-view',
+        baseGeneration: 2,
+        revision: 0,
+        kind: 'highlight',
+        pageIndex: 0,
+        text: 'Keep this pending annotation for review.',
+        anchor,
+        disposition: { kind: 'missing', reason: 'The previous passage is not present in this PDF.' },
+        status: 'frozen',
+        createdAt: '2026-08-30T00:00:00.000Z',
+        updatedAt: '2026-08-30T00:00:00.000Z',
+      }],
+    };
+  }
   if (variant === 'page-notes') {
     const pageAnchor = {
       kind: 'page' as const,
@@ -176,7 +207,7 @@ function createReconciliationPreviewState(variant = 'default'): ReviewState {
       }],
     };
   }
-  return {
+  const unresolvedState: ReviewState = {
     ...state,
     items: [{
       id: '00000000-0000-4000-8000-000000000203',
@@ -213,6 +244,35 @@ function createReconciliationPreviewState(variant = 'default'): ReviewState {
         revision: 1,
         anchor: { ...anchor, pageIndex: 1, quote: 'obsolete robustness sentence' },
         disposition: { kind: 'missing', reason: 'The previous passage is not present in this PDF.' },
+        previousAnchors: [],
+      },
+    }],
+  };
+  if (variant !== 'mixed') return unresolvedState;
+  return {
+    ...unresolvedState,
+    items: [...unresolvedState.items, {
+      id: '00000000-0000-4000-8000-000000000208',
+      kind: 'pageNote',
+      pageIndex: 2,
+      createdAt: '2026-08-30T00:00:00.000Z',
+      updatedAt: '2026-08-30T00:00:00.000Z',
+      payload: {
+        position: { x: 420, y: 620, width: 24, height: 24 },
+        comment: 'Keep the resolved robustness note visible in the current generation.',
+      },
+      reconciliation: {
+        schemaVersion: 1,
+        ownerViewId: 'harness-view',
+        baseGeneration: 1,
+        revision: 2,
+        anchor: {
+          kind: 'page',
+          pageIndex: 2,
+          rect: { x: 420, y: 620, width: 24, height: 24 },
+          nearbyText: 'The robustness appendix reports the same sign and magnitude.',
+        },
+        disposition: { kind: 'resolved', generation: 2 },
         previousAnchors: [],
       },
     }],
@@ -455,7 +515,7 @@ function Harness() {
     visualScenario?.referenceReturn ?? null,
   );
   const [harnessReferenceNavigation, setHarnessReferenceNavigation] = useState(
-    () => createReferenceNavigationState(0),
+    () => createReferenceNavigationState(reconciliationPreview === null ? 0 : 2),
   );
   const anchorKindRef = useRef(anchorKind);
   anchorKindRef.current = anchorKind;
@@ -474,6 +534,8 @@ function Harness() {
   const [activationRequest, setActivationRequest] = useState<{ id: string; token: number }>();
   const authoringActiveRef = useRef(false);
   const [saveDestinationOpen, setSaveDestinationOpen] = useState(false);
+  const [exportCount, setExportCount] = useState(0);
+  const failNextExportRef = useRef(exportPreview === 'fail-once');
   const [outlineDiscovery, setOutlineDiscovery] = useState<PdfOutlineDiscovery>({
     status: 'loading',
     documentGeneration: 0,
@@ -608,6 +670,18 @@ function Harness() {
         }
       }}
       onCommand={accept}
+      generationRefreshStatus={refreshPreview}
+      onExportReviewedCopy={async () => {
+        setExportCount((count) => count + 1);
+        if (exportPreview === 'delayed') {
+          await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        }
+        if (failNextExportRef.current) {
+          failNextExportRef.current = false;
+          throw new Error('Harness export failure');
+        }
+        return { kind: 'reviewed-copy' };
+      }}
       onAuthoringActiveChange={(active) => { authoringActiveRef.current = active; }}
       onAuthoringPreviewChange={() => {
         rootElement.setAttribute(
@@ -838,6 +912,8 @@ function Harness() {
           data-viewer-page-commands={viewerControls.pageCommands.join(',')}
           data-viewer-page-requests={directPageRequests}
           data-viewer-zoom-requests={zoomRequests}
+          data-export-count={exportCount}
+          data-pending-drafts={state.pendingDrafts.length}
         >
           Revision {state.revision}
         </output>

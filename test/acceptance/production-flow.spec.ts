@@ -3984,6 +3984,98 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
 });
 
+for (const surface of ['browser', 'vscode'] as const) {
+  test(`uses the shared generated-output document menu and blocked route on ${surface}`, async ({ page }) => {
+    const launched = await host.open({
+      pdfPath: await freshProductionPdf(pdf),
+      sourceRootPath: sourceRoot,
+      surface,
+      workflowMode: 'generated-output',
+      fork: true,
+    });
+    if (!launched.ok || launched.kind === 'recovery-offered') {
+      throw new Error(`${surface} generated-output launch failed`);
+    }
+    const state = host.broker.state(launched.sessionId);
+    if (!state) throw new Error(`${surface} generated-output state is unavailable`);
+    const timestamp = '2026-08-31T12:00:00.000Z';
+    await host.broker.acceptMutation(launched.sessionId, {
+      type: 'put-draft',
+      expectedRevision: state.revision,
+      expectedDraftRevision: -1,
+      draft: {
+        id: randomUUID(),
+        ownerViewId: `acceptance-${surface}`,
+        baseGeneration: state.workflow.documentGeneration,
+        revision: 0,
+        kind: 'highlight',
+        pageIndex: 0,
+        text: 'Keep this protected generated-output draft.',
+        anchor: {
+          kind: 'selection',
+          pageIndex: 0,
+          quote: 'existing supported highlight',
+          prefix: 'Before ',
+          suffix: ' after.',
+          rect: { x: 72, y: 92, width: 120, height: 14 },
+          segmentRects: [{ x: 72, y: 92, width: 120, height: 14 }],
+        },
+        disposition: {
+          kind: 'missing',
+          reason: 'The previous passage is not present in this PDF.',
+        },
+        status: 'protected',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+    });
+
+    await page.setViewportSize({ width: 760, height: 900 });
+    await page.goto(launched.url);
+    const review = page.locator('[data-production-review]');
+    await expect(review).toHaveAttribute('data-launch-surface', surface);
+    const firstPage = page.locator("[data-page-index='0']").first();
+    await waitForRenderedPageImage(firstPage);
+    const viewer = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
+    await viewer.evaluate((element) => {
+      element.setAttribute('data-shared-menu-mount-probe', 'stable');
+    });
+    await page.getByRole('button', { name: 'Zoom in' }).click();
+    const zoomBefore = await page.getByLabel('Zoom level').textContent();
+
+    const trigger = page.getByRole('button', { name: /Open document actions$/u });
+    await trigger.click();
+    const menu = page.getByRole('menu', { name: /Actions for/u });
+    await expect(menu).toBeVisible();
+    await expect(menu).toHaveAttribute('data-export-eligibility', 'blocked');
+    const exportAction = menu.getByRole('menuitem', { name: 'Export reviewed PDF' });
+    await expect(exportAction).toHaveAttribute('aria-disabled', 'true');
+    await expect(menu.getByText('Resolve 1 pending draft before export.')).toBeVisible();
+    const openAnnotations = menu.getByRole('menuitem', { name: 'Open Annotations' });
+    await expect(openAnnotations).toHaveClass(/document-actions__annotations-link/u);
+    await openAnnotations.click();
+
+    await expect(page.getByRole('tab', { name: 'Annotations', exact: true }))
+      .toHaveAttribute('aria-selected', 'true');
+    const attention = page.getByRole('region', { name: 'Needs attention' });
+    await expect(attention).toBeVisible();
+    const pendingDraft = attention.getByRole('button', {
+      name: 'Reattach previous Highlight annotation on page 1',
+    });
+    await expect(pendingDraft).toBeFocused();
+    await expect(page.getByRole('region', { name: 'From this PDF' }))
+      .toHaveAttribute('data-existing-annotations-state', 'ready');
+    await expect(page.locator('[data-existing-annotation][data-readonly="true"]')).not.toHaveCount(0);
+    await expect(viewer).toHaveAttribute('data-shared-menu-mount-probe', 'stable');
+    expect(await page.getByLabel('Zoom level').textContent()).toBe(zoomBefore);
+    const panelGeometry = await page.locator('#workspace-panel-annotations').evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(panelGeometry.scrollWidth).toBeLessThanOrEqual(panelGeometry.clientWidth + 1);
+  });
+}
+
 test('allows PDF text interaction without dismissing the Annotation Tray', async ({ page }) => {
   const launched = await host.open({
     pdfPath: await freshProductionPdf(pdf),

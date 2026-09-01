@@ -417,7 +417,7 @@ describe("loopback HTTP boundary", () => {
     }, { authorization: `Bearer ${credential}` });
     expect(forward.status).toBe(200);
     expect(await forward.json()).toMatchObject({ status: "out-of-root" });
-    expect(broker.state(launch.sessionId)?.workflow.freshness).toBe("possibly-stale");
+    expect(broker.state(launch.sessionId)?.workflow.freshness).toBe("current");
   });
 
   it("accepts a cross-site top-level bootstrap without weakening same-origin mutations", async () => {

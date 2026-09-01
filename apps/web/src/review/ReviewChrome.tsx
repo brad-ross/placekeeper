@@ -10,6 +10,10 @@ import { ReviewIcon } from './ReviewIcon.js';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import { CodexContextStatus } from './CodexContextStatus.js';
 import { CopyLinkControl, type CopyLinkControlProps } from './CopyLinkControl.js';
+import {
+  DocumentActionsMenu,
+  type DocumentActionsMenuProps,
+} from './DocumentActionsMenu.js';
 
 export function validPageNumber(draft: string, totalPages: number): number | undefined {
   const normalized = draft.trim();
@@ -59,6 +63,10 @@ export interface ReviewChromeProps {
   readonly savePhase?: 'clean' | 'saving' | 'not-saved';
   readonly savePendingDestination?: boolean;
   readonly saveOptionsOpen?: boolean;
+  readonly documentActions?: Omit<
+    DocumentActionsMenuProps,
+    'documentTitle' | 'savedLabel' | 'savePhase'
+  >;
   readonly controls?: ViewerControls;
   readonly viewerState: ViewerControlsSnapshot;
   readonly fitWidthReady?: boolean;
@@ -84,6 +92,7 @@ export function ReviewChrome({
   savePhase = 'clean',
   savePendingDestination = false,
   saveOptionsOpen = false,
+  documentActions,
   controls,
   viewerState,
   fitWidthReady = false,
@@ -274,7 +283,12 @@ export function ReviewChrome({
   return (
     <header className="review-chrome" data-review-chrome>
       <div className="review-chrome__identity">
-        {saveOptionsAvailable ? <button
+        {documentActions !== undefined ? <DocumentActionsMenu
+          documentTitle={documentTitle}
+          savedLabel={savedLabel}
+          savePhase={savePhase}
+          {...documentActions}
+        /> : saveOptionsAvailable ? <button
           ref={saveTriggerRef}
           type="button"
           className="review-chrome__save-identity"
