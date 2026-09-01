@@ -21,6 +21,16 @@ function stepBlock(workflow: string, stepName: string): string {
 }
 
 describe('manual CI workflow', () => {
+  it('builds shared web assets before packaging tests enter the canonical unit suite', async () => {
+    const packageManifest = JSON.parse(await readFile('package.json', 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+
+    expect(packageManifest.scripts?.['test:ci:unit']).toBe(
+      'pnpm build:web && pnpm build:vscode && vitest run --config vitest.ci.config.ts',
+    );
+  });
+
   it('runs the full CI suite when dispatched manually', async () => {
     const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
 
