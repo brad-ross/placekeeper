@@ -115,7 +115,6 @@ export function AnnotationList({
     <section
       className="annotation-drawer__owned"
       data-annotation-origin="owned"
-      data-annotations-section
       data-workspace-focus-token="annotations:section"
       aria-label="Owned annotations"
       tabIndex={-1}
@@ -198,7 +197,6 @@ export function AnnotationList({
                     className="annotation-item__title-actions"
                     role="group"
                     aria-label={`${kindLabel} annotation actions`}
-                    onClick={(event) => event.stopPropagation()}
                   >
                     {item.kind === 'delete' ? null : (
                       <button type="button" className="annotation-item__action" data-annotation-action="edit" aria-label={`Edit ${kindLabel} annotation on page ${item.pageIndex + 1}`} title="Edit annotation" onClick={(event) => onEdit(item, event.currentTarget)}>

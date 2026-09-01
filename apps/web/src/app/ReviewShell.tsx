@@ -542,6 +542,14 @@ export function ReviewShell(props: ReviewShellProps) {
   const visibleRightWorkspaceModes = visibleWorkspaceModes.filter(
     (mode): mode is RightWorkspaceMode => mode !== 'references',
   );
+  const documentActionsPresentation = useMemo(() => (
+    props.state.workflow.mode === 'generated-output'
+      ? reviewExportPresentation({
+          refreshStatus: props.generationRefreshStatus ?? 'idle',
+          summary: createReviewStateSummary(props.state),
+        })
+      : undefined
+  ), [props.generationRefreshStatus, props.state]);
   const requestedRightWorkspaceMode: RightWorkspaceMode = props.rightWorkspaceMode
     ?? (workspaceMode === 'references' ? 'outline' : workspaceMode);
   const rightWorkspaceMode: RightWorkspaceMode = visibleRightWorkspaceModes.includes(
@@ -919,7 +927,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const focusAnnotationsFallback = () => {
     requestAnimationFrame(() => {
       const shell = shellRef.current;
-      const target = shell?.querySelector<HTMLElement>('[data-annotations-section]')
+      const target = shell?.querySelector<HTMLElement>('[data-workspace-focus-token="annotations:section"]')
         ?? shell?.querySelector<HTMLElement>('#workspace-panel-annotations');
       target?.focus({ preventScroll: true });
     });
@@ -1746,17 +1754,14 @@ export function ReviewShell(props: ReviewShellProps) {
         saveOptionsOpen={props.saveOptionsOpen ?? false}
         onSaveOptions={() => props.onSaveOptions?.()}
         saveOptionsAvailable={props.onSaveOptions !== undefined}
-        {...(props.state.workflow.mode === 'generated-output' ? {
+        {...(documentActionsPresentation === undefined ? {} : {
           documentActions: {
-            presentation: reviewExportPresentation({
-              refreshStatus: props.generationRefreshStatus ?? 'idle',
-              summary: createReviewStateSummary(props.state),
-            }),
+            presentation: documentActionsPresentation,
             onExport: props.onExportReviewedCopy
               ?? (() => Promise.reject(new Error('Reviewed export is unavailable.'))),
             onOpenAnnotations: openAnnotationsFromDocumentActions,
           },
-        } : {})}
+        })}
         {...(props.viewerControls === undefined ? {} : { controls: props.viewerControls })}
         viewerState={props.viewerState ?? unavailableViewerControls()}
         fitWidthReady={props.viewerNavigation?.fitToWidthReady() ?? false}

@@ -266,31 +266,37 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   const records = useMemo<readonly ResolutionRecord[]>(() => [
     ...props.state.items.filter(
       (item) => item.reconciliation !== undefined && item.reconciliation.disposition.kind !== "resolved",
-    ).map((item): ResolutionRecord => ({
-      key: `item:${item.id}`,
-      target: {
-        kind: "item",
-        id: item.id,
-        revision: item.reconciliation!.revision,
-        ownerViewId: item.reconciliation!.ownerViewId,
-      },
-      value: item,
-      kind: item.kind,
-      pageNumber: item.pageIndex + 1,
-      authoredText: authoredText(item),
-      priorSourceText: meaningfulPriorSourceText(item, authoredText(item)),
-      stateLabel: resolutionStateLabel(item),
-    })),
-    ...props.state.pendingDrafts.map((draft): ResolutionRecord => ({
-      key: `draft:${draft.id}`,
-      target: { kind: "draft", draft },
-      value: draft,
-      kind: draft.kind,
-      pageNumber: draft.pageIndex + 1,
-      authoredText: authoredText(draft),
-      priorSourceText: meaningfulPriorSourceText(draft, authoredText(draft)),
-      stateLabel: resolutionStateLabel(draft),
-    })),
+    ).map((item): ResolutionRecord => {
+      const text = authoredText(item);
+      return {
+        key: `item:${item.id}`,
+        target: {
+          kind: "item",
+          id: item.id,
+          revision: item.reconciliation!.revision,
+          ownerViewId: item.reconciliation!.ownerViewId,
+        },
+        value: item,
+        kind: item.kind,
+        pageNumber: item.pageIndex + 1,
+        authoredText: text,
+        priorSourceText: meaningfulPriorSourceText(item, text),
+        stateLabel: resolutionStateLabel(item),
+      };
+    }),
+    ...props.state.pendingDrafts.map((draft): ResolutionRecord => {
+      const text = authoredText(draft);
+      return {
+        key: `draft:${draft.id}`,
+        target: { kind: "draft", draft },
+        value: draft,
+        kind: draft.kind,
+        pageNumber: draft.pageIndex + 1,
+        authoredText: text,
+        priorSourceText: meaningfulPriorSourceText(draft, text),
+        stateLabel: resolutionStateLabel(draft),
+      };
+    }),
   ], [props.state.items, props.state.pendingDrafts]);
   const recordsByKey = useMemo(
     () => new Map(records.map((record) => [record.key, record] as const)),
@@ -541,12 +547,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
             />
             <div className="annotation-item__title-row">
               <AnnotationMetadata kind={record.kind} pageNumber={record.pageNumber} sectionLabel={record.stateLabel} />
-              <div
-                className="annotation-item__title-actions"
-                role="group"
-                aria-label={`${typeLabel} resolution actions`}
-                onClick={(event) => event.stopPropagation()}
-              >
+              <div className="annotation-item__title-actions" role="group" aria-label={`${typeLabel} resolution actions`}>
                 <button
                   type="button"
                   className="annotation-item__action annotation-item__delete"

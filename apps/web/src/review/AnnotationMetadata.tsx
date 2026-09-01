@@ -24,8 +24,8 @@ const ANNOTATION_KIND_ICONS: Readonly<Record<string, ReviewIconName>> = {
   text: 'note',
 };
 
-export function annotationKindIcon(kind: string): ReviewIconName {
-  return ANNOTATION_KIND_ICONS[kind.toLocaleLowerCase()] ?? 'annotations';
+function annotationKindIcon(kind: string): ReviewIconName {
+  return ANNOTATION_KIND_ICONS[kind.toLowerCase()] ?? 'annotations';
 }
 
 export function annotationKindLabel(kind: string): string {

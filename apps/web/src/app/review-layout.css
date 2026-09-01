@@ -344,18 +344,14 @@ body:has(.terminal-recovery) {
   gap: var(--review-control-group-gap);
 }
 
-.document-actions__annotations-link {
-  border-top-color: var(--review-border-subtle) !important;
-  border-top-left-radius: 0 !important;
-  border-top-right-radius: 0 !important;
+.document-actions__menu > .document-actions__annotations-link {
+  border-top-color: var(--review-border-subtle);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 .document-actions__loading {
-  animation: review-document-export-spin .8s linear infinite;
-}
-
-@keyframes review-document-export-spin {
-  to { transform: rotate(360deg); }
+  animation: review-loader-spin .8s linear infinite;
 }
 
 .review-chrome__save-recovery {

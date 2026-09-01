@@ -34,7 +34,7 @@ export function reviewExportPresentation(input: {
   }
   const unresolvedItems = input.summary.reconciliation.unresolvedItemIds.length;
   const pendingDrafts = input.summary.reconciliation.pendingDraftIds.length;
-  if (unresolvedItems > 0 || pendingDrafts > 0) {
+  if (!input.summary.reconciliation.complete) {
     const parts = [
       unresolvedItems > 0
         ? `${unresolvedItems} Review Item${unresolvedItems === 1 ? '' : 's'}`
@@ -75,10 +75,16 @@ export interface DocumentActionsMenuProps {
   readonly presentation: ReviewExportPresentation;
   readonly onExport: (confirmPossiblyStale?: true) => Promise<unknown>;
   readonly onOpenAnnotations?: () => void;
-  readonly defaultOpen?: boolean;
 }
 
 type ExportOutcome = 'idle' | 'pending' | 'success' | 'failure';
+
+const EXPORT_OUTCOME_MESSAGES: Readonly<Record<ExportOutcome, string>> = {
+  idle: '',
+  pending: 'Exporting reviewed PDF…',
+  success: 'Reviewed PDF exported.',
+  failure: 'Export failed safely. Try again.',
+};
 
 export function DocumentActionsMenu({
   documentTitle,
@@ -87,9 +93,8 @@ export function DocumentActionsMenu({
   presentation,
   onExport,
   onOpenAnnotations,
-  defaultOpen = false,
 }: DocumentActionsMenuProps) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useState(false);
   const [staleConfirmation, setStaleConfirmation] = useState(false);
   const [outcome, setOutcome] = useState<ExportOutcome>('idle');
   const generatedId = useId().replaceAll(':', '');
@@ -175,13 +180,7 @@ export function DocumentActionsMenu({
     setOutcome('idle');
   };
 
-  const resultMessage = outcome === 'pending'
-    ? 'Exporting reviewed PDF…'
-    : outcome === 'success'
-      ? 'Reviewed PDF exported.'
-      : outcome === 'failure'
-        ? 'Export failed safely. Try again.'
-        : '';
+  const resultMessage = EXPORT_OUTCOME_MESSAGES[outcome];
   const exportUnavailable = !presentation.canExport || pending;
 
   return <div

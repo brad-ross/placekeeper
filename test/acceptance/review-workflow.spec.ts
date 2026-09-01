@@ -175,6 +175,9 @@ test.describe('canonical review workflow', () => {
     await documentActionsTrigger.click();
     const exportAction = page.getByRole('menuitem', { name: 'Export reviewed PDF' });
     await expect(exportAction).toHaveAttribute('aria-disabled', 'true');
+    const blockerDescription = await exportAction.getAttribute('aria-describedby');
+    expect(blockerDescription).toMatch(/^document-export-reason-/u);
+    await expect(page.locator(`#${blockerDescription}`)).toHaveText('Resolve 2 Review Items before export.');
     await expect(page.getByText('Resolve 2 Review Items before export.')).toBeVisible();
     const openAnnotations = page.getByRole('menuitem', { name: 'Open Annotations' });
     await expect(openAnnotations).toBeVisible();
@@ -250,7 +253,7 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('region', { name: 'Needs attention' })).toHaveCount(0);
     await expect(page.getByText('No previous annotations need attention.')).toHaveCount(0);
     await expect(page.getByText('Discard recorded.')).toHaveCount(0);
-    await expect(page.locator('[data-annotations-section]')).toBeFocused();
+    await expect(page.locator('[data-workspace-focus-token="annotations:section"]')).toBeFocused();
 
     await documentActionsTrigger.click();
     await expect(exportAction).toHaveAttribute('aria-disabled', 'false');

@@ -579,7 +579,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(peekHtml).toContain('Clarify the identifying variation behind this claim.');
     expect(peekHtml).not.toContain('Page 4');
     expect(peekHtml).not.toContain('<button');
-    expect(listHtml).toContain('data-annotations-section');
+    expect(listHtml).toContain('data-workspace-focus-token="annotations:section"');
     expect(listHtml).toContain('tabindex="-1"');
   });
 
