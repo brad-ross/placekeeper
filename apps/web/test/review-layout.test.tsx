@@ -583,7 +583,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(listHtml).toContain('tabindex="-1"');
   });
 
-  it('keeps the annotation Copy Link affordance visible and right-most while durability is pending', () => {
+  it('keeps the annotation Copy Link affordance mounted and right-most while durability is pending', () => {
     const copyLink = {
       getLink: () => 'placekeeper:///tmp/Paper.pdf#v=1&page=4&item=00000000-0000-4000-8000-000000000004',
       writeText: async () => undefined,
@@ -635,6 +635,30 @@ describe('review shell layout and accessibility contract', () => {
     expect(pendingList).toContain('disabled=""');
     expect(pageOnlyList).toContain('data-item-copy-link="false"');
     expect(pageOnlyList).not.toContain('data-annotation-action="copy-link"');
+  });
+
+  it('reveals mounted annotation actions only at mouse intent and keeps them visible for touch', () => {
+    expect(annotationStyles).toMatch(
+      /\.annotation-item__action\s*\{[^}]*opacity:\s*0;/u,
+    );
+    expect(annotationStyles).not.toMatch(
+      /\.annotation-item__title-actions \.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /li:hover \.annotation-item__action,\s*:is\(\.review-workspace, \.review-tools-workspace\) li:focus-within \.annotation-item__action,\s*:is\(\.review-workspace, \.review-tools-workspace\) li\[data-active="true"\] \.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
+    );
+    const coarsePointerRules = responsiveStyles.match(
+      /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*?)\n\}/u,
+    )?.[1];
+    expect(coarsePointerRules).toMatch(
+      /\.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
+    );
+    expect(coarsePointerRules).toMatch(
+      /\.annotation-item__title-actions \.annotation-item__action\s*\{[^}]*width:\s*var\(--review-control-touch\);[^}]*min-width:\s*var\(--review-control-touch\);[^}]*max-width:\s*var\(--review-control-touch\);[^}]*max-height:\s*var\(--review-control-touch\);/u,
+    );
+    expect(coarsePointerRules).not.toMatch(
+      /\.annotation-item__title-actions\s*\{[^}]*(?:height|min-height|padding)/u,
+    );
   });
 
   it('exposes keyboard-equivalent controls, live status, and state-preserving drawer semantics', () => {
@@ -1011,6 +1035,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('>Page 2<');
     expect(html).not.toContain('aria-label="Edit Highlight on page 2"');
     expect(html).not.toContain('aria-label="Delete Highlight on page 2"');
+    expect(html).not.toContain('data-annotation-action=');
     expect(html).toContain('id="workspace-mode-annotations"');
   });
 

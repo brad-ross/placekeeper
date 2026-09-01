@@ -231,9 +231,8 @@ async function expectAnnotationTitleEndcapGeometry(row: Locator): Promise<void> 
   expect(geometry.edit.height).toBeCloseTo(geometry.remove.height, 1);
   expect(geometry.remove.height).toBeCloseTo(geometry.copy.height, 1);
   expect(geometry.edit.width).toBeLessThanOrEqual(24);
-  expect(geometry.editOpacity).toBe(1);
-  expect(geometry.removeOpacity).toBe(1);
-  expect(geometry.copyOpacity).toBe(1);
+  expect(geometry.editOpacity).toBe(geometry.removeOpacity);
+  expect(geometry.removeOpacity).toBe(geometry.copyOpacity);
 }
 
 async function expectCompactAnnotationReader(page: Page): Promise<Locator> {

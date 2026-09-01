@@ -65,6 +65,109 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('button', { name: 'Proofread mode' })).toHaveCount(0);
   });
 
+  test('discloses mounted annotation actions at intent without activating their row', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 760 });
+    await page.getByRole('button', { name: 'Seed annotations' }).click();
+    await openAnnotationsWorkspace(page);
+
+    const candidate = page.locator(
+      '[data-review-item][data-active="false"]:has([data-annotation-action="edit"])',
+    ).first();
+    const itemId = await candidate.getAttribute('data-review-item');
+    if (itemId === null) throw new Error('No inactive editable annotation row is available.');
+    const row = page.locator(`[data-review-item="${itemId}"]`);
+    const navigation = row.locator('.annotation-item__navigation');
+    const edit = row.locator('[data-annotation-action="edit"]');
+    const remove = row.locator('[data-annotation-action="delete"]');
+    await expect(row).toBeVisible();
+    await expect(edit).toHaveCount(1);
+    await expect(remove).toHaveCount(1);
+    await expect(edit).toHaveCSS('opacity', '0');
+
+    await row.hover();
+    await expect(edit).toHaveCSS('opacity', '1');
+    await page.mouse.move(0, 0);
+    await expect(edit).toHaveCSS('opacity', '0');
+
+    await navigation.focus();
+    await page.keyboard.press('Tab');
+    await expect(edit).toBeFocused();
+    await expect(edit).toHaveCSS('opacity', '1');
+
+    await edit.click();
+    await expect(row).toHaveAttribute('data-active', 'false');
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await expect(row).toHaveAttribute('data-active', 'false');
+
+    await navigation.click();
+    await expect(row).toHaveAttribute('data-active', 'true');
+    await page.getByRole('application', { name: 'PDF review canvas' }).focus();
+    await page.mouse.move(0, 0);
+    await expect(edit).toHaveCSS('opacity', '1');
+  });
+
+  test('keeps coarse-pointer annotation actions visible, touch-sized, and layout-stable', async ({ browser }) => {
+    const context = await browser.newContext({
+      hasTouch: true,
+      viewport: { width: 390, height: 720 },
+    });
+    const touchPage = await context.newPage();
+    try {
+      await touchPage.goto('/test/acceptance/review-harness/index.html');
+      await touchPage.locator('#root').evaluate((element) => {
+        element.setAttribute('data-production-root', 'true');
+      });
+      await touchPage.getByRole('button', { name: 'Seed annotations' }).click();
+      await openAnnotationsWorkspace(touchPage);
+      expect(await touchPage.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+
+      const row = touchPage.locator(
+        '[data-review-item]:has([data-annotation-action="edit"])',
+      ).first();
+      const edit = row.locator('[data-annotation-action="edit"]');
+      const remove = row.locator('[data-annotation-action="delete"]');
+      const scrollViewport = touchPage.locator('[data-annotation-scroll-viewport]');
+      const before = await Promise.all([
+        row.evaluate((element) => element.getBoundingClientRect().height),
+        scrollViewport.evaluate((element) => element.scrollHeight),
+      ]);
+      await expect(edit).toHaveCSS('opacity', '1');
+      for (const action of [edit, remove]) {
+        const geometry = await action.evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return {
+            boundsWidth: bounds.width,
+            boundsHeight: bounds.height,
+            computedWidth: style.width,
+            computedHeight: style.height,
+            minWidth: style.minWidth,
+            maxWidth: style.maxWidth,
+            touchSize: style.getPropertyValue('--review-control-touch'),
+          };
+        });
+        expect(geometry).toMatchObject({
+          computedWidth: '44px',
+          computedHeight: '44px',
+          minWidth: '44px',
+          maxWidth: '44px',
+          touchSize: '44px',
+        });
+        expect(geometry.boundsWidth).toBeGreaterThanOrEqual(44);
+        expect(geometry.boundsHeight).toBeGreaterThanOrEqual(44);
+      }
+
+      await edit.focus();
+      const after = await Promise.all([
+        row.evaluate((element) => element.getBoundingClientRect().height),
+        scrollViewport.evaluate((element) => element.scrollHeight),
+      ]);
+      expect(after).toEqual(before);
+    } finally {
+      await context.close();
+    }
+  });
+
   test('resolves previous annotations through focused, annotation-native detail views', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=1');

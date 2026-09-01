@@ -194,7 +194,12 @@ export function AnnotationList({
                     pageNumber={item.pageIndex + 1}
                     {...(sectionLabel === undefined ? {} : { sectionLabel })}
                   />
-                  <div className="annotation-item__title-actions" role="group" aria-label={`${kindLabel} annotation actions`}>
+                  <div
+                    className="annotation-item__title-actions"
+                    role="group"
+                    aria-label={`${kindLabel} annotation actions`}
+                    onClick={(event) => event.stopPropagation()}
+                  >
                     {item.kind === 'delete' ? null : (
                       <button type="button" className="annotation-item__action" data-annotation-action="edit" aria-label={`Edit ${kindLabel} annotation on page ${item.pageIndex + 1}`} title="Edit annotation" onClick={(event) => onEdit(item, event.currentTarget)}>
                         <ReviewIcon name="edit" size={13} />

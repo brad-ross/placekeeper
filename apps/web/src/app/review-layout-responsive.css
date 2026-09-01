@@ -160,6 +160,15 @@
     opacity: 1;
   }
 
+  .annotation-item__title-actions .annotation-item__action {
+    width: var(--review-control-touch);
+    min-width: var(--review-control-touch);
+    max-width: var(--review-control-touch);
+    height: var(--review-control-touch);
+    min-height: var(--review-control-touch);
+    max-height: var(--review-control-touch);
+  }
+
   .row-action-group__direct {
     display: none;
   }

@@ -541,7 +541,12 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
             />
             <div className="annotation-item__title-row">
               <AnnotationMetadata kind={record.kind} pageNumber={record.pageNumber} sectionLabel={record.stateLabel} />
-              <div className="annotation-item__title-actions" role="group" aria-label={`${typeLabel} resolution actions`}>
+              <div
+                className="annotation-item__title-actions"
+                role="group"
+                aria-label={`${typeLabel} resolution actions`}
+                onClick={(event) => event.stopPropagation()}
+              >
                 <button
                   type="button"
                   className="annotation-item__action annotation-item__delete"

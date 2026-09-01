@@ -1814,7 +1814,6 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   min-height: 1.4rem;
   max-height: 1.4rem;
   border-radius: var(--review-radius-control);
-  opacity: 1;
 }
 
 .annotation-item__title-actions .copy-link-control--annotation {
@@ -1839,7 +1838,8 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
 }
 
 :is(.review-workspace, .review-tools-workspace) li:hover .annotation-item__action,
-:is(.review-workspace, .review-tools-workspace) li:focus-within .annotation-item__action {
+:is(.review-workspace, .review-tools-workspace) li:focus-within .annotation-item__action,
+:is(.review-workspace, .review-tools-workspace) li[data-active="true"] .annotation-item__action {
   opacity: 1;
 }
 
