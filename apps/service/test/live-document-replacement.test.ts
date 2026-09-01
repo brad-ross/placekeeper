@@ -9,9 +9,14 @@ import { SessionBroker } from "../src/sessions/session-broker.js";
 import type { SessionBrokerOptions } from "../src/sessions/session-broker.js";
 import type { ReviewItem } from "../../../packages/core/src/review-model.js";
 import { reviewSemanticDigest } from "../../../packages/core/src/live-context.js";
+import { createReviewState } from "../../../packages/core/src/review-model.js";
+import { reduceReview } from "../../../packages/core/src/review-reducer.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 import { PdfEvidenceService } from "../src/context/pdf-evidence-service.js";
-import { reconcilePdfAnchor } from "../src/reconciliation/pdf-anchor-reconciler.js";
+import {
+  reconcilePdfAnchor,
+  reconcilePdfAnchorState,
+} from "../src/reconciliation/pdf-anchor-reconciler.js";
 import { SessionControlRegistry } from "../src/sessions/control-socket.js";
 
 const temporaryDirectories: string[] = [];
@@ -125,6 +130,86 @@ describe("atomic live document replacement", () => {
       reviewRevision: 0,
       reason: "freshness",
     });
+  });
+
+  it("restores current freshness when a rebuild validates identical PDF bytes", async () => {
+    const controls = new SessionControlRegistry({ heartbeat: false });
+    const invalidated = vi.spyOn(controls, "publishStateInvalidation");
+    const value = await fixture({ controls });
+    await value.broker.markLiveDocumentPossiblyStale(value.launch.sessionId, 1);
+
+    await expect(value.broker.replaceLiveDocument({
+      sessionId: value.launch.sessionId,
+      outputPath: value.pdfPath,
+      observationEpoch: 2,
+    })).resolves.toMatchObject({ status: "same-digest", documentGeneration: 1 });
+
+    expect(value.broker.state(value.launch.sessionId)?.workflow.freshness).toBe("current");
+    expect(invalidated).toHaveBeenLastCalledWith(value.launch.sessionId, {
+      documentGeneration: 1,
+      reviewRevision: 0,
+      reason: "freshness",
+    });
+  });
+
+  it("advances an automatically reconciled draft so Apply accepts it", () => {
+    const anchor = {
+      kind: "selection" as const,
+      pageIndex: 0,
+      quote: "unique claim",
+      prefix: "before ",
+      suffix: " after",
+      rect: { x: 1, y: 1, width: 20, height: 8 },
+      segmentRects: [{ x: 1, y: 1, width: 20, height: 8 }],
+    };
+    const state = {
+      ...createReviewState({
+        sessionId: "00000000-0000-4000-8000-000000000100",
+        source: { fileId: "00000000-0000-4000-8000-000000000101", digest: "a".repeat(64), byteLength: 1 },
+        workflowMode: "generated-output",
+        documentGeneration: 2,
+      }),
+      pendingDrafts: [{
+        id: "00000000-0000-4000-8000-000000000102",
+        ownerViewId: "view-1",
+        baseGeneration: 1,
+        revision: 0,
+        kind: "highlight" as const,
+        pageIndex: 0,
+        text: "keep this",
+        anchor,
+        disposition: { kind: "resolved" as const, generation: 1 },
+        status: "protected" as const,
+        createdAt: "2026-08-31T00:00:00.000Z",
+        updatedAt: "2026-08-31T00:00:00.000Z",
+      }],
+    };
+    const text = "before unique claim after";
+    const reconciled = reconcilePdfAnchorState(state, {
+      generation: 2,
+      pages: [{
+        pageIndex: 0,
+        text,
+        geometry: [{
+          charStart: 0,
+          glyphs: Array.from(text, (_, index) => ({ x: index * 5, y: 10, width: 5, height: 8 })),
+        }],
+      }],
+    });
+
+    expect(reconciled.pendingDrafts[0]).toMatchObject({
+      baseGeneration: 2,
+      status: "protected",
+      disposition: { kind: "resolved", generation: 2 },
+    });
+    expect(() => reduceReview(reconciled, {
+      type: "apply-draft",
+      expectedRevision: reconciled.revision,
+      id: reconciled.pendingDrafts[0]!.id,
+      expectedDraftRevision: 0,
+      ownerViewId: "view-1",
+      updatedAt: "2026-08-31T00:00:01.000Z",
+    })).not.toThrow();
   });
 
   it("lets a newer source-save epoch supersede an older rebuild candidate", async () => {

@@ -577,6 +577,27 @@ describe("one production review tree", () => {
     expect(browserHtml).toContain('aria-haspopup="menu"');
   });
 
+  it("omits an empty attention section during rebuild progress and failure", () => {
+    const state = createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000091",
+      source: { fileId: "00000000-0000-4000-8000-000000000092", digest: "d".repeat(64), byteLength: 1 },
+      workflowMode: "generated-output",
+      documentGeneration: 2,
+    });
+
+    for (const refreshStatus of ["reconciling", "failed"] as const) {
+      const html = renderToStaticMarkup(<ReconciliationWorkspace
+        state={state}
+        selectionUpdate={{ kind: "cleared", generation: 2 }}
+        caretAnchor={null}
+        refreshStatus={refreshStatus}
+        onCommand={vi.fn()}
+      />);
+      expect(html).not.toContain("Needs attention");
+      expect(html).not.toContain("reconciliation-workspace");
+    }
+  });
+
   it("exposes Reference return state only for the current tab and document generation", () => {
     const presentation = {
       tabIdentity: "reference-a",

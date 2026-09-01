@@ -400,7 +400,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     discardedAt: new Date().toISOString(),
   });
 
-  if (activeRecord === undefined && records.length === 0 && props.refreshStatus === "idle") {
+  if (activeRecord === undefined && records.length === 0) {
     return null;
   }
 

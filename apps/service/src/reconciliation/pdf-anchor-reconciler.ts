@@ -205,6 +205,7 @@ function reconcileDraft(
   const resolved = reconcilePdfAnchor(draft.anchor, pages, generation);
   return {
     ...draft,
+    ...(resolved.disposition.kind === "resolved" ? { baseGeneration: generation } : {}),
     pageIndex: resolved.anchor.pageIndex,
     anchor: resolved.anchor,
     disposition: resolved.disposition,

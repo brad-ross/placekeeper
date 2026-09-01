@@ -2130,12 +2130,61 @@ export class SessionBroker {
     }
     if (staged.digest === expected.sourceDigest) {
       await rm(staged.path, { force: true });
-      return {
-        status: "same-digest",
-        sessionId: session.id,
-        documentGeneration: session.state.workflow.documentGeneration,
-        reason: "candidate-digest-matches-current-generation",
-      };
+      let invalidation: { readonly documentGeneration: number; readonly reviewRevision: number } | undefined;
+      const result = await this.#withSessionTail(session, async () => {
+        if (session.ending || session.latestObservationEpoch !== input.observationEpoch) {
+          return {
+            status: "superseded" as const,
+            sessionId: session.id,
+            documentGeneration: session.state.workflow.documentGeneration,
+            reason: "newer-observation-superseded-candidate",
+          };
+        }
+        if (
+          session.state.workflow.documentGeneration !== expected.documentGeneration ||
+          session.state.source.digest !== expected.sourceDigest ||
+          session.state.revision !== expected.reviewRevision
+        ) {
+          return {
+            status: "generation-conflict" as const,
+            sessionId: session.id,
+            documentGeneration: session.state.workflow.documentGeneration,
+            reason: "generation-digest-or-review-revision-fence-changed",
+          };
+        }
+        if (session.state.workflow.freshness === "possibly-stale") {
+          const state: ReviewState = {
+            ...session.state,
+            workflow: { ...session.state.workflow, freshness: "current" },
+          };
+          const sync: DurableSaveSync = {
+            ...session.sync,
+            desiredRevision: state.revision,
+            desiredDigest: reviewStateDigest(state),
+          };
+          await session.store.persist({ ...this.#draft(session), state, sync });
+          session.state = state;
+          session.sync = sync;
+          invalidation = {
+            documentGeneration: state.workflow.documentGeneration,
+            reviewRevision: state.revision,
+          };
+        }
+        return {
+          status: "same-digest" as const,
+          sessionId: session.id,
+          documentGeneration: session.state.workflow.documentGeneration,
+          reason: "candidate-digest-matches-current-generation",
+        };
+      });
+      if (invalidation !== undefined) {
+        this.controls.publishStateInvalidation(session.id, {
+          documentGeneration: invalidation.documentGeneration,
+          reviewRevision: invalidation.reviewRevision,
+          reason: "freshness",
+        });
+      }
+      return result;
     }
 
     let inspected: { readonly pageCount: number; readonly pages: readonly PdfAnchorPage[] };
