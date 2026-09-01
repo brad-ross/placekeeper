@@ -40,6 +40,10 @@ const previewParameters = new URLSearchParams(window.location.search);
 const saveEstablishing = previewParameters.has('establishing');
 const reconciliationPreview = previewParameters.get('reconciliation');
 const exportPreview = previewParameters.get('export');
+const requestedRefreshPreview = previewParameters.get('refresh');
+const refreshPreview = requestedRefreshPreview === 'reconciling' || requestedRefreshPreview === 'failed'
+  ? requestedRefreshPreview
+  : 'idle';
 const composerPreview = previewParameters.get('composer');
 const requestedComposerReturn = previewParameters.get('return');
 const composerReturnPreview = requestedComposerReturn === 'outside'
@@ -203,7 +207,7 @@ function createReconciliationPreviewState(variant = 'default'): ReviewState {
       }],
     };
   }
-  return {
+  const unresolvedState: ReviewState = {
     ...state,
     items: [{
       id: '00000000-0000-4000-8000-000000000203',
@@ -240,6 +244,35 @@ function createReconciliationPreviewState(variant = 'default'): ReviewState {
         revision: 1,
         anchor: { ...anchor, pageIndex: 1, quote: 'obsolete robustness sentence' },
         disposition: { kind: 'missing', reason: 'The previous passage is not present in this PDF.' },
+        previousAnchors: [],
+      },
+    }],
+  };
+  if (variant !== 'mixed') return unresolvedState;
+  return {
+    ...unresolvedState,
+    items: [...unresolvedState.items, {
+      id: '00000000-0000-4000-8000-000000000208',
+      kind: 'pageNote',
+      pageIndex: 2,
+      createdAt: '2026-08-30T00:00:00.000Z',
+      updatedAt: '2026-08-30T00:00:00.000Z',
+      payload: {
+        position: { x: 420, y: 620, width: 24, height: 24 },
+        comment: 'Keep the resolved robustness note visible in the current generation.',
+      },
+      reconciliation: {
+        schemaVersion: 1,
+        ownerViewId: 'harness-view',
+        baseGeneration: 1,
+        revision: 2,
+        anchor: {
+          kind: 'page',
+          pageIndex: 2,
+          rect: { x: 420, y: 620, width: 24, height: 24 },
+          nearbyText: 'The robustness appendix reports the same sign and magnitude.',
+        },
+        disposition: { kind: 'resolved', generation: 2 },
         previousAnchors: [],
       },
     }],
@@ -637,6 +670,7 @@ function Harness() {
         }
       }}
       onCommand={accept}
+      generationRefreshStatus={refreshPreview}
       onExportReviewedCopy={async () => {
         setExportCount((count) => count + 1);
         if (exportPreview === 'delayed') {

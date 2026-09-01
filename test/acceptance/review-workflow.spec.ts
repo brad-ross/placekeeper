@@ -354,6 +354,29 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
   });
 
+  test('presents reconciling and failed refresh export states from the document title', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&refresh=reconciling');
+    await page.getByRole('button', { name: /Open document actions/u }).click();
+    let menu = page.getByRole('menu', { name: /Actions for/u });
+    await expect(menu).toHaveAttribute('data-export-eligibility', 'blocked');
+    await expect(menu.getByRole('menuitem', { name: 'Export reviewed PDF' }))
+      .toHaveAttribute('aria-disabled', 'true');
+    await expect(menu.getByText(
+      'Export becomes available after document reconciliation finishes.',
+    )).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: 'Open Annotations' })).toHaveCount(0);
+
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&refresh=failed');
+    await page.getByRole('button', { name: /Open document actions/u }).click();
+    menu = page.getByRole('menu', { name: /Actions for/u });
+    await expect(menu).toHaveAttribute('data-export-eligibility', 'eligible');
+    await expect(menu.getByText(
+      'The last successful PDF may be stale. Confirm before exporting this generation.',
+    )).toBeVisible();
+    await menu.getByRole('menuitem', { name: 'Export reviewed PDF' }).click();
+    await expect(menu.getByText('Export the last successful PDF?')).toBeVisible();
+  });
+
   test('keeps focus and References coherent when a live outline disappears and returns', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole('button', { name: 'Set outline tree' }).click();

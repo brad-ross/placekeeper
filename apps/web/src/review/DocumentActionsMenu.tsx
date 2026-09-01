@@ -144,6 +144,7 @@ export function DocumentActionsMenu({
       setStaleConfirmation(false);
       setOutcome('failure');
     }
+    requestAnimationFrame(() => exportRef.current?.focus({ preventScroll: true }));
   };
 
   const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -164,6 +165,10 @@ export function DocumentActionsMenu({
 
   const onBlur = (event: FocusEvent<HTMLDivElement>) => {
     if (!open || pending) return;
+    // WebKit can dispatch a null relatedTarget while clicking a control inside
+    // the menu. The pointerdown listener remains the authority for outside
+    // dismissal in that case, so do not unmount before the control's click runs.
+    if (event.relatedTarget === null) return;
     if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
     setOpen(false);
     setStaleConfirmation(false);
