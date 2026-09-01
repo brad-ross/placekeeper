@@ -176,6 +176,10 @@ test.describe('shared viewer foundation', () => {
   });
 
   test('does not retain DOM pointer capture or block composer actions after reverse SyncTeX', async ({ page }) => {
+    const reverseSyncTexModifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    const reverseSyncTexModifierKey = process.platform === 'darwin'
+      ? { metaKey: true }
+      : { ctrlKey: true };
     await page.goto(
       '/test/acceptance/viewer-harness/index.html?reverse-synctex=true&composer=replacement',
     );
@@ -186,9 +190,9 @@ test.describe('shared viewer foundation', () => {
     if (!box) throw new Error('Rendered PDF page has no bounds.');
 
     await page.mouse.move(box.x + 320, box.y + 180);
-    await page.keyboard.down('Meta');
+    await page.keyboard.down(reverseSyncTexModifier);
     await page.mouse.down();
-    await page.keyboard.up('Meta');
+    await page.keyboard.up(reverseSyncTexModifier);
 
     expect(await pdfPage.evaluate((element) => element.hasPointerCapture(1))).toBe(false);
     await page.mouse.up();
@@ -203,9 +207,9 @@ test.describe('shared viewer foundation', () => {
     ))).toBe(1);
 
     await page.mouse.move(box.x + 320, box.y + 180);
-    await page.keyboard.down('Meta');
+    await page.keyboard.down(reverseSyncTexModifier);
     await page.mouse.down();
-    await page.keyboard.up('Meta');
+    await page.keyboard.up(reverseSyncTexModifier);
     await page.mouse.up();
     await composer.getByRole('button', { name: 'Apply' }).click();
     await expect.poll(() => page.evaluate(() => (
@@ -218,7 +222,7 @@ test.describe('shared viewer foundation', () => {
       isPrimary: true,
       button: 0,
       buttons: 1,
-      metaKey: true,
+      ...reverseSyncTexModifierKey,
       clientX: box.x + 320,
       clientY: box.y + 180,
     });
@@ -248,9 +252,9 @@ test.describe('shared viewer foundation', () => {
       window.viewerAcceptance.interactionCount('caret')
     ));
     await page.mouse.move(box.x + 320, box.y + 180);
-    await page.keyboard.down('Meta');
+    await page.keyboard.down(reverseSyncTexModifier);
     await page.mouse.down();
-    await page.keyboard.up('Meta');
+    await page.keyboard.up(reverseSyncTexModifier);
     await page.mouse.move(box.x - 20, box.y - 20);
     await page.mouse.up();
     await page.mouse.move(box.x + 400, box.y + 220);

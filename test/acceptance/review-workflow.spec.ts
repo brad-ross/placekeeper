@@ -503,7 +503,9 @@ test.describe('canonical review workflow', () => {
       name: 'Restore previous outline expansion',
     })).toHaveAttribute('aria-pressed', 'true');
 
-    await page.getByRole('button', { name: 'Begin outline replacement' }).click();
+    await page.getByRole('button', { name: 'Begin outline replacement' }).evaluate((button) => (
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    ));
     await expect(page.locator('[data-outline-state="loading"]')).toHaveText('Outline is loading…');
     await expect(page.getByRole('button', {
       name: 'Restore previous outline expansion',

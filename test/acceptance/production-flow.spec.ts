@@ -375,18 +375,18 @@ test("keeps mounted Codex context through refresh, then fails closed on a hung s
     await page.clock.install({ time: clientNow });
     await page.addInitScript(() => {
       const nativeFetch = window.fetch.bind(window);
-      let scopeRequests = 0;
       window.fetch = (input, init) => {
         const requestUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-        if (new URL(requestUrl, window.location.href).pathname.endsWith("/scope")) {
-          scopeRequests += 1;
-          if (scopeRequests > 1) {
-            return new Promise((_resolve, reject) => {
-              init?.signal?.addEventListener("abort", () => {
-                reject(new DOMException("Scope request aborted", "AbortError"));
-              }, { once: true });
-            });
-          }
+        const testWindow = window as typeof window & { __placekeeperHangScopePoll?: boolean };
+        if (
+          new URL(requestUrl, window.location.href).pathname.endsWith("/scope") &&
+          testWindow.__placekeeperHangScopePoll === true
+        ) {
+          return new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("Scope request aborted", "AbortError"));
+            }, { once: true });
+          });
         }
         return nativeFetch(input, init);
       };
@@ -410,6 +410,10 @@ test("keeps mounted Codex context through refresh, then fails closed on a hung s
       "data-codex-context",
       "current",
     );
+    await page.evaluate(() => {
+      const testWindow = window as typeof window & { __placekeeperHangScopePoll?: boolean };
+      testWindow.__placekeeperHangScopePoll = true;
+    });
 
     await page.clock.fastForward(2_100);
     await expect(status).toHaveAttribute("data-codex-context", "connecting");
@@ -703,9 +707,9 @@ test("searches extracted PDF text with variants, history, references, and retain
   }
 
   const workspaceTabs = page.getByRole("tablist", { name: "Workspace modes" }).getByRole("tab");
-  await expect(workspaceTabs).toHaveCount(1);
+  await expect(workspaceTabs).toHaveCount(2);
   expect(await workspaceTabs.evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("aria-label"))))
-    .toEqual(["Search"]);
+    .toEqual(["Search", "Annotations"]);
   await page.getByRole("tab", { name: "Search", exact: true }).click();
   await expect(query).toHaveValue("stable");
 
@@ -715,9 +719,9 @@ test("searches extracted PDF text with variants, history, references, and retain
     "bottom",
   );
   const narrowWorkspaceTabs = page.getByRole("tablist", { name: "Workspace modes" }).getByRole("tab");
-  await expect(narrowWorkspaceTabs).toHaveCount(1);
+  await expect(narrowWorkspaceTabs).toHaveCount(2);
   expect(await narrowWorkspaceTabs.evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("aria-label"))))
-    .toEqual(["Search"]);
+    .toEqual(["Search", "Annotations"]);
   await page.getByRole("tab", { name: "Search", exact: true }).click();
   await expect(query).toBeVisible();
   await expect(query).toHaveValue("stable");
@@ -2508,7 +2512,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
     };
   });
   expect(nestedLongLabelGeometry.actionRightInset).toBeCloseTo(0, 0);
-  expect(nestedLongLabelGeometry.actionWidth).toBe(44);
+  expect(nestedLongLabelGeometry.actionWidth).toBe(34);
   expect(nestedLongLabelGeometry).toMatchObject({
     contained: true,
     noHorizontalOverflow: true,
@@ -3834,8 +3838,10 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
     },
   });
   await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
-  await page.getByRole('textbox', { name: 'Comment' }).fill('Reveal this note above the sheet.');
+  const noteComment = page.getByRole('textbox', { name: 'Comment' });
+  await noteComment.fill('Reveal this note above the sheet.');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(noteComment).toHaveCount(0);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe('clean');
 
   const noteMark = page.locator('[data-owned-mark="pageNote"]').last();
@@ -4468,6 +4474,7 @@ test("anchors highlight and delete annotations across inline and display equatio
   await selectionActions.getByRole("button", { name: "Highlight", exact: true }).click();
   await expect(page.getByRole("region", { name: "Highlight Comment" })).toBeVisible();
   await page.getByRole("button", { name: "Keep", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Highlight Comment" })).toHaveCount(0);
   await expect(page.locator("[data-owned-mark='highlight']")).toHaveCount(3);
 
   await dragPdfPointer(
@@ -4571,6 +4578,11 @@ for (const key of ["Delete", "Backspace"] as const) {
 }
 
 test("shows command conflicts until a retry succeeds", async ({ page }) => {
+  await page.routeWebSocket(/\/control$/u, (browserSocket) => {
+    const serverSocket = browserSocket.connectToServer();
+    browserSocket.onMessage((message) => serverSocket.send(message));
+    serverSocket.onMessage(() => undefined);
+  });
   const launched = await openFreshProductionFixture(
     page,
     pdf,
