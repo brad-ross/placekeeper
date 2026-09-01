@@ -883,6 +883,7 @@ export function ReviewShell(props: ReviewShellProps) {
   useEffect(() => {
     const request = props.activationRequest;
     if (!request || authoringSessionRef.current !== null) return;
+    workspaceFraming.prepareMarkReveal();
     setActiveItem(request.id);
     setListActivation(request);
     setPeekItemId(undefined);
@@ -900,7 +901,11 @@ export function ReviewShell(props: ReviewShellProps) {
     dispatchReferenceLayout({ type: 'show-right-workspace' });
     dispatchReferenceLayout({ type: 'focus-surface', surface: 'right' });
     props.onWorkspaceModeChange?.('annotations');
-  }, [props.activationRequest?.id, props.activationRequest?.token]);
+  }, [
+    props.activationRequest?.id,
+    props.activationRequest?.token,
+    workspaceFraming.prepareMarkReveal,
+  ]);
 
   const selectWorkspaceMode = (mode: WorkspaceMode) => {
     if (authoringSessionRef.current !== null) return;

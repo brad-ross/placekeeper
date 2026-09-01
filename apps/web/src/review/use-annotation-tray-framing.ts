@@ -94,6 +94,7 @@ export interface WorkspaceFraming {
   readonly presentation: AnnotationPresentation;
   readonly sideWidth: number;
   requestSettledReframe(): void;
+  prepareMarkReveal(): void;
   waitForSettledGeometry: WaitForSettledViewerGeometry;
   markUserIntent(
     axes?: { left?: boolean; top?: boolean },
@@ -115,6 +116,12 @@ export function useWorkspaceFraming(input: {
   const authorityRef = useRef(new FramingSessionAuthority());
   const geometrySettlementRef = useRef(new ViewerGeometrySettlementAuthority());
   const sessionRef = useRef<ActiveFramingSession | null>(null);
+  const controlsRef = useRef(input.controls);
+  controlsRef.current = input.controls;
+  const pendingMarkRevealRef = useRef<{
+    readonly documentId: string;
+    readonly baseline: ViewerPosition;
+  } | null>(null);
   const [presentation, setPresentation] = useState<AnnotationPresentation>('right');
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [geometryRevision, setGeometryRevision] = useState(0);
@@ -237,6 +244,15 @@ export function useWorkspaceFraming(input: {
     const snapshot = input.controls?.snapshot();
     return snapshot?.ready ? snapshot.scroll : null;
   }, [input.controls]);
+
+  const prepareMarkReveal = useCallback(() => {
+    const snapshot = controlsRef.current?.snapshot();
+    if (!snapshot?.ready || !snapshot.documentId) return;
+    pendingMarkRevealRef.current = {
+      documentId: snapshot.documentId,
+      baseline: snapshot.scroll,
+    };
+  }, []);
 
   const markUserIntent = useCallback((
     axes: { left?: boolean; top?: boolean } = { left: true, top: true },
@@ -371,11 +387,26 @@ export function useWorkspaceFraming(input: {
 
     const openSession = async () => {
       if (!first.ready || !first.documentId) return;
+      const pendingMarkReveal = pendingMarkRevealRef.current;
+      const markRevealBaseline = pendingMarkReveal?.documentId === first.documentId
+        ? pendingMarkReveal.baseline
+        : null;
+      pendingMarkRevealRef.current = null;
       let session = sessionRef.current;
+      if (session?.documentId === first.documentId && markRevealBaseline) {
+        // Explicit mark activation starts from the reader's current position,
+        // then owns only the minimal reveal needed to clear the workspace.
+        // Retaining the preceding tray session here could first rewind to an
+        // older baseline before the mark geometry was measured.
+        session.baseline = markRevealBaseline;
+        session.automatic = { left: 0, top: 0 };
+        session.userAxes = { left: false, top: false };
+        delete session.closing;
+      }
       if (!session || session.documentId !== first.documentId) {
         session = {
           documentId: first.documentId,
-          baseline: first.scroll,
+          baseline: markRevealBaseline ?? first.scroll,
           automatic: { left: 0, top: 0 },
           userAxes: { left: false, top: false },
           presentation,
@@ -518,6 +549,7 @@ export function useWorkspaceFraming(input: {
     presentation,
     sideWidth,
     requestSettledReframe,
+    prepareMarkReveal,
     waitForSettledGeometry,
     markUserIntent,
     currentScroll,
