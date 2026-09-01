@@ -26,8 +26,7 @@ import {
 } from "../src/review/annotation-outline-context.js";
 import {
   buildReattachmentCommand,
-  cancelledReattachmentPresentation,
-  reconciliationCommandPresentation,
+  reconciliationCommandRejectionMessage,
   reconciliationFocusKeyAfterRemoval,
   reattachmentCandidateFor,
   reattachmentGenerationIsCurrent,
@@ -375,21 +374,11 @@ describe("one production review tree", () => {
       message: "The selection matches more than one passage.",
     });
     expect(reattachmentCandidateFor("caret", { kind: "cleared", generation: 4 }, null).anchor).toBeNull();
-    expect(cancelledReattachmentPresentation()).toEqual({
-      unresolved: true,
-      message: "Reattachment cancelled. The item remains unresolved.",
-    });
-    expect(reconciliationCommandPresentation({
+    expect(reconciliationCommandRejectionMessage({
       accepted: false,
       message: "Another review window changed this draft.",
-    }, "Reattachment saved.")).toEqual({
-      accepted: false,
-      message: "Another review window changed this draft.",
-    });
-    expect(reconciliationCommandPresentation({}, "Reattachment saved.")).toEqual({
-      accepted: true,
-      message: "Reattachment saved.",
-    });
+    })).toBe("Another review window changed this draft.");
+    expect(reconciliationCommandRejectionMessage({})).toBeNull();
   });
 
   it("names each focused reattachment task with its annotation intent", () => {
@@ -446,7 +435,7 @@ describe("one production review tree", () => {
     expect(reviewExportPresentation({
       refreshStatus: "idle",
       summary: summary(2, 0, "current"),
-    }).message).toContain("Resolve 2 Review Items");
+    }).message).toBe("2 annotations to resolve.");
     expect(reviewExportPresentation({
       refreshStatus: "idle",
       summary: summary(0, 0, "possibly-stale"),
@@ -487,6 +476,11 @@ describe("one production review tree", () => {
     expect(html).toContain('Select text in the PDF to add an annotation.');
     expect(html).toContain('data-document-actions-trigger');
     expect(html).toContain('aria-haspopup="menu"');
+    const titleTrigger = html.slice(
+      html.lastIndexOf('<button', html.indexOf('data-document-actions-trigger')),
+      html.indexOf('</button>', html.indexOf('data-document-actions-trigger')),
+    );
+    expect(titleTrigger).not.toContain('lucide-chevron-down');
     expect(html).not.toContain('class="reconciliation-workspace__footer"');
     expect(html).toContain("Protected review state");
     expect(html).not.toContain("Open automatic save options");

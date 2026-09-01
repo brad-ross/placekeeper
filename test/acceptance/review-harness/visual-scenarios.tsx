@@ -3,7 +3,6 @@ import { PdfZoomMode } from '@embedpdf/models';
 
 import type { ExistingAnnotationsDiscovery } from '../../../apps/web/src/pdf/existing-annotations.js';
 import type { PdfOutlineDiscovery } from '../../../apps/web/src/pdf/pdf-outline.js';
-import type { AnnotationOutlineLabels } from '../../../apps/web/src/review/annotation-outline-context.js';
 import {
   unavailableViewerControls,
   type ViewerControlsSnapshot,
@@ -47,7 +46,6 @@ export interface VisualScenario {
   readonly correspondingItemId?: string;
   readonly pageMenuOpen: boolean;
   readonly existingAnnotations: ExistingAnnotationsDiscovery;
-  readonly annotationOutlineLabels?: AnnotationOutlineLabels;
   readonly outlineDiscovery?: PdfOutlineDiscovery;
   readonly currentOutlineItemId?: string;
   readonly viewerState: ViewerControlsSnapshot;
@@ -177,18 +175,6 @@ const trayAnnotations: ExistingAnnotationsDiscovery = {
     appearanceModes: ['normal'],
     supportedAppearance: true,
   }],
-};
-
-const annotationOutlineLabels: AnnotationOutlineLabels = {
-  owned: new Map([
-    ['owned-highlight', 'Identification strategy and conditional comparison groups'],
-    ['owned-replace', 'Local equilibrium'],
-    ['owned-page-note', 'Robustness checks'],
-  ]),
-  source: new Map([
-    ['3:source-highlight-short', 'Mechanism details'],
-    ['7:source-highlight-long', 'Appendix specification'],
-  ]),
 };
 
 const viewerState: ViewerControlsSnapshot = {
@@ -332,7 +318,6 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
       ? exceptionalAnnotations
       : name === 'tray' ? trayAnnotations : readyAnnotations,
     ...(name === 'tray' ? {
-      annotationOutlineLabels,
       outlineDiscovery: {
         status: 'loaded-tree' as const,
         documentGeneration: 0,

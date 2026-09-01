@@ -172,16 +172,22 @@ test.describe('canonical review workflow', () => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=1');
     const documentActionsTrigger = page.getByRole('button', { name: /Open document actions/u });
+    await expect(documentActionsTrigger.locator('.review-icon')).toHaveCount(0);
     await documentActionsTrigger.click();
-    const exportAction = page.getByRole('menuitem', { name: 'Export reviewed PDF' });
+    const exportAction = page.getByRole('menuitem', { name: 'Export', exact: true });
     await expect(exportAction).toHaveAttribute('aria-disabled', 'true');
     const blockerDescription = await exportAction.getAttribute('aria-describedby');
     expect(blockerDescription).toMatch(/^document-export-reason-/u);
-    await expect(page.locator(`#${blockerDescription}`)).toHaveText('Resolve 2 Review Items before export.');
-    await expect(page.getByText('Resolve 2 Review Items before export.')).toBeVisible();
+    await expect(page.locator(`#${blockerDescription}`)).toHaveText('2 annotations to resolve.');
+    await expect(page.getByText('2 annotations to resolve.')).toBeVisible();
+    const attention = page.locator('[data-document-actions-attention]');
+    await expect(attention).toBeVisible();
     const openAnnotations = page.getByRole('menuitem', { name: 'Open Annotations' });
     await expect(openAnnotations).toBeVisible();
+    await expect(openAnnotations.locator('.lucide-list-checks')).toBeVisible();
     await openAnnotations.click();
+    await expect(page.getByRole('tab', { name: 'Annotations', exact: true }).locator('.lucide-list-checks'))
+      .toBeVisible();
 
     const reconciliation = page.getByRole('region', { name: 'Needs attention' });
     await expect(reconciliation.getByRole('heading', {
@@ -228,6 +234,7 @@ test.describe('canonical review workflow', () => {
 
     await reattachDetail.getByRole('button', { name: 'Confirm' }).click();
     await expect(page.locator('[data-reconciliation-detail]')).toHaveCount(0);
+    await expect(page.getByText('Reattachment saved.')).toHaveCount(0);
     await expect(page.locator('[data-reconciliation-entry]')).toHaveCount(1);
     await expect(page.getByRole('button', {
       name: 'Reattach previous Delete annotation on page 2',
@@ -236,9 +243,11 @@ test.describe('canonical review workflow', () => {
       'Check the identifying variation.',
     );
 
-    await page.getByRole('button', {
+    const deleteAction = page.getByRole('button', {
       name: 'Discard Delete annotation on page 2',
-    }).click();
+    });
+    const destructiveColor = await deleteAction.evaluate((element) => getComputedStyle(element).color);
+    await deleteAction.click();
     const discardDetail = page.locator('[data-reconciliation-detail="discard"]');
     await expect(discardDetail).toHaveAttribute(
       'aria-label',
@@ -247,7 +256,10 @@ test.describe('canonical review workflow', () => {
     await expect(discardDetail.getByText('obsolete robustness sentence')).toBeVisible();
     await expect(discardDetail.getByText('Missing text')).toHaveCount(1);
     await expect(discardDetail.getByText('The original text is no longer present. Select its new location.')).toHaveCount(0);
-    await discardDetail.getByRole('button', { name: 'Discard', exact: true }).click();
+    const discardButton = discardDetail.getByRole('button', { name: 'Discard', exact: true });
+    await expect(discardButton).toHaveCSS('color', destructiveColor);
+    await expect(discardButton.locator('.review-icon')).toHaveCSS('color', destructiveColor);
+    await discardButton.click();
 
     await expect(page.locator('[data-reconciliation-entry]')).toHaveCount(0);
     await expect(page.getByRole('region', { name: 'Needs attention' })).toHaveCount(0);
@@ -257,6 +269,8 @@ test.describe('canonical review workflow', () => {
 
     await documentActionsTrigger.click();
     await expect(exportAction).toHaveAttribute('aria-disabled', 'false');
+    const eligibleMenu = page.getByRole('menu', { name: /Actions for/u });
+    await expect(eligibleMenu.locator(':scope > *')).toHaveCount(1);
     await exportAction.click();
     await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
     await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
@@ -276,7 +290,7 @@ test.describe('canonical review workflow', () => {
 
     const documentActionsTrigger = page.getByRole('button', { name: /Open document actions/u });
     await documentActionsTrigger.click();
-    await expect(page.getByRole('menuitem', { name: 'Export reviewed PDF' }))
+    await expect(page.getByRole('menuitem', { name: 'Export', exact: true }))
       .toHaveAttribute('aria-disabled', 'true');
     await page.getByRole('menuitem', { name: 'Open Annotations' }).click();
 
@@ -324,7 +338,7 @@ test.describe('canonical review workflow', () => {
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=stale');
     const trigger = page.getByRole('button', { name: /Open document actions/u });
     await trigger.click();
-    let exportAction = page.getByRole('menuitem', { name: 'Export reviewed PDF' });
+    let exportAction = page.getByRole('menuitem', { name: 'Export', exact: true });
     await exportAction.click();
     await expect(page.getByText('Export the last successful PDF?')).toBeVisible();
     const cancel = page.getByRole('menuitem', { name: 'Cancel' });
@@ -338,17 +352,19 @@ test.describe('canonical review workflow', () => {
 
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&export=delayed');
     await page.getByRole('button', { name: /Open document actions/u }).click();
-    exportAction = page.getByRole('menuitem', { name: 'Export reviewed PDF' });
-    await exportAction.click();
+    exportAction = page.getByRole('menuitem', { name: 'Export', exact: true });
+    await exportAction.evaluate((element) => {
+      (element as HTMLButtonElement).click();
+      (element as HTMLButtonElement).click();
+    });
     await expect(page.getByText('Exporting reviewed PDF…')).toBeVisible();
-    await exportAction.click({ force: true });
     await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
     await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
     await expect(exportAction).toBeFocused();
 
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&export=fail-once');
     await page.getByRole('button', { name: /Open document actions/u }).click();
-    await page.getByRole('menuitem', { name: 'Export reviewed PDF' }).click();
+    await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
     const retry = page.getByRole('menuitem', { name: 'Retry export' });
     await expect(page.getByText('Export failed safely. Try again.')).toBeVisible();
     await expect(retry).toBeFocused();
@@ -362,7 +378,7 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: /Open document actions/u }).click();
     let menu = page.getByRole('menu', { name: /Actions for/u });
     await expect(menu).toHaveAttribute('data-export-eligibility', 'blocked');
-    await expect(menu.getByRole('menuitem', { name: 'Export reviewed PDF' }))
+    await expect(menu.getByRole('menuitem', { name: 'Export', exact: true }))
       .toHaveAttribute('aria-disabled', 'true');
     await expect(menu.getByText(
       'Export becomes available after document reconciliation finishes.',
@@ -376,7 +392,7 @@ test.describe('canonical review workflow', () => {
     await expect(menu.getByText(
       'The last successful PDF may be stale. Confirm before exporting this generation.',
     )).toBeVisible();
-    await menu.getByRole('menuitem', { name: 'Export reviewed PDF' }).click();
+    await menu.getByRole('menuitem', { name: 'Export', exact: true }).click();
     await expect(menu.getByText('Export the last successful PDF?')).toBeVisible();
   });
 

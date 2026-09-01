@@ -540,11 +540,8 @@ test('wide Annotation Tray', async ({ page }) => {
   await expect(page.getByRole('button', { name: /Copy link to Highlight annotation on page 1/u })
     .locator('.lucide-link')).toBeVisible();
   await expect(row.locator('.annotation-item__page')).toHaveText('1');
-  await expect(row.locator('.annotation-item__separator')).toHaveCount(2);
-  await expect(row.locator('.annotation-item__section')).toHaveAttribute(
-    'title',
-    'Identification strategy and conditional comparison groups',
-  );
+  await expect(row.locator('.annotation-item__separator')).toHaveCount(1);
+  await expect(row.locator('.annotation-item__section')).toHaveCount(0);
   await expectScene(product, 'wide-annotation-tray.png');
 
   await more.focus();
@@ -595,9 +592,11 @@ test('task-first generated Annotation Tray and blocked document menu', async ({ 
   await page.getByRole('button', { name: /Open document actions$/u }).click();
   const menu = page.getByRole('menu', { name: /Actions for/u });
   await expect(menu).toHaveAttribute('data-export-eligibility', 'blocked');
-  await expect(menu.getByRole('menuitem', { name: 'Export reviewed PDF' }))
+  await expect(menu.getByRole('menuitem', { name: 'Export', exact: true }))
     .toHaveAttribute('aria-disabled', 'true');
-  await expect(menu.getByRole('menuitem', { name: 'Open Annotations' })).toBeVisible();
+  const openAnnotations = menu.getByRole('menuitem', { name: 'Open Annotations' });
+  await expect(openAnnotations).toBeVisible();
+  await expect(openAnnotations.locator('.lucide-list-checks')).toBeVisible();
   await expectScene(product, 'wide-generated-document-actions.png');
 });
 
@@ -670,24 +669,8 @@ test('narrow Annotation Tray', async ({ page }) => {
   const row = page.locator('[data-review-item="owned-highlight"]');
   const annotation = row.getByRole('button', { name: /Highlight · Page 1/u });
   await annotation.focus();
-  const section = row.locator('.annotation-item__section');
-  const sectionGeometry = await section.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return {
-      clientWidth: element.clientWidth,
-      scrollWidth: element.scrollWidth,
-      overflow: style.overflow,
-      textOverflow: style.textOverflow,
-      whiteSpace: style.whiteSpace,
-    };
-  });
-  expect(sectionGeometry.clientWidth).toBeLessThanOrEqual(128);
-  expect(sectionGeometry.scrollWidth).toBeGreaterThan(sectionGeometry.clientWidth);
-  expect(sectionGeometry).toMatchObject({
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  });
+  await expect(row.locator('.annotation-item__section')).toHaveCount(0);
+  await expect(row.locator('.annotation-item__separator')).toHaveCount(1);
   await expectAnnotationTrayOverflow(page, { verticallyScrollable: true });
   const imported = page.locator('[data-existing-annotation="source-highlight-long"]');
   const more = imported.getByRole('button', {

@@ -26,7 +26,7 @@ deepened: true
 ### Summary
 
 Create a compact, task-first Annotation Tray with conditional sections for work needing attention, owned annotations, and read-only annotations from the PDF.
-Move reviewed-PDF export into the PDF-title menu, where blocked export states explain the problem briefly and link directly back to the Annotation Tray.
+Move reviewed-PDF export into a caret-free PDF-title menu whose ordinary state contains only **Export**. Annotation blockers add one compact attention unit that explains the problem and opens the Annotation Tray directly.
 
 ### Problem Frame
 
@@ -39,7 +39,9 @@ The result works but makes reviewers scan unrelated interface elements before th
 - **Use task-first sections with contextual presence.** (session-settled: user-directed — chosen over a unified stream, filter-first list, fixed sections, and persistent completion messages: urgent work should lead without leaving empty interface chrome behind.) Governs R1-R3, R8-R9.
 - **Reveal established annotation actions at the moment of intent.** (session-settled: user-directed — chosen over permanently visible controls and overflow menus: annotation text should remain primary while direct actions stay accessible.) Governs R4-R7, R13-R14.
 - **Treat export as a document action.** (session-settled: user-directed — chosen over the Annotation Tray export footer: the tray should own annotation work while the PDF-title menu owns whole-document actions.) Governs R10-R12.
-- **Reuse the existing Placekeeper design language across hosts.** (session-settled: user-approved — chosen over sketch-specific or VS Code-specific styling: browser and embedded review should feel like the same product.) Governs R7, R9-R14.
+- **Keep document actions conditional and task-sized.** (session-settled: user-directed — chosen over two editorial rows, a status-led menu, and a nested recovery card: ordinary export should be one action, with recovery chrome only when attention is required.) Governs R10-R12, R15-R16.
+- **Reuse one annotation action identity.** (session-settled: user-directed — chosen over a lookalike or one-off annotations glyph: the recovery action should be visually and semantically identical to the Annotations workspace destination.) Governs R17.
+- **Reuse the existing Placekeeper design language across hosts.** (session-settled: user-approved — chosen over sketch-specific or VS Code-specific styling: browser and embedded review should feel like the same product.) Governs R7, R9-R17.
 
 ### Requirements
 
@@ -63,23 +65,26 @@ The result works but makes reviewers scan unrelated interface elements before th
 
 **Document actions and export**
 
-- R10. The PDF title shall remain the document-action entry point and open a document-actions menu for generated-output reviews in both browser and fully embedded VS Code sessions.
-- R11. **Export reviewed PDF** shall appear in that menu and nowhere in the Annotation Tray, while retaining the current export result and eligibility rules.
-- R12. When export is blocked, its action shall be exposed as disabled but remain reachable in the menu's keyboard and accessibility traversal, with one short blocker reason programmatically associated with it; an annotation-work blocker shall also provide a link that opens the workspace directly on the Annotations tab.
+- R10. The PDF title shall remain the document-action entry point without a down caret and shall preserve its button, hover, focus, tooltip, and accessibility affordances in browser and fully embedded VS Code sessions.
+- R11. An eligible idle menu shall contain one action labeled **Export** with the established download icon and shall show no explanatory status sentence, heading, divider, or Annotation Tray action.
+- R12. When annotation work blocks export, **Export** shall remain keyboard- and accessibility-reachable as disabled, followed by one compact attention unit containing a human-readable blocker indicator and an **Open Annotations** button that opens the workspace directly on the Annotations tab.
 
 **Visual and interaction consistency**
 
 - R13. The tray and PDF-title menu shall reuse Warm Neutral and Compact Editorial color roles, typography, spacing, borders, radii, elevation, control sizing, focus treatment, and motion rather than introduce a parallel style vocabulary.
 - R14. Browser and fully embedded VS Code review sessions shall expose the same hierarchy, actions, states, copy, and responsive behavior without host-specific presentation branches.
+- R15. Possibly stale, reconciling, pending, success, and failure states shall retain their specialized behavior while using the same concise menu hierarchy.
+- R16. **Open Annotations** shall appear only when annotation work is the actionable blocker.
+- R17. **Open Annotations** shall use the same Annotations icon as the workspace tray navbar rather than a lookalike or one-off glyph.
 
 The two in-scope surfaces divide responsibility as follows:
 
 ```mermaid
 flowchart TB
   TITLE[PDF title] --> MENU[Document actions]
-  MENU --> EXPORT[Export reviewed PDF]
-  EXPORT -->|Blocked by annotation work| LINK[Open Annotations]
-  LINK --> ATTENTION[Needs attention]
+  MENU --> EXPORT[Export]
+  EXPORT -->|Blocked by annotation work| BLOCKER[Attention indicator + Open Annotations]
+  BLOCKER --> ATTENTION[Needs attention]
   TRAY[Annotation Tray] --> ATTENTION
   TRAY --> OWNED[Annotations]
   TRAY --> EXTERNAL[From this PDF]
@@ -102,14 +107,14 @@ flowchart TB
   - **Covered by:** R3-R7, R13-R14.
 - F3. Recover from blocked export
   - **Trigger:** The reviewer opens the PDF-title menu while annotation work makes export ineligible.
-  - **Steps:** The menu shows disabled **Export reviewed PDF**, a short explanation, and a link to Annotations. Activating the link opens the workspace on the Annotations tab with the relevant work visible first.
+  - **Steps:** The menu shows disabled **Export** and one compact attention unit with the blocker indicator and **Open Annotations**. Activating the button opens the workspace on the Annotations tab with the relevant work visible first.
   - **Outcome:** The reviewer can act on the blocker without searching for the reconciliation workspace or encountering duplicate export controls.
-  - **Covered by:** R1-R2, R8, R10-R14.
+  - **Covered by:** R1-R2, R8, R10-R17.
 - F4. Export a reviewed PDF
   - **Trigger:** The review is eligible for export.
-  - **Steps:** The reviewer opens the PDF-title menu and activates **Export reviewed PDF**.
+  - **Steps:** The reviewer opens the PDF-title menu and activates **Export**.
   - **Outcome:** The existing reviewed-PDF export completes from the document-actions surface.
-  - **Covered by:** R10-R14.
+  - **Covered by:** R10-R16.
 
 ### Acceptance Examples
 
@@ -129,28 +134,29 @@ flowchart TB
   - **When:** The reviewer hovers it, focuses it with the keyboard, selects it, or uses a touch device.
   - **Then:** The allowed annotation icon buttons appear with the same sizing and states as the established annotation actions, remain keyboard and screen-reader accessible, and do not appear on read-only PDF rows.
 - AE4. Export is blocked by annotation work
-  - **Covers R10-R14.**
+  - **Covers R10-R17.**
   - **Given:** A generated-output review has an unresolved reconciliation item or pending annotation draft.
   - **When:** The reviewer opens the PDF-title menu.
-  - **Then:** **Export reviewed PDF** is disabled, one short explanation identifies annotation work as the blocker, and the adjacent link opens the workspace directly on the Annotations tab.
+  - **Then:** **Export** is disabled, one compact attention unit identifies how many annotations need attention, and its **Open Annotations** button uses the workspace navbar's Annotations icon before opening that tab.
 - AE5. Cross-host document actions
-  - **Covers R10-R14.**
+  - **Covers R10-R16.**
   - **Given:** The same generated-output review is open in the browser and the fully embedded VS Code surface.
   - **When:** The reviewer opens the PDF-title menu in each host.
-  - **Then:** Both hosts show the same export eligibility, explanation, annotation link, control styling, and responsive menu behavior.
+  - **Then:** Both hosts show the same caret-free title trigger, conditional menu hierarchy, specialized export states, control styling, and responsive behavior.
 
 ### Success Criteria
 
 - A reviewer can distinguish work needing attention, owned annotations, and read-only PDF annotations without reading explanatory lifecycle copy.
 - The Annotation Tray contains no reviewed-PDF export control, redundant generation-status sentence, permanent success card, or empty optional section.
 - Secondary row actions match established annotation controls and remain discoverable by mouse, keyboard, screen reader, and touch without filling resting rows with icons.
+- An eligible idle PDF-title menu contains only **Export**, while an annotation blocker adds one compact and immediately actionable recovery unit.
 - Generated-output title menus and Annotation Tray behavior remain visually and behaviorally equivalent in browser and fully embedded VS Code sessions.
 
 ### Scope Boundaries
 
 - This work changes Annotation Tray list organization, row-action presentation, contextual section states, and the generated-output PDF-title menu.
 - This work reuses the focused reattachment behavior defined in `docs/plans/2026-08-31-1714-fix-focused-reattachment-visual-hierarchy-plan.md`; it does not redesign that detail view.
-- This work does not change annotation ownership, reconciliation matching, anchor capture, draft semantics, export eligibility, stale-generation handling, or reviewed-PDF contents.
+- This work does not change annotation ownership, reconciliation matching, anchor capture, draft semantics, export eligibility, stale-generation behavior, export result behavior, or reviewed-PDF contents.
 - This work does not make Existing PDF Annotations editable or merge them into the owned annotation population.
 - This work does not change PDF and LaTeX synchronization, workspace docking, tray framing, PDF rendering, or the overall viewer layout.
 
@@ -178,21 +184,25 @@ flowchart TB
 - `apps/web/src/review/AnnotationList.tsx`
 - `apps/web/src/review/ReconciliationWorkspace.tsx`
 - `apps/web/src/review/ReviewChrome.tsx`
+- `apps/web/src/review/DocumentActionsMenu.tsx`
+- `apps/web/src/review/WorkspaceModeStrip.tsx`
+- `apps/web/src/review/ReviewIcon.tsx`
 
 ---
 
 ## Planning Contract
 
-Product Contract preservation: clarified, no scope change. R10 now identifies the existing PDF-title trigger as the precedent and the generated-output dropdown as new behavior.
+Product Contract preservation: refined in place. R10-R17 now define the caret-free trigger, single-action idle menu, conditional annotation recovery unit, shared Annotations icon, and preserved specialized export states without changing export eligibility or output behavior.
 
 ### Key Technical Decisions
 
-- KTD1. **Project export state through one shared document-action model.** Move the current export presentation rules out of the reconciliation list component without duplicating eligibility or changing the export callback contract. (session-settled: user-directed — chosen over retaining export in the Annotation Tray footer: reviewed-PDF export is a document action.) Governs R10-R12.
-- KTD2. **Give the generated-output title an accessible menu lifecycle.** Extend the title trigger in the shared review chrome with the repository's established menu focus, keyboard, dismissal, accessible-description, and focus-return patterns. Keep the menu open while export is pending and while it presents the resulting success or retryable failure, then return focus to the title trigger when the reviewer dismisses it. Governs R10, R12-R14.
+- KTD1. **Project export state through one shared document-action model.** Move the current export presentation rules out of the reconciliation list component without duplicating eligibility or changing the export callback contract. (session-settled: user-directed — chosen over retaining export in the Annotation Tray footer: reviewed-PDF export is a document action.) Governs R10-R12, R15-R16.
+- KTD2. **Give the generated-output title a quiet, accessible menu lifecycle.** Remove the visual caret without changing the trigger's button or accessibility semantics. Render only the download-icon **Export** action while eligible and idle, add the compact attention unit only for annotation blockers, preserve specialized exceptional states, and return focus to the title trigger when the reviewer dismisses the menu. (session-settled: user-directed — chosen over two equal action rows, status-first framing, and a nested recovery card: the ordinary state should be minimal and recovery should appear only when actionable.) Governs R10-R16.
 - KTD3. **Compose three projections without merging their state owners.** Keep unresolved and pending reconciliation records, current-generation Owned Annotations, and the filtered Existing PDF Annotation inventory distinct while applying one compact row presentation grammar. (session-settled: user-directed — chosen over a unified stream, filter-first list, and fixed empty sections: task status and editability must remain clear.) Governs R1-R5, R8-R9.
 - KTD4. **Keep row actions mounted and reveal them through presentation state.** Use row hover, focus-within, active selection, and coarse-pointer rules rather than conditional mounting or accessibility-tree removal. (session-settled: user-directed — chosen over permanently visible controls and overflow menus: annotation text should dominate resting rows without hiding direct actions.) Governs R6-R7, R13-R14.
-- KTD5. **Route annotation blockers through the workspace owner.** Use the existing Annotations workspace selection path, preserve active composer state, and focus the nearest actionable annotation target after the menu closes. Governs R2, R8, R12, R14.
+- KTD5. **Route annotation blockers through the workspace owner.** Use the existing Annotations workspace selection path, preserve active composer state, and focus the nearest actionable annotation target after the menu closes. Governs R2, R8, R12, R14, R16.
 - KTD6. **Preserve coordinated PDF navigation and deterministic list focus.** Reuse the existing annotation navigation callbacks and restore focus to a surviving row or section fallback when a row or conditional section disappears. Governs R2, R5-R9, R14.
+- KTD7. **Reference one shared Annotations icon token.** Render **Open Annotations** through the same `ReviewIcon` annotations token used by `WorkspaceModeStrip`; do not import a separate glyph or add a second icon mapping. Governs R17.
 
 ### High-Level Technical Design
 
@@ -268,6 +278,8 @@ sequenceDiagram
 - Preserve the filtered Existing PDF Annotation inventory and its stable restoration keys; do not rebuild it from the raw PDF Annotation Catalog.
 - Preserve focused reconciliation detail takeover, Back and Cancel behavior, protected drafts, and list scroll restoration.
 - Preserve stale-generation confirmation, export pending state, success and failure feedback, and the service export path.
+- Keep the eligible idle menu free of lifecycle copy, and do not use a caret, heading, divider, or persistent Annotation Tray action to signal that the PDF title opens document actions.
+- Keep **Open Annotations** on the shared Annotations icon token and match established compact action-button geometry instead of creating a menu-specific glyph or control size.
 - Keep contextual action controls mounted and keyboard-reachable even when they are visually quiet.
 - Use review-stage dimensions and the existing responsive tray host instead of browser-window media assumptions.
 
@@ -295,7 +307,7 @@ sequenceDiagram
 ### U1. Shared export presentation and generated-output title menu
 
 - **Goal:** Move the complete reviewed-PDF export lifecycle into an accessible PDF-title menu without changing export eligibility or output behavior.
-- **Requirements:** R10-R14; F3-F4; AE4-AE5; KTD1-KTD2.
+- **Requirements:** R10-R17; F3-F4; AE4-AE5; KTD1-KTD2, KTD7.
 - **Dependencies:** None.
 - **Files:**
   - `apps/web/src/review/ReconciliationWorkspace.tsx`
@@ -303,19 +315,22 @@ sequenceDiagram
   - `apps/web/src/review/DocumentActionsMenu.tsx`
   - `apps/web/src/app/ReviewShell.tsx`
   - `apps/web/src/app/ProductionReviewApp.tsx`
+  - `apps/web/src/app/review-layout.css`
   - `apps/web/test/production-review-app.test.tsx`
   - `apps/web/test/review-layout.test.tsx`
   - `test/acceptance/review-harness/main.tsx`
 - **Approach:**
   1. Relocate the export presentation helper so both reconciliation and document chrome can consume it while the existing state summary remains authoritative.
   2. Lift export confirmation, pending, result, and invocation state to the shared review owner.
-  3. Add a generated-output document-actions menu anchored to the existing PDF-title trigger and use established menu-focus behavior. Represent blocked export with an activation-suppressed, keyboard-reachable menu item whose concise reason is connected through its accessible description.
-  4. Keep the menu open and focus stable while export is pending and when it reports success or a retryable failure; announce the result without moving focus, and return focus to the title trigger only when the menu is dismissed.
-  5. Remove the reconciliation footer only after the new menu handles every existing export state.
-- **Patterns to follow:** `apps/web/src/review/RowActionGroup.tsx` and `apps/web/src/review/menu-focus.ts` for menu interaction; `apps/web/src/save/SaveDestinationDialog.tsx` for title-trigger focus restoration; `packages/core/src/live-context.ts` for eligibility authority.
+  3. Remove the title caret without removing the trigger's button treatment, tooltip, hover, focus, or accessible menu semantics. Render a single download-icon **Export** action in the eligible idle state.
+  4. Represent annotation-blocked export with an activation-suppressed, keyboard-reachable **Export** action followed by one compact attention unit containing the blocker indicator and **Open Annotations** button. Connect the reason to **Export** programmatically without repeating it as free-standing menu copy. Reuse the exact shared Annotations icon token and the established compact annotation-action geometry for the recovery button.
+  5. Keep stale confirmation, reconciliation progress, export pending, success, and retryable failure in their specialized states. Keep focus stable while those states are active, announce results without moving focus, and return focus to the title trigger only when the menu is dismissed.
+  6. Remove the reconciliation footer only after the new menu handles every existing export state.
+- **Patterns to follow:** `apps/web/src/review/RowActionGroup.tsx` for compact action geometry; `apps/web/src/review/WorkspaceModeStrip.tsx` and `apps/web/src/review/ReviewIcon.tsx` for the canonical Annotations icon; `apps/web/src/review/menu-focus.ts` for menu interaction; `apps/web/src/save/SaveDestinationDialog.tsx` for title-trigger focus restoration; `packages/core/src/live-context.ts` for eligibility authority.
 - **Test scenarios:**
-  - Covers F4 / AE5. An eligible generated-output review opens the title menu and invokes reviewed-PDF export exactly once in browser and VS Code launch surfaces.
-  - Covers AE4. Unresolved items and pending drafts disable export, keep the export item keyboard-discoverable with its blocker reason as an accessible description, and expose **Open Annotations**.
+  - Covers F4 / AE5. An eligible generated-output review exposes a caret-free title trigger and a menu containing only download-icon **Export**, which invokes reviewed-PDF export exactly once in browser and VS Code launch surfaces.
+  - Covers AE4. Unresolved items and pending drafts disable **Export**, keep it keyboard-discoverable with its blocker reason as an accessible description, and add one compact attention unit with **Open Annotations**.
+  - The blocked attention unit renders the same shared Annotations glyph as the workspace navbar and uses the established compact action dimensions without adding a divider, nested card, or one-off spacing token.
   - A reconciling review disables export with its current transient reason and does not show an annotation link unless annotation work is the blocker.
   - A possibly stale review opens confirmation; Cancel restores focus to export and Confirm invokes export with stale confirmation.
   - Export pending state prevents a duplicate invocation while the menu stays open; success and retryable failure remain readable and are announced without moving focus, and dismissing the menu restores focus to the PDF title.
@@ -326,7 +341,7 @@ sequenceDiagram
 ### U2. Blocked-export workspace routing and focus continuity
 
 - **Goal:** Make **Open Annotations** land on a useful, preserved annotation task without losing drafts or keyboard position.
-- **Requirements:** R2, R8-R9, R12-R14; F1, F3; AE1-AE2, AE4; KTD5-KTD6.
+- **Requirements:** R2, R8-R9, R12-R14, R16; F1, F3; AE1-AE2, AE4; KTD5-KTD6.
 - **Dependencies:** U1.
 - **Files:**
   - `apps/web/src/app/ReviewShell.tsx`
@@ -417,7 +432,7 @@ sequenceDiagram
 ### U5. Shared-host and visual acceptance proof
 
 - **Goal:** Prove the completed tray and title menu behave and render as one feature across browser and fully embedded VS Code surfaces.
-- **Requirements:** R1-R14; F1-F4; AE1-AE5.
+- **Requirements:** R1-R17; F1-F4; AE1-AE5.
 - **Dependencies:** U1-U4.
 - **Files:**
   - `test/acceptance/review-harness/main.tsx`
@@ -437,7 +452,7 @@ sequenceDiagram
   - Chromium and WebKit produce the same task order, focus behavior, export states, and read-only imported rows.
   - Wide, narrow, height-constrained, and coarse-pointer scenes keep controls legible, touch-sized, and free of horizontal overflow.
   - Viewer zoom, PDF position, active annotation, tray scroll, and protected draft remain stable while sections appear or disappear.
-  - Visual baselines show focus-revealed actions, contextual empty sections, and the title menu without one-off colors, spacing, or control sizes.
+  - Visual baselines show focus-revealed actions, contextual empty sections, the caret-free title trigger, the single-action eligible menu, and the annotation-blocked attention unit without one-off colors, spacing, or control sizes.
 - **Execution note:** Update visual snapshots only after semantic and interaction assertions pass.
 - **Verification:** Cross-host, cross-engine, responsive, interaction, and visual evidence all confirm one shared implementation.
 
@@ -464,7 +479,8 @@ Visual snapshots may change only after the corresponding semantic assertions pas
 
 - U1-U5 satisfy their cited Requirements, Flows, and Acceptance Examples.
 - The requirements and assumptions have no unresolved implementation blocker.
-- Generated-output export is available only from the PDF-title menu and preserves every existing eligibility and result state.
+- Generated-output export is available only from the caret-free PDF-title menu; its eligible idle state contains only **Export**, and it preserves every existing eligibility and result state.
+- **Open Annotations** uses the same shared Annotations icon as the workspace tray navbar and the same compact action geometry as established annotation controls.
 - **Open Annotations** reaches a useful preserved annotation task for unresolved records, pending drafts, and active composers.
 - The tray orders and omits sections according to the Product Contract without duplicate records or persistent empty-success chrome.
 - Contextual actions remain mounted, keyboard-reachable, touch-appropriate, and visually consistent with established annotation buttons.

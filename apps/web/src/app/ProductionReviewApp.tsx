@@ -82,11 +82,7 @@ import {
   createTrailingTaskScheduler,
   waitForReviewNavigationReady,
 } from "../review/main-location-refresh.js";
-import {
-  canDeriveAnnotationOutlineLabels,
-  deriveAnnotationOutlineLabels,
-  reviewItemPoint,
-} from "../review/annotation-outline-context.js";
+import { reviewItemPoint } from "../review/annotation-outline-context.js";
 import {
   BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN,
   RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
@@ -566,9 +562,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [existingAnnotations, setExistingAnnotations] = useState<ExistingAnnotationsDiscovery>({
     status: 'loading', generation: 0,
   });
-  const [existingAnnotationsSourceIdentity, setExistingAnnotationsSourceIdentity] = useState(
-    `${props.initialState.source.fileId}:${props.initialState.source.digest}`,
-  );
   const [inventoryRetryGeneration, setInventoryRetryGeneration] = useState(0);
   const [correspondingItemId, setCorrespondingItemId] = useState<string>();
   const [activeItemId, setActiveItemId] = useState<string>();
@@ -1154,7 +1147,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     outlineDiscoveryRef.current = { status: 'loading', documentGeneration: nextGeneration };
     setOutlineDiscovery(outlineDiscoveryRef.current);
     setExistingAnnotations({ status: 'loading', generation: 0 });
-    setExistingAnnotationsSourceIdentity(sourceIdentity);
     setMainNavigationReadyGeneration(null);
     setMainDocumentReadyGeneration(null);
     navigationCoordinator.replaceDocument(nextGeneration, { preservePresentation: true });
@@ -1355,8 +1347,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [navigationCoordinator, refreshAuthoringAnchorNavigation]);
   const onExistingAnnotationsDiscovery = useCallback((result: ExistingAnnotationsDiscovery) => {
     setExistingAnnotations(result);
-    setExistingAnnotationsSourceIdentity(sourceIdentity);
-  }, [sourceIdentity]);
+  }, []);
   const onOutlineDiscovery = useCallback((discovery: PdfOutlineDiscovery) => {
     if (discovery.documentGeneration !== documentGenerationRef.current) return;
     outlineDiscoveryRef.current = discovery;
@@ -1563,37 +1554,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     />
   );
 
-  const annotationOutlineLabels = useMemo(() => {
-    const pages = mainNavigationRef.current?.captureDocumentOrderPages() ?? [];
-    const source = existingAnnotationsSourceIdentity === sourceIdentity
-      && existingAnnotations.status === 'ready'
-      ? existingAnnotations.items
-      : [];
-    const derivationContext = {
-      sourceIdentity,
-      activeSourceIdentity: sourceIdentityRef.current,
-      navigationGeneration: mainNavigationReadyGeneration,
-      outlineGeneration: outlineDiscovery.documentGeneration,
-    };
-    if (!canDeriveAnnotationOutlineLabels(derivationContext)) {
-      return { owned: new Map<string, string>(), source: new Map<string, string>() };
-    }
-    return deriveAnnotationOutlineLabels({
-      documentGeneration: derivationContext.navigationGeneration,
-      outline: outlineDiscovery,
-      pages,
-      owned: state.items,
-      source,
-    });
-  }, [
-    existingAnnotations,
-    existingAnnotationsSourceIdentity,
-    mainNavigationReadyGeneration,
-    outlineDiscovery,
-    sourceIdentity,
-    state.items,
-  ]);
-
   const effectiveReferenceLayout = deriveReferenceWorkspaceLayout(
     referenceLayoutState,
     rightWorkspaceMode,
@@ -1656,7 +1616,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         pendingReference={pendingReference}
         referenceReturn={activeReferenceReturn}
         outlineDiscovery={outlineDiscovery}
-        annotationOutlineLabels={annotationOutlineLabels}
         currentOutlineItemId={currentOutlineItemId}
         linkActionRequest={linkActionRequest}
         navigationAnnouncement={navigationAnnouncement}

@@ -609,7 +609,6 @@ function Harness() {
         listOpen: visualScenario.listOpen,
         viewerState: visualScenario.viewerState,
         existingAnnotations: visualScenario.existingAnnotations,
-        annotationOutlineLabels: visualScenario.annotationOutlineLabels,
         outlineDiscovery: visualScenario.outlineDiscovery,
         currentOutlineItemId: visualScenario.currentOutlineItemId,
         referenceTabs: visualScenario.referenceTabs,

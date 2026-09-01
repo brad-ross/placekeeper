@@ -1844,11 +1844,11 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
 }
 
 .annotation-item__delete {
-  color: var(--review-danger);
+  color: var(--review-danger, #9a3d34);
 }
 
 .annotation-item__delete:hover {
-  color: var(--review-danger);
+  color: var(--review-danger, #9a3d34);
 }
 
 .annotation-item__kind-icon {
@@ -2133,14 +2133,16 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
 }
 
 .reconciliation-workspace__discard,
-.reconciliation-workspace__destructive {
-  color: var(--review-danger);
+.review-button.reconciliation-workspace__destructive,
+#root[data-production-root="true"] .review-button.reconciliation-workspace__destructive {
+  color: var(--review-danger, #9a3d34);
 }
 
 .reconciliation-workspace__discard:hover,
-.reconciliation-workspace__destructive:hover:not(:disabled) {
+.review-button.reconciliation-workspace__destructive:hover:not(:disabled),
+#root[data-production-root="true"] .review-button.reconciliation-workspace__destructive:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--review-danger) 55%, var(--review-border-strong));
-  color: var(--review-danger);
+  color: var(--review-danger, #9a3d34);
   background: color-mix(in srgb, var(--review-danger) 8%, var(--review-surface-panel));
 }
 

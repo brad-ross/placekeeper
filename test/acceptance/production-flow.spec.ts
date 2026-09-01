@@ -2558,7 +2558,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await expect(unsectionedPageOne.locator('.annotation-item__separator')).toHaveCount(1);
 
   const nestedAnnotation = sourceRows.filter({
-    has: page.locator('.annotation-item__section', { hasText: /^Nested result$/u }),
+    has: page.locator('.annotation-item__page', { hasText: /^3$/u }),
   }).first();
   await expect(nestedAnnotation).toBeVisible();
   await expect(nestedAnnotation).toHaveCSS('background-color', 'rgb(255, 254, 250)');
@@ -2566,9 +2566,10 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await expect(nestedAnnotation).toHaveCSS('border-radius', '11px');
   await expect(nestedAnnotation).toHaveCSS('padding', '4px');
   await expect(nestedAnnotation.locator('.annotation-item__page')).toHaveText('3');
-  await expect(nestedAnnotation.locator('.annotation-item__separator')).toHaveCount(2);
+  await expect(nestedAnnotation.locator('.annotation-item__separator')).toHaveCount(1);
+  await expect(nestedAnnotation.locator('.annotation-item__section')).toHaveCount(0);
   await expect(nestedAnnotation.getByRole('button')).toHaveAccessibleName(
-    /Page 3 · Nested result/u,
+    /Page 3/u,
   );
   await page.getByRole("tab", { name: "Outline", exact: true }).click();
   await expect(nestedReference).toBeVisible();
@@ -4044,15 +4045,17 @@ for (const surface of ['browser', 'vscode'] as const) {
     const zoomBefore = await page.getByLabel('Zoom level').textContent();
 
     const trigger = page.getByRole('button', { name: /Open document actions$/u });
+    await expect(trigger.locator('.review-icon')).toHaveCount(0);
     await trigger.click();
     const menu = page.getByRole('menu', { name: /Actions for/u });
     await expect(menu).toBeVisible();
     await expect(menu).toHaveAttribute('data-export-eligibility', 'blocked');
-    const exportAction = menu.getByRole('menuitem', { name: 'Export reviewed PDF' });
+    const exportAction = menu.getByRole('menuitem', { name: 'Export', exact: true });
     await expect(exportAction).toHaveAttribute('aria-disabled', 'true');
-    await expect(menu.getByText('Resolve 1 pending draft before export.')).toBeVisible();
+    await expect(menu.getByText('1 annotation to resolve.')).toBeVisible();
     const openAnnotations = menu.getByRole('menuitem', { name: 'Open Annotations' });
     await expect(openAnnotations).toHaveClass(/document-actions__annotations-link/u);
+    await expect(openAnnotations.locator('.lucide-list-checks')).toBeVisible();
     await openAnnotations.click();
 
     await expect(page.getByRole('tab', { name: 'Annotations', exact: true }))

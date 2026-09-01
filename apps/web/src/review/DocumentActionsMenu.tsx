@@ -35,19 +35,15 @@ export function reviewExportPresentation(input: {
   const unresolvedItems = input.summary.reconciliation.unresolvedItemIds.length;
   const pendingDrafts = input.summary.reconciliation.pendingDraftIds.length;
   if (!input.summary.reconciliation.complete) {
-    const parts = [
-      unresolvedItems > 0
-        ? `${unresolvedItems} Review Item${unresolvedItems === 1 ? '' : 's'}`
-        : '',
-      pendingDrafts > 0
-        ? `${pendingDrafts} pending draft${pendingDrafts === 1 ? '' : 's'}`
-        : '',
-    ].filter(Boolean);
+    const attentionCount = unresolvedItems + pendingDrafts;
+    const message = attentionCount === 0
+      ? 'Annotations to resolve.'
+      : `${attentionCount} annotation${attentionCount === 1 ? '' : 's'} to resolve.`;
     return {
       canExport: false,
       requiresStaleConfirmation: false,
       annotationBlocked: true,
-      message: `Resolve ${parts.join(' and ')} before export.`,
+      message,
     };
   }
   if (input.summary.export.requiresStaleConfirmation || input.refreshStatus === 'failed') {
@@ -62,9 +58,7 @@ export function reviewExportPresentation(input: {
     canExport: input.summary.export.eligible,
     requiresStaleConfirmation: false,
     annotationBlocked: false,
-    message: input.summary.export.eligible
-      ? 'All Review Items are reconciled. The latest generation is ready to export.'
-      : 'Reviewed PDF export is not available yet.',
+    message: input.summary.export.eligible ? '' : 'Reviewed PDF export is not available yet.',
   };
 }
 
@@ -105,6 +99,7 @@ export function DocumentActionsMenu({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const exportRef = useRef<HTMLButtonElement>(null);
   const confirmationRef = useRef<HTMLButtonElement>(null);
+  const pendingRef = useRef(false);
   const pending = outcome === 'pending';
 
   const closeAndRestore = () => {
@@ -139,7 +134,8 @@ export function DocumentActionsMenu({
   }, [open, pending]);
 
   const exportReviewedPdf = async (confirmPossiblyStale?: true) => {
-    if (pending) return;
+    if (pendingRef.current) return;
+    pendingRef.current = true;
     setOutcome('pending');
     try {
       await onExport(confirmPossiblyStale);
@@ -148,6 +144,8 @@ export function DocumentActionsMenu({
     } catch {
       setStaleConfirmation(false);
       setOutcome('failure');
+    } finally {
+      pendingRef.current = false;
     }
     requestAnimationFrame(() => exportRef.current?.focus({ preventScroll: true }));
   };
@@ -182,6 +180,13 @@ export function DocumentActionsMenu({
 
   const resultMessage = EXPORT_OUTCOME_MESSAGES[outcome];
   const exportUnavailable = !presentation.canExport || pending;
+  const annotationAttentionVisible = presentation.annotationBlocked && onOpenAnnotations !== undefined;
+  const reasonVisible = presentation.message !== '' && !annotationAttentionVisible;
+  const exportDescriptionIds = [
+    presentation.message === '' ? '' : reasonId,
+    resultMessage ? resultId : '',
+  ].filter(Boolean).join(' ');
+  const exportLabel = pending ? 'Exporting…' : outcome === 'failure' ? 'Retry export' : 'Export';
 
   return <div
     ref={rootRef}
@@ -207,7 +212,6 @@ export function DocumentActionsMenu({
     >
       <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />
       <strong>{documentTitle}</strong>
-      <ReviewIcon name="chevron-down" size={14} />
       <span className="sr-only" data-review-saved-status>{savedLabel}</span>
     </button>
     {open ? <div
@@ -254,7 +258,7 @@ export function DocumentActionsMenu({
           role="menuitem"
           className="document-actions__export"
           aria-disabled={exportUnavailable}
-          aria-describedby={`${reasonId}${resultMessage ? ` ${resultId}` : ''}`}
+          {...(exportDescriptionIds === '' ? {} : { 'aria-describedby': exportDescriptionIds })}
           onClick={() => {
             if (exportUnavailable) return;
             if (presentation.requiresStaleConfirmation) {
@@ -269,18 +273,28 @@ export function DocumentActionsMenu({
             size={15}
             className={pending ? 'review-icon document-actions__loading' : 'review-icon'}
           />
-          <span>{outcome === 'failure' ? 'Retry export' : 'Export reviewed PDF'}</span>
+          <span>{exportLabel}</span>
         </button>
-        <p id={reasonId} className="document-actions__message">{presentation.message}</p>
-        {presentation.annotationBlocked && onOpenAnnotations ? <button
-          type="button"
-          role="menuitem"
-          className="document-actions__annotations-link"
-          onClick={() => {
-            closeForAction();
-            requestAnimationFrame(onOpenAnnotations);
-          }}
-        ><ReviewIcon name="annotations" size={15} /><span>Open Annotations</span></button> : null}
+        {annotationAttentionVisible ? <div
+          className="document-actions__attention"
+          data-document-actions-attention
+        >
+          <p id={reasonId} className="document-actions__attention-label">
+            <ReviewIcon name="warning" size={14} />
+            <span>{presentation.message}</span>
+          </p>
+          <button
+            type="button"
+            role="menuitem"
+            className="review-button review-button--secondary document-actions__annotations-link"
+            onClick={() => {
+              closeForAction();
+              requestAnimationFrame(onOpenAnnotations);
+            }}
+          ><ReviewIcon name="annotations" size={15} /><span>Open Annotations</span></button>
+        </div> : reasonVisible ? <p id={reasonId} className="document-actions__message">
+          {presentation.message}
+        </p> : null}
         {resultMessage ? <p
           id={resultId}
           className="document-actions__result"

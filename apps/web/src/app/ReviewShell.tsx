@@ -58,7 +58,6 @@ import {
   annotationAccessibleLabel,
   annotationKindLabel,
 } from '../review/AnnotationMetadata.js';
-import type { AnnotationOutlineLabels } from '../review/annotation-outline-context.js';
 import { AnnotationPeek } from '../review/AnnotationPeek.js';
 import { CommentComposer } from '../review/CommentComposer.js';
 import {
@@ -236,7 +235,6 @@ export interface ReviewShellProps {
   pendingReference?: PendingReferencePanel | null;
   referenceReturn?: ReferenceReturnControlState | null;
   outlineDiscovery?: PdfOutlineDiscovery;
-  annotationOutlineLabels?: AnnotationOutlineLabels;
   currentOutlineItemId?: string | null;
   linkActionRequest?: ViewerPdfLinkInvocation | null;
   navigationAnnouncement?: string;
@@ -510,7 +508,6 @@ export function ReviewShell(props: ReviewShellProps) {
       : { status: 'loading', documentGeneration: navigation.documentGeneration }
   ), [navigation.documentGeneration, outlineDiscovery]);
   const outlineAbsent = visibleOutlineDiscovery.status === 'loaded-empty';
-  const showAnnotationOutlineLabels = visibleOutlineDiscovery.status === 'loaded-tree';
   const existingAnnotations = props.existingAnnotations ?? { status: 'loading', generation: 0 };
   const visibleOwnedItems = props.state.workflow.mode === 'generated-output'
     ? props.state.items.filter((item) => reviewItemIsResolvedForGeneration(
@@ -599,10 +596,6 @@ export function ReviewShell(props: ReviewShellProps) {
         ownedItems: props.state.items,
         existingAnnotations,
         documentGeneration: navigation.documentGeneration,
-        ...(!showAnnotationOutlineLabels || props.annotationOutlineLabels === undefined ? {} : {
-          ownedSectionLabels: props.annotationOutlineLabels.owned,
-          sourceSectionLabels: props.annotationOutlineLabels.source,
-        }),
       });
   const annotationReaderOwnedItemId = annotationReaderRecord?.identity.origin === 'owned'
     ? annotationReaderRecord.identity.itemId
@@ -1109,10 +1102,6 @@ export function ReviewShell(props: ReviewShellProps) {
         ownedItems: (acceptedState ?? props.state).items,
         existingAnnotations,
         documentGeneration: navigation.documentGeneration,
-        ...(!showAnnotationOutlineLabels || props.annotationOutlineLabels === undefined ? {} : {
-          ownedSectionLabels: props.annotationOutlineLabels.owned,
-          sourceSectionLabels: props.annotationOutlineLabels.source,
-        }),
       });
       if (nextReaderRecord === null) {
         const readerItemId = readerOrigin.identity.origin === 'owned'
@@ -2065,9 +2054,6 @@ export function ReviewShell(props: ReviewShellProps) {
             {reconciliationDetailOpen ? null : <>
             <AnnotationList
               items={visibleOwnedItems}
-              {...(!showAnnotationOutlineLabels || props.annotationOutlineLabels === undefined
-                ? {}
-                : { sectionLabels: props.annotationOutlineLabels.owned })}
               {...(presentedActiveItemId === undefined ? {} : { activeId: presentedActiveItemId })}
               {...(!annotationsVisible || props.correspondingItemId === undefined
                 ? {}
@@ -2121,13 +2107,9 @@ export function ReviewShell(props: ReviewShellProps) {
               {existingAnnotations.status === 'ready' ? (
                 <ol className="existing-annotations__list">
                   {existingAnnotations.items.map((annotation) => {
-                    const sectionLabel = showAnnotationOutlineLabels
-                      ? props.annotationOutlineLabels?.source.get(existingAnnotationKey(annotation))
-                      : undefined;
                     const readerRecord = projectExistingAnnotationReader(annotation, {
                       documentGeneration: navigation.documentGeneration,
                       discoveryGeneration: existingAnnotations.generation,
-                      ...(sectionLabel === undefined ? {} : { sectionLabel }),
                     });
                     return <li
                       key={existingAnnotationKey(annotation)}
@@ -2142,7 +2124,6 @@ export function ReviewShell(props: ReviewShellProps) {
                       <button className="annotation-item__navigation" type="button" aria-label={annotationAccessibleLabel({
                         kind: annotation.subtype,
                         pageNumber: annotation.pageIndex + 1,
-                        ...(sectionLabel === undefined ? {} : { sectionLabel }),
                         ...(annotation.contents ? { excerpt: annotation.contents } : {}),
                       })} title={`Go to ${annotationKindLabel(annotation.subtype)} annotation on page ${annotation.pageIndex + 1}`} onClick={() => {
                         if (authoringSessionRef.current !== null) return;
@@ -2156,7 +2137,6 @@ export function ReviewShell(props: ReviewShellProps) {
                         <AnnotationMetadata
                           kind={annotation.subtype}
                           pageNumber={annotation.pageIndex + 1}
-                          {...(sectionLabel === undefined ? {} : { sectionLabel })}
                         />
                       </div>
                       <div className="annotation-item__body-row">

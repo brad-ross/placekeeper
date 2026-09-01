@@ -533,7 +533,6 @@ describe('review shell layout and accessibility contract', () => {
     const listHtml = renderToStaticMarkup(
       <AnnotationList
         items={[ownedAnnotation]}
-        sectionLabels={new Map([[ownedAnnotation.id, 'Methods and data']])}
         activeId={ownedAnnotation.id}
         correspondingId={ownedAnnotation.id}
         onNavigate={() => undefined}
@@ -564,8 +563,8 @@ describe('review shell layout and accessibility contract', () => {
     expect(listHtml).toContain('data-annotation-kind-icon="highlight"');
     expect(listHtml).toContain('data-annotation-state="active-corresponding"');
     expect(listHtml).toContain('<span class="annotation-item__separator">·</span><span class="annotation-item__page">4</span>');
-    expect(listHtml).toContain('class="annotation-item__section" title="Methods and data">Methods and data</span>');
-    expect(listHtml).toContain('aria-label="Highlight · Page 4 · Methods and data · Clarify the identifying variation behind this claim."');
+    expect(listHtml).not.toContain('annotation-item__section');
+    expect(listHtml).toContain('aria-label="Highlight · Page 4 · Clarify the identifying variation behind this claim."');
     expect(listHtml).toContain('data-read-full-annotation="true"');
     expect(listHtml).toContain('aria-label="Read full Highlight annotation on page 4"');
     expect(listHtml).toContain('title="Read full annotation"');
@@ -1001,16 +1000,12 @@ describe('review shell layout and accessibility contract', () => {
             supportedAppearance: true,
           }],
         }}
-        annotationOutlineLabels={{
-          owned: new Map(),
-          source: new Map([['1:source-highlight', 'Methods and data']]),
-        }}
         outlineDiscovery={{
           status: 'loaded-tree',
           documentGeneration: 0,
           items: [{
             id: 'outline-0',
-            label: 'Methods and data',
+            label: 'Representative review',
             pageContext: null,
             target: null,
             children: [],
@@ -1028,8 +1023,13 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('data-annotation-kind="Highlight"');
     expect(html).toContain('data-annotation-state="readonly"');
     expect(html).toContain('data-readonly="true"');
-    expect(html).toContain('class="annotation-item__section" title="Methods and data">Methods and data</span>');
-    expect(html).toContain('aria-label="Highlight · Page 2 · Methods and data · Source-only comment"');
+    const existingAnnotationsHtml = html.slice(
+      html.indexOf('<section class="existing-annotations"'),
+      html.indexOf('</section>', html.indexOf('<section class="existing-annotations"')),
+    );
+    expect(existingAnnotationsHtml).not.toContain('Representative review');
+    expect(existingAnnotationsHtml).not.toContain('annotation-item__section');
+    expect(html).toContain('aria-label="Highlight · Page 2 · Source-only comment"');
     expect(html).toContain('aria-label="Read full Highlight annotation on page 2"');
     expect(html).toContain('data-read-full-annotation="true"');
     expect(html).not.toContain('>Page 2<');
@@ -1127,10 +1127,6 @@ describe('review shell layout and accessibility contract', () => {
             supportedAppearance: true,
           }],
         }}
-        annotationOutlineLabels={{
-          owned: new Map([['owned-highlight', 'Methods and data']]),
-          source: new Map([['1:source-highlight', 'Methods and data']]),
-        }}
         onCommand={async () => state}
       >
         <div>Document canvas</div>
@@ -1155,10 +1151,6 @@ describe('review shell layout and accessibility contract', () => {
         state={state}
         workspaceOpen
         outlineDiscovery={{ status: 'loaded-empty', documentGeneration: -1 }}
-        annotationOutlineLabels={{
-          owned: new Map([['owned-highlight', 'Stale section']]),
-          source: new Map(),
-        }}
         selectionUpdate={{ kind: 'cleared', generation: 0 }}
         onCommand={async () => state}
       >

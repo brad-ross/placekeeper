@@ -19,7 +19,6 @@ export interface AnnotationListProps {
   activeId?: string;
   correspondingId?: string;
   activationRequest?: { readonly id: string; readonly token: number };
-  sectionLabels?: ReadonlyMap<string, string>;
   onNavigate(item: ReviewItem): void;
   onReadFull?(record: AnnotationReaderRecord, trigger: HTMLButtonElement): void;
   onReaderOverflowChange?(record: AnnotationReaderRecord, overflowing: boolean): void;
@@ -46,7 +45,6 @@ export function AnnotationList({
   activeId,
   correspondingId,
   activationRequest,
-  sectionLabels,
   onNavigate,
   onReadFull,
   onReaderOverflowChange,
@@ -134,9 +132,8 @@ export function AnnotationList({
           const kindLabel = annotationKindLabel(item.kind);
           const active = activeId === item.id;
           const corresponding = correspondingId === item.id;
-          const sectionLabel = sectionLabels?.get(item.id);
           const copyLink = copyLinkForItem?.(item);
-          const readerRecord = projectOwnedAnnotationReader(item, sectionLabel);
+          const readerRecord = projectOwnedAnnotationReader(item);
           return (
             <li
               key={item.id}
@@ -180,7 +177,6 @@ export function AnnotationList({
                   aria-label={annotationAccessibleLabel({
                     kind: item.kind,
                     pageNumber: item.pageIndex + 1,
-                    ...(sectionLabel === undefined ? {} : { sectionLabel }),
                     ...(text ? { excerpt: text } : {}),
                   })}
                   title={`Go to ${kindLabel} annotation on page ${item.pageIndex + 1}`}
@@ -191,7 +187,6 @@ export function AnnotationList({
                   <AnnotationMetadata
                     kind={item.kind}
                     pageNumber={item.pageIndex + 1}
-                    {...(sectionLabel === undefined ? {} : { sectionLabel })}
                   />
                   <div
                     className="annotation-item__title-actions"

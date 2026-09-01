@@ -133,29 +133,13 @@ export function reattachmentGenerationIsCurrent(expected: number, current: numbe
   return Number.isSafeInteger(expected) && expected === current;
 }
 
-export function reconciliationCommandPresentation(
-  result: unknown,
-  successMessage: string,
-): { readonly accepted: boolean; readonly message: string } {
+export function reconciliationCommandRejectionMessage(result: unknown): string | null {
   if (typeof result === "object" && result !== null && "accepted" in result && result.accepted === false) {
-    return {
-      accepted: false,
-      message: "message" in result && typeof result.message === "string"
-        ? result.message
-        : "The review state changed. Refresh the target and try again.",
-    };
+    return "message" in result && typeof result.message === "string"
+      ? result.message
+      : "The review state changed. Refresh the target and try again.";
   }
-  return { accepted: true, message: successMessage };
-}
-
-export function cancelledReattachmentPresentation(): {
-  readonly unresolved: true;
-  readonly message: string;
-} {
-  return {
-    unresolved: true,
-    message: "Reattachment cancelled. The item remains unresolved.",
-  };
+  return null;
 }
 
 function quote(target: ReviewItem | PendingReviewDraftV1): string {
@@ -365,7 +349,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     if (detail !== null) returnFocusKeyRef.current = detail.key;
     setDetail(null);
   };
-  const submit = async (command: ReviewCommand, success: string) => {
+  const submit = async (command: ReviewCommand) => {
     acceptedFocusKeyRef.current = detail === null
       ? null
       : reconciliationFocusKeyAfterRemoval(records.map(({ key }) => key), detail.key);
@@ -373,15 +357,14 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     setMessage("");
     try {
       const result = await props.onCommand(command);
-      const presentation = reconciliationCommandPresentation(result, success);
-      if (!presentation.accepted) {
+      const rejectionMessage = reconciliationCommandRejectionMessage(result);
+      if (rejectionMessage !== null) {
         acceptedFocusKeyRef.current = null;
-        setMessage(presentation.message);
+        setMessage(rejectionMessage);
         return;
       }
       setDetail(null);
       returnFocusKeyRef.current = null;
-      setMessage(presentation.message);
       requestAnimationFrame(() => {
         const acceptedFocusKey = acceptedFocusKeyRef.current;
         acceptedFocusKeyRef.current = null;
@@ -462,7 +445,6 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
         </p>
         <div className="reconciliation-workspace__editor-actions">
           <button className="review-button review-button--secondary" type="button" title="Keep this annotation unresolved" disabled={pending} onClick={() => {
-            setMessage(cancelledReattachmentPresentation().message);
             closeDetail();
           }}><ReviewIcon name="close" size={15} /><span>Cancel</span></button>
           <button className="review-button review-button--primary" type="button" title="Attach this annotation to the selected text" disabled={pending || candidate.anchor === null} onClick={() => {
@@ -477,7 +459,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
               documentGeneration: props.state.workflow.documentGeneration,
               anchor: candidate.anchor,
               updatedAt: new Date().toISOString(),
-            }), "Reattachment saved.");
+            }));
           }}><ReviewIcon name="check" size={15} /><span>Confirm</span></button>
         </div>
       </section> : null}
@@ -492,7 +474,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
             expectedDraftRevision: draft.revision,
             ownerViewId: draft.ownerViewId,
             updatedAt: new Date().toISOString(),
-          }, "Draft applied as a Review Item.")}><ReviewIcon name="check" size={15} /><span>Apply</span></button>
+          })}><ReviewIcon name="check" size={15} /><span>Apply</span></button>
         </div>
       </section> : null}
 
@@ -500,7 +482,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
         <p className="reconciliation-workspace__instruction">Discard this annotation from the reviewed PDF?</p>
         <div className="reconciliation-workspace__editor-actions">
           <button className="review-button review-button--secondary" type="button" title="Keep this annotation" disabled={pending} onClick={closeDetail}><ReviewIcon name="close" size={15} /><span>Cancel</span></button>
-          <button className="review-button review-button--secondary reconciliation-workspace__destructive" type="button" title="Discard this annotation" disabled={pending} onClick={() => void submit(discardCommand(activeRecord.target), "Discard recorded.")}><ReviewIcon name="delete" size={15} /><span>Discard</span></button>
+          <button className="review-button review-button--secondary reconciliation-workspace__destructive" type="button" title="Discard this annotation" disabled={pending} onClick={() => void submit(discardCommand(activeRecord.target))}><ReviewIcon name="delete" size={15} /><span>Discard</span></button>
         </div>
       </section> : null}
 
