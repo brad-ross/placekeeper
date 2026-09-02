@@ -36,6 +36,18 @@ A named process that replaces an application's human-facing and machine-facing i
 
 Completion requires both exclusivity in source and built artifacts and separate removal of active installed state; a clean repository alone does not prove a clean machine.
 
+## Embedded review runtime
+
+### Review Host Runtime
+The host-neutral contract through which the production review client bootstraps state, invokes review operations, receives invalidations and host commands, and releases resources in either a browser or an embedded editor.
+
+Each host supplies its own transport, lifecycle, resource-issuance policy, and privileged capabilities; sharing this contract does not transfer host authority into the review client.
+
+### Review Runtime Protocol
+The versioned operation vocabulary and identity envelope used when a Review Host Runtime crosses an embedded-client boundary.
+
+The protocol defines which operations and coordination identities are recognized, while the receiving host still validates each payload, authorizes the operation, and sanitizes its result.
+
 ## PDF review
 
 ### Temporary Browser Source
@@ -114,6 +126,8 @@ The nonmodal review surface that lists Review Items and Existing PDF Annotations
 
 Its presentation may change with available reading space, but disclosure changes do not replace the underlying viewer or discard review state. Its navigation exposes only destinations supported by current document or session state—including informative loading, failure, and pending surfaces—while preserving Search as a safe fallback.
 
+In a generated-output review, unresolved prior-generation items appear first as focused tasks. Reviewed-PDF export, when blocked by those tasks, routes back to the Annotation Tray rather than duplicating resolution controls in the document menu.
+
 ### Full Annotation Reader
 The transient Annotation Tray detail state that reveals complete annotation-specific authored content only when that content is visually truncated in the annotation list.
 
@@ -139,6 +153,31 @@ The source-linked review process that carries Review Items from one generated PD
 
 Confidently matching anchors carry forward. Missing or ambiguous anchors remain unresolved, are never silently retargeted, and must be reattached or discarded before reviewed-PDF export.
 
+### Generated Output Lineage
+The stable identity of one generated PDF output across successive builds, keyed by its canonical output location rather than by the changing bytes of any one build.
+
+A rebuild advances this lineage only after a complete successor has been validated and committed; invalid or unchanged candidates leave its current Document Generation in place.
+
+### Document Generation
+The monotonic identity of one immutable PDF byte snapshot and its associated page geometry within a Generated Output Lineage.
+
+Review operations, anchors, SyncTeX results, and derived viewer work are valid only for the generation that produced their evidence unless an explicit transition reconciles them to a successor.
+
+### Observation Epoch
+The monotonic ordering token assigned to relevant filesystem observations for one Generated Output Lineage.
+
+It prevents a slowly validated candidate from becoming current after a newer observation has arrived, but it does not itself prove that the observed bytes are complete or valid.
+
+### SyncTeX Binding
+The generation-scoped authority that joins one immutable PDF snapshot, its matching SyncTeX sidecar, approved source root, artifact fingerprints, and current navigation operation.
+
+A SyncTeX result is usable only while every part of this binding remains current; neither a sidecar nor a successful external query can be borrowed across Document Generations.
+
+### Source Navigation Intent
+The source location captured from the editor action that should eventually be reflected in the PDF.
+
+For rebuild-follow navigation, the newest intent remains pending until its matching Document Generation and SyncTeX Binding are ready; retryable sidecar lag preserves it, while terminal outcomes retire it.
+
 ### Outline Discovery
 The document-scoped capability result that distinguishes confirmed absence of a PDF outline from an outline still loading, available outline structure, or discovery failure.
 
@@ -150,6 +189,11 @@ The document-scoped set of open outline branches captured immediately before a b
 It remains unchanged while the reader individually opens or closes branches after collapse, is consumed by restoration, and is discarded when document generation changes.
 
 ## Viewer framing
+
+### Responsive Toolbar Presentation
+The measured arrangement of direct and compact PDF-review control groups that fits one toolbar row while preserving document identity and essential reading context.
+
+Presentations relocate complete control groups according to semantic priority without creating separate navigation, zoom, history, or review state; richer arrangements return only after enough width is available to avoid oscillation.
 
 ### Committed Zoom
 The provider-owned numeric PDF scale used to publish the viewer's zoom state.
@@ -181,7 +225,7 @@ Supporting copy appears only when it adds context. Creation comments use Save, e
 ### Contextual Annotation Composer
 The nonmodal Compact Editorial authoring surface for replacement, insertion, highlight comments, Page Notes, and mutable Review Item edits.
 
-At authoring start it freezes the original anchor and document authority while projecting the mutable draft as a provisional Owned Annotation in the live PDF. It temporarily takes over the Annotation Tray presentation without discarding the underlying tray state; a title-adjacent target action appears only when the anchor leaves the usable viewport. Cancelling removes the projection without changing Review Items, while an accepted action commits through normal review state.
+At authoring start it freezes the original anchor and document authority and establishes a stable provisional Owned Annotation in the live PDF. Mutable text remains in the composer and, for generated output, its protected draft rather than continuously republishing unchanged PDF geometry. It temporarily takes over the Annotation Tray presentation without discarding the underlying tray state; a title-adjacent target action appears only when the anchor leaves the usable viewport and occupies reserved control geometry. Cancelling removes the projection without changing Review Items, while an accepted action commits through normal review state.
 
 Dedicated nonmodal task surfaces may adopt the same structural grammar without becoming literal modals. They retain their own behavior, lifecycle, and security contracts.
 

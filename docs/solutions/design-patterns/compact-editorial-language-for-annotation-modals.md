@@ -1,7 +1,7 @@
 ---
 title: Compact Editorial language for review task and recovery surfaces
 date: 2026-08-21
-last_updated: 2026-08-28
+last_updated: 2026-09-02
 category: design-patterns
 module: PDF review task and recovery surface presentation
 problem_type: design_pattern
@@ -9,15 +9,17 @@ component: frontend_stimulus
 severity: medium
 applies_when:
   - "Related task or setting surfaces have drifted in hierarchy, terminology, or action styling"
-  - "A title already supplies context that nearby labels or supporting copy would only repeat"
+  - "A title already supplies context that nearby labels, status rows, or supporting copy would only repeat"
   - "Dialogs, nonmodal composers, recovery pages, and browser popups should share Warm Neutral presentation without sharing lifecycle ownership"
   - "Create, edit, recovery, and preference flows need concise but distinct action semantics"
-  - "Ordinary, conditional, and asynchronous states need content-fitting geometry plus deterministic semantic and visual validation"
+  - "A blocked document action should route directly to the focused workspace that owns its recovery"
 related_components:
   - "CommentComposer"
   - "SaveDestinationDialog"
   - "ReviewShell"
   - "Annotation Tray"
+  - "ReconciliationWorkspace"
+  - "DocumentActionsMenu"
   - "terminal recovery"
   - "review harness"
   - "testing_framework"
@@ -43,6 +45,8 @@ The durable solution is a shared presentation grammar, not a shared lifecycle or
 The same grammar now also covers a structurally different surface: the successor-daemon page that reopens an interrupted Placekeeper session. That page is centered on an otherwise inert document canvas and explicitly remains a page rather than a dialog over an interactive review (`apps/web/src/app/review-layout.css:6-39`). It reuses the visual hierarchy without moving the gesture-gated reopen, protected-draft choices, or Codex task reattachment into presentation code. Earlier versions required two reopen confirmations, exposed internal-looking identifiers, used review-oriented copy, and reserved empty layout rows; the settled surface uses one **Reopen** action, a filename-led title, session terminology, and content-driven height (session history). [PR #48](https://github.com/brad-ross/placekeeper/pull/48), merged on 2026-08-22, extended the grammar to this recovery surface.
 
 The Chrome extension's automatic-PDF preference exposed the same presentation boundary at popup scale. Its underlying setting persisted and PDF handoff worked, but every short-lived popup document recreated a static “Reading Chrome's PDF setting…” sentence and repeated the control's purpose across a long title, explanatory copy, toggle label, and state pill (session history). The current popup keeps only a direct **Placekeeper** title, one semantic **Open PDFs automatically** switch, and an initially empty live status region (`apps/chrome-extension/popup.html:6-18`). Runtime code owns synchronization, mutation, and failure copy while an ordinary successful read remains quiet (`apps/chrome-extension/src/popup-entry.ts:15-31`, `apps/chrome-extension/src/popup-entry.ts:34-60`).
+
+Generated-PDF reconciliation extends the same grammar from authoring to recovery. Unresolved prior-generation annotations are concrete tasks, not status prose: the Annotation Tray puts them first, selecting one immediately establishes the smallest useful apply, reattach, or discard state, and the live PDF remains the only replacement-selection surface. Reviewed-PDF export is a document action, so it lives in the PDF-title menu; when annotation work blocks it, that menu explains the block and routes directly to the owning Annotations workspace. Planning and visual iteration were important here because merely moving the export button would have split eligibility, pending state, results, and recovery across components without assigning lifecycle ownership (session history).
 
 Planning exposed one especially useful boundary: an early acceptance rule required a visible Cancel action while also prohibiting any change to the optional-highlight action set. That was inconsistent because keeping a highlight without a comment and cancelling the annotation are distinct outcomes. The final grammar exposes both instead of overloading one control (session history).
 
@@ -97,6 +101,31 @@ Use verbs consistently:
 
 For optional Highlight Comment, render all three truthful outcomes—Cancel, Keep, and Save—because dismissal, retention without text, and retention with text are separate transitions (`apps/web/src/review/CommentComposer.tsx:187-218`). Authoring semantics supply concise noun titles and the Apply or Save action without moving workflow logic into the presentational component (`apps/web/src/review/authoring-session.ts:203-250`, `apps/web/src/app/ReviewShell.tsx:1194-1230`).
 
+### Present unresolved annotations as tasks
+
+Project every unresolved canonical item and pending draft into one **Needs attention** queue ahead of ordinary owned annotations and read-only source-PDF annotations (`apps/web/src/review/ReconciliationWorkspace.tsx:249-284`, `apps/web/src/app/ReviewShell.tsx:2049-2128`). Remove the optional section entirely when it becomes empty instead of replacing it with “No previous annotations,” “Reattachment saved,” or “Discard recorded” chrome (`apps/web/src/review/ReconciliationWorkspace.tsx:392-394`, `test/acceptance/review-workflow.spec.ts:235-268`). Task completion itself is the feedback: close the detail, remove the resolved row from current state, and focus the next task or a stable annotations fallback (`apps/web/src/review/ReconciliationWorkspace.tsx:352-379`).
+
+Make the unresolved row the entry point to its expected resolution. Clicking it opens apply or reattach detail; discard remains the one separate destructive row action (`apps/web/src/review/ReconciliationWorkspace.tsx:493-540`). Do not require another Reattach or anchor button after selection. The row has already expressed the user's intent.
+
+The focused detail follows an intent-first hierarchy:
+
+1. Name the transition and type together—**Reattach highlight**, **Reattach deletion**, **Apply insert**—and place one human-readable status pill on the same header line (`apps/web/src/review/ReconciliationWorkspace.tsx:152-162`, `apps/web/src/review/ReconciliationWorkspace.tsx:406-426`).
+2. Show the authored annotation as primary content.
+3. Show “Previously attached to · Page N” as secondary context, and include old source text only when it is nonblank and distinct from the authored text (`apps/web/src/review/ReconciliationWorkspace.tsx:164-177`, `apps/web/src/review/ReconciliationWorkspace.tsx:429-440`).
+4. Use the main PDF as the sole new-anchor selection surface. Keep Confirm disabled until the current reliable selection or caret can supply valid evidence (`apps/web/src/review/ReconciliationWorkspace.tsx:70-130`, `apps/web/src/review/ReconciliationWorkspace.tsx:442-464`).
+
+Translate internal dispositions into concise human labels at projection time: **Ready to apply**, **Needs new location**, **Needs review**, **Multiple matches**, or **Missing text** (`apps/web/src/review/ReconciliationWorkspace.tsx:238-247`). Do not repeat the same status in a heading, metadata row, helper card, and instruction.
+
+Reuse the ordinary annotation icon and button grammar. Metadata uses the shared type mapping, actions use `ReviewIcon` and standard review-button classes, and destructive meaning stays red from the row's trash icon through the focused Discard action (`apps/web/src/review/AnnotationMetadata.tsx:9-29`, `apps/web/src/review/ReconciliationWorkspace.tsx:406-485`, `apps/web/src/app/review-layout-annotations.css:1846-1852`, `apps/web/src/app/review-layout-annotations.css:2135-2147`). Secondary row actions remain mounted for focus and accessibility but become visually prominent only on hover, focus-within, active selection, or coarse-pointer layouts (`apps/web/src/review/AnnotationList.tsx:186-214`, `apps/web/src/app/review-layout-responsive.css:153-183`).
+
+### Route blocked document actions to their owner
+
+Whole-document export belongs with document identity, not inside the Annotation Tray. The PDF-title menu derives its presentation from the canonical review summary: refresh can block export without an annotation recovery link; unresolved items or drafts block it with a count and recovery action; stale-only state permits an explicit confirmation path (`apps/web/src/review/DocumentActionsMenu.tsx:23-61`, `packages/core/src/live-context.ts:400-431`).
+
+When annotation work blocks export, keep **Export** visible but semantically unavailable using `aria-disabled` and `aria-describedby`. Place one short blocker count and **Open Annotations** directly beneath it, using the same annotations icon as workspace navigation (`apps/web/src/review/DocumentActionsMenu.tsx:206-214`, `apps/web/src/review/DocumentActionsMenu.tsx:282-324`, `apps/web/src/review/ReviewIcon.tsx:42-80`). Visually group the relationship as one attention unit instead of a detached recovery card.
+
+The recovery action closes the menu and, when a protected composer is active, preserves and refocuses it; otherwise it opens the Annotations workspace and focuses its first actionable task (`apps/web/src/review/DocumentActionsMenu.tsx:314-323`, `apps/web/src/app/ReviewShell.tsx:925-943`, `apps/web/src/review/ReconciliationWorkspace.tsx:318-379`). Ownership therefore stays coherent: the title menu explains a blocked document action; the Annotation Tray resolves it.
+
 ### Test semantics and appearance separately
 
 Deterministic preview routes make every composer variant reviewable without reproducing its PDF gesture. The harness enumerates creation and edit states with exact titles, field names, actions, and representative content (`test/acceptance/review-harness/main.tsx:39-93`). Always include a valid visual scene in a preview URL: the harness applies production-root styling only when a visual scenario resolves. An unstyled raw harness route is not evidence of a product CSS regression.
@@ -113,6 +142,8 @@ For a browser popup, protect the smallest stable contract directly. The extensio
 
 Keep responsive and motion behavior in the shared grammar. The nonmodal composer becomes a contained bottom surface on small screens, controls receive touch height, and pending animation is disabled under Reduced Motion (`apps/web/src/app/review-layout-responsive.css:17-48`, `apps/web/src/app/review-layout-responsive.css:234-248`).
 
+For task-first reconciliation, test the handoff as one workflow: blocked Export, concise reason, icon-consistent **Open Annotations**, selected workspace, and first-task focus (`test/acceptance/production-flow.spec.ts:4193-4214`). Separately assert list-to-detail hierarchy, PDF-driven Confirm enablement, focus repair after completion, danger styling, and absence of obsolete success blocks (`test/acceptance/review-workflow.spec.ts:192-268`, `test/acceptance/review-workflow.spec.ts:312-343`). Visual coverage should render the same focused task at wide and narrow widths and keep coarse-pointer actions persistent and touch-sized (`test/acceptance/review-visual.spec.ts:52-95`, `test/acceptance/review-visual.spec.ts:589-649`).
+
 ## Why This Matters
 
 Task-surface polish is not merely cosmetic. Titles and action verbs tell a reviewer whether they are creating content, applying a transformation, preserving an annotation without text, or changing a save contract. Ambiguous wording hides materially different outcomes; explicit actions make the state transition legible.
@@ -124,6 +155,10 @@ That boundary matters even more for interrupted-session recovery. A stale page m
 The test split prevents three different kinds of drift. Semantic assertions catch language and accessibility mistakes. Production flows catch lifecycle regressions. Visual and geometry checks catch spacing, containment, alignment, and motion regressions. A stylesheet-shape assertion alone cannot provide all three.
 
 Quiet ordinary preference hydration is part of the same truthfulness. A loading sentence that appears on every popup open makes persisted state look uncertain, while removing all status would hide repairs and failures. Stable markup plus runtime-owned exceptional feedback keeps the common path calm without suppressing actionable information.
+
+Task-first reconciliation applies that truthfulness to blockers. The queue says what requires action, row selection establishes the action, the live PDF supplies replacement evidence, and Confirm commits it. Removing duplicate previews, anchor buttons, technical reason strings, repeated labels, and completion cards makes the recovery state feel like an ordinary focused task rather than exposed reconciliation machinery.
+
+The export gate also remains legible because eligibility and recovery derive from the same canonical summary. A disabled command without a route feels broken; a recovery link detached from the command makes the relationship implicit. Placing a direct recovery action beside the unavailable export command explains the dependency while keeping lifecycle ownership in the Annotation Tray (`packages/core/src/live-context.ts:406-431`, `apps/web/src/review/DocumentActionsMenu.tsx:35-61`).
 
 ## When to Apply
 
@@ -138,6 +173,8 @@ Apply this pattern when:
 - a dedicated recovery page should look related to application dialogs while remaining outside the interactive application mount;
 - conditional risk or protected work should expand one bounded card instead of reserving empty space in the ordinary state.
 - a short-lived browser popup reads a persisted preference asynchronously and should stay quiet unless synchronization, mutation, or failure needs explanation.
+- a document-level action is blocked by one focused workspace and should route directly to its first actionable task.
+- prior-generation annotations need explicit resolution in the live document without a duplicate preview or extra mode-selection control.
 
 Do not use it to collapse distinct workflows into one conditional component, remove labels from multi-field forms, or force task-specific recovery actions into generic verbs. Retry, Locate PDF…, and Return to annotations remain specific because they perform different recovery transitions (`apps/web/src/save/SaveDestinationDialog.tsx:76-121`).
 
@@ -155,6 +192,9 @@ Do not use shared modal language to make a stale route act like a live dialog. T
 | Reopen an ordinary interrupted session | **Reopen review**, then a second open confirmation | Filename-led title with **Copy Link** and one primary **Reopen** |
 | Reopen with protected work | Always-visible or client-invented draft controls | Expand only after the service returns **Resume draft**, **Discard draft**, and **Open separate copy** |
 | Read an automatic-open preference | Static “Reading…” copy, repeated explanation, and a separate state pill | **Placekeeper**, one inline **Open PDFs automatically** switch, and status only for repairs, mutations, or failures |
+| Reattach an ambiguous annotation | Separate Open and Reattach controls, duplicate PDF preview, technical reason rows | Click the task, select in the live PDF, then **Confirm** under one type-specific heading and state pill |
+| Discard an obsolete prior annotation | Neutral action plus a persistent “Discard recorded” block | Red trash action, concise focused confirmation, then remove the completed task |
+| Recover from blocked reviewed export | Export controls inside the tray or a disabled menu item with no route | Disabled **Export**, concise blocker count, and icon-consistent **Open Annotations** in the PDF-title menu |
 
 ```tsx
 // Share presentation hooks and action vocabulary.
@@ -192,5 +232,7 @@ This is the useful abstraction level: shared visual structure and language rules
 - [Recoverable autosave for editable PDF annotations](../architecture-patterns/recoverable-editable-pdf-annotation-autosave.md) owns the Save Destination and recovery lifecycle that this presentation pattern must preserve.
 - [Adaptive annotation tray framing](../architecture-patterns/adaptive-annotation-tray-framing.md) applies the same presentation-versus-lifecycle ownership boundary to the workspace.
 - [Reliable compact right-docked Reference Tabs](../ui-bugs/reliable-compact-right-docked-reference-tabs.md) shows the complementary browser-validation pattern for compact control reuse.
-- [Contextual Annotation Composer preserves document context during authoring](contextual-annotation-composer-preserves-document-context-during-authoring.md) owns the nonmodal authoring authority, live preview, tray takeover, and restoration lifecycle that this presentation grammar must not absorb.
+- [Contextual Annotation Composer preserves document context during authoring](contextual-annotation-composer-preserves-document-context-during-authoring.md) owns the nonmodal authoring authority, stable provisional projection, tray takeover, and restoration lifecycle that this presentation grammar must not absorb.
 - [Authority boundaries for reloadable local-review URLs](../architecture-patterns/reloadable-local-review-url-authority-boundaries.md) owns the inert stale route, explicit reopen gesture, protected-draft offer, and independent Codex reconnect authority that this recovery presentation must not widen.
+- [Atomic generation transitions for rebuilt PDF reviews](../architecture-patterns/atomic-generation-transitions-for-rebuilt-pdf-reviews.md) owns the unresolved dispositions, pending drafts, and generation transition that this task-first presentation projects.
+- [Full Annotation Reader preserves tray context](full-annotation-reader-preserves-tray-context.md) supplies the mounted list-to-detail and focus-restoration precedent reused by focused reconciliation.
