@@ -373,6 +373,22 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
   });
 
+  test('clears stale export confirmation when a responsive transition closes document actions', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=stale');
+    const trigger = page.getByRole('button', { name: /Open document actions/u });
+    await trigger.click();
+    await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
+    await expect(page.getByText('Export the last successful PDF?')).toBeVisible();
+
+    await page.setViewportSize({ width: 320, height: 900 });
+    await expect(page.getByRole('menu', { name: /Actions for/u })).toHaveCount(0);
+
+    await trigger.click();
+    await expect(page.getByRole('menuitem', { name: 'Export', exact: true })).toBeVisible();
+    await expect(page.getByText('Export the last successful PDF?')).toHaveCount(0);
+  });
+
   test('presents reconciling and failed refresh export states from the document title', async ({ page }) => {
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&refresh=reconciling');
     await page.getByRole('button', { name: /Open document actions/u }).click();
@@ -671,6 +687,333 @@ test.describe('canonical review workflow', () => {
       'data-viewer-page-requests',
       '8,5',
     );
+  });
+
+  test('progressively compacts the top bar into repeatable semantic menus', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?responsive=full');
+    await page.setViewportSize({ width: 320, height: 720 });
+    const chrome = page.locator('[data-review-chrome]');
+    await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'navigationCompact');
+
+    const navigationTrigger = page.getByRole('button', {
+      name: 'Document navigation, current page 3 of 12',
+    });
+    await navigationTrigger.click();
+    const navigationMenu = page.getByRole('menu', { name: 'Document navigation' });
+    await expect(navigationMenu).toBeVisible();
+    await expect(navigationMenu.getByRole('menuitem')).toHaveCount(5);
+    await expect(navigationMenu.getByRole('menuitem').nth(0)).toHaveAttribute('aria-label', 'Previous page');
+    await expect(navigationMenu.getByRole('menuitem').nth(1)).toHaveAttribute('aria-label', 'Current page 3 of 12. Enter a page number');
+    await expect(navigationMenu.getByRole('menuitem').nth(2)).toHaveAttribute('aria-label', 'Next page');
+    await expect(navigationMenu.getByRole('menuitem').nth(3)).toHaveAttribute('aria-label', 'Back in document history');
+    await expect(navigationMenu.getByRole('menuitem').nth(4)).toHaveAttribute('aria-label', 'Forward in document history');
+    const nextPage = navigationMenu.getByRole('menuitem', { name: 'Next page' });
+    await nextPage.click();
+    await expect(navigationMenu).toBeVisible();
+    await expect(nextPage).toBeFocused();
+    await expect(page.getByRole('button', {
+      name: 'Document navigation, current page 4 of 12',
+    })).toBeVisible();
+
+    await navigationMenu.getByRole('menuitem', {
+      name: 'Current page 4 of 12. Enter a page number',
+    }).click();
+    const compactPageInput = page.getByRole('spinbutton', { name: 'Page number' });
+    await compactPageInput.fill('6');
+    await compactPageInput.press('Enter');
+    await expect(navigationMenu).toHaveCount(0);
+    await expect(page.getByRole('button', {
+      name: 'Document navigation, current page 6 of 12',
+    })).toBeFocused();
+
+    const zoomTrigger = page.getByRole('button', {
+      name: 'PDF zoom, current zoom 110 percent',
+    });
+    await zoomTrigger.click();
+    await expect(navigationMenu).toHaveCount(0);
+    const zoomMenu = page.getByRole('menu', { name: 'PDF zoom' });
+    await expect(zoomMenu).toBeVisible();
+    await expect(zoomMenu.getByRole('menuitem').nth(0)).toHaveAttribute('aria-label', 'Zoom out');
+    await expect(zoomMenu.getByRole('menuitem').nth(1)).toHaveAttribute('aria-label', 'Current zoom 110 percent. Enter a zoom percentage');
+    await expect(zoomMenu.getByRole('menuitem').nth(2)).toHaveAttribute('aria-label', 'Zoom in');
+    await expect(zoomMenu.getByRole('menuitem').nth(3)).toHaveAttribute('aria-label', 'Fit PDF to available width');
+    const zoomIn = zoomMenu.getByRole('menuitem', { name: 'Zoom in' });
+    await zoomIn.click();
+    await expect(zoomMenu).toBeVisible();
+    await expect(zoomIn).toBeFocused();
+    await expect(page.getByRole('button', {
+      name: 'PDF zoom, current zoom 120 percent',
+    })).toBeVisible();
+
+    await zoomMenu.getByRole('menuitem', {
+      name: 'Current zoom 120 percent. Enter a zoom percentage',
+    }).click();
+    const compactZoomInput = page.getByRole('spinbutton', { name: 'Zoom percentage' });
+    await compactZoomInput.fill('9999');
+    await compactZoomInput.press('Enter');
+    await expect(zoomMenu).toBeVisible();
+    await expect(compactZoomInput).toHaveAttribute('aria-invalid', 'true');
+    await compactZoomInput.press('Escape');
+    await expect(zoomMenu).toHaveCount(0);
+    await expect(page.getByRole('button', {
+      name: 'PDF zoom, current zoom 120 percent',
+    })).toBeFocused();
+
+    await page.getByRole('button', {
+      name: 'PDF zoom, current zoom 120 percent',
+    }).click();
+    const fitWidth = zoomMenu.getByRole('menuitem', { name: 'Fit PDF to available width' });
+    await fitWidth.click();
+    await expect(zoomMenu).toHaveCount(0);
+    await expect(page.getByRole('button', {
+      name: /PDF zoom, current zoom \d+ percent/u,
+    })).toBeFocused();
+  });
+
+  test('keeps all-disabled compact menus in keyboard ownership', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?responsive=full');
+    await page.setViewportSize({ width: 320, height: 720 });
+    const { workspace } = await openAnnotationsWorkspace(page);
+
+    await page.getByRole('button', { name: 'Make page controls unavailable' }).click();
+    const navigationTrigger = page.getByRole('button', {
+      name: 'Document navigation, page unavailable',
+    });
+    await navigationTrigger.focus();
+    await navigationTrigger.press('Enter');
+    const navigationMenu = page.getByRole('menu', { name: 'Document navigation' });
+    await expect(navigationMenu).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(navigationMenu).toHaveCount(0);
+    await expect(navigationTrigger).toBeFocused();
+    await expect(workspace).toHaveAttribute('aria-expanded', 'true');
+
+    await page.getByRole('button', { name: 'Make zoom controls unavailable' }).click();
+    const zoomTrigger = page.getByRole('button', { name: 'PDF zoom unavailable' });
+    await zoomTrigger.focus();
+    await zoomTrigger.press('Enter');
+    const zoomMenu = page.getByRole('menu', { name: 'PDF zoom' });
+    await expect(zoomMenu).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(zoomMenu).toHaveCount(0);
+    await expect(zoomTrigger).toBeFocused();
+    await expect(workspace).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  test('keeps a portaled compact menu attached when its trigger resizes', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?responsive=full');
+    await page.setViewportSize({ width: 760, height: 720 });
+    const chrome = page.locator('[data-review-chrome]');
+    await chrome.evaluate((element) => { element.style.width = '320px'; });
+    await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'navigationCompact');
+    const navigationTrigger = page.getByRole('button', {
+      name: 'Document navigation, current page 3 of 12',
+    });
+    await navigationTrigger.click();
+    const navigationMenu = page.getByRole('menu', { name: 'Document navigation' });
+    await expect(navigationMenu).toBeVisible();
+    const initialLeft = Number.parseFloat(await navigationMenu.evaluate((element) => element.style.left));
+
+    await navigationTrigger.evaluate((element) => {
+      element.style.transform = 'translateX(40px)';
+    });
+    await expect.poll(async () => Number.parseFloat(
+      await navigationMenu.evaluate((element) => element.style.left),
+    )).not.toBe(initialLeft);
+
+    const geometry = await Promise.all([
+      navigationTrigger.boundingBox(),
+      navigationMenu.boundingBox(),
+    ]);
+    if (!geometry[0] || !geometry[1]) throw new Error('Compact menu geometry is unavailable.');
+    expect(geometry[1].x).toBeLessThanOrEqual(geometry[0].x + geometry[0].width);
+    expect(geometry[1].x + geometry[1].width).toBeGreaterThanOrEqual(geometry[0].x);
+  });
+
+  test('does not let deferred focus close a newer compact menu', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?responsive=full');
+    await page.setViewportSize({ width: 320, height: 720 });
+    await page.getByRole('button', {
+      name: 'PDF zoom, current zoom 110 percent',
+    }).click();
+    const zoomMenu = page.getByRole('menu', { name: 'PDF zoom' });
+    await expect(zoomMenu).toBeVisible();
+    await page.evaluate(() => {
+      const original = window.requestAnimationFrame.bind(window);
+      let held: FrameRequestCallback | null = null;
+      window.requestAnimationFrame = (callback: FrameRequestCallback) => {
+        if (held === null) {
+          held = callback;
+          window.requestAnimationFrame = original;
+          return 2_147_483_647;
+        }
+        return original(callback);
+      };
+      (window as typeof window & { flushHeldTopBarFrame?: () => void }).flushHeldTopBarFrame = () => {
+        const callback = held;
+        held = null;
+        callback?.(performance.now());
+      };
+    });
+    await zoomMenu.getByRole('menuitem', { name: 'Fit PDF to available width' }).click();
+    await expect(zoomMenu).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Edit history' }).click();
+    const historyMenu = page.getByRole('menu', { name: 'Edit history' });
+    await expect(historyMenu).toBeVisible();
+    await page.evaluate(() => {
+      (window as typeof window & { flushHeldTopBarFrame?: () => void }).flushHeldTopBarFrame?.();
+    });
+    await expect(historyMenu).toBeVisible();
+    await expect(historyMenu).toBeFocused();
+  });
+
+  test('selects every rendered presentation and truncates a long title first', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?visual=reading');
+    await page.setViewportSize({ width: 1280, height: 720 });
+    const chrome = page.locator('[data-review-chrome]');
+    await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'expanded');
+
+    const longTitle = chrome.locator(':scope > .review-chrome__identity strong');
+    expect(await longTitle.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+
+    const reachCollapsedPresentation = async (
+      target: 'zoomCompact' | 'historyCompact' | 'navigationCompact',
+      previous: 'expanded' | 'zoomCompact' | 'historyCompact',
+    ) => {
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const widths = await chrome.locator('[data-review-chrome-sizing-rack]').evaluate((rack, names) => {
+          const width = (name: string) => rack.querySelector<HTMLElement>(
+            `[data-review-chrome-candidate="${name}"]`,
+          )?.getBoundingClientRect().width ?? 0;
+          return { previous: width(names.previous), target: width(names.target) };
+        }, { previous, target });
+        expect(widths.previous).toBeGreaterThan(widths.target);
+        const width = Math.max(320, Math.floor((widths.previous + widths.target) / 2));
+        await page.setViewportSize({ width, height: 720 });
+        await page.evaluate(() => new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }));
+        if (await chrome.getAttribute('data-review-chrome-presentation') === target) return;
+      }
+      await expect(chrome).toHaveAttribute('data-review-chrome-presentation', target);
+    };
+
+    await reachCollapsedPresentation('zoomCompact', 'expanded');
+    await reachCollapsedPresentation('historyCompact', 'zoomCompact');
+    await reachCollapsedPresentation('navigationCompact', 'historyCompact');
+
+    for (const target of ['historyCompact', 'zoomCompact', 'expanded'] as const) {
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const required = await chrome.locator(
+          `[data-review-chrome-candidate="${target}"]`,
+        ).evaluate((element) => element.getBoundingClientRect().width);
+        await page.setViewportSize({ width: Math.ceil(required + 24), height: 720 });
+        await page.evaluate(() => new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }));
+        if (await chrome.getAttribute('data-review-chrome-presentation') === target) break;
+      }
+      await expect(chrome).toHaveAttribute('data-review-chrome-presentation', target);
+    }
+  });
+
+  test('keeps the top bar to one contained 58px row across supported widths', async ({ page }) => {
+    await page.locator('#root').evaluate((element) => {
+      element.setAttribute('data-production-root', 'true');
+    });
+    for (const width of [1280, 760, 520, 390, 320]) {
+      await page.setViewportSize({ width, height: 720 });
+      const chrome = page.locator('[data-review-chrome]');
+      await expect(chrome).toHaveCSS('height', '58px');
+      await page.evaluate(() => new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }));
+
+      const geometry = await chrome.evaluate((element) => {
+        const identity = element.querySelector<HTMLElement>(':scope > .review-chrome__identity');
+        const controls = element.querySelector<HTMLElement>(':scope > .review-chrome__viewer-controls');
+        const actions = element.querySelector<HTMLElement>(':scope > .review-chrome__actions');
+        if (!identity || !controls || !actions) throw new Error('Review chrome geometry is incomplete.');
+        const chromeBounds = element.getBoundingClientRect();
+        const identityBounds = identity.getBoundingClientRect();
+        const controlsBounds = controls.getBoundingClientRect();
+        const actionsBounds = actions.getBoundingClientRect();
+        return {
+          clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+          height: chromeBounds.height,
+          identity: identityBounds.toJSON(),
+          controls: controlsBounds.toJSON(),
+          actions: actionsBounds.toJSON(),
+        };
+      });
+
+      expect(geometry.height).toBe(58);
+      expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
+      expect(geometry.identity.x + geometry.identity.width)
+        .toBeLessThanOrEqual(geometry.controls.x + 0.5);
+      expect(geometry.controls.x + geometry.controls.width)
+        .toBeLessThanOrEqual(geometry.actions.x + 0.5);
+      for (const item of [geometry.identity, geometry.controls, geometry.actions]) {
+        expect(item.y).toBeGreaterThanOrEqual(-0.5);
+        expect(item.y + item.height).toBeLessThanOrEqual(58.5);
+      }
+    }
+  });
+
+  test('keeps compact top-bar controls touch-sized on coarse pointers', async ({ browser }) => {
+    const context = await browser.newContext({
+      hasTouch: true,
+      viewport: { width: 320, height: 720 },
+    });
+    const touchPage = await context.newPage();
+    try {
+      await touchPage.goto('/test/acceptance/review-harness/index.html?responsive=full');
+      await touchPage.locator('#root').evaluate((element) => {
+        element.setAttribute('data-production-root', 'true');
+      });
+      expect(await touchPage.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+
+      const chrome = touchPage.locator('[data-review-chrome]');
+      for (const width of [760, 520, 320]) {
+        await touchPage.setViewportSize({ width, height: 720 });
+        await touchPage.evaluate(() => new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }));
+        const chromeButtons = chrome.locator(':scope > .review-chrome__identity button, :scope > .review-chrome__viewer-controls button');
+        const chromeButtonHeights = await chromeButtons.evaluateAll((buttons) => (
+          buttons.map((button) => button.getBoundingClientRect().height)
+        ));
+        expect(chromeButtonHeights.length).toBeGreaterThan(0);
+        expect(chromeButtonHeights.every((height) => height >= 44)).toBe(true);
+        const sizingIconWidths = await chrome.locator(
+          '[data-review-chrome-sizing-rack] .review-chrome__icon-control',
+        ).evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().width));
+        expect(sizingIconWidths.length).toBeGreaterThan(0);
+        expect(sizingIconWidths.every((iconWidth) => iconWidth >= 44)).toBe(true);
+        const geometry = await chrome.evaluate((element) => ({
+          clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+        }));
+        expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
+      }
+
+      await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'navigationCompact');
+
+      await touchPage.getByRole('button', {
+        name: 'Document navigation, current page 3 of 12',
+      }).click();
+      const menu = touchPage.getByRole('menu', { name: 'Document navigation' });
+      await expect(menu).toBeVisible();
+      const menuButtonHeights = await menu.locator('button').evaluateAll((buttons) => (
+        buttons.map((button) => button.getBoundingClientRect().height)
+      ));
+      expect(menuButtonHeights.length).toBeGreaterThan(0);
+      for (const height of menuButtonHeights) expect(height).toBeGreaterThanOrEqual(44);
+    } finally {
+      await context.close();
+    }
   });
 
   test('cancels page editing with Escape without closing the Annotation Tray', async ({ page }) => {
@@ -1006,7 +1349,7 @@ test.describe('canonical review workflow', () => {
   test('does not offer zoom editing or Fit Width while zoom is unavailable', async ({ page }) => {
     await page.getByRole('button', { name: 'Make zoom controls unavailable' }).click();
 
-    await expect(page.getByLabel('Zoom level')).toHaveText('—%');
+    await expect(page.getByLabel('Zoom unavailable')).toHaveText('—%');
     await expect(page.getByRole('spinbutton', { name: 'Zoom percentage' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Enter a zoom percentage/u })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Zoom out' })).toBeDisabled();

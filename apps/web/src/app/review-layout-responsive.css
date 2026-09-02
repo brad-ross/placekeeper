@@ -59,22 +59,6 @@
     --comment-composer-anchor-size: var(--review-control-touch);
   }
 
-  .review-chrome {
-    height: auto;
-    min-height: var(--review-chrome-height);
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: .3rem;
-    padding-block: .35rem;
-  }
-
-  .review-chrome__viewer-controls {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    flex-wrap: wrap;
-    justify-self: center;
-    justify-content: center;
-  }
-
   .annotation-peek {
     top: auto;
     right: .4rem;
@@ -109,6 +93,7 @@
 
 @media (max-width: 360px) {
   .review-chrome {
+    gap: .4rem;
     padding-inline: .4rem;
   }
 
@@ -118,8 +103,7 @@
   }
 
   .review-chrome__viewer-controls {
-    column-gap: .625rem;
-    row-gap: .25rem;
+    column-gap: .4rem;
   }
 
   .review-chrome__stat,
@@ -200,6 +184,7 @@
   }
 
   .review-chrome button,
+  .top-bar-menu__surface button,
   .review-context-palette button,
   .review-page-menu button,
   .review-workspace button,

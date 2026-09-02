@@ -797,10 +797,9 @@ describe("one production review tree", () => {
     />);
     expect(html).toContain("Real shared PDF viewer");
     expect(html).not.toContain("aria-label=\"Actions\"");
-    expect(html).toContain('aria-label="Back in document history"');
-    expect(html).toContain('aria-label="Forward in document history"');
-    expect(html).toContain('aria-label="Undo"');
-    expect(html).toContain('aria-label="Redo"');
+    expect(html).toContain('aria-label="Edit history"');
+    expect(html).toContain('aria-label="Document navigation, page unavailable"');
+    expect(html).toContain('aria-label="PDF zoom unavailable"');
     expect(html).toContain("paper.pdf, not saved. Open automatic save options");
     expect(html).toContain('data-save-phase="not-saved"');
     expect(html).toContain("Not saved");

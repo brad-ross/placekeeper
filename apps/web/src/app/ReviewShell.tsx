@@ -1243,6 +1243,7 @@ export function ReviewShell(props: ReviewShellProps) {
       && (
         (props.linkActionRequest && event.target.closest('[data-link-action-popover]') !== null)
         || event.target.closest('[data-row-actions-open="true"]') !== null
+        || event.target.closest('[data-top-bar-menu], [data-document-actions-open="true"]') !== null
       )
     ) return;
     const editable = isEditableTarget(event.target);

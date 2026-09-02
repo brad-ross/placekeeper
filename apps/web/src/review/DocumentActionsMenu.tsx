@@ -10,7 +10,7 @@ import {
 
 import type { ReviewStateSummaryV1 } from '../../../../packages/core/src/live-context.js';
 import type { GenerationRefreshStatus } from '../generation-status.js';
-import { compositeFocusIndex, enabledMenuItems } from './menu-focus.js';
+import { enabledMenuItems, menuRovingFocusIndex } from './menu-focus.js';
 import { ReviewIcon } from './ReviewIcon.js';
 
 export interface ReviewExportPresentation {
@@ -69,6 +69,9 @@ export interface DocumentActionsMenuProps {
   readonly presentation: ReviewExportPresentation;
   readonly onExport: (confirmPossiblyStale?: true) => Promise<unknown>;
   readonly onOpenAnnotations?: () => void;
+  readonly open?: boolean;
+  readonly onOpenChange?: (open: boolean) => void;
+  readonly onPendingChange?: (pending: boolean) => void;
 }
 
 type ExportOutcome = 'idle' | 'pending' | 'success' | 'failure';
@@ -87,8 +90,12 @@ export function DocumentActionsMenu({
   presentation,
   onExport,
   onOpenAnnotations,
+  open: controlledOpen,
+  onOpenChange,
+  onPendingChange,
 }: DocumentActionsMenuProps) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
   const [staleConfirmation, setStaleConfirmation] = useState(false);
   const [outcome, setOutcome] = useState<ExportOutcome>('idle');
   const generatedId = useId().replaceAll(':', '');
@@ -102,12 +109,17 @@ export function DocumentActionsMenu({
   const pendingRef = useRef(false);
   const pending = outcome === 'pending';
 
-  const closeAndRestore = () => {
+  const setOpen = (nextOpen: boolean) => {
+    if (controlledOpen === undefined) setUncontrolledOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+  };
+
+  const closeAndRestore = (restoreFocus = true) => {
     if (pending) return;
     setOpen(false);
     setStaleConfirmation(false);
     setOutcome('idle');
-    requestAnimationFrame(() => triggerRef.current?.focus({ preventScroll: true }));
+    if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus({ preventScroll: true }));
   };
 
   const closeForAction = () => {
@@ -127,16 +139,25 @@ export function DocumentActionsMenu({
     if (!open) return;
     const outside = (event: PointerEvent) => {
       if (event.target instanceof Node && rootRef.current?.contains(event.target)) return;
-      closeAndRestore();
+      const switchingTopBarMenu = event.target instanceof Element
+        && event.target.closest('[data-review-chrome-group]') !== null;
+      closeAndRestore(!switchingTopBarMenu);
     };
     document.addEventListener('pointerdown', outside);
     return () => document.removeEventListener('pointerdown', outside);
+  }, [open, pending]);
+
+  useEffect(() => {
+    if (open || pending) return;
+    setStaleConfirmation(false);
+    setOutcome('idle');
   }, [open, pending]);
 
   const exportReviewedPdf = async (confirmPossiblyStale?: true) => {
     if (pendingRef.current) return;
     pendingRef.current = true;
     setOutcome('pending');
+    onPendingChange?.(true);
     try {
       await onExport(confirmPossiblyStale);
       setStaleConfirmation(false);
@@ -146,6 +167,7 @@ export function DocumentActionsMenu({
       setOutcome('failure');
     } finally {
       pendingRef.current = false;
+      onPendingChange?.(false);
     }
     requestAnimationFrame(() => exportRef.current?.focus({ preventScroll: true }));
   };
@@ -158,9 +180,12 @@ export function DocumentActionsMenu({
       return;
     }
     const items = enabledMenuItems(event.currentTarget);
-    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
-    if (currentIndex < 0) return;
-    const nextIndex = compositeFocusIndex(currentIndex, items.length, event.key);
+    const nextIndex = menuRovingFocusIndex({
+      items,
+      activeElement: document.activeElement,
+      eventTarget: event.target,
+      key: event.key,
+    });
     if (nextIndex === null) return;
     event.preventDefault();
     items[nextIndex]?.focus({ preventScroll: true });
@@ -230,6 +255,7 @@ export function DocumentActionsMenu({
             ref={confirmationRef}
             type="button"
             role="menuitem"
+            title="Cancel export confirmation"
             aria-disabled={pending}
             onClick={() => {
               if (pending) return;
@@ -240,6 +266,7 @@ export function DocumentActionsMenu({
           <button
             type="button"
             role="menuitem"
+            title="Confirm export"
             aria-disabled={pending}
             onClick={() => void exportReviewedPdf(true)}
           ><ReviewIcon name="download" size={15} /><span>Confirm export</span></button>
@@ -256,6 +283,7 @@ export function DocumentActionsMenu({
           ref={exportRef}
           type="button"
           role="menuitem"
+          title={exportLabel}
           className="document-actions__export"
           aria-disabled={exportUnavailable}
           {...(exportDescriptionIds === '' ? {} : { 'aria-describedby': exportDescriptionIds })}
@@ -286,6 +314,7 @@ export function DocumentActionsMenu({
           <button
             type="button"
             role="menuitem"
+            title="Open Annotations"
             className="review-button review-button--secondary document-actions__annotations-link"
             onClick={() => {
               closeForAction();

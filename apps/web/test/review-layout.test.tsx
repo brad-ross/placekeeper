@@ -17,11 +17,17 @@ import {
 } from '../src/review/FullAnnotationReader.js';
 import {
   ReviewChrome,
+  resolveTopBarMenuRequest,
   resolveZoomDraft,
   validPageNumber,
   validZoomPercent,
   zoomEditorKeyAction,
 } from '../src/review/ReviewChrome.js';
+import { DocumentActionsMenu } from '../src/review/DocumentActionsMenu.js';
+import {
+  enabledMenuItems,
+  menuRovingFocusIndex,
+} from '../src/review/menu-focus.js';
 import { ReviewIcon } from '../src/review/ReviewIcon.js';
 import {
   ROW_ACTION_CONTAINER_NAME,
@@ -107,6 +113,87 @@ const unresolvedAnnotation: ReviewItem = {
 };
 
 describe('review shell layout and accessibility contract', () => {
+  it('coordinates one active top-bar menu while pending export owns dismissal', () => {
+    expect(resolveTopBarMenuRequest({
+      activeMenu: 'navigation',
+      requestedMenu: 'zoom',
+      requestedOpen: true,
+      documentMenuPending: false,
+    })).toBe('zoom');
+    expect(resolveTopBarMenuRequest({
+      activeMenu: 'zoom',
+      requestedMenu: 'history',
+      requestedOpen: true,
+      documentMenuPending: true,
+    })).toBe('document');
+    expect(resolveTopBarMenuRequest({
+      activeMenu: 'document',
+      requestedMenu: 'navigation',
+      requestedOpen: true,
+      documentMenuPending: true,
+    })).toBe('document');
+    expect(resolveTopBarMenuRequest({
+      activeMenu: 'document',
+      requestedMenu: 'document',
+      requestedOpen: false,
+      documentMenuPending: true,
+    })).toBe('document');
+    expect(resolveTopBarMenuRequest({
+      activeMenu: 'document',
+      requestedMenu: 'zoom',
+      requestedOpen: true,
+      documentMenuPending: false,
+    })).toBe('zoom');
+  });
+
+  it('renders document actions through its controlled open seam', () => {
+    const html = renderToStaticMarkup(
+      <DocumentActionsMenu
+        documentTitle="paper.pdf"
+        savedLabel="Saved"
+        open
+        onOpenChange={() => undefined}
+        presentation={{
+          canExport: true,
+          requiresStaleConfirmation: false,
+          annotationBlocked: false,
+          message: '',
+        }}
+        onExport={async () => undefined}
+      />,
+    );
+
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('role="menu"');
+    expect(html).toContain('data-document-actions-open="true"');
+  });
+
+  it('includes inputs in menu focus order without roving editable key presses', () => {
+    const action = { tagName: 'BUTTON' } as HTMLButtonElement;
+    const input = { tagName: 'INPUT' } as HTMLInputElement;
+    const surface = {
+      querySelectorAll: (selector: string) => {
+        expect(selector).toContain('input');
+        expect(selector).toContain('[aria-disabled="true"]');
+        return [action, input];
+      },
+    } as unknown as HTMLElement;
+
+    expect(enabledMenuItems(surface)).toEqual([action, input]);
+    expect(menuRovingFocusIndex({
+      items: [action, input],
+      activeElement: action,
+      eventTarget: action,
+      key: 'ArrowDown',
+    })).toBe(1);
+    expect(menuRovingFocusIndex({
+      items: [action, input],
+      activeElement: input,
+      eventTarget: input,
+      key: 'ArrowDown',
+    })).toBeNull();
+  });
+
   it('stacks generated-PDF status and command errors as top-left viewer toasts', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
@@ -481,7 +568,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toMatch(/class="[^"]*review-icon[^"]*"/);
   });
 
-  it('groups edit history, document navigation, and zoom in task order', () => {
+  it('groups compact edit history, document navigation, and zoom in task order before measurement', () => {
     const html = renderToStaticMarkup(
       <ReviewChrome
         documentTitle="paper.pdf"
@@ -499,34 +586,83 @@ describe('review shell layout and accessibility contract', () => {
     );
     const centerStart = html.indexOf('aria-label="PDF editing, navigation, and zoom"');
     const editGroup = html.indexOf('aria-label="Edit history"');
-    const navigationGroup = html.indexOf('aria-label="Document navigation"');
-    const zoomGroup = html.indexOf('aria-label="PDF zoom"');
+    const navigationGroup = html.indexOf('aria-label="Document navigation, current page 3 of 12"');
+    const zoomGroup = html.indexOf('aria-label="PDF zoom, current zoom 100 percent"');
 
     expect(centerStart).toBeGreaterThanOrEqual(0);
     const orderedControls = [
       editGroup,
-      html.indexOf('aria-label="Undo"'),
-      html.indexOf('aria-label="Redo"'),
       navigationGroup,
-      html.indexOf('aria-label="Back in document history"'),
-      html.indexOf('aria-label="Forward in document history"'),
-      html.indexOf('aria-label="Previous page"'),
-      html.indexOf('aria-label="Current page 3 of 12. Enter a page number"'),
-      html.indexOf('aria-label="Next page"'),
       zoomGroup,
-      html.indexOf('aria-label="Zoom out"'),
-      html.indexOf('aria-label="Zoom in"'),
-      html.indexOf('aria-label="Zoom level"'),
-      html.indexOf('aria-label="Fit PDF to available width"'),
     ];
     for (const [index, control] of orderedControls.entries()) {
       expect(control).toBeGreaterThan(index === 0 ? centerStart : orderedControls[index - 1]!);
     }
     expect(html).not.toContain('aria-label="Actions"');
-    expect(html).toMatch(/aria-label="Previous page"[^>]*>.*lucide-chevron-left/u);
-    expect(html).toMatch(/data-main-history="back"[^>]*>.*lucide-arrow-left/u);
-    expect(html).toMatch(/aria-label="Next page"[^>]*>.*lucide-chevron-right/u);
-    expect(html).toMatch(/data-main-history="forward"[^>]*>.*lucide-arrow-right/u);
+    expect(html).toContain('data-review-chrome-presentation="navigationCompact"');
+  });
+
+  it('starts with a compact measured presentation and an inert sizing rack', () => {
+    const html = renderChrome(true, true);
+
+    expect(html).toContain('data-review-chrome-presentation="navigationCompact"');
+    expect(html).toMatch(/data-review-chrome-sizing-rack[^>]*aria-hidden="true"[^>]*inert=""/u);
+    for (const presentation of ['expanded', 'zoomCompact', 'historyCompact', 'navigationCompact']) {
+      expect(html).toContain(`data-review-chrome-candidate="${presentation}"`);
+    }
+    expect(html).toContain('aria-label="Document navigation, current page 3 of 12"');
+    expect(html).toContain('aria-label="PDF zoom, current zoom 100 percent"');
+    expect(html).toContain('aria-label="Edit history"');
+  });
+
+  it('measures every fixed identity and icon footprint in the sizing rack', () => {
+    const html = renderToStaticMarkup(
+      <ReviewChrome
+        documentTitle="A very long paper title that must be allowed to truncate.pdf"
+        savePendingDestination
+        controls={viewerControls}
+        viewerState={viewerControls.snapshot()}
+        copyLink={{
+          getLink: () => 'placekeeper:///tmp/paper.pdf#v=1&page=1',
+          writeText: async () => undefined,
+        }}
+        canUndo={false}
+        canRedo={false}
+        onUndo={vi.fn()}
+        onRedo={vi.fn()}
+      />,
+    );
+
+    const rack = html.slice(html.indexOf('data-review-chrome-sizing-rack'));
+    expect(rack.match(/Protected Recovery/gu)).toHaveLength(4);
+    expect(rack).toContain('review-chrome__icon-control');
+    expect(rack).toContain('review-chrome__link');
+    expect(rack).toContain('review-chrome__save-recovery');
+  });
+
+  it('keeps responsive review chrome in one fixed-height row', () => {
+    expect(foundationStyles).toMatch(
+      /\.review-chrome\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) max-content max-content;[^}]*height:\s*var\(--review-chrome-height\);[^}]*overflow:\s*visible;/u,
+    );
+    expect(foundationStyles).toMatch(
+      /\.review-chrome__identity\s*\{[^}]*min-width:\s*0;/u,
+    );
+    expect(foundationStyles).toMatch(/\.review-chrome__link\s*\{[^}]*flex:\s*none;/u);
+    expect(foundationStyles).toMatch(
+      /\.review-chrome__viewer-controls\s*\{[^}]*min-width:\s*max-content;[^}]*flex-wrap:\s*nowrap;/u,
+    );
+    expect(foundationStyles).toMatch(
+      /\.review-chrome__sizing-candidate \.review-chrome__identity\s*\{[^}]*width:\s*max-content;/u,
+    );
+    expect(foundationStyles).toMatch(
+      /\.review-chrome__sizing-candidate \.review-chrome__save-identity strong\s*\{[^}]*width:\s*0;/u,
+    );
+    expect(responsiveStyles).not.toMatch(
+      /@media \(max-width: 820px\)[\s\S]*?\.review-chrome\s*\{[^}]*height:\s*auto;/u,
+    );
+    expect(responsiveStyles).not.toMatch(
+      /\.review-chrome__viewer-controls\s*\{[^}]*grid-row:\s*2;[^}]*flex-wrap:\s*wrap;/u,
+    );
   });
 
   it('exposes annotation kind, ownership, and state hooks with a read-only peek', () => {
@@ -704,11 +840,9 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('data-review-nested-host');
     expect(html.match(/Document canvas/g)).toHaveLength(1);
     expect(html).not.toContain('Codex');
-    expect(html).toContain('aria-label="Undo"');
-    expect(html).toContain('aria-label="Redo"');
-    expect(html).toMatch(/data-main-history="back"[^>]*aria-label="Back in document history"[^>]*disabled=""/u);
-    expect(html).toMatch(/data-main-history="forward"[^>]*aria-label="Forward in document history"[^>]*disabled=""/u);
-    expect(html.match(/data-main-history=/g)).toHaveLength(2);
+    expect(html).toContain('aria-label="Edit history"');
+    expect(html).toContain('aria-label="Document navigation, page unavailable"');
+    expect(html).toContain('aria-label="PDF zoom unavailable"');
     expect(html).not.toContain('aria-label="Workspace (0 annotations)"');
     expect(html).toContain('data-workspace-edge-rail="right"');
     expect(html).not.toContain('data-workspace-edge-rail="bottom"');
@@ -1177,25 +1311,23 @@ describe('review shell layout and accessibility contract', () => {
 
     expect(html).toContain('Page controls become available when PDF navigation is ready.');
     expect(html).toContain('Zoom controls become available when PDF zoom is ready.');
-    expect(html).toMatch(/aria-label="Previous page"[^>]*disabled=""/);
-    expect(html).toMatch(/aria-label="Zoom in"[^>]*disabled=""/);
+    expect(html).toContain('aria-label="Document navigation, page unavailable"');
+    expect(html).toContain('aria-label="PDF zoom unavailable"');
   });
 
   it('keeps unavailable page status noneditable with its existing description', () => {
     const html = renderChrome(false);
 
-    expect(html).toContain('aria-label="Current page"');
-    expect(html).toContain('>— / —</span>');
+    expect(html).toContain('aria-label="Document navigation, page unavailable"');
+    expect(html).toContain('>— / —</button>');
     expect(html).not.toContain('aria-label="Page number"');
-    expect(html).not.toContain('review-chrome__page-trigger');
     expect(html).toContain('Page controls become available when PDF navigation is ready.');
   });
 
   it('renders the ready current page as an activation control with numeric metadata and visible total', () => {
     const html = renderChrome(true);
 
-    expect(html).toContain('class="review-chrome__page-trigger review-chrome__stat"');
-    expect(html).toContain('aria-label="Current page 3 of 12. Enter a page number"');
+    expect(html).toContain('aria-label="Document navigation, current page 3 of 12"');
     expect(html).toContain('>3<span aria-hidden="true"> / 12</span></button>');
     expect(html).not.toContain('aria-label="Page number"');
   });
@@ -1210,27 +1342,13 @@ describe('review shell layout and accessibility contract', () => {
     expect(validPageNumber('', 12)).toBeUndefined();
   });
 
-  it('renders ready zoom as an editable percentage beside a semantic Fit Width action', () => {
+  it('renders ready page and zoom context in compact triggers before measurement', () => {
     const html = renderChrome(true, true);
 
-    const zoomOutIndex = html.indexOf('aria-label="Zoom out"');
-    const zoomInIndex = html.indexOf('aria-label="Zoom in"');
-    const zoomLevelIndex = html.indexOf('aria-label="Zoom level"');
-    const fitWidthIndex = html.indexOf('aria-label="Fit PDF to available width"');
-
-    expect(html).toContain('class="review-chrome__zoom-trigger review-chrome__stat"');
-    expect(html).toContain('class="review-chrome__zoom-control" data-review-stat="true" aria-label="Zoom level"');
-    expect(html).toContain('aria-label="Current zoom 100 percent. Enter a zoom percentage"');
+    expect(html).toContain('aria-label="PDF zoom, current zoom 100 percent"');
     expect(html).toContain('>100<span aria-hidden="true">%</span></button>');
     expect(html).not.toContain('aria-label="Zoom percentage"');
-    expect(html).toMatch(
-      /aria-label="Fit PDF to available width"[^>]*>.*lucide-move-horizontal/u,
-    );
-    expect(html).not.toMatch(/aria-label="Fit PDF to available width"[^>]*disabled=""/u);
-    expect(html.match(/data-review-zoom-action=/g)).toHaveLength(3);
-    expect(zoomOutIndex).toBeLessThan(zoomInIndex);
-    expect(zoomInIndex).toBeLessThan(zoomLevelIndex);
-    expect(zoomLevelIndex).toBeLessThan(fitWidthIndex);
+    expect(html).toContain('data-review-chrome-presentation="navigationCompact"');
   });
 
   it('accepts only whole zoom percentages within the configured viewer limits', () => {
@@ -1262,14 +1380,9 @@ describe('review shell layout and accessibility contract', () => {
   it('keeps unavailable zoom noneditable and disables every zoom action with one explanation', () => {
     const html = renderChrome(false);
 
-    expect(html).toContain('aria-label="Zoom level">—%</span>');
-    expect(html).not.toContain('review-chrome__zoom-trigger');
+    expect(html).toContain('aria-label="PDF zoom unavailable"');
+    expect(html).toContain('>—%</button>');
     expect(html).not.toContain('aria-label="Zoom percentage"');
-    for (const label of ['Zoom out', 'Zoom in', 'Fit PDF to available width']) {
-      expect(html).toMatch(
-        new RegExp(`aria-label="${label}"[^>]*aria-describedby="viewer-zoom-controls-readiness"[^>]*disabled=""`),
-      );
-    }
     expect(html).toContain('Zoom controls become available when PDF zoom is ready.');
   });
 

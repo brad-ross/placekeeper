@@ -3119,7 +3119,7 @@ test("one installed-style browser tree preserves review state across responsive 
   expect(browserErrors).toEqual([]);
 });
 
-test('edits the current page in a real multi-page viewer without losing adjacent state', async ({ page }) => {
+test('edits the current page and preserves real viewer state through responsive top-bar changes', async ({ page }) => {
   const launched = await host.open({
     pdfPath: await freshProductionPdf(multiPagePdf),
     sourceRootPath: sourceRoot,
@@ -3162,6 +3162,7 @@ test('edits the current page in a real multi-page viewer without losing adjacent
   await expect(noteRow).toBeVisible();
   await page.getByRole('button', { name: 'Zoom in' }).click();
   const zoomBeforeNavigation = await page.getByLabel('Zoom level').textContent();
+  if (zoomBeforeNavigation === null) throw new Error('Zoom context is unavailable before resizing.');
 
   const currentPage = page.getByRole('button', {
     name: 'Current page 1 of 2. Enter a page number',
@@ -3186,6 +3187,81 @@ test('edits the current page in a real multi-page viewer without losing adjacent
   await expect(noteRow).toBeVisible();
   expect(host.broker.state(launched.sessionId)?.revision).toBe(1);
   expect(host.broker.state(launched.sessionId)?.items).toHaveLength(1);
+
+  const viewerViewport = page.locator('[data-viewer-framing-viewport]');
+  await workspace.evaluate((element) => {
+    element.setAttribute('data-responsive-chrome-mount-probe', 'stable');
+  });
+  await page.getByRole('button', { name: 'Edit Page Note annotation on page 1' }).click();
+  const draftComposer = page.getByRole('region', { name: 'Edit Page Note' });
+  const draftEditor = draftComposer.getByRole('textbox', { name: 'Comment' });
+  await draftEditor.fill('Keep this draft through top-bar recomposition.');
+  const pageBeforeResize = await page.getByLabel('Current page').textContent();
+  if (pageBeforeResize === null) throw new Error('Current page context is unavailable before resizing.');
+  const pageMatch = pageBeforeResize.match(/^(\d+) \/ (\d+)$/u);
+  if (!pageMatch) throw new Error('Current page context is unavailable before resizing.');
+  const scrollMetrics = await viewerViewport.evaluate((element) => ({
+    maximum: Math.max(0, element.scrollHeight - element.clientHeight),
+    top: element.scrollTop,
+  }));
+  const requestedScroll = scrollMetrics.top > scrollMetrics.maximum / 2
+    ? Math.max(0, scrollMetrics.top - 80)
+    : Math.min(scrollMetrics.maximum, scrollMetrics.top + 80);
+  expect(requestedScroll).not.toBe(scrollMetrics.top);
+  await viewerViewport.dispatchEvent('wheel', {
+    bubbles: true,
+    deltaY: requestedScroll > scrollMetrics.top ? 80 : -80,
+  });
+  await viewerViewport.evaluate((element, top) => { element.scrollTop = top; }, requestedScroll);
+  await expect.poll(() => viewerViewport.evaluate((element) => element.scrollTop))
+    .toBeCloseTo(requestedScroll, 0);
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  const scrollBeforeResize = await viewerViewport.evaluate((element) => element.scrollTop);
+  expect(scrollBeforeResize).toBeGreaterThan(0);
+  const expectPreservedScroll = async () => {
+    // WebKit can settle by one compact-control width after the runway switches axes.
+    await expect.poll(() => viewerViewport.evaluate((element, desiredTop) => {
+      const maximum = Math.max(0, element.scrollHeight - element.clientHeight);
+      return Math.abs(element.scrollTop - Math.min(desiredTop, maximum));
+    }, scrollBeforeResize)).toBeLessThan(36);
+  };
+
+  await page.setViewportSize({ width: 320, height: 900 });
+  const chrome = page.locator('[data-review-chrome]');
+  await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'navigationCompact');
+  await expect(page.getByRole('button', {
+    name: `Document navigation, current page ${pageMatch[1]} of ${pageMatch[2]}`,
+  })).toBeVisible();
+  await expect(page.getByRole('button', {
+    name: `PDF zoom, current zoom ${zoomBeforeNavigation.replace('%', '')} percent`,
+  })).toBeVisible();
+  await expect(draftEditor).toHaveValue('Keep this draft through top-bar recomposition.');
+  await expect(page.locator('#review-tools-workspace'))
+    .toHaveAttribute('data-workspace-presentation', 'bottom');
+  await expect(page.locator('#review-tools-workspace'))
+    .toHaveAttribute('data-tools-workspace-open', 'true');
+  await expect(workspace).toHaveAttribute('data-responsive-chrome-mount-probe', 'stable');
+  await expectPreservedScroll();
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'expanded');
+  await expect(page.getByLabel('Current page')).toHaveText(pageBeforeResize);
+  await expect(page.getByLabel('Zoom level')).toHaveText(zoomBeforeNavigation);
+  await expect(draftEditor).toHaveValue('Keep this draft through top-bar recomposition.');
+  await expect(page.locator('#review-tools-workspace'))
+    .toHaveAttribute('data-workspace-presentation', 'right');
+  await expect(page.locator('#review-tools-workspace'))
+    .toHaveAttribute('data-authoring-takeover', 'true');
+  await expect(workspace).toHaveAttribute('data-responsive-chrome-mount-probe', 'stable');
+  await expectPreservedScroll();
+  await draftComposer.getByRole('button', { name: 'Apply', exact: true }).click();
+  await expect(draftComposer).toHaveCount(0);
+  await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe('clean');
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(2);
+  expect(host.broker.state(launched.sessionId)?.items[0]?.payload)
+    .toEqual(expect.objectContaining({ comment: 'Keep this draft through top-bar recomposition.' }));
   expect(browserErrors).toEqual([]);
 });
 
@@ -3901,17 +3977,31 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
 
 test('uses the same compact review tree for a narrow VS Code embed launch', async ({ page }) => {
   const launched = await host.open({
-    pdfPath: await freshProductionPdf(pdf),
+    pdfPath: await freshProductionPdf(referencePdf),
     sourceRootPath: sourceRoot,
     surface: 'vscode',
     fork: true,
   });
   if (!launched.ok || launched.kind === 'recovery-offered') throw new Error('VS Code embed launch failed');
+  const initialState = host.broker.state(launched.sessionId);
+  if (!initialState) throw new Error('VS Code embed review state is missing.');
+  await host.broker.acceptMutation(
+    launched.sessionId,
+    addPageNote(
+      initialState,
+      0,
+      { x: 80, y: 160, width: 18, height: 18 },
+      'Compact menu history probe.',
+    ),
+  );
   expect(new URL(launched.url).searchParams.get('embed')).toBe('vscode');
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto(launched.url);
+  await chooseFreshCopyDestination(page);
   await expect(page.locator('[data-production-review]')).toHaveCount(1);
-  await expect(page.locator('[data-review-chrome]')).toHaveCount(1);
+  const chrome = page.locator('[data-review-chrome]');
+  await expect(chrome).toHaveCount(1);
+  await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'navigationCompact');
   await expect(page.locator('.pdf-workspace')).toHaveCount(1);
   const pdfPage = page.locator("[data-page-index='0']").first();
   await expect(pdfPage).toBeVisible();
@@ -3922,22 +4012,71 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
     const box = await page.locator('#review-tools-workspace').boundingBox();
     return box === null ? Number.POSITIVE_INFINITY : Math.abs(box.x + box.width - 320);
   }).toBeLessThanOrEqual(1);
-  await page.getByRole('button', { name: /Highlight · Page 1 · Existing supported highlight/iu }).click();
-  await expect.poll(async () => {
-    const box = await page.locator('#review-tools-workspace').boundingBox();
-    return box === null ? Number.POSITIVE_INFINITY : Math.abs(box.x + box.width - 320);
-  }).toBeLessThanOrEqual(1);
 
-  const zoomBefore = await page.getByLabel('Zoom level').textContent();
-  await page.getByRole('button', { name: 'Zoom in' }).click();
-  await expect(page.getByLabel('Zoom level')).not.toHaveText(zoomBefore ?? '');
+  const expectMenuInsideViewport = async (menu: ReturnType<Page['locator']>) => {
+    const bounds = await menu.boundingBox();
+    if (!bounds) throw new Error('Compact top-bar menu has no bounds.');
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.y).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(320);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(720);
+  };
+
+  const historyTrigger = page.getByRole('button', { name: 'Edit history' });
+  await historyTrigger.click();
+  const historyMenu = page.getByRole('menu', { name: 'Edit history' });
+  await expect(historyMenu).toBeVisible();
+  await expectMenuInsideViewport(historyMenu);
+  const undo = historyMenu.getByRole('menuitem', { name: 'Undo' });
+  await expect(undo).toBeEnabled();
+  await undo.click();
+  await expect(historyMenu).toBeVisible();
+  const redo = historyMenu.getByRole('menuitem', { name: 'Redo' });
+  await expect(redo).toBeEnabled();
+  await redo.click();
+  await expect(historyMenu).toBeVisible();
+
+  const navigationTrigger = page.getByRole('button', {
+    name: 'Document navigation, current page 1 of 4',
+  });
+  await navigationTrigger.click();
+  await expect(historyMenu).toHaveCount(0);
+  const navigationMenu = page.getByRole('menu', { name: 'Document navigation' });
+  await expect(navigationMenu).toBeVisible();
+  await expectMenuInsideViewport(navigationMenu);
+  const nextPage = navigationMenu.getByRole('menuitem', { name: 'Next page' });
+  await nextPage.click();
+  await expect(navigationMenu).toBeVisible();
+  await expect(nextPage).toBeFocused();
+  await expect(page.getByRole('button', {
+    name: 'Document navigation, current page 2 of 4',
+  })).toBeVisible();
+
+  const zoomTrigger = page.getByRole('button', { name: /PDF zoom, current zoom \d+ percent/u });
+  const zoomBefore = await zoomTrigger.textContent();
+  await zoomTrigger.click();
+  await expect(navigationMenu).toHaveCount(0);
+  const zoomMenu = page.getByRole('menu', { name: 'PDF zoom' });
+  await expect(zoomMenu).toBeVisible();
+  await expectMenuInsideViewport(zoomMenu);
+  const zoomIn = zoomMenu.getByRole('menuitem', { name: 'Zoom in' });
+  await zoomIn.click();
+  await expect(zoomMenu).toBeVisible();
+  await expect(zoomIn).toBeFocused();
+  await expect(zoomTrigger).not.toHaveText(zoomBefore ?? '');
+  await page.keyboard.press('Escape');
+  await expect(zoomMenu).toHaveCount(0);
+  await expect(zoomTrigger).toBeFocused();
   await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
 
   const scrollViewport = page.locator('[data-viewer-framing-viewport]');
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const scrollable = await scrollViewport.evaluate((element) => element.scrollHeight > element.clientHeight);
     if (scrollable) break;
-    await page.getByRole('button', { name: 'Zoom in' }).click();
+    await zoomTrigger.click();
+    await page.getByRole('menu', { name: 'PDF zoom' })
+      .getByRole('menuitem', { name: 'Zoom in' }).click();
+    await page.keyboard.press('Escape');
   }
   await expect.poll(() => scrollViewport.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
   await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
@@ -3988,7 +4127,8 @@ test('uses the same compact review tree for a narrow VS Code embed launch', asyn
   await page.getByRole('button', { name: 'Close References tray' }).click();
   await expect(workspaceControl).toHaveAttribute('aria-expanded', 'false');
   expect(await scrollViewport.evaluate((element) => element.scrollLeft)).toBeCloseTo(touchScrollLeft, 0);
-  expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(3);
+  expect(host.broker.state(launched.sessionId)?.items).toHaveLength(1);
 });
 
 for (const surface of ['browser', 'vscode'] as const) {

@@ -260,6 +260,15 @@ body:has(.terminal-recovery) {
   min-width: 0;
 }
 
+.review-chrome__identity > .document-actions {
+  flex: 1 1 auto;
+}
+
+.review-chrome__identity .document-actions__trigger {
+  width: 100%;
+  max-width: 100%;
+}
+
 .document-actions__menu {
   position: absolute;
   z-index: 12;
@@ -274,6 +283,123 @@ body:has(.terminal-recovery) {
   color: var(--review-ink-primary);
   background: var(--review-surface-panel);
   box-shadow: var(--review-shadow-float);
+}
+
+/* Grouped review-chrome menus are portaled to the document body so they can
+ * remain viewport-clamped. Keep the same Warm Neutral token vocabulary on the
+ * portal surface, which sits outside the production root's inheritance tree. */
+.top-bar-menu__surface {
+  box-sizing: border-box;
+  inset: auto;
+  width: max-content;
+  min-width: 0;
+  max-width: calc(100vw - 24px);
+  margin: 0;
+  gap: 5px;
+  font-size: 11px;
+  pointer-events: auto;
+}
+
+.top-bar-menu__surface *,
+.top-bar-menu__surface *::before,
+.top-bar-menu__surface *::after {
+  box-sizing: border-box;
+}
+
+.top-bar-menu__surface button {
+  display: inline-flex;
+  min-width: var(--review-control-compact);
+  min-height: var(--review-control-compact);
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: .25rem .5rem;
+  border: 1px solid transparent;
+  border-radius: var(--review-radius-control);
+  color: var(--review-ink-muted);
+  background: transparent;
+  font: inherit;
+  transition: color var(--review-motion-fast) ease, border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
+}
+
+.top-bar-menu__surface button:hover:not(:disabled),
+.top-bar-menu__surface button:focus-visible {
+  border-color: var(--review-border-strong);
+  color: var(--review-ink-primary);
+  background: var(--review-surface-interactive);
+}
+
+.top-bar-menu__surface button:focus-visible,
+.top-bar-menu__surface input:focus-visible {
+  outline: 3px solid var(--review-focus);
+  outline-offset: 2px;
+}
+
+.top-bar-menu__surface button:active:not(:disabled) {
+  box-shadow: inset 0 1px 2px rgb(24 26 23 / 16%);
+}
+
+.top-bar-menu__surface button:disabled,
+.top-bar-menu__surface [aria-disabled="true"] {
+  color: var(--review-ink-quiet);
+  cursor: not-allowed;
+  opacity: .52;
+}
+
+.top-bar-menu__surface .review-chrome__icon-control {
+  width: var(--review-control-compact);
+  padding: 0 !important;
+}
+
+.top-bar-menu__compact-row,
+.top-bar-menu__palette {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--review-control-group-gap);
+}
+
+.top-bar-menu__compact-row {
+  justify-content: center;
+}
+
+.top-bar-menu__secondary-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--review-control-group-gap);
+  padding-top: 5px;
+  border-top: 1px solid var(--review-border-subtle);
+}
+
+.top-bar-menu__action {
+  width: 100%;
+  justify-content: flex-start !important;
+  color: var(--review-ink-primary) !important;
+  white-space: nowrap;
+}
+
+.top-bar-menu__action .review-icon {
+  color: var(--review-ink-muted);
+}
+
+@media (hover: none), (pointer: coarse) {
+  .top-bar-menu__surface.top-bar-menu__surface button {
+    min-height: var(--review-control-touch);
+  }
+
+  .top-bar-menu__surface .review-chrome__icon-control {
+    width: var(--review-control-touch);
+    min-width: var(--review-control-touch);
+  }
+
+  .top-bar-menu__surface .review-chrome__page-editor,
+  .top-bar-menu__surface .review-chrome__zoom-editor {
+    min-height: var(--review-control-touch);
+  }
+
+  .top-bar-menu__surface .review-chrome__page-input,
+  .top-bar-menu__surface .review-chrome__zoom-input {
+    height: var(--review-control-touch);
+  }
 }
 
 .document-actions__menu > button,

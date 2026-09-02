@@ -37,6 +37,7 @@ const rootElement = root;
 rootElement.setAttribute('data-authoring-preview-updates', '0');
 const visualScenario = resolveVisualScenario(window.location.search);
 const previewParameters = new URLSearchParams(window.location.search);
+const responsiveFullChrome = previewParameters.get('responsive') === 'full';
 const saveEstablishing = previewParameters.has('establishing');
 const reconciliationPreview = previewParameters.get('reconciliation');
 const exportPreview = previewParameters.get('export');
@@ -578,6 +579,14 @@ function Harness() {
   const shell = (
     <ReviewShell
       state={state}
+      {...(responsiveFullChrome ? {
+        savePendingDestination: true,
+        copyLink: {
+          getLink: () => 'placekeeper:///tmp/Responsive%20Review.pdf#v=1&page=3',
+          writeText: async () => undefined,
+        },
+        codexContext: { status: 'unbound' as const },
+      } : {})}
       saveOptionsOpen={saveDestinationOpen}
       onSaveOptions={() => setSaveDestinationOpen(true)}
       {...(visualScenario ? {

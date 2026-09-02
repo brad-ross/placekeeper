@@ -1,4 +1,4 @@
-:is(#root[data-production-root="true"], .terminal-recovery) {
+:is(#root[data-production-root="true"], .terminal-recovery, .top-bar-menu__surface) {
   --review-ink-primary: #181a17;
   --review-ink-muted: #676a63;
   --review-ink-quiet: #8b8e87;
@@ -97,12 +97,16 @@
 }
 
 .review-chrome {
+  position: relative;
   z-index: 5;
   display: grid;
-  grid-template-columns: minmax(8rem, 1fr) auto minmax(8rem, 1fr);
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  grid-template-rows: var(--review-chrome-height);
   align-items: center;
   height: var(--review-chrome-height);
   min-height: var(--review-chrome-height);
+  max-height: var(--review-chrome-height);
+  overflow: visible;
   gap: .75rem;
   padding: 0 1rem;
   border-bottom: 1px solid var(--review-border);
@@ -114,6 +118,14 @@
   min-width: 0;
   align-items: center;
   gap: var(--review-control-group-gap);
+}
+
+.review-chrome__identity > :first-child {
+  min-width: 0;
+}
+
+.review-chrome__link {
+  flex: none;
 }
 
 .review-chrome__file-badge {
@@ -145,6 +157,9 @@
 }
 
 .review-chrome__viewer-controls {
+  min-width: max-content;
+  flex-wrap: nowrap;
+  justify-self: center;
   column-gap: 1rem;
   row-gap: .35rem;
 }
@@ -158,8 +173,24 @@
 
 .review-chrome__actions {
   justify-self: end;
-  min-width: 0;
+  min-width: max-content;
   gap: var(--review-action-group-gap);
+}
+
+[data-review-chrome-sizing-rack] {
+  contain: layout style paint;
+}
+
+.review-chrome__sizing-candidate {
+  white-space: nowrap;
+}
+
+.review-chrome__sizing-candidate .review-chrome__identity {
+  width: max-content;
+}
+
+.review-chrome__sizing-candidate .review-chrome__save-identity strong {
+  width: 0;
 }
 
 .review-chrome button {
@@ -320,7 +351,7 @@
 
 .review-chrome__actions {
   display: flex;
-  min-width: 0;
+  min-width: max-content;
   align-items: center;
   gap: var(--review-action-group-gap);
   justify-self: end;
