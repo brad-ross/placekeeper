@@ -868,7 +868,7 @@ test.describe('canonical review workflow', () => {
     await expect(historyMenu).toBeFocused();
   });
 
-  test('selects every rendered presentation and truncates a long title first', async ({ page }) => {
+  test('keeps a readable title floor and collapses Edit history, Zoom, then Navigation', async ({ page }) => {
     await page.goto('/test/acceptance/review-harness/index.html?visual=reading');
     await page.setViewportSize({ width: 1280, height: 720 });
     const chrome = page.locator('[data-review-chrome]');
@@ -899,11 +899,22 @@ test.describe('canonical review workflow', () => {
       await expect(chrome).toHaveAttribute('data-review-chrome-presentation', target);
     };
 
-    await reachCollapsedPresentation('zoomCompact', 'expanded');
-    await reachCollapsedPresentation('historyCompact', 'zoomCompact');
-    await reachCollapsedPresentation('navigationCompact', 'historyCompact');
+    const expectReadableFilename = async () => {
+      const filenameWidth = await chrome.locator(
+        ':scope > .review-chrome__identity .review-chrome__save-identity strong',
+      ).evaluate((element) => element.getBoundingClientRect().width);
+      expect(filenameWidth).toBeGreaterThanOrEqual(143.5);
+    };
 
-    for (const target of ['historyCompact', 'zoomCompact', 'expanded'] as const) {
+    await expectReadableFilename();
+    await reachCollapsedPresentation('historyCompact', 'expanded');
+    await expectReadableFilename();
+    await reachCollapsedPresentation('zoomCompact', 'historyCompact');
+    await expectReadableFilename();
+    await reachCollapsedPresentation('navigationCompact', 'zoomCompact');
+    await expectReadableFilename();
+
+    for (const target of ['zoomCompact', 'historyCompact', 'expanded'] as const) {
       for (let attempt = 0; attempt < 4; attempt += 1) {
         const required = await chrome.locator(
           `[data-review-chrome-candidate="${target}"]`,
@@ -915,6 +926,7 @@ test.describe('canonical review workflow', () => {
         if (await chrome.getAttribute('data-review-chrome-presentation') === target) break;
       }
       await expect(chrome).toHaveAttribute('data-review-chrome-presentation', target);
+      await expectReadableFilename();
     }
   });
 
@@ -922,7 +934,7 @@ test.describe('canonical review workflow', () => {
     await page.locator('#root').evaluate((element) => {
       element.setAttribute('data-production-root', 'true');
     });
-    for (const width of [1280, 760, 520, 390, 320]) {
+    for (const width of [1280, 760, 641, 640, 521, 520, 481, 480, 390, 361, 360, 320]) {
       await page.setViewportSize({ width, height: 720 });
       const chrome = page.locator('[data-review-chrome]');
       await expect(chrome).toHaveCSS('height', '58px');
@@ -939,6 +951,9 @@ test.describe('canonical review workflow', () => {
         const identityBounds = identity.getBoundingClientRect();
         const controlsBounds = controls.getBoundingClientRect();
         const actionsBounds = actions.getBoundingClientRect();
+        const visibleBounds = (selector: string) => [...element.querySelectorAll<HTMLElement>(selector)]
+          .filter((child) => getComputedStyle(child).display !== 'none')
+          .map((child) => child.getBoundingClientRect().toJSON());
         return {
           clientWidth: element.clientWidth,
           scrollWidth: element.scrollWidth,
@@ -946,15 +961,29 @@ test.describe('canonical review workflow', () => {
           identity: identityBounds.toJSON(),
           controls: controlsBounds.toJSON(),
           actions: actionsBounds.toJSON(),
+          identityChildren: visibleBounds(':scope > .review-chrome__identity > *'),
+          saveChildren: visibleBounds(':scope > .review-chrome__identity .review-chrome__save-identity > :not(.sr-only)'),
+          filename: element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__save-identity strong')?.getBoundingClientRect().toJSON(),
         };
       });
 
       expect(geometry.height).toBe(58);
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
-      expect(geometry.identity.x + geometry.identity.width)
-        .toBeLessThanOrEqual(geometry.controls.x + 0.5);
-      expect(geometry.controls.x + geometry.controls.width)
-        .toBeLessThanOrEqual(geometry.actions.x + 0.5);
+      const visibleColumns = [geometry.identity, geometry.controls, geometry.actions]
+        .filter((item) => item.width > 0.5);
+      for (let index = 1; index < visibleColumns.length; index += 1) {
+        expect(visibleColumns[index - 1]!.x + visibleColumns[index - 1]!.width)
+          .toBeLessThanOrEqual(visibleColumns[index]!.x + 0.5);
+      }
+      for (const children of [geometry.identityChildren, geometry.saveChildren]) {
+        for (let index = 1; index < children.length; index += 1) {
+          expect(children[index - 1]!.x + children[index - 1]!.width)
+            .toBeLessThanOrEqual(children[index]!.x + 0.5);
+        }
+      }
+      expect(geometry.filename?.width).toBeGreaterThanOrEqual(
+        width <= 360 ? 71.5 : width <= 480 ? 95.5 : 143.5,
+      );
       for (const item of [geometry.identity, geometry.controls, geometry.actions]) {
         expect(item.y).toBeGreaterThanOrEqual(-0.5);
         expect(item.y + item.height).toBeLessThanOrEqual(58.5);
@@ -976,7 +1005,7 @@ test.describe('canonical review workflow', () => {
       expect(await touchPage.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
 
       const chrome = touchPage.locator('[data-review-chrome]');
-      for (const width of [760, 520, 320]) {
+      for (const width of [760, 641, 521, 481, 390, 361, 320]) {
         await touchPage.setViewportSize({ width, height: 720 });
         await touchPage.evaluate(() => new Promise<void>((resolve) => {
           requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
@@ -992,11 +1021,44 @@ test.describe('canonical review workflow', () => {
         ).evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().width));
         expect(sizingIconWidths.length).toBeGreaterThan(0);
         expect(sizingIconWidths.every((iconWidth) => iconWidth >= 44)).toBe(true);
-        const geometry = await chrome.evaluate((element) => ({
-          clientWidth: element.clientWidth,
-          scrollWidth: element.scrollWidth,
-        }));
+        const geometry = await chrome.evaluate((element) => {
+          const bounds = (selector: string) => element.querySelector<HTMLElement>(selector)?.getBoundingClientRect().toJSON();
+          const chromeBounds = element.getBoundingClientRect();
+          return {
+            clientWidth: element.clientWidth,
+            scrollWidth: element.scrollWidth,
+            chrome: chromeBounds.toJSON(),
+            identity: bounds(':scope > .review-chrome__identity'),
+            controls: bounds(':scope > .review-chrome__viewer-controls'),
+            saveIdentity: bounds(':scope > .review-chrome__identity .review-chrome__save-identity'),
+            copy: bounds(':scope > .review-chrome__identity [data-review-copy-link]'),
+            filename: bounds(':scope > .review-chrome__identity .review-chrome__save-identity strong'),
+            recoveryDisplay: getComputedStyle(element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__save-recovery')!).display,
+            contextDisplay: getComputedStyle(element.querySelector<HTMLElement>(':scope > .review-chrome__actions .review-chrome__context')!).display,
+          };
+        });
         expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
+        expect(geometry.identity).toBeDefined();
+        expect(geometry.controls).toBeDefined();
+        expect(geometry.saveIdentity).toBeDefined();
+        expect(geometry.copy).toBeDefined();
+        expect(geometry.copy!.width).toBeGreaterThanOrEqual(44);
+        expect(geometry.filename?.width).toBeGreaterThanOrEqual(
+          width <= 360 ? 71.5 : width <= 480 ? 95.5 : 143.5,
+        );
+        expect(geometry.identity!.x + geometry.identity!.width)
+          .toBeLessThanOrEqual(geometry.controls!.x + 0.5);
+        if (width === 320) {
+          expect(geometry.chrome.x).toBeLessThanOrEqual(geometry.saveIdentity!.x + 0.5);
+          expect(geometry.saveIdentity!.x + geometry.saveIdentity!.width)
+            .toBeLessThanOrEqual(geometry.copy!.x + 0.5);
+          expect(geometry.copy!.x + geometry.copy!.width)
+            .toBeLessThanOrEqual(geometry.identity!.x + geometry.identity!.width + 0.5);
+          expect(geometry.controls!.x + geometry.controls!.width)
+            .toBeLessThanOrEqual(geometry.chrome.x + geometry.chrome.width + 0.5);
+          expect(geometry.recoveryDisplay).toBe('none');
+          expect(geometry.contextDisplay).toBe('none');
+        }
       }
 
       await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'navigationCompact');
@@ -1914,9 +1976,11 @@ test.describe('canonical review workflow', () => {
     expect(inputBounds!.x).toBeGreaterThanOrEqual(0);
     expect(inputBounds!.x + inputBounds!.width).toBeLessThanOrEqual(320);
     await page.getByRole('button', { name: 'Apply' }).click();
-    await page.getByRole('button', { name: 'Undo' }).click();
+    await page.getByRole('button', { name: 'Edit history' }).click();
+    const historyMenu = page.getByRole('menu', { name: 'Edit history' });
+    await historyMenu.getByRole('menuitem', { name: 'Undo' }).click();
     await expect(page.locator('[data-owned-mark]')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Redo' }).click();
+    await historyMenu.getByRole('menuitem', { name: 'Redo' }).click();
     await expect(page.locator('[data-owned-mark="replace"]')).toHaveCount(1);
 
     await openAnnotationsWorkspace(page);

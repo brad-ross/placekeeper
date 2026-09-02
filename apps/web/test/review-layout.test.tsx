@@ -76,6 +76,10 @@ const foundationStyles = readFileSync(
   new URL('../src/app/review-layout-foundation.css', import.meta.url),
   'utf8',
 );
+const layoutStyles = readFileSync(
+  new URL('../src/app/review-layout.css', import.meta.url),
+  'utf8',
+);
 
 const ownedAnnotation: ReviewItem = {
   id: 'owned-highlight',
@@ -655,7 +659,23 @@ describe('review shell layout and accessibility contract', () => {
       /\.review-chrome__sizing-candidate \.review-chrome__identity\s*\{[^}]*width:\s*max-content;/u,
     );
     expect(foundationStyles).toMatch(
-      /\.review-chrome__sizing-candidate \.review-chrome__save-identity strong\s*\{[^}]*width:\s*0;/u,
+      /\.review-chrome__sizing-candidate \.review-chrome__save-identity strong\s*\{[^}]*width:\s*var\(--review-document-title-min\);[^}]*min-width:\s*var\(--review-document-title-min\);[^}]*max-width:\s*var\(--review-document-title-min\);[^}]*flex:\s*none;/u,
+    );
+    expect(foundationStyles).toMatch(/--review-document-title-min:\s*9rem;/u);
+    expect(layoutStyles).toMatch(
+      /\.review-chrome__save-identity strong\s*\{[^}]*min-width:\s*var\(--review-document-title-min\);[^}]*flex:\s*1 1 auto;/u,
+    );
+    expect(responsiveStyles).toMatch(
+      /@media \(max-width: 520px\)[\s\S]*?\.review-chrome__context\s*\{[^}]*display:\s*none;/u,
+    );
+    expect(responsiveStyles).toMatch(
+      /@media \(max-width: 480px\)[\s\S]*?--review-document-title-min:\s*6rem;/u,
+    );
+    expect(responsiveStyles).toMatch(
+      /@media \(max-width: 360px\)[\s\S]*?--review-document-title-min:\s*4\.5rem;/u,
+    );
+    expect(responsiveStyles).toMatch(
+      /@media \(max-width: 640px\)[\s\S]*?\.review-chrome__save-recovery\s*\{[^}]*display:\s*none;/u,
     );
     expect(responsiveStyles).not.toMatch(
       /@media \(max-width: 820px\)[\s\S]*?\.review-chrome\s*\{[^}]*height:\s*auto;/u,

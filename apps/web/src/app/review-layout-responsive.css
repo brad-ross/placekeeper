@@ -72,7 +72,32 @@
 
 }
 
+@media (max-width: 640px) {
+  .review-chrome__save-recovery {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .review-chrome {
+    gap: .4rem;
+    padding-inline: .5rem;
+  }
+
+  .review-chrome__viewer-controls {
+    column-gap: .4rem;
+  }
+
+  .review-chrome__context {
+    display: none;
+  }
+}
+
 @media (max-width: 480px) {
+  #root[data-production-root="true"] {
+    --review-document-title-min: 6rem;
+  }
+
   body:has(.terminal-recovery) {
     padding: .75rem;
   }
@@ -92,8 +117,12 @@
 }
 
 @media (max-width: 360px) {
+  #root[data-production-root="true"] {
+    --review-document-title-min: 4.5rem;
+  }
+
   .review-chrome {
-    gap: .4rem;
+    gap: .25rem;
     padding-inline: .4rem;
   }
 
@@ -103,7 +132,7 @@
   }
 
   .review-chrome__viewer-controls {
-    column-gap: .4rem;
+    column-gap: .25rem;
   }
 
   .review-chrome__stat,

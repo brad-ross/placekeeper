@@ -8,26 +8,26 @@ import {
 
 const widths: ReviewChromePresentationWidths = {
   expanded: 800,
-  zoomCompact: 700,
-  historyCompact: 600,
+  historyCompact: 700,
+  zoomCompact: 600,
   navigationCompact: 500,
 };
 
 describe('review chrome responsive presentation', () => {
-  it('collapses in Zoom, Edit history, Navigation order at measured fit edges', () => {
+  it('collapses in Edit history, Zoom, Navigation order at measured fit edges', () => {
     expect(REVIEW_CHROME_PRESENTATIONS).toEqual([
       'expanded',
-      'zoomCompact',
       'historyCompact',
+      'zoomCompact',
       'navigationCompact',
     ]);
 
     const cases = [
       { availableWidth: 800, expected: 'expanded' },
-      { availableWidth: 799, expected: 'zoomCompact' },
-      { availableWidth: 700, expected: 'zoomCompact' },
-      { availableWidth: 699, expected: 'historyCompact' },
-      { availableWidth: 600, expected: 'historyCompact' },
+      { availableWidth: 799, expected: 'historyCompact' },
+      { availableWidth: 700, expected: 'historyCompact' },
+      { availableWidth: 699, expected: 'zoomCompact' },
+      { availableWidth: 600, expected: 'zoomCompact' },
       { availableWidth: 599, expected: 'navigationCompact' },
     ] as const;
 
@@ -50,26 +50,26 @@ describe('review chrome responsive presentation', () => {
       availableWidth: 799,
       widths,
       previous: null,
-    })).toBe('zoomCompact');
+    })).toBe('historyCompact');
   });
 
   it('requires the restoration margin only when expanding', () => {
     expect(chooseReviewChromePresentation({
       availableWidth: 723,
       widths,
-      previous: 'historyCompact',
-    })).toBe('historyCompact');
+      previous: 'zoomCompact',
+    })).toBe('zoomCompact');
     expect(chooseReviewChromePresentation({
       availableWidth: 724,
       widths,
-      previous: 'historyCompact',
-    })).toBe('zoomCompact');
+      previous: 'zoomCompact',
+    })).toBe('historyCompact');
 
     expect(chooseReviewChromePresentation({
       availableWidth: 823,
       widths,
       previous: 'navigationCompact',
-    })).toBe('zoomCompact');
+    })).toBe('historyCompact');
     expect(chooseReviewChromePresentation({
       availableWidth: 824,
       widths,
@@ -79,17 +79,17 @@ describe('review chrome responsive presentation', () => {
     expect(chooseReviewChromePresentation({
       availableWidth: 699,
       widths,
-      previous: 'zoomCompact',
-    })).toBe('historyCompact');
+      previous: 'historyCompact',
+    })).toBe('zoomCompact');
   });
 
   it('allows callers to disable expansion hysteresis explicitly', () => {
     expect(chooseReviewChromePresentation({
       availableWidth: 700,
       widths,
-      previous: 'historyCompact',
+      previous: 'zoomCompact',
       expansionHysteresis: 0,
-    })).toBe('zoomCompact');
+    })).toBe('historyCompact');
   });
 
   it('jumps across multiple levels when intermediate presentations do not fit', () => {

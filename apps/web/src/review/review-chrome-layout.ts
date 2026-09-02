@@ -1,7 +1,7 @@
 export const REVIEW_CHROME_PRESENTATIONS = [
   'expanded',
-  'zoomCompact',
   'historyCompact',
+  'zoomCompact',
   'navigationCompact',
 ] as const;
 
