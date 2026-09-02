@@ -695,6 +695,9 @@ test.describe('canonical review workflow', () => {
     const chrome = page.locator('[data-review-chrome]');
     await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'navigationCompact');
 
+    const historyTrigger = page.getByRole('button', { name: 'Edit history' });
+    await expect(historyTrigger.locator('.review-icon')).toHaveCount(2);
+
     const navigationTrigger = page.getByRole('button', {
       name: 'Document navigation, current page 3 of 12',
     });
@@ -702,11 +705,11 @@ test.describe('canonical review workflow', () => {
     const navigationMenu = page.getByRole('menu', { name: 'Document navigation' });
     await expect(navigationMenu).toBeVisible();
     await expect(navigationMenu.getByRole('menuitem')).toHaveCount(5);
-    await expect(navigationMenu.getByRole('menuitem').nth(0)).toHaveAttribute('aria-label', 'Previous page');
-    await expect(navigationMenu.getByRole('menuitem').nth(1)).toHaveAttribute('aria-label', 'Current page 3 of 12. Enter a page number');
-    await expect(navigationMenu.getByRole('menuitem').nth(2)).toHaveAttribute('aria-label', 'Next page');
-    await expect(navigationMenu.getByRole('menuitem').nth(3)).toHaveAttribute('aria-label', 'Back in document history');
-    await expect(navigationMenu.getByRole('menuitem').nth(4)).toHaveAttribute('aria-label', 'Forward in document history');
+    await expect(navigationMenu.getByRole('menuitem').nth(0)).toHaveAttribute('aria-label', 'Back in document history');
+    await expect(navigationMenu.getByRole('menuitem').nth(1)).toHaveAttribute('aria-label', 'Forward in document history');
+    await expect(navigationMenu.getByRole('menuitem').nth(2)).toHaveAttribute('aria-label', 'Previous page');
+    await expect(navigationMenu.getByRole('menuitem').nth(3)).toHaveAttribute('aria-label', 'Current page 3 of 12. Enter a page number');
+    await expect(navigationMenu.getByRole('menuitem').nth(4)).toHaveAttribute('aria-label', 'Next page');
     const nextPage = navigationMenu.getByRole('menuitem', { name: 'Next page' });
     await nextPage.click();
     await expect(navigationMenu).toBeVisible();
@@ -734,8 +737,8 @@ test.describe('canonical review workflow', () => {
     const zoomMenu = page.getByRole('menu', { name: 'PDF zoom' });
     await expect(zoomMenu).toBeVisible();
     await expect(zoomMenu.getByRole('menuitem').nth(0)).toHaveAttribute('aria-label', 'Zoom out');
-    await expect(zoomMenu.getByRole('menuitem').nth(1)).toHaveAttribute('aria-label', 'Current zoom 110 percent. Enter a zoom percentage');
-    await expect(zoomMenu.getByRole('menuitem').nth(2)).toHaveAttribute('aria-label', 'Zoom in');
+    await expect(zoomMenu.getByRole('menuitem').nth(1)).toHaveAttribute('aria-label', 'Zoom in');
+    await expect(zoomMenu.getByRole('menuitem').nth(2)).toHaveAttribute('aria-label', 'Current zoom 110 percent. Enter a zoom percentage');
     await expect(zoomMenu.getByRole('menuitem').nth(3)).toHaveAttribute('aria-label', 'Fit PDF to available width');
     const zoomIn = zoomMenu.getByRole('menuitem', { name: 'Zoom in' });
     await zoomIn.click();

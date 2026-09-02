@@ -622,7 +622,7 @@ export function ReviewChrome({
     <button
       ref={(element) => { historyAnchorRef.current = element; }}
       type="button"
-      className="review-chrome__icon-control review-chrome__group-trigger"
+      className="review-chrome__icon-control review-chrome__group-trigger review-chrome__history-trigger"
       data-review-chrome-group="history"
       aria-label="Edit history"
       title="Edit history"
@@ -630,9 +630,12 @@ export function ReviewChrome({
       aria-expanded={activeTopBarMenu === 'history'}
       aria-controls={historyMenuId}
       onClick={() => requestTopBarMenu('history', activeTopBarMenu !== 'history')}
-    ><ReviewIcon name="more-horizontal" /></button>
+    >
+      <ReviewIcon name="undo" size={14} />
+      <ReviewIcon name="redo" size={14} />
+    </button>
     <TopBarMenu open={activeTopBarMenu === 'history'} menuId={historyMenuId} label="Edit history" openerRef={historyAnchorRef} onDismiss={() => requestTopBarMenu('history', false)}>
-      <div className="top-bar-menu__palette" role="group" aria-label="Edit history actions">
+      <div className="review-chrome__control-cluster" role="group" aria-label="Edit history actions">
         <button type="button" role="menuitem" className="review-chrome__icon-control review-chrome__history-control" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={onUndo}><ReviewIcon name="undo" /></button>
         <button type="button" role="menuitem" className="review-chrome__icon-control review-chrome__history-control" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={onRedo}><ReviewIcon name="redo" /></button>
       </div>
@@ -654,14 +657,12 @@ export function ReviewChrome({
       onClick={() => requestTopBarMenu('navigation', activeTopBarMenu !== 'navigation')}
     >{viewerState.pageReady ? <>{viewerState.currentPage}<span aria-hidden="true"> / {viewerState.totalPages}</span></> : '— / —'}</button>
     <TopBarMenu open={activeTopBarMenu === 'navigation'} menuId={navigationMenuId} label="Document navigation" openerRef={navigationAnchorRef} onDismiss={() => requestTopBarMenu('navigation', false)}>
-      <div className="top-bar-menu__compact-row" role="group" aria-label="Page navigation">
+      <div className="review-chrome__control-cluster" role="group" aria-label="Document navigation controls">
+        <button type="button" role="menuitem" className="review-chrome__icon-control review-chrome__main-history-control" data-main-history="back" aria-label="Back in document history" title="Back in document history" disabled={!canNavigateBack} onClick={onNavigateBack}><ReviewIcon name="arrow-left" /></button>
+        <button type="button" role="menuitem" className="review-chrome__icon-control review-chrome__main-history-control" data-main-history="forward" aria-label="Forward in document history" title="Forward in document history" disabled={!canNavigateForward} onClick={onNavigateForward}><ReviewIcon name="arrow-right" /></button>
         <button type="button" role="menuitem" className="review-chrome__icon-control" data-review-page-step="previous" aria-label="Previous page" title="Previous page" aria-describedby={pageUnavailable} disabled={!viewerState.pageReady || viewerState.currentPage <= 1} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.previousPage())}><ReviewIcon name="chevron-left" /></button>
         {pageValue(true)}
         <button type="button" role="menuitem" className="review-chrome__icon-control" data-review-page-step="next" aria-label="Next page" title="Next page" aria-describedby={pageUnavailable} disabled={!viewerState.pageReady || viewerState.currentPage >= viewerState.totalPages} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.nextPage())}><ReviewIcon name="chevron-right" /></button>
-      </div>
-      <div className="top-bar-menu__secondary-actions">
-        <button type="button" role="menuitem" className="top-bar-menu__action" data-main-history="back" aria-label="Back in document history" title="Back in document history" disabled={!canNavigateBack} onClick={onNavigateBack}><ReviewIcon name="arrow-left" /><span>Back</span></button>
-        <button type="button" role="menuitem" className="top-bar-menu__action" data-main-history="forward" aria-label="Forward in document history" title="Forward in document history" disabled={!canNavigateForward} onClick={onNavigateForward}><ReviewIcon name="arrow-right" /><span>Forward</span></button>
       </div>
     </TopBarMenu>
   </>;
@@ -681,12 +682,12 @@ export function ReviewChrome({
       onClick={() => requestTopBarMenu('zoom', activeTopBarMenu !== 'zoom')}
     >{viewerState.zoomReady ? <>{viewerState.zoomPercent}<span aria-hidden="true">%</span></> : '—%'}</button>
     <TopBarMenu open={activeTopBarMenu === 'zoom'} menuId={zoomMenuId} label="PDF zoom" openerRef={zoomAnchorRef} onDismiss={() => requestTopBarMenu('zoom', false)}>
-      <div className="top-bar-menu__compact-row" role="group" aria-label="Zoom controls">
+      <div className="review-chrome__control-cluster" role="group" aria-label="Zoom controls">
         <button type="button" role="menuitem" className="review-chrome__icon-control" data-review-zoom-action="out" aria-label="Zoom out" title="Zoom out" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomOut())}><ReviewIcon name="minus" /></button>
-        {zoomValue(true)}
         <button type="button" role="menuitem" className="review-chrome__icon-control" data-review-zoom-action="in" aria-label="Zoom in" title="Zoom in" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomIn())}><ReviewIcon name="plus" /></button>
+        {zoomValue(true)}
+        <button type="button" role="menuitem" className="review-chrome__icon-control review-chrome__fit-width" data-review-zoom-action="fit-width" aria-label="Fit PDF to available width" title="Fit PDF to available width" aria-busy={fitWidthPending ? 'true' : 'false'} aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)} disabled={!viewerState.zoomReady || !fitWidthReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runFitWidth(event.currentTarget, true)}><ReviewIcon name="fit-width" /></button>
       </div>
-      <button type="button" role="menuitem" className="top-bar-menu__action" data-review-zoom-action="fit-width" aria-label="Fit PDF to available width" title="Fit PDF to available width" aria-busy={fitWidthPending ? 'true' : 'false'} aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)} disabled={!viewerState.zoomReady || !fitWidthReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runFitWidth(event.currentTarget, true)}><ReviewIcon name="fit-width" /><span>Fit Width</span></button>
     </TopBarMenu>
   </>;
 
@@ -697,7 +698,7 @@ export function ReviewChrome({
   </>;
 
   const sizingCluster = (candidate: ReviewChromePresentation): ReactNode => <div className="review-chrome__viewer-controls" style={{ display: 'inline-flex', gridColumn: 'auto', gridRow: 'auto', flexWrap: 'nowrap' }}>
-    <span className="review-chrome__control-cluster">{candidate === 'expanded' ? <><button type="button" title="Undo" className="review-chrome__icon-control"><ReviewIcon name="undo" /></button><button type="button" title="Redo" className="review-chrome__icon-control"><ReviewIcon name="redo" /></button></> : <button type="button" title="Edit history" className="review-chrome__icon-control"><ReviewIcon name="more-horizontal" /></button>}</span>
+    <span className="review-chrome__control-cluster">{candidate === 'expanded' ? <><button type="button" title="Undo" className="review-chrome__icon-control"><ReviewIcon name="undo" /></button><button type="button" title="Redo" className="review-chrome__icon-control"><ReviewIcon name="redo" /></button></> : <button type="button" title="Edit history" className="review-chrome__icon-control review-chrome__history-trigger"><ReviewIcon name="undo" size={14} /><ReviewIcon name="redo" size={14} /></button>}</span>
     <span className="review-chrome__control-cluster">{candidate === 'navigationCompact' ? <button type="button" title="Document navigation" className="review-chrome__stat">{viewerState.pageReady ? `${viewerState.currentPage} / ${viewerState.totalPages}` : '— / —'}</button> : <><button type="button" title="Back in document history" className="review-chrome__icon-control"><ReviewIcon name="arrow-left" /></button><button type="button" title="Forward in document history" className="review-chrome__icon-control"><ReviewIcon name="arrow-right" /></button><button type="button" title="Previous page" className="review-chrome__icon-control"><ReviewIcon name="chevron-left" /></button><span className="review-chrome__stat">{viewerState.pageReady ? `${viewerState.currentPage} / ${viewerState.totalPages}` : '— / —'}</span><button type="button" title="Next page" className="review-chrome__icon-control"><ReviewIcon name="chevron-right" /></button></>}</span>
     <span className="review-chrome__control-cluster">{candidate === 'expanded' || candidate === 'historyCompact' ? <><button type="button" title="Zoom out" className="review-chrome__icon-control"><ReviewIcon name="minus" /></button><button type="button" title="Zoom in" className="review-chrome__icon-control"><ReviewIcon name="plus" /></button><span className="review-chrome__stat">{viewerState.zoomReady ? `${viewerState.zoomPercent}%` : '—%'}</span><button type="button" title="Fit PDF to available width" className="review-chrome__icon-control"><ReviewIcon name="fit-width" /></button></> : <button type="button" title="PDF zoom" className="review-chrome__stat">{viewerState.zoomReady ? `${viewerState.zoomPercent}%` : '—%'}</button>}</span>
   </div>;
