@@ -665,6 +665,9 @@ describe('review shell layout and accessibility contract', () => {
     expect(layoutStyles).toMatch(
       /\.review-chrome__save-identity strong\s*\{[^}]*min-width:\s*var\(--review-document-title-min\);[^}]*flex:\s*1 1 auto;/u,
     );
+    expect(layoutStyles).toMatch(
+      /\.review-chrome__identity \.document-actions__trigger\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;/u,
+    );
     expect(responsiveStyles).toMatch(
       /@media \(max-width: 520px\)[\s\S]*?\.review-chrome__context\s*\{[^}]*display:\s*none;/u,
     );

@@ -279,6 +279,36 @@ test.describe('canonical review workflow', () => {
     await expect(documentActionsTrigger).toBeFocused();
   });
 
+  test('limits the document-title hover surface without moving toolbar groups', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready');
+    await page.locator('#root').evaluate((element) => {
+      element.setAttribute('data-production-root', 'true');
+    });
+    const trigger = page.getByRole('button', { name: /Open document actions/u });
+    const documentActions = page.locator(
+      '[data-review-chrome] > .review-chrome__identity .document-actions',
+    );
+    const geometry = await documentActions.evaluate((element) => {
+      const triggerElement = element.querySelector<HTMLElement>('[data-document-actions-trigger]');
+      if (triggerElement === null) throw new Error('Document actions trigger is unavailable.');
+      return {
+        slot: element.getBoundingClientRect().toJSON(),
+        trigger: triggerElement.getBoundingClientRect().toJSON(),
+      };
+    });
+
+    expect(geometry.trigger.x).toBeCloseTo(geometry.slot.x, 0);
+    expect(geometry.trigger.width).toBeLessThan(geometry.slot.width - 16);
+    await trigger.hover();
+    await expect(trigger).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await page.mouse.move(
+      geometry.trigger.x + geometry.trigger.width + 8,
+      geometry.trigger.y + geometry.trigger.height / 2,
+    );
+    await expect(trigger).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  });
+
   test('routes a blocked export back to the active protected draft without discarding it', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready');

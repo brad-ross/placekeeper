@@ -266,7 +266,7 @@ body:has(.terminal-recovery) {
 }
 
 .review-chrome__identity .document-actions__trigger {
-  width: 100%;
+  width: fit-content;
   max-width: 100%;
 }
 
