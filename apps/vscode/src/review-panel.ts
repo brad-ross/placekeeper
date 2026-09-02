@@ -1,3 +1,4 @@
+import { isReviewPanelKey } from "../../../packages/core/src/review-runtime-protocol.js";
 import type { LaunchErrorPresentation } from "./local-workspace.js";
 
 export interface SuccessfulLaunch {
@@ -109,7 +110,7 @@ export function parseSharedAssetManifest(value: unknown): SharedAssetManifest {
 export function buildReviewWebviewHtml(options: ReviewWebviewHtmlOptions): string {
   if (!/^[A-Za-z0-9_-]{8,128}$/u.test(options.nonce)) throw new Error("A safe nonce is required");
   if (!/^[A-Za-z0-9_-]{16,128}$/u.test(options.panelId)) throw new Error("A safe panel identity is required");
-  if (options.panelKey !== undefined && !/^[A-Za-z0-9_-]{8,128}$/u.test(options.panelKey)) {
+  if (options.panelKey !== undefined && !isReviewPanelKey(options.panelKey)) {
     throw new Error("A safe panel key is required");
   }
   const extensionResource = (uri: string) => uri.startsWith("vscode-webview://") ||
@@ -137,9 +138,13 @@ export function buildReviewWebviewHtml(options: ReviewWebviewHtmlOptions): strin
 <title>Placekeeper</title></head><body><div id="root"></div>
 <script type="module" nonce="${nonce}">
 const vscode = acquireVsCodeApi();
-${panelKey === undefined ? "" : `const savedState = vscode.getState() ?? {};
-vscode.setState({ panelKey: ${panelKey}, ...(Number.isSafeInteger(savedState.pageIndex) && savedState.pageIndex >= 0 ? { pageIndex: savedState.pageIndex } : {}), ...(typeof savedState.zoom === "number" && Number.isFinite(savedState.zoom) && savedState.zoom >= 0.2 && savedState.zoom <= 60 ? { zoom: savedState.zoom } : {}) });`}
+${panelKey === undefined ? "" : `const persistedState = vscode.getState();
+vscode.setState({
+  ...(typeof persistedState === "object" && persistedState !== null && !Array.isArray(persistedState) ? persistedState : {}),
+  panelKey: ${panelKey},
+});
+`}
 const app = await import(${scriptUri});
-await app.startVscode({ panelId: ${panelId}, vscode });
+await app.startVscode({ panelId: ${panelId}, vscode${panelKey === undefined ? "" : `, panelKey: ${panelKey}`} });
 </script></body></html>`;
 }

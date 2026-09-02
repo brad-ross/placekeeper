@@ -6,6 +6,7 @@ import {
   decodePlacekeeperLinkFragment,
   encodePlacekeeperLinkFragment,
 } from "../../../packages/core/src/placekeeper-link.js";
+import { isReviewPanelKey } from "../../../packages/core/src/review-runtime-protocol.js";
 import {
   ProductionReviewApp,
   type HostForwardSyncTexRequest,
@@ -443,22 +444,28 @@ function RuntimeProductionReviewApp(props: {
 
 export async function startVscode(options: {
   readonly panelId: string;
+  readonly panelKey?: string;
   readonly vscode: {
     postMessage(message: unknown): unknown;
     getState(): unknown;
     setState(state: unknown): unknown;
   };
 }): Promise<void> {
+  if (options.panelKey !== undefined && !isReviewPanelKey(options.panelKey)) {
+    throw new Error("A safe panel key is required.");
+  }
   const runtime = createRpcHostRuntime(createVscodeMessagePort(options.panelId, options.vscode), {
     materializePdfiumWasm: materializeVscodeWasmResource,
   });
   globalThis.addEventListener("pagehide", () => runtime.dispose(), { once: true });
   const rawState = options.vscode.getState();
-  const panelKey = typeof rawState === "object" && rawState !== null &&
-    typeof (rawState as { panelKey?: unknown }).panelKey === "string" &&
-    /^[A-Za-z0-9_-]{8,128}$/u.test((rawState as { panelKey: string }).panelKey)
-    ? (rawState as { panelKey: string }).panelKey
+  const rawPanelKey = typeof rawState === "object" && rawState !== null
+    ? (rawState as { panelKey?: unknown }).panelKey
     : undefined;
+  const persistedPanelKey = isReviewPanelKey(rawPanelKey)
+    ? rawPanelKey
+    : undefined;
+  const panelKey = options.panelKey ?? persistedPanelKey;
   const initialPresentation = parseVscodePresentationState(rawState);
   const persist = (presentation: { readonly pageIndex: number; readonly zoom: number }) => {
     options.vscode.setState({

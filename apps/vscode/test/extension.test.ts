@@ -2,9 +2,14 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import { PDFDocument } from "pdf-lib";
 import { createReviewState } from "../../../packages/core/src/review-model.js";
+import {
+  REVIEW_RUNTIME_PROTOCOL,
+  REVIEW_RUNTIME_VERSION,
+} from "../../../packages/core/src/review-runtime-protocol.js";
 import { startHttpServer } from "../../service/src/server/http-server.js";
 import { SessionBroker } from "../../service/src/sessions/session-broker.js";
 import { subscribeRuntimeDocumentSource } from "../../web/src/host/runtime-document-source.js";
@@ -36,8 +41,6 @@ import {
   runLaunchClient,
 } from "../src/launch-client.js";
 import {
-  WEBVIEW_RPC_PROTOCOL,
-  WEBVIEW_RPC_VERSION,
   createLoopbackRuntimeClient,
   forwardSyncTexRetryable,
   forwardSyncTexStatus,
@@ -297,6 +300,7 @@ describe("VS Code local host adapter", () => {
     const html = buildReviewWebviewHtml({
       nonce: "nonce-value",
       panelId: "panel_identifier_1234",
+      panelKey: "opaque-panel-key",
       scriptUri: "vscode-webview://authority/assets/app.js",
       styleUri: "vscode-webview://authority/assets/app.css",
       cspSource: "vscode-webview://authority",
@@ -306,6 +310,9 @@ describe("VS Code local host adapter", () => {
     expect(html).toContain("img-src blob: data: vscode-webview://authority");
     expect(html).toContain("connect-src vscode-webview://authority");
     expect(html).toContain("startVscode");
+    expect(html).toContain('panelKey: "opaque-panel-key"');
+    expect(html.indexOf("vscode.setState")).toBeLessThan(html.indexOf("await import"));
+    expect(html).not.toContain("savedState");
     expect(html).not.toContain("iframe");
     expect(html).not.toContain("127.0.0.1");
     expect(html).not.toContain("localhost");
@@ -332,6 +339,33 @@ describe("VS Code local host adapter", () => {
     expect(() => parseLaunchResponse(JSON.stringify({ ok: true, kind: "opened", url: "http://127.0.0.1:49152/s/id/bootstrap?embed=other#cap=secret" }))).toThrow(/loopback/u);
   });
 
+  it("records the panel key before the shared application can fail to import", () => {
+    const html = buildReviewWebviewHtml({
+      nonce: "nonce-value",
+      panelId: "panel_identifier_1234",
+      panelKey: "opaque-panel-key",
+      scriptUri: "vscode-webview://authority/assets/app.js",
+      styleUri: "vscode-webview://authority/assets/app.css",
+      cspSource: "vscode-webview://authority",
+    });
+    const moduleScript = html.match(/<script type="module"[^>]*>([\s\S]*?)<\/script>/u)?.[1];
+    expect(moduleScript).toBeDefined();
+    const beforeImport = moduleScript!.slice(0, moduleScript!.indexOf("const app = await import"));
+    const vscode = {
+      getState: vi.fn(() => ({ pageIndex: 4, zoom: 1.25 })),
+      setState: vi.fn(),
+    };
+
+    expect(() => runInNewContext(`${beforeImport}\nthrow new Error("import failed");`, {
+      acquireVsCodeApi: () => vscode,
+    })).toThrow("import failed");
+    expect(vscode.setState).toHaveBeenCalledWith({
+      panelKey: "opaque-panel-key",
+      pageIndex: 4,
+      zoom: 1.25,
+    });
+  });
+
   it("validates the versioned webview RPC envelope before dispatch", () => {
     const expected = {
       panelId: "panel_identifier_1234",
@@ -340,8 +374,8 @@ describe("VS Code local host adapter", () => {
       revision: 7,
     };
     const request = {
-      protocol: WEBVIEW_RPC_PROTOCOL,
-      version: WEBVIEW_RPC_VERSION,
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
       kind: "request",
       panelId: expected.panelId,
       requestId: "request_identifier_1234",
@@ -428,8 +462,8 @@ describe("VS Code local host adapter", () => {
       revision: 7,
     };
     const valid = {
-      protocol: WEBVIEW_RPC_PROTOCOL,
-      version: WEBVIEW_RPC_VERSION,
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
       kind: "request",
       panelId: expected.panelId,
       requestId: "request_identifier_1234",
@@ -451,8 +485,8 @@ describe("VS Code local host adapter", () => {
       revision: 7,
     };
     const request = {
-      protocol: WEBVIEW_RPC_PROTOCOL,
-      version: WEBVIEW_RPC_VERSION,
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
       kind: "request",
       panelId: expected.panelId,
       requestId: "request_identifier_1234",

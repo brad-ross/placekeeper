@@ -1,4 +1,9 @@
 import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
+import {
+  REVIEW_RUNTIME_PROTOCOL,
+  REVIEW_RUNTIME_VERSION,
+  type ReviewRuntimeMethod,
+} from "../../../../packages/core/src/review-runtime-protocol.js";
 import type {
   ProductionExportResult,
   ProductionSaveStatus,
@@ -7,16 +12,12 @@ import type {
 } from "../app/ProductionReviewApp.js";
 import type { RejectedReviewCommand } from "../app/ReviewShell.js";
 import {
-  HOST_RUNTIME_PROTOCOL,
-  HOST_RUNTIME_VERSION,
   type HostRuntime,
   type HostRuntimeBootstrap,
   type HostRuntimeCommand,
   type HostRuntimeIdentity,
   type HostRuntimeInvalidation,
 } from "./runtime.js";
-
-export { HOST_RUNTIME_PROTOCOL, HOST_RUNTIME_VERSION } from "./runtime.js";
 
 const ID = /^[A-Za-z0-9_-]{16,128}$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -60,7 +61,7 @@ export async function materializeVscodeWasmResource(
 }
 
 interface PendingRequest {
-  readonly method: string;
+  readonly method: ReviewRuntimeMethod;
   readonly identity?: HostRuntimeIdentity;
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: Error) => void;
@@ -151,8 +152,8 @@ export function createRpcHostRuntime(
   };
 
   const unsubscribe = port.subscribe((message) => {
-    if (!isObject(message) || message.protocol !== HOST_RUNTIME_PROTOCOL ||
-      message.version !== HOST_RUNTIME_VERSION || message.panelId !== port.panelId) return;
+    if (!isObject(message) || message.protocol !== REVIEW_RUNTIME_PROTOCOL ||
+      message.version !== REVIEW_RUNTIME_VERSION || message.panelId !== port.panelId) return;
     if (message.kind === "event" && message.event === "host-command") {
       if (!validHostCommand(message.payload)) return;
       if (hostCommands.size === 0) pendingHostCommand = message.payload;
@@ -205,7 +206,7 @@ export function createRpcHostRuntime(
     else current.reject(new Error("The trusted host rejected the review action."));
   });
 
-  const invoke = <T>(method: string, payload: unknown = {}, signal?: AbortSignal): Promise<T> => {
+  const invoke = <T>(method: ReviewRuntimeMethod, payload: unknown = {}, signal?: AbortSignal): Promise<T> => {
     if (disposed) return Promise.reject(new Error("The review runtime is disposed."));
     if (signal?.aborted === true) return Promise.reject(abortError());
     const id = requestId();
@@ -216,8 +217,8 @@ export function createRpcHostRuntime(
       const onAbort = signal === undefined ? undefined : () => {
         if (!pending.delete(id)) return;
         port.postMessage({
-          protocol: HOST_RUNTIME_PROTOCOL,
-          version: HOST_RUNTIME_VERSION,
+          protocol: REVIEW_RUNTIME_PROTOCOL,
+          version: REVIEW_RUNTIME_VERSION,
           kind: "cancel",
           panelId: port.panelId,
           requestId: id,
@@ -233,8 +234,8 @@ export function createRpcHostRuntime(
         ...(onAbort === undefined ? {} : { abort: () => signal!.removeEventListener("abort", onAbort) }),
       });
       port.postMessage({
-        protocol: HOST_RUNTIME_PROTOCOL,
-        version: HOST_RUNTIME_VERSION,
+        protocol: REVIEW_RUNTIME_PROTOCOL,
+        version: REVIEW_RUNTIME_VERSION,
         kind: "request",
         panelId: port.panelId,
         requestId: id,

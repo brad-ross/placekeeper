@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createReviewState } from "../../../packages/core/src/review-model.js";
+import {
+  REVIEW_RUNTIME_PROTOCOL,
+  REVIEW_RUNTIME_VERSION,
+} from "../../../packages/core/src/review-runtime-protocol.js";
 import { createBrowserHostRuntime } from "../src/host/browser-runtime.js";
 import { subscribeRuntimeDocumentSource } from "../src/host/runtime-document-source.js";
 import type {
@@ -9,8 +13,6 @@ import type {
   HostRuntimeInvalidation,
 } from "../src/host/runtime.js";
 import {
-  HOST_RUNTIME_PROTOCOL,
-  HOST_RUNTIME_VERSION,
   createRpcHostRuntime,
   materializeVscodeWasmResource,
 } from "../src/host/vscode-runtime.js";
@@ -274,8 +276,8 @@ describe("host-neutral review runtime", () => {
       const request = message as { requestId: string; method: string };
       queueMicrotask(() => {
         for (const listener of listeners) listener({
-          protocol: HOST_RUNTIME_PROTOCOL,
-          version: HOST_RUNTIME_VERSION,
+          protocol: REVIEW_RUNTIME_PROTOCOL,
+          version: REVIEW_RUNTIME_VERSION,
           kind: "response",
           panelId: "panel_identifier_1234",
           sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -314,8 +316,8 @@ describe("host-neutral review runtime", () => {
       .map(([message]) => message as Record<string, unknown>)
       .find((message) => message.method === "scope");
     expect(scopeRequest).toEqual({
-      protocol: HOST_RUNTIME_PROTOCOL,
-      version: HOST_RUNTIME_VERSION,
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
       kind: "request",
       panelId: "panel_identifier_1234",
       requestId: expect.any(String),
@@ -352,8 +354,8 @@ describe("host-neutral review runtime", () => {
     });
     const respond = (request: Record<string, unknown>, revision: number, payload: unknown) => {
       const message = {
-        protocol: HOST_RUNTIME_PROTOCOL,
-        version: HOST_RUNTIME_VERSION,
+        protocol: REVIEW_RUNTIME_PROTOCOL,
+        version: REVIEW_RUNTIME_VERSION,
         kind: "response",
         panelId: "panel_identifier_1234",
         sessionId,
@@ -418,8 +420,8 @@ describe("host-neutral review runtime", () => {
     });
     const respond = (request: Record<string, unknown>, revision: number, payload: unknown) => {
       const message = {
-        protocol: HOST_RUNTIME_PROTOCOL,
-        version: HOST_RUNTIME_VERSION,
+        protocol: REVIEW_RUNTIME_PROTOCOL,
+        version: REVIEW_RUNTIME_VERSION,
         kind: "response",
         panelId: "panel_identifier_1234",
         sessionId,
@@ -451,8 +453,8 @@ describe("host-neutral review runtime", () => {
     const command = runtime.command({ type: "undo", expectedRevision: 0 });
     const commandRequest = requests.at(-1)!;
     const ownRevision = {
-      protocol: HOST_RUNTIME_PROTOCOL,
-      version: HOST_RUNTIME_VERSION,
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
       kind: "event",
       event: "session-invalidated",
       panelId: "panel_identifier_1234",
@@ -497,8 +499,8 @@ describe("host-neutral review runtime", () => {
     });
     const respond = (request: Record<string, unknown>, ok: boolean, payload: unknown) => {
       listeners.forEach((listener) => listener({
-        protocol: HOST_RUNTIME_PROTOCOL,
-        version: HOST_RUNTIME_VERSION,
+        protocol: REVIEW_RUNTIME_PROTOCOL,
+        version: REVIEW_RUNTIME_VERSION,
         kind: "response",
         panelId: "panel_identifier_1234",
         sessionId,
@@ -529,8 +531,8 @@ describe("host-neutral review runtime", () => {
     const command = runtime.command({ type: "undo", expectedRevision: 0 });
     const commandRequest = requests.at(-1)!;
     listeners.forEach((listener) => listener({
-      protocol: HOST_RUNTIME_PROTOCOL,
-      version: HOST_RUNTIME_VERSION,
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
       kind: "event",
       event: "session-invalidated",
       panelId: "panel_identifier_1234",
@@ -580,24 +582,24 @@ describe("host-neutral review runtime", () => {
     const publish = (message: unknown) => listeners.forEach((listener) => listener(message));
 
     publish({
-      protocol: HOST_RUNTIME_PROTOCOL,
-      version: HOST_RUNTIME_VERSION,
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "other_panel_identifier",
       payload: { command: "reattach" },
     });
     publish({
-      protocol: HOST_RUNTIME_PROTOCOL,
-      version: HOST_RUNTIME_VERSION,
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
       payload: { command: "reattach", path: "/Users/reader/paper.tex" },
     });
     publish({
-      protocol: HOST_RUNTIME_PROTOCOL,
-      version: HOST_RUNTIME_VERSION,
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
@@ -605,32 +607,32 @@ describe("host-neutral review runtime", () => {
     });
 
     publish({
-      protocol: HOST_RUNTIME_PROTOCOL,
-      version: HOST_RUNTIME_VERSION,
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
       payload: { command: "forward-synctex", pageIndex: 2, point: { x: 72, y: 144 } },
     });
     publish({
-      protocol: HOST_RUNTIME_PROTOCOL,
-      version: HOST_RUNTIME_VERSION,
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
       payload: { command: "forward-synctex", documentGeneration: 4, pageIndex: 2, point: { x: 72, y: 144 } },
     });
     publish({
-      protocol: HOST_RUNTIME_PROTOCOL,
-      version: HOST_RUNTIME_VERSION,
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
       payload: { command: "forward-synctex", pageIndex: -1, point: { x: 72, y: 144 } },
     });
     publish({
-      protocol: HOST_RUNTIME_PROTOCOL,
-      version: HOST_RUNTIME_VERSION,
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
@@ -664,8 +666,8 @@ describe("host-neutral review runtime", () => {
       previousGeneration: 1,
     } as const;
     for (const listener of listeners) listener({
-      protocol: HOST_RUNTIME_PROTOCOL,
-      version: HOST_RUNTIME_VERSION,
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
       kind: "event",
       event: "session-invalidated",
       panelId: "panel_identifier_1234",
@@ -689,8 +691,8 @@ describe("host-neutral review runtime", () => {
       },
     });
     for (const listener of listeners) listener({
-      protocol: HOST_RUNTIME_PROTOCOL,
-      version: HOST_RUNTIME_VERSION,
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",

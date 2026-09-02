@@ -9,9 +9,6 @@ import type {
 } from "../app/ProductionReviewApp.js";
 import type { ViewerAssetUrls, ViewerResourcePolicy } from "../pdf/embedpdf-viewer.js";
 
-export const HOST_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
-export const HOST_RUNTIME_VERSION = 1 as const;
-
 export interface HostRuntimeIdentity {
   readonly sessionId: string;
   readonly generation: number;

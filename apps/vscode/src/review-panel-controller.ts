@@ -1,3 +1,5 @@
+import { isReviewPanelKey } from "../../../packages/core/src/review-runtime-protocol.js";
+
 export interface ReviewBinding {
   readonly outputPath: string;
   readonly sourceRoot?: string;
@@ -11,8 +13,6 @@ export interface ReviewPanelLike {
 
 export interface SerializedReviewPanelState {
   readonly panelKey: string;
-  readonly pageIndex?: number;
-  readonly zoom?: number;
 }
 
 export interface ReviewPanelControllerOptions<Panel extends ReviewPanelLike> {
@@ -20,11 +20,7 @@ export interface ReviewPanelControllerOptions<Panel extends ReviewPanelLike> {
   readonly create: (binding: ReviewBinding, column: "beside") => Promise<Panel>;
   readonly detach?: (canonicalOutputPath: string) => void | Promise<void>;
   readonly resolvePanelKey?: (panelKey: string) => Promise<ReviewBinding | undefined>;
-  readonly attachRestored?: (
-    panel: Panel,
-    binding: ReviewBinding,
-    presentation: Omit<SerializedReviewPanelState, "panelKey">,
-  ) => Promise<void>;
+  readonly attachRestored?: (panel: Panel, binding: ReviewBinding) => Promise<void>;
 }
 
 /** Owns the one-panel-per-canonical-output invariant without owning review state. */
@@ -73,10 +69,7 @@ export class ReviewPanelController<Panel extends ReviewPanelLike> {
       const binding = await this.#options.resolvePanelKey(state.panelKey);
       if (binding === undefined) return { status: "retry", reason: "panel-output-is-unavailable" };
       const canonicalOutputPath = await this.#options.canonicalize(binding.outputPath);
-      await this.#options.attachRestored(panel, { ...binding, outputPath: canonicalOutputPath }, {
-        ...(state.pageIndex === undefined ? {} : { pageIndex: state.pageIndex }),
-        ...(state.zoom === undefined ? {} : { zoom: state.zoom }),
-      });
+      await this.#options.attachRestored(panel, { ...binding, outputPath: canonicalOutputPath });
       this.#bind(canonicalOutputPath, panel);
       return { status: "restored", outputPath: canonicalOutputPath };
     } catch {
@@ -101,12 +94,5 @@ export class ReviewPanelController<Panel extends ReviewPanelLike> {
 function parseSerializedPanelState(value: unknown): SerializedReviewPanelState | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const input = value as Record<string, unknown>;
-  if (typeof input.panelKey !== "string" || !/^[A-Za-z0-9_-]{8,128}$/u.test(input.panelKey)) return undefined;
-  if (input.pageIndex !== undefined && (!Number.isSafeInteger(input.pageIndex) || (input.pageIndex as number) < 0)) return undefined;
-  if (input.zoom !== undefined && (typeof input.zoom !== "number" || !Number.isFinite(input.zoom) || input.zoom <= 0)) return undefined;
-  return {
-    panelKey: input.panelKey,
-    ...(input.pageIndex === undefined ? {} : { pageIndex: input.pageIndex as number }),
-    ...(input.zoom === undefined ? {} : { zoom: input.zoom as number }),
-  };
+  return isReviewPanelKey(input.panelKey) ? { panelKey: input.panelKey } : undefined;
 }

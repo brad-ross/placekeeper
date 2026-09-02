@@ -75,9 +75,9 @@ describe("review panel controller", () => {
       attachRestored,
     });
     const panel = fakePanel(4);
-    await expect(controller.restore(panel, { panelKey: "opaque-panel-key", pageIndex: 8, zoom: 1.25 }))
+    await expect(controller.restore(panel, { panelKey: "opaque-panel-key", pageIndex: -1, zoom: 100 }))
       .resolves.toEqual({ status: "restored", outputPath: "/work/paper.pdf" });
-    expect(attachRestored).toHaveBeenCalledWith(panel, { outputPath: "/work/paper.pdf" }, { pageIndex: 8, zoom: 1.25 });
+    expect(attachRestored).toHaveBeenCalledWith(panel, { outputPath: "/work/paper.pdf" });
   });
 
   it("fails closed for malformed, unavailable, and rejected restoration state", async () => {

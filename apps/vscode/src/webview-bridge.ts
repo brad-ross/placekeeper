@@ -1,16 +1,16 @@
 import { randomBytes } from "node:crypto";
 import WebSocket from "ws";
-
-export const WEBVIEW_RPC_PROTOCOL = "placekeeper.review-runtime" as const;
-export const WEBVIEW_RPC_VERSION = 1 as const;
+import {
+  REVIEW_RUNTIME_PROTOCOL,
+  REVIEW_RUNTIME_VERSION,
+  isReviewRuntimeMethod,
+  type ReviewRuntimeBrokerMethod,
+  type ReviewRuntimeInvokeMethod,
+  type ReviewRuntimeMethod,
+} from "../../../packages/core/src/review-runtime-protocol.js";
 
 const SAFE_ID = /^[A-Za-z0-9_-]{16,128}$/u;
 const MAX_MESSAGE_BYTES = 65_536;
-const METHODS = new Set([
-  "bootstrap", "presence", "detach", "command", "saveStatus", "saveProposal",
-  "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave",
-  "scope", "forwardSyncTex", "reverseSyncTex", "exportReviewedCopy",
-]);
 
 export interface WebviewRpcIdentity {
   readonly panelId: string;
@@ -20,15 +20,15 @@ export interface WebviewRpcIdentity {
 }
 
 export interface WebviewRpcRequest {
-  readonly protocol: typeof WEBVIEW_RPC_PROTOCOL;
-  readonly version: typeof WEBVIEW_RPC_VERSION;
+  readonly protocol: typeof REVIEW_RUNTIME_PROTOCOL;
+  readonly version: typeof REVIEW_RUNTIME_VERSION;
   readonly kind: "request";
   readonly panelId: string;
   readonly requestId: string;
   readonly sessionId?: string;
   readonly generation?: number;
   readonly revision?: number;
-  readonly method: string;
+  readonly method: ReviewRuntimeMethod;
   readonly payload: unknown;
 }
 
@@ -98,7 +98,7 @@ function containsCapabilityPrimitive(value: unknown, depth = 0): boolean {
   ));
 }
 
-function validPayload(method: string, payload: unknown): boolean {
+function validPayload(method: ReviewRuntimeMethod, payload: unknown): boolean {
   if (!isObject(payload) || containsCapabilityPrimitive(payload)) return false;
   const keys = Object.keys(payload);
   if (["bootstrap", "presence", "detach", "saveStatus", "saveProposal", "chooseFolder",
@@ -127,11 +127,11 @@ export function parseWebviewRequest(
   expected: WebviewRpcIdentity,
   replayedRequestIds: ReadonlySet<string>,
 ): WebviewRpcRequest | undefined {
-  if (!isObject(value) || !bounded(value) || value.protocol !== WEBVIEW_RPC_PROTOCOL ||
-    value.version !== WEBVIEW_RPC_VERSION || value.kind !== "request" ||
+  if (!isObject(value) || !bounded(value) || value.protocol !== REVIEW_RUNTIME_PROTOCOL ||
+    value.version !== REVIEW_RUNTIME_VERSION || value.kind !== "request" ||
     value.panelId !== expected.panelId || typeof value.requestId !== "string" ||
     !SAFE_ID.test(value.requestId) || replayedRequestIds.has(value.requestId) ||
-    typeof value.method !== "string" || !METHODS.has(value.method) || !("payload" in value) ||
+    !isReviewRuntimeMethod(value.method) || !("payload" in value) ||
     !validPayload(value.method, value.payload)) return undefined;
   if (value.method !== "bootstrap" && (
     value.sessionId !== expected.sessionId || value.generation !== expected.generation || value.revision !== expected.revision
@@ -146,8 +146,8 @@ export function parseWebviewCancel(
   value: unknown,
   expectedPanelId: string,
 ): { readonly requestId: string } | undefined {
-  if (!isObject(value) || !bounded(value) || value.protocol !== WEBVIEW_RPC_PROTOCOL ||
-    value.version !== WEBVIEW_RPC_VERSION || value.kind !== "cancel" ||
+  if (!isObject(value) || !bounded(value) || value.protocol !== REVIEW_RUNTIME_PROTOCOL ||
+    value.version !== REVIEW_RUNTIME_VERSION || value.kind !== "cancel" ||
     value.panelId !== expectedPanelId || typeof value.requestId !== "string" || !SAFE_ID.test(value.requestId)) return undefined;
   return { requestId: value.requestId };
 }
@@ -155,7 +155,7 @@ export function parseWebviewCancel(
 export interface TrustedRuntimeClient {
   readonly identity: WebviewRpcIdentity;
   bootstrap(signal: AbortSignal): Promise<unknown>;
-  invoke(method: string, payload: unknown, signal: AbortSignal): Promise<unknown>;
+  invoke(method: ReviewRuntimeInvokeMethod, payload: unknown, signal: AbortSignal): Promise<unknown>;
   subscribeInvalidations?(listener: (payload: unknown) => void): () => void;
   dispose(): void;
 }
@@ -173,8 +173,8 @@ export class VersionedWebviewBridge {
     this.#postMessage = postMessage;
     this.#unsubscribeInvalidations = client.subscribeInvalidations?.((payload) => {
       this.#postMessage({
-        protocol: WEBVIEW_RPC_PROTOCOL,
-        version: WEBVIEW_RPC_VERSION,
+        protocol: REVIEW_RUNTIME_PROTOCOL,
+        version: REVIEW_RUNTIME_VERSION,
         kind: "event",
         event: "session-invalidated",
         panelId: this.#client.identity.panelId,
@@ -210,7 +210,7 @@ export class VersionedWebviewBridge {
         : await this.#client.invoke(request.method, request.payload, controller.signal);
       if (controller.signal.aborted) return;
       this.#postMessage({
-        protocol: WEBVIEW_RPC_PROTOCOL, version: WEBVIEW_RPC_VERSION, kind: "response",
+        protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "response",
         ...(requestIdentity ?? this.#client.identity), requestId: request.requestId, ok: true, payload,
       });
     } catch (error) {
@@ -218,7 +218,7 @@ export class VersionedWebviewBridge {
         `[Placekeeper] trusted runtime request failed: ${request.method} (${safeRuntimeRequestFailure(error)})`,
       );
       if (!controller.signal.aborted) this.#postMessage({
-        protocol: WEBVIEW_RPC_PROTOCOL, version: WEBVIEW_RPC_VERSION, kind: "response",
+        protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "response",
         ...(requestIdentity ?? this.#client.identity), requestId: request.requestId, ok: false,
         error: { kind: "rejected" },
       });
@@ -284,18 +284,32 @@ function safeSaveStatus(value: unknown): unknown {
   return { ...value, destination: { ...destination, targetPath: "Reviewed PDF" } };
 }
 
-function safeResult(method: string, value: unknown): unknown {
-  if (method === "scope") return safeScope(value);
-  if (["saveStatus", "chooseCopy", "chooseOriginal", "retrySave", "locateSave"].includes(method)) {
-    return safeSaveStatus(value);
+function safeResult(method: ReviewRuntimeBrokerMethod, value: unknown): unknown {
+  switch (method) {
+    case "scope":
+      return safeScope(value);
+    case "saveStatus":
+    case "chooseCopy":
+    case "chooseOriginal":
+    case "retrySave":
+    case "locateSave":
+      return safeSaveStatus(value);
+    case "saveProposal":
+      return isObject(value) ? { ...value, folder: "Local folder" } : value;
+    case "chooseFolder": {
+      if (!isObject(value)) return value;
+      const { folder: _folder, ...safe } = value;
+      return safe;
+    }
+    case "exportReviewedCopy":
+      return isObject(value) ? { ...value, path: "Reviewed PDF" } : value;
+    case "command":
+    case "forwardSyncTex":
+    case "reverseSyncTex":
+      return value;
+    default:
+      return method satisfies never;
   }
-  if (method === "saveProposal" && isObject(value)) return { ...value, folder: "Local folder" };
-  if (method === "chooseFolder" && isObject(value)) {
-    const { folder: _folder, ...safe } = value;
-    return safe;
-  }
-  if (method === "exportReviewedCopy" && isObject(value)) return { ...value, path: "Reviewed PDF" };
-  return value;
 }
 
 export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOptions): TrustedRuntimeClient {
@@ -342,7 +356,7 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
   const post = (path: string, payload: unknown, signal: AbortSignal) => json(path, {
     method: "POST", body: JSON.stringify(payload),
   }, signal);
-  const routes: Readonly<Record<string, { readonly method: "GET" | "POST"; readonly path: string }>> = {
+  const routes = {
     scope: { method: "GET", path: "/scope" },
     saveStatus: { method: "GET", path: "/save/status" },
     saveProposal: { method: "GET", path: "/save/proposal" },
@@ -355,7 +369,10 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
     forwardSyncTex: { method: "POST", path: "/synctex/forward" },
     reverseSyncTex: { method: "POST", path: "/synctex/reverse" },
     exportReviewedCopy: { method: "POST", path: "/export" },
-  };
+  } satisfies Readonly<Record<ReviewRuntimeBrokerMethod, {
+    readonly method: "GET" | "POST";
+    readonly path: string;
+  }>>;
   const client: TrustedRuntimeClient = {
     get identity() { return identity; },
     async bootstrap(signal) {

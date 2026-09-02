@@ -4,6 +4,10 @@ import { readFile, realpath, rm } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import * as vscode from "vscode";
+import {
+  REVIEW_RUNTIME_PROTOCOL,
+  REVIEW_RUNTIME_VERSION,
+} from "../../../packages/core/src/review-runtime-protocol.js";
 
 import {
   ScopedExternalLaunchRegistrations,
@@ -55,8 +59,6 @@ import { ReviewPanelController, type ReviewBinding } from "./review-panel-contro
 import { buildReviewWebviewHtml, parseSharedAssetManifest, reviewPanelOptions } from "./review-panel.js";
 import { openSourceEditor, sourceLineNumber, sourceLineReveal } from "./source-navigation.js";
 import {
-  WEBVIEW_RPC_PROTOCOL,
-  WEBVIEW_RPC_VERSION,
   VersionedWebviewBridge,
   createLoopbackRuntimeClient,
   forwardSyncTexRetryable,
@@ -271,8 +273,8 @@ async function revealForwardSyncTexTarget(
     const target = forwardSyncTexTarget(result);
     if (target !== undefined) {
       await panel.webview.postMessage({
-        protocol: WEBVIEW_RPC_PROTOCOL,
-        version: WEBVIEW_RPC_VERSION,
+        protocol: REVIEW_RUNTIME_PROTOCOL,
+        version: REVIEW_RUNTIME_VERSION,
         kind: "event",
         event: "host-command",
         panelId: runtime.client.identity.panelId,
@@ -573,8 +575,8 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       await activePanel.webview.postMessage({
-        protocol: WEBVIEW_RPC_PROTOCOL,
-        version: WEBVIEW_RPC_VERSION,
+        protocol: REVIEW_RUNTIME_PROTOCOL,
+        version: REVIEW_RUNTIME_VERSION,
         kind: "event",
         event: "host-command",
         panelId: runtime.client.identity.panelId,
@@ -586,8 +588,8 @@ export function activate(context: vscode.ExtensionContext): void {
       const runtime = runtimes.get(activePanel);
       if (runtime === undefined) return;
       await activePanel.webview.postMessage({
-        protocol: WEBVIEW_RPC_PROTOCOL,
-        version: WEBVIEW_RPC_VERSION,
+        protocol: REVIEW_RUNTIME_PROTOCOL,
+        version: REVIEW_RUNTIME_VERSION,
         kind: "event",
         event: "host-command",
         panelId: runtime.client.identity.panelId,
