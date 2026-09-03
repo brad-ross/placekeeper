@@ -44,6 +44,11 @@ interface PassageMatch {
   readonly pages: readonly DocumentPageSpan[];
 }
 
+interface DocumentPassageIndex {
+  readonly text: string;
+  readonly pages: readonly DocumentPageSpan[];
+}
+
 function candidateMatches(anchor: ReviewAnchorEvidenceV1, pages: readonly PdfAnchorPage[]) {
   const candidates: SemanticMatch[] = [];
   if (anchor.kind === "page" && anchor.nearbyText === undefined) return candidates;
@@ -148,10 +153,7 @@ function anchorForMatch(
     : { ...anchor, pageIndex: match.page.pageIndex, rect };
 }
 
-function documentPageSpans(pages: readonly PdfAnchorPage[]): {
-  readonly text: string;
-  readonly pages: readonly DocumentPageSpan[];
-} {
+function documentPageSpans(pages: readonly PdfAnchorPage[]): DocumentPassageIndex {
   let offset = 0;
   const ordered = pages.toSorted((left, right) => left.pageIndex - right.pageIndex);
   const spans = ordered.map((page) => {
@@ -164,12 +166,11 @@ function documentPageSpans(pages: readonly PdfAnchorPage[]): {
 
 function crossPagePassageMatches(
   anchor: Extract<ReviewAnchorEvidenceV1, { readonly kind: "selection" }>,
-  pages: readonly PdfAnchorPage[],
+  document: DocumentPassageIndex,
 ): readonly PassageMatch[] {
   const canonical = normalizeReviewSelectionAnchor(anchor);
   const needle = canonical.pages.map(({ quote }) => quote).join("");
   if (needle.length === 0) return [];
-  const document = documentPageSpans(pages);
   const matches: PassageMatch[] = [];
   let offset = 0;
   while (offset <= document.text.length - needle.length) {
@@ -235,10 +236,11 @@ function crossPageAnchorForMatch(
   };
 }
 
-export function reconcilePdfAnchor(
+function reconcilePdfAnchorWithPassageIndex(
   anchor: ReviewAnchorEvidenceV1,
   pages: readonly PdfAnchorPage[],
   generation: number,
+  passageIndex?: DocumentPassageIndex,
 ): AnchorResolution {
   if (anchor.kind === "page" && anchor.nearbyText === undefined) {
     return {
@@ -250,7 +252,7 @@ export function reconcilePdfAnchor(
     };
   }
   if (anchor.kind === "selection" && normalizeReviewSelectionAnchor(anchor).pages.length > 1) {
-    const matches = crossPagePassageMatches(anchor, pages);
+    const matches = crossPagePassageMatches(anchor, passageIndex ?? documentPageSpans(pages));
     if (matches.length === 1) {
       const resolvedAnchor = crossPageAnchorForMatch(anchor, matches[0]!);
       if (resolvedAnchor === undefined) {
@@ -307,15 +309,29 @@ export function reconcilePdfAnchor(
   };
 }
 
+export function reconcilePdfAnchor(
+  anchor: ReviewAnchorEvidenceV1,
+  pages: readonly PdfAnchorPage[],
+  generation: number,
+): AnchorResolution {
+  return reconcilePdfAnchorWithPassageIndex(anchor, pages, generation);
+}
+
 function reconcileItem(
   item: ReviewItem,
   pages: readonly PdfAnchorPage[],
   generation: number,
+  passageIndex?: DocumentPassageIndex,
 ): ReviewItem {
   if (item.reconciliation === undefined) {
     throw new Error(`Generated-output Review Item ${item.id} lacks canonical anchor state`);
   }
-  const resolved = reconcilePdfAnchor(item.reconciliation.anchor, pages, generation);
+  const resolved = reconcilePdfAnchorWithPassageIndex(
+    item.reconciliation.anchor,
+    pages,
+    generation,
+    passageIndex,
+  );
   return {
     ...item,
     pageIndex: resolved.anchor.pageIndex,
@@ -331,8 +347,14 @@ function reconcileDraft(
   draft: PendingReviewDraftV1,
   pages: readonly PdfAnchorPage[],
   generation: number,
+  passageIndex?: DocumentPassageIndex,
 ): PendingReviewDraftV1 {
-  const resolved = reconcilePdfAnchor(draft.anchor, pages, generation);
+  const resolved = reconcilePdfAnchorWithPassageIndex(
+    draft.anchor,
+    pages,
+    generation,
+    passageIndex,
+  );
   return {
     ...draft,
     ...(resolved.disposition.kind === "resolved" ? { baseGeneration: generation } : {}),
@@ -350,9 +372,19 @@ export function reconcilePdfAnchorState(
   state: ReviewState,
   input: { readonly pages: readonly PdfAnchorPage[]; readonly generation: number },
 ): ReviewState {
-  const items = state.items.map((item) => reconcileItem(item, input.pages, input.generation));
+  const anchors = [
+    ...state.items.map((item) => item.reconciliation?.anchor),
+    ...state.pendingDrafts.map((draft) => draft.anchor),
+  ];
+  const needsPassageIndex = anchors.some((anchor) =>
+    anchor?.kind === "selection" && normalizeReviewSelectionAnchor(anchor).pages.length > 1
+  );
+  const passageIndex = needsPassageIndex ? documentPageSpans(input.pages) : undefined;
+  const items = state.items.map((item) =>
+    reconcileItem(item, input.pages, input.generation, passageIndex)
+  );
   const pendingDrafts = state.pendingDrafts.map((draft) =>
-    reconcileDraft(draft, input.pages, input.generation)
+    reconcileDraft(draft, input.pages, input.generation, passageIndex)
   );
   return { ...state, items, pendingDrafts };
 }
