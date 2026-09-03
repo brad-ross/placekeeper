@@ -1,5 +1,11 @@
 import { createRoot } from "react-dom/client";
-import { useEffect, useState } from "react";
+import {
+  Component,
+  useEffect,
+  useState,
+  type ErrorInfo,
+  type ReactNode,
+} from "react";
 
 import {
   decodePlacekeeperLink,
@@ -26,6 +32,7 @@ import { createBrowserHostRuntime } from "./host/browser-runtime.js";
 import {
   createRpcHostRuntime,
   createVscodeMessagePort,
+  materializeVscodeWorkerResource,
   materializeVscodeWasmResource,
 } from "./host/vscode-runtime.js";
 import type { HostRuntime, HostRuntimeBootstrap } from "./host/runtime.js";
@@ -378,15 +385,43 @@ export async function startRuntime(
   options: {
     readonly initialPresentation?: VscodePresentationState;
     readonly onPresentationChange?: (presentation: { readonly pageIndex: number; readonly zoom: number }) => void;
+    readonly onDocumentReady?: (generation: number) => void;
+    readonly onDocumentTitleChange?: (title: string, generation: number) => void;
+    readonly onRuntimeError?: (error: Error) => void;
   } = {},
-): Promise<void> {
+): Promise<() => void> {
   const root = document.querySelector("#root");
   if (!(root instanceof HTMLElement)) throw new Error("Production review root is unavailable");
   root.dataset.productionRoot = "true";
   const loaded = await runtime.bootstrap();
-  createRoot(root).render(
-    <RuntimeProductionReviewApp runtime={runtime} initial={loaded} {...options} />,
+  const reactRoot = createRoot(root);
+  reactRoot.render(
+    <RuntimeFailureBoundary {...(options.onRuntimeError === undefined
+      ? {}
+      : { onError: options.onRuntimeError })}>
+      <RuntimeProductionReviewApp runtime={runtime} initial={loaded} {...options} />
+    </RuntimeFailureBoundary>,
   );
+  return () => reactRoot.unmount();
+}
+
+class RuntimeFailureBoundary extends Component<{
+  readonly children: ReactNode;
+  readonly onError?: (error: Error) => void;
+}, { readonly failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError(): { readonly failed: boolean } {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error, _info: ErrorInfo): void {
+    this.props.onError?.(error);
+  }
+
+  render(): ReactNode {
+    return this.state.failed ? null : this.props.children;
+  }
 }
 
 function RuntimeProductionReviewApp(props: {
@@ -394,6 +429,9 @@ function RuntimeProductionReviewApp(props: {
   readonly initial: HostRuntimeBootstrap;
   readonly initialPresentation?: VscodePresentationState;
   readonly onPresentationChange?: (presentation: { readonly pageIndex: number; readonly zoom: number }) => void;
+  readonly onDocumentReady?: (generation: number) => void;
+  readonly onDocumentTitleChange?: (title: string, generation: number) => void;
+  readonly onRuntimeError?: (error: Error) => void;
 }) {
   const [loaded, setLoaded] = useState(props.initial);
   const [refreshStatus, setRefreshStatus] = useState<"idle" | "reconciling" | "failed">("idle");
@@ -430,6 +468,8 @@ function RuntimeProductionReviewApp(props: {
     api={props.runtime}
     viewerAssets={loaded.viewerAssets}
     resourcePolicy={loaded.resourcePolicy}
+    {...(loaded.locationHistory === undefined ? {} : { locationHistory: loaded.locationHistory })}
+    {...(loaded.canonicalLinkBase === undefined ? {} : { copyLinkBase: loaded.canonicalLinkBase })}
     generationRefreshStatus={refreshStatus}
     hostReattachRequestToken={hostReattachRequestToken}
     hostReverseSyncTexRequestToken={hostReverseSyncTexRequestToken}
@@ -439,7 +479,75 @@ function RuntimeProductionReviewApp(props: {
       : {})}
     {...(props.initialPresentation === undefined ? {} : { initialPresentation: props.initialPresentation })}
     {...(props.onPresentationChange === undefined ? {} : { onPresentationChange: props.onPresentationChange })}
+    {...(props.onDocumentReady === undefined ? {} : { onDocumentReady: props.onDocumentReady })}
+    {...(props.onDocumentTitleChange === undefined
+      ? {}
+      : { onDocumentTitleChange: props.onDocumentTitleChange })}
   />;
+}
+
+export interface ChromeRuntimeStartResult {
+  readonly ready: Promise<number>;
+  dispose(): void;
+}
+
+/** Mounts the shared production client for a Chrome handler without granting
+ * it access to native messaging or service credentials. */
+export async function startChromeRuntime(options: {
+  readonly runtimeId: string;
+  readonly extensionOrigin: string;
+  readonly port: {
+    postMessage(message: unknown): unknown;
+    subscribe(listener: (message: unknown) => void): () => void;
+  };
+  readonly onDocumentTitleChange?: (title: string, generation: number) => void;
+  readonly onRuntimeError?: (error: Error) => void;
+}): Promise<ChromeRuntimeStartResult> {
+  const runtime = createRpcHostRuntime({
+    runtimeId: options.runtimeId,
+    postMessage: options.port.postMessage,
+    subscribe: options.port.subscribe,
+  }, {
+    host: "chrome",
+    extensionOrigin: options.extensionOrigin,
+  });
+  const ready = Promise.withResolvers<number>();
+  let settled = false;
+  let unmount: (() => void) | undefined;
+  try {
+    unmount = await startRuntime(runtime, {
+      onDocumentReady: (generation) => {
+        if (settled) return;
+        settled = true;
+        ready.resolve(generation);
+      },
+      ...(options.onDocumentTitleChange === undefined
+        ? {}
+        : { onDocumentTitleChange: options.onDocumentTitleChange }),
+      onRuntimeError: (error) => {
+        if (!settled) {
+          settled = true;
+          ready.reject(error);
+        }
+        options.onRuntimeError?.(error);
+      },
+    });
+  } catch (error) {
+    settled = true;
+    runtime.dispose();
+    throw error;
+  }
+  return {
+    ready: ready.promise,
+    dispose: () => {
+      if (!settled) {
+        settled = true;
+        ready.reject(new DOMException("The embedded review was disposed.", "AbortError"));
+      }
+      unmount?.();
+      runtime.dispose();
+    },
+  };
 }
 
 export async function startVscode(options: {
@@ -456,6 +564,7 @@ export async function startVscode(options: {
   }
   const runtime = createRpcHostRuntime(createVscodeMessagePort(options.panelId, options.vscode), {
     materializePdfiumWasm: materializeVscodeWasmResource,
+    materializePdfiumWorker: materializeVscodeWorkerResource,
   });
   globalThis.addEventListener("pagehide", () => runtime.dispose(), { once: true });
   const rawState = options.vscode.getState();

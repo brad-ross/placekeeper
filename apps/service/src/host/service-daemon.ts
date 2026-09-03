@@ -24,6 +24,10 @@ import { acquireLifecycleLock, LifecycleLockTimeoutError } from "./lifecycle-loc
 import { upgradeReason } from "./upgrade-coordinator.js";
 import { PLACEKEEPER_HTTP_PORT } from "../server/http-server.js";
 import type { ChromeBrowserSourceOpenRequest } from "../browser/browser-source-store.js";
+import type {
+  ChromeRuntimeExtensionMessage,
+  ChromeRuntimeHostMessage,
+} from "../../../../packages/core/src/chrome-native-runtime-protocol.js";
 
 export interface DaemonPaths {
   readonly appSupportRoot: string;
@@ -205,6 +209,39 @@ export async function openChromeBrowserSourceThroughDaemon(
   const response = await demandStartedControl({ kind: "chrome-open", request }, paths, signal);
   if (response.kind !== "chrome-open") throw new DaemonUpgradeRequiredError("malformed");
   return response.response;
+}
+
+export async function chromeRuntimeThroughDaemon(
+  portId: string,
+  message: ChromeRuntimeExtensionMessage,
+  signal?: AbortSignal,
+  paths = defaultDaemonPaths(),
+): Promise<readonly ChromeRuntimeHostMessage[]> {
+  const request = { kind: "chrome-runtime" as const, portId, message };
+  // Negotiation may need to start the daemon and therefore uses the lifecycle
+  // lock. Once the daemon owns the port, its aggregate activity keeps it alive
+  // and upgrade-ineligible; routing later frames directly avoids serializing
+  // independent Chrome tabs behind a long save picker or export.
+  const response = message.type === "hello"
+    ? await demandStartedControl(request, paths, signal)
+    : await requestControl(paths.socketPath, request, {
+        timeoutMs: 10 * 60_000,
+        ...(signal === undefined ? {} : { signal }),
+      });
+  if (response.kind !== "chrome-runtime") throw new DaemonUpgradeRequiredError("malformed");
+  return response.messages;
+}
+
+export async function detachChromeRuntimeThroughDaemon(
+  portId: string,
+  paths = defaultDaemonPaths(),
+): Promise<void> {
+  const response = await requestControl(
+    paths.socketPath,
+    { kind: "chrome-runtime-detach", portId },
+    { timeoutMs: 15_000 },
+  );
+  if (response.kind !== "chrome-runtime-detached") throw new DaemonUpgradeRequiredError("malformed");
 }
 
 export async function preflightLinkThroughDaemon(

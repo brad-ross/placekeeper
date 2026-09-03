@@ -1,4 +1,6 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { constants } from "node:fs";
+import { mkdtemp, open, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -38,15 +40,117 @@ async function extensionWorker(context: BrowserContext) {
     }).catch(() => undefined);
 }
 
+test.describe("Chrome PDF performance contract", () => {
+  test("pins the versioned native-transport performance contract", async () => {
+    const budget = JSON.parse(await readFile(
+      resolve("test/acceptance/chrome-performance-budget.json"),
+      "utf8",
+    )) as {
+      schemaVersion: number;
+      corpusVersion: string;
+      fixtures: Array<{
+        id: string;
+        local: { fixture?: string; byteLength?: number; sha256?: string };
+        remote: unknown;
+      }>;
+      repetitions: { cold: number; warm: number };
+      latency: { percentile: string; relativePercent: number; absoluteMilliseconds: number };
+      memory: {
+        extensionPdfBytes: number;
+        extensionFixedBytes: number;
+        nativeServiceTransientBytes: number;
+      };
+      cancellation: { releaseWithinMilliseconds: number };
+    };
+
+    expect(budget).toMatchObject({
+      schemaVersion: 1,
+      corpusVersion: "chrome-native-v1",
+      repetitions: { cold: 5, warm: 10 },
+      latency: { percentile: "p50", relativePercent: 20, absoluteMilliseconds: 1_000 },
+      memory: {
+        extensionPdfBytes: 1,
+        extensionFixedBytes: 96 * 1024 * 1024,
+        nativeServiceTransientBytes: 32 * 1024 * 1024,
+      },
+      cancellation: { releaseWithinMilliseconds: 2_000 },
+    });
+    expect(budget.fixtures.map(({ id }) => id)).toEqual([
+      "small-text",
+      "representative-mixed",
+      "image-heavy-scan",
+      "structurally-complex",
+      "near-64-mib",
+    ]);
+    expect(budget.fixtures.every(({ local, remote }) => local !== undefined && remote !== undefined))
+      .toBe(true);
+    for (const { local } of budget.fixtures) {
+      if (local.fixture === undefined) continue;
+      const bytes = await readFile(resolve(local.fixture));
+      expect(bytes.byteLength).toBe(local.byteLength);
+      expect(createHash("sha256").update(bytes).digest("hex")).toBe(local.sha256);
+    }
+    const nearLimit = budget.fixtures.at(-1)?.local as {
+      recipe?: string;
+      byteLength?: number;
+    };
+    expect(nearLimit.recipe).toBe("pad-before-eof");
+    expect(nearLimit.byteLength).toBeGreaterThanOrEqual(60 * 1024 * 1024);
+    expect(nearLimit.byteLength).toBeLessThan(64 * 1024 * 1024);
+  });
+});
+
+test.describe("Chrome local-source identity proof", () => {
+  test("an opened no-follow snapshot survives replacement, truncation, and symlink swaps", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-local-identity-proof-"));
+    try {
+      const source = join(root, "paper.pdf");
+      const moved = join(root, "opened-paper.pdf");
+      const outside = join(root, "outside.pdf");
+      const original = Buffer.from("%PDF-1.7\ntrusted source\n%%EOF");
+      await writeFile(source, original);
+      await writeFile(outside, "%PDF-1.7\nuntrusted source\n%%EOF");
+
+      const handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const opened = await handle.readFile();
+      const identity = await handle.stat();
+      await handle.close();
+      const accepted = {
+        byteLength: opened.byteLength,
+        sha256: createHash("sha256").update(opened).digest("hex"),
+        device: identity.dev,
+        inode: identity.ino,
+      };
+
+      await rename(source, moved);
+      await writeFile(source, "%PDF-1.7\nreplacement\n%%EOF");
+      await writeFile(moved, "");
+      await rm(source);
+      await symlink(outside, source);
+
+      expect(opened).toEqual(original);
+      expect({
+        byteLength: opened.byteLength,
+        sha256: createHash("sha256").update(opened).digest("hex"),
+        device: identity.dev,
+        inode: identity.ino,
+      }).toEqual(accepted);
+      expect(await readFile(source)).not.toEqual(opened);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 test.describe("Chrome PDF handoff acceptance", () => {
-  let fixture: ChromePdfFixtureServer;
+  let fixture!: ChromePdfFixtureServer;
 
   test.beforeAll(async () => {
     fixture = await startChromePdfFixtureServer({ pdfBytes: await readFile(pdfPath) });
   });
 
   test.afterAll(async () => {
-    await fixture.close();
+    if (fixture !== undefined) await fixture.close();
     await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, {
       recursive: true,
       force: true,

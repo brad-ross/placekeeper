@@ -1,9 +1,11 @@
 import { DocumentManagerPlugin } from '@embedpdf/plugin-document-manager';
 import { InteractionManagerPlugin } from '@embedpdf/plugin-interaction-manager';
-import { describe, expect, it } from 'vitest';
+import { ZoomMode, ZoomPlugin } from '@embedpdf/plugin-zoom';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   createLocalPdfiumViewerPlugins,
+  createTrustedPdfiumWorker,
   validateViewerResourceUrl,
 } from '../src/pdf/embedpdf-viewer.js';
 import { MAIN_PDF_DOCUMENT_ID } from '../src/pdf/viewer-document-ids.js';
@@ -25,6 +27,9 @@ describe('EmbedPDF registry configuration', () => {
     const interaction = registrations.find(({ package: pluginPackage }) => (
       pluginPackage.manifest.id === InteractionManagerPlugin.id
     ));
+    const zoom = registrations.find(({ package: pluginPackage }) => (
+      pluginPackage.manifest.id === ZoomPlugin.id
+    ));
 
     expect(documents?.config).toMatchObject({
       maxDocuments: 2,
@@ -39,6 +44,9 @@ describe('EmbedPDF registry configuration', () => {
     });
     expect(interaction?.config).toEqual({
       exclusionRules: { dataAttributes: ['data-pdf-link-control'] },
+    });
+    expect(zoom?.config).toMatchObject({
+      defaultZoomLevel: ZoomMode.FitWidth,
     });
   });
 
@@ -78,5 +86,42 @@ describe('EmbedPDF registry configuration', () => {
       host: 'vscode',
       issued,
     })).toThrow(/extension-issued/u);
+  });
+
+  it('binds Chrome document, WASM, and worker URLs to their issued roles', () => {
+    const extensionOrigin = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
+    const resources = {
+      document: `blob:${extensionOrigin}/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+      pdfiumWasm: `${extensionOrigin}/assets/pdfium.wasm`,
+      worker: `${extensionOrigin}/assets/pdfium-worker.js`,
+    };
+    const policy = { host: 'chrome', extensionOrigin, resources } as const;
+
+    expect(validateViewerResourceUrl(resources.document, policy, 'document')).toBe(resources.document);
+    expect(validateViewerResourceUrl(resources.pdfiumWasm, policy, 'pdfium-wasm')).toBe(resources.pdfiumWasm);
+    expect(validateViewerResourceUrl(resources.worker, policy, 'pdfium-worker')).toBe(resources.worker);
+    expect(() => validateViewerResourceUrl(resources.worker, policy, 'pdfium-wasm')).toThrow(/role/iu);
+    expect(() => validateViewerResourceUrl('https://example.com/worker.js', policy, 'pdfium-worker')).toThrow();
+    expect(() => validateViewerResourceUrl('http://127.0.0.1:43179/pdfium.wasm', policy, 'pdfium-wasm')).toThrow();
+    expect(() => validateViewerResourceUrl('data:text/javascript,postMessage(1)', policy, 'pdfium-worker')).toThrow();
+  });
+
+  it('creates the PDF engine worker only from the trusted worker role', () => {
+    const extensionOrigin = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
+    const workerUrl = `${extensionOrigin}/assets/pdfium-worker.js`;
+    const worker = { postMessage() {}, addEventListener() {}, removeEventListener() {}, terminate() {} } as unknown as Worker;
+    const workerFactory = vi.fn(() => worker);
+    const created = createTrustedPdfiumWorker(workerUrl, {
+      host: 'chrome',
+      extensionOrigin,
+      resources: {
+        document: `blob:${extensionOrigin}/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+        pdfiumWasm: `${extensionOrigin}/assets/pdfium.wasm`,
+        worker: workerUrl,
+      },
+    }, workerFactory);
+
+    expect(created).toBe(worker);
+    expect(workerFactory).toHaveBeenCalledWith(workerUrl, { type: 'module' });
   });
 });

@@ -101,6 +101,9 @@ export interface RemoteTemporarySourceOwnership {
   readonly displayName: string;
   readonly digest: string;
   readonly byteLength: number;
+  /** Stable native-normalized identity for Chrome re-acquisition. It is
+   * private recovery metadata and is never projected to the extension. */
+  readonly sourceIdentity?: string;
 }
 
 export type RecoverableSourceOwnership =
@@ -119,6 +122,9 @@ export interface RecoverableDraftV3 {
   readonly generationLineage?: readonly DurableGenerationRecordV1[];
   readonly latestObservationEpoch?: number;
   readonly sourceWorkInterruptions?: readonly DurableSourceWorkInterruptionV1[];
+  /** A Chrome review that accepted a potentially durable side effect must
+   * remain recoverable even when its save state is currently clean. */
+  readonly chromeProtected?: true;
 }
 
 export type RecoverableDraft = LegacyRecoverableDraft | RecoverableDraftV2 | RecoverableDraftV3;
@@ -208,7 +214,9 @@ function validV3Source(source: RecoverableSourceOwnership): boolean {
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
       .test(source.leaseId) && source.displayName.length > 0 && source.displayName.length <= 120 &&
     !/[\\/\u0000-\u001f\u007f]/u.test(source.displayName) &&
-    /^[a-f0-9]{64}$/u.test(source.digest) && Number.isSafeInteger(source.byteLength) &&
+    /^[a-f0-9]{64}$/u.test(source.digest) &&
+    (source.sourceIdentity === undefined || /^[a-f0-9]{64}$/u.test(source.sourceIdentity)) &&
+    Number.isSafeInteger(source.byteLength) &&
     source.byteLength > 0;
 }
 
@@ -222,6 +230,7 @@ function parse(contents: string): RecoverableDraftV3 | undefined {
       ![1, 2, 3].includes(envelope.payload.schemaVersion) ||
       (envelope.payload.schemaVersion === 3 && (
         !validV3Source(envelope.payload.source) ||
+        (envelope.payload.chromeProtected !== undefined && envelope.payload.chromeProtected !== true) ||
         (envelope.payload.source.disposition === "remote-temporary" && (
           envelope.payload.source.digest !== envelope.payload.state.source.digest ||
           envelope.payload.source.byteLength !== envelope.payload.state.source.byteLength

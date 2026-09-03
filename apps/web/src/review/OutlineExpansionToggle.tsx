@@ -17,7 +17,7 @@ export function OutlineExpansionToggle({
   return (
     <button
       type="button"
-      className="review-workspace__outline-toggle"
+      className="review-workspace__move review-workspace__move--activity review-workspace__move--header-action review-workspace__outline-toggle"
       data-outline-expansion-toggle={restorePending ? 'restore' : 'collapse'}
       aria-label={label}
       title={label}

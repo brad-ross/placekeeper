@@ -1,4 +1,5 @@
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -25,6 +26,25 @@ async function fixtureBundle(root: string): Promise<string> {
   await writeFile(join(extension, "handler.html"), "handler", { mode: 0o644 });
   await writeFile(join(extension, "popup.html"), "popup", { mode: 0o644 });
   await writeFile(join(extension, "background.js"), "background", { mode: 0o644 });
+  const shared = join(extension, "shared");
+  await mkdir(shared, { mode: 0o755 });
+  const assets = {
+    "app.js": "export function start() {}\n",
+    "app.css": ":root {}\n",
+    "pdfium.wasm": Buffer.from([0, 97, 115, 109, 1, 0, 0, 0]),
+    "pdfium-worker.js": 'class PdfiumEngineRunner {}\nif (message.type === "wasmInit") {}\n',
+  } as const;
+  for (const [name, bytes] of Object.entries(assets)) await writeFile(join(shared, name), bytes, { mode: 0o644 });
+  await writeFile(join(shared, "asset-manifest.json"), JSON.stringify({
+    schemaVersion: 3,
+    app: "app.js",
+    stylesheet: "app.css",
+    pdfiumWasm: "pdfium.wasm",
+    pdfiumWorker: "pdfium-worker.js",
+    integrity: Object.fromEntries(Object.entries(assets).map(([name, bytes]) => [
+      name, createHash("sha256").update(bytes).digest("hex"),
+    ])),
+  }), { mode: 0o644 });
   await writeFile(wrapper, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   return app;
 }
@@ -40,6 +60,14 @@ describe("Chrome distribution integration", () => {
     });
     expect(CHROME_EXTENSION_ID).toBe("cgegjjjhbhnfgcoipeffhogoojfoekgg");
     expect(CHROME_EXTENSION_ORIGIN).toBe(`chrome-extension://${CHROME_EXTENSION_ID}/`);
+    expect(() => validateChromeSourceContract({
+      ...sourceManifest,
+      host_permissions: ["http://127.0.0.1/*"],
+    } as typeof sourceManifest)).toThrow(/host permission/iu);
+    expect(() => validateChromeSourceContract({
+      ...sourceManifest,
+      content_security_policy: { extension_pages: "script-src 'self' https://example.invalid" },
+    } as typeof sourceManifest)).toThrow(/content security/iu);
   });
 
   it("renders one exact user-level native-host manifest without wildcards", () => {
@@ -187,6 +215,40 @@ describe("Chrome distribution integration", () => {
       }
     },
   );
+
+  it.each(["asset-manifest.json", "app.js", "app.css", "pdfium.wasm", "pdfium-worker.js"])(
+    "reports an installed extension missing or corrupt shared asset %s as incomplete",
+    async (asset) => {
+      const root = await mkdtemp(join(tmpdir(), "placekeeper-chrome-shared-incomplete-"));
+      try {
+        const app = await fixtureBundle(root);
+        const extension = join(app, "Contents/Resources/integrations/chrome-extension");
+        await rm(join(extension, "shared", asset));
+        await expect(validateChromeIntegrationBundle(app)).rejects.toThrow(new RegExp(asset.replace(".", "\\."), "u"));
+
+        await rm(root, { recursive: true, force: true });
+        const corruptApp = await fixtureBundle(root);
+        await writeFile(join(corruptApp, "Contents/Resources/integrations/chrome-extension/shared", asset), "corrupt");
+        await expect(validateChromeIntegrationBundle(corruptApp)).rejects.toThrow(new RegExp(asset.replace(".", "\\."), "u"));
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("rejects stale executable files in the packaged shared client", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-chrome-shared-stale-"));
+    try {
+      const app = await fixtureBundle(root);
+      await writeFile(
+        join(app, "Contents/Resources/integrations/chrome-extension/shared/stale.js"),
+        "export default true",
+      );
+      await expect(validateChromeIntegrationBundle(app)).rejects.toThrow(/stale assets/iu);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 
   it("reports an insecure installed extension tree as incomplete", async () => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-chrome-insecure-installed-"));

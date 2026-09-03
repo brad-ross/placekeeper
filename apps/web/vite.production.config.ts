@@ -2,8 +2,24 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
+import {
+  buildPackagedPdfiumWorkerSource,
+  EMBEDPDF_ENGINE_VERSION,
+  extractPinnedPdfiumWorkerSource,
+} from "../chrome-extension/scripts/embedpdf-worker-source.js";
 
 function offlinePdfium(): Plugin {
+  const engineRoot = resolve("node_modules/@embedpdf/engines");
+  const packageMetadata = JSON.parse(readFileSync(resolve(engineRoot, "package.json"), "utf8")) as {
+    readonly version?: unknown;
+  };
+  if (packageMetadata.version !== EMBEDPDF_ENGINE_VERSION) {
+    throw new Error(`Shared PDFium worker requires @embedpdf/engines ${EMBEDPDF_ENGINE_VERSION}`);
+  }
+  const workerSource = extractPinnedPdfiumWorkerSource(readFileSync(
+    resolve(engineRoot, "dist/lib/pdfium/web/worker-engine.js"),
+    "utf8",
+  ));
   return {
     name: "offline-pdfium",
     generateBundle() {
@@ -11,6 +27,11 @@ function offlinePdfium(): Plugin {
         type: "asset",
         fileName: "pdfium.wasm",
         source: readFileSync(resolve("node_modules/@embedpdf/pdfium/dist/pdfium.wasm")),
+      });
+      this.emitFile({
+        type: "asset",
+        fileName: "pdfium-worker.js",
+        source: buildPackagedPdfiumWorkerSource(workerSource),
       });
     },
   };
@@ -33,12 +54,9 @@ function sharedAssetManifest(): Plugin {
       const app = "app.js";
       const stylesheet = "app.css";
       const pdfiumWasm = "pdfium.wasm";
-      const appSource = bytes(app).toString("utf8");
-      if (!/new Worker\(/u.test(appSource) || !/new Blob\(/u.test(appSource)) {
-        throw new Error("The shared production client must contain its inline PDFium worker");
-      }
+      const pdfiumWorker = "pdfium-worker.js";
       const integrity = Object.fromEntries(
-        [app, stylesheet, pdfiumWasm].map((name) => [
+        [app, stylesheet, pdfiumWasm, pdfiumWorker].map((name) => [
           name,
           createHash("sha256").update(bytes(name)).digest("hex"),
         ]),
@@ -47,11 +65,11 @@ function sharedAssetManifest(): Plugin {
         type: "asset",
         fileName: "asset-manifest.json",
         source: JSON.stringify({
-          schemaVersion: 2,
+          schemaVersion: 3,
           app,
           stylesheet,
           pdfiumWasm,
-          worker: { kind: "inline-blob", container: app },
+          pdfiumWorker,
           integrity,
         }),
       });

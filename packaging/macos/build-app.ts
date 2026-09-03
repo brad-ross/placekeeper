@@ -338,6 +338,10 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
   if (JSON.stringify(vscodeWebManifest) !== JSON.stringify(sharedWebManifest)) {
     throw new Error("The VS Code extension web assets differ from the shared production payload");
   }
+  const chromeWebManifest = await validateSharedWebDistribution(resolve(chromeExtension, "shared"));
+  if (JSON.stringify(chromeWebManifest) !== JSON.stringify(sharedWebManifest)) {
+    throw new Error("The Chrome extension web assets differ from the shared production payload");
+  }
   await cp(chromeExtension, resolve(appPath, CHROME_EXTENSION_BUNDLE_PATH), {
     recursive: true,
     errorOnExist: true,

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PlacekeeperLinkLocation } from '../../../packages/core/src/placekeeper-link.js';
 import {
   BrowserReviewLocationHistory,
+  MemoryReviewLocationHistory,
   type ReviewLocationHistoryEnvironment,
 } from '../src/review/review-location-history.js';
 
@@ -179,5 +180,35 @@ describe('browser review location history', () => {
     history.replace(page(1));
     expect(environment.entries).toHaveLength(1);
     expect(environment.location.hash).toBe('#v=1&page=1');
+  });
+});
+
+describe('memory review location history', () => {
+  it('traverses semantic locations without touching browser location or history', () => {
+    const history = new MemoryReviewLocationHistory(page(3));
+    const restored: string[] = [];
+    history.start((direction) => { restored.push(direction); });
+
+    history.replace(page(4));
+    history.push(destination(7));
+    expect(history.read()).toEqual(destination(7));
+    expect(history.snapshot()).toEqual({ canBack: true, canForward: false });
+    expect(history.back()).toBe(true);
+    expect(history.read()).toEqual(page(4));
+    expect(history.forward()).toBe(true);
+    expect(history.read()).toEqual(destination(7));
+    expect(restored).toEqual(['back', 'forward']);
+  });
+
+  it('does not republish unchanged traversal availability', () => {
+    const history = new MemoryReviewLocationHistory(page(1));
+    const listener = vi.fn();
+    history.subscribe(listener);
+
+    history.push(page(2));
+    history.push(page(3));
+
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(listener).toHaveBeenLastCalledWith({ canBack: true, canForward: false });
   });
 });

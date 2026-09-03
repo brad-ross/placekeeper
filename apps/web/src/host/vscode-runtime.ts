@@ -1,7 +1,12 @@
 import type { ReviewCommand, ReviewState } from "../../../../packages/core/src/review-model.js";
+import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import {
   REVIEW_RUNTIME_PROTOCOL,
   REVIEW_RUNTIME_VERSION,
+  isReviewRuntimeMethodForHost,
+  sanitizeChromeReviewRuntimeRequest,
+  sanitizeChromeReviewRuntimeResponse,
+  type ReviewRuntimeHost,
   type ReviewRuntimeMethod,
 } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type {
@@ -18,6 +23,7 @@ import {
   type HostRuntimeIdentity,
   type HostRuntimeInvalidation,
 } from "./runtime.js";
+import { MemoryReviewLocationHistory } from "../review/review-location-history.js";
 
 const ID = /^[A-Za-z0-9_-]{16,128}$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -33,10 +39,14 @@ export interface MaterializedViewerResource {
 }
 
 export interface RpcHostRuntimeOptions {
+  readonly host?: ReviewRuntimeHost;
+  readonly extensionOrigin?: string;
   readonly materializePdfiumWasm?: (sourceUrl: string) => Promise<MaterializedViewerResource>;
+  readonly materializePdfiumWorker?: (sourceUrl: string) => Promise<MaterializedViewerResource>;
 }
 
 const MAX_PDFIUM_WASM_BYTES = 16 * 1024 * 1024;
+const MAX_PDFIUM_WORKER_BYTES = 4 * 1024 * 1024;
 
 export async function materializeVscodeWasmResource(
   sourceUrl: string,
@@ -57,6 +67,28 @@ export async function materializeVscodeWasmResource(
   const createObjectURL = environment.createObjectURL ?? URL.createObjectURL.bind(URL);
   const revokeObjectURL = environment.revokeObjectURL ?? URL.revokeObjectURL.bind(URL);
   const url = createObjectURL(new Blob([bytes], { type: "application/wasm" }));
+  return { url, dispose: () => revokeObjectURL(url) };
+}
+
+export async function materializeVscodeWorkerResource(
+  sourceUrl: string,
+  environment: {
+    readonly fetch?: typeof fetch;
+    readonly createObjectURL?: (blob: Blob) => string;
+    readonly revokeObjectURL?: (url: string) => void;
+  } = {},
+): Promise<MaterializedViewerResource> {
+  const fetchImpl = environment.fetch ?? fetch;
+  const response = await fetchImpl(sourceUrl, { credentials: "omit" });
+  if (!response.ok) throw new Error("The packaged PDF worker could not be loaded.");
+  const source = await response.text();
+  if (source.length === 0 || new TextEncoder().encode(source).byteLength > MAX_PDFIUM_WORKER_BYTES ||
+    !source.includes("class PdfiumEngineRunner") || !source.includes('type === "wasmInit"')) {
+    throw new Error("The packaged PDF worker was invalid.");
+  }
+  const createObjectURL = environment.createObjectURL ?? URL.createObjectURL.bind(URL);
+  const revokeObjectURL = environment.revokeObjectURL ?? URL.revokeObjectURL.bind(URL);
+  const url = createObjectURL(new Blob([source], { type: "application/javascript" }));
   return { url, dispose: () => revokeObjectURL(url) };
 }
 
@@ -99,10 +131,19 @@ function abortError(): Error {
 }
 
 export function createRpcHostRuntime(
-  port: VscodeMessagePort & { readonly panelId: string },
+  port: VscodeMessagePort & (
+    | { readonly panelId: string; readonly runtimeId?: never }
+    | { readonly runtimeId: string; readonly panelId?: never }
+  ),
   options: RpcHostRuntimeOptions = {},
 ): HostRuntime {
-  if (!ID.test(port.panelId)) throw new Error("A safe panel identity is required.");
+  const host = options.host ?? "vscode";
+  const runtimeId = "runtimeId" in port && port.runtimeId !== undefined ? port.runtimeId : port.panelId;
+  if (!ID.test(runtimeId)) throw new Error("A safe runtime identity is required.");
+  if (host === "chrome" && options.extensionOrigin === undefined) {
+    throw new Error("A Chrome extension origin is required.");
+  }
+  const envelopeIdentity = host === "chrome" ? { runtimeId } : { panelId: runtimeId };
   const pending = new Map<string, PendingRequest>();
   const invalidations = new Set<(event: HostRuntimeInvalidation) => void>();
   const hostCommands = new Set<(command: HostRuntimeCommand) => void>();
@@ -111,7 +152,9 @@ export function createRpcHostRuntime(
   let deferredCommandInvalidation: HostRuntimeInvalidation | undefined;
   let pendingHostCommand: HostRuntimeCommand | undefined;
   let disposed = false;
+  let chromeLocationHistory: MemoryReviewLocationHistory | undefined;
   const materializedPdfium = new Map<string, Promise<MaterializedViewerResource>>();
+  const materializedWorkers = new Map<string, Promise<MaterializedViewerResource>>();
 
   const pdfiumResource = async (sourceUrl: string): Promise<MaterializedViewerResource> => {
     if (options.materializePdfiumWasm === undefined) return { url: sourceUrl, dispose() {} };
@@ -119,6 +162,21 @@ export function createRpcHostRuntime(
     if (pending === undefined) {
       pending = options.materializePdfiumWasm(sourceUrl);
       materializedPdfium.set(sourceUrl, pending);
+    }
+    const resource = await pending;
+    if (disposed) {
+      resource.dispose();
+      throw new Error("The review runtime is disposed.");
+    }
+    return resource;
+  };
+
+  const workerResource = async (sourceUrl: string): Promise<MaterializedViewerResource> => {
+    if (options.materializePdfiumWorker === undefined) return { url: sourceUrl, dispose() {} };
+    let pending = materializedWorkers.get(sourceUrl);
+    if (pending === undefined) {
+      pending = options.materializePdfiumWorker(sourceUrl);
+      materializedWorkers.set(sourceUrl, pending);
     }
     const resource = await pending;
     if (disposed) {
@@ -153,9 +211,10 @@ export function createRpcHostRuntime(
 
   const unsubscribe = port.subscribe((message) => {
     if (!isObject(message) || message.protocol !== REVIEW_RUNTIME_PROTOCOL ||
-      message.version !== REVIEW_RUNTIME_VERSION || message.panelId !== port.panelId) return;
+      message.version !== REVIEW_RUNTIME_VERSION ||
+      (host === "chrome" ? message.runtimeId !== runtimeId : message.panelId !== runtimeId)) return;
     if (message.kind === "event" && message.event === "host-command") {
-      if (!validHostCommand(message.payload)) return;
+      if (host !== "vscode" || !validHostCommand(message.payload)) return;
       if (hostCommands.size === 0) pendingHostCommand = message.payload;
       else for (const listener of hostCommands) listener(message.payload);
       return;
@@ -202,12 +261,26 @@ export function createRpcHostRuntime(
       message.generation !== current.identity.generation || message.revision !== current.identity.revision) return;
     pending.delete(message.requestId);
     current.abort?.();
-    if (message.ok === true) current.resolve(message.payload);
-    else current.reject(new Error("The trusted host rejected the review action."));
+    if (message.ok === true) {
+      const payload = host === "chrome"
+        ? sanitizeChromeReviewRuntimeResponse(current.method, message.payload)
+        : message.payload;
+      if (payload === undefined) current.reject(new Error("The trusted host returned an invalid response."));
+      else current.resolve(payload);
+    } else current.reject(new Error("The trusted host rejected the review action."));
   });
 
   const invoke = <T>(method: ReviewRuntimeMethod, payload: unknown = {}, signal?: AbortSignal): Promise<T> => {
     if (disposed) return Promise.reject(new Error("The review runtime is disposed."));
+    if (!isReviewRuntimeMethodForHost(host, method)) {
+      return Promise.reject(new Error(`The ${method} capability is unavailable in ${host === "chrome" ? "Chrome" : "this host"}.`));
+    }
+    const outboundPayload = host === "chrome"
+      ? sanitizeChromeReviewRuntimeRequest(method, payload)
+      : payload;
+    if (outboundPayload === undefined) {
+      return Promise.reject(new Error("The review runtime request was invalid."));
+    }
     if (signal?.aborted === true) return Promise.reject(abortError());
     const id = requestId();
     const requestIdentity = method === "bootstrap" || identity === undefined
@@ -220,7 +293,7 @@ export function createRpcHostRuntime(
           protocol: REVIEW_RUNTIME_PROTOCOL,
           version: REVIEW_RUNTIME_VERSION,
           kind: "cancel",
-          panelId: port.panelId,
+          ...envelopeIdentity,
           requestId: id,
         });
         reject(abortError());
@@ -237,11 +310,11 @@ export function createRpcHostRuntime(
         protocol: REVIEW_RUNTIME_PROTOCOL,
         version: REVIEW_RUNTIME_VERSION,
         kind: "request",
-        panelId: port.panelId,
+        ...envelopeIdentity,
         requestId: id,
         ...(requestIdentity === undefined ? {} : requestIdentity),
         method,
-        payload,
+        payload: outboundPayload,
       });
     });
   };
@@ -269,7 +342,7 @@ export function createRpcHostRuntime(
   };
 
   return {
-    host: "vscode",
+    host,
     async bootstrap(signal?: AbortSignal): Promise<HostRuntimeBootstrap> {
       const value = await invoke<Record<string, unknown>>("bootstrap", {}, signal);
       if (!validIdentity(value) || !isObject(value.state) || !isObject(value.scope) ||
@@ -283,13 +356,36 @@ export function createRpcHostRuntime(
         generation: value.generation,
         revision: value.revision,
       };
-      const pdfium = await pdfiumResource(value.resources.pdfiumWasm);
+      const [pdfium, worker] = await Promise.all([
+        pdfiumResource(value.resources.pdfiumWasm),
+        typeof value.resources.worker === "string"
+          ? workerResource(value.resources.worker)
+          : Promise.resolve(undefined),
+      ]);
       const issued = new Set<string>([
         value.resources.document,
         value.resources.pdfiumWasm,
         pdfium.url,
         ...(typeof value.resources.worker === "string" ? [value.resources.worker] : []),
+        ...(worker === undefined ? [] : [worker.url]),
       ]);
+      const chromeResources = host === "chrome" && typeof value.resources.worker === "string"
+        ? {
+            document: value.resources.document,
+            pdfiumWasm: value.resources.pdfiumWasm,
+            worker: value.resources.worker,
+          }
+        : undefined;
+      if (host === "chrome" && chromeResources === undefined) {
+        throw new Error("The trusted host returned incomplete Chrome resources.");
+      }
+      if (host === "chrome" && chromeLocationHistory === undefined) {
+        chromeLocationHistory = new MemoryReviewLocationHistory(
+          isObject(value.location)
+            ? value.location as unknown as PlacekeeperLinkLocation
+            : { kind: "page", page: 1 },
+        );
+      }
       return {
         ...value,
         session: { sessionId: value.sessionId },
@@ -299,9 +395,19 @@ export function createRpcHostRuntime(
         viewerAssets: {
           documentUrl: value.resources.document,
           pdfiumWasm: pdfium.url,
-          ...(typeof value.resources.worker === "string" ? { workerUrl: value.resources.worker } : {}),
+          ...(worker === undefined ? {} : { workerUrl: worker.url }),
         },
-        resourcePolicy: { host: "vscode", issued },
+        resourcePolicy: host === "chrome"
+          ? {
+              host: "chrome",
+              extensionOrigin: options.extensionOrigin!,
+              resources: chromeResources!,
+            }
+          : { host: "vscode", issued },
+        ...(chromeLocationHistory === undefined ? {} : { locationHistory: chromeLocationHistory }),
+        ...(typeof value.canonicalLinkBase === "string"
+          ? { canonicalLinkBase: value.canonicalLinkBase }
+          : {}),
       };
     },
     presence() {
@@ -362,12 +468,15 @@ export function createRpcHostRuntime(
       for (const request of pending.values()) request.reject(new Error("The review runtime was disposed."));
       for (const resource of materializedPdfium.values()) void resource.then((value) => value.dispose());
       materializedPdfium.clear();
+      for (const resource of materializedWorkers.values()) void resource.then((value) => value.dispose());
+      materializedWorkers.clear();
       pending.clear();
       invalidations.clear();
       pendingInvalidation = undefined;
       deferredCommandInvalidation = undefined;
       pendingHostCommand = undefined;
       hostCommands.clear();
+      chromeLocationHistory?.dispose();
     },
   };
 }

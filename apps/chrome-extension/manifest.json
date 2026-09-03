@@ -4,6 +4,9 @@
   "description": "Open top-level PDFs in the installed Placekeeper viewer.",
   "version": "0.1.0",
   "minimum_chrome_version": "151",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; connect-src 'self'"
+  },
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAs6iCucK1MNlmlXT/NDuwCfV9i0UXEErhjJWzXn6qYJO4ZVFuM5k5XKXGpb3tgfl6lmBgtOIyh3yF4FmigJbY88e7slDg2RYlz3Bw5THl9PE3egQTLk6g0BxDExobUetD3G5wG+5m0JOSKCPOoCkLBYvLHeNeSeHy1pfiEedJabfr2wF8ccxqhN9D5cyWOftrls/SqXinz51urYHcsDt15l83AuI9nX89sFl9rhJ4L/PmIjxFcKm2MmGjXJ95Oh8C4TjF55t4wxsC8LqwzjknK6MfUEAm7huT6piBJZiN4bEA73Yd4oboLgHpyA4H42a6UDOPPfuHpLMX5Skpb4xPsQIDAQAB",
   "permissions": [
     "nativeMessaging",

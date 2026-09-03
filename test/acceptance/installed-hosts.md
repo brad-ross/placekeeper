@@ -84,7 +84,83 @@ Playwright support for unpacked extensions does not guarantee that its managed C
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Pending | Pending | Pending | `cgegjjjhbhnfgcoipeffhogoojfoekgg` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Pending |
 
-For the installed row, use a fresh Chrome profile, a disposable PDF fixture, and the installed extension path. Record the literal installed host-manifest path and its SHA-256 hash, but never copy the manifest contents into this document. Confirm that Back returns to the fixture landing page; history contains no `#cap=`, bind proof, task identifier, cookie, or private staging path; reading and closing creates no Downloads PDF; and removing/reinstalling registration leaves the disposable PDF and Protected Recovery data untouched. Upgrade/rollback and removal remain covered deterministically by the packaging transaction suites.
+### Installed embedded-review release gate
+
+Install the release-candidate app first, then run `pnpm test:chrome-installed`.
+The runner validates the distributable extension tree and exact user-level native
+host manifest before launching Google Chrome with a newly created disposable
+profile and remote-debugging endpoint. It never passes `--load-extension` and
+never touches the everyday profile: the person performing the release check must
+enable Developer Mode, select the exact packaged directory printed by the runner,
+verify extension ID `cgegjjjhbhnfgcoipeffhogoojfoekgg`, and enable **Open PDFs
+automatically** through the Placekeeper popup. The runner then records the
+initially paused state and automates outer-tab URL retention, metadata title,
+filename fallback, shared production-client mount, and browser Back.
+
+The generated JSON is prerequisite evidence, not the whole release pass. Keep
+the disposable window open and complete every row below before pressing Enter.
+That first run deliberately exits nonzero while `manualMatrix` is `pending`; an
+Enter keypress can never turn pending observations into a release pass. Record
+the completed checks in a private JSON file and rerun with
+`--manual-evidence <input.json>`. The file must bind the exact app build, Chrome
+version, and extension runtime identity printed by the automated run; every
+scenario key (`ae3PreActivationFallback` through `ae8ProtectedSuccessor`, plus
+`ordinaryReview`, `updateSkew`, `hostileCanaries`, `keyboardAccessibility`, and
+`crossSurfaceRegression`) must be `true`. Its `ktd8` object must record corpus
+`chrome-native-v1`, 5 cold and 10 warm runs per fixture, both local and
+authenticated-remote dispositions, passing latency/memory/responsiveness
+assessments, measured `cancellationReleaseMs` no greater than 2000, and one
+`measurements` entry per fixture/disposition. Each entry records redirect p50,
+native p50/p95, and peak extension/native-host/service/aggregate RSS; the runner
+recomputes the committed relative latency formula. A stale,
+partial, or over-budget record fails closed.
+Record only the build identity, Chrome and extension versions, literal native-host
+manifest path and SHA-256, aggregate timings/memory, and pass/fail results. Never
+record a PDF URL or path, cookie, capability, task identifier, presentation lease,
+credential, command payload, source locator, annotation text, or PDF bytes.
+
+| Scenario | Required installed evidence | Result |
+|---|---|---|
+| AE1 metadata title | Original authenticated PDF URL remains in the omnibox; the outer tab title becomes `Quarterly Results`; full Placekeeper UI is usable. | Pending |
+| AE2 filename title | Blank-title PDF uses its decoded, sanitized filename; title remains stable through Placekeeper navigation. | Pending |
+| AE3 pre-activation fallback | With native registration temporarily moved aside, one new PDF falls back to Chrome exactly once; restoring the manifest does not leave claimable transfer state. | Pending |
+| AE4 active disconnect | Stop the service after a clean activation: PDF remains visible/read-only with keyboard-operable **Reopen PDF** and no Chrome fallback. Repeat after an accepted annotation or save and verify protected recovery survives restart. | Pending |
+| AE5 canonical presentations | Reload, duplicate, restore the browser session, and open the same PDF in a fresh tab. Identical source plus digest shares mutations; each tab keeps an independent viewport and remains usable when another closes. | Pending |
+| AE6 navigation | Make several Placekeeper page/location jumps. Placekeeper Back/Forward traverses them without changing the omnibox; Chrome Back returns to the fixture landing page. | Pending |
+| AE7 native link surface | The Chrome top bar omits the document-level **Copy Link** because the PDF URL remains in the omnibox. A precise item-level **Copy Link** contains no source URL, task/bind data, credential, or presentation identity; opening it through Finder or Codex produces an ordinary unbound Placekeeper view. | Pending |
+| AE8 protected successor | Replace/restart the service after protected work. **Reopen PDF** presents resume/discard/fork; choose each against a fresh seeded case and verify exactly one idempotent outcome. | Pending |
+| Ordinary review | Search, create/edit/delete an annotation, reconcile a Review Item, save a copy, and export. Inject one service rejection and one disconnect during mutation. | Pending |
+| Update skew | Exercise older extension/new host and new extension/older host. Before activation: cleanup plus one Chrome fallback. After activation: read-only update-required state, retained protected work, no fallback. | Pending |
+| Hostile canaries | Seed canaries in query/fragment, local path, filename/title, locator, credential, command payload, and PDF bytes. Chrome UI, links, logs, diagnostics, crash output, and recovery artifacts contain only role-authorized fields. | Pending |
+| Keyboard/accessibility | Complete loading, fallback, disconnect, update, reconnect, reopen, and resume/discard/fork without a pointer; verify visible focus, live announcements, transition focus, and accessible labels. | Pending |
+| Cross-surface regression | Finder Open With, app picker, canonical link, Codex in-app browser, and VS Code embedded review retain their existing behavior. | Pending |
+
+Do not move the real native-host manifest while any non-disposable Placekeeper
+review is active. Copy it to a private temporary directory, move only the exact
+`com.placekeeper.chrome.json` file for AE3, and restore it immediately after that
+case. Removing or reinstalling registration must not remove Protected Recovery or
+the disposable source. Upgrade/rollback transaction suites remain deterministic
+prerequisites; this installed check confirms presentation behavior.
+
+The versioned KTD8 contract is `chrome-performance-budget.json`. Run every listed
+local and authenticated-remote disposition five cold and ten warm times. Record
+p50 and p95 navigation-to-first-page latency, peak extension/native-host/service
+and aggregate RSS, visible progress responsiveness, and cancellation cleanup.
+Cancellation must release within two seconds. Compare native p50 with the matching
+redirect baseline using the committed formula; a missing baseline or failed budget
+blocks release and must not be converted into a wider host permission.
+
+| Date | Build / Chrome | Corpus + repetitions | p50 / p95 latency | Peak extension / native / service / aggregate | Cancellation | Redirect comparison | Result |
+|---|---|---|---|---|---|---|---|
+| Pending | Pending | `chrome-native-v1`; 5 cold + 10 warm per local/remote fixture | Pending | Pending | Pending | Pending | Pending |
+
+The installed runner now injects a non-authorizing observer into the actual
+packaged PDFium worker and records worker startup, PDFium readiness, packaged
+asset access, and forbidden privilege results in the automated evidence. The
+earlier Chrome 152 proof established the same boundary and showed that
+handler-local reload identity is unavailable, which is why canonical review
+identity is service-owned. The temporary proof page and successful-path
+localhost redirect are not part of the release extension.
 
 ## Reading-first interface evidence
 

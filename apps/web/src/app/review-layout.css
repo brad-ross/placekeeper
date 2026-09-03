@@ -247,8 +247,9 @@ body:has(.terminal-recovery) {
 
 .review-chrome__save-identity strong {
   overflow: hidden;
-  min-width: var(--review-document-title-min);
-  flex: 1 1 auto;
+  min-width: 0;
+  max-width: var(--review-document-title-cap);
+  flex: 0 1 auto;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: -.01em;

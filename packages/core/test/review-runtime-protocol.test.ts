@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  REVIEW_RUNTIME_HOSTS,
+  REVIEW_RUNTIME_HOST_METHODS,
   REVIEW_RUNTIME_METHODS,
   REVIEW_RUNTIME_PROTOCOL,
   REVIEW_RUNTIME_VERSION,
+  isReviewRuntimeMethodForHost,
   isReviewPanelKey,
   isReviewRuntimeMethod,
+  sanitizeChromeReviewRuntimeRequest,
+  sanitizeChromeReviewRuntimeResponse,
+  sanitizeReviewRuntimeDisplayString,
 } from "../src/review-runtime-protocol.js";
+import { createReviewState } from "../src/review-model.js";
 
 describe("shared review runtime protocol", () => {
   it("defines the complete versioned method vocabulary for both hosts", () => {
@@ -42,5 +49,166 @@ describe("shared review runtime protocol", () => {
     expect(isReviewPanelKey("short")).toBe(false);
     expect(isReviewPanelKey("unsafe/panel/key")).toBe(false);
     expect(isReviewPanelKey(undefined)).toBe(false);
+  });
+
+  it("defines Chrome as a reduced, compiler-visible RPC host", () => {
+    expect(REVIEW_RUNTIME_HOSTS).toEqual(["vscode", "chrome"]);
+    expect(REVIEW_RUNTIME_HOST_METHODS.vscode).toEqual(REVIEW_RUNTIME_METHODS);
+    expect(REVIEW_RUNTIME_HOST_METHODS.chrome).not.toContain("forwardSyncTex");
+    expect(REVIEW_RUNTIME_HOST_METHODS.chrome).not.toContain("reverseSyncTex");
+    expect(isReviewRuntimeMethodForHost("chrome", "command")).toBe(true);
+    expect(isReviewRuntimeMethodForHost("chrome", "reverseSyncTex")).toBe(false);
+  });
+
+  it("accepts only closed Chrome request payloads without capability primitives", () => {
+    expect(sanitizeChromeReviewRuntimeRequest("chooseCopy", {
+      filename: "Reviewed.pdf",
+      folderSelectionId: "opaque_folder_selection_1234",
+    })).toEqual({ filename: "Reviewed.pdf", folderSelectionId: "opaque_folder_selection_1234" });
+    expect(sanitizeChromeReviewRuntimeRequest("chooseCopy", {
+      filename: "Reviewed.pdf",
+      credential: "secret",
+    })).toBeUndefined();
+    expect(sanitizeChromeReviewRuntimeRequest("command", {
+      type: "undo",
+      expectedRevision: 3,
+      headers: { authorization: "secret" },
+    })).toBeUndefined();
+    expect(sanitizeChromeReviewRuntimeRequest("forwardSyncTex", {})).toBeUndefined();
+  });
+
+  it("projects a Chrome bootstrap without task, bind, path, credential, or executable authority", () => {
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const state = createReviewState({
+      sessionId,
+      source: {
+        fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        digest: "a".repeat(64),
+        byteLength: 100,
+      },
+      sourceRootId: "must-not-cross",
+    });
+    const projected = sanitizeChromeReviewRuntimeResponse("bootstrap", {
+      sessionId,
+      generation: 1,
+      revision: 0,
+      state,
+      scope: {
+        documentTitle: "Paper.pdf",
+        sourceDisposition: "remote-temporary",
+        sourceDisplayName: "Paper.pdf",
+        launchSurface: "chrome",
+        sourceRootPath: "/Users/reader/secret",
+        codexContext: { taskId: "task-secret", bindProof: "proof-secret" },
+      },
+      saveStatus: {
+        destination: { phase: "none", generation: 0 },
+        sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 },
+      },
+      resources: {
+        document: "blob:chrome-extension://abcdefghijklmnopabcdefghijklmnop/document",
+        pdfiumWasm: "chrome-extension://abcdefghijklmnopabcdefghijklmnop/assets/pdfium.wasm",
+        worker: "chrome-extension://abcdefghijklmnopabcdefghijklmnop/assets/pdfium-worker.js",
+      },
+      canonicalLinkBase: "placekeeper:///Papers/Paper.pdf",
+      location: { kind: "page", page: 4 },
+    });
+
+    expect(projected).toMatchObject({
+      scope: { documentTitle: "Paper.pdf", launchSurface: "chrome" },
+      canonicalLinkBase: "placekeeper:///Papers/Paper.pdf",
+      location: { kind: "page", page: 4 },
+    });
+    const serialized = JSON.stringify(projected);
+    for (const canary of ["must-not-cross", "/Users/reader/secret", "task-secret", "proof-secret"]) {
+      expect(serialized).not.toContain(canary);
+    }
+  });
+
+  it("fails closed on forbidden Chrome response primitives and capability-bearing links", () => {
+    expect(sanitizeChromeReviewRuntimeResponse("scope", {
+      documentTitle: "Paper.pdf",
+      launchSurface: "chrome",
+      credential: "secret",
+    })).toBeUndefined();
+    expect(sanitizeChromeReviewRuntimeResponse("bootstrap", {
+      canonicalLinkBase: "placekeeper:///Paper.pdf#credential=secret",
+    })).toBeUndefined();
+    expect(sanitizeChromeReviewRuntimeResponse("bootstrap", {
+      canonicalLinkBase: "placekeeper:///https%3A%2F%2Fexample.com%2Fsecret.pdf",
+    })).toBeUndefined();
+    expect(sanitizeChromeReviewRuntimeResponse("forwardSyncTex", {})).toBeUndefined();
+  });
+
+  it("bounds Chrome-facing titles and removes control and bidirectional overrides", () => {
+    expect(sanitizeReviewRuntimeDisplayString("  Quarterly\n\u202eResults  "))
+      .toBe("Quarterly Results");
+    expect([...sanitizeReviewRuntimeDisplayString("x".repeat(300))!]).toHaveLength(255);
+  });
+
+  it("never forwards injected credentials from any Chrome response class", () => {
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const state = createReviewState({
+      sessionId,
+      source: {
+        fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        digest: "a".repeat(64),
+        byteLength: 100,
+      },
+    });
+    const saveStatus = {
+      destination: { phase: "none", generation: 0 },
+      sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 },
+      credential: "response-canary",
+    };
+    const cases = [
+      ["presence", { credential: "response-canary" }],
+      ["detach", { credential: "response-canary" }],
+      ["command", { ...state, credential: "response-canary" }],
+      ["saveStatus", saveStatus],
+      ["saveProposal", { sourceDisposition: "local", filename: "Paper.pdf", folder: "/secret", credential: "response-canary" }],
+      ["chooseCopy", saveStatus],
+      ["chooseFolder", { cancelled: false, selectionId: "opaque_selection_1234", folder: "/secret", credential: "response-canary" }],
+      ["chooseOriginal", saveStatus],
+      ["retrySave", saveStatus],
+      ["locateSave", saveStatus],
+      ["scope", { documentTitle: "Paper.pdf", launchSurface: "chrome", credential: "response-canary" }],
+      ["exportReviewedCopy", { kind: "reviewed-copy", path: "/secret", revision: 0, digest: "b".repeat(64), credential: "response-canary" }],
+    ] as const;
+
+    for (const [method, value] of cases) {
+      const projected = sanitizeChromeReviewRuntimeResponse(method, value);
+      expect(projected === undefined || !JSON.stringify(projected).includes("response-canary"), method)
+        .toBe(true);
+    }
+  });
+
+  it("preserves the remote-temporary save proposal without inventing a local filename", () => {
+    expect(sanitizeChromeReviewRuntimeResponse("saveProposal", {
+      sourceDisposition: "remote-temporary",
+    })).toEqual({ sourceDisposition: "remote-temporary" });
+    expect(sanitizeChromeReviewRuntimeResponse("saveProposal", {
+      sourceDisposition: "remote-temporary",
+      folder: "/private/source",
+    })).toBeUndefined();
+  });
+
+  it("fails closed instead of forwarding raw save and export errors", () => {
+    expect(sanitizeChromeReviewRuntimeResponse("saveStatus", {
+      destination: { phase: "none", generation: 0 },
+      sync: {
+        phase: "not-saved",
+        desiredRevision: 2,
+        savedRevision: 1,
+        failure: "/Users/reader/private.pdf: EACCES",
+      },
+    })).toBeUndefined();
+    expect(sanitizeChromeReviewRuntimeResponse("exportReviewedCopy", {
+      kind: "reviewed-copy",
+      path: "/Users/reader/private.pdf",
+      revision: 2,
+      digest: "b".repeat(64),
+      warning: "stack trace with /Users/reader/private.pdf",
+    })).toBeUndefined();
   });
 });

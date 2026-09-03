@@ -376,7 +376,10 @@ export function activate(context: vscode.ExtensionContext): void {
     const client = await attachStage("runtime", () => createLoopbackRuntimeClient({
       panelId,
       launch: exchanged,
-      assets: { pdfiumWasm: resourceUri(assetManifest.pdfiumWasm) },
+      assets: {
+        pdfiumWasm: resourceUri(assetManifest.pdfiumWasm),
+        worker: resourceUri(assetManifest.pdfiumWorker),
+      },
       materializeDocument: async ({ bytes, digest, byteLength }) => {
         const path = await materializePrivatePdfSnapshot({ directory: snapshotRoot, bytes, digest, byteLength });
         return panel.webview.asWebviewUri(vscode.Uri.file(path)).toString();

@@ -14,6 +14,7 @@ import type {
 } from "../src/host/runtime.js";
 import {
   createRpcHostRuntime,
+  materializeVscodeWorkerResource,
   materializeVscodeWasmResource,
 } from "../src/host/vscode-runtime.js";
 
@@ -49,6 +50,26 @@ describe("host-neutral review runtime", () => {
     expect(createObjectURL).not.toHaveBeenCalled();
   });
 
+  it("materializes only a bounded packaged PDFium worker into a webview blob", async () => {
+    const createObjectURL = vi.fn(() => "blob:vscode-webview://authority/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    const revokeObjectURL = vi.fn();
+    const source = 'class PdfiumEngineRunner {}\nif (message.type === "wasmInit") {}';
+    const resource = await materializeVscodeWorkerResource("vscode-webview://authority/pdfium-worker.js", {
+      fetch: vi.fn(async () => new Response(source)),
+      createObjectURL,
+      revokeObjectURL,
+    });
+    expect(resource.url).toMatch(/^blob:vscode-webview:/u);
+    resource.dispose();
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith(resource.url);
+
+    await expect(materializeVscodeWorkerResource("vscode-webview://authority/pdfium-worker.js", {
+      fetch: vi.fn(async () => new Response("self.postMessage('unexpected')")),
+      createObjectURL,
+    })).rejects.toThrow(/packaged PDF worker/iu);
+  });
+
   it("keeps browser bootstrap, scope, assets, presence, and export on authenticated HTTP/WebSocket", async () => {
     const state = createReviewState({
       sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -77,6 +98,7 @@ describe("host-neutral review runtime", () => {
     const bootstrap = await runtime.bootstrap();
     expect(bootstrap.viewerAssets).toMatchObject({
       documentUrl: `/s/${state.sessionId}/document/${state.source.fileId}?generation=1`,
+      workerUrl: `/s/${state.sessionId}/assets/pdfium-worker.js`,
       requestHeaders: { authorization: "Bearer memory-only" },
     });
     expect(bootstrap.resourcePolicy).toEqual({ host: "browser", origin: "http://127.0.0.1:43179" });
@@ -295,11 +317,16 @@ describe("host-neutral review runtime", () => {
             resources: {
               document: "vscode-webview://authority/snapshots/digest.pdf",
               pdfiumWasm: "vscode-webview://authority/assets/pdfium.wasm",
+              worker: "vscode-webview://authority/assets/pdfium-worker.js",
             },
           } : { documentTitle: "paper.pdf", launchSurface: "vscode" },
         });
       });
     });
+    const materializePdfiumWorker = vi.fn(async () => ({
+      url: "blob:vscode-webview://authority/cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      dispose: vi.fn(),
+    }));
     const runtime = createRpcHostRuntime({
       panelId: "panel_identifier_1234",
       postMessage,
@@ -307,10 +334,19 @@ describe("host-neutral review runtime", () => {
         listeners.add(listener);
         return () => listeners.delete(listener);
       },
-    });
+    }, { materializePdfiumWorker });
 
     const bootstrap = await runtime.bootstrap();
     expect(bootstrap.scope.launchSurface).toBe("vscode");
+    expect(bootstrap.viewerAssets.workerUrl).toBe(
+      "blob:vscode-webview://authority/cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    );
+    expect(bootstrap.resourcePolicy.host).toBe("vscode");
+    if (bootstrap.resourcePolicy.host !== "vscode") throw new Error("Expected VS Code resource policy");
+    expect(bootstrap.resourcePolicy.issued).toContain(bootstrap.viewerAssets.workerUrl);
+    expect(materializePdfiumWorker).toHaveBeenCalledWith(
+      "vscode-webview://authority/assets/pdfium-worker.js",
+    );
     await expect(runtime.scope()).resolves.toMatchObject({ documentTitle: "paper.pdf" });
     const scopeRequest = postMessage.mock.calls
       .map(([message]) => message as Record<string, unknown>)
@@ -329,6 +365,86 @@ describe("host-neutral review runtime", () => {
     });
     expect(JSON.stringify(postMessage.mock.calls)).not.toContain("credential");
     expect(JSON.stringify(postMessage.mock.calls)).not.toContain("/Users/");
+    runtime.dispose();
+  });
+
+  it("mounts a reduced Chrome RPC runtime with independent history, link, and resource seams", async () => {
+    const listeners = new Set<(message: unknown) => void>();
+    const requests: Record<string, unknown>[] = [];
+    const extensionOrigin = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const state = createReviewState({
+      sessionId,
+      source: {
+        fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        digest: "a".repeat(64),
+        byteLength: 100,
+      },
+      sourceRootId: "must-not-cross",
+    });
+    const runtime = createRpcHostRuntime({
+      runtimeId: "chrome_connection_1234",
+      postMessage(message) {
+        const request = message as Record<string, unknown>;
+        requests.push(request);
+        if (request.kind !== "request") return;
+        queueMicrotask(() => listeners.forEach((listener) => listener({
+          protocol: REVIEW_RUNTIME_PROTOCOL,
+          version: REVIEW_RUNTIME_VERSION,
+          kind: "response",
+          runtimeId: "chrome_connection_1234",
+          sessionId,
+          generation: 1,
+          revision: 0,
+          requestId: request.requestId,
+          ok: true,
+          payload: request.method === "bootstrap" ? {
+            sessionId,
+            generation: 1,
+            revision: 0,
+            state,
+            scope: {
+              documentTitle: "Paper.pdf",
+              launchSurface: "chrome",
+              sourceRootPath: "/Users/reader/secret",
+              codexContext: { taskId: "task-secret", bindProof: "proof-secret" },
+            },
+            saveStatus: {
+              destination: { phase: "none", generation: 0 },
+              sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 },
+            },
+            resources: {
+              document: `blob:${extensionOrigin}/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+              pdfiumWasm: `${extensionOrigin}/assets/pdfium.wasm`,
+              worker: `${extensionOrigin}/assets/pdfium-worker.js`,
+            },
+            canonicalLinkBase: "placekeeper:///Papers/Paper.pdf",
+            location: { kind: "page", page: 3 },
+          } : {},
+        })));
+      },
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    }, { host: "chrome", extensionOrigin });
+
+    const bootstrap = await runtime.bootstrap();
+    expect(runtime.host).toBe("chrome");
+    expect(bootstrap.canonicalLinkBase).toBe("placekeeper:///Papers/Paper.pdf");
+    expect(bootstrap.locationHistory?.read()).toEqual({ kind: "page", page: 3 });
+    expect(bootstrap.resourcePolicy).toEqual({
+      host: "chrome",
+      extensionOrigin,
+      resources: {
+        document: `blob:${extensionOrigin}/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+        pdfiumWasm: `${extensionOrigin}/assets/pdfium.wasm`,
+        worker: `${extensionOrigin}/assets/pdfium-worker.js`,
+      },
+    });
+    expect(JSON.stringify(bootstrap)).not.toMatch(/task-secret|proof-secret|must-not-cross|\/Users\/reader/iu);
+    await expect(runtime.reverseSyncTex({})).rejects.toThrow(/unavailable.*Chrome/iu);
+    expect(requests.some((request) => request.method === "reverseSyncTex")).toBe(false);
     runtime.dispose();
   });
 
