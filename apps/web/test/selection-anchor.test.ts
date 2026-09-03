@@ -7,7 +7,10 @@ import {
   createSelectionAnchor,
   type AnchorPage,
 } from '../src/pdf/selection-anchor.js';
-import { captureViewerSelection } from '../src/pdf/viewer-selection-adapter.js';
+import {
+  captureViewerSelection,
+  readViewerSelectionEvidence,
+} from '../src/pdf/viewer-selection-adapter.js';
 import { buildViewerDocumentOptions } from '../src/pdf/embedpdf-viewer.js';
 
 const naturalRect = {
@@ -579,6 +582,47 @@ describe('selection anchors', () => {
         segmentRects: [{ x: 24, y: 36 }],
       },
     });
+  });
+
+  it('returns stable document-ordered public evidence for a reverse cross-page selection', async () => {
+    const state = {
+      geometry: { 0: {} as never, 1: {} as never, 2: {} as never },
+      rects: { 0: [naturalRect], 1: [naturalRect], 2: [naturalRect] },
+      selection: { start: { page: 0, index: 4 }, end: { page: 2, index: 12 } },
+      slices: {
+        0: { start: 4, count: 18 },
+        1: { start: 0, count: 23 },
+        2: { start: 0, count: 13 },
+      },
+      active: true,
+      selecting: false,
+    };
+    const evidence = await readViewerSelectionEvidence('cross-page-doc', {
+      getFormattedSelection: () => [2, 0, 1].map((pageIndex) => ({
+        pageIndex,
+        rect: naturalRect,
+        segmentRects: [naturalRect],
+      })),
+      getSelectedText: () => ({
+        toPromise: async () => ['page one fragment', 'page two full fragment', 'page three end'],
+      }),
+      getState: () => state,
+    });
+
+    expect(evidence).toMatchObject({
+      active: true,
+      selecting: false,
+      pageCount: 3,
+      withinPageLimit: true,
+      stable: true,
+      pages: [
+        { pageIndex: 0, text: 'page one fragment', geometryCached: true },
+        { pageIndex: 1, text: 'page two full fragment', geometryCached: true },
+        { pageIndex: 2, text: 'page three end', geometryCached: true },
+      ],
+    });
+    expect(evidence.formatted.map(({ pageIndex }) => pageIndex)).toEqual([0, 1, 2]);
+    expect(evidence.selectionGeneration.length).toBeGreaterThan(0);
   });
 
   it('rejects a selection that changes while its page and text are being read', async () => {

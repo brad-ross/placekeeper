@@ -18,6 +18,7 @@ import {
   type SelectionAnchorResult,
 } from './selection-anchor.js';
 import { SELECTION_UNAVAILABLE_MESSAGE } from './text-reliability.js';
+import { PDF_SELECTION_PAGE_LIMIT } from './selection-page-limit.js';
 
 export interface PublicSelectionReader {
   getFormattedSelection(documentId?: string): ViewerFormattedSelection[];
@@ -36,7 +37,7 @@ export interface CaptureViewerSelectionInput {
   contextCharacters?: number;
 }
 
-function selectionSnapshotSignature(
+export function viewerSelectionGeneration(
   formatted: readonly ViewerFormattedSelection[],
   state: SelectionDocumentState,
 ): string {
@@ -65,13 +66,84 @@ function selectionSnapshotSignature(
   });
 }
 
+export interface ViewerSelectionPageEvidence {
+  readonly pageIndex: number;
+  readonly text: string | null;
+  readonly sliceStart: number;
+  readonly sliceCount: number;
+  readonly geometryCached: boolean;
+}
+
+export interface ViewerSelectionEvidence {
+  readonly selectionGeneration: string;
+  readonly stable: boolean;
+  readonly active: boolean;
+  readonly selecting: boolean;
+  readonly selection: SelectionDocumentState['selection'];
+  readonly pageCount: number;
+  readonly withinPageLimit: boolean;
+  readonly formatted: ReadonlyArray<{
+    readonly pageIndex: number;
+    readonly rect: ViewerFormattedSelection['rect'];
+    readonly segmentRects: ViewerFormattedSelection['segmentRects'];
+  }>;
+  readonly pages: readonly ViewerSelectionPageEvidence[];
+  readonly geometryPageIndexes: readonly number[];
+  readonly text: readonly string[];
+}
+
+/**
+ * Read the public EmbedPDF semantic-selection seam as one generation-fenced snapshot.
+ * The selection range detects every covered page independently of cache residency.
+ */
+export async function readViewerSelectionEvidence(
+  documentId: string,
+  selection: PublicSelectionReader,
+): Promise<ViewerSelectionEvidence> {
+  const formattedBefore = selection.getFormattedSelection(documentId);
+  const stateBefore = selection.getState(documentId);
+  const selectionGeneration = viewerSelectionGeneration(formattedBefore, stateBefore);
+  const text = await selection.getSelectedText(documentId).toPromise();
+  const formattedAfter = selection.getFormattedSelection(documentId);
+  const stateAfter = selection.getState(documentId);
+  const formatted = [...formattedAfter].sort((left, right) => left.pageIndex - right.pageIndex);
+  const slices = Object.entries(stateAfter.slices)
+    .map(([pageIndex, slice]) => ({ pageIndex: Number(pageIndex), ...slice }))
+    .sort((left, right) => left.pageIndex - right.pageIndex);
+  const pageCount = stateAfter.selection === null
+    ? 0
+    : stateAfter.selection.end.page - stateAfter.selection.start.page + 1;
+
+  return {
+    selectionGeneration,
+    stable: viewerSelectionGeneration(formattedAfter, stateAfter) === selectionGeneration,
+    active: stateAfter.active,
+    selecting: stateAfter.selecting,
+    selection: stateAfter.selection,
+    pageCount,
+    withinPageLimit: pageCount <= PDF_SELECTION_PAGE_LIMIT,
+    formatted,
+    pages: slices.map((slice, index) => ({
+      pageIndex: slice.pageIndex,
+      text: text[index] ?? null,
+      sliceStart: slice.start,
+      sliceCount: slice.count,
+      geometryCached: stateAfter.geometry[slice.pageIndex] !== undefined,
+    })),
+    geometryPageIndexes: Object.keys(stateAfter.geometry)
+      .map(Number)
+      .sort((left, right) => left - right),
+    text,
+  };
+}
+
 /** Convert the public EmbedPDF selection seam into the engine-neutral anchor contract. */
 export async function captureViewerSelection(
   input: CaptureViewerSelectionInput,
 ): Promise<SelectionAnchorResult> {
   const formatted = input.selection.getFormattedSelection(input.documentId);
   const state = input.selection.getState(input.documentId);
-  const snapshotSignature = selectionSnapshotSignature(formatted, state);
+  const snapshotSignature = viewerSelectionGeneration(formatted, state);
   const pageIndex = formatted[0]?.pageIndex ?? 0;
   const selectedTextReading = input.selection.getSelectedText(input.documentId).toPromise();
   const [page, selectedText] = await Promise.all([
@@ -80,7 +152,7 @@ export async function captureViewerSelection(
   ]);
   const currentFormatted = input.selection.getFormattedSelection(input.documentId);
   const currentState = input.selection.getState(input.documentId);
-  if (selectionSnapshotSignature(currentFormatted, currentState) !== snapshotSignature) {
+  if (viewerSelectionGeneration(currentFormatted, currentState) !== snapshotSignature) {
     return {
       ok: false,
       userMessage: SELECTION_UNAVAILABLE_MESSAGE,

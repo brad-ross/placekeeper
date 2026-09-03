@@ -15,6 +15,7 @@ import {
 } from './viewer-controls.js';
 import { PDF_LINK_INTERACTION_ATTRIBUTE } from './viewer-interaction-events.js';
 import { MAIN_PDF_DOCUMENT_ID } from './viewer-document-ids.js';
+import { PDF_SELECTION_GEOMETRY_CACHE_PAGE_LIMIT } from './selection-page-limit.js';
 
 export interface ViewerAssetUrls {
   pdfiumWasm: string;
@@ -85,7 +86,7 @@ export function createLocalPdfiumViewerPlugins(
     createPluginRegistration(RenderPluginPackage),
     createPluginRegistration(SelectionPluginPackage, {
       marquee: { enabled: false },
-      maxCachedGeometries: 12,
+      maxCachedGeometries: PDF_SELECTION_GEOMETRY_CACHE_PAGE_LIMIT,
     }),
     createPluginRegistration(AnnotationPluginPackage, {
       autoCommit: false,
