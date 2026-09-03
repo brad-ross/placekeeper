@@ -56,9 +56,18 @@ export interface ChromeRuntimeStagedReview {
   readonly projection: ChromeRuntimeProjection;
 }
 
+export interface ChromeRuntimeRecovery {
+  readonly choices: readonly ["resume", "discard", "fork"];
+  readonly offer: { readonly id: string; readonly expiresAt: string };
+  choose(
+    decision: "resume" | "discard" | "fork",
+    operationId: string,
+  ): Promise<ChromeRuntimeStagedReview>;
+}
+
 export interface ChromeRuntimeSourceSink {
   append(bytes: Uint8Array, signal?: AbortSignal): Promise<void>;
-  finish(claim?: { readonly sha256: string; readonly byteLength: number }, signal?: AbortSignal): Promise<ChromeRuntimeStagedReview>;
+  finish(claim?: { readonly sha256: string; readonly byteLength: number }, signal?: AbortSignal): Promise<ChromeRuntimeStagedReview | ChromeRuntimeRecovery>;
   cancel(): Promise<void>;
 }
 
@@ -348,7 +357,7 @@ interface ResourceState {
   timer?: ReturnType<typeof setTimeout>;
 }
 
-type ConnectionPhase = "negotiating" | "acquiring" | "provisional" | "active" | "update-required" | "closed";
+type ConnectionPhase = "negotiating" | "acquiring" | "recovery" | "provisional" | "active" | "update-required" | "closed";
 
 export interface ChromeRuntimeConnectionOptions {
   readonly callerOrigin: string;
@@ -373,6 +382,7 @@ export class ChromeRuntimeConnection {
   #acquisition: AcquisitionState | undefined;
   #resource: ResourceState | undefined;
   #staged: ChromeRuntimeStagedReview | undefined;
+  #recovery: ChromeRuntimeRecovery | undefined;
   #idleTimer: ReturnType<typeof setTimeout> | undefined;
   #portHeld = false;
 
@@ -523,9 +533,19 @@ export class ChromeRuntimeConnection {
     const sha256 = acquisition.digest.digest("hex");
     let staged: ChromeRuntimeStagedReview | undefined;
     try {
-      staged = await acquisition.sink.finish(
+      const finished = await acquisition.sink.finish(
         acquisition.disposition === "remote-temporary" ? { sha256, byteLength: acquisition.byteLength } : undefined,
       );
+      if ("choose" in finished) {
+        this.#recovery = finished;
+        this.#phase = "recovery";
+        return {
+          type: "recovery-offered", lane: "lifecycle", protocolVersion: 2,
+          connectionId: this.#connectionId!, requestId: message.requestId,
+          choices: finished.choices, offer: finished.offer,
+        };
+      }
+      staged = finished;
       const safeProjection = sanitizeChromeRuntimeProjection(staged.projection);
       if (safeProjection === undefined || staged.projection.generation < 1 ||
         (acquisition.disposition === "remote-temporary" && (
@@ -548,6 +568,36 @@ export class ChromeRuntimeConnection {
   }
 
   async #lifecycleMessage(message: Extract<ChromeRuntimeExtensionMessage, { readonly lane: "lifecycle" }>): Promise<ChromeRuntimeHostMessage> {
+    if (message.type === "recover") {
+      if (this.#phase !== "recovery" || this.#recovery === undefined ||
+        message.offer.id !== this.#recovery.offer.id ||
+        message.offer.expiresAt !== this.#recovery.offer.expiresAt) {
+        return this.#failure("lifecycle", "invalid-state", message.requestId);
+      }
+      try {
+        const staged = await this.#recovery.choose(message.decision, message.idempotencyKey);
+        const safeProjection = sanitizeChromeRuntimeProjection(staged.projection);
+        if (safeProjection === undefined) throw new Error("invalid-service-response");
+        this.#recovery = undefined;
+        this.#staged = { canonicalKey: staged.canonicalKey, projection: safeProjection as ChromeRuntimeProjection };
+        this.#phase = "provisional";
+        return this.#projection("projection", message.requestId, this.#staged.projection);
+      } catch {
+        return this.#failure("lifecycle", "operation-rejected", message.requestId);
+      }
+    }
+    if (message.type === "refresh") {
+      if (this.#phase !== "active" || this.#staged === undefined) {
+        return this.#failure("lifecycle", "invalid-state", message.requestId);
+      }
+      try {
+        const current = await this.#backend.current(this.#staged.canonicalKey);
+        this.#staged = { ...this.#staged, projection: current };
+        return this.#projection("projection", message.requestId, current);
+      } catch {
+        return this.#failure("lifecycle", "service-unavailable", message.requestId);
+      }
+    }
     if (message.type === "keepalive") {
       this.#armIdleDeadline();
       if (this.#phase === "active" && this.#staged !== undefined) {
@@ -555,12 +605,15 @@ export class ChromeRuntimeConnection {
           const current = await this.#backend.current(this.#staged.canonicalKey);
           const previous = this.#staged.projection;
           this.#staged = { ...this.#staged, projection: current };
-          if (current.generation !== previous.generation || current.revision !== previous.revision) {
+          const saveChanged = canonicalJson(current.saveStatus) !== canonicalJson(previous.saveStatus);
+          if (current.generation !== previous.generation || current.revision !== previous.revision || saveChanged) {
             return {
               type: "invalidation", lane: "runtime", protocolVersion: 2,
               connectionId: this.#connectionId!, revision: current.revision,
               generation: current.generation,
-              reason: current.generation !== previous.generation ? "generation" : "revision",
+              reason: current.generation !== previous.generation
+                ? "generation"
+                : current.revision !== previous.revision ? "revision" : "save",
             };
           }
         } catch {
@@ -593,6 +646,20 @@ export class ChromeRuntimeConnection {
       return this.#failure("runtime", "idempotency-required", message.requestId);
     }
     try {
+      if (NON_IDEMPOTENT_METHODS.has(message.method)) {
+        const previous = this.#staged.projection;
+        const current = await this.#backend.current(this.#staged.canonicalKey);
+        this.#staged = { ...this.#staged, projection: current };
+        if (message.generation !== current.generation || message.revision !== current.revision) {
+          this.#onAsyncMessage?.({
+            type: "invalidation", lane: "runtime", protocolVersion: 2,
+            connectionId: this.#connectionId!, revision: current.revision,
+            generation: current.generation,
+            reason: current.generation === previous.generation ? "revision" : "generation",
+          });
+          return this.#failure("runtime", "stale-presentation", message.requestId);
+        }
+      }
       const payloadDigest = createHash("sha256")
         .update(canonicalJson({ method: message.method, payload: message.payload }))
         .digest("hex");

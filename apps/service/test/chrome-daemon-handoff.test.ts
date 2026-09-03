@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,6 +24,73 @@ afterEach(async () => {
 });
 
 describe("Chrome daemon handoff", () => {
+  it("offers the existing protected draft when Chrome re-verifies the same remote source after restart", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-chrome-recovery-"));
+    roots.push(root);
+    const recoveryRoot = join(root, "recovery");
+    const browserSourceRoot = join(root, "browser-sources");
+    const assets = join(root, "assets");
+    await Promise.all([mkdir(browserSourceRoot), mkdir(assets)]);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    const start = () => PlacekeeperHost.start({
+      recoveryRoot, browserSourceRoot, webAssets: { root: assets }, port: 0,
+      browserSourceInspector: async () => ({ rewriteEligibility: { eligible: true } as const, importedItems: [] }),
+    });
+    let host = await start();
+    hosts.push(host);
+    const sourceIdentity = createHash("sha256").update("https://papers.example.test/protected.pdf").digest("hex");
+    const bytes = Buffer.from("%PDF-1.7\nprotected remote\n%%EOF");
+    const open = async (current: PlacekeeperHost) => {
+      const sourceHandle = randomBytes(24).toString("base64url");
+      await writeFile(join(browserSourceRoot, `${sourceHandle}.pdf`), bytes, { mode: 0o600 });
+      return current.broker.openChromeBrowserSource({
+        protocolVersion: 2,
+        sourceHandle,
+        sourceIdentity,
+        byteLength: bytes.byteLength,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        displayName: "Protected.pdf",
+      }, current.browserSources);
+    };
+    const opened = await open(host);
+    if (opened.kind === "recovery-offered") throw new Error("Expected a new Chrome review");
+    await host.broker.acceptMutation(opened.launch.sessionId, {
+      type: "add",
+      expectedRevision: 0,
+      item: {
+        id: randomUUID(),
+        kind: "pageNote",
+        pageIndex: 0,
+        createdAt: "2026-09-03T00:00:00.000Z",
+        updatedAt: "2026-09-03T00:00:00.000Z",
+        payload: { position: { x: 1, y: 1, width: 18, height: 18 }, comment: "Keep me" },
+      },
+    });
+    await host.close();
+    hosts.splice(hosts.indexOf(host), 1);
+
+    host = await start();
+    hosts.push(host);
+    const offered = await open(host);
+    expect(offered).toMatchObject({
+      kind: "recovery-offered",
+      choices: ["resume", "discard", "fork"],
+    });
+    if (offered.kind !== "recovery-offered") throw new Error("Expected protected recovery");
+    const resumed = await host.broker.openReview({
+      pdfPath: join(recoveryRoot, offered.recoverySessionId, "source.pdf"),
+      surface: "chrome",
+      recoveryDecision: "resume",
+      recoveryOffer: offered.recoveryOffer,
+      recoveryOperationId: "recovery-operation-remote-0001",
+    });
+    if (resumed.kind === "recovery-offered") throw new Error("Expected resumed review");
+    expect(host.broker.state(resumed.launch.sessionId)?.items).toHaveLength(1);
+    expect(await host.broker.sessionScope(resumed.launch.sessionId)).toMatchObject({
+      sourceDisposition: "remote-temporary",
+    });
+  });
+
   it("joins v2 acquisitions only when normalized source identity and verified digest both match", async () => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-chrome-canonical-"));
     roots.push(root);

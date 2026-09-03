@@ -120,6 +120,43 @@ describe("Chrome PDF handler controller", () => {
     expect(fallback).not.toHaveBeenCalled();
   });
 
+  it("keeps update-required state protected and never invokes Chrome fallback", async () => {
+    let lifecycle!: (event: { readonly type: "update-required"; readonly protected: boolean }) => void;
+    const fallback = vi.fn();
+    const status = vi.fn();
+    const review: EmbeddedReviewSession = {
+      displayName: "Paper.pdf",
+      mountAndValidate: vi.fn(async () => undefined),
+      activate: vi.fn(async () => undefined),
+      release: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+      subscribeLifecycle: vi.fn((listener) => {
+        lifecycle = listener;
+        return () => undefined;
+      }),
+    };
+    const controller = createHandlerController({
+      isOptedIn: async () => true,
+      getStreamInfo: async () => streamInfo,
+      handlerRuntimeVersion: 2,
+      openEmbedded: vi.fn(async () => review),
+      handoff: vi.fn(),
+      fallback,
+      replace: vi.fn(),
+      status,
+    });
+
+    await controller.run();
+    lifecycle({ type: "update-required", protected: true });
+    controller.bypass();
+
+    expect(controller.state()).toBe("update-required");
+    expect(status).toHaveBeenLastCalledWith(
+      "Placekeeper needs to be updated before this protected review can reopen.",
+    );
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
   it("releases and disposes before falling back when bypass interrupts mounting", async () => {
     let rejectMount!: (error: Error) => void;
     const mounted = new Promise<void>((_resolve, reject) => { rejectMount = reject; });

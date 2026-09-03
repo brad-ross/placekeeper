@@ -78,6 +78,37 @@ async function acquire(connection: ChromeRuntimeConnection): Promise<void> {
 }
 
 describe("Chrome least-authority native runtime", () => {
+  it("keeps protected recovery service-owned until one bound resume/discard/fork choice", async () => {
+    const choose = vi.fn(async () => ({
+      canonicalKey: `source-identity-1:${sourceDigest}:1`,
+      projection: projection(),
+    }));
+    const service = backend({
+      begin: vi.fn(async () => ({
+        append: vi.fn(async () => undefined),
+        finish: vi.fn(async () => ({
+          choices: ["resume", "discard", "fork"] as const,
+          offer: { id: "recovery-offer-0001", expiresAt: "2030-01-01T00:00:00.000Z" },
+          choose,
+        })),
+        cancel: vi.fn(async () => undefined),
+      })),
+    });
+    const connection = new ChromeRuntimeConnection({ callerOrigin: origin, backend: service });
+    await negotiate(connection);
+    await connection.handle({ type: "begin", lane: "acquisition", protocolVersion: 2, connectionId, requestId: "request-acquire-1", transferId: "transfer-runtime-1", disposition: "remote-temporary", sourceUrl: "https://papers.example.test/paper.pdf" });
+    await connection.handle({ type: "chunk", lane: "acquisition", protocolVersion: 2, connectionId, requestId: "request-chunk-1", transferId: "transfer-runtime-1", sequence: 0, data: sourceBytes.toString("base64") });
+    await expect(connection.handle({ type: "finish", lane: "acquisition", protocolVersion: 2, connectionId, requestId: "request-finish-recovery", transferId: "transfer-runtime-1", sequence: 1 }))
+      .resolves.toMatchObject({ type: "recovery-offered", choices: ["resume", "discard", "fork"] });
+    await expect(connection.handle({
+      type: "recover", lane: "lifecycle", protocolVersion: 2, connectionId,
+      requestId: "request-recover-1", decision: "resume",
+      offer: { id: "recovery-offer-0001", expiresAt: "2030-01-01T00:00:00.000Z" },
+      idempotencyKey: "recovery-operation-0001",
+    })).resolves.toMatchObject({ type: "projection", payload: { sessionId: projection().sessionId } });
+    expect(choose).toHaveBeenCalledExactlyOnceWith("resume", "recovery-operation-0001");
+  });
+
   it("streams only the generation-matching document while the lease is provisional", async () => {
     const service = backend();
     const connection = new ChromeRuntimeConnection({
@@ -257,7 +288,7 @@ describe("Chrome least-authority native runtime", () => {
       await connection.handle({ type: "chunk", lane: "acquisition", protocolVersion: 2, connectionId: id, requestId: `request-chunk-${id}`, transferId: `transfer-${id}`, sequence: 0, data: sourceBytes.toString("base64") });
       await connection.handle({ type: "finish", lane: "acquisition", protocolVersion: 2, connectionId: id, requestId: `request-finish-${id}`, transferId: `transfer-${id}`, sequence: 1 });
       await connection.handle({ type: "activate", lane: "lifecycle", protocolVersion: 2, connectionId: id, requestId: `request-activate-${id}`, documentValidated: true });
-      const result = await connection.handle({ type: "invoke", lane: "runtime", protocolVersion: 2, connectionId: id, requestId: `request-runtime-${id}`, method: "retrySave", payload: {}, idempotencyKey: "operation-key-shared" });
+      const result = await connection.handle({ type: "invoke", lane: "runtime", protocolVersion: 2, connectionId: id, requestId: `request-runtime-${id}`, generation: 1, revision: 0, method: "retrySave", payload: {}, idempotencyKey: "operation-key-shared" });
       await connection.disconnect();
       return result;
     };
@@ -303,6 +334,87 @@ describe("Chrome least-authority native runtime", () => {
       .resolves.toMatchObject({ type: "invalidation", lane: "runtime", revision: 1, generation: 1, reason: "revision" });
   });
 
+  it("polls service-owned save changes even when revision is unchanged", async () => {
+    const changed = {
+      ...projection(),
+      saveStatus: {
+        destination: { phase: "active", generation: 1, kind: "copy", targetPath: "Reviewed.pdf" },
+        sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 },
+      },
+    };
+    const service = backend({ current: vi.fn(async () => changed) });
+    const connection = new ChromeRuntimeConnection({ callerOrigin: origin, backend: service });
+    await negotiate(connection); await acquire(connection);
+    await connection.handle({ type: "activate", lane: "lifecycle", protocolVersion: 2, connectionId, requestId: "request-activate-1", documentValidated: true });
+    await expect(connection.handle({ type: "keepalive", lane: "lifecycle", protocolVersion: 2, connectionId, requestId: "request-keepalive-save" }))
+      .resolves.toMatchObject({ type: "invalidation", lane: "runtime", revision: 0, generation: 1, reason: "save" });
+  });
+
+  it("returns a fresh projection before a presentation reads successor bytes", async () => {
+    const successor = {
+      ...projection(),
+      generation: 2,
+      revision: 1,
+      state: {
+        ...(projection().state as Record<string, unknown>),
+        revision: 1,
+        workflow: {
+          ...((projection().state as Record<string, unknown>).workflow as Record<string, unknown>),
+          documentGeneration: 2,
+        },
+      },
+      document: { ...projection().document, generation: 2 },
+    };
+    const service = backend({ current: vi.fn(async () => successor) });
+    const connection = new ChromeRuntimeConnection({ callerOrigin: origin, backend: service });
+    await negotiate(connection); await acquire(connection);
+    await connection.handle({ type: "activate", lane: "lifecycle", protocolVersion: 2, connectionId, requestId: "request-activate-1", documentValidated: true });
+
+    await expect(connection.handle({
+      type: "refresh", lane: "lifecycle", protocolVersion: 2, connectionId,
+      requestId: "request-refresh-1",
+    })).resolves.toMatchObject({
+      type: "projection",
+      requestId: "request-refresh-1",
+      payload: { generation: 2, revision: 1, document: { generation: 2 } },
+    });
+    await expect(connection.handle({
+      type: "read", lane: "resource", protocolVersion: 2, connectionId,
+      requestId: "request-resource-successor", resource: "document",
+      generation: 2, offset: 0, length: sourceBytes.byteLength,
+    })).resolves.toMatchObject({ type: "resource-chunk", requestId: "request-resource-successor" });
+    expect(service.readDocument).toHaveBeenCalledWith(
+      `source-identity-1:${sourceDigest}:1`, 2, 0, sourceBytes.byteLength,
+    );
+  });
+
+  it("fences stale non-idempotent work and publishes the current canonical revision", async () => {
+    const current = {
+      ...projection(),
+      revision: 1,
+      state: { ...(projection().state as Record<string, unknown>), revision: 1 },
+    };
+    const events: unknown[] = [];
+    const service = backend({ current: vi.fn(async () => current) });
+    const connection = new ChromeRuntimeConnection({
+      callerOrigin: origin,
+      backend: service,
+      onAsyncMessage: (message) => events.push(message),
+    });
+    await negotiate(connection); await acquire(connection);
+    await connection.handle({ type: "activate", lane: "lifecycle", protocolVersion: 2, connectionId, requestId: "request-activate-1", documentValidated: true });
+
+    await expect(connection.handle({
+      type: "invoke", lane: "runtime", protocolVersion: 2, connectionId,
+      requestId: "request-stale-save", generation: 1, revision: 0,
+      method: "retrySave", payload: {}, idempotencyKey: "operation-key-stale-save",
+    })).resolves.toMatchObject({ type: "failure", reason: "stale-presentation" });
+    expect(service.invoke).not.toHaveBeenCalled();
+    expect(events).toEqual([expect.objectContaining({
+      type: "invalidation", generation: 1, revision: 1, reason: "revision",
+    })]);
+  });
+
   it("does not expire an active presentation while a runtime request is in flight", async () => {
     vi.useFakeTimers();
     try {
@@ -319,7 +431,8 @@ describe("Chrome least-authority native runtime", () => {
 
       const pending = connection.handle({
         type: "invoke", lane: "runtime", protocolVersion: 2, connectionId,
-        requestId: "request-runtime-long-1", method: "retrySave", payload: {},
+        requestId: "request-runtime-long-1", generation: 1, revision: 0,
+        method: "retrySave", payload: {},
         idempotencyKey: "operation-key-long-request",
       });
       await vi.advanceTimersByTimeAsync(100);

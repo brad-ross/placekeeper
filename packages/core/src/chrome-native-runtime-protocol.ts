@@ -33,11 +33,13 @@ export type ChromeRuntimeExtensionMessage = ChromeRuntimeHello | (RuntimeEnvelop
   | { readonly lane: "acquisition"; readonly type: "chunk"; readonly requestId: string; readonly transferId: string; readonly sequence: number; readonly data: string }
   | { readonly lane: "acquisition"; readonly type: "finish"; readonly requestId: string; readonly transferId: string; readonly sequence: number }
   | { readonly lane: "acquisition"; readonly type: "cancel"; readonly requestId: string; readonly transferId: string; readonly reason: string }
-  | { readonly lane: "runtime"; readonly type: "invoke"; readonly requestId: string; readonly method: ReviewRuntimeBrokerMethod; readonly payload: unknown; readonly idempotencyKey?: string }
+  | { readonly lane: "runtime"; readonly type: "invoke"; readonly requestId: string; readonly generation: number; readonly revision: number; readonly method: ReviewRuntimeBrokerMethod; readonly payload: unknown; readonly idempotencyKey?: string }
   | { readonly lane: "resource"; readonly type: "read"; readonly requestId: string; readonly resource: "document"; readonly generation: number; readonly offset: number; readonly length: number }
   | { readonly lane: "resource"; readonly type: "ack"; readonly requestId: string; readonly sequence: number }
   | { readonly lane: "resource"; readonly type: "cancel"; readonly requestId: string }
   | { readonly lane: "lifecycle"; readonly type: "activate"; readonly requestId: string; readonly documentValidated: true }
+  | { readonly lane: "lifecycle"; readonly type: "refresh"; readonly requestId: string }
+  | { readonly lane: "lifecycle"; readonly type: "recover"; readonly requestId: string; readonly decision: "resume" | "discard" | "fork"; readonly offer: { readonly id: string; readonly expiresAt: string }; readonly idempotencyKey: string }
   | { readonly lane: "lifecycle"; readonly type: "keepalive"; readonly requestId: string }
   | { readonly lane: "lifecycle"; readonly type: "detach"; readonly requestId: string }
 ));
@@ -47,6 +49,7 @@ export type ChromeRuntimeHostMessage = RuntimeEnvelope & (
   | { readonly lane: ChromeRuntimeLane; readonly type: "ack"; readonly requestId: string; readonly sequence?: number }
   | { readonly lane: "lifecycle"; readonly type: "projection"; readonly requestId: string; readonly payload: unknown }
   | { readonly lane: "lifecycle"; readonly type: "active"; readonly requestId: string; readonly payload: unknown }
+  | { readonly lane: "lifecycle"; readonly type: "recovery-offered"; readonly requestId: string; readonly choices: readonly ["resume", "discard", "fork"]; readonly offer: { readonly id: string; readonly expiresAt: string } }
   | { readonly lane: "runtime"; readonly type: "result"; readonly requestId: string; readonly method: ReviewRuntimeBrokerMethod; readonly payload: unknown }
   | { readonly lane: "runtime"; readonly type: "invalidation"; readonly revision: number; readonly generation: number; readonly reason: "revision" | "generation" | "save" | "recovery" }
   | { readonly lane: "resource"; readonly type: "resource-chunk"; readonly requestId: string; readonly sequence: number; readonly data: string; readonly done: boolean }
@@ -129,9 +132,12 @@ export function parseChromeRuntimeExtensionMessage(value: unknown): ChromeRuntim
       ? value as unknown as ChromeRuntimeExtensionMessage : undefined;
   }
   if (value.lane === "runtime" && value.type === "invoke") {
-    const keys = value.idempotencyKey === undefined ? [...base, "method", "payload"] : [...base, "method", "payload", "idempotencyKey"];
+    const keys = value.idempotencyKey === undefined
+      ? [...base, "generation", "revision", "method", "payload"]
+      : [...base, "generation", "revision", "method", "payload", "idempotencyKey"];
     if (!exact(value, keys) || !isReviewRuntimeMethodForHost("chrome", value.method) ||
       value.method === "bootstrap" || value.method === "presence" || value.method === "detach" ||
+      !safeInteger(value.generation) || !safeInteger(value.revision) ||
       (value.idempotencyKey !== undefined && (typeof value.idempotencyKey !== "string" || !OPERATION_KEY.test(value.idempotencyKey)))) return undefined;
     const payload = sanitizeChromeReviewRuntimeRequest(value.method, value.payload);
     return payload === undefined
@@ -154,7 +160,16 @@ export function parseChromeRuntimeExtensionMessage(value: unknown): ChromeRuntim
     return exact(value, [...base, "documentValidated"]) && value.documentValidated === true
       ? value as unknown as ChromeRuntimeExtensionMessage : undefined;
   }
-  if (value.lane === "lifecycle" && (value.type === "keepalive" || value.type === "detach")) {
+  if (value.lane === "lifecycle" && value.type === "recover") {
+    return exact(value, [...base, "decision", "offer", "idempotencyKey"]) &&
+      (value.decision === "resume" || value.decision === "discard" || value.decision === "fork") &&
+      record(value.offer) && exact(value.offer, ["id", "expiresAt"]) &&
+      typeof value.offer.id === "string" && OPERATION_KEY.test(value.offer.id) &&
+      typeof value.offer.expiresAt === "string" && Number.isFinite(Date.parse(value.offer.expiresAt)) &&
+      typeof value.idempotencyKey === "string" && OPERATION_KEY.test(value.idempotencyKey)
+      ? value as unknown as ChromeRuntimeExtensionMessage : undefined;
+  }
+  if (value.lane === "lifecycle" && (value.type === "refresh" || value.type === "keepalive" || value.type === "detach")) {
     return exact(value, base) ? value as unknown as ChromeRuntimeExtensionMessage : undefined;
   }
   return undefined;
@@ -231,6 +246,16 @@ export function parseChromeRuntimeHostMessage(value: unknown): ChromeRuntimeHost
     const payload = sanitizeChromeRuntimeProjection(value.payload);
     return payload === undefined
       ? undefined : { ...value, payload } as unknown as ChromeRuntimeHostMessage;
+  }
+  if (value.type === "recovery-offered") {
+    return value.lane === "lifecycle" &&
+      exact(value, ["type", "lane", "protocolVersion", "connectionId", "requestId", "choices", "offer"]) &&
+      safeId(value.requestId) && Array.isArray(value.choices) && value.choices.length === 3 &&
+      value.choices[0] === "resume" && value.choices[1] === "discard" && value.choices[2] === "fork" &&
+      record(value.offer) && exact(value.offer, ["id", "expiresAt"]) &&
+      typeof value.offer.id === "string" && OPERATION_KEY.test(value.offer.id) &&
+      typeof value.offer.expiresAt === "string" && Number.isFinite(Date.parse(value.offer.expiresAt))
+      ? value as unknown as ChromeRuntimeHostMessage : undefined;
   }
   if (value.type === "result") {
     if (value.lane !== "runtime" || !exact(value, ["type", "lane", "protocolVersion", "connectionId", "requestId", "method", "payload"]) ||

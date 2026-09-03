@@ -183,6 +183,16 @@ describe("shared review runtime protocol", () => {
     }
   });
 
+  it("preserves the remote-temporary save proposal without inventing a local filename", () => {
+    expect(sanitizeChromeReviewRuntimeResponse("saveProposal", {
+      sourceDisposition: "remote-temporary",
+    })).toEqual({ sourceDisposition: "remote-temporary" });
+    expect(sanitizeChromeReviewRuntimeResponse("saveProposal", {
+      sourceDisposition: "remote-temporary",
+      folder: "/private/source",
+    })).toBeUndefined();
+  });
+
   it("fails closed instead of forwarding raw save and export errors", () => {
     expect(sanitizeChromeReviewRuntimeResponse("saveStatus", {
       destination: { phase: "none", generation: 0 },

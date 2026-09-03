@@ -101,6 +101,9 @@ export interface RemoteTemporarySourceOwnership {
   readonly displayName: string;
   readonly digest: string;
   readonly byteLength: number;
+  /** Stable native-normalized identity for Chrome re-acquisition. It is
+   * private recovery metadata and is never projected to the extension. */
+  readonly sourceIdentity?: string;
 }
 
 export type RecoverableSourceOwnership =
@@ -208,7 +211,9 @@ function validV3Source(source: RecoverableSourceOwnership): boolean {
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
       .test(source.leaseId) && source.displayName.length > 0 && source.displayName.length <= 120 &&
     !/[\\/\u0000-\u001f\u007f]/u.test(source.displayName) &&
-    /^[a-f0-9]{64}$/u.test(source.digest) && Number.isSafeInteger(source.byteLength) &&
+    /^[a-f0-9]{64}$/u.test(source.digest) &&
+    (source.sourceIdentity === undefined || /^[a-f0-9]{64}$/u.test(source.sourceIdentity)) &&
+    Number.isSafeInteger(source.byteLength) &&
     source.byteLength > 0;
 }
 

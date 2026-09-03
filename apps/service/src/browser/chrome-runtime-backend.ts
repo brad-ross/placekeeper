@@ -13,6 +13,7 @@ import {
   ChromeRuntimeOperationJournal,
   type ChromeRuntimeBackend,
   type ChromeRuntimeProjection,
+  type ChromeRuntimeRecovery,
   type ChromeRuntimeSourceSink,
   type ChromeRuntimeStageRequest,
 } from "./chrome-runtime.js";
@@ -24,10 +25,9 @@ import {
 interface CanonicalRecord {
   readonly canonicalKey: string;
   readonly sessionId: string;
-  readonly credential: string;
-  readonly generation: number;
-  readonly sha256: string;
-  readonly byteLength: number;
+  generation: number;
+  sha256: string;
+  byteLength: number;
   readonly created: boolean;
 }
 
@@ -49,7 +49,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
   readonly #transferStore: ChromeTransferStore;
   readonly #saving: PdfSaveCoordinator;
   readonly #exporting: ExportCoordinator;
-  readonly #index = new ChromeCanonicalReviewIndex<CanonicalRecord>();
+  readonly #index = new ChromeCanonicalReviewIndex<CanonicalRecord | ChromeRuntimeRecovery>();
   readonly #records = new Map<string, CanonicalRecord>();
   readonly #presentations = new Map<string, Set<string>>();
   readonly #provisionals = new Map<string, number>();
@@ -91,6 +91,10 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
           { sourceIdentity: request.sourceIdentity, sha256: source.sha256, generation: 1 },
           async () => this.#openRemote(handle, request.sourceIdentity, source),
         ).finally(() => this.#transferStore.remove(handle));
+        if ("choose" in resolution.review) {
+          this.#index.delete(resolution.canonicalKey);
+          return resolution.review;
+        }
         this.#records.set(resolution.canonicalKey, resolution.review);
         this.#provisionals.set(
           resolution.canonicalKey,
@@ -136,41 +140,52 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     _operation: { readonly idempotencyKey?: string; readonly payloadDigest: string },
   ): Promise<unknown> {
     const record = this.#record(canonicalKey);
+    this.#refreshRecord(record);
+    let result: unknown;
     switch (method) {
       case "command":
-        return this.#broker.acceptMutation(record.sessionId, payload as ReviewCommand, { expectedGeneration: record.generation });
-      case "saveStatus": return this.#broker.saveStatus(record.sessionId);
-      case "saveProposal": return this.#saving.proposal(record.sessionId);
+        result = await this.#broker.acceptMutation(record.sessionId, payload as ReviewCommand, { expectedGeneration: record.generation });
+        break;
+      case "saveStatus": result = this.#broker.saveStatus(record.sessionId); break;
+      case "saveProposal": result = this.#saving.proposal(record.sessionId); break;
       case "chooseCopy": {
         const value = payload as { readonly filename?: string; readonly folderSelectionId?: string };
         await this.#saving.chooseCopyFilename(record.sessionId, value.filename, value.folderSelectionId);
-        return this.#broker.saveStatus(record.sessionId);
+        result = this.#broker.saveStatus(record.sessionId);
+        break;
       }
-      case "chooseFolder": return this.#saving.chooseFolder(record.sessionId);
+      case "chooseFolder": result = await this.#saving.chooseFolder(record.sessionId); break;
       case "chooseOriginal":
         await this.#saving.chooseOriginal(record.sessionId);
-        return this.#broker.saveStatus(record.sessionId);
+        result = this.#broker.saveStatus(record.sessionId);
+        break;
       case "retrySave":
         await this.#saving.retry(record.sessionId);
-        return this.#broker.saveStatus(record.sessionId);
+        result = this.#broker.saveStatus(record.sessionId);
+        break;
       case "locateSave":
         await this.#saving.locate(record.sessionId);
-        return this.#broker.saveStatus(record.sessionId);
-      case "scope": return this.#broker.sessionScope(record.sessionId, record.credential);
+        result = this.#broker.saveStatus(record.sessionId);
+        break;
+      case "scope": result = await this.#broker.sessionScope(record.sessionId); break;
       case "exportReviewedCopy": {
         const value = payload as { readonly confirmPossiblyStale?: true };
         const frozen = await this.#broker.freezeDelivery(record.sessionId);
-        return this.#exporting.exportReviewedCopy({
+        result = await this.#exporting.exportReviewedCopy({
           ...frozen,
           ...(value.confirmPossiblyStale === true ? { staleConfirmed: true as const } : {}),
         });
+        break;
       }
       default: throw new Error("chrome-method-forbidden");
     }
+    this.#refreshRecord(record);
+    return result;
   }
 
   async readDocument(canonicalKey: string, generation: number, offset: number, length: number): Promise<Buffer> {
     const record = this.#record(canonicalKey);
+    this.#refreshRecord(record);
     if (generation !== record.generation || offset < 0 || length < 1) throw new Error("stale-generation");
     const bytes = await this.#broker.documentRange(record.sessionId, generation, offset, length);
     if (bytes === undefined) throw new Error("source-unavailable");
@@ -202,6 +217,14 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     return record;
   }
 
+  #refreshRecord(record: CanonicalRecord): void {
+    const state = this.#broker.state(record.sessionId);
+    if (state === undefined) throw new Error("canonical-review-unavailable");
+    record.generation = state.workflow.documentGeneration;
+    record.sha256 = state.source.digest;
+    record.byteLength = state.source.byteLength;
+  }
+
   async #localSink(request: ChromeRuntimeStageRequest): Promise<ChromeRuntimeSourceSink> {
     const fileUrl = request.fileUrl!;
     let finished = false;
@@ -212,7 +235,27 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
         finished = true;
         const canonicalPath = await this.#transferStore.canonicalizeLocal(fileUrl);
         const opened = await this.#broker.openReview({ pdfPath: canonicalPath, surface: "chrome" });
-        if (opened.kind === "recovery-offered") throw new Error("recovery-required");
+        if (opened.kind === "recovery-offered") {
+          return {
+            choices: ["resume", "discard", "fork"],
+            offer: opened.recoveryOffer,
+            choose: async (decision, operationId) => {
+              const recovered = await this.#broker.openReview({
+                pdfPath: canonicalPath,
+                surface: "chrome",
+                recoveryDecision: decision,
+                recoveryOffer: opened.recoveryOffer,
+                recoveryOperationId: operationId,
+              });
+              if (recovered.kind === "recovery-offered") throw new Error("recovery-offer-unavailable");
+              const record = await this.#recordFromLaunch(recovered.launch, recovered.kind === "opened");
+              const canonicalKey = `${request.sourceIdentity}:${record.sha256}:${record.generation}`;
+              this.#records.set(canonicalKey, { ...record, canonicalKey });
+              this.#provisionals.set(canonicalKey, (this.#provisionals.get(canonicalKey) ?? 0) + 1);
+              return { canonicalKey, projection: await this.#projection(record) };
+            },
+          } satisfies ChromeRuntimeRecovery;
+        }
         const record = await this.#recordFromLaunch(opened.launch, false);
         const canonicalKey = `${request.sourceIdentity}:${record.sha256}:${record.generation}`;
         this.#records.set(canonicalKey, { ...record, canonicalKey });
@@ -235,7 +278,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     handle: SealedBrowserSourceHandle,
     sourceIdentity: string,
     source: { readonly sha256: string; readonly byteLength: number; readonly displayName?: string },
-  ): Promise<CanonicalRecord> {
+  ): Promise<CanonicalRecord | ChromeRuntimeRecovery> {
     const opened = await this.#broker.openChromeBrowserSource({
       protocolVersion: CHROME_RUNTIME_SOURCE_PROTOCOL_VERSION,
       sourceHandle: handle,
@@ -244,7 +287,29 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
       sha256: source.sha256,
       ...(source.displayName === undefined ? {} : { displayName: source.displayName }),
     }, this.#browserSources);
-    if (opened.kind === "recovery-offered") throw new Error("recovery-required");
+    if (opened.kind === "recovery-offered") {
+      const recoveryPath = join(this.#broker.recoveryRoot, opened.recoverySessionId, "source.pdf");
+      return {
+        choices: ["resume", "discard", "fork"],
+        offer: opened.recoveryOffer,
+        choose: async (decision, operationId) => {
+          const recovered = await this.#broker.openReview({
+            pdfPath: recoveryPath,
+            surface: "chrome",
+            recoveryDecision: decision,
+            recoveryOffer: opened.recoveryOffer,
+            recoveryOperationId: operationId,
+          });
+          if (recovered.kind === "recovery-offered") throw new Error("recovery-offer-unavailable");
+          const record = await this.#recordFromLaunch(recovered.launch, recovered.kind === "opened");
+          const canonicalKey = `${sourceIdentity}:${record.sha256}:${record.generation}`;
+          const staged = { canonicalKey, projection: await this.#projection(record) };
+          this.#records.set(canonicalKey, { ...record, canonicalKey });
+          this.#provisionals.set(canonicalKey, (this.#provisionals.get(canonicalKey) ?? 0) + 1);
+          return staged;
+        },
+      };
+    }
     return this.#recordFromLaunch(opened.launch, opened.kind === "opened");
   }
 
@@ -253,16 +318,18 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     const credential = capability === null ? undefined : this.#broker.exchangeBootstrap(launch.sessionId, capability);
     const state = this.#broker.state(launch.sessionId);
     if (credential === undefined || state === undefined) throw new Error("bootstrap-unavailable");
+    this.#broker.revokePresentationCredential(launch.sessionId, credential);
     return {
-      canonicalKey: "pending", sessionId: launch.sessionId, credential,
+      canonicalKey: "pending", sessionId: launch.sessionId,
       generation: state.workflow.documentGeneration, sha256: state.source.digest,
       byteLength: state.source.byteLength, created,
     };
   }
 
   async #projection(record: CanonicalRecord): Promise<ChromeRuntimeProjection> {
+    this.#refreshRecord(record);
     const state = this.#broker.state(record.sessionId);
-    const scope = await this.#broker.sessionScope(record.sessionId, record.credential);
+    const scope = await this.#broker.sessionScope(record.sessionId);
     const saveStatus = this.#broker.saveStatus(record.sessionId);
     const canonicalLinkBase = this.#broker.canonicalLinkBase(record.sessionId);
     if (state === undefined || scope === undefined || saveStatus === undefined || canonicalLinkBase === undefined) {

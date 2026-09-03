@@ -70,7 +70,20 @@ describe("Chrome runtime protocol v2", () => {
     })).toBeDefined();
     expect(validateRuntimeExtensionMessage({
       type: "invoke", lane: "runtime", protocolVersion: 2, connectionId,
-      requestId: "request-runtime-1", method: "forwardSyncTex", payload: {},
+      requestId: "request-runtime-1", generation: 1, revision: 0,
+      method: "forwardSyncTex", payload: {},
+    })).toBeUndefined();
+    expect(validateRuntimeExtensionMessage({
+      type: "recover", lane: "lifecycle", protocolVersion: 2, connectionId,
+      requestId: "request-recover-1", decision: "resume",
+      offer: { id: "recovery-offer-0001", expiresAt: "2030-01-01T00:00:00.000Z" },
+      idempotencyKey: "recovery-operation-0001",
+    })).toBeDefined();
+    expect(validateRuntimeExtensionMessage({
+      type: "recover", lane: "lifecycle", protocolVersion: 2, connectionId,
+      requestId: "request-recover-1", decision: "resume",
+      offer: { id: "recovery-offer-0001", expiresAt: "2030-01-01T00:00:00.000Z", sourceUrl: "https://private.test" },
+      idempotencyKey: "recovery-operation-0001",
     })).toBeUndefined();
     expect(validateRuntimeExtensionMessage({
       type: "detach", lane: "lifecycle", protocolVersion: 2, connectionId,
@@ -81,7 +94,7 @@ describe("Chrome runtime protocol v2", () => {
   it("returns the sanitized runtime payload rather than the untrusted input object", () => {
     expect(validateRuntimeExtensionMessage({
       type: "invoke", lane: "runtime", protocolVersion: 2, connectionId,
-      requestId: "request-runtime-1", method: "chooseCopy",
+      requestId: "request-runtime-1", generation: 1, revision: 0, method: "chooseCopy",
       payload: { filename: "Review\u202e copy.pdf" },
       idempotencyKey: "operation-key-0001",
     })).toMatchObject({

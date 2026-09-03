@@ -86,4 +86,15 @@ describe("Chrome extension static contract", () => {
     expect(handlerEntry).toContain("createNativeEmbeddedReview");
     expect(handler).toContain('<div id="root"');
   });
+
+  it("presents protected recovery as a labeled, keyboard-focusable choice", async () => {
+    const handlerEntry = await readFile(resolve(extensionRoot, "src/handler-entry.ts"), "utf8");
+
+    expect(handlerEntry).toContain('actions.setAttribute("role", "group")');
+    expect(handlerEntry).toContain('actions.setAttribute("aria-label", "Protected recovery choices")');
+    expect(handlerEntry).toContain('["resume", "Resume draft"]');
+    expect(handlerEntry).toContain('["discard", "Discard draft"]');
+    expect(handlerEntry).toContain('["fork", "Fork review"]');
+    expect(handlerEntry).toContain('buttons[0]!.focus({ preventScroll: true })');
+  });
 });

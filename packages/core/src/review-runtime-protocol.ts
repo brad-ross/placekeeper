@@ -351,11 +351,19 @@ export function sanitizeChromeReviewRuntimeResponse(
     return safeChromeState(value);
   }
   if (method === "saveProposal") {
-    if (!record(value) || (value.sourceDisposition !== "local" && value.sourceDisposition !== "remote-temporary") ||
-      sanitizeReviewRuntimeDisplayString(value.filename) === undefined) return undefined;
+    if (!record(value) || (value.sourceDisposition !== "local" && value.sourceDisposition !== "remote-temporary")) {
+      return undefined;
+    }
+    if (value.sourceDisposition === "remote-temporary") {
+      return hasOnlyKeys(value, ["sourceDisposition"])
+        ? { sourceDisposition: "remote-temporary" }
+        : undefined;
+    }
+    const filename = sanitizeReviewRuntimeDisplayString(value.filename);
+    if (filename === undefined) return undefined;
     return {
-      sourceDisposition: value.sourceDisposition,
-      filename: sanitizeReviewRuntimeDisplayString(value.filename),
+      sourceDisposition: "local",
+      filename,
       folder: "Local folder",
     };
   }

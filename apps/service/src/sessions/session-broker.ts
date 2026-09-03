@@ -731,6 +731,26 @@ export class SessionBroker {
         }
         if (chromeSourceKey !== undefined) this.#activeChromeBySource.delete(chromeSourceKey);
       }
+      if (adopted.sourceIdentity !== undefined) {
+        const drafts = await this.#recoverableDrafts();
+        const matches = drafts.filter((draft) =>
+          draft.sync.phase !== "clean" &&
+          draft.source.disposition === "remote-temporary" &&
+          draft.source.sourceIdentity === adopted.sourceIdentity &&
+          draft.source.digest === adopted.sha256 &&
+          draft.source.byteLength === adopted.byteLength
+        );
+        if (matches.length > 1) throw new Error("Recovery target is ambiguous; protected work was left unchanged");
+        if (matches[0] !== undefined) {
+          this.capabilities.revokeFile(approvedFile.id);
+          approvedFile = undefined;
+          await this.#store(sessionId).remove().catch(() => undefined);
+          return this.openReview({
+            pdfPath: this.#draftSnapshotPath(matches[0]),
+            surface: "chrome",
+          });
+        }
+      }
       const { rewriteEligibility, importedItems } = await this.#browserSourceInspector(
         adopted.path,
         signal,
@@ -752,6 +772,7 @@ export class SessionBroker {
         displayName: adopted.displayName,
         digest: adopted.sha256,
         byteLength: adopted.byteLength,
+        ...(adopted.sourceIdentity === undefined ? {} : { sourceIdentity: adopted.sourceIdentity }),
       };
       const session: ActiveSession = {
         id: sessionId,
@@ -1206,12 +1227,20 @@ export class SessionBroker {
       latestObservationEpoch: 0,
       sourceWorkInterruptions: [],
       documentGeneration: 1,
-      sourceOwnership: {
-        disposition: "local",
-        canonicalSourcePath: approvedFile.canonicalPath,
-        sourceSnapshotPath: sourceSnapshot.path,
-        displayName: basename(approvedFile.canonicalPath),
-      },
+      sourceOwnership: matchingDraft?.source.disposition === "remote-temporary"
+        ? {
+            ...matchingDraft.source,
+            acquisitionId: randomUUID(),
+            leaseId: randomUUID(),
+            digest: sourceSnapshot.digest,
+            byteLength: sourceSnapshot.byteLength,
+          }
+        : {
+            disposition: "local",
+            canonicalSourcePath: approvedFile.canonicalPath,
+            sourceSnapshotPath: sourceSnapshot.path,
+            displayName: basename(approvedFile.canonicalPath),
+          },
     };
     await session.store.persist(this.#draft(session));
     this.#activate(session);
@@ -1283,7 +1312,20 @@ export class SessionBroker {
 
   #activate(session: ActiveSession): void {
     this.#activeById.set(session.id, session);
-    if (session.sourceOwnership.disposition === "remote-temporary") return;
+    if (session.sourceOwnership.disposition === "remote-temporary") {
+      // A successor or recovered generation must replace every older Chrome
+      // source lookup for this canonical session. Leaving an earlier key in
+      // the index would let a later acquisition find a retired generation.
+      for (const [key, owner] of this.#activeChromeBySource) {
+        if (owner === session.id) this.#activeChromeBySource.delete(key);
+      }
+      if (session.sourceOwnership.sourceIdentity !== undefined) {
+        const key = `${session.sourceOwnership.sourceIdentity}\0${session.state.source.digest}\0${session.state.workflow.documentGeneration}`;
+        this.#activeChromeBySource.set(key, session.id);
+        this.#chromeSourceKeyBySession.set(session.id, key);
+      }
+      return;
+    }
     this.#activeBySource.set(
       activeKey(session.canonicalSourcePath, session.state.source.digest),
       session.id,
@@ -1611,6 +1653,14 @@ export class SessionBroker {
     this.#viewsById.delete(viewId);
     this.credentials.revoke(view.sessionId, view.credential);
     this.#credentialScopes.delete(digestSecretHex(view.credential));
+  }
+
+  /** Chrome runtime presentations authenticate through their native, tab-scoped
+   * lease. Bootstrap credentials are exchanged only to close the ordinary
+   * launch capability and are revoked before any projection leaves service code. */
+  revokePresentationCredential(sessionId: string, credential: string): void {
+    this.credentials.revoke(sessionId, credential);
+    this.#credentialScopes.delete(digestSecretHex(credential));
   }
 
   authenticate(sessionId: string, credential: string): boolean {

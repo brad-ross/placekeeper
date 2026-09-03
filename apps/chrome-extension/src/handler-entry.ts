@@ -117,6 +117,63 @@ const handoff = createNativeHandoff({
   fetchStream: async (url, signal) => signal === undefined ? fetch(url) : fetch(url, { signal }),
   createTransferId: () => crypto.randomUUID(),
 });
+
+async function chooseProtectedRecovery(
+  _recovery: {
+    readonly choices: readonly ["resume", "discard", "fork"];
+    readonly offer: { readonly id: string; readonly expiresAt: string };
+  },
+  signal?: AbortSignal,
+): Promise<"resume" | "discard" | "fork"> {
+  if (signal?.aborted === true) throw signal.reason;
+  title!.textContent = "Protected review found";
+  status!.textContent = "Choose how Placekeeper should reopen your unfinished review.";
+  const actions = document.createElement("div");
+  actions.className = "handler-actions recovery-actions";
+  actions.setAttribute("role", "group");
+  actions.setAttribute("aria-label", "Protected recovery choices");
+  const choices = [
+    ["resume", "Resume draft"],
+    ["discard", "Discard draft"],
+    ["fork", "Fork review"],
+  ] as const;
+  const buttons = choices.map(([choice, label]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.recoveryChoice = choice;
+    button.textContent = label;
+    actions.append(button);
+    return button;
+  });
+  launchShell!.append(actions);
+  buttons[0]!.focus({ preventScroll: true });
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = (opening: boolean) => {
+      actions.remove();
+      signal?.removeEventListener("abort", onAbort);
+      if (opening) status!.textContent = "Opening the protected review…";
+    };
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup(false);
+      reject(signal?.reason);
+    };
+    for (const button of buttons) {
+      button.addEventListener("click", () => {
+        if (settled) return;
+        settled = true;
+        const choice = button.dataset.recoveryChoice as "resume" | "discard" | "fork";
+        cleanup(true);
+        resolve(choice);
+      }, { once: true });
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted === true) onAbort();
+  });
+}
+
 const openNativeReview = createNativeEmbeddedReview({
   connectNative: () => connectPlacekeeper(chrome),
   fetchStream: async (url, signal) => signal === undefined ? fetch(url) : fetch(url, { signal }),
@@ -124,6 +181,7 @@ const openNativeReview = createNativeEmbeddedReview({
   createObjectURL: (blob) => URL.createObjectURL(blob),
   revokeObjectURL: (url) => URL.revokeObjectURL(url),
   getExtensionURL: (path) => chrome.runtime.getURL(path),
+  chooseRecovery: chooseProtectedRecovery,
 });
 
 async function openEmbeddedReview(
