@@ -332,6 +332,86 @@ describe("host-neutral review runtime", () => {
     runtime.dispose();
   });
 
+  it("mounts a reduced Chrome RPC runtime with independent history, link, and resource seams", async () => {
+    const listeners = new Set<(message: unknown) => void>();
+    const requests: Record<string, unknown>[] = [];
+    const extensionOrigin = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const state = createReviewState({
+      sessionId,
+      source: {
+        fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        digest: "a".repeat(64),
+        byteLength: 100,
+      },
+      sourceRootId: "must-not-cross",
+    });
+    const runtime = createRpcHostRuntime({
+      runtimeId: "chrome_connection_1234",
+      postMessage(message) {
+        const request = message as Record<string, unknown>;
+        requests.push(request);
+        if (request.kind !== "request") return;
+        queueMicrotask(() => listeners.forEach((listener) => listener({
+          protocol: REVIEW_RUNTIME_PROTOCOL,
+          version: REVIEW_RUNTIME_VERSION,
+          kind: "response",
+          runtimeId: "chrome_connection_1234",
+          sessionId,
+          generation: 1,
+          revision: 0,
+          requestId: request.requestId,
+          ok: true,
+          payload: request.method === "bootstrap" ? {
+            sessionId,
+            generation: 1,
+            revision: 0,
+            state,
+            scope: {
+              documentTitle: "Paper.pdf",
+              launchSurface: "chrome",
+              sourceRootPath: "/Users/reader/secret",
+              codexContext: { taskId: "task-secret", bindProof: "proof-secret" },
+            },
+            saveStatus: {
+              destination: { phase: "none", generation: 0 },
+              sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 },
+            },
+            resources: {
+              document: `blob:${extensionOrigin}/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+              pdfiumWasm: `${extensionOrigin}/assets/pdfium.wasm`,
+              worker: `${extensionOrigin}/assets/pdfium-worker.js`,
+            },
+            canonicalLinkBase: "placekeeper:///Papers/Paper.pdf",
+            location: { kind: "page", page: 3 },
+          } : {},
+        })));
+      },
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    }, { host: "chrome", extensionOrigin });
+
+    const bootstrap = await runtime.bootstrap();
+    expect(runtime.host).toBe("chrome");
+    expect(bootstrap.canonicalLinkBase).toBe("placekeeper:///Papers/Paper.pdf");
+    expect(bootstrap.locationHistory?.read()).toEqual({ kind: "page", page: 3 });
+    expect(bootstrap.resourcePolicy).toEqual({
+      host: "chrome",
+      extensionOrigin,
+      resources: {
+        document: `blob:${extensionOrigin}/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+        pdfiumWasm: `${extensionOrigin}/assets/pdfium.wasm`,
+        worker: `${extensionOrigin}/assets/pdfium-worker.js`,
+      },
+    });
+    expect(JSON.stringify(bootstrap)).not.toMatch(/task-secret|proof-secret|must-not-cross|\/Users\/reader/iu);
+    await expect(runtime.reverseSyncTex({})).rejects.toThrow(/unavailable.*Chrome/iu);
+    expect(requests.some((request) => request.method === "reverseSyncTex")).toBe(false);
+    runtime.dispose();
+  });
+
   it("settles an older VS Code command response after a concurrent rehydrate advances the panel", async () => {
     const listeners = new Set<(message: unknown) => void>();
     const requests: Record<string, unknown>[] = [];

@@ -3,7 +3,7 @@ import WebSocket from "ws";
 import {
   REVIEW_RUNTIME_PROTOCOL,
   REVIEW_RUNTIME_VERSION,
-  isReviewRuntimeMethod,
+  isReviewRuntimeMethodForHost,
   type ReviewRuntimeBrokerMethod,
   type ReviewRuntimeInvokeMethod,
   type ReviewRuntimeMethod,
@@ -131,7 +131,7 @@ export function parseWebviewRequest(
     value.version !== REVIEW_RUNTIME_VERSION || value.kind !== "request" ||
     value.panelId !== expected.panelId || typeof value.requestId !== "string" ||
     !SAFE_ID.test(value.requestId) || replayedRequestIds.has(value.requestId) ||
-    !isReviewRuntimeMethod(value.method) || !("payload" in value) ||
+    !isReviewRuntimeMethodForHost("vscode", value.method) || !("payload" in value) ||
     !validPayload(value.method, value.payload)) return undefined;
   if (value.method !== "bootstrap" && (
     value.sessionId !== expected.sessionId || value.generation !== expected.generation || value.revision !== expected.revision

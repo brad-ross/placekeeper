@@ -8,6 +8,7 @@ import type {
   ProductionSessionApi,
 } from "../app/ProductionReviewApp.js";
 import type { ViewerAssetUrls, ViewerResourcePolicy } from "../pdf/embedpdf-viewer.js";
+import type { ReviewLocationHistoryPort } from "../review/review-location-history.js";
 
 export interface HostRuntimeIdentity {
   readonly sessionId: string;
@@ -22,6 +23,8 @@ export interface HostRuntimeBootstrap extends HostRuntimeIdentity {
   readonly saveStatus: ProductionSaveStatus;
   readonly viewerAssets: ViewerAssetUrls;
   readonly resourcePolicy: ViewerResourcePolicy;
+  readonly locationHistory?: ReviewLocationHistoryPort;
+  readonly canonicalLinkBase?: string;
 }
 
 export interface HostRuntimeInvalidation extends HostRuntimeIdentity {
@@ -35,7 +38,7 @@ export type HostRuntimeCommand =
   | ({ readonly command: "forward-synctex" } & ForwardSyncTexRequest);
 
 export interface HostRuntime extends ProductionSessionApi {
-  readonly host: "browser" | "vscode";
+  readonly host: "browser" | "vscode" | "chrome";
   bootstrap(signal?: AbortSignal): Promise<HostRuntimeBootstrap>;
   subscribeInvalidations(listener: (event: HostRuntimeInvalidation) => void): () => void;
   subscribeHostCommands?(listener: (command: HostRuntimeCommand) => void): () => void;

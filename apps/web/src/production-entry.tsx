@@ -430,6 +430,8 @@ function RuntimeProductionReviewApp(props: {
     api={props.runtime}
     viewerAssets={loaded.viewerAssets}
     resourcePolicy={loaded.resourcePolicy}
+    {...(loaded.locationHistory === undefined ? {} : { locationHistory: loaded.locationHistory })}
+    {...(loaded.canonicalLinkBase === undefined ? {} : { copyLinkBase: loaded.canonicalLinkBase })}
     generationRefreshStatus={refreshStatus}
     hostReattachRequestToken={hostReattachRequestToken}
     hostReverseSyncTexRequestToken={hostReverseSyncTexRequestToken}
