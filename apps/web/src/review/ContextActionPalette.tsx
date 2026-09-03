@@ -3,7 +3,13 @@ import type { CSSProperties } from 'react';
 import { ReviewIcon } from './ReviewIcon.js';
 import { reviewActions } from './review-actions.js';
 
-type ContextActionKind = 'replace' | 'delete' | 'highlight';
+type ContextActionKind = 'copy' | 'replace' | 'delete' | 'highlight';
+
+const copyAction = {
+  kind: 'copy',
+  label: 'Copy',
+  shortcut: 'Meta+C Control+C',
+} as const;
 
 interface ContextActionButtonProps {
   readonly kind: ContextActionKind;
@@ -12,7 +18,9 @@ interface ContextActionButtonProps {
 }
 
 function ContextActionButton({ kind, iconOnly = false, onAction }: ContextActionButtonProps) {
-  const action = reviewActions.find((candidate) => candidate.kind === kind)!;
+  const action = kind === 'copy'
+    ? copyAction
+    : reviewActions.find((candidate) => candidate.kind === kind)!;
   return (
     <button
       type="button"
@@ -42,6 +50,7 @@ export interface ContextPlacement {
 export interface ContextActionPaletteProps {
   readonly placement: ContextPlacement;
   readonly hidden?: boolean;
+  onCopy?(): void;
   onReplace?(): void;
   onDelete?(): void;
   onHighlight?(): void;
@@ -63,6 +72,7 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
       inert={props.hidden}
       style={style}
     >
+      {props.onCopy ? <ContextActionButton kind="copy" iconOnly onAction={props.onCopy} /> : null}
       <ContextActionButton kind="replace" iconOnly onAction={props.onReplace} />
       <ContextActionButton kind="delete" iconOnly onAction={props.onDelete} />
       <ContextActionButton kind="highlight" iconOnly onAction={props.onHighlight} />

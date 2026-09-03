@@ -165,6 +165,7 @@ export interface ReviewShellProps {
   locationRestoreStatus?: LocationRestoreStatus;
   toolError?: string | null;
   onSelectionPageLimitExceeded?(): void;
+  onCopySelection?(): void;
   onExportReviewedCopy?(confirmPossiblyStale?: true): Promise<unknown>;
   listOpen?: boolean;
   selectionUpdate: SelectionUpdate;
@@ -1866,6 +1867,7 @@ export function ReviewShell(props: ReviewShellProps) {
             <ContextActionPalette
               placement={props.selectionPlacement}
               hidden={surface.nestedLayer !== 'none'}
+              {...(props.onCopySelection === undefined ? {} : { onCopy: props.onCopySelection })}
               onReplace={startReplacement}
               onDelete={deleteSelection}
               onHighlight={startHighlight}

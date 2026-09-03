@@ -580,6 +580,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [mainCopySelection, setMainCopySelection] = useState<CopySelectionUpdate | null>(null);
   const [referenceCopySelection, setReferenceCopySelection] = useState<CopySelectionUpdate | null>(null);
   const [pdfCopyOwner, setPdfCopyOwner] = useState<PdfCopyOwner>(null);
+  const paletteCopyOwnerRef = useRef<PdfCopyOwner>(null);
   const [pdfCopyOwnerIndicatorVisible, setPdfCopyOwnerIndicatorVisible] = useState(false);
   const [pdfCopyAnnouncement, setPdfCopyAnnouncement] = useState('');
   const [pdfCopyError, setPdfCopyError] = useState<string | null>(null);
@@ -1628,6 +1629,24 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     main: mainCopySelection,
     reference: referenceCopySelection,
   }), [mainCopySelection, referenceCopySelection]);
+  const copyMainSelectionFromPalette = useCallback(() => {
+    paletteCopyOwnerRef.current = 'main';
+    let copied = false;
+    try {
+      // Embedded browsers may deny the async Clipboard API while still allowing
+      // the user-initiated copy event path used by the platform shortcut.
+      copied = document.execCommand('copy');
+    } catch {
+      copied = false;
+    } finally {
+      paletteCopyOwnerRef.current = null;
+    }
+    setPdfCopyOwner('main');
+    if (!copied) {
+      setPdfCopyAnnouncement('');
+      setPdfCopyError('Placekeeper could not copy the selected text. Try Command-C instead.');
+    }
+  }, []);
   useEffect(() => {
     if (mainCopySelection !== null && mainCopySelection.kind !== 'cleared'
       && referenceCopySelection !== null && referenceCopySelection.kind !== 'cleared') {
@@ -1637,6 +1656,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   useEffect(() => {
     const handleCopy = (event: ClipboardEvent) => {
       const nativeSelection = window.getSelection();
+      const activeOwner = paletteCopyOwnerRef.current ?? pdfCopyOwner;
       const command = resolvePdfCopyCommand({
         nativeCopyHasPrecedence: nativeCopyHasPrecedence({
           editableTarget: isEditableTarget(event.target),
@@ -1644,7 +1664,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           domSelectionText: nativeSelection?.toString() ?? '',
           domSelectionOwnedByPdf: nativeSelectionBelongsToPdfBridge(nativeSelection),
         }),
-        owner: pdfCopyOwner,
+        owner: activeOwner,
         snapshots: pdfCopySnapshots,
       });
       applyPdfCopyCommand(command, event, {
@@ -1660,7 +1680,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       if (command.kind === 'copy') {
         setPdfCopyError(null);
         setPdfCopyAnnouncement(
-          `Copied selected text from ${pdfCopyOwner === 'main' ? 'Main PDF' : 'Reference PDF'}.`,
+          `Copied selected text from ${activeOwner === 'main' ? 'Main PDF' : 'Reference PDF'}.`,
         );
       }
     };
@@ -1713,6 +1733,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         locationRestoreStatus={locationRestoreStatus}
         toolError={pdfCopyError ?? commandError}
         onSelectionPageLimitExceeded={() => setCommandError(PDF_SELECTION_PAGE_LIMIT_MESSAGE)}
+        onCopySelection={copyMainSelectionFromPalette}
         pdfCopyOwner={pdfCopyOwner}
         pdfCopySnapshots={pdfCopySnapshots}
         pdfCopyOwnerIndicatorVisible={pdfCopyOwnerIndicatorVisible}

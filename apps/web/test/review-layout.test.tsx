@@ -966,6 +966,7 @@ describe('review shell layout and accessibility contract', () => {
           },
         }}
         selectionPlacement={{ left: 20, top: 30, suggestTop: true }}
+        onCopySelection={() => undefined}
         onCommand={async () => state}
       >
         <div>Document canvas</div>
@@ -1013,13 +1014,14 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-label="From this PDF"');
     expect(html).toContain('data-existing-annotations-state="loading"');
     expect(html).toContain('data-annotation-status="loading"');
-    for (const tool of ['Replace', 'Delete', 'Highlight']) {
+    for (const tool of ['Copy', 'Replace', 'Delete', 'Highlight']) {
       expect(html).toContain(`aria-label="${tool}"`);
       expect(html).toContain(`title="${tool}"`);
     }
-    expect(html.match(/review-action-button--icon/g)).toHaveLength(3);
-    expect(html).not.toMatch(/<\/svg>(?:Replace|Delete|Highlight)<\/button>/u);
-    expect(html.match(/class="[^"]*review-action-button[^"]*"/g)).toHaveLength(3);
+    expect(html).toContain('aria-keyshortcuts="Meta+C Control+C"');
+    expect(html.match(/review-action-button--icon/g)).toHaveLength(4);
+    expect(html).not.toMatch(/<\/svg>(?:Copy|Replace|Delete|Highlight)<\/button>/u);
+    expect(html.match(/class="[^"]*review-action-button[^"]*"/g)).toHaveLength(4);
     expect(html).not.toMatch(/>(?:‹|›|−|\+|↶|↷)<\/button>/u);
     expect(html).not.toContain('>Insert</button>');
     expect(html).not.toContain('>Page Note</button>');

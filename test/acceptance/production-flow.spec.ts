@@ -4402,6 +4402,51 @@ for (const selection of [
   });
 }
 
+test('copies a real Main PDF selection from the selection action popup', async ({ page }) => {
+  const launched = await openFreshProductionFixture(
+    page,
+    crossPagePdf,
+    'Selection action Copy launch failed',
+  );
+  const pasteTarget = await installPlainTextPasteTarget(page);
+  const main = page.locator('[data-pdf-copy-surface="main"]');
+  const expectedText = [
+    'PAGE 01: cross-page semantic selection contract.',
+    'PAGE 02: cross-page semantic selection contract.',
+  ].join('\n');
+
+  await dragAcrossProductionPdfPages(page, main, 0, 1);
+  const actions = page.getByRole('toolbar', { name: 'Selection review actions' });
+  await expect(actions).toBeVisible();
+  await actions.getByRole('button', { name: 'Copy', exact: true }).click();
+
+  await expect.poll(() => page.locator('p.sr-only[role="status"]').allTextContents())
+    .toContain('Copied selected text from Main PDF.');
+  expect(await pasteNativeClipboard(page, pasteTarget)).toBe(expectedText);
+
+  await pasteTarget.fill('');
+  await actions.getByRole('button', { name: 'Copy', exact: true }).click();
+  await expect(actions.getByRole('button', { name: 'Copy', exact: true })).toBeFocused();
+  await page.keyboard.press(platformCopyShortcut);
+  expect(await pasteNativeClipboard(page, pasteTarget)).toBe(expectedText);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: () => false,
+    });
+  });
+  await actions.getByRole('button', { name: 'Copy', exact: true }).click();
+  await expect.poll(() => page.locator('p.sr-only[role="status"]').allTextContents())
+    .not.toContain('Copied selected text from Main PDF.');
+  const copyFailure = page.locator('.review-toast--error');
+  await expect(copyFailure).toBeVisible();
+  await expect(copyFailure).toContainText('could not copy the selected text');
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
+  expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
+  await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+    .not.toHaveCount(0);
+});
+
 test('keeps prior clipboard text while a real cross-page selection is still pending', async ({ page }) => {
   const launched = await openFreshProductionFixture(
     page,
@@ -4494,7 +4539,7 @@ test('rejects every review action from a real 13-page selection without changing
   const actions = page.getByRole('toolbar', { name: 'Selection review actions' });
   await expect(actions).toBeVisible();
 
-  for (const action of ['Replace', 'Delete', 'Highlight'] as const) {
+  for (const action of ['Copy', 'Replace', 'Delete', 'Highlight'] as const) {
     await actions.getByRole('button', { name: action, exact: true }).click();
     const limitError = page.locator('.review-toast--error');
     await expect(limitError).toBeVisible();
