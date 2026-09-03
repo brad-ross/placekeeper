@@ -12,7 +12,7 @@ import type {
 
 import {
   createCaretAnchorAtPoint,
-  createSelectionAnchor,
+  createSelectionAnchorSpan,
   type AnchorGlyph,
   type AnchorPage,
   type SelectionAnchorResult,
@@ -141,43 +141,54 @@ export async function readViewerSelectionEvidence(
 export async function captureViewerSelection(
   input: CaptureViewerSelectionInput,
 ): Promise<SelectionAnchorResult> {
-  const formatted = input.selection.getFormattedSelection(input.documentId);
-  const state = input.selection.getState(input.documentId);
-  const snapshotSignature = viewerSelectionGeneration(formatted, state);
-  const pageIndex = formatted[0]?.pageIndex ?? 0;
-  const selectedTextReading = input.selection.getSelectedText(input.documentId).toPromise();
-  const [page, selectedText] = await Promise.all([
-    input.pages.read(pageIndex),
-    selectedTextReading,
-  ]);
-  const currentFormatted = input.selection.getFormattedSelection(input.documentId);
-  const currentState = input.selection.getState(input.documentId);
-  if (viewerSelectionGeneration(currentFormatted, currentState) !== snapshotSignature) {
+  try {
+    const evidence = await readViewerSelectionEvidence(input.documentId, input.selection);
+    if (
+      !evidence.stable || evidence.selection === null || evidence.pages.length === 0 ||
+      evidence.pages.some(({ text }) => text === null)
+    ) {
+      return {
+        ok: false,
+        userMessage: SELECTION_UNAVAILABLE_MESSAGE,
+        diagnostic: 'selection-text-geometry-mismatch',
+      };
+    }
+    const pages = await Promise.all(evidence.pages.map(({ pageIndex }) => input.pages.read(pageIndex)));
+    const currentFormatted = input.selection.getFormattedSelection(input.documentId);
+    const currentState = input.selection.getState(input.documentId);
+    if (viewerSelectionGeneration(currentFormatted, currentState) !== evidence.selectionGeneration) {
+      return {
+        ok: false,
+        userMessage: SELECTION_UNAVAILABLE_MESSAGE,
+        diagnostic: 'selection-text-geometry-mismatch',
+      };
+    }
+    return createSelectionAnchorSpan({
+      pages: evidence.pages.map((pageEvidence, index) => ({
+        page: pages[index]!,
+        quote: pageEvidence.text!,
+        quoteStart: pageEvidence.sliceStart,
+        glyphCount: pageEvidence.sliceCount,
+        formattedSelections: evidence.formatted
+          .filter(({ pageIndex }) => pageIndex === pageEvidence.pageIndex)
+          .map((formatted) => ({
+            pageIndex: formatted.pageIndex,
+            segmentRects: formatted.segmentRects,
+            // Public selection geometry is already unscaled natural page space.
+            coordinateRotation: Rotation.Degree0,
+          })),
+        ...(input.contextCharacters === undefined
+          ? {}
+          : { contextCharacters: input.contextCharacters }),
+      })),
+    });
+  } catch {
     return {
       ok: false,
       userMessage: SELECTION_UNAVAILABLE_MESSAGE,
       diagnostic: 'selection-text-geometry-mismatch',
     };
   }
-  const glyphCount = Object.values(state.slices).reduce((total, slice) => total + slice.count, 0);
-  const selectedSlice = state.slices[pageIndex];
-
-  return createSelectionAnchor({
-    page,
-    quote: selectedText.join('\n'),
-    ...(selectedSlice === undefined ? {} : { quoteStart: selectedSlice.start }),
-    glyphCount,
-    formattedSelections: formatted.map(({ pageIndex: selectionPage, segmentRects }) => ({
-      pageIndex: selectionPage,
-      segmentRects,
-      // The public selection capability returns unscaled page-space rectangles.
-      // Page rotation is presentation state and must not be applied a second time here.
-      coordinateRotation: Rotation.Degree0,
-    })),
-    ...(input.contextCharacters === undefined
-      ? {}
-      : { contextCharacters: input.contextCharacters }),
-  });
 }
 
 export function createEngineAnchorPageReader(

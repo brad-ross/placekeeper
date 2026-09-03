@@ -12,8 +12,16 @@ import {
   InvalidReviewCommandError,
   MAX_REVIEW_SELECTION_SEGMENTS,
 } from "./review-reducer.js";
+export {
+  assertPortableAnnotationGroupWritable,
+  PORTABLE_ANNOTATION_MAX_BYTES,
+  serializePortableAnnotationGroup,
+} from './grouped-annotation-envelope.js';
+import {
+  PORTABLE_ANNOTATION_MAX_BYTES,
+  PORTABLE_ANNOTATION_TOO_LARGE_MESSAGE,
+} from './grouped-annotation-envelope.js';
 
-export const PORTABLE_ANNOTATION_MAX_BYTES = 32 * 1024;
 export const PORTABLE_ANNOTATION_AUTHOR = "Placekeeper";
 const PORTABLE_ANNOTATION_OWNER = "placekeeper";
 const MAX_DEPTH = 12;
@@ -297,7 +305,7 @@ export function assertPortableAnnotationWritable(annotation: ReviewAnnotation): 
       PORTABLE_ANNOTATION_MAX_BYTES
   ) {
     throw new InvalidReviewCommandError(
-      "This annotation contains too much text or geometry to preserve as editable metadata. Shorten it and try again.",
+      PORTABLE_ANNOTATION_TOO_LARGE_MESSAGE,
     );
   }
 }

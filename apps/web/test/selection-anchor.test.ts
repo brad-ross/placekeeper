@@ -50,6 +50,15 @@ describe('selection anchors', () => {
           suffix: ' after',
           rect: { x: 24, y: 36, width: 120, height: 18 },
           segmentRects: [{ x: 24, y: 36, width: 120, height: 18 }],
+          pages: [{
+            pageIndex: 2,
+            quote: '<unique equilibrium>',
+            prefix: 'before ',
+            suffix: ' after',
+            rect: { x: 24, y: 36, width: 120, height: 18 },
+            segmentRects: [{ x: 24, y: 36, width: 120, height: 18 }],
+          }],
+          pageBoundaries: [],
           reliable: true,
         },
       });
@@ -623,6 +632,97 @@ describe('selection anchors', () => {
     });
     expect(evidence.formatted.map(({ pageIndex }) => pageIndex)).toEqual([0, 1, 2]);
     expect(evidence.selectionGeneration.length).toBeGreaterThan(0);
+  });
+
+  it('captures forward and reverse three-page selections as the same canonical anchor', async () => {
+    const texts = ['page one end', 'page two full', 'page three start'];
+    const makePage = (pageIndex: number): AnchorPage => ({
+      pageIndex,
+      size: { width: 540, height: 720 },
+      rotation: Rotation.Degree0,
+      extractedText: `before ${texts[pageIndex]} after`,
+      textRects: [{ content: texts[pageIndex]!, rect: naturalRect }],
+    });
+    const state = {
+      geometry: {},
+      rects: { 0: [naturalRect], 1: [naturalRect], 2: [naturalRect] },
+      selection: { start: { page: 0, index: 7 }, end: { page: 2, index: 22 } },
+      slices: {
+        0: { start: 7, count: texts[0]!.length },
+        1: { start: 7, count: texts[1]!.length },
+        2: { start: 7, count: texts[2]!.length },
+      },
+      active: true,
+      selecting: false,
+    };
+    const capture = (order: readonly number[]) => captureViewerSelection({
+      documentId: 'cross-page-doc',
+      selection: {
+        getFormattedSelection: () => order.map((pageIndex) => ({ pageIndex, rect: naturalRect, segmentRects: [naturalRect] })),
+        getSelectedText: () => ({ toPromise: async () => texts }),
+        getState: () => state,
+      },
+      pages: { read: async (pageIndex) => makePage(pageIndex) },
+      contextCharacters: 7,
+    });
+
+    const forward = await capture([0, 1, 2]);
+    const reverse = await capture([2, 1, 0]);
+    expect(forward).toEqual(reverse);
+    expect(forward).toMatchObject({
+      ok: true,
+      anchor: {
+        pageIndex: 0,
+        quote: texts.join('\n'),
+        pages: [
+          { pageIndex: 0, quote: texts[0] },
+          { pageIndex: 1, quote: texts[1] },
+          { pageIndex: 2, quote: texts[2] },
+        ],
+        pageBoundaries: [
+          { afterPageIndex: 0, separator: '\n' },
+          { afterPageIndex: 1, separator: '\n' },
+        ],
+      },
+    });
+  });
+
+  it('fails closed when an intermediate page cannot be read', async () => {
+    const state = {
+      geometry: {},
+      rects: { 0: [naturalRect], 1: [naturalRect] },
+      selection: { start: { page: 0, index: 0 }, end: { page: 1, index: 3 } },
+      slices: { 0: { start: 0, count: 4 }, 1: { start: 0, count: 4 } },
+      active: true,
+      selecting: false,
+    };
+    await expect(captureViewerSelection({
+      documentId: 'missing-intermediate-page',
+      selection: {
+        getFormattedSelection: () => [0, 1].map((pageIndex) => ({
+          pageIndex,
+          rect: naturalRect,
+          segmentRects: [naturalRect],
+        })),
+        getSelectedText: () => ({ toPromise: async () => ['page', 'page'] }),
+        getState: () => state,
+      },
+      pages: {
+        read: async (pageIndex) => {
+          if (pageIndex === 1) throw new Error('page unavailable');
+          return {
+            pageIndex,
+            size: { width: 540, height: 720 },
+            rotation: Rotation.Degree0,
+            extractedText: 'page',
+            textRects: [{ content: 'page', rect: naturalRect }],
+          };
+        },
+      },
+    })).resolves.toMatchObject({
+      ok: false,
+      diagnostic: 'selection-text-geometry-mismatch',
+    });
   });
 
   it('rejects a selection that changes while its page and text are being read', async () => {

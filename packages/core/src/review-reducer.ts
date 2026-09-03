@@ -1,5 +1,9 @@
 import {
+  anchorEvidenceFromReviewItem,
   canonicalizeReviewItem,
+  normalizeReviewSelectionAnchor,
+  PDF_SELECTION_PAGE_LIMIT,
+  reviewSelectionPayload,
   type JsonValue,
   type PendingReviewDraftV1,
   type ReviewAnchorEvidenceV1,
@@ -8,6 +12,10 @@ import {
   type ReviewItem,
   type ReviewState,
 } from "./review-model.js";
+import {
+  assertPortableAnnotationGroupWritable,
+  PortableAnnotationGroupError,
+} from './grouped-annotation-envelope.js';
 
 export const MAX_REVIEW_SELECTION_SEGMENTS = 256;
 
@@ -74,24 +82,14 @@ export function assertReviewItem(
 
   const keys = Object.keys(item.payload);
   const allowedByKind: Record<ReviewItem['kind'], readonly string[]> = {
-    replace: ['quote', 'prefix', 'suffix', 'rect', 'segmentRects', 'reliable', 'proposedText'],
-    delete: ['quote', 'prefix', 'suffix', 'rect', 'segmentRects', 'reliable'],
+    replace: ['quote', 'prefix', 'suffix', 'rect', 'segmentRects', 'pages', 'pageBoundaries', 'reliable', 'proposedText'],
+    delete: ['quote', 'prefix', 'suffix', 'rect', 'segmentRects', 'pages', 'pageBoundaries', 'reliable'],
     insert: ['position', 'leftContext', 'rightContext', 'reliable', 'proposedText'],
-    highlight: ['quote', 'prefix', 'suffix', 'rect', 'segmentRects', 'reliable', 'comment'],
+    highlight: ['quote', 'prefix', 'suffix', 'rect', 'segmentRects', 'pages', 'pageBoundaries', 'reliable', 'comment'],
     pageNote: ['position', 'comment', 'nearbyText'],
   };
   if (keys.some((key) => !allowedByKind[item.kind].includes(key))) {
     throw new InvalidReviewCommandError("Review item payload has unsupported fields");
-  }
-  if (
-    Array.isArray(item.payload.segmentRects) &&
-    item.payload.segmentRects.length >
-      (options.maxSelectionSegments ?? MAX_REVIEW_SELECTION_SEGMENTS)
-  ) {
-    const maximum = options.maxSelectionSegments ?? MAX_REVIEW_SELECTION_SEGMENTS;
-    throw new InvalidReviewCommandError(
-      `Selections can contain at most ${maximum} text segments. Shorten the selection and try again.`,
-    );
   }
   const text = (field: string, allowEmpty = true) =>
     typeof item.payload[field] === 'string' && (allowEmpty || item.payload[field] !== '');
@@ -134,6 +132,20 @@ export function assertReviewItem(
     assertReviewAnchorEvidence(reconciliation.anchor);
     assertDisposition(reconciliation.disposition);
   }
+  if (item.kind === 'replace' || item.kind === 'delete' || item.kind === 'highlight') {
+    try {
+      const anchor = anchorEvidenceFromReviewItem(item);
+      if (anchor.kind !== 'selection') throw new Error('Selection evidence is missing');
+      assertSelectionAnchorEvidence(anchor, options.maxSelectionSegments);
+      assertPortableAnnotationGroupWritable(item);
+    } catch (error) {
+      if (error instanceof InvalidReviewCommandError) throw error;
+      if (error instanceof PortableAnnotationGroupError) {
+        throw new InvalidReviewCommandError(error.message);
+      }
+      throw new InvalidReviewCommandError('Review selection evidence is malformed');
+    }
+  }
 }
 
 function assertDisposition(value: { readonly kind: string; readonly generation?: number; readonly reason?: string }): void {
@@ -154,6 +166,71 @@ function assertRect(value: { readonly x: number; readonly y: number; readonly wi
   }
 }
 
+function sameRect(
+  left: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+  right: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+): boolean {
+  return left.x === right.x && left.y === right.y
+    && left.width === right.width && left.height === right.height;
+}
+
+function assertSelectionAnchorEvidence(
+  anchor: Extract<ReviewAnchorEvidenceV1, { readonly kind: 'selection' }>,
+  maxSelectionSegments = MAX_REVIEW_SELECTION_SEGMENTS,
+): void {
+  const canonical = normalizeReviewSelectionAnchor(anchor);
+  if (canonical.pages.length === 0) {
+    throw new InvalidReviewCommandError('Selection reconciliation evidence is incomplete');
+  }
+  if (canonical.pages.length > PDF_SELECTION_PAGE_LIMIT) {
+    throw new InvalidReviewCommandError(
+      `Selections can span at most ${PDF_SELECTION_PAGE_LIMIT} pages. Shorten the selection and try again.`,
+    );
+  }
+  if (canonical.pages[0]!.pageIndex !== canonical.pageIndex) {
+    throw new InvalidReviewCommandError('Selection lead page does not match its ordered page evidence');
+  }
+  canonical.pages.forEach((page, index) => {
+    if (
+      !Number.isSafeInteger(page.pageIndex) || page.pageIndex < 0 ||
+      (index > 0 && page.pageIndex !== canonical.pages[index - 1]!.pageIndex + 1) ||
+      typeof page.quote !== 'string' || page.quote.length === 0 ||
+      typeof page.prefix !== 'string' || typeof page.suffix !== 'string' ||
+      !Array.isArray(page.segmentRects) || page.segmentRects.length === 0
+    ) {
+      throw new InvalidReviewCommandError('Selection pages must be non-empty and consecutive in document order');
+    }
+    assertRect(page.rect);
+    page.segmentRects.forEach(assertRect);
+  });
+  if (canonical.pageBoundaries.length !== canonical.pages.length - 1) {
+    throw new InvalidReviewCommandError('Selection page boundaries do not match its page span');
+  }
+  canonical.pageBoundaries.forEach((boundary, index) => {
+    if (
+      boundary.afterPageIndex !== canonical.pages[index]!.pageIndex ||
+      typeof boundary.separator !== 'string' || boundary.separator.length === 0
+    ) throw new InvalidReviewCommandError('Selection page boundaries are malformed');
+  });
+  const assembled = canonical.pages.map((page, index) =>
+    page.quote + (canonical.pageBoundaries[index]?.separator ?? '')).join('');
+  const first = canonical.pages[0]!;
+  const last = canonical.pages.at(-1)!;
+  if (
+    assembled !== canonical.quote ||
+    canonical.prefix !== first.prefix || canonical.suffix !== last.suffix ||
+    !sameRect(canonical.rect, first.rect) ||
+    canonical.segmentRects.length !== first.segmentRects.length ||
+    canonical.segmentRects.some((rect, index) => !sameRect(rect, first.segmentRects[index]!))
+  ) throw new InvalidReviewCommandError('Selection text or lead-page evidence does not match its complete span');
+  const segmentCount = canonical.pages.reduce((count, page) => count + page.segmentRects.length, 0);
+  if (segmentCount > maxSelectionSegments) {
+    throw new InvalidReviewCommandError(
+      `Selections can contain at most ${maxSelectionSegments} text segments. Shorten the selection and try again.`,
+    );
+  }
+}
+
 function assertReviewAnchorEvidence(anchor: ReviewAnchorEvidenceV1): void {
   if (!Number.isSafeInteger(anchor.pageIndex) || anchor.pageIndex < 0) {
     throw new InvalidReviewCommandError("Review anchor pageIndex must be non-negative");
@@ -167,6 +244,7 @@ function assertReviewAnchorEvidence(anchor: ReviewAnchorEvidenceV1): void {
         !Array.isArray(anchor.segmentRects) || anchor.segmentRects.length === 0
       ) throw new InvalidReviewCommandError("Selection reconciliation evidence is incomplete");
       anchor.segmentRects.forEach(assertRect);
+      assertSelectionAnchorEvidence(anchor);
       return;
     case "caret":
       if (typeof anchor.leftContext !== "string" || typeof anchor.rightContext !== "string") {
@@ -377,14 +455,7 @@ export function reduceReview(
         throw new InvalidReviewCommandError("Pending review draft must be reattached before Apply");
       }
       const anchorPayload: Readonly<Record<string, JsonValue>> = draft.anchor.kind === "selection"
-        ? {
-            quote: draft.anchor.quote,
-            prefix: draft.anchor.prefix,
-            suffix: draft.anchor.suffix,
-            rect: { ...draft.anchor.rect },
-            segmentRects: draft.anchor.segmentRects.map((rect) => ({ ...rect })),
-            reliable: true,
-          }
+        ? reviewSelectionPayload(draft.anchor, { canonical: true })
         : draft.anchor.kind === "caret"
           ? {
               position: { ...draft.anchor.rect },
@@ -432,22 +503,24 @@ export function reduceReview(
         if (existing.kind !== draft.kind || existing.kind === "delete") {
           throw new InvalidReviewCommandError("Pending review draft kind does not match its Review Item");
         }
+        const edited: ReviewItem = {
+          ...existing,
+          pageIndex: draft.anchor.pageIndex,
+          updatedAt: command.updatedAt,
+          payload: { ...existing.payload, ...anchorPayload, [textField]: draft.text },
+          ...(existing.reconciliation === undefined ? {} : {
+            reconciliation: {
+              ...existing.reconciliation,
+              ownerViewId: draft.ownerViewId,
+              revision: existing.reconciliation.revision + 1,
+              anchor: draft.anchor,
+              disposition: draft.disposition,
+            },
+          }),
+        };
+        assertReviewItem(edited);
         items = state.items.map((item, index) => index === itemIndex
-          ? {
-              ...item,
-              pageIndex: draft.anchor.pageIndex,
-              updatedAt: command.updatedAt,
-              payload: { ...item.payload, ...anchorPayload, [textField]: draft.text },
-              ...(item.reconciliation === undefined ? {} : {
-                reconciliation: {
-                  ...item.reconciliation,
-                  ownerViewId: draft.ownerViewId,
-                  revision: item.reconciliation.revision + 1,
-                  anchor: draft.anchor,
-                  disposition: draft.disposition,
-                },
-              }),
-            }
+          ? edited
           : item);
       }
       pendingDrafts = state.pendingDrafts.filter(({ id }) => id !== draft.id);

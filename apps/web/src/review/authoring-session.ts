@@ -4,7 +4,12 @@ import type {
   ReviewItem,
   ReviewState,
 } from '../../../../packages/core/src/review-model.js';
-import { anchorEvidenceFromReviewItem } from '../../../../packages/core/src/review-model.js';
+import {
+  anchorEvidenceFromReviewItem,
+  canonicalReviewSelectionEvidence,
+  normalizeReviewSelectionAnchor,
+  reviewSelectionPayload,
+} from '../../../../packages/core/src/review-model.js';
 import { projectReviewItem } from '../../../../packages/core/src/annotation-projection.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { ReviewRect } from '../../../../packages/core/src/review-commands.js';
@@ -135,13 +140,20 @@ function cloneRect(rect: ReviewRect): ReviewRect {
 }
 
 function cloneSelectionAnchor(anchor: SelectionAnchor): SelectionAnchor {
+  const canonical = normalizeReviewSelectionAnchor(anchor);
   return Object.freeze({
-    pageIndex: anchor.pageIndex,
-    quote: anchor.quote,
-    prefix: anchor.prefix,
-    suffix: anchor.suffix,
-    rect: cloneRect(anchor.rect),
-    segmentRects: Object.freeze(anchor.segmentRects.map(cloneRect)) as unknown as SelectionAnchor['segmentRects'],
+    pageIndex: canonical.pageIndex,
+    quote: canonical.quote,
+    prefix: canonical.prefix,
+    suffix: canonical.suffix,
+    rect: cloneRect(canonical.rect),
+    segmentRects: Object.freeze(canonical.segmentRects.map(cloneRect)) as unknown as SelectionAnchor['segmentRects'],
+    pages: Object.freeze(canonical.pages.map((page) => Object.freeze({
+      ...page,
+      rect: cloneRect(page.rect),
+      segmentRects: Object.freeze(page.segmentRects.map(cloneRect)),
+    }))),
+    pageBoundaries: Object.freeze(canonical.pageBoundaries.map((boundary) => Object.freeze({ ...boundary }))),
     reliable: true,
   });
 }
@@ -281,12 +293,7 @@ export function pendingDraftForAuthoring(input: {
   const anchor = source.kind === 'replace' || source.kind === 'highlight'
     ? {
         kind: 'selection' as const,
-        pageIndex: source.anchor.pageIndex,
-        quote: source.anchor.quote,
-        prefix: source.anchor.prefix,
-        suffix: source.anchor.suffix,
-        rect: source.anchor.rect,
-        segmentRects: source.anchor.segmentRects,
+        ...canonicalReviewSelectionEvidence(source.anchor),
       }
     : source.kind === 'insert'
       ? {
@@ -370,14 +377,7 @@ export function canStartAuthoringSession(current: AuthoringSession | null): curr
 function selectionPayload(
   source: Extract<AuthoringSource, { readonly kind: 'replace' | 'highlight' }>,
 ): Record<string, JsonValue> {
-  return {
-    quote: source.anchor.quote,
-    prefix: source.anchor.prefix,
-    suffix: source.anchor.suffix,
-    rect: { ...source.anchor.rect },
-    segmentRects: source.anchor.segmentRects.map((rect) => ({ ...rect })),
-    reliable: true,
-  };
+  return { ...reviewSelectionPayload(source.anchor, { canonical: true }) };
 }
 
 function editableField(item: ReviewItem): 'proposedText' | 'comment' | null {

@@ -9,8 +9,13 @@ import {
   inspectPortableAnnotation,
   inspectProjectedPortableAnnotation,
   PORTABLE_ANNOTATION_MAX_BYTES,
+  serializePortableAnnotationGroup,
 } from "../src/portable-annotation.js";
-import { anchorEvidenceFromReviewItem, type ReviewItem } from "../src/review-model.js";
+import {
+  anchorEvidenceFromReviewItem,
+  canonicalizeReviewItem,
+  type ReviewItem,
+} from "../src/review-model.js";
 import { MAX_REVIEW_SELECTION_SEGMENTS } from "../src/review-reducer.js";
 
 const item: ReviewItem = {
@@ -43,6 +48,72 @@ const visible = {
 };
 
 describe("portable annotation codec", () => {
+  it('serializes deterministic page-specific envelopes for one logical cross-page item', () => {
+    const crossPage: ReviewItem = {
+      ...item,
+      payload: {
+        ...item.payload,
+        quote: 'unique\ncontinuation',
+        pages: [
+          {
+            pageIndex: 0,
+            quote: 'unique',
+            prefix: 'a ',
+            suffix: '',
+            rect: { x: 72, y: 92, width: 90, height: 16 },
+            segmentRects: [{ x: 72, y: 92, width: 90, height: 16 }],
+          },
+          {
+            pageIndex: 1,
+            quote: 'continuation',
+            prefix: '',
+            suffix: ' ends',
+            rect: { x: 72, y: 42, width: 100, height: 16 },
+            segmentRects: [{ x: 72, y: 42, width: 100, height: 16 }],
+          },
+        ],
+        pageBoundaries: [{ afterPageIndex: 0, separator: '\n' }],
+      },
+    };
+
+    const group = serializePortableAnnotationGroup(crossPage);
+    expect(group).toHaveLength(2);
+    expect(group.map(({ pageIndex, projectionIndex, projectionCount }) => ({ pageIndex, projectionIndex, projectionCount })))
+      .toEqual([
+        { pageIndex: 0, projectionIndex: 0, projectionCount: 2 },
+        { pageIndex: 1, projectionIndex: 1, projectionCount: 2 },
+      ]);
+    expect(group.every(({ byteLength }) => byteLength <= PORTABLE_ANNOTATION_MAX_BYTES)).toBe(true);
+    expect(group[1]?.custom.placekeeper.projection).toMatchObject({
+      pageIndex: 1,
+      subtype: 'strikeOut',
+      contents: 'locally unique',
+      rect: { y: 42 },
+      segmentRects: [{ y: 42 }],
+    });
+    expect(group[0]?.custom.placekeeper.item).toMatchObject({
+      id: crossPage.id,
+      kind: 'replace',
+      pageIndex: 0,
+      payload: {
+        quote: 'unique\ncontinuation',
+        proposedText: 'locally unique',
+        pageBoundaries: [{ afterPageIndex: 0, separator: '\n' }],
+      },
+    });
+    expect(serializePortableAnnotationGroup(crossPage)).toEqual(group);
+
+    const canonicalized = canonicalizeReviewItem(crossPage, {
+      ownerViewId: 'main',
+      baseGeneration: 4,
+    });
+    const canonicalizedGroup = serializePortableAnnotationGroup(canonicalized);
+    expect(canonicalizedGroup.map(({ serialized }) => serialized))
+      .toEqual(group.map(({ serialized }) => serialized));
+    expect(canonicalizedGroup.map(({ byteLength }) => byteLength))
+      .toEqual(group.map(({ byteLength }) => byteLength));
+    expect(canonicalizedGroup[0]?.custom.placekeeper.item).not.toHaveProperty('reconciliation');
+  });
   it("round-trips the full semantic item through the crop-relative v2 envelope", () => {
     const annotation = projectReviewItem(item);
     const custom = createPortableAnnotationCustom(item, annotation);
