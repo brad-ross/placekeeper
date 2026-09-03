@@ -1,8 +1,8 @@
 import { runInNewContext } from "node:vm";
 
 export const EMBEDPDF_ENGINE_VERSION = "2.14.4";
-export const PACKAGED_PDFIUM_WORKER_PATH = "assets/pdfium-worker.js";
-export const PACKAGED_PDFIUM_WASM_PATH = "assets/pdfium.wasm";
+export const PACKAGED_PDFIUM_WORKER_PATH = "shared/pdfium-worker.js";
+export const PACKAGED_PDFIUM_WASM_PATH = "shared/pdfium.wasm";
 
 const workerBlobStart = "URL.createObjectURL(new Blob([";
 const workerBlobEnd = '], { type: "application/javascript" }))';

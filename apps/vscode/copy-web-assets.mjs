@@ -5,12 +5,11 @@ import { resolve } from "node:path";
 const sourceRoot = resolve("../../dist/web");
 const destinationRoot = resolve("dist/web");
 const manifest = JSON.parse(await readFile(resolve(sourceRoot, "asset-manifest.json"), "utf8"));
-const assetNames = [manifest.app, manifest.stylesheet, manifest.pdfiumWasm];
+const assetNames = [manifest.app, manifest.stylesheet, manifest.pdfiumWasm, manifest.pdfiumWorker];
 if (
-  manifest.schemaVersion !== 2 ||
+  manifest.schemaVersion !== 3 ||
   assetNames.some((name) => typeof name !== "string" || !/^[A-Za-z0-9._-]+$/u.test(name)) ||
   new Set(assetNames).size !== assetNames.length ||
-  manifest.worker?.kind !== "inline-blob" || manifest.worker?.container !== manifest.app ||
   typeof manifest.integrity !== "object" || manifest.integrity === null ||
   Object.keys(manifest.integrity).sort().join("\n") !== [...assetNames].sort().join("\n")
 ) throw new Error("The shared production asset manifest is invalid");

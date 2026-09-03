@@ -28,8 +28,8 @@ describe("installed Chrome platform proof", () => {
     expect(source).not.toContain("placekeeperPlatformProofNextScenario");
     expect(source).not.toContain("placekeeperPlatformProofRecords");
     expect(source).toContain("createPdfiumEngine");
-    expect(source).toContain("assets/pdfium-worker.js");
-    expect(source).toContain("assets/pdfium.wasm");
+    expect(source).toContain("shared/pdfium-worker.js");
+    expect(source).toContain("shared/pdfium.wasm");
   });
 
   it("extracts the exact pinned EmbedPDF worker and instruments that worker context", async () => {

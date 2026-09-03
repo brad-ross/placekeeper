@@ -48,7 +48,7 @@ function packagedAsset(path: string): string {
 function startPdfiumWorkerProbe(loopbackUrl: string): Promise<WorkerProbeResult> {
   let worker: Worker;
   try {
-    worker = new Worker(packagedAsset("assets/pdfium-worker.js"), { type: "module" });
+    worker = new Worker(packagedAsset("shared/pdfium-worker.js"), { type: "module" });
   } catch {
     throw new PlatformProofFailure("worker-create-failed");
   }
@@ -58,7 +58,7 @@ function startPdfiumWorkerProbe(loopbackUrl: string): Promise<WorkerProbeResult>
   });
   let engine: ReturnType<typeof createPdfiumEngine>;
   try {
-    engine = createPdfiumEngine(packagedAsset("assets/pdfium.wasm"), {
+    engine = createPdfiumEngine(packagedAsset("shared/pdfium.wasm"), {
       encoderPoolSize: 0,
       fontFallback: null,
       worker,

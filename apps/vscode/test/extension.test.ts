@@ -229,23 +229,24 @@ describe("VS Code local host adapter", () => {
 
   it("accepts only the shared production asset manifest", () => {
     expect(parseSharedAssetManifest({
-      schemaVersion: 2,
+      schemaVersion: 3,
       app: "app.js",
       stylesheet: "app.css",
       pdfiumWasm: "pdfium.wasm",
-      worker: { kind: "inline-blob", container: "app.js" },
+      pdfiumWorker: "pdfium-worker.js",
       integrity: {
         "app.js": "a".repeat(64),
         "app.css": "b".repeat(64),
         "pdfium.wasm": "c".repeat(64),
+        "pdfium-worker.js": "d".repeat(64),
       },
-    })).toMatchObject({ schemaVersion: 2, app: "app.js" });
+    })).toMatchObject({ schemaVersion: 3, app: "app.js", pdfiumWorker: "pdfium-worker.js" });
     expect(() => parseSharedAssetManifest({
-      schemaVersion: 2,
+      schemaVersion: 3,
       app: "../../secret.js",
       stylesheet: "app.css",
       pdfiumWasm: "pdfium.wasm",
-      worker: { kind: "inline-blob", container: "../../secret.js" },
+      pdfiumWorker: "pdfium-worker.js",
       integrity: {},
     })).toThrow(/manifest/u);
   });

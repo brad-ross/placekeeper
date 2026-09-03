@@ -742,6 +742,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     pdfiumWasm: props.session.appLinkBase === undefined
       ? `/s/${props.session.sessionId}/assets/pdfium.wasm`
       : '/assets/pdfium.wasm',
+    workerUrl: props.session.appLinkBase === undefined
+      ? `/s/${props.session.sessionId}/assets/pdfium-worker.js`
+      : '/assets/pdfium-worker.js',
     documentUrl: `/s/${props.session.sessionId}/document/${state.source.fileId}?generation=${state.workflow.documentGeneration}`,
     ...(props.session.credential === undefined
       ? {}

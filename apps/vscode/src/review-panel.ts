@@ -80,11 +80,11 @@ export interface ReviewWebviewHtmlOptions {
 }
 
 export interface SharedAssetManifest {
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 3;
   readonly app: string;
   readonly stylesheet: string;
   readonly pdfiumWasm: string;
-  readonly worker: { readonly kind: "inline-blob"; readonly container: string };
+  readonly pdfiumWorker: string;
   readonly integrity: Readonly<Record<string, string>>;
 }
 
@@ -92,14 +92,13 @@ export function parseSharedAssetManifest(value: unknown): SharedAssetManifest {
   if (typeof value !== "object" || value === null) throw new Error("The shared asset manifest is invalid");
   const candidate = value as Partial<SharedAssetManifest>;
   const safeAsset = (asset: unknown) => typeof asset === "string" && /^[A-Za-z0-9._-]+$/u.test(asset);
-  if (candidate.schemaVersion !== 2 || !safeAsset(candidate.app) ||
-    !safeAsset(candidate.stylesheet) || !safeAsset(candidate.pdfiumWasm)) {
+  if (candidate.schemaVersion !== 3 || !safeAsset(candidate.app) ||
+    !safeAsset(candidate.stylesheet) || !safeAsset(candidate.pdfiumWasm) ||
+    !safeAsset(candidate.pdfiumWorker)) {
     throw new Error("The shared asset manifest is invalid");
   }
-  const assets = [candidate.app, candidate.stylesheet, candidate.pdfiumWasm] as string[];
-  if (new Set(assets).size !== assets.length || typeof candidate.worker !== "object" ||
-    candidate.worker === null || candidate.worker.kind !== "inline-blob" ||
-    candidate.worker.container !== candidate.app || typeof candidate.integrity !== "object" ||
+  const assets = [candidate.app, candidate.stylesheet, candidate.pdfiumWasm, candidate.pdfiumWorker] as string[];
+  if (new Set(assets).size !== assets.length || typeof candidate.integrity !== "object" ||
     candidate.integrity === null || Object.keys(candidate.integrity).sort().join("\n") !== assets.sort().join("\n") ||
     Object.values(candidate.integrity).some((digest) => !/^[0-9a-f]{64}$/u.test(digest))) {
     throw new Error("The shared asset manifest is invalid");

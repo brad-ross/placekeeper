@@ -26,6 +26,7 @@ import { createBrowserHostRuntime } from "./host/browser-runtime.js";
 import {
   createRpcHostRuntime,
   createVscodeMessagePort,
+  materializeVscodeWorkerResource,
   materializeVscodeWasmResource,
 } from "./host/vscode-runtime.js";
 import type { HostRuntime, HostRuntimeBootstrap } from "./host/runtime.js";
@@ -458,6 +459,7 @@ export async function startVscode(options: {
   }
   const runtime = createRpcHostRuntime(createVscodeMessagePort(options.panelId, options.vscode), {
     materializePdfiumWasm: materializeVscodeWasmResource,
+    materializePdfiumWorker: materializeVscodeWorkerResource,
   });
   globalThis.addEventListener("pagehide", () => runtime.dispose(), { once: true });
   const rawState = options.vscode.getState();
