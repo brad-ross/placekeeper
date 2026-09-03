@@ -139,8 +139,11 @@ export function applyPdfCopyCommand(
     event.preventDefault();
     return;
   }
-  if (command.kind === 'pending') callbacks.onPending();
-  else if (command.kind === 'unavailable' || command.kind === 'over-limit') {
+  if (command.kind === 'pending') {
+    event.preventDefault();
+    callbacks.onPending();
+  } else if (command.kind === 'unavailable' || command.kind === 'over-limit') {
+    event.preventDefault();
     callbacks.onError(command.kind);
   }
 }

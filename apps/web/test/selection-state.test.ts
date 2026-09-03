@@ -203,7 +203,7 @@ describe('PDF copy selection state', () => {
     })).toEqual({ kind: 'over-limit' });
   });
 
-  it('mutates the clipboard and prevents native copy only when supplying ready PDF text', () => {
+  it('prevents handled PDF copy attempts while mutating the clipboard only for ready text', () => {
     const clipboard = { setData: vi.fn() };
     const preventDefault = vi.fn();
     const onPending = vi.fn();
@@ -221,13 +221,13 @@ describe('PDF copy selection state', () => {
     applyPdfCopyCommand({ kind: 'pending' }, event, { onPending, onError });
     expect(onPending).toHaveBeenCalledOnce();
     expect(clipboard.setData).not.toHaveBeenCalled();
-    expect(preventDefault).not.toHaveBeenCalled();
+    expect(preventDefault).toHaveBeenCalledOnce();
 
     vi.clearAllMocks();
     applyPdfCopyCommand({ kind: 'unavailable' }, event, { onPending, onError });
     applyPdfCopyCommand({ kind: 'over-limit' }, event, { onPending, onError });
     expect(onError).toHaveBeenCalledTimes(2);
     expect(clipboard.setData).not.toHaveBeenCalled();
-    expect(preventDefault).not.toHaveBeenCalled();
+    expect(preventDefault).toHaveBeenCalledTimes(2);
   });
 });

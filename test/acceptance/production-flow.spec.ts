@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { PDFDocument } from "pdf-lib";
 
 import { PlacekeeperHost } from "../../apps/service/src/host/placekeeper-host.js";
@@ -20,6 +20,7 @@ let referencePdf = "";
 let annotatedReferencePdf = "";
 let searchPdf = "";
 let equationPdf = "";
+let crossPagePdf = "";
 let metadataTitlePdf = "";
 
 const reportedMathSymbolInventory = [
@@ -107,6 +108,102 @@ async function waitForRenderedPageImage(
     element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0
   ))).toBe(true);
   return image;
+}
+
+const platformCopyShortcut = process.platform === "darwin" ? "Meta+C" : "Control+C";
+const platformPasteShortcut = process.platform === "darwin" ? "Meta+V" : "Control+V";
+
+async function installPlainTextPasteTarget(page: Page): Promise<Locator> {
+  await page.evaluate(() => {
+    const target = document.createElement("textarea");
+    target.setAttribute("aria-label", "Native copy paste proof");
+    target.style.position = "fixed";
+    target.style.inset = "auto 8px 8px auto";
+    target.style.width = "240px";
+    target.style.height = "64px";
+    target.style.zIndex = "2147483647";
+    document.body.append(target);
+  });
+  return page.getByRole("textbox", { name: "Native copy paste proof" });
+}
+
+async function pasteNativeClipboard(page: Page, target: Locator): Promise<string> {
+  await target.focus();
+  await page.keyboard.press(platformPasteShortcut);
+  return target.inputValue();
+}
+
+async function showPdfSelectionPage(
+  workspace: Locator,
+  pageIndex: number,
+  lineY: number,
+): Promise<{ box: NonNullable<Awaited<ReturnType<Locator["boundingBox"]>>>; scale: number }> {
+  const pdfPage = workspace.locator(`[data-page-index="${pageIndex}"]`);
+  await pdfPage.evaluate((element) => element.scrollIntoView({ block: 'start' }));
+  await waitForRenderedPageImage(pdfPage);
+  await expect.poll(async () => {
+    await pdfPage.evaluate((element) => element.scrollIntoView({ block: 'start' }));
+    const [workspaceBox, pageBox] = await Promise.all([
+      workspace.boundingBox(),
+      pdfPage.boundingBox(),
+    ]);
+    if (!workspaceBox || !pageBox) return false;
+    const selectableLineY = pageBox.y + lineY * (pageBox.width / 612);
+    return selectableLineY >= Math.max(0, workspaceBox.y)
+      && selectableLineY <= workspaceBox.y + workspaceBox.height;
+  }).toBe(true);
+  const box = await pdfPage.boundingBox();
+  if (!box) throw new Error(`Rendered PDF page ${pageIndex + 1} has no bounds.`);
+  return { box, scale: box.width / 612 };
+}
+
+async function dragAcrossProductionPdfPages(
+  page: Page,
+  workspace: Locator,
+  startPageIndex: number,
+  endPageIndex: number,
+  line: { y: number; startX?: number; endX?: number } = { y: 102 },
+  whileSelecting?: () => Promise<void>,
+): Promise<void> {
+  const forward = startPageIndex < endPageIndex;
+  const indexes = Array.from(
+    { length: Math.abs(endPageIndex - startPageIndex) + 1 },
+    (_, offset) => startPageIndex + (forward ? offset : -offset),
+  );
+  const start = await showPdfSelectionPage(workspace, startPageIndex, line.y);
+  const startX = forward ? (line.startX ?? 70) : (line.endX ?? 390);
+  await page.mouse.move(
+    start.box.x + startX * start.scale,
+    start.box.y + line.y * start.scale,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    start.box.x + (startX + (forward ? 12 : -12)) * start.scale,
+    start.box.y + line.y * start.scale,
+    { steps: 3 },
+  );
+  for (const pageIndex of indexes.slice(1)) {
+    const current = await showPdfSelectionPage(workspace, pageIndex, line.y);
+    await page.mouse.move(
+      current.box.x + (forward ? (line.endX ?? 390) : (line.startX ?? 70)) * current.scale,
+      current.box.y + line.y * current.scale,
+      { steps: 8 },
+    );
+  }
+  if (indexes.length === 1) {
+    await page.mouse.move(
+      start.box.x + (forward ? (line.endX ?? 390) : (line.startX ?? 70)) * start.scale,
+      start.box.y + line.y * start.scale,
+      { steps: 8 },
+    );
+  }
+  await whileSelecting?.();
+  await page.mouse.up();
+  await expect(workspace.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+    .not.toHaveCount(0);
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
 }
 
 async function openLinkInReferences(
@@ -298,6 +395,7 @@ test.beforeAll(async () => {
   annotatedReferencePdf = join(root, "reference-navigation-annotated.pdf");
   searchPdf = join(root, "pdf-search.pdf");
   equationPdf = join(root, "equation-selection.pdf");
+  crossPagePdf = join(root, "cross-page-selection.pdf");
   metadataTitlePdf = join(root, "fallback-filename.pdf");
   await copyFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf"), pdf);
   await copyFile(resolve("test/fixtures/pdfs/text-native.pdf"), plainTextPdf);
@@ -310,6 +408,7 @@ test.beforeAll(async () => {
   );
   await copyFile(resolve("test/fixtures/pdfs/pdf-search.pdf"), searchPdf);
   await copyFile(resolve("test/fixtures/pdfs/equation-selection.pdf"), equationPdf);
+  await copyFile(resolve("test/fixtures/pdfs/cross-page-selection.pdf"), crossPagePdf);
   const titledDocument = await PDFDocument.create();
   titledDocument.setTitle("Identification Strategy");
   titledDocument.addPage([612, 792]);
@@ -4249,6 +4348,280 @@ test('allows PDF text interaction without dismissing the Annotation Tray', async
   await page.mouse.move(box.x + 245, box.y + 98);
   await page.waitForTimeout(250);
   await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
+});
+
+for (const selection of [
+  { label: 'forward two-page', start: 0, end: 1, pages: [1, 2] },
+  { label: 'reverse three-page', start: 2, end: 0, pages: [1, 2, 3] },
+] as const) {
+  test(`copies a real ${selection.label} Main PDF selection through the platform shortcut and native paste`, async ({ page }) => {
+    const launched = await openFreshProductionFixture(
+      page,
+      crossPagePdf,
+      'Cross-page Main copy launch failed',
+    );
+    const pasteTarget = await installPlainTextPasteTarget(page);
+    const main = page.locator('[data-pdf-copy-surface="main"]');
+
+    await dragAcrossProductionPdfPages(page, main, selection.start, selection.end);
+    await page.keyboard.press(platformCopyShortcut);
+
+    expect(await pasteNativeClipboard(page, pasteTarget)).toBe(selection.pages.map((pageNumber) => (
+      `PAGE ${String(pageNumber).padStart(2, '0')}: cross-page semantic selection contract.`
+    )).join('\n'));
+    expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
+    expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
+    await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+      .not.toHaveCount(0);
+  });
+}
+
+test('keeps prior clipboard text while a real cross-page selection is still pending', async ({ page }) => {
+  const launched = await openFreshProductionFixture(
+    page,
+    crossPagePdf,
+    'Pending cross-page copy launch failed',
+  );
+  const main = page.locator('[data-pdf-copy-surface="main"]');
+  const pasteTarget = await installPlainTextPasteTarget(page);
+  const clipboardSentinel = 'clipboard text from before the pending PDF selection';
+  await pasteTarget.fill(clipboardSentinel);
+  await pasteTarget.selectText();
+  await page.keyboard.press(platformCopyShortcut);
+
+  await dragAcrossProductionPdfPages(page, main, 0, 1, { y: 102 }, async () => {
+    await page.keyboard.press(platformCopyShortcut);
+    await expect.poll(() => page.locator('p.sr-only[role="status"]').allTextContents())
+      .toContain('Selected text is still being read. Retry Copy when it is ready.');
+  });
+
+  await pasteTarget.fill('');
+  expect(await pasteNativeClipboard(page, pasteTarget)).toBe(clipboardSentinel);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
+  await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+    .not.toHaveCount(0);
+});
+
+test('copies exactly 12 selected pages through the platform shortcut and native paste', async ({ page }) => {
+  test.setTimeout(90_000);
+  const launched = await openFreshProductionFixture(
+    page,
+    crossPagePdf,
+    'Cross-page 12-page copy launch failed',
+  );
+  const main = page.locator('[data-pdf-copy-surface="main"]');
+  const pasteTarget = await installPlainTextPasteTarget(page);
+  const expectedWithinLimit = Array.from({ length: 12 }, (_, index) => (
+    `PAGE ${String(index + 1).padStart(2, '0')}: cross-page semantic selection contract.`
+  )).join('\n');
+
+  await dragAcrossProductionPdfPages(page, main, 0, 11);
+  await page.keyboard.press(platformCopyShortcut);
+  expect(await pasteNativeClipboard(page, pasteTarget)).toBe(expectedWithinLimit);
+
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
+  expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
+  await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+    .not.toHaveCount(0);
+});
+
+test('rejects a real 13-page copy without changing the clipboard, selection, or review state', async ({ page }) => {
+  test.setTimeout(90_000);
+  const launched = await openFreshProductionFixture(
+    page,
+    crossPagePdf,
+    'Cross-page 13-page copy launch failed',
+  );
+  const main = page.locator('[data-pdf-copy-surface="main"]');
+  const pasteTarget = await installPlainTextPasteTarget(page);
+  const clipboardSentinel = 'clipboard remains unchanged after rejected PDF copy';
+  await pasteTarget.fill(clipboardSentinel);
+  await pasteTarget.selectText();
+  await page.keyboard.press(platformCopyShortcut);
+
+  await dragAcrossProductionPdfPages(page, main, 0, 12);
+  await page.keyboard.press(platformCopyShortcut);
+  const limitError = page.locator('.review-toast--error');
+  await expect(limitError).toBeVisible();
+  await expect(limitError).toContainText('12 pages');
+  await expect(limitError).toHaveAttribute('data-viewer-status');
+  await pasteTarget.fill('');
+  expect(await pasteNativeClipboard(page, pasteTarget)).toBe(clipboardSentinel);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
+  expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
+  await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+    .not.toHaveCount(0);
+});
+
+for (const action of ['Replace', 'Delete', 'Highlight'] as const) {
+  test(`creates one atomic cross-page ${action} from a real selection`, async ({ page }) => {
+    const launched = await openFreshProductionFixture(
+      page,
+      crossPagePdf,
+      `Cross-page ${action} launch failed`,
+    );
+    await chooseFreshCopyDestination(page);
+    const main = page.locator('[data-pdf-copy-surface="main"]');
+    await dragAcrossProductionPdfPages(page, main, 0, 1);
+    const actions = page.getByRole('toolbar', { name: 'Selection review actions' });
+    await expect(actions).toBeVisible();
+    await actions.getByRole('button', { name: action, exact: true }).click();
+    if (action === 'Replace') {
+      const composer = page.getByRole('region', { name: 'Replacement' });
+      await composer.getByRole('textbox', { name: 'Replacement' }).fill('Replacement across pages');
+      await composer.getByRole('button', { name: 'Apply' }).click();
+    } else if (action === 'Highlight') {
+      const composer = page.getByRole('region', { name: 'Highlight Comment' });
+      await expect(composer).toBeVisible();
+      await composer.getByRole('button', { name: 'Keep', exact: true }).click();
+    }
+
+    await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
+    await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe('clean');
+    const item = host.broker.state(launched.sessionId)?.items[0];
+    expect(host.broker.state(launched.sessionId)?.items).toHaveLength(1);
+    expect(item?.kind).toBe(action.toLowerCase());
+    expect(item?.payload.pages).toHaveLength(2);
+    expect(item?.payload.quote).toBe([
+      'PAGE 01: cross-page semantic selection contract.',
+      'PAGE 02: cross-page semantic selection contract.',
+    ].join('\n'));
+    await expect(page.locator('[data-review-item]')).toHaveCount(1);
+    await expect(page.locator(`[data-review-id="${item!.id}"]`)).toHaveCount(2);
+
+    const undo = page.getByRole('button', { name: 'Undo', exact: true });
+    await undo.click();
+    await expect.poll(() => host.broker.state(launched.sessionId)?.items.length).toBe(0);
+    const redo = page.getByRole('button', { name: 'Redo', exact: true });
+    await redo.click();
+    await expect.poll(() => host.broker.state(launched.sessionId)?.items.length).toBe(1);
+    expect(host.broker.state(launched.sessionId)?.items[0]?.id).toBe(item?.id);
+
+    await page.reload();
+    await expect(page.locator('[data-production-review]')).toBeVisible();
+    await expect(page.locator('[data-review-item]')).toHaveCount(1);
+    await expect(page.locator(`[data-review-id="${item!.id}"]`)).toHaveCount(2);
+  });
+}
+
+test('copies only the focused Main or Reference selection and preserves native editable precedence', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const launched = await openFreshProductionFixture(
+    page,
+    referencePdf,
+    'Focused PDF copy launch failed',
+  );
+  const main = page.locator('[data-pdf-copy-surface="main"]');
+  const primaryLink = main.getByRole('button', {
+    name: 'Open PDF link to Primary result, Page 2',
+  });
+  await openLinkInReferences(page, primaryLink);
+  const primaryTab = page.getByRole('tab', { name: /Primary result/u });
+  await expectReferenceReady(page, primaryTab);
+  const reference = page.locator('[data-pdf-copy-surface="reference"]');
+  const pasteTarget = await installPlainTextPasteTarget(page);
+
+  await dragAcrossProductionPdfPages(page, main, 0, 1, { y: 58 });
+  await dragAcrossProductionPdfPages(page, reference, 1, 2, { y: 58, endX: 350 });
+  await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+    .not.toHaveCount(0);
+  await expect(reference.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+    .not.toHaveCount(0);
+  await reference.locator('[data-page-index="1"]').focus();
+  await page.keyboard.press(platformCopyShortcut);
+  expect(await page.locator('p.sr-only[role="status"]').allTextContents())
+    .toContain('Copied selected text from Reference PDF.');
+  const owner = page.locator('[data-pdf-copy-owner]');
+  await expect(owner).toHaveAttribute('data-pdf-copy-owner', 'reference');
+  await expect(owner).toHaveText('Copy source: Reference PDF');
+  const referenceText = [
+    'Reference navigation fixture — page 2',
+    'Primary target. Follow the target-to-target link for details.',
+    'Reference navigation fixture — page 3',
+  ].join('\n');
+  expect(await pasteNativeClipboard(page, pasteTarget)).toBe(referenceText);
+
+  await reference.locator('[data-page-index="1"]').focus();
+  const closeReferences = page.getByRole('button', { name: 'Close References tray' });
+  await closeReferences.click();
+  const openReferences = page.getByRole('button', { name: 'Open References tray' });
+  await expect(openReferences).toBeFocused();
+  await expect(owner).toHaveAttribute('data-pdf-copy-owner', 'none');
+  await expect(owner).toHaveText('Copy source: No PDF focused');
+  await openReferences.click();
+
+  await pasteTarget.fill('');
+  await main.locator('[data-page-index="0"]').focus();
+  await expect(owner).toHaveAttribute('data-pdf-copy-owner', 'main');
+  await page.keyboard.press(platformCopyShortcut);
+  expect(await pasteNativeClipboard(page, pasteTarget)).toBe([
+    'Reference navigation fixture — page 1',
+    'Body TOC: repeated, aliased, page-only, and distinct-coordinate links',
+    'Reference navigation fixture — page 2',
+  ].join('\n'));
+
+  await pasteTarget.fill('native editable text');
+  await pasteTarget.selectText();
+  await page.keyboard.press(platformCopyShortcut);
+  await pasteTarget.fill('');
+  expect(await pasteNativeClipboard(page, pasteTarget)).toBe('native editable text');
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
+  expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
+  await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+    .not.toHaveCount(0);
+  await expect(reference.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+    .not.toHaveCount(0);
+});
+
+test('revokes Reference copy authority across tab switch, Send to Main, and final close', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const launched = await openFreshProductionFixture(
+    page,
+    referencePdf,
+    'Reference copy lifecycle launch failed',
+  );
+  const main = page.locator('[data-pdf-copy-surface="main"]');
+  await dragAcrossProductionPdfPages(page, main, 0, 1, { y: 58 });
+  const primaryLink = main.getByRole('button', {
+    name: 'Open PDF link to Primary result, Page 2',
+  });
+  await openLinkInReferences(page, primaryLink);
+  const primaryTab = page.getByRole('tab', { name: /Primary result/u });
+  await expectReferenceReady(page, primaryTab);
+  const reference = page.locator('[data-pdf-copy-surface="reference"]');
+  const owner = page.locator('[data-pdf-copy-owner]');
+
+  await dragAcrossProductionPdfPages(page, reference, 1, 2, { y: 58, endX: 350 });
+  await reference.locator('[data-page-index="1"]').focus();
+  await expect(owner).toHaveAttribute('data-pdf-copy-owner', 'reference');
+  const detailLink = reference.getByRole('button', {
+    name: 'Open PDF link to Target-to-target detail link, Page 3',
+  });
+  await detailLink.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  await openLinkInReferences(page, detailLink);
+  const detailTab = page.getByRole('tab', { name: /Target-to-target detail link/u });
+  await expectReferenceReady(page, detailTab);
+  await expect(owner).toHaveAttribute('data-pdf-copy-owner', 'none');
+  await expect(owner).toHaveText('Copy source: No PDF focused');
+
+  await dragAcrossProductionPdfPages(page, reference, 2, 3, { y: 58, endX: 350 });
+  await reference.locator('[data-page-index="2"]').focus();
+  await expect(owner).toHaveAttribute('data-pdf-copy-owner', 'reference');
+  await page.getByRole('button', { name: 'Send to main document' }).click();
+  await expect(detailTab).toHaveCount(0);
+  await expect(primaryTab).toHaveAttribute('aria-selected', 'true');
+  await expect(primaryTab).toBeFocused();
+  await expect(owner).toHaveAttribute('data-pdf-copy-owner', 'none');
+
+  await dragAcrossProductionPdfPages(page, reference, 1, 2, { y: 58, endX: 350 });
+  await reference.locator('[data-page-index="1"]').focus();
+  await expect(owner).toHaveAttribute('data-pdf-copy-owner', 'reference');
+  await page.getByRole('button', { name: 'Close active reference' }).click();
+  await expect(page.locator('[data-reference-tab]')).toHaveCount(0);
+  const openReferences = page.getByRole('button', { name: /Open (References tray|right workspace)/u });
+  await expect(openReferences).toBeFocused();
+  await expect(owner).toHaveAttribute('data-pdf-copy-owner', 'none');
+  expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
 });
 
 test('keeps PDF drag selection available while the Annotation Tray is open', async ({ page }) => {
