@@ -204,7 +204,7 @@ export interface AppProps {
   /** Production composes the viewer inside the canonical reading-first ReviewShell. */
   embeddedInReviewShell?: boolean;
   ownedAnnotations?: readonly ReviewAnnotation[];
-  authoringPreview?: ReviewAnnotation | null;
+  authoringPreview?: readonly ReviewAnnotation[] | null;
   onViewerInteraction?: (event: ViewerInteractionEvent) => void;
   reverseSyncTexEnabled?: boolean;
   keyboardPageNoteActive?: boolean;

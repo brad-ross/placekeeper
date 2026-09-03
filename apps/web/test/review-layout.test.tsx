@@ -11,6 +11,7 @@ import {
 } from '../src/app/ReviewShell.js';
 import { AnnotationList } from '../src/review/AnnotationList.js';
 import { AnnotationPeek } from '../src/review/AnnotationPeek.js';
+import { projectOwnedAnnotationReader } from '../src/review/annotation-reader.js';
 import {
   FullAnnotationReader,
   FullAnnotationReaderActions,
@@ -796,6 +797,76 @@ describe('review shell layout and accessibility contract', () => {
     expect(peekHtml).not.toContain('<button');
     expect(listHtml).toContain('data-workspace-focus-token="annotations:section"');
     expect(listHtml).toContain('tabindex="-1"');
+  });
+
+  it('presents one tray row with a stable page range for a cross-page item', () => {
+    const crossPageItem = {
+      ...ownedAnnotation,
+      pageIndex: 2,
+      payload: {
+        ...ownedAnnotation.payload,
+        quote: 'First page\nMiddle page\nLast page',
+        prefix: '',
+        suffix: '',
+        rect: { x: 10, y: 80, width: 40, height: 12 },
+        segmentRects: [{ x: 10, y: 80, width: 40, height: 12 }],
+        reliable: true,
+        pages: [
+          {
+            pageIndex: 2,
+            quote: 'First page',
+            prefix: '',
+            suffix: '',
+            rect: { x: 10, y: 80, width: 40, height: 12 },
+            segmentRects: [{ x: 10, y: 80, width: 40, height: 12 }],
+          },
+          {
+            pageIndex: 3,
+            quote: 'Middle page',
+            prefix: '',
+            suffix: '',
+            rect: { x: 10, y: 20, width: 50, height: 12 },
+            segmentRects: [{ x: 10, y: 20, width: 50, height: 12 }],
+          },
+          {
+            pageIndex: 4,
+            quote: 'Last page',
+            prefix: '',
+            suffix: '',
+            rect: { x: 10, y: 20, width: 38, height: 12 },
+            segmentRects: [{ x: 10, y: 20, width: 38, height: 12 }],
+          },
+        ],
+        pageBoundaries: [
+          { afterPageIndex: 2, separator: '\n' },
+          { afterPageIndex: 3, separator: '\n' },
+        ],
+      },
+    };
+    const html = renderToStaticMarkup(
+      <AnnotationList
+        items={[crossPageItem]}
+        onNavigate={() => undefined}
+        onReadFull={() => undefined}
+        onEdit={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
+    const reader = projectOwnedAnnotationReader(crossPageItem);
+    if (reader === null) throw new Error('Expected authored reader content');
+    const readerHtml = renderToStaticMarkup(
+      <FullAnnotationReader record={reader} onBack={() => undefined} />,
+    );
+
+    expect(html.match(/data-review-item=/gu)).toHaveLength(1);
+    expect(html).toContain('<span class="annotation-item__page">3–5</span>');
+    expect(html).toContain('aria-label="Highlight · Pages 3–5');
+    expect(html).toContain('title="Go to Highlight annotation on pages 3–5"');
+    expect(html).toContain('aria-label="Edit Highlight annotation on pages 3–5"');
+    expect(html).toContain('aria-label="Remove Highlight annotation on pages 3–5"');
+    expect(html).toContain('aria-label="Read full Highlight annotation on pages 3–5"');
+    expect(readerHtml).toContain('aria-label="Full Highlight annotation on pages 3–5"');
+    expect(readerHtml).toContain('<span class="annotation-item__page">3–5</span>');
   });
 
   it('keeps the annotation Copy Link affordance mounted and right-most while durability is pending', () => {

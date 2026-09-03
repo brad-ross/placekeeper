@@ -24,7 +24,12 @@ export interface PdfRect {
 
 interface ReviewAnnotationBase {
   kind: ReviewAnnotationKind;
+  /** Deterministic identity of this page-local physical projection. */
   id: string;
+  /** Canonical Review Item identity shared by every page-local projection. */
+  reviewItemId?: string;
+  projectionIndex?: number;
+  projectionCount?: number;
   pageIndex: number;
   rect: PdfRect;
   contents: string;

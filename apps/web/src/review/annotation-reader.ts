@@ -5,6 +5,7 @@ import {
   type ExistingAnnotationsDiscovery,
 } from '../pdf/existing-annotations.js';
 import { annotationKindLabel } from './AnnotationMetadata.js';
+import { reviewItemPageRange } from './annotation-projection.js';
 
 export type AnnotationReaderIdentity =
   | {
@@ -24,6 +25,7 @@ interface AnnotationReaderRecordBase {
   readonly kind: string;
   readonly typeLabel: string;
   readonly pageNumber: number;
+  readonly lastPageNumber?: number;
   readonly sectionLabel?: string;
   readonly contentLabel:
     | 'Replacement text'
@@ -88,13 +90,15 @@ export function projectOwnedAnnotationReader(
   const authored = ownedAuthoredContent(item);
   if (authored === null) return null;
   const visibleSectionLabel = nonBlankString(sectionLabel);
+  const { firstPageIndex, lastPageIndex } = reviewItemPageRange(item);
 
   return {
     identity: { origin: 'owned', itemId: item.id },
     origin: 'owned',
     kind: item.kind,
     typeLabel: annotationKindLabel(item.kind),
-    pageNumber: item.pageIndex + 1,
+    pageNumber: firstPageIndex + 1,
+    ...(lastPageIndex === firstPageIndex ? {} : { lastPageNumber: lastPageIndex + 1 }),
     ...(visibleSectionLabel === null ? {} : { sectionLabel: visibleSectionLabel }),
     ...authored,
     mutable: true,

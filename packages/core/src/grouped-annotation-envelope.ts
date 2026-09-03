@@ -49,6 +49,16 @@ export class PortableAnnotationGroupError extends Error {
   }
 }
 
+export function portableAnnotationProjectionId(
+  itemId: string,
+  projectionIndex: number,
+  projectionCount: number,
+): string {
+  return projectionCount === 1
+    ? itemId
+    : `${itemId}:projection:${projectionIndex + 1}`;
+}
+
 /**
  * Build the deterministic final metadata carried by every physical page child.
  * Writer/importer code and pre-acknowledgement validation share this exact contract.
@@ -82,9 +92,11 @@ export function serializePortableAnnotationGroup(
       ? String(item.payload.comment ?? '')
       : '';
   return canonical.pages.map((page, projectionIndex) => {
-    const projectionId = projectionCount === 1
-      ? item.id
-      : `${item.id}:projection:${projectionIndex + 1}`;
+    const projectionId = portableAnnotationProjectionId(
+      item.id,
+      projectionIndex,
+      projectionCount,
+    );
     const custom = {
       placekeeper: {
         schemaVersion: 3 as const,

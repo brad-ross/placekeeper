@@ -5,6 +5,7 @@ import {
   authoringAuthorityFor,
   authoringAnchorSnapshot,
   authoringPreviewAnnotation,
+  authoringPreviewAnnotations,
   authoringSessionIsCurrent,
   canStartAuthoringSession,
   createAuthoringSession,
@@ -235,6 +236,21 @@ describe('frozen authoring-session contract', () => {
         },
       },
     });
+    expect(authoringPreviewAnnotations(
+      session,
+      kind === 'replace' ? 'replacement' : 'comment',
+    ).map(({ id, reviewItemId, pageIndex }) => ({ id, reviewItemId, pageIndex }))).toEqual([
+      {
+        id: 'authoring-preview:1:projection:1',
+        reviewItemId: 'authoring-preview:1',
+        pageIndex: 2,
+      },
+      {
+        id: 'authoring-preview:1:projection:2',
+        reviewItemId: 'authoring-preview:1',
+        pageIndex: 3,
+      },
+    ]);
   });
 
   it('projects the frozen selection, caret, page, and persisted-item points for Return', () => {

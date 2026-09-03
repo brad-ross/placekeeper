@@ -10,7 +10,10 @@ import {
   normalizeReviewSelectionAnchor,
   reviewSelectionPayload,
 } from '../../../../packages/core/src/review-model.js';
-import { projectReviewItem } from '../../../../packages/core/src/annotation-projection.js';
+import {
+  projectReviewItem,
+  projectReviewItemProjections,
+} from '../../../../packages/core/src/annotation-projection.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { ReviewRect } from '../../../../packages/core/src/review-commands.js';
 import type { CaretAnchor, SelectionAnchor } from '../pdf/selection-anchor.js';
@@ -386,19 +389,18 @@ function editableField(item: ReviewItem): 'proposedText' | 'comment' | null {
   return null;
 }
 
-/** Projects the current draft exactly as the accepted annotation layer renders it. */
-export function authoringPreviewAnnotation(
+function authoringPreviewItem(
   session: AuthoringSession,
   value: string,
-): ReviewAnnotation | null {
+): ReviewItem | null {
   const source = session.source;
   if (source.kind === 'edit') {
     const field = editableField(source.item);
     if (field === null) return null;
-    return projectReviewItem({
+    return {
       ...source.item,
       payload: { ...source.item.payload, [field]: value },
-    });
+    };
   }
 
   const timestamp = '1970-01-01T00:00:00.000Z';
@@ -449,5 +451,25 @@ export function authoringPreviewAnnotation(
                 : { nearbyText: source.nearbyText }),
             },
           };
-  return projectReviewItem(item);
+  return item;
+}
+
+/** Lead-page compatibility projection for callers that still consume one preview. */
+export function authoringPreviewAnnotation(
+  session: AuthoringSession,
+  value: string,
+): ReviewAnnotation | null {
+  const item = authoringPreviewItem(session, value);
+  return item === null ? null : projectReviewItem(item);
+}
+
+/** Page-local visual previews backed by one immutable authoring session and draft. */
+export function authoringPreviewAnnotations(
+  session: AuthoringSession,
+  value: string,
+): readonly ReviewAnnotation[] {
+  const item = authoringPreviewItem(session, value);
+  return item === null
+    ? []
+    : projectReviewItemProjections(item, undefined, { includePortableMetadata: false });
 }

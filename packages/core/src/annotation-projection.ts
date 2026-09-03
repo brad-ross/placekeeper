@@ -1,6 +1,13 @@
 import type { ReviewAnnotation } from "./pdf-writer.js";
 import type { JsonValue, ReviewItem } from "./review-model.js";
-import { anchorEvidenceFromReviewItem } from "./review-model.js";
+import {
+  anchorEvidenceFromReviewItem,
+  normalizeReviewSelectionAnchor,
+} from "./review-model.js";
+import {
+  portableAnnotationProjectionId,
+  serializePortableAnnotationGroup,
+} from "./grouped-annotation-envelope.js";
 import {
   createPortableAnnotationCustom,
   PORTABLE_ANNOTATION_AUTHOR,
@@ -29,25 +36,17 @@ export function projectReviewItem(
     throw new Error(`Review item ${item.id} has no valid PDF geometry`);
   }
   const segmentRects = anchor.kind === "selection" ? anchor.segmentRects : undefined;
-  const contents =
-    item.kind === "replace" || item.kind === "insert"
-      ? text(item.payload, "proposedText")
-      : text(item.payload, "comment");
   const annotation: ReviewAnnotation = {
-    kind: item.kind,
+    ...annotationBase(item, author),
     id: item.id,
+    reviewItemId: item.id,
+    projectionIndex: 0,
+    projectionCount: 1,
     pageIndex: anchor.pageIndex,
     rect: projectedRect,
-    contents,
-    author,
-    createdAt: item.createdAt,
-    modifiedAt: item.updatedAt,
     ...(segmentRects && segmentRects.length > 0
       ? { quadPoints: segmentRects }
       : {}),
-    ...(item.kind === "pageNote"
-      ? {}
-      : { textAnchorReliable: item.payload.reliable === true }),
   };
   return {
     ...annotation,
@@ -55,13 +54,127 @@ export function projectReviewItem(
   };
 }
 
+function annotationBase(item: ReviewItem, author: string) {
+  return {
+    kind: item.kind,
+    contents: item.kind === "replace" || item.kind === "insert"
+      ? text(item.payload, "proposedText")
+      : text(item.payload, "comment"),
+    author,
+    createdAt: item.createdAt,
+    modifiedAt: item.updatedAt,
+    ...(item.kind === "pageNote"
+      ? {}
+      : { textAnchorReliable: item.payload.reliable === true }),
+  };
+}
+
+function projectedAnnotation(input: {
+  readonly item: ReviewItem;
+  readonly pageIndex: number;
+  readonly rect: ReviewAnnotation['rect'];
+  readonly quadPoints?: readonly ReviewAnnotation['rect'][];
+  readonly projectionIndex: number;
+  readonly projectionCount: number;
+  readonly projectionId?: string;
+  readonly author: string;
+  readonly custom?: unknown;
+}): ReviewAnnotation {
+  const { item, projectionIndex, projectionCount } = input;
+  const projectionId = input.projectionId ?? portableAnnotationProjectionId(
+    item.id,
+    projectionIndex,
+    projectionCount,
+  );
+  const annotation: ReviewAnnotation = {
+    ...annotationBase(item, input.author),
+    id: projectionId,
+    reviewItemId: item.id,
+    projectionIndex,
+    projectionCount,
+    pageIndex: input.pageIndex,
+    rect: input.rect,
+    ...(input.quadPoints && input.quadPoints.length > 0
+      ? { quadPoints: input.quadPoints }
+      : {}),
+  };
+  if (input.custom !== undefined) return { ...annotation, custom: input.custom };
+  if (projectionCount > 1) return annotation;
+  return {
+    ...annotation,
+    custom: createPortableAnnotationCustom(item, annotation),
+  };
+}
+
+/** Projects one logical item into deterministic page-local visual annotations. */
+export function projectReviewItemProjections(
+  item: ReviewItem,
+  author = PORTABLE_ANNOTATION_AUTHOR,
+  options: { readonly includePortableMetadata?: boolean } = {},
+): ReviewAnnotation[] {
+  const anchor = anchorEvidenceFromReviewItem(item);
+  if (anchor.kind === 'selection') {
+    const pages = normalizeReviewSelectionAnchor(anchor).pages;
+    const portableGroup = options.includePortableMetadata !== false
+      && author === PORTABLE_ANNOTATION_AUTHOR
+      && pages.length > 1
+      ? serializePortableAnnotationGroup(item)
+      : [];
+    return pages.map((page, projectionIndex) => {
+      const portableChild = portableGroup[projectionIndex];
+      return projectedAnnotation({
+        item,
+        pageIndex: portableChild?.pageIndex ?? page.pageIndex,
+        rect: page.rect,
+        quadPoints: page.segmentRects,
+        projectionIndex: portableChild?.projectionIndex ?? projectionIndex,
+        projectionCount: portableChild?.projectionCount ?? pages.length,
+        author,
+        ...(portableChild === undefined ? {} : {
+          projectionId: portableChild.projectionId,
+          custom: portableChild.custom,
+        }),
+      });
+    });
+  }
+
+  return [projectedAnnotation({
+    item,
+    pageIndex: anchor.pageIndex,
+    rect: anchor.rect,
+    projectionIndex: 0,
+    projectionCount: 1,
+    author,
+  })];
+}
+
 export function projectReviewItems(
   items: readonly ReviewItem[],
   documentGeneration?: number,
+  options: { readonly includePortableMetadata?: boolean } = {},
 ): ReviewAnnotation[] {
   return documentOrderedItems(items)
     .filter((item) => documentGeneration === undefined || reviewItemIsResolvedForGeneration(item, documentGeneration))
-    .map((item) => projectReviewItem(item));
+    .flatMap((item) => projectReviewItemProjections(item, PORTABLE_ANNOTATION_AUTHOR, options));
+}
+
+export function reviewItemPageRange(item: ReviewItem): {
+  readonly firstPageIndex: number;
+  readonly lastPageIndex: number;
+} {
+  try {
+    const anchor = anchorEvidenceFromReviewItem(item);
+    if (anchor.kind === 'selection') {
+      const pages = normalizeReviewSelectionAnchor(anchor).pages;
+      return {
+        firstPageIndex: pages[0]?.pageIndex ?? item.pageIndex,
+        lastPageIndex: pages.at(-1)?.pageIndex ?? item.pageIndex,
+      };
+    }
+  } catch {
+    // Retain legacy tray rendering if imported evidence is malformed.
+  }
+  return { firstPageIndex: item.pageIndex, lastPageIndex: item.pageIndex };
 }
 
 export function reviewItemIsResolvedForGeneration(

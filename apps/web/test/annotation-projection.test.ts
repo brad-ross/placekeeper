@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { projectReviewItems } from '../src/review/annotation-projection.js';
+import {
+  mergeAuthoringPreviewProjections,
+  projectReviewItems,
+} from '../src/review/annotation-projection.js';
 import type { ReviewItem } from '../../../packages/core/src/review-model.js';
 
 const timestamp = '2026-08-07T12:00:00.000Z';
@@ -15,6 +18,87 @@ const selection = {
 };
 
 describe('canonical annotation projection', () => {
+  it('projects every canonical page while retaining one logical item identity', () => {
+    const projected = projectReviewItems([
+      item('highlight', 'cross-page', 1, {
+        quote: 'first\nsecond\nthird',
+        prefix: 'before ',
+        suffix: ' after',
+        rect: { x: 12, y: 80, width: 60, height: 12 },
+        segmentRects: [{ x: 12, y: 80, width: 60, height: 12 }],
+        pages: [
+          {
+            pageIndex: 1,
+            quote: 'first',
+            prefix: 'before ',
+            suffix: '',
+            rect: { x: 12, y: 80, width: 60, height: 12 },
+            segmentRects: [{ x: 12, y: 80, width: 60, height: 12 }],
+          },
+          {
+            pageIndex: 2,
+            quote: 'second',
+            prefix: '',
+            suffix: '',
+            rect: { x: 12, y: 18, width: 68, height: 12 },
+            segmentRects: [{ x: 12, y: 18, width: 68, height: 12 }],
+          },
+          {
+            pageIndex: 3,
+            quote: 'third',
+            prefix: '',
+            suffix: ' after',
+            rect: { x: 12, y: 14, width: 54, height: 12 },
+            segmentRects: [{ x: 12, y: 14, width: 54, height: 12 }],
+          },
+        ],
+        pageBoundaries: [
+          { afterPageIndex: 1, separator: '\n' },
+          { afterPageIndex: 2, separator: '\n' },
+        ],
+        reliable: true,
+        comment: 'One comment',
+      }),
+    ]);
+
+    expect(projected.map(({ id, pageIndex, reviewItemId, projectionIndex, projectionCount, rect }) => ({
+      id,
+      pageIndex,
+      reviewItemId,
+      projectionIndex,
+      projectionCount,
+      y: rect.y,
+    }))).toEqual([
+      {
+        id: 'cross-page:projection:1',
+        pageIndex: 1,
+        reviewItemId: 'cross-page',
+        projectionIndex: 0,
+        projectionCount: 3,
+        y: 80,
+      },
+      {
+        id: 'cross-page:projection:2',
+        pageIndex: 2,
+        reviewItemId: 'cross-page',
+        projectionIndex: 1,
+        projectionCount: 3,
+        y: 18,
+      },
+      {
+        id: 'cross-page:projection:3',
+        pageIndex: 3,
+        reviewItemId: 'cross-page',
+        projectionIndex: 2,
+        projectionCount: 3,
+        y: 14,
+      },
+    ]);
+
+    const preview = projected.map((projection) => ({ ...projection, contents: 'Edited comment' }));
+    expect(mergeAuthoringPreviewProjections(projected, preview)).toEqual(preview);
+  });
+
   it('projects every v1 semantic kind exhaustively and orders marks by document position', () => {
     const projected = projectReviewItems([
       item('pageNote', '00000000-0000-4000-8000-000000000005', 1, {

@@ -91,7 +91,9 @@ import {
   createTrailingTaskScheduler,
   waitForReviewNavigationReady,
 } from "../review/main-location-refresh.js";
-import { reviewItemPoint } from "../review/annotation-outline-context.js";
+import {
+  reviewItemNavigationTarget,
+} from "../review/annotation-outline-context.js";
 import {
   BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN,
   RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
@@ -567,7 +569,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [authoringAnchorNavigation, setAuthoringAnchorNavigation] = useState<
     AuthoringAnchorNavigationState | null
   >(null);
-  const [authoringPreview, setAuthoringPreview] = useState<ReviewAnnotation | null>(null);
+  const [authoringPreview, setAuthoringPreview] = useState<readonly ReviewAnnotation[] | null>(null);
   const [selectionUpdate, setSelectionUpdate] = useState<SelectionUpdate>(INITIAL_SELECTION_UPDATE);
   const selectionUpdateRef = useRef(selectionUpdate);
   selectionUpdateRef.current = selectionUpdate;
@@ -776,7 +778,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   ]);
   useEffect(() => props.api.presence?.(), [props.api]);
   const ownedAnnotations = useMemo(
-    () => projectReviewItems(state.items, state.workflow.documentGeneration),
+    () => projectReviewItems(
+      state.items,
+      state.workflow.documentGeneration,
+      { includePortableMetadata: false },
+    ),
     [state.items, state.workflow.documentGeneration],
   );
   useEffect(() => {
@@ -1011,9 +1017,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         resolvePortableItem: (itemId: string) => {
           if (!portableItemIdsRef.current.has(itemId)) return null;
           const item = stateRef.current.items.find(({ id }) => id === itemId);
-          return item === undefined
-            ? null
-            : { pageIndex: item.pageIndex, point: reviewItemPoint(item) };
+          return item === undefined ? null : reviewItemNavigationTarget(item);
         },
       }),
     });
@@ -2003,11 +2007,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           return result;
         }}
         onNavigate={(item) => {
+          const target = reviewItemNavigationTarget(item);
+          if (target === null) return;
           const portable = portableItemIdsRef.current.has(item.id)
             && saveStatusIsCleanCurrent(state, saveStatus);
           void navigationCoordinator.navigateMainAnnotation({
-            pageIndex: item.pageIndex,
-            point: reviewItemPoint(item),
+            ...target,
             ...(portable
               ? { portableItemId: item.id }
               : { linkFallbackNotice: 'The shareable link uses this page until the item is saved.' }),

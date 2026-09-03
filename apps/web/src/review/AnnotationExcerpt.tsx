@@ -83,6 +83,11 @@ export function AnnotationExcerpt({
   onReadFull,
   onOverflowChange,
 }: AnnotationExcerptProps) {
+  const readerPageDescription = readerRecord === null
+    ? ''
+    : readerRecord.lastPageNumber === undefined
+      ? `page ${readerRecord.pageNumber}`
+      : `pages ${readerRecord.pageNumber}–${readerRecord.lastPageNumber}`;
   const enabled = readerRecord !== null && onReadFull !== undefined;
   const { excerptRef, overflowing } = useAnnotationExcerptOverflow(
     content,
@@ -103,7 +108,7 @@ export function AnnotationExcerpt({
           type="button"
           className="annotation-item__more"
           data-read-full-annotation="true"
-          aria-label={`Read full ${readerRecord.typeLabel} annotation on page ${readerRecord.pageNumber}`}
+          aria-label={`Read full ${readerRecord.typeLabel} annotation on ${readerPageDescription}`}
           title="Read full annotation"
           hidden={!overflowing}
           onClick={(event) => {

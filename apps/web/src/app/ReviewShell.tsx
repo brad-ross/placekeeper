@@ -132,7 +132,7 @@ import {
   authoringAuthorityFor,
   authoringAuthorityMatches,
   authoringAnchorSnapshot,
-  authoringPreviewAnnotation,
+  authoringPreviewAnnotations,
   authoringSessionIsCurrent,
   canStartAuthoringSession,
   createAuthoringSession,
@@ -214,7 +214,7 @@ export interface ReviewShellProps {
   };
   onAuthoringAnchorChange?(anchor: AuthoringAnchorSnapshot | null): void;
   onAuthoringActiveChange?(active: boolean): void;
-  onAuthoringPreviewChange?(preview: ReviewAnnotation | null): void;
+  onAuthoringPreviewChange?(preview: readonly ReviewAnnotation[] | null): void;
   /** U3/U4 may publish measured overlay geometry without affecting viewer framing. */
   onAuthoringViewportChange?(viewport: PdfViewportQuery | null): void;
   onNavigate?(item: ReviewItem): void;
@@ -432,7 +432,7 @@ export function ReviewShell(props: ReviewShellProps) {
     props.onAuthoringPreviewChange?.(
       authoringSession === null
         ? null
-        : authoringPreviewAnnotation(authoringSession, initialAuthoringValue(authoringSession)),
+        : authoringPreviewAnnotations(authoringSession, initialAuthoringValue(authoringSession)),
     );
     return () => props.onAuthoringPreviewChange?.(null);
   }, [authoringSession, props.onAuthoringPreviewChange]);
