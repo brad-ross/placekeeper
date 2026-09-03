@@ -60,6 +60,8 @@ A durable, user-authored proofread instruction associated with PDF geometry, suc
 
 Review Items are the canonical review state: viewer markings and delivery artifacts are projections of them rather than independent editable records.
 
+A selection-based Review Item may span several pages while remaining one atomic instruction. It owns page-specific geometry for every covered page; tray presentation, history, persistence, and export operate on the item as a whole.
+
 ### Insertion Caret Anchor
 The reliable PDF insertion target that couples an exact extracted-text boundary with a thin crop-relative page position and the text immediately to either side.
 
