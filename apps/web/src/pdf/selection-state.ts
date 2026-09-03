@@ -58,9 +58,14 @@ export function nativeCopyHasPrecedence(input: {
   readonly editableTarget: boolean;
   readonly domSelectionCollapsed: boolean;
   readonly domSelectionText: string;
+  readonly domSelectionOwnedByPdf: boolean;
 }): boolean {
   return input.editableTarget
-    || (!input.domSelectionCollapsed && input.domSelectionText.length > 0);
+    || (
+      !input.domSelectionOwnedByPdf
+      && !input.domSelectionCollapsed
+      && input.domSelectionText.length > 0
+    );
 }
 
 function sameCopySurface(left: PdfCopySurface, right: PdfCopySurface): boolean {

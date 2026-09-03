@@ -19,6 +19,7 @@ import {
   type ReferenceScrollPosition,
 } from './reference-manual-scroll.js';
 import type { ViewerInteractionEvent } from './viewer-interaction-events.js';
+import { isContextPointerGesture } from './viewer-interaction-events.js';
 
 const PDF_TEXT_SELECTION_STYLE = {
   background: 'var(--review-selection-bg)',
@@ -133,6 +134,10 @@ export function ReferencePdfViewport({
                 tabIndex={-1}
                 onPointerDownCapture={(event) => {
                   event.currentTarget.focus({ preventScroll: true });
+                  if (isContextPointerGesture(event)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }
                 }}
                 style={{
                   position: 'relative',

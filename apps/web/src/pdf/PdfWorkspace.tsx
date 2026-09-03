@@ -32,6 +32,7 @@ import {
 } from './viewer-document-ids.js';
 import {
   dispatchNeutralViewerPointerUp,
+  isContextPointerGesture,
   isReverseSyncTexPointerGesture,
   isUnsafePageContextTarget,
   normalizePageClientPoint,
@@ -91,14 +92,6 @@ function groupByPageIndex<T extends { readonly pageIndex: number }>(
     else page.push(item);
   }
   return result;
-}
-
-function isContextPointerGesture(event: {
-  readonly button: number;
-  readonly ctrlKey: boolean;
-  readonly pointerType: string;
-}): boolean {
-  return event.button !== 0 || (event.pointerType === 'mouse' && event.ctrlKey);
 }
 
 export function PdfWorkspace({
@@ -247,6 +240,7 @@ export function PdfWorkspace({
                         if (contextGesture) {
                           contextPointers.current.add(event.pointerId);
                           if (event.pointerType === 'mouse') contextResetTarget.current = event.currentTarget;
+                          event.preventDefault();
                           event.stopPropagation();
                           return;
                         }

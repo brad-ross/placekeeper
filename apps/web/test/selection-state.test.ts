@@ -113,16 +113,25 @@ describe('PDF copy selection state', () => {
       editableTarget: true,
       domSelectionCollapsed: true,
       domSelectionText: '',
+      domSelectionOwnedByPdf: false,
     })).toBe(true);
     expect(nativeCopyHasPrecedence({
       editableTarget: false,
       domSelectionCollapsed: false,
       domSelectionText: 'interface text',
+      domSelectionOwnedByPdf: false,
     })).toBe(true);
     expect(nativeCopyHasPrecedence({
       editableTarget: false,
       domSelectionCollapsed: true,
       domSelectionText: '',
+      domSelectionOwnedByPdf: false,
+    })).toBe(false);
+    expect(nativeCopyHasPrecedence({
+      editableTarget: false,
+      domSelectionCollapsed: false,
+      domSelectionText: 'mirrored PDF text',
+      domSelectionOwnedByPdf: true,
     })).toBe(false);
   });
 

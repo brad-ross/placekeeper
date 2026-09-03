@@ -21,6 +21,10 @@ import {
   type SelectionUpdate,
 } from "../pdf/selection-state.js";
 import { PDF_SELECTION_PAGE_LIMIT_MESSAGE } from '../pdf/selection-page-limit.js';
+import {
+  NativePdfSelectionBridge,
+  nativeSelectionBelongsToPdfBridge,
+} from '../pdf/NativePdfSelectionBridge.js';
 import { isEditableTarget } from '../review/input-controller.js';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import { App } from "./App.js";
@@ -1638,6 +1642,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           editableTarget: isEditableTarget(event.target),
           domSelectionCollapsed: nativeSelection?.isCollapsed ?? true,
           domSelectionText: nativeSelection?.toString() ?? '',
+          domSelectionOwnedByPdf: nativeSelectionBelongsToPdfBridge(nativeSelection),
         }),
         owner: pdfCopyOwner,
         snapshots: pdfCopySnapshots,
@@ -1690,6 +1695,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         setPdfCopyOwner(surface === 'main' || surface === 'reference' ? surface : null);
       }}
     >
+      <NativePdfSelectionBridge owner={pdfCopyOwner} snapshots={pdfCopySnapshots} />
       <ReviewShell
         state={state}
         documentTitle={scope.documentTitle}

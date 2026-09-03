@@ -133,6 +133,17 @@ async function pasteNativeClipboard(page: Page, target: Locator): Promise<string
   return target.inputValue();
 }
 
+async function armContextMenuDefaultProbe(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    delete document.documentElement.dataset.pdfContextMenuDefaultPrevented;
+    document.addEventListener('contextmenu', (event) => {
+      document.documentElement.dataset.pdfContextMenuDefaultPrevented = String(
+        event.defaultPrevented,
+      );
+    }, { once: true });
+  });
+}
+
 async function showPdfSelectionPage(
   workspace: Locator,
   pageIndex: number,
@@ -4362,13 +4373,28 @@ for (const selection of [
     );
     const pasteTarget = await installPlainTextPasteTarget(page);
     const main = page.locator('[data-pdf-copy-surface="main"]');
+    const expectedText = selection.pages.map((pageNumber) => (
+      `PAGE ${String(pageNumber).padStart(2, '0')}: cross-page semantic selection contract.`
+    )).join('\n');
 
     await dragAcrossProductionPdfPages(page, main, selection.start, selection.end);
+    await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
+      .toBe(expectedText);
+
+    const selectedPage = main.locator(`[data-page-index="${selection.end}"]`);
+    const selectedPageBox = await selectedPage.boundingBox();
+    if (!selectedPageBox) throw new Error('Selected PDF page has no bounds.');
+    await armContextMenuDefaultProbe(page);
+    await page.mouse.click(selectedPageBox.x + 180, selectedPageBox.y + 102, {
+      button: 'right',
+    });
+    await expect(page.locator('html'))
+      .toHaveAttribute('data-pdf-context-menu-default-prevented', 'false');
+    expect(await page.evaluate(() => window.getSelection()?.toString() ?? ''))
+      .toBe(expectedText);
     await page.keyboard.press(platformCopyShortcut);
 
-    expect(await pasteNativeClipboard(page, pasteTarget)).toBe(selection.pages.map((pageNumber) => (
-      `PAGE ${String(pageNumber).padStart(2, '0')}: cross-page semantic selection contract.`
-    )).join('\n'));
+    expect(await pasteNativeClipboard(page, pasteTarget)).toBe(expectedText);
     expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
     expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
     await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
@@ -4533,7 +4559,7 @@ for (const action of ['Replace', 'Delete', 'Highlight'] as const) {
   });
 }
 
-test('copies only the focused Main or Reference selection and preserves native editable precedence', async ({ page }) => {
+test('copies only the focused Main or Reference selection and preserves DOM precedence', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const launched = await openFreshProductionFixture(
     page,
@@ -4556,6 +4582,15 @@ test('copies only the focused Main or Reference selection and preserves native e
     .not.toHaveCount(0);
   await expect(reference.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
+  const referenceText = [
+    'Reference navigation fixture — page 2',
+    'Primary target. Follow the target-to-target link for details.',
+    'Reference navigation fixture — page 3',
+  ].join('\n');
+  await expect.poll(() => page.evaluate(() => (
+    window.getSelection()?.toString().replace(/\r\n?/gu, '\n') ?? ''
+  )))
+    .toBe(referenceText);
   await reference.locator('[data-page-index="1"]').focus();
   await page.keyboard.press(platformCopyShortcut);
   expect(await page.locator('p.sr-only[role="status"]').allTextContents())
@@ -4563,11 +4598,6 @@ test('copies only the focused Main or Reference selection and preserves native e
   const owner = page.locator('[data-pdf-copy-owner]');
   await expect(owner).toHaveAttribute('data-pdf-copy-owner', 'reference');
   await expect(owner).toHaveText('Copy source: Reference PDF');
-  const referenceText = [
-    'Reference navigation fixture — page 2',
-    'Primary target. Follow the target-to-target link for details.',
-    'Reference navigation fixture — page 3',
-  ].join('\n');
   expect(await pasteNativeClipboard(page, pasteTarget)).toBe(referenceText);
 
   await reference.locator('[data-page-index="1"]').focus();
@@ -4577,6 +4607,8 @@ test('copies only the focused Main or Reference selection and preserves native e
   await expect(openReferences).toBeFocused();
   await expect(owner).toHaveAttribute('data-pdf-copy-owner', 'none');
   await expect(owner).toHaveText('Copy source: No PDF focused');
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
+    .toBe('');
   await openReferences.click();
 
   await pasteTarget.fill('');
@@ -4589,6 +4621,38 @@ test('copies only the focused Main or Reference selection and preserves native e
     'Reference navigation fixture — page 2',
   ].join('\n'));
 
+  const ordinaryDomSentinel = 'ordinary browser selection keeps native copy precedence';
+  await page.evaluate((text) => {
+    const marker = document.createElement('div');
+    marker.id = 'ordinary-dom-selection-sentinel';
+    marker.tabIndex = -1;
+    marker.style.position = 'fixed';
+    marker.style.inset = '8px auto auto 8px';
+    marker.style.zIndex = '2147483647';
+    marker.append('ordinary selection start ');
+    const intersectedBridge = document.createElement('span');
+    intersectedBridge.dataset.pdfNativeSelectionBridge = 'test';
+    intersectedBridge.textContent = text;
+    marker.append(intersectedBridge, ' ordinary selection end');
+    document.body.append(marker);
+    marker.focus();
+    const range = document.createRange();
+    range.selectNodeContents(marker);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    delete document.documentElement.dataset.ordinaryDomCopyPrevented;
+    window.addEventListener('copy', (event) => {
+      document.documentElement.dataset.ordinaryDomCopyPrevented = String(event.defaultPrevented);
+    }, { once: true });
+  }, ordinaryDomSentinel);
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
+    .toContain(ordinaryDomSentinel);
+  await page.keyboard.press(platformCopyShortcut);
+  await expect(page.locator('html')).toHaveAttribute('data-ordinary-dom-copy-prevented', 'false');
+  expect(await pasteNativeClipboard(page, pasteTarget)).toContain(ordinaryDomSentinel);
+  await page.locator('#ordinary-dom-selection-sentinel').evaluate((marker) => marker.remove());
+
   await pasteTarget.fill('native editable text');
   await pasteTarget.selectText();
   await page.keyboard.press(platformCopyShortcut);
@@ -4600,6 +4664,44 @@ test('copies only the focused Main or Reference selection and preserves native e
     .not.toHaveCount(0);
   await expect(reference.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
+});
+
+test('keeps a Reference PDF selection native for the standard context menu', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFreshProductionFixture(
+    page,
+    referencePdf,
+    'Reference native context-menu launch failed',
+  );
+  const main = page.locator('[data-pdf-copy-surface="main"]');
+  await openLinkInReferences(page, main.getByRole('button', {
+    name: 'Open PDF link to Primary result, Page 2',
+  }));
+  await expectReferenceReady(page, page.getByRole('tab', { name: /Primary result/u }));
+  const reference = page.locator('[data-pdf-copy-surface="reference"]');
+  await dragAcrossProductionPdfPages(page, reference, 1, 2, { y: 58, endX: 350 });
+  const referenceText = [
+    'Reference navigation fixture — page 2',
+    'Primary target. Follow the target-to-target link for details.',
+    'Reference navigation fixture — page 3',
+  ].join('\n');
+  await expect.poll(() => page.evaluate(() => (
+    window.getSelection()?.toString().replace(/\r\n?/gu, '\n') ?? ''
+  )))
+    .toBe(referenceText);
+  const selectedReferencePage = await showPdfSelectionPage(reference, 2, 58);
+  await armContextMenuDefaultProbe(page);
+  await page.mouse.click(
+    selectedReferencePage.box.x + 180 * selectedReferencePage.scale,
+    selectedReferencePage.box.y + 58 * selectedReferencePage.scale,
+    { button: 'right' },
+  );
+  await expect(page.locator('html'))
+    .toHaveAttribute('data-pdf-context-menu-default-prevented', 'false');
+  expect(await page.evaluate(() => (
+    window.getSelection()?.toString().replace(/\r\n?/gu, '\n') ?? ''
+  )))
+    .toBe(referenceText);
 });
 
 test('revokes Reference copy authority across tab switch, Send to Main, and final close', async ({ page }) => {

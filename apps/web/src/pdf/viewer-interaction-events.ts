@@ -101,6 +101,14 @@ export type ViewerInteractionEvent =
 
 export type ViewerInteractionListener = (event: ViewerInteractionEvent) => void;
 
+export function isContextPointerGesture(event: {
+  readonly button: number;
+  readonly ctrlKey: boolean;
+  readonly pointerType: string;
+}): boolean {
+  return event.button === 2 || (event.pointerType === 'mouse' && event.ctrlKey);
+}
+
 // EmbedPDF deliberately exposes an engine-neutral pointer event that omits the DOM
 // `button` field. The page wrapper records it during capture so neutral handlers can
 // still distinguish primary activation from a secondary-button context gesture.
