@@ -72,3 +72,25 @@ index 1c40ef8dd3aa8050f3a23242d23258dbd04b3604..2881f18d2c49a923852e8fb3b31a77fa
      {
        type: "module"
      }
+diff --git a/dist/lib/pdfium/web/worker-engine.d.ts b/dist/lib/pdfium/web/worker-engine.d.ts
+--- a/dist/lib/pdfium/web/worker-engine.d.ts
++++ b/dist/lib/pdfium/web/worker-engine.d.ts
+@@ -3,6 +3,10 @@ import { PdfEngine } from '../../orchestrator/pdf-engine';
+ import { FontFallbackConfig } from '../font-fallback';
+ export type { FontFallbackConfig };
+ export interface CreatePdfiumEngineOptions {
++    /**
++     * Caller-created PDFium worker. When omitted, the built-in inline Blob worker is used.
++     */
++    worker?: Worker;
+     /**
+      * Logger instance for debugging
+      */
+diff --git a/dist/lib/pdfium/web/worker-engine.js b/dist/lib/pdfium/web/worker-engine.js
+--- a/dist/lib/pdfium/web/worker-engine.js
++++ b/dist/lib/pdfium/web/worker-engine.js
+@@ -485,2 +485,2 @@ function createPdfiumEngine(wasmUrl, options) {
+-  const { logger, encoderPoolSize, fontFallback } = config;
+-  const worker = new Worker(
++  const { logger, encoderPoolSize, fontFallback, worker: providedWorker } = config;
++  const worker = providedWorker ?? new Worker(

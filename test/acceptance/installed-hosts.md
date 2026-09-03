@@ -84,6 +84,99 @@ Playwright support for unpacked extensions does not guarantee that its managed C
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Pending | Pending | Pending | `cgegjjjhbhnfgcoipeffhogoojfoekgg` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Pending |
 
+### Embedded-handler platform proof (U1)
+
+The extension contains an explicit installed-only probe path. It is inert unless
+`placekeeperPlatformProofEnabled` is set to `true` in the extension's own local
+storage. The normal handler continues to consume the MIME stream once, wait for
+acknowledged native frames, and navigate to the current localhost viewer. Proof
+mode never fetches the PDF stream or enters that success path; it holds the MIME
+handler page in the original tab so the platform behavior can be observed.
+
+Run this only in a disposable Chrome profile with a disposable PDF fixture:
+
+1. Build the extension, load `apps/chrome-extension/dist` unpacked, and verify
+   the profile is running Google Chrome stable 151 or newer. Confirm the build
+   contains `assets/pdfium-worker.js` and `assets/pdfium.wasm`. Open the
+   Placekeeper toolbar popup and turn on **Open PDFs automatically**; a fresh
+   profile starts paused, so proof mode cannot run until Chrome's PDF MIME
+   handler is enabled.
+2. In the extension service-worker console, enable the proof:
+
+   ```js
+   await chrome.storage.local.set({
+     placekeeperPlatformProofEnabled: true,
+   });
+   ```
+
+3. Open the authenticated `/document?id=42` fixture in a newly created tab
+   and confirm the omnibox still shows that exact PDF URL while the outer tab
+   title changes to `Placekeeper platform proof`. The result block must report
+   `documentTitleApplied: true`, `sourceUrlAvailable: true`,
+   `workerStarted: true`, `pdfiumReady: true`, `packagedAssetFetch: true`, and
+   `forbiddenWorkerPrivileges: []`. The fixture must expose `/worker-probe`;
+   reaching it from the worker is therefore a failure rather than a network
+   availability ambiguity. This is the actual packaged EmbedPDF PDFium worker,
+   not a generic stand-in.
+4. Disable the probe, then open the same disposable PDF normally and verify the
+   production native transfer plus same-tab localhost redirect still succeeds:
+
+   ```js
+   await chrome.storage.local.set({
+     placekeeperPlatformProofEnabled: false,
+   });
+   ```
+
+The worker probe is the separately emitted EmbedPDF 2.14.4 PDFium worker under
+the exact extension CSP, including `connect-src 'self'` so only packaged assets
+can be fetched. It initializes packaged `pdfium.wasm` before reporting ready and
+proves the target worker context can start from a packaged asset while
+`chrome.*`, native messaging, DOM access, `eval`, `Function`, `importScripts`,
+loopback fetch, and remote fetch are unavailable. The source and built manifest
+also forbid host permissions and allow workers only from the extension package.
+The narrowly scoped `'wasm-unsafe-eval'` source enables packaged WebAssembly
+compilation without enabling JavaScript `eval` or `Function`; the installed
+privilege probe must continue to report both executable-code checks unavailable.
+
+Installed Chrome 152 characterization established that handler-local attachment
+identity is unavailable: the Navigation API signal, handler `sessionStorage`,
+`PerformanceNavigationTiming.type`, and the reported tab lease all reset on an
+ordinary reload. Those values therefore cannot distinguish reload, duplicate,
+fresh navigation, Back, session restore, or extension reload. The abandoned
+scenario matrix and per-tab/session classifier were removed. Review identity is
+canonical and service-owned: reopening verified identical PDF bytes resumes the
+same review, while a future explicit **Start separate review** action may create
+another review. This requires no `tabs`, `sessions`, `webNavigation`, host, or
+localhost permission.
+
+EmbedPDF 2.14.4 has no upstream worker URL or worker-factory option and normally
+constructs PDFium from an inline Blob. The repository's version-pinned pnpm
+patch adds only a caller-created `Worker` option; omission preserves the existing
+inline-worker behavior used by the ordinary browser and VS Code hosts. The
+Chrome build extracts the exact pinned inline worker source as a packaged module,
+emits it with the pinned `pdfium.wasm`, and exercises that worker under the exact
+MV3 CSP before reporting success.
+
+The no-follow local-source probe proves that exact bytes and device/inode
+identity can be captured from one opened handle and remain stable after path
+replacement, truncation, and a symlink swap. The current production handoff
+still canonicalizes and checks a path, closes that file handle, and then passes
+the path to the service. U3 must apply the proven stable-snapshot pattern and
+exact digest/length acceptance before the embedded path can activate; this must
+not be waived or converted to URL/tab identity.
+
+The versioned measurement contract is
+`test/acceptance/chrome-performance-budget.json`. It fixes the five local and
+remote corpus roles, the near-64-MiB construction recipe, five cold and ten warm
+runs, p50/p95 reporting, the native-versus-redirect comparison, separate and
+aggregate memory accounting, and the two-second cancellation deadline. Baseline
+numbers are deliberately not invented in source control; capture them with the
+same installed profile and record only aggregate measurements.
+
+| Date | Chrome | Outer title + source URL | Handler-local identity | Packaged worker isolation | PDFium packaged-worker startup | Local identity swaps | Native/redirect KTD8 corpus | Result |
+|---|---|---|---|---|---|---|---|---|
+| 2026-09-03 | 152 | Pass | Unavailable; canonical service identity selected | Pass after `connect-src 'self'` | Pass with packaged EmbedPDF worker and `pdfium.wasm` under `'wasm-unsafe-eval'` | Prototype pass; U3 integration pending | Contract fixed; redirect baseline and native comparison remain | U1 platform gate pass |
+
 For the installed row, use a fresh Chrome profile, a disposable PDF fixture, and the installed extension path. Record the literal installed host-manifest path and its SHA-256 hash, but never copy the manifest contents into this document. Confirm that Back returns to the fixture landing page; history contains no `#cap=`, bind proof, task identifier, cookie, or private staging path; reading and closing creates no Downloads PDF; and removing/reinstalling registration leaves the disposable PDF and Protected Recovery data untouched. Upgrade/rollback and removal remain covered deterministically by the packaging transaction suites.
 
 ## Reading-first interface evidence

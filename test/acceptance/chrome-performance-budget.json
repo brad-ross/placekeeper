@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "corpusVersion": "chrome-native-v1",
+  "fixtures": [
+    {
+      "id": "small-text",
+      "local": {
+        "fixture": "test/fixtures/pdfs/text-native.pdf",
+        "byteLength": 997,
+        "sha256": "36877849a1b846c77d258d2d5d3895c3d467268b8da7a312ec407fc640d8b306"
+      },
+      "remote": { "fixture": "test/fixtures/pdfs/text-native.pdf", "route": "authenticated" }
+    },
+    {
+      "id": "representative-mixed",
+      "local": {
+        "fixture": "test/fixtures/pdfs/mixed-text-image.pdf",
+        "byteLength": 1877,
+        "sha256": "107c93b08a59f125f3eed7028c7da0038bdf7cb2571b4db9c72ce43646a54ca4"
+      },
+      "remote": { "fixture": "test/fixtures/pdfs/mixed-text-image.pdf", "route": "authenticated" }
+    },
+    {
+      "id": "image-heavy-scan",
+      "local": {
+        "fixture": "test/fixtures/pdfs/image-only.pdf",
+        "byteLength": 1316,
+        "sha256": "0428ced3a4b163b1490a3e402a5255092963e3d7441a8359f4b8d8311c72fc27"
+      },
+      "remote": { "fixture": "test/fixtures/pdfs/image-only.pdf", "route": "authenticated" }
+    },
+    {
+      "id": "structurally-complex",
+      "local": {
+        "fixture": "test/fixtures/pdfs/preservation-corpus.pdf",
+        "byteLength": 2754,
+        "sha256": "35024c5923c4c97b7cf4a5ad57bc0857908b5d922823ae5c1ad97f373a337f7f"
+      },
+      "remote": { "fixture": "test/fixtures/pdfs/preservation-corpus.pdf", "route": "authenticated" }
+    },
+    {
+      "id": "near-64-mib",
+      "local": {
+        "recipe": "pad-before-eof",
+        "source": "test/fixtures/pdfs/preservation-corpus.pdf",
+        "byteLength": 66060288
+      },
+      "remote": {
+        "recipe": "pad-before-eof",
+        "source": "test/fixtures/pdfs/preservation-corpus.pdf",
+        "byteLength": 66060288,
+        "route": "authenticated"
+      }
+    }
+  ],
+  "repetitions": { "cold": 5, "warm": 10 },
+  "latency": {
+    "start": "navigation-start",
+    "end": "first-page-rendered",
+    "percentile": "p50",
+    "recordPercentiles": [50, 95],
+    "relativePercent": 20,
+    "absoluteMilliseconds": 1000,
+    "comparison": "native <= redirect + max(redirect * 0.20, 1000ms)"
+  },
+  "memory": {
+    "reportProcesses": ["extension", "native-host", "service", "aggregate"],
+    "extensionPdfBytes": 1,
+    "extensionFixedBytes": 100663296,
+    "nativeServiceTransientBytes": 33554432
+  },
+  "cancellation": { "releaseWithinMilliseconds": 2000 },
+  "baseline": {
+    "status": "pending-installed-chrome",
+    "requiredBrowser": "Google Chrome stable 151+",
+    "profiles": "fresh disposable"
+  }
+}

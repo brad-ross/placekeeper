@@ -199,4 +199,21 @@ describe("Chrome PDF handler controller", () => {
     expect(fallback).toHaveBeenCalledOnce();
     expect(controller.state()).toBe("fallback");
   });
+
+  it("falls back exactly once when the registered native host is disabled", async () => {
+    const fallback = vi.fn();
+    const controller = createHandlerController({
+      isOptedIn: async () => true,
+      getStreamInfo: async () => streamInfo,
+      handoff: async () => { throw new HandoffError("native-disconnected"); },
+      fallback,
+      replace: vi.fn(),
+    });
+
+    await controller.run();
+    controller.bypass();
+
+    expect(fallback).toHaveBeenCalledOnce();
+    expect(controller.state()).toBe("fallback");
+  });
 });

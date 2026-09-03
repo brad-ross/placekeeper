@@ -111,6 +111,14 @@ export async function startChromePdfFixtureServer(
         landing(response);
         return;
       }
+      if (request.method === "GET" && url.pathname === "/worker-probe") {
+        response.writeHead(204, {
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "no-store",
+        });
+        response.end();
+        return;
+      }
       if (request.method === "POST" && url.pathname === "/session") {
         const body = new URLSearchParams((await readBody(request)).toString("utf8"));
         if (body.get("password") !== "reader") {

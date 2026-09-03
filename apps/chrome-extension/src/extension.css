@@ -144,6 +144,18 @@ button:disabled {
   display: none;
 }
 
+#platform-proof {
+  max-height: min(24rem, 50vh);
+  margin: 0 0 1rem;
+  padding: 0.75rem;
+  overflow: auto;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, CanvasText 6%, Canvas);
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .switch__control,
   .switch__thumb {

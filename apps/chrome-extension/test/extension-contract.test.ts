@@ -17,6 +17,24 @@ describe("Chrome extension static contract", () => {
         handler_url: "handler.html",
       },
     });
+    expect(manifest.content_security_policy).toEqual({
+      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; connect-src 'self'",
+    });
+  });
+
+  it("bundles the installed-only platform proof behind an explicit local flag", async () => {
+    const handlerEntry = await readFile(resolve(extensionRoot, "src/handler-entry.ts"), "utf8");
+    const proof = await readFile(resolve(extensionRoot, "src/platform-proof.ts"), "utf8");
+    expect(handlerEntry).toContain("runInstalledPlatformProof");
+    expect(proof).toContain('"placekeeperPlatformProofEnabled"');
+    expect(proof).not.toContain("sessionStorage");
+    expect(proof).not.toContain("getEntriesByType");
+    expect(proof).not.toContain("placekeeperPlatformProofNextScenario");
+    expect(proof).not.toContain("updateCurrentEntry");
+    expect(handlerEntry).toContain("if (proofEnabled)");
+    expect(handlerEntry.indexOf("if (proofEnabled)")).toBeLessThan(
+      handlerEntry.indexOf("void controller.run()"),
+    );
   });
 
   it("uses native keyboard controls and announced status regions", async () => {
