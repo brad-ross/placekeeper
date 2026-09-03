@@ -175,7 +175,7 @@ export function sanitizeChromeRuntimeProjection(value: unknown): unknown | undef
     "sessionId", "generation", "revision", "state", "scope", "saveStatus",
     "canonicalLinkBase", "location", "document",
   ].filter((key) => key !== "location" || value.location !== undefined)) ||
-    containsForbiddenKey(value) || !record(value.document) ||
+    !record(value.document) ||
     !exact(value.document, ["sha256", "byteLength", "generation"]) ||
     !SHA256.test(String(value.document.sha256)) || !safeInteger(value.document.byteLength) ||
     (value.document.byteLength as number) < 1 || !safeInteger(value.document.generation) ||
@@ -186,6 +186,7 @@ export function sanitizeChromeRuntimeProjection(value: unknown): unknown | undef
   });
   if (!record(projected)) return undefined;
   const { resources: _resources, ...safe } = projected;
+  if (containsForbiddenKey(safe)) return undefined;
   return { ...safe, document: { ...value.document } };
 }
 

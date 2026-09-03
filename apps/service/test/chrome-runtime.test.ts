@@ -93,11 +93,19 @@ describe("Chrome least-authority native runtime", () => {
     expect(JSON.stringify(connection.diagnostics())).not.toMatch(/credential|sourceUrl|presentation/i);
   });
 
-  it("releases a provisional review when the service projection is not safe for Chrome", async () => {
+  it("strips internal source authority before returning a service projection to Chrome", async () => {
     const release = vi.fn(async () => undefined);
     const unsafeProjection = {
       ...projection(),
-      scope: { ...(projection().scope as Record<string, unknown>), sourceUrl: "https://private.example.test/paper.pdf" },
+      state: {
+        ...(projection().state as Record<string, unknown>),
+        sourceRootId: "internal-source-root",
+      },
+      scope: {
+        ...(projection().scope as Record<string, unknown>),
+        sourceRootPath: "/Users/reader/private",
+        sourceUrl: "https://private.example.test/paper.pdf",
+      },
     };
     const service = backend({
       begin: vi.fn(async () => ({
@@ -111,9 +119,10 @@ describe("Chrome least-authority native runtime", () => {
     await negotiate(connection);
     await connection.handle({ type: "begin", lane: "acquisition", protocolVersion: 2, connectionId, requestId: "request-acquire-1", transferId: "transfer-runtime-1", disposition: "remote-temporary", sourceUrl: "https://papers.example.test/paper.pdf" });
     await connection.handle({ type: "chunk", lane: "acquisition", protocolVersion: 2, connectionId, requestId: "request-chunk-1", transferId: "transfer-runtime-1", sequence: 0, data: sourceBytes.toString("base64") });
-    await expect(connection.handle({ type: "finish", lane: "acquisition", protocolVersion: 2, connectionId, requestId: "request-finish-1", transferId: "transfer-runtime-1", sequence: 1 }))
-      .resolves.toMatchObject({ type: "failure", reason: "service-unavailable" });
-    expect(release).toHaveBeenCalledWith("canonical-unsafe-1");
+    const result = await connection.handle({ type: "finish", lane: "acquisition", protocolVersion: 2, connectionId, requestId: "request-finish-1", transferId: "transfer-runtime-1", sequence: 1 });
+    expect(result).toMatchObject({ type: "projection" });
+    expect(JSON.stringify(result)).not.toMatch(/sourceRoot|sourceUrl|private|internal-source-root/u);
+    expect(release).not.toHaveBeenCalled();
   });
 
   it("fails closed on skew, mid-port version changes, v1 smuggling, and agent-only methods", async () => {
