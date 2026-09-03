@@ -39,7 +39,7 @@ Completion requires both exclusivity in source and built artifacts and separate 
 ## Embedded review runtime
 
 ### Review Host Runtime
-The host-neutral contract through which the production review client bootstraps state, invokes review operations, receives invalidations and host commands, and releases resources in either a browser or an embedded editor.
+The host-neutral contract through which the production review client bootstraps state, invokes review operations, receives invalidations and host commands, and releases resources in a browser, embedded editor, or browser-extension document.
 
 Each host supplies its own transport, lifecycle, resource-issuance policy, and privileged capabilities; sharing this contract does not transfer host authority into the review client.
 
@@ -47,6 +47,16 @@ Each host supplies its own transport, lifecycle, resource-issuance policy, and p
 The versioned operation vocabulary and identity envelope used when a Review Host Runtime crosses an embedded-client boundary.
 
 The protocol defines which operations and coordination identities are recognized, while the receiving host still validates each payload, authorizes the operation, and sanitizes its result.
+
+### Canonical Review
+The service-owned review identity that joins durable review state to one verified PDF byte snapshot within its source lineage, independently of any viewer tab, extension document, or host process.
+
+A source location is only a lookup coordinate: attaching changed bytes advances or resolves a different Document Generation, while reattaching the same verified document may join the existing Canonical Review.
+
+### Presentation Lease
+The revocable attachment of one viewer surface to a Canonical Review, distinct from the review's durable identity and state.
+
+Reloading, duplicating, restoring, or freshly opening a document may issue a new Presentation Lease for the same Canonical Review. Releasing one lease never authorizes deletion while another presentation, protected state, or activated review still depends on it; activation is the commit point after which failures recover in Placekeeper instead of abandoning the review for a different viewer.
 
 ## PDF review
 
