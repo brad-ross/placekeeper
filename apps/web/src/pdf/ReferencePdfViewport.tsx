@@ -3,6 +3,7 @@ import { AnnotationLayer } from '@embedpdf/plugin-annotation/react';
 import { PagePointerProvider } from '@embedpdf/plugin-interaction-manager/react';
 import { RenderLayer } from '@embedpdf/plugin-render/react';
 import { Scroller } from '@embedpdf/plugin-scroll/react';
+import { SelectionLayer } from '@embedpdf/plugin-selection/react';
 import { Viewport } from '@embedpdf/plugin-viewport/react';
 import { ZoomGestureWrapper } from '@embedpdf/plugin-zoom/react';
 import { createPortal } from 'react-dom';
@@ -18,6 +19,10 @@ import {
   type ReferenceScrollPosition,
 } from './reference-manual-scroll.js';
 import type { ViewerInteractionEvent } from './viewer-interaction-events.js';
+
+const PDF_TEXT_SELECTION_STYLE = {
+  background: 'var(--review-selection-bg)',
+} as const;
 
 export interface ReferencePdfViewportProps {
   readonly documentId: string;
@@ -57,6 +62,7 @@ export function ReferencePdfViewport({
       ref={onViewportElement}
       className="pdf-workspace pdf-workspace--reference"
       data-reference-pdf-viewport
+      data-pdf-copy-surface="reference"
       aria-label="Reference PDF document"
       role="region"
       onWheelCapture={(event) => {
@@ -125,6 +131,9 @@ export function ReferencePdfViewport({
                 className="pdf-workspace__page"
                 data-page-index={layout.pageIndex}
                 tabIndex={-1}
+                onPointerDownCapture={(event) => {
+                  event.currentTarget.focus({ preventScroll: true });
+                }}
                 style={{
                   position: 'relative',
                   width: layout.rotatedWidth,
@@ -138,6 +147,11 @@ export function ReferencePdfViewport({
                   documentId={documentId}
                   pageIndex={layout.pageIndex}
                   style={{ pointerEvents: 'none' }}
+                />
+                <SelectionLayer
+                  documentId={documentId}
+                  pageIndex={layout.pageIndex}
+                  textStyle={PDF_TEXT_SELECTION_STYLE}
                 />
                 <div
                   inert

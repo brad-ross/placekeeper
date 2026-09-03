@@ -230,6 +230,63 @@ describe('review shell layout and accessibility contract', () => {
     );
   });
 
+  it('persistently exposes the focused PDF copy owner when selections compete', () => {
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        pdfCopyOwner="reference"
+        pdfCopySnapshots={{
+          main: {
+            kind: 'ready',
+            surface: { kind: 'main', documentGeneration: 1 },
+            generation: 2,
+            text: 'main selection',
+            pageCount: 1,
+          },
+          reference: {
+            kind: 'ready',
+            surface: {
+              kind: 'reference', documentGeneration: 1, tabIdentity: 'reference-a',
+            },
+            generation: 3,
+            text: 'reference selection',
+            pageCount: 2,
+          },
+        }}
+        onCommand={async () => state}
+      >
+        <div>Document canvas</div>
+      </ReviewShell>,
+    );
+
+    expect(html).toContain('data-pdf-copy-owner="reference"');
+    expect(html).toContain('Copy source: Reference PDF');
+    expect(html).toContain('role="status"');
+
+    const revokedHtml = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        pdfCopyOwner={null}
+        pdfCopyOwnerIndicatorVisible
+        pdfCopySnapshots={{
+          main: {
+            kind: 'ready',
+            surface: { kind: 'main', documentGeneration: 1 },
+            generation: 2,
+            text: 'main selection',
+            pageCount: 1,
+          },
+          reference: null,
+        }}
+        onCommand={async () => state}
+      ><div>Document canvas</div></ReviewShell>,
+    );
+    expect(revokedHtml).toContain('data-pdf-copy-owner="none"');
+    expect(revokedHtml).toContain('Copy source: No PDF focused');
+  });
+
   it('floats a reversible outline expansion toggle opposite the active workspace navbar', () => {
     const html = renderToStaticMarkup(
       <ReviewShell

@@ -153,6 +153,7 @@ export function PdfWorkspace({
       aria-label={documentLabel}
       role="region"
       className="pdf-workspace"
+      data-pdf-copy-surface="main"
       style={fillContainer ? undefined : { height: '70vh', minHeight: 480 }}
     >
       <EmbedPDF

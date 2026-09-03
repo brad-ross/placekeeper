@@ -49,8 +49,11 @@ import {
   hitTestOwnedMark,
 } from '../pdf/owned-mark-hit-test.js';
 import {
+  copySelectionUpdateFromEvidence,
   SelectionReadAuthority,
   terminalSelectionUpdate,
+  type CopySelectionUpdate,
+  type PdfCopySurface,
   type SelectionUpdate,
 } from '../pdf/selection-state.js';
 import {
@@ -62,6 +65,7 @@ import {
   captureViewerCaret,
   captureViewerSelection,
   createEngineAnchorPageReader,
+  readViewerSelectionEvidence,
 } from '../pdf/viewer-selection-adapter.js';
 import {
   VIEWER_POINTER_BUTTON_NONE,
@@ -194,6 +198,7 @@ export interface AppProps {
   onViewerInitialized?: (registry: PluginRegistry) => Promise<void>;
   onViewerFramingInitialized?: (controls: ViewerFramingControls) => void;
   onSelectionUpdate?: (update: SelectionUpdate) => void;
+  onCopySelectionUpdate?: (update: CopySelectionUpdate) => void;
   documentTitle?: string;
   toolError?: string | null;
   /** Production composes the viewer inside the canonical reading-first ReviewShell. */
@@ -209,6 +214,7 @@ export interface AppProps {
   inventoryRetryGeneration?: number;
   documentGeneration?: number;
   referenceViewportHost?: HTMLElement | null;
+  activeReferenceTabIdentity?: string | null;
   onReferenceDocumentControls?: (controls: ReferenceDocumentController | null) => void;
   onReferenceManualScroll?: () => void;
   referenceManualScrollObserver?: ReferenceManualScrollObserver;
@@ -249,6 +255,7 @@ export function App({
   onViewerInitialized,
   onViewerFramingInitialized,
   onSelectionUpdate,
+  onCopySelectionUpdate,
   documentTitle = 'Local PDF',
   toolError = null,
   embeddedInReviewShell = false,
@@ -263,6 +270,7 @@ export function App({
   inventoryRetryGeneration = 0,
   documentGeneration = 0,
   referenceViewportHost = null,
+  activeReferenceTabIdentity = null,
   onReferenceDocumentControls,
   onReferenceManualScroll,
   referenceManualScrollObserver: providedReferenceManualScrollObserver,
@@ -283,6 +291,9 @@ export function App({
   const pageReadGeneration = useRef(0);
   const viewerInitialization = useRef(new ViewerInitializationAuthority());
   const selectionReads = useRef(new SelectionReadAuthority());
+  const mainCopyReads = useRef(new SelectionReadAuthority());
+  const referenceCopyReads = useRef(new SelectionReadAuthority());
+  const activeReferenceTabIdentityRef = useRef(activeReferenceTabIdentity);
   const registryRef = useRef<PluginRegistry | null>(null);
   const framingControlsRef = useRef<ViewerFramingControls | null>(null);
   const workspaceElementRef = useRef<HTMLDivElement | null>(null);
@@ -442,8 +453,25 @@ export function App({
     framingControlsRef.current?.dispose();
     framingControlsRef.current = null;
     selectionReads.current.invalidate();
+    mainCopyReads.current.invalidate();
+    referenceCopyReads.current.invalidate();
     caretReadGeneration.current += 1;
   }, [clearReferenceSubscriptions, clearSubscriptions, onReferenceDocumentControls, onViewerNavigationInitialized, viewer]);
+
+  useEffect(() => {
+    const generation = referenceCopyReads.current.invalidate().generation;
+    activeReferenceTabIdentityRef.current = activeReferenceTabIdentity;
+    if (activeReferenceTabIdentity === null) return;
+    onCopySelectionUpdate?.({
+      kind: 'cleared',
+      surface: {
+        kind: 'reference',
+        documentGeneration,
+        tabIdentity: activeReferenceTabIdentity,
+      },
+      generation,
+    });
+  }, [activeReferenceTabIdentity, documentGeneration, onCopySelectionUpdate]);
   const updateViewerRunway = useCallback((runway: ViewerRunway) => {
     const next = {
       right: Math.max(0, runway.right),
@@ -507,6 +535,12 @@ export function App({
     currentOutlineDocument.current = null;
     outlineAuthority.current.invalidate();
     onSelectionUpdate?.(selectionReads.current.invalidate());
+    onCopySelectionUpdate?.({
+      kind: 'cleared',
+      surface: { kind: 'main', documentGeneration },
+      generation: mainCopyReads.current.invalidate().generation,
+    });
+    referenceCopyReads.current.invalidate();
     const installViewerFraming = () => {
       framingControlsRef.current?.dispose();
       const framingControls = createViewerFramingControls({
@@ -844,6 +878,47 @@ export function App({
     }
 
     if (selection) {
+      const copySurface = (documentId: string): PdfCopySurface | null => {
+        if (documentId === MAIN_PDF_DOCUMENT_ID) {
+          return { kind: 'main', documentGeneration };
+        }
+        if (documentId !== REFERENCE_PDF_DOCUMENT_ID) return null;
+        const tabIdentity = activeReferenceTabIdentityRef.current;
+        return tabIdentity === null
+          ? null
+          : { kind: 'reference', documentGeneration, tabIdentity };
+      };
+      const copyAuthority = (surface: PdfCopySurface) => surface.kind === 'main'
+        ? mainCopyReads.current
+        : referenceCopyReads.current;
+      const beginCopySelectionRead = (documentId: string) => {
+        const surface = copySurface(documentId);
+        if (surface === null) return;
+        const authority = copyAuthority(surface);
+        const { generation, started } = authority.begin(
+          surface.kind === 'main' ? documentId : `${documentId}:${surface.tabIdentity}`,
+        );
+        if (started) onCopySelectionUpdate?.({ kind: 'pending', surface, generation });
+      };
+      const captureCopySelection = async (
+        documentId: string,
+        surface: PdfCopySurface,
+        generation: number,
+      ) => {
+        const authority = copyAuthority(surface);
+        try {
+          const evidence = await readViewerSelectionEvidence(documentId, selection);
+          if (authority.isCurrent(generation)) {
+            onCopySelectionUpdate?.(
+              copySelectionUpdateFromEvidence(surface, generation, evidence),
+            );
+          }
+        } catch {
+          if (authority.isCurrent(generation)) {
+            onCopySelectionUpdate?.({ kind: 'unavailable', surface, generation });
+          }
+        }
+      };
       const beginSelectionRead = (documentId: string) => {
         const { generation, started } = selectionReads.current.begin(documentId);
         if (!started) return;
@@ -870,6 +945,17 @@ export function App({
       };
       subscriptions.current.push(
         selection.onSelectionChange(({ documentId, selection: selectedRange }) => {
+          const surface = copySurface(documentId);
+          if (surface !== null) {
+            const authority = copyAuthority(surface);
+            if (selectedRange === null) {
+              onCopySelectionUpdate?.({
+                kind: 'cleared',
+                surface,
+                generation: authority.invalidate().generation,
+              });
+            } else beginCopySelectionRead(documentId);
+          }
           if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
           if (selectedRange === null) {
             setDetectedSelectionReliable(true);
@@ -882,6 +968,17 @@ export function App({
           }
         }),
         selection.onEndSelection(({ documentId }) => {
+          const surface = copySurface(documentId);
+          if (surface !== null) {
+            const authority = copyAuthority(surface);
+            const identity = surface.kind === 'main'
+              ? documentId
+              : `${documentId}:${surface.tabIdentity}`;
+            const copyGeneration = authority.finish(identity);
+            if (copyGeneration !== null) {
+              void captureCopySelection(documentId, surface, copyGeneration);
+            }
+          }
           if (documentId !== MAIN_PDF_DOCUMENT_ID) return;
           const generation = selectionReads.current.finish(documentId);
           if (generation === null) return;
@@ -940,7 +1037,7 @@ export function App({
     if (!initializationIsCurrent()) return;
     const inventoryDocument = currentInventoryDocument.current;
     if (inventoryDocument) discoverExistingAnnotations(inventoryDocument.id, inventoryDocument.document);
-  }, [assets, clearReferenceSubscriptions, clearSubscriptions, discoverExistingAnnotations, discoverOutline, documentGeneration, emit, initializeKeyboardCursor, onMainDocumentReady, onReferenceDocumentControls, onSelectionUpdate, onViewerFramingInitialized, onViewerInitialized, onViewerNavigationInitialized, publishKeyboardCursor, updateViewerRunway]);
+  }, [assets, clearReferenceSubscriptions, clearSubscriptions, discoverExistingAnnotations, discoverOutline, documentGeneration, emit, initializeKeyboardCursor, onCopySelectionUpdate, onMainDocumentReady, onReferenceDocumentControls, onSelectionUpdate, onViewerFramingInitialized, onViewerInitialized, onViewerNavigationInitialized, publishKeyboardCursor, updateViewerRunway]);
 
   const effectivePageReliability = pageSemanticReliable ?? detectedPageReliable;
   const effectiveSelectionReliability =

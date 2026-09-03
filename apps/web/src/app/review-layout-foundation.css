@@ -640,6 +640,23 @@
   color: var(--review-danger);
 }
 
+.pdf-copy-owner {
+  position: absolute;
+  z-index: 8;
+  top: .5rem;
+  right: .5rem;
+  margin: 0;
+  padding: .3rem .55rem;
+  border: 1px solid var(--review-border);
+  border-radius: var(--review-radius-control);
+  background: color-mix(in srgb, var(--review-surface-panel) 94%, transparent);
+  box-shadow: 0 2px 7px rgb(24 27 23 / 8%);
+  color: var(--review-ink-muted);
+  font-size: 11px;
+  font-weight: 650;
+  pointer-events: none;
+}
+
 .review-toast[data-generation-status="reconciling"] .review-icon {
   animation: review-loader-spin 900ms linear infinite;
 }

@@ -33,7 +33,12 @@ import {
   type ExistingAnnotation,
   type ExistingAnnotationsDiscovery,
 } from '../pdf/existing-annotations.js';
-import { reliableSelection, type SelectionUpdate } from '../pdf/selection-state.js';
+import {
+  reliableSelection,
+  type PdfCopyOwner,
+  type PdfCopySnapshots,
+  type SelectionUpdate,
+} from '../pdf/selection-state.js';
 import type { ViewerControls, ViewerControlsSnapshot } from '../pdf/viewer-controls.js';
 import { unavailableViewerControls } from '../pdf/viewer-controls.js';
 import type { ViewerFramingControls, ViewerPosition } from '../pdf/viewer-framing.js';
@@ -162,6 +167,10 @@ export interface ReviewShellProps {
   onExportReviewedCopy?(confirmPossiblyStale?: true): Promise<unknown>;
   listOpen?: boolean;
   selectionUpdate: SelectionUpdate;
+  pdfCopyOwner?: PdfCopyOwner;
+  pdfCopySnapshots?: PdfCopySnapshots;
+  pdfCopyOwnerIndicatorVisible?: boolean;
+  pdfCopyAnnouncement?: string;
   selectionPlacement?: ContextPlacement | null;
   caretAnchor?: CaretAnchor | null;
   caretPlacement?: ContextPlacement | null;
@@ -604,6 +613,13 @@ export function ReviewShell(props: ReviewShellProps) {
   const selectionAnchor = reliableSelection(props.selectionUpdate);
   const selectionActionsAvailable = selectionAnchor !== null
     && props.selectionUpdate.generation !== consumedSelectionGeneration;
+  const competingPdfSelections = props.pdfCopySnapshots?.main?.kind !== undefined
+    && props.pdfCopySnapshots.main.kind !== 'cleared'
+    && props.pdfCopySnapshots.reference?.kind !== undefined
+    && props.pdfCopySnapshots.reference.kind !== 'cleared';
+  const pdfCopyOwnerLabel = props.pdfCopyOwner === 'main'
+    ? 'Main PDF'
+    : props.pdfCopyOwner === 'reference' ? 'Reference PDF' : 'No PDF focused';
   const lastPlacedPageNoteToken = useRef<number | undefined>(undefined);
   const workspaceFraming = useWorkspaceFraming({
     workspaceOpen: anyWorkspaceOpen,
@@ -1820,6 +1836,12 @@ export function ReviewShell(props: ReviewShellProps) {
             generatedStatusMessages.join(' ')
           }</p> : null}
         </div> : null}
+        {competingPdfSelections || props.pdfCopyOwnerIndicatorVisible ? <p
+          className="pdf-copy-owner"
+          role="status"
+          aria-live="polite"
+          data-pdf-copy-owner={props.pdfCopyOwner ?? 'none'}
+        >Copy source: {pdfCopyOwnerLabel}</p> : null}
         <div className="review-document">{props.children}</div>
         <div className="review-contextual-host" data-review-contextual-host>
           {selectionActionsAvailable && props.selectionPlacement ? (
@@ -2199,6 +2221,9 @@ export function ReviewShell(props: ReviewShellProps) {
           ) : null}
         </div>
       </div>
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {props.pdfCopyAnnouncement ?? ''}
+      </p>
       <div
         className="review-nested-host"
         data-review-nested-host
