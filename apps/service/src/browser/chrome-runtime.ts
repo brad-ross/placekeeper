@@ -614,7 +614,9 @@ export class ChromeRuntimeConnection {
   }
 
   async #resourceMessage(message: Extract<ChromeRuntimeExtensionMessage, { readonly lane: "resource" }>): Promise<ChromeRuntimeHostMessage> {
-    if (this.#phase !== "active" || this.#staged === undefined) return this.#failure("resource", "read-only", message.requestId);
+    if ((this.#phase !== "provisional" && this.#phase !== "active") || this.#staged === undefined) {
+      return this.#failure("resource", "read-only", message.requestId);
+    }
     if (message.type === "cancel") {
       if (this.#resource?.requestId !== message.requestId) return this.#failure("resource", "invalid-state", message.requestId);
       this.#releaseResource();

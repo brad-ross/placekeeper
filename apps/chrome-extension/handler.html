@@ -3,15 +3,19 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Opening in Placekeeper</title>
+    <title>document.pdf</title>
     <link rel="stylesheet" href="/src/extension.css">
   </head>
   <body class="handler">
-    <main class="card" aria-labelledby="title">
-      <h1 id="title">Opening in Placekeeper</h1>
+    <div id="root" aria-label="Placekeeper PDF review" inert></div>
+    <main id="launch-shell" class="card" aria-labelledby="title">
+      <h1 id="title" tabindex="-1">Opening in Placekeeper</h1>
       <p id="status" class="status" role="status" aria-live="polite">Preparing this PDF…</p>
       <pre id="platform-proof" hidden aria-label="Platform proof results"></pre>
-      <button id="bypass" type="button">Use Chrome viewer</button>
+      <div class="handler-actions">
+        <button id="bypass" type="button">Use Chrome viewer</button>
+        <button id="reopen" type="button" hidden>Reopen PDF</button>
+      </div>
     </main>
     <script type="module" src="/src/handler-entry.ts"></script>
   </body>

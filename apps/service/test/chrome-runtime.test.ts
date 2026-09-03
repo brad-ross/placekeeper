@@ -78,6 +78,26 @@ async function acquire(connection: ChromeRuntimeConnection): Promise<void> {
 }
 
 describe("Chrome least-authority native runtime", () => {
+  it("streams only the generation-matching document while the lease is provisional", async () => {
+    const service = backend();
+    const connection = new ChromeRuntimeConnection({
+      callerOrigin: origin,
+      backend: service,
+    });
+    await negotiate(connection);
+    await acquire(connection);
+
+    await expect(connection.handle({
+      type: "read", lane: "resource", protocolVersion: 2, connectionId,
+      requestId: "request-resource-provisional", resource: "document",
+      generation: 1, offset: 0, length: sourceBytes.byteLength,
+    })).resolves.toMatchObject({
+      type: "resource-chunk", lane: "resource",
+      requestId: "request-resource-provisional", sequence: 0, done: true,
+    });
+    expect(service.readDocument).toHaveBeenCalledOnce();
+  });
+
   it("stages verified bytes, activates an internal presentation lease, and detaches", async () => {
     const service = backend();
     const connection = new ChromeRuntimeConnection({ callerOrigin: origin, backend: service });

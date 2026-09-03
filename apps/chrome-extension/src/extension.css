@@ -15,6 +15,26 @@ body {
   place-items: center;
 }
 
+.handler #root {
+  position: fixed;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.handler #root:empty {
+  display: none;
+}
+
+.handler #launch-shell {
+  position: relative;
+  z-index: 10;
+}
+
+.handler #launch-shell[hidden] {
+  display: none;
+}
+
 .card {
   box-sizing: border-box;
   width: min(28rem, calc(100vw - 2rem));
@@ -73,6 +93,16 @@ button:focus-visible {
 button:disabled {
   cursor: wait;
   opacity: 0.65;
+}
+
+.handler-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+}
+
+.handler-actions button[hidden] {
+  display: none;
 }
 
 .popup .switch {

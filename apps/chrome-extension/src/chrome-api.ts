@@ -29,6 +29,7 @@ export interface ChromeApi {
   };
   readonly runtime: {
     connectNative(application: string): NativePort;
+    getURL(path: string): string;
     readonly onInstalled: {
       addListener(listener: (details: { reason: string }) => void): void;
     };

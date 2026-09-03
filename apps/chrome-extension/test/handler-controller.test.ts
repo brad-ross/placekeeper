@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createHandlerController, HandoffError } from "../src/handler-controller.js";
+import {
+  createHandlerController,
+  HandoffError,
+  type EmbeddedReviewSession,
+} from "../src/handler-controller.js";
 
 const streamInfo = {
   originalUrl: "https://papers.example.test/download?id=42",
@@ -9,6 +13,145 @@ const streamInfo = {
 };
 
 describe("Chrome PDF handler controller", () => {
+  it("mounts and validates v2 before activation without replacing the PDF URL", async () => {
+    const order: string[] = [];
+    const replace = vi.fn();
+    const fallback = vi.fn();
+    const release = vi.fn(async () => undefined);
+    const dispose = vi.fn();
+    const review: EmbeddedReviewSession = {
+      displayName: "Paper.pdf",
+      mountAndValidate: vi.fn(async () => { order.push("document-ready"); }),
+      activate: vi.fn(async () => { order.push("active"); }),
+      release,
+      dispose,
+      subscribeLifecycle: vi.fn(() => () => undefined),
+    };
+    const controller = createHandlerController({
+      isOptedIn: async () => true,
+      getStreamInfo: async () => streamInfo,
+      handlerRuntimeVersion: 2,
+      openEmbedded: vi.fn(async () => review),
+      handoff: vi.fn(),
+      fallback,
+      replace,
+    });
+
+    await controller.run();
+
+    expect(order).toEqual(["document-ready", "active"]);
+    expect(controller.state()).toBe("active");
+    expect(replace).not.toHaveBeenCalled();
+    expect(fallback).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+    expect(dispose).not.toHaveBeenCalled();
+  });
+
+  it.each(["acquire", "mount", "activate"] as const)(
+    "releases provisional state and falls back once when embedded %s fails",
+    async (failure) => {
+      const fallback = vi.fn();
+      const release = vi.fn(async () => undefined);
+      const dispose = vi.fn();
+      const review: EmbeddedReviewSession = {
+        displayName: "Paper.pdf",
+        mountAndValidate: vi.fn(async () => {
+          if (failure === "mount") throw new Error("document-invalid");
+        }),
+        activate: vi.fn(async () => {
+          if (failure === "activate") throw new Error("activation-rejected");
+        }),
+        release,
+        dispose,
+        subscribeLifecycle: vi.fn(() => () => undefined),
+      };
+      const controller = createHandlerController({
+        isOptedIn: async () => true,
+        getStreamInfo: async () => streamInfo,
+        handlerRuntimeVersion: 2,
+        openEmbedded: vi.fn(async () => {
+          if (failure === "acquire") throw new Error("native-unavailable");
+          return review;
+        }),
+        handoff: vi.fn(),
+        fallback,
+        replace: vi.fn(),
+      });
+
+      await controller.run();
+      controller.bypass();
+
+      expect(fallback).toHaveBeenCalledOnce();
+      if (failure === "acquire") expect(release).not.toHaveBeenCalled();
+      else expect(release).toHaveBeenCalledOnce();
+      if (failure === "mount") expect(review.activate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("never falls back after activation and exposes a protected disconnect state", async () => {
+    let lifecycle!: (event: { readonly type: "disconnected"; readonly protected: boolean }) => void;
+    const fallback = vi.fn();
+    const review: EmbeddedReviewSession = {
+      displayName: "Paper.pdf",
+      mountAndValidate: vi.fn(async () => undefined),
+      activate: vi.fn(async () => undefined),
+      release: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+      subscribeLifecycle: vi.fn((listener) => {
+        lifecycle = listener;
+        return () => undefined;
+      }),
+    };
+    const controller = createHandlerController({
+      isOptedIn: async () => true,
+      getStreamInfo: async () => streamInfo,
+      handlerRuntimeVersion: 2,
+      openEmbedded: vi.fn(async () => review),
+      handoff: vi.fn(),
+      fallback,
+      replace: vi.fn(),
+    });
+
+    await controller.run();
+    lifecycle({ type: "disconnected", protected: true });
+    controller.bypass();
+
+    expect(controller.state()).toBe("disconnected-protected");
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it("releases and disposes before falling back when bypass interrupts mounting", async () => {
+    let rejectMount!: (error: Error) => void;
+    const mounted = new Promise<void>((_resolve, reject) => { rejectMount = reject; });
+    const order: string[] = [];
+    const review: EmbeddedReviewSession = {
+      displayName: "Paper.pdf",
+      mountAndValidate: vi.fn(async () => mounted),
+      activate: vi.fn(async () => undefined),
+      release: vi.fn(async () => { order.push("release"); }),
+      dispose: vi.fn(() => { order.push("dispose"); }),
+      subscribeLifecycle: vi.fn(() => () => undefined),
+    };
+    const controller = createHandlerController({
+      isOptedIn: async () => true,
+      getStreamInfo: async () => streamInfo,
+      handlerRuntimeVersion: 2,
+      openEmbedded: vi.fn(async () => review),
+      handoff: vi.fn(),
+      fallback: vi.fn(() => { order.push("fallback"); }),
+      replace: vi.fn(),
+    });
+
+    const run = controller.run();
+    await vi.waitFor(() => expect(controller.state()).toBe("mounting"));
+    controller.bypass();
+    rejectMount(new HandoffError("bypassed"));
+    await run;
+
+    expect(order).toEqual(["release", "dispose", "fallback"]);
+    expect(review.activate).not.toHaveBeenCalled();
+  });
+
   it("fails closed before install-time option synchronization", async () => {
     const fallback = vi.fn();
     const handoff = vi.fn();

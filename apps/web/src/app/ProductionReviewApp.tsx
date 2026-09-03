@@ -212,6 +212,10 @@ export interface ProductionReviewAppProps {
   readonly onReverseSyncTex?: (input: ReverseSyncTexRequest) => Promise<unknown>;
   readonly initialPresentation?: { readonly pageIndex?: number; readonly zoom?: number };
   readonly onPresentationChange?: (presentation: { readonly pageIndex: number; readonly zoom: number }) => void;
+  /** Host activation seam: emitted only after the main PDF generation is parsed. */
+  readonly onDocumentReady?: (generation: number) => void;
+  /** Host-visible title seam, already resolved through metadata then filename fallback. */
+  readonly onDocumentTitleChange?: (title: string, generation: number) => void;
 }
 
 export function forwardSyncTexRequestReady(input: {
@@ -1131,7 +1135,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     : resolvedPageTitle;
   useEffect(() => {
     document.title = pageTitle;
-  }, [pageTitle]);
+    props.onDocumentTitleChange?.(pageTitle, documentGenerationRef.current);
+  }, [pageTitle, props.onDocumentTitleChange]);
   useEffect(() => {
     const next = `${props.initialState.workflow.documentGeneration}:${props.initialState.revision}:${props.initialState.workflow.freshness}:${props.initialState.source.fileId}:${props.initialState.source.digest}`;
     if (next === initialStateKeyRef.current) return;
@@ -1400,6 +1405,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     const documentGeneration = documentGenerationRef.current;
     const documentSourceIdentity = sourceIdentity;
     setMainDocumentReadyGeneration(documentGeneration);
+    props.onDocumentReady?.(documentGeneration);
     searchControllerRef.current?.dispose();
     searchDocumentRef.current = document;
     void resolvePdfMetadataTitle(engine, document).then((title) => {
@@ -1440,7 +1446,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       void search.search(pendingQuery);
     }
     else if (searchRequestedRef.current) void search.prepare();
-  }, [sourceIdentity]);
+  }, [props.onDocumentReady, sourceIdentity]);
   const onViewerFramingInitialized = useCallback((controls: ViewerFramingControls) => {
     setViewerFraming(controls);
   }, []);

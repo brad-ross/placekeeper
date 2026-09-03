@@ -74,4 +74,16 @@ describe("Chrome extension static contract", () => {
     expect(handlerEntry).toContain("chrome.tabs.update(tabId, { url: destination })");
     expect(handlerEntry).not.toContain("window.location.replace");
   });
+
+  it("keeps the v1 redirect gated while the v2 handler mounts the packaged shared client", async () => {
+    const [handlerEntry, handler] = await Promise.all([
+      readFile(resolve(extensionRoot, "src/handler-entry.ts"), "utf8"),
+      readFile(resolve(extensionRoot, "handler.html"), "utf8"),
+    ]);
+    expect(handlerEntry).toContain("const HANDLER_RUNTIME_VERSION = 2");
+    expect(handlerEntry).toContain('chrome.runtime.getURL("shared/app.js")');
+    expect(handlerEntry).toContain('chrome.runtime.getURL("shared/app.css")');
+    expect(handlerEntry).toContain("createNativeEmbeddedReview");
+    expect(handler).toContain('<div id="root"');
+  });
 });
