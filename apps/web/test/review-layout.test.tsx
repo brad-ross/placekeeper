@@ -1020,6 +1020,8 @@ describe('review shell layout and accessibility contract', () => {
     }
     expect(html).toContain('aria-keyshortcuts="Meta+C Control+C"');
     expect(html.match(/review-action-button--icon/g)).toHaveLength(4);
+    expect(html.indexOf('aria-label="Copy"'))
+      .toBeGreaterThan(html.indexOf('aria-label="Highlight"'));
     expect(html).not.toMatch(/<\/svg>(?:Copy|Replace|Delete|Highlight)<\/button>/u);
     expect(html.match(/class="[^"]*review-action-button[^"]*"/g)).toHaveLength(4);
     expect(html).not.toMatch(/>(?:‹|›|−|\+|↶|↷)<\/button>/u);

@@ -72,10 +72,10 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
       inert={props.hidden}
       style={style}
     >
-      {props.onCopy ? <ContextActionButton kind="copy" iconOnly onAction={props.onCopy} /> : null}
       <ContextActionButton kind="replace" iconOnly onAction={props.onReplace} />
       <ContextActionButton kind="delete" iconOnly onAction={props.onDelete} />
       <ContextActionButton kind="highlight" iconOnly onAction={props.onHighlight} />
+      {props.onCopy ? <ContextActionButton kind="copy" iconOnly onAction={props.onCopy} /> : null}
     </div>
   );
 }
