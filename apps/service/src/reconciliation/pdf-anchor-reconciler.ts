@@ -1,9 +1,11 @@
-import type {
-  PendingReviewDraftV1,
-  ReviewAnchorDisposition,
-  ReviewAnchorEvidenceV1,
-  ReviewItem,
-  ReviewState,
+import {
+  normalizeReviewSelectionAnchor,
+  type ReviewSelectionPageEvidenceV1,
+  type PendingReviewDraftV1,
+  type ReviewAnchorDisposition,
+  type ReviewAnchorEvidenceV1,
+  type ReviewItem,
+  type ReviewState,
 } from "../../../../packages/core/src/review-model.js";
 
 export interface PdfAnchorPage {
@@ -28,6 +30,18 @@ interface AnchorResolution {
 interface SemanticMatch {
   readonly page: PdfAnchorPage;
   readonly offset: number;
+}
+
+interface DocumentPageSpan {
+  readonly page: PdfAnchorPage;
+  readonly start: number;
+  readonly end: number;
+}
+
+interface PassageMatch {
+  readonly start: number;
+  readonly end: number;
+  readonly pages: readonly DocumentPageSpan[];
 }
 
 function candidateMatches(anchor: ReviewAnchorEvidenceV1, pages: readonly PdfAnchorPage[]) {
@@ -134,6 +148,93 @@ function anchorForMatch(
     : { ...anchor, pageIndex: match.page.pageIndex, rect };
 }
 
+function documentPageSpans(pages: readonly PdfAnchorPage[]): {
+  readonly text: string;
+  readonly pages: readonly DocumentPageSpan[];
+} {
+  let offset = 0;
+  const ordered = pages.toSorted((left, right) => left.pageIndex - right.pageIndex);
+  const spans = ordered.map((page) => {
+    const span = { page, start: offset, end: offset + page.text.length };
+    offset = span.end;
+    return span;
+  });
+  return { text: ordered.map(({ text }) => text).join(""), pages: spans };
+}
+
+function crossPagePassageMatches(
+  anchor: Extract<ReviewAnchorEvidenceV1, { readonly kind: "selection" }>,
+  pages: readonly PdfAnchorPage[],
+): readonly PassageMatch[] {
+  const canonical = normalizeReviewSelectionAnchor(anchor);
+  const needle = canonical.pages.map(({ quote }) => quote).join("");
+  if (needle.length === 0) return [];
+  const document = documentPageSpans(pages);
+  const matches: PassageMatch[] = [];
+  let offset = 0;
+  while (offset <= document.text.length - needle.length) {
+    const found = document.text.indexOf(needle, offset);
+    if (found < 0) break;
+    const contextMatches = found >= canonical.prefix.length &&
+      document.text.startsWith(canonical.prefix, found - canonical.prefix.length) &&
+      document.text.startsWith(canonical.suffix, found + needle.length);
+    if (contextMatches) {
+      matches.push({ start: found, end: found + needle.length, pages: document.pages });
+      if (matches.length === 2) return matches;
+    }
+    offset = found + 1;
+  }
+  return matches;
+}
+
+function crossPageAnchorForMatch(
+  anchor: Extract<ReviewAnchorEvidenceV1, { readonly kind: "selection" }>,
+  match: PassageMatch,
+): Extract<ReviewAnchorEvidenceV1, { readonly kind: "selection" }> | undefined {
+  const canonical = normalizeReviewSelectionAnchor(anchor);
+  const pages: ReviewSelectionPageEvidenceV1[] = [];
+  for (const span of match.pages) {
+    const overlapStart = Math.max(match.start, span.start);
+    const overlapEnd = Math.min(match.end, span.end);
+    if (overlapStart >= overlapEnd) continue;
+    const localStart = overlapStart - span.start;
+    const length = overlapEnd - overlapStart;
+    const segmentRects = geometryForRange(span.page, localStart, length);
+    if (segmentRects === undefined) return undefined;
+    const rect = unionRects(segmentRects);
+    if (rect === undefined) return undefined;
+    pages.push({
+      pageIndex: span.page.pageIndex,
+      quote: span.page.text.slice(localStart, localStart + length),
+      prefix: "",
+      suffix: "",
+      rect,
+      segmentRects,
+    });
+  }
+  const first = pages[0];
+  const last = pages.at(-1);
+  if (first === undefined || last === undefined) return undefined;
+  pages[0] = { ...first, prefix: canonical.prefix };
+  pages[pages.length - 1] = { ...last, suffix: canonical.suffix };
+  const separator = canonical.pageBoundaries[0]?.separator ?? "\n";
+  const pageBoundaries = pages.slice(0, -1).map(({ pageIndex }) => ({
+    afterPageIndex: pageIndex,
+    separator,
+  }));
+  return {
+    kind: "selection",
+    pageIndex: first.pageIndex,
+    quote: pages.map((page, index) => page.quote + (pageBoundaries[index]?.separator ?? "")).join(""),
+    prefix: canonical.prefix,
+    suffix: canonical.suffix,
+    rect: first.rect,
+    segmentRects: first.segmentRects,
+    pages,
+    pageBoundaries,
+  };
+}
+
 export function reconcilePdfAnchor(
   anchor: ReviewAnchorEvidenceV1,
   pages: readonly PdfAnchorPage[],
@@ -146,6 +247,35 @@ export function reconcilePdfAnchor(
         kind: "unsupported",
         reason: "page-anchor-has-no-semantic-text-evidence",
       },
+    };
+  }
+  if (anchor.kind === "selection" && normalizeReviewSelectionAnchor(anchor).pages.length > 1) {
+    const matches = crossPagePassageMatches(anchor, pages);
+    if (matches.length === 1) {
+      const resolvedAnchor = crossPageAnchorForMatch(anchor, matches[0]!);
+      if (resolvedAnchor === undefined) {
+        return {
+          anchor,
+          disposition: {
+            kind: "unsupported",
+            reason: "current-generation-anchor-geometry-unavailable",
+          },
+        };
+      }
+      return {
+        anchor: resolvedAnchor,
+        disposition: { kind: "resolved", generation },
+      };
+    }
+    if (matches.length > 1) {
+      return {
+        anchor,
+        disposition: { kind: "ambiguous", reason: "semantic-anchor-matched-more-than-once" },
+      };
+    }
+    return {
+      anchor,
+      disposition: { kind: "missing", reason: "semantic-anchor-not-found" },
     };
   }
   const candidates = candidateMatches(anchor, pages);

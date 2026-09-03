@@ -76,6 +76,113 @@ function selectionItem(id: string, quote: string, prefix = "", suffix = ""): Rev
 }
 
 describe("atomic live document replacement", () => {
+  it("reconciles one full cross-page passage after repagination without matching synthetic separators", () => {
+    const page = (pageIndex: number, text: string) => ({
+      pageIndex,
+      text,
+      geometry: [{
+        charStart: 0,
+        glyphs: Array.from(text, (_, index) => ({ x: 10 + index * 4, y: 20, width: 4, height: 8 })),
+      }],
+    });
+    const anchor = {
+      kind: "selection" as const,
+      pageIndex: 0,
+      quote: "alpha end\nnext beta",
+      prefix: "before ",
+      suffix: " after",
+      rect: { x: 1, y: 1, width: 8, height: 8 },
+      segmentRects: [{ x: 1, y: 1, width: 8, height: 8 }],
+      pages: [
+        {
+          pageIndex: 0, quote: "alpha end", prefix: "before ", suffix: "",
+          rect: { x: 1, y: 1, width: 8, height: 8 },
+          segmentRects: [{ x: 1, y: 1, width: 8, height: 8 }],
+        },
+        {
+          pageIndex: 1, quote: "next beta", prefix: "", suffix: " after",
+          rect: { x: 1, y: 1, width: 8, height: 8 },
+          segmentRects: [{ x: 1, y: 1, width: 8, height: 8 }],
+        },
+      ],
+      pageBoundaries: [{ afterPageIndex: 0, separator: "\n" }],
+    };
+
+    const result = reconcilePdfAnchor(anchor, [
+      page(0, "before alpha"),
+      page(1, " endnext "),
+      page(2, "beta after"),
+    ], 2);
+
+    expect(result).toMatchObject({
+      disposition: { kind: "resolved", generation: 2 },
+      anchor: {
+        kind: "selection",
+        pageIndex: 0,
+        quote: "alpha\n endnext \nbeta",
+        pages: [
+          { pageIndex: 0, quote: "alpha" },
+          { pageIndex: 1, quote: " endnext " },
+          { pageIndex: 2, quote: "beta" },
+        ],
+        pageBoundaries: [
+          { afterPageIndex: 0, separator: "\n" },
+          { afterPageIndex: 1, separator: "\n" },
+        ],
+      },
+    });
+  });
+
+  it("keeps a cross-page item wholly unresolved when only its fragments match", () => {
+    const anchor = {
+      kind: "selection" as const,
+      pageIndex: 0,
+      quote: "alpha\nbeta",
+      prefix: "before ",
+      suffix: " after",
+      rect: { x: 1, y: 1, width: 8, height: 8 },
+      segmentRects: [{ x: 1, y: 1, width: 8, height: 8 }],
+      pages: [
+        { pageIndex: 0, quote: "alpha", prefix: "before ", suffix: "", rect: { x: 1, y: 1, width: 8, height: 8 }, segmentRects: [{ x: 1, y: 1, width: 8, height: 8 }] },
+        { pageIndex: 1, quote: "beta", prefix: "", suffix: " after", rect: { x: 1, y: 1, width: 8, height: 8 }, segmentRects: [{ x: 1, y: 1, width: 8, height: 8 }] },
+      ],
+      pageBoundaries: [{ afterPageIndex: 0, separator: "\n" }],
+    };
+
+    expect(reconcilePdfAnchor(anchor, [
+      { pageIndex: 0, text: "before alpha unrelated" },
+      { pageIndex: 1, text: "unrelated beta after" },
+    ], 2)).toEqual({
+      anchor,
+      disposition: { kind: "missing", reason: "semantic-anchor-not-found" },
+    });
+  });
+
+  it("keeps a cross-page passage wholly ambiguous when the complete text matches twice", () => {
+    const anchor = {
+      kind: "selection" as const,
+      pageIndex: 0,
+      quote: "alpha\nbeta",
+      prefix: "before ",
+      suffix: " after",
+      rect: { x: 1, y: 1, width: 8, height: 8 },
+      segmentRects: [{ x: 1, y: 1, width: 8, height: 8 }],
+      pages: [
+        { pageIndex: 0, quote: "alpha", prefix: "before ", suffix: "", rect: { x: 1, y: 1, width: 8, height: 8 }, segmentRects: [{ x: 1, y: 1, width: 8, height: 8 }] },
+        { pageIndex: 1, quote: "beta", prefix: "", suffix: " after", rect: { x: 1, y: 1, width: 8, height: 8 }, segmentRects: [{ x: 1, y: 1, width: 8, height: 8 }] },
+      ],
+      pageBoundaries: [{ afterPageIndex: 0, separator: "\n" }],
+    };
+
+    expect(reconcilePdfAnchor(anchor, [{
+      pageIndex: 0,
+      text: "before alphabeta after and before alphabeta after",
+    }], 2)).toEqual({
+      anchor,
+      disposition: { kind: "ambiguous", reason: "semantic-anchor-matched-more-than-once" },
+    });
+  });
+
   it("keeps overlapping semantic matches ambiguous", () => {
     const resolved = reconcilePdfAnchor({
       kind: "selection",

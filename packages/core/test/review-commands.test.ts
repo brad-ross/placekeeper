@@ -353,6 +353,49 @@ describe('canonical review commands', () => {
       .toThrow(/rebuild history boundary/iu);
   });
 
+  it('reattaches a complete cross-page anchor in one history entry', () => {
+    let { state, commands } = setup();
+    state = reduceReview(state, addReplace(state, selection, 'same semantics', commands));
+    const before = state.items[0]!;
+    state = startReviewGeneration(state, { documentGeneration: 2 });
+    const beforeHistoryLength = state.history.length;
+    const pages = [2, 3].map((pageIndex) => ({
+      pageIndex,
+      quote: pageIndex === 2 ? 'replacement' : 'target',
+      prefix: pageIndex === 2 ? 'left ' : '',
+      suffix: pageIndex === 3 ? ' right' : '',
+      rect: { x: 20, y: pageIndex === 2 ? 30 : 10, width: 40, height: 10 },
+      segmentRects: [{ x: 20, y: pageIndex === 2 ? 30 : 10, width: 40, height: 10 }],
+    }));
+    const nextAnchor = {
+      kind: 'selection' as const,
+      pageIndex: 2,
+      quote: 'replacement\ntarget',
+      prefix: 'left ',
+      suffix: ' right',
+      rect: pages[0]!.rect,
+      segmentRects: pages[0]!.segmentRects,
+      pages,
+      pageBoundaries: [{ afterPageIndex: 2, separator: '\n' }],
+    };
+
+    state = reduceReview(state, {
+      type: 'reattach',
+      expectedRevision: state.revision,
+      id: before.id,
+      expectedReconciliationRevision: 1,
+      ownerViewId: 'panel-b',
+      anchor: nextAnchor,
+      updatedAt: '2026-08-07T12:05:00.000Z',
+    });
+
+    expect(state.history).toHaveLength(beforeHistoryLength + 1);
+    expect(state.items).toHaveLength(1);
+    expect(state.items[0]?.reconciliation?.anchor).toEqual(nextAnchor);
+    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    expect(state.items[0]?.reconciliation?.anchor).toEqual(anchorEvidenceFromReviewItem(before));
+  });
+
   it('rejects unknown and item-incompatible reattachment anchors', () => {
     let { state, commands } = setup();
     state = reduceReview(state, addReplace(state, selection, 'same semantics', commands));
