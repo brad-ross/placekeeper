@@ -57,6 +57,7 @@ async function fixture(options: {
   querySourceHints?: ConstructorParameters<typeof LiveContextService>[0]["querySourceHints"];
   sourceRoot?: boolean;
   sourceHintBudgetMs?: number;
+  generatedOutput?: boolean;
 } = {}): Promise<{
   broker: SessionBroker;
   launch: SessionLaunch;
@@ -74,6 +75,7 @@ async function fixture(options: {
   const opened = await broker.openReview({
     pdfPath,
     surface: "codex",
+    ...(options.generatedOutput === true ? { workflowMode: "generated-output" as const } : {}),
     ...(options.sourceRoot === true ? { sourceRootPath: directory } : {}),
   });
   if (opened.kind !== "opened" || opened.launch.bindProof === undefined) {
@@ -548,6 +550,35 @@ describe("atomic live-context service", () => {
       identity: { reviewRevision: 1 },
     });
     expect(inspectionCount).toBe(1);
+  });
+
+  it("publishes a complete freshness snapshot when a source save races prompt inspection", async () => {
+    let releaseInspection!: () => void;
+    let inspectionStarted!: () => void;
+    const started = new Promise<void>((resolve) => { inspectionStarted = resolve; });
+    const release = new Promise<void>((resolve) => { releaseInspection = resolve; });
+    const { broker, launch, service } = await fixture({
+      generatedOutput: true,
+      inspect: async () => {
+        inspectionStarted();
+        await release;
+        return { pageCount: 1, existingAnnotations: [], warnings: [], sourceHints: new Map() };
+      },
+    });
+
+    const refresh = service.refresh({ taskSessionId: "task-a" });
+    await started;
+    await broker.markLiveDocumentPossiblyStale(launch.sessionId);
+    releaseInspection();
+
+    await expect(refresh).resolves.toMatchObject({
+      status: "current",
+      identity: { documentGeneration: 1, reviewRevision: 0 },
+      reviewState: {
+        document: { generation: 1, freshness: "possibly-stale" },
+        export: { eligible: false, requiresStaleConfirmation: true, reasons: ["possibly-stale"] },
+      },
+    });
   });
 
   it("fails closed for unbound, stale-generation, and ended sessions", async () => {

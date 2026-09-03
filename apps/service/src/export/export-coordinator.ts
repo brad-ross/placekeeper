@@ -18,7 +18,9 @@ import type {
 import type {
   ReviewItem,
   ReviewSourceIdentity,
+  ReviewWorkflowMode,
 } from "../../../../packages/core/src/review-model.js";
+import type { ReviewStateSummaryV1 } from "../../../../packages/core/src/live-context.js";
 import {
   runPdfBackend,
   type PdfBackendRunOptions,
@@ -47,13 +49,19 @@ export interface FrozenReviewDelivery {
   readonly items: readonly ReviewItem[];
   readonly sourceRootId?: string;
   readonly sourceRootPath?: string;
+  readonly workflowMode: ReviewWorkflowMode;
+  readonly documentGeneration: number;
+  readonly dispositionDigest: string;
+  readonly stateDigest: string;
+  readonly exportEligibility: ReviewStateSummaryV1["export"];
+  readonly staleConfirmed?: true;
 }
 
 export type FrozenPdfDelivery = Omit<
   FrozenReviewDelivery,
-  "items" | "sourceRootId" | "sourceRootPath"
+  "items" | "sourceRootId" | "sourceRootPath" | "workflowMode" | "documentGeneration" | "dispositionDigest" | "stateDigest" | "exportEligibility" | "staleConfirmed"
 > &
-  Partial<Pick<FrozenReviewDelivery, "items" | "sourceRootId" | "sourceRootPath">>;
+  Partial<Pick<FrozenReviewDelivery, "items" | "sourceRootId" | "sourceRootPath" | "workflowMode" | "documentGeneration" | "dispositionDigest" | "stateDigest" | "exportEligibility" | "staleConfirmed">>;
 
 export interface PdfExportResult {
   readonly kind: "reviewed-copy" | "original-replacement";
@@ -89,6 +97,7 @@ export interface ExportCoordinatorOptions {
     replacementDigest: string,
   ) => Promise<void>;
   readonly hooks?: ExportCoordinatorHooks;
+  readonly validateFrozenDelivery?: (delivery: FrozenPdfDelivery) => boolean | Promise<boolean>;
 }
 
 export class ExportCoordinatorError extends Error {
@@ -96,7 +105,10 @@ export class ExportCoordinatorError extends Error {
     | "EMPTY_REVIEW"
     | "ORIGINAL_REPLACEMENT_UNAVAILABLE"
     | "SOURCE_SNAPSHOT_INVALID"
-    | "SESSION_CAPABILITY_REVOKED";
+    | "SESSION_CAPABILITY_REVOKED"
+    | "RECONCILIATION_INCOMPLETE"
+    | "GENERATED_OUTPUT_IMMUTABLE"
+    | "EXPORT_FENCE_STALE";
 
   constructor(code: ExportCoordinatorError["code"], message: string) {
     super(message);
@@ -129,6 +141,7 @@ export class ExportCoordinator {
     | ((sessionId: string, replacementDigest: string) => Promise<void>)
     | undefined;
   readonly #hooks: ExportCoordinatorHooks;
+  readonly #validateFrozenDelivery: (delivery: FrozenPdfDelivery) => boolean | Promise<boolean>;
   readonly #copyInFlight = new Map<string, Promise<PdfExportResult>>();
   readonly #copyCompleted = new Map<string, PdfExportResult>();
   readonly #replaceInFlight = new Map<string, Promise<PdfExportResult>>();
@@ -145,11 +158,12 @@ export class ExportCoordinator {
     this.#prepareReplacement = options.prepareReplacement;
     this.#recordSuccessfulReplacement = options.recordSuccessfulReplacement;
     this.#hooks = options.hooks ?? {};
+    this.#validateFrozenDelivery = options.validateFrozenDelivery ?? (() => true);
   }
 
   exportReviewedCopy(delivery: FrozenPdfDelivery): Promise<PdfExportResult> {
     this.#assertDeliverable(delivery);
-    const key = `${delivery.sessionId}:${delivery.revision}`;
+    const key = this.#deliveryKey(delivery);
     const complete = this.#copyCompleted.get(key);
     if (complete !== undefined) return Promise.resolve(complete);
     const existing = this.#copyInFlight.get(key);
@@ -166,7 +180,13 @@ export class ExportCoordinator {
 
   replaceOriginal(delivery: FrozenPdfDelivery): Promise<PdfExportResult> {
     this.#assertDeliverable(delivery);
-    const key = `${delivery.sessionId}:${delivery.revision}`;
+    if (delivery.workflowMode === "generated-output") {
+      throw new ExportCoordinatorError(
+        "GENERATED_OUTPUT_IMMUTABLE",
+        "Replace Original is unavailable for generated output.",
+      );
+    }
+    const key = this.#deliveryKey(delivery);
     const complete = this.#replaceCompleted.get(key);
     if (complete !== undefined) return Promise.resolve(complete);
     const existing = this.#replaceInFlight.get(key);
@@ -182,10 +202,43 @@ export class ExportCoordinator {
   }
 
   #assertDeliverable(delivery: FrozenPdfDelivery): void {
+    const confirmedStale = delivery.exportEligibility?.eligible === false &&
+      delivery.exportEligibility.requiresStaleConfirmation &&
+      delivery.exportEligibility.reasons.length === 1 &&
+      delivery.exportEligibility.reasons[0] === "possibly-stale" &&
+      delivery.staleConfirmed === true;
+    if (
+      delivery.workflowMode === "generated-output" &&
+      delivery.exportEligibility?.eligible !== true &&
+      !confirmedStale
+    ) {
+      throw new ExportCoordinatorError(
+        "RECONCILIATION_INCOMPLETE",
+        "Generated-output reconciliation must be complete before explicit export.",
+      );
+    }
     if (delivery.annotations.length === 0) {
       throw new ExportCoordinatorError(
         "EMPTY_REVIEW",
         "There is no review feedback to deliver. Add an annotation first.",
+      );
+    }
+  }
+
+  #deliveryKey(delivery: FrozenPdfDelivery): string {
+    return [
+      delivery.sessionId,
+      delivery.documentGeneration ?? 1,
+      delivery.revision,
+      delivery.dispositionDigest ?? "legacy",
+    ].join(":");
+  }
+
+  async #assertFrozenDeliveryCurrent(delivery: FrozenPdfDelivery): Promise<void> {
+    if (!await this.#validateFrozenDelivery(delivery)) {
+      throw new ExportCoordinatorError(
+        "EXPORT_FENCE_STALE",
+        "The PDF generation or review state changed during export. Refresh and export again.",
       );
     }
   }
@@ -277,6 +330,7 @@ export class ExportCoordinator {
       );
       candidatePath = candidate.path;
       await this.#hooks.beforeFinalize?.(lease.signal);
+      await this.#assertFrozenDeliveryCurrent(delivery);
       lease.signal.throwIfAborted();
 
       const directory = dirname(originalPath);
@@ -377,6 +431,7 @@ export class ExportCoordinator {
       lease.signal.throwIfAborted();
       await this.#hooks.afterOriginalValidation?.();
       await this.#hooks.beforeFinalize?.(lease.signal);
+      await this.#assertFrozenDeliveryCurrent(delivery);
       await this.#capabilities.validateOriginalForReplacement(
         delivery.source.fileId,
         delivery.originalDigest,

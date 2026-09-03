@@ -4,7 +4,11 @@ import { dirname, join, resolve } from "node:path";
 import { createServer } from "node:net";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { validateBackendRuntimeManifest, validateCodexPlugin } from "./validate-manifest.js";
+import {
+  validateBackendRuntimeManifest,
+  validateCodexPlugin,
+  validateSharedWebDistribution,
+} from "./validate-manifest.js";
 import { BUILD_IDENTITY_FILENAME, computePackagedBuildIdentity } from "./build-app.js";
 import { encodePlacekeeperLink } from "../../packages/core/src/placekeeper-link.js";
 import {
@@ -657,6 +661,26 @@ export async function smokeInstalledBundle(appPath: string, fixturePath: string,
     },
   });
   const evidence = validateDoctorEvidence(JSON.parse(result.stdout) as unknown, manifest.nodeVersion, pdfium.sha256);
+  const vscodeLauncher = resolve(appPath, "Contents/MacOS/placekeeper-vscode");
+  const launcherInfo = await lstat(vscodeLauncher);
+  if (!launcherInfo.isFile() || (launcherInfo.mode & 0o111) === 0) {
+    throw new Error("Installed scoped VS Code launcher is not executable");
+  }
+  const sharedWeb = await validateSharedWebDistribution(resolve(appPath, "Contents/Resources/web"));
+  const vscodeWeb = await validateSharedWebDistribution(resolve(
+    appPath,
+    "Contents/Resources/integrations/vscode/dist/web",
+  ));
+  if (JSON.stringify(vscodeWeb) !== JSON.stringify(sharedWeb)) {
+    throw new Error("Installed VS Code web assets differ from the shared production client");
+  }
+  await execFileAsync(vscodeLauncher, [
+    "--registration", "invalid",
+    "--pdf", resolve(fixturePath),
+  ], { encoding: "utf8", timeout: 5_000, maxBuffer: 4_096 }).then(
+    () => { throw new Error("Installed scoped VS Code launcher accepted an invalid registration"); },
+    () => undefined,
+  );
   await smokeInstalledLaunchServicesBridge(appPath);
   await smokeInstalledHookLifecycle(appPath, fixturePath, repoRoot);
   return evidence;

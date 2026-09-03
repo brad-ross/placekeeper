@@ -19,7 +19,6 @@ export interface AnnotationListProps {
   activeId?: string;
   correspondingId?: string;
   activationRequest?: { readonly id: string; readonly token: number };
-  sectionLabels?: ReadonlyMap<string, string>;
   onNavigate(item: ReviewItem): void;
   onReadFull?(record: AnnotationReaderRecord, trigger: HTMLButtonElement): void;
   onReaderOverflowChange?(record: AnnotationReaderRecord, overflowing: boolean): void;
@@ -46,7 +45,6 @@ export function AnnotationList({
   activeId,
   correspondingId,
   activationRequest,
-  sectionLabels,
   onNavigate,
   onReadFull,
   onReaderOverflowChange,
@@ -112,7 +110,13 @@ export function AnnotationList({
   };
 
   return (
-    <section className="annotation-drawer__owned" data-annotation-origin="owned" aria-label="Owned annotations">
+    <section
+      className="annotation-drawer__owned"
+      data-annotation-origin="owned"
+      data-workspace-focus-token="annotations:section"
+      aria-label="Owned annotations"
+      tabIndex={-1}
+    >
       <header className="annotation-drawer__header">
         <h2>Annotations</h2>
       </header>
@@ -128,9 +132,8 @@ export function AnnotationList({
           const kindLabel = annotationKindLabel(item.kind);
           const active = activeId === item.id;
           const corresponding = correspondingId === item.id;
-          const sectionLabel = sectionLabels?.get(item.id);
           const copyLink = copyLinkForItem?.(item);
-          const readerRecord = projectOwnedAnnotationReader(item, sectionLabel);
+          const readerRecord = projectOwnedAnnotationReader(item);
           return (
             <li
               key={item.id}
@@ -174,7 +177,6 @@ export function AnnotationList({
                   aria-label={annotationAccessibleLabel({
                     kind: item.kind,
                     pageNumber: item.pageIndex + 1,
-                    ...(sectionLabel === undefined ? {} : { sectionLabel }),
                     ...(text ? { excerpt: text } : {}),
                   })}
                   title={`Go to ${kindLabel} annotation on page ${item.pageIndex + 1}`}
@@ -185,9 +187,12 @@ export function AnnotationList({
                   <AnnotationMetadata
                     kind={item.kind}
                     pageNumber={item.pageIndex + 1}
-                    {...(sectionLabel === undefined ? {} : { sectionLabel })}
                   />
-                  <div className="annotation-item__title-actions" role="group" aria-label={`${kindLabel} annotation actions`}>
+                  <div
+                    className="annotation-item__title-actions"
+                    role="group"
+                    aria-label={`${kindLabel} annotation actions`}
+                  >
                     {item.kind === 'delete' ? null : (
                       <button type="button" className="annotation-item__action" data-annotation-action="edit" aria-label={`Edit ${kindLabel} annotation on page ${item.pageIndex + 1}`} title="Edit annotation" onClick={(event) => onEdit(item, event.currentTarget)}>
                         <ReviewIcon name="edit" size={13} />
@@ -225,7 +230,7 @@ export function AnnotationList({
           );
         })}
       </ol>
-      {ordered.length === 0 ? <p className="annotation-empty" data-annotation-status="empty">No annotations yet.</p> : null}
+      {ordered.length === 0 ? <p className="annotation-empty" data-annotation-status="empty">Select text in the PDF to add an annotation.</p> : null}
     </section>
   );
 }

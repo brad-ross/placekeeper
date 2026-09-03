@@ -105,6 +105,41 @@ export async function resolveScopedSourcePath(
   };
 }
 
+/** Resolves an untrusted SyncTeX source candidate. SyncTeX may emit either a
+ * project-relative path or an absolute path, but the physical target must be
+ * one unique regular file under the already canonical approved root. */
+export async function resolveSyncTexSourcePath(
+  canonicalRoot: string,
+  candidatePath: string,
+): Promise<{ readonly path: string; readonly relativePath: string }> {
+  if (candidatePath.length === 0 || candidatePath.includes("\0")) {
+    throw new UnsafeSourcePathError("The SyncTeX source path is empty or malformed");
+  }
+  const lexical = isAbsolute(candidatePath)
+    ? resolve(candidatePath)
+    : resolve(canonicalRoot, candidatePath);
+  const lexicalContained = lexical !== canonicalRoot && isContained(canonicalRoot, lexical);
+  if (!isAbsolute(candidatePath) && !lexicalContained) {
+    throw new UnsafeSourcePathError("The SyncTeX source path escapes the approved source root");
+  }
+  if (lexicalContained) await rejectSymlinkAncestors(canonicalRoot, lexical);
+  const info = await lstat(lexical);
+  if (info.isSymbolicLink() || !info.isFile()) {
+    throw new UnsafeSourcePathError("The SyncTeX source target must be a regular file");
+  }
+  const physical = await realpath(lexical);
+  if (!isContained(canonicalRoot, physical)) {
+    throw new UnsafeSourcePathError("The SyncTeX source target leaves the approved source root");
+  }
+  if (lexicalContained && physical !== lexical) {
+    throw new UnsafeSourcePathError("The SyncTeX source target traverses a symbolic link");
+  }
+  return {
+    path: physical,
+    relativePath: relative(canonicalRoot, physical).split(sep).join("/"),
+  };
+}
+
 export interface ScopedSourceRead {
   readonly fingerprint: SourceFingerprint;
   readonly text: string;

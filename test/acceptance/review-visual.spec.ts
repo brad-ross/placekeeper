@@ -49,6 +49,59 @@ async function expectScene(locator: Locator, name: string): Promise<void> {
   });
 }
 
+async function openFocusedReattachment(
+  page: Page,
+  viewport: { readonly width: number; readonly height: number },
+): Promise<Locator> {
+  await page.setViewportSize(viewport);
+  await page.goto('/test/acceptance/review-harness/index.html?visual=tray&reconciliation=1');
+  const product = page.locator('.review-shell');
+  await expect(product).toBeVisible();
+  const workspace = viewport.width < 900
+    ? page.getByRole('button', { name: /^(?:Open|Close) References tray$/u })
+    : page.getByRole('button', { name: /^(?:Open|Close) right workspace$/u });
+  if (await workspace.getAttribute('aria-expanded') !== 'true') await workspace.click();
+  const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
+  if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
+  await page.getByRole('button', {
+    name: 'Reattach previous Highlight annotation on page 1',
+  }).click();
+  const detail = page.locator('[data-reconciliation-detail="reattach"]');
+  await expect(detail).toBeVisible();
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
+  return detail;
+}
+
+async function expectFocusedReattachmentGeometry(detail: Locator): Promise<void> {
+  const geometry = await detail.evaluate((element) => {
+    const header = element.querySelector<HTMLElement>('.reconciliation-workspace__detail-header');
+    const title = header?.querySelector<HTMLElement>('h2');
+    const pill = header?.querySelector<HTMLElement>('.reconciliation-workspace__state-pill');
+    const back = header?.querySelector<HTMLElement>('.full-annotation-reader__back');
+    const discard = header?.querySelector<HTMLElement>('.full-annotation-reader__edit');
+    if (!header || !title || !pill || !back || !discard) throw new Error('Focused reattachment header is incomplete.');
+    return {
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      title: title.getBoundingClientRect().toJSON(),
+      pill: pill.getBoundingClientRect().toJSON(),
+      back: back.getBoundingClientRect().toJSON(),
+      discard: discard.getBoundingClientRect().toJSON(),
+    };
+  });
+  expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
+  expect(geometry.pill.x).toBeGreaterThanOrEqual(geometry.title.x + geometry.title.width - 0.5);
+  expect(geometry.pill.y).toBeGreaterThanOrEqual(geometry.title.y - 8);
+  expect(geometry.pill.y + geometry.pill.height).toBeLessThanOrEqual(
+    geometry.title.y + geometry.title.height + 8,
+  );
+  expect(geometry.back.width).toBeCloseTo(geometry.discard.width, 1);
+  expect(geometry.back.height).toBeCloseTo(geometry.discard.height, 1);
+}
+
 async function expectAnnotationTrayOverflow(
   page: Page,
   { verticallyScrollable = false }: { readonly verticallyScrollable?: boolean } = {},
@@ -178,9 +231,8 @@ async function expectAnnotationTitleEndcapGeometry(row: Locator): Promise<void> 
   expect(geometry.edit.height).toBeCloseTo(geometry.remove.height, 1);
   expect(geometry.remove.height).toBeCloseTo(geometry.copy.height, 1);
   expect(geometry.edit.width).toBeLessThanOrEqual(24);
-  expect(geometry.editOpacity).toBe(1);
-  expect(geometry.removeOpacity).toBe(1);
-  expect(geometry.copyOpacity).toBe(1);
+  expect(geometry.editOpacity).toBe(geometry.removeOpacity);
+  expect(geometry.removeOpacity).toBe(geometry.copyOpacity);
 }
 
 async function expectCompactAnnotationReader(page: Page): Promise<Locator> {
@@ -425,12 +477,27 @@ test('wide reading', async ({ page }) => {
   await expectScene(product, 'wide-reading.png');
 });
 
+test('narrow responsive top-bar menu', async ({ page }) => {
+  await openScene(page, 'reading', { width: 390, height: 720 });
+  const chrome = page.locator('[data-review-chrome]');
+  await expect(chrome).toHaveCSS('height', '58px');
+  await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'navigationCompact');
+  await page.getByRole('button', {
+    name: 'Document navigation, current page 4 of 128',
+  }).click();
+  await expect(page.getByRole('menu', { name: 'Document navigation' })).toBeVisible();
+  await expect(page).toHaveScreenshot('narrow-responsive-top-bar-menu.png', {
+    animations: 'disabled',
+    maxDiffPixels: 100,
+  });
+});
+
 test('unavailable viewer controls', async ({ page }) => {
   const product = await openScene(page, 'unavailable-controls');
   await expect(page.getByRole('button', { name: 'Previous page' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Zoom out' })).toBeDisabled();
   await expect(page.getByLabel('Current page')).toHaveText('— / —');
-  await expect(page.getByLabel('Zoom level')).toHaveText('—%');
+  await expect(page.getByLabel('Zoom unavailable')).toHaveText('—%');
   await expectScene(product, 'unavailable-viewer-controls.png');
 });
 
@@ -444,9 +511,15 @@ test('installed real PDF reading', async ({ page }) => {
   await expect.poll(() => image.evaluate((element) => (
     element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0
   ))).toBe(true);
-  const identityBox = await page.locator('.review-chrome__save-identity').boundingBox();
-  const copyLinkBox = await page.locator('[data-review-copy-link]').boundingBox();
-  const viewerControlsBox = await page.locator('.review-chrome__viewer-controls').boundingBox();
+  const identityBox = await page.locator(
+    '[data-review-chrome] > .review-chrome__identity .review-chrome__save-identity',
+  ).boundingBox();
+  const copyLinkBox = await page.locator(
+    '[data-review-chrome] > .review-chrome__identity [data-review-copy-link]',
+  ).boundingBox();
+  const viewerControlsBox = await page.locator(
+    '[data-review-chrome] > .review-chrome__viewer-controls',
+  ).boundingBox();
   if (!identityBox || !copyLinkBox || !viewerControlsBox) {
     throw new Error('Document chrome geometry is unavailable.');
   }
@@ -488,11 +561,8 @@ test('wide Annotation Tray', async ({ page }) => {
   await expect(page.getByRole('button', { name: /Copy link to Highlight annotation on page 1/u })
     .locator('.lucide-link')).toBeVisible();
   await expect(row.locator('.annotation-item__page')).toHaveText('1');
-  await expect(row.locator('.annotation-item__separator')).toHaveCount(2);
-  await expect(row.locator('.annotation-item__section')).toHaveAttribute(
-    'title',
-    'Identification strategy and conditional comparison groups',
-  );
+  await expect(row.locator('.annotation-item__separator')).toHaveCount(1);
+  await expect(row.locator('.annotation-item__section')).toHaveCount(0);
   await expectScene(product, 'wide-annotation-tray.png');
 
   await more.focus();
@@ -516,6 +586,97 @@ test('wide Annotation Tray', async ({ page }) => {
   await expectScene(product, 'wide-full-annotation-reader-owned.png');
 });
 
+test('focused reattachment hierarchy', async ({ page }) => {
+  const wide = await openFocusedReattachment(page, { width: 1280, height: 900 });
+  await expectFocusedReattachmentGeometry(wide);
+  await expectScene(wide, 'wide-focused-reattachment.png');
+
+  const narrow = await openFocusedReattachment(page, { width: 320, height: 900 });
+  await expectFocusedReattachmentGeometry(narrow);
+  await expectScene(narrow, 'narrow-focused-reattachment.png');
+});
+
+test('task-first generated Annotation Tray and blocked document menu', async ({ page }) => {
+  const product = await openScene(page, 'tray&reconciliation=mixed');
+  const workspace = page.getByRole('button', { name: /^(?:Open|Close) right workspace$/u });
+  if (await workspace.getAttribute('aria-expanded') !== 'true') await workspace.click();
+  const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
+  if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
+
+  const headings = page.locator('#workspace-panel-annotations h2');
+  await expect(headings).toHaveText(['Needs attention', 'Annotations', 'From this PDF']);
+  const resolved = page.locator('[data-review-item="00000000-0000-4000-8000-000000000208"]');
+  await resolved.locator('.annotation-item__navigation').focus();
+  await expect(resolved.locator('[data-annotation-action]').first()).toHaveCSS('opacity', '1');
+  await expectScene(product, 'wide-generated-annotation-tray.png');
+
+  await page.getByRole('button', { name: /Open document actions$/u }).click();
+  const menu = page.getByRole('menu', { name: /Actions for/u });
+  await expect(menu).toHaveAttribute('data-export-eligibility', 'blocked');
+  await expect(menu.getByRole('menuitem', { name: 'Export', exact: true }))
+    .toHaveAttribute('aria-disabled', 'true');
+  const openAnnotations = menu.getByRole('menuitem', { name: 'Open Annotations' });
+  await expect(openAnnotations).toBeVisible();
+  await expect(openAnnotations.locator('.lucide-list-checks')).toBeVisible();
+  await expectScene(product, 'wide-generated-document-actions.png');
+});
+
+test('height-constrained generated Annotation Tray stays contained', async ({ page }) => {
+  const viewport = { width: 320, height: 560 };
+  const product = await openScene(page, 'tray&reconciliation=mixed', viewport);
+  const rail = page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
+  if (await rail.getAttribute('aria-expanded') !== 'true') await rail.click();
+  const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
+  if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
+  const panel = page.locator('#workspace-panel-annotations');
+  const geometry = await panel.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return {
+      top: bounds.top,
+      right: bounds.right,
+      bottom: bounds.bottom,
+      left: bounds.left,
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    };
+  });
+  expect(geometry.top).toBeGreaterThanOrEqual(0);
+  expect(geometry.left).toBeGreaterThanOrEqual(0);
+  expect(geometry.right).toBeLessThanOrEqual(viewport.width + 1);
+  expect(geometry.bottom).toBeLessThanOrEqual(viewport.height + 1);
+  expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
+  await expect(page.locator('[data-annotation-scroll-viewport]')).toHaveCSS('overflow-y', 'auto');
+  await expectScene(product, 'height-constrained-generated-annotation-tray.png');
+});
+
+test('coarse-pointer generated Annotation Tray keeps contextual controls visible', async ({ browser }) => {
+  const context = await browser.newContext({
+    hasTouch: true,
+    viewport: { width: 390, height: 720 },
+    deviceScaleFactor: 1,
+    colorScheme: 'light',
+  });
+  const page = await context.newPage();
+  try {
+    const product = await openScene(page, 'tray&reconciliation=mixed', { width: 390, height: 720 });
+    const rail = page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
+    if (await rail.getAttribute('aria-expanded') !== 'true') await rail.click();
+    const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
+    if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
+    expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+    const action = page.locator('[data-review-item="00000000-0000-4000-8000-000000000208"]')
+      .locator('[data-annotation-action]').first();
+    await expect(action).toHaveCSS('opacity', '1');
+    const bounds = await action.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.width).toBeGreaterThanOrEqual(44);
+    expect(bounds!.height).toBeGreaterThanOrEqual(44);
+    await expectScene(product, 'coarse-generated-annotation-tray.png');
+  } finally {
+    await context.close();
+  }
+});
+
 test('narrow Annotation Tray', async ({ page }) => {
   const product = await openScene(page, 'tray', { width: 320, height: 720 });
   await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-workspace-presentation', 'bottom');
@@ -529,24 +690,8 @@ test('narrow Annotation Tray', async ({ page }) => {
   const row = page.locator('[data-review-item="owned-highlight"]');
   const annotation = row.getByRole('button', { name: /Highlight · Page 1/u });
   await annotation.focus();
-  const section = row.locator('.annotation-item__section');
-  const sectionGeometry = await section.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return {
-      clientWidth: element.clientWidth,
-      scrollWidth: element.scrollWidth,
-      overflow: style.overflow,
-      textOverflow: style.textOverflow,
-      whiteSpace: style.whiteSpace,
-    };
-  });
-  expect(sectionGeometry.clientWidth).toBeLessThanOrEqual(128);
-  expect(sectionGeometry.scrollWidth).toBeGreaterThan(sectionGeometry.clientWidth);
-  expect(sectionGeometry).toMatchObject({
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  });
+  await expect(row.locator('.annotation-item__section')).toHaveCount(0);
+  await expect(row.locator('.annotation-item__separator')).toHaveCount(1);
   await expectAnnotationTrayOverflow(page, { verticallyScrollable: true });
   const imported = page.locator('[data-existing-annotation="source-highlight-long"]');
   const more = imported.getByRole('button', {
@@ -925,6 +1070,70 @@ test('the out-of-view anchor uses one icon button and keeps actions beneath the 
   expect(actionsBox!.y).toBeGreaterThanOrEqual(inputBox!.y + inputBox!.height);
   expect(await composer.boundingBox()).toEqual(before);
   await expectScene(product, 'wide-contextual-long-source.png');
+
+  const measureAnchorLayout = async () => composer.evaluate((element) => {
+    const header = element.querySelector<HTMLElement>('.comment-composer__header');
+    const body = element.querySelector<HTMLElement>('.comment-composer__body');
+    const returnControl = element.querySelector<HTMLElement>('.comment-composer__anchor');
+    const cancel = element.querySelector<HTMLElement>('.comment-composer__actions button');
+    if (!header || !body || !cancel) throw new Error('Composer geometry is incomplete.');
+    return {
+      header: header.getBoundingClientRect().toJSON(),
+      body: body.getBoundingClientRect().toJSON(),
+      anchor: returnControl?.getBoundingClientRect().toJSON() ?? null,
+      cancel: cancel.getBoundingClientRect().toJSON(),
+    };
+  });
+  const wideOutside = await measureAnchorLayout();
+  await openScene(page, 'reading&composer=replacement&context=long&return=visible');
+  const wideVisible = await measureAnchorLayout();
+  expect(wideOutside.anchor).not.toBeNull();
+  expect(wideOutside.anchor!.width).toBeCloseTo(wideOutside.anchor!.height, 0);
+  expect(wideOutside.anchor!.height).toBeCloseTo(wideOutside.cancel.height, 0);
+  expect(wideOutside.header.height).toBeCloseTo(wideVisible.header.height, 0);
+  expect(wideOutside.body.y).toBeCloseTo(wideVisible.body.y, 0);
+
+  const mediumViewport = { width: 840, height: 720 };
+  await openScene(
+    page,
+    'reading&composer=replacement&context=long&return=outside',
+    mediumViewport,
+  );
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+    'data-annotation-presentation',
+    'bottom',
+  );
+  const mediumOutside = await measureAnchorLayout();
+  await openScene(
+    page,
+    'reading&composer=replacement&context=long&return=visible',
+    mediumViewport,
+  );
+  const mediumVisible = await measureAnchorLayout();
+  expect(mediumOutside.anchor).not.toBeNull();
+  expect(mediumOutside.anchor!.width).toBeCloseTo(mediumOutside.anchor!.height, 0);
+  expect(mediumOutside.anchor!.height).toBeCloseTo(mediumOutside.cancel.height, 0);
+  expect(mediumOutside.header.height).toBeCloseTo(mediumVisible.header.height, 0);
+  expect(mediumOutside.body.y).toBeCloseTo(mediumVisible.body.y, 0);
+
+  const narrowViewport = { width: 520, height: 720 };
+  await openScene(
+    page,
+    'reading&composer=replacement&context=long&return=outside',
+    narrowViewport,
+  );
+  const narrowOutside = await measureAnchorLayout();
+  await openScene(
+    page,
+    'reading&composer=replacement&context=long&return=visible',
+    narrowViewport,
+  );
+  const narrowVisible = await measureAnchorLayout();
+  expect(narrowOutside.anchor).not.toBeNull();
+  expect(narrowOutside.anchor!.width).toBeCloseTo(narrowOutside.anchor!.height, 0);
+  expect(narrowOutside.anchor!.height).toBeCloseTo(narrowOutside.cancel.height, 0);
+  expect(narrowOutside.header.height).toBeCloseTo(narrowVisible.header.height, 0);
+  expect(narrowOutside.body.y).toBeCloseTo(narrowVisible.body.y, 0);
 });
 
 test('no anchor control is shown when its location is unavailable', async ({ page }) => {

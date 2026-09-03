@@ -8,6 +8,7 @@ import { App } from '../../../apps/web/src/app/App.js';
 import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
 import type { SelectionUpdate } from '../../../apps/web/src/pdf/selection-state.js';
 import type { ViewerInteractionEvent } from '../../../apps/web/src/pdf/viewer-interaction-events.js';
+import { CommentComposer } from '../../../apps/web/src/review/CommentComposer.js';
 
 const htmlPayload = '<img src=x onerror="globalThis.__htmlPayloadExecuted=true">';
 const root = document.querySelector('#root');
@@ -18,6 +19,7 @@ let lastSelectionUpdate: SelectionUpdate | null = null;
 let lastCaretPageIndex: number | null = null;
 let lastCaretLeftContext = '';
 const viewerInteractionCounts = new Map<ViewerInteractionEvent['type'], number>();
+const composerActionCounts = new Map<'apply' | 'cancel', number>();
 const params = new URLSearchParams(globalThis.location.search);
 
 globalThis.__htmlPayloadExecuted = false;
@@ -66,6 +68,9 @@ globalThis.viewerAcceptance = {
   interactionCount(type: ViewerInteractionEvent['type']) {
     return viewerInteractionCounts.get(type) ?? 0;
   },
+  composerActionCount(action: 'apply' | 'cancel') {
+    return composerActionCounts.get(action) ?? 0;
+  },
   caretAnchorPageIndex() {
     return lastCaretPageIndex;
   },
@@ -74,7 +79,7 @@ globalThis.viewerAcceptance = {
   },
 };
 
-createRoot(root).render(
+createRoot(root).render(<>
   <App
       assets={{
         pdfiumWasm: '/test/fixtures/pdfium/pdfium.wasm',
@@ -130,8 +135,25 @@ createRoot(root).render(
           lastCaretLeftContext = event.value.anchor?.leftContext ?? '';
         }
       }}
-  />,
-);
+      reverseSyncTexEnabled={params.get('reverse-synctex') === 'true'}
+  />
+  {params.get('composer') === 'replacement' ? (
+    <div className="review-layout" data-annotation-presentation="right">
+      <CommentComposer
+        title="Replacement"
+        fieldLabel="Replacement"
+        initialValue="replacement"
+        saveLabel="Apply"
+        onSave={() => {
+          composerActionCounts.set('apply', (composerActionCounts.get('apply') ?? 0) + 1);
+        }}
+        onDismiss={() => {
+          composerActionCounts.set('cancel', (composerActionCounts.get('cancel') ?? 0) + 1);
+        }}
+      />
+    </div>
+  ) : null}
+</>);
 
 declare global {
   var __htmlPayloadExecuted: boolean;
@@ -144,6 +166,7 @@ declare global {
     goToPage(pageNumber: number): void;
     reviewItemCount(): number;
     interactionCount(type: ViewerInteractionEvent['type']): number;
+    composerActionCount(action: 'apply' | 'cancel'): number;
     caretAnchorPageIndex(): number | null;
     caretAnchorLeftContext(): string;
   };

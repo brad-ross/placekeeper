@@ -21,8 +21,20 @@ export interface SessionControlRegistryOptions {
   readonly heartbeat?: boolean;
 }
 
+export type SessionStateInvalidationReason = "revision" | "freshness";
+
 function serverFrame(opcode: number, payload = Buffer.alloc(0)): Buffer {
-  return Buffer.concat([Buffer.from([0x80 | opcode, payload.byteLength]), payload]);
+  if (payload.byteLength <= 125) {
+    return Buffer.concat([Buffer.from([0x80 | opcode, payload.byteLength]), payload]);
+  }
+  if (payload.byteLength <= 0xffff) {
+    const header = Buffer.alloc(4);
+    header[0] = 0x80 | opcode;
+    header[1] = 126;
+    header.writeUInt16BE(payload.byteLength, 2);
+    return Buffer.concat([header, payload]);
+  }
+  throw new RangeError("Server control frame exceeds the bounded payload size");
 }
 
 export class SessionControlRegistry {
@@ -174,6 +186,48 @@ export class SessionControlRegistry {
       reviewPresence: connected + this.#graceExpiresAt.size,
       transientWork: writes,
     };
+  }
+
+  publishSuccessor(
+    sessionId: string,
+    event: {
+      readonly previousGeneration: number;
+      readonly documentGeneration: number;
+      readonly reviewRevision: number;
+    },
+  ): void {
+    this.#publish(sessionId, {
+      kind: "document-successor",
+      previousGeneration: event.previousGeneration,
+      documentGeneration: event.documentGeneration,
+      reviewRevision: event.reviewRevision,
+    });
+  }
+
+  publishStateInvalidation(
+    sessionId: string,
+    event: {
+      readonly documentGeneration: number;
+      readonly reviewRevision: number;
+      readonly reason: SessionStateInvalidationReason;
+    },
+  ): void {
+    this.#publish(sessionId, { kind: "session-invalidated", ...event });
+  }
+
+  #publish(sessionId: string, event: Readonly<Record<string, unknown>>): void {
+    const payload = Buffer.from(JSON.stringify(event), "utf8");
+    if (payload.byteLength > MAX_APPLICATION_FRAME_BYTES) {
+      throw new RangeError("Session invalidation exceeds the control-frame limit");
+    }
+    const frame = serverFrame(0x1, payload);
+    for (const client of this.#clients.get(sessionId) ?? []) {
+      try {
+        client.socket.write(frame);
+      } catch {
+        client.socket.destroy();
+      }
+    }
   }
 
   cancel(sessionId: string): void {

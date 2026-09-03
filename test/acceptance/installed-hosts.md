@@ -59,6 +59,21 @@ The 2026-08-07 acceptance record predates the clean-break identity and no longer
 - Manual installation and visual smoke tests for Codex desktop and VS Code desktop are still recommended for users who choose those integrations. This source-tree run does not claim that the current Codex desktop rendered or trusted the plugin; disabled or untrusted hooks are represented by the provider's explicit `unavailable` behavior.
 - VS Code Remote SSH, containers, Codespaces, web, virtual, and non-file workspaces remain intentionally refused.
 
+## Installed VS Code LaTeX workflow release gate
+
+Automated distribution checks prove that the app and extension carry identical integrity-pinned `app.js`, `app.css`, `pdfium.wasm`, and inline-worker declarations; missing, duplicated, externally hosted, stale, or unexpected assets fail validation. They also prove that the macOS bundle contains the executable `Contents/MacOS/placekeeper-vscode` wrapper and its bounded `vscode://placekeeper-local.placekeeper-vscode/placekeeper/external` route. These checks are scaffolding, not Electron webview evidence.
+
+Before U8 is called complete, run the copied fixture in `test/fixtures/latex` and record both rows below. Do not record PDF/source paths, registration IDs, capabilities, review text, or credentials. A result is Pass only when the extension log and generated webview HTML contain none of that material and the network log has zero external requests.
+
+| Date | Build | VS Code / LaTeX Workshop | Route | Direct boot + first page | Two rebuilds + same panel | Forward / reverse SyncTeX | Mixed + stale continuity | Distinct export | Hide/show + restart presentation | Zero iframe/browser/network | Result |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-08-28 | U8 source candidate | 1.135.0 / 10.18.0 | Placekeeper commands with LaTeX Workshop retaining build authority | Pass: embedded first page rendered beside source | Pass: two `latexmk` rebuilds changed the PDF in one panel | Pass: forward returned `ok`; reverse opened the mapped source line | Pass in generation, stale-sidecar, and reconciliation automation | Pass in broker/export automation | Pending release-presentation move + restart repetition | Pass: direct webview, no iframe/browser launch, empty network log | Partial: functional source-PDF loop passes; release-presentation repetition remains |
+| Pending | Pending | 1.95 / absent or incompatible | Supported Placekeeper-only fallback | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Pending |
+
+For the current-host row, also move the panel, repeat view and SyncTeX, hide/show it, and reload VS Code. The restored serializer state may contain only the opaque panel key plus bounded page index and zoom. The service must rebind current semantic state; no session credential, source path, review text, or capability may be serialized. Exercise a partial candidate, source-save-without-successor, sidecar skew, ambiguous reconciliation, and export race; each must fail closed while protected work remains.
+
+If the LaTeX Workshop probe fails, record that failure as the compatibility result and complete the same loop with **Placekeeper: View PDF** and **Placekeeper: Forward SyncTeX**. Do not mark the release blocked merely because the unsupported compatibility path is unavailable; do mark it blocked if the supported fallback fails.
+
 ## Chrome PDF handoff evidence
 
 `pnpm test:chrome-handoff` is the deterministic gate. It uses a disposable persistent Chromium profile and a private loopback fixture; the profile directory is removed after the run. The fixture counts only named outcome categories. It does not retain request URLs, cookies, form bodies, local PDF paths, capabilities, or native-host messages. The focused unit portion proves exact-once stream consumption and drain-before-fallback, local-path reuse, origin and quota enforcement, temporary-source ownership and cleanup, remote save restrictions, Protected Recovery, and the absence of new Codex authority.

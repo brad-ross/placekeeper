@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
+import { lstat, readFile, readdir } from "node:fs/promises";
 import { extname, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { inflateSync } from "node:zlib";
@@ -28,7 +28,7 @@ export const CATALOG_DISTRIBUTION_BASELINE = {
     report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
     thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
   },
-  productionWebJavaScriptBytes: 2_410_043,
+  productionWebJavaScriptBytes: 2_495_440,
 } as const;
 
 const CATALOG_ATTRIBUTION_URLS = [
@@ -721,10 +721,24 @@ async function validateVscodeIdentity(
   ]);
   const manifest = record(JSON.parse(manifestSource) as unknown, "VS Code extension manifest");
   const contributes = record(manifest.contributes, "VS Code extension contributions");
-  if (!Array.isArray(contributes.commands) || contributes.commands.length !== 1) {
-    throw new Error("The Placekeeper VS Code extension must expose one command");
+  if (!Array.isArray(contributes.commands)) {
+    throw new Error("The Placekeeper VS Code extension must expose commands");
   }
-  const command = record(contributes.commands[0], "VS Code Placekeeper command");
+  const commands = contributes.commands.map((value, index) => record(value, `VS Code Placekeeper command ${index}`));
+  const command = commands.find((value) => value.command === "placekeeper.open");
+  const commandIds = new Set(commands.map((value) => value.command));
+  if (command === undefined || ![
+    "placekeeper.open",
+    "placekeeper.viewPdf",
+    "placekeeper.forwardSyncTex",
+    "placekeeper.goToSource",
+    "placekeeper.reattach",
+    "placekeeper.exportReviewedPdf",
+    "placekeeper.configureLatexWorkshop",
+    "placekeeper.restoreLatexWorkshop",
+  ].every((id) => commandIds.has(id))) {
+    throw new Error("The Placekeeper VS Code extension command surface is incomplete");
+  }
   const commandIconPaths = record(command.icon, "VS Code Placekeeper command icon");
   if (
     manifest.publisher !== "placekeeper-local" ||
@@ -740,6 +754,81 @@ async function validateVscodeIdentity(
 
 interface DistributionValidationOptions {
   readonly productionWebRoot?: string;
+  readonly vscodeWebRoot?: string;
+}
+
+export interface SharedWebAssetManifest {
+  readonly schemaVersion: 2;
+  readonly app: string;
+  readonly stylesheet: string;
+  readonly pdfiumWasm: string;
+  readonly worker: { readonly kind: "inline-blob"; readonly container: string };
+  readonly integrity: Readonly<Record<string, string>>;
+}
+
+export async function validateSharedWebDistribution(webRoot: string): Promise<SharedWebAssetManifest> {
+  const root = resolve(webRoot);
+  let manifestSource: string;
+  try {
+    manifestSource = await readFile(resolve(root, "asset-manifest.json"), "utf8");
+  } catch {
+    throw new Error("The shared web distribution is missing asset-manifest.json");
+  }
+  let value: unknown;
+  try { value = JSON.parse(manifestSource) as unknown; }
+  catch { throw new Error("The shared web asset manifest is invalid JSON"); }
+  const manifest = record(value, "Shared web asset manifest");
+  const exactManifestKeys = ["app", "integrity", "pdfiumWasm", "schemaVersion", "stylesheet", "worker"];
+  if (Object.keys(manifest).sort().join("\n") !== exactManifestKeys.join("\n") || manifest.schemaVersion !== 2) {
+    throw new Error("The shared web asset manifest has an unsupported shape");
+  }
+  const app = boundedString(manifest.app, "Shared web app asset");
+  const stylesheet = boundedString(manifest.stylesheet, "Shared web stylesheet asset");
+  const pdfiumWasm = boundedString(manifest.pdfiumWasm, "Shared web PDFium asset");
+  const assets = [app, stylesheet, pdfiumWasm];
+  if (assets.some((name) => !/^[A-Za-z0-9._-]+$/u.test(name))) {
+    throw new Error("Shared web assets must be local filenames");
+  }
+  if (new Set(assets).size !== assets.length) throw new Error("Shared web asset paths must not be duplicated");
+  const worker = record(manifest.worker, "Shared web worker");
+  if (Object.keys(worker).sort().join("\n") !== "container\nkind" ||
+    worker.kind !== "inline-blob" || worker.container !== app) {
+    throw new Error("The shared PDFium worker must be an inline app asset");
+  }
+  const integrity = record(manifest.integrity, "Shared web asset integrity");
+  if (Object.keys(integrity).sort().join("\n") !== [...assets].sort().join("\n") ||
+    Object.values(integrity).some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/u.test(digest))) {
+    throw new Error("The shared web asset integrity map is incomplete");
+  }
+  const expectedFiles = ["asset-manifest.json", ...assets].sort();
+  let actualFiles: string[];
+  try { actualFiles = (await readdir(root)).sort(); }
+  catch { throw new Error("The shared web distribution is missing"); }
+  if (actualFiles.join("\n") !== expectedFiles.join("\n")) {
+    throw new Error(`The shared web distribution has missing or unexpected stale assets; expected ${expectedFiles.join(", ")}`);
+  }
+  const bytes = new Map<string, Buffer>();
+  for (const name of assets) {
+    const path = resolve(root, name);
+    if (!(await lstat(path)).isFile()) throw new Error(`Shared web asset must be a regular file: ${name}`);
+    const assetBytes = await readFile(path);
+    if (assetBytes.byteLength === 0) throw new Error(`Shared web asset is empty: ${name}`);
+    const digest = createHash("sha256").update(assetBytes).digest("hex");
+    if (integrity[name] !== digest) throw new Error(`Shared web asset is stale: ${name}`);
+    bytes.set(name, assetBytes);
+  }
+  const appSource = bytes.get(app)!.toString("utf8");
+  if (!/new Worker\(/u.test(appSource) || !/new Blob\(/u.test(appSource)) {
+    throw new Error("The packaged client is missing its inline PDFium worker");
+  }
+  return {
+    schemaVersion: 2,
+    app,
+    stylesheet,
+    pdfiumWasm,
+    worker: { kind: "inline-blob", container: app },
+    integrity: Object.freeze({ ...integrity }) as Readonly<Record<string, string>>,
+  };
 }
 
 export async function validateDistributionManifests(
@@ -781,8 +870,8 @@ export async function validateDistributionManifests(
   if (packageManifest.scripts?.["prebuild:web"] !== "pnpm catalog:check") {
     throw new Error("Production web builds must run the non-mutating catalog:check gate");
   }
-  if (packageManifest.scripts?.["validate:distribution"] !== "pnpm build:web && pnpm build:chrome && tsx packaging/macos/validate-manifest.ts") {
-    throw new Error("Distribution validation must rebuild the production web and Chrome bundles before inspection");
+  if (packageManifest.scripts?.["validate:distribution"] !== "pnpm build:web && pnpm build:vscode && pnpm build:chrome && tsx packaging/macos/validate-manifest.ts") {
+    throw new Error("Distribution validation must rebuild the production web, VS Code, and Chrome bundles before inspection");
   }
   for (const scriptName of ["build", "build:web", "package:macos", "install:local"] as const) {
     if (/catalog:(?:audit|generate|update)/u.test(packageManifest.scripts?.[scriptName] ?? "")) {
@@ -796,12 +885,20 @@ export async function validateDistributionManifests(
       webEntry: resolve(webRoot, "app.js"),
       noticePath,
     });
+    const productionManifest = await validateSharedWebDistribution(webRoot);
+    if (options.vscodeWebRoot !== undefined) {
+      const vscodeManifest = await validateSharedWebDistribution(options.vscodeWebRoot);
+      if (JSON.stringify(vscodeManifest) !== JSON.stringify(productionManifest)) {
+        throw new Error("The packaged VS Code client assets are stale or differ from the shared production assets");
+      }
+    }
   }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   await validateDistributionManifests(process.cwd(), {
     productionWebRoot: resolve(process.cwd(), "dist/web"),
+    vscodeWebRoot: resolve(process.cwd(), "apps/vscode/dist/web"),
   });
   process.stdout.write("Distribution manifests and offline runtime assets are valid.\n");
 }

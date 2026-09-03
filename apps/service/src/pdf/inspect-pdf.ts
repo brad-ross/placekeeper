@@ -14,6 +14,24 @@ export interface InspectedPdfPageEvidence {
   readonly bytes: Buffer;
 }
 
+export interface InspectedPdfPageText {
+  readonly pageIndex: number;
+  readonly text: string;
+  readonly geometry: readonly InspectedPdfTextGeometryRun[];
+}
+
+export interface InspectedPdfGlyphGeometry {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface InspectedPdfTextGeometryRun {
+  readonly charStart: number;
+  readonly glyphs: readonly InspectedPdfGlyphGeometry[];
+}
+
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.slice().buffer;
 }
@@ -104,6 +122,45 @@ export async function inspectPdfPageEvidence(
         rgba: rgba.toString("base64"),
       })),
     };
+  } finally {
+    if (document !== undefined) {
+      await engine.closeDocument(document).toPromise().catch(() => false);
+    }
+    await engine.destroy().toPromise();
+  }
+}
+
+/** Extracts every page's text while sharing one PDFium engine/document open. */
+export async function inspectPdfPageTexts(bytes: Uint8Array): Promise<readonly InspectedPdfPageText[]> {
+  const engine = await createEngine();
+  let document: PdfDocumentObject | undefined;
+  try {
+    document = await engine.openDocumentBuffer({
+      id: "generation-anchor-reconciliation",
+      content: toArrayBuffer(bytes),
+    }).toPromise();
+    const pages: InspectedPdfPageText[] = [];
+    for (let pageIndex = 0; pageIndex < document.pageCount; pageIndex += 1) {
+      const page = pageAt(document, pageIndex);
+      const [text, geometry] = await Promise.all([
+        engine.extractText(document, [pageIndex]).toPromise(),
+        engine.getPageGeometry(document, page).toPromise(),
+      ]);
+      pages.push({
+        pageIndex,
+        text,
+        geometry: geometry.runs.map((run) => ({
+          charStart: run.charStart,
+          glyphs: run.glyphs.map((glyph) => ({
+            x: glyph.x,
+            y: glyph.y,
+            width: glyph.width,
+            height: glyph.height,
+          })),
+        })),
+      });
+    }
+    return pages;
   } finally {
     if (document !== undefined) {
       await engine.closeDocument(document).toPromise().catch(() => false);

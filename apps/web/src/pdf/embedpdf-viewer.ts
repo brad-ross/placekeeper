@@ -19,28 +19,52 @@ import { MAIN_PDF_DOCUMENT_ID } from './viewer-document-ids.js';
 export interface ViewerAssetUrls {
   pdfiumWasm: string;
   documentUrl: string;
+  /** Optional packaged single-file worker fetched and launched as a blob by the host runtime. */
+  workerUrl?: string;
   /** Memory-only headers, normally the U2 document-scoped Bearer credential. */
   requestHeaders?: Readonly<Record<string, string>>;
 }
 
-function sameOriginUrl(rawUrl: string, origin: string): string {
+export type ViewerResourcePolicy =
+  | { readonly host: 'browser'; readonly origin: string }
+  | { readonly host: 'vscode'; readonly issued: ReadonlySet<string> };
+
+export function validateViewerResourceUrl(rawUrl: string, policy: ViewerResourcePolicy): string {
+  if (policy.host === 'vscode') {
+    const extensionResource = rawUrl.startsWith('vscode-webview://') ||
+      /^https:\/\/[^/\s]+\.vscode-cdn\.net(?:\/|$)/u.test(rawUrl) ||
+      /^blob:vscode-webview:\/\/[A-Za-z0-9._~-]+\/[0-9a-f-]{36}$/iu.test(rawUrl);
+    if (!policy.issued.has(rawUrl) || !extensionResource) {
+      throw new Error('Viewer resources must be extension-issued.');
+    }
+    return rawUrl;
+  }
+  const origin = policy.origin;
   const url = new URL(rawUrl, origin);
   if (url.origin !== origin) throw new Error('Viewer assets must be same-origin.');
   return url.href;
 }
 
-export function createLocalPdfiumViewer(assetUrls: ViewerAssetUrls, origin = globalThis.location.origin) {
-  const pdfiumWasm = sameOriginUrl(assetUrls.pdfiumWasm, origin);
+function browserPolicy(origin: string): ViewerResourcePolicy {
+  return { host: 'browser', origin };
+}
+
+export function createLocalPdfiumViewer(
+  assetUrls: ViewerAssetUrls,
+  policy: ViewerResourcePolicy = browserPolicy(globalThis.location.origin),
+) {
+  const pdfiumWasm = validateViewerResourceUrl(assetUrls.pdfiumWasm, policy);
   const engine = createPdfiumEngine(pdfiumWasm, { encoderPoolSize: 1, fontFallback: null });
-  return { engine, plugins: createLocalPdfiumViewerPlugins(assetUrls, origin) };
+  return { engine, plugins: createLocalPdfiumViewerPlugins(assetUrls, policy) };
 }
 
 export function createLocalPdfiumViewerPlugins(
   assetUrls: ViewerAssetUrls,
-  origin: string,
+  policyOrOrigin: ViewerResourcePolicy | string,
 ): PluginBatchRegistrations {
+  const policy = typeof policyOrOrigin === 'string' ? browserPolicy(policyOrOrigin) : policyOrOrigin;
   const document = {
-    ...buildViewerDocumentOptions(assetUrls, origin),
+    ...buildViewerDocumentOptions(assetUrls, policy),
     documentId: MAIN_PDF_DOCUMENT_ID,
     autoActivate: true,
   };
@@ -74,10 +98,11 @@ export function createLocalPdfiumViewerPlugins(
 
 export function buildViewerDocumentOptions(
   assetUrls: ViewerAssetUrls,
-  origin: string,
+  policyOrOrigin: ViewerResourcePolicy | string,
 ): LoadDocumentUrlOptions {
+  const policy = typeof policyOrOrigin === 'string' ? browserPolicy(policyOrOrigin) : policyOrOrigin;
   return {
-    url: sameOriginUrl(assetUrls.documentUrl, origin),
+    url: validateViewerResourceUrl(assetUrls.documentUrl, policy),
     name: 'Local PDF',
     mode: 'full-fetch',
     requestOptions: {

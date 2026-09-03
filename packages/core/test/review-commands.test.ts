@@ -10,7 +10,13 @@ import {
   removeReviewItem,
   type ReviewCommandFactory,
 } from '../src/review-commands.js';
-import { createReviewState, type ReviewState } from '../src/review-model.js';
+import {
+  anchorEvidenceFromReviewItem,
+  createReviewState,
+  startReviewGeneration,
+  type ReviewCommand,
+  type ReviewState,
+} from '../src/review-model.js';
 import {
   InvalidReviewCommandError,
   MAX_REVIEW_SELECTION_SEGMENTS,
@@ -53,6 +59,165 @@ function setup(): { state: ReviewState; commands: ReviewCommandFactory } {
 }
 
 describe('canonical review commands', () => {
+  it('keeps generated-output items and pending authoring generation-bound and revisioned', () => {
+    let state = createReviewState({
+      sessionId: 'session',
+      source,
+      workflowMode: 'generated-output',
+      documentGeneration: 4,
+    });
+    const commands = setup().commands;
+    const addCommand = addReplace(state, selection, 'locally unique equilibrium', commands);
+    if (addCommand.type !== 'add') throw new Error('Expected add');
+    state = reduceReview(state, {
+      ...addCommand,
+      authoring: { ownerViewId: 'panel-a', baseGeneration: 4 },
+    });
+
+    expect(state.workflow).toMatchObject({
+      mode: 'generated-output',
+      documentRole: 'generated-output',
+      documentGeneration: 4,
+    });
+    expect(state.items[0]?.reconciliation).toMatchObject({
+      ownerViewId: 'panel-a',
+      baseGeneration: 4,
+      revision: 0,
+      disposition: { kind: 'resolved', generation: 4 },
+    });
+
+    state = reduceReview(state, {
+      type: 'put-draft',
+      expectedRevision: state.revision,
+      expectedDraftRevision: -1,
+      draft: {
+        id: '00000000-0000-4000-8000-000000000099',
+        ownerViewId: 'panel-a',
+        baseGeneration: 4,
+        revision: 0,
+        kind: 'replace',
+        pageIndex: 0,
+        text: 'draft replacement',
+        anchor: anchorEvidenceFromReviewItem(state.items[0]!),
+        disposition: { kind: 'resolved', generation: 4 },
+        status: 'protected',
+        createdAt: '2026-08-07T12:00:00.000Z',
+        updatedAt: '2026-08-07T12:00:00.000Z',
+      },
+    });
+    expect(state.pendingDrafts[0]).toMatchObject({ revision: 0, status: 'protected' });
+
+    expect(() => reduceReview(state, {
+      type: 'put-draft',
+      expectedRevision: state.revision,
+      expectedDraftRevision: -1,
+      draft: { ...state.pendingDrafts[0]!, text: 'racing update' },
+    })).toThrow(/draft revision/iu);
+
+    state = reduceReview(state, {
+      type: 'apply-draft',
+      expectedRevision: state.revision,
+      id: state.pendingDrafts[0]!.id,
+      expectedDraftRevision: state.pendingDrafts[0]!.revision,
+      ownerViewId: 'panel-a',
+      updatedAt: '2026-08-07T12:01:00.000Z',
+    });
+    expect(state.pendingDrafts).toEqual([]);
+    expect(state.items[1]).toMatchObject({
+      id: '00000000-0000-4000-8000-000000000099',
+      kind: 'replace',
+      payload: { proposedText: 'draft replacement' },
+      reconciliation: { disposition: { kind: 'resolved', generation: 4 } },
+    });
+  });
+
+  it('reattaches without changing semantic payload and fences undo at a rebuild boundary', () => {
+    let { state, commands } = setup();
+    state = reduceReview(state, addReplace(state, selection, 'same semantics', commands));
+    const before = state.items[0]!;
+    state = startReviewGeneration(state, { documentGeneration: 2 });
+    expect(state.items[0]?.reconciliation?.disposition.kind).toBe('missing');
+
+    const nextAnchor = {
+      ...anchorEvidenceFromReviewItem(before),
+      pageIndex: 2,
+      rect: { x: 20, y: 30, width: 40, height: 10 },
+      segmentRects: [{ x: 20, y: 30, width: 40, height: 10 }],
+    };
+    state = reduceReview(state, {
+      type: 'reattach',
+      expectedRevision: state.revision,
+      id: before.id,
+      expectedReconciliationRevision: 1,
+      ownerViewId: 'panel-b',
+      anchor: nextAnchor,
+      updatedAt: '2026-08-07T12:05:00.000Z',
+    });
+    expect(state.items[0]?.payload).toEqual(before.payload);
+    expect(state.items[0]?.pageIndex).toBe(2);
+    expect(state.items[0]?.reconciliation).toMatchObject({
+      revision: 2,
+      disposition: { kind: 'resolved', generation: 2 },
+      anchor: { pageIndex: 2 },
+    });
+
+    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    expect(state.items[0]?.reconciliation?.disposition.kind).toBe('missing');
+    expect(() => reduceReview(state, { type: 'undo', expectedRevision: state.revision }))
+      .toThrow(/rebuild history boundary/iu);
+  });
+
+  it('rejects unknown and item-incompatible reattachment anchors', () => {
+    let { state, commands } = setup();
+    state = reduceReview(state, addReplace(state, selection, 'same semantics', commands));
+    state = startReviewGeneration(state, { documentGeneration: 2 });
+    const item = state.items[0]!;
+    const command = {
+      type: 'reattach',
+      expectedRevision: state.revision,
+      id: item.id,
+      expectedReconciliationRevision: item.reconciliation!.revision,
+      ownerViewId: 'panel-b',
+      updatedAt: '2026-08-07T12:05:00.000Z',
+    } as const;
+
+    expect(() => reduceReview(state, {
+      ...command,
+      anchor: {
+        kind: 'unknown',
+        pageIndex: 0,
+        rect: { x: 20, y: 30, width: 40, height: 10 },
+      },
+    } as unknown as ReviewCommand)).toThrow(/anchor kind/iu);
+
+    expect(() => reduceReview(state, {
+      ...command,
+      anchor: {
+        kind: 'caret',
+        pageIndex: 0,
+        leftContext: 'before',
+        rightContext: 'after',
+        rect: { x: 20, y: 30, width: 2, height: 10 },
+      },
+    })).toThrow(/requires a selection anchor/iu);
+  });
+
+  it('drops predecessor redo entries when a rebuild starts', () => {
+    let { state, commands } = setup();
+    state = reduceReview(state, addReplace(state, selection, 'first', commands));
+    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    expect(state.historyCursor).toBe(0);
+    expect(state.history).toHaveLength(1);
+
+    state = startReviewGeneration(state, { documentGeneration: 2 });
+
+    expect(state.history).toHaveLength(0);
+    expect(state.historyCursor).toBe(0);
+    expect(state.workflow.historyBoundary).toBe(0);
+    expect(() => reduceReview(state, { type: 'redo', expectedRevision: state.revision }))
+      .toThrow(/no review command to redo/iu);
+  });
+
   it('creates all five v1 tools as stable semantic items and advances one revision each', () => {
     let { state, commands } = setup();
     const commandBuilders = [

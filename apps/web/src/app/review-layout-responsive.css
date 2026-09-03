@@ -14,7 +14,14 @@
   position: fixed;
 }
 
+@media (pointer: fine) {
+  [data-production-review] {
+    --review-control-touch: var(--review-control-default);
+  }
+}
+
 .review-layout[data-annotation-presentation="bottom"] .comment-composer {
+  --comment-composer-header-padding-block: 10px;
   align-self: end;
   justify-self: stretch;
   width: 100%;
@@ -29,7 +36,7 @@
 }
 
 .review-layout[data-annotation-presentation="bottom"] .comment-composer__header {
-  padding: 10px 12px;
+  padding: var(--comment-composer-header-padding-block) 12px;
 }
 
 .review-layout[data-annotation-presentation="bottom"] .comment-composer__body {
@@ -48,20 +55,8 @@
 }
 
 @media (max-width: 820px) {
-  .review-chrome {
-    height: auto;
-    min-height: var(--review-chrome-height);
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: .3rem;
-    padding-block: .35rem;
-  }
-
-  .review-chrome__viewer-controls {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    flex-wrap: wrap;
-    justify-self: center;
-    justify-content: center;
+  .comment-composer {
+    --comment-composer-anchor-size: var(--review-control-touch);
   }
 
   .annotation-peek {
@@ -77,7 +72,32 @@
 
 }
 
+@media (max-width: 640px) {
+  .review-chrome__save-recovery {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .review-chrome {
+    gap: .4rem;
+    padding-inline: .5rem;
+  }
+
+  .review-chrome__viewer-controls {
+    column-gap: .4rem;
+  }
+
+  .review-chrome__context {
+    display: none;
+  }
+}
+
 @media (max-width: 480px) {
+  #root[data-production-root="true"] {
+    --review-document-title-min: 6rem;
+  }
+
   body:has(.terminal-recovery) {
     padding: .75rem;
   }
@@ -97,7 +117,12 @@
 }
 
 @media (max-width: 360px) {
+  #root[data-production-root="true"] {
+    --review-document-title-min: 4.5rem;
+  }
+
   .review-chrome {
+    gap: .25rem;
     padding-inline: .4rem;
   }
 
@@ -107,8 +132,7 @@
   }
 
   .review-chrome__viewer-controls {
-    column-gap: .625rem;
-    row-gap: .25rem;
+    column-gap: .25rem;
   }
 
   .review-chrome__stat,
@@ -127,6 +151,10 @@
 }
 
 @media (hover: none), (pointer: coarse) {
+  .comment-composer {
+    --comment-composer-anchor-size: var(--review-control-touch);
+  }
+
   #root[data-production-root="true"] {
     --review-workspace-header-height: 53px;
   }
@@ -143,6 +171,15 @@
 
   .annotation-item__action {
     opacity: 1;
+  }
+
+  .annotation-item__title-actions .annotation-item__action {
+    width: var(--review-control-touch);
+    min-width: var(--review-control-touch);
+    max-width: var(--review-control-touch);
+    height: var(--review-control-touch);
+    min-height: var(--review-control-touch);
+    max-height: var(--review-control-touch);
   }
 
   .row-action-group__direct {
@@ -176,6 +213,7 @@
   }
 
   .review-chrome button,
+  .top-bar-menu__surface button,
   .review-context-palette button,
   .review-page-menu button,
   .review-workspace button,
@@ -290,7 +328,8 @@
   .workspace-state .review-icon,
   .compact-editorial-modal .lucide-loader-circle,
   .comment-composer__anchor[data-return-state="pending"] .review-icon,
-  .pdf-workspace__loading .review-icon {
+  .pdf-workspace__loading .review-icon,
+  .review-toast[data-generation-status="reconciling"] .review-icon {
     transition: none;
     animation: none;
   }

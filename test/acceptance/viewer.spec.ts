@@ -175,6 +175,99 @@ test.describe('shared viewer foundation', () => {
       .toBe(caretCountBefore);
   });
 
+  test('does not retain DOM pointer capture or block composer actions after reverse SyncTeX', async ({ page }) => {
+    const reverseSyncTexModifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    const reverseSyncTexModifierKey = process.platform === 'darwin'
+      ? { metaKey: true }
+      : { ctrlKey: true };
+    await page.goto(
+      '/test/acceptance/viewer-harness/index.html?reverse-synctex=true&composer=replacement',
+    );
+    await page.waitForFunction(() => window.viewerAcceptance?.ready === true);
+    const pdfPage = page.locator('[data-page-index="0"]');
+    await expect(pdfPage).toBeVisible();
+    const box = await pdfPage.boundingBox();
+    if (!box) throw new Error('Rendered PDF page has no bounds.');
+
+    await page.mouse.move(box.x + 320, box.y + 180);
+    await page.keyboard.down(reverseSyncTexModifier);
+    await page.mouse.down();
+    await page.keyboard.up(reverseSyncTexModifier);
+
+    expect(await pdfPage.evaluate((element) => element.hasPointerCapture(1))).toBe(false);
+    await page.mouse.up();
+    await expect.poll(() => page.evaluate(() => (
+      window.viewerAcceptance.interactionCount('reverse-synctex')
+    ))).toBe(1);
+
+    const composer = page.getByRole('region', { name: 'Replacement' });
+    await composer.getByRole('button', { name: 'Cancel' }).click();
+    await expect.poll(() => page.evaluate(() => (
+      window.viewerAcceptance.composerActionCount('cancel')
+    ))).toBe(1);
+
+    await page.mouse.move(box.x + 320, box.y + 180);
+    await page.keyboard.down(reverseSyncTexModifier);
+    await page.mouse.down();
+    await page.keyboard.up(reverseSyncTexModifier);
+    await page.mouse.up();
+    await composer.getByRole('button', { name: 'Apply' }).click();
+    await expect.poll(() => page.evaluate(() => (
+      window.viewerAcceptance.composerActionCount('apply')
+    ))).toBe(1);
+
+    await pdfPage.dispatchEvent('pointerdown', {
+      pointerId: 91,
+      pointerType: 'mouse',
+      isPrimary: true,
+      button: 0,
+      buttons: 1,
+      ...reverseSyncTexModifierKey,
+      clientX: box.x + 320,
+      clientY: box.y + 180,
+    });
+    await pdfPage.dispatchEvent('pointermove', {
+      pointerId: 91,
+      pointerType: 'mouse',
+      isPrimary: true,
+      button: -1,
+      buttons: 0,
+      clientX: box.x + 330,
+      clientY: box.y + 190,
+    });
+    await pdfPage.dispatchEvent('pointerup', {
+      pointerId: 91,
+      pointerType: 'mouse',
+      isPrimary: true,
+      button: 0,
+      buttons: 0,
+      clientX: box.x + 330,
+      clientY: box.y + 190,
+    });
+    expect(await page.evaluate(() => (
+      window.viewerAcceptance.interactionCount('reverse-synctex')
+    ))).toBe(2);
+
+    const caretCountBefore = await page.evaluate(() => (
+      window.viewerAcceptance.interactionCount('caret')
+    ));
+    await page.mouse.move(box.x + 320, box.y + 180);
+    await page.keyboard.down(reverseSyncTexModifier);
+    await page.mouse.down();
+    await page.keyboard.up(reverseSyncTexModifier);
+    await page.mouse.move(box.x - 20, box.y - 20);
+    await page.mouse.up();
+    await page.mouse.move(box.x + 400, box.y + 220);
+    await page.mouse.click(box.x + 400, box.y + 220);
+
+    expect(await page.evaluate(() => (
+      window.viewerAcceptance.interactionCount('reverse-synctex')
+    ))).toBe(2);
+    await expect.poll(() => page.evaluate(() => (
+      window.viewerAcceptance.interactionCount('caret')
+    ))).toBe(caretCountBefore + 1);
+  });
+
   test('repairs a missing primary release before hover movement', async ({ page }) => {
     const pdfPage = page.locator('[data-page-index="0"]');
     await page.waitForFunction(() => window.viewerAcceptance.selectionGeometryReady());

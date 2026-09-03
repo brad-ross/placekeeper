@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   createAtomicLiveContextObservation,
   createReviewSnapshot,
+  createReviewStateSummary,
   createUnavailableLiveContextObservation,
   diffReviewSnapshots,
   type ExistingPdfAnnotation,
@@ -373,6 +374,7 @@ export class LiveContextService {
             warnings: inspection.warnings,
           },
           evidence: catalog,
+          reviewState: createReviewStateSummary(snapshot.state),
         });
         projected = { status: "projected", observation, snapshot: current };
         break;
@@ -529,10 +531,13 @@ export class LiveContextService {
     before: AtomicSessionProjection,
     after: AtomicSessionProjection,
   ): boolean {
+    const beforeSummary = createReviewStateSummary(before.state);
+    const afterSummary = createReviewStateSummary(after.state);
     return before.sessionId === after.sessionId &&
       before.documentGeneration === after.documentGeneration &&
       before.state.revision === after.state.revision &&
       before.state.source.digest === after.state.source.digest &&
+      beforeSummary.reconciliation.dispositionDigest === afterSummary.reconciliation.dispositionDigest &&
       before.destination.phase === after.destination.phase &&
       before.destination.generation === after.destination.generation &&
       before.sync.phase === after.sync.phase &&

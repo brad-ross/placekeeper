@@ -24,6 +24,34 @@ export function horizontalTabFocusIndex(
   return null;
 }
 
-export function enabledMenuItems(surface: HTMLElement): readonly HTMLButtonElement[] {
-  return [...surface.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')];
+export function enabledMenuItems(surface: HTMLElement): readonly HTMLElement[] {
+  const candidates = surface.querySelectorAll<HTMLElement>([
+    '[role="menuitem"]:not(:disabled):not([aria-disabled="true"])',
+    'input:not(:disabled):not([aria-disabled="true"])',
+    'select:not(:disabled):not([aria-disabled="true"])',
+    'textarea:not(:disabled):not([aria-disabled="true"])',
+    '[contenteditable="true"]:not([aria-disabled="true"])',
+  ].join(','));
+  return [...candidates];
+}
+
+function isEditableMenuTarget(target: EventTarget | null): boolean {
+  if (target === null || typeof target !== 'object') return false;
+  const element = target as HTMLElement;
+  return element.tagName === 'INPUT'
+    || element.tagName === 'TEXTAREA'
+    || element.tagName === 'SELECT'
+    || element.isContentEditable === true;
+}
+
+export function menuRovingFocusIndex(input: {
+  readonly items: readonly HTMLElement[];
+  readonly activeElement: Element | null;
+  readonly eventTarget: EventTarget | null;
+  readonly key: string;
+}): number | null {
+  if (isEditableMenuTarget(input.eventTarget)) return null;
+  const currentIndex = input.items.indexOf(input.activeElement as HTMLElement);
+  if (currentIndex < 0) return null;
+  return compositeFocusIndex(currentIndex, input.items.length, input.key);
 }

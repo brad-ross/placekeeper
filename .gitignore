@@ -6,6 +6,13 @@ tmp/
 output/pdf/*.pdf
 test/fixtures/pdfs/*.pdf
 test/fixtures/pdfium/*.wasm
+test/fixtures/latex/*.aux
+test/fixtures/latex/*.fdb_latexmk
+test/fixtures/latex/*.fls
+test/fixtures/latex/*.log
+test/fixtures/latex/*.out
+test/fixtures/latex/*.pdf
+test/fixtures/latex/*.synctex.gz
 dist/
 apps/*/dist/
 .local/

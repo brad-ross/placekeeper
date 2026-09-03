@@ -3,8 +3,18 @@ import { PdfZoomMode } from "@embedpdf/models";
 import { describe, expect, it, vi } from "vitest";
 
 import { createReviewState } from "../../../packages/core/src/review-model.js";
+import { createReviewStateSummary } from "../../../packages/core/src/live-context.js";
 import {
+  applyHostForwardSyncTex,
+  ReverseSyncTexRequestCoordinator,
+  reverseSyncTexError,
+  reverseSyncTexAtCurrentLocation,
+  runHostForwardSyncTexRequest,
   initiallyPortableItemIds,
+  canonicalStateSupersedes,
+  firstUnresolvedReviewItemId,
+  forwardSyncTexCompletionIsCurrent,
+  forwardSyncTexRequestReady,
   ProductionReviewApp,
   referenceReturnForActiveTab,
   visibleCodexContext,
@@ -14,8 +24,493 @@ import {
   canDeriveAnnotationOutlineLabels,
   deriveAnnotationOutlineLabels,
 } from "../src/review/annotation-outline-context.js";
+import {
+  buildReattachmentCommand,
+  reconciliationCommandRejectionMessage,
+  reconciliationFocusKeyAfterRemoval,
+  reattachmentCandidateFor,
+  reattachmentGenerationIsCurrent,
+  reattachmentTitle,
+  ReconciliationWorkspace,
+} from "../src/review/ReconciliationWorkspace.js";
+import {
+  reviewExportPresentation,
+} from "../src/review/DocumentActionsMenu.js";
 
 describe("one production review tree", () => {
+  it("chooses the next, previous, or section fallback after attention rows disappear", () => {
+    const keys = ["first", "middle", "final"];
+    expect(reconciliationFocusKeyAfterRemoval(keys, "first")).toBe("middle");
+    expect(reconciliationFocusKeyAfterRemoval(keys, "middle")).toBe("final");
+    expect(reconciliationFocusKeyAfterRemoval(keys, "final")).toBe("middle");
+    expect(reconciliationFocusKeyAfterRemoval(["only"], "only")).toBeNull();
+  });
+
+  it("defers a host forward SyncTeX request until its PDF generation and restoration are ready", () => {
+    expect(forwardSyncTexRequestReady({
+      requestGeneration: 4,
+      documentGeneration: 3,
+      navigationReadyGeneration: 3,
+      documentReadyGeneration: 3,
+      locationRestoreStatus: "idle",
+    })).toBe(false);
+    expect(forwardSyncTexRequestReady({
+      requestGeneration: 4,
+      documentGeneration: 4,
+      navigationReadyGeneration: 4,
+      documentReadyGeneration: 4,
+      locationRestoreStatus: "restoring",
+    })).toBe(false);
+    expect(forwardSyncTexRequestReady({
+      requestGeneration: 4,
+      documentGeneration: 4,
+      navigationReadyGeneration: 4,
+      documentReadyGeneration: 4,
+      locationRestoreStatus: "idle",
+    })).toBe(true);
+    expect(forwardSyncTexRequestReady({
+      requestGeneration: 4,
+      documentGeneration: 4,
+      navigationReadyGeneration: 4,
+      documentReadyGeneration: 4,
+      locationRestoreStatus: "fallback",
+    })).toBe(true);
+  });
+
+  it("ignores a forward SyncTeX completion after its request, generation, or navigation is superseded", () => {
+    const current = {
+      requestToken: 2,
+      latestRequestToken: 2,
+      requestGeneration: 4,
+      documentGeneration: 4,
+      navigationMatches: true,
+    };
+    expect(forwardSyncTexCompletionIsCurrent(current)).toBe(true);
+    expect(forwardSyncTexCompletionIsCurrent({ ...current, latestRequestToken: 3 })).toBe(false);
+    expect(forwardSyncTexCompletionIsCurrent({ ...current, documentGeneration: 5 })).toBe(false);
+    expect(forwardSyncTexCompletionIsCurrent({ ...current, navigationMatches: false })).toBe(false);
+  });
+
+  it("publishes only the current forward SyncTeX completion and converts rejection to failure", async () => {
+    let resolveApply!: (applied: boolean) => void;
+    const applyLocation = vi.fn(() => new Promise<boolean>((resolve) => { resolveApply = resolve; }));
+    const navigation = {
+      captureLocation: vi.fn(() => ({
+        pageIndex: 0,
+        anchor: { x: 0, y: 0 },
+        alignment: { xPercent: 50, yPercent: 50 },
+        zoom: 1,
+      })),
+      applyLocation,
+      focusAtDestination: vi.fn(),
+    };
+    const publishResult = vi.fn();
+    let current = true;
+    const request = runHostForwardSyncTexRequest(
+      navigation,
+      { pageIndex: 2, point: { x: 72, y: 144 } },
+      () => current,
+      publishResult,
+    );
+    current = false;
+    resolveApply(false);
+    await request;
+    expect(publishResult).not.toHaveBeenCalled();
+
+    await runHostForwardSyncTexRequest(
+      { ...navigation, applyLocation: vi.fn(async () => { throw new Error("viewer replaced"); }) },
+      { pageIndex: 2, point: { x: 72, y: 144 } },
+      () => true,
+      publishResult,
+    );
+    expect(publishResult).toHaveBeenCalledWith(false);
+  });
+
+  it("centers a trusted forward SyncTeX point without changing the current zoom", async () => {
+    const applyLocation = vi.fn(async () => true);
+    const focusAtDestination = vi.fn(() => true);
+    const navigation = {
+      captureLocation: vi.fn(() => ({
+        pageIndex: 0,
+        anchor: { x: 0, y: 0 },
+        alignment: { xPercent: 10, yPercent: 20 },
+        zoom: 1.25,
+      })),
+      applyLocation,
+      focusAtDestination,
+    };
+
+    await expect(applyHostForwardSyncTex(navigation, {
+      pageIndex: 2,
+      point: { x: 72, y: 144 },
+    })).resolves.toBe(true);
+    expect(applyLocation).toHaveBeenCalledWith({
+      pageIndex: 2,
+      anchor: { x: 72, y: 144 },
+      alignment: { xPercent: 50, yPercent: 50 },
+      zoom: 1.25,
+    });
+    expect(focusAtDestination).toHaveBeenCalledWith(2);
+    await expect(applyHostForwardSyncTex(navigation, {
+      pageIndex: -1,
+      point: { x: 72, y: 144 },
+    })).resolves.toBe(false);
+  });
+
+  it("starts reverse SyncTeX from the current visible PDF anchor", async () => {
+    const reverseSyncTex = vi.fn(async () => ({ status: "ok" }));
+    const navigation = {
+      captureLocation: vi.fn(() => ({
+        pageIndex: 2,
+        anchor: { x: 72, y: 144 },
+        alignment: { xPercent: 50, yPercent: 50 },
+        zoom: 1.25,
+      })),
+    };
+
+    await expect(reverseSyncTexAtCurrentLocation(navigation, reverseSyncTex)).resolves.toBe(true);
+    expect(reverseSyncTex).toHaveBeenCalledWith({
+      pageIndex: 2,
+      point: { x: 72, y: 144 },
+    });
+    await expect(reverseSyncTexAtCurrentLocation(
+      { captureLocation: () => null },
+      reverseSyncTex,
+    )).resolves.toBe(false);
+    await expect(reverseSyncTexAtCurrentLocation(
+      navigation,
+      async () => ({ status: "missing" }),
+    )).resolves.toBe(false);
+  });
+
+  it("keeps a newer successful reverse SyncTeX result when an older request fails later", async () => {
+    const coordinator = new ReverseSyncTexRequestCoordinator();
+    const errors: Array<string | null> = [];
+    let resolveOlder: ((value: unknown) => void) | undefined;
+    const older = coordinator.run(
+      () => new Promise((resolve) => { resolveOlder = resolve; }),
+      { pageIndex: 0, point: { x: 10, y: 20 } },
+      (error) => errors.push(error),
+    );
+    await coordinator.run(
+      async () => ({ status: 'ok' }),
+      { pageIndex: 1, point: { x: 30, y: 40 } },
+      (error) => errors.push(error),
+    );
+    resolveOlder?.({ status: 'missing' });
+    await older;
+
+    expect(errors.at(-1)).toBeNull();
+  });
+
+  it("explains actionable reverse SyncTeX failures", () => {
+    expect(reverseSyncTexError({ status: 'missing' })).toContain('Rebuild');
+    expect(reverseSyncTexError({ status: 'stale' })).toContain('stale');
+    expect(reverseSyncTexError({ status: 'unavailable-tool' })).toContain('unavailable');
+    expect(reverseSyncTexError({ status: 'failed', reason: 'workspace-untrusted' })).toContain('Trust');
+    expect(reverseSyncTexError({ status: 'ok' })).toBeNull();
+  });
+
+  it("routes the VS Code reattach command to the first canonical unresolved item", () => {
+    const resolved = { id: "resolved", reconciliation: { disposition: { kind: "resolved" } } };
+    const ambiguous = { id: "ambiguous", reconciliation: { disposition: { kind: "ambiguous" } } };
+    const missing = { id: "missing", reconciliation: { disposition: { kind: "missing" } } };
+    expect(firstUnresolvedReviewItemId([resolved, ambiguous, missing])).toBe("ambiguous");
+    expect(firstUnresolvedReviewItemId([resolved])).toBeUndefined();
+  });
+
+  it("adopts same-generation canonical freshness without requiring a review revision", () => {
+    const current = { revision: 2, workflow: { documentGeneration: 3, freshness: "current" as const } };
+    const stale = { revision: 2, workflow: { documentGeneration: 3, freshness: "possibly-stale" as const } };
+    expect(canonicalStateSupersedes(current, stale)).toBe(true);
+    expect(canonicalStateSupersedes(stale, current)).toBe(false);
+    expect(canonicalStateSupersedes(current, current)).toBe(false);
+  });
+  it("renders canonical unresolved work, frozen drafts, freshness, and export gates", () => {
+    const base = createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000071",
+      source: { fileId: "00000000-0000-4000-8000-000000000072", digest: "d".repeat(64), byteLength: 10 },
+      workflowMode: "generated-output",
+      documentGeneration: 4,
+    });
+    const anchor = {
+      kind: "selection" as const,
+      pageIndex: 0,
+      quote: "old sentence",
+      prefix: "before ",
+      suffix: " after",
+      rect: { x: 1, y: 2, width: 30, height: 8 },
+      segmentRects: [{ x: 1, y: 2, width: 30, height: 8 }],
+    };
+    const state = {
+      ...base,
+      workflow: { ...base.workflow, freshness: "possibly-stale" as const },
+      items: [{
+        id: "00000000-0000-4000-8000-000000000073",
+        kind: "replace" as const,
+        pageIndex: 0,
+        createdAt: "2026-08-27T00:00:00.000Z",
+        updatedAt: "2026-08-27T00:00:00.000Z",
+        payload: { ...anchor, reliable: true, proposedText: "new sentence" },
+        reconciliation: {
+          schemaVersion: 1 as const,
+          ownerViewId: "view-1",
+          baseGeneration: 3,
+          revision: 2,
+          anchor,
+          disposition: { kind: "ambiguous" as const, reason: "two matching passages" },
+          previousAnchors: [],
+        },
+      }],
+      pendingDrafts: [{
+        id: "00000000-0000-4000-8000-000000000074",
+        ownerViewId: "view-1",
+        baseGeneration: 3,
+        revision: 1,
+        kind: "replace" as const,
+        pageIndex: 0,
+        text: "unfinished wording",
+        anchor,
+        disposition: { kind: "missing" as const, reason: "draft-frozen-on-predecessor-generation" },
+        status: "frozen" as const,
+        createdAt: "2026-08-27T00:00:00.000Z",
+        updatedAt: "2026-08-27T00:00:00.000Z",
+      }],
+    };
+
+    const html = renderToStaticMarkup(<ReconciliationWorkspace
+      state={state}
+      selectionUpdate={{ kind: "cleared", generation: 1 }}
+      caretAnchor={null}
+      refreshStatus="idle"
+      onCommand={vi.fn()}
+    />);
+
+    expect(html).toContain('data-reconciliation-workspace');
+    expect(html).toContain("Needs attention");
+    expect(html).toContain("new sentence");
+    expect(html).toContain("unfinished wording");
+    expect(html).toContain("Multiple matches");
+    expect(html).toContain("Needs new location");
+    expect(html).not.toContain('data-reconciliation-action="reattach"');
+    expect(html).toContain('data-reconciliation-action="discard"');
+    expect(html).toContain('aria-label="Reattach previous Replace annotation on page 1"');
+    expect(html).not.toContain("Ambiguous anchor");
+    expect(html).not.toContain("Frozen draft");
+    expect(html).not.toContain("two matching passages");
+    expect(html).not.toContain(">Apply</button>");
+    expect(html).not.toContain("Generation 4 is possibly stale");
+    expect(html).not.toContain("Export reviewed PDF");
+  });
+
+  it("builds revision-fenced reattachment commands without changing semantic identity", () => {
+    const anchor = {
+      kind: "selection" as const,
+      pageIndex: 2,
+      quote: "replacement target",
+      prefix: "left",
+      suffix: "right",
+      rect: { x: 2, y: 3, width: 40, height: 9 },
+      segmentRects: [{ x: 2, y: 3, width: 40, height: 9 }],
+    };
+    expect(buildReattachmentCommand({
+      target: { kind: "item", id: "item-1", revision: 5, ownerViewId: "view-1" },
+      stateRevision: 9,
+      documentGeneration: 7,
+      anchor,
+      updatedAt: "2026-08-27T01:00:00.000Z",
+    })).toMatchObject({
+      type: "reattach",
+      expectedRevision: 9,
+      id: "item-1",
+      expectedReconciliationRevision: 5,
+      ownerViewId: "view-1",
+      anchor,
+    });
+
+    const draft = {
+      id: "draft-1",
+      ownerViewId: "view-1",
+      baseGeneration: 6,
+      revision: 3,
+      kind: "replace" as const,
+      pageIndex: 0,
+      text: "do not lose this text",
+      anchor,
+      disposition: { kind: "missing" as const, reason: "predecessor" },
+      status: "frozen" as const,
+      createdAt: "2026-08-27T00:00:00.000Z",
+      updatedAt: "2026-08-27T00:00:00.000Z",
+    };
+    expect(buildReattachmentCommand({
+      target: { kind: "draft", draft },
+      stateRevision: 9,
+      documentGeneration: 7,
+      anchor,
+      updatedAt: "2026-08-27T01:00:00.000Z",
+    })).toMatchObject({
+      type: "put-draft",
+      expectedRevision: 9,
+      expectedDraftRevision: 3,
+      draft: {
+        id: "draft-1",
+        text: "do not lose this text",
+        baseGeneration: 7,
+        status: "protected",
+        disposition: { kind: "resolved", generation: 7 },
+      },
+    });
+    expect(reattachmentGenerationIsCurrent(7, 8)).toBe(false);
+  });
+
+  it("keeps invalid or ambiguous replacement evidence unconfirmable", () => {
+    expect(reattachmentCandidateFor("selection", {
+      kind: "unreliable",
+      generation: 4,
+      userMessage: "The selection matches more than one passage.",
+      diagnostic: "selection-quote-not-unique",
+    }, null)).toEqual({
+      anchor: null,
+      message: "The selection matches more than one passage.",
+    });
+    expect(reattachmentCandidateFor("caret", { kind: "cleared", generation: 4 }, null).anchor).toBeNull();
+    expect(reconciliationCommandRejectionMessage({
+      accepted: false,
+      message: "Another review window changed this draft.",
+    })).toBe("Another review window changed this draft.");
+    expect(reconciliationCommandRejectionMessage({})).toBeNull();
+  });
+
+  it("names each focused reattachment task with its annotation intent", () => {
+    expect(([
+      "highlight",
+      "delete",
+      "insert",
+      "replace",
+      "pageNote",
+    ] as const).map(reattachmentTitle)).toEqual([
+      "Reattach highlight",
+      "Reattach deletion",
+      "Reattach insertion",
+      "Reattach replacement",
+      "Reattach page note",
+    ]);
+  });
+
+  it("explains reconciling, unresolved, stale-confirmation, and eligible export states", () => {
+    const summary = (unresolvedItems: number, pendingDrafts: number, freshness: "current" | "possibly-stale") => ({
+      ...createReviewStateSummary({
+        ...createReviewState({
+          sessionId: "00000000-0000-4000-8000-000000000099",
+          source: { fileId: "00000000-0000-4000-8000-000000000098", digest: "f".repeat(64), byteLength: 1 },
+          workflowMode: "generated-output",
+          documentGeneration: 1,
+        }),
+        workflow: {
+          ...createReviewState({
+            sessionId: "00000000-0000-4000-8000-000000000099",
+            source: { fileId: "00000000-0000-4000-8000-000000000098", digest: "f".repeat(64), byteLength: 1 },
+            workflowMode: "generated-output",
+            documentGeneration: 1,
+          }).workflow,
+          freshness,
+        },
+      }),
+      reconciliation: {
+        complete: unresolvedItems === 0 && pendingDrafts === 0,
+        dispositionDigest: "0".repeat(64),
+        unresolvedItemIds: Array.from({ length: unresolvedItems }, (_, index) => `item-${index}`),
+        pendingDraftIds: Array.from({ length: pendingDrafts }, (_, index) => `draft-${index}`),
+      },
+      export: unresolvedItems > 0 || pendingDrafts > 0
+        ? { eligible: false as const, requiresStaleConfirmation: false as const, reasons: [unresolvedItems > 0 ? "unresolved-items" as const : "pending-drafts" as const] }
+        : freshness === "possibly-stale"
+          ? { eligible: false as const, requiresStaleConfirmation: true as const, reasons: ["possibly-stale" as const] }
+          : { eligible: true as const, requiresStaleConfirmation: false as const },
+    });
+    expect(reviewExportPresentation({
+      refreshStatus: "reconciling",
+      summary: summary(0, 0, "current"),
+    }).message).toContain("reconciliation finishes");
+    expect(reviewExportPresentation({
+      refreshStatus: "idle",
+      summary: summary(2, 0, "current"),
+    }).message).toBe("2 annotations to resolve.");
+    expect(reviewExportPresentation({
+      refreshStatus: "idle",
+      summary: summary(0, 0, "possibly-stale"),
+    })).toMatchObject({ canExport: true, requiresStaleConfirmation: true });
+    expect(reviewExportPresentation({
+      refreshStatus: "idle",
+      summary: summary(0, 0, "current"),
+    })).toMatchObject({ canExport: true, requiresStaleConfirmation: false });
+  });
+
+  it("integrates generated-output reconciliation and export without automatic-save controls", () => {
+    const state = createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000081",
+      source: { fileId: "00000000-0000-4000-8000-000000000082", digest: "e".repeat(64), byteLength: 20 },
+      workflowMode: "generated-output",
+      documentGeneration: 8,
+    });
+    const renderSurface = (launchSurface: "browser" | "vscode") => renderToStaticMarkup(
+      <ProductionReviewApp
+        session={{ sessionId: state.sessionId }}
+        initialState={state}
+        scope={{ documentTitle: "paper.pdf", launchSurface }}
+        api={{
+          command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+          chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
+          exportReviewedCopy: vi.fn(), scope: vi.fn(),
+        }}
+        viewer={<div>Generation 8 viewer</div>}
+      />,
+    );
+    const html = renderSurface("vscode");
+    const browserHtml = renderSurface("browser");
+
+    expect(html).toContain("Generation 8 viewer");
+    expect(html).toContain('data-launch-surface="vscode"');
+    expect(html).not.toContain('data-reconciliation-workspace');
+    expect(html).toContain('<h2>Annotations</h2>');
+    expect(html).toContain('Select text in the PDF to add an annotation.');
+    expect(html).toContain('data-document-actions-trigger');
+    expect(html).toContain('aria-haspopup="menu"');
+    const titleTrigger = html.slice(
+      html.lastIndexOf('<button', html.indexOf('data-document-actions-trigger')),
+      html.indexOf('</button>', html.indexOf('data-document-actions-trigger')),
+    );
+    expect(titleTrigger).not.toContain('lucide-chevron-down');
+    expect(html).not.toContain('class="reconciliation-workspace__footer"');
+    expect(html).toContain("Protected review state");
+    expect(html).not.toContain("Open automatic save options");
+    expect(html).not.toContain('aria-haspopup="dialog"');
+    expect(browserHtml).toContain('data-launch-surface="browser"');
+    expect(browserHtml).toContain('data-document-actions-trigger');
+    expect(browserHtml).toContain('aria-haspopup="menu"');
+  });
+
+  it("omits an empty attention section during rebuild progress and failure", () => {
+    const state = createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000091",
+      source: { fileId: "00000000-0000-4000-8000-000000000092", digest: "d".repeat(64), byteLength: 1 },
+      workflowMode: "generated-output",
+      documentGeneration: 2,
+    });
+
+    for (const refreshStatus of ["reconciling", "failed"] as const) {
+      const html = renderToStaticMarkup(<ReconciliationWorkspace
+        state={state}
+        selectionUpdate={{ kind: "cleared", generation: 2 }}
+        caretAnchor={null}
+        refreshStatus={refreshStatus}
+        onCommand={vi.fn()}
+      />);
+      expect(html).not.toContain("Needs attention");
+      expect(html).not.toContain("reconciliation-workspace");
+    }
+  });
+
   it("exposes Reference return state only for the current tab and document generation", () => {
     const presentation = {
       tabIdentity: "reference-a",
@@ -302,10 +797,9 @@ describe("one production review tree", () => {
     />);
     expect(html).toContain("Real shared PDF viewer");
     expect(html).not.toContain("aria-label=\"Actions\"");
-    expect(html).toContain('aria-label="Back in document history"');
-    expect(html).toContain('aria-label="Forward in document history"');
-    expect(html).toContain('aria-label="Undo"');
-    expect(html).toContain('aria-label="Redo"');
+    expect(html).toContain('aria-label="Edit history"');
+    expect(html).toContain('aria-label="Document navigation, page unavailable"');
+    expect(html).toContain('aria-label="PDF zoom unavailable"');
     expect(html).toContain("paper.pdf, not saved. Open automatic save options");
     expect(html).toContain('data-save-phase="not-saved"');
     expect(html).toContain("Not saved");

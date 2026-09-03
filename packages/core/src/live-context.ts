@@ -1,13 +1,18 @@
-import { createHash } from "node:crypto";
-
 import { documentOrderedItems } from "./annotation-projection.js";
+import { sha256Hex } from "./sha256.js";
 import {
   projectStructuredReviewItem,
   type SourceHint,
   type StructuredReviewItem,
 } from "./structured-review-item.js";
 import type { PdfRect } from "./pdf-writer.js";
-import type { JsonValue, ReviewItem, ReviewSourceIdentity } from "./review-model.js";
+import type {
+  JsonValue,
+  PendingReviewDraftV1,
+  ReviewItem,
+  ReviewSourceIdentity,
+  ReviewWorkflowStateV1,
+} from "./review-model.js";
 import { assertReviewItem } from "./review-reducer.js";
 import type { SaveFailureReason } from "./save-status.js";
 
@@ -68,6 +73,33 @@ export interface ReviewSnapshot {
   readonly revision: number;
   readonly semanticDigest: string;
   readonly items: readonly StructuredReviewItem[];
+}
+
+export type ReviewExportBlockReason =
+  | "unresolved-items"
+  | "pending-drafts"
+  | "possibly-stale";
+
+export interface ReviewStateSummaryV1 {
+  readonly schemaVersion: 1;
+  readonly document: {
+    readonly role: ReviewWorkflowStateV1["documentRole"];
+    readonly generation: number;
+    readonly freshness: ReviewWorkflowStateV1["freshness"];
+  };
+  readonly reconciliation: {
+    readonly complete: boolean;
+    readonly dispositionDigest: string;
+    readonly unresolvedItemIds: readonly string[];
+    readonly pendingDraftIds: readonly string[];
+  };
+  readonly export:
+    | { readonly eligible: true; readonly requiresStaleConfirmation: false }
+    | {
+        readonly eligible: false;
+        readonly requiresStaleConfirmation: boolean;
+        readonly reasons: readonly ReviewExportBlockReason[];
+      };
 }
 
 interface ReviewChangeBase {
@@ -175,6 +207,7 @@ export interface AtomicLiveContextObservationV1 {
   readonly reviewItems: ReviewItemChanges;
   readonly existingPdfAnnotations: ExistingPdfAnnotationInventory;
   readonly evidence: PdfEvidenceCatalog;
+  readonly reviewState?: ReviewStateSummaryV1;
 }
 
 export interface UnavailableLiveContextObservationV1 {
@@ -263,7 +296,7 @@ function canonicalJson(value: unknown): string {
 }
 
 export function canonicalSha256(value: unknown): string {
-  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+  return sha256Hex(canonicalJson(value));
 }
 
 const sha256 = canonicalSha256;
@@ -336,9 +369,67 @@ export function reviewSemanticDigest(items: readonly ReviewItem[]): string {
       kind: item.kind,
       pageIndex: item.pageIndex,
       payload: item.payload,
+      reconciliation: item.reconciliation,
     };
   }).toSorted((left, right) => left.id.localeCompare(right.id));
   return sha256(canonical);
+}
+
+export function reviewDispositionDigest(input: {
+  readonly workflow: ReviewWorkflowStateV1;
+  readonly items: readonly ReviewItem[];
+  readonly pendingDrafts: readonly PendingReviewDraftV1[];
+}): string {
+  return sha256({
+    generation: input.workflow.documentGeneration,
+    freshness: input.workflow.freshness,
+    items: input.items.map((item) => ({ id: item.id, reconciliation: item.reconciliation }))
+      .toSorted((left, right) => left.id.localeCompare(right.id)),
+    drafts: input.pendingDrafts.map((draft) => ({
+      id: draft.id,
+      baseGeneration: draft.baseGeneration,
+      revision: draft.revision,
+      anchor: draft.anchor,
+      disposition: draft.disposition,
+      status: draft.status,
+      text: draft.text,
+    })).toSorted((left, right) => left.id.localeCompare(right.id)),
+  });
+}
+
+export function createReviewStateSummary(input: {
+  readonly workflow: ReviewWorkflowStateV1;
+  readonly revision: number;
+  readonly items: readonly ReviewItem[];
+  readonly pendingDrafts: readonly PendingReviewDraftV1[];
+}): ReviewStateSummaryV1 {
+  const unresolvedItemIds = input.items
+    .filter((item) => item.reconciliation !== undefined && item.reconciliation.disposition.kind !== "resolved")
+    .map(({ id }) => id)
+    .toSorted();
+  const pendingDraftIds = input.pendingDrafts.map(({ id }) => id).toSorted();
+  const reasons: ReviewExportBlockReason[] = [];
+  if (unresolvedItemIds.length > 0) reasons.push("unresolved-items");
+  if (pendingDraftIds.length > 0) reasons.push("pending-drafts");
+  if (input.workflow.freshness === "possibly-stale") reasons.push("possibly-stale");
+  const requiresStaleConfirmation = reasons.includes("possibly-stale") && reasons.length === 1;
+  return {
+    schemaVersion: 1,
+    document: {
+      role: input.workflow.documentRole,
+      generation: input.workflow.documentGeneration,
+      freshness: input.workflow.freshness,
+    },
+    reconciliation: {
+      complete: unresolvedItemIds.length === 0 && pendingDraftIds.length === 0,
+      dispositionDigest: reviewDispositionDigest(input),
+      unresolvedItemIds,
+      pendingDraftIds,
+    },
+    export: reasons.length === 0
+      ? { eligible: true, requiresStaleConfirmation: false }
+      : { eligible: false, requiresStaleConfirmation, reasons },
+  };
 }
 
 export function createReviewSnapshot(input: {
@@ -518,6 +609,7 @@ export function createAtomicLiveContextObservation(input: {
     readonly warnings: readonly string[];
   };
   readonly evidence: PdfEvidenceCatalog;
+  readonly reviewState?: ReviewStateSummaryV1;
 }): AtomicLiveContextObservationV1 {
   assertIsoDate(input.observedAt, "observedAt");
   assertIdentity(input.identity);
@@ -542,6 +634,7 @@ export function createAtomicLiveContextObservation(input: {
     reviewItems: input.reviewItems,
     existingPdfAnnotations: createExistingInventory(input.existingPdfAnnotations),
     evidence: createPdfEvidenceCatalog(input.evidence),
+    ...(input.reviewState === undefined ? {} : { reviewState: input.reviewState }),
   };
 }
 

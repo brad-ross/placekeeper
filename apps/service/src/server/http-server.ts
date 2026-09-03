@@ -8,16 +8,22 @@ import {
   validateRequestSecurity,
 } from "../../../../packages/core/src/session-security.js";
 import type { ReviewCommand } from "../../../../packages/core/src/review-model.js";
-import { InvalidReviewCommandError } from "../../../../packages/core/src/review-reducer.js";
+import {
+  InvalidReviewCommandError,
+  ReviewConflictError,
+  ReviewDraftConflictError,
+} from "../../../../packages/core/src/review-reducer.js";
 import { isContained } from "../files/file-capabilities.js";
 import {
   isRecoveryDecision,
   RecoveryOfferUnavailableError,
+  ReviewGenerationConflictError,
   type RecoveryOfferIdentity,
   type SessionBroker,
 } from "../sessions/session-broker.js";
 import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { DaemonLifecycleCoordinator } from "../host/daemon-lifecycle.js";
+import { ExportCoordinatorError, type ExportCoordinator } from "../export/export-coordinator.js";
 import { openPlacekeeperLink, parsePlacekeeperReadableViewRoute } from "../links/placekeeper-link.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -254,6 +260,7 @@ export interface LocalHttpServerOptions {
     PdfSaveCoordinator,
     "proposal" | "chooseCopyFilename" | "chooseFolder" | "chooseOriginal" | "requestSave" | "retry" | "locate"
   >;
+  readonly exporting?: Pick<ExportCoordinator, "exportReviewedCopy">;
   readonly lifecycle?: Pick<DaemonLifecycleCoordinator, "enterActivity">;
 }
 
@@ -312,7 +319,12 @@ export async function startHttpServer(
         `^/s/(${UUID})/save/(status|proposal|copy|folder|original|retry|locate)$`,
         "u",
       ).exec(pathname);
+      const exportMatch = new RegExp(`^/s/(${UUID})/export$`, "u").exec(pathname);
+      const observeMatch = new RegExp(`^/s/(${UUID})/observe$`, "u").exec(pathname);
+      const staleMatch = new RegExp(`^/s/(${UUID})/stale$`, "u").exec(pathname);
+      const syncTexMatch = new RegExp(`^/s/(${UUID})/synctex/(forward|reverse)$`, "u").exec(pathname);
       const mutates = exchangeMatch !== null || resumeMatch !== null || reopenMatch || commandMatch !== null ||
+        exportMatch !== null || observeMatch !== null || staleMatch !== null || syncTexMatch !== null ||
         (saveMatch !== null && saveMatch[2] !== "status" && saveMatch[2] !== "proposal");
       const expectsJson = mutates;
       const contentLength = Number(request.headers["content-length"] ?? 0);
@@ -594,7 +606,7 @@ export async function startHttpServer(
       const documentMatch = new RegExp(`^/s/(${UUID})/document/(${UUID})$`, "u").exec(pathname);
       const authenticatedSessionId =
         stateMatch?.[1] ?? scopeMatch?.[1] ?? documentMatch?.[1] ?? commandMatch?.[1] ??
-        saveMatch?.[1];
+        saveMatch?.[1] ?? exportMatch?.[1] ?? observeMatch?.[1] ?? staleMatch?.[1] ?? syncTexMatch?.[1];
       if (authenticatedSessionId !== undefined) {
         const credential = bearerCredential(request);
         if (
@@ -662,13 +674,115 @@ export async function startHttpServer(
         sendJson(response, 200, publicSaveStatus(broker.saveStatus(sessionId)));
         return;
       }
+      if (exportMatch !== null) {
+        if (request.method !== "POST") {
+          send(response, 405, "Method not allowed");
+          return;
+        }
+        if (options.exporting === undefined) {
+          send(response, 503, "Export service is unavailable");
+          return;
+        }
+        const body = await readJson(request) as { confirmPossiblyStale?: unknown };
+        if (body.confirmPossiblyStale !== undefined && body.confirmPossiblyStale !== true) {
+          send(response, 400, "Invalid request");
+          return;
+        }
+        const frozen = await broker.freezeDelivery(exportMatch[1]!);
+        const result = await options.exporting.exportReviewedCopy({
+          ...frozen,
+          ...(body.confirmPossiblyStale === true ? { staleConfirmed: true as const } : {}),
+        });
+        sendJson(response, 200, result);
+        return;
+      }
+      if (observeMatch !== null) {
+        if (request.method !== "POST") {
+          send(response, 405, "Method not allowed");
+          return;
+        }
+        const body = await readJson(request) as { outputPath?: unknown; observationEpoch?: unknown };
+        if (typeof body.outputPath !== "string" || !Number.isSafeInteger(body.observationEpoch) ||
+          (body.observationEpoch as number) <= 0) {
+          send(response, 400, "Invalid request");
+          return;
+        }
+        sendJson(response, 200, await broker.replaceLiveDocument({
+          sessionId: observeMatch[1]!,
+          outputPath: body.outputPath,
+          observationEpoch: body.observationEpoch as number,
+        }));
+        return;
+      }
+      if (staleMatch !== null) {
+        if (request.method !== "POST") {
+          send(response, 405, "Method not allowed");
+          return;
+        }
+        const body = await readJson(request) as Record<string, unknown>;
+        if (!Number.isSafeInteger(body.observationEpoch) || (body.observationEpoch as number) <= 0) {
+          send(response, 400, "Invalid request");
+          return;
+        }
+        sendJson(response, 200, await broker.markLiveDocumentPossiblyStale(
+          staleMatch[1]!,
+          body.observationEpoch as number,
+        ));
+        return;
+      }
+      if (syncTexMatch !== null) {
+        if (request.method !== "POST") {
+          send(response, 405, "Method not allowed");
+          return;
+        }
+        const body = await readJson(request) as Record<string, unknown>;
+        if (typeof body.operationToken !== "string") {
+          send(response, 400, "Invalid request");
+          return;
+        }
+        if (syncTexMatch[2] === "forward") {
+          if (typeof body.sourcePath !== "string" || !Number.isSafeInteger(body.line) ||
+            (body.line as number) <= 0 || (body.column !== undefined && !Number.isSafeInteger(body.column))) {
+            send(response, 400, "Invalid request");
+            return;
+          }
+          sendJson(response, 200, await broker.forwardSyncTex({
+            sessionId: syncTexMatch[1]!, operationToken: body.operationToken,
+            sourcePath: body.sourcePath, line: body.line as number,
+            ...(body.column === undefined ? {} : { column: body.column as number }),
+          }));
+          return;
+        }
+        if (!Number.isSafeInteger(body.pageIndex) || (body.pageIndex as number) < 0 ||
+          typeof body.point !== "object" || body.point === null ||
+          !Number.isFinite((body.point as { x?: unknown }).x) ||
+          !Number.isFinite((body.point as { y?: unknown }).y)) {
+          send(response, 400, "Invalid request");
+          return;
+        }
+        sendJson(response, 200, await broker.reverseSyncTex({
+          sessionId: syncTexMatch[1]!, operationToken: body.operationToken,
+          pageIndex: body.pageIndex as number,
+          point: { x: (body.point as { x: number }).x, y: (body.point as { y: number }).y },
+        }));
+        return;
+      }
       if (documentMatch !== null && request.method === "GET") {
         const state = broker.state(documentMatch[1]!);
         if (state?.source.fileId !== documentMatch[2]) {
           send(response, 404, "Not found");
           return;
         }
-        const bytes = await broker.documentBytes(documentMatch[1]!);
+        const generationValue = requestUrl.searchParams.get("generation");
+        const generation = generationValue === null || !/^\d+$/u.test(generationValue)
+          ? undefined
+          : Number(generationValue);
+        if (generationValue !== null &&
+          (generation === undefined || !Number.isSafeInteger(generation) || generation <= 0)) {
+          send(response, 400, "Invalid request");
+          return;
+        }
+        const bytes = await broker.documentBytes(documentMatch[1]!, generation);
         if (bytes === undefined) {
           send(response, 404, "Not found");
           return;
@@ -686,9 +800,21 @@ export async function startHttpServer(
           send(response, 405, "Method not allowed");
           return;
         }
+        const generationHeader = request.headers["x-placekeeper-generation"];
+        const expectedGeneration = typeof generationHeader === "string" && /^\d+$/u.test(generationHeader)
+          ? Number(generationHeader)
+          : undefined;
+        if (
+          generationHeader !== undefined &&
+          (expectedGeneration === undefined || !Number.isSafeInteger(expectedGeneration))
+        ) {
+          send(response, 400, "Invalid request");
+          return;
+        }
         const next = await broker.acceptMutation(
           commandMatch[1]!,
           (await readJson(request)) as ReviewCommand,
+          expectedGeneration === undefined ? {} : { expectedGeneration },
         );
         if (broker.saveStatus(commandMatch[1]!)?.destination.phase === "active") {
           void options.saving?.requestSave(commandMatch[1]!);
@@ -698,7 +824,21 @@ export async function startHttpServer(
       }
       send(response, 404, "Not found");
     } catch (error) {
-      if (error instanceof InvalidReviewCommandError) {
+      if (error instanceof ReviewGenerationConflictError) {
+        sendJson(response, 409, {
+          ok: false,
+          error: {
+            kind: "generation-conflict",
+            documentGeneration: error.currentGeneration,
+            reviewRevision: error.currentRevision,
+          },
+        });
+      } else if (error instanceof ReviewConflictError || error instanceof ReviewDraftConflictError) {
+        sendJson(response, 409, {
+          ok: false,
+          error: { kind: "review-revision-conflict" },
+        });
+      } else if (error instanceof InvalidReviewCommandError) {
         sendJson(response, 422, {
           ok: false,
           error: { kind: "invalid-review-command", message: error.message },
@@ -711,6 +851,11 @@ export async function startHttpServer(
         sendJson(response, 409, {
           ok: false,
           error: { kind: "recovery-offer-unavailable" },
+        });
+      } else if (error instanceof ExportCoordinatorError) {
+        sendJson(response, 409, {
+          ok: false,
+          error: { kind: "export-rejected", code: error.code, message: error.message },
         });
       } else {
         send(response, 409, "Request could not be applied");
@@ -749,7 +894,6 @@ export async function startHttpServer(
         .map((value) => value.trim().toLowerCase());
       if (
         failure !== undefined ||
-        request.headers.origin !== origin ||
         request.headers.upgrade?.toLowerCase() !== "websocket" ||
         !connectionTokens?.includes("upgrade") ||
         request.headers["sec-websocket-version"] !== "13"
@@ -762,13 +906,14 @@ export async function startHttpServer(
       const credential = protocols
         ?.find((value) => value.startsWith("placekeeper-auth."))
         ?.slice("placekeeper-auth.".length);
-      if (!protocols?.includes("placekeeper")) {
+      if (!protocols?.includes("placekeeper") || credential === undefined) {
         return reject();
       }
-      if (
-        credential === undefined ||
-        !broker.authenticate(match[1]!, credential)
-      ) {
+      const authenticated = request.headers.origin === origin
+        ? broker.authenticate(match[1]!, credential)
+        : request.headers.origin === undefined &&
+          broker.authenticateSurface(match[1]!, credential, "vscode");
+      if (!authenticated) {
         return reject();
       }
       const key = request.headers["sec-websocket-key"];

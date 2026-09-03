@@ -188,7 +188,7 @@ function completeFocusableSurface(surface: HTMLElement): readonly HTMLElement[] 
   ].join(','))];
 }
 
-function visibleViewport(): ViewportRect {
+export function visibleReviewViewport(): ViewportRect {
   const viewport = globalThis.visualViewport;
   if (viewport) {
     return {
@@ -269,7 +269,7 @@ export function LinkActionPopover({
       const nextPlacement = placeLinkActionPopover({
         anchor: request.clientRect,
         menu: { width: bounds.width, height: bounds.height },
-        viewport: visibleViewport(),
+        viewport: visibleReviewViewport(),
       });
       setPlacement((current) => current?.left === nextPlacement.left
         && current.top === nextPlacement.top

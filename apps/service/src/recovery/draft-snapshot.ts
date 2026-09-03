@@ -9,13 +9,18 @@ import {
   stat,
 } from "node:fs/promises";
 import { basename, join } from "node:path";
-import type { ReviewState } from "../../../../packages/core/src/review-model.js";
+import { normalizeReviewState, type ReviewState } from "../../../../packages/core/src/review-model.js";
+import { canonicalSha256 } from "../../../../packages/core/src/live-context.js";
 import type {
   SaveDestination,
   SaveSync,
 } from "../../../../packages/core/src/save-status.js";
 export type { SaveFailureReason } from "../../../../packages/core/src/save-status.js";
 import { ensurePrivateDirectory } from "./source-snapshot.js";
+import type {
+  GenerationOutputIdentity,
+  GenerationSyncTexSnapshot,
+} from "./source-snapshot.js";
 import {
   isRecoveryTemporaryPathActive,
   trackRecoveryTemporaryPath,
@@ -34,6 +39,37 @@ export interface LegacyRecoverableDraft {
 export type DurableSaveDestination = SaveDestination;
 export type DurableSaveSync = SaveSync;
 
+export interface DurableGenerationRecordV1 {
+  readonly schemaVersion: 1;
+  readonly generation: number;
+  readonly digest: string;
+  readonly byteLength: number;
+  readonly snapshotPath: string;
+  readonly outputIdentity: GenerationOutputIdentity;
+  readonly observationEpoch: number;
+  readonly committedAt: string;
+  readonly syncTex?: GenerationSyncTexSnapshot;
+}
+
+export interface DurableSourceWorkInterruptionV1 {
+  readonly schemaVersion: 1;
+  readonly taskSessionId: string;
+  readonly previousGeneration: number;
+  readonly successorGeneration: number;
+  readonly disposition: "interrupted-by-generation";
+  readonly interruptedAt: string;
+  readonly appliedChanges?: readonly DurableInterruptedSourceChangeV1[];
+}
+
+export interface DurableInterruptedSourceChangeV1 {
+  readonly schemaVersion: 1;
+  readonly executionId: string;
+  readonly itemId: string;
+  readonly path: string;
+  readonly guardSha256: string;
+  readonly observedSha256: string;
+}
+
 export interface RecoverableDraftV2 {
   readonly schemaVersion: 2;
   readonly canonicalSourcePath: string;
@@ -44,6 +80,9 @@ export interface RecoverableDraftV2 {
   readonly acceptedOriginalDigests?: readonly string[];
   readonly destination: DurableSaveDestination;
   readonly sync: DurableSaveSync;
+  readonly generationLineage?: readonly DurableGenerationRecordV1[];
+  readonly latestObservationEpoch?: number;
+  readonly sourceWorkInterruptions?: readonly DurableSourceWorkInterruptionV1[];
 }
 
 export type SourceDisposition = "local" | "remote-temporary";
@@ -77,6 +116,9 @@ export interface RecoverableDraftV3 {
   readonly acceptedOriginalDigests?: readonly string[];
   readonly destination: DurableSaveDestination;
   readonly sync: DurableSaveSync;
+  readonly generationLineage?: readonly DurableGenerationRecordV1[];
+  readonly latestObservationEpoch?: number;
+  readonly sourceWorkInterruptions?: readonly DurableSourceWorkInterruptionV1[];
 }
 
 export type RecoverableDraft = LegacyRecoverableDraft | RecoverableDraftV2 | RecoverableDraftV3;
@@ -100,27 +142,40 @@ function serialize(draft: RecoverableDraft): string {
   return JSON.stringify(envelope);
 }
 
-export function reviewStateDigest(state: Pick<ReviewState, "items">): string {
+export function reviewStateDigest(
+  state: Pick<ReviewState, "items"> & Partial<Pick<ReviewState, "workflow" | "pendingDrafts" | "discardAudit">>,
+): string {
   const ordered = [...state.items].sort((left, right) => left.id.localeCompare(right.id));
-  return createHash("sha256").update(JSON.stringify(ordered)).digest("hex");
+  return canonicalSha256({
+    items: ordered,
+    workflow: state.workflow,
+    pendingDrafts: state.pendingDrafts ?? [],
+    discardAudit: state.discardAudit ?? [],
+  });
 }
 
 export function migrateRecoverableDraft(draft: RecoverableDraft): RecoverableDraftV3 {
-  if (draft.schemaVersion === 3) return draft;
+  const state = normalizeReviewState(draft.state);
+  if (draft.schemaVersion === 3) return { ...draft, state };
+  const desiredDigest = reviewStateDigest(state);
   const v2: RecoverableDraftV2 = draft.schemaVersion === 2
-    ? draft
+    ? {
+        ...draft,
+        state,
+        sync: { ...draft.sync, desiredDigest },
+      }
     : {
         ...draft,
         schemaVersion: 2,
+        state,
         destination: { phase: "none", generation: 0 },
         sync: (() => {
-          const desiredDigest = reviewStateDigest(draft.state);
-          const hasChanges = draft.state.revision > 0 || draft.state.items.length > 0;
+          const hasChanges = state.revision > 0 || state.items.length > 0;
           return {
             phase: hasChanges ? "not-saved" as const : "clean" as const,
-            desiredRevision: draft.state.revision,
+            desiredRevision: state.revision,
             desiredDigest,
-            savedRevision: hasChanges ? -1 : draft.state.revision,
+            savedRevision: hasChanges ? -1 : state.revision,
             ...(hasChanges ? { failure: "destination-unconfigured" as const } : { savedDigest: desiredDigest }),
           };
         })(),
@@ -217,7 +272,7 @@ export class DraftSnapshotStore {
         .filter(
           (entry) =>
             entry.isFile() &&
-            /^\.(?:draft|source)-.*\.tmp$/u.test(entry.name) &&
+            /^\.(?:draft|source|synctex)-.*\.tmp$/u.test(entry.name) &&
             !isRecoveryTemporaryPathActive(join(this.directory, entry.name)),
         )
         .map((entry) => rm(join(this.directory, entry.name), { force: true })),

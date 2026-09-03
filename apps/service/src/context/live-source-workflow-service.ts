@@ -23,8 +23,10 @@ import {
 } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import {
   canonicalSourceRoot,
+  readScopedSource,
   resolveScopedOutputPath,
 } from "../files/source-scope.js";
+import type { DurableInterruptedSourceChangeV1 } from "../recovery/draft-snapshot.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
 import type { LiveContextService } from "./live-context-service.js";
 import type { PdfEvidenceUnavailableReason } from "./pdf-evidence-service.js";
@@ -87,6 +89,7 @@ interface RebuildPlanRecord {
 interface WorkflowExecution {
   readonly taskSessionId: string;
   readonly baseline: LiveExecutionBaselineV1;
+  readonly sourceRoot: string;
   readonly guardedApplyByItem: Map<string, { readonly path: string; readonly sha256: string }>;
   readonly verifiedRebuilds: Set<string>;
 }
@@ -173,6 +176,8 @@ export class LiveSourceWorkflowService {
     this.#now = options.now ?? (() => new Date());
     this.#id = options.id ?? randomUUID;
     this.#inspectPdf = options.inspectPdf ?? inspectPdfWithEmbedPdf;
+    this.#broker.registerSourceWorkInterruptionCollector((input) =>
+      this.#collectInterruptedChanges(input.taskSessionId, input.previousGeneration));
   }
 
   async begin(input: {
@@ -194,9 +199,11 @@ export class LiveSourceWorkflowService {
       if (baseline.identity.stateDigest !== after.identity.stateDigest) {
         throw new Error("Review State changed during baseline capture; refresh and begin source work again");
       }
+      const scope = await this.#sourceScope(taskSessionId);
       this.#registerExecution(baseline.executionId, {
         taskSessionId,
         baseline,
+        sourceRoot: scope.root,
         guardedApplyByItem: new Map(),
         verifiedRebuilds: new Set(),
       });
@@ -420,6 +427,35 @@ export class LiveSourceWorkflowService {
       if (plan.taskSessionId === taskSessionId) this.#rebuildPlans.delete(planId);
     }
     this.#executionIdsByTask.delete(taskSessionId);
+  }
+
+  async #collectInterruptedChanges(
+    taskSessionId: string,
+    previousGeneration: number,
+  ): Promise<readonly DurableInterruptedSourceChangeV1[]> {
+    const changes: DurableInterruptedSourceChangeV1[] = [];
+    for (const [executionId, execution] of this.#executions) {
+      if (
+        execution.taskSessionId !== taskSessionId ||
+        execution.baseline.identity.documentGeneration !== previousGeneration
+      ) continue;
+      for (const [itemId, guarded] of execution.guardedApplyByItem) {
+        const observed = await readScopedSource(execution.sourceRoot, guarded.path);
+        if (observed.fingerprint.sha256 === guarded.sha256) continue;
+        changes.push({
+          schemaVersion: 1,
+          executionId,
+          itemId,
+          path: observed.fingerprint.path,
+          guardSha256: guarded.sha256,
+          observedSha256: observed.fingerprint.sha256,
+        });
+      }
+    }
+    return changes.sort((left, right) =>
+      left.executionId.localeCompare(right.executionId) ||
+      left.itemId.localeCompare(right.itemId) ||
+      left.path.localeCompare(right.path));
   }
 
   #registerExecution(executionId: string, execution: WorkflowExecution): void {

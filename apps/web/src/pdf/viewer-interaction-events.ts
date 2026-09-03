@@ -85,6 +85,13 @@ export type ViewerInteractionEvent =
   | { readonly type: 'selection-placement'; readonly value: ViewerSelectionPlacement | null }
   | { readonly type: 'caret'; readonly value: ViewerCaretUpdate }
   | { readonly type: 'page-menu'; readonly value: ViewerPageMenuInvocation | null }
+  | {
+      readonly type: 'reverse-synctex';
+      readonly value: {
+        readonly pageIndex: number;
+        readonly point: { readonly x: number; readonly y: number };
+      };
+    }
   | { readonly type: 'page-note-cursor'; readonly value: ViewerPagePoint | null }
   | { readonly type: 'page-note-commit'; readonly value: ViewerPagePoint }
   | { readonly type: 'owned-mark'; readonly value: ViewerOwnedMarkInteraction }
@@ -150,6 +157,55 @@ export function viewerPointerButton(event: { readonly currentTarget: unknown }):
     return undefined;
   }
   return pointerButtonByTarget.get(currentTarget);
+}
+
+export function isReverseSyncTexPointerGesture(
+  event: { readonly button: number; readonly ctrlKey: boolean; readonly metaKey: boolean },
+  platform = globalThis.navigator?.platform ?? '',
+): boolean {
+  if (event.button !== 0) return false;
+  return /^Mac/iu.test(platform) ? event.metaKey : event.ctrlKey;
+}
+
+interface PendingReverseSyncTexPointer {
+  readonly clientX: number;
+  readonly clientY: number;
+  dragged: boolean;
+}
+
+/** Tracks modifier-clicks through capture and rejects drags before reverse SyncTeX. */
+export class ReverseSyncTexPointerGesture {
+  readonly #pending = new Map<number, PendingReverseSyncTexPointer>();
+
+  constructor(readonly movementThreshold = 5) {}
+
+  pointerDown(pointerId: number, clientX: number, clientY: number): void {
+    this.#pending.set(pointerId, { clientX, clientY, dragged: false });
+  }
+
+  has(pointerId: number): boolean {
+    return this.#pending.has(pointerId);
+  }
+
+  pointerMove(pointerId: number, clientX: number, clientY: number): void {
+    const pending = this.#pending.get(pointerId);
+    if (pending === undefined || pending.dragged) return;
+    if (Math.hypot(clientX - pending.clientX, clientY - pending.clientY) > this.movementThreshold) {
+      pending.dragged = true;
+    }
+  }
+
+  pointerUp(pointerId: number, clientX: number, clientY: number): { readonly activate: boolean } | undefined {
+    this.pointerMove(pointerId, clientX, clientY);
+    const pending = this.#pending.get(pointerId);
+    if (pending === undefined) return undefined;
+    this.#pending.delete(pointerId);
+    return { activate: !pending.dragged };
+  }
+
+  cancel(pointerId: number): void {
+    this.#pending.delete(pointerId);
+  }
 }
 
 export interface ViewerPrimaryClick {

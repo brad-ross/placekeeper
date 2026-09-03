@@ -65,6 +65,383 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('button', { name: 'Proofread mode' })).toHaveCount(0);
   });
 
+  test('discloses mounted annotation actions at intent without activating their row', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 760 });
+    await page.getByRole('button', { name: 'Seed annotations' }).click();
+    await openAnnotationsWorkspace(page);
+
+    const candidate = page.locator(
+      '[data-review-item][data-active="false"]:has([data-annotation-action="edit"])',
+    ).first();
+    const itemId = await candidate.getAttribute('data-review-item');
+    if (itemId === null) throw new Error('No inactive editable annotation row is available.');
+    const row = page.locator(`[data-review-item="${itemId}"]`);
+    const navigation = row.locator('.annotation-item__navigation');
+    const edit = row.locator('[data-annotation-action="edit"]');
+    const remove = row.locator('[data-annotation-action="delete"]');
+    await expect(row).toBeVisible();
+    await expect(edit).toHaveCount(1);
+    await expect(remove).toHaveCount(1);
+    await expect(edit).toHaveCSS('opacity', '0');
+
+    await row.hover();
+    await expect(edit).toHaveCSS('opacity', '1');
+    await page.mouse.move(0, 0);
+    await expect(edit).toHaveCSS('opacity', '0');
+
+    await navigation.focus();
+    await page.keyboard.press('Tab');
+    await expect(edit).toBeFocused();
+    await expect(edit).toHaveCSS('opacity', '1');
+
+    await edit.click();
+    await expect(row).toHaveAttribute('data-active', 'false');
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await expect(row).toHaveAttribute('data-active', 'false');
+
+    await navigation.click();
+    await expect(row).toHaveAttribute('data-active', 'true');
+    await page.getByRole('application', { name: 'PDF review canvas' }).focus();
+    await page.mouse.move(0, 0);
+    await expect(edit).toHaveCSS('opacity', '1');
+  });
+
+  test('keeps coarse-pointer annotation actions visible, touch-sized, and layout-stable', async ({ browser }) => {
+    const context = await browser.newContext({
+      hasTouch: true,
+      viewport: { width: 390, height: 720 },
+    });
+    const touchPage = await context.newPage();
+    try {
+      await touchPage.goto('/test/acceptance/review-harness/index.html');
+      await touchPage.locator('#root').evaluate((element) => {
+        element.setAttribute('data-production-root', 'true');
+      });
+      await touchPage.getByRole('button', { name: 'Seed annotations' }).click();
+      await openAnnotationsWorkspace(touchPage);
+      expect(await touchPage.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+
+      const row = touchPage.locator(
+        '[data-review-item]:has([data-annotation-action="edit"])',
+      ).first();
+      const edit = row.locator('[data-annotation-action="edit"]');
+      const remove = row.locator('[data-annotation-action="delete"]');
+      const scrollViewport = touchPage.locator('[data-annotation-scroll-viewport]');
+      const before = await Promise.all([
+        row.evaluate((element) => element.getBoundingClientRect().height),
+        scrollViewport.evaluate((element) => element.scrollHeight),
+      ]);
+      await expect(edit).toHaveCSS('opacity', '1');
+      for (const action of [edit, remove]) {
+        const geometry = await action.evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return {
+            boundsWidth: bounds.width,
+            boundsHeight: bounds.height,
+            computedWidth: style.width,
+            computedHeight: style.height,
+            minWidth: style.minWidth,
+            maxWidth: style.maxWidth,
+            touchSize: style.getPropertyValue('--review-control-touch'),
+          };
+        });
+        expect(geometry).toMatchObject({
+          computedWidth: '44px',
+          computedHeight: '44px',
+          minWidth: '44px',
+          maxWidth: '44px',
+          touchSize: '44px',
+        });
+        expect(geometry.boundsWidth).toBeGreaterThanOrEqual(44);
+        expect(geometry.boundsHeight).toBeGreaterThanOrEqual(44);
+      }
+
+      await edit.focus();
+      const after = await Promise.all([
+        row.evaluate((element) => element.getBoundingClientRect().height),
+        scrollViewport.evaluate((element) => element.scrollHeight),
+      ]);
+      expect(after).toEqual(before);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('resolves previous annotations through focused, annotation-native detail views', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=1');
+    const documentActionsTrigger = page.getByRole('button', { name: /Open document actions/u });
+    await expect(documentActionsTrigger.locator('.review-icon')).toHaveCount(0);
+    await documentActionsTrigger.click();
+    const exportAction = page.getByRole('menuitem', { name: 'Export', exact: true });
+    await expect(exportAction).toHaveAttribute('aria-disabled', 'true');
+    const blockerDescription = await exportAction.getAttribute('aria-describedby');
+    expect(blockerDescription).toMatch(/^document-export-reason-/u);
+    await expect(page.locator(`#${blockerDescription}`)).toHaveText('2 annotations to resolve.');
+    await expect(page.getByText('2 annotations to resolve.')).toBeVisible();
+    const attention = page.locator('[data-document-actions-attention]');
+    await expect(attention).toBeVisible();
+    const openAnnotations = page.getByRole('menuitem', { name: 'Open Annotations' });
+    await expect(openAnnotations).toBeVisible();
+    await expect(openAnnotations.locator('.lucide-list-checks')).toBeVisible();
+    await openAnnotations.click();
+    await expect(page.getByRole('tab', { name: 'Annotations', exact: true }).locator('.lucide-list-checks'))
+      .toBeVisible();
+
+    const reconciliation = page.getByRole('region', { name: 'Needs attention' });
+    await expect(reconciliation.getByRole('heading', {
+      name: 'Needs attention',
+    })).toBeVisible();
+    await expect(reconciliation.locator('[data-reconciliation-entry]')).toHaveCount(2);
+    await expect(reconciliation.getByRole('button', {
+      name: 'Reattach previous Highlight annotation on page 1',
+    })).toBeFocused();
+    await expect(documentActionsTrigger).not.toBeFocused();
+    await expect(reconciliation.locator('[data-reconciliation-action="reattach"]')).toHaveCount(0);
+    await expect(reconciliation.getByRole('button', {
+      name: 'Discard Delete annotation on page 2',
+    })).toBeVisible();
+
+    await reconciliation.getByRole('button', {
+      name: 'Reattach previous Highlight annotation on page 1',
+    }).click();
+    const reattachDetail = page.locator('[data-reconciliation-detail="reattach"]');
+    await expect(reattachDetail).toHaveAttribute(
+      'aria-label',
+      'Resolve previous Highlight annotation on page 1',
+    );
+    await expect(reattachDetail.getByRole('heading', { name: 'Reattach highlight' })).toBeVisible();
+    await expect(reattachDetail.getByText('Your annotation')).toBeVisible();
+    await expect(reattachDetail.getByText('Check the identifying variation.')).toBeVisible();
+    await expect(reattachDetail.getByText('Multiple matches')).toHaveCount(1);
+    await expect(reattachDetail.getByText('Previously attached to · Page 1')).toBeVisible();
+    await expect(reattachDetail.getByText('the previous identification argument')).toBeVisible();
+    await expect(reattachDetail.getByText('Select the intended text in the PDF, then confirm.')).toBeVisible();
+    await expect(reattachDetail.locator('.full-annotation-reader__metadata')).toHaveCount(0);
+    await expect(reattachDetail.locator('[data-reattachment-preview]')).toHaveCount(0);
+    await expect(reattachDetail.locator('.reconciliation-workspace__editor')).toHaveCount(0);
+    await reattachDetail.getByRole('button', { name: 'Back' }).click();
+    await expect(page.getByRole('button', {
+      name: 'Reattach previous Highlight annotation on page 1',
+    })).toBeFocused();
+
+    await reconciliation.getByRole('button', {
+      name: 'Reattach previous Highlight annotation on page 1',
+    }).click();
+    await expect(page.getByRole('region', { name: 'Owned annotations' })).toHaveCount(0);
+    await expect(reattachDetail.getByRole('button', { name: 'Confirm' })).toBeEnabled();
+
+    await reattachDetail.getByRole('button', { name: 'Confirm' }).click();
+    await expect(page.locator('[data-reconciliation-detail]')).toHaveCount(0);
+    await expect(page.getByText('Reattachment saved.')).toHaveCount(0);
+    await expect(page.locator('[data-reconciliation-entry]')).toHaveCount(1);
+    await expect(page.getByRole('button', {
+      name: 'Reattach previous Delete annotation on page 2',
+    })).toBeFocused();
+    await expect(page.getByRole('region', { name: 'Owned annotations' })).toContainText(
+      'Check the identifying variation.',
+    );
+
+    const deleteAction = page.getByRole('button', {
+      name: 'Discard Delete annotation on page 2',
+    });
+    const destructiveColor = await deleteAction.evaluate((element) => getComputedStyle(element).color);
+    await deleteAction.click();
+    const discardDetail = page.locator('[data-reconciliation-detail="discard"]');
+    await expect(discardDetail).toHaveAttribute(
+      'aria-label',
+      'Resolve previous Delete annotation on page 2',
+    );
+    await expect(discardDetail.getByText('obsolete robustness sentence')).toBeVisible();
+    await expect(discardDetail.getByText('Missing text')).toHaveCount(1);
+    await expect(discardDetail.getByText('The original text is no longer present. Select its new location.')).toHaveCount(0);
+    const discardButton = discardDetail.getByRole('button', { name: 'Discard', exact: true });
+    await expect(discardButton).toHaveCSS('color', destructiveColor);
+    await expect(discardButton.locator('.review-icon')).toHaveCSS('color', destructiveColor);
+    await discardButton.click();
+
+    await expect(page.locator('[data-reconciliation-entry]')).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'Needs attention' })).toHaveCount(0);
+    await expect(page.getByText('No previous annotations need attention.')).toHaveCount(0);
+    await expect(page.getByText('Discard recorded.')).toHaveCount(0);
+    await expect(page.locator('[data-workspace-focus-token="annotations:section"]')).toBeFocused();
+
+    await documentActionsTrigger.click();
+    await expect(exportAction).toHaveAttribute('aria-disabled', 'false');
+    const eligibleMenu = page.getByRole('menu', { name: /Actions for/u });
+    await expect(eligibleMenu.locator(':scope > *')).toHaveCount(1);
+    await exportAction.click();
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
+    await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
+    await expect(exportAction).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(documentActionsTrigger).toBeFocused();
+  });
+
+  test('limits the document-title hover surface without moving toolbar groups', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready');
+    await page.locator('#root').evaluate((element) => {
+      element.setAttribute('data-production-root', 'true');
+    });
+    const trigger = page.getByRole('button', { name: /Open document actions/u });
+    const documentActions = page.locator(
+      '[data-review-chrome] > .review-chrome__identity .document-actions',
+    );
+    const geometry = await documentActions.evaluate((element) => {
+      const triggerElement = element.querySelector<HTMLElement>('[data-document-actions-trigger]');
+      if (triggerElement === null) throw new Error('Document actions trigger is unavailable.');
+      return {
+        slot: element.getBoundingClientRect().toJSON(),
+        trigger: triggerElement.getBoundingClientRect().toJSON(),
+      };
+    });
+
+    expect(geometry.trigger.x).toBeCloseTo(geometry.slot.x, 0);
+    expect(geometry.trigger.width).toBeLessThan(geometry.slot.width - 16);
+    await trigger.hover();
+    await expect(trigger).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await page.mouse.move(
+      geometry.trigger.x + geometry.trigger.width + 8,
+      geometry.trigger.y + geometry.trigger.height / 2,
+    );
+    await expect(trigger).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  });
+
+  test('routes a blocked export back to the active protected draft without discarding it', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready');
+    await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+    const composer = page.getByRole('region', { name: 'Highlight Comment' });
+    const editor = composer.getByRole('textbox', { name: 'Comment (optional)' });
+    await editor.fill('Keep this protected draft exactly as written.');
+    await expect(page.locator('[data-pending-drafts]')).toHaveAttribute('data-pending-drafts', '1');
+
+    const documentActionsTrigger = page.getByRole('button', { name: /Open document actions/u });
+    await documentActionsTrigger.click();
+    await expect(page.getByRole('menuitem', { name: 'Export', exact: true }))
+      .toHaveAttribute('aria-disabled', 'true');
+    await page.getByRole('menuitem', { name: 'Open Annotations' }).click();
+
+    await expect(composer).toBeVisible();
+    await expect(editor).toHaveValue('Keep this protected draft exactly as written.');
+    await expect(editor).toBeFocused();
+    await expect(page.locator('[data-pending-drafts]')).toHaveAttribute('data-pending-drafts', '1');
+    await expect(page.getByRole('menu')).toHaveCount(0);
+  });
+
+  test('routes a pending draft without an active composer to its attention row', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=pending-draft');
+    await page.getByRole('button', { name: /Open document actions/u }).click();
+    await page.getByRole('menuitem', { name: 'Open Annotations' }).click();
+
+    await expect(page.getByRole('button', {
+      name: 'Reattach previous Highlight annotation on page 1',
+    })).toBeFocused();
+  });
+
+  test('shows Page Note source context only when it identifies the prior location', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=page-notes');
+    await openAnnotationsWorkspace(page);
+
+    await page.getByRole('button', {
+      name: 'Reattach previous Page Note annotation on page 3',
+    }).click();
+    const detail = page.locator('[data-reconciliation-detail="reattach"]');
+    await expect(detail.getByRole('heading', { name: 'Reattach page note' })).toBeVisible();
+    await expect(detail.getByText('Previously attached to · Page 3')).toBeVisible();
+    await expect(detail.getByText('Original PDF text:')).toHaveCount(0);
+    await expect(detail.getByText('Page 3', { exact: true })).toHaveCount(0);
+    await detail.getByRole('button', { name: 'Back' }).click();
+
+    await page.getByRole('button', {
+      name: 'Reattach previous Page Note annotation on page 4',
+    }).click();
+    await expect(detail.getByText('Previously attached to · Page 4')).toBeVisible();
+    await expect(detail.getByText('The appendix extends the comparison.')).toBeVisible();
+  });
+
+  test('keeps stale confirmation, pending export, and retry feedback inside document actions', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=stale');
+    const trigger = page.getByRole('button', { name: /Open document actions/u });
+    await trigger.click();
+    let exportAction = page.getByRole('menuitem', { name: 'Export', exact: true });
+    await exportAction.click();
+    await expect(page.getByText('Export the last successful PDF?')).toBeVisible();
+    const cancel = page.getByRole('menuitem', { name: 'Cancel' });
+    await expect(cancel).toBeFocused();
+    await cancel.click();
+    await expect(exportAction).toBeFocused();
+    await exportAction.click();
+    await page.getByRole('menuitem', { name: 'Confirm export' }).click();
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
+    await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
+
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&export=delayed');
+    await page.getByRole('button', { name: /Open document actions/u }).click();
+    exportAction = page.getByRole('menuitem', { name: 'Export', exact: true });
+    await exportAction.evaluate((element) => {
+      (element as HTMLButtonElement).click();
+      (element as HTMLButtonElement).click();
+    });
+    await expect(page.getByText('Exporting reviewed PDF…')).toBeVisible();
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
+    await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
+    await expect(exportAction).toBeFocused();
+
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&export=fail-once');
+    await page.getByRole('button', { name: /Open document actions/u }).click();
+    await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
+    const retry = page.getByRole('menuitem', { name: 'Retry export' });
+    await expect(page.getByText('Export failed safely. Try again.')).toBeVisible();
+    await expect(retry).toBeFocused();
+    await retry.click();
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '2');
+    await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
+  });
+
+  test('clears stale export confirmation when a responsive transition closes document actions', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=stale');
+    const trigger = page.getByRole('button', { name: /Open document actions/u });
+    await trigger.click();
+    await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
+    await expect(page.getByText('Export the last successful PDF?')).toBeVisible();
+
+    await page.setViewportSize({ width: 320, height: 900 });
+    await expect(page.getByRole('menu', { name: /Actions for/u })).toHaveCount(0);
+
+    await trigger.click();
+    await expect(page.getByRole('menuitem', { name: 'Export', exact: true })).toBeVisible();
+    await expect(page.getByText('Export the last successful PDF?')).toHaveCount(0);
+  });
+
+  test('presents reconciling and failed refresh export states from the document title', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&refresh=reconciling');
+    await page.getByRole('button', { name: /Open document actions/u }).click();
+    let menu = page.getByRole('menu', { name: /Actions for/u });
+    await expect(menu).toHaveAttribute('data-export-eligibility', 'blocked');
+    await expect(menu.getByRole('menuitem', { name: 'Export', exact: true }))
+      .toHaveAttribute('aria-disabled', 'true');
+    await expect(menu.getByText(
+      'Export becomes available after document reconciliation finishes.',
+    )).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: 'Open Annotations' })).toHaveCount(0);
+
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&refresh=failed');
+    await page.getByRole('button', { name: /Open document actions/u }).click();
+    menu = page.getByRole('menu', { name: /Actions for/u });
+    await expect(menu).toHaveAttribute('data-export-eligibility', 'eligible');
+    await expect(menu.getByText(
+      'The last successful PDF may be stale. Confirm before exporting this generation.',
+    )).toBeVisible();
+    await menu.getByRole('menuitem', { name: 'Export', exact: true }).click();
+    await expect(menu.getByText('Export the last successful PDF?')).toBeVisible();
+  });
+
   test('keeps focus and References coherent when a live outline disappears and returns', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole('button', { name: 'Set outline tree' }).click();
@@ -172,7 +549,9 @@ test.describe('canonical review workflow', () => {
       name: 'Restore previous outline expansion',
     })).toHaveAttribute('aria-pressed', 'true');
 
-    await page.getByRole('button', { name: 'Begin outline replacement' }).click();
+    await page.getByRole('button', { name: 'Begin outline replacement' }).evaluate((button) => (
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    ));
     await expect(page.locator('[data-outline-state="loading"]')).toHaveText('Outline is loading…');
     await expect(page.getByRole('button', {
       name: 'Restore previous outline expansion',
@@ -338,6 +717,398 @@ test.describe('canonical review workflow', () => {
       'data-viewer-page-requests',
       '8,5',
     );
+  });
+
+  test('progressively compacts the top bar into repeatable semantic menus', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?responsive=full');
+    await page.setViewportSize({ width: 320, height: 720 });
+    const chrome = page.locator('[data-review-chrome]');
+    await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'navigationCompact');
+
+    const historyTrigger = page.getByRole('button', { name: 'Edit history' });
+    await expect(historyTrigger.locator('.review-icon')).toHaveCount(2);
+
+    const navigationTrigger = page.getByRole('button', {
+      name: 'Document navigation, current page 3 of 12',
+    });
+    await navigationTrigger.click();
+    const navigationMenu = page.getByRole('menu', { name: 'Document navigation' });
+    await expect(navigationMenu).toBeVisible();
+    await expect(navigationMenu.getByRole('menuitem')).toHaveCount(5);
+    await expect(navigationMenu.getByRole('menuitem').nth(0)).toHaveAttribute('aria-label', 'Back in document history');
+    await expect(navigationMenu.getByRole('menuitem').nth(1)).toHaveAttribute('aria-label', 'Forward in document history');
+    await expect(navigationMenu.getByRole('menuitem').nth(2)).toHaveAttribute('aria-label', 'Previous page');
+    await expect(navigationMenu.getByRole('menuitem').nth(3)).toHaveAttribute('aria-label', 'Current page 3 of 12. Enter a page number');
+    await expect(navigationMenu.getByRole('menuitem').nth(4)).toHaveAttribute('aria-label', 'Next page');
+    const nextPage = navigationMenu.getByRole('menuitem', { name: 'Next page' });
+    await nextPage.click();
+    await expect(navigationMenu).toBeVisible();
+    await expect(nextPage).toBeFocused();
+    await expect(page.getByRole('button', {
+      name: 'Document navigation, current page 4 of 12',
+    })).toBeVisible();
+
+    await navigationMenu.getByRole('menuitem', {
+      name: 'Current page 4 of 12. Enter a page number',
+    }).click();
+    const compactPageInput = page.getByRole('spinbutton', { name: 'Page number' });
+    await compactPageInput.fill('6');
+    await compactPageInput.press('Enter');
+    await expect(navigationMenu).toHaveCount(0);
+    await expect(page.getByRole('button', {
+      name: 'Document navigation, current page 6 of 12',
+    })).toBeFocused();
+
+    const zoomTrigger = page.getByRole('button', {
+      name: 'PDF zoom, current zoom 110 percent',
+    });
+    await zoomTrigger.click();
+    await expect(navigationMenu).toHaveCount(0);
+    const zoomMenu = page.getByRole('menu', { name: 'PDF zoom' });
+    await expect(zoomMenu).toBeVisible();
+    await expect(zoomMenu.getByRole('menuitem').nth(0)).toHaveAttribute('aria-label', 'Zoom out');
+    await expect(zoomMenu.getByRole('menuitem').nth(1)).toHaveAttribute('aria-label', 'Zoom in');
+    await expect(zoomMenu.getByRole('menuitem').nth(2)).toHaveAttribute('aria-label', 'Current zoom 110 percent. Enter a zoom percentage');
+    await expect(zoomMenu.getByRole('menuitem').nth(3)).toHaveAttribute('aria-label', 'Fit PDF to available width');
+    const zoomIn = zoomMenu.getByRole('menuitem', { name: 'Zoom in' });
+    await zoomIn.click();
+    await expect(zoomMenu).toBeVisible();
+    await expect(zoomIn).toBeFocused();
+    await expect(page.getByRole('button', {
+      name: 'PDF zoom, current zoom 120 percent',
+    })).toBeVisible();
+
+    await zoomMenu.getByRole('menuitem', {
+      name: 'Current zoom 120 percent. Enter a zoom percentage',
+    }).click();
+    const compactZoomInput = page.getByRole('spinbutton', { name: 'Zoom percentage' });
+    await compactZoomInput.fill('9999');
+    await compactZoomInput.press('Enter');
+    await expect(zoomMenu).toBeVisible();
+    await expect(compactZoomInput).toHaveAttribute('aria-invalid', 'true');
+    await compactZoomInput.press('Escape');
+    await expect(zoomMenu).toHaveCount(0);
+    await expect(page.getByRole('button', {
+      name: 'PDF zoom, current zoom 120 percent',
+    })).toBeFocused();
+
+    await page.getByRole('button', {
+      name: 'PDF zoom, current zoom 120 percent',
+    }).click();
+    const fitWidth = zoomMenu.getByRole('menuitem', { name: 'Fit PDF to available width' });
+    await fitWidth.click();
+    await expect(zoomMenu).toHaveCount(0);
+    await expect(page.getByRole('button', {
+      name: /PDF zoom, current zoom \d+ percent/u,
+    })).toBeFocused();
+  });
+
+  test('keeps all-disabled compact menus in keyboard ownership', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?responsive=full');
+    await page.setViewportSize({ width: 320, height: 720 });
+    const { workspace } = await openAnnotationsWorkspace(page);
+
+    await page.getByRole('button', { name: 'Make page controls unavailable' }).click();
+    const navigationTrigger = page.getByRole('button', {
+      name: 'Document navigation, page unavailable',
+    });
+    await navigationTrigger.focus();
+    await navigationTrigger.press('Enter');
+    const navigationMenu = page.getByRole('menu', { name: 'Document navigation' });
+    await expect(navigationMenu).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(navigationMenu).toHaveCount(0);
+    await expect(navigationTrigger).toBeFocused();
+    await expect(workspace).toHaveAttribute('aria-expanded', 'true');
+
+    await page.getByRole('button', { name: 'Make zoom controls unavailable' }).click();
+    const zoomTrigger = page.getByRole('button', { name: 'PDF zoom unavailable' });
+    await zoomTrigger.focus();
+    await zoomTrigger.press('Enter');
+    const zoomMenu = page.getByRole('menu', { name: 'PDF zoom' });
+    await expect(zoomMenu).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(zoomMenu).toHaveCount(0);
+    await expect(zoomTrigger).toBeFocused();
+    await expect(workspace).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  test('keeps a portaled compact menu attached when its trigger resizes', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?responsive=full');
+    await page.setViewportSize({ width: 760, height: 720 });
+    const chrome = page.locator('[data-review-chrome]');
+    await chrome.evaluate((element) => { element.style.width = '320px'; });
+    await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'navigationCompact');
+    const navigationTrigger = page.getByRole('button', {
+      name: 'Document navigation, current page 3 of 12',
+    });
+    await navigationTrigger.click();
+    const navigationMenu = page.getByRole('menu', { name: 'Document navigation' });
+    await expect(navigationMenu).toBeVisible();
+    const initialLeft = Number.parseFloat(await navigationMenu.evaluate((element) => element.style.left));
+
+    await navigationTrigger.evaluate((element) => {
+      element.style.transform = 'translateX(40px)';
+    });
+    await expect.poll(async () => Number.parseFloat(
+      await navigationMenu.evaluate((element) => element.style.left),
+    )).not.toBe(initialLeft);
+
+    const geometry = await Promise.all([
+      navigationTrigger.boundingBox(),
+      navigationMenu.boundingBox(),
+    ]);
+    if (!geometry[0] || !geometry[1]) throw new Error('Compact menu geometry is unavailable.');
+    expect(geometry[1].x).toBeLessThanOrEqual(geometry[0].x + geometry[0].width);
+    expect(geometry[1].x + geometry[1].width).toBeGreaterThanOrEqual(geometry[0].x);
+  });
+
+  test('does not let deferred focus close a newer compact menu', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?responsive=full');
+    await page.setViewportSize({ width: 320, height: 720 });
+    await page.getByRole('button', {
+      name: 'PDF zoom, current zoom 110 percent',
+    }).click();
+    const zoomMenu = page.getByRole('menu', { name: 'PDF zoom' });
+    await expect(zoomMenu).toBeVisible();
+    await page.evaluate(() => {
+      const original = window.requestAnimationFrame.bind(window);
+      let held: FrameRequestCallback | null = null;
+      window.requestAnimationFrame = (callback: FrameRequestCallback) => {
+        if (held === null) {
+          held = callback;
+          window.requestAnimationFrame = original;
+          return 2_147_483_647;
+        }
+        return original(callback);
+      };
+      (window as typeof window & { flushHeldTopBarFrame?: () => void }).flushHeldTopBarFrame = () => {
+        const callback = held;
+        held = null;
+        callback?.(performance.now());
+      };
+    });
+    await zoomMenu.getByRole('menuitem', { name: 'Fit PDF to available width' }).click();
+    await expect(zoomMenu).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Edit history' }).click();
+    const historyMenu = page.getByRole('menu', { name: 'Edit history' });
+    await expect(historyMenu).toBeVisible();
+    await page.evaluate(() => {
+      (window as typeof window & { flushHeldTopBarFrame?: () => void }).flushHeldTopBarFrame?.();
+    });
+    await expect(historyMenu).toBeVisible();
+    await expect(historyMenu).toBeFocused();
+  });
+
+  test('keeps a readable title floor and collapses Edit history, Zoom, then Navigation', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?visual=reading');
+    await page.setViewportSize({ width: 1280, height: 720 });
+    const chrome = page.locator('[data-review-chrome]');
+    await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'expanded');
+
+    const longTitle = chrome.locator(':scope > .review-chrome__identity strong');
+    expect(await longTitle.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+
+    const reachCollapsedPresentation = async (
+      target: 'zoomCompact' | 'historyCompact' | 'navigationCompact',
+      previous: 'expanded' | 'zoomCompact' | 'historyCompact',
+    ) => {
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const widths = await chrome.locator('[data-review-chrome-sizing-rack]').evaluate((rack, names) => {
+          const width = (name: string) => rack.querySelector<HTMLElement>(
+            `[data-review-chrome-candidate="${name}"]`,
+          )?.getBoundingClientRect().width ?? 0;
+          return { previous: width(names.previous), target: width(names.target) };
+        }, { previous, target });
+        expect(widths.previous).toBeGreaterThan(widths.target);
+        const width = Math.max(320, Math.floor((widths.previous + widths.target) / 2));
+        await page.setViewportSize({ width, height: 720 });
+        await page.evaluate(() => new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }));
+        if (await chrome.getAttribute('data-review-chrome-presentation') === target) return;
+      }
+      await expect(chrome).toHaveAttribute('data-review-chrome-presentation', target);
+    };
+
+    const expectReadableFilename = async () => {
+      const filenameWidth = await chrome.locator(
+        ':scope > .review-chrome__identity .review-chrome__save-identity strong',
+      ).evaluate((element) => element.getBoundingClientRect().width);
+      expect(filenameWidth).toBeGreaterThanOrEqual(143.5);
+    };
+
+    await expectReadableFilename();
+    await reachCollapsedPresentation('historyCompact', 'expanded');
+    await expectReadableFilename();
+    await reachCollapsedPresentation('zoomCompact', 'historyCompact');
+    await expectReadableFilename();
+    await reachCollapsedPresentation('navigationCompact', 'zoomCompact');
+    await expectReadableFilename();
+
+    for (const target of ['zoomCompact', 'historyCompact', 'expanded'] as const) {
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const required = await chrome.locator(
+          `[data-review-chrome-candidate="${target}"]`,
+        ).evaluate((element) => element.getBoundingClientRect().width);
+        await page.setViewportSize({ width: Math.ceil(required + 24), height: 720 });
+        await page.evaluate(() => new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }));
+        if (await chrome.getAttribute('data-review-chrome-presentation') === target) break;
+      }
+      await expect(chrome).toHaveAttribute('data-review-chrome-presentation', target);
+      await expectReadableFilename();
+    }
+  });
+
+  test('keeps the top bar to one contained 58px row across supported widths', async ({ page }) => {
+    await page.locator('#root').evaluate((element) => {
+      element.setAttribute('data-production-root', 'true');
+    });
+    for (const width of [1280, 760, 641, 640, 521, 520, 481, 480, 390, 361, 360, 320]) {
+      await page.setViewportSize({ width, height: 720 });
+      const chrome = page.locator('[data-review-chrome]');
+      await expect(chrome).toHaveCSS('height', '58px');
+      await page.evaluate(() => new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }));
+
+      const geometry = await chrome.evaluate((element) => {
+        const identity = element.querySelector<HTMLElement>(':scope > .review-chrome__identity');
+        const controls = element.querySelector<HTMLElement>(':scope > .review-chrome__viewer-controls');
+        const actions = element.querySelector<HTMLElement>(':scope > .review-chrome__actions');
+        if (!identity || !controls || !actions) throw new Error('Review chrome geometry is incomplete.');
+        const chromeBounds = element.getBoundingClientRect();
+        const identityBounds = identity.getBoundingClientRect();
+        const controlsBounds = controls.getBoundingClientRect();
+        const actionsBounds = actions.getBoundingClientRect();
+        const visibleBounds = (selector: string) => [...element.querySelectorAll<HTMLElement>(selector)]
+          .filter((child) => getComputedStyle(child).display !== 'none')
+          .map((child) => child.getBoundingClientRect().toJSON());
+        return {
+          clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+          height: chromeBounds.height,
+          identity: identityBounds.toJSON(),
+          controls: controlsBounds.toJSON(),
+          actions: actionsBounds.toJSON(),
+          identityChildren: visibleBounds(':scope > .review-chrome__identity > *'),
+          saveChildren: visibleBounds(':scope > .review-chrome__identity .review-chrome__save-identity > :not(.sr-only)'),
+          filename: element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__save-identity strong')?.getBoundingClientRect().toJSON(),
+        };
+      });
+
+      expect(geometry.height).toBe(58);
+      expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
+      const visibleColumns = [geometry.identity, geometry.controls, geometry.actions]
+        .filter((item) => item.width > 0.5);
+      for (let index = 1; index < visibleColumns.length; index += 1) {
+        expect(visibleColumns[index - 1]!.x + visibleColumns[index - 1]!.width)
+          .toBeLessThanOrEqual(visibleColumns[index]!.x + 0.5);
+      }
+      for (const children of [geometry.identityChildren, geometry.saveChildren]) {
+        for (let index = 1; index < children.length; index += 1) {
+          expect(children[index - 1]!.x + children[index - 1]!.width)
+            .toBeLessThanOrEqual(children[index]!.x + 0.5);
+        }
+      }
+      expect(geometry.filename?.width).toBeGreaterThanOrEqual(
+        width <= 360 ? 71.5 : width <= 480 ? 95.5 : 143.5,
+      );
+      for (const item of [geometry.identity, geometry.controls, geometry.actions]) {
+        expect(item.y).toBeGreaterThanOrEqual(-0.5);
+        expect(item.y + item.height).toBeLessThanOrEqual(58.5);
+      }
+    }
+  });
+
+  test('keeps compact top-bar controls touch-sized on coarse pointers', async ({ browser }) => {
+    const context = await browser.newContext({
+      hasTouch: true,
+      viewport: { width: 320, height: 720 },
+    });
+    const touchPage = await context.newPage();
+    try {
+      await touchPage.goto('/test/acceptance/review-harness/index.html?responsive=full');
+      await touchPage.locator('#root').evaluate((element) => {
+        element.setAttribute('data-production-root', 'true');
+      });
+      expect(await touchPage.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+
+      const chrome = touchPage.locator('[data-review-chrome]');
+      for (const width of [760, 641, 521, 481, 390, 361, 320]) {
+        await touchPage.setViewportSize({ width, height: 720 });
+        await touchPage.evaluate(() => new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }));
+        const chromeButtons = chrome.locator(':scope > .review-chrome__identity button, :scope > .review-chrome__viewer-controls button');
+        const chromeButtonHeights = await chromeButtons.evaluateAll((buttons) => (
+          buttons.map((button) => button.getBoundingClientRect().height)
+        ));
+        expect(chromeButtonHeights.length).toBeGreaterThan(0);
+        expect(chromeButtonHeights.every((height) => height >= 44)).toBe(true);
+        const sizingIconWidths = await chrome.locator(
+          '[data-review-chrome-sizing-rack] .review-chrome__icon-control',
+        ).evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().width));
+        expect(sizingIconWidths.length).toBeGreaterThan(0);
+        expect(sizingIconWidths.every((iconWidth) => iconWidth >= 44)).toBe(true);
+        const geometry = await chrome.evaluate((element) => {
+          const bounds = (selector: string) => element.querySelector<HTMLElement>(selector)?.getBoundingClientRect().toJSON();
+          const chromeBounds = element.getBoundingClientRect();
+          return {
+            clientWidth: element.clientWidth,
+            scrollWidth: element.scrollWidth,
+            chrome: chromeBounds.toJSON(),
+            identity: bounds(':scope > .review-chrome__identity'),
+            controls: bounds(':scope > .review-chrome__viewer-controls'),
+            saveIdentity: bounds(':scope > .review-chrome__identity .review-chrome__save-identity'),
+            copy: bounds(':scope > .review-chrome__identity [data-review-copy-link]'),
+            filename: bounds(':scope > .review-chrome__identity .review-chrome__save-identity strong'),
+            recoveryDisplay: getComputedStyle(element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__save-recovery')!).display,
+            contextDisplay: getComputedStyle(element.querySelector<HTMLElement>(':scope > .review-chrome__actions .review-chrome__context')!).display,
+          };
+        });
+        expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
+        expect(geometry.identity).toBeDefined();
+        expect(geometry.controls).toBeDefined();
+        expect(geometry.saveIdentity).toBeDefined();
+        expect(geometry.copy).toBeDefined();
+        expect(geometry.copy!.width).toBeGreaterThanOrEqual(44);
+        expect(geometry.filename?.width).toBeGreaterThanOrEqual(
+          width <= 360 ? 71.5 : width <= 480 ? 95.5 : 143.5,
+        );
+        expect(geometry.identity!.x + geometry.identity!.width)
+          .toBeLessThanOrEqual(geometry.controls!.x + 0.5);
+        if (width === 320) {
+          expect(geometry.chrome.x).toBeLessThanOrEqual(geometry.saveIdentity!.x + 0.5);
+          expect(geometry.saveIdentity!.x + geometry.saveIdentity!.width)
+            .toBeLessThanOrEqual(geometry.copy!.x + 0.5);
+          expect(geometry.copy!.x + geometry.copy!.width)
+            .toBeLessThanOrEqual(geometry.identity!.x + geometry.identity!.width + 0.5);
+          expect(geometry.controls!.x + geometry.controls!.width)
+            .toBeLessThanOrEqual(geometry.chrome.x + geometry.chrome.width + 0.5);
+          expect(geometry.recoveryDisplay).toBe('none');
+          expect(geometry.contextDisplay).toBe('none');
+        }
+      }
+
+      await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'navigationCompact');
+
+      await touchPage.getByRole('button', {
+        name: 'Document navigation, current page 3 of 12',
+      }).click();
+      const menu = touchPage.getByRole('menu', { name: 'Document navigation' });
+      await expect(menu).toBeVisible();
+      const menuButtonHeights = await menu.locator('button').evaluateAll((buttons) => (
+        buttons.map((button) => button.getBoundingClientRect().height)
+      ));
+      expect(menuButtonHeights.length).toBeGreaterThan(0);
+      for (const height of menuButtonHeights) expect(height).toBeGreaterThanOrEqual(44);
+    } finally {
+      await context.close();
+    }
   });
 
   test('cancels page editing with Escape without closing the Annotation Tray', async ({ page }) => {
@@ -673,7 +1444,7 @@ test.describe('canonical review workflow', () => {
   test('does not offer zoom editing or Fit Width while zoom is unavailable', async ({ page }) => {
     await page.getByRole('button', { name: 'Make zoom controls unavailable' }).click();
 
-    await expect(page.getByLabel('Zoom level')).toHaveText('—%');
+    await expect(page.getByLabel('Zoom unavailable')).toHaveText('—%');
     await expect(page.getByRole('spinbutton', { name: 'Zoom percentage' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Enter a zoom percentage/u })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Zoom out' })).toBeDisabled();
@@ -987,7 +1758,7 @@ test.describe('canonical review workflow', () => {
 
   test('opens imported readers through existing PDF navigation', async ({ page }) => {
     await openAnnotationsWorkspace(page);
-    const existing = page.getByRole('region', { name: 'External Annotations (read only)' });
+    const existing = page.getByRole('region', { name: 'From this PDF' });
     await existing.getByRole('button', {
       name: /Read full Highlight annotation on page 1/u,
     }).click();
@@ -1020,7 +1791,7 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('#workspace-panel-annotations')).toBeFocused();
     await expect.poll(() => panel.evaluate((element) => element.scrollTop)).toBe(0);
 
-    const existing = page.getByRole('region', { name: 'External Annotations (read only)' });
+    const existing = page.getByRole('region', { name: 'From this PDF' });
     await existing.getByRole('button', {
       name: /Read full Highlight annotation on page 1/u,
     }).click();
@@ -1238,9 +2009,11 @@ test.describe('canonical review workflow', () => {
     expect(inputBounds!.x).toBeGreaterThanOrEqual(0);
     expect(inputBounds!.x + inputBounds!.width).toBeLessThanOrEqual(320);
     await page.getByRole('button', { name: 'Apply' }).click();
-    await page.getByRole('button', { name: 'Undo' }).click();
+    await page.getByRole('button', { name: 'Edit history' }).click();
+    const historyMenu = page.getByRole('menu', { name: 'Edit history' });
+    await historyMenu.getByRole('menuitem', { name: 'Undo' }).click();
     await expect(page.locator('[data-owned-mark]')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Redo' }).click();
+    await historyMenu.getByRole('menuitem', { name: 'Redo' }).click();
     await expect(page.locator('[data-owned-mark="replace"]')).toHaveCount(1);
 
     await openAnnotationsWorkspace(page);
@@ -1420,6 +2193,24 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
 
+  test('keeps annotation preview geometry stable while typing a highlight comment', async ({ page }) => {
+    await page.getByRole('button', { name: 'Use selection' }).click();
+    await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+    const composer = page.getByRole('region', { name: 'Highlight Comment' });
+    const editor = composer.getByRole('textbox', { name: 'Comment (optional)' });
+    await expect(composer).toBeVisible();
+    const updatesBeforeTyping = await page.locator('#root').getAttribute(
+      'data-authoring-preview-updates',
+    );
+
+    await editor.fill('Comment text should not refresh unchanged PDF geometry.');
+
+    await expect(page.locator('#root')).toHaveAttribute(
+      'data-authoring-preview-updates',
+      updatesBeforeTyping ?? '',
+    );
+  });
+
   test('invokes action shortcuts while insertion remains typing-only', async ({ page }) => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.focus();
@@ -1513,7 +2304,7 @@ test.describe('canonical review workflow', () => {
     await expect(row.getByRole('button', { name: /Highlight · Page 1/ })).toBeFocused();
     expect(await canvas.boundingBox()).toEqual(beforeActivation);
 
-    const existing = page.getByRole('region', { name: 'External Annotations (read only)' });
+    const existing = page.getByRole('region', { name: 'From this PDF' });
     await expect(existing.getByRole('button', { name: /Highlight · Page 1 · Source comment/ })).toBeVisible();
     await expect(existing.getByRole('button', { name: /^Edit/ })).toHaveCount(0);
     await expect(existing.getByRole('button', { name: /^Delete/ })).toHaveCount(0);

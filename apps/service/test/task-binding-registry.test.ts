@@ -379,6 +379,43 @@ describe("task-scoped PDF binding registry", () => {
     }, digestSecretHex(BROWSER_CAPABILITY))).toEqual({ status: "unbound" });
   });
 
+  it("migrates only the exact active lease and clears predecessor verification", () => {
+    const { registry } = registryFixture();
+    const bindProof = issue(registry);
+    registry.claim({
+      bindProof,
+      taskSessionId: "task-a",
+      reviewSessionId: "review-a",
+      documentGeneration: 1,
+    });
+    registry.activateBrowser({
+      reviewSessionId: "review-a",
+      documentGeneration: 1,
+      browserCapability: BROWSER_CAPABILITY,
+    });
+    expect(registry.markVerified("task-a", verifiedIdentity())).toBe(true);
+
+    expect(registry.migrateGeneration({
+      reviewSessionId: "review-a",
+      previousGeneration: 1,
+      successorGeneration: 2,
+    })).toEqual({ status: "migrated", taskSessionId: "task-a" });
+    expect(registry.bindingForTask("task-a")).toMatchObject({
+      reviewSessionId: "review-a",
+      documentGeneration: 2,
+    });
+    expect(registry.bindingForTask("task-a")?.lastVerified).toBeUndefined();
+    expect(registry.taskForGeneration("review-a", 1)).toBeUndefined();
+    expect(registry.taskForGeneration("review-a", 2)).toBe("task-a");
+
+    expect(registry.migrateGeneration({
+      reviewSessionId: "review-a",
+      previousGeneration: 1,
+      successorGeneration: 3,
+    })).toEqual({ status: "revoked" });
+    expect(registry.bindingForTask("task-a")).toBeUndefined();
+  });
+
   it("expires pending claims and active leases and supports explicit lifecycle revocation", () => {
     const { registry, advance } = registryFixture();
     const pendingProof = issue(registry);

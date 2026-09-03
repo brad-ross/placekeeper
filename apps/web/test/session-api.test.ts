@@ -175,4 +175,58 @@ describe("production review commands", () => {
       reason: "rejected",
     });
   });
+
+  it("rehydrates a generation conflict without replaying the rejected mutation", async () => {
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const predecessor = createReviewState({
+      sessionId,
+      source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 10 },
+      workflowMode: "generated-output",
+      documentGeneration: 1,
+    });
+    const successor = {
+      ...predecessor,
+      source: { ...predecessor.source, digest: "b".repeat(64) },
+      workflow: { ...predecessor.workflow, documentGeneration: 2 },
+    };
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, ...(init === undefined ? {} : { init }) });
+      if (url.endsWith("/state")) {
+        return jsonResponse(requests.filter(({ url: seen }) => seen.endsWith("/state")).length === 1
+          ? predecessor
+          : successor);
+      }
+      if (url.endsWith("/scope")) return jsonResponse({ documentTitle: "paper.pdf" });
+      if (url.endsWith("/save/status")) {
+        return jsonResponse({
+          destination: { phase: "none", generation: 0 },
+          sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 },
+        });
+      }
+      if (url.endsWith("/commands")) {
+        return requests.filter(({ url: seen }) => seen.endsWith("/commands")).length === 1
+          ? jsonResponse({ ok: false, error: { kind: "generation-conflict" } }, 409)
+          : jsonResponse(successor);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    const loaded = await loadProductionSession({ sessionId, credential: "memory-only" });
+    const result = await loaded.api.command({ type: "undo", expectedRevision: 0 });
+    expect(result).toMatchObject({
+      accepted: false,
+      state: { workflow: { documentGeneration: 2 } },
+      reason: "generation-conflict",
+    });
+    const commandRequests = requests.filter(({ url }) => url.endsWith("/commands"));
+    expect(commandRequests).toHaveLength(1);
+    expect(commandRequests[0]?.init?.headers).toMatchObject({ "x-placekeeper-generation": "1" });
+    await expect(loaded.api.command({ type: "undo", expectedRevision: 0 }))
+      .resolves.toMatchObject({ workflow: { documentGeneration: 2 } });
+    const retriedRequests = requests.filter(({ url }) => url.endsWith("/commands"));
+    expect(retriedRequests).toHaveLength(2);
+    expect(retriedRequests[1]?.init?.headers).toMatchObject({ "x-placekeeper-generation": "2" });
+  });
 });

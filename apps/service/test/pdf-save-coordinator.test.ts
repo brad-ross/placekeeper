@@ -67,6 +67,7 @@ async function setup(
       | { readonly eligible: true }
       | { readonly eligible: false; readonly code: "permission-denied"; readonly message: string }
     >;
+    readonly workflowMode?: "standard" | "generated-output";
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "placekeeper-save-"));
@@ -79,7 +80,10 @@ async function setup(
     portableReader: async () => [],
     ...(options.rewriteAssessor === undefined ? {} : { rewriteAssessor: options.rewriteAssessor }),
   });
-  const opened = await broker.openReview({ pdfPath: source });
+  const opened = await broker.openReview({
+    pdfPath: source,
+    ...(options.workflowMode === undefined ? {} : { workflowMode: options.workflowMode }),
+  });
   if (opened.kind !== "opened") throw new Error("expected opened session");
   const coordinator = new PdfSaveCoordinator({
     broker,
@@ -218,6 +222,21 @@ function portableCheckingWriter(): PdfWriter {
 }
 
 describe("coalescing PDF autosave", () => {
+  it("keeps generated output outside autosave and Replace Original paths", async () => {
+    const { root, source, original, broker, coordinator, sessionId } = await setup(undefined, {
+      workflowMode: "generated-output",
+    });
+    await expect(coordinator.chooseOriginal(sessionId)).rejects.toThrow(/generated output/iu);
+    await expect(coordinator.chooseCopy(sessionId, join(root, "paper-annotated.pdf")))
+      .rejects.toThrow(/explicit export/iu);
+    await broker.acceptMutation(sessionId, add(0));
+    await coordinator.requestSave(sessionId);
+    const recovered = await new DraftSnapshotStore(join(root, "recovery", sessionId)).recover();
+    expect(recovered?.state.items).toEqual(broker.state(sessionId)?.items);
+    expect(await readFile(source)).toEqual(Buffer.from(original));
+    expect(broker.saveStatus(sessionId)?.destination.phase).toBe("none");
+  });
+
   it("rejects original, implicit-source, and private recovery destinations for remote sources", async () => {
     const { browserRoot, durableRoot, recoveryRoot, broker, coordinator, sessionId } = await setupRemote();
 
@@ -283,7 +302,6 @@ describe("coalescing PDF autosave", () => {
     await expect(coordinator.chooseOriginal(sessionId)).resolves.toBeUndefined();
     expect(source).toBe(join(root, "paper.pdf"));
   });
-
   it.each(["copy", "original"] as const)(
     "saves a 33-segment editable highlight to the %s destination",
     async (destination) => {
@@ -384,6 +402,8 @@ describe("coalescing PDF autosave", () => {
     });
 
     expect(restarted.state(sessionId)?.items[0]?.payload.segmentRects).toHaveLength(256);
+    expect(restarted.state(sessionId)?.workflow.mode).toBe("standard");
+    expect((await restarted.freezeDelivery(sessionId)).annotations).toHaveLength(1);
     await resumedCoordinator.requestSave(sessionId);
 
     expect(await readFile(copy, "utf8")).toContain(legacyItem.id);

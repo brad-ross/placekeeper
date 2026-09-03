@@ -3,6 +3,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: [
+      'test/ci-workflow.test.ts',
       'apps/chrome-extension/test/*.test.ts',
       'test/conformance/pdf-writer.conformance.test.ts',
       'test/conformance/reviewed-pdf.test.ts',
@@ -22,6 +23,7 @@ export default defineConfig({
       'apps/service/test/pdf-evidence-service.test.ts',
       'apps/service/test/source-reconciliation-service.test.ts',
       'apps/service/test/live-source-workflow.test.ts',
+      'apps/service/test/live-document-replacement.test.ts',
       'apps/service/test/codex-live-context.integration.test.ts',
       'packages/core/test/live-context.test.ts',
       'packages/core/test/placekeeper-link.test.ts',
@@ -40,6 +42,8 @@ export default defineConfig({
       'apps/web/test/codex-context-status.test.tsx',
       'apps/web/test/existing-annotations.test.ts',
       'apps/web/test/main-location-refresh.test.ts',
+      'apps/web/test/host-runtime.test.ts',
+      'apps/web/test/session-api.test.ts',
       'apps/web/test/navigation-coordinator.test.ts',
       'apps/web/test/review-location-history.test.ts',
       'apps/web/test/copy-link-control.test.ts',
@@ -50,6 +54,11 @@ export default defineConfig({
       'apps/web/test/pdf-symbol-catalog.test.ts',
       'apps/web/test/pdf-search-workspace.test.tsx',
       'apps/vscode/test/extension.test.ts',
+      'apps/vscode/test/review-panel-controller.test.ts',
+      'apps/vscode/test/latex-workshop-bridge.test.ts',
+      'apps/vscode/test/external-launch-registration.test.ts',
+      'apps/vscode/test/rebuild-observer.test.ts',
+      'apps/vscode/test/rebuild-navigation.test.ts',
       'packaging/macos/packaging.test.ts',
     ],
   },

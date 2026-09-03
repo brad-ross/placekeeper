@@ -28,9 +28,11 @@ import {
 } from './viewer-document-ids.js';
 import {
   dispatchNeutralViewerPointerUp,
+  isReverseSyncTexPointerGesture,
   isUnsafePageContextTarget,
   normalizePageClientPoint,
   recordViewerPointerButton,
+  ReverseSyncTexPointerGesture,
   VIEWER_POINTER_BUTTON_NONE,
   type ViewerOwnedMarkInteraction,
   type ViewerPagePoint,
@@ -64,6 +66,7 @@ export interface PdfWorkspaceProps {
   onWorkspaceElement?: (element: HTMLDivElement | null) => void;
   documentGeneration?: number;
   onViewerInteraction?: (event: ViewerInteractionEvent) => void;
+  reverseSyncTexEnabled?: boolean;
   referenceViewportHost?: HTMLElement | null;
   onReferenceViewportElement?: (element: HTMLDivElement | null) => void;
   onReferenceScrollIntent?: (position: ReferenceScrollPosition) => void;
@@ -112,6 +115,7 @@ export function PdfWorkspace({
   onWorkspaceElement,
   documentGeneration = 0,
   onViewerInteraction,
+  reverseSyncTexEnabled = false,
   referenceViewportHost = null,
   onReferenceViewportElement,
   onReferenceScrollIntent,
@@ -119,6 +123,7 @@ export function PdfWorkspace({
 }: PdfWorkspaceProps) {
   const pressedPrimaryPointers = useRef(new Map<number, HTMLDivElement>());
   const contextPointers = useRef(new Set<number>());
+  const reverseSyncTexPointers = useRef(new ReverseSyncTexPointerGesture());
   const contextResetTarget = useRef<HTMLDivElement | null>(null);
   const visibleAnnotations = useMemo(
     () => authoringPreview === null
@@ -161,6 +166,30 @@ export function PdfWorkspace({
             return <div className="pdf-workspace__loading" role="status"><ReviewIcon name="loading" />Loading local PDF…</div>;
           }
           const activePdf = mainDocument.document;
+          const pagePointFromClient = (
+            pageIndex: number,
+            element: HTMLDivElement,
+            target: EventTarget,
+            clientX: number,
+            clientY: number,
+          ): { readonly x: number; readonly y: number } | null => {
+            if (isUnsafePageContextTarget(target)) return null;
+            const page = activePdf.pages[pageIndex];
+            if (!page) return null;
+            const bounds = element.getBoundingClientRect();
+            const rotation = combinePageRotation(page.rotation, mainDocument.rotation);
+            const rotatedSize = transformSize(page.size, rotation, 1);
+            return normalizePageClientPoint(
+              { x: clientX, y: clientY },
+              {
+                pageSize: page.size,
+                rotation,
+                scale: bounds.width / rotatedSize.width,
+                elementLeft: bounds.left,
+                elementTop: bounds.top,
+              },
+            );
+          };
           const linkRenderers = sourceAnnotationLinkRenderers({
             sourceScope: 'main',
             documentGeneration,
@@ -192,12 +221,25 @@ export function PdfWorkspace({
                       data-page-index={layout.pageIndex}
                       tabIndex={-1}
                       onPointerDownCapture={(event) => {
+                        reverseSyncTexPointers.current.cancel(event.pointerId);
+                        const reverseSyncTexGesture = reverseSyncTexEnabled &&
+                          isReverseSyncTexPointerGesture(event);
                         const contextGesture = isContextPointerGesture(event);
                         recordViewerPointerButton(
                           event.currentTarget,
-                          contextGesture ? VIEWER_POINTER_BUTTON_NONE : event.button,
+                          contextGesture || reverseSyncTexGesture ? VIEWER_POINTER_BUTTON_NONE : event.button,
                         );
                         event.currentTarget.focus({ preventScroll: true });
+                        if (reverseSyncTexGesture) {
+                          reverseSyncTexPointers.current.pointerDown(
+                            event.pointerId,
+                            event.clientX,
+                            event.clientY,
+                          );
+                          event.preventDefault();
+                          event.stopPropagation();
+                          return;
+                        }
                         if (contextGesture) {
                           contextPointers.current.add(event.pointerId);
                           if (event.pointerType === 'mouse') contextResetTarget.current = event.currentTarget;
@@ -208,6 +250,20 @@ export function PdfWorkspace({
                         pressedPrimaryPointers.current.set(event.pointerId, event.currentTarget);
                       }}
                       onPointerMoveCapture={(event) => {
+                        if (reverseSyncTexPointers.current.has(event.pointerId)) {
+                          if (event.buttons === 0) {
+                            reverseSyncTexPointers.current.cancel(event.pointerId);
+                            return;
+                          }
+                          reverseSyncTexPointers.current.pointerMove(
+                            event.pointerId,
+                            event.clientX,
+                            event.clientY,
+                          );
+                          event.preventDefault();
+                          event.stopPropagation();
+                          return;
+                        }
                         if (
                           event.pointerType === 'mouse'
                           && (event.buttons & 1) !== 0
@@ -231,6 +287,33 @@ export function PdfWorkspace({
                       }}
                       onPointerUpCapture={(event) => {
                         pressedPrimaryPointers.current.delete(event.pointerId);
+                        const reverseSyncTexGesture = reverseSyncTexPointers.current.pointerUp(
+                          event.pointerId,
+                          event.clientX,
+                          event.clientY,
+                        );
+                        if (reverseSyncTexGesture !== undefined) {
+                          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                            event.currentTarget.releasePointerCapture(event.pointerId);
+                          }
+                          recordViewerPointerButton(event.currentTarget, VIEWER_POINTER_BUTTON_NONE);
+                          const point = reverseSyncTexGesture.activate ? pagePointFromClient(
+                            layout.pageIndex,
+                            event.currentTarget,
+                            event.target,
+                            event.clientX,
+                            event.clientY,
+                          ) : null;
+                          if (point) {
+                            onViewerInteraction?.({
+                              type: 'reverse-synctex',
+                              value: { pageIndex: layout.pageIndex, point },
+                            });
+                          }
+                          event.preventDefault();
+                          event.stopPropagation();
+                          return;
+                        }
                         const startedAsContext = contextPointers.current.delete(event.pointerId);
                         recordViewerPointerButton(
                           event.currentTarget,
@@ -242,23 +325,22 @@ export function PdfWorkspace({
                       onPointerCancelCapture={(event) => {
                         pressedPrimaryPointers.current.delete(event.pointerId);
                         contextPointers.current.delete(event.pointerId);
+                        reverseSyncTexPointers.current.cancel(event.pointerId);
+                        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                          event.currentTarget.releasePointerCapture(event.pointerId);
+                        }
+                      }}
+                      onLostPointerCapture={(event) => {
+                        reverseSyncTexPointers.current.cancel(event.pointerId);
                       }}
                       onContextMenu={(event) => {
-                        if (onPageContextMenu === undefined || isUnsafePageContextTarget(event.target)) return;
-                        const page = activePdf.pages[layout.pageIndex];
-                        if (!page) return;
-                        const bounds = event.currentTarget.getBoundingClientRect();
-                        const rotation = combinePageRotation(page.rotation, mainDocument.rotation);
-                        const rotatedSize = transformSize(page.size, rotation, 1);
-                        const point = normalizePageClientPoint(
-                          { x: event.clientX, y: event.clientY },
-                          {
-                            pageSize: page.size,
-                            rotation,
-                            scale: bounds.width / rotatedSize.width,
-                            elementLeft: bounds.left,
-                            elementTop: bounds.top,
-                          },
+                        if (onPageContextMenu === undefined) return;
+                        const point = pagePointFromClient(
+                          layout.pageIndex,
+                          event.currentTarget,
+                          event.target,
+                          event.clientX,
+                          event.clientY,
                         );
                         if (!point) return;
                         if (hitTestOwnedMark(

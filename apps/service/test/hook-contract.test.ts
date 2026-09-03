@@ -89,6 +89,21 @@ const current: Extract<LiveContextRefreshResult, { status: "current" }> = {
     removed: [],
   },
   existingPdfAnnotations: { semanticDigest: "c".repeat(64), count: 0, items: [], warnings: [] },
+  reviewState: {
+    schemaVersion: 1,
+    document: { role: "generated-output", generation: 1, freshness: "possibly-stale" },
+    reconciliation: {
+      complete: false,
+      dispositionDigest: "d".repeat(64),
+      unresolvedItemIds: ["00000000-0000-4000-8000-000000000001"],
+      pendingDraftIds: ["00000000-0000-4000-8000-000000000002"],
+    },
+    export: {
+      eligible: false,
+      requiresStaleConfirmation: false,
+      reasons: ["unresolved-items", "pending-drafts", "possibly-stale"],
+    },
+  },
   evidence: {
     handle: {
       schemaVersion: 1,
@@ -192,6 +207,14 @@ describe("Codex lifecycle hook", () => {
       untrustedDataPolicy: { classification: "untrusted-data" },
       document: { dataClassification: "untrusted-derived-data", generation: 1, reviewRevision: 4, stateDigest: "b".repeat(64) },
       saveSync: { sync: { phase: "not-saved", failure: "write-failed" } },
+      reviewState: {
+        document: { generation: 1, freshness: "possibly-stale" },
+        reconciliation: {
+          unresolvedItemIds: ["00000000-0000-4000-8000-000000000001"],
+          pendingDraftIds: ["00000000-0000-4000-8000-000000000002"],
+        },
+        export: { eligible: false },
+      },
       reviewItems: {
         dataClassification: "untrusted-data",
         sourceHintClassification: "untrusted-data",

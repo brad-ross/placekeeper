@@ -13,6 +13,32 @@ export interface RetentionResult {
   readonly overLimit: boolean;
 }
 
+export interface GenerationRetentionAssessment {
+  readonly accepted: boolean;
+  readonly retainedBytes: number;
+  readonly retainedCount: number;
+  readonly reason?: "byte-budget-exceeded" | "generation-count-exceeded";
+}
+
+/** Generation records are all protected while the lineage can still refer to
+ * predecessor evidence. Capacity is therefore admission control, never an
+ * excuse to evict a referenced predecessor. */
+export function assessGenerationRetention(
+  retained: readonly { readonly byteLength: number }[],
+  candidateByteLength: number,
+  policy: { readonly maxBytes: number; readonly maxCount: number },
+): GenerationRetentionAssessment {
+  const retainedBytes = retained.reduce((sum, record) => sum + record.byteLength, 0);
+  const retainedCount = retained.length;
+  if (retainedCount + 1 > policy.maxCount) {
+    return { accepted: false, retainedBytes, retainedCount, reason: "generation-count-exceeded" };
+  }
+  if (retainedBytes + candidateByteLength > policy.maxBytes) {
+    return { accepted: false, retainedBytes, retainedCount, reason: "byte-budget-exceeded" };
+  }
+  return { accepted: true, retainedBytes, retainedCount };
+}
+
 export async function enforceRetention(
   recoveryRoot: string,
   activeSessionIds: ReadonlySet<string>,

@@ -1,7 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
-import { validateCodexPlugin } from "../../packaging/macos/validate-manifest.js";
+import {
+  validateCodexPlugin,
+  validateSharedWebDistribution,
+} from "../../packaging/macos/validate-manifest.js";
 
 test("Finder Open With passes exactly one explicit path through the native document bridge", async () => {
   const bridge = await readFile(resolve("packaging/macos/finder-bridge.applescript"), "utf8");
@@ -57,7 +60,7 @@ test("Codex plugin packages launch plus task-scoped live-context hooks", async (
   expect(plugin.interface.longDescription).toContain("every prompt");
 });
 
-test("VS Code manifest is desktop-local and exposes one PDF command", async () => {
+test("VS Code manifest is desktop-local and exposes the supported LaTeX review commands", async () => {
   const manifest = JSON.parse(await readFile(resolve("apps/vscode/package.json"), "utf8")) as { name: string; displayName: string; publisher: string; icon: string; extensionKind: string[]; browser?: string; contributes: { commands: Array<{ command: string; title: string; icon: { light: string; dark: string } }>; configuration: { properties: Record<string, unknown> } } };
   expect(manifest.name).toBe("placekeeper-vscode");
   expect(manifest.displayName).toBe("Placekeeper");
@@ -65,16 +68,39 @@ test("VS Code manifest is desktop-local and exposes one PDF command", async () =
   expect(manifest.icon).toBe("assets/placekeeper.png");
   expect(manifest.extensionKind).toEqual(["ui"]);
   expect(manifest.browser).toBeUndefined();
-  expect(manifest.contributes.commands).toHaveLength(1);
-  expect(manifest.contributes.commands[0]).toEqual({
-    command: "placekeeper.open",
-    title: "Placekeeper: Open Local PDF",
-    icon: {
-      light: "assets/placekeeper.svg",
-      dark: "assets/placekeeper.svg",
-    },
-  });
+  expect(manifest.contributes.commands.map((command) => command.command)).toEqual(expect.arrayContaining([
+    "placekeeper.open",
+    "placekeeper.viewPdf",
+    "placekeeper.forwardSyncTex",
+    "placekeeper.goToSource",
+    "placekeeper.exportReviewedPdf",
+    "placekeeper.configureLatexWorkshop",
+    "placekeeper.restoreLatexWorkshop",
+  ]));
   expect(manifest.contributes.configuration.properties).toHaveProperty(["placekeeper.launcherPath"]);
+  expect(manifest.contributes.configuration.properties).toHaveProperty(["placekeeper.externalLauncherPath"]);
+});
+
+test("VS Code review loads the shared client directly without a localhost frame", async () => {
+  const panel = await readFile(resolve("apps/vscode/src/review-panel.ts"), "utf8");
+  const extension = await readFile(resolve("apps/vscode/src/extension.ts"), "utf8");
+  const productionEntry = await readFile(resolve("apps/web/src/production-entry.tsx"), "utf8");
+  expect(panel).toContain("app.startVscode");
+  expect(panel).toContain("worker-src blob:");
+  expect(panel).toContain("frame-src 'none'");
+  expect(panel).not.toContain("<iframe");
+  expect(panel).not.toContain("launch-url");
+  expect(extension).toContain("exchangeVscodeLaunch(launched.url)");
+  expect(panel).toContain("localResourceRoots");
+  expect(extension).not.toContain("postMessage({ type: \"launch-url\"");
+  expect(productionEntry).toContain("export async function startVscode");
+  await expect(validateSharedWebDistribution(resolve("dist/web"))).resolves.toMatchObject({
+    schemaVersion: 2,
+    worker: { kind: "inline-blob", container: "app.js" },
+  });
+  await expect(validateSharedWebDistribution(resolve("apps/vscode/dist/web"))).resolves.toEqual(
+    await validateSharedWebDistribution(resolve("dist/web")),
+  );
 });
 
 test("only the Codex adapter requests the Codex launch surface", async () => {

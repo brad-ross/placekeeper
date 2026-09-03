@@ -82,11 +82,7 @@ import {
   createTrailingTaskScheduler,
   waitForReviewNavigationReady,
 } from "../review/main-location-refresh.js";
-import {
-  canDeriveAnnotationOutlineLabels,
-  deriveAnnotationOutlineLabels,
-  reviewItemPoint,
-} from "../review/annotation-outline-context.js";
+import { reviewItemPoint } from "../review/annotation-outline-context.js";
 import {
   BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN,
   RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
@@ -108,10 +104,13 @@ import {
   type AuthoringAuthority,
   type AuthoringAnchorSnapshot,
 } from '../review/authoring-session.js';
+import type { ViewerAssetUrls, ViewerResourcePolicy } from '../pdf/embedpdf-viewer.js';
+import type { GenerationRefreshStatus, LocationRestoreStatus } from '../generation-status.js';
 
 export interface ProductionSession {
   readonly sessionId: string;
-  readonly credential: string;
+  /** Browser-only memory credential. VS Code keeps this in the extension host. */
+  readonly credential?: string;
   /** Present for top-level readable views; embedded bootstrap sessions omit it. */
   readonly appLinkBase?: string;
 }
@@ -148,6 +147,14 @@ export type SaveCopyProposal =
       readonly folder?: string;
     };
 
+export interface ProductionExportResult {
+  readonly kind: "reviewed-copy";
+  readonly path: string;
+  readonly revision: number;
+  readonly digest: string;
+  readonly warning?: string;
+}
+
 interface AuthoringAnchorNavigationState {
   readonly token: number;
   readonly visibility: PdfTargetVisibility;
@@ -164,8 +171,24 @@ export interface ProductionSessionApi {
   chooseOriginal(): Promise<ProductionSaveStatus>;
   retrySave(): Promise<ProductionSaveStatus>;
   locateSave(): Promise<ProductionSaveStatus>;
+  exportReviewedCopy?(confirmPossiblyStale?: true): Promise<ProductionExportResult>;
   scope(signal?: AbortSignal): Promise<ProductionScope>;
 }
+
+interface ReverseSyncTexRequest {
+  readonly pageIndex: number;
+  readonly point: { readonly x: number; readonly y: number };
+}
+
+export interface ForwardSyncTexRequest {
+  readonly documentGeneration: number;
+  readonly pageIndex: number;
+  readonly point: { readonly x: number; readonly y: number };
+}
+
+export type HostForwardSyncTexRequest = ForwardSyncTexRequest & {
+  readonly token: number;
+};
 
 export interface ProductionReviewAppProps {
   readonly session: ProductionSession;
@@ -173,7 +196,179 @@ export interface ProductionReviewAppProps {
   readonly initialSaveStatus?: ProductionSaveStatus;
   readonly scope: ProductionScope;
   readonly api: ProductionSessionApi;
+  readonly viewerAssets?: ViewerAssetUrls;
+  readonly resourcePolicy?: ViewerResourcePolicy;
   readonly viewer?: ReactNode;
+  readonly generationRefreshStatus?: GenerationRefreshStatus;
+  readonly hostReattachRequestToken?: number;
+  readonly hostForwardSyncTexRequest?: HostForwardSyncTexRequest;
+  readonly hostReverseSyncTexRequestToken?: number;
+  readonly onReverseSyncTex?: (input: ReverseSyncTexRequest) => Promise<unknown>;
+  readonly initialPresentation?: { readonly pageIndex?: number; readonly zoom?: number };
+  readonly onPresentationChange?: (presentation: { readonly pageIndex: number; readonly zoom: number }) => void;
+}
+
+export function forwardSyncTexRequestReady(input: {
+  readonly requestGeneration: number;
+  readonly documentGeneration: number;
+  readonly navigationReadyGeneration: number | null;
+  readonly documentReadyGeneration: number | null;
+  readonly locationRestoreStatus: LocationRestoreStatus;
+}): boolean {
+  return input.requestGeneration === input.documentGeneration &&
+    input.navigationReadyGeneration === input.documentGeneration &&
+    input.documentReadyGeneration === input.documentGeneration &&
+    input.locationRestoreStatus !== 'restoring';
+}
+
+export function forwardSyncTexCompletionIsCurrent(input: {
+  readonly requestToken: number;
+  readonly latestRequestToken: number;
+  readonly requestGeneration: number;
+  readonly documentGeneration: number;
+  readonly navigationMatches: boolean;
+}): boolean {
+  return input.requestToken === input.latestRequestToken &&
+    input.requestGeneration === input.documentGeneration &&
+    input.navigationMatches;
+}
+
+export async function applyHostForwardSyncTex(
+  navigation: Pick<PdfViewerNavigation, 'captureLocation' | 'applyLocation' | 'focusAtDestination'>,
+  request: {
+    readonly pageIndex: number;
+    readonly point: { readonly x: number; readonly y: number };
+  },
+): Promise<boolean> {
+  if (!Number.isSafeInteger(request.pageIndex) || request.pageIndex < 0 ||
+    !Number.isFinite(request.point.x) || request.point.x < 0 ||
+    !Number.isFinite(request.point.y) || request.point.y < 0) return false;
+  const current = navigation.captureLocation();
+  if (current === null) return false;
+  const applied = await navigation.applyLocation({
+    ...current,
+    pageIndex: request.pageIndex,
+    anchor: request.point,
+    alignment: { xPercent: 50, yPercent: 50 },
+  });
+  if (applied) navigation.focusAtDestination(request.pageIndex);
+  return applied;
+}
+
+export async function runHostForwardSyncTexRequest(
+  navigation: Pick<PdfViewerNavigation, 'captureLocation' | 'applyLocation' | 'focusAtDestination'>,
+  request: { readonly pageIndex: number; readonly point: { readonly x: number; readonly y: number } },
+  isCurrent: () => boolean,
+  publishResult: (applied: boolean) => void,
+): Promise<void> {
+  let applied = false;
+  try {
+    applied = await applyHostForwardSyncTex(navigation, request);
+  } catch {
+    // A rejected viewer navigation is the same user-visible failure as a false result.
+  }
+  if (isCurrent()) publishResult(applied);
+}
+
+function reverseSyncTexSucceeded(value: unknown): boolean {
+  return typeof value === 'object' && value !== null &&
+    (value as { readonly status?: unknown }).status === 'ok';
+}
+
+const REVERSE_SYNCTEX_GENERIC_ERROR = 'Reverse SyncTeX could not find a LaTeX source location.';
+
+export function reverseSyncTexError(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null) return REVERSE_SYNCTEX_GENERIC_ERROR;
+  const result = value as { readonly status?: unknown; readonly reason?: unknown };
+  if (result.status === 'ok') return null;
+  if (result.reason === 'workspace-untrusted') {
+    return 'Trust this workspace before using Reverse SyncTeX.';
+  }
+  switch (result.status) {
+    case 'missing':
+      return 'SyncTeX data is missing. Rebuild the PDF with SyncTeX enabled.';
+    case 'pending':
+      return 'SyncTeX data for this PDF is still being prepared. Try again shortly.';
+    case 'stale':
+      return 'SyncTeX data is stale. Rebuild the PDF before going to source.';
+    case 'ambiguous':
+      return 'SyncTeX found more than one LaTeX source location for this PDF point.';
+    case 'out-of-root':
+      return 'The SyncTeX source location is outside the approved workspace.';
+    case 'unavailable-tool':
+      return 'The SyncTeX tool is unavailable. Install or configure SyncTeX and retry.';
+    case 'timeout':
+      return 'The SyncTeX query timed out. Try again.';
+    case 'oversized':
+      return 'The SyncTeX result was too large to use safely.';
+    case 'malformed':
+      return 'The SyncTeX data was malformed. Rebuild the PDF and retry.';
+    default:
+      return REVERSE_SYNCTEX_GENERIC_ERROR;
+  }
+}
+
+export class ReverseSyncTexRequestCoordinator {
+  #latestRequest = 0;
+
+  async run(
+    reverseSyncTex: (input: ReverseSyncTexRequest) => Promise<unknown>,
+    request: ReverseSyncTexRequest,
+    publishError: (message: string | null) => void,
+  ): Promise<unknown> {
+    const requestId = ++this.#latestRequest;
+    publishError(null);
+    try {
+      const value = await reverseSyncTex(request);
+      if (requestId === this.#latestRequest) publishError(reverseSyncTexError(value));
+      return value;
+    } catch {
+      if (requestId === this.#latestRequest) publishError(REVERSE_SYNCTEX_GENERIC_ERROR);
+      return { status: 'failed' };
+    }
+  }
+}
+
+export async function reverseSyncTexAtCurrentLocation(
+  navigation: Pick<PdfViewerNavigation, 'captureLocation'>,
+  reverseSyncTex: (input: ReverseSyncTexRequest) => Promise<unknown>,
+): Promise<boolean> {
+  const location = navigation.captureLocation();
+  if (location === null) return false;
+  return reverseSyncTexSucceeded(await reverseSyncTex({
+    pageIndex: location.pageIndex,
+    point: location.anchor,
+  }));
+}
+
+export function firstUnresolvedReviewItemId(
+  items: readonly {
+    readonly id: string;
+    readonly reconciliation?: { readonly disposition: { readonly kind: string } };
+  }[],
+): string | undefined {
+  return items.find((item) =>
+    item.reconciliation !== undefined && item.reconciliation.disposition.kind !== "resolved"
+  )?.id;
+}
+
+export function canonicalStateSupersedes(
+  current: { readonly revision: number; readonly workflow: {
+    readonly documentGeneration: number;
+    readonly freshness: "current" | "possibly-stale";
+  } },
+  canonical: { readonly revision: number; readonly workflow: {
+    readonly documentGeneration: number;
+    readonly freshness: "current" | "possibly-stale";
+  } },
+): boolean {
+  return canonical.workflow.documentGeneration > current.workflow.documentGeneration ||
+    canonical.workflow.documentGeneration === current.workflow.documentGeneration && (
+      canonical.revision > current.revision ||
+      canonical.revision === current.revision &&
+        canonical.workflow.freshness === "possibly-stale" &&
+        current.workflow.freshness === "current"
+    );
 }
 
 export function referenceReturnForActiveTab(
@@ -306,7 +501,12 @@ function updateCodexContext(
 }
 
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
-  const [state, setState] = useState(props.initialState);
+  const [localState, setState] = useState(props.initialState);
+  // A runtime successor arrives as one state/assets render. Prefer that canonical
+  // generation immediately so the viewer URL and semantic authority never split.
+  const state = canonicalStateSupersedes(localState, props.initialState)
+    ? props.initialState
+    : localState;
   // A restart successor begins as an ordinary browser view, then its next
   // task prompt promotes this same authenticated page to the Codex surface.
   const [scope, setScope] = useState(props.scope);
@@ -350,6 +550,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const selectionUpdateRef = useRef(selectionUpdate);
   selectionUpdateRef.current = selectionUpdate;
   const [commandError, setCommandError] = useState<string | null>(null);
+  const [locationRestoreStatus, setLocationRestoreStatus] = useState<LocationRestoreStatus>('idle');
   const [codexContext, setCodexContext] = useState(scope.codexContext);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -361,9 +562,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [existingAnnotations, setExistingAnnotations] = useState<ExistingAnnotationsDiscovery>({
     status: 'loading', generation: 0,
   });
-  const [existingAnnotationsSourceIdentity, setExistingAnnotationsSourceIdentity] = useState(
-    `${props.initialState.source.fileId}:${props.initialState.source.digest}`,
-  );
   const [inventoryRetryGeneration, setInventoryRetryGeneration] = useState(0);
   const [correspondingItemId, setCorrespondingItemId] = useState<string>();
   const [activeItemId, setActiveItemId] = useState<string>();
@@ -392,6 +590,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [mainNavigationReadyGeneration, setMainNavigationReadyGeneration] = useState<number | null>(null);
   const [mainDocumentReadyGeneration, setMainDocumentReadyGeneration] = useState<number | null>(null);
   const [mainNavigation, setMainNavigation] = useState<PdfViewerNavigation | null>(null);
+  const latestForwardSyncTexTokenRef = useRef(0);
+  const handledForwardSyncTexTokenRef = useRef(0);
+  const handledReverseSyncTexTokenRef = useRef(0);
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
   const referenceManualScrollObserverRef = useRef(new ReferenceManualScrollObserver());
@@ -409,8 +610,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     readonly resolve: (navigation: PdfViewerNavigation | null) => void;
     timeout: ReturnType<typeof setTimeout> | null;
   }>>([]);
-  const documentGenerationRef = useRef(0);
-  const navigationStateRef = useRef(createReferenceNavigationState(0));
+  const documentGenerationRef = useRef(props.initialState.workflow.documentGeneration);
+  const navigationStateRef = useRef(createReferenceNavigationState(documentGenerationRef.current));
   const [navigationState, setNavigationState] = useState(navigationStateRef.current);
   const [referenceLayoutState, dispatchReferenceLayout] = useReducer(
     reduceReferenceWorkspaceLayout,
@@ -428,7 +629,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [navigationAnnouncement, setNavigationAnnouncement] = useState('');
   const outlineDiscoveryRef = useRef<PdfOutlineDiscovery>({
     status: 'loading',
-    documentGeneration: 0,
+    documentGeneration: documentGenerationRef.current,
   });
   const [outlineDiscovery, setOutlineDiscovery] = useState<PdfOutlineDiscovery>(
     outlineDiscoveryRef.current,
@@ -460,23 +661,95 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const markFocusRef = useRef<string | undefined>(undefined);
   const rowCorrespondenceRef = useRef<string | undefined>(undefined);
   const activationTokenRef = useRef(0);
+  useEffect(() => {
+    if (props.hostReattachRequestToken === undefined || props.hostReattachRequestToken <= 0) return;
+    const id = firstUnresolvedReviewItemId(stateRef.current.items);
+    if (id === undefined) return;
+    setActiveItemId(id);
+    setActivationRequest({ id, token: ++activationTokenRef.current });
+  }, [props.hostReattachRequestToken]);
   const [viewerState, setViewerState] = useState<ViewerControlsSnapshot>(unavailableViewerControls);
-  const viewerAssets = useMemo(() => ({
+  const reverseSyncTexCoordinatorRef = useRef(new ReverseSyncTexRequestCoordinator());
+  const requestReverseSyncTex = useCallback((request: ReverseSyncTexRequest): Promise<unknown> => {
+    const reverseSyncTex = props.onReverseSyncTex;
+    if (reverseSyncTex === undefined) return Promise.resolve({ status: 'failed' });
+    return reverseSyncTexCoordinatorRef.current.run(reverseSyncTex, request, setCommandError);
+  }, [props.onReverseSyncTex]);
+  const initialPresentationAppliedRef = useRef(false);
+  latestForwardSyncTexTokenRef.current = Math.max(
+    latestForwardSyncTexTokenRef.current,
+    props.hostForwardSyncTexRequest?.token ?? 0,
+  );
+  useEffect(() => {
+    const request = props.hostForwardSyncTexRequest;
+    if (request === undefined || mainNavigation === null ||
+      request.token <= handledForwardSyncTexTokenRef.current) return;
+    if (request.documentGeneration < state.workflow.documentGeneration) {
+      handledForwardSyncTexTokenRef.current = request.token;
+      return;
+    }
+    if (!forwardSyncTexRequestReady({
+      requestGeneration: request.documentGeneration,
+      documentGeneration: state.workflow.documentGeneration,
+      navigationReadyGeneration: mainNavigationReadyGeneration,
+      documentReadyGeneration: mainDocumentReadyGeneration,
+      locationRestoreStatus,
+    })) return;
+    handledForwardSyncTexTokenRef.current = request.token;
+    void runHostForwardSyncTexRequest(
+      mainNavigation,
+      request,
+      () => forwardSyncTexCompletionIsCurrent({
+        requestToken: request.token,
+        latestRequestToken: latestForwardSyncTexTokenRef.current,
+        requestGeneration: request.documentGeneration,
+        documentGeneration: stateRef.current.workflow.documentGeneration,
+        navigationMatches: mainNavigationRef.current === mainNavigation,
+      }),
+      (applied) => setCommandError(
+        applied ? null : 'Forward SyncTeX could not reveal this PDF location.',
+      ),
+    );
+  }, [
+    locationRestoreStatus,
+    mainDocumentReadyGeneration,
+    mainNavigation,
+    mainNavigationReadyGeneration,
+    props.hostForwardSyncTexRequest,
+    state.workflow.documentGeneration,
+  ]);
+  useEffect(() => {
+    const token = props.hostReverseSyncTexRequestToken;
+    if (token === undefined || token <= 0 || mainNavigation === null ||
+      token <= handledReverseSyncTexTokenRef.current || props.onReverseSyncTex === undefined) return;
+    handledReverseSyncTexTokenRef.current = token;
+    const location = mainNavigation.captureLocation();
+    if (location === null) {
+      setCommandError(REVERSE_SYNCTEX_GENERIC_ERROR);
+      return;
+    }
+    void requestReverseSyncTex({ pageIndex: location.pageIndex, point: location.anchor });
+  }, [mainNavigation, props.hostReverseSyncTexRequestToken, props.onReverseSyncTex, requestReverseSyncTex]);
+  const viewerAssets = useMemo(() => props.viewerAssets ?? ({
     pdfiumWasm: props.session.appLinkBase === undefined
       ? `/s/${props.session.sessionId}/assets/pdfium.wasm`
       : '/assets/pdfium.wasm',
-    documentUrl: `/s/${props.session.sessionId}/document/${state.source.fileId}`,
-    requestHeaders: { authorization: `Bearer ${props.session.credential}` },
+    documentUrl: `/s/${props.session.sessionId}/document/${state.source.fileId}?generation=${state.workflow.documentGeneration}`,
+    ...(props.session.credential === undefined
+      ? {}
+      : { requestHeaders: { authorization: `Bearer ${props.session.credential}` } }),
   }), [
+    props.viewerAssets,
     props.session.appLinkBase,
     props.session.credential,
     props.session.sessionId,
     state.source.fileId,
+    state.workflow.documentGeneration,
   ]);
   useEffect(() => props.api.presence?.(), [props.api]);
   const ownedAnnotations = useMemo(
-    () => projectReviewItems(state.items),
-    [state.items],
+    () => projectReviewItems(state.items, state.workflow.documentGeneration),
+    [state.items, state.workflow.documentGeneration],
   );
   useEffect(() => {
     if (scope.launchSurface !== 'codex' && scope.reconnectPending !== true) return;
@@ -828,10 +1101,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   ]);
   const sourceIdentity = `${state.source.fileId}:${state.source.digest}`;
   const sourceIdentityRef = useRef(sourceIdentity);
+  const pendingPresentationLocationRef = useRef<ReturnType<PdfViewerNavigation['captureLocation']>>(null);
+  if (sourceIdentity !== sourceIdentityRef.current && pendingPresentationLocationRef.current === null) {
+    pendingPresentationLocationRef.current = mainNavigationRef.current?.captureLocation() ?? null;
+  }
   const restoredLocationGenerationRef = useRef<number | null>(null);
   const restoringLocationGenerationRef = useRef<number | null>(null);
-  const initialSourceIdentityRef = useRef(
-    `${props.initialState.source.fileId}:${props.initialState.source.digest}`,
+  const initialStateKeyRef = useRef(
+    `${props.initialState.workflow.documentGeneration}:${props.initialState.revision}:${props.initialState.workflow.freshness}:${props.initialState.source.fileId}:${props.initialState.source.digest}`,
   );
   const pageTitle = pdfDocumentTitleForSource(
     metadataPageTitle,
@@ -842,14 +1119,15 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     document.title = pageTitle;
   }, [pageTitle]);
   useEffect(() => {
-    const next = `${props.initialState.source.fileId}:${props.initialState.source.digest}`;
-    if (next === initialSourceIdentityRef.current) return;
-    initialSourceIdentityRef.current = next;
+    const next = `${props.initialState.workflow.documentGeneration}:${props.initialState.revision}:${props.initialState.workflow.freshness}:${props.initialState.source.fileId}:${props.initialState.source.digest}`;
+    if (next === initialStateKeyRef.current) return;
+    initialStateKeyRef.current = next;
     portableItemIdsRef.current = initiallyPortableItemIds(
       props.initialState,
       props.initialSaveStatus,
     );
     setState(props.initialState);
+    if (props.initialSaveStatus !== undefined) setSaveStatus(props.initialSaveStatus);
   }, [props.initialState]);
   useEffect(() => {
     if (sourceIdentity === sourceIdentityRef.current) return;
@@ -858,8 +1136,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     portableItemIdsRef.current = new Set();
     restoredLocationGenerationRef.current = null;
     restoringLocationGenerationRef.current = null;
-    const nextGeneration = documentGenerationRef.current + 1;
+    const nextGeneration = state.workflow.documentGeneration;
+    if (nextGeneration <= documentGenerationRef.current) return;
     documentGenerationRef.current = nextGeneration;
+    setLocationRestoreStatus('restoring');
     for (const waiter of referenceNavigationWaiters.current.splice(0)) {
       if (waiter.timeout !== null) clearTimeout(waiter.timeout);
       waiter.resolve(null);
@@ -867,10 +1147,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     outlineDiscoveryRef.current = { status: 'loading', documentGeneration: nextGeneration };
     setOutlineDiscovery(outlineDiscoveryRef.current);
     setExistingAnnotations({ status: 'loading', generation: 0 });
-    setExistingAnnotationsSourceIdentity(sourceIdentity);
     setMainNavigationReadyGeneration(null);
     setMainDocumentReadyGeneration(null);
-    navigationCoordinator.replaceDocument(nextGeneration);
+    navigationCoordinator.replaceDocument(nextGeneration, { preservePresentation: true });
     searchControllerRef.current?.dispose();
     searchControllerRef.current = null;
     searchDocumentRef.current = null;
@@ -880,9 +1159,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     submittedSearchQueryRef.current = '';
     searchRequestedRef.current = false;
     setSearchState(initialPdfSearchState());
-    dispatchLayout({ type: 'replace-document' });
-    setRightWorkspaceMode('outline');
-  }, [mainLocationRefresh, navigationCoordinator, sourceIdentity]);
+    setSelectionUpdate((current) => ({ kind: 'cleared', generation: current.generation + 1 }));
+    setCaret(null);
+    setSelectionPlacement(null);
+    setCaretPlacement(null);
+    setActiveItemId(undefined);
+    setCorrespondingItemId(undefined);
+  }, [mainLocationRefresh, navigationCoordinator, sourceIdentity, state.workflow.documentGeneration]);
   useEffect(() => {
     const pending = destinationDialog?.pending;
     if (
@@ -909,8 +1192,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [navigationCoordinator, referenceLayoutState]);
   useEffect(() => {
     if (
-      locationHistory === undefined
-      || mainNavigationReadyGeneration !== documentGenerationRef.current
+      mainNavigationReadyGeneration !== documentGenerationRef.current
       || mainDocumentReadyGeneration !== documentGenerationRef.current
       || restoredLocationGenerationRef.current === documentGenerationRef.current
       || restoringLocationGenerationRef.current === documentGenerationRef.current
@@ -927,12 +1209,22 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         if (restoringLocationGenerationRef.current === generation) {
           restoringLocationGenerationRef.current = null;
         }
+        if (!cancelled && generation === documentGenerationRef.current) {
+          setLocationRestoreStatus('fallback');
+        }
         return;
       }
       navigationCoordinator.startLocationHistory();
-      await navigationCoordinator.restoreCurrentLocation();
+      const presentation = pendingPresentationLocationRef.current;
+      const restored = locationHistory === undefined
+        ? presentation === null
+          ? true
+          : await navigationCoordinator.restorePresentationLocation(presentation, generation)
+        : await navigationCoordinator.restoreCurrentLocation();
       if (!cancelled && generation === documentGenerationRef.current) {
         restoredLocationGenerationRef.current = generation;
+        pendingPresentationLocationRef.current = null;
+        setLocationRestoreStatus(restored ? 'idle' : 'fallback');
       }
       if (restoringLocationGenerationRef.current === generation) {
         restoringLocationGenerationRef.current = null;
@@ -956,6 +1248,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     portableItemIdsRef.current = new Set(state.items.map((item) => item.id));
   }, [navigationCoordinator, saveStatus, state]);
   const onViewerInteraction = useCallback((event: ViewerInteractionEvent) => {
+    if (event.type === 'reverse-synctex') {
+      requestReverseSyncTex(event.value);
+      return;
+    }
     if (event.type === 'pdf-link') {
       navigationCoordinator.requestLink(event.value);
       return;
@@ -1019,7 +1315,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       }
       publishCorrespondence();
     }
-  }, [authoringAnchorRefresh, mainLocationRefresh, navigationCoordinator]);
+  }, [authoringAnchorRefresh, mainLocationRefresh, navigationCoordinator, requestReverseSyncTex]);
   const onReferenceDocumentControls = useCallback((controls: ReferenceDocumentController | null) => {
     referenceControllerRef.current = controls;
     if (controls === null) navigationCoordinator.referenceNavigationUnavailable();
@@ -1051,8 +1347,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   }, [navigationCoordinator, refreshAuthoringAnchorNavigation]);
   const onExistingAnnotationsDiscovery = useCallback((result: ExistingAnnotationsDiscovery) => {
     setExistingAnnotations(result);
-    setExistingAnnotationsSourceIdentity(sourceIdentity);
-  }, [sourceIdentity]);
+  }, []);
   const onOutlineDiscovery = useCallback((discovery: PdfOutlineDiscovery) => {
     if (discovery.documentGeneration !== documentGenerationRef.current) return;
     outlineDiscoveryRef.current = discovery;
@@ -1065,11 +1360,27 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     const controls = createViewerControls(registry);
     viewerControlsRef.current = controls;
     setViewerState(controls.snapshot());
+    if (!initialPresentationAppliedRef.current) {
+      initialPresentationAppliedRef.current = true;
+      if (props.initialPresentation?.pageIndex !== undefined) {
+        controls.goToPage(props.initialPresentation.pageIndex + 1);
+      }
+      if (props.initialPresentation?.zoom !== undefined) {
+        controls.zoomToPercent(props.initialPresentation.zoom * 100);
+      }
+    }
     controls.subscribe(() => {
       setViewerState(controls.snapshot());
       mainLocationRefresh.schedule();
     });
-  }, [mainLocationRefresh]);
+  }, [mainLocationRefresh, props.initialPresentation]);
+  useEffect(() => {
+    if (!viewerState.ready || props.onPresentationChange === undefined) return;
+    props.onPresentationChange({
+      pageIndex: viewerState.currentPage,
+      zoom: viewerState.zoomPercent / 100,
+    });
+  }, [props.onPresentationChange, viewerState]);
   const onMainDocumentReady = useCallback((engine: PdfEngine, document: PdfDocumentObject) => {
     if (searchDocumentRef.current === document && searchControllerRef.current) return;
     const documentGeneration = documentGenerationRef.current;
@@ -1123,13 +1434,14 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     <App
       embeddedInReviewShell
       assets={viewerAssets}
+      {...(props.resourcePolicy === undefined ? {} : { resourcePolicy: props.resourcePolicy })}
       documentTitle={scope.documentTitle}
-      toolError={commandError}
       onSelectionUpdate={onSelectionUpdate}
       ownedAnnotations={ownedAnnotations}
       authoringPreview={authoringPreview}
       keyboardPageNoteActive={keyboardPageNoteActive}
       onViewerInteraction={onViewerInteraction}
+      reverseSyncTexEnabled={props.onReverseSyncTex !== undefined}
       {...(activeItemId === undefined ? {} : { activeOwnedAnnotationId: activeItemId })}
       {...(correspondingItemId === undefined ? {} : { correspondingOwnedAnnotationId: correspondingItemId })}
       onExistingAnnotationsDiscovery={onExistingAnnotationsDiscovery}
@@ -1242,37 +1554,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     />
   );
 
-  const annotationOutlineLabels = useMemo(() => {
-    const pages = mainNavigationRef.current?.captureDocumentOrderPages() ?? [];
-    const source = existingAnnotationsSourceIdentity === sourceIdentity
-      && existingAnnotations.status === 'ready'
-      ? existingAnnotations.items
-      : [];
-    const derivationContext = {
-      sourceIdentity,
-      activeSourceIdentity: sourceIdentityRef.current,
-      navigationGeneration: mainNavigationReadyGeneration,
-      outlineGeneration: outlineDiscovery.documentGeneration,
-    };
-    if (!canDeriveAnnotationOutlineLabels(derivationContext)) {
-      return { owned: new Map<string, string>(), source: new Map<string, string>() };
-    }
-    return deriveAnnotationOutlineLabels({
-      documentGeneration: derivationContext.navigationGeneration,
-      outline: outlineDiscovery,
-      pages,
-      owned: state.items,
-      source,
-    });
-  }, [
-    existingAnnotations,
-    existingAnnotationsSourceIdentity,
-    mainNavigationReadyGeneration,
-    outlineDiscovery,
-    sourceIdentity,
-    state.items,
-  ]);
-
   const effectiveReferenceLayout = deriveReferenceWorkspaceLayout(
     referenceLayoutState,
     rightWorkspaceMode,
@@ -1289,19 +1570,32 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     commitMainFramingPositionRef.current = commit ?? (() => undefined);
   }, []);
   return (
-    <main data-production-review ref={productionRootRef}>
+    <main
+      data-production-review
+      data-launch-surface={scope.launchSurface ?? 'browser'}
+      ref={productionRootRef}
+    >
       <ReviewShell
         state={state}
         documentTitle={scope.documentTitle}
-        savedLabel="Saved"
-        savePhase={saveStatus.sync.phase}
+        savedLabel={state.workflow.mode === 'generated-output' ? 'Protected review state' : 'Saved'}
+        savePhase={state.workflow.mode === 'generated-output' ? 'clean' : saveStatus.sync.phase}
         savePendingDestination={
-          scope.sourceDisposition === 'remote-temporary'
+          state.workflow.mode !== 'generated-output'
+          && scope.sourceDisposition === 'remote-temporary'
           && saveStatus.destination.phase === 'none'
           && saveStatus.sync.phase === 'not-saved'
         }
-        saveOptionsOpen={destinationDialog !== null}
-        onSaveOptions={() => openCopyDialog("menu")}
+        saveOptionsOpen={state.workflow.mode === 'generated-output' ? false : destinationDialog !== null}
+        {...(state.workflow.mode === 'generated-output' ? {} : { onSaveOptions: () => openCopyDialog("menu") })}
+        generationRefreshStatus={props.generationRefreshStatus ?? 'idle'}
+        locationRestoreStatus={locationRestoreStatus}
+        toolError={commandError}
+        onExportReviewedCopy={(confirmPossiblyStale) => {
+          const method = props.api.exportReviewedCopy;
+          if (method === undefined) return Promise.reject(new Error('Reviewed export is unavailable.'));
+          return method(confirmPossiblyStale);
+        }}
         {...(viewerControlsRef.current === undefined ? {} : { viewerControls: viewerControlsRef.current })}
         {...(viewerFraming === undefined ? {} : { viewerFraming })}
         {...(mainNavigation === null ? {} : { viewerNavigation: mainNavigation })}
@@ -1322,7 +1616,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         pendingReference={pendingReference}
         referenceReturn={activeReferenceReturn}
         outlineDiscovery={outlineDiscovery}
-        annotationOutlineLabels={annotationOutlineLabels}
         currentOutlineItemId={currentOutlineItemId}
         linkActionRequest={linkActionRequest}
         navigationAnnouncement={navigationAnnouncement}
@@ -1458,6 +1751,17 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           pageIndex: pageMenu.point.pageIndex,
           position: { x: pageMenu.point.x, y: pageMenu.point.y, width: 18, height: 18 },
         }}
+        {...(props.onReverseSyncTex === undefined ? {} : {
+          onGoToSource: (menu: {
+            readonly pageIndex: number;
+            readonly position: { readonly x: number; readonly y: number };
+          }) => {
+            requestReverseSyncTex({
+              pageIndex: menu.pageIndex,
+              point: { x: menu.position.x, y: menu.position.y },
+            });
+          },
+        })}
         placedPageNote={placedPageNote}
         keyboardPageNoteActive={keyboardPageNoteActive}
         existingAnnotations={existingAnnotations}
@@ -1539,6 +1843,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             };
           }
           const gated = gateReviewCommand(
+            currentState,
             saveStatus,
             command,
             scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local',

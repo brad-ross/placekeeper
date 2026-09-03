@@ -2,7 +2,10 @@ import { DocumentManagerPlugin } from '@embedpdf/plugin-document-manager';
 import { InteractionManagerPlugin } from '@embedpdf/plugin-interaction-manager';
 import { describe, expect, it } from 'vitest';
 
-import { createLocalPdfiumViewerPlugins } from '../src/pdf/embedpdf-viewer.js';
+import {
+  createLocalPdfiumViewerPlugins,
+  validateViewerResourceUrl,
+} from '../src/pdf/embedpdf-viewer.js';
 import { MAIN_PDF_DOCUMENT_ID } from '../src/pdf/viewer-document-ids.js';
 
 describe('EmbedPDF registry configuration', () => {
@@ -37,5 +40,43 @@ describe('EmbedPDF registry configuration', () => {
     expect(interaction?.config).toEqual({
       exclusionRules: { dataAttributes: ['data-pdf-link-control'] },
     });
+  });
+
+  it('keeps browser resources same-origin and accepts only extension-issued webview resources', () => {
+    expect(validateViewerResourceUrl('/document.pdf', {
+      host: 'browser',
+      origin: 'http://127.0.0.1:4173',
+    })).toBe('http://127.0.0.1:4173/document.pdf');
+    expect(() => validateViewerResourceUrl('https://example.com/document.pdf', {
+      host: 'browser',
+      origin: 'http://127.0.0.1:4173',
+    })).toThrow(/same-origin/u);
+
+    const issued = new Set([
+      'vscode-webview://authority/snapshots/digest.pdf',
+      'vscode-webview://authority/assets/pdfium.wasm',
+    ]);
+    expect(validateViewerResourceUrl('vscode-webview://authority/snapshots/digest.pdf', {
+      host: 'vscode',
+      issued,
+    })).toBe('vscode-webview://authority/snapshots/digest.pdf');
+    const desktopUri = 'https://file+.vscode-resource.vscode-cdn.net/private/digest.pdf';
+    expect(validateViewerResourceUrl(desktopUri, {
+      host: 'vscode',
+      issued: new Set([desktopUri]),
+    })).toBe(desktopUri);
+    const blobUri = 'blob:vscode-webview://authority/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    expect(validateViewerResourceUrl(blobUri, {
+      host: 'vscode',
+      issued: new Set([blobUri]),
+    })).toBe(blobUri);
+    expect(() => validateViewerResourceUrl('vscode-webview://authority/snapshots/other.pdf', {
+      host: 'vscode',
+      issued,
+    })).toThrow(/extension-issued/u);
+    expect(() => validateViewerResourceUrl('http://127.0.0.1:43179/document.pdf', {
+      host: 'vscode',
+      issued,
+    })).toThrow(/extension-issued/u);
   });
 });

@@ -19,6 +19,8 @@ import type { TaskBindingRegistry } from "../context/task-binding-registry.js";
 import { DaemonLifecycleCoordinator } from "./daemon-lifecycle.js";
 import { decodePlacekeeperLink } from "../../../../packages/core/src/placekeeper-link.js";
 import { openPlacekeeperLink } from "../links/placekeeper-link.js";
+import type { ReviewWorkflowMode } from "../../../../packages/core/src/review-model.js";
+import { ExportCoordinator, type FrozenReviewDelivery } from "../export/export-coordinator.js";
 import {
   BrowserSourceStore,
   type ChromeBrowserSourceOpenRequest,
@@ -36,6 +38,7 @@ export interface LaunchRequest {
   readonly recoveryOffer?: RecoveryOfferIdentity;
   readonly recoveryOperationId?: string;
   readonly surface?: LaunchSurface;
+  readonly workflowMode?: ReviewWorkflowMode;
 }
 
 export interface LaunchFailure {
@@ -153,6 +156,7 @@ export class PlacekeeperHost {
   readonly reconciliation: SourceReconciliationService;
   readonly sourceWorkflow: LiveSourceWorkflowService;
   readonly saving: PdfSaveCoordinator;
+  readonly exporting: ExportCoordinator;
   readonly lifecycle: DaemonLifecycleCoordinator;
   readonly browserSources: BrowserSourceStore;
   #closePromise?: Promise<void>;
@@ -164,6 +168,7 @@ export class PlacekeeperHost {
     reconciliation: SourceReconciliationService,
     sourceWorkflow: LiveSourceWorkflowService,
     saving: PdfSaveCoordinator,
+    exporting: ExportCoordinator,
     lifecycle: DaemonLifecycleCoordinator,
     browserSources: BrowserSourceStore,
   ) {
@@ -173,6 +178,7 @@ export class PlacekeeperHost {
     this.reconciliation = reconciliation;
     this.sourceWorkflow = sourceWorkflow;
     this.saving = saving;
+    this.exporting = exporting;
     this.lifecycle = lifecycle;
     this.browserSources = browserSources;
   }
@@ -186,13 +192,21 @@ export class PlacekeeperHost {
         : { browserSourceInspector: options.browserSourceInspector }),
     });
     await broker.initialize();
+    const writer = await createSelectedPdfWriter();
     const browserSources = await BrowserSourceStore.create(
       options.browserSourceRoot ?? join(dirname(options.recoveryRoot), "browser-sources"),
     );
     const saving = new PdfSaveCoordinator({
       broker,
-      writer: await createSelectedPdfWriter(),
+      writer,
       ...(process.platform === "darwin" ? { picker: new MacOsDestinationPicker() } : {}),
+    });
+    const exporting = new ExportCoordinator({
+      writer,
+      capabilities: broker.capabilities,
+      controls: broker.controls,
+      recordSuccessfulExport: (sessionId) => broker.recordSuccessfulExport(sessionId),
+      validateFrozenDelivery: (delivery) => broker.isFrozenDeliveryCurrent(delivery as FrozenReviewDelivery),
     });
     const lifecycle = new DaemonLifecycleCoordinator({
       activity: () => {
@@ -211,17 +225,28 @@ export class PlacekeeperHost {
       ...(options.port === undefined ? {} : { port: options.port }),
       ...(options.webAssets === undefined ? {} : { webAssets: options.webAssets }),
       saving,
+      exporting,
       lifecycle,
     });
     const context = new LiveContextService({ broker });
     const reconciliation = new SourceReconciliationService({ broker });
+    const sourceWorkflow = new LiveSourceWorkflowService({ broker, context, reconciliation });
+    broker.onGenerationAdvance((event) => {
+      // Observation cursors, evidence handles, source hints, and source-work
+      // baselines are generation-bound even when the exact task lease migrates.
+      context.discardSession(event.sessionId);
+      if (event.migratedTaskSessionId !== undefined) {
+        sourceWorkflow.discardTask(event.migratedTaskSessionId);
+      }
+    });
     return new PlacekeeperHost(
       broker,
       server,
       context,
       reconciliation,
-      new LiveSourceWorkflowService({ broker, context, reconciliation }),
+      sourceWorkflow,
       saving,
+      exporting,
       lifecycle,
       browserSources,
     );
@@ -345,6 +370,7 @@ export class PlacekeeperHost {
           ? {}
           : { recoveryOperationId: request.recoveryOperationId }),
         surface,
+        ...(request.workflowMode === undefined ? {} : { workflowMode: request.workflowMode }),
       });
       if (opened.kind === "recovery-offered") {
         return {

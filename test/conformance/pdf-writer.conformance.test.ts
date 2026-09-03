@@ -446,6 +446,9 @@ describe('EmbedPDF writer gate', () => {
       revision: 1,
       lifecycle: 'active',
       items: [legacyItem],
+      workflow: { schemaVersion: 1, mode: 'standard', documentRole: 'source-pdf', documentGeneration: 1, freshness: 'current', historyBoundary: 0 },
+      pendingDrafts: [],
+      discardAudit: [],
       history: [{ beforeItems: [], afterItems: [legacyItem] }],
       historyCursor: 1,
     };

@@ -58,7 +58,6 @@ import {
   annotationAccessibleLabel,
   annotationKindLabel,
 } from '../review/AnnotationMetadata.js';
-import type { AnnotationOutlineLabels } from '../review/annotation-outline-context.js';
 import { AnnotationPeek } from '../review/AnnotationPeek.js';
 import { CommentComposer } from '../review/CommentComposer.js';
 import {
@@ -98,7 +97,10 @@ import {
   type ReferenceWorkspaceLayoutState,
   type RightWorkspaceMode,
 } from '../review/reference-workspace-layout.js';
-import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
+import {
+  createReviewStateSummary,
+  type LiveContextBindingStatus,
+} from '../../../../packages/core/src/live-context.js';
 import type { CopyLinkControlProps } from '../review/CopyLinkControl.js';
 import type { PdfDestinationCopyLink } from '../review/copy-link-model.js';
 import {
@@ -129,12 +131,19 @@ import {
   authoringSessionIsCurrent,
   canStartAuthoringSession,
   createAuthoringSession,
+  pendingDraftForAuthoring,
   type AuthoringAuthority,
   type AuthoringAnchorSnapshot,
   type AuthoringOriginKind,
   type AuthoringSession,
   type AuthoringSource,
 } from '../review/authoring-session.js';
+import {
+  ReconciliationWorkspace,
+} from '../review/ReconciliationWorkspace.js';
+import { reviewExportPresentation } from '../review/DocumentActionsMenu.js';
+import type { GenerationRefreshStatus, LocationRestoreStatus } from '../generation-status.js';
+import { reviewItemIsResolvedForGeneration } from '../../../../packages/core/src/annotation-projection.js';
 import './review-layout.css';
 
 function ignoreReferenceViewportHost(_element: HTMLDivElement | null): void {}
@@ -147,6 +156,10 @@ export interface ReviewShellProps {
   savePendingDestination?: boolean;
   saveOptionsOpen?: boolean;
   onSaveOptions?(): void;
+  generationRefreshStatus?: GenerationRefreshStatus;
+  locationRestoreStatus?: LocationRestoreStatus;
+  toolError?: string | null;
+  onExportReviewedCopy?(confirmPossiblyStale?: true): Promise<unknown>;
   listOpen?: boolean;
   selectionUpdate: SelectionUpdate;
   selectionPlacement?: ContextPlacement | null;
@@ -170,6 +183,7 @@ export interface ReviewShellProps {
   onCancelKeyboardPageNote?(): void;
   onPageMenuDismiss?(invocationId: string): void;
   onPageMenuConsumed?(invocationId: string): void;
+  onGoToSource?(menu: NonNullable<ReviewShellProps['pageMenu']>): void;
   onPlacedPageNoteConsumed?(token: number): void;
   onPageNoteComposerComplete?(): void;
   onSelectionConsumed?(generation: number): void;
@@ -221,7 +235,6 @@ export interface ReviewShellProps {
   pendingReference?: PendingReferencePanel | null;
   referenceReturn?: ReferenceReturnControlState | null;
   outlineDiscovery?: PdfOutlineDiscovery;
-  annotationOutlineLabels?: AnnotationOutlineLabels;
   currentOutlineItemId?: string | null;
   linkActionRequest?: ViewerPdfLinkInvocation | null;
   navigationAnnouncement?: string;
@@ -257,7 +270,7 @@ export interface RejectedReviewCommand {
   readonly accepted: false;
   readonly state: ReviewState;
   readonly message: string;
-  readonly reason?: 'rejected' | 'save-destination' | 'stale-authoring';
+  readonly reason?: 'rejected' | 'save-destination' | 'stale-authoring' | 'generation-conflict';
 }
 
 export function controlledWorkspaceSurfaceAction(input: {
@@ -381,6 +394,8 @@ export function ReviewShell(props: ReviewShellProps) {
   const [consumedSelectionGeneration, setConsumedSelectionGeneration] = useState<number>();
   const [listActivation, setListActivation] = useState<{ readonly id: string; readonly token: number }>();
   const [annotationReaderSession, setAnnotationReaderSession] = useState<FullAnnotationReaderSession | null>(null);
+  const [reconciliationDetailOpen, setReconciliationDetailOpen] = useState(false);
+  const [reconciliationFocusRequest, setReconciliationFocusRequest] = useState(0);
   const pendingReaderResumeRef = useRef<FullAnnotationReaderSession | null>(null);
   const annotationRestorationTokenRef = useRef(0);
   const annotationRestorationFramesRef = useRef(new Set<number>());
@@ -389,6 +404,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const peekHeldRef = useRef(false);
   const peekTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [announcement, setAnnouncement] = useState(`Review revision ${props.state.revision}.`);
+  const authoringOwnerViewIdRef = useRef(crypto.randomUUID());
 
   const cancelAnnotationRestoration = useCallback(() => {
     annotationRestorationTokenRef.current += 1;
@@ -492,21 +508,45 @@ export function ReviewShell(props: ReviewShellProps) {
       : { status: 'loading', documentGeneration: navigation.documentGeneration }
   ), [navigation.documentGeneration, outlineDiscovery]);
   const outlineAbsent = visibleOutlineDiscovery.status === 'loaded-empty';
-  const showAnnotationOutlineLabels = visibleOutlineDiscovery.status === 'loaded-tree';
   const existingAnnotations = props.existingAnnotations ?? { status: 'loading', generation: 0 };
-  const annotationsAvailable = props.state.items.length > 0
-    || (existingAnnotations.status === 'ready' && existingAnnotations.items.length > 0);
+  const visibleOwnedItems = props.state.workflow.mode === 'generated-output'
+    ? props.state.items.filter((item) => reviewItemIsResolvedForGeneration(
+        item,
+        props.state.workflow.documentGeneration,
+      ))
+    : props.state.items;
+  const generatedStatusMessages = props.state.workflow.mode !== 'generated-output' ? [] : [
+    props.generationRefreshStatus === 'reconciling'
+      ? 'A rebuilt PDF is loading and Review Items are reconciling.'
+      : props.generationRefreshStatus === 'failed'
+        ? 'The rebuilt PDF could not be loaded safely. The last successful PDF remains reviewable.'
+        : props.state.workflow.freshness === 'possibly-stale'
+          ? 'The last successful PDF may be stale.'
+          : '',
+    props.locationRestoreStatus === 'restoring'
+      ? 'Restoring the prior reading position.'
+      : props.locationRestoreStatus === 'fallback'
+        ? 'The prior reading position could not be restored; review remains available.'
+        : '',
+  ].filter(Boolean);
   const workspaceRequestedOpen = props.workspaceOpen ?? surface.baseSurface === 'workspace';
   const workspaceOpen = workspaceIsVisible(workspaceRequestedOpen, surface.baseSurface);
   const workspaceMode = navigation.workspace.lastMode;
   const visibleWorkspaceModes = WORKSPACE_MODES.filter((mode) => (
     (referencesAvailable || mode !== 'references')
     && (!outlineAbsent || mode !== 'outline')
-    && (annotationsAvailable || mode !== 'annotations')
   ));
   const visibleRightWorkspaceModes = visibleWorkspaceModes.filter(
     (mode): mode is RightWorkspaceMode => mode !== 'references',
   );
+  const documentActionsPresentation = useMemo(() => (
+    props.state.workflow.mode === 'generated-output'
+      ? reviewExportPresentation({
+          refreshStatus: props.generationRefreshStatus ?? 'idle',
+          summary: createReviewStateSummary(props.state),
+        })
+      : undefined
+  ), [props.generationRefreshStatus, props.state]);
   const requestedRightWorkspaceMode: RightWorkspaceMode = props.rightWorkspaceMode
     ?? (workspaceMode === 'references' ? 'outline' : workspaceMode);
   const rightWorkspaceMode: RightWorkspaceMode = visibleRightWorkspaceModes.includes(
@@ -556,10 +596,6 @@ export function ReviewShell(props: ReviewShellProps) {
         ownedItems: props.state.items,
         existingAnnotations,
         documentGeneration: navigation.documentGeneration,
-        ...(!showAnnotationOutlineLabels || props.annotationOutlineLabels === undefined ? {} : {
-          ownedSectionLabels: props.annotationOutlineLabels.owned,
-          sourceSectionLabels: props.annotationOutlineLabels.source,
-        }),
       });
   const annotationReaderOwnedItemId = annotationReaderRecord?.identity.origin === 'owned'
     ? annotationReaderRecord.identity.itemId
@@ -847,6 +883,7 @@ export function ReviewShell(props: ReviewShellProps) {
   useEffect(() => {
     const request = props.activationRequest;
     if (!request || authoringSessionRef.current !== null) return;
+    workspaceFraming.prepareMarkReveal();
     setActiveItem(request.id);
     setListActivation(request);
     setPeekItemId(undefined);
@@ -864,7 +901,11 @@ export function ReviewShell(props: ReviewShellProps) {
     dispatchReferenceLayout({ type: 'show-right-workspace' });
     dispatchReferenceLayout({ type: 'focus-surface', surface: 'right' });
     props.onWorkspaceModeChange?.('annotations');
-  }, [props.activationRequest?.id, props.activationRequest?.token]);
+  }, [
+    props.activationRequest?.id,
+    props.activationRequest?.token,
+    workspaceFraming.prepareMarkReveal,
+  ]);
 
   const selectWorkspaceMode = (mode: WorkspaceMode) => {
     if (authoringSessionRef.current !== null) return;
@@ -880,6 +921,25 @@ export function ReviewShell(props: ReviewShellProps) {
       surface: mode === 'references' ? 'references' : 'right',
     });
     props.onWorkspaceModeChange?.(mode);
+  };
+  const focusAnnotationsFallback = () => {
+    requestAnimationFrame(() => {
+      const shell = shellRef.current;
+      const target = shell?.querySelector<HTMLElement>('[data-workspace-focus-token="annotations:section"]')
+        ?? shell?.querySelector<HTMLElement>('#workspace-panel-annotations');
+      target?.focus({ preventScroll: true });
+    });
+  };
+  const openAnnotationsFromDocumentActions = () => {
+    if (authoringSessionRef.current !== null) {
+      requestAnimationFrame(() => authoringEditorRef.current?.focus({ preventScroll: true }));
+      return;
+    }
+    setWorkspaceRequest({ kind: 'reading', token: ++annotationRequestTokenRef.current });
+    setReconciliationFocusRequest((token) => token + 1);
+    dispatchSurface({ type: 'open-workspace', mode: 'annotations' });
+    dispatchReferenceLayout({ type: 'show-right-workspace' });
+    selectWorkspaceMode('annotations');
   };
   const acknowledgedAuthority = authoringAuthorityFor(
     acknowledgedRef.current,
@@ -963,6 +1023,9 @@ export function ReviewShell(props: ReviewShellProps) {
     props.onAuthoringActiveChange?.(true);
     setAuthoringSession(session);
     dispatchSurface({ type: 'open-nested' });
+    if (props.state.workflow.mode === 'generated-output') {
+      void protectAuthoringDraft(session, initialAuthoringValue(session));
+    }
     return true;
   };
 
@@ -1044,10 +1107,6 @@ export function ReviewShell(props: ReviewShellProps) {
         ownedItems: (acceptedState ?? props.state).items,
         existingAnnotations,
         documentGeneration: navigation.documentGeneration,
-        ...(!showAnnotationOutlineLabels || props.annotationOutlineLabels === undefined ? {} : {
-          ownedSectionLabels: props.annotationOutlineLabels.owned,
-          sourceSectionLabels: props.annotationOutlineLabels.source,
-        }),
       });
       if (nextReaderRecord === null) {
         const readerItemId = readerOrigin.identity.origin === 'owned'
@@ -1104,6 +1163,9 @@ export function ReviewShell(props: ReviewShellProps) {
       props.authoringAnchorNavigation?.token === session.token
       && props.authoringAnchorNavigation.pending
     ) await props.authoringAnchorNavigation.onCancelReturn?.();
+    if (props.state.workflow.mode === 'generated-output') {
+      await discardProtectedAuthoringDraft(session);
+    }
     closeAuthoringSession(session.token, 'cancelled');
   };
   const closeNested = async () => {
@@ -1181,6 +1243,7 @@ export function ReviewShell(props: ReviewShellProps) {
       && (
         (props.linkActionRequest && event.target.closest('[data-link-action-popover]') !== null)
         || event.target.closest('[data-row-actions-open="true"]') !== null
+        || event.target.closest('[data-top-bar-menu], [data-document-actions-open="true"]') !== null
       )
     ) return;
     const editable = isEditableTarget(event.target);
@@ -1374,8 +1437,82 @@ export function ReviewShell(props: ReviewShellProps) {
     if (accepted) closeAuthoringSession(session.token, 'accepted', next);
   };
 
+  const protectAuthoringDraft = (
+    session: AuthoringSession,
+    value: string,
+  ): Promise<ReviewState> => submit((state) => {
+    const existing = state.pendingDrafts.find(({ id }) => id === session.draftId);
+    const updatedAt = new Date().toISOString();
+    return {
+      type: 'put-draft',
+      expectedRevision: state.revision,
+      expectedDraftRevision: existing?.revision ?? -1,
+      draft: pendingDraftForAuthoring({
+        session,
+        ownerViewId: authoringOwnerViewIdRef.current,
+        text: value,
+        revision: existing?.revision ?? 0,
+        createdAt: existing?.createdAt ?? updatedAt,
+        updatedAt,
+      }),
+    };
+  }, {
+    authority: session.authority,
+    onStale: () => closeAuthoringSession(session.token, 'source-replaced'),
+  });
+
+  const discardProtectedAuthoringDraft = async (session: AuthoringSession): Promise<void> => {
+    await commandTailRef.current;
+    const existing = acknowledgedRef.current.pendingDrafts.find(({ id }) => id === session.draftId);
+    if (existing === undefined) return;
+    await submit((state) => {
+      const current = state.pendingDrafts.find(({ id }) => id === session.draftId);
+      if (current === undefined) throw new Error('The protected authoring draft is unavailable.');
+      return {
+        type: 'discard-reconciliation',
+        expectedRevision: state.revision,
+        target: 'draft',
+        id: current.id,
+        expectedTargetRevision: current.revision,
+        ownerViewId: current.ownerViewId,
+        reason: 'cancelled-by-author-before-apply',
+        discardedAt: new Date().toISOString(),
+      };
+    }, { authority: session.authority });
+  };
+
+  const applyProtectedAuthoring = async (
+    session: AuthoringSession,
+    value: string,
+    onAccepted?: () => void,
+  ) => {
+    await protectAuthoringDraft(session, value);
+    await submitAuthoring(session, (state) => {
+      const draft = state.pendingDrafts.find(({ id }) => id === session.draftId);
+      if (draft === undefined) throw new Error('The protected authoring draft is unavailable.');
+      return {
+        type: 'apply-draft',
+        expectedRevision: state.revision,
+        id: draft.id,
+        expectedDraftRevision: draft.revision,
+        ownerViewId: draft.ownerViewId,
+        updatedAt: new Date().toISOString(),
+      };
+    }, onAccepted);
+  };
+
   const saveAuthoring = async (session: AuthoringSession, value: string) => {
     const source = session.source;
+    if (props.state.workflow.mode === 'generated-output') {
+      await applyProtectedAuthoring(
+        session,
+        value,
+        source.kind === 'replace' || source.kind === 'highlight'
+          ? () => consumeSelectionActions(source.selectionGeneration)
+          : undefined,
+      );
+      return;
+    }
     if (source.kind === 'replace') {
       await submitAuthoring(
         session,
@@ -1528,7 +1665,9 @@ export function ReviewShell(props: ReviewShellProps) {
       anchorNavigation={anchorNavigation}
       onValueChange={(value) => {
         if (authoringSessionRef.current?.token !== authoringSession.token) return;
-        props.onAuthoringPreviewChange?.(authoringPreviewAnnotation(authoringSession, value));
+        if (props.state.workflow.mode === 'generated-output') {
+          void protectAuthoringDraft(authoringSession, value);
+        }
       }}
       onDismiss={() => dismissAuthoring(authoringSession)}
       {...(source.kind !== 'highlight'
@@ -1609,6 +1748,15 @@ export function ReviewShell(props: ReviewShellProps) {
         savePendingDestination={props.savePendingDestination ?? false}
         saveOptionsOpen={props.saveOptionsOpen ?? false}
         onSaveOptions={() => props.onSaveOptions?.()}
+        saveOptionsAvailable={props.onSaveOptions !== undefined}
+        {...(documentActionsPresentation === undefined ? {} : {
+          documentActions: {
+            presentation: documentActionsPresentation,
+            onExport: props.onExportReviewedCopy
+              ?? (() => Promise.reject(new Error('Reviewed export is unavailable.'))),
+            onOpenAnnotations: openAnnotationsFromDocumentActions,
+          },
+        })}
         {...(props.viewerControls === undefined ? {} : { controls: props.viewerControls })}
         viewerState={props.viewerState ?? unavailableViewerControls()}
         fitWidthReady={props.viewerNavigation?.fitToWidthReady() ?? false}
@@ -1655,6 +1803,23 @@ export function ReviewShell(props: ReviewShellProps) {
             ? effectiveReferenceLayout.bottomHeight : referenceLayout.bottomReferenceHeight}px`,
         } as CSSProperties}
       >
+        {props.toolError || generatedStatusMessages.length > 0 ? <div
+          className="review-toast-stack"
+          data-review-toast-stack
+        >
+          {props.toolError ? <p
+            className="review-toast review-toast--error"
+            role="alert"
+            data-viewer-status
+          ><ReviewIcon name="alert" />{props.toolError}</p> : null}
+          {generatedStatusMessages.length > 0 ? <p
+            className="review-toast review-toast--status"
+            data-generation-status={props.generationRefreshStatus ?? 'idle'}
+            role={props.generationRefreshStatus === 'failed' ? 'alert' : 'status'}
+          ><ReviewIcon name={props.generationRefreshStatus === 'failed' ? 'alert' : 'loading'} />{
+            generatedStatusMessages.join(' ')
+          }</p> : null}
+        </div> : null}
         <div className="review-document">{props.children}</div>
         <div className="review-contextual-host" data-review-contextual-host>
           {selectionActionsAvailable && props.selectionPlacement ? (
@@ -1677,6 +1842,15 @@ export function ReviewShell(props: ReviewShellProps) {
             <PageActionMenu
               placement={props.pageMenu.placement}
               triggerRef={pageNoteTriggerRef}
+              {...(props.onGoToSource === undefined ? {} : {
+                onGoToSource: () => {
+                  const menu = props.pageMenu;
+                  if (!menu) return;
+                  props.onPageMenuConsumed?.(menu.invocationId);
+                  props.onGoToSource?.(menu);
+                  dispatchSurface({ type: 'close-transient' });
+                },
+              })}
               onAddPageNote={() => {
                 const menu = props.pageMenu;
                 if (!menu) return;
@@ -1873,11 +2047,19 @@ export function ReviewShell(props: ReviewShellProps) {
                 })}
               />
             ) : <div id="review-annotation-list" aria-label="All annotations">
+            {props.state.workflow.mode === 'generated-output' ? <ReconciliationWorkspace
+              state={props.state}
+              selectionUpdate={props.selectionUpdate}
+              {...(props.caretAnchor === undefined ? {} : { caretAnchor: props.caretAnchor })}
+              refreshStatus={props.generationRefreshStatus ?? 'idle'}
+              onCommand={(command) => props.onCommand(command)}
+              onDetailOpenChange={setReconciliationDetailOpen}
+              focusRequestToken={reconciliationFocusRequest}
+              onFocusFallback={focusAnnotationsFallback}
+            /> : null}
+            {reconciliationDetailOpen ? null : <>
             <AnnotationList
-              items={props.state.items}
-              {...(!showAnnotationOutlineLabels || props.annotationOutlineLabels === undefined
-                ? {}
-                : { sectionLabels: props.annotationOutlineLabels.owned })}
+              items={visibleOwnedItems}
               {...(presentedActiveItemId === undefined ? {} : { activeId: presentedActiveItemId })}
               {...(!annotationsVisible || props.correspondingItemId === undefined
                 ? {}
@@ -1911,9 +2093,9 @@ export function ReviewShell(props: ReviewShellProps) {
               }}
             />
             {existingAnnotations.status === 'empty' ? null : (
-              <section className="existing-annotations" data-existing-annotations-state={existingAnnotations.status} aria-label="External Annotations (read only)">
+              <section className="existing-annotations" data-existing-annotations-state={existingAnnotations.status} aria-label="From this PDF">
               <header className="existing-annotations__header">
-                <h2>External Annotations (read only)</h2>
+                <h2>From this PDF</h2>
               </header>
               {existingAnnotations.status === 'loading' ? (
                 <p className="annotation-status" data-annotation-status="loading" role="status">
@@ -1931,13 +2113,9 @@ export function ReviewShell(props: ReviewShellProps) {
               {existingAnnotations.status === 'ready' ? (
                 <ol className="existing-annotations__list">
                   {existingAnnotations.items.map((annotation) => {
-                    const sectionLabel = showAnnotationOutlineLabels
-                      ? props.annotationOutlineLabels?.source.get(existingAnnotationKey(annotation))
-                      : undefined;
                     const readerRecord = projectExistingAnnotationReader(annotation, {
                       documentGeneration: navigation.documentGeneration,
                       discoveryGeneration: existingAnnotations.generation,
-                      ...(sectionLabel === undefined ? {} : { sectionLabel }),
                     });
                     return <li
                       key={existingAnnotationKey(annotation)}
@@ -1948,11 +2126,10 @@ export function ReviewShell(props: ReviewShellProps) {
                       data-annotation-state="readonly"
                       data-readonly="true"
                     >
-                      <div className="existing-annotation__content">
+                      <div className="annotation-item__content existing-annotation__content">
                       <button className="annotation-item__navigation" type="button" aria-label={annotationAccessibleLabel({
                         kind: annotation.subtype,
                         pageNumber: annotation.pageIndex + 1,
-                        ...(sectionLabel === undefined ? {} : { sectionLabel }),
                         ...(annotation.contents ? { excerpt: annotation.contents } : {}),
                       })} title={`Go to ${annotationKindLabel(annotation.subtype)} annotation on page ${annotation.pageIndex + 1}`} onClick={() => {
                         if (authoringSessionRef.current !== null) return;
@@ -1962,21 +2139,24 @@ export function ReviewShell(props: ReviewShellProps) {
                         props.onNavigateExisting?.(annotation);
                       }}>
                       </button>
-                      <AnnotationMetadata
-                        kind={annotation.subtype}
-                        pageNumber={annotation.pageIndex + 1}
-                        {...(sectionLabel === undefined ? {} : { sectionLabel })}
-                      />
-                      {annotation.contents ? (
-                        <AnnotationExcerpt
-                          content={annotation.contents}
-                          readerRecord={readerRecord}
-                          onOverflowChange={settlePendingReaderResume}
-                          onReadFull={(record, trigger) => {
-                            openExistingAnnotationReader(annotation, record, trigger);
-                          }}
+                      <div className="annotation-item__title-row">
+                        <AnnotationMetadata
+                          kind={annotation.subtype}
+                          pageNumber={annotation.pageIndex + 1}
                         />
-                      ) : null}
+                      </div>
+                      <div className="annotation-item__body-row">
+                        {annotation.contents ? (
+                          <AnnotationExcerpt
+                            content={annotation.contents}
+                            readerRecord={readerRecord}
+                            onOverflowChange={settlePendingReaderResume}
+                            onReadFull={(record, trigger) => {
+                              openExistingAnnotationReader(annotation, record, trigger);
+                            }}
+                          />
+                        ) : <span />}
+                      </div>
                       </div>
                     </li>;
                   })}
@@ -1984,6 +2164,7 @@ export function ReviewShell(props: ReviewShellProps) {
               ) : null}
               </section>
             )}
+            </>}
             </div>}
             search={props.search ?? (
               <div className="workspace-state" data-workspace-focus-token="search:unavailable" tabIndex={-1}>

@@ -1591,6 +1591,22 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.dependencies.layout.hideReferences).toHaveBeenCalled();
     expect(run.dependencies.focusReferenceTab).not.toHaveBeenCalled();
   });
+
+  it('invalidates successor semantics while preserving view-local workspace presentation', () => {
+    const run = harness();
+    run.dependencies.dispatch({ type: 'select-workspace-mode', mode: 'annotations' });
+    run.reopenReferences();
+
+    run.coordinator.replaceDocument(2, { preservePresentation: true });
+
+    expect(run.state().documentGeneration).toBe(2);
+    expect(run.state().tabs).toEqual([]);
+    expect(run.state().mainHistory).toEqual({ entries: [], index: -1 });
+    expect(run.state().workspace.lastMode).toBe('annotations');
+    expect(run.referencesOpen()).toBe(true);
+    expect(run.dependencies.layout.hideReferences).not.toHaveBeenCalled();
+    expect(run.main.controls.focusAtDestination).not.toHaveBeenCalled();
+  });
 });
 
 describe('current outline destination', () => {

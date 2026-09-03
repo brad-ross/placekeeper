@@ -6,6 +6,7 @@ import {
   createPdfEvidenceCatalog,
   createReconciliationOutcome,
   createReviewSnapshot,
+  createReviewStateSummary,
   createUnavailableLiveContextObservation,
   diffReviewSnapshots,
   reviewSemanticDigest,
@@ -74,6 +75,50 @@ describe("live PDF context contracts", () => {
     expect(reviewSemanticDigest(reordered)).not.toBe(
       reviewSemanticDigest([{ ...first, payload: { ...first.payload, proposedText: "different" } }, second]),
     );
+  });
+
+  it("reports prompt-safe generated-output reconciliation and export eligibility", () => {
+    const resolved = replaceItem(1, 0, 50, "replacement");
+    const unresolved: ReviewItem = {
+      ...replaceItem(2, 0, 80, "uncertain"),
+      reconciliation: {
+        schemaVersion: 1,
+        ownerViewId: "panel-a",
+        baseGeneration: 2,
+        revision: 1,
+        anchor: {
+          kind: "selection",
+          pageIndex: 0,
+          quote: "claim 2",
+          prefix: "before ",
+          suffix: " after",
+          rect: rect(72, 80),
+          segmentRects: [rect(72, 80)],
+        },
+        disposition: { kind: "ambiguous", reason: "multiple-quote-matches" },
+        previousAnchors: [],
+      },
+    };
+    const summary = createReviewStateSummary({
+      workflow: {
+        schemaVersion: 1,
+        mode: "generated-output",
+        documentRole: "generated-output",
+        documentGeneration: 3,
+        freshness: "current",
+        historyBoundary: 0,
+      },
+      revision: 4,
+      items: [resolved, unresolved],
+      pendingDrafts: [],
+    });
+
+    expect(summary).toMatchObject({
+      document: { role: "generated-output", generation: 3, freshness: "current" },
+      reconciliation: { complete: false, unresolvedItemIds: [unresolved.id] },
+      export: { eligible: false },
+    });
+    expect(JSON.stringify(summary)).not.toContain("panel-a");
   });
 
   it("represents initial, unchanged, and add/edit/remove observations without losing records", () => {

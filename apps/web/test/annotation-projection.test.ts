@@ -35,4 +35,34 @@ describe('canonical annotation projection', () => {
     expect(projected.every(({ id }) => id.startsWith('00000000-'))).toBe(true);
     expect(projected.filter(({ kind }) => kind !== 'pageNote').every(({ textAnchorReliable }) => textAnchorReliable)).toBe(true);
   });
+
+  it('projects only geometry resolved to the active generation', () => {
+    const resolved = item('highlight', 'resolved', 0, { ...selection, comment: 'Current' });
+    const unresolved = item('highlight', 'unresolved', 0, { ...selection, comment: 'Old' });
+    const canonical = (value: ReviewItem, disposition: NonNullable<ReviewItem['reconciliation']>['disposition']): ReviewItem => ({
+      ...value,
+      reconciliation: {
+        schemaVersion: 1,
+        ownerViewId: 'view-1',
+        baseGeneration: 6,
+        revision: 2,
+        anchor: {
+          kind: 'selection',
+          pageIndex: 0,
+          quote: selection.quote,
+          prefix: selection.prefix,
+          suffix: selection.suffix,
+          rect: selection.rect,
+          segmentRects: selection.segmentRects,
+        },
+        disposition,
+        previousAnchors: [],
+      },
+    });
+
+    expect(projectReviewItems([
+      canonical(resolved, { kind: 'resolved', generation: 7 }),
+      canonical(unresolved, { kind: 'ambiguous', reason: 'two matches' }),
+    ], 7).map(({ id }) => id)).toEqual(['resolved']);
+  });
 });

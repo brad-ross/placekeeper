@@ -33,9 +33,18 @@ import { resolveVisualScenario, VisualDocument } from './visual-scenarios.js';
 
 const root = document.querySelector('#root');
 if (!root) throw new Error('Review harness root is missing');
+const rootElement = root;
+rootElement.setAttribute('data-authoring-preview-updates', '0');
 const visualScenario = resolveVisualScenario(window.location.search);
 const previewParameters = new URLSearchParams(window.location.search);
+const responsiveFullChrome = previewParameters.get('responsive') === 'full';
 const saveEstablishing = previewParameters.has('establishing');
+const reconciliationPreview = previewParameters.get('reconciliation');
+const exportPreview = previewParameters.get('export');
+const requestedRefreshPreview = previewParameters.get('refresh');
+const refreshPreview = requestedRefreshPreview === 'reconciling' || requestedRefreshPreview === 'failed'
+  ? requestedRefreshPreview
+  : 'idle';
 const composerPreview = previewParameters.get('composer');
 const requestedComposerReturn = previewParameters.get('return');
 const composerReturnPreview = requestedComposerReturn === 'outside'
@@ -109,6 +118,167 @@ const caret: CaretAnchor = {
   rightContext: ' exists',
   reliable: true,
 };
+
+function createReconciliationPreviewState(variant = 'default'): ReviewState {
+  const state = createReviewState({
+    sessionId: '00000000-0000-4000-8000-000000000201',
+    source: {
+      fileId: '00000000-0000-4000-8000-000000000202',
+      digest: 'c'.repeat(64),
+      byteLength: 120,
+    },
+    workflowMode: 'generated-output',
+    documentGeneration: 2,
+  });
+  if (variant === 'ready') return state;
+  if (variant === 'stale') {
+    return {
+      ...state,
+      workflow: { ...state.workflow, freshness: 'possibly-stale' },
+    };
+  }
+  const anchor = {
+    kind: 'selection' as const,
+    pageIndex: 0,
+    quote: 'the previous identification argument',
+    prefix: 'Review ',
+    suffix: ' carefully.',
+    rect: { x: 72, y: 92, width: 180, height: 14 },
+    segmentRects: [{ x: 72, y: 92, width: 180, height: 14 }],
+  };
+  if (variant === 'pending-draft') {
+    return {
+      ...state,
+      pendingDrafts: [{
+        id: '00000000-0000-4000-8000-000000000207',
+        ownerViewId: 'harness-view',
+        baseGeneration: 2,
+        revision: 0,
+        kind: 'highlight',
+        pageIndex: 0,
+        text: 'Keep this pending annotation for review.',
+        anchor,
+        disposition: { kind: 'missing', reason: 'The previous passage is not present in this PDF.' },
+        status: 'frozen',
+        createdAt: '2026-08-30T00:00:00.000Z',
+        updatedAt: '2026-08-30T00:00:00.000Z',
+      }],
+    };
+  }
+  if (variant === 'page-notes') {
+    const pageAnchor = {
+      kind: 'page' as const,
+      pageIndex: 2,
+      rect: { x: 420, y: 620, width: 24, height: 24 },
+    };
+    return {
+      ...state,
+      items: [{
+        id: '00000000-0000-4000-8000-000000000205',
+        kind: 'pageNote',
+        pageIndex: 2,
+        createdAt: '2026-08-30T00:00:00.000Z',
+        updatedAt: '2026-08-30T00:00:00.000Z',
+        payload: { ...pageAnchor, position: pageAnchor.rect, comment: 'Check the full-page comparison.' },
+        reconciliation: {
+          schemaVersion: 1,
+          ownerViewId: 'harness-view',
+          baseGeneration: 1,
+          revision: 1,
+          anchor: pageAnchor,
+          disposition: { kind: 'missing', reason: 'The prior page context is unavailable.' },
+          previousAnchors: [],
+        },
+      }, {
+        id: '00000000-0000-4000-8000-000000000206',
+        kind: 'pageNote',
+        pageIndex: 3,
+        createdAt: '2026-08-30T00:00:00.000Z',
+        updatedAt: '2026-08-30T00:00:00.000Z',
+        payload: { ...pageAnchor, pageIndex: 3, position: pageAnchor.rect, comment: 'Verify the appendix transition.' },
+        reconciliation: {
+          schemaVersion: 1,
+          ownerViewId: 'harness-view',
+          baseGeneration: 1,
+          revision: 1,
+          anchor: { ...pageAnchor, pageIndex: 3, nearbyText: 'The appendix extends the comparison.' },
+          disposition: { kind: 'missing', reason: 'The prior page context is unavailable.' },
+          previousAnchors: [],
+        },
+      }],
+    };
+  }
+  const unresolvedState: ReviewState = {
+    ...state,
+    items: [{
+      id: '00000000-0000-4000-8000-000000000203',
+      kind: 'highlight',
+      pageIndex: 0,
+      createdAt: '2026-08-30T00:00:00.000Z',
+      updatedAt: '2026-08-30T00:00:00.000Z',
+      payload: { ...anchor, reliable: true, comment: 'Check the identifying variation.' },
+      reconciliation: {
+        schemaVersion: 1,
+        ownerViewId: 'harness-view',
+        baseGeneration: 1,
+        revision: 1,
+        anchor,
+        disposition: { kind: 'ambiguous', reason: 'Two passages match this previous annotation.' },
+        previousAnchors: [],
+      },
+    }, {
+      id: '00000000-0000-4000-8000-000000000204',
+      kind: 'delete',
+      pageIndex: 1,
+      createdAt: '2026-08-30T00:00:00.000Z',
+      updatedAt: '2026-08-30T00:00:00.000Z',
+      payload: {
+        ...anchor,
+        pageIndex: 1,
+        quote: 'obsolete robustness sentence',
+        reliable: true,
+      },
+      reconciliation: {
+        schemaVersion: 1,
+        ownerViewId: 'harness-view',
+        baseGeneration: 1,
+        revision: 1,
+        anchor: { ...anchor, pageIndex: 1, quote: 'obsolete robustness sentence' },
+        disposition: { kind: 'missing', reason: 'The previous passage is not present in this PDF.' },
+        previousAnchors: [],
+      },
+    }],
+  };
+  if (variant !== 'mixed') return unresolvedState;
+  return {
+    ...unresolvedState,
+    items: [...unresolvedState.items, {
+      id: '00000000-0000-4000-8000-000000000208',
+      kind: 'pageNote',
+      pageIndex: 2,
+      createdAt: '2026-08-30T00:00:00.000Z',
+      updatedAt: '2026-08-30T00:00:00.000Z',
+      payload: {
+        position: { x: 420, y: 620, width: 24, height: 24 },
+        comment: 'Keep the resolved robustness note visible in the current generation.',
+      },
+      reconciliation: {
+        schemaVersion: 1,
+        ownerViewId: 'harness-view',
+        baseGeneration: 1,
+        revision: 2,
+        anchor: {
+          kind: 'page',
+          pageIndex: 2,
+          rect: { x: 420, y: 620, width: 24, height: 24 },
+          nearbyText: 'The robustness appendix reports the same sign and magnitude.',
+        },
+        disposition: { kind: 'resolved', generation: 2 },
+        previousAnchors: [],
+      },
+    }],
+  };
+}
 
 interface HarnessViewerControls extends ViewerControls {
   readonly pageCommands: string[];
@@ -329,10 +499,12 @@ function activateVisualReference(
 }
 
 function Harness() {
-  const [state, setState] = useState(() => visualScenario?.state ?? createReviewState({
-    sessionId: 'acceptance',
-    source: { fileId: 'source', digest: 'a'.repeat(64), byteLength: 100 },
-  }));
+  const [state, setState] = useState(() => reconciliationPreview !== null
+    ? createReconciliationPreviewState(reconciliationPreview)
+    : (visualScenario?.state ?? createReviewState({
+      sessionId: 'acceptance',
+      source: { fileId: 'source', digest: 'a'.repeat(64), byteLength: 100 },
+    })));
   const [anchorKind, setAnchorKind] = useState<'selection' | 'caret' | 'none'>(
     visualScenario ? (visualScenario.name === 'contextual' ? 'selection' : 'none') : 'selection',
   );
@@ -344,7 +516,7 @@ function Harness() {
     visualScenario?.referenceReturn ?? null,
   );
   const [harnessReferenceNavigation, setHarnessReferenceNavigation] = useState(
-    () => createReferenceNavigationState(0),
+    () => createReferenceNavigationState(reconciliationPreview === null ? 0 : 2),
   );
   const anchorKindRef = useRef(anchorKind);
   anchorKindRef.current = anchorKind;
@@ -363,6 +535,8 @@ function Harness() {
   const [activationRequest, setActivationRequest] = useState<{ id: string; token: number }>();
   const authoringActiveRef = useRef(false);
   const [saveDestinationOpen, setSaveDestinationOpen] = useState(false);
+  const [exportCount, setExportCount] = useState(0);
+  const failNextExportRef = useRef(exportPreview === 'fail-once');
   const [outlineDiscovery, setOutlineDiscovery] = useState<PdfOutlineDiscovery>({
     status: 'loading',
     documentGeneration: 0,
@@ -405,6 +579,14 @@ function Harness() {
   const shell = (
     <ReviewShell
       state={state}
+      {...(responsiveFullChrome ? {
+        savePendingDestination: true,
+        copyLink: {
+          getLink: () => 'placekeeper:///tmp/Responsive%20Review.pdf#v=1&page=3',
+          writeText: async () => undefined,
+        },
+        codexContext: { status: 'unbound' as const },
+      } : {})}
       saveOptionsOpen={saveDestinationOpen}
       onSaveOptions={() => setSaveDestinationOpen(true)}
       {...(visualScenario ? {
@@ -436,7 +618,6 @@ function Harness() {
         listOpen: visualScenario.listOpen,
         viewerState: visualScenario.viewerState,
         existingAnnotations: visualScenario.existingAnnotations,
-        annotationOutlineLabels: visualScenario.annotationOutlineLabels,
         outlineDiscovery: visualScenario.outlineDiscovery,
         currentOutlineItemId: visualScenario.currentOutlineItemId,
         referenceTabs: visualScenario.referenceTabs,
@@ -497,7 +678,25 @@ function Harness() {
         }
       }}
       onCommand={accept}
+      generationRefreshStatus={refreshPreview}
+      onExportReviewedCopy={async () => {
+        setExportCount((count) => count + 1);
+        if (exportPreview === 'delayed') {
+          await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        }
+        if (failNextExportRef.current) {
+          failNextExportRef.current = false;
+          throw new Error('Harness export failure');
+        }
+        return { kind: 'reviewed-copy' };
+      }}
       onAuthoringActiveChange={(active) => { authoringActiveRef.current = active; }}
+      onAuthoringPreviewChange={() => {
+        rootElement.setAttribute(
+          'data-authoring-preview-updates',
+          String(Number(rootElement.getAttribute('data-authoring-preview-updates') ?? '0') + 1),
+        );
+      }}
       onNavigate={(item) => setNavigated(item.id)}
       {...(correspondingItemId === undefined ? {} : { correspondingItemId })}
       {...(activationRequest === undefined ? {} : { activationRequest })}
@@ -721,6 +920,8 @@ function Harness() {
           data-viewer-page-commands={viewerControls.pageCommands.join(',')}
           data-viewer-page-requests={directPageRequests}
           data-viewer-zoom-requests={zoomRequests}
+          data-export-count={exportCount}
+          data-pending-drafts={state.pendingDrafts.length}
         >
           Revision {state.revision}
         </output>

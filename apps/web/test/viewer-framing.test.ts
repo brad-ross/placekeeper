@@ -283,4 +283,57 @@ describe('viewer framing', () => {
     expect(setScrollLeft).toHaveBeenCalledWith(233);
     expect(setScrollTop).toHaveBeenCalledWith(18);
   });
+
+  it('returns an unavailable snapshot without reading a disposed viewer registry', async () => {
+    let registryDisposed = false;
+    const disposedRead = () => {
+      if (registryDisposed) throw new TypeError("Cannot read properties of undefined (reading 'documents')");
+      return {
+        scrollLeft: 0,
+        scrollTop: 0,
+        scrollWidth: 800,
+        scrollHeight: 900,
+        clientWidth: 500,
+        clientHeight: 600,
+      };
+    };
+    const registry = {
+      getStore: () => ({ getState: () => ({ core: { activeDocumentId: 'doc' } }) }),
+      getPlugin: (id: string) => id === ViewportPlugin.id
+        ? { provides: () => ({
+          forDocument: () => ({ getMetrics: disposedRead, scrollTo: vi.fn() }),
+        }) }
+        : id === ScrollPlugin.id
+          ? { provides: () => ({ forDocument: () => ({
+            getCurrentPage: () => {
+              if (registryDisposed) throw new TypeError('Disposed scroll registry');
+              return 1;
+            },
+          }) }) }
+          : id === ZoomPlugin.id
+            ? { provides: () => ({
+              forDocument: () => ({ onZoomChange: () => () => undefined }),
+            }) }
+            : null,
+    } as unknown as PluginRegistry;
+    const controls = createViewerFramingControls({
+      registry,
+      root: () => null,
+      updateRunway: vi.fn(),
+    });
+
+    controls.dispose();
+    registryDisposed = true;
+
+    expect(controls.snapshot()).toEqual({
+      ready: false,
+      scroll: { left: 0, top: 0 },
+      maximum: { left: 0, top: 0 },
+    });
+    await expect(controls.setRunway({ right: 0, bottom: 0 })).resolves.toEqual({
+      ready: false,
+      scroll: { left: 0, top: 0 },
+      maximum: { left: 0, top: 0 },
+    });
+  });
 });

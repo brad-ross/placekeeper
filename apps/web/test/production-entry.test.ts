@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  parseVscodePresentationState,
   terminalRecoveryDocumentIdentity,
   terminalRecoveryLocationFragment,
 } from '../src/production-entry.js';
@@ -31,5 +32,18 @@ describe('terminal readable-view recovery', () => {
     )).toEqual({
       filename: 'Root Paper.pdf',
     });
+  });
+});
+
+describe('VS Code presentation restoration', () => {
+  it('restores only bounded view-local page and zoom state', () => {
+    expect(parseVscodePresentationState({
+      panelKey: 'opaque-panel-key',
+      pageIndex: 4,
+      zoom: 1.25,
+      credential: 'must-not-survive',
+    })).toEqual({ pageIndex: 4, zoom: 1.25 });
+    expect(parseVscodePresentationState({ pageIndex: -1, zoom: 1.25 })).toBeUndefined();
+    expect(parseVscodePresentationState({ pageIndex: 1, zoom: 100 })).toBeUndefined();
   });
 });

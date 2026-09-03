@@ -17,11 +17,17 @@ import {
 } from '../src/review/FullAnnotationReader.js';
 import {
   ReviewChrome,
+  resolveTopBarMenuRequest,
   resolveZoomDraft,
   validPageNumber,
   validZoomPercent,
   zoomEditorKeyAction,
 } from '../src/review/ReviewChrome.js';
+import { DocumentActionsMenu } from '../src/review/DocumentActionsMenu.js';
+import {
+  enabledMenuItems,
+  menuRovingFocusIndex,
+} from '../src/review/menu-focus.js';
 import { ReviewIcon } from '../src/review/ReviewIcon.js';
 import {
   ROW_ACTION_CONTAINER_NAME,
@@ -51,6 +57,13 @@ const state = createReviewState({
   source: { fileId: 'file', digest: 'a'.repeat(64), byteLength: 10 },
 });
 
+const generatedState = createReviewState({
+  sessionId: 'generated-layout-test',
+  source: { fileId: 'generated-file', digest: 'b'.repeat(64), byteLength: 10 },
+  workflowMode: 'generated-output',
+  documentGeneration: 4,
+});
+
 const responsiveStyles = readFileSync(
   new URL('../src/app/review-layout-responsive.css', import.meta.url),
   'utf8',
@@ -63,6 +76,10 @@ const foundationStyles = readFileSync(
   new URL('../src/app/review-layout-foundation.css', import.meta.url),
   'utf8',
 );
+const layoutStyles = readFileSync(
+  new URL('../src/app/review-layout.css', import.meta.url),
+  'utf8',
+);
 
 const ownedAnnotation: ReviewItem = {
   id: 'owned-highlight',
@@ -73,7 +90,146 @@ const ownedAnnotation: ReviewItem = {
   payload: { comment: 'Clarify the identifying variation behind this claim.' },
 };
 
+const unresolvedAnnotation: ReviewItem = {
+  id: 'unresolved-highlight',
+  kind: 'highlight',
+  pageIndex: 0,
+  createdAt: '2026-08-09T00:00:00.000Z',
+  updatedAt: '2026-08-09T00:00:00.000Z',
+  payload: { comment: 'Reconnect this annotation after the rebuild.' },
+  reconciliation: {
+    schemaVersion: 1,
+    ownerViewId: 'view-1',
+    baseGeneration: 3,
+    revision: 1,
+    anchor: {
+      kind: 'selection',
+      pageIndex: 0,
+      quote: 'previous source text',
+      prefix: '',
+      suffix: '',
+      rect: { x: 10, y: 10, width: 20, height: 10 },
+      segmentRects: [{ x: 10, y: 10, width: 20, height: 10 }],
+    },
+    disposition: { kind: 'missing', reason: 'not found after rebuild' },
+    previousAnchors: [],
+  },
+};
+
 describe('review shell layout and accessibility contract', () => {
+  it('coordinates one active top-bar menu while pending export owns dismissal', () => {
+    expect(resolveTopBarMenuRequest({
+      activeMenu: 'navigation',
+      requestedMenu: 'zoom',
+      requestedOpen: true,
+      documentMenuPending: false,
+    })).toBe('zoom');
+    expect(resolveTopBarMenuRequest({
+      activeMenu: 'zoom',
+      requestedMenu: 'history',
+      requestedOpen: true,
+      documentMenuPending: true,
+    })).toBe('document');
+    expect(resolveTopBarMenuRequest({
+      activeMenu: 'document',
+      requestedMenu: 'navigation',
+      requestedOpen: true,
+      documentMenuPending: true,
+    })).toBe('document');
+    expect(resolveTopBarMenuRequest({
+      activeMenu: 'document',
+      requestedMenu: 'document',
+      requestedOpen: false,
+      documentMenuPending: true,
+    })).toBe('document');
+    expect(resolveTopBarMenuRequest({
+      activeMenu: 'document',
+      requestedMenu: 'zoom',
+      requestedOpen: true,
+      documentMenuPending: false,
+    })).toBe('zoom');
+  });
+
+  it('renders document actions through its controlled open seam', () => {
+    const html = renderToStaticMarkup(
+      <DocumentActionsMenu
+        documentTitle="paper.pdf"
+        savedLabel="Saved"
+        open
+        onOpenChange={() => undefined}
+        presentation={{
+          canExport: true,
+          requiresStaleConfirmation: false,
+          annotationBlocked: false,
+          message: '',
+        }}
+        onExport={async () => undefined}
+      />,
+    );
+
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('role="menu"');
+    expect(html).toContain('data-document-actions-open="true"');
+  });
+
+  it('includes inputs in menu focus order without roving editable key presses', () => {
+    const action = { tagName: 'BUTTON' } as HTMLButtonElement;
+    const input = { tagName: 'INPUT' } as HTMLInputElement;
+    const surface = {
+      querySelectorAll: (selector: string) => {
+        expect(selector).toContain('input');
+        expect(selector).toContain('[aria-disabled="true"]');
+        return [action, input];
+      },
+    } as unknown as HTMLElement;
+
+    expect(enabledMenuItems(surface)).toEqual([action, input]);
+    expect(menuRovingFocusIndex({
+      items: [action, input],
+      activeElement: action,
+      eventTarget: action,
+      key: 'ArrowDown',
+    })).toBe(1);
+    expect(menuRovingFocusIndex({
+      items: [action, input],
+      activeElement: input,
+      eventTarget: input,
+      key: 'ArrowDown',
+    })).toBeNull();
+  });
+
+  it('stacks generated-PDF status and command errors as top-left viewer toasts', () => {
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={generatedState}
+        generationRefreshStatus="reconciling"
+        locationRestoreStatus="restoring"
+        toolError="Forward SyncTeX could not reveal this PDF location."
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        onCommand={async () => generatedState}
+      >
+        <div>Document canvas</div>
+      </ReviewShell>,
+    );
+
+    expect(html).toContain('data-review-toast-stack');
+    expect(html).toContain('data-viewer-status');
+    expect(html).toContain('data-generation-status="reconciling"');
+    expect(html.indexOf('data-review-stage')).toBeLessThan(html.indexOf('data-review-toast-stack'));
+    expect(html.indexOf('data-review-toast-stack')).toBeLessThan(html.indexOf('Document canvas'));
+    expect(html).not.toContain('review-shell--generation-status');
+    expect(foundationStyles).toMatch(
+      /\.review-toast-stack\s*\{[^}]*position:\s*absolute;[^}]*top:\s*\.5rem;[^}]*left:\s*\.5rem;/u,
+    );
+    expect(foundationStyles).toMatch(
+      /\.pdf-workspace__status\s*\{[^}]*left:\s*\.5rem;/u,
+    );
+    expect(foundationStyles).not.toMatch(/\.pdf-workspace__status\s*\{[^}]*right:/u);
+    expect(responsiveStyles).toMatch(
+      /\.review-toast\[data-generation-status="reconciling"\] \.review-icon\s*\{[^}]*animation:\s*none;/u,
+    );
+  });
+
   it('floats a reversible outline expansion toggle opposite the active workspace navbar', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
@@ -416,7 +572,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toMatch(/class="[^"]*review-icon[^"]*"/);
   });
 
-  it('groups edit history, document navigation, and zoom in task order', () => {
+  it('groups compact edit history, document navigation, and zoom in task order before measurement', () => {
     const html = renderToStaticMarkup(
       <ReviewChrome
         documentTitle="paper.pdf"
@@ -434,41 +590,108 @@ describe('review shell layout and accessibility contract', () => {
     );
     const centerStart = html.indexOf('aria-label="PDF editing, navigation, and zoom"');
     const editGroup = html.indexOf('aria-label="Edit history"');
-    const navigationGroup = html.indexOf('aria-label="Document navigation"');
-    const zoomGroup = html.indexOf('aria-label="PDF zoom"');
+    const navigationGroup = html.indexOf('aria-label="Document navigation, current page 3 of 12"');
+    const zoomGroup = html.indexOf('aria-label="PDF zoom, current zoom 100 percent"');
 
     expect(centerStart).toBeGreaterThanOrEqual(0);
     const orderedControls = [
       editGroup,
-      html.indexOf('aria-label="Undo"'),
-      html.indexOf('aria-label="Redo"'),
       navigationGroup,
-      html.indexOf('aria-label="Back in document history"'),
-      html.indexOf('aria-label="Forward in document history"'),
-      html.indexOf('aria-label="Previous page"'),
-      html.indexOf('aria-label="Current page 3 of 12. Enter a page number"'),
-      html.indexOf('aria-label="Next page"'),
       zoomGroup,
-      html.indexOf('aria-label="Zoom out"'),
-      html.indexOf('aria-label="Zoom in"'),
-      html.indexOf('aria-label="Zoom level"'),
-      html.indexOf('aria-label="Fit PDF to available width"'),
     ];
     for (const [index, control] of orderedControls.entries()) {
       expect(control).toBeGreaterThan(index === 0 ? centerStart : orderedControls[index - 1]!);
     }
     expect(html).not.toContain('aria-label="Actions"');
-    expect(html).toMatch(/aria-label="Previous page"[^>]*>.*lucide-chevron-left/u);
-    expect(html).toMatch(/data-main-history="back"[^>]*>.*lucide-arrow-left/u);
-    expect(html).toMatch(/aria-label="Next page"[^>]*>.*lucide-chevron-right/u);
-    expect(html).toMatch(/data-main-history="forward"[^>]*>.*lucide-arrow-right/u);
+    expect(html).toContain('data-review-chrome-presentation="navigationCompact"');
+  });
+
+  it('starts with a compact measured presentation and an inert sizing rack', () => {
+    const html = renderChrome(true, true);
+
+    expect(html).toContain('data-review-chrome-presentation="navigationCompact"');
+    expect(html).toMatch(/data-review-chrome-sizing-rack[^>]*aria-hidden="true"[^>]*inert=""/u);
+    for (const presentation of ['expanded', 'zoomCompact', 'historyCompact', 'navigationCompact']) {
+      expect(html).toContain(`data-review-chrome-candidate="${presentation}"`);
+    }
+    expect(html).toContain('aria-label="Document navigation, current page 3 of 12"');
+    expect(html).toContain('aria-label="PDF zoom, current zoom 100 percent"');
+    expect(html).toContain('aria-label="Edit history"');
+  });
+
+  it('measures every fixed identity and icon footprint in the sizing rack', () => {
+    const html = renderToStaticMarkup(
+      <ReviewChrome
+        documentTitle="A very long paper title that must be allowed to truncate.pdf"
+        savePendingDestination
+        controls={viewerControls}
+        viewerState={viewerControls.snapshot()}
+        copyLink={{
+          getLink: () => 'placekeeper:///tmp/paper.pdf#v=1&page=1',
+          writeText: async () => undefined,
+        }}
+        canUndo={false}
+        canRedo={false}
+        onUndo={vi.fn()}
+        onRedo={vi.fn()}
+      />,
+    );
+
+    const rack = html.slice(html.indexOf('data-review-chrome-sizing-rack'));
+    expect(rack.match(/Protected Recovery/gu)).toHaveLength(4);
+    expect(rack).toContain('review-chrome__icon-control');
+    expect(rack).toContain('review-chrome__link');
+    expect(rack).toContain('review-chrome__save-recovery');
+  });
+
+  it('keeps responsive review chrome in one fixed-height row', () => {
+    expect(foundationStyles).toMatch(
+      /\.review-chrome\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) max-content max-content;[^}]*height:\s*var\(--review-chrome-height\);[^}]*overflow:\s*visible;/u,
+    );
+    expect(foundationStyles).toMatch(
+      /\.review-chrome__identity\s*\{[^}]*min-width:\s*0;/u,
+    );
+    expect(foundationStyles).toMatch(/\.review-chrome__link\s*\{[^}]*flex:\s*none;/u);
+    expect(foundationStyles).toMatch(
+      /\.review-chrome__viewer-controls\s*\{[^}]*min-width:\s*max-content;[^}]*flex-wrap:\s*nowrap;/u,
+    );
+    expect(foundationStyles).toMatch(
+      /\.review-chrome__sizing-candidate \.review-chrome__identity\s*\{[^}]*width:\s*max-content;/u,
+    );
+    expect(foundationStyles).toMatch(
+      /\.review-chrome__sizing-candidate \.review-chrome__save-identity strong\s*\{[^}]*width:\s*var\(--review-document-title-min\);[^}]*min-width:\s*var\(--review-document-title-min\);[^}]*max-width:\s*var\(--review-document-title-min\);[^}]*flex:\s*none;/u,
+    );
+    expect(foundationStyles).toMatch(/--review-document-title-min:\s*9rem;/u);
+    expect(layoutStyles).toMatch(
+      /\.review-chrome__save-identity strong\s*\{[^}]*min-width:\s*var\(--review-document-title-min\);[^}]*flex:\s*1 1 auto;/u,
+    );
+    expect(layoutStyles).toMatch(
+      /\.review-chrome__identity \.document-actions__trigger\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;/u,
+    );
+    expect(responsiveStyles).toMatch(
+      /@media \(max-width: 520px\)[\s\S]*?\.review-chrome__context\s*\{[^}]*display:\s*none;/u,
+    );
+    expect(responsiveStyles).toMatch(
+      /@media \(max-width: 480px\)[\s\S]*?--review-document-title-min:\s*6rem;/u,
+    );
+    expect(responsiveStyles).toMatch(
+      /@media \(max-width: 360px\)[\s\S]*?--review-document-title-min:\s*4\.5rem;/u,
+    );
+    expect(responsiveStyles).toMatch(
+      /@media \(max-width: 640px\)[\s\S]*?\.review-chrome__save-recovery\s*\{[^}]*display:\s*none;/u,
+    );
+    expect(responsiveStyles).not.toMatch(
+      /@media \(max-width: 820px\)[\s\S]*?\.review-chrome\s*\{[^}]*height:\s*auto;/u,
+    );
+    expect(responsiveStyles).not.toMatch(
+      /\.review-chrome__viewer-controls\s*\{[^}]*grid-row:\s*2;[^}]*flex-wrap:\s*wrap;/u,
+    );
   });
 
   it('exposes annotation kind, ownership, and state hooks with a read-only peek', () => {
     const listHtml = renderToStaticMarkup(
       <AnnotationList
         items={[ownedAnnotation]}
-        sectionLabels={new Map([[ownedAnnotation.id, 'Methods and data']])}
         activeId={ownedAnnotation.id}
         correspondingId={ownedAnnotation.id}
         onNavigate={() => undefined}
@@ -496,10 +719,11 @@ describe('review shell layout and accessibility contract', () => {
     expect(listHtml).toContain('<h2>Annotations</h2>');
     expect(listHtml).not.toContain('annotation-drawer__count');
     expect(listHtml).toContain('data-annotation-kind="highlight"');
+    expect(listHtml).toContain('data-annotation-kind-icon="highlight"');
     expect(listHtml).toContain('data-annotation-state="active-corresponding"');
     expect(listHtml).toContain('<span class="annotation-item__separator">·</span><span class="annotation-item__page">4</span>');
-    expect(listHtml).toContain('class="annotation-item__section" title="Methods and data">Methods and data</span>');
-    expect(listHtml).toContain('aria-label="Highlight · Page 4 · Methods and data · Clarify the identifying variation behind this claim."');
+    expect(listHtml).not.toContain('annotation-item__section');
+    expect(listHtml).toContain('aria-label="Highlight · Page 4 · Clarify the identifying variation behind this claim."');
     expect(listHtml).toContain('data-read-full-annotation="true"');
     expect(listHtml).toContain('aria-label="Read full Highlight annotation on page 4"');
     expect(listHtml).toContain('title="Read full annotation"');
@@ -513,9 +737,11 @@ describe('review shell layout and accessibility contract', () => {
     expect(peekHtml).toContain('Clarify the identifying variation behind this claim.');
     expect(peekHtml).not.toContain('Page 4');
     expect(peekHtml).not.toContain('<button');
+    expect(listHtml).toContain('data-workspace-focus-token="annotations:section"');
+    expect(listHtml).toContain('tabindex="-1"');
   });
 
-  it('keeps the annotation Copy Link affordance visible and right-most while durability is pending', () => {
+  it('keeps the annotation Copy Link affordance mounted and right-most while durability is pending', () => {
     const copyLink = {
       getLink: () => 'placekeeper:///tmp/Paper.pdf#v=1&page=4&item=00000000-0000-4000-8000-000000000004',
       writeText: async () => undefined,
@@ -569,6 +795,30 @@ describe('review shell layout and accessibility contract', () => {
     expect(pageOnlyList).not.toContain('data-annotation-action="copy-link"');
   });
 
+  it('reveals mounted annotation actions only at mouse intent and keeps them visible for touch', () => {
+    expect(annotationStyles).toMatch(
+      /\.annotation-item__action\s*\{[^}]*opacity:\s*0;/u,
+    );
+    expect(annotationStyles).not.toMatch(
+      /\.annotation-item__title-actions \.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /li:hover \.annotation-item__action,\s*:is\(\.review-workspace, \.review-tools-workspace\) li:focus-within \.annotation-item__action,\s*:is\(\.review-workspace, \.review-tools-workspace\) li\[data-active="true"\] \.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
+    );
+    const coarsePointerRules = responsiveStyles.match(
+      /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*?)\n\}/u,
+    )?.[1];
+    expect(coarsePointerRules).toMatch(
+      /\.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
+    );
+    expect(coarsePointerRules).toMatch(
+      /\.annotation-item__title-actions \.annotation-item__action\s*\{[^}]*width:\s*var\(--review-control-touch\);[^}]*min-width:\s*var\(--review-control-touch\);[^}]*max-width:\s*var\(--review-control-touch\);[^}]*max-height:\s*var\(--review-control-touch\);/u,
+    );
+    expect(coarsePointerRules).not.toMatch(
+      /\.annotation-item__title-actions\s*\{[^}]*(?:height|min-height|padding)/u,
+    );
+  });
+
   it('exposes keyboard-equivalent controls, live status, and state-preserving drawer semantics', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
@@ -597,7 +847,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('role="toolbar"');
     expect(html).toContain('aria-label="Selection review actions"');
     expect(html).toContain('aria-keyshortcuts="Alt+Shift+H"');
-    expect(html).not.toContain('aria-label="All annotations"');
+    expect(html).toContain('aria-label="All annotations"');
     expect(html).toContain('aria-live="polite"');
     expect(html).toContain('data-workspace-open="false"');
     expect(html).toContain('data-review-chrome');
@@ -613,30 +863,28 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('data-review-nested-host');
     expect(html.match(/Document canvas/g)).toHaveLength(1);
     expect(html).not.toContain('Codex');
-    expect(html).toContain('aria-label="Undo"');
-    expect(html).toContain('aria-label="Redo"');
-    expect(html).toMatch(/data-main-history="back"[^>]*aria-label="Back in document history"[^>]*disabled=""/u);
-    expect(html).toMatch(/data-main-history="forward"[^>]*aria-label="Forward in document history"[^>]*disabled=""/u);
-    expect(html.match(/data-main-history=/g)).toHaveLength(2);
+    expect(html).toContain('aria-label="Edit history"');
+    expect(html).toContain('aria-label="Document navigation, page unavailable"');
+    expect(html).toContain('aria-label="PDF zoom unavailable"');
     expect(html).not.toContain('aria-label="Workspace (0 annotations)"');
     expect(html).toContain('data-workspace-edge-rail="right"');
     expect(html).not.toContain('data-workspace-edge-rail="bottom"');
     expect(html).toContain('class="review-workspace__activity-strip"');
-    expect(html).toContain('data-workspace-mode-count="2"');
+    expect(html).toContain('data-workspace-mode-count="3"');
     expect(html).not.toContain('data-workspace-mode-label="references"');
     expect(html).not.toContain('aria-label="Move References to right"');
     expect(html).not.toContain('id="workspace-panel-references"');
-    expect(html).not.toContain('id="workspace-panel-annotations"');
-    expect(html).not.toContain('id="review-annotation-list"');
+    expect(html).toContain('id="workspace-panel-annotations"');
+    expect(html).toContain('id="review-annotation-list"');
     expect(html).toContain('data-review-workspace');
     expect(html).toContain('data-annotation-drawer');
     expect(html).not.toContain('aria-label="Close annotations"');
     expect(html).not.toContain('aria-label="Close workspace"');
-    expect(html).not.toContain('class="annotation-drawer__header"');
-    expect(html).not.toContain('aria-label="Owned annotations"');
-    expect(html).not.toContain('aria-label="External Annotations (read only)"');
-    expect(html).not.toContain('data-existing-annotations-state="loading"');
-    expect(html).not.toContain('data-annotation-status="loading"');
+    expect(html).toContain('class="annotation-drawer__header"');
+    expect(html).toContain('aria-label="Owned annotations"');
+    expect(html).toContain('aria-label="From this PDF"');
+    expect(html).toContain('data-existing-annotations-state="loading"');
+    expect(html).toContain('data-annotation-status="loading"');
     for (const tool of ['Replace', 'Delete', 'Highlight']) {
       expect(html).toContain(`aria-label="${tool}"`);
       expect(html).toContain(`title="${tool}"`);
@@ -665,7 +913,7 @@ describe('review shell layout and accessibility contract', () => {
       ><div>Document canvas</div></ReviewShell>,
     );
     expect(html).toContain('data-reference-layout="wide-split"');
-    expect(html).toContain('aria-label="Outline and search"');
+    expect(html).toContain('aria-label="Outline, search, and annotations"');
     expect(html).toContain('aria-label="References"');
     expect(html.match(/data-reference-viewport-host/g)).toHaveLength(1);
     expect(html.match(/id="workspace-panel-references"/g)).toHaveLength(1);
@@ -888,7 +1136,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-controls="review-workspace review-tools-workspace"');
   });
 
-  it('keeps source annotations explicitly read-only and distinct from owned rows', () => {
+  it('keeps annotations task-first and source annotations explicitly read-only', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
@@ -909,16 +1157,12 @@ describe('review shell layout and accessibility contract', () => {
             supportedAppearance: true,
           }],
         }}
-        annotationOutlineLabels={{
-          owned: new Map(),
-          source: new Map([['1:source-highlight', 'Methods and data']]),
-        }}
         outlineDiscovery={{
           status: 'loaded-tree',
           documentGeneration: 0,
           items: [{
             id: 'outline-0',
-            label: 'Methods and data',
+            label: 'Representative review',
             pageContext: null,
             target: null,
             children: [],
@@ -931,21 +1175,66 @@ describe('review shell layout and accessibility contract', () => {
     );
 
     expect(html).toContain('data-existing-annotations-state="ready"');
+    expect(html).toContain('<h2>From this PDF</h2>');
     expect(html).toContain('data-annotation-origin="source"');
     expect(html).toContain('data-annotation-kind="Highlight"');
     expect(html).toContain('data-annotation-state="readonly"');
     expect(html).toContain('data-readonly="true"');
-    expect(html).toContain('class="annotation-item__section" title="Methods and data">Methods and data</span>');
-    expect(html).toContain('aria-label="Highlight · Page 2 · Methods and data · Source-only comment"');
+    const existingAnnotationsHtml = html.slice(
+      html.indexOf('<section class="existing-annotations"'),
+      html.indexOf('</section>', html.indexOf('<section class="existing-annotations"')),
+    );
+    expect(existingAnnotationsHtml).not.toContain('Representative review');
+    expect(existingAnnotationsHtml).not.toContain('annotation-item__section');
+    expect(html).toContain('aria-label="Highlight · Page 2 · Source-only comment"');
     expect(html).toContain('aria-label="Read full Highlight annotation on page 2"');
     expect(html).toContain('data-read-full-annotation="true"');
     expect(html).not.toContain('>Page 2<');
     expect(html).not.toContain('aria-label="Edit Highlight on page 2"');
     expect(html).not.toContain('aria-label="Delete Highlight on page 2"');
+    expect(html).not.toContain('data-annotation-action=');
     expect(html).toContain('id="workspace-mode-annotations"');
   });
 
-  it('omits the Annotations mode and panel when owned and source annotations are empty', () => {
+  it('orders attention, owned, and read-only populations without duplicating unresolved items', () => {
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={{ ...generatedState, items: [ownedAnnotation, unresolvedAnnotation] }}
+        documentTitle="paper.pdf"
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        existingAnnotations={{
+          status: 'ready',
+          generation: 4,
+          items: [{
+            id: 'source-highlight',
+            subtype: 'Highlight',
+            pageIndex: 1,
+            rect: { x: 1, y: 2, width: 3, height: 4 },
+            contents: 'Source-only comment',
+            author: 'Reviewer',
+            flags: [],
+            appearanceModes: ['normal'],
+            supportedAppearance: true,
+          }],
+        }}
+        onCommand={async () => generatedState}
+      >
+        <div>Document canvas</div>
+      </ReviewShell>,
+    );
+
+    const attention = html.indexOf('<h2>Needs attention</h2>');
+    const owned = html.indexOf('<h2>Annotations</h2>');
+    const existing = html.indexOf('<h2>From this PDF</h2>');
+    expect(attention).toBeGreaterThan(-1);
+    expect(owned).toBeGreaterThan(attention);
+    expect(existing).toBeGreaterThan(owned);
+    expect(html.match(/data-reconciliation-item="unresolved-highlight"/gu)).toHaveLength(1);
+    expect(html).not.toContain('data-review-item="unresolved-highlight"');
+    expect(html).toContain('data-review-item="owned-highlight"');
+  });
+
+  it('keeps Annotations as the stable empty core and omits optional sections', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
@@ -961,13 +1250,15 @@ describe('review shell layout and accessibility contract', () => {
       </ReviewShell>,
     );
 
-    expect(html).not.toContain('aria-label="Owned annotations"');
-    expect(html).not.toContain('aria-label="External Annotations (read only)"');
+    expect(html).toContain('aria-label="Owned annotations"');
+    expect(html).toContain('Select text in the PDF to add an annotation.');
+    expect(html.match(/Select text in the PDF to add an annotation\./gu)).toHaveLength(1);
+    expect(html).not.toContain('aria-label="From this PDF"');
     expect(html).not.toContain('data-existing-annotations-state');
     expect(html).not.toContain('No existing annotations.');
-    expect(html).not.toContain('id="workspace-mode-annotations"');
-    expect(html).not.toContain('id="workspace-panel-annotations"');
-    expect(html).toMatch(/id="workspace-mode-search"[^>]*aria-selected="true"/u);
+    expect(html).toContain('id="workspace-mode-annotations"');
+    expect(html).toContain('id="workspace-panel-annotations"');
+    expect(html).toMatch(/id="workspace-mode-annotations"[^>]*aria-selected="true"/u);
   });
 
   it('keeps populated Annotations available and suppresses injected outline context for an empty outline', () => {
@@ -993,10 +1284,6 @@ describe('review shell layout and accessibility contract', () => {
             supportedAppearance: true,
           }],
         }}
-        annotationOutlineLabels={{
-          owned: new Map([['owned-highlight', 'Methods and data']]),
-          source: new Map([['1:source-highlight', 'Methods and data']]),
-        }}
         onCommand={async () => state}
       >
         <div>Document canvas</div>
@@ -1009,7 +1296,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toMatch(/id="workspace-mode-search"[^>]*aria-selected="true"/u);
     expect(html).not.toContain('Methods and data');
     expect(html).toContain('<h2>Annotations</h2>');
-    expect(html).toContain('<h2>External Annotations (read only)</h2>');
+    expect(html).toContain('<h2>From this PDF</h2>');
     expect(html).not.toContain('Review comments');
     expect(html).not.toContain('Source PDF');
     expect(html).not.toContain('existing-annotations__readonly');
@@ -1021,10 +1308,6 @@ describe('review shell layout and accessibility contract', () => {
         state={state}
         workspaceOpen
         outlineDiscovery={{ status: 'loaded-empty', documentGeneration: -1 }}
-        annotationOutlineLabels={{
-          owned: new Map([['owned-highlight', 'Stale section']]),
-          source: new Map(),
-        }}
         selectionUpdate={{ kind: 'cleared', generation: 0 }}
         onCommand={async () => state}
       >
@@ -1051,25 +1334,23 @@ describe('review shell layout and accessibility contract', () => {
 
     expect(html).toContain('Page controls become available when PDF navigation is ready.');
     expect(html).toContain('Zoom controls become available when PDF zoom is ready.');
-    expect(html).toMatch(/aria-label="Previous page"[^>]*disabled=""/);
-    expect(html).toMatch(/aria-label="Zoom in"[^>]*disabled=""/);
+    expect(html).toContain('aria-label="Document navigation, page unavailable"');
+    expect(html).toContain('aria-label="PDF zoom unavailable"');
   });
 
   it('keeps unavailable page status noneditable with its existing description', () => {
     const html = renderChrome(false);
 
-    expect(html).toContain('aria-label="Current page"');
-    expect(html).toContain('>— / —</span>');
+    expect(html).toContain('aria-label="Document navigation, page unavailable"');
+    expect(html).toContain('>— / —</button>');
     expect(html).not.toContain('aria-label="Page number"');
-    expect(html).not.toContain('review-chrome__page-trigger');
     expect(html).toContain('Page controls become available when PDF navigation is ready.');
   });
 
   it('renders the ready current page as an activation control with numeric metadata and visible total', () => {
     const html = renderChrome(true);
 
-    expect(html).toContain('class="review-chrome__page-trigger review-chrome__stat"');
-    expect(html).toContain('aria-label="Current page 3 of 12. Enter a page number"');
+    expect(html).toContain('aria-label="Document navigation, current page 3 of 12"');
     expect(html).toContain('>3<span aria-hidden="true"> / 12</span></button>');
     expect(html).not.toContain('aria-label="Page number"');
   });
@@ -1084,27 +1365,13 @@ describe('review shell layout and accessibility contract', () => {
     expect(validPageNumber('', 12)).toBeUndefined();
   });
 
-  it('renders ready zoom as an editable percentage beside a semantic Fit Width action', () => {
+  it('renders ready page and zoom context in compact triggers before measurement', () => {
     const html = renderChrome(true, true);
 
-    const zoomOutIndex = html.indexOf('aria-label="Zoom out"');
-    const zoomInIndex = html.indexOf('aria-label="Zoom in"');
-    const zoomLevelIndex = html.indexOf('aria-label="Zoom level"');
-    const fitWidthIndex = html.indexOf('aria-label="Fit PDF to available width"');
-
-    expect(html).toContain('class="review-chrome__zoom-trigger review-chrome__stat"');
-    expect(html).toContain('class="review-chrome__zoom-control" data-review-stat="true" aria-label="Zoom level"');
-    expect(html).toContain('aria-label="Current zoom 100 percent. Enter a zoom percentage"');
+    expect(html).toContain('aria-label="PDF zoom, current zoom 100 percent"');
     expect(html).toContain('>100<span aria-hidden="true">%</span></button>');
     expect(html).not.toContain('aria-label="Zoom percentage"');
-    expect(html).toMatch(
-      /aria-label="Fit PDF to available width"[^>]*>.*lucide-move-horizontal/u,
-    );
-    expect(html).not.toMatch(/aria-label="Fit PDF to available width"[^>]*disabled=""/u);
-    expect(html.match(/data-review-zoom-action=/g)).toHaveLength(3);
-    expect(zoomOutIndex).toBeLessThan(zoomInIndex);
-    expect(zoomInIndex).toBeLessThan(zoomLevelIndex);
-    expect(zoomLevelIndex).toBeLessThan(fitWidthIndex);
+    expect(html).toContain('data-review-chrome-presentation="navigationCompact"');
   });
 
   it('accepts only whole zoom percentages within the configured viewer limits', () => {
@@ -1136,14 +1403,9 @@ describe('review shell layout and accessibility contract', () => {
   it('keeps unavailable zoom noneditable and disables every zoom action with one explanation', () => {
     const html = renderChrome(false);
 
-    expect(html).toContain('aria-label="Zoom level">—%</span>');
-    expect(html).not.toContain('review-chrome__zoom-trigger');
+    expect(html).toContain('aria-label="PDF zoom unavailable"');
+    expect(html).toContain('>—%</button>');
     expect(html).not.toContain('aria-label="Zoom percentage"');
-    for (const label of ['Zoom out', 'Zoom in', 'Fit PDF to available width']) {
-      expect(html).toMatch(
-        new RegExp(`aria-label="${label}"[^>]*aria-describedby="viewer-zoom-controls-readiness"[^>]*disabled=""`),
-      );
-    }
     expect(html).toContain('Zoom controls become available when PDF zoom is ready.');
   });
 

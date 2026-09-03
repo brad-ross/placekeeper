@@ -26,6 +26,14 @@ Top-level review tabs use readable local addresses whose path names the PDF and 
 
 With the bundled Codex plugin installed, ask Codex to open one explicit local PDF in Placekeeper. The hosting task is bound automatically after the in-app browser loads. Each later prompt refreshes the current Review Items, Existing PDF Annotations, and save status; Codex retrieves bounded PDF text, layout, render, or annotation evidence only when needed. Finder, ordinary-browser, and VS Code launches remain unbound and show no Codex control.
 
+### Review LaTeX in VS Code
+
+Install the bundled extension from `~/Applications/Placekeeper.app/Contents/Resources/integrations/vscode`, open a local trusted LaTeX workspace, and run **Placekeeper: View PDF** or **Placekeeper: Forward SyncTeX**. The extension opens the shared Placekeeper client directly in one reusable VS Code panel. Its JavaScript, CSS, inline PDFium worker, and PDFium WASM are integrity-checked local extension assets; the working loop uses no iframe, external browser, or network fallback.
+
+Placekeeper observes successful LaTeX output replacement but does not build LaTeX or write the generated PDF. After a rebuild, the same panel refreshes atomically, preserves current or explicitly unresolved Review Items, and shows **possibly stale** when a saved source has no valid successor. **Placekeeper: Export Reviewed PDF** is the only reviewed-PDF write path and always targets a distinct file.
+
+LaTeX Workshop 10.18.x users may opt into **Placekeeper: Configure LaTeX Workshop** after opening the output in Placekeeper. The command previews workspace-only changes and uses the installed scoped launcher at `~/Applications/Placekeeper.app/Contents/MacOS/placekeeper-vscode`; it never changes user settings. Because LaTeX Workshop does not provide a supported custom-viewer API, this compatibility route is best-effort. If its probe fails, if LaTeX Workshop is absent, or on the VS Code 1.95 support floor, use the supported **Placekeeper: View PDF** and **Placekeeper: Forward SyncTeX** commands. **Placekeeper: Restore LaTeX Workshop Settings** restores only values Placekeeper still owns.
+
 ## Supported release scope
 
 The current personal release is source-first and Apple-silicon-only. Developer ID signing, notarization, Intel/x64, DMG/PKG packaging, auto-update, and release CI are optional future work, not installation requirements.
