@@ -74,6 +74,11 @@ The temporally consistent combination of selected text, extracted-text offsets, 
 
 Selection capture may await document work only while the selection's semantic state remains unchanged; if that state changes before capture completes, the snapshot is rejected rather than combining values from different selections.
 
+### PDF Copy Authority
+The focused Main PDF or active Reference Tab whose ready semantic selection supplies text when Placekeeper handles a PDF copy command, after editable fields and ordinary browser selections retain native precedence.
+
+Retained selections do not compete implicitly: focus grants authority, hiding a focused Reference Tab revokes it, and a contextual Copy control preserves the owning PDF for a later keyboard copy.
+
 ### Owned Annotation
 A viewer marking projected from a Review Item and identified by that item's canonical identity.
 
