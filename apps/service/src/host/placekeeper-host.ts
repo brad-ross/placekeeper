@@ -27,6 +27,10 @@ import {
 } from "../browser/browser-source-store.js";
 import type { ChromePdfInspection } from "../browser/chrome-pdf-validator.js";
 import { dirname, join } from "node:path";
+import { ChromeTransferStore } from "../browser/chrome-handoff.js";
+import { validatePdfInSubprocess } from "../browser/chrome-pdf-validator.js";
+import { ChromeRuntimeManager } from "../browser/chrome-runtime.js";
+import { ChromeServiceRuntimeBackend } from "../browser/chrome-runtime-backend.js";
 
 export type LaunchSurface = BrokerLaunchSurface;
 
@@ -159,6 +163,7 @@ export class PlacekeeperHost {
   readonly exporting: ExportCoordinator;
   readonly lifecycle: DaemonLifecycleCoordinator;
   readonly browserSources: BrowserSourceStore;
+  readonly chromeRuntime: ChromeRuntimeManager;
   #closePromise?: Promise<void>;
 
   private constructor(
@@ -171,6 +176,7 @@ export class PlacekeeperHost {
     exporting: ExportCoordinator,
     lifecycle: DaemonLifecycleCoordinator,
     browserSources: BrowserSourceStore,
+    chromeRuntime: ChromeRuntimeManager,
   ) {
     this.broker = broker;
     this.server = server;
@@ -181,6 +187,7 @@ export class PlacekeeperHost {
     this.exporting = exporting;
     this.lifecycle = lifecycle;
     this.browserSources = browserSources;
+    this.chromeRuntime = chromeRuntime;
   }
 
   static async start(options: PlacekeeperHostOptions): Promise<PlacekeeperHost> {
@@ -208,11 +215,23 @@ export class PlacekeeperHost {
       recordSuccessfulExport: (sessionId) => broker.recordSuccessfulExport(sessionId),
       validateFrozenDelivery: (delivery) => broker.isFrozenDeliveryCurrent(delivery as FrozenReviewDelivery),
     });
+    const chromeTransferStore = await ChromeTransferStore.create({
+      root: browserSources.root,
+      validate: options.browserSourceInspector === undefined
+        ? validatePdfInSubprocess
+        : async (path) => { await options.browserSourceInspector!(path); },
+    });
+    const chromeRuntimeBackend = new ChromeServiceRuntimeBackend({
+      broker, browserSources, transferStore: chromeTransferStore, saving, exporting,
+    });
+    const chromeRuntime = new ChromeRuntimeManager(chromeRuntimeBackend.authority());
     const lifecycle = new DaemonLifecycleCoordinator({
       activity: () => {
         const activity = broker.activity();
+        const chromeActivity = chromeRuntime.activity();
         return {
           ...activity,
+          reviewPresence: activity.reviewPresence + chromeActivity.connections,
           transientWork: activity.transientWork + saving.activityCount(),
         };
       },
@@ -249,6 +268,7 @@ export class PlacekeeperHost {
       exporting,
       lifecycle,
       browserSources,
+      chromeRuntime,
     );
   }
 
@@ -402,6 +422,7 @@ export class PlacekeeperHost {
     this.#closePromise ??= (async () => {
       this.context.discardAll();
       await this.server.close();
+      await this.chromeRuntime.close();
       await this.saving.drain();
       await this.broker.quiesceForShutdown();
     })();

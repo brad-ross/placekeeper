@@ -6,17 +6,27 @@ import { ensurePrivateDirectory } from "../recovery/source-snapshot.js";
 import { MAX_CHROME_PDF_BYTES } from "./chrome-pdf-limits.js";
 
 export const CHROME_BROWSER_SOURCE_PROTOCOL_VERSION = 1;
+export const CHROME_RUNTIME_SOURCE_PROTOCOL_VERSION = 2;
 
 const SEALED_HANDLE = /^[A-Za-z0-9_-]{32}$/u;
 const DIGEST = /^[a-f0-9]{64}$/u;
 
-export interface ChromeBrowserSourceOpenRequest {
-  readonly protocolVersion: typeof CHROME_BROWSER_SOURCE_PROTOCOL_VERSION;
+interface ChromeBrowserSourceBaseRequest {
   readonly sourceHandle: string;
   readonly byteLength: number;
   readonly sha256: string;
   readonly displayName?: string;
 }
+
+export type ChromeBrowserSourceOpenRequest = ChromeBrowserSourceBaseRequest & (
+  | { readonly protocolVersion: typeof CHROME_BROWSER_SOURCE_PROTOCOL_VERSION }
+  | {
+      readonly protocolVersion: typeof CHROME_RUNTIME_SOURCE_PROTOCOL_VERSION;
+      /** Native-normalized, opaque source identity; canonical matching also
+       * requires the independently verified byte digest. */
+      readonly sourceIdentity: string;
+    }
+);
 
 export interface AdoptedBrowserSource {
   readonly path: string;
@@ -26,6 +36,7 @@ export interface AdoptedBrowserSource {
   readonly byteLength: number;
   readonly sha256: string;
   readonly displayName: string;
+  readonly sourceIdentity?: string;
 }
 
 function safeDisplayName(value: string | undefined): string {
@@ -80,7 +91,8 @@ export class BrowserSourceStore {
     sessionDirectory: string,
   ): Promise<AdoptedBrowserSource> {
     if (
-      request.protocolVersion !== CHROME_BROWSER_SOURCE_PROTOCOL_VERSION ||
+      (request.protocolVersion !== CHROME_BROWSER_SOURCE_PROTOCOL_VERSION &&
+        request.protocolVersion !== CHROME_RUNTIME_SOURCE_PROTOCOL_VERSION) ||
       !SEALED_HANDLE.test(request.sourceHandle) ||
       !Number.isSafeInteger(request.byteLength) ||
       request.byteLength <= 0 || request.byteLength > MAX_CHROME_PDF_BYTES ||
@@ -115,6 +127,9 @@ export class BrowserSourceStore {
       byteLength: request.byteLength,
       sha256: request.sha256,
       displayName: safeDisplayName(request.displayName),
+      ...(request.protocolVersion === CHROME_RUNTIME_SOURCE_PROTOCOL_VERSION
+        ? { sourceIdentity: request.sourceIdentity }
+        : {}),
     };
   }
 }
@@ -124,18 +139,21 @@ export function isChromeBrowserSourceOpenRequest(
 ): value is ChromeBrowserSourceOpenRequest {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
-  const keys = record.displayName === undefined
-    ? ["protocolVersion", "sourceHandle", "byteLength", "sha256"]
-    : ["protocolVersion", "sourceHandle", "byteLength", "sha256", "displayName"];
+  const isRuntime = record.protocolVersion === CHROME_RUNTIME_SOURCE_PROTOCOL_VERSION;
+  const keys = ["protocolVersion", "sourceHandle", "byteLength", "sha256",
+    ...(record.displayName === undefined ? [] : ["displayName"]),
+    ...(isRuntime ? ["sourceIdentity"] : []),
+  ];
   if (
     Object.keys(record).length !== keys.length ||
     !keys.every((key) => Object.hasOwn(record, key))
   ) return false;
-  return record.protocolVersion === CHROME_BROWSER_SOURCE_PROTOCOL_VERSION &&
+  return (record.protocolVersion === CHROME_BROWSER_SOURCE_PROTOCOL_VERSION || isRuntime) &&
     typeof record.sourceHandle === "string" && SEALED_HANDLE.test(record.sourceHandle) &&
     Number.isSafeInteger(record.byteLength) && (record.byteLength as number) > 0 &&
     (record.byteLength as number) <= MAX_CHROME_PDF_BYTES &&
     typeof record.sha256 === "string" && DIGEST.test(record.sha256) &&
+    (!isRuntime || (typeof record.sourceIdentity === "string" && DIGEST.test(record.sourceIdentity))) &&
     (record.displayName === undefined ||
       (typeof record.displayName === "string" && record.displayName.length > 0 &&
         record.displayName.length <= 120));

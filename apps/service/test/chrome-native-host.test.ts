@@ -11,6 +11,7 @@ import {
   runChromeNativeHostCommand,
 } from "../src/browser/chrome-native-host.js";
 import { encodeNativeMessage, NativeMessageDecoder } from "../src/browser/native-messaging.js";
+import type { ChromeRuntimeBackend } from "../src/browser/chrome-runtime.js";
 
 const roots: string[] = [];
 
@@ -32,6 +33,62 @@ async function storeFixture(): Promise<ChromeTransferStore> {
 }
 
 describe("Chrome native host entry", () => {
+  it("routes a negotiated v2 port without starting the legacy absolute watchdog", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const frames: Buffer[] = [];
+    output.on("data", (chunk: Buffer) => frames.push(chunk));
+    const runtimeBackend: ChromeRuntimeBackend = {
+      begin: vi.fn(async () => { throw new Error("unused"); }),
+      activate: vi.fn(async () => { throw new Error("unused"); }),
+      current: vi.fn(async () => { throw new Error("unused"); }),
+      invoke: vi.fn(async () => { throw new Error("unused"); }),
+      readDocument: vi.fn(async () => Buffer.alloc(0)),
+      detach: vi.fn(async () => undefined),
+      release: vi.fn(async () => undefined),
+    };
+    const run = runChromeNativeHostCommand([CHROME_EXTENSION_ORIGIN], {
+      input, output, store: await storeFixture(), runtimeBackend, maxDurationMs: 1,
+    });
+    input.end(encodeNativeMessage({
+      type: "hello", protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
+      connectionId: "connection-runtime-1",
+    }));
+
+    await expect(run).resolves.toBe(0);
+    expect(new NativeMessageDecoder().push(Buffer.concat(frames))).toEqual([
+      expect.objectContaining({
+        type: "hello-ack", protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
+        connectionId: "connection-runtime-1",
+      }),
+    ]);
+  });
+
+  it("actively detaches an idle proxy-mode native port without another Chrome message", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const exchange = vi.fn(async (_portId: string, message: { readonly connectionId: string }) => [{
+      type: "hello-ack" as const,
+      protocol: "placekeeper.chrome-runtime" as const,
+      protocolVersion: 2 as const,
+      connectionId: message.connectionId,
+      leaseMs: 1_000,
+    }]);
+    const detach = vi.fn(async () => undefined);
+    const run = runChromeNativeHostCommand([CHROME_EXTENSION_ORIGIN], {
+      input, output, store: await storeFixture(), runtimeExchange: exchange,
+      runtimeDetach: detach, runtimeIdleLeaseMs: 25,
+    });
+    input.write(encodeNativeMessage({
+      type: "hello", protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
+      connectionId: "connection-proxy-idle-1",
+    }));
+
+    await expect(run).resolves.toBe(0);
+    expect(exchange).toHaveBeenCalledOnce();
+    expect(detach).toHaveBeenCalledOnce();
+  });
+
   it("integrates native framing with the bounded remote handoff", async () => {
     const input = new PassThrough();
     const pause = vi.spyOn(input, "pause");

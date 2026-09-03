@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { readdir, readFile, realpath, rm, stat } from "node:fs/promises";
+import { open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative } from "node:path";
 import {
   documentOrderedItems,
@@ -16,6 +16,7 @@ import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-wr
 import {
   encodePlacekeeperLinkFragment,
   encodePlacekeeperReadableViewPathname,
+  placekeeperLinkBase,
   type PlacekeeperLinkLocation,
 } from "../../../../packages/core/src/placekeeper-link.js";
 import { createReviewState } from "../../../../packages/core/src/review-model.js";
@@ -120,7 +121,7 @@ export class ReviewGenerationConflictError extends Error {
     this.name = "ReviewGenerationConflictError";
   }
 }
-export const LAUNCH_SURFACES = ["browser", "finder", "codex", "vscode"] as const;
+export const LAUNCH_SURFACES = ["browser", "finder", "codex", "vscode", "chrome"] as const;
 export type LaunchSurface = typeof LAUNCH_SURFACES[number];
 
 export function isRecoveryDecision(value: unknown): value is RecoveryDecision {
@@ -408,6 +409,8 @@ export class SessionBroker {
   readonly #activeById = new Map<string, ActiveSession>();
   readonly #activeBySource = new Map<string, string>();
   readonly #activeByOutputPath = new Map<string, string>();
+  readonly #activeChromeBySource = new Map<string, string>();
+  readonly #chromeSourceKeyBySession = new Map<string, string>();
   readonly #openingByOutputPath = new Map<string, Promise<void>>();
   readonly #bootstrapScopes = new Map<string, BrowserLaunchScope>();
   readonly #credentialScopes = new Map<string, BrowserLaunchScope>();
@@ -710,6 +713,24 @@ export class SessionBroker {
         await hashFile(adopted.path) !== adopted.sha256
       ) throw new Error("Adopted browser source changed");
       signal?.throwIfAborted();
+      const chromeSourceKey = adopted.sourceIdentity === undefined
+        ? undefined
+        : `${adopted.sourceIdentity}\0${adopted.sha256}\0${1}`;
+      const existingId = chromeSourceKey === undefined
+        ? undefined
+        : this.#activeChromeBySource.get(chromeSourceKey);
+      if (existingId !== undefined) {
+        const existing = this.#activeById.get(existingId);
+        if (existing !== undefined && !existing.ending &&
+          existing.state.source.digest === adopted.sha256 &&
+          existing.state.workflow.documentGeneration === 1) {
+          this.capabilities.revokeFile(approvedFile.id);
+          approvedFile = undefined;
+          await this.#store(sessionId).remove().catch(() => undefined);
+          return { kind: "focused", launch: this.#launch(existing, "chrome") };
+        }
+        if (chromeSourceKey !== undefined) this.#activeChromeBySource.delete(chromeSourceKey);
+      }
       const { rewriteEligibility, importedItems } = await this.#browserSourceInspector(
         adopted.path,
         signal,
@@ -763,9 +784,13 @@ export class SessionBroker {
       await session.store.persist(this.#draft(session));
       signal?.throwIfAborted();
       this.#activate(session);
+      if (chromeSourceKey !== undefined) {
+        this.#activeChromeBySource.set(chromeSourceKey, session.id);
+        this.#chromeSourceKeyBySession.set(session.id, chromeSourceKey);
+      }
       activated = true;
       signal?.throwIfAborted();
-      return { kind: "opened", launch: this.#launch(session, "browser") };
+      return { kind: "opened", launch: this.#launch(session, adopted.sourceIdentity === undefined ? "browser" : "chrome") };
     } catch (error) {
       if (activated) await this.#end(sessionId);
       else {
@@ -1719,6 +1744,13 @@ export class SessionBroker {
     return this.#activeById.get(sessionId)?.sourceOwnership.disposition;
   }
 
+  canonicalLinkBase(sessionId: string): string | undefined {
+    const session = this.#activeById.get(sessionId);
+    return session === undefined || session.ending
+      ? undefined
+      : placekeeperLinkBase(this.#readableSourcePath(session.sourceOwnership));
+  }
+
   #assertSaveDestinationAllowed(
     session: ActiveSession,
     input: { readonly kind: "original" | "copy"; readonly targetPath: string },
@@ -2646,6 +2678,31 @@ export class SessionBroker {
     return record === undefined ? undefined : readFile(record.snapshotPath).catch(() => undefined);
   }
 
+  async documentRange(
+    sessionId: string,
+    generation: number,
+    offset: number,
+    length: number,
+  ): Promise<Buffer | undefined> {
+    const session = this.#activeById.get(sessionId);
+    if (session === undefined || session.ending || !Number.isSafeInteger(generation) || generation < 1 ||
+      !Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1 ||
+      length > 256 * 1024) return undefined;
+    const path = generation === session.state.workflow.documentGeneration
+      ? session.sourceSnapshotPath
+      : session.generationLineage.find((candidate) => candidate.generation === generation)?.snapshotPath;
+    if (path === undefined) return undefined;
+    const file = await open(path, "r").catch(() => undefined);
+    if (file === undefined) return undefined;
+    try {
+      const bytes = Buffer.allocUnsafe(length);
+      const { bytesRead } = await file.read(bytes, 0, length, offset);
+      return bytes.subarray(0, bytesRead);
+    } finally {
+      await file.close();
+    }
+  }
+
   /** Capture a lightweight, internally consistent session snapshot. The write
    * tail is held only while in-memory metadata is cloned. */
   async snapshotAtomicSession(sessionId: string): Promise<AtomicSessionProjection | undefined> {
@@ -2965,6 +3022,8 @@ export class SessionBroker {
     this.#activeById.clear();
     this.#activeBySource.clear();
     this.#activeByOutputPath.clear();
+    this.#activeChromeBySource.clear();
+    this.#chromeSourceKeyBySession.clear();
     this.#bootstrapScopes.clear();
     this.#credentialScopes.clear();
     this.#viewsById.clear();
@@ -2993,6 +3052,11 @@ export class SessionBroker {
     session.ending = true;
     this.#clearRecoveryRecordsForSession(sessionId);
     this.#activeById.delete(sessionId);
+    const chromeSourceKey = this.#chromeSourceKeyBySession.get(sessionId);
+    if (chromeSourceKey !== undefined && this.#activeChromeBySource.get(chromeSourceKey) === sessionId) {
+      this.#activeChromeBySource.delete(chromeSourceKey);
+    }
+    this.#chromeSourceKeyBySession.delete(sessionId);
     if (this.#activeByOutputPath.get(session.canonicalSourcePath) === sessionId) {
       this.#activeByOutputPath.delete(session.canonicalSourcePath);
     }

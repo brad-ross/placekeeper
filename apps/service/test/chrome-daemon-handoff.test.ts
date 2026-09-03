@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { access, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,6 +24,83 @@ afterEach(async () => {
 });
 
 describe("Chrome daemon handoff", () => {
+  it("joins v2 acquisitions only when normalized source identity and verified digest both match", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-chrome-canonical-"));
+    roots.push(root);
+    const recoveryRoot = join(root, "recovery");
+    const browserSourceRoot = join(root, "browser-sources");
+    const assets = join(root, "assets");
+    await Promise.all([mkdir(browserSourceRoot), mkdir(assets)]);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    const host = await PlacekeeperHost.start({
+      recoveryRoot, browserSourceRoot, webAssets: { root: assets }, port: 0,
+      browserSourceInspector: async () => ({ rewriteEligibility: { eligible: true }, importedItems: [] }),
+    });
+    hosts.push(host);
+    const socketPath = join(root, "control.sock");
+    controls.push(await startLaunchControlServer(host, socketPath));
+    const sourceIdentity = createHash("sha256").update("https://papers.example.test/paper.pdf").digest("hex");
+    const open = async (bytes: Buffer) => {
+      const sourceHandle = randomBytes(24).toString("base64url");
+      await writeFile(join(browserSourceRoot, `${sourceHandle}.pdf`), bytes, { mode: 0o600 });
+      return requestControl(socketPath, {
+        kind: "chrome-open",
+        request: {
+          protocolVersion: 2, sourceHandle, sourceIdentity,
+          byteLength: bytes.byteLength,
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+          displayName: "Canonical.pdf",
+        },
+      });
+    };
+    const bytes = Buffer.from("%PDF-1.7\ncanonical\n%%EOF");
+    const first = await open(bytes);
+    const duplicate = await open(bytes);
+    const changed = await open(Buffer.from("%PDF-1.7\nchanged\n%%EOF"));
+    expect(first).toMatchObject({ kind: "chrome-open", response: { ok: true, kind: "opened" } });
+    expect(duplicate).toMatchObject({ kind: "chrome-open", response: { ok: true, kind: "focused" } });
+    expect(changed).toMatchObject({ kind: "chrome-open", response: { ok: true, kind: "opened" } });
+    if (first.kind !== "chrome-open" || duplicate.kind !== "chrome-open" || changed.kind !== "chrome-open" ||
+      !first.response.ok || !duplicate.response.ok || !changed.response.ok ||
+      first.response.kind === "recovery-offered" || duplicate.response.kind === "recovery-offered" || changed.response.kind === "recovery-offered") throw new Error("Expected Chrome opens");
+    expect(duplicate.response.sessionId).toBe(first.response.sessionId);
+    expect(changed.response.sessionId).not.toBe(first.response.sessionId);
+  });
+
+  it("runs negotiated acquisition, activation, and bounded resources inside daemon authority", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-chrome-runtime-control-"));
+    roots.push(root);
+    const recoveryRoot = join(root, "recovery");
+    const browserSourceRoot = join(root, "browser-sources");
+    const assets = join(root, "assets");
+    await Promise.all([mkdir(browserSourceRoot), mkdir(assets)]);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    const host = await PlacekeeperHost.start({
+      recoveryRoot, browserSourceRoot, webAssets: { root: assets }, port: 0,
+      browserSourceInspector: async () => ({ rewriteEligibility: { eligible: true }, importedItems: [] }),
+    });
+    hosts.push(host);
+    const socketPath = join(root, "control.sock");
+    controls.push(await startLaunchControlServer(host, socketPath));
+    const portId = "runtime-control-port-1";
+    const connectionId = "runtime-control-connection-1";
+    const exchange = (message: unknown) => requestControl(socketPath, { kind: "chrome-runtime", portId, message });
+    await expect(exchange({ type: "hello", protocol: "placekeeper.chrome-runtime", protocolVersion: 2, connectionId }))
+      .resolves.toMatchObject({ kind: "chrome-runtime", messages: [{ type: "hello-ack" }] });
+    await exchange({ type: "begin", lane: "acquisition", protocolVersion: 2, connectionId, requestId: "request-acquire-1", transferId: "transfer-runtime-1", disposition: "remote-temporary", sourceUrl: "https://papers.example.test/runtime.pdf", displayName: "Runtime.pdf" });
+    const bytes = await readFile(join(process.cwd(), "test/fixtures/pdfs/text-native.pdf"));
+    await exchange({ type: "chunk", lane: "acquisition", protocolVersion: 2, connectionId, requestId: "request-chunk-1", transferId: "transfer-runtime-1", sequence: 0, data: bytes.toString("base64") });
+    const staged = await exchange({ type: "finish", lane: "acquisition", protocolVersion: 2, connectionId, requestId: "request-finish-1", transferId: "transfer-runtime-1", sequence: 1 });
+    expect(staged).toMatchObject({ kind: "chrome-runtime", messages: [{ type: "projection", payload: { document: { byteLength: bytes.byteLength } } }] });
+    expect(JSON.stringify(staged)).not.toMatch(/credential|sourceUrl|presentationId|taskId|bindProof/u);
+    await expect(exchange({ type: "activate", lane: "lifecycle", protocolVersion: 2, connectionId, requestId: "request-activate-1", documentValidated: true }))
+      .resolves.toMatchObject({ kind: "chrome-runtime", messages: [{ type: "active" }] });
+    await expect(exchange({ type: "read", lane: "resource", protocolVersion: 2, connectionId, requestId: "request-resource-1", resource: "document", generation: 1, offset: 0, length: 8 }))
+      .resolves.toMatchObject({ kind: "chrome-runtime", messages: [{ type: "resource-chunk", sequence: 0 }] });
+    await expect(requestControl(socketPath, { kind: "chrome-runtime-detach", portId }))
+      .resolves.toEqual({ kind: "chrome-runtime-detached" });
+  });
+
   it("admits only the fixed opaque request and transfers ownership without a path", async () => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-chrome-daemon-"));
     roots.push(root);

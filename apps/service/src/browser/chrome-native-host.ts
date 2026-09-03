@@ -1,9 +1,12 @@
 import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
+import { randomBytes } from "node:crypto";
 
 import {
   launchThroughDaemon,
   openChromeBrowserSourceThroughDaemon,
+  chromeRuntimeThroughDaemon,
+  detachChromeRuntimeThroughDaemon,
 } from "../host/service-daemon.js";
 import { defaultDaemonPaths } from "../host/service-daemon.js";
 import type { LaunchRequest, LaunchResponse } from "../host/placekeeper-host.js";
@@ -21,6 +24,17 @@ import {
   NativeMessageDecoder,
 } from "./native-messaging.js";
 import type { ChromeBrowserSourceOpenRequest } from "./browser-source-store.js";
+import {
+  ChromeRuntimeConnection,
+  type ChromeRuntimeBackend,
+} from "./chrome-runtime.js";
+import {
+  CHROME_RUNTIME_PROTOCOL,
+} from "../../../../packages/core/src/chrome-native-runtime-protocol.js";
+import type {
+  ChromeRuntimeExtensionMessage,
+  ChromeRuntimeHostMessage,
+} from "../../../../packages/core/src/chrome-native-runtime-protocol.js";
 
 export interface ChromeNativeHostCommandOptions {
   readonly input?: Readable;
@@ -29,9 +43,14 @@ export interface ChromeNativeHostCommandOptions {
   readonly opener?: ChromeBrowserReviewOpener;
   readonly quota?: ChromeTransferQuota;
   readonly maxDurationMs?: number;
+  readonly runtimeBackend?: ChromeRuntimeBackend;
+  readonly runtimeIdleLeaseMs?: number;
+  readonly runtimeExchange?: (portId: string, message: ChromeRuntimeExtensionMessage, signal?: AbortSignal) => Promise<readonly ChromeRuntimeHostMessage[]>;
+  readonly runtimeDetach?: (portId: string) => Promise<void>;
 }
 
 const DEFAULT_NATIVE_HOST_DURATION_MS = 30_000;
+const DEFAULT_RUNTIME_IDLE_LEASE_MS = 90_000;
 
 export type ChromeBrowserLaunchClient = (
   request: LaunchRequest,
@@ -103,25 +122,15 @@ export async function runChromeNativeHostCommand(
   } catch {
     return 2;
   }
-  let session: ChromeHandoffSession;
+  let session: ChromeHandoffSession | undefined;
+  let runtime: ChromeRuntimeConnection | undefined;
+  const runtimePortId = randomBytes(24).toString("base64url");
+  let runtimeProxyTimer: ReturnType<typeof setTimeout> | undefined;
+  let runtimeIdleExpired = false;
+  let runtimeProxyDetached = false;
+  let mode: "handoff-v1" | "runtime-v2" | undefined;
   const lifetime = new AbortController();
-  const lifetimeTimer = setTimeout(
-    () => lifetime.abort(new Error("native-host-timeout")),
-    options.maxDurationMs ?? DEFAULT_NATIVE_HOST_DURATION_MS,
-  );
-  try {
-    session = new ChromeHandoffSession({
-      callerOrigin: args[0]!,
-      store,
-      opener: options.opener ?? createDaemonChromeBrowserOpener(store),
-      quota: options.quota ?? new ChromeTransferQuota(),
-      maxDurationMs: options.maxDurationMs ?? DEFAULT_NATIVE_HOST_DURATION_MS,
-      signal: lifetime.signal,
-    });
-  } catch {
-    clearTimeout(lifetimeTimer);
-    return 2;
-  }
+  let lifetimeTimer: ReturnType<typeof setTimeout> | undefined;
 
   const decoder = new NativeMessageDecoder();
   let protocolFailure = false;
@@ -153,13 +162,73 @@ export async function runChromeNativeHostCommand(
     const frame = encodeNativeMessage(value);
     output.write(frame, finish);
   });
+  const armLegacyDeadline = (): void => {
+    lifetimeTimer ??= setTimeout(
+      () => {
+        lifetime.abort(new Error("native-host-timeout"));
+        input.destroy();
+      },
+      options.maxDurationMs ?? DEFAULT_NATIVE_HOST_DURATION_MS,
+    );
+  };
+  const armRuntimeProxyDeadline = (): void => {
+    if (runtimeProxyTimer !== undefined) clearTimeout(runtimeProxyTimer);
+    runtimeProxyTimer = setTimeout(() => {
+      runtimeIdleExpired = true;
+      runtimeProxyDetached = true;
+      void (options.runtimeDetach ?? detachChromeRuntimeThroughDaemon)(runtimePortId)
+        .finally(() => input.destroy());
+    }, options.runtimeIdleLeaseMs ?? DEFAULT_RUNTIME_IDLE_LEASE_MS);
+    runtimeProxyTimer.unref?.();
+  };
   const handleChunk = (chunk: Buffer): void => {
     if (protocolFailure) return;
     input.pause();
     queue = queue.then(async () => {
       for (const message of decoder.push(chunk)) {
-        const response = await session.handle(message);
-        if (response !== undefined) await write(response);
+        if (mode === undefined) {
+          const record = typeof message === "object" && message !== null && !Array.isArray(message)
+            ? message as Record<string, unknown> : undefined;
+          mode = record?.type === "hello" && record.protocol === CHROME_RUNTIME_PROTOCOL
+            ? "runtime-v2" : "handoff-v1";
+          if (mode === "handoff-v1") {
+            armLegacyDeadline();
+            session = new ChromeHandoffSession({
+              callerOrigin: args[0]!, store,
+              opener: options.opener ?? createDaemonChromeBrowserOpener(store),
+              quota: options.quota ?? new ChromeTransferQuota(),
+              maxDurationMs: options.maxDurationMs ?? DEFAULT_NATIVE_HOST_DURATION_MS,
+              signal: lifetime.signal,
+            });
+          } else if (options.runtimeBackend !== undefined) {
+            runtime = new ChromeRuntimeConnection({
+              callerOrigin: args[0]!, backend: options.runtimeBackend,
+              ...(options.runtimeIdleLeaseMs === undefined ? {} : { idleLeaseMs: options.runtimeIdleLeaseMs }),
+              onAsyncMessage: (event) => {
+                void write(event).finally(() => {
+                  if (event.type === "failure" && event.reason === "idle-timeout") input.destroy();
+                });
+              },
+            });
+          } else {
+            armRuntimeProxyDeadline();
+          }
+        }
+        if (mode === "runtime-v2" && runtime === undefined && runtimeProxyTimer !== undefined) {
+          clearTimeout(runtimeProxyTimer);
+          runtimeProxyTimer = undefined;
+        }
+        const responses = mode === "runtime-v2"
+          ? runtime !== undefined
+            ? [await runtime.handle(message)]
+            : await (options.runtimeExchange ?? chromeRuntimeThroughDaemon)(
+                runtimePortId,
+                message as ChromeRuntimeExtensionMessage,
+                lifetime.signal,
+              )
+          : [await session!.handle(message)];
+        for (const response of responses) if (response !== undefined) await write(response);
+        if (mode === "runtime-v2" && runtime === undefined) armRuntimeProxyDeadline();
       }
     }).catch(() => {
       protocolFailure = true;
@@ -171,11 +240,9 @@ export async function runChromeNativeHostCommand(
   input.on("data", handleChunk);
   const termination = await new Promise<"end" | "close" | "error" | "timeout">((resolveEnd) => {
     let settled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
     const settle = (reason: "end" | "close" | "error" | "timeout"): void => {
       if (settled) return;
       settled = true;
-      if (timer !== undefined) clearTimeout(timer);
       input.off("end", onEnd);
       input.off("close", onClose);
       input.off("error", onError);
@@ -187,13 +254,10 @@ export async function runChromeNativeHostCommand(
     input.once("end", onEnd);
     input.once("close", onClose);
     input.once("error", onError);
-    timer = setTimeout(
-      () => settle("timeout"),
-      options.maxDurationMs ?? DEFAULT_NATIVE_HOST_DURATION_MS,
-    );
+    lifetime.signal.addEventListener("abort", () => settle("timeout"), { once: true });
   });
   input.off("data", handleChunk);
-  if (termination !== "end") {
+  if (termination !== "end" && !runtimeIdleExpired) {
     protocolFailure = true;
     lifetime.abort(new Error("native-host-terminated"));
     input.destroy();
@@ -204,8 +268,13 @@ export async function runChromeNativeHostCommand(
     protocolFailure = true;
   }
   await queue;
-  await session.disconnect();
-  clearTimeout(lifetimeTimer);
+  await session?.disconnect();
+  await runtime?.disconnect();
+  if (mode === "runtime-v2" && runtime === undefined && !runtimeProxyDetached) {
+    await (options.runtimeDetach ?? detachChromeRuntimeThroughDaemon)(runtimePortId).catch(() => undefined);
+  }
+  if (lifetimeTimer !== undefined) clearTimeout(lifetimeTimer);
+  if (runtimeProxyTimer !== undefined) clearTimeout(runtimeProxyTimer);
   output.off("error", handleOutputError);
   return protocolFailure ? 2 : 0;
 }

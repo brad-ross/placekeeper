@@ -2,6 +2,19 @@ export const NATIVE_HOST_NAME = "com.placekeeper.chrome";
 export const NATIVE_PROTOCOL_VERSION = 1;
 export const MAX_CHUNK_BYTES = 256 * 1024;
 
+export {
+  CHROME_RUNTIME_PROTOCOL,
+  CHROME_RUNTIME_PROTOCOL_VERSION,
+  CHROME_RUNTIME_RESOURCE_CHUNK_BYTES,
+  parseChromeRuntimeExtensionMessage as validateRuntimeExtensionMessage,
+  parseChromeRuntimeHostMessage as parseRuntimeHostMessage,
+} from "../../../packages/core/src/chrome-native-runtime-protocol.js";
+export type {
+  ChromeRuntimeExtensionMessage,
+  ChromeRuntimeHostMessage,
+  ChromeRuntimeLane,
+} from "../../../packages/core/src/chrome-native-runtime-protocol.js";
+
 const TRANSFER_ID = /^[A-Za-z0-9_-]{8,128}$/u;
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const CAPABILITY = /^[A-Za-z0-9_-]{43}$/u;
