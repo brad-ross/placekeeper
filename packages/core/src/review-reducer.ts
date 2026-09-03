@@ -4,6 +4,7 @@ import {
   normalizeReviewSelectionAnchor,
   PDF_SELECTION_PAGE_LIMIT,
   reviewSelectionPayload,
+  synchronizeReviewItemAnchor,
   type JsonValue,
   type PendingReviewDraftV1,
   type ReviewAnchorEvidenceV1,
@@ -231,7 +232,7 @@ function assertSelectionAnchorEvidence(
   }
 }
 
-function assertReviewAnchorEvidence(anchor: ReviewAnchorEvidenceV1): void {
+export function assertReviewAnchorEvidence(anchor: ReviewAnchorEvidenceV1): void {
   if (!Number.isSafeInteger(anchor.pageIndex) || anchor.pageIndex < 0) {
     throw new InvalidReviewCommandError("Review anchor pageIndex must be non-negative");
   }
@@ -539,9 +540,9 @@ export function reduceReview(
       }
       assertReviewAnchorEvidence(command.anchor);
       assertAnchorMatchesReviewItem(existing, command.anchor);
+      const synchronized = synchronizeReviewItemAnchor(existing, command.anchor);
       const reattached: ReviewItem = {
-        ...existing,
-        pageIndex: command.anchor.pageIndex,
+        ...synchronized,
         updatedAt: command.updatedAt,
         reconciliation: {
           ...reconciliation,
@@ -551,6 +552,7 @@ export function reduceReview(
           disposition: { kind: "resolved", generation: state.workflow.documentGeneration },
         },
       };
+      assertReviewItem(reattached);
       items = state.items.map((item, itemIndex) => itemIndex === index ? reattached : item);
       break;
     }

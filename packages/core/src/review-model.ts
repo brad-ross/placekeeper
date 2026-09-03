@@ -149,6 +149,63 @@ export type ReviewAnchorEvidenceV1 =
       readonly rect: ReviewRectEvidence;
     };
 
+/** Keep a Review Item's compatibility payload and canonical reconciliation
+ * anchor in lockstep when semantic evidence moves to a new document layout. */
+export function synchronizeReviewItemAnchor(
+  item: ReviewItem,
+  anchor: ReviewAnchorEvidenceV1,
+): ReviewItem {
+  let payload: Readonly<Record<string, JsonValue>>;
+  if (anchor.kind === "selection") {
+    if (item.kind !== "replace" && item.kind !== "delete" && item.kind !== "highlight") {
+      throw new Error(`Review item ${item.kind} cannot use a selection anchor`);
+    }
+    const selection = reviewSelectionPayload(anchor, { canonical: true });
+    if (item.kind === "replace") {
+      const proposedText = item.payload.proposedText;
+      if (typeof proposedText !== "string") throw new Error("Replace item is missing proposed text");
+      payload = { ...selection, proposedText };
+    } else if (item.kind === "highlight") {
+      const comment = item.payload.comment;
+      payload = {
+        ...selection,
+        ...(typeof comment === "string" ? { comment } : {}),
+      };
+    } else {
+      payload = selection;
+    }
+  } else if (anchor.kind === "caret") {
+    if (item.kind !== "insert") throw new Error(`Review item ${item.kind} cannot use a caret anchor`);
+    const proposedText = item.payload.proposedText;
+    if (typeof proposedText !== "string") throw new Error("Insert item is missing proposed text");
+    payload = {
+      position: { ...anchor.rect },
+      leftContext: anchor.leftContext,
+      rightContext: anchor.rightContext,
+      reliable: true,
+      proposedText,
+    };
+  } else {
+    if (item.kind !== "pageNote") throw new Error(`Review item ${item.kind} cannot use a page anchor`);
+    const comment = item.payload.comment;
+    if (typeof comment !== "string") throw new Error("Page note is missing its comment");
+    payload = {
+      position: { ...anchor.rect },
+      comment,
+      ...(anchor.nearbyText === undefined ? {} : { nearbyText: anchor.nearbyText }),
+    };
+  }
+
+  return {
+    ...item,
+    pageIndex: anchor.pageIndex,
+    payload,
+    ...(item.reconciliation === undefined ? {} : {
+      reconciliation: { ...item.reconciliation, anchor },
+    }),
+  };
+}
+
 export type ReviewAnchorDisposition =
   | { readonly kind: "resolved"; readonly generation: number }
   | { readonly kind: "ambiguous"; readonly reason: string }

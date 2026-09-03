@@ -939,7 +939,9 @@ export function App({
           pages: pageReaderFor(documentId, document),
         });
         if (selectionReads.current.isCurrent(generation)) {
-          setDetectedSelectionReliable(result.ok);
+          setDetectedSelectionReliable(
+            result.ok || result.diagnostic === 'selection-page-limit-exceeded',
+          );
           onSelectionUpdate?.(terminalSelectionUpdate(generation, result));
         }
       };

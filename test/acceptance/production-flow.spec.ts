@@ -4453,6 +4453,35 @@ test('rejects a real 13-page copy without changing the clipboard, selection, or 
     .not.toHaveCount(0);
 });
 
+test('rejects every review action from a real 13-page selection without changing review state', async ({ page }) => {
+  test.setTimeout(90_000);
+  const launched = await openFreshProductionFixture(
+    page,
+    crossPagePdf,
+    'Cross-page 13-page review action launch failed',
+  );
+  await chooseFreshCopyDestination(page);
+  const main = page.locator('[data-pdf-copy-surface="main"]');
+  await dragAcrossProductionPdfPages(page, main, 0, 12);
+  await expect.poll(() => page.locator('[data-review-contextual-host]')
+    .getAttribute('data-selection-status')).toBe('over-limit');
+  const actions = page.getByRole('toolbar', { name: 'Selection review actions' });
+  await expect(actions).toBeVisible();
+
+  for (const action of ['Replace', 'Delete', 'Highlight'] as const) {
+    await actions.getByRole('button', { name: action, exact: true }).click();
+    const limitError = page.locator('.review-toast--error');
+    await expect(limitError).toBeVisible();
+    await expect(limitError).toContainText('12 pages');
+    expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
+    expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
+  }
+
+  await expect(page.getByRole('region', { name: /Replacement|Highlight Comment/u })).toHaveCount(0);
+  await expect(main.locator(':scope [data-page-index] > div[style*="mix-blend-mode"]'))
+    .not.toHaveCount(0);
+});
+
 for (const action of ['Replace', 'Delete', 'Highlight'] as const) {
   test(`creates one atomic cross-page ${action} from a real selection`, async ({ page }) => {
     const launched = await openFreshProductionFixture(

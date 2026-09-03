@@ -9,8 +9,15 @@ import { SessionBroker } from "../src/sessions/session-broker.js";
 import type { SessionBrokerOptions } from "../src/sessions/session-broker.js";
 import type { ReviewItem } from "../../../packages/core/src/review-model.js";
 import { reviewSemanticDigest } from "../../../packages/core/src/live-context.js";
-import { createReviewState } from "../../../packages/core/src/review-model.js";
-import { reduceReview } from "../../../packages/core/src/review-reducer.js";
+import {
+  createReviewState,
+  reviewSelectionPayload,
+} from "../../../packages/core/src/review-model.js";
+import {
+  assertReviewItem,
+  reduceReview,
+} from "../../../packages/core/src/review-reducer.js";
+import { projectReviewItemProjections } from "../../../packages/core/src/annotation-projection.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 import { PdfEvidenceService } from "../src/context/pdf-evidence-service.js";
 import {
@@ -108,11 +115,12 @@ describe("atomic live document replacement", () => {
       pageBoundaries: [{ afterPageIndex: 0, separator: "\n" }],
     };
 
-    const result = reconcilePdfAnchor(anchor, [
+    const repaginatedPages = [
       page(0, "before alpha"),
       page(1, " endnext "),
       page(2, "beta after"),
-    ], 2);
+    ];
+    const result = reconcilePdfAnchor(anchor, repaginatedPages, 2);
 
     expect(result).toMatchObject({
       disposition: { kind: "resolved", generation: 2 },
@@ -129,6 +137,117 @@ describe("atomic live document replacement", () => {
           { afterPageIndex: 0, separator: "\n" },
           { afterPageIndex: 1, separator: "\n" },
         ],
+      },
+    });
+
+    const item: ReviewItem = {
+      ...selectionItem(ITEM_IDS.stable, anchor.quote, anchor.prefix, anchor.suffix),
+      payload: { ...reviewSelectionPayload(anchor, { canonical: true }), comment: "Keep this" },
+      reconciliation: {
+        schemaVersion: 1,
+        ownerViewId: "panel-a",
+        baseGeneration: 1,
+        revision: 1,
+        anchor,
+        disposition: { kind: "missing", reason: "not-yet-reconciled-to-generation" },
+        previousAnchors: [],
+      },
+    };
+    const reconciled = reconcilePdfAnchorState({
+      ...createReviewState({
+        sessionId: "00000000-0000-4000-8000-000000000100",
+        source: { fileId: "source", digest: "a".repeat(64), byteLength: 1 },
+        workflowMode: "generated-output",
+        documentGeneration: 2,
+      }),
+      items: [item],
+    }, { pages: repaginatedPages, generation: 2 });
+    const reconciledItem = reconciled.items[0]!;
+
+    expect(reconciledItem.payload).toMatchObject({
+      quote: "alpha\n endnext \nbeta",
+      comment: "Keep this",
+      pages: [
+        { pageIndex: 0, quote: "alpha" },
+        { pageIndex: 1, quote: " endnext " },
+        { pageIndex: 2, quote: "beta" },
+      ],
+    });
+    expect(() => assertReviewItem(reconciledItem)).not.toThrow();
+    expect(projectReviewItemProjections(reconciledItem)).toHaveLength(3);
+  });
+
+  it("keeps a rebuilt cross-page anchor unsupported when it would skip a blank page", () => {
+    const page = (pageIndex: number, text: string) => ({
+      pageIndex,
+      text,
+      geometry: text.length === 0 ? [] : [{
+        charStart: 0,
+        glyphs: Array.from(text, (_, index) => ({ x: 10 + index * 4, y: 20, width: 4, height: 8 })),
+      }],
+    });
+    const anchor = {
+      kind: "selection" as const,
+      pageIndex: 0,
+      quote: "alpha\nbeta",
+      prefix: "before ",
+      suffix: " after",
+      rect: { x: 1, y: 1, width: 8, height: 8 },
+      segmentRects: [{ x: 1, y: 1, width: 8, height: 8 }],
+      pages: [
+        { pageIndex: 0, quote: "alpha", prefix: "before ", suffix: "", rect: { x: 1, y: 1, width: 8, height: 8 }, segmentRects: [{ x: 1, y: 1, width: 8, height: 8 }] },
+        { pageIndex: 1, quote: "beta", prefix: "", suffix: " after", rect: { x: 1, y: 1, width: 8, height: 8 }, segmentRects: [{ x: 1, y: 1, width: 8, height: 8 }] },
+      ],
+      pageBoundaries: [{ afterPageIndex: 0, separator: "\n" }],
+    };
+
+    expect(reconcilePdfAnchor(anchor, [
+      page(0, "before alpha"),
+      page(1, ""),
+      page(2, "beta after"),
+    ], 2)).toEqual({
+      anchor,
+      disposition: {
+        kind: "unsupported",
+        reason: "reconciled-selection-violates-canonical-invariants",
+      },
+    });
+  });
+
+  it("keeps a rebuilt cross-page anchor unsupported when repagination exceeds the page limit", () => {
+    const rect = { x: 1, y: 1, width: 8, height: 8 };
+    const anchor = {
+      kind: "selection" as const,
+      pageIndex: 0,
+      quote: "abcdef\nghijklm",
+      prefix: "before ",
+      suffix: " after",
+      rect,
+      segmentRects: [rect],
+      pages: [
+        { pageIndex: 0, quote: "abcdef", prefix: "before ", suffix: "", rect, segmentRects: [rect] },
+        { pageIndex: 1, quote: "ghijklm", prefix: "", suffix: " after", rect, segmentRects: [rect] },
+      ],
+      pageBoundaries: [{ afterPageIndex: 0, separator: "\n" }],
+    };
+    const letters = Array.from("abcdefghijklm");
+    const pages = letters.map((letter, pageIndex) => {
+      const text = `${pageIndex === 0 ? "before " : ""}${letter}${pageIndex === 12 ? " after" : ""}`;
+      return {
+        pageIndex,
+        text,
+        geometry: [{
+          charStart: 0,
+          glyphs: Array.from(text, (_, index) => ({ x: 10 + index * 4, y: 20, width: 4, height: 8 })),
+        }],
+      };
+    });
+
+    expect(reconcilePdfAnchor(anchor, pages, 2)).toEqual({
+      anchor,
+      disposition: {
+        kind: "unsupported",
+        reason: "reconciled-selection-violates-canonical-invariants",
       },
     });
   });
@@ -458,6 +577,10 @@ describe("atomic live document replacement", () => {
         segmentRects: [{ x: 75, y: 72, width: 60, height: 9 }],
       },
       previousAnchors: [{ generation: 1, disposition: { kind: "resolved", generation: 1 } }],
+    });
+    expect(items[0]?.payload).toMatchObject({
+      rect: { x: 75, y: 72, width: 60, height: 9 },
+      segmentRects: [{ x: 75, y: 72, width: 60, height: 9 }],
     });
     expect(items[1]?.reconciliation?.anchor).toMatchObject({ quote: "repeated claim", pageIndex: 0 });
     expect(items[2]?.reconciliation?.anchor).toMatchObject({ quote: "removed claim", pageIndex: 0 });

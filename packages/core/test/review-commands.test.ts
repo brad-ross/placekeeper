@@ -245,6 +245,31 @@ describe('canonical review commands', () => {
     expect(() => reduceReview(state, build(low + 1))).toThrow(/too much text or geometry/iu);
     expect(state).toMatchObject({ revision: 0, items: [], history: [] });
   });
+
+  it('rejects importer-unsafe grouped metadata before acknowledgement', () => {
+    const { state, commands } = setup();
+    const pageQuote = 'x'.repeat(8_500);
+    const pages = crossPageSelection.pages.map((page, index) => ({
+      ...page,
+      quote: index === 0 ? pageQuote : `y${pageQuote.slice(1)}`,
+    }));
+    const fullQuote = pages.map(({ quote }) => quote).join('\n');
+    const command = addDelete(state, {
+      ...crossPageSelection,
+      quote: fullQuote,
+      pages,
+    }, commands);
+    if (command.type !== 'add') throw new Error('Expected add');
+
+    const children = serializePortableAnnotationGroup(command.item);
+    expect(fullQuote.length).toBeGreaterThan(16 * 1024);
+    expect(children).toHaveLength(2);
+    expect(children.every(({ byteLength }) =>
+      byteLength < PORTABLE_ANNOTATION_MAX_BYTES)).toBe(true);
+    expect(() => reduceReview(state, command)).toThrow(/too complex to preserve/iu);
+    expect(state).toMatchObject({ revision: 0, items: [], history: [] });
+  });
+
   it('keeps generated-output items and pending authoring generation-bound and revisioned', () => {
     let state = createReviewState({
       sessionId: 'session',
@@ -317,7 +342,7 @@ describe('canonical review commands', () => {
     });
   });
 
-  it('reattaches without changing semantic payload and fences undo at a rebuild boundary', () => {
+  it('reattaches while preserving proposed text and fences undo at a rebuild boundary', () => {
     let { state, commands } = setup();
     state = reduceReview(state, addReplace(state, selection, 'same semantics', commands));
     const before = state.items[0]!;
@@ -339,7 +364,13 @@ describe('canonical review commands', () => {
       anchor: nextAnchor,
       updatedAt: '2026-08-07T12:05:00.000Z',
     });
-    expect(state.items[0]?.payload).toEqual(before.payload);
+    expect(state.items[0]?.payload).toMatchObject({
+      quote: 'unique equilibrium',
+      proposedText: 'same semantics',
+      rect: { x: 20, y: 30, width: 40, height: 10 },
+      pages: [{ pageIndex: 2, quote: 'unique equilibrium' }],
+      pageBoundaries: [],
+    });
     expect(state.items[0]?.pageIndex).toBe(2);
     expect(state.items[0]?.reconciliation).toMatchObject({
       revision: 2,
@@ -353,7 +384,7 @@ describe('canonical review commands', () => {
       .toThrow(/rebuild history boundary/iu);
   });
 
-  it('reattaches a complete cross-page anchor in one history entry', () => {
+  it('reattaches a complete cross-page anchor and synchronizes its payload in one history entry', () => {
     let { state, commands } = setup();
     state = reduceReview(state, addReplace(state, selection, 'same semantics', commands));
     const before = state.items[0]!;
@@ -392,8 +423,17 @@ describe('canonical review commands', () => {
     expect(state.history).toHaveLength(beforeHistoryLength + 1);
     expect(state.items).toHaveLength(1);
     expect(state.items[0]?.reconciliation?.anchor).toEqual(nextAnchor);
+    expect(state.items[0]?.payload).toMatchObject({
+      quote: 'replacement\ntarget',
+      prefix: 'left ',
+      suffix: ' right',
+      proposedText: 'same semantics',
+      pages,
+      pageBoundaries: [{ afterPageIndex: 2, separator: '\n' }],
+    });
     state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
     expect(state.items[0]?.reconciliation?.anchor).toEqual(anchorEvidenceFromReviewItem(before));
+    expect(state.items[0]?.payload).toEqual(before.payload);
   });
 
   it('rejects unknown and item-incompatible reattachment anchors', () => {

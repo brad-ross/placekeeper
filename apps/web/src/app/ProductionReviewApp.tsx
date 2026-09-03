@@ -1706,6 +1706,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         generationRefreshStatus={props.generationRefreshStatus ?? 'idle'}
         locationRestoreStatus={locationRestoreStatus}
         toolError={pdfCopyError ?? commandError}
+        onSelectionPageLimitExceeded={() => setCommandError(PDF_SELECTION_PAGE_LIMIT_MESSAGE)}
         pdfCopyOwner={pdfCopyOwner}
         pdfCopySnapshots={pdfCopySnapshots}
         pdfCopyOwnerIndicatorVisible={pdfCopyOwnerIndicatorVisible}

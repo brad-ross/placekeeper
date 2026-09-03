@@ -18,7 +18,11 @@ import {
   type SelectionAnchorResult,
 } from './selection-anchor.js';
 import { SELECTION_UNAVAILABLE_MESSAGE } from './text-reliability.js';
-import { PDF_SELECTION_PAGE_LIMIT } from './selection-page-limit.js';
+import {
+  PDF_SELECTION_GEOMETRY_CACHE_PAGE_LIMIT,
+  PDF_SELECTION_PAGE_LIMIT,
+  PDF_SELECTION_PAGE_LIMIT_MESSAGE,
+} from './selection-page-limit.js';
 
 export interface PublicSelectionReader {
   getFormattedSelection(documentId?: string): ViewerFormattedSelection[];
@@ -103,7 +107,14 @@ export async function readViewerSelectionEvidence(
   const formattedBefore = selection.getFormattedSelection(documentId);
   const stateBefore = selection.getState(documentId);
   const selectionGeneration = viewerSelectionGeneration(formattedBefore, stateBefore);
-  const text = await selection.getSelectedText(documentId).toPromise();
+  const pageCountBefore = stateBefore.selection === null
+    ? 0
+    : stateBefore.selection.end.page - stateBefore.selection.start.page + 1;
+  // The range itself is public evidence for enforcing the product limit. Avoid
+  // materializing text which Copy and review actions are guaranteed to reject.
+  const text = pageCountBefore > PDF_SELECTION_PAGE_LIMIT
+    ? []
+    : await selection.getSelectedText(documentId).toPromise();
   const formattedAfter = selection.getFormattedSelection(documentId);
   const stateAfter = selection.getState(documentId);
   const formatted = [...formattedAfter].sort((left, right) => left.pageIndex - right.pageIndex);
@@ -143,6 +154,13 @@ export async function captureViewerSelection(
 ): Promise<SelectionAnchorResult> {
   try {
     const evidence = await readViewerSelectionEvidence(input.documentId, input.selection);
+    if (evidence.stable && !evidence.withinPageLimit) {
+      return {
+        ok: false,
+        userMessage: PDF_SELECTION_PAGE_LIMIT_MESSAGE,
+        diagnostic: 'selection-page-limit-exceeded',
+      };
+    }
     if (
       !evidence.stable || evidence.selection === null || evidence.pages.length === 0 ||
       evidence.pages.some(({ text }) => text === null)
@@ -191,15 +209,40 @@ export async function captureViewerSelection(
   }
 }
 
+/**
+ * Cache completed page reads in access order with four pages of headroom over
+ * the 12-page product limit. In-flight reads are never evicted, so concurrent
+ * callers share one PDFium operation; the cache returns to its bound as those
+ * reads settle.
+ */
 export function createEngineAnchorPageReader(
   engine: PdfEngine,
   document: PdfDocumentObject,
 ): AnchorPageReader {
-  const reads = new Map<number, Promise<AnchorPage>>();
+  type CacheEntry = {
+    readonly reading: Promise<AnchorPage>;
+    settled: boolean;
+  };
+  const reads = new Map<number, CacheEntry>();
+  const touch = (pageIndex: number, entry: CacheEntry) => {
+    reads.delete(pageIndex);
+    reads.set(pageIndex, entry);
+  };
+  const pruneSettled = () => {
+    if (reads.size <= PDF_SELECTION_GEOMETRY_CACHE_PAGE_LIMIT) return;
+    for (const [pageIndex, entry] of reads) {
+      if (!entry.settled) continue;
+      reads.delete(pageIndex);
+      if (reads.size <= PDF_SELECTION_GEOMETRY_CACHE_PAGE_LIMIT) return;
+    }
+  };
   return {
     read(pageIndex) {
       const cached = reads.get(pageIndex);
-      if (cached) return cached;
+      if (cached) {
+        touch(pageIndex, cached);
+        return cached.reading;
+      }
       const reading = (async () => {
         const page = document.pages[pageIndex];
         if (!page) throw new Error(`PDF page ${pageIndex} is unavailable.`);
@@ -215,8 +258,17 @@ export function createEngineAnchorPageReader(
           textRects: textRects.map(({ content, rect }) => ({ content, rect })),
         };
       })();
-      reads.set(pageIndex, reading);
-      void reading.catch(() => reads.delete(pageIndex));
+      const entry: CacheEntry = { reading, settled: false };
+      reads.set(pageIndex, entry);
+      void reading.then(
+        () => {
+          entry.settled = true;
+          pruneSettled();
+        },
+        () => {
+          if (reads.get(pageIndex) === entry) reads.delete(pageIndex);
+        },
+      );
       return reading;
     },
   };

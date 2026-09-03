@@ -66,6 +66,23 @@ describe('selection update authority', () => {
       generation: 9,
     });
   });
+
+  it('publishes the page-limit terminal separately from an unreliable selection', () => {
+    const pending: SelectionUpdate = { kind: 'pending', generation: 10 };
+    const overLimit = terminalSelectionUpdate(10, {
+      ok: false,
+      userMessage: 'Selections can span at most 12 pages.',
+      diagnostic: 'selection-page-limit-exceeded',
+    });
+
+    expect(overLimit).toEqual({
+      kind: 'over-limit',
+      generation: 10,
+      userMessage: 'Selections can span at most 12 pages.',
+    });
+    expect(acceptSelectionUpdate(pending, overLimit)).toEqual(overLimit);
+    expect(selectionReadinessMessage(overLimit)).toContain('12 pages');
+  });
 });
 
 const mainSurface = { kind: 'main' as const, documentGeneration: 3 };
@@ -117,8 +134,83 @@ describe('PDF copy selection state', () => {
         end: { page: 1, index: 12 },
       },
       pageCount: 2,
+      pages: [
+        { pageIndex: 0, text: 'end of first', sliceCount: 12 },
+        { pageIndex: 1, text: 'start of second', sliceCount: 15 },
+      ],
       text: ['end of first', 'start of second'],
     })).toEqual(readyCopy(mainSurface, 4, 'end of first\nstart of second'));
+
+    expect(copySelectionUpdateFromEvidence(mainSurface, 5, {
+      stable: true,
+      selection: {
+        start: { page: 3, index: 2 },
+        end: { page: 3, index: 8 },
+      },
+      pageCount: 1,
+      pages: [{ pageIndex: 3, text: 'one page', sliceCount: 7 }],
+      text: ['one page'],
+    })).toEqual(readyCopy(mainSurface, 5, 'one page', 1));
+  });
+
+  it('rejects a partial multi-page text read and never writes its fragment', () => {
+    const partial = copySelectionUpdateFromEvidence(mainSurface, 6, {
+      stable: true,
+      selection: {
+        start: { page: 0, index: 10 },
+        end: { page: 1, index: 12 },
+      },
+      pageCount: 2,
+      pages: [{ pageIndex: 0, text: 'end of first', sliceCount: 12 }],
+      text: ['end of first'],
+    });
+    expect(partial).toEqual({ kind: 'unavailable', surface: mainSurface, generation: 6 });
+
+    const command = resolvePdfCopyCommand({
+      nativeCopyHasPrecedence: false,
+      owner: 'main',
+      snapshots: { main: partial, reference: null },
+    });
+    const clipboard = { setData: vi.fn() };
+    const preventDefault = vi.fn();
+    const onError = vi.fn();
+    applyPdfCopyCommand(command, { clipboardData: clipboard, preventDefault }, {
+      onPending: vi.fn(),
+      onError,
+    });
+
+    expect(command).toEqual({ kind: 'unavailable' });
+    expect(clipboard.setData).not.toHaveBeenCalled();
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith('unavailable');
+  });
+
+  it('keeps an over-limit no-text snapshot commandable only as an error', () => {
+    const pageCount = 13;
+    const snapshot = copySelectionUpdateFromEvidence(mainSurface, 7, {
+      stable: true,
+      selection: { start: { page: 0 }, end: { page: pageCount - 1 } },
+      pageCount,
+      pages: Array.from({ length: pageCount }, (_, pageIndex) => ({
+        pageIndex,
+        text: null,
+        sliceCount: 5,
+      })),
+      text: [],
+    });
+
+    expect(snapshot).toEqual({
+      kind: 'ready',
+      surface: mainSurface,
+      generation: 7,
+      text: '',
+      pageCount,
+    });
+    expect(resolvePdfCopyCommand({
+      nativeCopyHasPrecedence: false,
+      owner: 'main',
+      snapshots: { main: snapshot, reference: null },
+    })).toEqual({ kind: 'over-limit' });
   });
 
   it('rejects stale document, selection, and reference-tab resolutions', () => {
@@ -159,6 +251,7 @@ describe('PDF copy selection state', () => {
       stable: false,
       selection: { start: { page: 0 }, end: { page: 0 } },
       pageCount: 1,
+      pages: [{ pageIndex: 0, text: 'obsolete text', sliceCount: 13 }],
       text: ['obsolete text'],
     })).toEqual({ kind: 'unavailable', surface: mainSurface, generation: 5 });
   });

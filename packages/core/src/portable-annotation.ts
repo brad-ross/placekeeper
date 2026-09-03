@@ -20,19 +20,16 @@ export {
 import {
   PORTABLE_ANNOTATION_MAX_BYTES,
   PORTABLE_ANNOTATION_TOO_LARGE_MESSAGE,
+  PORTABLE_ANNOTATION_UNSAFE_SHAPE_MESSAGE,
   portableAnnotationProjectionId,
   serializePortableAnnotationGroup,
   type SerializedPortableAnnotationChild,
 } from './grouped-annotation-envelope.js';
+import { hasSafePortableAnnotationShape } from './portable-annotation-shape.js';
 
 export const PORTABLE_ANNOTATION_AUTHOR = "Placekeeper";
 const PORTABLE_ANNOTATION_OWNER = "placekeeper";
-const MAX_DEPTH = 12;
 const MAX_PORTABLE_ARRAY_ENTRIES = MAX_REVIEW_SELECTION_SEGMENTS;
-const MAX_OBJECT_ENTRIES = 128;
-const MAX_NODES = 4_096;
-const MAX_STRING_LENGTH = 16 * 1024;
-const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const KINDS = new Set<ReviewItemKind>([
   "replace",
   "delete",
@@ -114,24 +111,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
-}
-
-function hasSafeShape(value: unknown, depth = 0, budget = { nodes: 0 }): boolean {
-  budget.nodes += 1;
-  if (depth > MAX_DEPTH || budget.nodes > MAX_NODES) return false;
-  if (typeof value === "string") return value.length <= MAX_STRING_LENGTH;
-  if (value === null || typeof value === "boolean" || isFiniteNumber(value)) return true;
-  if (Array.isArray(value)) {
-    if (value.length > MAX_PORTABLE_ARRAY_ENTRIES) return false;
-    return value.every((entry) => hasSafeShape(entry, depth + 1, budget));
-  }
-  if (!isRecord(value)) return false;
-  const keys = Object.keys(value);
-  if (
-    keys.length > MAX_OBJECT_ENTRIES ||
-    keys.some((key) => FORBIDDEN_KEYS.has(key))
-  ) return false;
-  return keys.every((key) => hasSafeShape(value[key], depth + 1, budget));
 }
 
 function isIsoDate(value: unknown): value is string {
@@ -348,7 +327,7 @@ function isGroupedProjection(value: unknown): value is GroupedPortableProjection
 }
 
 function groupedEnvelope(value: unknown): GroupedPortableAnnotationEnvelope | undefined {
-  if (!isRecord(value) || !hasSafeShape(value)) return undefined;
+  if (!isRecord(value) || !hasSafePortableAnnotationShape(value)) return undefined;
   const envelope = value.placekeeper;
   if (
     !isRecord(envelope) ||
@@ -459,9 +438,9 @@ export function createPortableAnnotationCustom(
 }
 
 export function assertPortableAnnotationWritable(annotation: ReviewAnnotation): void {
-  if (!hasSafeShape(annotation.custom)) {
+  if (!hasSafePortableAnnotationShape(annotation.custom)) {
     throw new InvalidReviewCommandError(
-      "This annotation is too complex to preserve as editable metadata. Shorten the selection and try again.",
+      PORTABLE_ANNOTATION_UNSAFE_SHAPE_MESSAGE,
     );
   }
   if (
@@ -480,7 +459,7 @@ export function inspectPortableAnnotation(
   options: { readonly visibleIdCount?: number } = {},
 ): PortableAnnotationInspection {
   if (!isRecord(custom) || !("placekeeper" in custom)) return { status: "foreign" };
-  if (!hasSafeShape(custom)) return { status: "invalid", reason: "unsafe-shape" };
+  if (!hasSafePortableAnnotationShape(custom)) return { status: "invalid", reason: "unsafe-shape" };
   const envelope = custom.placekeeper;
   if (!isRecord(envelope)) return { status: "invalid", reason: "invalid-envelope" };
   if (
@@ -691,7 +670,7 @@ export function decodePortableAnnotationJson(raw: string): PortableAnnotationIns
   }
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!hasSafeShape(parsed)) return { status: "invalid", reason: "unsafe-shape" };
+    if (!hasSafePortableAnnotationShape(parsed)) return { status: "invalid", reason: "unsafe-shape" };
     return isRecord(parsed) && "placekeeper" in parsed
       ? { status: "invalid", reason: "requires-visible-annotation" }
       : { status: "foreign" };

@@ -335,7 +335,8 @@ test.describe('shared viewer foundation', () => {
     expect(overLimit.pages).toHaveLength(PDF_SELECTION_PAGE_LIMIT + 1);
     expect(overLimit.formatted).toHaveLength(PDF_SELECTION_PAGE_LIMIT + 1);
     expect(overLimit.pages.every(({ geometryCached }) => geometryCached)).toBe(true);
-    expect(overLimit.text.at(-1)).toContain('PAGE 13');
+    expect(overLimit.pages.every(({ text }) => text === null)).toBe(true);
+    expect(overLimit.text).toEqual([]);
   });
 
   test('never arms text selection from a secondary pointer gesture', async ({ page }) => {

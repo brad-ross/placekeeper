@@ -4,11 +4,15 @@ import {
   type ReviewItem,
   type ReviewSelectionPageEvidenceV1,
 } from './review-model.js';
+import { hasSafePortableAnnotationShape } from './portable-annotation-shape.js';
 
 export const PORTABLE_ANNOTATION_MAX_BYTES = 32 * 1024;
 
 export const PORTABLE_ANNOTATION_TOO_LARGE_MESSAGE =
   'This annotation contains too much text or geometry to preserve as editable metadata. Shorten it and try again.';
+
+export const PORTABLE_ANNOTATION_UNSAFE_SHAPE_MESSAGE =
+  'This annotation is too complex to preserve as editable metadata. Shorten the selection and try again.';
 
 export interface SerializedPortableAnnotationChild {
   readonly pageIndex: number;
@@ -134,10 +138,11 @@ export function serializePortableAnnotationGroup(
 }
 
 export function assertPortableAnnotationGroupWritable(item: ReviewItem): void {
-  if (
-    serializePortableAnnotationGroup(item)
-      .some(({ byteLength }) => byteLength > PORTABLE_ANNOTATION_MAX_BYTES)
-  ) {
+  const children = serializePortableAnnotationGroup(item);
+  if (children.some(({ custom }) => !hasSafePortableAnnotationShape(custom))) {
+    throw new PortableAnnotationGroupError(PORTABLE_ANNOTATION_UNSAFE_SHAPE_MESSAGE);
+  }
+  if (children.some(({ byteLength }) => byteLength > PORTABLE_ANNOTATION_MAX_BYTES)) {
     throw new PortableAnnotationGroupError(PORTABLE_ANNOTATION_TOO_LARGE_MESSAGE);
   }
 }

@@ -1,5 +1,6 @@
 import {
   normalizeReviewSelectionAnchor,
+  synchronizeReviewItemAnchor,
   type ReviewSelectionPageEvidenceV1,
   type PendingReviewDraftV1,
   type ReviewAnchorDisposition,
@@ -7,6 +8,7 @@ import {
   type ReviewItem,
   type ReviewState,
 } from "../../../../packages/core/src/review-model.js";
+import { assertReviewAnchorEvidence } from "../../../../packages/core/src/review-reducer.js";
 
 export interface PdfAnchorPage {
   readonly pageIndex: number;
@@ -264,6 +266,17 @@ function reconcilePdfAnchorWithPassageIndex(
           },
         };
       }
+      try {
+        assertReviewAnchorEvidence(resolvedAnchor);
+      } catch {
+        return {
+          anchor,
+          disposition: {
+            kind: "unsupported",
+            reason: "reconciled-selection-violates-canonical-invariants",
+          },
+        };
+      }
       return {
         anchor: resolvedAnchor,
         disposition: { kind: "resolved", generation },
@@ -332,11 +345,11 @@ function reconcileItem(
     generation,
     passageIndex,
   );
+  const synchronized = synchronizeReviewItemAnchor(item, resolved.anchor);
   return {
-    ...item,
-    pageIndex: resolved.anchor.pageIndex,
+    ...synchronized,
     reconciliation: {
-      ...item.reconciliation,
+      ...synchronized.reconciliation!,
       anchor: resolved.anchor,
       disposition: resolved.disposition,
     },

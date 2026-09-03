@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import { Rotation, transformPosition, transformRect } from '@embedpdf/models';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  Rotation,
+  transformPosition,
+  transformRect,
+  type PdfDocumentObject,
+  type PdfEngine,
+} from '@embedpdf/models';
 
 import {
   createCaretAnchor,
@@ -9,9 +15,15 @@ import {
 } from '../src/pdf/selection-anchor.js';
 import {
   captureViewerSelection,
+  createEngineAnchorPageReader,
   readViewerSelectionEvidence,
 } from '../src/pdf/viewer-selection-adapter.js';
 import { buildViewerDocumentOptions } from '../src/pdf/embedpdf-viewer.js';
+import {
+  PDF_SELECTION_GEOMETRY_CACHE_PAGE_LIMIT,
+  PDF_SELECTION_PAGE_LIMIT,
+  PDF_SELECTION_PAGE_LIMIT_MESSAGE,
+} from '../src/pdf/selection-page-limit.js';
 
 const naturalRect = {
   origin: { x: 24, y: 36 },
@@ -632,6 +644,91 @@ describe('selection anchors', () => {
     });
     expect(evidence.formatted.map(({ pageIndex }) => pageIndex)).toEqual([0, 1, 2]);
     expect(evidence.selectionGeneration.length).toBeGreaterThan(0);
+  });
+
+  it('rejects an over-limit range without extracting selected text or page geometry', async () => {
+    const selectedPages = PDF_SELECTION_PAGE_LIMIT + 1;
+    const selectedText = vi.fn(() => ({
+      toPromise: async () => Array.from({ length: selectedPages }, () => 'discarded'),
+    }));
+    const readPage = vi.fn(async (pageIndex: number) => ({
+      ...page(Rotation.Degree0),
+      pageIndex,
+    }));
+    const state = {
+      geometry: {},
+      rects: {},
+      selection: {
+        start: { page: 0, index: 0 },
+        end: { page: selectedPages - 1, index: 4 },
+      },
+      slices: Object.fromEntries(Array.from({ length: selectedPages }, (_, pageIndex) => [
+        pageIndex,
+        { start: 0, count: 5 },
+      ])),
+      active: true,
+      selecting: false,
+    };
+    const result = await captureViewerSelection({
+      documentId: 'over-limit-doc',
+      selection: {
+        getFormattedSelection: () => Array.from({ length: selectedPages }, (_, pageIndex) => ({
+          pageIndex,
+          rect: naturalRect,
+          segmentRects: [naturalRect],
+        })),
+        getSelectedText: selectedText,
+        getState: () => state,
+      },
+      pages: { read: readPage },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      userMessage: PDF_SELECTION_PAGE_LIMIT_MESSAGE,
+      diagnostic: 'selection-page-limit-exceeded',
+    });
+    expect(selectedText).not.toHaveBeenCalled();
+    expect(readPage).not.toHaveBeenCalled();
+  });
+
+  it('bounds cached engine pages across disjoint spans while deduplicating in-flight reads', async () => {
+    const pageCount = PDF_SELECTION_GEOMETRY_CACHE_PAGE_LIMIT + PDF_SELECTION_PAGE_LIMIT;
+    const pages = Array.from({ length: pageCount }, (_, pageIndex) => ({
+      pageIndex,
+      size: { width: 540, height: 720 },
+      rotation: Rotation.Degree0,
+    }));
+    const extractText = vi.fn((_document: PdfDocumentObject, [pageIndex]: number[]) => ({
+      toPromise: async () => `page ${pageIndex}`,
+    }));
+    const getPageTextRects = vi.fn((_document: PdfDocumentObject, pdfPage: { pageIndex: number }) => ({
+      toPromise: async () => [{ content: `page ${pdfPage.pageIndex}`, rect: naturalRect }],
+    }));
+    const document = { pages } as unknown as PdfDocumentObject;
+    const reader = createEngineAnchorPageReader({
+      extractText,
+      getPageTextRects,
+    } as unknown as PdfEngine, document);
+
+    const firstRead = reader.read(0);
+    expect(reader.read(0)).toBe(firstRead);
+    await firstRead;
+    expect(extractText).toHaveBeenCalledTimes(1);
+
+    await Promise.all(Array.from({ length: PDF_SELECTION_PAGE_LIMIT - 1 }, (_, index) => (
+      reader.read(index + 1)
+    )));
+    await reader.read(0);
+    await Promise.all(Array.from({ length: PDF_SELECTION_PAGE_LIMIT }, (_, index) => (
+      reader.read(PDF_SELECTION_PAGE_LIMIT + index)
+    )));
+
+    const callsBeforeCacheChecks = extractText.mock.calls.length;
+    await reader.read(0);
+    expect(extractText).toHaveBeenCalledTimes(callsBeforeCacheChecks);
+    await reader.read(1);
+    expect(extractText).toHaveBeenCalledTimes(callsBeforeCacheChecks + 1);
   });
 
   it('captures forward and reverse three-page selections as the same canonical anchor', async () => {

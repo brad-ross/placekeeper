@@ -164,6 +164,7 @@ export interface ReviewShellProps {
   generationRefreshStatus?: GenerationRefreshStatus;
   locationRestoreStatus?: LocationRestoreStatus;
   toolError?: string | null;
+  onSelectionPageLimitExceeded?(): void;
   onExportReviewedCopy?(confirmPossiblyStale?: true): Promise<unknown>;
   listOpen?: boolean;
   selectionUpdate: SelectionUpdate;
@@ -611,8 +612,9 @@ export function ReviewShell(props: ReviewShellProps) {
     : undefined;
   const annotationReaderOpen = annotationReaderRecord !== null;
   const selectionAnchor = reliableSelection(props.selectionUpdate);
-  const selectionActionsAvailable = selectionAnchor !== null
-    && props.selectionUpdate.generation !== consumedSelectionGeneration;
+  const selectionActionsAvailable = (
+    selectionAnchor !== null || props.selectionUpdate.kind === 'over-limit'
+  ) && props.selectionUpdate.generation !== consumedSelectionGeneration;
   const competingPdfSelections = props.pdfCopySnapshots?.main?.kind !== undefined
     && props.pdfCopySnapshots.main.kind !== 'cleared'
     && props.pdfCopySnapshots.reference?.kind !== undefined
@@ -1376,6 +1378,10 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const startHighlight = () => {
     if (authoringSessionRef.current !== null) return;
+    if (props.selectionUpdate.kind === 'over-limit') {
+      props.onSelectionPageLimitExceeded?.();
+      return;
+    }
     const anchor = selectionAnchor;
     const selectionGeneration = props.selectionUpdate.kind === 'reliable'
       ? props.selectionUpdate.generation
@@ -1390,6 +1396,10 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const startReplacement = () => {
     if (authoringSessionRef.current !== null) return;
+    if (props.selectionUpdate.kind === 'over-limit') {
+      props.onSelectionPageLimitExceeded?.();
+      return;
+    }
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!selectionAnchor || props.selectionUpdate.kind !== 'reliable') {
       setAnnouncement('Select reliable text to suggest a replacement.');
@@ -1404,6 +1414,10 @@ export function ReviewShell(props: ReviewShellProps) {
   };
 
   const deleteSelection = () => {
+    if (props.selectionUpdate.kind === 'over-limit') {
+      props.onSelectionPageLimitExceeded?.();
+      return;
+    }
     const selectionGeneration = props.selectionUpdate.kind === 'reliable'
       ? props.selectionUpdate.generation
       : undefined;
@@ -1843,7 +1857,11 @@ export function ReviewShell(props: ReviewShellProps) {
           data-pdf-copy-owner={props.pdfCopyOwner ?? 'none'}
         >Copy source: {pdfCopyOwnerLabel}</p> : null}
         <div className="review-document">{props.children}</div>
-        <div className="review-contextual-host" data-review-contextual-host>
+        <div
+          className="review-contextual-host"
+          data-review-contextual-host
+          data-selection-status={props.selectionUpdate.kind}
+        >
           {selectionActionsAvailable && props.selectionPlacement ? (
             <ContextActionPalette
               placement={props.selectionPlacement}

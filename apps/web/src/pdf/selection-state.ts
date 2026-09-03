@@ -6,6 +6,7 @@ export type SelectionUpdate =
   | { readonly kind: 'cleared'; readonly generation: number }
   | { readonly kind: 'pending'; readonly generation: number }
   | { readonly kind: 'reliable'; readonly generation: number; readonly anchor: SelectionAnchor }
+  | { readonly kind: 'over-limit'; readonly generation: number; readonly userMessage: string }
   | {
       readonly kind: 'unreliable';
       readonly generation: number;
@@ -90,12 +91,50 @@ export function copySelectionUpdateFromEvidence(
   generation: number,
   evidence: {
     readonly stable: boolean;
-    readonly selection: unknown | null;
+    readonly selection: {
+      readonly start: { readonly page: number; readonly index?: number };
+      readonly end: { readonly page: number; readonly index?: number };
+    } | null;
     readonly pageCount: number;
+    readonly pages: ReadonlyArray<{
+      readonly pageIndex: number;
+      readonly text: string | null;
+      readonly sliceCount: number;
+    }>;
     readonly text: readonly string[];
   },
 ): CopySelectionUpdate {
-  if (!evidence.stable || evidence.selection === null || evidence.text.length === 0) {
+  const { selection } = evidence;
+  const expectedPageCount = selection === null
+    ? 0
+    : selection.end.page - selection.start.page + 1;
+  if (
+    evidence.stable
+    && selection !== null
+    && evidence.pageCount === expectedPageCount
+    && evidence.pageCount > PDF_SELECTION_PAGE_LIMIT
+  ) {
+    // Preserve a commandable over-limit snapshot without materializing text that
+    // can never be copied. resolvePdfCopyCommand rejects it before clipboard I/O.
+    return {
+      kind: 'ready',
+      surface,
+      generation,
+      text: '',
+      pageCount: evidence.pageCount,
+    };
+  }
+  const completePageText = selection !== null
+    && evidence.pageCount === expectedPageCount
+    && evidence.pages.length === expectedPageCount
+    && evidence.text.length === expectedPageCount
+    && evidence.pages.every((page, index) => (
+      page.pageIndex === selection.start.page + index
+      && page.sliceCount > 0
+      && page.text !== null
+      && page.text === evidence.text[index]
+    ));
+  if (!evidence.stable || !completePageText) {
     return { kind: 'unavailable', surface, generation };
   }
   return {
@@ -188,21 +227,25 @@ export function acceptSelectionUpdate(
   if (next.generation < current.generation) return current;
   if (next.generation > current.generation) return next;
   if (current.kind !== 'pending') return current;
-  return next.kind === 'reliable' || next.kind === 'unreliable' ? next : current;
+  return next.kind === 'reliable' || next.kind === 'over-limit' || next.kind === 'unreliable'
+    ? next
+    : current;
 }
 
 export function terminalSelectionUpdate(
   generation: number,
   result: SelectionAnchorResult,
 ): SelectionUpdate {
-  return result.ok
-    ? { kind: 'reliable', generation, anchor: result.anchor }
-    : {
-        kind: 'unreliable',
-        generation,
-        userMessage: result.userMessage,
-        diagnostic: result.diagnostic,
-      };
+  if (result.ok) return { kind: 'reliable', generation, anchor: result.anchor };
+  if (result.diagnostic === 'selection-page-limit-exceeded') {
+    return { kind: 'over-limit', generation, userMessage: result.userMessage };
+  }
+  return {
+    kind: 'unreliable',
+    generation,
+    userMessage: result.userMessage,
+    diagnostic: result.diagnostic,
+  };
 }
 
 export function reliableSelection(update: SelectionUpdate): SelectionAnchor | null {
@@ -211,6 +254,7 @@ export function reliableSelection(update: SelectionUpdate): SelectionAnchor | nu
 
 export function selectionReadinessMessage(update: SelectionUpdate): string | null {
   if (update.kind === 'pending') return SELECTION_PENDING_MESSAGE;
+  if (update.kind === 'over-limit') return update.userMessage;
   if (update.kind === 'unreliable') return update.userMessage;
   return null;
 }
