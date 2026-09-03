@@ -53,6 +53,8 @@
     "install:local": "/bin/sh ./install.sh",
     "notarize:macos": "tsx packaging/macos/notarize.ts",
     "smoke:installed": "tsx packaging/macos/smoke-installed.ts",
+    "spike:electron": "pnpm --dir apps/electron-spike start",
+    "test:electron-spike": "pnpm --dir apps/electron-spike test",
     "typecheck": "tsc -p tsconfig.base.json --noEmit",
     "lint": "tsc -p tsconfig.base.json --noEmit"
   },
