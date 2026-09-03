@@ -5,6 +5,11 @@ import type {
   ReviewAnnotation,
 } from "../../../../packages/core/src/pdf-writer.js";
 import {
+  inspectPortableAnnotations,
+  inspectProjectedPortableAnnotations,
+} from "../../../../packages/core/src/portable-annotation.js";
+import type { ReviewItem } from "../../../../packages/core/src/review-model.js";
+import {
   inspectPdfWithEmbedPdf,
   type InspectedPdf,
   type InspectedPdfAnnotation,
@@ -43,6 +48,26 @@ function sha256(bytes: Uint8Array): string {
 
 function fail(message: string): never {
   throw new PdfVerificationError(message);
+}
+
+function portableInventory(inspection: InspectedPdf): {
+  readonly items: readonly ReviewItem[];
+  readonly physicalIds: ReadonlySet<string>;
+} {
+  const result = inspectPortableAnnotations(inspection.annotations.map((annotation) => ({
+    custom: annotation.custom,
+    visible: annotation,
+  })));
+  if (result.status === "invalid") {
+    fail(`The reviewed PDF contains an incomplete portable annotation group (${result.reason}).`);
+  }
+  if (result.status === "foreign") return { items: [], physicalIds: new Set() };
+  return {
+    items: result.items,
+    physicalIds: new Set(result.ownedCandidates.map(
+      ({ candidateIndex }) => inspection.annotations[candidateIndex]!.id,
+    )),
+  };
 }
 
 function stableAnnotation(
@@ -133,8 +158,9 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
     sourceInspection ?? inspectPdfWithEmbedPdf(sourcePdf),
     candidateInspection ?? inspectPdfWithEmbedPdf(candidatePdf),
   ]);
-  const sourcePortableItems = source.portableItems;
-  const candidatePortableItems = candidate.portableItems;
+  const sourcePortable = portableInventory(source);
+  const candidatePortable = portableInventory(candidate);
+  const candidatePortableItems = candidatePortable.items;
   if (source.pageCount !== candidate.pageCount || candidate.pageCount !== evidence.pageCount) {
     fail("The reviewed PDF page inventory differs from the source.");
   }
@@ -147,7 +173,7 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
     fail("The frozen review contains duplicate annotation IDs.");
   }
   const sourceIds = new Set(source.annotations.map(({ id }) => id));
-  const sourceOwnedIds = new Set(sourcePortableItems.map(({ id }) => id));
+  const sourceOwnedIds = sourcePortable.physicalIds;
   if ([...requestedIds].some((id) => sourceIds.has(id) && !sourceOwnedIds.has(id))) {
     fail("A review annotation ID collides with a pre-existing annotation.");
   }
@@ -176,13 +202,28 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
   if (candidate.annotations.length !== sourceInventory.length + annotations.length) {
     fail("The reviewed PDF annotation inventory contains unexpected entries.");
   }
+  const requestedPortable = inspectProjectedPortableAnnotations(annotations);
+  if (requestedPortable.status === "invalid") {
+    fail(`The frozen review contains an incomplete portable annotation group (${requestedPortable.reason}).`);
+  }
   const portableIds = candidatePortableItems.map(({ id }) => id).sort();
-  const requestedPortableIds = annotations
-    .filter(({ custom }) => custom !== undefined)
-    .map(({ id }) => id)
-    .sort();
+  const requestedPortableIds = requestedPortable.status === "owned"
+    ? requestedPortable.items.map(({ id }) => id).sort()
+    : [];
   if (JSON.stringify(portableIds) !== JSON.stringify(requestedPortableIds)) {
     fail("The reviewed PDF portable annotation inventory is incomplete.");
+  }
+  const candidatePortableById = new Map(
+    candidatePortableItems.map((item) => [item.id, JSON.stringify(item)]),
+  );
+  if (
+    requestedPortable.status === "owned" &&
+    requestedPortable.items.some((item) => {
+      const reopened = candidatePortableById.get(item.id);
+      return reopened === undefined || reopened !== JSON.stringify(item);
+    })
+  ) {
+    fail("The reviewed PDF portable annotation payload differs from the frozen review.");
   }
 
   const candidateById = new Map<string, InspectedPdfAnnotation[]>();

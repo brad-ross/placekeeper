@@ -27,7 +27,8 @@ import type {
 } from '../../core/src/pdf-writer.js';
 import {
   inspectPortableAnnotation,
-  inspectProjectedPortableAnnotation,
+  inspectPortableAnnotations,
+  inspectProjectedPortableAnnotations,
   type VisiblePortableAnnotation,
 } from '../../core/src/portable-annotation.js';
 import type { JsonValue, ReviewItem, ReviewState } from '../../core/src/review-model.js';
@@ -358,32 +359,25 @@ function portableItemsFromPages(
   items: ReviewItem[];
   owned: Array<{ pageIndex: number; annotation: PdfAnnotationObject; item: ReviewItem }>;
 } {
-  const counts = new Map<string, number>();
-  for (const annotations of annotationPages) {
-    for (const annotation of annotations) {
-      counts.set(annotation.id, (counts.get(annotation.id) ?? 0) + 1);
-    }
+  const flattened = annotationPages.flatMap((annotations, pageIndex) =>
+    annotations.map((annotation) => ({ pageIndex, annotation })),
+  );
+  const inspected = inspectPortableAnnotations(flattened.map(({ pageIndex, annotation }) => ({
+    custom: annotation.custom,
+    visible: visibleAnnotation(annotation, pageIndex),
+  })));
+  if (inspected.status === 'invalid') {
+    throw new PdfWriterError(
+      'invalid-portable-annotation',
+      `Placekeeper portable annotation metadata is incomplete or inconsistent (${inspected.reason}).`,
+    );
   }
-  const owned: Array<{
-    pageIndex: number;
-    annotation: PdfAnnotationObject;
-    item: ReviewItem;
-  }> = [];
-  annotationPages.forEach((annotations, pageIndex) => {
-    for (const annotation of annotations) {
-      const inspected = inspectPortableAnnotation(
-        annotation.custom,
-        visibleAnnotation(annotation, pageIndex),
-        counts.has(annotation.id)
-          ? { visibleIdCount: counts.get(annotation.id)! }
-          : {},
-      );
-      if (inspected.status === 'owned') {
-        owned.push({ pageIndex, annotation, item: inspected.item });
-      }
-    }
-  });
-  return { items: owned.map(({ item }) => item), owned };
+  if (inspected.status === 'foreign') return { items: [], owned: [] };
+  const owned = inspected.ownedCandidates.map(({ candidateIndex, item }) => ({
+    ...flattened[candidateIndex]!,
+    item,
+  }));
+  return { items: [...inspected.items], owned };
 }
 
 export async function readPortableReviewItems(bytes: Uint8Array): Promise<ReviewItem[]> {
@@ -401,6 +395,7 @@ export async function readPortableReviewItems(bytes: Uint8Array): Promise<Review
       await engine.closeDocument(document).toPromise();
     }
   } catch (error) {
+    if (error instanceof PdfWriterError) throw error;
     throw new PdfWriterError('invalid-pdf', 'EmbedPDF could not read portable annotations.', {
       cause: error,
     });
@@ -491,6 +486,7 @@ export async function inspectPdfWithEmbedPdf(bytes: Uint8Array): Promise<Inspect
   try {
     return await inspectWithEngine(engine, bytes);
   } catch (error) {
+    if (error instanceof PdfWriterError) throw error;
     throw new PdfWriterError('invalid-pdf', 'EmbedPDF could not reopen the PDF.', { cause: error });
   } finally {
     await engine.destroy().toPromise();
@@ -521,6 +517,7 @@ export async function inspectPdfAnnotationCatalogWithEmbedPdf(
       portableItems: portableItemsFromPages(pages).items,
     };
   } catch (error) {
+    if (error instanceof PdfWriterError) throw error;
     throw new PdfWriterError('invalid-pdf', 'EmbedPDF could not inspect PDF annotations.', {
       cause: error,
     });
@@ -647,11 +644,36 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
     const portable = portableItemsFromPages(beforePages);
     const ownedIds = new Set(portable.owned.map(({ annotation }) => annotation.id));
     const foreignPreexisting = preexisting.filter(({ id }) => !ownedIds.has(id));
+    const requestedPortable = inspectProjectedPortableAnnotations(request.annotations);
+    if (requestedPortable.status === 'invalid') {
+      throw new PdfWriterError(
+        'backend-error',
+        `The requested portable annotation set is incomplete or inconsistent (${requestedPortable.reason}).`,
+      );
+    }
+    const requestedItemById = new Map(
+      requestedPortable.status === 'owned'
+        ? requestedPortable.items.map((item) => [item.id, item] as const)
+        : [],
+    );
+    const requestedPortableIndexes = new Set(
+      requestedPortable.status === 'owned' ? requestedPortable.ownedIndexes : [],
+    );
     const requestedPortableItems = new Map(
-      request.annotations.flatMap((annotation) => {
-        const inspected = inspectProjectedPortableAnnotation(annotation);
-        return inspected.status === 'owned' ? [[annotation.id, inspected.item] as const] : [];
+      request.annotations.flatMap((annotation, index) => {
+        if (
+          requestedPortable.status !== 'owned' ||
+          !requestedPortableIndexes.has(index)
+        ) return [];
+        const item = requestedItemById.get(annotation.reviewItemId ?? annotation.id);
+        return item === undefined ? [] : [[annotation.id, item] as const];
       }),
+    );
+    const requestedCanonical = new Map(
+      [...requestedPortableItems].map(([id, item]) => [id, JSON.stringify(canonical(item))]),
+    );
+    const existingCanonical = new Map(
+      portable.items.map((item) => [item.id, JSON.stringify(canonical(item))]),
     );
     const preservedOwnedIds = new Set<string>();
 
@@ -659,7 +681,7 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
       const requested = requestedPortableItems.get(owned.annotation.id);
       if (
         requested !== undefined &&
-        JSON.stringify(canonical(requested)) === JSON.stringify(canonical(owned.item))
+        requestedCanonical.get(owned.annotation.id) === existingCanonical.get(owned.item.id)
       ) {
         preservedOwnedIds.add(owned.annotation.id);
         continue;
@@ -699,13 +721,17 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
         'At least one annotation lacks an explicit normal appearance.',
       );
     }
-    const portableRequested = request.annotations.filter(
-      (annotation) => annotation.custom !== undefined,
-    );
     const reopenedItems = reopened.portableItems;
+    const reopenedItemById = new Map(
+      reopenedItems.map((item) => [item.id, JSON.stringify(canonical(item))]),
+    );
     if (
-      reopenedItems.length !== portableRequested.length ||
-      portableRequested.some(({ id }) => !reopenedItems.some((item) => item.id === id))
+      reopenedItems.length !== requestedItemById.size ||
+      [...requestedItemById].some(([id, item]) => {
+        const reopenedItem = reopenedItemById.get(id);
+        return reopenedItem === undefined ||
+          reopenedItem !== JSON.stringify(canonical(item));
+      })
     ) {
       const diagnostics = created.map((annotation) => ({
         id: annotation.id,
