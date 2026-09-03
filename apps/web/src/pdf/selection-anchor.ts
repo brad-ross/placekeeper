@@ -1,4 +1,9 @@
 import { Rotation, type Position, type Rect, type Size } from '@embedpdf/models';
+import type {
+  ReviewSelectionAnchorV1,
+  ReviewSelectionPageEvidenceV1,
+} from '../../../../packages/core/src/review-model.js';
+import { normalizeReviewSelectionAnchor } from '../../../../packages/core/src/review-model.js';
 
 import {
   assessPageTextReliability,
@@ -38,13 +43,7 @@ export interface PdfSpaceRect {
   height: number;
 }
 
-export interface SelectionAnchor {
-  pageIndex: number;
-  quote: string;
-  prefix: string;
-  suffix: string;
-  rect: PdfSpaceRect;
-  segmentRects: PdfSpaceRect[];
+export interface SelectionAnchor extends ReviewSelectionAnchorV1 {
   reliable: true;
 }
 
@@ -68,6 +67,11 @@ export interface CreateSelectionAnchorInput {
   glyphCount: number;
   formattedSelections: readonly FormattedSelection[];
   contextCharacters?: number;
+}
+
+export interface CreateSelectionAnchorSpanInput {
+  readonly pages: readonly CreateSelectionAnchorInput[];
+  readonly separator?: string;
 }
 
 function toNaturalRect(page: AnchorPage, selection: FormattedSelection, rect: Rect): Rect {
@@ -180,18 +184,75 @@ export function createSelectionAnchor(input: CreateSelectionAnchorInput): Select
   const quoteIndex = input.quoteStart ?? input.page.extractedText.indexOf(input.quote);
   const contextCharacters = Math.max(0, input.contextCharacters ?? 48);
   const segmentRects = naturalRects.map(toPageSpace);
+  const prefix = input.page.extractedText.slice(Math.max(0, quoteIndex - contextCharacters), quoteIndex);
+  const suffix = input.page.extractedText.slice(
+    quoteIndex + input.quote.length,
+    quoteIndex + input.quote.length + contextCharacters,
+  );
+  const rect = union(segmentRects);
+  const pageEvidence: ReviewSelectionPageEvidenceV1 = {
+    pageIndex: input.page.pageIndex,
+    quote: input.quote,
+    prefix,
+    suffix,
+    rect,
+    segmentRects,
+  };
   return {
     ok: true,
     anchor: {
       pageIndex: input.page.pageIndex,
       quote: input.quote,
-      prefix: input.page.extractedText.slice(Math.max(0, quoteIndex - contextCharacters), quoteIndex),
-      suffix: input.page.extractedText.slice(
-        quoteIndex + input.quote.length,
-        quoteIndex + input.quote.length + contextCharacters,
-      ),
-      rect: union(segmentRects),
+      prefix,
+      suffix,
+      rect,
       segmentRects,
+      pages: [pageEvidence],
+      pageBoundaries: [],
+      reliable: true,
+    },
+  };
+}
+
+/** Normalize viewer drag direction into one document-ordered logical anchor. */
+export function createSelectionAnchorSpan(
+  input: CreateSelectionAnchorSpanInput,
+): SelectionAnchorResult {
+  const pages = [...input.pages].sort((left, right) => left.page.pageIndex - right.page.pageIndex);
+  if (
+    pages.length === 0 ||
+    pages.some((page, index) => index > 0 && page.page.pageIndex !== pages[index - 1]!.page.pageIndex + 1)
+  ) {
+    return {
+      ok: false,
+      userMessage: SELECTION_UNAVAILABLE_MESSAGE,
+      diagnostic: 'selection-crosses-pages',
+    };
+  }
+  const anchors: SelectionAnchor[] = [];
+  for (const page of pages) {
+    const result = createSelectionAnchor(page);
+    if (!result.ok) return result;
+    anchors.push(result.anchor);
+  }
+  const separator = input.separator ?? '\n';
+  const pageEntries = anchors.map((anchor) => normalizeReviewSelectionAnchor(anchor).pages[0]!);
+  const first = pageEntries[0]!;
+  const last = pageEntries.at(-1)!;
+  return {
+    ok: true,
+    anchor: {
+      pageIndex: first.pageIndex,
+      quote: pageEntries.map(({ quote }) => quote).join(separator),
+      prefix: first.prefix,
+      suffix: last.suffix,
+      rect: first.rect,
+      segmentRects: [...first.segmentRects],
+      pages: pageEntries,
+      pageBoundaries: pageEntries.slice(0, -1).map(({ pageIndex }) => ({
+        afterPageIndex: pageIndex,
+        separator,
+      })),
       reliable: true,
     },
   };

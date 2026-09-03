@@ -5,13 +5,13 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { PdfWriterError, type PdfWriter } from "../../../packages/core/src/pdf-writer.js";
-import { inspectProjectedPortableAnnotation } from "../../../packages/core/src/portable-annotation.js";
+import { inspectProjectedPortableAnnotations } from "../../../packages/core/src/portable-annotation.js";
 import type { ReviewCommand, ReviewItem, ReviewState } from "../../../packages/core/src/review-model.js";
 import { PdfSaveCoordinator } from "../src/saving/pdf-save-coordinator.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
 import { BrowserSourceStore } from "../src/browser/browser-source-store.js";
 import type { DestinationPicker } from "../src/host/destination-picker.js";
-import type { PdfExportVerifier } from "../src/export/pdf-verifier.js";
+import { PdfVerificationError, type PdfExportVerifier } from "../src/export/pdf-verifier.js";
 import { DraftSnapshotStore, reviewStateDigest } from "../src/recovery/draft-snapshot.js";
 
 const roots: string[] = [];
@@ -68,6 +68,7 @@ async function setup(
       | { readonly eligible: false; readonly code: "permission-denied"; readonly message: string }
     >;
     readonly workflowMode?: "standard" | "generated-output";
+    readonly verify?: PdfExportVerifier;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "placekeeper-save-"));
@@ -88,7 +89,7 @@ async function setup(
   const coordinator = new PdfSaveCoordinator({
     broker,
     writer: options.writer ?? fakeWriter(),
-    verify: verifyIds,
+    verify: options.verify ?? verifyIds,
     ...(picker === undefined ? {} : { picker }),
   });
   return { root, source, original, broker, coordinator, sessionId: opened.launch.sessionId };
@@ -177,6 +178,38 @@ function addLongHighlight(expectedRevision: number): ReviewCommand {
   };
 }
 
+function addCrossPage(expectedRevision: number): ReviewCommand {
+  const command = add(expectedRevision);
+  if (command.type !== "add") throw new Error("Expected an add command");
+  const pages = [0, 1, 2].map((pageIndex) => ({
+    pageIndex,
+    quote: `page ${pageIndex + 1}`,
+    prefix: pageIndex === 0 ? "before " : "",
+    suffix: pageIndex === 2 ? " after" : "",
+    rect: { x: 1, y: 1 + pageIndex * 4, width: 2, height: 2 },
+    segmentRects: [{ x: 1, y: 1 + pageIndex * 4, width: 2, height: 2 }],
+  }));
+  return {
+    ...command,
+    item: {
+      ...command.item,
+      payload: {
+        ...command.item.payload,
+        quote: pages.map(({ quote }) => quote).join("\n"),
+        prefix: pages[0]!.prefix,
+        suffix: pages[2]!.suffix,
+        rect: pages[0]!.rect,
+        segmentRects: pages[0]!.segmentRects,
+        pages,
+        pageBoundaries: [
+          { afterPageIndex: 0, separator: "\n" },
+          { afterPageIndex: 1, separator: "\n" },
+        ],
+      },
+    },
+  };
+}
+
 function withSegmentCount(item: ReviewItem, count: number): ReviewItem {
   return {
     ...item,
@@ -213,15 +246,90 @@ function portableCheckingWriter(): PdfWriter {
   return {
     ...delegate,
     write: async (request) => {
-      for (const annotation of request.annotations) {
-        expect(inspectProjectedPortableAnnotation(annotation)).toMatchObject({ status: "owned" });
-      }
+      expect(inspectProjectedPortableAnnotations(request.annotations))
+        .toMatchObject(request.annotations.length === 0 ? { status: "foreign" } : { status: "owned" });
       return delegate.write(request);
     },
   };
 }
 
 describe("coalescing PDF autosave", () => {
+  it("fails portable reopen without activating an empty replacement state", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-portable-import-"));
+    roots.push(root);
+    const source = join(root, "paper.pdf");
+    await writeFile(source, "%PDF-1.7\ncorrupt grouped metadata\n%%EOF");
+    const broker = new SessionBroker({
+      recoveryRoot: join(root, "recovery"),
+      portableReader: async () => {
+        throw Object.assign(new Error("Incomplete portable group"), {
+          code: "invalid-portable-annotation",
+        });
+      },
+    });
+
+    await expect(broker.openReview({ pdfPath: source }))
+      .rejects.toMatchObject({ code: "invalid-portable-annotation" });
+    expect(broker.activity()).toEqual({
+      reviewPresence: 0,
+      codexTasks: 0,
+      transientWork: 0,
+    });
+  });
+
+  it.each(["copy", "original"] as const)(
+    "persists one cross-page item as a complete three-child group to the %s destination",
+    async (destination) => {
+      const { root, source, broker, coordinator, sessionId } = await setup(undefined, {
+        writer: portableCheckingWriter(),
+      });
+      const copy = join(root, "paper-annotated.pdf");
+      if (destination === "copy") await coordinator.chooseCopy(sessionId, copy);
+      else await coordinator.chooseOriginal(sessionId);
+
+      await broker.acceptMutation(sessionId, addCrossPage(0));
+      await coordinator.requestSave(sessionId);
+
+      const itemId = broker.state(sessionId)!.items[0]!.id;
+      const contents = await readFile(destination === "copy" ? copy : source, "utf8");
+      expect(contents).toContain(`${itemId}:projection:1`);
+      expect(contents).toContain(`${itemId}:projection:2`);
+      expect(contents).toContain(`${itemId}:projection:3`);
+      expect((await broker.freezeDelivery(sessionId)).items).toHaveLength(1);
+      expect(broker.saveStatus(sessionId)?.sync).toMatchObject({
+        phase: "clean",
+        savedRevision: 1,
+      });
+    },
+  );
+
+  it("keeps the prior saved PDF and complete semantic item when group verification fails", async () => {
+    const verify: PdfExportVerifier = async (input) => {
+      if (input.annotations.length > 0) {
+        throw new PdfVerificationError("Portable projection group is incomplete.");
+      }
+      return verifyIds(input);
+    };
+    const { root, broker, coordinator, sessionId } = await setup(undefined, {
+      writer: portableCheckingWriter(),
+      verify,
+    });
+    const copy = join(root, "paper-annotated.pdf");
+    await coordinator.chooseCopy(sessionId, copy);
+    const before = await readFile(copy);
+
+    await broker.acceptMutation(sessionId, addCrossPage(0));
+    await coordinator.requestSave(sessionId);
+
+    expect(await readFile(copy)).toEqual(before);
+    expect(broker.state(sessionId)?.items).toHaveLength(1);
+    expect(broker.state(sessionId)?.items[0]?.payload.pages).toHaveLength(3);
+    expect(broker.saveStatus(sessionId)?.sync).toMatchObject({
+      phase: "not-saved",
+      failure: "verification-failed",
+    });
+  });
+
   it("keeps generated output outside autosave and Replace Original paths", async () => {
     const { root, source, original, broker, coordinator, sessionId } = await setup(undefined, {
       workflowMode: "generated-output",

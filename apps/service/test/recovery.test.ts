@@ -109,6 +109,78 @@ function draft(revision: number): RecoverableDraft {
 }
 
 describe("atomic recovery generations", () => {
+  it("recovers one unresolved cross-page logical item without splitting its page evidence", async () => {
+    const directory = await temporaryDirectory();
+    const store = new DraftSnapshotStore(directory);
+    const base = draft(1);
+    const pages = [0, 1].map((pageIndex) => ({
+      pageIndex,
+      quote: pageIndex === 0 ? "claim across" : "pages",
+      prefix: pageIndex === 0 ? "before " : "",
+      suffix: pageIndex === 1 ? " after" : "",
+      rect: { x: 20, y: 30, width: 80, height: 12 },
+      segmentRects: [{ x: 20, y: 30, width: 80, height: 12 }],
+    }));
+    const anchor = {
+      kind: "selection" as const,
+      pageIndex: 0,
+      quote: "claim across\npages",
+      prefix: "before ",
+      suffix: " after",
+      rect: pages[0]!.rect,
+      segmentRects: pages[0]!.segmentRects,
+      pages,
+      pageBoundaries: [{ afterPageIndex: 0, separator: "\n" }],
+    };
+    const state: ReviewState = {
+      ...base.state,
+      workflow: {
+        ...base.state.workflow,
+        mode: "generated-output",
+        documentRole: "generated-output",
+        documentGeneration: 2,
+      },
+      items: [{
+        id: randomUUID(),
+        kind: "highlight",
+        pageIndex: 0,
+        createdAt: "2026-09-03T12:00:00.000Z",
+        updatedAt: "2026-09-03T12:01:00.000Z",
+        payload: {
+          quote: anchor.quote,
+          prefix: anchor.prefix,
+          suffix: anchor.suffix,
+          rect: anchor.rect,
+          segmentRects: anchor.segmentRects,
+          pages,
+          pageBoundaries: anchor.pageBoundaries,
+          reliable: true,
+          comment: "keep together",
+        },
+        reconciliation: {
+          schemaVersion: 1,
+          ownerViewId: "panel-a",
+          baseGeneration: 1,
+          revision: 1,
+          anchor,
+          disposition: { kind: "missing", reason: "semantic-anchor-not-found" },
+          previousAnchors: [],
+        },
+      }],
+    };
+    await store.persist({ ...base, state });
+
+    const recovered = await store.recover();
+    expect(recovered?.state.items).toHaveLength(1);
+    expect(recovered?.state.items[0]).toMatchObject({
+      payload: { comment: "keep together", pages: [{ pageIndex: 0 }, { pageIndex: 1 }] },
+      reconciliation: {
+        disposition: { kind: "missing" },
+        anchor: { pages: [{ pageIndex: 0 }, { pageIndex: 1 }] },
+      },
+    });
+  });
+
   it("protects generated-output pending authoring and hashes it as canonical state", async () => {
     const directory = await temporaryDirectory();
     const store = new DraftSnapshotStore(directory);

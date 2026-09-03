@@ -476,8 +476,11 @@ export class SessionBroker {
             let importedItems: readonly ReviewItem[] = [];
             try {
               importedItems = await abortable(this.#portableReader(bytes), signal);
-            } catch {
+            } catch (error) {
               signal?.throwIfAborted();
+              if ((error as { readonly code?: unknown }).code === "invalid-portable-annotation") {
+                throw error;
+              }
             }
             return { rewriteEligibility, importedItems };
           }
@@ -1151,7 +1154,10 @@ export class SessionBroker {
       importedItems = await this.#portableReader(
         new Uint8Array(await readFile(sourceSnapshot.path)),
       );
-    } catch {
+    } catch (error) {
+      if ((error as { readonly code?: unknown }).code === "invalid-portable-annotation") {
+        throw error;
+      }
       importedItems = [];
     }
     const initialOutputIdentity = {

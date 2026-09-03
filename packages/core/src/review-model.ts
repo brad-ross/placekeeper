@@ -29,16 +29,112 @@ export interface ReviewRectEvidence {
   readonly height: number;
 }
 
+export const PDF_SELECTION_PAGE_LIMIT = 12;
+
+export interface ReviewSelectionPageEvidenceV1 {
+  readonly pageIndex: number;
+  readonly quote: string;
+  readonly prefix: string;
+  readonly suffix: string;
+  readonly rect: ReviewRectEvidence;
+  readonly segmentRects: readonly ReviewRectEvidence[];
+}
+
+export interface ReviewSelectionPageBoundaryV1 {
+  /** The source page immediately before this synthetic clipboard separator. */
+  readonly afterPageIndex: number;
+  readonly separator: string;
+}
+
+export interface ReviewSelectionAnchorV1 {
+  readonly pageIndex: number;
+  /** Complete selected plain text in document order, including declared synthetic separators. */
+  readonly quote: string;
+  /** Compatibility aliases for the lead page and trailing context. */
+  readonly prefix: string;
+  readonly suffix: string;
+  readonly rect: ReviewRectEvidence;
+  readonly segmentRects: readonly ReviewRectEvidence[];
+  /** Absent only on legacy one-page payloads at a compatibility boundary. */
+  readonly pages?: readonly ReviewSelectionPageEvidenceV1[];
+  /** Synthetic separators are metadata, never page-source text. */
+  readonly pageBoundaries?: readonly ReviewSelectionPageBoundaryV1[];
+}
+
+export type CanonicalReviewSelectionAnchorV1 = ReviewSelectionAnchorV1 & {
+  readonly pages: readonly ReviewSelectionPageEvidenceV1[];
+  readonly pageBoundaries: readonly ReviewSelectionPageBoundaryV1[];
+};
+
+/** Normalize legacy one-page selection evidence without changing its compatibility aliases. */
+export function normalizeReviewSelectionAnchor<T extends ReviewSelectionAnchorV1>(
+  anchor: T,
+): T & CanonicalReviewSelectionAnchorV1 {
+  const legacyPage = {
+    pageIndex: anchor.pageIndex,
+    quote: anchor.quote,
+    prefix: anchor.prefix,
+    suffix: anchor.suffix,
+    rect: anchor.rect,
+    segmentRects: anchor.segmentRects,
+  };
+  const pages = anchor.pages ?? [legacyPage];
+  return {
+    ...anchor,
+    pages,
+    pageBoundaries: anchor.pageBoundaries ?? [],
+  };
+}
+
+export function canonicalReviewSelectionEvidence(
+  anchor: ReviewSelectionAnchorV1,
+): CanonicalReviewSelectionAnchorV1 {
+  const canonical = normalizeReviewSelectionAnchor(anchor);
+  return {
+    pageIndex: canonical.pageIndex,
+    quote: canonical.quote,
+    prefix: canonical.prefix,
+    suffix: canonical.suffix,
+    rect: { ...canonical.rect },
+    segmentRects: canonical.segmentRects.map((rect) => ({ ...rect })),
+    pages: canonical.pages.map((page) => ({
+      ...page,
+      rect: { ...page.rect },
+      segmentRects: page.segmentRects.map((rect) => ({ ...rect })),
+    })),
+    pageBoundaries: canonical.pageBoundaries.map((boundary) => ({ ...boundary })),
+  };
+}
+
+export function reviewSelectionPayload(
+  anchor: ReviewSelectionAnchorV1,
+  options: { readonly canonical?: boolean } = {},
+): Readonly<Record<string, JsonValue>> {
+  const evidence = canonicalReviewSelectionEvidence(anchor);
+  const includeCanonical = options.canonical === true
+    || anchor.pages !== undefined || anchor.pageBoundaries !== undefined;
+  return {
+    quote: evidence.quote,
+    prefix: evidence.prefix,
+    suffix: evidence.suffix,
+    rect: { ...evidence.rect },
+    segmentRects: evidence.segmentRects.map((rect) => ({ ...rect })),
+    ...(includeCanonical ? {
+      pages: evidence.pages.map((page) => ({
+        ...page,
+        rect: { ...page.rect },
+        segmentRects: page.segmentRects.map((rect) => ({ ...rect })),
+      })),
+      pageBoundaries: evidence.pageBoundaries.map((boundary) => ({ ...boundary })),
+    } : {}),
+    reliable: true,
+  };
+}
+
 export type ReviewAnchorEvidenceV1 =
-  | {
+  | (ReviewSelectionAnchorV1 & {
       readonly kind: "selection";
-      readonly pageIndex: number;
-      readonly quote: string;
-      readonly prefix: string;
-      readonly suffix: string;
-      readonly rect: ReviewRectEvidence;
-      readonly segmentRects: readonly ReviewRectEvidence[];
-    }
+    })
   | {
       readonly kind: "caret";
       readonly pageIndex: number;
@@ -52,6 +148,63 @@ export type ReviewAnchorEvidenceV1 =
       readonly nearbyText?: string;
       readonly rect: ReviewRectEvidence;
     };
+
+/** Keep a Review Item's compatibility payload and canonical reconciliation
+ * anchor in lockstep when semantic evidence moves to a new document layout. */
+export function synchronizeReviewItemAnchor(
+  item: ReviewItem,
+  anchor: ReviewAnchorEvidenceV1,
+): ReviewItem {
+  let payload: Readonly<Record<string, JsonValue>>;
+  if (anchor.kind === "selection") {
+    if (item.kind !== "replace" && item.kind !== "delete" && item.kind !== "highlight") {
+      throw new Error(`Review item ${item.kind} cannot use a selection anchor`);
+    }
+    const selection = reviewSelectionPayload(anchor, { canonical: true });
+    if (item.kind === "replace") {
+      const proposedText = item.payload.proposedText;
+      if (typeof proposedText !== "string") throw new Error("Replace item is missing proposed text");
+      payload = { ...selection, proposedText };
+    } else if (item.kind === "highlight") {
+      const comment = item.payload.comment;
+      payload = {
+        ...selection,
+        ...(typeof comment === "string" ? { comment } : {}),
+      };
+    } else {
+      payload = selection;
+    }
+  } else if (anchor.kind === "caret") {
+    if (item.kind !== "insert") throw new Error(`Review item ${item.kind} cannot use a caret anchor`);
+    const proposedText = item.payload.proposedText;
+    if (typeof proposedText !== "string") throw new Error("Insert item is missing proposed text");
+    payload = {
+      position: { ...anchor.rect },
+      leftContext: anchor.leftContext,
+      rightContext: anchor.rightContext,
+      reliable: true,
+      proposedText,
+    };
+  } else {
+    if (item.kind !== "pageNote") throw new Error(`Review item ${item.kind} cannot use a page anchor`);
+    const comment = item.payload.comment;
+    if (typeof comment !== "string") throw new Error("Page note is missing its comment");
+    payload = {
+      position: { ...anchor.rect },
+      comment,
+      ...(anchor.nearbyText === undefined ? {} : { nearbyText: anchor.nearbyText }),
+    };
+  }
+
+  return {
+    ...item,
+    pageIndex: anchor.pageIndex,
+    payload,
+    ...(item.reconciliation === undefined ? {} : {
+      reconciliation: { ...item.reconciliation, anchor },
+    }),
+  };
+}
 
 export type ReviewAnchorDisposition =
   | { readonly kind: "resolved"; readonly generation: number }
@@ -225,6 +378,44 @@ function rectEvidence(value: JsonValue | undefined): ReviewRectEvidence {
   return { x: x as number, y: y as number, width: width as number, height: height as number };
 }
 
+function selectionPages(value: JsonValue | undefined): readonly ReviewSelectionPageEvidenceV1[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error("Review selection pages are malformed");
+  return value.map((entry) => {
+    const page = record(entry);
+    if (
+      !Number.isSafeInteger(page.pageIndex) ||
+      typeof page.quote !== "string" ||
+      typeof page.prefix !== "string" ||
+      typeof page.suffix !== "string" ||
+      !Array.isArray(page.segmentRects)
+    ) throw new Error("Review selection page evidence is malformed");
+    return {
+      pageIndex: page.pageIndex as number,
+      quote: page.quote,
+      prefix: page.prefix,
+      suffix: page.suffix,
+      rect: rectEvidence(page.rect),
+      segmentRects: page.segmentRects.map((rect) => rectEvidence(rect)),
+    };
+  });
+}
+
+function selectionBoundaries(value: JsonValue | undefined): readonly ReviewSelectionPageBoundaryV1[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error("Review selection boundaries are malformed");
+  return value.map((entry) => {
+    const boundary = record(entry);
+    if (!Number.isSafeInteger(boundary.afterPageIndex) || typeof boundary.separator !== "string") {
+      throw new Error("Review selection boundary is malformed");
+    }
+    return {
+      afterPageIndex: boundary.afterPageIndex as number,
+      separator: boundary.separator,
+    };
+  });
+}
+
 function payloadText(item: ReviewItem, key: string): string {
   const value = item.payload[key];
   if (typeof value !== "string") throw new Error(`Review item ${item.id} is missing ${key}`);
@@ -250,6 +441,8 @@ export function anchorEvidenceFromReviewItem(item: ReviewItem): ReviewAnchorEvid
       rect: rectEvidence(item.payload.position),
     };
   }
+  const pages = selectionPages(item.payload.pages);
+  const pageBoundaries = selectionBoundaries(item.payload.pageBoundaries);
   return {
     kind: "selection",
     pageIndex: item.pageIndex,
@@ -260,6 +453,8 @@ export function anchorEvidenceFromReviewItem(item: ReviewItem): ReviewAnchorEvid
     segmentRects: Array.isArray(item.payload.segmentRects)
       ? item.payload.segmentRects.map((value) => rectEvidence(value))
       : [],
+    ...(pages === undefined ? {} : { pages }),
+    ...(pageBoundaries === undefined ? {} : { pageBoundaries }),
   };
 }
 

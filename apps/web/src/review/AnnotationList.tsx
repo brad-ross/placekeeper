@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
-import { documentOrderedItems } from './annotation-projection.js';
+import { documentOrderedItems, reviewItemPageRange } from './annotation-projection.js';
 import {
   AnnotationMetadata,
   annotationAccessibleLabel,
@@ -134,6 +134,17 @@ export function AnnotationList({
           const corresponding = correspondingId === item.id;
           const copyLink = copyLinkForItem?.(item);
           const readerRecord = projectOwnedAnnotationReader(item);
+          const { firstPageIndex, lastPageIndex } = readerRecord === null
+            ? reviewItemPageRange(item)
+            : {
+                firstPageIndex: readerRecord.pageNumber - 1,
+                lastPageIndex: (readerRecord.lastPageNumber ?? readerRecord.pageNumber) - 1,
+              };
+          const pageNumber = firstPageIndex + 1;
+          const lastPageNumber = lastPageIndex + 1;
+          const pageDescription = pageNumber === lastPageNumber
+            ? `page ${pageNumber}`
+            : `pages ${pageNumber}–${lastPageNumber}`;
           return (
             <li
               key={item.id}
@@ -176,17 +187,19 @@ export function AnnotationList({
                   className="annotation-item__navigation"
                   aria-label={annotationAccessibleLabel({
                     kind: item.kind,
-                    pageNumber: item.pageIndex + 1,
+                    pageNumber,
+                    lastPageNumber,
                     ...(text ? { excerpt: text } : {}),
                   })}
-                  title={`Go to ${kindLabel} annotation on page ${item.pageIndex + 1}`}
+                  title={`Go to ${kindLabel} annotation on ${pageDescription}`}
                   onClick={() => onNavigate(item)}
                 >
                 </button>
                 <div className="annotation-item__title-row">
                   <AnnotationMetadata
                     kind={item.kind}
-                    pageNumber={item.pageIndex + 1}
+                    pageNumber={pageNumber}
+                    lastPageNumber={lastPageNumber}
                   />
                   <div
                     className="annotation-item__title-actions"
@@ -194,18 +207,18 @@ export function AnnotationList({
                     aria-label={`${kindLabel} annotation actions`}
                   >
                     {item.kind === 'delete' ? null : (
-                      <button type="button" className="annotation-item__action" data-annotation-action="edit" aria-label={`Edit ${kindLabel} annotation on page ${item.pageIndex + 1}`} title="Edit annotation" onClick={(event) => onEdit(item, event.currentTarget)}>
+                      <button type="button" className="annotation-item__action" data-annotation-action="edit" aria-label={`Edit ${kindLabel} annotation on ${pageDescription}`} title="Edit annotation" onClick={(event) => onEdit(item, event.currentTarget)}>
                         <ReviewIcon name="edit" size={13} />
                       </button>
                     )}
-                    <button type="button" className="annotation-item__action annotation-item__delete" data-annotation-action="delete" aria-label={`Remove ${kindLabel} annotation on page ${item.pageIndex + 1}`} title="Delete annotation" onClick={() => void remove(item)}>
+                    <button type="button" className="annotation-item__action annotation-item__delete" data-annotation-action="delete" aria-label={`Remove ${kindLabel} annotation on ${pageDescription}`} title="Delete annotation" onClick={() => void remove(item)}>
                       <ReviewIcon name="delete" size={13} />
                     </button>
                     {copyLink === undefined ? null : (
                       <CopyLinkControl
                         {...copyLink}
                         variant="annotation"
-                        ariaLabel={`Copy link to ${kindLabel} annotation on page ${item.pageIndex + 1}`}
+                        ariaLabel={`Copy link to ${kindLabel} annotation on ${pageDescription}`}
                         title={copyLink.disabled
                           ? 'Save annotation before copying its link'
                           : 'Copy annotation link'}

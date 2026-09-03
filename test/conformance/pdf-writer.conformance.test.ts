@@ -5,7 +5,11 @@ import { describe, expect, it } from 'vitest';
 
 import type { PdfWriteRequest, ReviewAnnotation } from '../../packages/core/src/pdf-writer.js';
 import { PdfWriterError } from '../../packages/core/src/pdf-writer.js';
-import { documentOrderedItems, projectReviewItem } from '../../packages/core/src/annotation-projection.js';
+import {
+  documentOrderedItems,
+  projectReviewItem,
+  projectReviewItemProjections,
+} from '../../packages/core/src/annotation-projection.js';
 import { MAX_REVIEW_SELECTION_SEGMENTS } from '../../packages/core/src/review-reducer.js';
 import type { ReviewItem, ReviewState } from '../../packages/core/src/review-model.js';
 import {
@@ -105,6 +109,87 @@ async function requestFor(name: string, items = annotations): Promise<PdfWriteRe
 }
 
 describe('EmbedPDF writer gate', () => {
+  it('writes a three-page group with visible unique children and reopens one canonical item', async () => {
+    const timestamp = '2026-09-03T12:00:00.000Z';
+    const pages = [0, 1, 2].map((pageIndex) => ({
+      pageIndex,
+      quote: `page ${pageIndex + 1}`,
+      prefix: pageIndex === 0 ? 'before ' : '',
+      suffix: pageIndex === 2 ? ' after' : '',
+      rect: { x: 72, y: 92 + pageIndex * 12, width: 120, height: 16 },
+      segmentRects: [{ x: 72, y: 92 + pageIndex * 12, width: 120, height: 16 }],
+    }));
+    const item: ReviewItem = {
+      id: '70000000-0000-4000-8000-000000000007',
+      kind: 'highlight',
+      pageIndex: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      payload: {
+        quote: pages.map(({ quote }) => quote).join('\n'),
+        prefix: pages[0]!.prefix,
+        suffix: pages[2]!.suffix,
+        rect: pages[0]!.rect,
+        segmentRects: pages[0]!.segmentRects,
+        pages,
+        pageBoundaries: [
+          { afterPageIndex: 0, separator: '\n' },
+          { afterPageIndex: 1, separator: '\n' },
+        ],
+        reliable: true,
+        comment: 'Cross-page evidence.',
+      },
+    };
+    const projected = projectReviewItemProjections(item);
+    const result = await runPdfBackend(
+      await createEmbedPdfWriter(),
+      await requestFor('pdf-search.pdf', projected),
+    );
+    const reopened = await inspectPdfWithEmbedPdf(result.pdfBytes);
+
+    expect(await readPortableReviewItems(result.pdfBytes)).toEqual([item]);
+    expect(reopened.portableItems).toEqual([item]);
+    expect(reopened.annotations.filter(({ id }) => id.startsWith(`${item.id}:projection:`)))
+      .toMatchObject(projected.map((annotation) => ({
+        id: annotation.id,
+        pageIndex: annotation.pageIndex,
+        subtype: 'highlight',
+        contents: 'Cross-page evidence.',
+        author: 'Placekeeper',
+        hasNormalAppearance: true,
+      })));
+  });
+
+  it('rejects an incomplete requested v3 group before producing output', async () => {
+    const timestamp = '2026-09-03T12:00:00.000Z';
+    const item: ReviewItem = {
+      id: '70000000-0000-4000-8000-000000000008',
+      kind: 'delete',
+      pageIndex: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      payload: {
+        quote: 'page 1\npage 2',
+        prefix: '',
+        suffix: '',
+        rect: { x: 72, y: 92, width: 120, height: 16 },
+        segmentRects: [{ x: 72, y: 92, width: 120, height: 16 }],
+        pages: [
+          { pageIndex: 0, quote: 'page 1', prefix: '', suffix: '', rect: { x: 72, y: 92, width: 120, height: 16 }, segmentRects: [{ x: 72, y: 92, width: 120, height: 16 }] },
+          { pageIndex: 1, quote: 'page 2', prefix: '', suffix: '', rect: { x: 72, y: 92, width: 120, height: 16 }, segmentRects: [{ x: 72, y: 92, width: 120, height: 16 }] },
+        ],
+        pageBoundaries: [{ afterPageIndex: 0, separator: '\n' }],
+        reliable: true,
+      },
+    };
+    const incomplete = projectReviewItemProjections(item).slice(0, 1);
+
+    await expect(runPdfBackend(
+      await createEmbedPdfWriter(),
+      await requestFor('multi-page-text.pdf', incomplete),
+    )).rejects.toMatchObject({ code: 'backend-error' });
+  });
+
   it('round-trips editable metadata for every app annotation kind', async () => {
     const timestamp = '2026-08-11T12:00:00.000Z';
     const semanticItems: ReviewItem[] = [

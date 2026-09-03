@@ -3,6 +3,7 @@ import { ReviewIcon, type ReviewIconName } from './ReviewIcon.js';
 export interface AnnotationMetadataProps {
   readonly kind: string;
   readonly pageNumber: number;
+  readonly lastPageNumber?: number;
   readonly sectionLabel?: string;
 }
 
@@ -37,13 +38,15 @@ export function annotationAccessibleLabel(input: AnnotationMetadataProps & {
 }): string {
   return [
     annotationKindLabel(input.kind),
-    `Page ${input.pageNumber}`,
+    input.lastPageNumber !== undefined && input.lastPageNumber !== input.pageNumber
+      ? `Pages ${input.pageNumber}–${input.lastPageNumber}`
+      : `Page ${input.pageNumber}`,
     input.sectionLabel,
     input.excerpt,
   ].filter((value): value is string => typeof value === 'string' && value.length > 0).join(' · ');
 }
 
-export function AnnotationMetadata({ kind, pageNumber, sectionLabel }: AnnotationMetadataProps) {
+export function AnnotationMetadata({ kind, pageNumber, lastPageNumber, sectionLabel }: AnnotationMetadataProps) {
   const icon = annotationKindIcon(kind);
   return (
     <span className="annotation-item__meta" aria-hidden="true">
@@ -52,7 +55,11 @@ export function AnnotationMetadata({ kind, pageNumber, sectionLabel }: Annotatio
       </span>
       <strong>{annotationKindLabel(kind)}</strong>
       <span className="annotation-item__separator">·</span>
-      <span className="annotation-item__page">{pageNumber}</span>
+      <span className="annotation-item__page">
+        {lastPageNumber !== undefined && lastPageNumber !== pageNumber
+          ? `${pageNumber}–${lastPageNumber}`
+          : pageNumber}
+      </span>
       {sectionLabel ? (
         <>
           <span className="annotation-item__separator">·</span>

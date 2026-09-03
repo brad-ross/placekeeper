@@ -5,6 +5,7 @@ import {
   authoringAuthorityFor,
   authoringAnchorSnapshot,
   authoringPreviewAnnotation,
+  authoringPreviewAnnotations,
   authoringSessionIsCurrent,
   canStartAuthoringSession,
   createAuthoringSession,
@@ -37,6 +38,29 @@ const selection = {
   reliable: true as const,
   rect: { x: 10, y: 20, width: 30, height: 12 },
   segmentRects: [{ x: 10, y: 20, width: 30, height: 12 }],
+};
+const crossPageSelection = {
+  ...selection,
+  quote: 'the original passage\ncontinued passage',
+  pages: [
+    {
+      pageIndex: selection.pageIndex,
+      quote: selection.quote,
+      prefix: selection.prefix,
+      suffix: '',
+      rect: selection.rect,
+      segmentRects: selection.segmentRects,
+    },
+    {
+      pageIndex: 3,
+      quote: 'continued passage',
+      prefix: '',
+      suffix: ' after',
+      rect: { x: 10, y: 20, width: 34, height: 12 },
+      segmentRects: [{ x: 10, y: 20, width: 34, height: 12 }],
+    },
+  ],
+  pageBoundaries: [{ afterPageIndex: 2, separator: '\n' }],
 };
 
 const caret = {
@@ -171,6 +195,62 @@ describe('frozen authoring-session contract', () => {
         segmentRects: [{ x: 10 }],
       },
     });
+  });
+
+  it.each(['replace', 'highlight'] as const)('freezes every page of a cross-page %s draft', (kind) => {
+    const mutable = structuredClone(crossPageSelection);
+    const source = kind === 'replace'
+      ? { kind, anchor: mutable, initialValue: '', selectionGeneration: 11 }
+      : { kind, anchor: mutable, selectionGeneration: 11 };
+    const session = createAuthoringSession(seed(source));
+
+    mutable.quote = 'retargeted';
+    mutable.pages[1]!.quote = 'retargeted';
+    mutable.pages[1]!.segmentRects[0]!.x = 999;
+
+    expect(session.source).toMatchObject({
+      anchor: {
+        quote: 'the original passage\ncontinued passage',
+        pages: [
+          { pageIndex: 2, quote: 'the original passage' },
+          { pageIndex: 3, quote: 'continued passage', segmentRects: [{ x: 10 }] },
+        ],
+      },
+    });
+    if (session.source.kind !== 'replace' && session.source.kind !== 'highlight') {
+      throw new Error('Expected selection authoring source');
+    }
+    expect(Object.isFrozen(session.source.anchor.pages)).toBe(true);
+    expect(Object.isFrozen(session.source.anchor.pages?.[1])).toBe(true);
+    const preview = authoringPreviewAnnotation(session, kind === 'replace' ? 'replacement' : 'comment');
+    expect(preview?.custom).toMatchObject({
+      placekeeper: {
+        item: {
+          payload: {
+            pages: [
+              { pageIndex: 2, quote: 'the original passage' },
+              { pageIndex: 3, quote: 'continued passage' },
+            ],
+            pageBoundaries: [{ afterPageIndex: 2, separator: '\n' }],
+          },
+        },
+      },
+    });
+    expect(authoringPreviewAnnotations(
+      session,
+      kind === 'replace' ? 'replacement' : 'comment',
+    ).map(({ id, reviewItemId, pageIndex }) => ({ id, reviewItemId, pageIndex }))).toEqual([
+      {
+        id: 'authoring-preview:1:projection:1',
+        reviewItemId: 'authoring-preview:1',
+        pageIndex: 2,
+      },
+      {
+        id: 'authoring-preview:1:projection:2',
+        reviewItemId: 'authoring-preview:1',
+        pageIndex: 3,
+      },
+    ]);
   });
 
   it('projects the frozen selection, caret, page, and persisted-item points for Return', () => {

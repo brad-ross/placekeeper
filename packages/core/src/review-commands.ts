@@ -3,8 +3,10 @@ import type {
   ReviewCommand,
   ReviewItem,
   ReviewItemKind,
+  ReviewSelectionAnchorV1,
   ReviewState,
 } from './review-model.js';
+import { reviewSelectionPayload } from './review-model.js';
 
 export interface ReviewRect {
   x: number;
@@ -13,13 +15,7 @@ export interface ReviewRect {
   height: number;
 }
 
-export interface ReviewSelectionAnchor {
-  pageIndex: number;
-  quote: string;
-  prefix: string;
-  suffix: string;
-  rect: ReviewRect;
-  segmentRects: readonly ReviewRect[];
+export interface ReviewSelectionAnchor extends ReviewSelectionAnchorV1 {
   reliable: true;
 }
 
@@ -42,14 +38,7 @@ const defaultFactory: ReviewCommandFactory = {
 };
 
 function selectionPayload(anchor: ReviewSelectionAnchor): Record<string, JsonValue> {
-  return {
-    quote: anchor.quote,
-    prefix: anchor.prefix,
-    suffix: anchor.suffix,
-    rect: { ...anchor.rect },
-    segmentRects: anchor.segmentRects.map((rect) => ({ ...rect })),
-    reliable: anchor.reliable,
-  };
+  return { ...reviewSelectionPayload(anchor) };
 }
 
 function add(

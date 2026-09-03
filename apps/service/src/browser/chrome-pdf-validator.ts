@@ -70,7 +70,10 @@ export async function inspectPdfFile(path: string): Promise<ChromePdfInspection>
   let importedItems: readonly ReviewItem[] = [];
   try {
     importedItems = await readPortableReviewItems(bytes);
-  } catch {
+  } catch (error) {
+    if ((error as { readonly code?: unknown }).code === "invalid-portable-annotation") {
+      throw error;
+    }
     importedItems = [];
   }
   return { rewriteEligibility, importedItems };

@@ -13,6 +13,7 @@ import {
 } from '../src/pdf/viewer-document-ids.js';
 import {
   fixedViewerClientRect,
+  isContextPointerGesture,
   isReverseSyncTexPointerGesture,
   normalizePageClientPoint,
   recordViewerPointerButton,
@@ -22,6 +23,13 @@ import {
 } from '../src/pdf/viewer-interaction-events.js';
 
 describe('viewer page interaction coordinates', () => {
+  it('recognizes secondary-click and mouse Control-click without consuming middle-click', () => {
+    expect(isContextPointerGesture({ button: 2, ctrlKey: false, pointerType: 'mouse' })).toBe(true);
+    expect(isContextPointerGesture({ button: 0, ctrlKey: true, pointerType: 'mouse' })).toBe(true);
+    expect(isContextPointerGesture({ button: 1, ctrlKey: false, pointerType: 'mouse' })).toBe(false);
+    expect(isContextPointerGesture({ button: 0, ctrlKey: true, pointerType: 'touch' })).toBe(false);
+  });
+
   it('recognizes the platform reverse-SyncTeX modifier without stealing macOS context-click', () => {
     expect(isReverseSyncTexPointerGesture({ button: 0, metaKey: true, ctrlKey: false }, 'MacIntel')).toBe(true);
     expect(isReverseSyncTexPointerGesture({ button: 0, metaKey: false, ctrlKey: true }, 'MacIntel')).toBe(false);

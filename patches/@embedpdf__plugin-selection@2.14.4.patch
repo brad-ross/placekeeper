@@ -1,0 +1,15 @@
+diff --git a/dist/index.js b/dist/index.js
+index dce6980ea20918157acac43e00db4c9e81661861..421bd69e0a7d73e1b416c846a5fdaea61f77bef2 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -563,7 +563,9 @@ function createTextSelectionHandler(opts) {
+         reset();
+         return;
+       }
+-      if (dragStarted) {
++      // A cross-page drag ends in a different page handler, whose local
++      // dragStarted flag is false even though the document is still selecting.
++      if (dragStarted || opts.isSelecting()) {
+         opts.onEnd(modeId);
+       }
+       reset();

@@ -40,6 +40,41 @@ function replaceItem(suffix: number, pageIndex: number, y: number, proposedText:
   };
 }
 
+function crossPageReplaceItem(): ReviewItem {
+  const pages = [
+    {
+      pageIndex: 1,
+      quote: "claim across",
+      prefix: "before ",
+      suffix: "",
+      rect: rect(72, 100),
+      segmentRects: [rect(72, 100)],
+    },
+    {
+      pageIndex: 2,
+      quote: "pages",
+      prefix: "",
+      suffix: " after",
+      rect: rect(72, 40),
+      segmentRects: [rect(72, 40)],
+    },
+  ];
+  return {
+    ...replaceItem(7, 1, 100, "cross-page replacement"),
+    payload: {
+      quote: "claim across\npages",
+      prefix: "before ",
+      suffix: " after",
+      rect: pages[0]!.rect,
+      segmentRects: pages[0]!.segmentRects,
+      pages,
+      pageBoundaries: [{ afterPageIndex: 1, separator: "\n" }],
+      reliable: true,
+      proposedText: "cross-page replacement",
+    },
+  };
+}
+
 const source = { fileId: id(90), digest: "a".repeat(64), byteLength: 400 };
 
 function snapshot(
@@ -58,6 +93,26 @@ function snapshot(
 }
 
 describe("live PDF context contracts", () => {
+  it("projects one cross-page Review Item with its full ordered geometry and page range", () => {
+    const item = crossPageReplaceItem();
+    const projected = snapshot("cursor-cross-page", 1, [item]).items;
+
+    expect(projected).toHaveLength(1);
+    expect(projected[0]).toMatchObject({
+      id: item.id,
+      pageIndex: 1,
+      pageRange: { firstPageIndex: 1, lastPageIndex: 2 },
+      anchor: { kind: "selection", quote: "claim across\npages" },
+      coordinates: {
+        rect: pagesRect(item, 0),
+        pages: [
+          { pageIndex: 1, rect: pagesRect(item, 0), segmentRects: [pagesRect(item, 0)] },
+          { pageIndex: 2, rect: pagesRect(item, 1), segmentRects: [pagesRect(item, 1)] },
+        ],
+      },
+    });
+  });
+
   it("orders records deterministically and hashes canonical review semantics", () => {
     const first = replaceItem(1, 1, 100, "first replacement");
     const second = replaceItem(2, 0, 50, "second replacement");
@@ -352,3 +407,13 @@ describe("live PDF context contracts", () => {
     })).toThrow(/exactly once/i);
   });
 });
+
+function pagesRect(item: ReviewItem, index: number): Record<string, number> {
+  const pages = item.payload.pages;
+  if (!Array.isArray(pages)) throw new Error("Expected canonical page evidence");
+  const page = pages[index];
+  if (page === null || typeof page !== "object" || Array.isArray(page)) {
+    throw new Error("Expected page evidence");
+  }
+  return page.rect as Record<string, number>;
+}

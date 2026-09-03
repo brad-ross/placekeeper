@@ -12,7 +12,13 @@ import {
   type ReviewSnapshot,
 } from "../../../../packages/core/src/live-context.js";
 import type { SourceHint } from "../../../../packages/core/src/structured-review-item.js";
-import type { JsonValue, ReviewItem } from "../../../../packages/core/src/review-model.js";
+import {
+  anchorEvidenceFromReviewItem,
+  normalizeReviewSelectionAnchor,
+  type JsonValue,
+  type ReviewItem,
+} from "../../../../packages/core/src/review-model.js";
+import { portableAnnotationProjectionId } from "../../../../packages/core/src/grouped-annotation-envelope.js";
 import { isNavigationalPdfAnnotationSubtype } from "../../../../packages/core/src/pdf-annotation-classification.js";
 import { inspectPdfAnnotationCatalogWithEmbedPdf } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import {
@@ -144,7 +150,14 @@ export async function inspectLivePdf(
   snapshot: AtomicSessionProjection & { readonly sourceBytes: Buffer },
 ): Promise<LivePdfInspection> {
   const inspected = await inspectPdfAnnotationCatalogWithEmbedPdf(snapshot.sourceBytes);
-  const ownedIds = new Set(inspected.portableItems.map(({ id }) => id));
+  const ownedIds = new Set(inspected.portableItems.flatMap((item) => {
+    const anchor = anchorEvidenceFromReviewItem(item);
+    const projectionCount = anchor.kind === "selection"
+      ? normalizeReviewSelectionAnchor(anchor).pages.length
+      : 1;
+    return Array.from({ length: projectionCount }, (_, projectionIndex) =>
+      portableAnnotationProjectionId(item.id, projectionIndex, projectionCount));
+  }));
   const reviewerAnnotations = inspected.annotations.filter(
     ({ id, subtype }) => !ownedIds.has(id) && !isNavigationalPdfAnnotationSubtype(subtype),
   );

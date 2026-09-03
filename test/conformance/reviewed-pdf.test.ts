@@ -8,7 +8,10 @@ import type {
   PdfStructuralEvidence,
   ReviewAnnotation,
 } from "../../packages/core/src/pdf-writer.js";
-import { projectReviewItem } from "../../packages/core/src/annotation-projection.js";
+import {
+  projectReviewItem,
+  projectReviewItemProjections,
+} from "../../packages/core/src/annotation-projection.js";
 import type { ReviewItem } from "../../packages/core/src/review-model.js";
 import { createSelectedPdfWriter } from "../../packages/pdf-backends/src/selected-writer.js";
 import { inspectPdfWithEmbedPdf } from "../../packages/pdf-backends/src/embedpdf-adapter.js";
@@ -121,6 +124,57 @@ async function deliveryForFixture(name: string) {
 }
 
 describe("reviewed PDF conformance", () => {
+  it("exports and verifies one complete cross-page portable group", async () => {
+    const fixture = await deliveryForFixture("pdf-search.pdf");
+    const pages = [0, 1, 2].map((pageIndex) => ({
+      pageIndex,
+      quote: `page ${pageIndex + 1}`,
+      prefix: pageIndex === 0 ? "before " : "",
+      suffix: pageIndex === 2 ? " after" : "",
+      rect: { x: 72, y: 92 + pageIndex * 12, width: 120, height: 16 },
+      segmentRects: [{ x: 72, y: 92 + pageIndex * 12, width: 120, height: 16 }],
+    }));
+    const item: ReviewItem = {
+      id: "80000000-0000-4000-8000-000000000008",
+      kind: "replace",
+      pageIndex: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      payload: {
+        quote: pages.map(({ quote }) => quote).join("\n"),
+        prefix: pages[0]!.prefix,
+        suffix: pages[2]!.suffix,
+        rect: pages[0]!.rect,
+        segmentRects: pages[0]!.segmentRects,
+        pages,
+        pageBoundaries: [
+          { afterPageIndex: 0, separator: "\n" },
+          { afterPageIndex: 1, separator: "\n" },
+        ],
+        reliable: true,
+        proposedText: "Replacement across pages",
+      },
+    };
+    const projections = projectReviewItemProjections(item);
+    const coordinator = new ExportCoordinator({
+      writer: await createSelectedPdfWriter(),
+      capabilities: fixture.capabilities,
+      backend: { timeoutMs: 20_000 },
+    });
+
+    const result = await coordinator.exportReviewedCopy({
+      ...fixture.delivery,
+      annotations: projections,
+    });
+    const inspected = await inspectPdfWithEmbedPdf(
+      new Uint8Array(await readFile(result.path)),
+    );
+
+    expect(inspected.portableItems).toEqual([item]);
+    expect(inspected.annotations.filter(({ id }) => id.startsWith(`${item.id}:projection:`)))
+      .toHaveLength(3);
+  }, 60_000);
+
   it("exports every v1 type and preserves supported and unsupported source annotations", async () => {
     const fixture = await deliveryForFixture("preservation-corpus.pdf");
     const coordinator = new ExportCoordinator({

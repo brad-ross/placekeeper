@@ -1,4 +1,5 @@
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+import { reviewItemIdForAnnotation } from '../review/annotation-projection.js';
 
 export interface OwnedMarkPoint {
   readonly x: number;
@@ -23,18 +24,19 @@ export function groupOwnedMarkGeometry(
 ): OwnedMarkGeometry[] {
   const groups = new Map<string, OwnedMarkGeometry>();
   annotations.forEach((annotation, index) => {
+    const reviewItemId = reviewItemIdForAnnotation(annotation);
     const rects = annotation.quadPoints?.length ? annotation.quadPoints : [annotation.rect];
-    const current = groups.get(annotation.id);
+    const current = groups.get(reviewItemId);
     if (current) {
-      groups.set(annotation.id, {
+      groups.set(reviewItemId, {
         ...current,
         rects: [...current.rects, ...rects],
         paintOrder: Math.max(current.paintOrder, paintOrderForIndex(index)),
       });
       return;
     }
-    groups.set(annotation.id, {
-      id: annotation.id,
+    groups.set(reviewItemId, {
+      id: reviewItemId,
       pageIndex: annotation.pageIndex,
       rects: rects.map((rect) => ({ ...rect })),
       paintOrder: paintOrderForIndex(index),

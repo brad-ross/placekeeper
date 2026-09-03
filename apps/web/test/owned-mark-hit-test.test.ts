@@ -26,6 +26,29 @@ function annotation(
 }
 
 describe('owned mark page-space hit testing', () => {
+  it('activates one canonical item from distinct page projection identities', () => {
+    const projections = [
+      {
+        ...annotation('logical-item:projection:1', [{ x: 10, y: 10, width: 30, height: 8 }]),
+        reviewItemId: 'logical-item',
+        pageIndex: 1,
+      },
+      {
+        ...annotation('logical-item:projection:2', [{ x: 10, y: 20, width: 45, height: 8 }]),
+        reviewItemId: 'logical-item',
+        pageIndex: 2,
+      },
+    ] as readonly ReviewAnnotation[];
+
+    const firstPage = groupOwnedMarkGeometry([projections[0]!]);
+    const secondPage = groupOwnedMarkGeometry([projections[1]!]);
+
+    expect(firstPage).toMatchObject([{ id: 'logical-item', pageIndex: 1 }]);
+    expect(secondPage).toMatchObject([{ id: 'logical-item', pageIndex: 2 }]);
+    expect(hitTestOwnedMark(firstPage, { x: 12, y: 12 })).toBe('logical-item');
+    expect(hitTestOwnedMark(secondPage, { x: 12, y: 24 })).toBe('logical-item');
+  });
+
   it('groups multiline rectangles behind one canonical ID and keyboard target', () => {
     const groups = groupOwnedMarkGeometry([
       annotation('multi', [

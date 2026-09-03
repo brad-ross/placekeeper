@@ -53,12 +53,18 @@ export function FullAnnotationReaderActions({
 }
 
 export function FullAnnotationReader({ record, onBack, onEdit }: FullAnnotationReaderProps) {
+  const pageDescription = record.lastPageNumber === undefined
+    ? `page ${record.pageNumber}`
+    : `pages ${record.pageNumber}–${record.lastPageNumber}`;
+  const pageLabel = record.lastPageNumber === undefined
+    ? `${record.pageNumber}`
+    : `${record.pageNumber}–${record.lastPageNumber}`;
   return (
     <section
       className="full-annotation-reader"
       data-full-annotation-reader="true"
       data-annotation-origin={record.origin}
-      aria-label={`Full ${record.typeLabel} annotation on page ${record.pageNumber}`}
+      aria-label={`Full ${record.typeLabel} annotation on ${pageDescription}`}
     >
       <div className="full-annotation-reader__metadata-bar">
         <div
@@ -67,7 +73,7 @@ export function FullAnnotationReader({ record, onBack, onEdit }: FullAnnotationR
         >
           <strong>{record.typeLabel}</strong>
           <span className="annotation-item__separator">·</span>
-          <span className="annotation-item__page">{record.pageNumber}</span>
+          <span className="annotation-item__page">{pageLabel}</span>
           {record.sectionLabel === undefined ? null : (
             <>
               <span className="annotation-item__separator">·</span>

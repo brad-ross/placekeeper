@@ -33,7 +33,12 @@ import {
   type ExistingAnnotation,
   type ExistingAnnotationsDiscovery,
 } from '../pdf/existing-annotations.js';
-import { reliableSelection, type SelectionUpdate } from '../pdf/selection-state.js';
+import {
+  reliableSelection,
+  type PdfCopyOwner,
+  type PdfCopySnapshots,
+  type SelectionUpdate,
+} from '../pdf/selection-state.js';
 import type { ViewerControls, ViewerControlsSnapshot } from '../pdf/viewer-controls.js';
 import { unavailableViewerControls } from '../pdf/viewer-controls.js';
 import type { ViewerFramingControls, ViewerPosition } from '../pdf/viewer-framing.js';
@@ -127,7 +132,7 @@ import {
   authoringAuthorityFor,
   authoringAuthorityMatches,
   authoringAnchorSnapshot,
-  authoringPreviewAnnotation,
+  authoringPreviewAnnotations,
   authoringSessionIsCurrent,
   canStartAuthoringSession,
   createAuthoringSession,
@@ -159,9 +164,15 @@ export interface ReviewShellProps {
   generationRefreshStatus?: GenerationRefreshStatus;
   locationRestoreStatus?: LocationRestoreStatus;
   toolError?: string | null;
+  onSelectionPageLimitExceeded?(): void;
+  onCopySelection?(): void;
   onExportReviewedCopy?(confirmPossiblyStale?: true): Promise<unknown>;
   listOpen?: boolean;
   selectionUpdate: SelectionUpdate;
+  pdfCopyOwner?: PdfCopyOwner;
+  pdfCopySnapshots?: PdfCopySnapshots;
+  pdfCopyOwnerIndicatorVisible?: boolean;
+  pdfCopyAnnouncement?: string;
   selectionPlacement?: ContextPlacement | null;
   caretAnchor?: CaretAnchor | null;
   caretPlacement?: ContextPlacement | null;
@@ -205,7 +216,7 @@ export interface ReviewShellProps {
   };
   onAuthoringAnchorChange?(anchor: AuthoringAnchorSnapshot | null): void;
   onAuthoringActiveChange?(active: boolean): void;
-  onAuthoringPreviewChange?(preview: ReviewAnnotation | null): void;
+  onAuthoringPreviewChange?(preview: readonly ReviewAnnotation[] | null): void;
   /** U3/U4 may publish measured overlay geometry without affecting viewer framing. */
   onAuthoringViewportChange?(viewport: PdfViewportQuery | null): void;
   onNavigate?(item: ReviewItem): void;
@@ -423,7 +434,7 @@ export function ReviewShell(props: ReviewShellProps) {
     props.onAuthoringPreviewChange?.(
       authoringSession === null
         ? null
-        : authoringPreviewAnnotation(authoringSession, initialAuthoringValue(authoringSession)),
+        : authoringPreviewAnnotations(authoringSession, initialAuthoringValue(authoringSession)),
     );
     return () => props.onAuthoringPreviewChange?.(null);
   }, [authoringSession, props.onAuthoringPreviewChange]);
@@ -602,8 +613,16 @@ export function ReviewShell(props: ReviewShellProps) {
     : undefined;
   const annotationReaderOpen = annotationReaderRecord !== null;
   const selectionAnchor = reliableSelection(props.selectionUpdate);
-  const selectionActionsAvailable = selectionAnchor !== null
-    && props.selectionUpdate.generation !== consumedSelectionGeneration;
+  const selectionActionsAvailable = (
+    selectionAnchor !== null || props.selectionUpdate.kind === 'over-limit'
+  ) && props.selectionUpdate.generation !== consumedSelectionGeneration;
+  const competingPdfSelections = props.pdfCopySnapshots?.main?.kind !== undefined
+    && props.pdfCopySnapshots.main.kind !== 'cleared'
+    && props.pdfCopySnapshots.reference?.kind !== undefined
+    && props.pdfCopySnapshots.reference.kind !== 'cleared';
+  const pdfCopyOwnerLabel = props.pdfCopyOwner === 'main'
+    ? 'Main PDF'
+    : props.pdfCopyOwner === 'reference' ? 'Reference PDF' : 'No PDF focused';
   const lastPlacedPageNoteToken = useRef<number | undefined>(undefined);
   const workspaceFraming = useWorkspaceFraming({
     workspaceOpen: anyWorkspaceOpen,
@@ -1360,6 +1379,10 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const startHighlight = () => {
     if (authoringSessionRef.current !== null) return;
+    if (props.selectionUpdate.kind === 'over-limit') {
+      props.onSelectionPageLimitExceeded?.();
+      return;
+    }
     const anchor = selectionAnchor;
     const selectionGeneration = props.selectionUpdate.kind === 'reliable'
       ? props.selectionUpdate.generation
@@ -1374,6 +1397,10 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const startReplacement = () => {
     if (authoringSessionRef.current !== null) return;
+    if (props.selectionUpdate.kind === 'over-limit') {
+      props.onSelectionPageLimitExceeded?.();
+      return;
+    }
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!selectionAnchor || props.selectionUpdate.kind !== 'reliable') {
       setAnnouncement('Select reliable text to suggest a replacement.');
@@ -1388,6 +1415,10 @@ export function ReviewShell(props: ReviewShellProps) {
   };
 
   const deleteSelection = () => {
+    if (props.selectionUpdate.kind === 'over-limit') {
+      props.onSelectionPageLimitExceeded?.();
+      return;
+    }
     const selectionGeneration = props.selectionUpdate.kind === 'reliable'
       ? props.selectionUpdate.generation
       : undefined;
@@ -1820,12 +1851,23 @@ export function ReviewShell(props: ReviewShellProps) {
             generatedStatusMessages.join(' ')
           }</p> : null}
         </div> : null}
+        {competingPdfSelections || props.pdfCopyOwnerIndicatorVisible ? <p
+          className="pdf-copy-owner"
+          role="status"
+          aria-live="polite"
+          data-pdf-copy-owner={props.pdfCopyOwner ?? 'none'}
+        >Copy source: {pdfCopyOwnerLabel}</p> : null}
         <div className="review-document">{props.children}</div>
-        <div className="review-contextual-host" data-review-contextual-host>
+        <div
+          className="review-contextual-host"
+          data-review-contextual-host
+          data-selection-status={props.selectionUpdate.kind}
+        >
           {selectionActionsAvailable && props.selectionPlacement ? (
             <ContextActionPalette
               placement={props.selectionPlacement}
               hidden={surface.nestedLayer !== 'none'}
+              {...(props.onCopySelection === undefined ? {} : { onCopy: props.onCopySelection })}
               onReplace={startReplacement}
               onDelete={deleteSelection}
               onHighlight={startHighlight}
@@ -2199,6 +2241,9 @@ export function ReviewShell(props: ReviewShellProps) {
           ) : null}
         </div>
       </div>
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {props.pdfCopyAnnouncement ?? ''}
+      </p>
       <div
         className="review-nested-host"
         data-review-nested-host
