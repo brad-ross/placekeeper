@@ -61,8 +61,9 @@ test("a live Codex review copies a browser-safe URL, survives refresh, and reope
   await expectCurrentPage(page, "1 / 4");
   expect(page.url()).not.toContain("cap=");
 
-  await page.evaluate(() => history.replaceState(history.state, "", "#v=1&page=3"));
-  await page.reload();
+  const pageThreeUrl = page.url().replace(/#.*$/u, "#v=1&page=3");
+  await page.goto("about:blank");
+  await page.goto(pageThreeUrl);
   await expect(page).toHaveURL(/#v=1&page=3$/u);
   await expectCurrentPage(page, "3 / 4");
   const readableUrl = page.url();

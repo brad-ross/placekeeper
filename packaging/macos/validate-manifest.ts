@@ -28,7 +28,7 @@ export const CATALOG_DISTRIBUTION_BASELINE = {
     report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
     thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
   },
-  productionWebJavaScriptBytes: 2_516_125,
+  productionWebJavaScriptBytes: 2_535_345,
 } as const;
 
 const CATALOG_ATTRIBUTION_URLS = [
@@ -755,14 +755,15 @@ async function validateVscodeIdentity(
 interface DistributionValidationOptions {
   readonly productionWebRoot?: string;
   readonly vscodeWebRoot?: string;
+  readonly chromeWebRoot?: string;
 }
 
 export interface SharedWebAssetManifest {
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 3;
   readonly app: string;
   readonly stylesheet: string;
   readonly pdfiumWasm: string;
-  readonly worker: { readonly kind: "inline-blob"; readonly container: string };
+  readonly pdfiumWorker: string;
   readonly integrity: Readonly<Record<string, string>>;
 }
 
@@ -776,25 +777,21 @@ export async function validateSharedWebDistribution(webRoot: string): Promise<Sh
   }
   let value: unknown;
   try { value = JSON.parse(manifestSource) as unknown; }
-  catch { throw new Error("The shared web asset manifest is invalid JSON"); }
+  catch { throw new Error("The shared web asset-manifest.json is invalid JSON"); }
   const manifest = record(value, "Shared web asset manifest");
-  const exactManifestKeys = ["app", "integrity", "pdfiumWasm", "schemaVersion", "stylesheet", "worker"];
-  if (Object.keys(manifest).sort().join("\n") !== exactManifestKeys.join("\n") || manifest.schemaVersion !== 2) {
+  const exactManifestKeys = ["app", "integrity", "pdfiumWasm", "pdfiumWorker", "schemaVersion", "stylesheet"];
+  if (Object.keys(manifest).sort().join("\n") !== exactManifestKeys.join("\n") || manifest.schemaVersion !== 3) {
     throw new Error("The shared web asset manifest has an unsupported shape");
   }
   const app = boundedString(manifest.app, "Shared web app asset");
   const stylesheet = boundedString(manifest.stylesheet, "Shared web stylesheet asset");
   const pdfiumWasm = boundedString(manifest.pdfiumWasm, "Shared web PDFium asset");
-  const assets = [app, stylesheet, pdfiumWasm];
+  const pdfiumWorker = boundedString(manifest.pdfiumWorker, "Shared web PDFium worker asset");
+  const assets = [app, stylesheet, pdfiumWasm, pdfiumWorker];
   if (assets.some((name) => !/^[A-Za-z0-9._-]+$/u.test(name))) {
     throw new Error("Shared web assets must be local filenames");
   }
   if (new Set(assets).size !== assets.length) throw new Error("Shared web asset paths must not be duplicated");
-  const worker = record(manifest.worker, "Shared web worker");
-  if (Object.keys(worker).sort().join("\n") !== "container\nkind" ||
-    worker.kind !== "inline-blob" || worker.container !== app) {
-    throw new Error("The shared PDFium worker must be an inline app asset");
-  }
   const integrity = record(manifest.integrity, "Shared web asset integrity");
   if (Object.keys(integrity).sort().join("\n") !== [...assets].sort().join("\n") ||
     Object.values(integrity).some((digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/u.test(digest))) {
@@ -817,16 +814,17 @@ export async function validateSharedWebDistribution(webRoot: string): Promise<Sh
     if (integrity[name] !== digest) throw new Error(`Shared web asset is stale: ${name}`);
     bytes.set(name, assetBytes);
   }
-  const appSource = bytes.get(app)!.toString("utf8");
-  if (!/new Worker\(/u.test(appSource) || !/new Blob\(/u.test(appSource)) {
-    throw new Error("The packaged client is missing its inline PDFium worker");
+  const workerSource = bytes.get(pdfiumWorker)!.toString("utf8");
+  if (!workerSource.includes("class PdfiumEngineRunner") ||
+    !workerSource.includes('type === "wasmInit"')) {
+    throw new Error(`The packaged PDFium worker contract is invalid: ${pdfiumWorker}`);
   }
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     app,
     stylesheet,
     pdfiumWasm,
-    worker: { kind: "inline-blob", container: app },
+    pdfiumWorker,
     integrity: Object.freeze({ ...integrity }) as Readonly<Record<string, string>>,
   };
 }
@@ -870,8 +868,8 @@ export async function validateDistributionManifests(
   if (packageManifest.scripts?.["prebuild:web"] !== "pnpm catalog:check") {
     throw new Error("Production web builds must run the non-mutating catalog:check gate");
   }
-  if (packageManifest.scripts?.["validate:distribution"] !== "pnpm build:web && pnpm build:vscode && pnpm build:chrome && tsx packaging/macos/validate-manifest.ts") {
-    throw new Error("Distribution validation must rebuild the production web, VS Code, and Chrome bundles before inspection");
+  if (packageManifest.scripts?.["validate:distribution"] !== "pnpm build && node --check dist/service/main.js && tsx packaging/macos/validate-manifest.ts") {
+    throw new Error("Distribution validation must rebuild every production bundle and syntax-check the service before inspection");
   }
   for (const scriptName of ["build", "build:web", "package:macos", "install:local"] as const) {
     if (/catalog:(?:audit|generate|update)/u.test(packageManifest.scripts?.[scriptName] ?? "")) {
@@ -892,6 +890,12 @@ export async function validateDistributionManifests(
         throw new Error("The packaged VS Code client assets are stale or differ from the shared production assets");
       }
     }
+    if (options.chromeWebRoot !== undefined) {
+      const chromeManifest = await validateSharedWebDistribution(options.chromeWebRoot);
+      if (JSON.stringify(chromeManifest) !== JSON.stringify(productionManifest)) {
+        throw new Error("The packaged Chrome client assets are stale or differ from the shared production assets");
+      }
+    }
   }
 }
 
@@ -899,6 +903,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   await validateDistributionManifests(process.cwd(), {
     productionWebRoot: resolve(process.cwd(), "dist/web"),
     vscodeWebRoot: resolve(process.cwd(), "apps/vscode/dist/web"),
+    chromeWebRoot: resolve(process.cwd(), "apps/chrome-extension/dist/shared"),
   });
   process.stdout.write("Distribution manifests and offline runtime assets are valid.\n");
 }

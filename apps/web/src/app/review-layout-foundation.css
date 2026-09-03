@@ -27,7 +27,7 @@
   --review-control-group-gap: 2px;
   --review-action-group-gap: 6px;
   --review-chrome-height: 58px;
-  --review-document-title-min: 9rem;
+  --review-document-title-cap: 9rem;
   --review-workspace-header-height: 44px;
   --review-metadata-separator-gap: .3rem;
   --review-workspace-card-surface: var(--review-surface-panel);
@@ -187,9 +187,9 @@
 }
 
 .review-chrome__sizing-candidate .review-chrome__save-identity strong {
-  width: var(--review-document-title-min);
-  min-width: var(--review-document-title-min);
-  max-width: var(--review-document-title-min);
+  width: var(--review-document-title-cap);
+  min-width: var(--review-document-title-cap);
+  max-width: var(--review-document-title-cap);
   flex: none;
 }
 

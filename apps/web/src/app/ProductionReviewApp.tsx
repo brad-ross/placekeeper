@@ -6,6 +6,7 @@ import { SelectionPlugin } from "@embedpdf/plugin-selection";
 import type { ReviewCommand, ReviewItem, ReviewState } from "../../../../packages/core/src/review-model.js";
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
+import { sanitizeReviewRuntimeDisplayString } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { CaretAnchor } from "../pdf/selection-anchor.js";
 import type { ExistingAnnotation, ExistingAnnotationsDiscovery } from "../pdf/existing-annotations.js";
 import {
@@ -74,6 +75,7 @@ import {
 import {
   BrowserReviewLocationHistory,
   type ReviewLocationHistoryEnvironment,
+  type ReviewLocationHistoryPort,
   type ReviewLocationHistorySnapshot,
 } from '../review/review-location-history.js';
 import { buildPlacekeeperCopyLink } from '../review/CopyLinkControl.js';
@@ -135,7 +137,7 @@ export interface ProductionScope {
   readonly sourceDisposition?: 'local' | 'remote-temporary';
   readonly sourceDisplayName?: string;
   readonly sourceRootPath?: string;
-  readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode';
+  readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode' | 'chrome';
   /** A restarted browser is awaiting task-scoped Codex reattachment. */
   readonly reconnectPending?: true;
   readonly codexContext?: LiveContextBindingStatus;
@@ -226,6 +228,10 @@ export interface ProductionReviewAppProps {
   readonly api: ProductionSessionApi;
   readonly viewerAssets?: ViewerAssetUrls;
   readonly resourcePolicy?: ViewerResourcePolicy;
+  /** Host-owned semantic history. `null` explicitly disables address-bar history. */
+  readonly locationHistory?: ReviewLocationHistoryPort | null;
+  /** Host-issued capability-free canonical link base, independent of history. */
+  readonly copyLinkBase?: string | null;
   readonly viewer?: ReactNode;
   readonly generationRefreshStatus?: GenerationRefreshStatus;
   readonly hostReattachRequestToken?: number;
@@ -234,6 +240,10 @@ export interface ProductionReviewAppProps {
   readonly onReverseSyncTex?: (input: ReverseSyncTexRequest) => Promise<unknown>;
   readonly initialPresentation?: { readonly pageIndex?: number; readonly zoom?: number };
   readonly onPresentationChange?: (presentation: { readonly pageIndex: number; readonly zoom: number }) => void;
+  /** Host activation seam: emitted only after the main PDF generation is parsed. */
+  readonly onDocumentReady?: (generation: number) => void;
+  /** Host-visible title seam, already resolved through metadata then filename fallback. */
+  readonly onDocumentTitleChange?: (title: string, generation: number) => void;
 }
 
 export function forwardSyncTexRequestReady(input: {
@@ -671,6 +681,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   );
   const [currentOutlineItemId, setCurrentOutlineItemId] = useState<string | null>(null);
   const locationHistory = useMemo(() => {
+    if (props.locationHistory !== undefined) return props.locationHistory ?? undefined;
     if (props.session.appLinkBase === undefined || typeof window === 'undefined') return undefined;
     const environment: ReviewLocationHistoryEnvironment = {
       location: window.location,
@@ -679,14 +690,15 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       removeEventListener: (type, listener) => window.removeEventListener(type, listener),
     };
     return new BrowserReviewLocationHistory(environment);
-  }, [props.session.appLinkBase]);
+  }, [props.locationHistory, props.session.appLinkBase]);
   const copyLinkBase = useMemo(() => {
+    if (props.copyLinkBase !== undefined) return props.copyLinkBase ?? undefined;
     if (props.session.appLinkBase === undefined) return undefined;
     if (scope.launchSurface !== 'codex' || typeof window === 'undefined') {
       return props.session.appLinkBase;
     }
     return `${window.location.origin}${window.location.pathname}`;
-  }, [props.session.appLinkBase, scope.launchSurface]);
+  }, [props.copyLinkBase, props.session.appLinkBase, scope.launchSurface]);
   const [locationHistorySnapshot, setLocationHistorySnapshot] = useState<ReviewLocationHistorySnapshot>({
     canBack: false,
     canForward: false,
@@ -769,6 +781,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     pdfiumWasm: props.session.appLinkBase === undefined
       ? `/s/${props.session.sessionId}/assets/pdfium.wasm`
       : '/assets/pdfium.wasm',
+    workerUrl: props.session.appLinkBase === undefined
+      ? `/s/${props.session.sessionId}/assets/pdfium-worker.js`
+      : '/assets/pdfium-worker.js',
     documentUrl: `/s/${props.session.sessionId}/document/${state.source.fileId}?generation=${state.workflow.documentGeneration}`,
     ...(props.session.credential === undefined
       ? {}
@@ -1163,14 +1178,18 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const initialStateKeyRef = useRef(
     `${props.initialState.workflow.documentGeneration}:${props.initialState.revision}:${props.initialState.workflow.freshness}:${props.initialState.source.fileId}:${props.initialState.source.digest}`,
   );
-  const pageTitle = pdfDocumentTitleForSource(
+  const resolvedPageTitle = pdfDocumentTitleForSource(
     metadataPageTitle,
     sourceIdentity,
     scope.documentTitle,
   );
+  const pageTitle = scope.launchSurface === 'chrome'
+    ? sanitizeReviewRuntimeDisplayString(resolvedPageTitle) ?? scope.documentTitle
+    : resolvedPageTitle;
   useEffect(() => {
     document.title = pageTitle;
-  }, [pageTitle]);
+    props.onDocumentTitleChange?.(pageTitle, documentGenerationRef.current);
+  }, [pageTitle, props.onDocumentTitleChange]);
   useEffect(() => {
     const next = `${props.initialState.workflow.documentGeneration}:${props.initialState.revision}:${props.initialState.workflow.freshness}:${props.initialState.source.fileId}:${props.initialState.source.digest}`;
     if (next === initialStateKeyRef.current) return;
@@ -1444,6 +1463,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     const documentGeneration = documentGenerationRef.current;
     const documentSourceIdentity = sourceIdentity;
     setMainDocumentReadyGeneration(documentGeneration);
+    props.onDocumentReady?.(documentGeneration);
     searchControllerRef.current?.dispose();
     searchDocumentRef.current = document;
     void resolvePdfMetadataTitle(engine, document).then((title) => {
@@ -1484,7 +1504,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       void search.search(pendingQuery);
     }
     else if (searchRequestedRef.current) void search.prepare();
-  }, [sourceIdentity]);
+  }, [props.onDocumentReady, sourceIdentity]);
   const onViewerFramingInitialized = useCallback((controls: ViewerFramingControls) => {
     setViewerFraming(controls);
   }, []);
@@ -1779,18 +1799,20 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           ? { codexContext: visibleCodexContext(codexContext, state) ?? UNAVAILABLE_CODEX_CONTEXT }
           : {})}
         {...(copyLinkBase === undefined || locationHistory === undefined ? {} : {
-          copyLink: {
-            disabled: navigationState.pendingMainNavigation !== null
-              || navigationState.pendingSendToMain !== null,
-            getLink: () => {
-              mainLocationRefresh.flush();
-              return buildPlacekeeperCopyLink(
-                copyLinkBase,
-                navigationCoordinator.currentLinkLocation(),
-              );
+          ...(scope.launchSurface === 'chrome' ? {} : {
+            copyLink: {
+              disabled: navigationState.pendingMainNavigation !== null
+                || navigationState.pendingSendToMain !== null,
+              getLink: () => {
+                mainLocationRefresh.flush();
+                return buildPlacekeeperCopyLink(
+                  copyLinkBase,
+                  navigationCoordinator.currentLinkLocation(),
+                );
+              },
+              writeText: writePlacekeeperLink,
             },
-            writeText: writePlacekeeperLink,
-          },
+          }),
           copyItemLink: {
             getLink: (item: ReviewItem) => buildPlacekeeperCopyLink(
               copyLinkBase,

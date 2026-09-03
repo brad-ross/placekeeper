@@ -7,6 +7,7 @@ import { RenderPluginPackage } from '@embedpdf/plugin-render/react';
 import { ScrollPluginPackage } from '@embedpdf/plugin-scroll/react';
 import { SelectionPluginPackage } from '@embedpdf/plugin-selection/react';
 import { ViewportPluginPackage } from '@embedpdf/plugin-viewport/react';
+import { ZoomMode } from '@embedpdf/plugin-zoom';
 import { ZoomPluginPackage } from '@embedpdf/plugin-zoom/react';
 import type { LoadDocumentUrlOptions } from '@embedpdf/plugin-document-manager';
 import {
@@ -26,11 +27,26 @@ export interface ViewerAssetUrls {
   requestHeaders?: Readonly<Record<string, string>>;
 }
 
+export type ViewerResourceRole = 'document' | 'pdfium-wasm' | 'pdfium-worker';
+
 export type ViewerResourcePolicy =
   | { readonly host: 'browser'; readonly origin: string }
-  | { readonly host: 'vscode'; readonly issued: ReadonlySet<string> };
+  | { readonly host: 'vscode'; readonly issued: ReadonlySet<string> }
+  | {
+      readonly host: 'chrome';
+      readonly extensionOrigin: string;
+      readonly resources: {
+        readonly document: string;
+        readonly pdfiumWasm: string;
+        readonly worker: string;
+      };
+    };
 
-export function validateViewerResourceUrl(rawUrl: string, policy: ViewerResourcePolicy): string {
+export function validateViewerResourceUrl(
+  rawUrl: string,
+  policy: ViewerResourcePolicy,
+  role: ViewerResourceRole = 'document',
+): string {
   if (policy.host === 'vscode') {
     const extensionResource = rawUrl.startsWith('vscode-webview://') ||
       /^https:\/\/[^/\s]+\.vscode-cdn\.net(?:\/|$)/u.test(rawUrl) ||
@@ -40,10 +56,39 @@ export function validateViewerResourceUrl(rawUrl: string, policy: ViewerResource
     }
     return rawUrl;
   }
+  if (policy.host === 'chrome') {
+    if (!/^chrome-extension:\/\/[a-p]{32}$/u.test(policy.extensionOrigin)) {
+      throw new Error('A valid Chrome extension origin is required.');
+    }
+    const expected = role === 'document'
+      ? policy.resources.document
+      : role === 'pdfium-wasm' ? policy.resources.pdfiumWasm : policy.resources.worker;
+    if (rawUrl !== expected) throw new Error('Viewer resources must match their issued role.');
+    const url = new URL(rawUrl);
+    if (role === 'document') {
+      if (url.protocol !== 'blob:' || !rawUrl.startsWith(`blob:${policy.extensionOrigin}/`)) {
+        throw new Error('The Chrome document resource must be an extension-issued Blob.');
+      }
+    } else if (url.protocol !== 'chrome-extension:' || !rawUrl.startsWith(`${policy.extensionOrigin}/`)) {
+      throw new Error('Chrome executable resources must be packaged extension assets.');
+    }
+    return rawUrl;
+  }
   const origin = policy.origin;
   const url = new URL(rawUrl, origin);
   if (url.origin !== origin) throw new Error('Viewer assets must be same-origin.');
   return url.href;
+}
+
+export type ViewerWorkerFactory = (url: string, options: WorkerOptions) => Worker;
+
+export function createTrustedPdfiumWorker(
+  workerUrl: string,
+  policy: ViewerResourcePolicy,
+  workerFactory: ViewerWorkerFactory = (url, options) => new Worker(url, options),
+): Worker {
+  const trustedUrl = validateViewerResourceUrl(workerUrl, policy, 'pdfium-worker');
+  return workerFactory(trustedUrl, { type: 'module' });
 }
 
 function browserPolicy(origin: string): ViewerResourcePolicy {
@@ -53,9 +98,17 @@ function browserPolicy(origin: string): ViewerResourcePolicy {
 export function createLocalPdfiumViewer(
   assetUrls: ViewerAssetUrls,
   policy: ViewerResourcePolicy = browserPolicy(globalThis.location.origin),
+  workerFactory?: ViewerWorkerFactory,
 ) {
-  const pdfiumWasm = validateViewerResourceUrl(assetUrls.pdfiumWasm, policy);
-  const engine = createPdfiumEngine(pdfiumWasm, { encoderPoolSize: 1, fontFallback: null });
+  const pdfiumWasm = validateViewerResourceUrl(assetUrls.pdfiumWasm, policy, 'pdfium-wasm');
+  const worker = assetUrls.workerUrl === undefined
+    ? undefined
+    : createTrustedPdfiumWorker(assetUrls.workerUrl, policy, workerFactory);
+  const engine = createPdfiumEngine(pdfiumWasm, {
+    encoderPoolSize: 1,
+    fontFallback: null,
+    ...(worker === undefined ? {} : { worker }),
+  });
   return { engine, plugins: createLocalPdfiumViewerPlugins(assetUrls, policy) };
 }
 
@@ -80,6 +133,7 @@ export function createLocalPdfiumViewerPlugins(
     createPluginRegistration(ViewportPluginPackage),
     createPluginRegistration(ScrollPluginPackage),
     createPluginRegistration(ZoomPluginPackage, {
+      defaultZoomLevel: ZoomMode.FitWidth,
       minZoom: VIEWER_ZOOM_MIN_PERCENT / 100,
       maxZoom: VIEWER_ZOOM_MAX_PERCENT / 100,
     }),
@@ -103,7 +157,7 @@ export function buildViewerDocumentOptions(
 ): LoadDocumentUrlOptions {
   const policy = typeof policyOrOrigin === 'string' ? browserPolicy(policyOrOrigin) : policyOrOrigin;
   return {
-    url: validateViewerResourceUrl(assetUrls.documentUrl, policy),
+    url: validateViewerResourceUrl(assetUrls.documentUrl, policy, 'document'),
     name: 'Local PDF',
     mode: 'full-fetch',
     requestOptions: {

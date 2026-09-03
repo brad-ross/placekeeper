@@ -178,7 +178,7 @@ export function PdfSearchWorkspace({
             onPointerDown={(event) => event.preventDefault()}
             onClick={clearQuery}
           >
-            <ReviewIcon name="close" size={15} />
+            <ReviewIcon name="close" size={13} />
           </button>
         ) : null}
         {indexing ? <ReviewIcon name="loading" className="review-icon pdf-search__spinner" /> : null}

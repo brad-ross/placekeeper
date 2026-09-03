@@ -110,7 +110,7 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
       {dockAttached ? (
         <button
           type="button"
-          className="review-workspace__move review-workspace__move--activity"
+          className="review-workspace__move review-workspace__move--activity review-workspace__move--header-action"
           data-reference-move={dockAction.destination}
           aria-label={`Move References to ${dockAction.destination}`}
           title={`Move References to ${dockAction.destination}`}

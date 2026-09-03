@@ -158,9 +158,7 @@ if [ -e "$chrome_extension_path" ]; then
   legacy_extension="$app_path/Contents/Resources/integrations/chrome-extension"
   if [ -f "$chrome_extension_marker" ] && [ ! -L "$chrome_extension_marker" ] && \
      [ "$(/bin/cat "$chrome_extension_marker")" = "$chrome_extension_owner" ]; then
-    "$built_app/Contents/Resources/node/bin/node" \
-      "$built_app/Contents/Resources/service/main.js" \
-      chrome-registration validate-extension --extension "$chrome_extension_path"
+    : # A prior managed version may predate the candidate's extension schema.
   elif [ -d "$legacy_extension" ] && /usr/bin/diff -qr "$chrome_extension_path" "$legacy_extension" >/dev/null; then
     : # Adopt the one pre-marker release only when its complete tree matches the installed bundle.
   else

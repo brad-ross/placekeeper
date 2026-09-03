@@ -95,7 +95,7 @@
 
 @media (max-width: 480px) {
   #root[data-production-root="true"] {
-    --review-document-title-min: 6rem;
+    --review-document-title-cap: 6rem;
   }
 
   body:has(.terminal-recovery) {
@@ -118,7 +118,7 @@
 
 @media (max-width: 360px) {
   #root[data-production-root="true"] {
-    --review-document-title-min: 4.5rem;
+    --review-document-title-cap: 4.5rem;
   }
 
   .review-chrome {
@@ -161,12 +161,6 @@
 
   .review-workspace__header {
     padding-block: 2px;
-  }
-
-  .review-workspace__outline-toggle {
-    width: calc(var(--review-control-touch) + 4px);
-    min-width: calc(var(--review-control-touch) + 4px);
-    height: calc(var(--review-control-touch) + 4px);
   }
 
   .annotation-item__action {

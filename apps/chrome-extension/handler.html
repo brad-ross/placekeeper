@@ -3,14 +3,31 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Opening in Placekeeper</title>
+    <title>document.pdf</title>
     <link rel="stylesheet" href="/src/extension.css">
   </head>
   <body class="handler">
-    <main class="card" aria-labelledby="title">
-      <h1 id="title">Opening in Placekeeper</h1>
-      <p id="status" class="status" role="status" aria-live="polite">Preparing this PDF…</p>
-      <button id="bypass" type="button">Use Chrome viewer</button>
+    <div id="root" aria-label="Placekeeper PDF review" inert></div>
+    <main
+      id="launch-shell"
+      class="handler-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="title"
+      aria-describedby="status"
+    >
+      <header class="handler-dialog__header">
+        <h1 id="title" tabindex="-1">Opening in Placekeeper</h1>
+      </header>
+      <section class="handler-dialog__body">
+        <p id="status" class="status" role="status" aria-live="polite">Preparing this PDF…</p>
+      </section>
+      <footer class="handler-dialog__footer">
+        <div id="handler-actions" class="handler-actions" role="group" aria-label="Handler actions">
+          <button id="bypass" type="button">Default</button>
+          <button id="reopen" type="button" hidden>Reopen PDF</button>
+        </div>
+      </footer>
     </main>
     <script type="module" src="/src/handler-entry.ts"></script>
   </body>

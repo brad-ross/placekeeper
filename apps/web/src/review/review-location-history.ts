@@ -28,6 +28,86 @@ export interface ReviewLocationHistoryEnvironment {
   removeEventListener(type: 'popstate', listener: () => void): void;
 }
 
+export class MemoryReviewLocationHistory implements ReviewLocationHistoryPort {
+  private readonly entries: PlacekeeperLinkLocation[];
+  private index = 0;
+  private onPop: ((direction: 'back' | 'forward' | 'unknown') => void | Promise<void>) | null = null;
+  private readonly listeners = new Set<(snapshot: ReviewLocationHistorySnapshot) => void>();
+  private lastPublishedSnapshot: ReviewLocationHistorySnapshot = {
+    canBack: false,
+    canForward: false,
+  };
+
+  constructor(initial: PlacekeeperLinkLocation = { kind: 'page', page: 1 }) {
+    this.entries = [structuredClone(initial)];
+  }
+
+  start(onPop: (direction: 'back' | 'forward' | 'unknown') => void | Promise<void>): void {
+    this.onPop = onPop;
+    this.publish();
+  }
+
+  read(): PlacekeeperLinkLocation {
+    return structuredClone(this.entries[this.index]!);
+  }
+
+  replace(location: PlacekeeperLinkLocation): void {
+    this.entries[this.index] = structuredClone(location);
+  }
+
+  push(location: PlacekeeperLinkLocation): void {
+    this.entries.splice(this.index + 1, Infinity, structuredClone(location));
+    this.index += 1;
+    this.publish();
+  }
+
+  back(): boolean {
+    return this.move(-1, 'back');
+  }
+
+  forward(): boolean {
+    return this.move(1, 'forward');
+  }
+
+  snapshot(): ReviewLocationHistorySnapshot {
+    return { canBack: this.index > 0, canForward: this.index < this.entries.length - 1 };
+  }
+
+  subscribe(listener: (snapshot: ReviewLocationHistorySnapshot) => void): () => void {
+    this.listeners.add(listener);
+    listener(this.snapshot());
+    return () => this.listeners.delete(listener);
+  }
+
+  dispose(): void {
+    this.onPop = null;
+    this.listeners.clear();
+  }
+
+  private move(offset: -1 | 1, direction: 'back' | 'forward'): boolean {
+    const next = this.index + offset;
+    if (next < 0 || next >= this.entries.length) return false;
+    this.index = next;
+    const restoring = this.onPop?.(direction);
+    if (restoring === undefined) this.publish();
+    else void restoring.then(
+      () => this.publish(),
+      () => this.publish(),
+    );
+    return true;
+  }
+
+  private publish(): void {
+    const snapshot = this.snapshot();
+    if (
+      snapshot.canBack === this.lastPublishedSnapshot.canBack
+      && snapshot.canForward === this.lastPublishedSnapshot.canForward
+    ) return;
+    this.lastPublishedSnapshot = snapshot;
+    for (const listener of this.listeners) listener(snapshot);
+  }
+}
+
 interface PlacekeeperHistoryState {
   readonly placekeeperReviewLocation: 1;
   readonly index: number;

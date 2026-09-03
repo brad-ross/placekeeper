@@ -34,6 +34,8 @@ interface ChromeManifest {
   readonly minimum_chrome_version?: unknown;
   readonly key?: unknown;
   readonly permissions?: unknown;
+  readonly host_permissions?: unknown;
+  readonly content_security_policy?: unknown;
   readonly mime_types_handler?: unknown;
 }
 
@@ -82,6 +84,12 @@ export function validateChromeSourceContract(manifest: ChromeManifest): ChromeSo
     manifest.permissions[0] !== "nativeMessaging" ||
     manifest.permissions[1] !== "storage"
   ) throw new Error("Chrome extension permissions changed");
+  if (manifest.host_permissions !== undefined) {
+    throw new Error("Chrome extension host permissions are forbidden");
+  }
+  if (JSON.stringify(manifest.content_security_policy) !== JSON.stringify({
+    extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; connect-src 'self'",
+  })) throw new Error("Chrome extension content security policy changed");
   if (
     !isRecord(manifest.mime_types_handler) ||
     JSON.stringify(manifest.mime_types_handler) !==
@@ -198,6 +206,40 @@ async function assertSecureTree(root: string): Promise<void> {
   await visit(root);
 }
 
+async function validatePackagedSharedClient(root: string): Promise<void> {
+  const manifestPath = join(root, "asset-manifest.json");
+  let source: string;
+  try { source = await readFile(manifestPath, "utf8"); }
+  catch { throw new Error("Chrome shared client is missing asset-manifest.json"); }
+  let value: unknown;
+  try { value = JSON.parse(source) as unknown; }
+  catch { throw new Error("Chrome shared client asset-manifest.json is invalid"); }
+  if (!isRecord(value) || value.schemaVersion !== 3) {
+    throw new Error("Chrome shared client manifest is invalid");
+  }
+  const assets = [value.app, value.stylesheet, value.pdfiumWasm, value.pdfiumWorker];
+  if (assets.some((name) => typeof name !== "string" || !/^[A-Za-z0-9._-]+$/u.test(name)) ||
+    new Set(assets).size !== assets.length || !isRecord(value.integrity)) {
+    throw new Error("Chrome shared client manifest is invalid");
+  }
+  const names = assets as string[];
+  if (Object.keys(value.integrity).sort().join("\n") !== [...names].sort().join("\n")) {
+    throw new Error("Chrome shared client integrity map is incomplete");
+  }
+  const expected = ["asset-manifest.json", ...names].sort();
+  if ((await readdir(root)).sort().join("\n") !== expected.join("\n")) {
+    throw new Error(`Chrome shared client has missing or unexpected stale assets; expected ${expected.join(", ")}`);
+  }
+  for (const name of names) {
+    const path = join(root, name);
+    await assertSecureEntry(path, "file");
+    const digest = createHash("sha256").update(await readFile(path)).digest("hex");
+    if (value.integrity[name] !== digest) {
+      throw new Error(`Chrome shared client asset failed integrity validation: ${name}`);
+    }
+  }
+}
+
 export async function validateChromeExtensionDirectory(
   extensionPath: string,
 ): Promise<ChromeSourceContract> {
@@ -208,6 +250,7 @@ export async function validateChromeExtensionDirectory(
   for (const entry of ["handler.html", "popup.html", "background.js"] as const) {
     await assertSecureEntry(join(extensionPath, entry), "file");
   }
+  await validatePackagedSharedClient(join(extensionPath, "shared"));
   return contract;
 }
 

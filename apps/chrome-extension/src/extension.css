@@ -1,8 +1,6 @@
 :root {
-  color-scheme: light dark;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: Canvas;
-  color: CanvasText;
+  color-scheme: only light;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 body {
@@ -10,19 +8,96 @@ body {
 }
 
 .handler {
-  min-height: 100vh;
+  --review-ink-primary: #181a17;
+  --review-ink-muted: #676a63;
+  --review-surface-canvas: #e8e9e4;
+  --review-surface-panel: #fffefa;
+  --review-surface-subtle: #f1f2ed;
+  --review-surface-interactive: #e5e6e1;
+  --review-border: #d1d5cc;
+  --review-border-subtle: #e2e4de;
+  --review-border-strong: #aeb6aa;
+  --review-focus: #245c9c;
+  --review-danger: #9a3d34;
+  --review-radius-control: 9px;
+  --review-radius-dialog: 16px;
+  --review-control-default: 34px;
+  --review-action-group-gap: 6px;
+  --review-shadow-float: 0 14px 34px rgb(24 27 23 / 17%), 0 2px 7px rgb(24 27 23 / 8%);
+  --review-motion-fast: 120ms;
+
   display: grid;
+  box-sizing: border-box;
+  min-height: 100dvh;
   place-items: center;
+  padding: 1rem;
+  color: var(--review-ink-primary);
+  background: var(--review-surface-canvas);
+  font-size: .875rem;
+  line-height: 1.4;
 }
 
-.card {
+.handler #root {
+  position: fixed;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.handler #root:empty {
+  display: none;
+}
+
+.handler #launch-shell {
+  position: relative;
+  z-index: 10;
+}
+
+.handler #launch-shell[hidden] {
+  display: none;
+}
+
+.handler-dialog {
+  position: relative;
+  display: grid;
   box-sizing: border-box;
-  width: min(28rem, calc(100vw - 2rem));
-  padding: 1.5rem;
-  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
-  border-radius: 0.75rem;
-  background: Canvas;
-  box-shadow: 0 0.5rem 2rem color-mix(in srgb, CanvasText 10%, transparent);
+  width: min(32rem, 100%);
+  max-height: calc(100dvh - 2rem);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--review-border-strong);
+  border-radius: var(--review-radius-dialog);
+  background: var(--review-surface-panel);
+  box-shadow: var(--review-shadow-float);
+}
+
+.handler-dialog__header {
+  padding: 16px 18px 13px;
+  border-bottom: 1px solid var(--review-border-subtle);
+}
+
+.handler-dialog__header h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 730;
+  line-height: 1.25;
+  letter-spacing: -.02em;
+}
+
+.handler-dialog__header h1:focus {
+  outline: none;
+}
+
+.handler-dialog__body {
+  min-height: 0;
+  padding: 16px 18px;
+  overflow: auto;
+}
+
+.handler-dialog__footer {
+  padding: 12px 18px 14px;
+  border-top: 1px solid var(--review-border-subtle);
+  background: color-mix(in srgb, var(--review-surface-subtle) 42%, var(--review-surface-panel));
 }
 
 .popup {
@@ -49,30 +124,115 @@ body {
   letter-spacing: -0.02em;
 }
 
-p {
-  margin: 0.5rem 0 1rem;
-  line-height: 1.45;
-}
-
 button {
-  min-height: 2.75rem;
-  padding: 0.55rem 0.85rem;
-  border: 1px solid color-mix(in srgb, CanvasText 30%, transparent);
-  border-radius: 0.5rem;
-  background: ButtonFace;
-  color: ButtonText;
   font: inherit;
-  cursor: pointer;
 }
 
 button:focus-visible {
-  outline: 3px solid #245c9c;
+  outline: 3px solid var(--review-focus, #245c9c);
   outline-offset: 2px;
 }
 
 button:disabled {
-  cursor: wait;
-  opacity: 0.65;
+  cursor: not-allowed;
+  opacity: .52;
+}
+
+.handler-actions {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: var(--review-action-group-gap);
+}
+
+.handler-actions button[hidden] {
+  display: none;
+}
+
+.handler-recovery-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: var(--review-action-group-gap);
+  margin-left: auto;
+}
+
+.handler-button {
+  display: inline-flex;
+  min-height: var(--review-control-default);
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 0;
+  padding: 0 11px;
+  border: 1px solid var(--review-border);
+  border-radius: var(--review-radius-control);
+  color: var(--review-ink-primary);
+  background: var(--review-surface-subtle);
+  font-size: 11px;
+  font-weight: 680;
+  line-height: 1.3;
+  text-align: center;
+  cursor: pointer;
+  transition: color var(--review-motion-fast) ease, border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
+}
+
+.handler-actions[aria-label="Protected recovery choices"] > #bypass {
+  margin-right: auto;
+}
+
+.handler-button:hover:not(:disabled) {
+  border-color: var(--review-border-strong);
+  background: var(--review-surface-interactive);
+}
+
+.handler-button:active:not(:disabled) {
+  box-shadow: inset 0 0 0 1px var(--review-border-strong);
+}
+
+.handler-button--primary {
+  border-color: var(--review-ink-primary);
+  color: var(--review-surface-panel);
+  background: var(--review-ink-primary);
+}
+
+.handler-button--primary:hover:not(:disabled) {
+  border-color: var(--review-ink-primary);
+  color: var(--review-surface-panel);
+  background: color-mix(in srgb, var(--review-ink-primary) 88%, var(--review-surface-panel));
+}
+
+.handler-button--destructive {
+  border-color: color-mix(in srgb, var(--review-danger) 58%, var(--review-border-strong));
+  color: var(--review-danger);
+  background: color-mix(in srgb, var(--review-danger) 7%, var(--review-surface-panel));
+  box-shadow: inset 3px 0 0 var(--review-danger);
+}
+
+.handler-button--destructive:hover:not(:disabled) {
+  border-color: var(--review-danger);
+  background: color-mix(in srgb, var(--review-danger) 12%, var(--review-surface-panel));
+}
+
+.handler-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.handler-button[data-icon="chrome"] .handler-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.handler-button[data-icon="git-fork"] .handler-icon {
+  width: 15px;
+  height: 15px;
 }
 
 .popup .switch {
@@ -133,15 +293,35 @@ button:disabled {
   transform: translateX(1rem);
 }
 
-.status {
+.popup .status {
   margin: -0.125rem 0 0;
   color: #676a63;
   font-size: 0.75rem;
   line-height: 1.5;
 }
 
-.status:empty {
+.popup .status:empty {
   display: none;
+}
+
+.handler .status {
+  margin: 0;
+  color: var(--review-ink-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (pointer: coarse) {
+  .handler-button {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 34rem) {
+  .handler-actions,
+  .handler-recovery-actions {
+    flex-wrap: wrap;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -264,7 +264,7 @@ describe("macOS distribution manifests", () => {
         report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
         thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
       },
-      productionWebJavaScriptBytes: 2_516_125,
+      productionWebJavaScriptBytes: 2_535_345,
     });
 
     const root = await mkdtemp(resolve(tmpdir(), "placekeeper-catalog-baseline-"));
@@ -751,6 +751,7 @@ describe("macOS distribution manifests", () => {
     expect(installer.indexOf("daemon coordinate-install")).toBeLessThan(installer.indexOf("install-built-app.sh"));
     expect(installer).not.toMatch(/(?:kill|pkill|killall).*daemon/u);
     const helper = await readFile(resolve("packaging/macos/install-built-app.sh"), "utf8");
+    expect(helper).toContain("A prior managed version may predate the candidate's extension schema");
     expect(helper.indexOf('"$readiness_executable" daemon ensure-ready --receipt')).toBeLessThan(helper.lastIndexOf("committed=1"));
     expect(helper.indexOf('"$readiness_executable" daemon stop-ready --receipt')).toBeLessThan(helper.indexOf('if [ "$app_touched" -eq 1 ]'));
     expect(helper.slice(0, helper.lastIndexOf("committed=1"))).not.toMatch(/\bopen\s+--json\b|autosave/u);
@@ -947,23 +948,27 @@ describe("macOS distribution manifests", () => {
       scripts?: Record<string, string>;
     };
     expect(packageManifest.scripts?.["validate:distribution"])
-      .toBe("pnpm build:web && pnpm build:vscode && pnpm build:chrome && tsx packaging/macos/validate-manifest.ts");
+      .toBe("pnpm build && node --check dist/service/main.js && tsx packaging/macos/validate-manifest.ts");
     await expect(validateDistributionManifests(resolve("."))).resolves.toBeUndefined();
   });
 
-  it("pins one complete, offline shared client payload for the app and VS Code extension", async () => {
+  it("pins one complete, offline shared client payload for the app, VS Code, and Chrome", async () => {
     const packageManifest = JSON.parse(await readFile(resolve("package.json"), "utf8")) as {
       scripts?: Record<string, string>;
     };
     expect(packageManifest.scripts?.["validate:distribution"])
-      .toBe("pnpm build:web && pnpm build:vscode && pnpm build:chrome && tsx packaging/macos/validate-manifest.ts");
+      .toBe("pnpm build && node --check dist/service/main.js && tsx packaging/macos/validate-manifest.ts");
     const web = await validateSharedWebDistribution(resolve("dist/web"));
     const vscodeWeb = await validateSharedWebDistribution(resolve("apps/vscode/dist/web"));
+    const chromeWeb = await validateSharedWebDistribution(resolve("apps/chrome-extension/dist/shared"));
     expect(vscodeWeb).toEqual(web);
-    expect(web.worker).toEqual({ kind: "inline-blob", container: web.app });
+    expect(chromeWeb).toEqual(web);
+    expect(web.schemaVersion).toBe(3);
+    expect(web.pdfiumWorker).toBe("pdfium-worker.js");
     expect(Object.keys(web.integrity).sort()).toEqual([
       web.app,
       web.pdfiumWasm,
+      web.pdfiumWorker,
       web.stylesheet,
     ].sort());
   });
@@ -990,6 +995,32 @@ describe("macOS distribution manifests", () => {
       await expect(validateSharedWebDistribution(root)).rejects.toThrow(/stale|unexpected/iu);
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects every missing or corrupt integrity-pinned shared-client asset", async () => {
+    const source = resolve("dist/web");
+    const manifest = await validateSharedWebDistribution(source);
+    for (const asset of [
+      "asset-manifest.json",
+      manifest.app,
+      manifest.stylesheet,
+      manifest.pdfiumWasm,
+      manifest.pdfiumWorker,
+    ]) {
+      const root = await mkdtemp(join(tmpdir(), "placekeeper-shared-asset-"));
+      try {
+        await cp(source, root, { recursive: true });
+        await rm(join(root, asset));
+        await expect(validateSharedWebDistribution(root)).rejects.toThrow(new RegExp(asset.replace(".", "\\."), "u"));
+
+        await rm(root, { recursive: true, force: true });
+        await cp(source, root, { recursive: true });
+        await writeFile(join(root, asset), "corrupt");
+        await expect(validateSharedWebDistribution(root)).rejects.toThrow(new RegExp(asset.replace(".", "\\."), "u"));
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
     }
   });
 

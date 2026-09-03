@@ -155,6 +155,32 @@ describe("temporary browser source ownership", () => {
     });
   });
 
+  it("retains a clean Chrome review once an acknowledged side effect protects it", async () => {
+    const value = await fixture();
+    const broker = new SessionBroker({ recoveryRoot: value.recoveryRoot, portableReader: async () => [] });
+    const sourceIdentity = createHash("sha256").update("https://papers.example.test/saved.pdf").digest("hex");
+    const chromeRequest = async (): Promise<ChromeBrowserSourceOpenRequest> => ({
+      ...await value.request("Saved.pdf"),
+      protocolVersion: 2,
+      sourceIdentity,
+    });
+    const opened = await broker.openChromeBrowserSource(await chromeRequest(), value.store);
+    if (opened.kind !== "opened") throw new Error("Expected open");
+
+    await broker.protectChromeReview(opened.launch.sessionId);
+    expect(broker.chromeProtected(opened.launch.sessionId)).toBe(true);
+    await broker.quiesceForShutdown();
+
+    const recovered = await new DraftSnapshotStore(
+      join(value.recoveryRoot, opened.launch.sessionId),
+    ).recover();
+    expect(recovered).toMatchObject({ chromeProtected: true, sync: { phase: "clean" } });
+
+    const restarted = new SessionBroker({ recoveryRoot: value.recoveryRoot, portableReader: async () => [] });
+    const reopened = await restarted.openChromeBrowserSource(await chromeRequest(), value.store);
+    expect(reopened).toMatchObject({ kind: "recovery-offered" });
+  });
+
   it("rolls back an adopted source when its control request is cancelled during inspection", async () => {
     const value = await fixture();
     const inspectionStarted = Promise.withResolvers<void>();

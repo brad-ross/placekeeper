@@ -484,7 +484,9 @@ export function useWorkspaceFraming(input: {
           input.request.kind === 'mark' ? ANNOTATION_MARK_GUTTER_PX : 0,
         );
       }
-      if (runway.bottom === 0 && !session.userAxes.top && session.automatic.top !== 0) {
+      if (input.request.kind === 'reading') {
+        topDelta = first.scroll.top - measured.scroll.top;
+      } else if (runway.bottom === 0 && !session.userAxes.top && session.automatic.top !== 0) {
         topDelta = session.baseline.top - measured.scroll.top;
       } else if (runway.bottom > 0 && input.request.kind === 'mark' && !session.userAxes.top) {
         topDelta = revealDelta(
@@ -507,6 +509,9 @@ export function useWorkspaceFraming(input: {
             : measured.scroll.left + leftDelta),
           measured.maximum.left,
         ),
+        // Opening or selecting Annotations is passive. Keep the immediate
+        // pre-open reading position even if browser scroll anchoring changes
+        // the measured position while the bottom runway is committed.
         top: Math.min(
           Math.max(0, session.userAxes.top
             ? session.baseline.top

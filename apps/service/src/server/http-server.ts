@@ -292,7 +292,10 @@ export async function startHttpServer(
       return;
     }
     const bytes = await readFile(physical);
-    setBaseHeaders(response);
+    const csp = assetName === "pdfium-worker.js"
+      ? RESTRICTIVE_CSP.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'")
+      : RESTRICTIVE_CSP;
+    setBaseHeaders(response, csp);
     response.statusCode = 200;
     response.setHeader("Content-Type", assetContentType(physical));
     response.setHeader("Content-Length", bytes.byteLength);

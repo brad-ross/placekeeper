@@ -1,5 +1,8 @@
-import type { NativePort } from "./native-handoff.js";
-import { NATIVE_HOST_NAME } from "./native-protocol.js";
+import {
+  NATIVE_HOST_NAME,
+  type ChromeRuntimeExtensionMessage,
+  type ExtensionMessage,
+} from "./native-protocol.js";
 import {
   AUTO_OPEN_SENTINEL_KEY,
   PDF_MIME_TYPE,
@@ -24,15 +27,25 @@ export interface ChromeApi {
     } | undefined>;
     abortAndFallbackToNativeHandler(): Promise<void>;
   };
-  readonly tabs: {
-    update(tabId: number, properties: { url: string }): Promise<unknown>;
-  };
   readonly runtime: {
     connectNative(application: string): NativePort;
+    getURL(path: string): string;
     readonly onInstalled: {
       addListener(listener: (details: { reason: string }) => void): void;
     };
   };
+}
+
+interface NativeEvent<T> {
+  addListener(listener: (value: T) => void): void;
+  removeListener(listener: (value: T) => void): void;
+}
+
+export interface NativePort {
+  postMessage(message: ExtensionMessage | ChromeRuntimeExtensionMessage): void;
+  disconnect(): void;
+  readonly onMessage: NativeEvent<unknown>;
+  readonly onDisconnect: NativeEvent<void>;
 }
 
 export function chromeAutoOpenPorts(api: ChromeApi): AutoOpenPorts {

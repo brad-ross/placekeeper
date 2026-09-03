@@ -37,6 +37,7 @@ import {
 import {
   reviewExportPresentation,
 } from "../src/review/DocumentActionsMenu.js";
+import { MemoryReviewLocationHistory } from "../src/review/review-location-history.js";
 
 describe("one production review tree", () => {
   it('navigates a cross-page item once through its canonical first segment', () => {
@@ -860,6 +861,32 @@ describe("one production review tree", () => {
     expect(html.match(/Real shared PDF viewer/g)).toHaveLength(1);
     expect(html).not.toContain("Submit task");
     expect(html).not.toContain('aria-modal="true" aria-labelledby="finish-review-heading"');
+  });
+
+  it("omits the redundant document link from Chrome while retaining it on app-hosted surfaces", () => {
+    const state = createReviewState({
+      sessionId: "00000000-0000-4000-8000-000000000101",
+      source: { fileId: "00000000-0000-4000-8000-000000000102", digest: "a".repeat(64), byteLength: 12 },
+    });
+    const api = {
+      command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
+      chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
+      scope: vi.fn(),
+    };
+    const renderSurface = (launchSurface: "browser" | "chrome") => renderToStaticMarkup(
+      <ProductionReviewApp
+        session={{ sessionId: state.sessionId }}
+        initialState={state}
+        scope={{ documentTitle: "paper.pdf", launchSurface }}
+        api={api}
+        copyLinkBase="placekeeper:///tmp/paper.pdf"
+        locationHistory={new MemoryReviewLocationHistory()}
+        viewer={<div>Viewer</div>}
+      />,
+    );
+
+    expect(renderSurface("browser")).toContain('data-review-copy-link');
+    expect(renderSurface("chrome")).not.toContain('data-review-copy-link');
   });
 
   it("shows passive status only for a trusted Codex launch scope", () => {

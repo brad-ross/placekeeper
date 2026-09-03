@@ -41,6 +41,9 @@ import {
   isChromeBrowserSourceOpenRequest,
   type ChromeBrowserSourceOpenRequest,
 } from "../browser/browser-source-store.js";
+import {
+  type ChromeRuntimeHostMessage,
+} from "../../../../packages/core/src/chrome-native-runtime-protocol.js";
 
 // Both directions are explicitly bounded. Evidence requests use a stricter
 // byte budget before base64 expansion, so a document can never turn this
@@ -144,6 +147,8 @@ export type PlacekeeperControlRequest =
     }
   | { readonly kind: "launch"; readonly request: LaunchRequest }
   | { readonly kind: "chrome-open"; readonly request: ChromeBrowserSourceOpenRequest }
+  | { readonly kind: "chrome-runtime"; readonly portId: string; readonly message: unknown }
+  | { readonly kind: "chrome-runtime-detach"; readonly portId: string }
   | { readonly kind: "link-preflight"; readonly link: string }
   | { readonly kind: "link-open"; readonly request: LinkOpenRequest }
   | {
@@ -240,6 +245,8 @@ export type PlacekeeperControlResponse =
     }
   | { readonly kind: "launch"; readonly response: LaunchResponse }
   | { readonly kind: "chrome-open"; readonly response: LaunchResponse }
+  | { readonly kind: "chrome-runtime"; readonly messages: readonly ChromeRuntimeHostMessage[] }
+  | { readonly kind: "chrome-runtime-detached" }
   | { readonly kind: "link-preflight"; readonly response: LinkPreflightResponse }
   | { readonly kind: "link-open"; readonly response: LinkLaunchResponse }
   | { readonly kind: "binding"; readonly result: TaskBindingClaimResult }
@@ -314,6 +321,15 @@ function isControlRequest(value: unknown): value is PlacekeeperControlRequest {
   if (value.kind === "chrome-open") {
     return Object.keys(value).length === 2 && Object.hasOwn(value, "request") &&
       isChromeBrowserSourceOpenRequest(value.request);
+  }
+  if (value.kind === "chrome-runtime") {
+    return Object.keys(value).length === 3 && typeof value.portId === "string" &&
+      /^[A-Za-z0-9_-]{16,128}$/u.test(value.portId) &&
+      isObject(value.message);
+  }
+  if (value.kind === "chrome-runtime-detach") {
+    return Object.keys(value).length === 2 && typeof value.portId === "string" &&
+      /^[A-Za-z0-9_-]{16,128}$/u.test(value.portId);
   }
   if (value.kind === "link-preflight") {
     return typeof value.link === "string" && value.link.length <= PLACEKEEPER_LINK_MAX_LENGTH;
@@ -412,6 +428,13 @@ async function dispatch(
   }
   if (request.kind === "chrome-open") {
     return { kind: "chrome-open", response: await host.openChromeBrowserSource(request.request, signal) };
+  }
+  if (request.kind === "chrome-runtime") {
+    return { kind: "chrome-runtime", messages: await host.chromeRuntime.handle(request.portId, request.message) };
+  }
+  if (request.kind === "chrome-runtime-detach") {
+    await host.chromeRuntime.detach(request.portId);
+    return { kind: "chrome-runtime-detached" };
   }
   if (request.kind === "link-preflight") {
     return { kind: "link-preflight", response: await host.preflightLink(request.link) };

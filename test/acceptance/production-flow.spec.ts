@@ -444,7 +444,7 @@ test("uses PDF metadata for the tab title and the filename when metadata is abse
   await expect(page).toHaveTitle("plain-text.pdf");
 });
 
-test("keeps mounted Codex context through refresh, then fails closed on a hung scope poll", async ({ page }) => {
+test("keeps mounted Codex context through fresh-page re-entry, then fails closed on a hung scope poll", async ({ page }) => {
   const clientNow = Date.now();
   const taskBindings = new TaskBindingRegistry({
     now: () => new Date(clientNow),
@@ -512,9 +512,10 @@ test("keeps mounted Codex context through refresh, then fails closed on a hung s
     await expect(status.locator("[role='tooltip']")).toContainText("PDF content and annotations are synced with the connected agent");
 
     const readableUrl = new URL(page.url());
-    await page.evaluate(() => history.replaceState(history.state, "", "#v=1&page=3"));
-    await page.reload();
-    await expect(page).toHaveURL(`${readableUrl.origin}${readableUrl.pathname}#v=1&page=3`);
+    const pageThreeUrl = `${readableUrl.origin}${readableUrl.pathname}#v=1&page=3`;
+    await page.goto("about:blank");
+    await page.goto(pageThreeUrl);
+    await expect(page).toHaveURL(pageThreeUrl);
     await expect(page.locator('.review-chrome__page-control')).toHaveText("3 / 4");
     await expect(page.locator("[data-codex-context]")).toHaveAttribute(
       "data-codex-context",
@@ -578,6 +579,53 @@ test("searches extracted PDF text with variants, history, references, and retain
   await expect(searchPanel.locator(".pdf-search__search-icon")).toBeVisible();
   const clearSearch = searchPanel.getByRole("button", { name: "Clear search" });
   await expect(clearSearch).toBeVisible();
+  const clearSearchGeometry = await clearSearch.evaluate((button) => {
+    const input = button.parentElement?.querySelector<HTMLInputElement>('.pdf-search__input');
+    const icon = button.querySelector<SVGElement>('.review-icon');
+    if (!input) throw new Error('Search input is missing beside its clear action.');
+    if (!icon) throw new Error('Search clear action icon is missing.');
+    const buttonBounds = button.getBoundingClientRect();
+    const inputBounds = input.getBoundingClientRect();
+    const iconBounds = icon.getBoundingClientRect();
+    const style = getComputedStyle(button);
+    return {
+      width: buttonBounds.width,
+      height: buttonBounds.height,
+      verticalInset: Math.min(
+        buttonBounds.top - inputBounds.top,
+        inputBounds.bottom - buttonBounds.bottom,
+      ),
+      centerDelta: Math.abs(
+        (buttonBounds.top + buttonBounds.height / 2) - (inputBounds.top + inputBounds.height / 2),
+      ),
+      iconCenterXOffset:
+        (iconBounds.left + iconBounds.width / 2) - (buttonBounds.left + buttonBounds.width / 2),
+      iconCenterYOffset:
+        (iconBounds.top + iconBounds.height / 2) - (buttonBounds.top + buttonBounds.height / 2),
+      rightInset: inputBounds.right - buttonBounds.right,
+      minWidth: style.minWidth,
+      maxWidth: style.maxWidth,
+      minHeight: style.minHeight,
+      maxHeight: style.maxHeight,
+      borderStyle: style.borderStyle,
+      borderRadius: style.borderRadius,
+    };
+  });
+  expect(clearSearchGeometry.width).toBeCloseTo(22.4, 1);
+  expect(clearSearchGeometry.height).toBeCloseTo(22.4, 1);
+  expect(clearSearchGeometry.verticalInset).toBeGreaterThanOrEqual(4);
+  expect(clearSearchGeometry.centerDelta).toBeLessThanOrEqual(1);
+  expect(clearSearchGeometry.iconCenterXOffset).toBeCloseTo(0.5, 1);
+  expect(clearSearchGeometry.iconCenterYOffset).toBeCloseTo(0.5, 1);
+  expect(clearSearchGeometry.rightInset).toBeCloseTo(5, 1);
+  expect(clearSearchGeometry).toMatchObject({
+    minWidth: '22.4px',
+    maxWidth: '22.4px',
+    minHeight: '22.4px',
+    maxHeight: '22.4px',
+    borderStyle: 'solid',
+    borderRadius: '9px',
+  });
   await clearSearch.click();
   await expect(query).toHaveValue("");
   await query.fill("stable");
@@ -1898,6 +1946,57 @@ test("records annotation tray jumps in document history", async ({ page }) => {
   await forward.click();
   await expect(page.getByLabel("Current page")).toHaveText("3 / 4");
 });
+
+for (const seededAnnotation of [false, true]) {
+  test(`opens the annotations tray without moving the PDF${seededAnnotation ? ' when annotations exist' : ''}`, async ({ page }) => {
+    await page.setViewportSize({ width: 760, height: 900 });
+    await openFreshProductionFixture(
+      page,
+      referencePdf,
+      'Passive annotations launch failed',
+      seededAnnotation
+        ? async (sessionId) => {
+            const initialState = host.broker.state(sessionId);
+            if (!initialState) throw new Error('Passive annotations review state is missing');
+            await host.broker.acceptMutation(
+              sessionId,
+              addPageNote(
+                initialState,
+                0,
+                { x: 80, y: 160, width: 18, height: 18 },
+                'Do not navigate here when the tray opens.',
+              ),
+            );
+          }
+        : undefined,
+    );
+
+    const workspace = await currentWorkspaceRail(page);
+    await workspace.click();
+    await page.getByRole('tab', { name: 'Search', exact: true }).click();
+    await expect(page.getByRole('tab', { name: 'Search', exact: true })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    const viewport = page.locator('[data-viewer-framing-viewport]');
+    await expect(viewport).toHaveCount(1);
+    await viewport.evaluate((element) => {
+      element.scrollTop = Math.min(420, Math.max(0, element.scrollHeight - element.clientHeight));
+    });
+    const readingTop = await viewport.evaluate((element) => element.scrollTop);
+    expect(readingTop).toBeGreaterThan(0);
+
+    await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
+    await expect(page.getByRole('tab', { name: 'Annotations', exact: true })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect.poll(() => viewport.evaluate((element, expected) => (
+      Math.abs(element.scrollTop - expected)
+    ), readingTop)).toBeLessThan(1);
+  });
+}
 
 test("settles tray copy actions without selection or tooltip flashes", async ({ page }) => {
   await page.addInitScript(() => {
@@ -3680,7 +3779,7 @@ test('keeps the bottom workspace and its toggle moving vertically together witho
   ))).not.toHaveLength(0);
 });
 
-test('fits a real PDF to closed, bottom, and resizable right reading widths as a one-shot zoom', async ({ page }) => {
+test('defaults a real PDF to fit width and refits bottom and resizable right reading widths', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, 'Fit Width production launch failed');
 
@@ -3742,7 +3841,6 @@ test('fits a real PDF to closed, bottom, and resizable right reading widths as a
     return geometry;
   };
 
-  await fitAndWait();
   const standardGap = 10;
   const closedGeometry = await expectFitted(standardGap);
   const closedZoom = await zoomTrigger().textContent();
@@ -3996,6 +4094,10 @@ test('minimally reveals the PDF beside the adaptive annotations surface and rest
     );
     return Math.abs(element.scrollLeft - Math.min(desiredLeft, maximum));
   }, deliberateLeft)).toBeLessThan(1);
+  await viewport.evaluate((element) => {
+    element.scrollTop = Math.min(240, Math.max(0, element.scrollHeight - element.clientHeight));
+  });
+  await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   const narrowScrollBefore = await viewport.evaluate((element) => ({
     left: element.scrollLeft,
     top: element.scrollTop,
