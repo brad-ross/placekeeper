@@ -2,21 +2,20 @@ name: Release macOS
 
 on:
   workflow_dispatch:
+    inputs:
+      installed_chrome_evidence:
+        description: Final JSON from test:chrome-installed for this exact build
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   package:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: arm64
-            runner: macos-15
-          - arch: x64
-            runner: macos-15-intel
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-15
+    env:
+      RELEASE_ARCH: arm64
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -31,7 +30,6 @@ jobs:
       - run: pnpm fixtures:pdf
       - run: pnpm build
       - name: Validate macOS packaging contracts
-        if: matrix.arch == 'arm64'
         run: pnpm exec vitest run packaging/macos/packaging.test.ts
       - name: Import Developer ID certificate
         env:
@@ -42,21 +40,25 @@ jobs:
       - name: Build and sign app
         env:
           SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
-        run: pnpm package:macos -- --arch "${{ matrix.arch }}" --node-runtime "$(command -v node)" --service-dist dist/service --web-dist dist/web --output "artifacts/${{ matrix.arch }}" --sign-identity "$SIGNING_IDENTITY"
+        run: pnpm package:macos -- --arch "$RELEASE_ARCH" --node-runtime "$(command -v node)" --service-dist dist/service --web-dist dist/web --output "artifacts/$RELEASE_ARCH" --sign-identity "$SIGNING_IDENTITY"
       - name: Installed offline writer smoke
-        run: pnpm smoke:installed -- "artifacts/${{ matrix.arch }}/Placekeeper.app" test/fixtures/pdfs/text-native.pdf
+        run: pnpm smoke:installed -- "artifacts/$RELEASE_ARCH/Placekeeper.app" test/fixtures/pdfs/text-native.pdf
+      - name: Verify installed Google Chrome release evidence
+        env:
+          PLACEKEEPER_INSTALLED_CHROME_EVIDENCE: ${{ inputs.installed_chrome_evidence }}
+        run: pnpm exec tsx test/acceptance/validate-installed-chrome-evidence.ts "artifacts/$RELEASE_ARCH/Placekeeper.app"
       - name: Archive signed app
-        run: ditto -c -k --keepParent "artifacts/${{ matrix.arch }}/Placekeeper.app" "artifacts/Placekeeper-${{ matrix.arch }}-submission.zip"
+        run: ditto -c -k --keepParent "artifacts/$RELEASE_ARCH/Placekeeper.app" "artifacts/Placekeeper-$RELEASE_ARCH-submission.zip"
       - name: Notarize and staple
         env:
           PLACEKEEPER_NOTARY_PROFILE: ${{ secrets.MACOS_NOTARY_PROFILE }}
-        run: pnpm notarize:macos -- "artifacts/Placekeeper-${{ matrix.arch }}-submission.zip" "artifacts/${{ matrix.arch }}/Placekeeper.app"
+        run: pnpm notarize:macos -- "artifacts/Placekeeper-$RELEASE_ARCH-submission.zip" "artifacts/$RELEASE_ARCH/Placekeeper.app"
       - name: Archive stapled app
-        run: ditto -c -k --keepParent "artifacts/${{ matrix.arch }}/Placekeeper.app" "artifacts/Placekeeper-${{ matrix.arch }}.zip"
+        run: ditto -c -k --keepParent "artifacts/$RELEASE_ARCH/Placekeeper.app" "artifacts/Placekeeper-$RELEASE_ARCH.zip"
       - name: Gatekeeper assessment
-        run: spctl --assess --type execute --verbose=4 "artifacts/${{ matrix.arch }}/Placekeeper.app"
+        run: spctl --assess --type execute --verbose=4 "artifacts/$RELEASE_ARCH/Placekeeper.app"
       - uses: actions/upload-artifact@v4
         with:
-          name: Placekeeper-${{ matrix.arch }}
-          path: artifacts/Placekeeper-${{ matrix.arch }}.zip
+          name: Placekeeper-arm64
+          path: artifacts/Placekeeper-arm64.zip
           if-no-files-found: error

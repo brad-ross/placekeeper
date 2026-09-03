@@ -323,6 +323,7 @@ export function sanitizeChromeReviewRuntimeResponse(
       state,
       scope,
       saveStatus,
+      ...(typeof value.protected === "boolean" ? { protected: value.protected } : {}),
       resources: {
         document: resources.document,
         pdfiumWasm: resources.pdfiumWasm,

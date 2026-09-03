@@ -204,6 +204,7 @@ interface ActiveSession {
   syncTexOperationToken?: string;
   readonly documentGeneration: number;
   sourceOwnership: RecoverableSourceOwnership;
+  chromeProtected: boolean;
 }
 
 interface BrowserLaunchScope {
@@ -715,7 +716,7 @@ export class SessionBroker {
       signal?.throwIfAborted();
       const chromeSourceKey = adopted.sourceIdentity === undefined
         ? undefined
-        : `${adopted.sourceIdentity}\0${adopted.sha256}\0${1}`;
+        : [adopted.sourceIdentity, adopted.sha256, "1"].join("\0");
       const existingId = chromeSourceKey === undefined
         ? undefined
         : this.#activeChromeBySource.get(chromeSourceKey);
@@ -734,7 +735,7 @@ export class SessionBroker {
       if (adopted.sourceIdentity !== undefined) {
         const drafts = await this.#recoverableDrafts();
         const matches = drafts.filter((draft) =>
-          draft.sync.phase !== "clean" &&
+          (draft.sync.phase !== "clean" || draft.chromeProtected === true) &&
           draft.source.disposition === "remote-temporary" &&
           draft.source.sourceIdentity === adopted.sourceIdentity &&
           draft.source.digest === adopted.sha256 &&
@@ -799,6 +800,7 @@ export class SessionBroker {
         sourceWorkInterruptions: [],
         documentGeneration: 1,
         sourceOwnership,
+        chromeProtected: false,
       };
       // Persisting the lease is the ownership acknowledgement. No second
       // snapshot is created: the adopted source.pdf is the recovery source.
@@ -866,7 +868,7 @@ export class SessionBroker {
     const drafts = await this.#recoverableDrafts();
     const identityMatches = drafts.filter(
       (draft) =>
-        draft.sync.phase !== "clean" &&
+        (draft.sync.phase !== "clean" || draft.chromeProtected === true) &&
         ((draft.state.workflow.mode === "generated-output" &&
           this.#draftCanonicalPath(draft) === approvedFile.canonicalPath) ||
           ((draft.source.disposition === "local" ||
@@ -1114,6 +1116,7 @@ export class SessionBroker {
         latestObservationEpoch: matchingDraft.latestObservationEpoch ?? 0,
         sourceWorkInterruptions: [...(matchingDraft.sourceWorkInterruptions ?? [])],
         documentGeneration: 1,
+        chromeProtected: matchingDraft.chromeProtected === true,
         sourceOwnership: matchingDraft.source.disposition === "local"
           ? {
               ...matchingDraft.source,
@@ -1227,6 +1230,7 @@ export class SessionBroker {
       latestObservationEpoch: 0,
       sourceWorkInterruptions: [],
       documentGeneration: 1,
+      chromeProtected: matchingDraft?.chromeProtected === true,
       sourceOwnership: matchingDraft?.source.disposition === "remote-temporary"
         ? {
             ...matchingDraft.source,
@@ -1356,6 +1360,7 @@ export class SessionBroker {
       generationLineage: [...session.generationLineage],
       latestObservationEpoch: session.latestObservationEpoch,
       sourceWorkInterruptions: [...session.sourceWorkInterruptions],
+      ...(session.chromeProtected ? { chromeProtected: true as const } : {}),
     };
   }
 
@@ -1771,6 +1776,26 @@ export class SessionBroker {
 
   state(sessionId: string): ReviewState | undefined {
     return this.#activeById.get(sessionId)?.state;
+  }
+
+  chromeProtected(sessionId: string): boolean {
+    return this.#activeById.get(sessionId)?.chromeProtected === true;
+  }
+
+  async protectChromeReview(sessionId: string): Promise<void> {
+    const session = this.#activeById.get(sessionId);
+    if (session === undefined || session.ending) throw new Error("Review session is unavailable");
+    if (session.chromeProtected) return;
+    await this.#withSessionTail(session, async () => {
+      if (session.chromeProtected) return;
+      session.chromeProtected = true;
+      try {
+        await session.store.persist(this.#draft(session));
+      } catch (error) {
+        session.chromeProtected = false;
+        throw error;
+      }
+    });
   }
 
   saveStatus(sessionId: string):
@@ -3059,7 +3084,7 @@ export class SessionBroker {
       const clean = session.sync.phase === "clean" &&
         session.sync.savedRevision === session.sync.desiredRevision &&
         session.sync.savedDigest === session.sync.desiredDigest;
-      if (clean) await session.store.remove();
+      if (clean && !session.chromeProtected) await session.store.remove();
     }));
     for (const session of sessions) {
       this.capabilities.revokeFile(session.fileId);

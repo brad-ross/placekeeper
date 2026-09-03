@@ -22,19 +22,12 @@ describe("Chrome extension static contract", () => {
     });
   });
 
-  it("bundles the installed-only platform proof behind an explicit local flag", async () => {
+  it("ships only the production embedded handler after the installed platform proof passes", async () => {
     const handlerEntry = await readFile(resolve(extensionRoot, "src/handler-entry.ts"), "utf8");
-    const proof = await readFile(resolve(extensionRoot, "src/platform-proof.ts"), "utf8");
-    expect(handlerEntry).toContain("runInstalledPlatformProof");
-    expect(proof).toContain('"placekeeperPlatformProofEnabled"');
-    expect(proof).not.toContain("sessionStorage");
-    expect(proof).not.toContain("getEntriesByType");
-    expect(proof).not.toContain("placekeeperPlatformProofNextScenario");
-    expect(proof).not.toContain("updateCurrentEntry");
-    expect(handlerEntry).toContain("if (proofEnabled)");
-    expect(handlerEntry.indexOf("if (proofEnabled)")).toBeLessThan(
-      handlerEntry.indexOf("void controller.run()"),
-    );
+    expect(handlerEntry).not.toContain("PlatformProof");
+    expect(handlerEntry).not.toContain("platformProof");
+    expect(handlerEntry).not.toContain("placekeeperPlatformProofEnabled");
+    expect(handlerEntry).toContain("void controller.run()");
   });
 
   it("uses native keyboard controls and announced status regions", async () => {
@@ -42,7 +35,12 @@ describe("Chrome extension static contract", () => {
       readFile(resolve(extensionRoot, "handler.html"), "utf8"),
       readFile(resolve(extensionRoot, "popup.html"), "utf8"),
     ]);
-    expect(handler).toContain('<button id="bypass" type="button">Use Chrome viewer</button>');
+    expect(handler).toContain('class="handler-dialog"');
+    expect(handler).toContain('role="dialog"');
+    expect(handler).toContain('class="handler-dialog__header"');
+    expect(handler).toContain('class="handler-dialog__body"');
+    expect(handler).toContain('class="handler-dialog__footer"');
+    expect(handler).toContain('<button id="bypass" type="button">Default</button>');
     expect(handler).toContain('role="status"');
     expect(popup).toContain('<button id="automatic-open" class="switch" type="button" role="switch"');
     expect(popup).toContain('aria-checked="false"');
@@ -69,18 +67,17 @@ describe("Chrome extension static contract", () => {
     expect(popupEntry).toContain("const nextEnabled = !enabled;");
   });
 
-  it("navigates the MIME handler's owning tab instead of its child frame", async () => {
+  it("never replaces the MIME handler's owning tab on the production path", async () => {
     const handlerEntry = await readFile(resolve(extensionRoot, "src/handler-entry.ts"), "utf8");
-    expect(handlerEntry).toContain("chrome.tabs.update(tabId, { url: destination })");
+    expect(handlerEntry).not.toContain("chrome.tabs.update");
     expect(handlerEntry).not.toContain("window.location.replace");
   });
 
-  it("keeps the v1 redirect gated while the v2 handler mounts the packaged shared client", async () => {
+  it("mounts the packaged shared client directly in the PDF handler", async () => {
     const [handlerEntry, handler] = await Promise.all([
       readFile(resolve(extensionRoot, "src/handler-entry.ts"), "utf8"),
       readFile(resolve(extensionRoot, "handler.html"), "utf8"),
     ]);
-    expect(handlerEntry).toContain("const HANDLER_RUNTIME_VERSION = 2");
     expect(handlerEntry).toContain('chrome.runtime.getURL("shared/app.js")');
     expect(handlerEntry).toContain('chrome.runtime.getURL("shared/app.css")');
     expect(handlerEntry).toContain("createNativeEmbeddedReview");
@@ -88,13 +85,32 @@ describe("Chrome extension static contract", () => {
   });
 
   it("presents protected recovery as a labeled, keyboard-focusable choice", async () => {
-    const handlerEntry = await readFile(resolve(extensionRoot, "src/handler-entry.ts"), "utf8");
+    const [handlerEntry, handlerUi, styles] = await Promise.all([
+      readFile(resolve(extensionRoot, "src/handler-entry.ts"), "utf8"),
+      readFile(resolve(extensionRoot, "src/handler-ui.ts"), "utf8"),
+      readFile(resolve(extensionRoot, "src/extension.css"), "utf8"),
+    ]);
 
-    expect(handlerEntry).toContain('actions.setAttribute("role", "group")');
-    expect(handlerEntry).toContain('actions.setAttribute("aria-label", "Protected recovery choices")');
-    expect(handlerEntry).toContain('["resume", "Resume draft"]');
-    expect(handlerEntry).toContain('["discard", "Discard draft"]');
-    expect(handlerEntry).toContain('["fork", "Fork review"]');
-    expect(handlerEntry).toContain('buttons[0]!.focus({ preventScroll: true })');
+    expect(handlerEntry).toContain('handlerActions!.setAttribute("aria-label", "Protected recovery choices")');
+    expect(handlerEntry).toContain('title!.textContent = "Existing review recovered"');
+    expect(handlerEntry).toContain('setHandlerButtonContent(bypass, "chrome", "Default")');
+    expect(handlerEntry).toContain('["discard", "Discard", "delete", "destructive"]');
+    expect(handlerEntry).toContain('["fork", "Fork", "git-fork", "secondary"]');
+    expect(handlerEntry).toContain('["resume", "Resume", "redo", "primary"]');
+    expect(handlerEntry).toContain('recoveryActions.className = "handler-recovery-actions"');
+    expect(handlerEntry).toContain('resume.focus({ preventScroll: true })');
+    expect(handlerUi).toContain('button.className = `handler-button');
+    expect(handlerUi).toContain('icon.classList.add("handler-icon")');
+    expect(handlerUi).toContain('"git-fork"');
+    expect(handlerUi).toContain('["circle", { cx: "12", cy: "18", r: "3" }]');
+    expect(handlerUi).toContain('fill: "currentColor"');
+    expect(handlerUi).toContain('stroke: "none"');
+    expect(styles).toContain("min-height: var(--review-control-default)");
+    expect(styles).toContain("justify-content: flex-end");
+    expect(styles).toContain(".handler-button--primary");
+    expect(styles).toContain(".handler-button--destructive");
+    expect(styles).toContain("width: 14px");
+    expect(styles).toContain('.handler-button[data-icon="chrome"] .handler-icon');
+    expect(styles).toContain('.handler-button[data-icon="git-fork"] .handler-icon');
   });
 });

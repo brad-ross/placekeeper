@@ -1,5 +1,3 @@
-import { validatePlacekeeperDestination } from "./native-protocol.js";
-
 export interface PdfStreamInfo {
   readonly originalUrl: string;
   readonly streamUrl: string;
@@ -8,10 +6,6 @@ export interface PdfStreamInfo {
 export interface MimeHandlerContext extends PdfStreamInfo {
   readonly tabId: number;
   readonly embedded: boolean;
-}
-
-export interface HandoffResult {
-  readonly destination: string;
 }
 
 export type EmbeddedReviewLifecycleEvent =
@@ -38,22 +32,14 @@ export type HandlerState =
   | "disconnected-clean"
   | "disconnected-protected"
   | "update-required"
-  | "replacing"
-  | "fallback"
-  | "replaced";
-
-export class HandoffError extends Error {}
+  | "fallback";
 
 export interface HandlerPorts {
   isOptedIn(): Promise<boolean>;
   getStreamInfo(): Promise<unknown>;
-  /** Version 1 keeps the shipped redirect available until the installed U7 cutover. */
-  readonly handlerRuntimeVersion?: 1 | 2;
-  openEmbedded?(info: PdfStreamInfo, signal: AbortSignal): Promise<EmbeddedReviewSession>;
+  openEmbedded(info: PdfStreamInfo, signal: AbortSignal): Promise<EmbeddedReviewSession>;
   pendingTitle?(originalUrl: string): void;
-  handoff(info: PdfStreamInfo, signal: AbortSignal): Promise<HandoffResult>;
   fallback(): void;
-  replace(tabId: number, destination: string): Promise<void>;
   status?(message: string): void;
 }
 
@@ -98,7 +84,7 @@ export function createHandlerController(ports: HandlerPorts): HandlerController 
   return {
     state: () => current,
     bypass: () => {
-      if (current === "replacing" || activeCommitted) return;
+      if (activeCommitted) return;
       bypassRequested = true;
       abort.abort();
       if (current === "pending" || current === "mounting" || current === "activating") {
@@ -123,59 +109,38 @@ export function createHandlerController(ports: HandlerPorts): HandlerController 
         ports.pendingTitle?.(info.originalUrl);
         current = "pending";
         ports.status?.("Opening this PDF in Placekeeper…");
-        if (ports.handlerRuntimeVersion === 2) {
-          if (ports.openEmbedded === undefined) throw new HandoffError("embedded-runtime-unavailable");
-          review = await ports.openEmbedded(info, abort.signal);
-          if (terminal || bypassRequested) {
-            await review.release();
-            review.dispose();
-            review = undefined;
-            fallbackOnce();
-            return;
-          }
-          unsubscribeLifecycle = review.subscribeLifecycle((event) => {
-            if (!activeCommitted || terminal) return;
-            current = event.type === "update-required"
-              ? "update-required"
-              : event.protected ? "disconnected-protected" : "disconnected-clean";
-            ports.status?.(event.type === "update-required"
-              ? event.protected
-                ? "Placekeeper needs to be updated before this protected review can reopen."
-                : "Placekeeper needs to be updated before this review can reconnect."
-              : event.protected
-                ? "Placekeeper disconnected. Your review is protected and can be reopened."
-                : "Placekeeper disconnected. Reopen this PDF to continue.");
-          });
-          current = "mounting";
-          ports.status?.("Preparing the Placekeeper viewer…");
-          await review.mountAndValidate(abort.signal);
-          if (terminal || bypassRequested) throw new HandoffError("bypassed");
-          current = "activating";
-          ports.status?.("Activating this review…");
-          await review.activate(abort.signal);
-          activeCommitted = true;
-          current = "active";
-          ports.status?.("Review ready.");
-          return;
-        }
-        const result = await ports.handoff(info, abort.signal);
-        if (terminal) return;
-        if (bypassRequested) {
+        review = await ports.openEmbedded(info, abort.signal);
+        if (terminal || bypassRequested) {
+          await review.release();
+          review.dispose();
+          review = undefined;
           fallbackOnce();
           return;
         }
-        const destination = validatePlacekeeperDestination(result.destination);
-        if (destination === undefined) {
-          fallbackOnce();
-          return;
-        }
-        ports.status?.("Opening Placekeeper.");
-        current = "replacing";
-        await ports.replace(info.tabId, destination);
-        if (terminal) return;
-        terminal = true;
-        current = "replaced";
-      } catch (error) {
+        unsubscribeLifecycle = review.subscribeLifecycle((event) => {
+          if (!activeCommitted || terminal) return;
+          current = event.type === "update-required"
+            ? "update-required"
+            : event.protected ? "disconnected-protected" : "disconnected-clean";
+          ports.status?.(event.type === "update-required"
+            ? event.protected
+              ? "Placekeeper needs to be updated before this protected review can reopen."
+              : "Placekeeper needs to be updated before this review can reconnect."
+            : event.protected
+              ? "Placekeeper disconnected. Your review is protected and can be reopened."
+              : "Placekeeper disconnected. Reopen this PDF to continue.");
+        });
+        current = "mounting";
+        ports.status?.("Preparing the Placekeeper viewer…");
+        await review.mountAndValidate(abort.signal);
+        if (terminal || bypassRequested) throw new Error("bypassed");
+        current = "activating";
+        ports.status?.("Activating this review…");
+        await review.activate(abort.signal);
+        activeCommitted = true;
+        current = "active";
+        ports.status?.("Review ready.");
+      } catch {
         if (!activeCommitted && review !== undefined) {
           unsubscribeLifecycle?.();
           unsubscribeLifecycle = undefined;

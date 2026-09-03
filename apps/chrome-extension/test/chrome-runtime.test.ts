@@ -6,7 +6,7 @@ import {
   createNativeEmbeddedReview,
   type NativeEmbeddedReviewSession,
 } from "../src/chrome-runtime.js";
-import type { NativePort } from "../src/native-handoff.js";
+import type { NativePort } from "../src/chrome-api.js";
 
 class ReplyEvent<T> {
   readonly #listeners = new Set<(value: T) => void>();
@@ -60,6 +60,7 @@ function projection(sha256 = digest, byteLength = pdf.byteLength) {
       sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 },
     },
     canonicalLinkBase: "placekeeper:///Placekeeper%20Browser/review/Review.pdf",
+    protected: false,
     location: { kind: "page", page: 1 },
     document: { sha256, byteLength, generation: 1 },
   };
@@ -87,13 +88,17 @@ function runtimePort(options: {
   readonly resultThenInvalidation?: boolean;
   readonly successor?: ReturnType<typeof successorProjection>;
   readonly recovery?: boolean;
+  readonly dropFirstInvoke?: boolean;
+  readonly dropKeepalive?: boolean;
 } = {}): NativePort & {
   readonly sent: Record<string, unknown>[];
   invalidate(message: { readonly generation: number; readonly revision: number; readonly reason: "revision" | "generation" | "save" }): void;
+  acknowledgeLatestKeepalive(): void;
 } {
   const onMessage = new ReplyEvent<unknown>();
   const onDisconnect = new ReplyEvent<void>();
   const sent: Record<string, unknown>[] = [];
+  let droppedInvoke = false;
   const reply = (message: Record<string, unknown>) => queueMicrotask(() => onMessage.emit({
     protocolVersion: 2,
     connectionId,
@@ -103,6 +108,11 @@ function runtimePort(options: {
     sent,
     invalidate(message) {
       reply({ type: "invalidation", lane: "runtime", ...message });
+    },
+    acknowledgeLatestKeepalive() {
+      const request = sent.findLast(({ type }) => type === "keepalive");
+      if (typeof request?.requestId !== "string") throw new Error("No keepalive request is pending.");
+      reply({ type: "ack", lane: "lifecycle", requestId: request.requestId });
     },
     onMessage,
     onDisconnect,
@@ -172,6 +182,10 @@ function runtimePort(options: {
           done: true,
         });
       } else if (message.type === "invoke") {
+        if (options.dropFirstInvoke === true && !droppedInvoke) {
+          droppedInvoke = true;
+          return;
+        }
         reply({
           type: "result",
           lane: "runtime",
@@ -192,6 +206,8 @@ function runtimePort(options: {
             reason: "revision",
           });
         }
+      } else if (message.type === "keepalive" && options.dropKeepalive === true) {
+        return;
       } else if (message.type === "keepalive" || message.type === "detach") {
         reply({ type: "ack", lane: "lifecycle", requestId: message.requestId });
       }
@@ -218,6 +234,35 @@ describe("embedded Chrome review runtime", () => {
       .toBe("Quarterly Results.pdf");
     expect(chromePdfDisplayName("https://papers.example.test/%E2%80%AE%00paper.pdf"))
       .toBe("paper.pdf");
+  });
+
+  it("does not disconnect an active review when a pending keepalive resumes after system sleep", async () => {
+    vi.useFakeTimers();
+    try {
+      let now = 0;
+      const port = runtimePort({ dropKeepalive: true });
+      const session = await opener(port, { timeoutMs: 25, now: () => now })({
+        originalUrl: "https://papers.example.test/Review.pdf",
+        streamUrl: "blob:chrome-authorized-stream",
+      });
+      const lifecycle: unknown[] = [];
+      session.subscribeLifecycle((event) => lifecycle.push(event));
+      await session.activate();
+
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect(port.sent.some(({ type }) => type === "keepalive")).toBe(true);
+      now = 10_000;
+      await vi.advanceTimersByTimeAsync(25);
+      expect(lifecycle).toEqual([]);
+
+      port.acknowledgeLatestKeepalive();
+      await vi.runAllTicks();
+      expect(lifecycle).toEqual([]);
+      await session.release();
+      session.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("consumes the remote MIME stream once and exposes only a verified runtime bootstrap", async () => {
@@ -490,6 +535,50 @@ describe("embedded Chrome review runtime", () => {
     expect(session.protected).toBe(true);
   });
 
+  it("reuses a logical operation key after a lost reply and rotates it after success", async () => {
+    const port = runtimePort({ dropFirstInvoke: true });
+    const session = await opener(port, { timeoutMs: 10 })({
+      originalUrl: "https://papers.example.test/Review.pdf",
+      streamUrl: "blob:chrome-authorized-stream",
+    });
+    await session.activate();
+    const responses: Array<Record<string, unknown>> = [];
+    session.runtimePort.subscribe((message) => responses.push(message as Record<string, unknown>));
+    const send = (requestId: string) => session.runtimePort.postMessage({
+      protocol: "placekeeper.review-runtime", version: 1, kind: "request",
+      runtimeId: connectionId, requestId, sessionId, generation: 1, revision: 0,
+      method: "exportReviewedCopy", payload: {},
+    });
+
+    send("logical-export-1");
+    await vi.waitFor(() => expect(responses).toContainEqual(expect.objectContaining({
+      requestId: "logical-export-1", ok: false,
+    })));
+    expect(session.protected).toBe(true);
+    send("logical-export-2");
+    await vi.waitFor(() => expect(responses).toContainEqual(expect.objectContaining({
+      requestId: "logical-export-2", ok: true,
+    })));
+    send("logical-export-3");
+    await vi.waitFor(() => expect(responses).toContainEqual(expect.objectContaining({
+      requestId: "logical-export-3", ok: true,
+    })));
+
+    const invokes = port.sent.filter(({ type }) => type === "invoke");
+    expect(invokes.map(({ idempotencyKey }) => idempotencyKey)).toEqual([
+      "logical-export-1", "logical-export-1", "logical-export-3",
+    ]);
+  });
+
+  it("starts protected when the recovered service projection says so", async () => {
+    const port = runtimePort({ projection: { ...projection(), protected: true } });
+    const session = await opener(port)({
+      originalUrl: "https://papers.example.test/Review.pdf",
+      streamUrl: "blob:chrome-authorized-stream",
+    });
+    expect(session.protected).toBe(true);
+  });
+
   it("crosses the protected boundary when another presentation saves", async () => {
     const port = runtimePort();
     const session = await opener(port)({
@@ -504,6 +593,7 @@ describe("embedded Chrome review runtime", () => {
     await vi.waitFor(() => expect(messages).toContainEqual(expect.objectContaining({
       kind: "event",
       event: "session-invalidated",
+      payload: expect.objectContaining({ reason: "freshness" }),
     })));
     expect(session.protected).toBe(true);
   });

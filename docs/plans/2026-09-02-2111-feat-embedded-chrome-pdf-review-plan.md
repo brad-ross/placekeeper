@@ -65,7 +65,7 @@ The VS Code work established a shared production client and an embedded-host run
 - R8. Reloading, restoring, reopening, or duplicating a Chrome PDF joins the canonical semantic review only after the service verifies both source identity and the ingested PDF digest.
 - R9. Each Chrome tab receives an independent presentation lease and transient viewport over the canonical review. Concurrent tabs observe the same service-owned mutations, while a changed source generation or digest is reconciled or adopted under the existing successor rules rather than silently conflated.
 - R10. Placekeeper Back and Forward traverse semantic document locations inside the client, while browser Back leaves the PDF and the address-bar URL and fragment remain unchanged.
-- R11. Copy Link produces a capability-free canonical `placekeeper://` link for the current semantic location without exposing the source URL, presentation identity, session credential, or task data.
+- R11. Chrome omits the redundant document-level Copy Link because the original PDF URL remains in the address bar. Precise item-level Copy Link actions remain available and produce capability-free canonical `placekeeper://` links without exposing the source URL, presentation identity, session credential, or task data.
 
 #### Acquisition, failure, and recovery
 
@@ -86,7 +86,7 @@ The VS Code work established a shared production client and an embedded-host run
 - F2. **Pre-commit failure:** Any failure through ingestion, service bootstrap, shared-client mount, or document validation releases unclaimed state and invokes the bounded Chrome fallback. Covers R13.
 - F3. **Reload, restore, reopen, or duplicate:** Every presentation stages and verifies its source independently, then joins the canonical review only when source identity and digest match. Each tab receives a fresh presentation lease; changed bytes follow the existing reconciliation or successor path. Covers R7-R9, R12.
 - F4. **Active disconnect:** The client keeps the PDF visible but read-only and offers explicit Reconnect or Reopen behavior without Chrome fallback. It retains protected draft recovery only after the first accepted mutation or save. Covers R14-R15.
-- F5. **Semantic navigation:** Placekeeper navigation updates internal location state and Copy Link output without mutating the browser URL. Covers R10-R11.
+- F5. **Semantic navigation:** Placekeeper navigation updates internal location state without mutating the browser URL; precise item-level Copy Link actions remain canonical and capability-free. Covers R10-R11.
 
 ### Acceptance Examples
 
@@ -96,7 +96,7 @@ The VS Code work established a shared production client and an embedded-host run
 - AE4. Given a daemon disconnect after activation, the tab stays read-only and offers Reconnect or Reopen without falling back to Chrome. If the service accepted an annotation or save first, the draft remains protected after the daemon returns. Covers R14-R15.
 - AE5. Given an active review, reload, browser-session restore, duplication, or opening the same verified PDF in a new tab joins the same semantic review after source-and-digest verification, while each tab receives a distinct presentation lease. Covers R7-R9.
 - AE6. Given several Placekeeper page jumps, browser Back returns to the page visited before the PDF and Placekeeper Back traverses the document locations. Covers R10.
-- AE7. Given a Chrome review with no Codex task, Copy Link opens as an ordinary Placekeeper view in Finder or Codex and does not bind the receiving task. Covers R6, R11, R18.
+- AE7. Given a Chrome review, the top bar has no document-level Copy Link beside the title because the PDF URL is already in the address bar; a precise item-level Copy Link still opens as an ordinary Placekeeper view in Finder or Codex without binding the receiving task. Covers R6, R11, R18.
 - AE8. Given a protected temporary-source draft after service replacement, Reopen presents the existing resume, discard, or fork decision and applies exactly one valid idempotent choice. Covers R14-R15.
 
 ### Scope Boundaries
@@ -334,7 +334,7 @@ U1 is a stage gate. U3 builds on U2's host-neutral protocol. U6 makes the exact 
 
 - Mount the shared app with browser, VS Code, and Chrome runtime fixtures; assert each receives only its allowed capabilities.
 - Navigate within a Chrome fixture and assert internal Back/Forward changes semantic location without changing `window.location`.
-- Generate a Copy Link from Chrome and assert it is canonical and capability-free even though address-bar history is disabled.
+- Assert Chrome omits the document-level Copy Link, then generate a precise item-level link and assert it is canonical and capability-free even though address-bar history is disabled.
 - Resolve metadata title, blank title, and document-generation replacement through all hosts.
 - Reject a Chrome resource URL that is remote, loopback, or outside the packaged extension asset set.
 - Inject forbidden paths, credentials, bind proofs, task state, headers, executable authorities, and raw errors into each Chrome response class; assert sanitization or fail-closed rejection.

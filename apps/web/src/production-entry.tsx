@@ -389,18 +389,20 @@ export async function startRuntime(
     readonly onDocumentTitleChange?: (title: string, generation: number) => void;
     readonly onRuntimeError?: (error: Error) => void;
   } = {},
-): Promise<void> {
+): Promise<() => void> {
   const root = document.querySelector("#root");
   if (!(root instanceof HTMLElement)) throw new Error("Production review root is unavailable");
   root.dataset.productionRoot = "true";
   const loaded = await runtime.bootstrap();
-  createRoot(root).render(
+  const reactRoot = createRoot(root);
+  reactRoot.render(
     <RuntimeFailureBoundary {...(options.onRuntimeError === undefined
       ? {}
       : { onError: options.onRuntimeError })}>
       <RuntimeProductionReviewApp runtime={runtime} initial={loaded} {...options} />
     </RuntimeFailureBoundary>,
   );
+  return () => reactRoot.unmount();
 }
 
 class RuntimeFailureBoundary extends Component<{
@@ -511,8 +513,9 @@ export async function startChromeRuntime(options: {
   });
   const ready = Promise.withResolvers<number>();
   let settled = false;
+  let unmount: (() => void) | undefined;
   try {
-    await startRuntime(runtime, {
+    unmount = await startRuntime(runtime, {
       onDocumentReady: (generation) => {
         if (settled) return;
         settled = true;
@@ -536,7 +539,14 @@ export async function startChromeRuntime(options: {
   }
   return {
     ready: ready.promise,
-    dispose: () => runtime.dispose(),
+    dispose: () => {
+      if (!settled) {
+        settled = true;
+        ready.reject(new DOMException("The embedded review was disposed.", "AbortError"));
+      }
+      unmount?.();
+      runtime.dispose();
+    },
   };
 }
 

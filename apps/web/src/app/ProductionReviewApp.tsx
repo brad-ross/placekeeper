@@ -1652,18 +1652,20 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           ? { codexContext: visibleCodexContext(codexContext, state) ?? UNAVAILABLE_CODEX_CONTEXT }
           : {})}
         {...(copyLinkBase === undefined || locationHistory === undefined ? {} : {
-          copyLink: {
-            disabled: navigationState.pendingMainNavigation !== null
-              || navigationState.pendingSendToMain !== null,
-            getLink: () => {
-              mainLocationRefresh.flush();
-              return buildPlacekeeperCopyLink(
-                copyLinkBase,
-                navigationCoordinator.currentLinkLocation(),
-              );
+          ...(scope.launchSurface === 'chrome' ? {} : {
+            copyLink: {
+              disabled: navigationState.pendingMainNavigation !== null
+                || navigationState.pendingSendToMain !== null,
+              getLink: () => {
+                mainLocationRefresh.flush();
+                return buildPlacekeeperCopyLink(
+                  copyLinkBase,
+                  navigationCoordinator.currentLinkLocation(),
+                );
+              },
+              writeText: writePlacekeeperLink,
             },
-            writeText: writePlacekeeperLink,
-          },
+          }),
           copyItemLink: {
             getLink: (item: ReviewItem) => buildPlacekeeperCopyLink(
               copyLinkBase,

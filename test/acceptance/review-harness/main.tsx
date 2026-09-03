@@ -743,7 +743,7 @@ function Harness() {
           current,
           2,
           { x: 112, y: 228, width: 18, height: 18 },
-          'This long annotation explains the identification concern in enough detail to exceed the compact annotation card. It keeps going so the full annotation reader can present every authored sentence without repeating selected or nearby PDF text, and it gives the workflow harness a stable overflow case for focus and scroll restoration.',
+          'This long annotation explains the identification concern in enough detail to exceed the compact annotation card. It keeps going so the full annotation reader can present every authored sentence without repeating selected or nearby PDF text, and it gives the workflow harness a stable overflow case for focus and scroll restoration. The fixture deliberately continues well beyond the compact card limit so browser font metrics and workspace width cannot collapse this overflow scenario into exactly three lines.',
         )))}>Seed long annotation</button>
         <button type="button" onClick={() => setState((current) => ({
           ...current,

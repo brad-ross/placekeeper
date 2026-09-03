@@ -34,6 +34,7 @@ async function fixture(options: {
     await writeFile(pdf, "%PDF-1.7\nfixture\n%%EOF");
   }
   await writeFile(join(assets, "app.js"), "export async function start(){ document.body.dataset.productionApp = 'ready' }\n");
+  await writeFile(join(assets, "pdfium-worker.js"), "WebAssembly.instantiate(new Uint8Array())\n");
   await writeFile(join(assets, "pdfium.wasm"), "offline-wasm");
   const host = await PlacekeeperHost.start({
     recoveryRoot: join(root, "recovery"),
@@ -592,6 +593,10 @@ describe("persistent launch host", () => {
     const publicApp = await fetch(`${launch.origin}/assets/app.js`);
     expect(publicApp.status).toBe(200);
     expect(await publicApp.text()).toContain("productionApp");
+    expect(publicApp.headers.get("content-security-policy")).not.toContain("wasm-unsafe-eval");
+    const pdfiumWorker = await fetch(`${launch.origin}/assets/pdfium-worker.js`);
+    expect(pdfiumWorker.status).toBe(200);
+    expect(pdfiumWorker.headers.get("content-security-policy")).toContain("wasm-unsafe-eval");
     const saveStatus = await fetch(`${launch.origin}/s/${launched.sessionId}/save/status`, {
       headers: { authorization: `Bearer ${credential}` },
     });

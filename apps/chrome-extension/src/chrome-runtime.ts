@@ -8,8 +8,9 @@ import {
   type ReviewRuntimeMethod,
 } from "../../../packages/core/src/review-runtime-protocol.js";
 import { sha256Hex } from "../../../packages/core/src/sha256.js";
+import { deadlineWasSubstantiallyDelayed } from "../../../packages/core/src/suspend-aware-deadline.js";
 import type { EmbeddedReviewLifecycleEvent, PdfStreamInfo } from "./handler-controller.js";
-import type { NativePort } from "./native-handoff.js";
+import type { NativePort } from "./chrome-api.js";
 import {
   CHROME_RUNTIME_PROTOCOL,
   CHROME_RUNTIME_PROTOCOL_VERSION,
@@ -21,6 +22,8 @@ import {
 } from "./native-protocol.js";
 
 const MAX_DOCUMENT_BYTES = 64 * 1024 * 1024;
+const INTERACTIVE_REQUEST_TIMEOUT_MS = 5 * 60_000 + 5_000;
+const RELEASE_TIMEOUT_MS = 1_000;
 const NON_IDEMPOTENT = new Set<ReviewRuntimeBrokerMethod>([
   "command",
   "chooseCopy",
@@ -45,6 +48,7 @@ interface RuntimeProjection {
   readonly scope: Record<string, unknown>;
   readonly saveStatus: Record<string, unknown>;
   readonly canonicalLinkBase: string;
+  readonly protected: boolean;
   readonly location?: unknown;
   readonly document: {
     readonly sha256: string;
@@ -76,6 +80,7 @@ export interface NativeEmbeddedReviewOptions {
   ): Promise<"resume" | "discard" | "fork">;
   timeoutMs?: number;
   maxDocumentBytes?: number;
+  now?(): number;
 }
 
 interface PendingNativeRequest {
@@ -83,7 +88,7 @@ interface PendingNativeRequest {
   readonly resolve: (message: ChromeRuntimeHostMessage) => void;
   readonly reject: (error: Error) => void;
   readonly cleanupAbort?: () => void;
-  readonly timer: ReturnType<typeof setTimeout>;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 type NativeExtensionBody = ChromeRuntimeExtensionMessage extends infer Message
@@ -94,6 +99,15 @@ type NativeExtensionBody = ChromeRuntimeExtensionMessage extends infer Message
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (record(value)) {
+    return `{${Object.keys(value).sort().map((key) =>
+      `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
 }
 
 function aborted(): Error {
@@ -156,7 +170,8 @@ function runtimeProjection(value: unknown): RuntimeProjection | undefined {
   if (!record(value) || !record(value.document) || !record(value.state) || !record(value.scope) ||
     !record(value.saveStatus) || typeof value.sessionId !== "string" ||
     !Number.isSafeInteger(value.generation) || !Number.isSafeInteger(value.revision) ||
-    typeof value.canonicalLinkBase !== "string" || typeof value.document.sha256 !== "string" ||
+    typeof value.canonicalLinkBase !== "string" || typeof value.protected !== "boolean" ||
+    typeof value.document.sha256 !== "string" ||
     !Number.isSafeInteger(value.document.byteLength) || !Number.isSafeInteger(value.document.generation)) {
     return undefined;
   }
@@ -167,6 +182,7 @@ class NativeRuntimeChannel {
   readonly connectionId: string;
   readonly #port: NativePort;
   readonly #timeoutMs: number;
+  readonly #now: () => number;
   readonly #pending = new Map<string, PendingNativeRequest>();
   readonly #events = new Set<(message: ChromeRuntimeHostMessage) => void>();
   readonly #disconnects = new Set<() => void>();
@@ -174,10 +190,11 @@ class NativeRuntimeChannel {
   #closed = false;
   #leaseMs = 90_000;
 
-  constructor(port: NativePort, connectionId: string, timeoutMs: number) {
+  constructor(port: NativePort, connectionId: string, timeoutMs: number, now: () => number) {
     this.#port = port;
     this.connectionId = connectionId;
     this.#timeoutMs = timeoutMs;
+    this.#now = now;
     port.onMessage.addListener(this.#onMessage);
     port.onDisconnect.addListener(this.#onDisconnect);
   }
@@ -209,6 +226,7 @@ class NativeRuntimeChannel {
     body: NativeExtensionBody,
     accept: (message: ChromeRuntimeHostMessage) => boolean,
     signal?: AbortSignal,
+    timeoutMs = this.#timeoutMs,
   ): Promise<ChromeRuntimeHostMessage> {
     const message = {
       ...body,
@@ -218,7 +236,7 @@ class NativeRuntimeChannel {
     if (validateRuntimeExtensionMessage(message) === undefined) {
       return Promise.reject(reasonError("invalid-extension-message"));
     }
-    return this.#requestInternal(message, accept, signal, false);
+    return this.#requestInternal(message, accept, signal, false, timeoutMs);
   }
 
   close(): void {
@@ -291,25 +309,35 @@ class NativeRuntimeChannel {
     accept: (message: ChromeRuntimeHostMessage) => boolean,
     signal: AbortSignal | undefined,
     hello: boolean,
+    timeoutMs = this.#timeoutMs,
   ): Promise<ChromeRuntimeHostMessage> {
     if (this.#closed) return Promise.reject(reasonError("disconnected"));
     if (signal?.aborted === true) return Promise.reject(aborted());
     const id = "requestId" in message ? message.requestId : undefined;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (hello) this.#hello = undefined;
-        else if (id !== undefined) this.#pending.delete(id);
-        pending.cleanupAbort?.();
-        reject(reasonError("request-timeout"));
-      }, this.#timeoutMs);
+      let pending: PendingNativeRequest;
+      const armDeadline = (): ReturnType<typeof setTimeout> => {
+        const armedAt = this.#now();
+        return setTimeout(() => {
+          if (deadlineWasSubstantiallyDelayed(armedAt, timeoutMs, this.#now())) {
+            pending.timer = armDeadline();
+            return;
+          }
+          if (hello) this.#hello = undefined;
+          else if (id !== undefined) this.#pending.delete(id);
+          pending.cleanupAbort?.();
+          reject(reasonError("request-timeout"));
+        }, timeoutMs);
+      };
+      const timer = armDeadline();
       const onAbort = signal === undefined ? undefined : () => {
-        clearTimeout(timer);
+        clearTimeout(pending.timer);
         if (hello) this.#hello = undefined;
         else if (id !== undefined) this.#pending.delete(id);
         reject(aborted());
       };
       if (onAbort !== undefined) signal!.addEventListener("abort", onAbort, { once: true });
-      const pending: PendingNativeRequest = {
+      pending = {
         accept,
         resolve,
         reject,
@@ -320,7 +348,7 @@ class NativeRuntimeChannel {
       };
       if (hello) this.#hello = pending;
       else if (id !== undefined) this.#pending.set(id, pending);
-      this.#port.postMessage(message as never);
+      this.#port.postMessage(message);
     });
   }
 
@@ -481,7 +509,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
     const connectionId = options.createId();
     const transferId = options.createId();
     const port = options.connectNative();
-    const channel = new NativeRuntimeChannel(port, connectionId, timeoutMs);
+    const channel = new NativeRuntimeChannel(port, connectionId, timeoutMs, options.now ?? Date.now);
     let acquisitionStarted = false;
     let projection: RuntimeProjection | undefined;
     let documentUrl: string | undefined;
@@ -571,7 +599,8 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
 
       let bootstrap = initialBootstrap;
       let active = false;
-      let protectedReview = false;
+      let protectedReview = projection.protected;
+      const operationKeys = new Map<string, string>();
       let disposed = false;
       let keepalive: ReturnType<typeof setInterval> | undefined;
       let runtimeInvokes = 0;
@@ -654,7 +683,9 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
               sessionId: next.sessionId,
               generation: next.generation,
               revision: next.revision,
-              reason: next.generation === previous.generation ? "revision" : "generation",
+              reason: message.reason === "save" && next.generation === previous.generation
+                ? "freshness"
+                : next.generation === previous.generation ? "revision" : "generation",
               ...(next.generation === previous.generation ? {} : {
                 previousGeneration: previous.generation,
               }),
@@ -698,7 +729,8 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
           lane: "lifecycle",
           requestId,
         }, (message) => message.type === "ack" && message.lane === "lifecycle" &&
-          message.requestId === requestId).catch(() => undefined);
+          message.requestId === requestId, AbortSignal.timeout(Math.min(RELEASE_TIMEOUT_MS, timeoutMs)),
+        Math.min(RELEASE_TIMEOUT_MS, timeoutMs)).catch(() => undefined);
         channel.close();
       };
 
@@ -733,6 +765,17 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
             return;
           }
           const requestId = options.createId();
+          const operationFingerprint = NON_IDEMPOTENT.has(method)
+            ? canonicalJson([method, payload])
+            : undefined;
+          const idempotencyKey = operationFingerprint === undefined
+            ? undefined
+            : operationKeys.get(operationFingerprint) ?? raw.requestId;
+          if (operationFingerprint !== undefined) {
+            operationKeys.set(operationFingerprint, idempotencyKey!);
+            // A missing reply cannot prove that a side effect did not commit.
+            protectedReview = true;
+          }
           runtimeInvokes += 1;
           void channel.request({
             type: "invoke",
@@ -742,12 +785,16 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
             revision: Number.isSafeInteger(raw.revision) ? raw.revision as number : projection!.revision,
             method,
             payload,
-            ...(NON_IDEMPOTENT.has(method) ? { idempotencyKey: raw.requestId } : {}),
+            ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
           }, (message) => message.type === "result" && message.requestId === requestId &&
-            message.method === method).then((result) => {
+            message.method === method, undefined,
+          method === "chooseFolder" || method === "locateSave"
+            ? INTERACTIVE_REQUEST_TIMEOUT_MS
+            : timeoutMs).then((result) => {
               if (result.type !== "result") throw new Error("Unexpected native runtime response.");
               const safe = sanitizeChromeReviewRuntimeResponse(method, result.payload);
               if (safe === undefined) throw new Error("Invalid native runtime response.");
+              if (operationFingerprint !== undefined) operationKeys.delete(operationFingerprint);
               if (method === "command" && record(safe) && safe.accepted !== false &&
                 Number.isSafeInteger(safe.revision)) {
                 projection = {
@@ -802,9 +849,28 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
             next.document.generation !== projection!.document.generation) {
             throw new Error("The active document identity changed before activation.");
           }
+          const previous = projection!;
           projection = next;
           bootstrap = { ...bootstrap, ...next };
           active = true;
+          if (next.generation !== previous.generation || next.revision !== previous.revision) {
+            emitRuntime({
+              protocol: REVIEW_RUNTIME_PROTOCOL,
+              version: REVIEW_RUNTIME_VERSION,
+              kind: "event",
+              event: "session-invalidated",
+              runtimeId: connectionId,
+              payload: {
+                sessionId: next.sessionId,
+                generation: next.generation,
+                revision: next.revision,
+                reason: next.generation === previous.generation ? "revision" : "generation",
+                ...(next.generation === previous.generation ? {} : {
+                  previousGeneration: previous.generation,
+                }),
+              },
+            });
+          }
           keepalive = setInterval(() => {
             if (released) return;
             const id = options.createId();

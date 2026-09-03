@@ -89,6 +89,46 @@ describe("Chrome native host entry", () => {
     expect(detach).toHaveBeenCalledOnce();
   });
 
+  it("grants a proxy-mode native port one fresh lease after a suspended deadline resumes", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const frames: Buffer[] = [];
+    const firstFrame = Promise.withResolvers<void>();
+    output.on("data", (chunk: Buffer) => {
+      frames.push(chunk);
+      firstFrame.resolve();
+    });
+    let now = 0;
+    const exchange = vi.fn(async (_portId: string, message: { readonly connectionId: string }) => [{
+      type: "hello-ack" as const,
+      protocol: "placekeeper.chrome-runtime" as const,
+      protocolVersion: 2 as const,
+      connectionId: message.connectionId,
+      leaseMs: 1_000,
+    }]);
+    const detach = vi.fn(async () => undefined);
+    const run = runChromeNativeHostCommand([CHROME_EXTENSION_ORIGIN], {
+      input, output, store: await storeFixture(), runtimeExchange: exchange,
+      runtimeDetach: detach, runtimeIdleLeaseMs: 25, now: () => now,
+    });
+    input.write(encodeNativeMessage({
+      type: "hello", protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
+      connectionId: "connection-proxy-sleep-1",
+    }));
+    await firstFrame.promise;
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(exchange).toHaveBeenCalledOnce();
+    expect(frames.length).toBeGreaterThan(0);
+
+    now = 10_000;
+    await new Promise((resolve) => setTimeout(resolve, 35));
+    expect(detach).not.toHaveBeenCalled();
+
+    now = 10_025;
+    await expect(run).resolves.toBe(0);
+    expect(detach).toHaveBeenCalledOnce();
+  });
+
   it("integrates native framing with the bounded remote handoff", async () => {
     const input = new PassThrough();
     const pause = vi.spyOn(input, "pause");

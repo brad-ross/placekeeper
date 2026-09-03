@@ -91,6 +91,7 @@ function addReportedMathSymbolInventory(document: PDFDocument, page: PDFPage): v
   )));
 }
 const outputDirectory = resolve('test/fixtures/pdfs');
+const fixtureMetadataDate = new Date('2024-01-01T00:00:00.000Z');
 const encryptedNoAnnotationBase64 =
   'JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PAovUHJvZHVjZXIgPGRlOTU0NjMwYzIwMGU1MTc2YmYwNjdhOTAxMWYxNjBjMjZlN2Y5M2NiMDg1YzNmMTc0MzAzYmQ5NmVlYWU5ODU+Cj4+CmVuZG9iagoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwovQ291bnQgMQovS2lkcyBbIDQgMCBSIF0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL0NhdGFsb2cKL1BhZ2VzIDIgMCBSCj4+CmVuZG9iago0IDAgb2JqCjw8Ci9UeXBlIC9QYWdlCi9SZXNvdXJjZXMgPDwKL0ZvbnQgPDwKL0hlbHZldGljYS03MDk4NDgwNzg5IDUgMCBSCi9IZWx2ZXRpY2EtOTc0MjY4MjU2OCA1IDAgUgo+PgovWE9iamVjdCA8PAo+PgovRXh0R1N0YXRlIDw8Cj4+Cj4+Ci9NZWRpYUJveCBbIDAgMCA2MTIgNzkyIF0KL0Fubm90cyBbIF0KL0NvbnRlbnRzIFsgNiAwIFIgXQovUGFyZW50IDIgMCBSCj4+CmVuZG9iago1IDAgb2JqCjw8Ci9UeXBlIC9Gb250Ci9TdWJ0eXBlIC9UeXBlMQovQmFzZUZvbnQgL0hlbHZldGljYQovRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZwo+PgplbmRvYmoKNiAwIG9iago8PAovRmlsdGVyIC9GbGF0ZURlY29kZQovTGVuZ3RoIDI1Ngo+PgpzdHJlYW0K+D741cssH9mtvMVGLzls9Uow/5r8LccUtB9r7Lwh1mStk3Na1fAdvsTJ4jNo7Ar07jFUILdMwU1qaQIQ4cQbQzSkxonj+kiYVngxdZLOUPnASxVGRFuZuTOp9h/+/8Go4xRIoK4IDYF9sTEbyUzr/28knmX1oJtUOV1CENJeHcU4IENHxw3P99W18tTKufF4DrjyKqsVCo3QrbrhvesjJNWiINW3cmTJlPWMMc23UP4nxs3QFqXLSyZXp/6RVTwfSb9w5hNeiaV0rdRuLf0upQ2i9glRC4GT1H3Xq+iqtkShFfjDpJlPX7VFzd/+SBv+PXfRIN7Cui271Ps2WhfnlQplbmRzdHJlYW0KZW5kb2JqCjcgMCBvYmoKPDwKL1YgNQovUiA2Ci9MZW5ndGggMjU2Ci9QIDQKL0ZpbHRlciAvU3RhbmRhcmQKL08gPDUxZGNjOGJmM2FkYjYzNDMwMDc1NTA1ZWI4ODk1ZmVlOWQyMDRhOTg5ZjhjMjZjOWY1ZDQ0OWNiMGI2MjRmZTkwNTJjMGQxNGIzYzhiYzhiNmU5ZGE4NGUzM2UzM2I5ZD4KL1UgPGM1NjJmYTI4YTU3YzE5MTQ3MDE0ZTdkNzA4ZTJjZjJiZjRmN2Y2NjMxMzljMzIxZDM5MmNhNmJhM2M0NzJmZmU3MjVjMjlkNTliODliZWFmMGIyOTJjNWQ0MzJlNGQxZD4KL0NGIDw8Ci9TdGRDRiA8PAovQXV0aEV2ZW50IC9Eb2NPcGVuCi9DRk0gL0FFU1YzCi9MZW5ndGggMzIKPj4KPj4KL1N0bUYgL1N0ZENGCi9TdHJGIC9TdGRDRgovT0UgPGFlOWI4OGVhZDM2MWVlMjUyOTYyZGY2NmNmNWYzMjQ2NDdlMDliNWNhZDMwNzZmYzJlMDI4OGE3MzA0YmY2MTU+Ci9VRSA8ZTQ4NWM4MjNhNTM2MzVkMTdkYmZlZDk4ZTAzNDIxYzEwYTU2MGI5ZWM3NDlkZGM1MzY0ZWNlMGFkY2MyY2UxMj4KL1Blcm1zIDw3MDBlMDE5YmRlNjE4ZGRmMzk0NzNhYjdiMzMxMWMyMz4KPj4KZW5kb2JqCnhyZWYKMCA4CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAxNSAwMDAwMCBuIAowMDAwMDAwMTEzIDAwMDAwIG4gCjAwMDAwMDAxNzIgMDAwMDAgbiAKMDAwMDAwMDIyMSAwMDAwMCBuIAowMDAwMDAwNDQzIDAwMDAwIG4gCjAwMDAwMDA1NDAgMDAwMDAgbiAKMDAwMDAwMDg2OCAwMDAwMCBuIAp0cmFpbGVyCjw8Ci9TaXplIDgKL1Jvb3QgMyAwIFIKL0luZm8gMSAwIFIKL0lEIFsgPDM1MzQzOTMxNjMzOTYxMzczMjY1NjEzOTM5NjMzNDY0MzEzMTMxNjMzNjY1MzQ2MTY0Mzg2NTM0MzE2NjMyMzc+IDwzNTM0MzkzMTYzMzk2MTM3MzI2NTYxMzkzOTYzMzQ2NDMxMzEzMTYzMzY2NTM0NjE2NDM4NjUzNDMxNjYzMjM3PiBdCi9FbmNyeXB0IDcgMCBSCj4+CnN0YXJ0eHJlZgoxNDE0CiUlRU9GCg==';
 
@@ -98,6 +99,15 @@ async function writeFixture(name: string, bytes: Uint8Array): Promise<void> {
   const path = resolve(outputDirectory, name);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, bytes);
+}
+
+async function createFixturePdf(): Promise<PDFDocument> {
+  const document = await PDFDocument.create();
+  // pdf-lib otherwise stamps both values with the wall clock. These fixtures
+  // are integrity-pinned release inputs, so their metadata must be reproducible.
+  document.setCreationDate(fixtureMetadataDate);
+  document.setModificationDate(fixtureMetadataDate);
+  return document;
 }
 
 function addExistingAnnotations(document: PDFDocument): void {
@@ -141,7 +151,7 @@ function addExistingAnnotations(document: PDFDocument): void {
 }
 
 async function textPdf(options: { annotations?: boolean; rotation?: number; crop?: boolean } = {}) {
-  const document = await PDFDocument.create();
+  const document = await createFixturePdf();
   const page = document.addPage([612, 792]);
   const font = await document.embedFont(StandardFonts.Helvetica);
   page.drawText('Selectable placekeeper text: unique equilibrium clearly.', {
@@ -163,7 +173,7 @@ async function textPdf(options: { annotations?: boolean; rotation?: number; crop
 }
 
 async function imageOnlyPdf() {
-  const document = await PDFDocument.create();
+  const document = await createFixturePdf();
   const page = document.addPage([612, 792]);
   const png = await document.embedPng(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -173,7 +183,7 @@ async function imageOnlyPdf() {
 }
 
 async function mixedTextImagePdf() {
-  const document = await PDFDocument.create();
+  const document = await createFixturePdf();
   const font = await document.embedFont(StandardFonts.Helvetica);
   const textPage = document.addPage([612, 792]);
   textPage.drawText('Reliable selectable text on page one.', {
@@ -191,7 +201,7 @@ async function mixedTextImagePdf() {
 }
 
 async function equationSelectionPdf() {
-  const document = await PDFDocument.create();
+  const document = await createFixturePdf();
   const page = document.addPage([612, 792]);
   const roman = await document.embedFont(StandardFonts.TimesRoman);
   const italic = await document.embedFont(StandardFonts.TimesRomanItalic);
@@ -226,7 +236,7 @@ async function equationSelectionPdf() {
 }
 
 async function multiPageTextPdf() {
-  const document = await PDFDocument.create();
+  const document = await createFixturePdf();
   const font = await document.embedFont(StandardFonts.Helvetica);
   for (const [index, pageLabel] of ['one', 'two'].entries()) {
     const page = document.addPage([612, 792]);
@@ -240,7 +250,7 @@ async function multiPageTextPdf() {
 }
 
 async function pdfSearchPdf() {
-  const document = await PDFDocument.create();
+  const document = await createFixturePdf();
   const font = await document.embedFont(StandardFonts.Helvetica);
   const first = document.addPage([612, 792]);
   first.drawText('A stable model is defined here. Stability matters for the proof. A 90° angle is fixed.', {
@@ -272,7 +282,7 @@ async function pdfSearchPdf() {
 }
 
 async function hostileActionsPdf() {
-  const document = await PDFDocument.create();
+  const document = await createFixturePdf();
   const page = document.addPage([612, 792]);
   page.drawRectangle({ x: 72, y: 650, width: 200, height: 40, color: rgb(0.9, 0.9, 0.9) });
   const context = document.context;
@@ -305,7 +315,7 @@ async function hostileActionsPdf() {
 }
 
 async function referenceNavigationPdf() {
-  const document = await PDFDocument.create();
+  const document = await createFixturePdf();
   const font = await document.embedFont(StandardFonts.Helvetica);
   const pages = Array.from({ length: 4 }, (_, index) => {
     const page = document.addPage([612, 792]);
@@ -615,7 +625,7 @@ async function annotatedReferenceNavigationPdf(sourcePdf: Uint8Array): Promise<U
 }
 
 async function preservationCorpusPdf() {
-  const document = await PDFDocument.load(await textPdf());
+  const document = await PDFDocument.load(await textPdf(), { updateMetadata: false });
   const page = document.getPage(0);
   const context = document.context;
   const appearance = context.flateStream("0.3 0.6 0.9 rg 0 0 80 18 re f", {
@@ -680,7 +690,7 @@ async function preservationCorpusPdf() {
 }
 
 async function certifiedPdf() {
-  const document = await PDFDocument.load(await textPdf());
+  const document = await PDFDocument.load(await textPdf(), { updateMetadata: false });
   const context = document.context;
   const signature = context.obj({
     Type: 'Sig',

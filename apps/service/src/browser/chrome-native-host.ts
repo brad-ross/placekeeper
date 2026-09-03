@@ -31,6 +31,7 @@ import {
 import {
   CHROME_RUNTIME_PROTOCOL,
 } from "../../../../packages/core/src/chrome-native-runtime-protocol.js";
+import { deadlineWasSubstantiallyDelayed } from "../../../../packages/core/src/suspend-aware-deadline.js";
 import type {
   ChromeRuntimeExtensionMessage,
   ChromeRuntimeHostMessage,
@@ -45,12 +46,22 @@ export interface ChromeNativeHostCommandOptions {
   readonly maxDurationMs?: number;
   readonly runtimeBackend?: ChromeRuntimeBackend;
   readonly runtimeIdleLeaseMs?: number;
+  readonly now?: () => number;
   readonly runtimeExchange?: (portId: string, message: ChromeRuntimeExtensionMessage, signal?: AbortSignal) => Promise<readonly ChromeRuntimeHostMessage[]>;
   readonly runtimeDetach?: (portId: string) => Promise<void>;
 }
 
 const DEFAULT_NATIVE_HOST_DURATION_MS = 30_000;
 const DEFAULT_RUNTIME_IDLE_LEASE_MS = 90_000;
+const RUNTIME_DETACH_BUDGET_MS = 1_000;
+
+async function detachWithinBudget(detach: () => Promise<void>): Promise<void> {
+  const pending = detach().catch(() => undefined);
+  await Promise.race([
+    pending,
+    new Promise<void>((resolve) => setTimeout(resolve, RUNTIME_DETACH_BUDGET_MS)),
+  ]);
+}
 
 export type ChromeBrowserLaunchClient = (
   request: LaunchRequest,
@@ -165,6 +176,7 @@ export async function runChromeNativeHostCommand(
   const armLegacyDeadline = (): void => {
     lifetimeTimer ??= setTimeout(
       () => {
+        protocolFailure = true;
         lifetime.abort(new Error("native-host-timeout"));
         input.destroy();
       },
@@ -173,12 +185,19 @@ export async function runChromeNativeHostCommand(
   };
   const armRuntimeProxyDeadline = (): void => {
     if (runtimeProxyTimer !== undefined) clearTimeout(runtimeProxyTimer);
+    const idleLeaseMs = options.runtimeIdleLeaseMs ?? DEFAULT_RUNTIME_IDLE_LEASE_MS;
+    const now = options.now ?? Date.now;
+    const armedAt = now();
     runtimeProxyTimer = setTimeout(() => {
+      if (deadlineWasSubstantiallyDelayed(armedAt, idleLeaseMs, now())) {
+        armRuntimeProxyDeadline();
+        return;
+      }
       runtimeIdleExpired = true;
       runtimeProxyDetached = true;
       void (options.runtimeDetach ?? detachChromeRuntimeThroughDaemon)(runtimePortId)
         .finally(() => input.destroy());
-    }, options.runtimeIdleLeaseMs ?? DEFAULT_RUNTIME_IDLE_LEASE_MS);
+    }, idleLeaseMs);
     runtimeProxyTimer.unref?.();
   };
   const handleChunk = (chunk: Buffer): void => {
@@ -231,7 +250,7 @@ export async function runChromeNativeHostCommand(
         if (mode === "runtime-v2" && runtime === undefined) armRuntimeProxyDeadline();
       }
     }).catch(() => {
-      protocolFailure = true;
+      if (!lifetime.signal.aborted) protocolFailure = true;
     }).finally(() => {
       if (protocolFailure) input.destroy();
       else input.resume();
@@ -261,6 +280,12 @@ export async function runChromeNativeHostCommand(
     protocolFailure = true;
     lifetime.abort(new Error("native-host-terminated"));
     input.destroy();
+  } else if (!lifetime.signal.aborted) {
+    const drained = await Promise.race([
+      queue.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 50)),
+    ]);
+    if (!drained) lifetime.abort(new Error("native-host-terminated"));
   }
   try {
     decoder.end();
@@ -271,7 +296,9 @@ export async function runChromeNativeHostCommand(
   await session?.disconnect();
   await runtime?.disconnect();
   if (mode === "runtime-v2" && runtime === undefined && !runtimeProxyDetached) {
-    await (options.runtimeDetach ?? detachChromeRuntimeThroughDaemon)(runtimePortId).catch(() => undefined);
+    await detachWithinBudget(
+      () => (options.runtimeDetach ?? detachChromeRuntimeThroughDaemon)(runtimePortId),
+    );
   }
   if (lifetimeTimer !== undefined) clearTimeout(lifetimeTimer);
   if (runtimeProxyTimer !== undefined) clearTimeout(runtimeProxyTimer);

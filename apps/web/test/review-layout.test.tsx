@@ -264,14 +264,15 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-label="Collapse all outline entries"');
     expect(html).toContain('aria-pressed="false"');
     expect(html).toContain('lucide-chevrons-down-up');
-    expect(html).toMatch(
-      /class="review-workspace__activity-strip[^"]*"[\s\S]*data-outline-expansion-toggle/u,
+    expect(html).toContain(
+      'class="review-workspace__move review-workspace__move--activity review-workspace__move--header-action review-workspace__outline-toggle"',
     );
+    expect(html).not.toContain('review-workspace__activity-strip--action');
     expect(annotationStyles).toMatch(
-      /\.review-workspace__outline-toggle\s*\{[^}]*margin-left:\s*auto;[^}]*border:\s*1px solid var\(--review-border-subtle\);[^}]*box-shadow:\s*0 1px 2px/u,
+      /\.review-workspace__outline-toggle\s*\{[^}]*margin-left:\s*auto;/u,
     );
-    expect(annotationStyles).toMatch(
-      /\.review-workspace__outline-toggle\s*>\s*\.review-icon\s*\{[^}]*margin:\s*auto;[^}]*transform:\s*translate\(\.5px, 1px\);/u,
+    expect(annotationStyles).not.toMatch(
+      /\.review-workspace__outline-toggle\s*\{[^}]*(?:width|height|border|background|box-shadow):/u,
     );
   });
 
@@ -659,11 +660,11 @@ describe('review shell layout and accessibility contract', () => {
       /\.review-chrome__sizing-candidate \.review-chrome__identity\s*\{[^}]*width:\s*max-content;/u,
     );
     expect(foundationStyles).toMatch(
-      /\.review-chrome__sizing-candidate \.review-chrome__save-identity strong\s*\{[^}]*width:\s*var\(--review-document-title-min\);[^}]*min-width:\s*var\(--review-document-title-min\);[^}]*max-width:\s*var\(--review-document-title-min\);[^}]*flex:\s*none;/u,
+      /\.review-chrome__sizing-candidate \.review-chrome__save-identity strong\s*\{[^}]*width:\s*var\(--review-document-title-cap\);[^}]*min-width:\s*var\(--review-document-title-cap\);[^}]*max-width:\s*var\(--review-document-title-cap\);[^}]*flex:\s*none;/u,
     );
-    expect(foundationStyles).toMatch(/--review-document-title-min:\s*9rem;/u);
+    expect(foundationStyles).toMatch(/--review-document-title-cap:\s*9rem;/u);
     expect(layoutStyles).toMatch(
-      /\.review-chrome__save-identity strong\s*\{[^}]*min-width:\s*var\(--review-document-title-min\);[^}]*flex:\s*1 1 auto;/u,
+      /\.review-chrome__save-identity strong\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*var\(--review-document-title-cap\);[^}]*flex:\s*0 1 auto;/u,
     );
     expect(layoutStyles).toMatch(
       /\.review-chrome__identity \.document-actions__trigger\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;/u,
@@ -672,10 +673,10 @@ describe('review shell layout and accessibility contract', () => {
       /@media \(max-width: 520px\)[\s\S]*?\.review-chrome__context\s*\{[^}]*display:\s*none;/u,
     );
     expect(responsiveStyles).toMatch(
-      /@media \(max-width: 480px\)[\s\S]*?--review-document-title-min:\s*6rem;/u,
+      /@media \(max-width: 480px\)[\s\S]*?--review-document-title-cap:\s*6rem;/u,
     );
     expect(responsiveStyles).toMatch(
-      /@media \(max-width: 360px\)[\s\S]*?--review-document-title-min:\s*4\.5rem;/u,
+      /@media \(max-width: 360px\)[\s\S]*?--review-document-title-cap:\s*4\.5rem;/u,
     );
     expect(responsiveStyles).toMatch(
       /@media \(max-width: 640px\)[\s\S]*?\.review-chrome__save-recovery\s*\{[^}]*display:\s*none;/u,
@@ -796,6 +797,9 @@ describe('review shell layout and accessibility contract', () => {
   });
 
   it('reveals mounted annotation actions only at mouse intent and keeps them visible for touch', () => {
+    expect(annotationStyles).toMatch(
+      /\.annotation-item__title-actions \.annotation-item__action,\s*\.pdf-search__clear\s*\{[^}]*width:\s*1\.4rem;[^}]*min-width:\s*1\.4rem;[^}]*max-width:\s*1\.4rem;[^}]*height:\s*1\.4rem;[^}]*min-height:\s*1\.4rem;[^}]*max-height:\s*1\.4rem;[^}]*border-radius:\s*var\(--review-radius-control\);/u,
+    );
     expect(annotationStyles).toMatch(
       /\.annotation-item__action\s*\{[^}]*opacity:\s*0;/u,
     );
@@ -1051,10 +1055,10 @@ describe('review shell layout and accessibility contract', () => {
       /\.review-workspace__mode-segment--compound\s*>\s*\.review-workspace__mode-tab\[aria-selected="true"\]\s*\{[^}]*padding-right:\s*2px;[^}]*border-color:\s*transparent;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/u,
     );
     expect(annotationStyles).toMatch(
-      /\.review-workspace__activity-strip--compound\s*>\s*\.review-workspace__move--activity\s*\{[^}]*border-color:\s*transparent;[^}]*border-radius:\s*var\(--review-radius-control\);[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/u,
+      /\.review-workspace__move--header-action\s*\{[^}]*border-color:\s*transparent;[^}]*border-radius:\s*var\(--review-radius-control\);[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/u,
     );
     expect(annotationStyles).toMatch(
-      /\.review-workspace__activity-strip--compound\s*>\s*\.review-workspace__move--activity:hover\s*\{[^}]*border-color:\s*var\(--review-border-strong\);[^}]*background:\s*var\(--review-surface-interactive\);/u,
+      /\.review-workspace__move--header-action:hover\s*\{[^}]*border-color:\s*var\(--review-border-strong\);[^}]*background:\s*var\(--review-surface-interactive\);/u,
     );
     expect(annotationStyles).toContain('height: var(--review-workspace-header-height, 44px)');
     expect(annotationStyles).toContain('margin-top: var(--review-workspace-header-height, 44px)');

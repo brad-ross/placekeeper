@@ -28,7 +28,7 @@ export const CATALOG_DISTRIBUTION_BASELINE = {
     report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
     thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
   },
-  productionWebJavaScriptBytes: 2_512_981,
+  productionWebJavaScriptBytes: 2_514_976,
 } as const;
 
 const CATALOG_ATTRIBUTION_URLS = [
@@ -868,8 +868,8 @@ export async function validateDistributionManifests(
   if (packageManifest.scripts?.["prebuild:web"] !== "pnpm catalog:check") {
     throw new Error("Production web builds must run the non-mutating catalog:check gate");
   }
-  if (packageManifest.scripts?.["validate:distribution"] !== "pnpm build:web && pnpm build:vscode && pnpm build:chrome:bundle && tsx packaging/macos/validate-manifest.ts") {
-    throw new Error("Distribution validation must rebuild the production web, VS Code, and Chrome bundles before inspection");
+  if (packageManifest.scripts?.["validate:distribution"] !== "pnpm build && node --check dist/service/main.js && tsx packaging/macos/validate-manifest.ts") {
+    throw new Error("Distribution validation must rebuild every production bundle and syntax-check the service before inspection");
   }
   for (const scriptName of ["build", "build:web", "package:macos", "install:local"] as const) {
     if (/catalog:(?:audit|generate|update)/u.test(packageManifest.scripts?.[scriptName] ?? "")) {

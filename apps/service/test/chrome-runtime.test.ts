@@ -34,6 +34,7 @@ function projection(): ChromeRuntimeProjection {
     scope: { documentTitle: "Runtime paper", sourceDisposition: "remote-temporary", sourceDisplayName: "Runtime paper.pdf", launchSurface: "chrome" },
     saveStatus: { destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 } },
     canonicalLinkBase: "placekeeper:///Placekeeper%20Browser/runtime/Runtime%20paper.pdf",
+    protected: false,
     location: { kind: "page", page: 1 },
     document: { sha256: sourceDigest, byteLength: sourceBytes.byteLength, generation: 1 },
   };
@@ -441,6 +442,41 @@ describe("Chrome least-authority native runtime", () => {
 
       operation.resolve(projection().saveStatus);
       await expect(pending).resolves.toMatchObject({ type: "result", requestId: "request-runtime-long-1" });
+      await vi.advanceTimersByTimeAsync(25);
+      expect(quota.snapshot().ports).toBe(0);
+      expect(messages).toContainEqual(expect.objectContaining({ reason: "idle-timeout" }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("grants an active presentation one fresh lease after a suspended idle deadline resumes", async () => {
+    vi.useFakeTimers();
+    try {
+      let now = 0;
+      const quota = new ChromeRuntimeAggregateQuota();
+      const messages: unknown[] = [];
+      const connection = new ChromeRuntimeConnection({
+        callerOrigin: origin,
+        backend: backend(),
+        quota,
+        idleLeaseMs: 25,
+        now: () => now,
+        onAsyncMessage: (message) => messages.push(message),
+      });
+      await negotiate(connection);
+      await acquire(connection);
+      await connection.handle({
+        type: "activate", lane: "lifecycle", protocolVersion: 2, connectionId,
+        requestId: "request-activate-sleep-1", documentValidated: true,
+      });
+
+      now = 10_000;
+      await vi.advanceTimersByTimeAsync(25);
+      expect(quota.snapshot().ports).toBe(1);
+      expect(messages).not.toContainEqual(expect.objectContaining({ reason: "idle-timeout" }));
+
+      now = 10_025;
       await vi.advanceTimersByTimeAsync(25);
       expect(quota.snapshot().ports).toBe(0);
       expect(messages).toContainEqual(expect.objectContaining({ reason: "idle-timeout" }));

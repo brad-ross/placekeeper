@@ -38,12 +38,14 @@ After installation, select one local PDF in Finder and use **Open With -> Placek
 Chrome 151 or newer is required. Installation intentionally leaves this feature paused.
 
 1. In Chrome, open `chrome://extensions`, turn on **Developer mode**, and choose **Load unpacked**.
-2. Select `~/Applications/Placekeeper.app/Contents/Resources/integrations/chrome-extension`.
+2. Select `~/Applications/Placekeeper Chrome Extension`. This ordinary folder is the transactionally installed copy intended for Chrome's folder picker; do not select the copy inside `Placekeeper.app`.
 3. Pin **Placekeeper PDF Viewer** if you want its control readily available, open its toolbar menu, and turn on automatic PDF opening.
 
 The checked-in extension key keeps the ID `cgegjjjhbhnfgcoipeffhogoojfoekgg` stable. The user-level native host accepts only that exact extension origin. Because this is source-first, unpacked distribution, Chrome trusts code at the loaded path as your macOS user; do not replace it with a symlink or make it group/world writable. An update preserves the extension's existing on/off choice because that choice lives in Chrome, not the installer.
 
-When automatic opening is on, a top-level PDF replaces its Chrome tab with Placekeeper. The pending page offers **Use Chrome viewer** for a one-PDF bypass. To pause all automatic opening, use the extension's toolbar menu. Other installed PDF-handler extensions can conflict because Chrome chooses the most recently installed eligible handler; pause or remove the other handler, then reload Placekeeper's packaged extension.
+When automatic opening is on, an eligible top-level PDF renders the complete Placekeeper client inside its existing Chrome tab. The address bar keeps the original PDF URL. The tab title uses PDF metadata when it contains a usable title and otherwise uses the sanitized filename. Placekeeper's own Back and Forward controls traverse document locations without changing browser history, so Chrome Back returns to the page before the PDF.
+
+Before the PDF is activated, the pending page offers **Use Chrome viewer** for a one-PDF bypass. A native-host or validation failure at this stage falls back to Chrome once. After activation, Placekeeper never invokes Chrome fallback: if the local service disconnects or an update is required, the PDF stays visible and read-only with an explicit **Reopen PDF** action. Protected work is retained and may offer **Resume draft**, **Discard draft**, or **Fork review**. To pause all automatic opening, use the extension's toolbar popup. Other installed PDF-handler extensions can conflict because Chrome chooses the most recently installed eligible handler; pause or remove the other handler, then reload Placekeeper's packaged extension.
 
 If Chrome falls back unexpectedly, first confirm that Placekeeper is installed at the same path shown above and reload the packaged extension from `chrome://extensions`. Then run:
 
@@ -51,7 +53,7 @@ If Chrome falls back unexpectedly, first confirm that Placekeeper is installed a
 "$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper" doctor --json --chrome
 ```
 
-`healthy` means the packaged extension path, stable ID, protocol, and native registration agree. `load-packaged-extension`, `reload-packaged-extension`, or `reinstall-placekeeper` is the recommended corrective action; the report deliberately omits private paths and browser capabilities. An older extension or host with an incompatible protocol safely falls back to Chrome without changing the automatic-open toggle.
+`healthy` means the packaged extension path, stable ID, protocol, and native registration agree. `load-packaged-extension`, `reload-packaged-extension`, or `reinstall-placekeeper` is the recommended corrective action; the report deliberately omits private paths and browser capabilities. If a failure occurs before Placekeeper activates, an incompatible extension or host safely falls back to Chrome without changing the automatic-open toggle. If the PDF is already visible in Placekeeper, reload the packaged extension and choose **Reopen PDF**; do not discard a protected draft unless that is intentional.
 
 ### Verify the Chrome integration from source
 
@@ -63,7 +65,13 @@ pnpm test:chrome-handoff
 
 This uses a newly created temporary Chromium profile and an in-process loopback fixture. It covers authenticated suffixless PDFs, a redirect that preserves a one-use POST response, slow/chunked delivery, invalid content, interrupted delivery, the transfer limit, exact-once stream handling, paused/bypass and host-failure fallback, local-file identity, temporary-source cleanup and recovery, remote/local save policy, and the browser/Codex authority boundary. It never opens or modifies the everyday Chrome profile. If Playwright's managed Chromium cannot expose Chrome 151's public `mimeHandler` API, that one automation probe is reported as skipped with a reason; the protocol and lifecycle checks still run.
 
-That skip does not waive the release check. Before approving an installed build, use a fresh Google Chrome 151+ profile, load the extension from the installed app, and record the checklist in [`test/acceptance/installed-hosts.md`](../test/acceptance/installed-hosts.md). Confirm the initially paused state, one enabled same-tab success, Back to the preceding page, **Use Chrome viewer**, one unavailable-host fallback, and an authenticated one-use response. Record only build and registration identities—never a PDF path, response URL, cookie, capability, or browser-history entry.
+That skip does not waive the release check. After installing the release-candidate app, run:
+
+```sh
+pnpm test:chrome-installed
+```
+
+The runner validates the distributable extension and exact native-host registration, launches a fresh Google Chrome 151+ profile, and displays the exact **Load unpacked** path. After you enable Developer Mode, load that directory, and turn on **Open PDFs automatically**, it verifies the initially paused state, loaded runtime identity, outer-tab metadata and filename titles, original URL retention, shared-client mount, browser Back, and the packaged PDFium worker's privilege boundary. It leaves the disposable window open for the remaining recovery, keyboard, lifecycle, and performance matrix in [`test/acceptance/installed-hosts.md`](../test/acceptance/installed-hosts.md), then erases the profile when you confirm completion. That exploratory run exits nonzero while its matrix is pending. Record the aggregate evidence described there—never a fixture URL, cookie, capability, task identifier, staging path, or PDF content—then rerun with `--manual-evidence <input.json>` to produce the build-bound release evidence. A pending, stale, partial, or over-budget record cannot pass or enter the release workflow.
 
 ## Optional integrations
 

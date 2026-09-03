@@ -1,5 +1,6 @@
 import { DocumentManagerPlugin } from '@embedpdf/plugin-document-manager';
 import { InteractionManagerPlugin } from '@embedpdf/plugin-interaction-manager';
+import { ZoomMode, ZoomPlugin } from '@embedpdf/plugin-zoom';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -26,6 +27,9 @@ describe('EmbedPDF registry configuration', () => {
     const interaction = registrations.find(({ package: pluginPackage }) => (
       pluginPackage.manifest.id === InteractionManagerPlugin.id
     ));
+    const zoom = registrations.find(({ package: pluginPackage }) => (
+      pluginPackage.manifest.id === ZoomPlugin.id
+    ));
 
     expect(documents?.config).toMatchObject({
       maxDocuments: 2,
@@ -40,6 +44,9 @@ describe('EmbedPDF registry configuration', () => {
     });
     expect(interaction?.config).toEqual({
       exclusionRules: { dataAttributes: ['data-pdf-link-control'] },
+    });
+    expect(zoom?.config).toMatchObject({
+      defaultZoomLevel: ZoomMode.FitWidth,
     });
   });
 

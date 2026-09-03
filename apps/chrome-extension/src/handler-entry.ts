@@ -7,27 +7,24 @@ import {
   chromePdfDisplayName,
   createNativeEmbeddedReview,
 } from "./chrome-runtime.js";
-import { createNativeHandoff } from "./native-handoff.js";
 import { readAutoOpenState } from "./opt-in.js";
 import {
-  platformProofEnabled,
-  platformProofFailureCode,
-  runInstalledPlatformProof,
-} from "./platform-proof.js";
+  createHandlerButton,
+  setHandlerButtonContent,
+} from "./handler-ui.js";
 
 const bypass = document.querySelector<HTMLButtonElement>("#bypass");
 const status = document.querySelector<HTMLElement>("#status");
-const proofOutput = document.querySelector<HTMLElement>("#platform-proof");
 const launchShell = document.querySelector<HTMLElement>("#launch-shell");
+const handlerActions = document.querySelector<HTMLElement>("#handler-actions");
 const title = document.querySelector<HTMLElement>("#title");
 const reopen = document.querySelector<HTMLButtonElement>("#reopen");
 const reviewRoot = document.querySelector<HTMLElement>("#root");
-if (bypass === null || status === null || proofOutput === null || launchShell === null ||
+if (bypass === null || status === null || launchShell === null || handlerActions === null ||
   title === null || reopen === null || reviewRoot === null) {
   throw new Error("Incomplete Placekeeper handler page");
 }
 
-const HANDLER_RUNTIME_VERSION = 2 as const;
 const DOCUMENT_READY_TIMEOUT_MS = 20_000;
 
 interface SharedChromeClient {
@@ -112,11 +109,9 @@ async function loadSharedClient(): Promise<SharedClientModule> {
 }
 
 const autoOpen = chromeAutoOpenPorts(chrome);
-const handoff = createNativeHandoff({
-  connectNative: () => connectPlacekeeper(chrome),
-  fetchStream: async (url, signal) => signal === undefined ? fetch(url) : fetch(url, { signal }),
-  createTransferId: () => crypto.randomUUID(),
-});
+setHandlerButtonContent(bypass, "chrome", "Default");
+setHandlerButtonContent(reopen, "redo", "Reopen PDF", "primary");
+handlerActions.replaceChildren(bypass);
 
 async function chooseProtectedRecovery(
   _recovery: {
@@ -126,31 +121,31 @@ async function chooseProtectedRecovery(
   signal?: AbortSignal,
 ): Promise<"resume" | "discard" | "fork"> {
   if (signal?.aborted === true) throw signal.reason;
-  title!.textContent = "Protected review found";
+  title!.textContent = "Existing review recovered";
   status!.textContent = "Choose how Placekeeper should reopen your unfinished review.";
-  const actions = document.createElement("div");
-  actions.className = "handler-actions recovery-actions";
-  actions.setAttribute("role", "group");
-  actions.setAttribute("aria-label", "Protected recovery choices");
+  handlerActions!.setAttribute("aria-label", "Protected recovery choices");
   const choices = [
-    ["resume", "Resume draft"],
-    ["discard", "Discard draft"],
-    ["fork", "Fork review"],
+    ["discard", "Discard", "delete", "destructive"],
+    ["fork", "Fork", "git-fork", "secondary"],
+    ["resume", "Resume", "redo", "primary"],
   ] as const;
-  const buttons = choices.map(([choice, label]) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.recoveryChoice = choice;
-    button.textContent = label;
-    actions.append(button);
-    return button;
-  });
-  launchShell!.append(actions);
-  buttons[0]!.focus({ preventScroll: true });
+  const buttons = choices.map(([choice, label, icon, tone]) => createHandlerButton(document, {
+    choice,
+    label,
+    icon,
+    tone,
+  }));
+  const recoveryActions = document.createElement("div");
+  recoveryActions.className = "handler-recovery-actions";
+  recoveryActions.append(...buttons);
+  handlerActions!.replaceChildren(bypass!, recoveryActions);
+  const resume = buttons.at(-1)!;
+  resume.focus({ preventScroll: true });
   return new Promise((resolve, reject) => {
     let settled = false;
     const cleanup = (opening: boolean) => {
-      actions.remove();
+      handlerActions!.setAttribute("aria-label", "Handler actions");
+      handlerActions!.replaceChildren(bypass!);
       signal?.removeEventListener("abort", onAbort);
       if (opening) status!.textContent = "Opening the protected review…";
     };
@@ -197,16 +192,20 @@ async function openEmbeddedReview(
   const unsubscribeNativeLifecycle = native.subscribeLifecycle((event) => {
     for (const listener of lifecycleListeners) listener(event);
   });
+  const disposeShared = () => {
+    shared?.dispose();
+    shared = undefined;
+  };
   const release = async () => {
     if (released) return;
     released = true;
-    shared?.dispose();
+    disposeShared();
     await native.release();
   };
   const dispose = () => {
     globalThis.removeEventListener("pagehide", onPageHide);
     unsubscribeNativeLifecycle();
-    shared?.dispose();
+    disposeShared();
     native.dispose();
   };
   const onPageHide = () => { void release().finally(dispose); };
@@ -219,9 +218,10 @@ async function openEmbeddedReview(
     },
     async mountAndValidate(mountSignal) {
       await runWithDocumentReadyDeadline(mountSignal, async (boundedSignal) => {
-        await loadSharedStylesheet(boundedSignal);
-        if (boundedSignal.aborted) throw boundedSignal.reason;
-        const module = await loadSharedClient();
+        const [, module] = await Promise.all([
+          loadSharedStylesheet(boundedSignal),
+          loadSharedClient(),
+        ]);
         if (boundedSignal.aborted) throw boundedSignal.reason;
         shared = await module.startChromeRuntime({
           runtimeId: native.runtimePort.runtimeId,
@@ -240,7 +240,7 @@ async function openEmbeddedReview(
           },
         });
         if (boundedSignal.aborted) {
-          shared.dispose();
+          disposeShared();
           throw boundedSignal.reason;
         }
         await shared.ready;
@@ -255,14 +255,9 @@ async function openEmbeddedReview(
 const controller = createHandlerController({
   isOptedIn: async () => (await readAutoOpenState(autoOpen)).enabled,
   getStreamInfo: async () => chrome.mimeHandler.getStreamInfo(),
-  handlerRuntimeVersion: HANDLER_RUNTIME_VERSION,
   openEmbedded: openEmbeddedReview,
-  handoff,
   fallback: () => {
     void chrome.mimeHandler.abortAndFallbackToNativeHandler();
-  },
-  replace: async (tabId, destination) => {
-    await chrome.tabs.update(tabId, { url: destination });
   },
   pendingTitle: (originalUrl) => {
     const name = chromePdfDisplayName(originalUrl);
@@ -279,33 +274,15 @@ const controller = createHandlerController({
     if (message.includes("disconnected") || message.includes("updated")) {
       reviewRoot.inert = true;
       launchShell.hidden = false;
-      bypass.hidden = true;
       reopen.hidden = false;
+      handlerActions.replaceChildren(reopen);
       title.textContent = message.includes("updated") ? "Update required" : "Review disconnected";
       reopen.focus({ preventScroll: true });
     }
   },
 });
 
-void (async () => {
-  const proofEnabled = await platformProofEnabled(chrome);
-  if (proofEnabled) {
-    bypass.addEventListener("click", () => {
-      void chrome.mimeHandler.abortAndFallbackToNativeHandler();
-    }, { once: true });
-    try {
-      await runInstalledPlatformProof({ api: chrome, status, output: proofOutput });
-    } catch (error) {
-      status.textContent = "Platform proof failed — stop the embedded-viewer rollout.";
-      proofOutput.hidden = false;
-      proofOutput.textContent = JSON.stringify({
-        failureCode: platformProofFailureCode(error),
-      }, null, 2);
-    }
-  } else {
-    bypass.addEventListener("click", () => controller.bypass());
-    reopen.addEventListener("click", () => globalThis.location.reload());
-    void controller.run();
-  }
-  bypass.focus();
-})();
+bypass.addEventListener("click", () => controller.bypass());
+reopen.addEventListener("click", () => globalThis.location.reload());
+bypass.focus();
+void controller.run();

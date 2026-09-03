@@ -15,6 +15,7 @@ import {
   sanitizeChromeReviewRuntimeResponse,
   type ReviewRuntimeBrokerMethod,
 } from "../../../../packages/core/src/review-runtime-protocol.js";
+import { deadlineWasSubstantiallyDelayed } from "../../../../packages/core/src/suspend-aware-deadline.js";
 import { CHROME_EXTENSION_ORIGIN } from "./chrome-handoff.js";
 import { ensurePrivateDirectory } from "../recovery/source-snapshot.js";
 
@@ -32,6 +33,7 @@ export interface ChromeRuntimeProjection {
   readonly scope: unknown;
   readonly saveStatus: unknown;
   readonly canonicalLinkBase: string;
+  readonly protected: boolean;
   readonly location?: unknown;
   readonly document: {
     readonly sha256: string;
@@ -365,6 +367,7 @@ export interface ChromeRuntimeConnectionOptions {
   readonly quota?: ChromeRuntimeAggregateQuota;
   readonly requestTimeoutMs?: number;
   readonly idleLeaseMs?: number;
+  readonly now?: () => number;
   readonly onAsyncMessage?: (message: ChromeRuntimeHostMessage) => void;
   readonly onClosed?: () => void;
 }
@@ -374,6 +377,7 @@ export class ChromeRuntimeConnection {
   readonly #quota: ChromeRuntimeAggregateQuota;
   readonly #requestTimeoutMs: number;
   readonly #idleLeaseMs: number;
+  readonly #now: () => number;
   readonly #onAsyncMessage: ((message: ChromeRuntimeHostMessage) => void) | undefined;
   readonly #onClosed: (() => void) | undefined;
   readonly #presentationLease = randomBytes(32).toString("base64url");
@@ -394,6 +398,7 @@ export class ChromeRuntimeConnection {
     this.#portHeld = true;
     this.#requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
     this.#idleLeaseMs = options.idleLeaseMs ?? 90_000;
+    this.#now = options.now ?? Date.now;
     this.#onAsyncMessage = options.onAsyncMessage;
     this.#onClosed = options.onClosed;
   }
@@ -736,8 +741,13 @@ export class ChromeRuntimeConnection {
   }
   #armIdleDeadline(): void {
     if (this.#idleTimer !== undefined) clearTimeout(this.#idleTimer);
+    const armedAt = this.#now();
     this.#idleTimer = setTimeout(() => {
       if (this.#phase === "closed") return;
+      if (deadlineWasSubstantiallyDelayed(armedAt, this.#idleLeaseMs, this.#now())) {
+        this.#armIdleDeadline();
+        return;
+      }
       const message = this.#failure("lifecycle", "idle-timeout");
       this.#onAsyncMessage?.(message);
       void this.disconnect();

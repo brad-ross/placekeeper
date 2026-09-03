@@ -264,7 +264,7 @@ describe("macOS distribution manifests", () => {
         report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
         thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
       },
-      productionWebJavaScriptBytes: 2_512_981,
+      productionWebJavaScriptBytes: 2_514_976,
     });
 
     const root = await mkdtemp(resolve(tmpdir(), "placekeeper-catalog-baseline-"));
@@ -751,6 +751,7 @@ describe("macOS distribution manifests", () => {
     expect(installer.indexOf("daemon coordinate-install")).toBeLessThan(installer.indexOf("install-built-app.sh"));
     expect(installer).not.toMatch(/(?:kill|pkill|killall).*daemon/u);
     const helper = await readFile(resolve("packaging/macos/install-built-app.sh"), "utf8");
+    expect(helper).toContain("A prior managed version may predate the candidate's extension schema");
     expect(helper.indexOf('"$readiness_executable" daemon ensure-ready --receipt')).toBeLessThan(helper.lastIndexOf("committed=1"));
     expect(helper.indexOf('"$readiness_executable" daemon stop-ready --receipt')).toBeLessThan(helper.indexOf('if [ "$app_touched" -eq 1 ]'));
     expect(helper.slice(0, helper.lastIndexOf("committed=1"))).not.toMatch(/\bopen\s+--json\b|autosave/u);
@@ -947,7 +948,7 @@ describe("macOS distribution manifests", () => {
       scripts?: Record<string, string>;
     };
     expect(packageManifest.scripts?.["validate:distribution"])
-      .toBe("pnpm build:web && pnpm build:vscode && pnpm build:chrome:bundle && tsx packaging/macos/validate-manifest.ts");
+      .toBe("pnpm build && node --check dist/service/main.js && tsx packaging/macos/validate-manifest.ts");
     await expect(validateDistributionManifests(resolve("."))).resolves.toBeUndefined();
   });
 
@@ -956,7 +957,7 @@ describe("macOS distribution manifests", () => {
       scripts?: Record<string, string>;
     };
     expect(packageManifest.scripts?.["validate:distribution"])
-      .toBe("pnpm build:web && pnpm build:vscode && pnpm build:chrome:bundle && tsx packaging/macos/validate-manifest.ts");
+      .toBe("pnpm build && node --check dist/service/main.js && tsx packaging/macos/validate-manifest.ts");
     const web = await validateSharedWebDistribution(resolve("dist/web"));
     const vscodeWeb = await validateSharedWebDistribution(resolve("apps/vscode/dist/web"));
     const chromeWeb = await validateSharedWebDistribution(resolve("apps/chrome-extension/dist/shared"));

@@ -84,100 +84,83 @@ Playwright support for unpacked extensions does not guarantee that its managed C
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Pending | Pending | Pending | `cgegjjjhbhnfgcoipeffhogoojfoekgg` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Pending |
 
-### Embedded-handler platform proof (U1)
+### Installed embedded-review release gate
 
-The extension contains an explicit installed-only probe path. It is inert unless
-`placekeeperPlatformProofEnabled` is set to `true` in the extension's own local
-storage. The normal handler continues to consume the MIME stream once, wait for
-acknowledged native frames, and navigate to the current localhost viewer. Proof
-mode never fetches the PDF stream or enters that success path; it holds the MIME
-handler page in the original tab so the platform behavior can be observed.
+Install the release-candidate app first, then run `pnpm test:chrome-installed`.
+The runner validates the distributable extension tree and exact user-level native
+host manifest before launching Google Chrome with a newly created disposable
+profile and remote-debugging endpoint. It never passes `--load-extension` and
+never touches the everyday profile: the person performing the release check must
+enable Developer Mode, select the exact packaged directory printed by the runner,
+verify extension ID `cgegjjjhbhnfgcoipeffhogoojfoekgg`, and enable **Open PDFs
+automatically** through the Placekeeper popup. The runner then records the
+initially paused state and automates outer-tab URL retention, metadata title,
+filename fallback, shared production-client mount, and browser Back.
 
-Run this only in a disposable Chrome profile with a disposable PDF fixture:
+The generated JSON is prerequisite evidence, not the whole release pass. Keep
+the disposable window open and complete every row below before pressing Enter.
+That first run deliberately exits nonzero while `manualMatrix` is `pending`; an
+Enter keypress can never turn pending observations into a release pass. Record
+the completed checks in a private JSON file and rerun with
+`--manual-evidence <input.json>`. The file must bind the exact app build, Chrome
+version, and extension runtime identity printed by the automated run; every
+scenario key (`ae3PreActivationFallback` through `ae8ProtectedSuccessor`, plus
+`ordinaryReview`, `updateSkew`, `hostileCanaries`, `keyboardAccessibility`, and
+`crossSurfaceRegression`) must be `true`. Its `ktd8` object must record corpus
+`chrome-native-v1`, 5 cold and 10 warm runs per fixture, both local and
+authenticated-remote dispositions, passing latency/memory/responsiveness
+assessments, measured `cancellationReleaseMs` no greater than 2000, and one
+`measurements` entry per fixture/disposition. Each entry records redirect p50,
+native p50/p95, and peak extension/native-host/service/aggregate RSS; the runner
+recomputes the committed relative latency formula. A stale,
+partial, or over-budget record fails closed.
+Record only the build identity, Chrome and extension versions, literal native-host
+manifest path and SHA-256, aggregate timings/memory, and pass/fail results. Never
+record a PDF URL or path, cookie, capability, task identifier, presentation lease,
+credential, command payload, source locator, annotation text, or PDF bytes.
 
-1. Build the extension, load `apps/chrome-extension/dist` unpacked, and verify
-   the profile is running Google Chrome stable 151 or newer. Confirm the build
-   contains `assets/pdfium-worker.js` and `assets/pdfium.wasm`. Open the
-   Placekeeper toolbar popup and turn on **Open PDFs automatically**; a fresh
-   profile starts paused, so proof mode cannot run until Chrome's PDF MIME
-   handler is enabled.
-2. In the extension service-worker console, enable the proof:
+| Scenario | Required installed evidence | Result |
+|---|---|---|
+| AE1 metadata title | Original authenticated PDF URL remains in the omnibox; the outer tab title becomes `Quarterly Results`; full Placekeeper UI is usable. | Pending |
+| AE2 filename title | Blank-title PDF uses its decoded, sanitized filename; title remains stable through Placekeeper navigation. | Pending |
+| AE3 pre-activation fallback | With native registration temporarily moved aside, one new PDF falls back to Chrome exactly once; restoring the manifest does not leave claimable transfer state. | Pending |
+| AE4 active disconnect | Stop the service after a clean activation: PDF remains visible/read-only with keyboard-operable **Reopen PDF** and no Chrome fallback. Repeat after an accepted annotation or save and verify protected recovery survives restart. | Pending |
+| AE5 canonical presentations | Reload, duplicate, restore the browser session, and open the same PDF in a fresh tab. Identical source plus digest shares mutations; each tab keeps an independent viewport and remains usable when another closes. | Pending |
+| AE6 navigation | Make several Placekeeper page/location jumps. Placekeeper Back/Forward traverses them without changing the omnibox; Chrome Back returns to the fixture landing page. | Pending |
+| AE7 native link surface | The Chrome top bar omits the document-level **Copy Link** because the PDF URL remains in the omnibox. A precise item-level **Copy Link** contains no source URL, task/bind data, credential, or presentation identity; opening it through Finder or Codex produces an ordinary unbound Placekeeper view. | Pending |
+| AE8 protected successor | Replace/restart the service after protected work. **Reopen PDF** presents resume/discard/fork; choose each against a fresh seeded case and verify exactly one idempotent outcome. | Pending |
+| Ordinary review | Search, create/edit/delete an annotation, reconcile a Review Item, save a copy, and export. Inject one service rejection and one disconnect during mutation. | Pending |
+| Update skew | Exercise older extension/new host and new extension/older host. Before activation: cleanup plus one Chrome fallback. After activation: read-only update-required state, retained protected work, no fallback. | Pending |
+| Hostile canaries | Seed canaries in query/fragment, local path, filename/title, locator, credential, command payload, and PDF bytes. Chrome UI, links, logs, diagnostics, crash output, and recovery artifacts contain only role-authorized fields. | Pending |
+| Keyboard/accessibility | Complete loading, fallback, disconnect, update, reconnect, reopen, and resume/discard/fork without a pointer; verify visible focus, live announcements, transition focus, and accessible labels. | Pending |
+| Cross-surface regression | Finder Open With, app picker, canonical link, Codex in-app browser, and VS Code embedded review retain their existing behavior. | Pending |
 
-   ```js
-   await chrome.storage.local.set({
-     placekeeperPlatformProofEnabled: true,
-   });
-   ```
+Do not move the real native-host manifest while any non-disposable Placekeeper
+review is active. Copy it to a private temporary directory, move only the exact
+`com.placekeeper.chrome.json` file for AE3, and restore it immediately after that
+case. Removing or reinstalling registration must not remove Protected Recovery or
+the disposable source. Upgrade/rollback transaction suites remain deterministic
+prerequisites; this installed check confirms presentation behavior.
 
-3. Open the authenticated `/document?id=42` fixture in a newly created tab
-   and confirm the omnibox still shows that exact PDF URL while the outer tab
-   title changes to `Placekeeper platform proof`. The result block must report
-   `documentTitleApplied: true`, `sourceUrlAvailable: true`,
-   `workerStarted: true`, `pdfiumReady: true`, `packagedAssetFetch: true`, and
-   `forbiddenWorkerPrivileges: []`. The fixture must expose `/worker-probe`;
-   reaching it from the worker is therefore a failure rather than a network
-   availability ambiguity. This is the actual packaged EmbedPDF PDFium worker,
-   not a generic stand-in.
-4. Disable the probe, then open the same disposable PDF normally and verify the
-   production native transfer plus same-tab localhost redirect still succeeds:
+The versioned KTD8 contract is `chrome-performance-budget.json`. Run every listed
+local and authenticated-remote disposition five cold and ten warm times. Record
+p50 and p95 navigation-to-first-page latency, peak extension/native-host/service
+and aggregate RSS, visible progress responsiveness, and cancellation cleanup.
+Cancellation must release within two seconds. Compare native p50 with the matching
+redirect baseline using the committed formula; a missing baseline or failed budget
+blocks release and must not be converted into a wider host permission.
 
-   ```js
-   await chrome.storage.local.set({
-     placekeeperPlatformProofEnabled: false,
-   });
-   ```
+| Date | Build / Chrome | Corpus + repetitions | p50 / p95 latency | Peak extension / native / service / aggregate | Cancellation | Redirect comparison | Result |
+|---|---|---|---|---|---|---|---|
+| Pending | Pending | `chrome-native-v1`; 5 cold + 10 warm per local/remote fixture | Pending | Pending | Pending | Pending | Pending |
 
-The worker probe is the separately emitted EmbedPDF 2.14.4 PDFium worker under
-the exact extension CSP, including `connect-src 'self'` so only packaged assets
-can be fetched. It initializes packaged `pdfium.wasm` before reporting ready and
-proves the target worker context can start from a packaged asset while
-`chrome.*`, native messaging, DOM access, `eval`, `Function`, `importScripts`,
-loopback fetch, and remote fetch are unavailable. The source and built manifest
-also forbid host permissions and allow workers only from the extension package.
-The narrowly scoped `'wasm-unsafe-eval'` source enables packaged WebAssembly
-compilation without enabling JavaScript `eval` or `Function`; the installed
-privilege probe must continue to report both executable-code checks unavailable.
-
-Installed Chrome 152 characterization established that handler-local attachment
-identity is unavailable: the Navigation API signal, handler `sessionStorage`,
-`PerformanceNavigationTiming.type`, and the reported tab lease all reset on an
-ordinary reload. Those values therefore cannot distinguish reload, duplicate,
-fresh navigation, Back, session restore, or extension reload. The abandoned
-scenario matrix and per-tab/session classifier were removed. Review identity is
-canonical and service-owned: reopening verified identical PDF bytes resumes the
-same review, while a future explicit **Start separate review** action may create
-another review. This requires no `tabs`, `sessions`, `webNavigation`, host, or
-localhost permission.
-
-EmbedPDF 2.14.4 has no upstream worker URL or worker-factory option and normally
-constructs PDFium from an inline Blob. The repository's version-pinned pnpm
-patch adds only a caller-created `Worker` option; omission preserves the existing
-inline-worker behavior used by the ordinary browser and VS Code hosts. The
-Chrome build extracts the exact pinned inline worker source as a packaged module,
-emits it with the pinned `pdfium.wasm`, and exercises that worker under the exact
-MV3 CSP before reporting success.
-
-The no-follow local-source probe proves that exact bytes and device/inode
-identity can be captured from one opened handle and remain stable after path
-replacement, truncation, and a symlink swap. The current production handoff
-still canonicalizes and checks a path, closes that file handle, and then passes
-the path to the service. U3 must apply the proven stable-snapshot pattern and
-exact digest/length acceptance before the embedded path can activate; this must
-not be waived or converted to URL/tab identity.
-
-The versioned measurement contract is
-`test/acceptance/chrome-performance-budget.json`. It fixes the five local and
-remote corpus roles, the near-64-MiB construction recipe, five cold and ten warm
-runs, p50/p95 reporting, the native-versus-redirect comparison, separate and
-aggregate memory accounting, and the two-second cancellation deadline. Baseline
-numbers are deliberately not invented in source control; capture them with the
-same installed profile and record only aggregate measurements.
-
-| Date | Chrome | Outer title + source URL | Handler-local identity | Packaged worker isolation | PDFium packaged-worker startup | Local identity swaps | Native/redirect KTD8 corpus | Result |
-|---|---|---|---|---|---|---|---|---|
-| 2026-09-03 | 152 | Pass | Unavailable; canonical service identity selected | Pass after `connect-src 'self'` | Pass with packaged EmbedPDF worker and `pdfium.wasm` under `'wasm-unsafe-eval'` | Prototype pass; U3 integration pending | Contract fixed; redirect baseline and native comparison remain | U1 platform gate pass |
-
-For the installed row, use a fresh Chrome profile, a disposable PDF fixture, and the installed extension path. Record the literal installed host-manifest path and its SHA-256 hash, but never copy the manifest contents into this document. Confirm that Back returns to the fixture landing page; history contains no `#cap=`, bind proof, task identifier, cookie, or private staging path; reading and closing creates no Downloads PDF; and removing/reinstalling registration leaves the disposable PDF and Protected Recovery data untouched. Upgrade/rollback and removal remain covered deterministically by the packaging transaction suites.
+The installed runner now injects a non-authorizing observer into the actual
+packaged PDFium worker and records worker startup, PDFium readiness, packaged
+asset access, and forbidden privilege results in the automated evidence. The
+earlier Chrome 152 proof established the same boundary and showed that
+handler-local reload identity is unavailable, which is why canonical review
+identity is service-owned. The temporary proof page and successful-path
+localhost redirect are not part of the release extension.
 
 ## Reading-first interface evidence
 

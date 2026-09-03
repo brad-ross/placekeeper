@@ -7,6 +7,7 @@ import { RenderPluginPackage } from '@embedpdf/plugin-render/react';
 import { ScrollPluginPackage } from '@embedpdf/plugin-scroll/react';
 import { SelectionPluginPackage } from '@embedpdf/plugin-selection/react';
 import { ViewportPluginPackage } from '@embedpdf/plugin-viewport/react';
+import { ZoomMode } from '@embedpdf/plugin-zoom';
 import { ZoomPluginPackage } from '@embedpdf/plugin-zoom/react';
 import type { LoadDocumentUrlOptions } from '@embedpdf/plugin-document-manager';
 import {
@@ -131,6 +132,7 @@ export function createLocalPdfiumViewerPlugins(
     createPluginRegistration(ViewportPluginPackage),
     createPluginRegistration(ScrollPluginPackage),
     createPluginRegistration(ZoomPluginPackage, {
+      defaultZoomLevel: ZoomMode.FitWidth,
       minZoom: VIEWER_ZOOM_MIN_PERCENT / 100,
       maxZoom: VIEWER_ZOOM_MAX_PERCENT / 100,
     }),

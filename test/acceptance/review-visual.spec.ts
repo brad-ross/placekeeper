@@ -733,6 +733,49 @@ test('narrow Annotation Tray', async ({ page }) => {
 test('wide Outline tree', async ({ page }) => {
   const product = await openOutlineScene(page);
   await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-workspace-presentation', 'right');
+  const outlineToggleGeometry = await page.getByRole('button', {
+    name: 'Collapse all outline entries',
+  }).evaluate((button) => {
+    const header = button.closest<HTMLElement>('.review-workspace__header');
+    const modeStrip = header?.querySelector<HTMLElement>('.review-workspace__activity-strip');
+    const searchTab = modeStrip?.querySelector<HTMLElement>('#workspace-mode-search');
+    if (!searchTab || !header || !modeStrip) {
+      throw new Error('Outline workspace navbar geometry is incomplete.');
+    }
+    const buttonBounds = button.getBoundingClientRect();
+    const icon = button.querySelector<SVGElement>('.review-icon');
+    if (!icon) throw new Error('Outline expansion icon is missing.');
+    const iconBounds = icon.getBoundingClientRect();
+    const tabBounds = searchTab.getBoundingClientRect();
+    const headerBounds = header.getBoundingClientRect();
+    return {
+      usesReferenceMoveClasses:
+        button.classList.contains('review-workspace__move')
+        && button.classList.contains('review-workspace__move--activity')
+        && button.classList.contains('review-workspace__move--header-action'),
+      isDirectHeaderAction: button.parentElement === header,
+      width: buttonBounds.width,
+      height: buttonBounds.height,
+      tabWidth: tabBounds.width,
+      tabHeight: tabBounds.height,
+      centerDelta: Math.abs(
+        (buttonBounds.top + buttonBounds.height / 2) - (tabBounds.top + tabBounds.height / 2),
+      ),
+      iconCenterXOffset:
+        (iconBounds.left + iconBounds.width / 2) - (buttonBounds.left + buttonBounds.width / 2),
+      iconCenterYOffset:
+        (iconBounds.top + iconBounds.height / 2) - (buttonBounds.top + buttonBounds.height / 2),
+      rightInset: headerBounds.right - buttonBounds.right,
+    };
+  });
+  expect(outlineToggleGeometry.usesReferenceMoveClasses).toBe(true);
+  expect(outlineToggleGeometry.isDirectHeaderAction).toBe(true);
+  expect(outlineToggleGeometry.width).toBeCloseTo(outlineToggleGeometry.tabWidth, 1);
+  expect(outlineToggleGeometry.height).toBeCloseTo(outlineToggleGeometry.tabHeight, 1);
+  expect(outlineToggleGeometry.centerDelta).toBeLessThanOrEqual(1);
+  expect(outlineToggleGeometry.iconCenterXOffset).toBeCloseTo(0.5, 1);
+  expect(outlineToggleGeometry.iconCenterYOffset).toBeCloseTo(1, 1);
+  expect(outlineToggleGeometry.rightInset).toBeCloseTo(7.5, 1);
   await expectOutlineTreeGeometry(page, 31);
   await page.getByRole('button', {
     name: 'Conditional comparison estimates, Page 24',

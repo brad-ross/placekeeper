@@ -188,10 +188,11 @@ function containsForbiddenKey(value: unknown, depth = 0): boolean {
 export function sanitizeChromeRuntimeProjection(value: unknown): unknown | undefined {
   if (!record(value) || !exact(value, [
     "sessionId", "generation", "revision", "state", "scope", "saveStatus",
-    "canonicalLinkBase", "location", "document",
+    "canonicalLinkBase", "protected", "location", "document",
   ].filter((key) => key !== "location" || value.location !== undefined)) ||
     !record(value.document) ||
     !exact(value.document, ["sha256", "byteLength", "generation"]) ||
+    typeof value.protected !== "boolean" ||
     !SHA256.test(String(value.document.sha256)) || !safeInteger(value.document.byteLength) ||
     (value.document.byteLength as number) < 1 || !safeInteger(value.document.generation) ||
     value.document.generation !== value.generation) return undefined;

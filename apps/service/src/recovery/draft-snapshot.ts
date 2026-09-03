@@ -122,6 +122,9 @@ export interface RecoverableDraftV3 {
   readonly generationLineage?: readonly DurableGenerationRecordV1[];
   readonly latestObservationEpoch?: number;
   readonly sourceWorkInterruptions?: readonly DurableSourceWorkInterruptionV1[];
+  /** A Chrome review that accepted a potentially durable side effect must
+   * remain recoverable even when its save state is currently clean. */
+  readonly chromeProtected?: true;
 }
 
 export type RecoverableDraft = LegacyRecoverableDraft | RecoverableDraftV2 | RecoverableDraftV3;
@@ -227,6 +230,7 @@ function parse(contents: string): RecoverableDraftV3 | undefined {
       ![1, 2, 3].includes(envelope.payload.schemaVersion) ||
       (envelope.payload.schemaVersion === 3 && (
         !validV3Source(envelope.payload.source) ||
+        (envelope.payload.chromeProtected !== undefined && envelope.payload.chromeProtected !== true) ||
         (envelope.payload.source.disposition === "remote-temporary" && (
           envelope.payload.source.digest !== envelope.payload.state.source.digest ||
           envelope.payload.source.byteLength !== envelope.payload.state.source.byteLength

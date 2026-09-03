@@ -65,7 +65,10 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('button', { name: 'Proofread mode' })).toHaveCount(0);
   });
 
-  test('discloses mounted annotation actions at intent without activating their row', async ({ page }) => {
+  test('discloses mounted annotation actions at intent without activating their row', async ({
+    page,
+    browserName,
+  }) => {
     await page.setViewportSize({ width: 1280, height: 760 });
     await page.getByRole('button', { name: 'Seed annotations' }).click();
     await openAnnotationsWorkspace(page);
@@ -90,7 +93,7 @@ test.describe('canonical review workflow', () => {
     await expect(edit).toHaveCSS('opacity', '0');
 
     await navigation.focus();
-    await page.keyboard.press('Tab');
+    await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
     await expect(edit).toBeFocused();
     await expect(edit).toHaveCSS('opacity', '1');
 
@@ -901,14 +904,30 @@ test.describe('canonical review workflow', () => {
     await expect(historyMenu).toBeFocused();
   });
 
-  test('keeps a readable title floor and collapses Edit history, Zoom, then Navigation', async ({ page }) => {
+  test('caps long titles, shrinks short titles, and collapses Edit history, Zoom, then Navigation', async ({ page }) => {
     await page.goto('/test/acceptance/review-harness/index.html?visual=reading');
     await page.setViewportSize({ width: 1280, height: 720 });
     const chrome = page.locator('[data-review-chrome]');
     await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'expanded');
 
     const longTitle = chrome.locator(':scope > .review-chrome__identity strong');
-    expect(await longTitle.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+    const originalTitle = await longTitle.textContent();
+    const longTitleGeometry = await longTitle.evaluate((element) => ({
+      width: element.getBoundingClientRect().width,
+      truncated: element.scrollWidth > element.clientWidth,
+    }));
+    expect(longTitleGeometry.truncated).toBe(true);
+    expect(longTitleGeometry.width).toBeLessThanOrEqual(144.5);
+    const shortTitleGeometry = await longTitle.evaluate((element) => {
+      element.textContent = 'A.pdf';
+      return {
+        width: element.getBoundingClientRect().width,
+        truncated: element.scrollWidth > element.clientWidth,
+      };
+    });
+    expect(shortTitleGeometry.truncated).toBe(false);
+    expect(shortTitleGeometry.width).toBeLessThan(80);
+    await longTitle.evaluate((element, title) => { element.textContent = title; }, originalTitle);
 
     const reachCollapsedPresentation = async (
       target: 'zoomCompact' | 'historyCompact' | 'navigationCompact',
@@ -932,20 +951,21 @@ test.describe('canonical review workflow', () => {
       await expect(chrome).toHaveAttribute('data-review-chrome-presentation', target);
     };
 
-    const expectReadableFilename = async () => {
+    const expectCappedFilename = async () => {
       const filenameWidth = await chrome.locator(
         ':scope > .review-chrome__identity .review-chrome__save-identity strong',
       ).evaluate((element) => element.getBoundingClientRect().width);
       expect(filenameWidth).toBeGreaterThanOrEqual(143.5);
+      expect(filenameWidth).toBeLessThanOrEqual(144.5);
     };
 
-    await expectReadableFilename();
+    await expectCappedFilename();
     await reachCollapsedPresentation('historyCompact', 'expanded');
-    await expectReadableFilename();
+    await expectCappedFilename();
     await reachCollapsedPresentation('zoomCompact', 'historyCompact');
-    await expectReadableFilename();
+    await expectCappedFilename();
     await reachCollapsedPresentation('navigationCompact', 'zoomCompact');
-    await expectReadableFilename();
+    await expectCappedFilename();
 
     for (const target of ['zoomCompact', 'historyCompact', 'expanded'] as const) {
       for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -959,7 +979,7 @@ test.describe('canonical review workflow', () => {
         if (await chrome.getAttribute('data-review-chrome-presentation') === target) break;
       }
       await expect(chrome).toHaveAttribute('data-review-chrome-presentation', target);
-      await expectReadableFilename();
+      await expectCappedFilename();
     }
   });
 
