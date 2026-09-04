@@ -158,6 +158,7 @@ export interface ReviewShellProps {
   documentTitle?: string;
   savedLabel?: string;
   savePhase?: 'clean' | 'saving' | 'not-saved';
+  exportOnly?: boolean;
   savePendingDestination?: boolean;
   saveOptionsOpen?: boolean;
   onSaveOptions?(): void;
@@ -551,13 +552,13 @@ export function ReviewShell(props: ReviewShellProps) {
     (mode): mode is RightWorkspaceMode => mode !== 'references',
   );
   const documentActionsPresentation = useMemo(() => (
-    props.state.workflow.mode === 'generated-output'
+    props.state.workflow.mode === 'generated-output' || props.exportOnly === true
       ? reviewExportPresentation({
           refreshStatus: props.generationRefreshStatus ?? 'idle',
           summary: createReviewStateSummary(props.state),
         })
       : undefined
-  ), [props.generationRefreshStatus, props.state]);
+  ), [props.exportOnly, props.generationRefreshStatus, props.state]);
   const requestedRightWorkspaceMode: RightWorkspaceMode = props.rightWorkspaceMode
     ?? (workspaceMode === 'references' ? 'outline' : workspaceMode);
   const rightWorkspaceMode: RightWorkspaceMode = visibleRightWorkspaceModes.includes(

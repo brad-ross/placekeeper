@@ -94,6 +94,15 @@ describe("first annotation save gate", () => {
       command,
     });
   });
+
+  it("submits export-only browser commands without establishing a save destination", () => {
+    const command: ReviewCommand = { type: "undo", expectedRevision: 0 };
+
+    expect(gateReviewCommand(state, unselected, command, "ephemeral")).toEqual({
+      kind: "submit",
+      command,
+    });
+  });
 });
 
 describe("save status polling", () => {

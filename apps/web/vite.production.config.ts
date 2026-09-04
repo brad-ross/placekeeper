@@ -8,7 +8,7 @@ import {
   extractPinnedPdfiumWorkerSource,
 } from "../chrome-extension/scripts/embedpdf-worker-source.js";
 
-function offlinePdfium(): Plugin {
+export function offlinePdfium(): Plugin {
   const engineRoot = resolve("node_modules/@embedpdf/engines");
   const packageMetadata = JSON.parse(readFileSync(resolve(engineRoot, "package.json"), "utf8")) as {
     readonly version?: unknown;

@@ -10,9 +10,11 @@ export function gateReviewCommand(
   state: Pick<ReviewState, "workflow">,
   status: ProductionSaveStatus,
   command: ReviewCommand,
-  sourceDisposition: "local" | "remote-temporary" = "local",
+  sourceDisposition: "local" | "remote-temporary" | "ephemeral" = "local",
 ): SaveGatedCommand {
-  if (state.workflow.mode === "generated-output") return { kind: "submit", command };
+  if (state.workflow.mode === "generated-output" || sourceDisposition === "ephemeral") {
+    return { kind: "submit", command };
+  }
   if (status.destination.phase !== "none") return { kind: "submit", command };
   return sourceDisposition === "remote-temporary"
     ? { kind: "submit-and-choose-destination", command }
