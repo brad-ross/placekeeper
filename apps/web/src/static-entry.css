@@ -21,35 +21,32 @@ body,
 }
 
 .static-launcher__card {
-  box-sizing: border-box;
   width: min(420px, 100%);
-  padding: 24px;
-  border: 1px solid var(--review-border-strong);
-  border-radius: var(--review-radius-dialog);
-  background: var(--review-surface-panel);
-  box-shadow: var(--review-shadow-float);
 }
 
 .static-launcher__brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 24px;
+  gap: 12px;
 }
 
 .static-launcher__mark {
   display: block;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
 }
 
 .static-launcher h1 {
   margin: 0;
-  font-size: 17px;
+  font-size: 22px;
   font-weight: 730;
   line-height: 1.25;
   letter-spacing: -.02em;
+}
+
+.static-launcher__description {
+  margin-top: 12px;
 }
 
 .static-launcher__input {
@@ -156,14 +153,7 @@ body,
   opacity: .55;
 }
 
-.static-launcher__durability {
-  margin: 18px 0 0;
-  color: var(--review-ink-muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.static-launcher__durability a {
+.static-launcher__description a {
   color: var(--review-focus);
   text-underline-offset: 2px;
 }
@@ -225,9 +215,6 @@ body,
     padding: 12px;
   }
 
-  .static-launcher__card {
-    padding: 20px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

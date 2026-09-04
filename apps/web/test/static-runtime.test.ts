@@ -83,6 +83,7 @@ describe("static browser review runtime", () => {
     expect(markup).toContain('<img class="static-launcher__mark"');
     expect(markup).toContain("Placekeeper.svg");
     expect(markup).toContain('alt=""');
+    expect(markup).toMatch(/<img class="static-launcher__mark"[^>]*width="42"[^>]*height="42"/);
     expect(markup).not.toContain('aria-hidden="true">P</div>');
     expect(markup).toContain("Upload PDF");
     expect(markup).toContain('aria-label="PDF URL"');
@@ -94,6 +95,10 @@ describe("static browser review runtime", () => {
     expect(markup).toContain("Annotations must be exported manually in this browser version");
     expect(markup).toContain("For autosave,");
     expect(markup).toContain("download the local version");
+    expect(markup).toContain('class="compact-editorial-modal__header"');
+    expect(markup).toContain('class="static-launcher__description compact-editorial-modal__description"');
+    expect(markup).toContain('class="compact-editorial-modal__body"');
+    expect(markup.indexOf("Annotations must be exported manually")).toBeLessThan(markup.indexOf("Upload PDF"));
     expect(markup).not.toContain("beta");
     expect(markup).not.toContain("non-confidential");
     expect(markup).not.toContain("64 MB maximum");

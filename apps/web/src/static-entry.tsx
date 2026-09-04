@@ -138,75 +138,79 @@ export function StaticLauncher(props: {
 
   return <main className="static-launcher">
     <section
-      className="static-launcher__card"
+      className="static-launcher__card compact-editorial-modal"
       onDragOver={(event) => event.preventDefault()}
       onDrop={onDrop}
     >
-      <div className="static-launcher__brand">
-        <img
-          className="static-launcher__mark"
-          src={PLACEKEEPER_ICON_URL}
-          alt=""
-          width="30"
-          height="30"
-        />
-        <h1>Placekeeper</h1>
-      </div>
-      <input
-        ref={inputRef}
-        id={inputId}
-        className="static-launcher__input"
-        type="file"
-        accept="application/pdf,.pdf"
-        disabled={pending}
-        onChange={onChange}
-      />
-      <button
-        ref={chooseButtonRef}
-        type="button"
-        className="static-launcher__button"
-        disabled={pending}
-        onClick={() => inputRef.current?.click()}
-      >
-        <ReviewIcon name="upload" size={14} />
-        Upload PDF
-      </button>
-      <div className="static-launcher__separator"><span>or</span></div>
-      <form className="static-launcher__url" onSubmit={(event) => {
-        event.preventDefault();
-        void open(remoteUrl.trim(), "url");
-      }}>
-        <div>
-          <input
-            ref={urlInputRef}
-            id={`${inputId}-url`}
-            type="url"
-            aria-label="PDF URL"
-            inputMode="url"
-            autoComplete="off"
-            placeholder="https://example.org/paper.pdf"
-            value={remoteUrl}
-            disabled={pending}
-            onChange={(event) => setRemoteUrl(event.currentTarget.value)}
+      <header className="compact-editorial-modal__header">
+        <div className="static-launcher__brand">
+          <img
+            className="static-launcher__mark"
+            src={PLACEKEEPER_ICON_URL}
+            alt=""
+            width="42"
+            height="42"
           />
-          <button type="submit" disabled={pending || remoteUrl.trim() === ""}>
-            <ReviewIcon name="link" size={14} />
-            Open
-          </button>
+          <h1>Placekeeper</h1>
         </div>
-      </form>
-      <p className="static-launcher__durability">
-        Annotations must be exported manually in this browser version. For autosave, <a
-          href="https://github.com/brad-ross/placekeeper#install"
-          target="_blank"
-          rel="noreferrer noopener"
-        >download the local version</a>.
-      </p>
-      {pending ? <div className="static-launcher__progress">
-        <p role="status" aria-live="polite">{OPENING_STATUS[phase]}</p>
-        <button type="button" onClick={() => operationRef.current?.abort()}>Cancel</button>
-      </div> : null}
-      {error === undefined ? null : <p className="static-launcher__error" role="alert" tabIndex={-1}>{error}</p>}
+        <p className="static-launcher__description compact-editorial-modal__description">
+          Annotations must be exported manually in this browser version. For autosave, <a
+            href="https://github.com/brad-ross/placekeeper#install"
+            target="_blank"
+            rel="noreferrer noopener"
+          >download the local version</a>.
+        </p>
+      </header>
+      <div className="compact-editorial-modal__body">
+        <input
+          ref={inputRef}
+          id={inputId}
+          className="static-launcher__input"
+          type="file"
+          accept="application/pdf,.pdf"
+          disabled={pending}
+          onChange={onChange}
+        />
+        <button
+          ref={chooseButtonRef}
+          type="button"
+          className="static-launcher__button"
+          disabled={pending}
+          onClick={() => inputRef.current?.click()}
+        >
+          <ReviewIcon name="upload" size={14} />
+          Upload PDF
+        </button>
+        <div className="static-launcher__separator"><span>or</span></div>
+        <form className="static-launcher__url" onSubmit={(event) => {
+          event.preventDefault();
+          void open(remoteUrl.trim(), "url");
+        }}>
+          <div>
+            <input
+              ref={urlInputRef}
+              id={`${inputId}-url`}
+              type="url"
+              aria-label="PDF URL"
+              inputMode="url"
+              autoComplete="off"
+              placeholder="https://example.org/paper.pdf"
+              value={remoteUrl}
+              disabled={pending}
+              onChange={(event) => setRemoteUrl(event.currentTarget.value)}
+            />
+            <button type="submit" disabled={pending || remoteUrl.trim() === ""}>
+              <ReviewIcon name="link" size={14} />
+              Open
+            </button>
+          </div>
+        </form>
+        {pending ? <div className="static-launcher__progress">
+          <p role="status" aria-live="polite">{OPENING_STATUS[phase]}</p>
+          <button type="button" onClick={() => operationRef.current?.abort()}>Cancel</button>
+        </div> : null}
+        {error === undefined ? null : <p className="static-launcher__error" role="alert" tabIndex={-1}>{error}</p>}
+      </div>
     </section>
   </main>;
 }
