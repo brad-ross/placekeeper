@@ -23,3 +23,15 @@ Developer ID signing, notarization, stapling, Intel/x64 packages, DMGs, auto-upd
 Detailed source-install, live-context, and host evidence lives in `test/acceptance/installed-hosts.md`.
 
 VS Code follows the official guidance for [UI extension hosts](https://code.visualstudio.com/api/advanced-topics/extension-host), [remote refusal](https://code.visualstudio.com/api/advanced-topics/remote-extensions), and [restricted webviews](https://code.visualstudio.com/api/extension-guides/webview).
+
+## Web beta
+
+The front-end-only beta is an export-only companion, not the recoverable installed app. It accepts exactly one PDF up to 64 MiB. Current desktop Chromium and Firefox are the advertised browser targets. Automated Playwright WebKit coverage is a regression signal, not proof of branded Safari behavior; real desktop Safari must complete the live upload-export-reopen qualification before Safari is promoted as supported. Mobile browsers and PDF-content screen-reader access are best effort.
+
+If a local file is rejected, confirm that it is no larger than 67,108,864 bytes, begins as a PDF, and is not encrypted, signed, permission-restricted, malformed, or otherwise ineligible for safe rewrite. Because authoring starts only after export eligibility is established, there is no view-only fallback in this beta for an unexportable document. Use the installed Placekeeper app or another reader when viewing alone is sufficient.
+
+If a remote URL fails, it must be a direct HTTPS response that permits cross-origin browser access, identifies PDF content, does not redirect, completes within the time bound, and fits the same size limit. CORS failure does not mean no request was sent. Placekeeper deliberately refuses credentials in the URL and obvious local or private targets, but client-side checks cannot prove public DNS resolution. Download the document through a trusted browser route and upload the local copy instead.
+
+If an export reports failure, the in-memory review remains available for another attempt as long as the tab stays open. If export reports success, verify that the browser actually retained the download and reopen that file independently. The success check is structural and does not certify every source object, preserve every unsupported foreign annotation, or sanitize active PDF content. Edits made after an export snapshot remain unexported until another successful export.
+
+Reloading or closing a dirty review discards it after the browser warning is accepted. There is no autosave, crash recovery, account, server copy, or browser-storage recovery path. See [Web beta operation and release](web-beta.md) for compatibility details, security boundaries, and the dormant publication checklist.
