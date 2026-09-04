@@ -14,6 +14,7 @@ import "./static-entry.css";
 // The static Vite plugin replaces these with content-addressed Rollup asset URLs.
 const PDFIUM_WASM_ASSET = "__PLACEKEEPER_STATIC_PDFIUM_WASM__";
 const PDFIUM_WORKER_ASSET = "__PLACEKEEPER_STATIC_PDFIUM_WORKER__";
+const PLACEKEEPER_ICON_URL = new URL("../../../packaging/macos/icon/Placekeeper.svg", import.meta.url).href;
 
 const ACTIVATION_TIMEOUT_MS = 30_000;
 
@@ -142,7 +143,13 @@ export function StaticLauncher(props: {
       onDrop={onDrop}
     >
       <div className="static-launcher__brand">
-        <div className="static-launcher__mark" aria-hidden="true">P</div>
+        <img
+          className="static-launcher__mark"
+          src={PLACEKEEPER_ICON_URL}
+          alt=""
+          width="30"
+          height="30"
+        />
         <h1>Placekeeper</h1>
       </div>
       <input

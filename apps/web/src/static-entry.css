@@ -38,15 +38,10 @@ body,
 }
 
 .static-launcher__mark {
-  display: grid;
+  display: block;
   width: 30px;
   height: 30px;
-  place-items: center;
   border-radius: 8px;
-  color: var(--review-surface-panel);
-  background: var(--review-ink-primary);
-  font-size: 15px;
-  font-weight: 700;
 }
 
 .static-launcher h1 {

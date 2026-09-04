@@ -80,6 +80,10 @@ describe("static browser review runtime", () => {
     const markup = renderToStaticMarkup(createElement(StaticLauncher, {
       onOpen: async () => undefined,
     }));
+    expect(markup).toContain('<img class="static-launcher__mark"');
+    expect(markup).toContain("Placekeeper.svg");
+    expect(markup).toContain('alt=""');
+    expect(markup).not.toContain('aria-hidden="true">P</div>');
     expect(markup).toContain("Upload PDF");
     expect(markup).toContain('aria-label="PDF URL"');
     expect(markup).not.toContain(">PDF URL<");
