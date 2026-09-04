@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import {
   Component,
   useEffect,
+  useRef,
   useState,
   type ErrorInfo,
   type ReactNode,
@@ -12,6 +13,7 @@ import {
   decodePlacekeeperLinkFragment,
   encodePlacekeeperLinkFragment,
 } from "../../../packages/core/src/placekeeper-link.js";
+import { createReviewState } from "../../../packages/core/src/review-model.js";
 import { isReviewPanelKey } from "../../../packages/core/src/review-runtime-protocol.js";
 import {
   ProductionReviewApp,
@@ -37,6 +39,14 @@ import {
 } from "./host/vscode-runtime.js";
 import type { HostRuntime, HostRuntimeBootstrap } from "./host/runtime.js";
 import { subscribeRuntimeDocumentSource } from "./host/runtime-document-source.js";
+import type {
+  ReviewCommandInvocation,
+  ReviewCommandSurfaceSnapshot,
+} from "./review/review-command-surface.js";
+import {
+  AccessibilityTransitionCoordinator,
+  type AccessibilityTransitionEffect,
+} from "./app/accessibility-transitions.js";
 
 export async function resume(viewId: string, pathname: string): Promise<void> {
   await start(await resumeProductionSession(viewId, pathname));
@@ -424,26 +434,117 @@ class RuntimeFailureBoundary extends Component<{
   }
 }
 
-function RuntimeProductionReviewApp(props: {
-  readonly runtime: HostRuntime;
-  readonly initial: HostRuntimeBootstrap;
+const PENDING_SESSION_ID = "00000000-0000-4000-8000-000000000000";
+const PENDING_FILE_ID = "00000000-0000-4000-8000-000000000001";
+
+const pendingApi: HostRuntime = {
+  host: "macos",
+  bootstrap: async () => Promise.reject(new Error("The review is still loading.")),
+  subscribeInvalidations: () => () => undefined,
+  command: async () => Promise.reject(new Error("The review is still loading.")),
+  saveStatus: async () => Promise.reject(new Error("The review is still loading.")),
+  saveProposal: async () => Promise.reject(new Error("The review is still loading.")),
+  chooseCopy: async () => Promise.reject(new Error("The review is still loading.")),
+  chooseFolder: async () => Promise.reject(new Error("The review is still loading.")),
+  chooseOriginal: async () => Promise.reject(new Error("The review is still loading.")),
+  retrySave: async () => Promise.reject(new Error("The review is still loading.")),
+  locateSave: async () => Promise.reject(new Error("The review is still loading.")),
+  exportReviewedCopy: async () => Promise.reject(new Error("The review is still loading.")),
+  scope: async () => Promise.reject(new Error("The review is still loading.")),
+  forwardSyncTex: async () => Promise.reject(new Error("The review is still loading.")),
+  reverseSyncTex: async () => Promise.reject(new Error("The review is still loading.")),
+  dispose: () => undefined,
+};
+
+export function pendingRuntimeBootstrap(documentTitle: string): HostRuntimeBootstrap {
+  const created = createReviewState({
+    sessionId: PENDING_SESSION_ID,
+    source: { fileId: PENDING_FILE_ID, digest: "0".repeat(64), byteLength: 5 },
+  });
+  const state = {
+    ...created,
+    workflow: { ...created.workflow, documentGeneration: 0 },
+  };
+  return {
+    sessionId: PENDING_SESSION_ID,
+    generation: 0,
+    revision: 0,
+    session: { sessionId: PENDING_SESSION_ID },
+    state,
+    scope: { documentTitle, launchSurface: "macos" },
+    saveStatus: {
+      destination: { phase: "none", generation: 0 },
+      sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 },
+    },
+    viewerAssets: {
+      documentUrl: "placekeeper-resource://document/pending_resource?generation=1&role=document",
+      pdfiumWasm: "placekeeper-app://bundle/assets/pdfium.wasm",
+      workerUrl: "placekeeper-app://bundle/assets/pdfium-worker.js",
+    },
+    resourcePolicy: {
+      host: "macos",
+      resources: {
+        document: "placekeeper-resource://document/pending_resource?generation=1&role=document",
+        pdfiumWasm: "placekeeper-app://bundle/assets/pdfium.wasm",
+        worker: "placekeeper-app://bundle/assets/pdfium-worker.js",
+      },
+    },
+  };
+}
+
+export function RuntimeProductionReviewApp(props: {
+  readonly runtime?: HostRuntime;
+  readonly initial?: HostRuntimeBootstrap;
+  readonly loadingDocumentTitle?: string;
   readonly initialPresentation?: VscodePresentationState;
   readonly onPresentationChange?: (presentation: { readonly pageIndex: number; readonly zoom: number }) => void;
   readonly onDocumentReady?: (generation: number) => void;
   readonly onDocumentTitleChange?: (title: string, generation: number) => void;
   readonly onRuntimeError?: (error: Error) => void;
+  readonly onCommandSurfaceChange?: (snapshot: ReviewCommandSurfaceSnapshot) => void;
+  readonly commandInvocation?: ReviewCommandInvocation;
+  readonly transitionAttemptId?: string;
+  readonly transitionVisible?: boolean;
 }) {
+  const [seed, setSeed] = useState(props.initial);
   const [loaded, setLoaded] = useState(props.initial);
   const [refreshStatus, setRefreshStatus] = useState<"idle" | "reconciling" | "failed">("idle");
   const [hostReattachRequestToken, setHostReattachRequestToken] = useState(0);
   const [hostForwardSyncTexRequest, setHostForwardSyncTexRequest] = useState<HostForwardSyncTexRequest>();
   const [hostReverseSyncTexRequestToken, setHostReverseSyncTexRequestToken] = useState(0);
+  const transitionCoordinator = useRef(new AccessibilityTransitionCoordinator());
+  const [accessibilityTransition, setAccessibilityTransition] = useState<AccessibilityTransitionEffect>();
+  const [documentReady, setDocumentReady] = useState<{
+    readonly attemptId: string;
+    readonly generation: number;
+  }>();
 
-  useEffect(() => subscribeRuntimeDocumentSource(props.runtime, props.initial, (snapshot) => {
+  useEffect(() => {
+    if (props.initial === undefined) return;
+    setSeed(props.initial);
+    setLoaded(props.initial);
+  }, [props.initial]);
+  useEffect(() => {
+    if (seed !== undefined || props.runtime === undefined) return;
+    const controller = new AbortController();
+    void props.runtime.bootstrap(controller.signal).then((initial) => {
+      if (controller.signal.aborted) return;
+      setSeed(initial);
+      setLoaded(initial);
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      setRefreshStatus("failed");
+      props.onRuntimeError?.(error instanceof Error ? error : new Error("The review could not be loaded."));
+    });
+    return () => controller.abort();
+  }, [props.runtime, seed]);
+  useEffect(() => seed === undefined || props.runtime === undefined
+    ? undefined
+    : subscribeRuntimeDocumentSource(props.runtime, seed, (snapshot) => {
     setLoaded(snapshot.loaded);
     setRefreshStatus(snapshot.refreshStatus);
-  }), [props.initial, props.runtime]);
-  useEffect(() => props.runtime.subscribeHostCommands?.((command) => {
+  }), [props.runtime, seed]);
+  useEffect(() => props.runtime?.subscribeHostCommands?.((command) => {
     if (command.command === "reattach") {
       setHostReattachRequestToken((token) => token + 1);
       return;
@@ -459,30 +560,78 @@ function RuntimeProductionReviewApp(props: {
       point: command.point,
     }));
   }), [props.runtime]);
+  useEffect(() => {
+    const attemptId = props.transitionAttemptId;
+    if (attemptId === undefined) return;
+    transitionCoordinator.current.activateAttempt(attemptId);
+    const kind = refreshStatus === "failed"
+      ? "recoverable-failure"
+      : documentReady?.attemptId === attemptId ? "document-ready" : undefined;
+    if (kind === undefined) return;
+    const effect = transitionCoordinator.current.transition({
+      attemptId,
+      visible: props.transitionVisible ?? false,
+      kind,
+      ...(documentReady?.attemptId === attemptId ? { generation: documentReady.generation } : {}),
+    });
+    if (effect !== undefined) setAccessibilityTransition(effect);
+  }, [
+    documentReady?.attemptId,
+    documentReady?.generation,
+    props.transitionAttemptId,
+    props.transitionVisible,
+    refreshStatus,
+  ]);
 
+  const visible = loaded ?? pendingRuntimeBootstrap(props.loadingDocumentTitle ?? "Opening PDF");
   return <ProductionReviewApp
-    session={loaded.session}
-    initialState={loaded.state}
-    initialSaveStatus={loaded.saveStatus}
-    scope={loaded.scope}
-    api={props.runtime}
-    viewerAssets={loaded.viewerAssets}
-    resourcePolicy={loaded.resourcePolicy}
-    {...(loaded.locationHistory === undefined ? {} : { locationHistory: loaded.locationHistory })}
-    {...(loaded.canonicalLinkBase === undefined ? {} : { copyLinkBase: loaded.canonicalLinkBase })}
+    session={visible.session}
+    initialState={visible.state}
+    initialSaveStatus={visible.saveStatus}
+    scope={visible.scope}
+    api={loaded === undefined ? pendingApi : props.runtime ?? pendingApi}
+    viewerAssets={visible.viewerAssets}
+    resourcePolicy={visible.resourcePolicy}
+    {...(loaded === undefined ? {
+      viewer: <section
+        className="macos-loading-shell__workspace"
+        data-runtime-loading-workspace
+        aria-busy="true"
+      >
+        <p role={refreshStatus === "failed" ? "alert" : "status"}>
+          {refreshStatus === "failed" ? "This review could not be prepared." : "Preparing this review…"}
+        </p>
+      </section>,
+    } : {})}
+    {...(visible.locationHistory === undefined ? {} : { locationHistory: visible.locationHistory })}
+    {...(visible.canonicalLinkBase === undefined ? {} : { copyLinkBase: visible.canonicalLinkBase })}
     generationRefreshStatus={refreshStatus}
     hostReattachRequestToken={hostReattachRequestToken}
     hostReverseSyncTexRequestToken={hostReverseSyncTexRequestToken}
     {...(hostForwardSyncTexRequest === undefined ? {} : { hostForwardSyncTexRequest })}
-    {...(props.runtime.host === "vscode"
-      ? { onReverseSyncTex: (input: unknown) => props.runtime.reverseSyncTex(input) }
+    {...(props.runtime?.host === "vscode"
+      ? { onReverseSyncTex: (input: unknown) => props.runtime!.reverseSyncTex(input) }
       : {})}
     {...(props.initialPresentation === undefined ? {} : { initialPresentation: props.initialPresentation })}
     {...(props.onPresentationChange === undefined ? {} : { onPresentationChange: props.onPresentationChange })}
-    {...(props.onDocumentReady === undefined ? {} : { onDocumentReady: props.onDocumentReady })}
+    {...(props.onDocumentReady === undefined && props.transitionAttemptId === undefined ? {} : {
+      onDocumentReady: (generation: number) => {
+        if (props.transitionAttemptId !== undefined) {
+          setDocumentReady({ attemptId: props.transitionAttemptId, generation });
+        }
+        props.onDocumentReady?.(generation);
+      },
+    })}
     {...(props.onDocumentTitleChange === undefined
       ? {}
       : { onDocumentTitleChange: props.onDocumentTitleChange })}
+    {...(props.onCommandSurfaceChange === undefined
+      ? {}
+      : { onCommandSurfaceChange: props.onCommandSurfaceChange })}
+    {...(props.commandInvocation === undefined
+      ? {}
+      : { commandInvocation: props.commandInvocation })}
+    {...(accessibilityTransition === undefined ? {} : { accessibilityTransition })}
   />;
 }
 

@@ -71,6 +71,18 @@
   line-height: 1.4;
 }
 
+.review-transition-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .review-shell button,
 .review-shell input,
 .review-shell textarea {
@@ -112,6 +124,11 @@
   padding: 0 1rem;
   border-bottom: 1px solid var(--review-border);
   background: var(--review-surface-panel);
+}
+
+[data-launch-surface="macos"] .review-chrome {
+  padding-inline-start: max(1rem, var(--macos-titlebar-leading-inset, 0px));
+  padding-inline-end: max(1rem, var(--macos-titlebar-trailing-inset, 0px));
 }
 
 .review-chrome__identity {

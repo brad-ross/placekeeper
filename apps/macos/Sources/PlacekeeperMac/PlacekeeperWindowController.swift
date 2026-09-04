@@ -41,7 +41,13 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         let configuration = WKWebViewConfiguration()
         let handler = MacSchemeHandler(
             packagedRoot: packagedRoot,
-            manifestKeys: ["macos.html", "assets/shell.js", "assets/shell.css"],
+            manifestKeys: [
+                "macos.html",
+                "assets/shell.js",
+                "assets/shell.css",
+                "assets/pdfium.wasm",
+                "assets/pdfium-worker.js",
+            ],
             resourceID: resourceID,
             generation: generation,
             resourceBytes: resourceBytes
@@ -193,7 +199,12 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         }
         if type == "drag-regions", let revision = body["layoutRevision"] as? Int,
            let identity = body["geometryIdentity"] as? String,
+           let transitioning = body["transitioning"] as? Bool,
            let rawRegions = body["regions"] as? [[String: Double]] {
+            if transitioning {
+                installDragOverlays([])
+                return
+            }
             let regions = rawRegions.compactMap { region -> DragRect? in
                 guard let x = region["x"], let y = region["y"], let width = region["width"], let height = region["height"] else { return nil }
                 return DragRect(x: x, y: y, width: width, height: height)

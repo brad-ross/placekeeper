@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MACOS_REVIEW_COMMAND_IDS,
   MACOS_SHELL_PROTOCOL_VERSION,
   parseMacosBundleURL,
   parseMacosNativeMessage,
@@ -30,6 +31,7 @@ describe("macOS packaged-shell protocol", () => {
       type: "drag-regions",
       layoutRevision: 7,
       geometryIdentity: "geometry_12345678",
+      transitioning: false,
       regions: [{ x: 12, y: 0, width: 300, height: 52 }],
     })).toMatchObject({ type: "drag-regions", layoutRevision: 7 });
     expect(parseMacosPageMessage({
@@ -37,6 +39,7 @@ describe("macOS packaged-shell protocol", () => {
       type: "drag-regions",
       layoutRevision: 7,
       geometryIdentity: "geometry_12345678",
+      transitioning: false,
       regions: [],
       path: "/tmp/paper.pdf",
     })).toBeUndefined();
@@ -64,6 +67,8 @@ describe("macOS packaged-shell protocol", () => {
     });
     expect(message).toMatchObject({ type: "bootstrap", document: { displayName: "Paper.pdf" } });
     expect(JSON.stringify(message)).not.toMatch(/path|credential|taskId|token|method/iu);
+    expect(parseMacosNativeMessage({ ...message, attemptId: "attempt_identifier_1234" }))
+      .toBeUndefined();
   });
 
   it("fails closed on sensitive, generic, oversized, or malformed page messages", () => {
@@ -74,6 +79,73 @@ describe("macOS packaged-shell protocol", () => {
       { protocolVersion: 2, type: "shell-ready", layoutRevision: 1 },
       "not-an-object",
     ]) expect(parseMacosPageMessage(value)).toBeUndefined();
+  });
+
+  it("carries only closed Mac runtime requests on the attempt-fenced bridge", () => {
+    const message = parseMacosPageMessage({
+      protocolVersion: 1,
+      type: "runtime-message",
+      runtimeId: "runtime_identifier_1234",
+      attemptId: "attempt_identifier_1234",
+      message: {
+        protocol: "placekeeper.review-runtime",
+        version: 1,
+        kind: "request",
+        runtimeId: "runtime_identifier_1234",
+        requestId: "request_identifier_1234",
+        method: "bootstrap",
+        payload: {},
+      },
+    });
+    expect(message).toMatchObject({ type: "runtime-message", message: { method: "bootstrap" } });
+    expect(parseMacosPageMessage({
+      ...(message as object),
+      message: {
+        protocol: "placekeeper.review-runtime",
+        version: 1,
+        kind: "request",
+        runtimeId: "runtime_identifier_1234",
+        requestId: "request_identifier_1234",
+        method: "scope",
+        payload: { sourcePath: "/private/forbidden.pdf" },
+      },
+    })).toBeUndefined();
+  });
+
+  it("carries a complete primitive command projection and closed invocation", () => {
+    const commands = MACOS_REVIEW_COMMAND_IDS.map((id) => ({
+      id,
+      label: id === "undo" ? "Undo Review Change" : id,
+      enabled: id === "undo",
+      ...(id === "undo" ? { shortcut: "Meta+Z" } : {}),
+    }));
+    expect(parseMacosPageMessage({
+      protocolVersion: 1,
+      type: "command-snapshot",
+      runtimeId: "runtime_identifier_1234",
+      attemptId: "attempt_identifier_1234",
+      revision: 3,
+      focusContext: "review",
+      commands,
+    })).toMatchObject({ type: "command-snapshot", revision: 3, commands });
+    expect(parseMacosNativeMessage({
+      protocolVersion: 1,
+      type: "invoke-command",
+      runtimeId: "runtime_identifier_1234",
+      attemptId: "attempt_identifier_1234",
+      command: "undo",
+      snapshotRevision: 3,
+      token: 4,
+    })).toMatchObject({ type: "invoke-command", command: "undo", token: 4 });
+    expect(parseMacosPageMessage({
+      protocolVersion: 1,
+      type: "command-snapshot",
+      runtimeId: "runtime_identifier_1234",
+      attemptId: "attempt_identifier_1234",
+      revision: 3,
+      focusContext: "review",
+      commands: commands.map((command) => ({ ...command, sourcePath: "/private/paper.pdf" })),
+    })).toBeUndefined();
   });
 
   it("uses closed canonical bundle and resource URL grammars", () => {

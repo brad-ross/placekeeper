@@ -110,6 +110,13 @@ import {
 } from '../review/input-controller.js';
 import { reviewActionForKey } from '../review/review-actions.js';
 import {
+  createReviewCommandSurface,
+  type ReviewCommandFocusContext,
+  type ReviewCommandInvocation,
+  type ReviewCommandSurfaceSnapshot,
+} from '../review/review-command-surface.js';
+import type { AccessibilityTransitionEffect } from './accessibility-transitions.js';
+import {
   useWorkspaceFraming,
   type WorkspaceOpenRequest,
 } from '../review/use-annotation-tray-framing.js';
@@ -263,6 +270,9 @@ export interface ReviewShellProps {
   search?: ReactNode;
   viewerNavigationIntentToken?: number;
   onCommitMainFramingPositionChange?(commit: (() => void) | null): void;
+  onCommandSurfaceChange?(snapshot: ReviewCommandSurfaceSnapshot): void;
+  commandInvocation?: ReviewCommandInvocation;
+  accessibilityTransition?: AccessibilityTransitionEffect;
   children?: ReactNode;
 }
 
@@ -401,9 +411,13 @@ export function ReviewShell(props: ReviewShellProps) {
   const annotationRestorationFramesRef = useRef(new Set<number>());
   const [peekItemId, setPeekItemId] = useState<string>();
   const [searchFocusRequest, setSearchFocusRequest] = useState(0);
+  const [commandFocusContext, setCommandFocusContext] = useState<ReviewCommandFocusContext>('review');
+  const handledCommandInvocationRef = useRef(0);
   const peekHeldRef = useRef(false);
   const peekTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [announcement, setAnnouncement] = useState(`Review revision ${props.state.revision}.`);
+  const [transitionAnnouncement, setTransitionAnnouncement] = useState('');
+  const handledAccessibilityTransitionRef = useRef(0);
   const authoringOwnerViewIdRef = useRef(crypto.randomUUID());
 
   const cancelAnnotationRestoration = useCallback(() => {
@@ -941,6 +955,11 @@ export function ReviewShell(props: ReviewShellProps) {
     dispatchReferenceLayout({ type: 'show-right-workspace' });
     selectWorkspaceMode('annotations');
   };
+  const openFindCommand = () => {
+    setSearchFocusRequest((request) => request + 1);
+    selectWorkspaceMode('search');
+    dispatchReferenceLayout({ type: 'show-right-workspace' });
+  };
   const acknowledgedAuthority = authoringAuthorityFor(
     acknowledgedRef.current,
     navigation.documentGeneration,
@@ -1256,10 +1275,7 @@ export function ReviewShell(props: ReviewShellProps) {
       && surface.nestedLayer === 'none'
       && authoringSessionRef.current === null
     ) {
-      event.preventDefault();
-      setSearchFocusRequest((request) => request + 1);
-      selectWorkspaceMode('search');
-      dispatchReferenceLayout({ type: 'show-right-workspace' });
+      if (commandSurface.invoke('find')) event.preventDefault();
       return;
     }
     if (workspaceOpen && !editable && !isWorkspaceOrChrome(event.target)) {
@@ -1334,8 +1350,7 @@ export function ReviewShell(props: ReviewShellProps) {
       }
     }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
-      event.preventDefault();
-      void submit((state) => event.shiftKey ? redoReview(state) : undoReview(state));
+      if (commandSurface.invoke(event.shiftKey ? 'redo' : 'undo')) event.preventDefault();
       return;
     }
     inputController.keyDown({
@@ -1554,6 +1569,64 @@ export function ReviewShell(props: ReviewShellProps) {
 
   const canUndo = props.state.historyCursor > 0;
   const canRedo = props.state.historyCursor < props.state.history.length;
+  const fitWidthCommand = () => props.viewerNavigation
+    ?.fitToWidth(workspaceFraming.waitForSettledGeometry)
+    .then(() => undefined) ?? Promise.resolve();
+  const commandSurface = createReviewCommandSurface({
+    focusContext: commandFocusContext,
+    canUndo: authoringSession === null && canUndo,
+    canRedo: authoringSession === null && canRedo,
+    canNavigateBack: props.canNavigateBack ?? false,
+    canNavigateForward: props.canNavigateForward ?? false,
+    canFind: surface.nestedLayer === 'none' && authoringSession === null,
+    canOpenAnnotations: authoringSession === null,
+    canOpenSaveOptions: props.onSaveOptions !== undefined,
+    canFitWidth: props.viewerNavigation?.fitToWidthReady() ?? false,
+    handlers: {
+      undo: () => { void submit(undoReview); },
+      redo: () => { void submit(redoReview); },
+      'navigate-back': () => props.onNavigateBack?.(),
+      'navigate-forward': () => props.onNavigateForward?.(),
+      find: openFindCommand,
+      'open-annotations': openAnnotationsFromDocumentActions,
+      'save-options': () => props.onSaveOptions?.(),
+      'fit-width': () => { void fitWidthCommand(); },
+    },
+  });
+  const commandSurfaceKey = JSON.stringify(commandSurface.snapshot);
+  useEffect(() => {
+    props.onCommandSurfaceChange?.(commandSurface.snapshot);
+  }, [commandSurfaceKey, props.onCommandSurfaceChange]);
+  useEffect(() => {
+    const invocation = props.commandInvocation;
+    if (invocation === undefined || invocation.token <= handledCommandInvocationRef.current) return;
+    handledCommandInvocationRef.current = invocation.token;
+    commandSurface.invoke(invocation.id);
+  }, [props.commandInvocation?.id, props.commandInvocation?.token, commandSurfaceKey]);
+  useEffect(() => {
+    const transition = props.accessibilityTransition;
+    if (transition === undefined || transition.token <= handledAccessibilityTransitionRef.current) return;
+    handledAccessibilityTransitionRef.current = transition.token;
+    setTransitionAnnouncement(transition.announcement);
+    const frame = requestAnimationFrame(() => {
+      const shell = shellRef.current;
+      if (shell === null) return;
+      const active = shell.ownerDocument.activeElement instanceof HTMLElement
+        ? shell.ownerDocument.activeElement : null;
+      if (active !== null && active.closest('.review-chrome') !== null && isVisibleFocusTarget(active)) return;
+      const target = transition.focus === 'first-recovery-action-if-needed'
+        ? shell.querySelector<HTMLElement>(
+          '[data-recovery-primary]:not(:disabled), [data-recovery-action]:not(:disabled)',
+        )
+        : transition.focus === 'retry-status'
+          ? shell.querySelector<HTMLElement>('[data-retry-status]')
+          : shell.querySelector<HTMLElement>(
+            '.pdf-workspace:not(.pdf-workspace--reference) [data-page-index], [role="application"]',
+          );
+      if (target !== null && isVisibleFocusTarget(target)) target.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [props.accessibilityTransition?.token]);
   const closeWorkspace = () => {
     cancelAnnotationRestoration();
     pendingReaderResumeRef.current = null;
@@ -1682,7 +1755,14 @@ export function ReviewShell(props: ReviewShellProps) {
       onBeforeInputCapture={beforeInput}
       onKeyDownCapture={keyDown}
       onFocusCapture={(event) => {
-        inputController.focusChanged(isEditableTarget(event.target));
+        const editable = isEditableTarget(event.target);
+        inputController.focusChanged(editable);
+        setCommandFocusContext(
+          event.target instanceof Element
+          && event.target.closest('[role="dialog"], [aria-modal="true"]') !== null
+            ? 'dialog'
+            : editable ? 'editable' : 'review',
+        );
       }}
       onCompositionStartCapture={(event) => inputController.compositionStart(event.target)}
       onCompositionEndCapture={compositionEnd}
@@ -1741,20 +1821,23 @@ export function ReviewShell(props: ReviewShellProps) {
         }
       }}
     >
+      <p className="review-transition-announcement" aria-live="polite" aria-atomic="true">
+        {transitionAnnouncement}
+      </p>
       <ReviewChrome
         documentTitle={props.documentTitle ?? 'Local PDF'}
         {...(props.savedLabel === undefined ? {} : { savedLabel: props.savedLabel })}
         {...(props.savePhase === undefined ? {} : { savePhase: props.savePhase })}
         savePendingDestination={props.savePendingDestination ?? false}
         saveOptionsOpen={props.saveOptionsOpen ?? false}
-        onSaveOptions={() => props.onSaveOptions?.()}
+        onSaveOptions={() => commandSurface.invoke('save-options')}
         saveOptionsAvailable={props.onSaveOptions !== undefined}
         {...(documentActionsPresentation === undefined ? {} : {
           documentActions: {
             presentation: documentActionsPresentation,
             onExport: props.onExportReviewedCopy
               ?? (() => Promise.reject(new Error('Reviewed export is unavailable.'))),
-            onOpenAnnotations: openAnnotationsFromDocumentActions,
+            onOpenAnnotations: () => { commandSurface.invoke('open-annotations'); },
           },
         })}
         {...(props.viewerControls === undefined ? {} : { controls: props.viewerControls })}
@@ -1765,23 +1848,17 @@ export function ReviewShell(props: ReviewShellProps) {
             await props.viewerNavigation?.cancelPendingNavigation();
           },
         })}
-        onFitWidth={() => props.viewerNavigation
-          ?.fitToWidth(workspaceFraming.waitForSettledGeometry)
-          .then(() => undefined)}
+        onFitWidth={fitWidthCommand}
         canUndo={authoringSession === null && canUndo}
         canRedo={authoringSession === null && canRedo}
         canNavigateBack={props.canNavigateBack ?? false}
         canNavigateForward={props.canNavigateForward ?? false}
         {...(props.codexContext === undefined ? {} : { codexContext: props.codexContext })}
         {...(props.copyLink === undefined ? {} : { copyLink: props.copyLink })}
-        onUndo={() => {
-          if (authoringSessionRef.current === null) void submit(undoReview);
-        }}
-        onRedo={() => {
-          if (authoringSessionRef.current === null) void submit(redoReview);
-        }}
-        onNavigateBack={() => props.onNavigateBack?.()}
-        onNavigateForward={() => props.onNavigateForward?.()}
+        onUndo={() => { commandSurface.invoke('undo'); }}
+        onRedo={() => { commandSurface.invoke('redo'); }}
+        onNavigateBack={() => { commandSurface.invoke('navigate-back'); }}
+        onNavigateForward={() => { commandSurface.invoke('navigate-forward'); }}
       />
       <div
         ref={workspaceFraming.stageRef}

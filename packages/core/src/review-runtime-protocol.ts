@@ -429,6 +429,10 @@ export function sanitizeMacosReviewRuntimeResponse(
     const projected = sanitizeChromeReviewRuntimeResponse("bootstrap", {
       ...value,
       scope: { ...value.scope, launchSurface: "chrome" },
+      // The Mac page never receives or supplies the path-bearing link base.
+      // A fixed inert placeholder lets us reuse the remainder of Chrome's
+      // closed bootstrap validator before removing this field below.
+      canonicalLinkBase: "placekeeper:///Redacted.pdf",
     });
     if (!record(projected)) return undefined;
     const scope = safeMacosScope(value.scope);

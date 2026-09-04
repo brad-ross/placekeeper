@@ -6,6 +6,8 @@ import {
   isReviewRuntimeMethodForHost,
   sanitizeChromeReviewRuntimeRequest,
   sanitizeChromeReviewRuntimeResponse,
+  sanitizeMacosReviewRuntimeRequest,
+  sanitizeMacosReviewRuntimeResponse,
   type ReviewRuntimeHost,
   type ReviewRuntimeMethod,
 } from "../../../../packages/core/src/review-runtime-protocol.js";
@@ -39,7 +41,7 @@ export interface MaterializedViewerResource {
 }
 
 export interface RpcHostRuntimeOptions {
-  readonly host?: Exclude<ReviewRuntimeHost, "macos">;
+  readonly host?: ReviewRuntimeHost;
   readonly extensionOrigin?: string;
   readonly materializePdfiumWasm?: (sourceUrl: string) => Promise<MaterializedViewerResource>;
   readonly materializePdfiumWorker?: (sourceUrl: string) => Promise<MaterializedViewerResource>;
@@ -143,7 +145,7 @@ export function createRpcHostRuntime(
   if (host === "chrome" && options.extensionOrigin === undefined) {
     throw new Error("A Chrome extension origin is required.");
   }
-  const envelopeIdentity = host === "chrome" ? { runtimeId } : { panelId: runtimeId };
+  const envelopeIdentity = host === "chrome" || host === "macos" ? { runtimeId } : { panelId: runtimeId };
   const pending = new Map<string, PendingRequest>();
   const invalidations = new Set<(event: HostRuntimeInvalidation) => void>();
   const hostCommands = new Set<(command: HostRuntimeCommand) => void>();
@@ -212,7 +214,9 @@ export function createRpcHostRuntime(
   const unsubscribe = port.subscribe((message) => {
     if (!isObject(message) || message.protocol !== REVIEW_RUNTIME_PROTOCOL ||
       message.version !== REVIEW_RUNTIME_VERSION ||
-      (host === "chrome" ? message.runtimeId !== runtimeId : message.panelId !== runtimeId)) return;
+      (host === "chrome" || host === "macos"
+        ? message.runtimeId !== runtimeId
+        : message.panelId !== runtimeId)) return;
     if (message.kind === "event" && message.event === "host-command") {
       if (host !== "vscode" || !validHostCommand(message.payload)) return;
       if (hostCommands.size === 0) pendingHostCommand = message.payload;
@@ -253,6 +257,7 @@ export function createRpcHostRuntime(
     if (message.kind !== "response" || typeof message.requestId !== "string") return;
     const current = pending.get(message.requestId);
     if (current === undefined) return;
+    if (host === "macos" && message.method !== current.method) return;
     if (!validIdentity(message)) return;
     if (current.method === "bootstrap") {
       if (!isObject(message.payload) || message.payload.sessionId !== message.sessionId ||
@@ -264,7 +269,9 @@ export function createRpcHostRuntime(
     if (message.ok === true) {
       const payload = host === "chrome"
         ? sanitizeChromeReviewRuntimeResponse(current.method, message.payload)
-        : message.payload;
+        : host === "macos"
+          ? sanitizeMacosReviewRuntimeResponse(current.method, message.payload)
+          : message.payload;
       if (payload === undefined) current.reject(new Error("The trusted host returned an invalid response."));
       else current.resolve(payload);
     } else current.reject(new Error("The trusted host rejected the review action."));
@@ -277,7 +284,7 @@ export function createRpcHostRuntime(
     }
     const outboundPayload = host === "chrome"
       ? sanitizeChromeReviewRuntimeRequest(method, payload)
-      : payload;
+      : host === "macos" ? sanitizeMacosReviewRuntimeRequest(method, payload) : payload;
     if (outboundPayload === undefined) {
       return Promise.reject(new Error("The review runtime request was invalid."));
     }
@@ -369,15 +376,15 @@ export function createRpcHostRuntime(
         ...(typeof value.resources.worker === "string" ? [value.resources.worker] : []),
         ...(worker === undefined ? [] : [worker.url]),
       ]);
-      const chromeResources = host === "chrome" && typeof value.resources.worker === "string"
+      const nativeResources = (host === "chrome" || host === "macos") && typeof value.resources.worker === "string"
         ? {
             document: value.resources.document,
             pdfiumWasm: value.resources.pdfiumWasm,
             worker: value.resources.worker,
           }
         : undefined;
-      if (host === "chrome" && chromeResources === undefined) {
-        throw new Error("The trusted host returned incomplete Chrome resources.");
+      if ((host === "chrome" || host === "macos") && nativeResources === undefined) {
+        throw new Error("The trusted host returned incomplete packaged resources.");
       }
       if (host === "chrome" && chromeLocationHistory === undefined) {
         chromeLocationHistory = new MemoryReviewLocationHistory(
@@ -401,9 +408,11 @@ export function createRpcHostRuntime(
           ? {
               host: "chrome",
               extensionOrigin: options.extensionOrigin!,
-              resources: chromeResources!,
+              resources: nativeResources!,
             }
-          : { host: "vscode", issued },
+          : host === "macos"
+            ? { host: "macos", resources: nativeResources! }
+            : { host: "vscode", issued },
         ...(chromeLocationHistory === undefined ? {} : { locationHistory: chromeLocationHistory }),
         ...(typeof value.canonicalLinkBase === "string"
           ? { canonicalLinkBase: value.canonicalLinkBase }

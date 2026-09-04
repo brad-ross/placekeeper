@@ -1,8 +1,17 @@
+import {
+  REVIEW_RUNTIME_PROTOCOL,
+  REVIEW_RUNTIME_VERSION,
+  isReviewRuntimeMethodForHost,
+  sanitizeMacosReviewRuntimeRequest,
+  sanitizeMacosReviewRuntimeResponse,
+} from "./review-runtime-protocol.js";
+
 export const MACOS_SHELL_PROTOCOL_VERSION = 1 as const;
 
 const OPAQUE_ID = /^[A-Za-z0-9_-]{8,128}$/u;
 const MANIFEST_KEY = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 export interface MacosRect {
   readonly x: number;
@@ -10,6 +19,19 @@ export interface MacosRect {
   readonly width: number;
   readonly height: number;
 }
+
+export const MACOS_REVIEW_COMMAND_IDS = [
+  "undo",
+  "redo",
+  "navigate-back",
+  "navigate-forward",
+  "find",
+  "open-annotations",
+  "save-options",
+  "fit-width",
+] as const;
+
+export type MacosReviewCommandId = typeof MACOS_REVIEW_COMMAND_IDS[number];
 
 export type MacosPageMessage =
   | {
@@ -29,7 +51,29 @@ export type MacosPageMessage =
     readonly type: "drag-regions";
     readonly layoutRevision: number;
     readonly geometryIdentity: string;
+    readonly transitioning: boolean;
     readonly regions: readonly MacosRect[];
+  }
+  | {
+    readonly protocolVersion: 1;
+    readonly type: "runtime-message";
+    readonly runtimeId: string;
+    readonly attemptId: string;
+    readonly message: unknown;
+  }
+  | {
+    readonly protocolVersion: 1;
+    readonly type: "command-snapshot";
+    readonly runtimeId: string;
+    readonly attemptId: string;
+    readonly revision: number;
+    readonly focusContext: "review" | "editable" | "dialog";
+    readonly commands: readonly {
+      readonly id: MacosReviewCommandId;
+      readonly label: string;
+      readonly enabled: boolean;
+      readonly shortcut?: string;
+    }[];
   };
 
 export interface MacosDocumentResource {
@@ -53,6 +97,8 @@ export type MacosNativeMessage =
       readonly trafficLightInset: number;
       readonly trailingInset: number;
     };
+    readonly runtimeId?: string;
+    readonly attemptId?: string;
   }
   | {
     readonly protocolVersion: 1;
@@ -72,6 +118,22 @@ export type MacosNativeMessage =
     readonly protocolVersion: 1;
     readonly type: "fatal-error";
     readonly code: "shell-unavailable" | "helper-unavailable" | "resource-invalid";
+  }
+  | {
+    readonly protocolVersion: 1;
+    readonly type: "runtime-message";
+    readonly runtimeId: string;
+    readonly attemptId: string;
+    readonly message: unknown;
+  }
+  | {
+    readonly protocolVersion: 1;
+    readonly type: "invoke-command";
+    readonly runtimeId: string;
+    readonly attemptId: string;
+    readonly command: MacosReviewCommandId;
+    readonly snapshotRevision: number;
+    readonly token: number;
   };
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -92,6 +154,65 @@ function safeFinite(value: unknown, maximum = 100_000): value is number {
 
 function opaqueId(value: unknown): value is string {
   return typeof value === "string" && OPAQUE_ID.test(value);
+}
+
+function safeCommandString(value: unknown, maximum: number): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= maximum
+    && !/[\u0000-\u001f\u007f]/u.test(value);
+}
+
+function reviewCommandId(value: unknown): value is MacosReviewCommandId {
+  return MACOS_REVIEW_COMMAND_IDS.includes(value as MacosReviewCommandId);
+}
+
+function runtimeIdentity(value: Record<string, unknown>): boolean {
+  return typeof value.sessionId === "string" && SESSION_ID.test(value.sessionId)
+    && safeInteger(value.generation) && safeInteger(value.revision);
+}
+
+function validPageRuntimeMessage(value: unknown, runtimeId: string): boolean {
+  if (!record(value) || value.protocol !== REVIEW_RUNTIME_PROTOCOL || value.version !== REVIEW_RUNTIME_VERSION
+    || value.runtimeId !== runtimeId || !opaqueId(value.requestId)) return false;
+  if (value.kind === "cancel") {
+    return exact(value, ["protocol", "version", "kind", "runtimeId", "requestId"]);
+  }
+  if (value.kind !== "request" || !isReviewRuntimeMethodForHost("macos", value.method)) return false;
+  const bootstrap = value.method === "bootstrap";
+  const keys = bootstrap
+    ? ["protocol", "version", "kind", "runtimeId", "requestId", "method", "payload"]
+    : [
+        "protocol", "version", "kind", "runtimeId", "requestId", "sessionId", "generation",
+        "revision", "method", "payload",
+      ];
+  return exact(value, keys) && (bootstrap || runtimeIdentity(value))
+    && sanitizeMacosReviewRuntimeRequest(value.method, value.payload) !== undefined;
+}
+
+function validNativeRuntimeMessage(value: unknown, runtimeId: string): boolean {
+  if (!record(value) || value.protocol !== REVIEW_RUNTIME_PROTOCOL || value.version !== REVIEW_RUNTIME_VERSION
+    || value.runtimeId !== runtimeId) return false;
+  if (value.kind === "event") {
+    if (!exact(value, ["protocol", "version", "kind", "runtimeId", "event", "payload"])
+      || value.event !== "session-invalidated" || !record(value.payload)
+      || !runtimeIdentity(value.payload)) return false;
+    return exact(value.payload, [
+      "sessionId", "generation", "revision", "reason",
+      ...(value.payload.previousGeneration === undefined ? [] : ["previousGeneration"]),
+    ]) && ["generation", "revision", "freshness"].includes(String(value.payload.reason))
+      && (value.payload.previousGeneration === undefined || safeInteger(value.payload.previousGeneration));
+  }
+  if (value.kind !== "response" || !opaqueId(value.requestId) || !runtimeIdentity(value)
+    || !isReviewRuntimeMethodForHost("macos", value.method) || typeof value.ok !== "boolean") return false;
+  if (value.ok) {
+    return exact(value, [
+      "protocol", "version", "kind", "runtimeId", "sessionId", "generation", "revision",
+      "requestId", "method", "ok", "payload",
+    ]) && sanitizeMacosReviewRuntimeResponse(value.method, value.payload) !== undefined;
+  }
+  return exact(value, [
+    "protocol", "version", "kind", "runtimeId", "sessionId", "generation", "revision",
+    "requestId", "method", "ok", "error",
+  ]) && record(value.error) && exact(value.error, ["kind"]) && value.error.kind === "rejected";
 }
 
 function rect(value: unknown): value is MacosRect {
@@ -116,10 +237,46 @@ export function parseMacosPageMessage(value: unknown): MacosPageMessage | undefi
   }
   if (value.type === "drag-regions") {
     return exact(value, [
-      "protocolVersion", "type", "layoutRevision", "geometryIdentity", "regions",
+      "protocolVersion", "type", "layoutRevision", "geometryIdentity", "transitioning", "regions",
     ]) && safeInteger(value.layoutRevision) && opaqueId(value.geometryIdentity)
+      && typeof value.transitioning === "boolean"
       && Array.isArray(value.regions) && value.regions.length <= 32 && value.regions.every(rect)
+      && (!value.transitioning || value.regions.length === 0)
       ? value as unknown as MacosPageMessage : undefined;
+  }
+  if (value.type === "runtime-message") {
+    if (!(exact(value, ["protocolVersion", "type", "runtimeId", "attemptId", "message"])
+      && opaqueId(value.runtimeId) && opaqueId(value.attemptId)
+      && validPageRuntimeMessage(value.message, value.runtimeId))) return undefined;
+    const message = value.message as Record<string, unknown>;
+    if (message.kind !== "request") return value as unknown as MacosPageMessage;
+    if (!isReviewRuntimeMethodForHost("macos", message.method)) return undefined;
+    return {
+      ...value,
+      message: {
+        ...message,
+        payload: sanitizeMacosReviewRuntimeRequest(message.method, message.payload),
+      },
+    } as unknown as MacosPageMessage;
+  }
+  if (value.type === "command-snapshot") {
+    if (!(exact(value, [
+      "protocolVersion", "type", "runtimeId", "attemptId", "revision", "focusContext", "commands",
+    ]) && opaqueId(value.runtimeId) && opaqueId(value.attemptId) && safeInteger(value.revision)
+      && ["review", "editable", "dialog"].includes(String(value.focusContext))
+      && Array.isArray(value.commands) && value.commands.length === MACOS_REVIEW_COMMAND_IDS.length)) {
+      return undefined;
+    }
+    const seen = new Set<MacosReviewCommandId>();
+    for (const command of value.commands) {
+      if (!record(command) || !exact(command, [
+        "id", "label", "enabled", ...(command.shortcut === undefined ? [] : ["shortcut"]),
+      ]) || !reviewCommandId(command.id) || seen.has(command.id)
+        || !safeCommandString(command.label, 80) || typeof command.enabled !== "boolean"
+        || (command.shortcut !== undefined && !safeCommandString(command.shortcut, 40))) return undefined;
+      seen.add(command.id);
+    }
+    return value as unknown as MacosPageMessage;
   }
   return undefined;
 }
@@ -189,9 +346,36 @@ export function parseMacosNativeMessage(value: unknown): MacosNativeMessage | un
       && ["shell-unavailable", "helper-unavailable", "resource-invalid"].includes(String(value.code))
       ? value as unknown as MacosNativeMessage : undefined;
   }
-  if (value.type !== "bootstrap" || !exact(value, [
-    "protocolVersion", "type", "document", "geometry",
-  ]) || !record(value.document) || !record(value.geometry)) return undefined;
+  if (value.type === "runtime-message") {
+    if (!(exact(value, ["protocolVersion", "type", "runtimeId", "attemptId", "message"])
+      && opaqueId(value.runtimeId) && opaqueId(value.attemptId)
+      && validNativeRuntimeMessage(value.message, value.runtimeId))) return undefined;
+    const message = value.message as Record<string, unknown>;
+    if (message.kind !== "response" || message.ok !== true) return value as unknown as MacosNativeMessage;
+    if (!isReviewRuntimeMethodForHost("macos", message.method)) return undefined;
+    return {
+      ...value,
+      message: {
+        ...message,
+        payload: sanitizeMacosReviewRuntimeResponse(message.method, message.payload),
+      },
+    } as unknown as MacosNativeMessage;
+  }
+  if (value.type === "invoke-command") {
+    return exact(value, [
+      "protocolVersion", "type", "runtimeId", "attemptId", "command", "snapshotRevision", "token",
+    ]) && opaqueId(value.runtimeId) && opaqueId(value.attemptId)
+      && reviewCommandId(value.command) && safeInteger(value.snapshotRevision)
+      && value.snapshotRevision > 0 && safeInteger(value.token) && value.token > 0
+      ? value as unknown as MacosNativeMessage : undefined;
+  }
+  const hasRuntimeIdentity = value.runtimeId !== undefined || value.attemptId !== undefined;
+  const bootstrapKeys = !hasRuntimeIdentity
+    ? ["protocolVersion", "type", "document", "geometry"]
+    : ["protocolVersion", "type", "document", "geometry", "runtimeId", "attemptId"];
+  if (value.type !== "bootstrap" || !exact(value, bootstrapKeys)
+    || (hasRuntimeIdentity && (!opaqueId(value.runtimeId) || !opaqueId(value.attemptId)))
+    || !record(value.document) || !record(value.geometry)) return undefined;
   const resource = value.document.resource;
   if (!exact(value.document, ["displayName", "resource"]) || !safeDisplayName(value.document.displayName)
     || !record(resource) || !exact(resource, ["url", "generation", "mime", "byteLength", "digest"])

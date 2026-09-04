@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type ReactElement } from "react";
+import { useCallback, useLayoutEffect, useRef, type CSSProperties, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 
 import {
@@ -8,8 +8,13 @@ import {
   type MacosPageMessage,
   type MacosRect,
 } from "../../../packages/core/src/macos-shell-protocol.js";
-import { ReviewChrome } from "./review/ReviewChrome.js";
-import { unavailableViewerControls } from "./pdf/viewer-controls.js";
+import type { HostRuntime } from "./host/runtime.js";
+import { createMacosHostRuntime } from "./host/macos-runtime.js";
+import { RuntimeProductionReviewApp } from "./production-entry.js";
+import type {
+  ReviewCommandInvocation,
+  ReviewCommandSurfaceSnapshot,
+} from "./review/review-command-surface.js";
 import "./app/review-layout.css";
 
 declare global {
@@ -29,6 +34,7 @@ export function deriveMacosDragRegions(input: {
   readonly geometryIdentity: string;
   readonly chromeBounds: MacosRect;
   readonly interactiveBounds: readonly MacosRect[];
+  readonly transitioning?: boolean;
 }): Extract<MacosPageMessage, { readonly type: "drag-regions" }> {
   const left = input.chromeBounds.x;
   const right = left + input.chromeBounds.width;
@@ -58,7 +64,8 @@ export function deriveMacosDragRegions(input: {
     type: "drag-regions",
     layoutRevision: input.layoutRevision,
     geometryIdentity: input.geometryIdentity,
-    regions,
+    transitioning: input.transitioning ?? false,
+    regions: input.transitioning === true ? [] : regions,
   };
 }
 
@@ -68,19 +75,61 @@ function postToNative(value: MacosPageMessage): void {
 
 let publishedLayoutRevision = 0;
 
+export function macosCommandInvocationForSnapshot(
+  invocation: Extract<MacosNativeMessage, { readonly type: "invoke-command" }> | undefined,
+  currentSnapshotRevision: number,
+): ReviewCommandInvocation | undefined {
+  return invocation === undefined || invocation.snapshotRevision !== currentSnapshotRevision
+    ? undefined
+    : { id: invocation.command, token: invocation.token };
+}
+
 export function MacosLoadingShell({
   documentTitle,
   geometryIdentity,
+  trafficLightInset = 0,
+  trailingInset = 0,
+  runtime,
+  runtimeId,
+  attemptId,
+  nativeCommandInvocation,
+  transitionVisible = false,
 }: {
   readonly documentTitle: string;
   readonly geometryIdentity?: string;
+  readonly trafficLightInset?: number;
+  readonly trailingInset?: number;
+  readonly runtime?: HostRuntime;
+  readonly runtimeId?: string;
+  readonly attemptId?: string;
+  readonly nativeCommandInvocation?: Extract<MacosNativeMessage, { readonly type: "invoke-command" }>;
+  readonly transitionVisible?: boolean;
 }): ReactElement {
   const root = useRef<HTMLDivElement>(null);
   const revision = useRef(1);
+  const commandRevision = useRef(0);
+  const commandInvocation = macosCommandInvocationForSnapshot(
+    nativeCommandInvocation,
+    commandRevision.current,
+  );
+  const publishCommandSurface = useCallback((snapshot: ReviewCommandSurfaceSnapshot) => {
+    if (runtimeId === undefined || attemptId === undefined) return;
+    commandRevision.current += 1;
+    postToNative({
+      protocolVersion: MACOS_SHELL_PROTOCOL_VERSION,
+      type: "command-snapshot",
+      runtimeId,
+      attemptId,
+      revision: commandRevision.current,
+      focusContext: snapshot.focusContext,
+      commands: snapshot.commands,
+    });
+  }, [attemptId, runtimeId]);
   useLayoutEffect(() => {
     const shell = root.current;
     if (shell === null || geometryIdentity === undefined) return;
-    const publishGeometry = () => {
+    let frame = 0;
+    const publishGeometry = (transitioning = false) => {
       const chrome = shell.querySelector<HTMLElement>(".review-chrome");
       if (chrome === null) return;
       const bounds = chrome.getBoundingClientRect();
@@ -92,6 +141,7 @@ export function MacosLoadingShell({
         geometryIdentity,
         chromeBounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
         interactiveBounds: interactive,
+        transitioning,
       }));
       publishedLayoutRevision = revision.current;
     };
@@ -105,30 +155,46 @@ export function MacosLoadingShell({
         layoutRevision: revision.current,
       });
     }));
-    const resize = new ResizeObserver(() => {
+    const scheduleGeometry = () => {
       revision.current += 1;
-      publishGeometry();
-    });
+      publishGeometry(true);
+      if (frame !== 0) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        publishGeometry();
+      });
+    };
+    const resize = new ResizeObserver(scheduleGeometry);
     resize.observe(shell);
+    const mutations = new MutationObserver(scheduleGeometry);
+    mutations.observe(shell, { subtree: true, childList: true, attributes: true });
     return () => {
       cancelled = true;
+      if (frame !== 0) cancelAnimationFrame(frame);
       resize.disconnect();
+      mutations.disconnect();
     };
   }, [geometryIdentity]);
   return (
-    <div ref={root} className="review-shell macos-loading-shell" data-macos-packaged-shell>
-      <ReviewChrome
-        documentTitle={documentTitle}
-        viewerState={unavailableViewerControls()}
-        canUndo={false}
-        canRedo={false}
-        onUndo={() => undefined}
-        onRedo={() => undefined}
-        saveOptionsAvailable={false}
+    <div
+      ref={root}
+      className="macos-loading-shell"
+      data-macos-packaged-shell
+      style={{
+        "--macos-titlebar-leading-inset": `${trafficLightInset}px`,
+        "--macos-titlebar-trailing-inset": `${trailingInset}px`,
+      } as CSSProperties}
+    >
+      <RuntimeProductionReviewApp
+        {...(runtime === undefined ? {} : { runtime })}
+        loadingDocumentTitle={documentTitle}
+        onCommandSurfaceChange={publishCommandSurface}
+        {...(commandInvocation === undefined ? {} : { commandInvocation })}
+        {...(attemptId === undefined ? {} : {
+          transitionAttemptId: attemptId,
+          transitionVisible,
+        })}
       />
-      <main className="macos-loading-shell__workspace" aria-busy="true">
-        <p role="status">Preparing this review…</p>
-      </main>
     </div>
   );
 }
@@ -136,23 +202,54 @@ export function MacosLoadingShell({
 function start(): void {
   const rootElement = document.querySelector<HTMLElement>("#root");
   if (rootElement === null) throw new Error("Packaged macOS shell root is missing");
+  rootElement.dataset.productionRoot = "true";
   const root = createRoot(rootElement);
   let current: Extract<MacosNativeMessage, { readonly type: "bootstrap" }> | undefined;
+  let runtime: HostRuntime | undefined;
+  let nativeCommandInvocation: Extract<MacosNativeMessage, { readonly type: "invoke-command" }> | undefined;
+  let visibleAttempt = false;
+  const runtimeListeners = new Set<(message: MacosNativeMessage) => void>();
+  const installRuntime = () => {
+    if (runtime !== undefined || current?.runtimeId === undefined || current.attemptId === undefined) return;
+    runtime = createMacosHostRuntime({
+      runtimeId: current.runtimeId,
+      attemptId: current.attemptId,
+      postToNative,
+      subscribeNative(listener) {
+        runtimeListeners.add(listener);
+        return () => runtimeListeners.delete(listener);
+      },
+    });
+  };
   const render = () => root.render(
     <MacosLoadingShell
       documentTitle={current?.document.displayName ?? "Opening PDF"}
       {...(current === undefined ? {} : { geometryIdentity: current.geometry.identity })}
+      {...(current === undefined ? {} : {
+        trafficLightInset: current.geometry.trafficLightInset,
+        trailingInset: current.geometry.trailingInset,
+      })}
+      {...(runtime === undefined ? {} : { runtime })}
+      {...(current?.runtimeId === undefined ? {} : { runtimeId: current.runtimeId })}
+      {...(current?.attemptId === undefined ? {} : { attemptId: current.attemptId })}
+      {...(nativeCommandInvocation === undefined ? {} : { nativeCommandInvocation })}
+      transitionVisible={visibleAttempt}
     />,
   );
   window.__PLACEKEEPER_MAC_RECEIVE__ = (value) => {
     const message = parseMacosNativeMessage(value);
     if (message?.type === "bootstrap") {
       current = message;
+      visibleAttempt = false;
+      nativeCommandInvocation = undefined;
+      installRuntime();
       render();
     } else if (message?.type === "geometry-changed" && current !== undefined) {
       current = { ...current, geometry: message.geometry };
       render();
     } else if (message?.type === "commit-visible" && current?.geometry.identity === message.geometryIdentity) {
+      visibleAttempt = true;
+      render();
       requestAnimationFrame(() => requestAnimationFrame(() => postToNative({
         protocolVersion: MACOS_SHELL_PROTOCOL_VERSION,
         type: "visible-shell-ready",
@@ -160,8 +257,18 @@ function start(): void {
         geometryIdentity: message.geometryIdentity,
         frameSequence: 1,
       })));
+    } else if (message?.type === "runtime-message") {
+      for (const listener of runtimeListeners) listener(message);
+    } else if (
+      message?.type === "invoke-command"
+      && message.runtimeId === current?.runtimeId
+      && message.attemptId === current.attemptId
+    ) {
+      nativeCommandInvocation = message;
+      render();
     }
   };
+  globalThis.addEventListener("pagehide", () => runtime?.dispose(), { once: true });
   render();
 }
 

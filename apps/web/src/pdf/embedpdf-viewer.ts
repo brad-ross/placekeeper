@@ -39,6 +39,14 @@ export type ViewerResourcePolicy =
         readonly pdfiumWasm: string;
         readonly worker: string;
       };
+    }
+  | {
+      readonly host: 'macos';
+      readonly resources: {
+        readonly document: string;
+        readonly pdfiumWasm: string;
+        readonly worker: string;
+      };
     };
 
 export function validateViewerResourceUrl(
@@ -70,6 +78,21 @@ export function validateViewerResourceUrl(
       }
     } else if (url.protocol !== 'chrome-extension:' || !rawUrl.startsWith(`${policy.extensionOrigin}/`)) {
       throw new Error('Chrome executable resources must be packaged extension assets.');
+    }
+    return rawUrl;
+  }
+  if (policy.host === 'macos') {
+    const expected = role === 'document'
+      ? policy.resources.document
+      : role === 'pdfium-wasm' ? policy.resources.pdfiumWasm : policy.resources.worker;
+    if (rawUrl !== expected) throw new Error('Viewer resources must match their issued role.');
+    const url = new URL(rawUrl);
+    if (role === 'document') {
+      if (url.protocol !== 'placekeeper-resource:' || url.hostname !== 'document') {
+        throw new Error('The macOS document resource must be issued by its window.');
+      }
+    } else if (url.protocol !== 'placekeeper-app:' || url.hostname !== 'bundle') {
+      throw new Error('macOS executable resources must be packaged assets.');
     }
     return rawUrl;
   }
