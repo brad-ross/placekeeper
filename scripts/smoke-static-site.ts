@@ -11,6 +11,7 @@ import { sha256Hex } from "../packages/core/src/sha256.js";
 import { addStaticKeyboardPageNote, waitForStaticPdf } from "./static-browser-journey.js";
 
 const EXPECTED_URL = "https://brad-ross.github.io/placekeeper/";
+const GITHUB_COMPARE_BASE_URL = "https://api.github.com/repos/brad-ross/placekeeper/compare/";
 const MAX_PROPAGATION_MS = 10 * 60 * 1_000;
 const REQUEST_TIMEOUT_MS = 15_000;
 const TOKEN_ENVIRONMENT_KEYS = [
@@ -202,14 +203,33 @@ async function readCoherentIdentity(
   return parseIdentity(version.bytes, manifest.bytes);
 }
 
-function observedSourceIsNewer(expected: string, observed: string): boolean {
-  try {
-    execFileSync("git", ["cat-file", "-e", `${observed}^{commit}`], { stdio: "ignore" });
-    execFileSync("git", ["merge-base", "--is-ancestor", expected, observed], { stdio: "ignore" });
-    return expected !== observed;
-  } catch {
-    return false;
+export async function observedSourceIsNewer(
+  request: APIRequestContext,
+  expected: string,
+  observed: string,
+  deadline: number,
+): Promise<boolean> {
+  if (!/^[0-9a-f]{40}$/u.test(expected) || !/^[0-9a-f]{40}$/u.test(observed)) {
+    throw new Error("GitHub comparison requires full lowercase commit SHAs.");
   }
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error("Propagation deadline reached.");
+  const compareUrl = new URL(`${expected}...${observed}`, GITHUB_COMPARE_BASE_URL);
+  const response = await request.get(compareUrl.href, {
+    failOnStatusCode: false,
+    headers: {
+      accept: "application/vnd.github+json",
+      "x-github-api-version": "2022-11-28",
+    },
+    timeout: Math.min(REQUEST_TIMEOUT_MS, remaining),
+  });
+  if (response.url() !== compareUrl.href) throw new Error("Unexpected redirect while comparing deployed commits.");
+  if (response.status() !== 200) throw new Error(`GitHub commit comparison returned HTTP ${response.status()}.`);
+  const payload = await response.json() as { readonly status?: unknown };
+  if (!["ahead", "behind", "diverged", "identical"].includes(String(payload.status))) {
+    throw new Error("GitHub commit comparison returned an unsupported status.");
+  }
+  return payload.status === "ahead";
 }
 
 async function pollForExpectedIdentity(
@@ -221,6 +241,7 @@ async function pollForExpectedIdentity(
   let lastCoherent: CoherentIdentity | undefined;
   let sawExpectedSource = false;
   let lastError = "No live identity was observed.";
+  const newerSourceBySha = new Map<string, boolean>();
   while (Date.now() < deadline) {
     try {
       const observed = await readCoherentIdentity(request, options.targetUrl, deadline);
@@ -229,8 +250,18 @@ async function pollForExpectedIdentity(
       if (observed.sourceSha === options.sourceSha && observed.contentDigest === options.contentDigest) {
         return { identity: observed, detail: "Expected coherent identity observed." };
       }
-      if (observedSourceIsNewer(options.sourceSha, observed.sourceSha)) {
-        return { result: "superseded", detail: "A newer coherent source identity replaced the requested candidate.", observed };
+      if (observed.sourceSha !== options.sourceSha) {
+        const cachedComparison = newerSourceBySha.get(observed.sourceSha);
+        const isNewer = cachedComparison ?? await observedSourceIsNewer(
+          request,
+          options.sourceSha,
+          observed.sourceSha,
+          deadline,
+        );
+        newerSourceBySha.set(observed.sourceSha, isNewer);
+        if (isNewer) {
+          return { result: "superseded", detail: "A newer coherent source identity replaced the requested candidate.", observed };
+        }
       }
       lastError = observed.sourceSha === options.sourceSha
         ? "Expected source appeared with a different payload digest."

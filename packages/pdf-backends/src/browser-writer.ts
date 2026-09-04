@@ -28,6 +28,7 @@ import type { DisposablePdfWriter } from './browser-document-session.js';
 
 const EMBEDPDF_VERSION = '2.14.4';
 const NORMAL_APPEARANCE = 1;
+const ANNOTATION_PAGE_CONCURRENCY = 8;
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.slice().buffer;
@@ -82,13 +83,35 @@ function assertAnnotationWithinPage(
   }
 }
 
-async function annotationPages(
+export async function annotationPages(
   engine: PdfEngine<Blob>,
   document: PdfDocumentObject,
 ): Promise<PdfAnnotationObject[][]> {
-  return Promise.all(document.pages.map(
-    (page) => engine.getPageAnnotations(document, page).toPromise(),
-  ));
+  const results = Array.from(
+    { length: document.pages.length },
+    (): PdfAnnotationObject[] => [],
+  );
+  let nextPageIndex = 0;
+  let stopped = false;
+  const workers = Array.from(
+    { length: Math.min(ANNOTATION_PAGE_CONCURRENCY, document.pages.length) },
+    async () => {
+      while (!stopped) {
+        const pageIndex = nextPageIndex;
+        nextPageIndex += 1;
+        const page = document.pages[pageIndex];
+        if (page === undefined) return;
+        try {
+          results[pageIndex] = await engine.getPageAnnotations(document, page).toPromise();
+        } catch (error) {
+          stopped = true;
+          throw error;
+        }
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
 }
 
 function unavailableFromMarkers(bytes: Uint8Array): PdfRewriteEligibility | undefined {

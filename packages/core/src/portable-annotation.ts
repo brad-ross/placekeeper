@@ -239,7 +239,9 @@ function projectionMatches(
   // width on rotated pages. All other semantic evidence remains exact.
   const textIcon = item.kind === "insert" || item.kind === "pageNote";
   const originTolerance = textIcon ? 20.01 : 0.01;
-  const sizeTolerance = item.kind === "insert" ? 6.01 : item.kind === "pageNote" ? 2.01 : 0.01;
+  // A real insertion starts as a 2pt caret, which PDFium persists as a 20pt
+  // Text icon. Keep the allowance bounded to that observed 18pt expansion.
+  const sizeTolerance = item.kind === "insert" ? 18.01 : item.kind === "pageNote" ? 2.01 : 0.01;
   const expectedSegments = expected.segmentRects;
   const visibleSegments = visible.segmentRects;
   return (

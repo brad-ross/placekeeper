@@ -215,6 +215,27 @@ function ipv4Parts(hostname: string): readonly number[] | undefined {
   return values.every((value) => value >= 0 && value <= 255) ? values : undefined;
 }
 
+function mappedIpv4Parts(hostname: string): readonly number[] | undefined {
+  const mapped = hostname.match(/^::ffff:([\da-f]{1,4}):([\da-f]{1,4})$/u);
+  if (mapped === null) return undefined;
+  const high = Number.parseInt(mapped[1]!, 16);
+  const low = Number.parseInt(mapped[2]!, 16);
+  return [high >>> 8, high & 0xff, low >>> 8, low & 0xff];
+}
+
+function isObviousLocalOrPrivateIpv4(ipv4: readonly number[]): boolean {
+  const [a, b] = ipv4;
+  return a === 0
+    || a === 10
+    || a === 127
+    || (a === 100 && b! >= 64 && b! <= 127)
+    || (a === 169 && b === 254)
+    || (a === 172 && b! >= 16 && b! <= 31)
+    || (a === 192 && b === 168)
+    || (a === 198 && (b === 18 || b === 19))
+    || a! >= 224;
+}
+
 function isLoopbackHostname(hostname: string): boolean {
   const normalized = hostname.toLowerCase().replace(/^\[|\]$/gu, "").replace(/\.$/u, "");
   const ipv4 = ipv4Parts(normalized);
@@ -234,22 +255,11 @@ function isObviousLocalOrPrivateHostname(hostname: string): boolean {
     || (!normalized.includes(".") && !normalized.includes(":"))
   ) return true;
   const ipv4 = ipv4Parts(normalized);
-  if (ipv4 !== undefined) {
-    const [a, b] = ipv4;
-    return a === 0
-      || a === 10
-      || a === 127
-      || (a === 100 && b! >= 64 && b! <= 127)
-      || (a === 169 && b === 254)
-      || (a === 172 && b! >= 16 && b! <= 31)
-      || (a === 192 && b === 168)
-      || (a === 198 && (b === 18 || b === 19))
-      || a! >= 224;
-  }
+  if (ipv4 !== undefined) return isObviousLocalOrPrivateIpv4(ipv4);
   if (normalized.includes(":")) {
     if (/^(?:fc|fd)/u.test(normalized) || /^fe[89ab]/u.test(normalized)) return true;
-    const mapped = normalized.match(/(?:^|:)ffff:(\d+\.\d+\.\d+\.\d+)$/u)?.[1];
-    return mapped === undefined ? false : isObviousLocalOrPrivateHostname(mapped);
+    const mapped = mappedIpv4Parts(normalized);
+    return mapped === undefined ? false : isObviousLocalOrPrivateIpv4(mapped);
   }
   return false;
 }

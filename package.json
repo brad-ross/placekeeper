@@ -30,7 +30,7 @@
     "test:pdf-viewer": "pnpm fixtures:pdf && playwright test test/conformance/pdf-viewer.conformance.spec.ts",
     "test:static:artifact": "playwright test --config playwright.static.config.ts",
     "test:static:secondary-full": "PLACEKEEPER_STATIC_ENGINE=firefox PLACEKEEPER_STATIC_PROFILE=exhaustive pnpm test:static:artifact && PLACEKEEPER_STATIC_ENGINE=webkit PLACEKEEPER_STATIC_PROFILE=exhaustive pnpm test:static:artifact",
-    "test:static:unit": "vitest run apps/web/test/static-runtime.test.ts packages/core/test/portable-annotation.test.ts scripts/static-release.test.ts",
+    "test:static:unit": "vitest run apps/web/test/static-runtime.test.ts apps/web/test/static-entry.test.ts packages/core/test/portable-annotation.test.ts packages/pdf-backends/test/browser-writer.test.ts scripts/static-release.test.ts",
     "test:static:conformance": "vitest run test/conformance/pdf-writer.conformance.test.ts test/conformance/reviewed-pdf.test.ts",
     "test:static": "pnpm fixtures:pdf && pnpm test:static:unit && pnpm test:static:conformance && pnpm build:static:pages && pnpm validate:static && PLACEKEEPER_STATIC_ENGINE=chromium PLACEKEEPER_STATIC_PROFILE=exhaustive pnpm test:static:artifact && PLACEKEEPER_STATIC_ENGINE=firefox PLACEKEEPER_STATIC_PROFILE=representative pnpm test:static:artifact && PLACEKEEPER_STATIC_ENGINE=webkit PLACEKEEPER_STATIC_PROFILE=representative pnpm test:static:artifact",
     "test:static:pr": "pnpm fixtures:pdf && pnpm test:static:unit && pnpm typecheck && pnpm build:static:pages && pnpm validate:static && pnpm test:static:distribution && PLACEKEEPER_STATIC_ENGINE=chromium PLACEKEEPER_STATIC_PROFILE=critical pnpm test:static:artifact",

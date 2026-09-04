@@ -1,10 +1,16 @@
 import { readFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
+import type { APIRequestContext } from "@playwright/test";
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from "pdf-lib";
 
 import { sha256Hex } from "../packages/core/src/sha256.js";
-import { createSmokePdf, parseArguments, parseIdentity } from "./smoke-static-site.js";
+import {
+  createSmokePdf,
+  observedSourceIsNewer,
+  parseArguments,
+  parseIdentity,
+} from "./smoke-static-site.js";
 
 async function workflow(name: string): Promise<string> {
   return readFile(new URL(`../.github/workflows/${name}`, import.meta.url), "utf8");
@@ -27,6 +33,8 @@ describe("static release workflows", () => {
     const source = await workflow("static-web.yml");
     const triggers = source.slice(0, source.indexOf("\nconcurrency:\n"));
     expect(triggers).toContain("pull_request:");
+    expect(triggers).toContain('- "apps/chrome-extension/scripts/embedpdf-worker-source.ts"');
+    expect(triggers).not.toContain("embedpdf-worker-source.js");
     expect(triggers).not.toMatch(/pull_request_target:|push:|schedule:/u);
     expect(source).toContain("cancel-in-progress: true");
     expect(source).toContain("permissions: {}\n");
@@ -114,6 +122,58 @@ describe("static live smoke inputs", () => {
     })}\n`);
     expect(() => parseIdentity(unsafeVersion, unsafeManifest)).toThrow("unsafe or malformed");
   });
+
+  it("classifies a remotely newer source even when its commit is absent locally", async () => {
+    const expected = "d".repeat(40);
+    const unseenObserved = "e".repeat(40);
+    const requests: Array<{ readonly url: string; readonly options: Record<string, unknown> }> = [];
+    const request = {
+      get: async (url: string, options: Record<string, unknown>) => {
+        requests.push({ url, options });
+        return {
+          url: () => url,
+          status: () => 200,
+          json: async () => ({ status: "ahead" }),
+        };
+      },
+    } as unknown as APIRequestContext;
+
+    await expect(observedSourceIsNewer(request, expected, unseenObserved, Date.now() + 1_000))
+      .resolves.toBe(true);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.url).toBe(
+      `https://api.github.com/repos/brad-ross/placekeeper/compare/${expected}...${unseenObserved}`,
+    );
+    expect(requests[0]!.options).toMatchObject({
+      failOnStatusCode: false,
+      headers: {
+        accept: "application/vnd.github+json",
+        "x-github-api-version": "2022-11-28",
+      },
+    });
+    expect(JSON.stringify(requests[0]!.options)).not.toMatch(/authorization|token/iu);
+  });
+
+  it.each(["behind", "diverged", "identical"])(
+    "does not classify a %s source comparison as superseded",
+    async (status) => {
+      const expectedUrl = `https://api.github.com/repos/brad-ross/placekeeper/compare/${"a".repeat(40)}...${"b".repeat(40)}`;
+      const request = {
+        get: async () => ({
+          url: () => expectedUrl,
+          status: () => 200,
+          json: async () => ({ status }),
+        }),
+      } as unknown as APIRequestContext;
+
+      await expect(observedSourceIsNewer(
+        request,
+        "a".repeat(40),
+        "b".repeat(40),
+        Date.now() + 1_000,
+      )).resolves.toBe(false);
+    },
+  );
 
   it("creates its local smoke PDF with one foreign annotation", async () => {
     const document = await PDFDocument.load(await createSmokePdf());

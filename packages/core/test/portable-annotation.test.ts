@@ -389,6 +389,35 @@ describe("portable annotation codec", () => {
       ...noteVisible,
       rect: { origin: { x: 60.2, y: 48 }, size: { width: 20, height: 20 } },
     })).toMatchObject({ status: "invalid", reason: "projection-mismatch" });
+
+    const insertion: ReviewItem = {
+      ...item,
+      kind: "insert",
+      payload: {
+        position: { x: 149, y: 89, width: 2, height: 16 },
+        leftContext: "Selectable p",
+        rightContext: "lacekeeper text",
+        proposedText: "inserted text",
+        reliable: true,
+      },
+    };
+    const insertionAnnotation = projectReviewItem(insertion);
+    const normalizedInsertion = {
+      id: insertion.id,
+      pageIndex: 0,
+      subtype: "text",
+      contents: "inserted text",
+      author: "Placekeeper",
+      rect: { origin: { x: 149, y: 89 }, size: { width: 20, height: 20 } },
+    };
+    expect(inspectPortableAnnotation(insertionAnnotation.custom, normalizedInsertion)).toEqual({
+      status: "owned",
+      item: insertion,
+    });
+    expect(inspectPortableAnnotation(insertionAnnotation.custom, {
+      ...normalizedInsertion,
+      rect: { origin: { x: 149, y: 89 }, size: { width: 22.2, height: 20 } },
+    })).toMatchObject({ status: "invalid", reason: "projection-mismatch" });
   });
 
   it("round-trips a legitimate highlight with 33 text segments", () => {

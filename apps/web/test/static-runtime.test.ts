@@ -252,6 +252,10 @@ describe("static browser review runtime", () => {
     "https://192.168.1.2/paper.pdf",
     "https://169.254.1.2/paper.pdf",
     "https://[::1]/paper.pdf",
+    "https://[::ffff:127.0.0.1]/paper.pdf",
+    "https://[::ffff:10.0.0.1]/paper.pdf",
+    "https://[::ffff:7f00:1]/paper.pdf",
+    "https://[::ffff:a00:1]/paper.pdf",
     "https://[fd00::1]/paper.pdf",
     "https://[fe80::1]/paper.pdf",
   ])("rejects unsafe deployed remote target %s without making a request", async (rawUrl) => {
