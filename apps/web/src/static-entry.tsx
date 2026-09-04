@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useEffect, useId, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { createRoot } from "react-dom/client";
 
 import {
@@ -85,27 +85,28 @@ export function StaticLauncher(props: {
   const [phase, setPhase] = useState<OpeningPhase>("idle");
   const [error, setError] = useState<string>();
   const [remoteUrl, setRemoteUrl] = useState("");
+  const [focusTarget, setFocusTarget] = useState<SourceControl>();
   const pending = phase !== "idle";
 
-  const restoreFocus = (control: SourceControl) => {
-    requestAnimationFrame(() => {
-      (control === "url" ? urlInputRef.current : chooseButtonRef.current)
-        ?.focus({ preventScroll: true });
-    });
-  };
+  useEffect(() => {
+    if (phase !== "idle" || focusTarget === undefined) return;
+    (focusTarget === "url" ? urlInputRef.current : chooseButtonRef.current)
+      ?.focus({ preventScroll: true });
+    setFocusTarget(undefined);
+  }, [focusTarget, phase]);
+
+  const restoreFocus = (control: SourceControl) => setFocusTarget(control);
   const open = async (source: File | string | undefined, control: SourceControl) => {
     if (source === undefined || (typeof source === "string" && source.trim() === "") || pending) return;
     const controller = new AbortController();
     operationRef.current = controller;
+    if (typeof source === "string") setRemoteUrl("");
     setPhase("acquiring");
     setError(undefined);
     try {
       await props.onOpen(source, {
         signal: controller.signal,
-        onPhase: (nextPhase) => {
-          if (typeof source === "string" && nextPhase === "assessing") setRemoteUrl("");
-          setPhase(nextPhase);
-        },
+        onPhase: setPhase,
       });
     } catch (cause) {
       if (!isStaticOperationCancelled(cause) && !(cause instanceof DOMException && cause.name === "AbortError")) {

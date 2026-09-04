@@ -76,11 +76,22 @@ export interface DocumentActionsMenuProps {
 
 type ExportOutcome = 'idle' | 'pending' | 'success' | 'failure';
 
+function exportMessageFromResult(result: unknown): string {
+  if (
+    typeof result === 'object'
+    && result !== null
+    && 'warning' in result
+    && typeof result.warning === 'string'
+    && result.warning.trim() !== ''
+  ) return result.warning;
+  return 'Reviewed PDF exported.';
+}
+
 const EXPORT_OUTCOME_MESSAGES: Readonly<Record<ExportOutcome, string>> = {
   idle: '',
   pending: 'Exporting reviewed PDF…',
   success: 'Reviewed PDF exported.',
-  failure: 'Export failed safely. Try again.',
+  failure: 'Export failed. Your review is still available; try again.',
 };
 
 export function DocumentActionsMenu({
@@ -98,6 +109,7 @@ export function DocumentActionsMenu({
   const open = controlledOpen ?? uncontrolledOpen;
   const [staleConfirmation, setStaleConfirmation] = useState(false);
   const [outcome, setOutcome] = useState<ExportOutcome>('idle');
+  const [exportDetail, setExportDetail] = useState('');
   const generatedId = useId().replaceAll(':', '');
   const menuId = `document-actions-menu-${generatedId}`;
   const reasonId = `document-export-reason-${generatedId}`;
@@ -119,6 +131,7 @@ export function DocumentActionsMenu({
     setOpen(false);
     setStaleConfirmation(false);
     setOutcome('idle');
+    setExportDetail('');
     if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus({ preventScroll: true }));
   };
 
@@ -127,6 +140,7 @@ export function DocumentActionsMenu({
     setOpen(false);
     setStaleConfirmation(false);
     setOutcome('idle');
+    setExportDetail('');
   };
 
   useLayoutEffect(() => {
@@ -151,16 +165,19 @@ export function DocumentActionsMenu({
     if (open || pending) return;
     setStaleConfirmation(false);
     setOutcome('idle');
+    setExportDetail('');
   }, [open, pending]);
 
   const exportReviewedPdf = async (confirmPossiblyStale?: true) => {
     if (pendingRef.current) return;
     pendingRef.current = true;
     setOutcome('pending');
+    setExportDetail('');
     onPendingChange?.(true);
     try {
-      await onExport(confirmPossiblyStale);
+      const result = await onExport(confirmPossiblyStale);
       setStaleConfirmation(false);
+      setExportDetail(exportMessageFromResult(result));
       setOutcome('success');
     } catch {
       setStaleConfirmation(false);
@@ -203,7 +220,7 @@ export function DocumentActionsMenu({
     setOutcome('idle');
   };
 
-  const resultMessage = EXPORT_OUTCOME_MESSAGES[outcome];
+  const resultMessage = exportDetail || EXPORT_OUTCOME_MESSAGES[outcome];
   const exportUnavailable = !presentation.canExport || pending;
   const annotationAttentionVisible = presentation.annotationBlocked && onOpenAnnotations !== undefined;
   const reasonVisible = presentation.message !== '' && !annotationAttentionVisible;
