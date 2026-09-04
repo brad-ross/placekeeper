@@ -106,10 +106,16 @@ function unavailableFromMarkers(bytes: Uint8Array): PdfRewriteEligibility | unde
   return undefined;
 }
 
-export async function createBrowserEmbedPdfWriter(pdfiumWasm: string): Promise<DisposablePdfWriter> {
+export async function createBrowserEmbedPdfWriter(
+  pdfiumWasm: string,
+  pdfiumWorker?: string,
+): Promise<DisposablePdfWriter> {
   const newEngine = () => createPdfiumEngine(pdfiumWasm, {
     encoderPoolSize: 1,
     fontFallback: null,
+    ...(pdfiumWorker === undefined
+      ? {}
+      : { worker: new Worker(pdfiumWorker, { type: 'module' }) }),
   });
   const activeEngines = new Map<PdfEngine<Blob>, PdfDocumentObject | undefined>();
   let disposed = false;

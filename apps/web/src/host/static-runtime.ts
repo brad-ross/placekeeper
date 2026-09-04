@@ -383,7 +383,10 @@ export async function createStaticHostRuntime(
   const writerTimeoutMs = dependencies.writerTimeoutMs ?? STATIC_PDF_EXPORT_TIMEOUT_MS;
   const documentSession = dependencies.documentSession ?? createBrowserDocumentSession({
     createWriter: dependencies.writer === undefined
-      ? () => createBrowserEmbedPdfWriter(input.viewerAssets.pdfiumWasm)
+      ? () => createBrowserEmbedPdfWriter(
+          input.viewerAssets.pdfiumWasm,
+          input.viewerAssets.workerUrl,
+        )
       : () => dependencies.writer!,
     operationTimeoutMs: writerTimeoutMs,
   });

@@ -10,6 +10,10 @@ import {
 import { startRuntime } from "./production-entry.js";
 import "./static-entry.css";
 
+// The static Vite plugin replaces these with content-addressed Rollup asset URLs.
+const PDFIUM_WASM_ASSET = "__PLACEKEEPER_STATIC_PDFIUM_WASM__";
+const PDFIUM_WORKER_ASSET = "__PLACEKEEPER_STATIC_PDFIUM_WORKER__";
+
 const ACTIVATION_TIMEOUT_MS = 30_000;
 
 type OpeningPhase = "idle" | "acquiring" | "assessing" | "activating";
@@ -146,6 +150,7 @@ export function StaticLauncher(props: {
         <p>Local PDFs remain in this tab. A PDF URL is requested directly from its host, which receives the URL and request details.</p>
         <p>There is no autosave or reload recovery. Exporting a reviewed PDF is the only way to keep your annotations.</p>
         <p>This GitHub Pages project shares its browser origin with other pages, so do not use it for confidential documents.</p>
+        <p><a href="./privacy.html" target="_blank" rel="noreferrer noopener">Privacy and durability details</a> · <a href="./third-party-notices.html" target="_blank" rel="noreferrer noopener">Third-party notices</a></p>
       </div>
       <input
         ref={inputRef}
@@ -195,11 +200,59 @@ export function StaticLauncher(props: {
   </main>;
 }
 
-export function mountStaticBrowserApp(): void {
-  const pdfiumWasm = new URL("./pdfium.wasm", document.baseURI).href;
+async function staticEnvironmentFailure(): Promise<string | undefined> {
+  if (window.self !== window.top) {
+    return "Placekeeper cannot run inside another page. Open this page in its own tab.";
+  }
+  if (window.opener !== null) {
+    return "Placekeeper cannot start from a tab that can control this page. Open the address in a new independent tab.";
+  }
+  const serviceWorker = window.navigator.serviceWorker;
+  if (serviceWorker === undefined) return undefined;
+  if (serviceWorker.controller !== null) {
+    return "Placekeeper cannot run while a service worker controls this page. Clear site data, then reopen it.";
+  }
+  const pageUrl = new URL(document.baseURI);
+  let registrations: readonly ServiceWorkerRegistration[];
+  try {
+    registrations = await serviceWorker.getRegistrations();
+  } catch {
+    return "Placekeeper could not confirm that this page is free from service-worker control. Try a private browser window.";
+  }
+  if (registrations.some((registration) => pageUrl.href.startsWith(registration.scope))) {
+    return "Placekeeper cannot run under a registered service worker. Clear site data, then reopen it.";
+  }
+  return undefined;
+}
+
+function renderStaticFailure(rootElement: HTMLElement, message: string): void {
+  rootElement.replaceChildren();
+  const main = document.createElement("main");
+  main.className = "static-launcher";
+  const section = document.createElement("section");
+  section.className = "static-launcher__card";
+  const heading = document.createElement("h1");
+  heading.textContent = "Placekeeper did not start";
+  const detail = document.createElement("p");
+  detail.className = "static-launcher__error";
+  detail.setAttribute("role", "alert");
+  detail.textContent = message;
+  section.append(heading, detail);
+  main.append(section);
+  rootElement.append(main);
+}
+
+export async function mountStaticBrowserApp(): Promise<void> {
   const rootElement = document.querySelector("#root");
   if (!(rootElement instanceof HTMLElement)) throw new Error("Placekeeper root is unavailable.");
+  const environmentFailure = await staticEnvironmentFailure();
+  if (environmentFailure !== undefined) {
+    renderStaticFailure(rootElement, environmentFailure);
+    return;
+  }
   const launcher = createRoot(rootElement);
+  const pdfiumWasmUrl = new URL(PDFIUM_WASM_ASSET, document.baseURI).href;
+  const pdfiumWorkerUrl = new URL(PDFIUM_WORKER_ASSET, document.baseURI).href;
   let activationEpoch = 0;
 
   launcher.render(<StaticLauncher onOpen={async (input, operation) => {
@@ -208,7 +261,10 @@ export function mountStaticBrowserApp(): void {
       ? await readStaticPdfUrl(input, fetch, { signal: operation.signal })
       : await readStaticPdfFile(input, operation.signal);
     operation.onPhase("assessing");
-    const runtime = await createStaticHostRuntime({ source, viewerAssets: { pdfiumWasm } }, {
+    const runtime = await createStaticHostRuntime({
+      source,
+      viewerAssets: { pdfiumWasm: pdfiumWasmUrl, workerUrl: pdfiumWorkerUrl },
+    }, {
       signal: operation.signal,
     });
     operation.onPhase("activating");
@@ -252,4 +308,4 @@ export function mountStaticBrowserApp(): void {
   }} />);
 }
 
-if (typeof document !== "undefined") mountStaticBrowserApp();
+if (typeof document !== "undefined") void mountStaticBrowserApp();
