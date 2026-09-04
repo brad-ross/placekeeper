@@ -1,24 +1,31 @@
 import { defineConfig } from "@playwright/test";
 
-type BrowserName = "chromium" | "firefox" | "webkit";
-const engines = new Set<BrowserName>(["chromium", "firefox", "webkit"]);
-const profiles = new Set(["critical", "representative", "exhaustive"] as const);
-type StaticCoverageProfile = "critical" | "representative" | "exhaustive";
+const SUPPORTED_ENGINES = ["chromium", "firefox", "webkit"] as const;
+const SUPPORTED_PROFILES = ["critical", "representative", "exhaustive"] as const;
+type BrowserName = typeof SUPPORTED_ENGINES[number];
+type StaticCoverageProfile = typeof SUPPORTED_PROFILES[number];
+
+function isSupportedValue<const Values extends readonly string[]>(
+  candidate: string,
+  values: Values,
+): candidate is Values[number] {
+  return values.some((value) => value === candidate);
+}
 
 function selectedEngine(): BrowserName {
   const candidate = process.env.PLACEKEEPER_STATIC_ENGINE ?? "chromium";
-  if (!engines.has(candidate as BrowserName)) {
+  if (!isSupportedValue(candidate, SUPPORTED_ENGINES)) {
     throw new Error(`PLACEKEEPER_STATIC_ENGINE must be chromium, firefox, or webkit (received ${candidate}).`);
   }
-  return candidate as BrowserName;
+  return candidate;
 }
 
 function selectedProfile(): StaticCoverageProfile {
   const candidate = process.env.PLACEKEEPER_STATIC_PROFILE ?? "exhaustive";
-  if (!profiles.has(candidate as StaticCoverageProfile)) {
+  if (!isSupportedValue(candidate, SUPPORTED_PROFILES)) {
     throw new Error(`PLACEKEEPER_STATIC_PROFILE must be critical, representative, or exhaustive (received ${candidate}).`);
   }
-  return candidate as StaticCoverageProfile;
+  return candidate;
 }
 
 const engine = selectedEngine();

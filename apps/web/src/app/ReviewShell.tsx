@@ -146,7 +146,10 @@ import {
 import {
   ReconciliationWorkspace,
 } from '../review/ReconciliationWorkspace.js';
-import { reviewExportPresentation } from '../review/DocumentActionsMenu.js';
+import {
+  reviewExportPresentation,
+  type ReviewExportResult,
+} from '../review/DocumentActionsMenu.js';
 import type { GenerationRefreshStatus, LocationRestoreStatus } from '../generation-status.js';
 import { reviewItemIsResolvedForGeneration } from '../../../../packages/core/src/annotation-projection.js';
 import './review-layout.css';
@@ -167,7 +170,7 @@ export interface ReviewShellProps {
   toolError?: string | null;
   onSelectionPageLimitExceeded?(): void;
   onCopySelection?(): void;
-  onExportReviewedCopy?(confirmPossiblyStale?: true): Promise<unknown>;
+  onExportReviewedCopy?(confirmPossiblyStale?: true): Promise<ReviewExportResult | void>;
   listOpen?: boolean;
   selectionUpdate: SelectionUpdate;
   pdfCopyOwner?: PdfCopyOwner;

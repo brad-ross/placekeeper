@@ -4,32 +4,10 @@ import { resolve } from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { inspectPdfAnnotationCatalogWithEmbedPdf } from "../../packages/pdf-backends/src/embedpdf-adapter.js";
+import { addStaticKeyboardPageNote, waitForStaticPdf } from "../../scripts/static-browser-journey.js";
 
 const annotatedPdf = resolve("test/fixtures/pdfs/text-native-with-annotations.pdf");
 const representativePdf = resolve("test/fixtures/pdfs/rotation-0-crop.pdf");
-
-async function waitForPdf(page: Page): Promise<void> {
-  await expect(page.locator("[data-production-review]")).toHaveAttribute("data-launch-surface", "static");
-  const image = page.locator("[data-page-index='0'] > img").first();
-  await expect(image).toBeVisible();
-  await expect.poll(() => image.evaluate((element) => (
-    element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0
-  ))).toBe(true);
-}
-
-async function addKeyboardPageNote(page: Page, comment: string): Promise<void> {
-  const pdfPage = page.locator("[data-page-index='0']").first();
-  await pdfPage.focus();
-  await page.keyboard.press("Alt+Shift+N");
-  const cursor = page.getByRole("button", { name: /^Page Note placement cursor/u });
-  await expect(cursor).toBeFocused();
-  await page.keyboard.press("ArrowRight");
-  await page.keyboard.press("Enter");
-  const composer = page.getByRole("region", { name: "Page Note" });
-  await composer.getByRole("textbox", { name: "Comment" }).fill(comment);
-  await composer.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.locator("[data-owned-mark='pageNote']")).toHaveCount(1);
-}
 
 async function exportReviewedPdf(page: Page): Promise<string> {
   await page.getByRole("button", { name: /Open document actions$/u }).click();
@@ -76,10 +54,17 @@ async function assertBasicAccessibility(page: Page): Promise<void> {
             : "");
         return labelledBy === null && label.trim() === "";
       });
-    const ids = [...document.querySelectorAll<HTMLElement>("[id]")].map(({ id }) => id);
+    const seenIds = new Set<string>();
+    const duplicateIds = [...document.querySelectorAll<HTMLElement>("[id]")]
+      .map(({ id }) => id)
+      .filter((id) => {
+        if (seenIds.has(id)) return true;
+        seenIds.add(id);
+        return false;
+      });
     return {
       unnamed: unnamed.map((element) => element.outerHTML.slice(0, 120)),
-      duplicateIds: ids.filter((id, index) => ids.indexOf(id) !== index),
+      duplicateIds,
       liveRegions: document.querySelectorAll("[aria-live], [role='status'], [role='alert']").length,
     };
   });
@@ -109,8 +94,8 @@ test("@critical @representative keeps the local keyboard journey private and rou
   await focusByTab(page, page.getByRole("button", { name: "Choose a PDF" }));
 
   await page.locator("input[type=file]").setInputFiles(annotatedPdf);
-  await waitForPdf(page);
-  await addKeyboardPageNote(page, "Static export proof.");
+  await waitForStaticPdf(page);
+  await addStaticKeyboardPageNote(page, "Static export proof.");
   await assertBasicAccessibility(page);
   await assertNoDurableBrowserState(page);
 
@@ -135,7 +120,7 @@ test("@critical @representative keeps the local keyboard journey private and rou
   await reopened.emulateMedia({ reducedMotion: "reduce" });
   await reopened.goto(page.url());
   await reopened.locator("input[type=file]").setInputFiles(firstDownload);
-  await waitForPdf(reopened);
+  await waitForStaticPdf(reopened);
   await expect(reopened.locator("[data-owned-mark='pageNote']")).toHaveCount(1);
   await expect(reopened.locator("[data-existing-annotation='existing-highlight']")).toHaveCount(1);
   await expect(reopened.locator("[data-existing-annotation='existing-stamp']")).toHaveCount(1);
@@ -162,7 +147,7 @@ test("@critical @representative keeps the local keyboard journey private and rou
 test("@representative creates a selection-derived highlight on a cropped PDF with a foreign annotation", async ({ page }) => {
   await page.goto("./");
   await page.locator("input[type=file]").setInputFiles(representativePdf);
-  await waitForPdf(page);
+  await waitForStaticPdf(page);
   const pdfPage = page.locator("[data-page-index='0']").first();
   const box = await pdfPage.boundingBox();
   if (box === null) throw new Error("Rendered cropped page has no bounds.");

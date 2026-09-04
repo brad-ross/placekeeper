@@ -67,7 +67,7 @@ export interface DocumentActionsMenuProps {
   readonly savedLabel: string;
   readonly savePhase?: 'clean' | 'saving' | 'not-saved';
   readonly presentation: ReviewExportPresentation;
-  readonly onExport: (confirmPossiblyStale?: true) => Promise<unknown>;
+  readonly onExport: (confirmPossiblyStale?: true) => Promise<ReviewExportResult | void>;
   readonly onOpenAnnotations?: () => void;
   readonly open?: boolean;
   readonly onOpenChange?: (open: boolean) => void;
@@ -76,14 +76,13 @@ export interface DocumentActionsMenuProps {
 
 type ExportOutcome = 'idle' | 'pending' | 'success' | 'failure';
 
-function exportMessageFromResult(result: unknown): string {
-  if (
-    typeof result === 'object'
-    && result !== null
-    && 'warning' in result
-    && typeof result.warning === 'string'
-    && result.warning.trim() !== ''
-  ) return result.warning;
+export interface ReviewExportResult {
+  readonly kind?: string;
+  readonly warning?: string;
+}
+
+function exportMessageFromResult(result: ReviewExportResult | void): string {
+  if (result?.warning !== undefined && result.warning.trim() !== '') return result.warning;
   return 'Reviewed PDF exported.';
 }
 

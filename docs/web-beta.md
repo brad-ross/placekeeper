@@ -46,6 +46,10 @@ Record evidence outside transient Actions artifacts so another operator can iden
 
 The release workflow builds the Pages artifact once, tests that same directory sequentially, verifies it was not mutated, and lets the environment-gated deploy job consume only the named same-run artifact. It does not run on each `main` push or on a schedule, and it ends after deployment without spending a hosted job on live-origin testing.
 
+The routine `.github/workflows/static-web.yml` gate is deliberately smaller. It runs only for pull requests whose static dependency surface changed, cancels an older run for the same pull request, and uses one read-only Ubuntu job with the Chromium critical profile. It never uses `pull_request_target`, receives no deploy or OIDC permission, and retains short-lived browser diagnostics only when the gate fails.
+
+The manual `.github/workflows/deploy-pages.yml` path has exactly two jobs. The unprotected `package` job has only `contents: read`; it checks out once without persisted credentials, installs once, builds once, runs static unit and PDF conformance checks followed by exhaustive Chromium and representative Firefox/WebKit coverage against that one directory, revalidates its unchanged bytes, and uploads one run-and-attempt-named Pages artifact. The `deploy` job is the only job attached to the protected `github-pages` environment and the only job with Pages/OIDC write permission. It performs no checkout, install, or repository-script execution. Immediately before the official deploy action it reads trusted `main` through the GitHub API, verifies the packaged source is still current, verifies the official upload returned a numeric artifact ID for the deterministic same-run name, and verifies the configured origin and `/placekeeper/` project base. Any mismatch stops publication.
+
 ## Live smoke and terminal classifications
 
 After a successful deployment, use a clean trusted local checkout whose `HEAD` is the deployed source SHA. Do not supply a GitHub token or Pages permission to the smoke process. Run the local script with the recorded page URL, source SHA, and content-manifest digest:
@@ -54,7 +58,11 @@ After a successful deployment, use a clean trusted local checkout whose `HEAD` i
 pnpm smoke:static-pages -- --url https://brad-ross.github.io/placekeeper/ --source <deployed-source-sha> --content <content-manifest-sha256>
 ```
 
-The script uses a fresh browser context, cache-busted identity reads, complete payload-manifest verification, bounded propagation polling, worker and `application/wasm` checks, and one local upload-render-annotate-export-reopen journey. Retain its machine-readable record with probe commit, target URL, deployed source SHA, payload digest, browser version, timestamp, and result.
+The command refuses to run when a GitHub/Actions token is present, the checkout is dirty, `HEAD` or the local trusted `origin/main` ref differs from `--source`, or `remote.origin.url` is not the reviewed `brad-ross/placekeeper` repository. Fetch and inspect trusted `main`, create a clean checkout at the deployed source, remove token-bearing environment variables, and generate no fixture files before running it. The smoke creates its local annotated PDF entirely in memory.
+
+The script uses a fresh browser context, cache-busted identity reads for at most ten minutes, complete payload-manifest hash and size verification, PDFium worker and `application/wasm` MIME checks, and one local upload-render-keyboard-annotate-export journey followed by an independent-context editable reopen. It prints one JSON record containing the probe commit, target URL, deployed source SHA, payload digest, observed tuple when available, browser version, timestamp, terminal result, and a bounded detail. Retain that record outside transient workflow artifacts. A non-`passed` classification exits nonzero.
+
+For the first release, when there is deliberately no last-known-good site to roll back to, append `--first-release`. That makes an otherwise unreachable or broken first candidate terminally classify as `first-release-failure`, preserving the documented administrator-unpublish response rather than implying that a rollback target exists. Do not use the flag after a known-good release has been recorded.
 
 Classify the outcome exactly once:
 
