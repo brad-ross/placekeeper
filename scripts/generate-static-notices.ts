@@ -89,4 +89,3 @@ export async function createStaticLegalAssets(): Promise<{
 <body><main><h1>Privacy and durability</h1><p>This public web beta is for non-confidential PDFs. Local PDF bytes stay in the current tab; a remote PDF URL is requested directly from that host. GitHub Pages and the remote host may receive ordinary web request information.</p><p>Placekeeper does not add analytics, autosave, browser storage, or reload recovery here. Export a reviewed PDF to keep your Review Items. Export preserves other source PDF content but is not a sanitizer.</p></main></body></html>\n`;
   return { noticeHtml, privacyHtml, dependencyInventory };
 }
-
