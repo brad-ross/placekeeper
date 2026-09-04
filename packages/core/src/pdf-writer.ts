@@ -54,6 +54,7 @@ export interface PdfWriteRequest {
 
 export interface PdfWrittenAnnotationEvidence {
   id: string;
+  pageIndex?: number;
   subtype: string;
   contents: string;
   author?: string;
@@ -61,16 +62,31 @@ export interface PdfWrittenAnnotationEvidence {
   hasNormalAppearance: boolean;
 }
 
-export interface PdfStructuralEvidence {
+interface PdfStructuralEvidenceBase {
   backend: 'embedpdf';
   backendVersion: string;
   originalSha256: string;
   outputSha256: string;
   pageCount: number;
   structurallyValid: boolean;
-  preexistingAnnotationIds: readonly string[];
   annotations: readonly PdfWrittenAnnotationEvidence[];
 }
+
+export interface PdfOwnedOutputEvidence extends PdfStructuralEvidenceBase {
+  /** Browser-bounded verification of only the newly owned output projections. */
+  coverage: 'owned-output';
+  preexistingAnnotationIds?: never;
+}
+
+export interface PdfExhaustivePreservationEvidence extends PdfStructuralEvidenceBase {
+  /** Omitted by legacy callers; service verification still treats it as exhaustive. */
+  coverage?: 'exhaustive-preservation';
+  preexistingAnnotationIds: readonly string[];
+}
+
+export type PdfStructuralEvidence =
+  | PdfOwnedOutputEvidence
+  | PdfExhaustivePreservationEvidence;
 
 export interface PdfWriteResult {
   pdfBytes: Uint8Array;

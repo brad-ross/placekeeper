@@ -516,9 +516,12 @@ export function inspectProjectedPortableAnnotation(
 export function inspectPortableAnnotations(
   candidates: readonly PortableAnnotationCandidate[],
 ): PortableAnnotationCollectionInspection {
+  const projectionIdentity = ({ id, pageIndex }: VisiblePortableAnnotation) =>
+    `${pageIndex}:${id}`;
   const visibleIdCounts = new Map<string, number>();
   for (const { visible } of candidates) {
-    visibleIdCounts.set(visible.id, (visibleIdCounts.get(visible.id) ?? 0) + 1);
+    const identity = projectionIdentity(visible);
+    visibleIdCounts.set(identity, (visibleIdCounts.get(identity) ?? 0) + 1);
   }
 
   const groups = new Map<string, Array<{
@@ -544,7 +547,7 @@ export function inspectPortableAnnotations(
       if (envelope === undefined) {
         return { status: "invalid", reason: "invalid-group-child" };
       }
-      if ((visibleIdCounts.get(candidate.visible.id) ?? 0) !== 1) {
+      if ((visibleIdCounts.get(projectionIdentity(candidate.visible)) ?? 0) !== 1) {
         return { status: "invalid", reason: "duplicate-projection-id" };
       }
       if (!visibleMatchesGroupedProjection(envelope.projection, candidate.visible)) {
@@ -564,7 +567,7 @@ export function inspectPortableAnnotations(
     const inspected = inspectPortableAnnotation(
       candidate.custom,
       candidate.visible,
-      { visibleIdCount: visibleIdCounts.get(candidate.visible.id) ?? 0 },
+      { visibleIdCount: visibleIdCounts.get(projectionIdentity(candidate.visible)) ?? 0 },
     );
     if (inspected.status === "owned") {
       orderedEntries.push({ kind: "v2", item: inspected.item, candidateIndex });

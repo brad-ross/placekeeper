@@ -4,8 +4,20 @@ import type {
   PdfWriteResult,
   PdfWriter,
 } from '../../core/src/pdf-writer.js';
+import type { ReviewItem } from '../../core/src/review-model.js';
+
+export interface BrowserPdfProjectionIdentity {
+  readonly pageIndex: number;
+  readonly annotationId: string;
+}
+
+export interface BrowserPdfInspection {
+  readonly portableItems: readonly ReviewItem[];
+  readonly ownedProjections: readonly BrowserPdfProjectionIdentity[];
+}
 
 export interface DisposablePdfWriter extends PdfWriter {
+  inspect?(sourcePdf: Uint8Array): Promise<BrowserPdfInspection>;
   dispose?(): void | Promise<void>;
 }
 
@@ -27,6 +39,10 @@ export interface BrowserDocumentSession {
     sourcePdf: Uint8Array,
     options?: { readonly signal?: AbortSignal; readonly timeoutMs?: number },
   ): Promise<PdfRewriteEligibility>;
+  inspect(
+    sourcePdf: Uint8Array,
+    options?: { readonly signal?: AbortSignal; readonly timeoutMs?: number },
+  ): Promise<BrowserPdfInspection>;
   write(
     request: PdfWriteRequest,
     options?: { readonly signal?: AbortSignal; readonly timeoutMs?: number },
@@ -150,6 +166,11 @@ export function createBrowserDocumentSession(options: {
       return run(async (ownedWriter) => (
         ownedWriter.assess?.(sourcePdf) ?? { eligible: true }
       ), operationOptions, 'PDF assessment timed out.');
+    },
+    inspect(sourcePdf, operationOptions = {}) {
+      return run(async (ownedWriter) => (
+        ownedWriter.inspect?.(sourcePdf) ?? { portableItems: [], ownedProjections: [] }
+      ), operationOptions, 'PDF annotation inspection timed out.');
     },
     write(request, operationOptions = {}) {
       return run(

@@ -10,6 +10,7 @@ import {
   createPortableAnnotationCustom,
   decodePortableAnnotationJson,
   inspectPortableAnnotation,
+  inspectPortableAnnotations,
   inspectProjectedPortableAnnotations,
   inspectProjectedPortableAnnotation,
   PORTABLE_ANNOTATION_MAX_BYTES,
@@ -117,6 +118,27 @@ describe("portable annotation codec", () => {
       status: "owned",
       items: [crossPage, legacyItem],
       ownedIndexes: [0, 1, 2],
+    });
+  });
+
+  it("uses page-local projection identity when a foreign annotation reuses an ID", () => {
+    const projected = projectReviewItem(item);
+    const foreignOnAnotherPage = {
+      custom: undefined,
+      visible: { ...visible, pageIndex: 1 },
+    };
+    expect(inspectProjectedPortableAnnotation(projected)).toMatchObject({ status: "owned" });
+    const inspection = inspectPortableAnnotations([
+      {
+        custom: projected.custom,
+        visible,
+      },
+      foreignOnAnotherPage,
+    ]);
+    expect(inspection).toMatchObject({
+      status: "owned",
+      items: [item],
+      ownedIndexes: [0],
     });
   });
 

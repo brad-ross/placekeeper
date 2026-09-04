@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { addPageNote } from "../../../packages/core/src/review-commands.js";
 import type { PdfWriter } from "../../../packages/core/src/pdf-writer.js";
+import type { ReviewItem } from "../../../packages/core/src/review-model.js";
 import { createBrowserDocumentSession } from "../../../packages/pdf-backends/src/browser-document-session.js";
 import {
   STATIC_PDF_MAX_BYTES,
@@ -17,6 +18,64 @@ import { StaticLauncher } from "../src/static-entry.js";
 const sourceBytes = new TextEncoder().encode("%PDF-1.7\n%%EOF");
 
 describe("static browser review runtime", () => {
+  it("reimports an exported Review Item as clean editable state", async () => {
+    const imported: ReviewItem = {
+      id: "11111111-1111-4111-8111-111111111111",
+      kind: "pageNote",
+      pageIndex: 0,
+      createdAt: "2026-09-03T12:00:00.000Z",
+      updatedAt: "2026-09-03T12:00:00.000Z",
+      payload: {
+        position: { x: 40, y: 50, width: 18, height: 18 },
+        comment: "Imported note",
+      },
+    };
+    const writer = {
+      assess: vi.fn(async () => ({ eligible: true as const })),
+      inspect: vi.fn(async () => ({
+        portableItems: [imported],
+        ownedProjections: [{ pageIndex: 0, annotationId: imported.id }],
+      })),
+      write: vi.fn<PdfWriter["write"]>(async (request) => ({
+        pdfBytes: sourceBytes,
+        evidence: {
+          coverage: "owned-output" as const,
+          backend: "embedpdf" as const,
+          backendVersion: "test",
+          originalSha256: request.sourceSha256,
+          outputSha256: "b".repeat(64),
+          pageCount: 1,
+          structurallyValid: true,
+          annotations: [],
+        },
+      })),
+    };
+    const runtime = await createStaticHostRuntime({
+      source: { name: "notes-reviewed.pdf", bytes: sourceBytes },
+      viewerAssets: { pdfiumWasm: "https://placekeeper.example/pdfium.wasm" },
+    }, {
+      writer,
+      digest: async () => "a".repeat(64),
+      createObjectURL: () => "blob:source",
+      revokeObjectURL: vi.fn(),
+      download: vi.fn(),
+    });
+
+    const bootstrap = await runtime.bootstrap();
+    expect(bootstrap.state).toMatchObject({
+      revision: 0,
+      history: [],
+      historyCursor: 0,
+      items: [imported],
+    });
+    expect(bootstrap.saveStatus.sync).toMatchObject({
+      desiredRevision: 0,
+      savedRevision: 0,
+    });
+    expect(writer.inspect).toHaveBeenCalledWith(sourceBytes);
+    runtime.dispose();
+  });
+
   it("discloses the non-confidential, direct-request, export-only boundary before source controls", () => {
     const markup = renderToStaticMarkup(createElement(StaticLauncher, {
       onOpen: async () => undefined,

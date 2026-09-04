@@ -9,7 +9,12 @@ import {
   type Rect,
 } from '@embedpdf/models';
 
-import type { ReviewAnnotation } from '../../core/src/pdf-writer.js';
+import { PdfWriterError, type ReviewAnnotation } from '../../core/src/pdf-writer.js';
+import {
+  inspectPortableAnnotations,
+  type VisiblePortableAnnotation,
+} from '../../core/src/portable-annotation.js';
+import type { ReviewItem } from '../../core/src/review-model.js';
 
 const ENCRYPT_MARKER = new TextEncoder().encode('/Encrypt');
 const DOC_MDP_MARKER = new TextEncoder().encode('/DocMDP');
@@ -18,6 +23,79 @@ export type SupportedOutputAnnotation =
   | PdfStrikeOutAnnoObject
   | PdfHighlightAnnoObject
   | PdfTextAnnoObject;
+
+export interface PortablePdfAnnotationCatalog {
+  readonly items: readonly ReviewItem[];
+  readonly owned: readonly {
+    readonly pageIndex: number;
+    readonly annotation: PdfAnnotationObject;
+    readonly item: ReviewItem;
+  }[];
+}
+
+export function pdfAnnotationIdentity(pageIndex: number, annotationId: string): string {
+  return `${pageIndex}:${annotationId}`;
+}
+
+export function embedPdfSubtypeName(type: PdfAnnotationSubtype): string {
+  switch (type) {
+    case PdfAnnotationSubtype.STRIKEOUT:
+      return 'strikeOut';
+    case PdfAnnotationSubtype.FREETEXT:
+      return 'freeText';
+    case PdfAnnotationSubtype.FILEATTACHMENT:
+      return 'fileAttachment';
+    default:
+      return PdfAnnotationSubtype[type]?.toLowerCase() ?? 'unknown';
+  }
+}
+
+export function visibleEmbedPdfAnnotation(
+  annotation: PdfAnnotationObject,
+  pageIndex: number,
+): VisiblePortableAnnotation {
+  const segmentRects =
+    'segmentRects' in annotation && Array.isArray(annotation.segmentRects)
+      ? annotation.segmentRects
+      : undefined;
+  return {
+    id: annotation.id,
+    pageIndex,
+    subtype: embedPdfSubtypeName(annotation.type),
+    contents: annotation.contents ?? '',
+    ...(annotation.author === undefined ? {} : { author: annotation.author }),
+    rect: annotation.rect,
+    ...(segmentRects === undefined ? {} : { segmentRects }),
+  };
+}
+
+export function portableItemsFromAnnotationPages(
+  annotationPages: readonly (readonly PdfAnnotationObject[])[],
+  options: { readonly invalidMetadata: 'reject' | 'foreign' } = { invalidMetadata: 'reject' },
+): PortablePdfAnnotationCatalog {
+  const flattened = annotationPages.flatMap((annotations, pageIndex) =>
+    annotations.map((annotation) => ({ pageIndex, annotation })),
+  );
+  const inspected = inspectPortableAnnotations(flattened.map(({ pageIndex, annotation }) => ({
+    custom: annotation.custom,
+    visible: visibleEmbedPdfAnnotation(annotation, pageIndex),
+  })));
+  if (inspected.status === 'invalid') {
+    if (options.invalidMetadata === 'foreign') return { items: [], owned: [] };
+    throw new PdfWriterError(
+      'invalid-portable-annotation',
+      `Placekeeper portable annotation metadata is incomplete or inconsistent (${inspected.reason}).`,
+    );
+  }
+  if (inspected.status === 'foreign') return { items: [], owned: [] };
+  return {
+    items: [...inspected.items],
+    owned: inspected.ownedCandidates.map(({ candidateIndex, item }) => ({
+      ...flattened[candidateIndex]!,
+      item,
+    })),
+  };
+}
 
 export function canonicalEmbedPdfValue(value: unknown): unknown {
   if (value instanceof Date) return value.toISOString();

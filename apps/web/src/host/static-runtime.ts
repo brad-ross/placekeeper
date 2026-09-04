@@ -3,7 +3,8 @@ import type {
   PdfRewriteEligibility,
   PdfWriteResult,
 } from "../../../../packages/core/src/pdf-writer.js";
-import { createReviewState, type ReviewState } from "../../../../packages/core/src/review-model.js";
+import { createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
+import type { ReviewState } from "../../../../packages/core/src/review-model.js";
 import { reduceReview } from "../../../../packages/core/src/review-reducer.js";
 import { createBrowserEmbedPdfWriter } from "../../../../packages/pdf-backends/src/browser-writer.js";
 import {
@@ -388,6 +389,7 @@ export async function createStaticHostRuntime(
   });
   let digest: string;
   let eligibility: PdfRewriteEligibility;
+  let inspection: Awaited<ReturnType<BrowserDocumentSession["inspect"]>>;
   try {
     [digest, eligibility] = await waitWithin(Promise.all([
       (dependencies.digest ?? sha256)(input.source.bytes),
@@ -399,6 +401,10 @@ export async function createStaticHostRuntime(
       void documentSession.dispose();
     }, dependencies.signal, () => {
       void documentSession.dispose();
+    });
+    inspection = await documentSession.inspect(input.source.bytes, {
+      ...(dependencies.signal === undefined ? {} : { signal: dependencies.signal }),
+      timeoutMs: startupTimeoutMs,
     });
   } catch (error) {
     await documentSession.dispose();
@@ -425,16 +431,17 @@ export async function createStaticHostRuntime(
   const origin = dependencies.origin ?? globalThis.location?.origin ?? "https://placekeeper.invalid";
   const download = dependencies.download ?? downloadBytes;
   const lifecycle = dependencies.lifecycle ?? globalThis as unknown as StaticLifecycleTarget;
-  let state = createReviewState({
+  let state = createImportedReviewState({
     sessionId,
     source: {
       fileId: digest,
       digest,
       byteLength: input.source.bytes.byteLength,
     },
+    items: inspection.portableItems,
   });
   let disposed = false;
-  let lastExportedRevision = -1;
+  let lastExportedRevision = inspection.portableItems.length > 0 ? 0 : -1;
   let unloadGuardRegistered = false;
 
   const beforeUnload: EventListener = (rawEvent) => {

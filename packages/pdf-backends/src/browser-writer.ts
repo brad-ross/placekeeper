@@ -1,6 +1,5 @@
 import { createPdfiumEngine } from '@embedpdf/engines/pdfium-worker-engine';
 import {
-  PdfAnnotationSubtype,
   PdfPermissionFlag,
   type PdfAnnotationObject,
   type PdfDocumentObject,
@@ -16,10 +15,14 @@ import {
   type PdfWriteResult,
   type ReviewAnnotation,
 } from '../../core/src/pdf-writer.js';
+import { inspectPortableAnnotations, inspectProjectedPortableAnnotations } from '../../core/src/portable-annotation.js';
 import {
-  annotationPreservationSignature,
+  embedPdfSubtypeName,
   mapReviewAnnotationToEmbedPdf,
+  pdfAnnotationIdentity,
   pdfRewriteMarkers,
+  portableItemsFromAnnotationPages,
+  visibleEmbedPdfAnnotation,
 } from './embedpdf-annotation.js';
 import type { DisposablePdfWriter } from './browser-document-session.js';
 
@@ -35,19 +38,6 @@ async function sha256(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)]
     .map((value) => value.toString(16).padStart(2, '0'))
     .join('');
-}
-
-function subtypeName(type: PdfAnnotationSubtype): string {
-  switch (type) {
-    case PdfAnnotationSubtype.STRIKEOUT:
-      return 'strikeOut';
-    case PdfAnnotationSubtype.FREETEXT:
-      return 'freeText';
-    case PdfAnnotationSubtype.FILEATTACHMENT:
-      return 'fileAttachment';
-    default:
-      return PdfAnnotationSubtype[type]?.toLowerCase() ?? 'unknown';
-  }
 }
 
 function closeEngine(engine: PdfEngine<Blob>, document?: PdfDocumentObject): Promise<unknown> {
@@ -195,6 +185,35 @@ export async function createBrowserEmbedPdfWriter(pdfiumWasm: string): Promise<D
     return eligibility;
   };
 
+  const inspect = async (bytes: Uint8Array) => {
+    if (disposed) throw new PdfWriterError('cancelled', 'The browser PDF session is closed.');
+    const engine = openEngine();
+    let document: PdfDocumentObject | undefined;
+    try {
+      document = await engine.openDocumentBuffer({
+        id: crypto.randomUUID(),
+        content: toArrayBuffer(bytes),
+      }).toPromise();
+      trackDocument(engine, document);
+      const catalog = portableItemsFromAnnotationPages(
+        await annotationPages(engine, document),
+        { invalidMetadata: 'foreign' },
+      );
+      return {
+        portableItems: catalog.items,
+        ownedProjections: catalog.owned.map(({ pageIndex, annotation }) => ({
+          pageIndex,
+          annotationId: annotation.id,
+        })),
+      };
+    } catch (error) {
+      if (error instanceof PdfWriterError) throw error;
+      throw new PdfWriterError('invalid-pdf', 'The browser could not inspect this PDF.', { cause: error });
+    } finally {
+      await releaseEngine(engine, document);
+    }
+  };
+
   const write = async (request: PdfWriteRequest): Promise<PdfWriteResult> => {
     if (disposed) throw new PdfWriterError('cancelled', 'The browser PDF session is closed.');
     assertSemanticGeometry(request.annotations);
@@ -223,10 +242,28 @@ export async function createBrowserEmbedPdfWriter(pdfiumWasm: string): Promise<D
         }
         assertAnnotationWithinPage(annotation, page);
       }
+      const sourcePageCount = document.pageCount;
 
-      const before = (await annotationPages(engine, document)).flatMap((annotations, pageIndex) => (
-        annotations.map((annotation) => annotationPreservationSignature(annotation, pageIndex))
-      )).toSorted();
+      const sourcePages = await annotationPages(engine, document);
+      const sourceCatalog = portableItemsFromAnnotationPages(sourcePages, {
+        invalidMetadata: 'foreign',
+      });
+      for (const { pageIndex, annotation } of sourceCatalog.owned) {
+        const page = document.pages[pageIndex];
+        if (page === undefined || !(await engine.removePageAnnotation(document, page, annotation).toPromise())) {
+          throw new PdfWriterError(
+            'backend-error',
+            `Could not replace owned annotation ${annotation.id} on page ${pageIndex}.`,
+          );
+        }
+      }
+      const requestedPortable = inspectProjectedPortableAnnotations(request.annotations);
+      if (requestedPortable.status === 'invalid') {
+        throw new PdfWriterError(
+          'backend-error',
+          `The requested portable annotation set is incomplete or inconsistent (${requestedPortable.reason}).`,
+        );
+      }
       for (const annotation of request.annotations) {
         await engine.createPageAnnotation(
           document,
@@ -246,27 +283,29 @@ export async function createBrowserEmbedPdfWriter(pdfiumWasm: string): Promise<D
       document = reopened;
       trackDocument(engine, document);
       if (disposed) throw new PdfWriterError('cancelled', 'The browser PDF session is closed.');
-      const reopenedPages = await annotationPages(engine, reopened);
-      const reopenedAnnotations = reopenedPages.flatMap((annotations, pageIndex) => (
-        annotations.map((annotation) => ({ annotation, pageIndex }))
-      ));
-      const after = new Map<string, number>();
-      for (const { annotation, pageIndex } of reopenedAnnotations) {
-        const signature = annotationPreservationSignature(annotation, pageIndex);
-        after.set(signature, (after.get(signature) ?? 0) + 1);
+      if (reopened.pageCount !== sourcePageCount) {
+        throw new PdfWriterError('backend-error', 'The exported copy has a different page count.');
       }
-      for (const signature of before) {
-        const count = after.get(signature) ?? 0;
-        if (count === 0) {
-          throw new PdfWriterError('backend-error', 'A pre-existing PDF annotation changed during export.');
-        }
-        if (count === 1) after.delete(signature);
-        else after.set(signature, count - 1);
+      const requestedPages = new Set(request.annotations.map(({ pageIndex }) => pageIndex));
+      const reopenedAnnotations = (await Promise.all([...requestedPages].map(async (pageIndex) => {
+        const page = reopened.pages[pageIndex];
+        if (page === undefined) return [];
+        const annotations = await engine.getPageAnnotations(reopened, page).toPromise();
+        return annotations.map((annotation) => ({ annotation, pageIndex }));
+      }))).flat();
+      const requestedIdentities = new Set(request.annotations.map(({ pageIndex, id }) =>
+        pdfAnnotationIdentity(pageIndex, id)));
+      const created = reopenedAnnotations.filter(({ annotation, pageIndex }) =>
+        requestedIdentities.has(pdfAnnotationIdentity(pageIndex, annotation.id)));
+      const createdCounts = new Map<string, number>();
+      for (const { annotation, pageIndex } of created) {
+        const identity = pdfAnnotationIdentity(pageIndex, annotation.id);
+        createdCounts.set(identity, (createdCounts.get(identity) ?? 0) + 1);
       }
-
-      const requestedIds = new Set(request.annotations.map(({ id }) => id));
-      const created = reopenedAnnotations.filter(({ annotation }) => requestedIds.has(annotation.id));
-      if (created.length !== request.annotations.length) {
+      if (
+        created.length !== request.annotations.length
+        || [...requestedIdentities].some((identity) => createdCounts.get(identity) !== 1)
+      ) {
         throw new PdfWriterError('backend-error', 'Not every requested annotation reopened after export.');
       }
       if (created.some(({ annotation }) => (
@@ -274,20 +313,37 @@ export async function createBrowserEmbedPdfWriter(pdfiumWasm: string): Promise<D
       ))) {
         throw new PdfWriterError('backend-error', 'An exported annotation lacks a normal appearance.');
       }
+      const reopenedPortable = inspectPortableAnnotations(created.map(({ annotation, pageIndex }) => ({
+        custom: annotation.custom,
+        visible: visibleEmbedPdfAnnotation(annotation, pageIndex),
+      })));
+      const requestedItems = requestedPortable.status === 'owned' ? requestedPortable.items : [];
+      const reopenedItems = reopenedPortable.status === 'owned' ? reopenedPortable.items : [];
+      const canonicalItems = (items: typeof requestedItems) => items
+        .map((item) => `${item.id}:${JSON.stringify(item)}`)
+        .toSorted();
+      if (
+        reopenedPortable.status === 'invalid'
+        || JSON.stringify(canonicalItems(reopenedItems)) !== JSON.stringify(canonicalItems(requestedItems))
+      ) {
+        throw new PdfWriterError(
+          'backend-error',
+          'At least one exported annotation did not reopen with its exact editable identity.',
+        );
+      }
 
       const evidence: PdfStructuralEvidence = {
+        coverage: 'owned-output',
         backend: 'embedpdf',
         backendVersion: EMBEDPDF_VERSION,
         originalSha256: request.sourceSha256,
         outputSha256: await sha256(output),
         pageCount: reopened.pageCount,
         structurallyValid: true,
-        preexistingAnnotationIds: reopenedAnnotations
-          .filter(({ annotation }) => !requestedIds.has(annotation.id))
-          .map(({ annotation }) => annotation.id),
-        annotations: created.map(({ annotation }) => ({
+        annotations: created.map(({ annotation, pageIndex }) => ({
           id: annotation.id,
-          subtype: subtypeName(annotation.type),
+          pageIndex,
+          subtype: embedPdfSubtypeName(annotation.type),
           contents: annotation.contents ?? '',
           ...(annotation.author === undefined ? {} : { author: annotation.author }),
           flags: annotation.flags ?? [],
@@ -307,6 +363,7 @@ export async function createBrowserEmbedPdfWriter(pdfiumWasm: string): Promise<D
 
   return {
     assess,
+    inspect,
     write,
     async dispose() {
       if (disposed) return;
