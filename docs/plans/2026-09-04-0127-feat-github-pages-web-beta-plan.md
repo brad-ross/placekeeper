@@ -7,6 +7,7 @@ artifact_readiness: implementation-ready
 product_contract_source: ce-plan-bootstrap
 execution: code
 deepened: 2026-09-04
+last_updated: 2026-09-04
 ---
 
 # GitHub Pages Web Beta - Plan
@@ -26,7 +27,9 @@ deepened: 2026-09-04
 
 ### Summary
 
-Productionize the existing static browser spike as an export-only companion and lightweight tryout for full Placekeeper, with no Placekeeper analytics or application telemetry. The beta is hosted at `https://brad-ross.github.io/placekeeper/`, accepts one local PDF or one user-entered HTTPS PDF URL, runs the shared review client in memory, and creates durability only when the user initiates a structurally checked PDF download. Because the project path shares browser authority with the existing personal site and sibling project pages, the beta is explicitly non-confidential. Deployment remains dormant until the public-distribution gate is satisfied.
+Productionize the existing static browser spike as an export-only companion and lightweight tryout for full Placekeeper, with no Placekeeper analytics or application telemetry. The beta is hosted at `https://brad-ross.github.io/placekeeper/`, accepts one local PDF or one user-entered HTTPS PDF URL, runs the shared review client in memory, and creates durability only when the user initiates a structurally checked PDF download. Because the project path shares browser authority with the existing personal site and sibling project pages, public documentation identifies the beta as non-confidential without repeating that qualification in the launcher modal. Deployment remains dormant until the public-distribution gate is satisfied.
+
+**Product Contract preservation:** changed R9, R16, AE9, and their linked scope and unit text at the user's direction: the launcher modal no longer carries persistent beta, non-confidential, local-file, remote-request, size, HTTPS, or CORS qualifications. It keeps only the manual-export/autosave note; detailed constraints remain in public documentation and actionable failures.
 
 ### Problem Frame
 
@@ -36,7 +39,8 @@ The current spike proves that Placekeeper can review and export a PDF without th
 
 - **Browser-only export durability** (session-settled: user-directed — chosen over a backend autosave service: the beta should avoid server-side document state and its persistence obligations). Governs R1, R4-R8.
 - **Local selection plus direct remote URL acquisition** (session-settled: user-directed — chosen over Placekeeper-hosted PDF uploads: the browser can acquire the bytes without adding cloud document storage). Governs R2, R3, R9.
-- **Standard GitHub Pages project path with no Placekeeper analytics** (session-settled: user-approved — chosen over a custom-domain and instrumented launch: the beta should minimize infrastructure and data collection). The project path is the initial beta launch target and is explicitly labeled non-confidential because the browser origin is shared with unrelated content. Dedicated-origin hosting is deferred. Governs R1, R9-R13, R16.
+- **Standard GitHub Pages project path with no Placekeeper analytics** (session-settled: user-approved — chosen over a custom-domain and instrumented launch: the beta should minimize infrastructure and data collection). The project path is the initial beta launch target and is documented as non-confidential because the browser origin is shared with unrelated content. Dedicated-origin hosting is deferred. Governs R1, R9-R13, R16.
+- **Keep the launcher modal concise** (session-settled: user-directed — chosen over persistent beta, confidentiality, transport, and file-limit qualifications in the modal: detailed constraints belong in public documentation, while acquisition-specific limits appear only when an operation fails). The launcher shows only that annotations require manual export in the browser version and links to the local version for autosave. Governs R9, R16.
 - **Public activation remains clearance-gated.** Existing repository policy permits implementation and validation but blocks public distribution under the Placekeeper name until trademark, marketplace, and domain clearance is recorded. Governs R12-R14.
 - **No new first-party license grant.** The beta preserves the repository's current licensing posture while satisfying all notices required for the distributed browser artifact. Governs R14.
 
@@ -67,10 +71,10 @@ The current spike proves that Placekeeper can review and export a PDF without th
 
 **Privacy, security, and usability**
 
-- R9. The beta adds no analytics, application telemetry, cookies, durable browser storage, service worker, or automatic remote request. Before the source controls, the launcher states that local files remain in the tab, remote URLs are requested directly from their host, there is no autosave or reload recovery, and Export is the only durability action; detailed copy distinguishes GitHub site logging and other external request logging.
+- R9. The beta adds no analytics, application telemetry, cookies, durable browser storage, service worker, or automatic remote request. Before the source controls, the launcher states only that annotations require manual export in the browser version and links to the local version for autosave. It does not persistently describe beta status, confidentiality, local-file handling, remote-request handling, size limits, HTTPS, CORS, or reload recovery in the modal. Public documentation owns those detailed guarantees and qualifications; operation-specific errors expose only the size, URL, network, or CORS information needed to recover.
 - R10. The static document applies an early meta CSP and no-referrer policy that permit only the packaged app, the shared UI's tested style exception, required PDFium/WASM/blob resources, and explicit HTTPS URL acquisition, without claiming protections that require response headers.
 - R11. The supported beta path is keyboard-operable and responsive in current desktop Chromium, Firefox, and Safari/WebKit; mobile and PDF-content screen-reader accessibility remain best effort rather than advertised support.
-- R16. The project-site beta is labeled non-confidential and fails closed before file selection when it is framed, retains opener authority, or detects a controlling root-scoped service worker. Documentation states that these checks are partial mitigations rather than origin isolation.
+- R16. Public documentation identifies the project-site beta as non-confidential, while the launcher modal carries no persistent non-confidential or shared-origin warning. The application fails closed before file selection when it is framed, retains opener authority, or detects a controlling root-scoped service worker. Documentation states that these checks are partial mitigations rather than origin isolation.
 
 **Distribution and operation**
 
@@ -149,7 +153,7 @@ The current spike proves that Placekeeper can review and export a PDF without th
   - **Covers:** R9, R10, R16.
   - **Given:** The `/placekeeper/` artifact is tested on the existing user Pages origin.
   - **When:** The origin has a root-scoped service worker, the app is framed, or another same-origin page retains opener authority.
-  - **Then:** The beta fails closed before file selection. Otherwise the launcher displays its non-confidential shared-origin disclosure and documentation explains that the checks are partial mitigations rather than origin isolation.
+  - **Then:** The beta fails closed before file selection. Otherwise the launcher remains concise, while public documentation identifies the shared-origin deployment as non-confidential and explains that the checks are partial mitigations rather than origin isolation.
 
 ### Success Criteria
 
@@ -165,7 +169,7 @@ The current spike proves that Placekeeper can review and export a PDF without th
 - Production hardening of the existing static Review Host Runtime and shared review client integration.
 - Local PDF selection, explicit HTTPS+CORS acquisition, in-memory review, lightweight structural export checking, and portable re-import.
 - Project-subpath packaging, CSP/referrer controls, notices, privacy copy, browser/accessibility coverage, deployment, smoke verification, and rollback instructions.
-- Standard `/placekeeper/` project-site publication with a pre-selection non-confidential disclosure.
+- Standard `/placekeeper/` project-site publication with the non-confidential shared-origin disclosure in public documentation rather than persistent launcher-modal copy.
 
 **Deferred to Follow-Up Work**
 
@@ -193,7 +197,7 @@ The current spike proves that Placekeeper can review and export a PDF without th
 - KTD6. **Match security claims to Pages capabilities.** An early meta CSP and referrer policy constrain the document. The CSP allows only `wasm-unsafe-eval` for script compilation when required, the narrow inline-style exception required by the shared React UI, and tested same-origin/Blob worker resources. Application logic, not `connect-src https:`, enforces user-initiated URL acquisition. Documentation does not claim header-only controls. Governs R3, R9, R10, R16.
 - KTD7. **Keep automation cost-aware while preserving release privilege boundaries** (session-settled: user-directed — chosen over automatic full-matrix builds on every pull request and `main` push). One path-scoped, cancel-in-progress pull-request job receives no secrets or deployment authority and runs the cheap gate plus one critical Chromium journey. A manually dispatched release from trusted `main` uses two security-separated jobs: package and deploy. The package job builds once and tests the same allowlisted artifact sequentially across supported engines, avoiding a build/install matrix. The deploy job checks out no repository and runs no package or repository code; it only consumes the same-run named artifact and invokes pinned official Pages actions. Post-deploy smoke runs from the operator's local checkout/Codex browser with no GitHub token, Pages permission, or additional hosted runner. No scheduled workflow or automatic release build runs on `main`. Governs R12-R14, R17, R18.
 - KTD8. **Rollback compares source and payload identities separately.** A rollback commit truthfully becomes the new deployment source while its payload-manifest digest must match the recorded last-known-good digest. A failed first public release is unpublished by an administrator because disabling later deploys does not retract it. Governs R13, R18.
-- KTD9. **Treat the standard project origin as non-confidential.** The beta refuses framed, retained-opener, and controlling root-service-worker states when detected, but copy states that these are partial checks on a shared origin rather than isolation. Dedicated-origin hosting is follow-up work. Governs R1, R9, R10, R16.
+- KTD9. **Treat the standard project origin as non-confidential without burdening the launcher.** The beta refuses framed, retained-opener, and controlling root-service-worker states when detected. Public documentation, rather than persistent modal copy, states that these are partial checks on a shared origin rather than isolation. Dedicated-origin hosting is follow-up work. Governs R1, R9, R10, R16.
 - KTD10. **Do not follow remote PDF redirects or claim request privacy.** Static validation rejects userinfo and normalized obvious loopback, private, link-local, and local-host targets before one direct HTTPS request. Documentation states that client-side code cannot prove DNS resolution is public, CORS failure occurs after request issuance, and signed query tokens are transmitted to the destination. Governs R3, R9.
 - KTD11. **Separate static-browser runtime export assurance from exhaustive correctness testing** (session-settled: user-directed — chosen over repeating the full PDF preservation suite for every browser export). Each static-browser export performs only a lightweight structural read-after-write check: reopen the generated bytes, confirm page count, and confirm each expected owned annotation exactly once with valid portable identity and a normal appearance. It does not exhaustively diff foreign annotations or visually compare rendering. Fixture, conformance, and multi-engine release tests own those comprehensive checks. A discriminated evidence-coverage contract preserves the service-backed host's existing exhaustive runtime verification instead of silently weakening it. Neither layer inspects, removes, or sanitizes active source content; user-facing copy states that the output preserves source content. Governs R7, R15.
 
@@ -266,7 +270,7 @@ flowchart TB
 
 ### Assumptions and Implementation Constraints
 
-- The artifact launches at the standard repository project path and is explicitly non-confidential because the origin is shared with unrelated pages.
+- The artifact launches at the standard repository project path, and public documentation explicitly characterizes that shared origin as non-confidential without repeating the qualification in the launcher modal.
 - The existing 64 MiB source limit remains the beta boundary. Lowering or increasing it requires an explicit Product Contract amendment supported by browser-memory evidence.
 - The current non-threaded PDFium integration works without cross-origin isolation. A future `SharedArrayBuffer` requirement invalidates GitHub Pages as the direct host.
 - Playwright WebKit is a regression engine, not proof of branded Safari. The first release and PDFium upgrades require a real desktop Safari smoke.
@@ -293,7 +297,7 @@ flowchart TB
 ### Risks and Dependencies
 
 - **Naming clearance blocks activation.** `docs/support.md` already records the gate. Mitigation: merge verification and dormant automation while keeping publication disabled and the README unlinked.
-- **The standard user Pages URL is a shared origin.** An existing root page or root-scoped service worker can hold authority over `/placekeeper/`. Mitigation: label the beta non-confidential before source selection, fail closed on detected framing/opener/service-worker control, and defer any confidential-PDF claim until dedicated hosting exists.
+- **The standard user Pages URL is a shared origin.** An existing root page or root-scoped service worker can hold authority over `/placekeeper/`. Mitigation: label the beta non-confidential in public documentation, fail closed on detected framing/opener/service-worker control, keep the launcher copy concise, and defer any confidential-PDF claim until dedicated hosting exists.
 - **GitHub Pages requires one manual source setting.** `actions/configure-pages` does not replace Settings → Pages → Source → GitHub Actions with the normal workflow token. Mitigation: keep this as an operator checklist item without introducing a PAT.
 - **Pages cannot set custom response headers.** Meta CSP cannot enforce every modern browser control. Mitigation: test the narrow supported policy and change hosts if header-only controls become requirements.
 - **Cached code and PDFium assets can mismatch.** Stable executable filenames make cross-release failures hard to diagnose. Mitigation: a payload manifest, content hashes, separate deployment provenance, no service worker, and live cohort verification.
@@ -327,7 +331,7 @@ flowchart TB
 - **Dependencies:** None.
 - **Files:** `apps/web/src/static-entry.tsx`, `apps/web/src/static-entry.css`, `apps/web/src/production-entry.tsx`, `apps/web/src/host/static-runtime.ts`, `packages/pdf-backends/src/browser-writer.ts`, `packages/pdf-backends/src/browser-document-session.ts`, `apps/web/test/static-runtime.test.ts`.
 - **Approach:**
-  1. Introduce an `Activating` state and keep retry UI available until the existing document-ready signal confirms the viewer; activation error or deadline disposes the provisional runtime before restoring focus to the launcher. Before the source controls, render the persistent non-confidential privacy and export-only durability disclosure required by R9, and identify the web beta as a companion and tryout for full Placekeeper.
+  1. Introduce an `Activating` state and keep retry UI available until the existing document-ready signal confirms the viewer; activation error or deadline disposes the provisional runtime before restoring focus to the launcher. Before the source controls, render only R9's manual-export note and local-version autosave link in the shared modal-description style. Keep beta, confidentiality, privacy, transport, file-limit, and recovery qualifications out of persistent modal copy.
   2. Enforce one-file drop semantics and KTD10 URL rules, including userinfo and obvious private-target rejection, `redirect: error`, bounded streaming bytes, input clearing, safe filenames, redacted diagnostics, and distinct validation, status, CORS/network, and timeout messages. Provide a keyboard-operable Cancel action during remote fetch, assessment, and provisional activation; abort the owned operation, complete worker and object-URL teardown, restore the empty launcher, and return focus to the initiating source control.
   3. Establish the KTD4 browser backend session with operation-owned engine/worker teardown, bounded operations, single-flight admission, and an epoch fence before any late result can download or advance the export checkpoint. Define accessible status text for four states: exporting a snapshot; checked copy with download requested; checked snapshot with newer unexported edits; and failed export with the in-memory review preserved for retry.
   4. Register the unload guard only while R5 is dirty, preserve BFCache, revoke object URLs on terminal disposal, and keep reload empty without durable browser APIs.
@@ -342,7 +346,7 @@ flowchart TB
   - Cancelling remote fetch, assessment, or provisional activation completes owned teardown, restores the empty launcher, and returns focus without a late callback activating the viewer.
   - A document-ready timeout or render error disposes the provisional runtime and returns to the launcher without adding activation semantics to the shared client.
   - Dropping zero, one, multiple, or directory-like entries follows the one-file policy and returns focus to the appropriate launcher control.
-- **Verification:** Static runtime unit tests prove every acquisition, deadline, epoch, cancellation, and lifecycle transition. A component-level launcher test proves the pre-selection disclosure, document-ready activation, progress, alert announcement, focus recovery, and successful retry without remount leakage.
+- **Verification:** Static runtime unit tests prove every acquisition, deadline, epoch, cancellation, and lifecycle transition. A component-level launcher test proves the concise manual-export/autosave note, absence of verbose persistent qualifications, document-ready activation, progress, alert announcement, focus recovery, and successful retry without remount leakage.
 
 ### U2. Restore portable Review Items on import
 
@@ -425,14 +429,14 @@ flowchart TB
 - **Approach:**
   1. Scope the existing privacy and recovery claims to local service-backed hosts, then add a Web beta section that distinguishes local selection, GitHub serving metadata, direct cookie-free remote fetches, transmitted URL/query/IP/CORS `Origin`, and structurally checked download initiation. State explicitly that browser, operating-system, DNS, enterprise-network, and remote-host logging are outside Placekeeper's control.
   2. Document the 64 MiB limit, desktop browser posture, no autosave or recovery, reload loss, remote URL and DNS limitations, supported annotation kinds, untrusted-PDF posture, non-sanitizing export, unexportable PDFs, and download-then-upload fallback.
-  3. Position the web beta as an export-only companion and lightweight tryout for full Placekeeper. Before its source controls, show a concise persistent disclosure that local files remain in the tab, remote URLs are requested directly from their host, there is no autosave or reload recovery, Export is the only durability action, and the shared-origin site is non-confidential; retain the detailed privacy link beneath it.
+  3. Position the web beta as an export-only companion in documentation, not in launcher copy. Before the source controls, show only the manual-export sentence and the local-version autosave link in the shared modal-description treatment. Keep beta, non-confidential, local-file, remote-request, size, HTTPS, CORS, and reload-recovery qualifications in public documentation or actionable failure messages rather than persistent modal text.
   4. Add an operator checklist for clearance evidence, the expected project origin/base, the no-new-license assumption, third-party notices, Pages source selection, environment protection, enablement variable, candidate provenance, first Safari smoke, payload-manifest evidence, README promotion, rollback, and first-release unpublish.
   5. Keep the README live link absent or clearly non-live until U7 passes; do not weaken the existing public-distribution gate.
 - **Patterns to follow:** `docs/privacy-and-recovery.md`, `docs/support.md`, and `test/acceptance/installed-hosts.md` for user-facing guarantees and evidence-oriented operational notes.
 - **Test scenarios:**
   - Copy review rejects claims that nothing leaves the computer, GitHub receives no data, a remote request is credential-free when its URL contains a token, CORS blocks request issuance, export sanitizes the source, a download is retained, or a review can recover after reload.
   - Documentation distinguishes advertised desktop support from mobile best effort and Playwright WebKit from real Safari qualification.
-  - The dormant state has no clickable public beta link; the promoted state names the standard project URL, labels it non-confidential, and links visible third-party notices and privacy details.
+  - The dormant state has no clickable public beta link; the promoted README and public documentation name the standard project URL, label it non-confidential, and link third-party notices and privacy details without requiring the launcher modal to repeat those qualifications.
   - The operator checklist identifies source and content identities, run and attempt, artifact ID, expected origin, terminal smoke classifications, rollback target, unpublish path, and exact next action without relying on retained Pages artifacts.
 - **Verification:** Documentation and UI use the same host-specific terms, the public-distribution rule remains intact, and the notice/link audit passes in dormant and promoted release states.
 
@@ -478,7 +482,7 @@ flowchart TB
 - **Patterns to follow:** The release gate in `docs/support.md` and the evidence format established by `docs/web-beta.md`.
 - **Test scenarios:**
   - Covers AE8. An absent clearance record, stale candidate, or failed scripted/manual smoke leaves the README unlinked and invokes the matching no-go, rollback, superseded, or unpublish path.
-  - Covers AE9. The first successful release serves the standard project URL with its non-confidential disclosure, passes frame/opener/service-worker checks, matches the expected source and payload identity in one complete operator-run scripted smoke, and completes the Safari local upload-export-reopen journey.
+  - Covers AE9. The first successful release serves the standard project URL with its non-confidential disclosure in public documentation and concise launcher copy, passes frame/opener/service-worker checks, matches the expected source and payload identity in one complete operator-run scripted smoke, and completes the Safari local upload-export-reopen journey.
   - The rollback runbook requires a new truthful rollback source identity whose payload-manifest digest matches the prior known-good release and whose complete smoke passes when rollback is actually needed; a benign prelaunch rollback deployment is not required.
   - A README-only promotion does not trigger a new application artifact deployment; if it does, the new revision must complete live verification before the link is considered promoted.
 - **Verification:** The repository contains the clearance record, the live manifest and workflow identify the source and payload cohort, one complete operator-run scripted live-smoke result and the real-Safari result are recorded, the rollback/unpublish path is actionable, and the README link resolves to the checked standard project URL.
@@ -509,11 +513,11 @@ flowchart TB
 
 ### Per-unit completion
 
-- U1 is done when every source, activation, assessment, deadline, lifecycle, cancellation, and writer failure returns a usable state and no unsupported PDF can enter authoring.
+- U1 is done when every source, activation, assessment, deadline, lifecycle, cancellation, and writer failure returns a usable state, no unsupported PDF can enter authoring, and the launcher retains only the concise manual-export/autosave note before its source controls.
 - U2 is done when the browser-safe backend reopens a reviewed PDF with exact editable ownership and no loss or duplication of navigation or foreign annotations.
 - U3 is done when the allowlisted artifact is project-path-safe, cache-safe, self-identifying, CSP-compatible, dependency-inventoried, notice-complete, and independently validatable.
 - U4 is done when the cheap affected-PR Chromium gate and the comprehensive release/local suite are distinct, and the latter passes exhaustive PDF coverage in conformance/Chromium plus representative essential behavior sequentially in Firefox and WebKit against one build.
-- U5 is done when user and operator documentation make only host-accurate claims and preserve the dormant activation gate.
+- U5 is done when user and operator documentation make only host-accurate claims, preserve the dormant activation gate, and carry detailed privacy/shared-origin qualifications without duplicating them in the launcher modal.
 - U6 is done when affected pull requests have one cancel-in-progress read-only Chromium job and a manual trusted-`main` release can seal and deploy one provenance-complete candidate through two least-privilege jobs, one build, and sequential engine reuse while skipping deployment when disabled.
 - U7 is done only after external clearance, one-time project Pages configuration, freshness proof, one classified operator-run scripted live smoke, real-Safari live evidence, and README promotion.
 
