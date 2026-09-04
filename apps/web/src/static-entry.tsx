@@ -140,18 +140,9 @@ export function StaticLauncher(props: {
       onDragOver={(event) => event.preventDefault()}
       onDrop={onDrop}
     >
-      <div className="static-launcher__mark" aria-hidden="true">P</div>
-      <p className="static-launcher__eyebrow">Placekeeper web beta</p>
-      <h1>Try Placekeeper on one PDF</h1>
-      <p className="static-launcher__lede">
-        This browser beta is a lightweight companion and tryout for the full Placekeeper app.
-      </p>
-      <div className="static-launcher__disclosure" aria-label="Privacy and saving limits">
-        <strong>Non-confidential, export-only beta</strong>
-        <p>Local PDFs remain in this tab. A PDF URL is requested directly from its host, which receives the URL and request details.</p>
-        <p>There is no autosave or reload recovery. Exporting a reviewed PDF is the only way to keep your annotations.</p>
-        <p>This GitHub Pages project shares its browser origin with other pages, so do not use it for confidential documents.</p>
-        <p><a href="./privacy.html" target="_blank" rel="noreferrer noopener">Privacy and durability details</a> · <a href="./third-party-notices.html" target="_blank" rel="noreferrer noopener">Third-party notices</a></p>
+      <div className="static-launcher__brand">
+        <div className="static-launcher__mark" aria-hidden="true">P</div>
+        <h1>Placekeeper</h1>
       </div>
       <input
         ref={inputRef}
@@ -168,14 +159,13 @@ export function StaticLauncher(props: {
         className="static-launcher__button"
         disabled={pending}
         onClick={() => inputRef.current?.click()}
-      >Choose a PDF</button>
-      <p className="static-launcher__drop">or drop exactly one PDF here · 64 MB maximum</p>
+      >Upload PDF</button>
       <div className="static-launcher__separator"><span>or</span></div>
       <form className="static-launcher__url" onSubmit={(event) => {
         event.preventDefault();
         void open(remoteUrl.trim(), "url");
       }}>
-        <label htmlFor={`${inputId}-url`}>Public HTTPS PDF URL</label>
+        <label htmlFor={`${inputId}-url`}>PDF URL</label>
         <div>
           <input
             ref={urlInputRef}
@@ -190,8 +180,14 @@ export function StaticLauncher(props: {
           />
           <button type="submit" disabled={pending || remoteUrl.trim() === ""}>Open URL</button>
         </div>
-        <p>The host must allow direct cross-origin browser access (CORS). Redirects are not followed.</p>
       </form>
+      <p className="static-launcher__durability">
+        Annotations must be exported manually in this browser version. For autosave, <a
+          href="https://github.com/brad-ross/placekeeper#install"
+          target="_blank"
+          rel="noreferrer noopener"
+        >download the local version</a>.
+      </p>
       {pending ? <div className="static-launcher__progress">
         <p role="status" aria-live="polite">{OPENING_STATUS[phase]}</p>
         <button type="button" onClick={() => operationRef.current?.abort()}>Cancel</button>

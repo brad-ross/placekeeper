@@ -118,7 +118,7 @@ describe("static browser startup guards", () => {
 
     expect(renderedText(root)).toContain("Placekeeper did not start");
     expect(renderedText(root)).toContain(message);
-    expect(renderedText(root)).not.toContain("Choose a PDF");
+    expect(renderedText(root)).not.toContain("Upload PDF");
     expect(createRoot).not.toHaveBeenCalled();
   });
 });

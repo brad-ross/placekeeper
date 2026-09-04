@@ -28,7 +28,7 @@ test("exhaustive profile opens a controlled HTTPS+CORS PDF without credentials o
   });
 
   await page.goto("./");
-  await page.getByLabel("Public HTTPS PDF URL").fill(remotePdf);
+  await page.getByLabel("PDF URL").fill(remotePdf);
   await page.getByRole("button", { name: "Open URL" }).click();
   await expect(page.locator("[data-production-review]")).toHaveAttribute("data-launch-surface", "static");
   await expect(page.locator("[data-page-index='0'] > img").first()).toBeVisible();
@@ -57,7 +57,7 @@ test("@representative redacts a failed remote URL and restores keyboard focus fo
   await page.route("https://pdf.example.invalid/**", (route) => route.abort("failed"));
 
   await page.goto("./");
-  const input = page.getByLabel("Public HTTPS PDF URL");
+  const input = page.getByLabel("PDF URL");
   await input.fill(failingUrl);
   await page.getByRole("button", { name: "Open URL" }).click();
   await expect(page.getByRole("alert")).toContainText(/CORS|network request/u);
@@ -78,7 +78,7 @@ test("exhaustive profile rejects private targets and redirects before a secondar
     return route.abort();
   });
   await page.goto("./");
-  const input = page.getByLabel("Public HTTPS PDF URL");
+  const input = page.getByLabel("PDF URL");
   await input.fill("https://10.0.0.1/private.pdf");
   await page.getByRole("button", { name: "Open URL" }).click();
   await expect(page.getByRole("alert")).toContainText("public PDF URL");
@@ -103,7 +103,7 @@ test("exhaustive profile cancels a remote open without a late activation", async
   });
 
   await page.goto("./");
-  const input = page.getByLabel("Public HTTPS PDF URL");
+  const input = page.getByLabel("PDF URL");
   await input.fill("https://pdf.example.invalid/slow.pdf");
   await page.getByRole("button", { name: "Open URL" }).click();
   await expect(page.getByRole("status")).toContainText("Reading the PDF");
@@ -111,5 +111,5 @@ test("exhaustive profile cancels a remote open without a late activation", async
   releaseResponse?.();
   await expect(input).toBeFocused();
   await expect(page.locator("[data-production-review]")).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Try Placekeeper on one PDF" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Placekeeper" })).toBeVisible();
 });

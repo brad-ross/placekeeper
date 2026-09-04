@@ -76,16 +76,20 @@ describe("static browser review runtime", () => {
     runtime.dispose();
   });
 
-  it("discloses the non-confidential, direct-request, export-only boundary before source controls", () => {
+  it("keeps the launcher focused on opening a PDF and the manual-export boundary", () => {
     const markup = renderToStaticMarkup(createElement(StaticLauncher, {
       onOpen: async () => undefined,
     }));
-    expect(markup).toContain("Non-confidential, export-only beta");
-    expect(markup).toContain("Local PDFs remain in this tab");
-    expect(markup).toContain("requested directly from its host");
-    expect(markup).toContain("There is no autosave or reload recovery");
-    expect(markup.indexOf("Non-confidential, export-only beta"))
-      .toBeLessThan(markup.indexOf("Choose a PDF"));
+    expect(markup).toContain("Upload PDF");
+    expect(markup).toContain("PDF URL");
+    expect(markup).toContain("Annotations must be exported manually in this browser version");
+    expect(markup).toContain("For autosave,");
+    expect(markup).toContain("download the local version");
+    expect(markup).not.toContain("beta");
+    expect(markup).not.toContain("non-confidential");
+    expect(markup).not.toContain("64 MB maximum");
+    expect(markup).not.toContain("CORS");
+    expect(markup.indexOf("Upload PDF")).toBeLessThan(markup.indexOf("PDF URL"));
   });
 
   it("opens a user-selected PDF as an export-only in-memory review", async () => {

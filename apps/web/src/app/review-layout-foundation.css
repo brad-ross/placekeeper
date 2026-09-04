@@ -1,4 +1,4 @@
-:is(#root[data-production-root="true"], .terminal-recovery, .top-bar-menu__surface) {
+:is(#root[data-production-root="true"], .terminal-recovery, .top-bar-menu__surface, .static-launcher) {
   --review-ink-primary: #181a17;
   --review-ink-muted: #676a63;
   --review-ink-quiet: #8b8e87;

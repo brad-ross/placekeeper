@@ -142,10 +142,9 @@ test("@critical @representative keeps the local keyboard journey private and rou
   page.on("request", (request) => requests.push({ method: request.method(), url: request.url() }));
 
   await page.goto("./");
-  await expect(page.getByRole("heading", { name: "Try Placekeeper on one PDF" })).toBeVisible();
-  await expect(page.getByLabel("Privacy and saving limits")).toContainText("Non-confidential, export-only beta");
-  await expect(page.getByLabel("Privacy and saving limits")).toContainText("no autosave or reload recovery");
-  await focusByTab(page, page.getByRole("button", { name: "Choose a PDF" }));
+  await expect(page.getByRole("heading", { name: "Placekeeper" })).toBeVisible();
+  await expect(page.getByText("Annotations must be exported manually in this browser version")).toBeVisible();
+  await focusByTab(page, page.getByRole("button", { name: "Upload PDF" }));
 
   await page.locator("input[type=file]").setInputFiles(annotatedPdf);
   await waitForStaticPdf(page);
@@ -331,6 +330,6 @@ test("exhaustive profile rejects unsupported input, announces recovery, and rest
     buffer: Buffer.from("not a PDF"),
   });
   await expect(page.getByRole("alert")).toContainText("does not look like a PDF");
-  await expect(page.getByRole("button", { name: "Choose a PDF" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Upload PDF" })).toBeFocused();
   await expect(page.locator("[data-production-review]")).toHaveCount(0);
 });
