@@ -7,6 +7,7 @@ const remotePdf = "https://pdf.example.invalid/papers/public-paper.pdf";
 const sourceBytes = await readFile(resolve("test/fixtures/pdfs/text-native.pdf"));
 
 test("exhaustive profile opens a controlled HTTPS+CORS PDF without credentials or URL persistence", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   const appConsoleMessages: string[] = [];
   page.on("console", (message) => {
     if (message.location().url.startsWith(new URL(page.url()).origin)) {
@@ -28,8 +29,15 @@ test("exhaustive profile opens a controlled HTTPS+CORS PDF without credentials o
   });
 
   await page.goto("./");
+  const uploadButton = page.getByRole("button", { name: "Upload PDF" });
+  const openButton = page.getByRole("button", { name: "Open" });
+  await expect(uploadButton.locator(".lucide-upload")).toHaveCount(1);
+  await expect(openButton.locator(".lucide-link")).toHaveCount(1);
+  expect(await page.locator(".static-launcher__card").evaluate((card) => (
+    card.scrollWidth <= card.clientWidth
+  ))).toBe(true);
   await page.getByLabel("PDF URL").fill(remotePdf);
-  await page.getByRole("button", { name: "Open URL" }).click();
+  await openButton.click();
   await expect(page.locator("[data-production-review]")).toHaveAttribute("data-launch-surface", "static");
   await expect(page.locator("[data-page-index='0'] > img").first()).toBeVisible();
   expect(requestHeaders?.cookie).toBeUndefined();
@@ -59,7 +67,7 @@ test("@representative redacts a failed remote URL and restores keyboard focus fo
   await page.goto("./");
   const input = page.getByLabel("PDF URL");
   await input.fill(failingUrl);
-  await page.getByRole("button", { name: "Open URL" }).click();
+  await page.getByRole("button", { name: "Open" }).click();
   await expect(page.getByRole("alert")).toContainText(/CORS|network request/u);
   await expect(input).toBeFocused();
   await expect(input).toHaveValue("");
@@ -80,7 +88,7 @@ test("exhaustive profile rejects private targets and redirects before a secondar
   await page.goto("./");
   const input = page.getByLabel("PDF URL");
   await input.fill("https://10.0.0.1/private.pdf");
-  await page.getByRole("button", { name: "Open URL" }).click();
+  await page.getByRole("button", { name: "Open" }).click();
   await expect(page.getByRole("alert")).toContainText("public PDF URL");
   expect(privateRequests).toBe(0);
 
@@ -89,7 +97,7 @@ test("exhaustive profile rejects private targets and redirects before a secondar
     headers: { location: "https://10.0.0.1/redirected.pdf" },
   }));
   await input.fill("https://pdf.example.invalid/redirect.pdf");
-  await page.getByRole("button", { name: "Open URL" }).click();
+  await page.getByRole("button", { name: "Open" }).click();
   await expect(page.getByRole("alert")).toContainText(/redirect|CORS|network request/u);
   expect(privateRequests).toBe(0);
 });
@@ -105,7 +113,7 @@ test("exhaustive profile cancels a remote open without a late activation", async
   await page.goto("./");
   const input = page.getByLabel("PDF URL");
   await input.fill("https://pdf.example.invalid/slow.pdf");
-  await page.getByRole("button", { name: "Open URL" }).click();
+  await page.getByRole("button", { name: "Open" }).click();
   await expect(page.getByRole("status")).toContainText("Reading the PDF");
   await page.getByRole("button", { name: "Cancel" }).click();
   releaseResponse?.();

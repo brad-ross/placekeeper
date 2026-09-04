@@ -8,6 +8,7 @@ import {
   readStaticPdfUrl,
 } from "./host/static-runtime.js";
 import { startRuntime } from "./production-entry.js";
+import { ReviewIcon } from "./review/ReviewIcon.js";
 import "./static-entry.css";
 
 // The static Vite plugin replaces these with content-addressed Rollup asset URLs.
@@ -159,18 +160,21 @@ export function StaticLauncher(props: {
         className="static-launcher__button"
         disabled={pending}
         onClick={() => inputRef.current?.click()}
-      >Upload PDF</button>
+      >
+        <ReviewIcon name="upload" size={14} />
+        Upload PDF
+      </button>
       <div className="static-launcher__separator"><span>or</span></div>
       <form className="static-launcher__url" onSubmit={(event) => {
         event.preventDefault();
         void open(remoteUrl.trim(), "url");
       }}>
-        <label htmlFor={`${inputId}-url`}>PDF URL</label>
         <div>
           <input
             ref={urlInputRef}
             id={`${inputId}-url`}
             type="url"
+            aria-label="PDF URL"
             inputMode="url"
             autoComplete="off"
             placeholder="https://example.org/paper.pdf"
@@ -178,7 +182,10 @@ export function StaticLauncher(props: {
             disabled={pending}
             onChange={(event) => setRemoteUrl(event.currentTarget.value)}
           />
-          <button type="submit" disabled={pending || remoteUrl.trim() === ""}>Open URL</button>
+          <button type="submit" disabled={pending || remoteUrl.trim() === ""}>
+            <ReviewIcon name="link" size={14} />
+            Open
+          </button>
         </div>
       </form>
       <p className="static-launcher__durability">

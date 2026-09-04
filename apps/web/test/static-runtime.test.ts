@@ -81,7 +81,12 @@ describe("static browser review runtime", () => {
       onOpen: async () => undefined,
     }));
     expect(markup).toContain("Upload PDF");
-    expect(markup).toContain("PDF URL");
+    expect(markup).toContain('aria-label="PDF URL"');
+    expect(markup).not.toContain(">PDF URL<");
+    expect(markup).toContain("lucide-upload");
+    expect(markup).toContain("lucide-link");
+    expect(markup).toContain(">Open</button>");
+    expect(markup).not.toContain("Open URL");
     expect(markup).toContain("Annotations must be exported manually in this browser version");
     expect(markup).toContain("For autosave,");
     expect(markup).toContain("download the local version");
@@ -89,7 +94,7 @@ describe("static browser review runtime", () => {
     expect(markup).not.toContain("non-confidential");
     expect(markup).not.toContain("64 MB maximum");
     expect(markup).not.toContain("CORS");
-    expect(markup.indexOf("Upload PDF")).toBeLessThan(markup.indexOf("PDF URL"));
+    expect(markup.indexOf("Upload PDF")).toBeLessThan(markup.indexOf('aria-label="PDF URL"'));
   });
 
   it("opens a user-selected PDF as an export-only in-memory review", async () => {
