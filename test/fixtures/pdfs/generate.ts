@@ -757,7 +757,12 @@ await Promise.all([
   writeFixture('multi-page-text.pdf', await multiPageTextPdf()),
   writeFixture('cross-page-selection.pdf', await crossPageSelectionPdf()),
   writeFixture('pdf-search.pdf', await pdfSearchPdf()),
-  writeFixture('rotation-0-crop.pdf', await textPdf({ rotation: 0, crop: true })),
+  writeFixture('rotation-0-crop.pdf', await textPdf({ rotation: 0, crop: true, annotations: true })),
+  // These fixtures back the intentionally small cross-engine release profile:
+  // cropped selectable text plus unrelated supported and unsupported marks,
+  // with rotated variants retained for the exhaustive corpus.
+  // Any Firefox/WebKit-only regression found with the exhaustive corpus must
+  // be reduced into this fixture/profile before returning to the small gate.
   writeFixture('rotation-90-crop.pdf', await textPdf({ rotation: 90, crop: true })),
   writeFixture('rotation-180-crop.pdf', await textPdf({ rotation: 180, crop: true })),
   writeFixture('rotation-270-crop.pdf', await textPdf({ rotation: 270, crop: true })),

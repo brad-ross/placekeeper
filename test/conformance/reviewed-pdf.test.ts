@@ -124,6 +124,27 @@ async function deliveryForFixture(name: string) {
 }
 
 describe("reviewed PDF conformance", () => {
+  it("rejects browser-owned-output evidence on the service verification path", async () => {
+    const bytes = new TextEncoder().encode("%PDF-1.7\n%%EOF");
+    const evidence: PdfStructuralEvidence = {
+      coverage: "owned-output",
+      backend: "embedpdf",
+      backendVersion: "2.14.4",
+      originalSha256: sha256(bytes),
+      outputSha256: sha256(bytes),
+      pageCount: 1,
+      structurallyValid: true,
+      annotations: [],
+    };
+
+    await expect(verifyReviewedPdf({
+      sourcePdf: bytes,
+      candidatePdf: bytes,
+      evidence,
+      annotations: [],
+    })).rejects.toThrow(/requires exhaustive preservation evidence/i);
+  });
+
   it("exports and verifies one complete cross-page portable group", async () => {
     const fixture = await deliveryForFixture("pdf-search.pdf");
     const pages = [0, 1, 2].map((pageIndex) => ({

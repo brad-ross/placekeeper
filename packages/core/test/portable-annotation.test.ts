@@ -10,6 +10,7 @@ import {
   createPortableAnnotationCustom,
   decodePortableAnnotationJson,
   inspectPortableAnnotation,
+  inspectPortableAnnotations,
   inspectProjectedPortableAnnotations,
   inspectProjectedPortableAnnotation,
   PORTABLE_ANNOTATION_MAX_BYTES,
@@ -117,6 +118,27 @@ describe("portable annotation codec", () => {
       status: "owned",
       items: [crossPage, legacyItem],
       ownedIndexes: [0, 1, 2],
+    });
+  });
+
+  it("uses page-local projection identity when a foreign annotation reuses an ID", () => {
+    const projected = projectReviewItem(item);
+    const foreignOnAnotherPage = {
+      custom: undefined,
+      visible: { ...visible, pageIndex: 1 },
+    };
+    expect(inspectProjectedPortableAnnotation(projected)).toMatchObject({ status: "owned" });
+    const inspection = inspectPortableAnnotations([
+      {
+        custom: projected.custom,
+        visible,
+      },
+      foreignOnAnotherPage,
+    ]);
+    expect(inspection).toMatchObject({
+      status: "owned",
+      items: [item],
+      ownedIndexes: [0],
     });
   });
 
@@ -366,6 +388,35 @@ describe("portable annotation codec", () => {
     expect(inspectPortableAnnotation(annotation.custom, {
       ...noteVisible,
       rect: { origin: { x: 60.2, y: 48 }, size: { width: 20, height: 20 } },
+    })).toMatchObject({ status: "invalid", reason: "projection-mismatch" });
+
+    const insertion: ReviewItem = {
+      ...item,
+      kind: "insert",
+      payload: {
+        position: { x: 149, y: 89, width: 2, height: 16 },
+        leftContext: "Selectable p",
+        rightContext: "lacekeeper text",
+        proposedText: "inserted text",
+        reliable: true,
+      },
+    };
+    const insertionAnnotation = projectReviewItem(insertion);
+    const normalizedInsertion = {
+      id: insertion.id,
+      pageIndex: 0,
+      subtype: "text",
+      contents: "inserted text",
+      author: "Placekeeper",
+      rect: { origin: { x: 149, y: 89 }, size: { width: 20, height: 20 } },
+    };
+    expect(inspectPortableAnnotation(insertionAnnotation.custom, normalizedInsertion)).toEqual({
+      status: "owned",
+      item: insertion,
+    });
+    expect(inspectPortableAnnotation(insertionAnnotation.custom, {
+      ...normalizedInsertion,
+      rect: { origin: { x: 149, y: 89 }, size: { width: 22.2, height: 20 } },
     })).toMatchObject({ status: "invalid", reason: "projection-mismatch" });
   });
 

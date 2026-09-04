@@ -14,6 +14,7 @@ import {
   type InspectedPdf,
   type InspectedPdfAnnotation,
 } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
+import { pdfAnnotationIdentity } from "../../../../packages/pdf-backends/src/embedpdf-annotation.js";
 
 export interface PdfVerificationInput {
   readonly sourcePdf: Uint8Array;
@@ -52,7 +53,7 @@ function fail(message: string): never {
 
 function portableInventory(inspection: InspectedPdf): {
   readonly items: readonly ReviewItem[];
-  readonly physicalIds: ReadonlySet<string>;
+  readonly physicalIdentities: ReadonlySet<string>;
 } {
   const result = inspectPortableAnnotations(inspection.annotations.map((annotation) => ({
     custom: annotation.custom,
@@ -61,14 +62,21 @@ function portableInventory(inspection: InspectedPdf): {
   if (result.status === "invalid") {
     fail(`The reviewed PDF contains an incomplete portable annotation group (${result.reason}).`);
   }
-  if (result.status === "foreign") return { items: [], physicalIds: new Set() };
+  if (result.status === "foreign") return { items: [], physicalIdentities: new Set() };
   return {
     items: result.items,
-    physicalIds: new Set(result.ownedCandidates.map(
-      ({ candidateIndex }) => inspection.annotations[candidateIndex]!.id,
+    physicalIdentities: new Set(result.ownedCandidates.map(
+      ({ candidateIndex }) => {
+        const annotation = inspection.annotations[candidateIndex]!;
+        return pdfAnnotationIdentity(annotation.pageIndex, annotation.id);
+      },
     )),
   };
 }
+
+const annotationIdentity = (
+  annotation: { readonly id: string; readonly pageIndex: number },
+): string => pdfAnnotationIdentity(annotation.pageIndex, annotation.id);
 
 function stableAnnotation(
   annotation: InspectedPdfAnnotation,
@@ -144,6 +152,9 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
   sourceInspection,
   candidateInspection,
 }) => {
+  if (evidence.coverage === "owned-output") {
+    fail("Service export requires exhaustive preservation evidence; browser-only evidence is insufficient.");
+  }
   const sourceDigest = sha256(sourcePdf);
   const outputDigest = sha256(candidatePdf);
   if (
@@ -168,13 +179,14 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
     fail("The reviewed PDF page content or geometry differs from the source.");
   }
 
-  const requestedIds = new Set(annotations.map(({ id }) => id));
-  if (requestedIds.size !== annotations.length) {
-    fail("The frozen review contains duplicate annotation IDs.");
+  const requestedIdentities = new Set(annotations.map(annotationIdentity));
+  if (requestedIdentities.size !== annotations.length) {
+    fail("The frozen review contains duplicate page-local annotation identities.");
   }
-  const sourceIds = new Set(source.annotations.map(({ id }) => id));
-  const sourceOwnedIds = sourcePortable.physicalIds;
-  if ([...requestedIds].some((id) => sourceIds.has(id) && !sourceOwnedIds.has(id))) {
+  const sourceIdentities = new Set(source.annotations.map(annotationIdentity));
+  const sourceOwnedIdentities = sourcePortable.physicalIdentities;
+  if ([...requestedIdentities].some((identity) =>
+    sourceIdentities.has(identity) && !sourceOwnedIdentities.has(identity))) {
     fail("A review annotation ID collides with a pre-existing annotation.");
   }
 
@@ -189,11 +201,11 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
   );
 
   const preservedInventory = candidate.annotations
-    .filter(({ id }) => !requestedIds.has(id))
+    .filter((annotation) => !requestedIdentities.has(annotationIdentity(annotation)))
     .map((annotation) => stableAnnotation(annotation, persistentIds))
     .sort();
   const sourceInventory = source.annotations
-    .filter(({ id }) => !sourceOwnedIds.has(id))
+    .filter((annotation) => !sourceOwnedIdentities.has(annotationIdentity(annotation)))
     .map((annotation) => stableAnnotation(annotation, persistentIds))
     .sort();
   if (JSON.stringify(preservedInventory) !== JSON.stringify(sourceInventory)) {
@@ -226,14 +238,15 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
     fail("The reviewed PDF portable annotation payload differs from the frozen review.");
   }
 
-  const candidateById = new Map<string, InspectedPdfAnnotation[]>();
+  const candidateByIdentity = new Map<string, InspectedPdfAnnotation[]>();
   for (const annotation of candidate.annotations) {
-    const matches = candidateById.get(annotation.id);
-    if (matches === undefined) candidateById.set(annotation.id, [annotation]);
+    const identity = annotationIdentity(annotation);
+    const matches = candidateByIdentity.get(identity);
+    if (matches === undefined) candidateByIdentity.set(identity, [annotation]);
     else matches.push(annotation);
   }
   for (const requested of annotations) {
-    const matches = candidateById.get(requested.id) ?? [];
+    const matches = candidateByIdentity.get(annotationIdentity(requested)) ?? [];
     const written = matches[0];
     if (
       matches.length !== 1 ||

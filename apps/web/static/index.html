@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; connect-src 'self' blob: https:; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Review a local PDF and export an annotated copy without uploading it." />
+    <title>Placekeeper — Local PDF review</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>Placekeeper requires JavaScript. This public beta is for non-confidential PDFs and does not autosave.</noscript>
+    <script type="module" src="../src/static-entry.tsx"></script>
+  </body>
+</html>

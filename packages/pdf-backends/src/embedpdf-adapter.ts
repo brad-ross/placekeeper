@@ -3,16 +3,10 @@ import { isAbsolute } from 'node:path';
 
 import { PdfiumNative } from '@embedpdf/engines/pdfium';
 import {
-  PdfAnnotationName,
-  PdfAnnotationSubtype,
   PdfPermissionFlag,
   Rotation,
-  type PdfAnnotationFlagName,
   type PdfAnnotationObject,
   type PdfDocumentObject,
-  type PdfHighlightAnnoObject,
-  type PdfStrikeOutAnnoObject,
-  type PdfTextAnnoObject,
   type Rect,
 } from '@embedpdf/models';
 import { init } from '@embedpdf/pdfium';
@@ -27,15 +21,22 @@ import type {
 } from '../../core/src/pdf-writer.js';
 import {
   inspectPortableAnnotation,
-  inspectPortableAnnotations,
   inspectProjectedPortableAnnotations,
-  type VisiblePortableAnnotation,
 } from '../../core/src/portable-annotation.js';
 import type { JsonValue, ReviewItem, ReviewState } from '../../core/src/review-model.js';
 import {
   PdfWriterError,
   SEMANTIC_MARKUP_KINDS,
 } from '../../core/src/pdf-writer.js';
+import {
+  annotationPreservationSignature,
+  canonicalEmbedPdfValue as canonical,
+  embedPdfSubtypeName,
+  mapReviewAnnotationToEmbedPdf,
+  pdfAnnotationIdentity,
+  pdfRewriteMarkers,
+  portableItemsFromAnnotationPages,
+} from './embedpdf-annotation.js';
 
 const EMBEDPDF_VERSION = '2.14.4';
 const NORMAL_APPEARANCE = 1;
@@ -68,119 +69,18 @@ export interface InspectedPdfAnnotationCatalog {
   portableItems: ReviewItem[];
 }
 
-type SupportedOutputAnnotation =
-  | PdfStrikeOutAnnoObject
-  | PdfHighlightAnnoObject
-  | PdfTextAnnoObject;
-
 function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
-}
-
-function canonical(value: unknown): unknown {
-  if (value instanceof Date) return value.toISOString();
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .filter(([, entry]) => entry !== undefined)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, entry]) => [key, canonical(entry)]),
-    );
-  }
-  return value;
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.slice().buffer;
 }
 
-function toEngineRect(rect: ReviewAnnotation['rect']): Rect {
-  return {
-    origin: { x: rect.x, y: rect.y },
-    size: { width: rect.width, height: rect.height },
-  };
-}
-
-function subtypeName(type: PdfAnnotationSubtype): string {
-  switch (type) {
-    case PdfAnnotationSubtype.STRIKEOUT:
-      return 'strikeOut';
-    case PdfAnnotationSubtype.FREETEXT:
-      return 'freeText';
-    case PdfAnnotationSubtype.FILEATTACHMENT:
-      return 'fileAttachment';
-    default:
-      return PdfAnnotationSubtype[type]?.toLowerCase() ?? 'unknown';
-  }
-}
-
-function common(annotation: ReviewAnnotation, type: PdfAnnotationSubtype) {
-  return {
-    id: annotation.id,
-    type,
-    pageIndex: annotation.pageIndex,
-    rect: toEngineRect(annotation.rect),
-    contents: annotation.contents,
-    author: annotation.author,
-    created: new Date(annotation.createdAt),
-    modified: new Date(annotation.modifiedAt),
-    flags: ['print'] as PdfAnnotationFlagName[],
-    ...(annotation.custom === undefined ? {} : { custom: annotation.custom }),
-  };
-}
-
-function mapAnnotation(annotation: ReviewAnnotation): SupportedOutputAnnotation {
-  const segmentRects = annotation.quadPoints?.map(toEngineRect) ?? [toEngineRect(annotation.rect)];
-  switch (annotation.kind) {
-    case 'replace':
-    case 'delete':
-      return {
-        ...common(annotation, PdfAnnotationSubtype.STRIKEOUT),
-        type: PdfAnnotationSubtype.STRIKEOUT,
-        strokeColor: '#d32f2f',
-        opacity: 1,
-        segmentRects,
-      };
-    case 'insert':
-      return {
-        ...common(annotation, PdfAnnotationSubtype.TEXT),
-        type: PdfAnnotationSubtype.TEXT,
-        strokeColor: '#1565c0',
-        opacity: 1,
-        name: PdfAnnotationName.Insert,
-      };
-    case 'highlight':
-      return {
-        ...common(annotation, PdfAnnotationSubtype.HIGHLIGHT),
-        type: PdfAnnotationSubtype.HIGHLIGHT,
-        strokeColor: '#ffd54f',
-        opacity: 0.45,
-        segmentRects,
-      };
-    case 'pageNote':
-      return {
-        ...common(annotation, PdfAnnotationSubtype.TEXT),
-        type: PdfAnnotationSubtype.TEXT,
-        strokeColor: '#ffc107',
-        opacity: 1,
-        name: PdfAnnotationName.Note,
-      };
-  }
-}
-
-function rawMarkers(bytes: Uint8Array): { encrypted: boolean; docMdp: boolean } {
-  const raw = new TextDecoder('latin1').decode(bytes);
-  return {
-    encrypted: raw.includes('/Encrypt'),
-    docMdp: raw.includes('/DocMDP'),
-  };
-}
-
 export async function assessPdfRewriteEligibility(
   bytes: Uint8Array,
 ): Promise<PdfRewriteEligibility> {
-  const markers = rawMarkers(bytes);
+  const markers = pdfRewriteMarkers(bytes);
   if (markers.encrypted) {
     return { eligible: false, code: 'encrypted', message: 'This encrypted PDF cannot be annotated safely.' };
   }
@@ -255,7 +155,7 @@ function inspectAnnotations(
     return {
       id: annotation.id,
       pageIndex,
-      subtype: subtypeName(annotation.type),
+      subtype: embedPdfSubtypeName(annotation.type),
       contents: annotation.contents ?? '',
       ...(annotation.author === undefined ? {} : { author: annotation.author }),
       flags: annotation.flags ?? [],
@@ -268,31 +168,10 @@ function inspectAnnotations(
       // not part of the PDF dictionary and must not make preservation checks
       // nondeterministic. The writer still verifies persistent IDs separately.
       preservationFingerprint: createHash('sha256')
-        .update(JSON.stringify(canonical(
-          Object.fromEntries(Object.entries(annotation).filter(([key]) => key !== 'id')),
-        )))
+        .update(annotationPreservationSignature(annotation, pageIndex))
         .digest('hex'),
     };
   });
-}
-
-function visibleAnnotation(
-  annotation: PdfAnnotationObject,
-  pageIndex: number,
-): VisiblePortableAnnotation {
-  const segmentRects =
-    'segmentRects' in annotation && Array.isArray(annotation.segmentRects)
-      ? annotation.segmentRects
-      : undefined;
-  return {
-    id: annotation.id,
-    pageIndex,
-    subtype: subtypeName(annotation.type),
-    contents: annotation.contents ?? '',
-    ...(annotation.author === undefined ? {} : { author: annotation.author }),
-    rect: annotation.rect,
-    ...(segmentRects === undefined ? {} : { segmentRects }),
-  };
 }
 
 function translateLegacyRect(value: JsonValue | undefined, left: number, top: number): JsonValue | undefined {
@@ -353,33 +232,6 @@ function migrateLegacyStateWithPages(
   };
 }
 
-function portableItemsFromPages(
-  annotationPages: readonly (readonly PdfAnnotationObject[])[],
-): {
-  items: ReviewItem[];
-  owned: Array<{ pageIndex: number; annotation: PdfAnnotationObject; item: ReviewItem }>;
-} {
-  const flattened = annotationPages.flatMap((annotations, pageIndex) =>
-    annotations.map((annotation) => ({ pageIndex, annotation })),
-  );
-  const inspected = inspectPortableAnnotations(flattened.map(({ pageIndex, annotation }) => ({
-    custom: annotation.custom,
-    visible: visibleAnnotation(annotation, pageIndex),
-  })));
-  if (inspected.status === 'invalid') {
-    throw new PdfWriterError(
-      'invalid-portable-annotation',
-      `Placekeeper portable annotation metadata is incomplete or inconsistent (${inspected.reason}).`,
-    );
-  }
-  if (inspected.status === 'foreign') return { items: [], owned: [] };
-  const owned = inspected.ownedCandidates.map(({ candidateIndex, item }) => ({
-    ...flattened[candidateIndex]!,
-    item,
-  }));
-  return { items: [...inspected.items], owned };
-}
-
 export async function readPortableReviewItems(bytes: Uint8Array): Promise<ReviewItem[]> {
   const engine = await newEngine();
   try {
@@ -390,7 +242,7 @@ export async function readPortableReviewItems(bytes: Uint8Array): Promise<Review
       const pages = await Promise.all(
         document.pages.map((page) => engine.getPageAnnotations(document, page).toPromise()),
       );
-      return portableItemsFromPages(pages).items;
+      return [...portableItemsFromAnnotationPages(pages).items];
     } finally {
       await engine.closeDocument(document).toPromise();
     }
@@ -468,7 +320,7 @@ async function inspectWithEngine(engine: PdfiumNative, bytes: Uint8Array): Promi
     const annotations = pages.flatMap((pageAnnotations, pageIndex) =>
       inspectAnnotations(pageAnnotations, pageIndex),
     );
-    const portableItems = portableItemsFromPages(pages).items;
+    const portableItems = [...portableItemsFromAnnotationPages(pages).items];
     return {
       pageCount: document.pageCount,
       pageFingerprints,
@@ -514,7 +366,7 @@ export async function inspectPdfAnnotationCatalogWithEmbedPdf(
       pageCount: document.pageCount,
       annotations: pages.flatMap((annotations, pageIndex) =>
         inspectAnnotations(annotations, pageIndex)),
-      portableItems: portableItemsFromPages(pages).items,
+      portableItems: [...portableItemsFromAnnotationPages(pages).items],
     };
   } catch (error) {
     if (error instanceof PdfWriterError) throw error;
@@ -572,8 +424,13 @@ function assertPreexistingPreserved(
   before: readonly InspectedPdfAnnotation[],
   after: readonly InspectedPdfAnnotation[],
 ): void {
+  const reopenedByIdentity = new Map<string, InspectedPdfAnnotation>();
+  for (const annotation of after) {
+    const identity = pdfAnnotationIdentity(annotation.pageIndex, annotation.id);
+    if (!reopenedByIdentity.has(identity)) reopenedByIdentity.set(identity, annotation);
+  }
   for (const annotation of before) {
-    const reopened = after.find(({ id }) => id === annotation.id);
+    const reopened = reopenedByIdentity.get(pdfAnnotationIdentity(annotation.pageIndex, annotation.id));
     const stableBefore = JSON.stringify(annotation);
     const stableAfter = reopened && JSON.stringify(reopened);
     if (!reopened || stableAfter !== stableBefore) {
@@ -587,7 +444,7 @@ function assertPreexistingPreserved(
 
 async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResult> {
   assertSemanticGeometry(request.annotations);
-  const markers = rawMarkers(request.sourcePdf);
+  const markers = pdfRewriteMarkers(request.sourcePdf);
   if (markers.encrypted) {
     throw new PdfWriterError('encrypted', 'Encrypted PDF annotation is unavailable in v1.');
   }
@@ -641,9 +498,11 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
     const preexisting = beforePages.flatMap((pageAnnotations, pageIndex) =>
       inspectAnnotations(pageAnnotations, pageIndex),
     );
-    const portable = portableItemsFromPages(beforePages);
-    const ownedIds = new Set(portable.owned.map(({ annotation }) => annotation.id));
-    const foreignPreexisting = preexisting.filter(({ id }) => !ownedIds.has(id));
+    const portable = portableItemsFromAnnotationPages(beforePages);
+    const ownedIdentities = new Set(portable.owned.map(({ pageIndex, annotation }) =>
+      pdfAnnotationIdentity(pageIndex, annotation.id)));
+    const foreignPreexisting = preexisting.filter(({ id, pageIndex }) =>
+      !ownedIdentities.has(pdfAnnotationIdentity(pageIndex, id)));
     const requestedPortable = inspectProjectedPortableAnnotations(request.annotations);
     if (requestedPortable.status === 'invalid') {
       throw new PdfWriterError(
@@ -666,24 +525,29 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
           !requestedPortableIndexes.has(index)
         ) return [];
         const item = requestedItemById.get(annotation.reviewItemId ?? annotation.id);
-        return item === undefined ? [] : [[annotation.id, item] as const];
+        return item === undefined ? [] : [[
+          pdfAnnotationIdentity(annotation.pageIndex, annotation.id), item,
+        ] as const];
       }),
     );
     const requestedCanonical = new Map(
-      [...requestedPortableItems].map(([id, item]) => [id, JSON.stringify(canonical(item))]),
+      [...requestedPortableItems].map(([identity, item]) => [
+        identity, JSON.stringify(canonical(item)),
+      ]),
     );
     const existingCanonical = new Map(
       portable.items.map((item) => [item.id, JSON.stringify(canonical(item))]),
     );
-    const preservedOwnedIds = new Set<string>();
+    const preservedOwnedIdentities = new Set<string>();
 
     for (const owned of portable.owned) {
-      const requested = requestedPortableItems.get(owned.annotation.id);
+      const identity = pdfAnnotationIdentity(owned.pageIndex, owned.annotation.id);
+      const requested = requestedPortableItems.get(identity);
       if (
         requested !== undefined &&
-        requestedCanonical.get(owned.annotation.id) === existingCanonical.get(owned.item.id)
+        requestedCanonical.get(identity) === existingCanonical.get(owned.item.id)
       ) {
-        preservedOwnedIds.add(owned.annotation.id);
+        preservedOwnedIdentities.add(identity);
         continue;
       }
       const page = document.pages[owned.pageIndex];
@@ -696,9 +560,13 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
     }
 
     for (const annotation of request.annotations) {
-      if (preservedOwnedIds.has(annotation.id)) continue;
+      if (preservedOwnedIdentities.has(pdfAnnotationIdentity(annotation.pageIndex, annotation.id))) continue;
       const page = document.pages[annotation.pageIndex]!;
-      await engine.createPageAnnotation(document, page, mapAnnotation(annotation)).toPromise();
+      await engine.createPageAnnotation(
+        document,
+        page,
+        mapReviewAnnotationToEmbedPdf(annotation),
+      ).toPromise();
     }
 
     const output = new Uint8Array(await engine.saveAsCopy(document).toPromise());
@@ -708,10 +576,13 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
     const reopened = await inspectWithEngine(engine, output);
     assertPreexistingPreserved([
       ...foreignPreexisting,
-      ...preexisting.filter(({ id }) => preservedOwnedIds.has(id)),
+      ...preexisting.filter(({ id, pageIndex }) =>
+        preservedOwnedIdentities.has(pdfAnnotationIdentity(pageIndex, id))),
     ], reopened.annotations);
-    const requestedIds = new Set(request.annotations.map(({ id }) => id));
-    const created = reopened.annotations.filter(({ id }) => requestedIds.has(id));
+    const requestedIdentities = new Set(request.annotations.map(({ id, pageIndex }) =>
+      pdfAnnotationIdentity(pageIndex, id)));
+    const created = reopened.annotations.filter(({ id, pageIndex }) =>
+      requestedIdentities.has(pdfAnnotationIdentity(pageIndex, id)));
     if (created.length !== request.annotations.length) {
       throw new PdfWriterError('backend-error', 'Not every requested annotation reopened.');
     }
@@ -744,6 +615,7 @@ async function writeWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWriteResu
     }
 
     const evidence: PdfStructuralEvidence = {
+      coverage: 'exhaustive-preservation',
       backend: 'embedpdf',
       backendVersion: EMBEDPDF_VERSION,
       originalSha256: request.sourceSha256,

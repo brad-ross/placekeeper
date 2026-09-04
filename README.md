@@ -16,6 +16,12 @@ The installer uses a checksum-pinned local Node toolchain, installs locked depen
 
 See [Install and uninstall](docs/installation.md) for first-launch, update, optional Codex/VS Code integration, and removal instructions. See [Privacy and recovery](docs/privacy-and-recovery.md) for local storage behavior.
 
+### Web beta (not yet published)
+
+A front-end-only web beta is implemented as a lightweight, export-only companion to the full Placekeeper app. It can open one local PDF or a compatible public HTTPS PDF, create and edit Review Items, export a reviewed copy, and restore Placekeeper-owned items as editable when that copy is uploaded again. It has no autosave or reload recovery: exporting is the only durability action. The project-site build is for non-confidential PDFs, and remote URL use discloses the complete URL and ordinary request metadata to the remote host.
+
+The public link is intentionally absent. Publication under the Placekeeper name remains blocked until the external clearance, protected deployment, live-origin smoke, and real-Safari qualification in the [web beta runbook](docs/web-beta.md) are complete. See [Privacy and recovery](docs/privacy-and-recovery.md#front-end-only-web-beta) and [Support and diagnostics](docs/support.md#web-beta) before testing a local build.
+
 ## Use
 
 After installation, select one local PDF in Finder and choose **Open With -> Placekeeper**. You can also open `~/Applications/Placekeeper.app` and choose a PDF. The app runs on numeric loopback, bundles its browser and PDF assets, performs no telemetry, and leaves the original PDF unchanged unless you explicitly choose the separately confirmed Replace Original action.

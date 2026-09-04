@@ -1,0 +1,212 @@
+name: Package and deploy static web
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: placekeeper-pages-publication
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  package:
+    name: Package comprehensively tested Pages artifact
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact_id }}
+      artifact_name: ${{ steps.identity.outputs.artifact_name }}
+      content_manifest_sha256: ${{ steps.identity.outputs.content_manifest_sha256 }}
+      source_sha: ${{ steps.identity.outputs.source_sha }}
+    steps:
+      - name: Check out trusted main source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Set up pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 11.16.0
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.14.0
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install release browsers
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - name: Generate PDF fixtures
+        run: pnpm fixtures:pdf
+      - name: Run static unit coverage
+        run: pnpm test:static:unit
+      - name: Run static PDF conformance coverage
+        run: pnpm test:static:conformance
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Build the Pages artifact once
+        run: pnpm build:static:pages
+      - name: Validate the built distribution
+        run: |
+          pnpm validate:static
+          pnpm test:static:distribution
+      - name: Seal the pre-browser artifact tree
+        run: find dist/static-web -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/static-web.before.sha256"
+      - name: Run exhaustive Chromium coverage
+        run: PLACEKEEPER_STATIC_ENGINE=chromium PLACEKEEPER_STATIC_PROFILE=exhaustive pnpm test:static:artifact
+      - name: Run representative Firefox coverage
+        run: PLACEKEEPER_STATIC_ENGINE=firefox PLACEKEEPER_STATIC_PROFILE=representative pnpm test:static:artifact
+      - name: Run representative WebKit coverage
+        run: PLACEKEEPER_STATIC_ENGINE=webkit PLACEKEEPER_STATIC_PROFILE=representative pnpm test:static:artifact
+      - name: Prove browser coverage did not mutate the artifact
+        run: |
+          find dist/static-web -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/static-web.after.sha256"
+          diff --unified "$RUNNER_TEMP/static-web.before.sha256" "$RUNNER_TEMP/static-web.after.sha256"
+          pnpm validate:static
+      - name: Record sealed artifact identity
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_name="placekeeper-pages-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          content_digest="$(sha256sum dist/static-web/content-manifest.json | cut -d ' ' -f 1)"
+          test "$GITHUB_SHA" = "$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("dist/static-web/version.json", "utf8")).sourceSha)')"
+          test "$content_digest" = "$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("dist/static-web/version.json", "utf8")).contentManifestSha256)')"
+          printf 'artifact_name=%s\n' "$artifact_name" >> "$GITHUB_OUTPUT"
+          printf 'content_manifest_sha256=%s\n' "$content_digest" >> "$GITHUB_OUTPUT"
+          printf 'source_sha=%s\n' "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+      - name: Upload the one Pages artifact
+        id: upload
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
+        with:
+          name: ${{ steps.identity.outputs.artifact_name }}
+          path: dist/static-web
+          retention-days: 1
+      - name: Record package evidence
+        if: always() && steps.upload.outcome == 'success'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact_id }}
+          ARTIFACT_NAME: ${{ steps.identity.outputs.artifact_name }}
+          CONTENT_DIGEST: ${{ steps.identity.outputs.content_manifest_sha256 }}
+          PUBLICATION_GATE: ${{ vars.PLACEKEEPER_PAGES_PUBLICATION }}
+          SOURCE_SHA: ${{ steps.identity.outputs.source_sha }}
+        with:
+          script: |
+            const gate = process.env.PUBLICATION_GATE === 'enabled' ? 'enabled' : 'dormant';
+            await core.summary
+              .addHeading('Static Pages package evidence')
+              .addTable([
+                [{data: 'Field', header: true}, {data: 'Value', header: true}],
+                ['Actor', context.actor],
+                ['Publication gate', gate],
+                ['Source SHA', process.env.SOURCE_SHA],
+                ['Run / attempt', `${context.runId} / ${process.env.GITHUB_RUN_ATTEMPT}`],
+                ['Artifact name', process.env.ARTIFACT_NAME],
+                ['Artifact ID', process.env.ARTIFACT_ID],
+                ['content-manifest.json SHA-256', process.env.CONTENT_DIGEST],
+                ['Environment result', gate === 'enabled' ? 'pending protected-environment approval' : 'not requested'],
+                ['Deployment result', gate === 'enabled' ? 'pending' : 'skipped (publication dormant)'],
+                ['page_url', 'not available before deployment'],
+              ])
+              .write();
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: static-pages-package-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-results/static-web/
+            playwright-report/static-web/
+          if-no-files-found: ignore
+          retention-days: 3
+
+  deploy:
+    name: Deploy protected same-run artifact
+    needs: package
+    if: needs.package.result == 'success' && github.ref == 'refs/heads/main' && vars.PLACEKEEPER_PAGES_PUBLICATION == 'enabled'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Read configured Pages target
+        id: pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+      - name: Recheck trusted main, target, and sealed artifact
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          ARTIFACT_ID: ${{ needs.package.outputs.artifact_id }}
+          ARTIFACT_NAME: ${{ needs.package.outputs.artifact_name }}
+          CONFIGURED_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          CONFIGURED_BASE_URL: ${{ steps.pages.outputs.base_url }}
+          CONFIGURED_ORIGIN: ${{ steps.pages.outputs.origin }}
+          CONTENT_DIGEST: ${{ needs.package.outputs.content_manifest_sha256 }}
+          PACKAGED_SOURCE_SHA: ${{ needs.package.outputs.source_sha }}
+          PUBLICATION_GATE: ${{ vars.PLACEKEEPER_PAGES_PUBLICATION }}
+        with:
+          script: |
+            const assert = (condition, message) => {
+              if (!condition) throw new Error(message);
+            };
+            const expectedArtifact = `placekeeper-pages-${context.runId}-${process.env.GITHUB_RUN_ATTEMPT}`;
+            assert(process.env.PUBLICATION_GATE === 'enabled', 'Publication gate is not the exact literal enabled.');
+            assert(context.eventName === 'workflow_dispatch' && context.ref === 'refs/heads/main', 'Only a manual trusted-main dispatch can deploy.');
+            assert(/^[0-9a-f]{40}$/.test(process.env.PACKAGED_SOURCE_SHA ?? ''), 'Packaged source identity is malformed.');
+            assert(/^[0-9a-f]{64}$/.test(process.env.CONTENT_DIGEST ?? ''), 'Payload-manifest digest is malformed.');
+            assert(/^[1-9][0-9]*$/.test(process.env.ARTIFACT_ID ?? ''), 'The official upload did not return a usable artifact ID.');
+            assert(process.env.ARTIFACT_NAME === expectedArtifact, 'Same-run artifact name does not match the sealed package output.');
+            assert(process.env.CONFIGURED_ORIGIN === 'https://brad-ross.github.io', 'Configured Pages origin is not the reviewed project origin.');
+            assert(process.env.CONFIGURED_BASE_PATH === '/placekeeper', 'Configured Pages base path is not /placekeeper/.');
+            assert(process.env.CONFIGURED_BASE_URL === 'https://brad-ross.github.io/placekeeper', 'Configured Pages base URL is not the reviewed project URL.');
+            const response = await github.rest.git.getRef({owner: context.repo.owner, repo: context.repo.repo, ref: 'heads/main'});
+            assert(
+              response.data.object.type === 'commit' && response.data.object.sha === process.env.PACKAGED_SOURCE_SHA,
+              'Packaged candidate is superseded by the current trusted main ref.',
+            );
+      - name: Deploy exact same-run Pages artifact
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+        with:
+          artifact_name: ${{ needs.package.outputs.artifact_name }}
+      - name: Record deployment evidence
+        if: always()
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          ARTIFACT_ID: ${{ needs.package.outputs.artifact_id }}
+          ARTIFACT_NAME: ${{ needs.package.outputs.artifact_name }}
+          CONTENT_DIGEST: ${{ needs.package.outputs.content_manifest_sha256 }}
+          DEPLOYMENT_OUTCOME: ${{ steps.deployment.outcome }}
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          SOURCE_SHA: ${{ needs.package.outputs.source_sha }}
+        with:
+          script: |
+            if (process.env.DEPLOYMENT_OUTCOME === 'success' && process.env.PAGE_URL !== 'https://brad-ross.github.io/placekeeper/') {
+              core.setFailed('Deployed page_url does not match the reviewed project URL.');
+            }
+            await core.summary
+              .addHeading('Static Pages deployment evidence')
+              .addTable([
+                [{data: 'Field', header: true}, {data: 'Value', header: true}],
+                ['Actor', context.actor],
+                ['Publication gate', 'enabled'],
+                ['Source SHA', process.env.SOURCE_SHA],
+                ['Run / attempt', `${context.runId} / ${process.env.GITHUB_RUN_ATTEMPT}`],
+                ['Artifact name', process.env.ARTIFACT_NAME],
+                ['Artifact ID', process.env.ARTIFACT_ID],
+                ['content-manifest.json SHA-256', process.env.CONTENT_DIGEST],
+                ['Environment result', 'approved and entered'],
+                ['Deployment result', process.env.DEPLOYMENT_OUTCOME || 'unknown'],
+                ['page_url', process.env.PAGE_URL || 'not returned'],
+              ])
+              .write();

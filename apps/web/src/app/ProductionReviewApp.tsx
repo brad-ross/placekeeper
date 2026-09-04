@@ -137,7 +137,9 @@ export interface ProductionScope {
   readonly sourceDisposition?: 'local' | 'remote-temporary';
   readonly sourceDisplayName?: string;
   readonly sourceRootPath?: string;
-  readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode' | 'chrome';
+  readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode' | 'chrome' | 'static';
+  /** Static hosting keeps review state only in this tab and offers explicit PDF export. */
+  readonly persistenceMode?: 'export-only';
   /** A restarted browser is awaiting task-scoped Codex reattachment. */
   readonly reconnectPending?: true;
   readonly codexContext?: LiveContextBindingStatus;
@@ -548,6 +550,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   // A restart successor begins as an ordinary browser view, then its next
   // task prompt promotes this same authenticated page to the Codex surface.
   const [scope, setScope] = useState(props.scope);
+  const exportOnly = scope.persistenceMode === 'export-only';
   const [metadataPageTitle, setMetadataPageTitle] = useState<PdfMetadataPageTitle | null>(null);
   const portableItemIdsRef = useRef(initiallyPortableItemIds(
     props.initialState,
@@ -1739,16 +1742,25 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       <ReviewShell
         state={state}
         documentTitle={scope.documentTitle}
-        savedLabel={state.workflow.mode === 'generated-output' ? 'Protected review state' : 'Saved'}
-        savePhase={state.workflow.mode === 'generated-output' ? 'clean' : saveStatus.sync.phase}
+        savedLabel={exportOnly
+          ? 'Export to keep your annotations'
+          : state.workflow.mode === 'generated-output' ? 'Protected review state' : 'Saved'}
+        savePhase={exportOnly
+          ? 'not-saved'
+          : state.workflow.mode === 'generated-output' ? 'clean' : saveStatus.sync.phase}
+        exportOnly={exportOnly}
         savePendingDestination={
           state.workflow.mode !== 'generated-output'
           && scope.sourceDisposition === 'remote-temporary'
           && saveStatus.destination.phase === 'none'
           && saveStatus.sync.phase === 'not-saved'
         }
-        saveOptionsOpen={state.workflow.mode === 'generated-output' ? false : destinationDialog !== null}
-        {...(state.workflow.mode === 'generated-output' ? {} : { onSaveOptions: () => openCopyDialog("menu") })}
+        saveOptionsOpen={state.workflow.mode === 'generated-output' || exportOnly
+          ? false
+          : destinationDialog !== null}
+        {...(state.workflow.mode === 'generated-output' || exportOnly
+          ? {}
+          : { onSaveOptions: () => openCopyDialog("menu") })}
         generationRefreshStatus={props.generationRefreshStatus ?? 'idle'}
         locationRestoreStatus={locationRestoreStatus}
         toolError={pdfCopyError ?? commandError}
@@ -2015,7 +2027,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             currentState,
             saveStatus,
             command,
-            scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local',
+            exportOnly
+              ? 'ephemeral'
+              : scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local',
           );
           if (gated.kind === "choose-destination") {
             openCopyDialog("first-annotation", {
@@ -2078,7 +2092,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       >
         {viewer}
       </ReviewShell>
-      <SaveDestinationDialog
+      {exportOnly ? null : <SaveDestinationDialog
         open={destinationDialog !== null}
         sourceDisposition={scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local'}
         protectedRecovery={
@@ -2246,7 +2260,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             setDestinationEstablishing(false);
           }
         }}
-      />
+      />}
     </main>
   );
 }

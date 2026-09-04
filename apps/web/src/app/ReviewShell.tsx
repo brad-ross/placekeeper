@@ -146,7 +146,10 @@ import {
 import {
   ReconciliationWorkspace,
 } from '../review/ReconciliationWorkspace.js';
-import { reviewExportPresentation } from '../review/DocumentActionsMenu.js';
+import {
+  reviewExportPresentation,
+  type ReviewExportResult,
+} from '../review/DocumentActionsMenu.js';
 import type { GenerationRefreshStatus, LocationRestoreStatus } from '../generation-status.js';
 import { reviewItemIsResolvedForGeneration } from '../../../../packages/core/src/annotation-projection.js';
 import './review-layout.css';
@@ -158,6 +161,7 @@ export interface ReviewShellProps {
   documentTitle?: string;
   savedLabel?: string;
   savePhase?: 'clean' | 'saving' | 'not-saved';
+  exportOnly?: boolean;
   savePendingDestination?: boolean;
   saveOptionsOpen?: boolean;
   onSaveOptions?(): void;
@@ -166,7 +170,7 @@ export interface ReviewShellProps {
   toolError?: string | null;
   onSelectionPageLimitExceeded?(): void;
   onCopySelection?(): void;
-  onExportReviewedCopy?(confirmPossiblyStale?: true): Promise<unknown>;
+  onExportReviewedCopy?(confirmPossiblyStale?: true): Promise<ReviewExportResult | void>;
   listOpen?: boolean;
   selectionUpdate: SelectionUpdate;
   pdfCopyOwner?: PdfCopyOwner;
@@ -551,13 +555,13 @@ export function ReviewShell(props: ReviewShellProps) {
     (mode): mode is RightWorkspaceMode => mode !== 'references',
   );
   const documentActionsPresentation = useMemo(() => (
-    props.state.workflow.mode === 'generated-output'
+    props.state.workflow.mode === 'generated-output' || props.exportOnly === true
       ? reviewExportPresentation({
           refreshStatus: props.generationRefreshStatus ?? 'idle',
           summary: createReviewStateSummary(props.state),
         })
       : undefined
-  ), [props.generationRefreshStatus, props.state]);
+  ), [props.exportOnly, props.generationRefreshStatus, props.state]);
   const requestedRightWorkspaceMode: RightWorkspaceMode = props.rightWorkspaceMode
     ?? (workspaceMode === 'references' ? 'outline' : workspaceMode);
   const rightWorkspaceMode: RightWorkspaceMode = visibleRightWorkspaceModes.includes(
