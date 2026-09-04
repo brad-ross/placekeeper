@@ -67,10 +67,32 @@ body,
 
 .static-launcher__lede {
   max-width: 440px;
-  margin: 18px 0 26px;
+  margin: 18px 0;
   color: #5d615b;
   font-size: 16px;
   line-height: 1.55;
+}
+
+.static-launcher__disclosure {
+  display: grid;
+  gap: 7px;
+  margin: 0 0 24px;
+  padding: 14px 15px;
+  border: 1px solid #d5c9a8;
+  border-radius: 9px;
+  color: #5d5645;
+  background: #fbf7e9;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.static-launcher__disclosure strong {
+  color: #4b4028;
+  font-size: 13px;
+}
+
+.static-launcher__disclosure p {
+  margin: 0;
 }
 
 .static-launcher__input {
@@ -201,20 +223,45 @@ body,
   line-height: 1.45;
 }
 
-.static-launcher__privacy {
-  display: grid;
-  gap: 4px;
-  margin-top: 26px;
-  padding-top: 20px;
-  border-top: 1px solid #d9dad5;
-  color: #6a6e67;
-  font-size: 12px;
-  line-height: 1.45;
+.static-launcher__progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #35483d;
+  background: #e8eee9;
+  font-size: 13px;
 }
 
-.static-launcher__privacy strong {
-  color: #353a35;
-  font-size: 13px;
+.static-launcher__progress p {
+  margin: 0;
+}
+
+.static-launcher__progress button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #7d8e82;
+  border-radius: 7px;
+  color: #26392e;
+  background: #f8faf8;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.static-review-root {
+  min-height: 100dvh;
+}
+
+.static-review-root--activating {
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 @media (max-width: 560px) {

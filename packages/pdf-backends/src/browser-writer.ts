@@ -14,7 +14,6 @@ import {
   type PdfStructuralEvidence,
   type PdfWriteRequest,
   type PdfWriteResult,
-  type PdfWriter,
   type ReviewAnnotation,
 } from '../../core/src/pdf-writer.js';
 import {
@@ -22,6 +21,7 @@ import {
   mapReviewAnnotationToEmbedPdf,
   pdfRewriteMarkers,
 } from './embedpdf-annotation.js';
+import type { DisposablePdfWriter } from './browser-document-session.js';
 
 const EMBEDPDF_VERSION = '2.14.4';
 const NORMAL_APPEARANCE = 1;
@@ -116,11 +116,30 @@ function unavailableFromMarkers(bytes: Uint8Array): PdfRewriteEligibility | unde
   return undefined;
 }
 
-export async function createBrowserEmbedPdfWriter(pdfiumWasm: string): Promise<PdfWriter> {
+export async function createBrowserEmbedPdfWriter(pdfiumWasm: string): Promise<DisposablePdfWriter> {
   const newEngine = () => createPdfiumEngine(pdfiumWasm, {
     encoderPoolSize: 1,
     fontFallback: null,
   });
+  const activeEngines = new Map<PdfEngine<Blob>, PdfDocumentObject | undefined>();
+  let disposed = false;
+
+  const openEngine = (): PdfEngine<Blob> => {
+    if (disposed) throw new PdfWriterError('cancelled', 'The browser PDF session is closed.');
+    const engine = newEngine();
+    activeEngines.set(engine, undefined);
+    return engine;
+  };
+  const trackDocument = (engine: PdfEngine<Blob>, document: PdfDocumentObject | undefined): void => {
+    if (activeEngines.has(engine)) activeEngines.set(engine, document);
+  };
+  const releaseEngine = async (
+    engine: PdfEngine<Blob>,
+    document?: PdfDocumentObject,
+  ): Promise<void> => {
+    activeEngines.delete(engine);
+    await closeEngine(engine, document);
+  };
 
   let cachedAssessment: {
     readonly digest: string;
@@ -130,13 +149,15 @@ export async function createBrowserEmbedPdfWriter(pdfiumWasm: string): Promise<P
   const assessUncached = async (bytes: Uint8Array): Promise<PdfRewriteEligibility> => {
     const markerFailure = unavailableFromMarkers(bytes);
     if (markerFailure !== undefined) return markerFailure;
-    const engine = newEngine();
+    const engine = openEngine();
     let document: PdfDocumentObject | undefined;
     try {
       document = await engine.openDocumentBuffer({
         id: crypto.randomUUID(),
         content: toArrayBuffer(bytes),
       }).toPromise();
+      trackDocument(engine, document);
+      if (disposed) throw new PdfWriterError('cancelled', 'The browser PDF session is closed.');
       if (document.isEncrypted) {
         return { eligible: false, code: 'encrypted', message: 'This encrypted PDF cannot be annotated safely.' };
       }
@@ -161,11 +182,12 @@ export async function createBrowserEmbedPdfWriter(pdfiumWasm: string): Promise<P
     } catch {
       return { eligible: false, code: 'invalid-pdf', message: 'This PDF cannot be rewritten safely.' };
     } finally {
-      await closeEngine(engine, document);
+      await releaseEngine(engine, document);
     }
   };
 
   const assess = async (bytes: Uint8Array): Promise<PdfRewriteEligibility> => {
+    if (disposed) throw new PdfWriterError('cancelled', 'The browser PDF session is closed.');
     const digest = await sha256(bytes);
     if (cachedAssessment?.digest === digest) return cachedAssessment.eligibility;
     const eligibility = await assessUncached(bytes);
@@ -174,6 +196,7 @@ export async function createBrowserEmbedPdfWriter(pdfiumWasm: string): Promise<P
   };
 
   const write = async (request: PdfWriteRequest): Promise<PdfWriteResult> => {
+    if (disposed) throw new PdfWriterError('cancelled', 'The browser PDF session is closed.');
     assertSemanticGeometry(request.annotations);
     const sourceDigest = await sha256(request.sourcePdf);
     if (sourceDigest !== request.sourceSha256) {
@@ -184,13 +207,15 @@ export async function createBrowserEmbedPdfWriter(pdfiumWasm: string): Promise<P
       : await assess(request.sourcePdf);
     if (!eligible.eligible) throw new PdfWriterError(eligible.code, eligible.message);
 
-    const engine = newEngine();
+    const engine = openEngine();
     let document: PdfDocumentObject | undefined;
     try {
       document = await engine.openDocumentBuffer({
         id: crypto.randomUUID(),
         content: toArrayBuffer(request.sourcePdf),
       }).toPromise();
+      trackDocument(engine, document);
+      if (disposed) throw new PdfWriterError('cancelled', 'The browser PDF session is closed.');
       for (const annotation of request.annotations) {
         const page = document.pages[annotation.pageIndex];
         if (page === undefined) {
@@ -212,12 +237,15 @@ export async function createBrowserEmbedPdfWriter(pdfiumWasm: string): Promise<P
       const output = new Uint8Array(await engine.saveAsCopy(document).toPromise());
       await engine.closeDocument(document).toPromise();
       document = undefined;
+      trackDocument(engine, undefined);
 
       const reopened = await engine.openDocumentBuffer({
         id: crypto.randomUUID(),
         content: toArrayBuffer(output),
       }).toPromise();
       document = reopened;
+      trackDocument(engine, document);
+      if (disposed) throw new PdfWriterError('cancelled', 'The browser PDF session is closed.');
       const reopenedPages = await annotationPages(engine, reopened);
       const reopenedAnnotations = reopenedPages.flatMap((annotations, pageIndex) => (
         annotations.map((annotation) => ({ annotation, pageIndex }))
@@ -273,9 +301,20 @@ export async function createBrowserEmbedPdfWriter(pdfiumWasm: string): Promise<P
         cause: error,
       });
     } finally {
-      await closeEngine(engine, document);
+      await releaseEngine(engine, document);
     }
   };
 
-  return { assess, write };
+  return {
+    assess,
+    write,
+    async dispose() {
+      if (disposed) return;
+      disposed = true;
+      cachedAssessment = undefined;
+      const engines = [...activeEngines.entries()];
+      activeEngines.clear();
+      await Promise.all(engines.map(([engine, document]) => closeEngine(engine, document)));
+    },
+  };
 }

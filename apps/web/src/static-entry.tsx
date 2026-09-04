@@ -3,38 +3,130 @@ import { createRoot } from "react-dom/client";
 
 import {
   createStaticHostRuntime,
+  isStaticOperationCancelled,
   readStaticPdfFile,
   readStaticPdfUrl,
 } from "./host/static-runtime.js";
 import { startRuntime } from "./production-entry.js";
 import "./static-entry.css";
 
-const pdfiumWasm = new URL("./pdfium.wasm", document.baseURI).href;
+const ACTIVATION_TIMEOUT_MS = 30_000;
 
-function StaticLauncher(props: { readonly onOpen: (source: File | string) => Promise<void> }) {
+type OpeningPhase = "idle" | "acquiring" | "assessing" | "activating";
+type SourceControl = "file" | "url";
+
+const OPENING_STATUS: Readonly<Record<Exclude<OpeningPhase, "idle">, string>> = {
+  acquiring: "Reading the PDF…",
+  assessing: "Checking whether this PDF can be safely annotated…",
+  activating: "Preparing the PDF viewer…",
+};
+
+function cancelledOpening(): DOMException {
+  return new DOMException("Opening was cancelled.", "AbortError");
+}
+
+function waitForActivation(
+  ready: Promise<void>,
+  signal: AbortSignal,
+  timeoutMs = ACTIVATION_TIMEOUT_MS,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (complete: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      complete();
+    };
+    const onAbort = () => finish(() => reject(cancelledOpening()));
+    timer = globalThis.setTimeout(() => finish(() => reject(new Error(
+      "The PDF viewer took too long to become ready. Try opening the PDF again.",
+    ))), timeoutMs);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    ready.then(
+      () => finish(resolve),
+      (error: unknown) => finish(() => reject(error)),
+    );
+  });
+}
+
+function droppedPdf(dataTransfer: DataTransfer): File {
+  const files = [...dataTransfer.files];
+  const containsDirectory = [...dataTransfer.items].some((item) => (
+    item.kind === "file" && item.webkitGetAsEntry?.()?.isDirectory === true
+  ));
+  if (containsDirectory || files.length !== 1) {
+    throw new Error("Drop exactly one PDF file, not a folder or multiple files.");
+  }
+  return files[0]!;
+}
+
+export function StaticLauncher(props: {
+  readonly onOpen: (
+    source: File | string,
+    options: {
+      readonly signal: AbortSignal;
+      readonly onPhase: (phase: Exclude<OpeningPhase, "idle">) => void;
+    },
+  ) => Promise<void>;
+}) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [pending, setPending] = useState(false);
+  const chooseButtonRef = useRef<HTMLButtonElement>(null);
+  const urlInputRef = useRef<HTMLInputElement>(null);
+  const operationRef = useRef<AbortController | undefined>(undefined);
+  const [phase, setPhase] = useState<OpeningPhase>("idle");
   const [error, setError] = useState<string>();
   const [remoteUrl, setRemoteUrl] = useState("");
-  const open = async (source: File | string | undefined) => {
+  const pending = phase !== "idle";
+
+  const restoreFocus = (control: SourceControl) => {
+    requestAnimationFrame(() => {
+      (control === "url" ? urlInputRef.current : chooseButtonRef.current)
+        ?.focus({ preventScroll: true });
+    });
+  };
+  const open = async (source: File | string | undefined, control: SourceControl) => {
     if (source === undefined || (typeof source === "string" && source.trim() === "") || pending) return;
-    setPending(true);
+    const controller = new AbortController();
+    operationRef.current = controller;
+    setPhase("acquiring");
     setError(undefined);
     try {
-      await props.onOpen(source);
+      await props.onOpen(source, {
+        signal: controller.signal,
+        onPhase: (nextPhase) => {
+          if (typeof source === "string" && nextPhase === "assessing") setRemoteUrl("");
+          setPhase(nextPhase);
+        },
+      });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "This PDF could not be opened.");
-      setPending(false);
+      if (!isStaticOperationCancelled(cause) && !(cause instanceof DOMException && cause.name === "AbortError")) {
+        setError(cause instanceof Error ? cause.message : "This PDF could not be opened.");
+      }
+      setPhase("idle");
+      restoreFocus(control);
+    } finally {
+      if (operationRef.current === controller) operationRef.current = undefined;
     }
   };
   const onChange = (event: ChangeEvent<HTMLInputElement>) => {
-    void open(event.currentTarget.files?.[0]);
+    const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
+    void open(file, "file");
   };
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    void open(event.dataTransfer.files[0]);
+    if (pending) return;
+    try {
+      void open(droppedPdf(event.dataTransfer), "file");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Drop exactly one PDF file.");
+      restoreFocus("file");
+    }
   };
 
   return <main className="static-launcher">
@@ -44,11 +136,17 @@ function StaticLauncher(props: { readonly onOpen: (source: File | string) => Pro
       onDrop={onDrop}
     >
       <div className="static-launcher__mark" aria-hidden="true">P</div>
-      <p className="static-launcher__eyebrow">Placekeeper for the web</p>
-      <h1>Review a PDF without uploading it</h1>
+      <p className="static-launcher__eyebrow">Placekeeper web beta</p>
+      <h1>Try Placekeeper on one PDF</h1>
       <p className="static-launcher__lede">
-        Your PDF and annotations stay in this browser tab. Export a reviewed copy before closing or reloading.
+        This browser beta is a lightweight companion and tryout for the full Placekeeper app.
       </p>
+      <div className="static-launcher__disclosure" aria-label="Privacy and saving limits">
+        <strong>Non-confidential, export-only beta</strong>
+        <p>Local PDFs remain in this tab. A PDF URL is requested directly from its host, which receives the URL and request details.</p>
+        <p>There is no autosave or reload recovery. Exporting a reviewed PDF is the only way to keep your annotations.</p>
+        <p>This GitHub Pages project shares its browser origin with other pages, so do not use it for confidential documents.</p>
+      </div>
       <input
         ref={inputRef}
         id={inputId}
@@ -59,23 +157,26 @@ function StaticLauncher(props: { readonly onOpen: (source: File | string) => Pro
         onChange={onChange}
       />
       <button
+        ref={chooseButtonRef}
         type="button"
         className="static-launcher__button"
         disabled={pending}
         onClick={() => inputRef.current?.click()}
-      >{pending ? "Opening PDF…" : "Choose a PDF"}</button>
-      <p className="static-launcher__drop">or drop a PDF here · 64 MB maximum</p>
+      >Choose a PDF</button>
+      <p className="static-launcher__drop">or drop exactly one PDF here · 64 MB maximum</p>
       <div className="static-launcher__separator"><span>or</span></div>
       <form className="static-launcher__url" onSubmit={(event) => {
         event.preventDefault();
-        void open(remoteUrl.trim());
+        void open(remoteUrl.trim(), "url");
       }}>
-        <label htmlFor={`${inputId}-url`}>PDF URL</label>
+        <label htmlFor={`${inputId}-url`}>Public HTTPS PDF URL</label>
         <div>
           <input
+            ref={urlInputRef}
             id={`${inputId}-url`}
             type="url"
             inputMode="url"
+            autoComplete="off"
             placeholder="https://example.org/paper.pdf"
             value={remoteUrl}
             disabled={pending}
@@ -83,39 +184,72 @@ function StaticLauncher(props: { readonly onOpen: (source: File | string) => Pro
           />
           <button type="submit" disabled={pending || remoteUrl.trim() === ""}>Open URL</button>
         </div>
-        <p>The PDF host must allow cross-origin browser access (CORS).</p>
+        <p>The host must allow direct cross-origin browser access (CORS). Redirects are not followed.</p>
       </form>
-      {error === undefined ? null : <p className="static-launcher__error" role="alert">{error}</p>}
-      <div className="static-launcher__privacy">
-        <strong>Export-only preview</strong>
-        <span>No autosave, accounts, uploads, or recovery after this tab closes.</span>
-      </div>
+      {pending ? <div className="static-launcher__progress">
+        <p role="status" aria-live="polite">{OPENING_STATUS[phase]}</p>
+        <button type="button" onClick={() => operationRef.current?.abort()}>Cancel</button>
+      </div> : null}
+      {error === undefined ? null : <p className="static-launcher__error" role="alert" tabIndex={-1}>{error}</p>}
     </section>
   </main>;
 }
 
-const rootElement = document.querySelector("#root");
-if (!(rootElement instanceof HTMLElement)) throw new Error("Placekeeper root is unavailable.");
-const launcher = createRoot(rootElement);
-launcher.render(<StaticLauncher onOpen={async (input) => {
-  const source = typeof input === "string"
-    ? await readStaticPdfUrl(input)
-    : await readStaticPdfFile(input);
-  const runtime = await createStaticHostRuntime({ source, viewerAssets: { pdfiumWasm } });
-  launcher.unmount();
-  rootElement.replaceChildren();
-  let unmount: () => void;
-  try {
-    unmount = await startRuntime(runtime);
-  } catch (error) {
-    runtime.dispose();
-    throw error;
-  }
-  const onPageHide = (event: PageTransitionEvent) => {
-    if (event.persisted) return;
-    globalThis.removeEventListener("pagehide", onPageHide);
-    unmount();
-    runtime.dispose();
-  };
-  globalThis.addEventListener("pagehide", onPageHide);
-}} />);
+export function mountStaticBrowserApp(): void {
+  const pdfiumWasm = new URL("./pdfium.wasm", document.baseURI).href;
+  const rootElement = document.querySelector("#root");
+  if (!(rootElement instanceof HTMLElement)) throw new Error("Placekeeper root is unavailable.");
+  const launcher = createRoot(rootElement);
+  let activationEpoch = 0;
+
+  launcher.render(<StaticLauncher onOpen={async (input, operation) => {
+    const epoch = ++activationEpoch;
+    const source = typeof input === "string"
+      ? await readStaticPdfUrl(input, fetch, { signal: operation.signal })
+      : await readStaticPdfFile(input, operation.signal);
+    operation.onPhase("assessing");
+    const runtime = await createStaticHostRuntime({ source, viewerAssets: { pdfiumWasm } }, {
+      signal: operation.signal,
+    });
+    operation.onPhase("activating");
+
+    const reviewRoot = document.createElement("div");
+    reviewRoot.className = "static-review-root static-review-root--activating";
+    document.body.append(reviewRoot);
+    const ready = Promise.withResolvers<void>();
+    let unmount: (() => void) | undefined;
+    let disposed = false;
+    const dispose = () => {
+      if (disposed) return;
+      disposed = true;
+      unmount?.();
+      runtime.dispose();
+      reviewRoot.remove();
+    };
+    try {
+      unmount = await startRuntime(runtime, {
+        rootElement: reviewRoot,
+        onDocumentReady: () => ready.resolve(),
+        onRuntimeError: (error) => ready.reject(error),
+      });
+      await waitForActivation(ready.promise, operation.signal);
+      if (epoch !== activationEpoch || operation.signal.aborted) throw cancelledOpening();
+    } catch (error) {
+      dispose();
+      throw error;
+    }
+
+    launcher.unmount();
+    rootElement.remove();
+    reviewRoot.id = "root";
+    reviewRoot.classList.remove("static-review-root--activating");
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (event.persisted) return;
+      globalThis.removeEventListener("pagehide", onPageHide);
+      dispose();
+    };
+    globalThis.addEventListener("pagehide", onPageHide);
+  }} />);
+}
+
+if (typeof document !== "undefined") mountStaticBrowserApp();

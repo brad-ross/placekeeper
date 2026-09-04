@@ -1,17 +1,34 @@
 import { describe, expect, it, vi } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import { addPageNote } from "../../../packages/core/src/review-commands.js";
 import type { PdfWriter } from "../../../packages/core/src/pdf-writer.js";
+import { createBrowserDocumentSession } from "../../../packages/pdf-backends/src/browser-document-session.js";
 import {
   STATIC_PDF_MAX_BYTES,
   createStaticHostRuntime,
+  isStaticOperationCancelled,
   readStaticPdfFile,
   readStaticPdfUrl,
 } from "../src/host/static-runtime.js";
+import { StaticLauncher } from "../src/static-entry.js";
 
 const sourceBytes = new TextEncoder().encode("%PDF-1.7\n%%EOF");
 
 describe("static browser review runtime", () => {
+  it("discloses the non-confidential, direct-request, export-only boundary before source controls", () => {
+    const markup = renderToStaticMarkup(createElement(StaticLauncher, {
+      onOpen: async () => undefined,
+    }));
+    expect(markup).toContain("Non-confidential, export-only beta");
+    expect(markup).toContain("Local PDFs remain in this tab");
+    expect(markup).toContain("requested directly from its host");
+    expect(markup).toContain("There is no autosave or reload recovery");
+    expect(markup.indexOf("Non-confidential, export-only beta"))
+      .toBeLessThan(markup.indexOf("Choose a PDF"));
+  });
+
   it("opens a user-selected PDF as an export-only in-memory review", async () => {
     const write = vi.fn<PdfWriter["write"]>(async (request) => ({
       pdfBytes: Uint8Array.of(37, 80, 68, 70),
@@ -87,11 +104,12 @@ describe("static browser review runtime", () => {
       sync: { phase: "not-saved", desiredRevision: 1, savedRevision: -1 },
     });
 
-    await expect(runtime.exportReviewedCopy()).resolves.toEqual({
+    await expect(runtime.exportReviewedCopy()).resolves.toMatchObject({
       kind: "reviewed-copy",
       path: "notes-reviewed.pdf",
       revision: 1,
       digest: "b".repeat(64),
+      warning: expect.stringMatching(/other PDF content was not comprehensively checked/i),
     });
     expect(write).toHaveBeenCalledOnce();
     expect(write.mock.calls[0]![0]).toMatchObject({
@@ -141,11 +159,17 @@ describe("static browser review runtime", () => {
     )).resolves.toEqual({ name: "review copy.pdf", bytes: sourceBytes });
     expect(fetchPdf).toHaveBeenCalledWith(
       new URL("https://papers.example/review%20copy.pdf?download=1"),
-      expect.objectContaining({ mode: "cors", credentials: "omit" }),
+      expect.objectContaining({
+        mode: "cors",
+        credentials: "omit",
+        cache: "no-store",
+        redirect: "error",
+        referrerPolicy: "no-referrer",
+      }),
     );
 
     await expect(readStaticPdfUrl("file:///private/paper.pdf", fetchPdf))
-      .rejects.toThrow("HTTP or HTTPS");
+      .rejects.toThrow("HTTPS");
     await expect(readStaticPdfUrl("https://blocked.example/paper.pdf", async () => {
       throw new TypeError("Failed to fetch");
     })).rejects.toThrow("CORS");
@@ -157,13 +181,78 @@ describe("static browser review runtime", () => {
     ))).rejects.toThrow("64 MB");
   });
 
+  it.each([
+    "http://papers.example/paper.pdf",
+    "https://reader:secret@papers.example/paper.pdf",
+    "https://localhost/paper.pdf",
+    "https://notes.local/paper.pdf",
+    "https://127.0.0.1/paper.pdf",
+    "https://2130706433/paper.pdf",
+    "https://10.1.2.3/paper.pdf",
+    "https://172.20.1.2/paper.pdf",
+    "https://192.168.1.2/paper.pdf",
+    "https://169.254.1.2/paper.pdf",
+    "https://[::1]/paper.pdf",
+    "https://[fd00::1]/paper.pdf",
+    "https://[fe80::1]/paper.pdf",
+  ])("rejects unsafe deployed remote target %s without making a request", async (rawUrl) => {
+    const fetchPdf = vi.fn();
+    await expect(readStaticPdfUrl(rawUrl, fetchPdf, {
+      currentUrl: "https://brad-ross.github.io/placekeeper/",
+    })).rejects.toThrow();
+    expect(fetchPdf).not.toHaveBeenCalled();
+  });
+
+  it("allows HTTP loopback only when the app itself is running on loopback", async () => {
+    const fetchPdf = vi.fn(async () => new Response(sourceBytes, { status: 200 }));
+    await expect(readStaticPdfUrl("http://127.0.0.1:8080/paper.pdf", fetchPdf, {
+      currentUrl: "http://127.0.0.1:4174/",
+    })).resolves.toMatchObject({ name: "paper.pdf" });
+    await expect(readStaticPdfUrl("http://127.0.0.1:8080/paper.pdf", fetchPdf, {
+      currentUrl: "https://brad-ross.github.io/placekeeper/",
+    })).rejects.toThrow("HTTPS");
+  });
+
+  it("rejects redirects and redacts the submitted URL from failures", async () => {
+    const secretUrl = "https://papers.example/private.pdf?token=do-not-repeat";
+    const redirected = new Response(sourceBytes, { status: 200 });
+    Object.defineProperty(redirected, "redirected", { value: true });
+    await expect(readStaticPdfUrl(secretUrl, async () => redirected)).rejects.toThrow("redirect");
+
+    const failure = await readStaticPdfUrl(secretUrl, async () => {
+      throw new TypeError("request included token=do-not-repeat");
+    }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).not.toContain("do-not-repeat");
+  });
+
+  it("cancels remote acquisition distinctly from a timeout", async () => {
+    const controller = new AbortController();
+    const fetchPdf = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => (
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("aborted", "AbortError"));
+        }, { once: true });
+      })
+    ));
+    const pending = readStaticPdfUrl(
+      "https://papers.example/paper.pdf",
+      fetchPdf,
+      { signal: controller.signal, timeoutMs: 1_000 },
+    );
+    controller.abort();
+    const error = await pending.catch((cause: unknown) => cause);
+    expect(isStaticOperationCancelled(error)).toBe(true);
+    expect((error as Error).message).toBe("Opening was cancelled.");
+  });
+
   it("times out a remote PDF request that never settles", async () => {
     const fetchPdf = vi.fn(() => new Promise<Response>(() => undefined));
 
     await expect(readStaticPdfUrl(
       "https://papers.example/stalled.pdf",
       fetchPdf,
-      5,
+      { timeoutMs: 5 },
     )).rejects.toThrow("PDF request timed out");
     expect(fetchPdf).toHaveBeenCalledWith(
       new URL("https://papers.example/stalled.pdf"),
@@ -173,6 +262,193 @@ describe("static browser review runtime", () => {
         signal: expect.any(AbortSignal),
       }),
     );
+  });
+
+  it("keeps unsupported input out of authoring and disposes its backend", async () => {
+    const dispose = vi.fn();
+    const writer = {
+      assess: vi.fn(async () => ({
+        eligible: false as const,
+        code: "encrypted" as const,
+        message: "This encrypted PDF cannot be annotated safely.",
+      })),
+      write: vi.fn(),
+      dispose,
+    };
+    const createObjectURL = vi.fn();
+    await expect(createStaticHostRuntime({
+      source: { name: "locked.pdf", bytes: sourceBytes },
+      viewerAssets: { pdfiumWasm: "https://placekeeper.example/pdfium.wasm" },
+    }, {
+      writer,
+      startupTimeoutMs: 100,
+      digest: async () => "a".repeat(64),
+      createObjectURL,
+    })).rejects.toThrow("encrypted PDF");
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it("admits one backend operation and fences a late result after disposal", async () => {
+    const write = Promise.withResolvers<Awaited<ReturnType<PdfWriter["write"]>>>();
+    const writer: PdfWriter & { dispose(): void } = {
+      assess: async () => ({ eligible: true }),
+      write: () => write.promise,
+      dispose: vi.fn(),
+    };
+    const session = createBrowserDocumentSession({
+      createWriter: async () => writer,
+      operationTimeoutMs: 1_000,
+    });
+    const request = {
+      sourcePdf: sourceBytes,
+      sourceSha256: "a".repeat(64),
+      revision: 0,
+      annotations: [],
+    };
+    const first = session.write(request);
+    await expect(session.write(request)).rejects.toThrow("already in progress");
+    const disposal = session.dispose();
+    write.resolve({
+      pdfBytes: sourceBytes,
+      evidence: {
+        backend: "embedpdf",
+        backendVersion: "test",
+        originalSha256: request.sourceSha256,
+        outputSha256: "b".repeat(64),
+        pageCount: 1,
+        structurallyValid: true,
+        preexistingAnnotationIds: [],
+        annotations: [],
+      },
+    });
+    await disposal;
+    await expect(first).rejects.toThrow("cancelled");
+    expect(writer.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("registers the unload guard only while edits are newer than the export checkpoint", async () => {
+    const listeners = new Map<string, EventListener>();
+    const lifecycle = {
+      addEventListener: vi.fn((type: string, listener: EventListener) => listeners.set(type, listener)),
+      removeEventListener: vi.fn((type: string, listener: EventListener) => {
+        if (listeners.get(type) === listener) listeners.delete(type);
+      }),
+    };
+    const writer: PdfWriter = {
+      assess: async () => ({ eligible: true }),
+      write: async (request) => ({
+        pdfBytes: sourceBytes,
+        evidence: {
+          backend: "embedpdf",
+          backendVersion: "test",
+          originalSha256: request.sourceSha256,
+          outputSha256: "b".repeat(64),
+          pageCount: 1,
+          structurallyValid: true,
+          preexistingAnnotationIds: [],
+          annotations: request.annotations.map(({ id, contents }) => ({
+            id,
+            subtype: "text",
+            contents,
+            flags: ["print"],
+            hasNormalAppearance: true,
+          })),
+        },
+      }),
+    };
+    const runtime = await createStaticHostRuntime({
+      source: { name: "notes.pdf", bytes: sourceBytes },
+      viewerAssets: { pdfiumWasm: "https://placekeeper.example/pdfium.wasm" },
+    }, {
+      writer,
+      digest: async () => "a".repeat(64),
+      createObjectURL: () => "blob:source",
+      revokeObjectURL: vi.fn(),
+      download: vi.fn(),
+      lifecycle,
+    });
+    expect(lifecycle.addEventListener).not.toHaveBeenCalled();
+    const bootstrap = await runtime.bootstrap();
+    await runtime.command(addPageNote(
+      bootstrap.state,
+      0,
+      { x: 40, y: 50, width: 18, height: 18 },
+      "Review",
+      {
+        createId: () => "22222222-2222-4222-8222-222222222222",
+        now: () => "2026-09-03T12:00:00.000Z",
+      },
+    ));
+    expect(lifecycle.addEventListener).toHaveBeenCalledOnce();
+    expect(listeners.has("beforeunload")).toBe(true);
+    await runtime.exportReviewedCopy();
+    expect(lifecycle.removeEventListener).toHaveBeenCalledOnce();
+    expect(listeners.has("beforeunload")).toBe(false);
+    runtime.dispose();
+  });
+
+  it("exports a snapshot without clearing a newer edit and reports the limited check", async () => {
+    const pendingWrite = Promise.withResolvers<Awaited<ReturnType<PdfWriter["write"]>>>();
+    const writer: PdfWriter = {
+      assess: async () => ({ eligible: true }),
+      write: () => pendingWrite.promise,
+    };
+    const download = vi.fn();
+    const runtime = await createStaticHostRuntime({
+      source: { name: "notes.pdf", bytes: sourceBytes },
+      viewerAssets: { pdfiumWasm: "https://placekeeper.example/pdfium.wasm" },
+    }, {
+      writer,
+      digest: async () => "a".repeat(64),
+      createObjectURL: () => "blob:source",
+      revokeObjectURL: vi.fn(),
+      download,
+    });
+    const bootstrap = await runtime.bootstrap();
+    const firstState = await runtime.command(addPageNote(
+      bootstrap.state,
+      0,
+      { x: 40, y: 50, width: 18, height: 18 },
+      "First",
+      {
+        createId: () => "22222222-2222-4222-8222-222222222222",
+        now: () => "2026-09-03T12:00:00.000Z",
+      },
+    ));
+    const exporting = runtime.exportReviewedCopy();
+    await runtime.command(addPageNote(
+      "accepted" in firstState ? firstState.state : firstState,
+      0,
+      { x: 80, y: 90, width: 18, height: 18 },
+      "Later",
+      {
+        createId: () => "33333333-3333-4333-8333-333333333333",
+        now: () => "2026-09-03T12:01:00.000Z",
+      },
+    ));
+    pendingWrite.resolve({
+      pdfBytes: sourceBytes,
+      evidence: {
+        backend: "embedpdf",
+        backendVersion: "test",
+        originalSha256: "a".repeat(64),
+        outputSha256: "b".repeat(64),
+        pageCount: 1,
+        structurallyValid: true,
+        preexistingAnnotationIds: [],
+        annotations: [],
+      },
+    });
+    await expect(exporting).resolves.toMatchObject({
+      revision: 1,
+      warning: expect.stringMatching(/copy opens.*not comprehensively checked.*newer edits/i),
+    });
+    expect(download).toHaveBeenCalledOnce();
+    await expect(runtime.saveStatus()).resolves.toMatchObject({
+      sync: { desiredRevision: 2, savedRevision: 1 },
+    });
+    runtime.dispose();
   });
 
   it("times out a stalled PDF writer without downloading a partial export", async () => {
