@@ -424,9 +424,13 @@ function assertPreexistingPreserved(
   before: readonly InspectedPdfAnnotation[],
   after: readonly InspectedPdfAnnotation[],
 ): void {
+  const reopenedByIdentity = new Map<string, InspectedPdfAnnotation>();
+  for (const annotation of after) {
+    const identity = pdfAnnotationIdentity(annotation.pageIndex, annotation.id);
+    if (!reopenedByIdentity.has(identity)) reopenedByIdentity.set(identity, annotation);
+  }
   for (const annotation of before) {
-    const reopened = after.find(({ id, pageIndex }) =>
-      id === annotation.id && pageIndex === annotation.pageIndex);
+    const reopened = reopenedByIdentity.get(pdfAnnotationIdentity(annotation.pageIndex, annotation.id));
     const stableBefore = JSON.stringify(annotation);
     const stableAfter = reopened && JSON.stringify(reopened);
     if (!reopened || stableAfter !== stableBefore) {

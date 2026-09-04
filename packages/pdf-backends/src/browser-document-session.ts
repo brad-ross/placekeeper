@@ -77,9 +77,7 @@ export function createBrowserDocumentSession(options: {
 
   const getWriter = async (): Promise<DisposablePdfWriter> => {
     if (closed) throw new BrowserDocumentSessionError('closed', 'This PDF session is closed.');
-    writerPromise ??= Promise.resolve(options.createWriter()).then((created) => {
-      return created;
-    });
+    writerPromise ??= Promise.resolve(options.createWriter());
     return writerPromise;
   };
 

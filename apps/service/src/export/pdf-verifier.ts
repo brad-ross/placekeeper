@@ -14,6 +14,7 @@ import {
   type InspectedPdf,
   type InspectedPdfAnnotation,
 } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
+import { pdfAnnotationIdentity } from "../../../../packages/pdf-backends/src/embedpdf-annotation.js";
 
 export interface PdfVerificationInput {
   readonly sourcePdf: Uint8Array;
@@ -65,14 +66,17 @@ function portableInventory(inspection: InspectedPdf): {
   return {
     items: result.items,
     physicalIdentities: new Set(result.ownedCandidates.map(
-      ({ candidateIndex }) => annotationIdentity(inspection.annotations[candidateIndex]!),
+      ({ candidateIndex }) => {
+        const annotation = inspection.annotations[candidateIndex]!;
+        return pdfAnnotationIdentity(annotation.pageIndex, annotation.id);
+      },
     )),
   };
 }
 
-function annotationIdentity(annotation: { readonly id: string; readonly pageIndex: number }): string {
-  return `${annotation.pageIndex}:${annotation.id}`;
-}
+const annotationIdentity = (
+  annotation: { readonly id: string; readonly pageIndex: number },
+): string => pdfAnnotationIdentity(annotation.pageIndex, annotation.id);
 
 function stableAnnotation(
   annotation: InspectedPdfAnnotation,
