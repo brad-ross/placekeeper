@@ -197,6 +197,9 @@ describe("open command", () => {
     expect(() => parseOpenArguments([
       "open", "--json", "--pdf", "/a.pdf", "--recovery", "resume",
     ])).toThrow("offer and operation");
+    expect(() => parseOpenArguments([
+      "open", "--json", "--pdf", "/a.pdf", "--surface", "macos",
+    ])).toThrow("Unsupported launch surface");
   });
 
   it("prints exactly one structured response and never logs a secret on errors", async () => {

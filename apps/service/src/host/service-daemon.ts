@@ -28,6 +28,16 @@ import type {
   ChromeRuntimeExtensionMessage,
   ChromeRuntimeHostMessage,
 } from "../../../../packages/core/src/chrome-native-runtime-protocol.js";
+import type {
+  MacosReviewHelperMessage,
+  MacosReviewHelperResponse,
+} from "../../../../packages/core/src/macos-helper-protocol.js";
+import { validMacosReviewHelperResponse } from "../../../../packages/core/src/macos-helper-protocol.js";
+import type {
+  MacosAppControlMessage,
+  MacosAppControlResponse,
+} from "../../../../packages/core/src/macos-app-control-protocol.js";
+import { parseMacosAppControlResponse } from "../../../../packages/core/src/macos-app-control-protocol.js";
 
 export interface DaemonPaths {
   readonly appSupportRoot: string;
@@ -242,6 +252,57 @@ export async function detachChromeRuntimeThroughDaemon(
     { timeoutMs: 15_000 },
   );
   if (response.kind !== "chrome-runtime-detached") throw new DaemonUpgradeRequiredError("malformed");
+}
+
+export async function macosRuntimeThroughDaemon(
+  appInstanceId: string,
+  helperId: string,
+  message: MacosReviewHelperMessage,
+  signal?: AbortSignal,
+  paths = defaultDaemonPaths(),
+): Promise<MacosReviewHelperResponse> {
+  const request = { kind: "macos-runtime" as const, appInstanceId, helperId, message };
+  const response = message.type === "admit"
+    ? await demandStartedControl(request, paths, signal)
+    : await requestControl(paths.socketPath, request, {
+        timeoutMs: 10 * 60_000,
+        ...(signal === undefined ? {} : { signal }),
+      });
+  if (response.kind !== "macos-runtime" || !validMacosReviewHelperResponse(response.response)) {
+    throw new DaemonUpgradeRequiredError("malformed");
+  }
+  return response.response;
+}
+
+export async function detachMacosRuntimeThroughDaemon(
+  appInstanceId: string,
+  helperId: string,
+  paths = defaultDaemonPaths(),
+): Promise<void> {
+  const response = await requestControl(
+    paths.socketPath,
+    { kind: "macos-runtime-detach", appInstanceId, helperId },
+    { timeoutMs: 15_000 },
+  );
+  if (response.kind !== "macos-runtime-detached") throw new DaemonUpgradeRequiredError("malformed");
+}
+
+export async function macosAppControlThroughDaemon(
+  message: MacosAppControlMessage,
+  signal?: AbortSignal,
+  paths = defaultDaemonPaths(),
+): Promise<MacosAppControlResponse> {
+  const request = { kind: "macos-app-control" as const, message };
+  const response = message.type === "register-app"
+    ? await demandStartedControl(request, paths, signal)
+    : await requestControl(paths.socketPath, request, {
+        timeoutMs: 15_000,
+        ...(signal === undefined ? {} : { signal }),
+      });
+  if (response.kind !== "macos-app-control" || parseMacosAppControlResponse(response.response) === undefined) {
+    throw new DaemonUpgradeRequiredError("malformed");
+  }
+  return response.response;
 }
 
 export async function preflightLinkThroughDaemon(

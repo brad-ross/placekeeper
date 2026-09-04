@@ -4,8 +4,8 @@ import {
   MACOS_HELPER_MAX_FRAME_BYTES,
   decodeMacosHelperFrame,
   encodeMacosHelperFrame,
-  parseMacosLifecycleMessage,
   parseMacosReviewHelperMessage,
+  validMacosReviewHelperResponse,
 } from "../src/macos-helper-protocol.js";
 
 const base = {
@@ -40,22 +40,29 @@ describe("macOS helper protocols", () => {
     })).toBeUndefined();
   });
 
-  it("keeps app lifecycle capability-minimal and disjoint", () => {
-    expect(parseMacosLifecycleMessage({
-      protocolVersion: 1,
-      type: "register-app",
-      processId: 123,
-      startIdentity: "start_12345678",
-      buildIdentity: "build_12345678",
-    })).toMatchObject({ type: "register-app", processId: 123 });
-    expect(parseMacosLifecycleMessage({
-      protocolVersion: 1,
-      type: "register-app",
-      processId: 123,
-      startIdentity: "start_12345678",
-      buildIdentity: "build_12345678",
-      resourceId: "resource_12345678",
+  it("admits only bound recovery choices and typed invalidations", () => {
+    const offer = { id: "recovery_offer_1234", expiresAt: "2026-09-05T00:00:00.000Z" };
+    expect(parseMacosReviewHelperMessage({
+      ...base,
+      type: "recover",
+      decision: "resume",
+      offer,
+      idempotencyKey: "operation_recover_1234",
+    })).toMatchObject({ type: "recover", decision: "resume", offer });
+    expect(parseMacosReviewHelperMessage({
+      ...base,
+      type: "recover",
+      decision: "resume",
+      offer: { ...offer, sourcePath: "/private/forbidden.pdf" },
+      idempotencyKey: "operation_recover_1234",
     })).toBeUndefined();
+    expect(validMacosReviewHelperResponse({
+      ...base,
+      type: "invalidation",
+      generation: 2,
+      revision: 7,
+      reason: "generation",
+    })).toBe(true);
   });
 
   it("rejects trailing, truncated, and oversized frames", () => {

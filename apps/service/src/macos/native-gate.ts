@@ -1,6 +1,5 @@
 import type {
   MacosReviewHelperMessage,
-  MacosReviewHelperResponse,
 } from "../../../../packages/core/src/macos-helper-protocol.js";
 import { parseMacosReviewHelperMessage } from "../../../../packages/core/src/macos-helper-protocol.js";
 import type { MacosNativeMessage } from "../../../../packages/core/src/macos-shell-protocol.js";
@@ -18,6 +17,25 @@ export interface MacosReviewAuthority {
   readResource(input: MacosProvisionalAdmission & { readonly offset: number; readonly length: number }): Promise<Uint8Array>;
   release(provisionalId: string): Promise<void>;
 }
+
+interface MacosNativeGateEnvelope {
+  readonly protocolVersion: 1;
+  readonly windowId: string;
+  readonly attemptId: string;
+  readonly requestId: string;
+}
+
+type MacosNativeGateResponse =
+  | ({
+      readonly type: "admitted";
+    } & MacosProvisionalAdmission & MacosNativeGateEnvelope)
+  | ({
+      readonly type: "resource-bytes";
+      readonly sequence: number;
+      readonly data: string;
+      readonly done: boolean;
+    } & MacosNativeGateEnvelope)
+  | ({ readonly type: "released" } & MacosNativeGateEnvelope);
 
 export function projectMacosAdmissionToPage(
   admission: MacosProvisionalAdmission,
@@ -51,7 +69,7 @@ export class MacosReviewHelperSession {
     private readonly authority: MacosReviewAuthority,
   ) {}
 
-  async handle(raw: unknown): Promise<MacosReviewHelperResponse> {
+  async handle(raw: unknown): Promise<MacosNativeGateResponse> {
     const message = parseMacosReviewHelperMessage(raw);
     if (message === undefined || message.windowId !== this.windowId || message.attemptId !== this.attemptId) {
       throw new Error("Invalid macOS review helper message");
@@ -60,7 +78,7 @@ export class MacosReviewHelperSession {
     if (message.type === "admit") return this.#admit(message);
     if (message.type === "read-resource") return this.#read(message);
     await this.close();
-    return { ...this.#envelope(message.requestId), type: "released" };
+    return { ...this.envelope(message.requestId), type: "released" };
   }
 
   async close(): Promise<void> {
@@ -71,17 +89,17 @@ export class MacosReviewHelperSession {
     if (admission !== undefined) await this.authority.release(admission.provisionalId);
   }
 
-  async #admit(message: Extract<MacosReviewHelperMessage, { readonly type: "admit" }>): Promise<MacosReviewHelperResponse> {
+  async #admit(message: Extract<MacosReviewHelperMessage, { readonly type: "admit" }>): Promise<MacosNativeGateResponse> {
     if (this.#admission !== undefined) throw new Error("One provisional admission is allowed per helper attempt");
     const admission = await this.authority.admit(message.sourcePath, {
       windowId: this.windowId,
       attemptId: this.attemptId,
     });
     this.#admission = admission;
-    return { ...this.#envelope(message.requestId), type: "admitted", ...admission };
+    return { ...this.envelope(message.requestId), type: "admitted", ...admission };
   }
 
-  async #read(message: Extract<MacosReviewHelperMessage, { readonly type: "read-resource" }>): Promise<MacosReviewHelperResponse> {
+  async #read(message: Extract<MacosReviewHelperMessage, { readonly type: "read-resource" }>): Promise<MacosNativeGateResponse> {
     const admission = this.#admission;
     if (admission === undefined || admission.resourceId !== message.resourceId
       || admission.generation !== message.generation || message.role !== "document") {
@@ -90,7 +108,7 @@ export class MacosReviewHelperSession {
     if (message.offset + message.length > admission.byteLength) throw new Error("macOS resource range exceeds admission");
     const bytes = await this.authority.readResource({ ...admission, offset: message.offset, length: message.length });
     return {
-      ...this.#envelope(message.requestId),
+      ...this.envelope(message.requestId),
       type: "resource-bytes",
       sequence: Math.floor(message.offset / Math.max(1, message.length)),
       data: Buffer.from(bytes).toString("base64"),
@@ -98,7 +116,7 @@ export class MacosReviewHelperSession {
     };
   }
 
-  #envelope(requestId: string) {
+  envelope(requestId: string) {
     return { protocolVersion: 1 as const, windowId: this.windowId, attemptId: this.attemptId, requestId };
   }
 }

@@ -39,7 +39,7 @@ export interface MaterializedViewerResource {
 }
 
 export interface RpcHostRuntimeOptions {
-  readonly host?: ReviewRuntimeHost;
+  readonly host?: Exclude<ReviewRuntimeHost, "macos">;
   readonly extensionOrigin?: string;
   readonly materializePdfiumWasm?: (sourceUrl: string) => Promise<MaterializedViewerResource>;
   readonly materializePdfiumWorker?: (sourceUrl: string) => Promise<MaterializedViewerResource>;

@@ -38,6 +38,7 @@ export interface ChromeServiceRuntimeBackendOptions {
   readonly saving: PdfSaveCoordinator;
   readonly exporting: ExportCoordinator;
   readonly quota?: ChromeRuntimeAggregateQuota;
+  readonly runtimeHost?: "chrome" | "macos";
 }
 
 /** Disk-backed adapter from the Chrome runtime protocol to existing service
@@ -54,6 +55,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
   readonly #presentations = new Map<string, Set<string>>();
   readonly #provisionals = new Map<string, number>();
   readonly #activated = new Set<string>();
+  readonly #runtimeHost: "chrome" | "macos";
 
   constructor(options: ChromeServiceRuntimeBackendOptions) {
     this.#broker = options.broker;
@@ -61,13 +63,14 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     this.#transferStore = options.transferStore;
     this.#saving = options.saving;
     this.#exporting = options.exporting;
+    this.#runtimeHost = options.runtimeHost ?? "chrome";
   }
 
   authority(quota?: ChromeRuntimeAggregateQuota): ChromeRuntimeServiceAuthority {
     return new ChromeRuntimeServiceAuthority(this, {
       quota: quota ?? new ChromeRuntimeAggregateQuota(),
       journal: new ChromeRuntimeOperationJournal({
-        root: join(this.#broker.recoveryRoot, ".chrome-operations"),
+        root: join(this.#broker.recoveryRoot, `.${this.#runtimeHost}-operations`),
       }),
     });
   }
@@ -227,7 +230,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
         if (finished) throw new Error("source-already-finished");
         finished = true;
         const canonicalPath = await this.#transferStore.canonicalizeLocal(fileUrl);
-        const opened = await this.#broker.openReview({ pdfPath: canonicalPath, surface: "chrome" });
+        const opened = await this.#broker.openReview({ pdfPath: canonicalPath, surface: this.#runtimeHost });
         if (opened.kind === "recovery-offered") {
           return {
             choices: ["resume", "discard", "fork"],
@@ -235,7 +238,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
             choose: async (decision, operationId) => {
               const recovered = await this.#broker.openReview({
                 pdfPath: canonicalPath,
-                surface: "chrome",
+                surface: this.#runtimeHost,
                 recoveryDecision: decision,
                 recoveryOffer: opened.recoveryOffer,
                 recoveryOperationId: operationId,

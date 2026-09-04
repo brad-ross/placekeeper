@@ -31,6 +31,8 @@ import { ChromeTransferStore } from "../browser/chrome-handoff.js";
 import { validatePdfInSubprocess } from "../browser/chrome-pdf-validator.js";
 import { ChromeRuntimeManager } from "../browser/chrome-runtime.js";
 import { ChromeServiceRuntimeBackend } from "../browser/chrome-runtime-backend.js";
+import { MacosRuntimeManager } from "../macos/macos-runtime.js";
+import { MacosAppLifecycleManager } from "../macos/app-lifecycle.js";
 
 export type LaunchSurface = BrokerLaunchSurface;
 
@@ -164,6 +166,8 @@ export class PlacekeeperHost {
   readonly lifecycle: DaemonLifecycleCoordinator;
   readonly browserSources: BrowserSourceStore;
   readonly chromeRuntime: ChromeRuntimeManager;
+  readonly macosRuntime: MacosRuntimeManager;
+  readonly macosLifecycle: MacosAppLifecycleManager;
   #closePromise?: Promise<void>;
 
   private constructor(
@@ -177,6 +181,8 @@ export class PlacekeeperHost {
     lifecycle: DaemonLifecycleCoordinator,
     browserSources: BrowserSourceStore,
     chromeRuntime: ChromeRuntimeManager,
+    macosRuntime: MacosRuntimeManager,
+    macosLifecycle: MacosAppLifecycleManager,
   ) {
     this.broker = broker;
     this.server = server;
@@ -188,6 +194,8 @@ export class PlacekeeperHost {
     this.lifecycle = lifecycle;
     this.browserSources = browserSources;
     this.chromeRuntime = chromeRuntime;
+    this.macosRuntime = macosRuntime;
+    this.macosLifecycle = macosLifecycle;
   }
 
   static async start(options: PlacekeeperHostOptions): Promise<PlacekeeperHost> {
@@ -225,13 +233,22 @@ export class PlacekeeperHost {
       broker, browserSources, transferStore: chromeTransferStore, saving, exporting,
     });
     const chromeRuntime = new ChromeRuntimeManager(chromeRuntimeBackend.authority());
+    const macosRuntimeBackend = new ChromeServiceRuntimeBackend({
+      broker, browserSources, transferStore: chromeTransferStore, saving, exporting,
+      runtimeHost: "macos",
+    });
+    const macosRuntime = new MacosRuntimeManager(macosRuntimeBackend.authority());
+    const macosLifecycle = new MacosAppLifecycleManager(macosRuntime);
     const lifecycle = new DaemonLifecycleCoordinator({
       activity: () => {
         const activity = broker.activity();
         const chromeActivity = chromeRuntime.activity();
+        const macosActivity = macosRuntime.activity();
+        const macosAppActivity = macosLifecycle.activity();
         return {
           ...activity,
-          reviewPresence: activity.reviewPresence + chromeActivity.connections,
+          reviewPresence: activity.reviewPresence + chromeActivity.connections
+            + macosActivity.helpers + macosAppActivity.appInstances,
           transientWork: activity.transientWork + saving.activityCount(),
         };
       },
@@ -269,6 +286,8 @@ export class PlacekeeperHost {
       lifecycle,
       browserSources,
       chromeRuntime,
+      macosRuntime,
+      macosLifecycle,
     );
   }
 
@@ -423,6 +442,8 @@ export class PlacekeeperHost {
       this.context.discardAll();
       await this.server.close();
       await this.chromeRuntime.close();
+      await this.macosLifecycle.close();
+      await this.macosRuntime.close();
       await this.saving.drain();
       await this.broker.quiesceForShutdown();
     })();
