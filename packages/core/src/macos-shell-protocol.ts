@@ -63,6 +63,13 @@ export type MacosPageMessage =
   }
   | {
     readonly protocolVersion: 1;
+    readonly type: "document-ready";
+    readonly runtimeId: string;
+    readonly attemptId: string;
+    readonly generation: number;
+  }
+  | {
+    readonly protocolVersion: 1;
     readonly type: "command-snapshot";
     readonly runtimeId: string;
     readonly attemptId: string;
@@ -258,6 +265,12 @@ export function parseMacosPageMessage(value: unknown): MacosPageMessage | undefi
         payload: sanitizeMacosReviewRuntimeRequest(message.method, message.payload),
       },
     } as unknown as MacosPageMessage;
+  }
+  if (value.type === "document-ready") {
+    return exact(value, ["protocolVersion", "type", "runtimeId", "attemptId", "generation"])
+      && opaqueId(value.runtimeId) && opaqueId(value.attemptId)
+      && safeInteger(value.generation) && value.generation > 0
+      ? value as unknown as MacosPageMessage : undefined;
   }
   if (value.type === "command-snapshot") {
     if (!(exact(value, [

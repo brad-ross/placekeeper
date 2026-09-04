@@ -1,5 +1,4 @@
 import AppKit
-import CryptoKit
 import Foundation
 @preconcurrency import WebKit
 
@@ -8,32 +7,39 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     let windowID: String
     private let webView: WKWebView
     private let schemeHandler: MacSchemeHandler
+    private let attemptID: String
+    private let runtimeID: String
+    private let bridge: ReviewBridge
     private let displayName: String
-    private let resourceID: String
-    private let generation: Int
+    private let admission: MacReviewAdmission
     private let diagnosticsEnabled = ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_DIAGNOSTICS"] == "1"
-    private var resourceBytes: Data
     private var readiness = ShellReadinessFence()
     private var dragFence: DragRegionFence
     private var dragOverlays: [NSView] = []
     private let onClose: (String) -> Void
     private var closed = false
+    private var failed = false
+    private var visiblePaintConfirmed = false
+    private var pendingDocumentReadyGeneration: Int?
+    private var activationStarted = false
 
     init(
         windowID: String,
         documentURL: URL,
         packagedRoot: URL,
-        resourceID: String,
-        generation: Int,
-        resourceBytes: Data,
+        attemptID: String,
+        runtimeID: String,
+        helper: SupervisedReviewHelper,
+        admission: MacReviewAdmission,
         onClose: @escaping (String) -> Void
     ) {
         self.windowID = windowID
         self.onClose = onClose
-        self.displayName = documentURL.lastPathComponent
-        self.resourceID = resourceID
-        self.generation = generation
-        self.resourceBytes = resourceBytes
+        self.attemptID = attemptID
+        self.runtimeID = runtimeID
+        self.admission = admission
+        self.displayName = admission.displayName
+        self.bridge = ReviewBridge(runtimeID: runtimeID, attemptID: attemptID, helper: helper, admission: admission)
         let geometryIdentity = "geometry_" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(16))
         self.dragFence = DragRegionFence(geometryIdentity: geometryIdentity)
 
@@ -48,9 +54,8 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                 "assets/pdfium.wasm",
                 "assets/pdfium-worker.js",
             ],
-            resourceID: resourceID,
-            generation: generation,
-            resourceBytes: resourceBytes
+            helper: helper,
+            admission: admission
         )
         self.schemeHandler = handler
         configuration.websiteDataStore = .nonPersistent()
@@ -116,6 +121,8 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     }
 
     func helperDidFail() {
+        guard !closed, !failed else { return }
+        failed = true
         webView.stopLoading()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "placekeeperShell")
         schemeHandler.invalidate()
@@ -149,7 +156,6 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         webView.stopLoading()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "placekeeperShell")
         schemeHandler.invalidate()
-        resourceBytes.removeAll()
         installDragOverlays([])
         onClose(windowID)
     }
@@ -181,7 +187,9 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
               body["protocolVersion"] as? Int == macShellProtocolVersion,
               let type = body["type"] as? String else { return }
         diagnostic("page-message: \(type)")
-        if type == "shell-ready", let revision = body["layoutRevision"] as? Int {
+        if type == "shell-ready",
+           Set(body.keys) == Set(["protocolVersion", "type", "layoutRevision"]),
+           let revision = body["layoutRevision"] as? Int, revision >= 0 {
             _ = readiness.shellReady(revision: revision)
             if readiness.commitRouting() {
                 window?.center()
@@ -192,12 +200,38 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             }
             return
         }
-        if type == "visible-shell-ready", let revision = body["layoutRevision"] as? Int,
-           body["geometryIdentity"] as? String == dragFence.geometryIdentity {
-            _ = readiness.confirmPaint(revision: revision)
+        if type == "document-ready",
+           Set(body.keys) == Set(["protocolVersion", "type", "runtimeId", "attemptId", "generation"]),
+           body["runtimeId"] as? String == runtimeID,
+           body["attemptId"] as? String == attemptID,
+           let generation = body["generation"] as? Int,
+           generation == admission.generation {
+            pendingDocumentReadyGeneration = generation
+            activateWhenReady()
             return
         }
-        if type == "drag-regions", let revision = body["layoutRevision"] as? Int,
+        if type == "runtime-message",
+           Set(body.keys) == Set(["protocolVersion", "type", "runtimeId", "attemptId", "message"]),
+           body["runtimeId"] as? String == runtimeID,
+           body["attemptId"] as? String == attemptID,
+           let message = body["message"] {
+            bridge.handle(message) { [weak self] response in self?.sendRuntimeMessage(response) }
+            return
+        }
+        if type == "visible-shell-ready",
+           Set(body.keys) == Set(["protocolVersion", "type", "layoutRevision", "geometryIdentity", "frameSequence"]),
+           let revision = body["layoutRevision"] as? Int,
+           let frameSequence = body["frameSequence"] as? Int, frameSequence > 0,
+           body["geometryIdentity"] as? String == dragFence.geometryIdentity {
+            if readiness.confirmPaint(revision: revision) {
+                visiblePaintConfirmed = true
+                activateWhenReady()
+            }
+            return
+        }
+        if type == "drag-regions",
+           Set(body.keys) == Set(["protocolVersion", "type", "layoutRevision", "geometryIdentity", "transitioning", "regions"]),
+           let revision = body["layoutRevision"] as? Int,
            let identity = body["geometryIdentity"] as? String,
            let transitioning = body["transitioning"] as? Bool,
            let rawRegions = body["regions"] as? [[String: Double]] {
@@ -219,18 +253,19 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         diagnostic("navigation-finished")
-        let resourceURL = "placekeeper-resource://document/\(resourceID)?generation=\(generation)&role=document"
         sendToPage([
             "protocolVersion": 1,
             "type": "bootstrap",
+            "runtimeId": runtimeID,
+            "attemptId": attemptID,
             "document": [
                 "displayName": displayName,
                 "resource": [
-                    "url": resourceURL,
-                    "generation": generation,
+                    "url": bridge.documentResourceURL,
+                    "generation": admission.generation,
                     "mime": "application/pdf",
-                    "byteLength": resourceBytes.count,
-                    "digest": SHA256.hash(data: resourceBytes).map { String(format: "%02x", $0) }.joined(),
+                    "byteLength": admission.byteLength,
+                    "digest": admission.digest,
                 ] as [String: Any],
             ],
             "geometry": [
@@ -258,7 +293,9 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
-        guard let url = navigationAction.request.url, MacSchemePolicy.permitsInWebView(url) else {
+        guard navigationAction.targetFrame?.isMainFrame == true,
+              let url = navigationAction.request.url,
+              MacSchemePolicy.bundleKey(for: url) == "macos.html" else {
             decisionHandler(.cancel)
             return
         }
@@ -275,6 +312,25 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             in: nil,
             in: .page
         ) { _ in }
+    }
+
+    private func sendRuntimeMessage(_ message: [String: Any]) {
+        sendToPage([
+            "protocolVersion": 1,
+            "type": "runtime-message",
+            "runtimeId": runtimeID,
+            "attemptId": attemptID,
+            "message": message,
+        ])
+    }
+
+    private func activateWhenReady() {
+        guard !activationStarted, visiblePaintConfirmed,
+              let generation = pendingDocumentReadyGeneration else { return }
+        activationStarted = true
+        bridge.activate(generation: generation) { [weak self] active in
+            if !active { self?.helperDidFail() }
+        }
     }
 
     private func installDragOverlays(_ regions: [DragRect]) {
@@ -329,57 +385,4 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
 private final class DraggableTitlebarView: NSView {
     override var mouseDownCanMoveWindow: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { self }
-}
-
-private final class MacSchemeHandler: NSObject, WKURLSchemeHandler {
-    private let packagedRoot: URL
-    private let manifestKeys: Set<String>
-    private let resourceID: String
-    private let generation: Int
-    private var resourceBytes: Data
-
-    init(packagedRoot: URL, manifestKeys: Set<String>, resourceID: String, generation: Int, resourceBytes: Data) {
-        self.packagedRoot = packagedRoot.standardizedFileURL
-        self.manifestKeys = manifestKeys
-        self.resourceID = resourceID
-        self.generation = generation
-        self.resourceBytes = resourceBytes
-    }
-
-    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
-        guard urlSchemeTask.request.httpMethod == "GET", let url = urlSchemeTask.request.url else {
-            urlSchemeTask.didFailWithError(URLError(.unsupportedURL)); return
-        }
-        if let key = MacSchemePolicy.bundleKey(for: url), manifestKeys.contains(key) {
-            let file = packagedRoot.appendingPathComponent(key).standardizedFileURL
-            guard file.path.hasPrefix(packagedRoot.path + "/"), let bytes = try? Data(contentsOf: file) else {
-                urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist)); return
-            }
-            respond(urlSchemeTask, url: url, bytes: bytes, mime: mimeType(for: key)); return
-        }
-        if let identity = MacSchemePolicy.resourceIdentity(for: url), identity.id == resourceID,
-           identity.generation == generation, resourceBytes.starts(with: Data("%PDF".utf8)) {
-            respond(urlSchemeTask, url: url, bytes: resourceBytes, mime: "application/pdf"); return
-        }
-        urlSchemeTask.didFailWithError(URLError(.noPermissionsToReadFile))
-    }
-
-    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
-
-    func invalidate() { resourceBytes.removeAll() }
-
-    private func respond(_ task: WKURLSchemeTask, url: URL, bytes: Data, mime: String) {
-        let response = URLResponse(url: url, mimeType: mime, expectedContentLength: bytes.count, textEncodingName: nil)
-        task.didReceive(response)
-        task.didReceive(bytes)
-        task.didFinish()
-    }
-
-    private func mimeType(for key: String) -> String {
-        if key.hasSuffix(".html") { return "text/html" }
-        if key.hasSuffix(".js") { return "text/javascript" }
-        if key.hasSuffix(".css") { return "text/css" }
-        if key.hasSuffix(".wasm") { return "application/wasm" }
-        return "application/octet-stream"
-    }
 }

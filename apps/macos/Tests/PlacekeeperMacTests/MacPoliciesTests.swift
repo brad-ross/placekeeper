@@ -54,13 +54,115 @@ final class MacPoliciesTests: XCTestCase {
             "DYLD_INSERT_LIBRARIES": "/tmp/inject.dylib",
             "LD_PRELOAD": "/tmp/inject.so",
             "PLACEKEEPER_RUNTIME_ROOT": "/Applications/Placekeeper.app/Contents/Resources",
+            "PLACEKEEPER_APP_INSTANCE_ID": "app_12345678",
+            "PLACEKEEPER_HELPER_ID": "helper_12345678",
             "SECRET": "no",
         ])
         XCTAssertEqual(environment, [
             "HOME": "/Users/reviewer",
             "PATH": "/usr/bin:/bin",
             "PLACEKEEPER_RUNTIME_ROOT": "/Applications/Placekeeper.app/Contents/Resources",
+            "PLACEKEEPER_APP_INSTANCE_ID": "app_12345678",
+            "PLACEKEEPER_HELPER_ID": "helper_12345678",
         ])
+    }
+
+    func testHelperFramesAreIncrementalAndRejectOversizedLengths() throws {
+        let body = try JSONSerialization.data(withJSONObject: ["type": "released"])
+        var length = UInt32(body.count).bigEndian
+        var frame = withUnsafeBytes(of: &length) { Data($0) }
+        frame.append(body)
+        var accumulator = HelperFrameAccumulator()
+        XCTAssertTrue(try accumulator.append(frame.prefix(3)).isEmpty)
+        let messages = try accumulator.append(frame.dropFirst(3))
+        XCTAssertEqual(messages.first?["type"] as? String, "released")
+
+        var oversized = UInt32(macosHelperMaxFrameBytes + 1).bigEndian
+        let oversizedFrame = withUnsafeBytes(of: &oversized) { Data($0) }
+        XCTAssertThrowsError(try accumulator.append(oversizedFrame)) { error in
+            XCTAssertEqual(error as? HelperFrameError, .oversized)
+        }
+    }
+
+    func testHelperReplyParserBindsEnvelopeAndAdmissionDescriptor() {
+        let projection: [String: Any] = [
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "generation": 1,
+            "revision": 0,
+            "state": ["schemaVersion": 2],
+            "scope": ["documentTitle": "Paper.pdf", "launchSurface": "macos"],
+            "saveStatus": ["destination": ["phase": "none", "generation": 0]],
+            "protected": false,
+            "document": ["sha256": String(repeating: "a", count: 64), "byteLength": 995, "generation": 1],
+        ]
+        let admitted: [String: Any] = [
+            "protocolVersion": 1,
+            "windowId": "window_12345678",
+            "attemptId": "attempt_12345678",
+            "requestId": "request_12345678",
+            "type": "admitted",
+            "provisionalId": "claim_12345678",
+            "resourceId": "resource_12345678",
+            "generation": 1,
+            "byteLength": 995,
+            "digest": String(repeating: "a", count: 64),
+            "displayName": "Paper.pdf",
+            "projection": projection,
+        ]
+        guard case let .admitted(value)? = MacReviewHelperReplyParser.parse(
+            admitted,
+            windowID: "window_12345678",
+            attemptID: "attempt_12345678",
+            requestID: "request_12345678"
+        ) else { return XCTFail("expected an admitted reply") }
+        XCTAssertEqual(value.resourceID, "resource_12345678")
+        XCTAssertEqual(value.projection.sessionID, "11111111-1111-4111-8111-111111111111")
+        XCTAssertNil(MacReviewHelperReplyParser.parse(
+            admitted.merging(["attemptId": "attempt_other123"]) { _, new in new },
+            windowID: "window_12345678",
+            attemptID: "attempt_12345678",
+            requestID: "request_12345678"
+        ))
+    }
+
+    func testPageRuntimeRequestRequiresClosedCurrentIdentity() {
+        let bootstrap: [String: Any] = [
+            "protocol": "placekeeper.review-runtime",
+            "version": 1,
+            "kind": "request",
+            "runtimeId": "runtime_12345678",
+            "requestId": "request_12345678",
+            "method": "bootstrap",
+            "payload": [String: Any](),
+        ]
+        XCTAssertEqual(
+            MacPageRuntimeRequest.parse(bootstrap, runtimeID: "runtime_12345678")?.method,
+            "bootstrap"
+        )
+        XCTAssertNil(MacPageRuntimeRequest.parse(
+            bootstrap.merging(["sourcePath": "/private/paper.pdf"]) { _, new in new },
+            runtimeID: "runtime_12345678"
+        ))
+
+        let scoped: [String: Any] = [
+            "protocol": "placekeeper.review-runtime",
+            "version": 1,
+            "kind": "request",
+            "runtimeId": "runtime_12345678",
+            "requestId": "request_abcdefgh",
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "generation": 2,
+            "revision": 4,
+            "method": "scope",
+            "payload": [String: Any](),
+        ]
+        let parsed = MacPageRuntimeRequest.parse(scoped, runtimeID: "runtime_12345678")
+        XCTAssertEqual(parsed?.generation, 2)
+        XCTAssertEqual(parsed?.revision, 4)
+        XCTAssertNil(MacPageRuntimeRequest.parse(
+            scoped.merging(["runtimeId": "runtime_wrong123"]) { _, new in new },
+            runtimeID: "runtime_12345678"
+        ))
     }
 
     func testHelperLossIsWindowScopedAndLastCloseLeavesNone() {

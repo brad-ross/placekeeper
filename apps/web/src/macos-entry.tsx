@@ -125,6 +125,16 @@ export function MacosLoadingShell({
       commands: snapshot.commands,
     });
   }, [attemptId, runtimeId]);
+  const publishDocumentReady = useCallback((generation: number) => {
+    if (runtimeId === undefined || attemptId === undefined) return;
+    postToNative({
+      protocolVersion: MACOS_SHELL_PROTOCOL_VERSION,
+      type: "document-ready",
+      runtimeId,
+      attemptId,
+      generation,
+    });
+  }, [attemptId, runtimeId]);
   useLayoutEffect(() => {
     const shell = root.current;
     if (shell === null || geometryIdentity === undefined) return;
@@ -188,6 +198,7 @@ export function MacosLoadingShell({
       <RuntimeProductionReviewApp
         {...(runtime === undefined ? {} : { runtime })}
         loadingDocumentTitle={documentTitle}
+        onDocumentReady={publishDocumentReady}
         onCommandSurfaceChange={publishCommandSurface}
         {...(commandInvocation === undefined ? {} : { commandInvocation })}
         {...(attemptId === undefined ? {} : {

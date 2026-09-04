@@ -201,7 +201,7 @@ export class MacosLifecycleControlSession {
 const ALLOWED_CHILD_ENVIRONMENT = new Set([
   "HOME", "LANG", "LC_ALL", "PATH", "TMPDIR", "PLACEKEEPER_RUNTIME_ROOT",
   "PLACEKEEPER_CONTROL_SOCKET", "PLACEKEEPER_BUILD_IDENTITY", "PLACEKEEPER_WINDOW_ID",
-  "PLACEKEEPER_ATTEMPT_ID",
+  "PLACEKEEPER_ATTEMPT_ID", "PLACEKEEPER_APP_INSTANCE_ID", "PLACEKEEPER_HELPER_ID",
 ]);
 
 export function minimalMacosChildEnvironment(source: NodeJS.ProcessEnv): Record<string, string> {

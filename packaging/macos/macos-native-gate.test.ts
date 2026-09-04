@@ -44,6 +44,8 @@ describe("macOS native gate packaging policy", () => {
       DYLD_INSERT_LIBRARIES: "/tmp/inject.dylib",
       LD_PRELOAD: "/tmp/inject.so",
       PLACEKEEPER_RUNTIME_ROOT: "/Applications/Placekeeper.app/Contents/Resources",
+      PLACEKEEPER_APP_INSTANCE_ID: "app_12345678",
+      PLACEKEEPER_HELPER_ID: "helper_12345678",
       UNRELATED_SECRET: "no",
     });
     expect(environment).toEqual({
@@ -52,6 +54,8 @@ describe("macOS native gate packaging policy", () => {
       HOME: "/Users/reviewer",
       LANG: "en_US.UTF-8",
       PLACEKEEPER_RUNTIME_ROOT: "/Applications/Placekeeper.app/Contents/Resources",
+      PLACEKEEPER_APP_INSTANCE_ID: "app_12345678",
+      PLACEKEEPER_HELPER_ID: "helper_12345678",
     });
   });
 

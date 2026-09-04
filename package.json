@@ -57,6 +57,7 @@
     "smoke:installed": "tsx packaging/macos/smoke-installed.ts",
     "spike:electron": "pnpm --dir apps/electron-spike start",
     "test:electron-spike": "pnpm --dir apps/electron-spike test",
+    "test:macos:native": "swift test --package-path apps/macos",
     "test:macos:gate": "vitest run packages/core/test/macos-shell-protocol.test.ts packages/core/test/macos-helper-protocol.test.ts apps/service/test/macos-native-gate.test.ts apps/web/test/macos-entry.test.tsx packaging/macos/macos-native-gate.test.ts && swift test --package-path apps/macos",
     "typecheck": "tsc -p tsconfig.base.json --noEmit",
     "lint": "tsc -p tsconfig.base.json --noEmit"

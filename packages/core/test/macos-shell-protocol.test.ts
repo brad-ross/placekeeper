@@ -25,6 +25,23 @@ describe("macOS packaged-shell protocol", () => {
     })).toMatchObject({ type: "visible-shell-ready", frameSequence: 1 });
   });
 
+  it("accepts document readiness only for a current-shaped runtime attempt", () => {
+    expect(parseMacosPageMessage({
+      protocolVersion: MACOS_SHELL_PROTOCOL_VERSION,
+      type: "document-ready",
+      runtimeId: "runtime_identifier_1234",
+      attemptId: "attempt_identifier_1234",
+      generation: 2,
+    })).toMatchObject({ type: "document-ready", generation: 2 });
+    expect(parseMacosPageMessage({
+      protocolVersion: MACOS_SHELL_PROTOCOL_VERSION,
+      type: "document-ready",
+      runtimeId: "runtime_identifier_1234",
+      attemptId: "attempt_identifier_1234",
+      generation: 0,
+    })).toBeUndefined();
+  });
+
   it("accepts atomic revision-fenced drag geometry and rejects stale-shaped input", () => {
     expect(parseMacosPageMessage({
       protocolVersion: MACOS_SHELL_PROTOCOL_VERSION,
