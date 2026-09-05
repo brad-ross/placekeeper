@@ -284,6 +284,20 @@ When bottom References is open, its hide and dock-right actions remain inside th
 - Full document and reference names are available in the existing tooltip on hover and keyboard focus, including when visually truncated. Include the short action separately where needed (for example, filename followed by “Save options”); retain the full accessible name. Wrap long tooltip text and clamp it within the viewport.
 - Long paths, titles, translated system labels, multi-page anchors, long annotations, narrow widths, text scaling, and keyboard occlusion remain usable.
 
+### App icon
+
+Include the app icon in this visual refresh. Preserve the established two-page reference-and-return metaphor: a main reading sheet, a tucked reference sheet, one smooth detour that returns to the reading position, and a small destination dot. The user selected a muted blue path and small amber dot; the neutral interface does not require a grayscale app identity. Replace the current warm field and ivory paper with neutral grays and near-white paper, softer corners, and restrained page detail.
+
+The user selected **B — Soft pages** from the [app-icon proposals](assets/neutral-soft-design/app-icons/index.html). Preserve its borderless layered sheets and subtle depth as the design direction. The [refined B comparison](assets/neutral-soft-design/app-icons/refinement-review.html) keeps the pages closely tucked with a modestly wider fan than the original B, places the amber dot near the middle of the exposed reference-page area, and recenters the complete stack. Avoid separating the sheets into a broadly spread pair. Raise the reference sheet slightly while keeping its upper corner concealed behind the front sheet, and extend its lower edge diagonally until it disappears behind the front sheet before the bottom-right corner begins to round. Preserve the selected fan, path, dot, and stack centering. This centered stack replaces the prior rebrand’s slight leftward placement. The alternatives remain documented for comparison:
+
+- **A — Familiar:** retain outlined fanned pages and the existing path geometry; primarily update palette and corner softness.
+- **B — Soft pages (selected):** use borderless layered sheets, a very shallow page shadow, and fewer text marks. This most closely reflects the new supporting trays while preserving the recognizable path.
+- **C — Simple mark:** reduce page detail further and strengthen the path for a clearer small silhouette. Review whether the heavier path feels too prominent beside the quiet interface.
+
+B is the approved design direction; these proposal files are not yet production masters. The comparison uses the same icon field, palette, and display sizes to isolate the treatment differences. Its rounded display crop is illustrative; confirm actual platform presentation in the built app. Refine B for production while preserving its selected geometry and restrained depth; review the final artwork at actual icon sizes before replacing assets. This section supersedes the prior rebrand's warm-palette requirement for the forthcoming refresh; its reference-and-return meaning remains authoritative.
+
+During implementation, update `packaging/macos/icon/Placekeeper.svg`, regenerate every required PNG in `Placekeeper.iconset`, and build the `.icns` through the existing packaging pipeline. Check 16, 32, 48, 128, 256, 512, and 1024 px presentations, including Retina variants required by the current iconset, on light and dark desktop backgrounds. Inspect actual Finder and Dock rendering. At small sizes, optically adjust or remove subordinate text marks as needed while retaining two distinguishable pages, a continuous return path, and the destination dot. Do not assume a scaled master is sufficient. Run the existing iconset validation and packaging checks, including reverse expansion of the built `.icns`. Keep app identity, bundle identifiers, and installation behavior unchanged.
+
 ## 8. Implementation sequence and review gates
 
 1. Confirm the implementation target revision and the passage-attached editor contract. Record any additional behavior change explicitly rather than deriving it from a sketch.
@@ -291,6 +305,7 @@ When bottom References is open, its hide and dock-right actions remain inside th
 3. Restyle the actual reading toolbar and workspace header first. Review a real dense paper with the workspace closed and open before spreading the system.
 4. Restyle annotations, search, outline, reference tabs/popovers, authoring, save/export dialogs, and exceptional states with the same vocabulary.
 5. Review the full split-reference layout and narrow/unified layout, including every supported host. Inspect actual app screens, not only isolated component scenes.
+   Finish the selected B app icon alongside this review; inspect the regenerated iconset and packaged Finder/Dock result before final visual sign-off.
 6. Run relevant existing component, interaction, Chromium/WebKit, host, and visual tests. Add focused tests only where a real changed behavior or accessibility risk requires them. Baseline changes require visual review and must not conceal regressions.
 
 Required acceptance walkthrough:
@@ -318,4 +333,4 @@ Where a lifecycle or host condition is not fully simulated, this contract and ex
 
 ## 10. Decision status
 
-No design question remains blocked on user input. The user chose soft, spacious neutral gray, retained icon-forward navigation, and delegated editor placement on design merit. The recommendation is the passage-attached editor specified above. Dark-mode delivery is explicitly outside the first implementation scope; expanding that scope can be requested separately. The plan does not authorize starting product implementation; the user is reviewing the design before commissioning it.
+The interface direction is settled: the user chose soft, spacious neutral gray, retained icon-forward navigation, and delegated editor placement on design merit. The recommendation is the passage-attached editor specified above. The app icon is explicitly in scope: B — Soft pages is selected, including borderless layered pages, subtle depth, a muted blue path, and a small amber dot. Production artwork and optical refinement at small sizes remain implementation work. Dark-mode interface delivery is explicitly outside the first implementation scope; testing the icon against a dark desktop background does not expand that scope. The plan does not authorize starting product implementation; the user is reviewing the design before commissioning it.

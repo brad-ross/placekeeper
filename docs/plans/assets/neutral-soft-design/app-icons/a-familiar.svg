@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 220 220" role="img" aria-labelledby="title desc">
+  <title id="title">A — Familiar</title>
+  <desc id="desc">Two neutral pages, a muted blue reference-and-return path, and a small amber destination dot.</desc>
+  <rect width="220" height="220" fill="#ededed" />
+  <g transform="translate(1 0.5)">
+    <rect x="76" y="54" width="101" height="112" rx="20" fill="#e3e3e3" stroke="#c7c7c7" stroke-width="2" transform="rotate(23 126 110)" />
+    <rect x="43" y="34" width="118" height="151" rx="20" fill="#fcfcfc" stroke="#c7c7c7" stroke-width="2" />
+    <path d="M68 73H133M68 96H120M68 143H128M68 163H109" fill="none" stroke="#737373" stroke-linecap="round" stroke-width="4" />
+    <path d="M92 34V65C92 77 99 83 111 83H151C166 83 173 91 173 102C173 113 166 121 151 121H111C99 121 92 129 92 141V157" fill="none" stroke="#526d89" stroke-linecap="round" stroke-linejoin="round" stroke-width="8" />
+    <path d="M82 153L92 165L102 153" fill="#526d89" />
+    <circle cx="173" cy="102" r="6" fill="#b98960" />
+  </g>
+</svg>
