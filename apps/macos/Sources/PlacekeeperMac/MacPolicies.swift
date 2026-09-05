@@ -169,6 +169,72 @@ enum ChildEnvironmentPolicy {
     }
 }
 
+struct PackagedHelperBuildIdentity: Equatable {
+    let daemonIdentity: String
+    let installArtifactIdentity: String
+}
+
+enum PackagedHelperEnvironmentPolicy {
+    private static let digest = try! NSRegularExpression(pattern: "^[a-f0-9]{64}$")
+
+    static func parseBuildIdentity(_ data: Data) -> PackagedHelperBuildIdentity? {
+        guard let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              Set(value.keys) == Set([
+                "managementProtocolVersion", "daemonIdentity", "installArtifactIdentity",
+              ]),
+              value["managementProtocolVersion"] as? Int == 1,
+              let daemonIdentity = value["daemonIdentity"] as? String,
+              let installArtifactIdentity = value["installArtifactIdentity"] as? String,
+              fullMatch(digest, daemonIdentity), fullMatch(digest, installArtifactIdentity) else { return nil }
+        return .init(
+            daemonIdentity: daemonIdentity,
+            installArtifactIdentity: installArtifactIdentity
+        )
+    }
+
+    static func merging(
+        source: [String: String],
+        resources: URL,
+        identity: PackagedHelperBuildIdentity,
+        allowDevelopmentOverrides: Bool
+    ) -> [String: String] {
+        var result = source
+        let bundled = [
+            "PLACEKEEPER_RUNTIME_ROOT": resources.path,
+            "PLACEKEEPER_DAEMON_IDENTITY": identity.daemonIdentity,
+            "PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY": identity.installArtifactIdentity,
+            "PLACEKEEPER_PDFIUM_WASM": resources.appendingPathComponent("pdfium/pdfium.wasm").path,
+        ]
+        for (key, value) in bundled where !allowDevelopmentOverrides || result[key] == nil {
+            result[key] = value
+        }
+        return result
+    }
+
+    static func resolve(
+        source: [String: String],
+        resources: URL?,
+        allowDevelopmentOverrides: Bool
+    ) -> [String: String]? {
+        guard let resources,
+              let data = try? Data(contentsOf: resources.appendingPathComponent("build-identity.json")),
+              let identity = parseBuildIdentity(data) else {
+            return allowDevelopmentOverrides ? source : nil
+        }
+        return merging(
+            source: source,
+            resources: resources,
+            identity: identity,
+            allowDevelopmentOverrides: allowDevelopmentOverrides
+        )
+    }
+
+    private static func fullMatch(_ expression: NSRegularExpression, _ value: String) -> Bool {
+        expression.firstMatch(in: value, range: NSRange(value.startIndex..., in: value))?.range.length
+            == value.utf16.count
+    }
+}
+
 protocol ReviewHelperProcess: AnyObject {
     var windowID: String { get }
     var isRunning: Bool { get }

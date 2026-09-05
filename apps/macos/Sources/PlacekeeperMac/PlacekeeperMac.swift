@@ -35,6 +35,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     private var lifecycleRegistered = false
     private var terminating = false
     private var helperCommand: HelperLaunchCommand?
+    private var helperBaseEnvironment: [String: String] = [:]
     private var openPanelPresented = false
     private let diagnosticsEnabled = ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_DIAGNOSTICS"] == "1"
     private lazy var menuCoordinator = MenuCoordinator(
@@ -57,12 +58,22 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         }
         let pendingSource = launchCoordinator.pending.first?.sourceURL
         let pendingDocumentName = pendingSource?.lastPathComponent ?? "Placekeeper"
-        guard let helperCommand = resolveHelperCommand(),
+        #if DEBUG
+        let allowDevelopmentOverrides = true
+        #else
+        let allowDevelopmentOverrides = false
+        #endif
+        guard let helperEnvironment = PackagedHelperEnvironmentPolicy.resolve(
+                source: ProcessInfo.processInfo.environment,
+                resources: Bundle.main.resourceURL,
+                allowDevelopmentOverrides: allowDevelopmentOverrides
+              ),
+              let helperCommand = resolveHelperCommand(),
               let lifecycle = AppLifecycleControlClient(
                 appInstanceID: appInstanceID,
                 executable: helperCommand.executable,
                 argumentPrefix: helperCommand.argumentPrefix,
-                baseEnvironment: ProcessInfo.processInfo.environment,
+                baseEnvironment: helperEnvironment,
                 onExit: { [weak self] in Task { @MainActor in self?.lifecycleDidFail() } }
               ) else {
             diagnostic("lifecycle-helper-launch-failed")
@@ -70,6 +81,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         self.helperCommand = helperCommand
+        helperBaseEnvironment = helperEnvironment
         lifecycleControl = lifecycle
         let rawBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "development"
         let safeBuild = rawBuild.replacingOccurrences(
@@ -194,7 +206,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 attemptID: attemptID,
                 executable: helperCommand.executable,
                 argumentPrefix: helperCommand.argumentPrefix,
-                baseEnvironment: ProcessInfo.processInfo.environment,
+                baseEnvironment: helperBaseEnvironment,
                 onExit: { [weak self] failedWindowID in
                     Task { @MainActor in
                         self?.helperDidExit(windowID: failedWindowID)

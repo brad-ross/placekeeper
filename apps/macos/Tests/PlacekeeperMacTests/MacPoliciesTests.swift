@@ -115,6 +115,50 @@ final class MacPoliciesTests: XCTestCase {
         ])
     }
 
+    func testPackagedHelperEnvironmentParsesIdentityAndOverridesAmbientReleaseValues() throws {
+        let identity = try XCTUnwrap(PackagedHelperEnvironmentPolicy.parseBuildIdentity(Data("""
+        {"managementProtocolVersion":1,"daemonIdentity":"\(String(repeating: "a", count: 64))","installArtifactIdentity":"\(String(repeating: "b", count: 64))"}
+        """.utf8)))
+        let resources = URL(fileURLWithPath: "/Applications/Placekeeper.app/Contents/Resources")
+        let environment = PackagedHelperEnvironmentPolicy.merging(
+            source: [
+                "HOME": "/Users/reviewer",
+                "PLACEKEEPER_DAEMON_IDENTITY": String(repeating: "c", count: 64),
+                "PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY": String(repeating: "d", count: 64),
+                "PLACEKEEPER_PDFIUM_WASM": "/tmp/ambient.wasm",
+            ],
+            resources: resources,
+            identity: identity,
+            allowDevelopmentOverrides: false
+        )
+        XCTAssertEqual(environment["PLACEKEEPER_RUNTIME_ROOT"], resources.path)
+        XCTAssertEqual(environment["PLACEKEEPER_DAEMON_IDENTITY"], String(repeating: "a", count: 64))
+        XCTAssertEqual(environment["PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY"], String(repeating: "b", count: 64))
+        XCTAssertEqual(environment["PLACEKEEPER_PDFIUM_WASM"], resources.appendingPathComponent("pdfium/pdfium.wasm").path)
+    }
+
+    func testPackagedHelperEnvironmentRejectsOpenOrMalformedIdentityAndKeepsDebugOverrides() throws {
+        let digest = String(repeating: "a", count: 64)
+        XCTAssertNil(PackagedHelperEnvironmentPolicy.parseBuildIdentity(Data("""
+        {"managementProtocolVersion":1,"daemonIdentity":"\(digest)","installArtifactIdentity":"\(digest)","extra":true}
+        """.utf8)))
+        let identity = try XCTUnwrap(PackagedHelperEnvironmentPolicy.parseBuildIdentity(Data("""
+        {"managementProtocolVersion":1,"daemonIdentity":"\(digest)","installArtifactIdentity":"\(digest)"}
+        """.utf8)))
+        let environment = PackagedHelperEnvironmentPolicy.merging(
+            source: [
+                "PLACEKEEPER_DAEMON_IDENTITY": "development",
+                "PLACEKEEPER_PDFIUM_WASM": "/tmp/debug.wasm",
+            ],
+            resources: URL(fileURLWithPath: "/Applications/Placekeeper.app/Contents/Resources"),
+            identity: identity,
+            allowDevelopmentOverrides: true
+        )
+        XCTAssertEqual(environment["PLACEKEEPER_DAEMON_IDENTITY"], "development")
+        XCTAssertEqual(environment["PLACEKEEPER_PDFIUM_WASM"], "/tmp/debug.wasm")
+        XCTAssertEqual(environment["PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY"], digest)
+    }
+
     func testHelperFramesAreIncrementalAndRejectOversizedLengths() throws {
         let body = try JSONSerialization.data(withJSONObject: ["type": "released"])
         var length = UInt32(body.count).bigEndian

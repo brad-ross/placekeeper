@@ -82,6 +82,7 @@ interface CatalogRuntimeDistributionOptions {
   readonly runtimeRoot: string;
   readonly webEntry: string;
   readonly noticePath: string;
+  readonly enforceReviewedWebSize?: boolean;
 }
 
 const catalogRuntimeFiles = async (root: string): Promise<string[]> => {
@@ -109,7 +110,8 @@ export async function validateCatalogRuntimeDistribution(
   validateCatalogThirdPartyNotices(notice);
 
   const webBytes = await readFile(webEntry);
-  if (webBytes.byteLength > CATALOG_DISTRIBUTION_BASELINE.productionWebJavaScriptBytes) {
+  if (options.enforceReviewedWebSize !== false
+    && webBytes.byteLength > CATALOG_DISTRIBUTION_BASELINE.productionWebJavaScriptBytes) {
     throw new Error(
       `Production web JavaScript exceeds the reviewed ${CATALOG_DISTRIBUTION_BASELINE.productionWebJavaScriptBytes}-byte catalog bundle baseline: ${webBytes.byteLength}`,
     );

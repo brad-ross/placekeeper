@@ -52,6 +52,7 @@
     "test:ci": "pnpm fixtures:pdf && pnpm catalog:check && pnpm typecheck && pnpm test:ci:unit && pnpm test:chrome-handoff && pnpm build:web && pnpm test:ci:chromium && pnpm test:ci:webkit && pnpm test:ci:visual && pnpm validate:distribution",
     "validate:distribution": "pnpm build && node --check dist/service/main.js && tsx packaging/macos/validate-manifest.ts",
     "package:macos": "pnpm build && tsx packaging/macos/build-app.ts",
+    "package:macos:native-candidate": "pnpm build && pnpm build:macos:web && tsx packaging/macos/build-native-candidate.ts",
     "install:local": "/bin/sh ./install.sh",
     "notarize:macos": "tsx packaging/macos/notarize.ts",
     "smoke:installed": "tsx packaging/macos/smoke-installed.ts",
