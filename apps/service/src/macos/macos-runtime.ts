@@ -10,7 +10,11 @@ import {
   type MacosReviewHelperResponse,
   type MacosRuntimeProjection,
 } from "../../../../packages/core/src/macos-helper-protocol.js";
-import { encodePlacekeeperLinkFragment } from "../../../../packages/core/src/placekeeper-link.js";
+import {
+  decodePlacekeeperLink,
+  encodePlacekeeperLinkFragment,
+  type PlacekeeperLinkLocation,
+} from "../../../../packages/core/src/placekeeper-link.js";
 import {
   sanitizeMacosReviewRuntimeResponse,
   sanitizeReviewRuntimeDisplayString,
@@ -51,6 +55,7 @@ interface StagedRuntimeRecord extends RuntimeRecordBase {
 interface RecoveryRuntimeRecord extends RuntimeRecordBase {
   readonly phase: "recovery";
   readonly recovery: ChromeRuntimeRecovery;
+  readonly location?: PlacekeeperLinkLocation;
 }
 
 type RuntimeRecord = StagedRuntimeRecord | RecoveryRuntimeRecord;
@@ -164,9 +169,12 @@ export class MacosRuntimeManager {
   async #dispatch(helperId: string, message: MacosReviewHelperMessage): Promise<MacosReviewHelperResponse> {
     const existing = this.#records.get(helperId);
     if (existing === undefined) {
-      return message.type === "admit" ? this.#admit(helperId, message) : this.#failure(message, "invalid");
+      return message.type === "admit" || message.type === "admit-link"
+        ? this.#admit(helperId, message)
+        : this.#failure(message, "invalid");
     }
-    if (message.windowId !== existing.windowId || message.attemptId !== existing.attemptId || message.type === "admit") {
+    if (message.windowId !== existing.windowId || message.attemptId !== existing.attemptId
+      || message.type === "admit" || message.type === "admit-link") {
       return this.#failure(message, "invalid");
     }
     if (message.type === "release") {
@@ -188,10 +196,23 @@ export class MacosRuntimeManager {
 
   async #admit(
     helperId: string,
-    message: Extract<MacosReviewHelperMessage, { readonly type: "admit" }>,
+    message: Extract<MacosReviewHelperMessage, { readonly type: "admit" | "admit-link" }>,
   ): Promise<MacosReviewHelperResponse> {
     if (this.#records.size >= this.#limits.maxHelpers) return this.#failure(message, "budget");
-    const fileUrl = pathToFileURL(message.sourcePath).href;
+    let sourcePath: string;
+    let location: PlacekeeperLinkLocation | undefined;
+    try {
+      if (message.type === "admit-link") {
+        const target = decodePlacekeeperLink(message.link);
+        sourcePath = target.path;
+        location = target.location;
+      } else {
+        sourcePath = message.sourcePath;
+      }
+    } catch {
+      return this.#failure(message, "invalid");
+    }
+    const fileUrl = pathToFileURL(sourcePath).href;
     let canonicalKey: string | undefined;
     try {
       const sink = await this.#backend.begin({
@@ -200,7 +221,7 @@ export class MacosRuntimeManager {
         fileUrl,
       });
       const staged = await sink.finish();
-      const displayName = sanitizeReviewRuntimeDisplayString(basename(message.sourcePath));
+      const displayName = sanitizeReviewRuntimeDisplayString(basename(sourcePath));
       if (displayName === undefined) throw new Error("invalid-display-name");
       if ("choose" in staged) {
         this.#records.set(helperId, {
@@ -210,6 +231,7 @@ export class MacosRuntimeManager {
           displayName,
           phase: "recovery",
           recovery: staged,
+          ...(location === undefined ? {} : { location }),
         });
         return {
           ...this.#envelope(message),
@@ -219,7 +241,7 @@ export class MacosRuntimeManager {
         };
       }
       canonicalKey = staged.canonicalKey;
-      return this.#stage(helperId, message, displayName, staged);
+      return this.#stage(helperId, message, displayName, staged, location);
     } catch {
       if (canonicalKey !== undefined) await this.#backend.release(canonicalKey).catch(() => undefined);
       return this.#failure(message, "unavailable");
@@ -236,7 +258,7 @@ export class MacosRuntimeManager {
     let staged: ChromeRuntimeStagedReview | undefined;
     try {
       staged = await record.recovery.choose(message.decision, message.idempotencyKey);
-      return this.#stage(record.helperId, message, record.displayName, staged);
+      return this.#stage(record.helperId, message, record.displayName, staged, record.location);
     } catch {
       if (staged !== undefined) await this.#backend.release(staged.canonicalKey).catch(() => undefined);
       return this.#failure(message, "recovery");
@@ -248,8 +270,12 @@ export class MacosRuntimeManager {
     message: Pick<MacosReviewHelperMessage, "windowId" | "attemptId" | "requestId">,
     displayName: string,
     staged: ChromeRuntimeStagedReview,
+    location?: PlacekeeperLinkLocation,
   ): MacosReviewHelperResponse {
-    const projection = sanitizeMacosRuntimeProjection(staged.projection);
+    const trustedProjection = location === undefined
+      ? staged.projection
+      : { ...staged.projection, location };
+    const projection = sanitizeMacosRuntimeProjection(trustedProjection);
     if (projection === undefined) throw new Error("invalid-projection");
     const record: StagedRuntimeRecord = {
       helperId,
@@ -261,7 +287,7 @@ export class MacosRuntimeManager {
       displayName,
       presentationLease: randomBytes(32).toString("base64url"),
       phase: "provisional",
-      trustedProjection: staged.projection,
+      trustedProjection,
       projection,
     };
     this.#records.set(helperId, record);

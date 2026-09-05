@@ -1,6 +1,7 @@
 import {
   decodePlacekeeperLink,
   encodePlacekeeperLinkFragment,
+  PLACEKEEPER_LINK_MAX_LENGTH,
   type PlacekeeperLinkLocation,
 } from "./placekeeper-link.js";
 import {
@@ -44,6 +45,7 @@ export interface MacosRuntimeProjection {
 
 export type MacosReviewHelperMessage = ReviewEnvelope & (
   | { readonly type: "admit"; readonly sourcePath: string }
+  | { readonly type: "admit-link"; readonly link: string; readonly confirmed: true }
   | { readonly type: "activate"; readonly documentValidated: true }
   | { readonly type: "refresh" }
   | { readonly type: "keepalive" }
@@ -140,6 +142,16 @@ export function parseMacosReviewHelperMessage(value: unknown): MacosReviewHelper
     return exact(value, [...base, "sourcePath"]) && typeof value.sourcePath === "string"
       && value.sourcePath.startsWith("/") && value.sourcePath.length <= 16_384 && !value.sourcePath.includes("\0")
       ? value as unknown as MacosReviewHelperMessage : undefined;
+  }
+  if (value.type === "admit-link") {
+    if (!exact(value, [...base, "link", "confirmed"]) || value.confirmed !== true
+      || typeof value.link !== "string" || value.link.length > PLACEKEEPER_LINK_MAX_LENGTH) return undefined;
+    try {
+      decodePlacekeeperLink(value.link);
+      return value as unknown as MacosReviewHelperMessage;
+    } catch {
+      return undefined;
+    }
   }
   if (value.type === "activate") {
     return exact(value, [...base, "documentValidated"]) && value.documentValidated === true

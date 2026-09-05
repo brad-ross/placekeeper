@@ -214,6 +214,58 @@ final class MacPoliciesTests: XCTestCase {
         }
     }
 
+    func testLaunchCoordinatorQueuesBatchesAndSerializesTheSameSource() throws {
+        let first = try XCTUnwrap(NativeOpenIntent.parse(URL(fileURLWithPath: "/tmp/First.pdf")))
+        let second = try XCTUnwrap(NativeOpenIntent.parse(URL(fileURLWithPath: "/tmp/Second.pdf")))
+        var coordinator = LaunchCoordinator()
+        XCTAssertTrue(coordinator.enqueue([first, second, first]).isEmpty)
+        XCTAssertEqual(coordinator.pending, [first, second])
+        XCTAssertEqual(coordinator.markReady(), [first, second])
+        XCTAssertEqual(coordinator.inFlightCount, 2)
+
+        let laterLink = try XCTUnwrap(NativeOpenIntent.parse(URL(
+            string: "placekeeper:///tmp/First.pdf#v=1&page=7"
+        )))
+        XCTAssertTrue(coordinator.enqueue([laterLink]).isEmpty)
+        XCTAssertEqual(coordinator.finish(first), [laterLink])
+        XCTAssertEqual(coordinator.inFlightCount, 2)
+    }
+
+    func testNativeLinkHintIsBoundedWhileServiceRetainsFinalAuthority() throws {
+        let link = try XCTUnwrap(NativeOpenIntent.parse(URL(
+            string: "placekeeper:///tmp/Paper%20One.pdf#v=1&page=3"
+        )))
+        XCTAssertEqual(link.sourceURL.path, "/tmp/Paper One.pdf")
+        guard case let .placekeeperLink(raw) = link.kind else { return XCTFail("expected a link intent") }
+        XCTAssertEqual(raw, "placekeeper:///tmp/Paper%20One.pdf#v=1&page=3")
+        XCTAssertNil(NativeOpenIntent.parse(URL(
+            string: "placekeeper://example.com/tmp/Paper.pdf#v=1&page=3"
+        )!))
+        XCTAssertNil(NativeOpenIntent.parse(URL(
+            string: "placekeeper:///tmp/Paper.pdf?session=secret#v=1&page=3"
+        )!))
+    }
+
+    func testDocumentRegistryUsesServiceApprovedReviewIdentityAndMostRecentWindow() {
+        var registry = DocumentWindowRegistry()
+        let reviewID = "779e1d9d-58c1-4b12-8dc2-3449dad132c1"
+        XCTAssertTrue(registry.register(
+            windowID: "window_first",
+            canonicalReviewID: reviewID,
+            documentDigest: String(repeating: "a", count: 64)
+        ))
+        XCTAssertTrue(registry.register(
+            windowID: "window_second",
+            canonicalReviewID: reviewID,
+            documentDigest: String(repeating: "a", count: 64)
+        ))
+        XCTAssertEqual(registry.matchingWindow(canonicalReviewID: reviewID), "window_second")
+        registry.noteKey(windowID: "window_first")
+        XCTAssertEqual(registry.matchingWindow(canonicalReviewID: reviewID), "window_first")
+        registry.remove(windowID: "window_first")
+        XCTAssertEqual(registry.matchingWindow(canonicalReviewID: reviewID), "window_second")
+    }
+
     func testGenerationBoundResourceAndCatastrophicSurface() {
         var vault = ResourceVault()
         XCTAssertTrue(vault.install(.init(id: "resource_12345678", generation: 1, bytes: Data("%PDF-1.7".utf8))))

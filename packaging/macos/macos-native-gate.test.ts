@@ -16,12 +16,15 @@ function entitlementKeys(xml: string): string[] {
 
 describe("macOS native gate packaging policy", () => {
   it("keeps the proof executable production-shaped and network-free", async () => {
-    const [windowSource, appSource, packageSource, shellHtml, shellCss] = await Promise.all([
+    const [windowSource, appSource, packageSource, shellHtml, shellCss, launchSource, registrySource, lifecycleSource] = await Promise.all([
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift"), "utf8"),
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/PlacekeeperMac.swift"), "utf8"),
       readFile(resolve("apps/macos/Package.swift"), "utf8"),
       readFile(resolve("apps/web/macos.html"), "utf8"),
       readFile(resolve("apps/web/src/app/review-layout.css"), "utf8"),
+      readFile(resolve("apps/macos/Sources/PlacekeeperMac/LaunchCoordinator.swift"), "utf8"),
+      readFile(resolve("apps/macos/Sources/PlacekeeperMac/DocumentWindowRegistry.swift"), "utf8"),
+      readFile(resolve("apps/macos/Sources/PlacekeeperMac/AppLifecycleControlClient.swift"), "utf8"),
     ]);
     expect(packageSource).toContain(".macOS(.v13)");
     expect(windowSource).toContain(".fullSizeContentView");
@@ -40,6 +43,14 @@ describe("macOS native gate packaging policy", () => {
     expect(shellCss).toMatch(/\.macos-loading-shell\s*\{[\s\S]*height:\s*100%/u);
     expect(appSource).toContain('environment["PLACEKEEPER_MAC_REVIEW_HELPER"]');
     expect(appSource).toContain("applicationShouldTerminateAfterLastWindowClosed");
+    expect(appSource).toContain("openFiles filenames: [String]");
+    expect(appSource).toContain("NSWindow.allowsAutomaticWindowTabbing = false");
+    expect(appSource).toContain("noteNewRecentDocumentURL");
+    expect(launchSource).toContain("private(set) var inFlightKeys");
+    expect(launchSource).toContain('raw.hasPrefix("placekeeper:///")');
+    expect(registrySource).toContain("canonicalReviewID");
+    expect(registrySource).not.toContain("sourceURL");
+    expect(lifecycleSource).toContain("queued.count < 64");
   });
 
   it("strips Node and dynamic-loader injection from child environments", () => {

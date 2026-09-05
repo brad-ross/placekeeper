@@ -88,6 +88,7 @@ describe("host-neutral review runtime", () => {
                 pdfiumWasm: "placekeeper-app://bundle/assets/pdfium.wasm",
                 worker: "placekeeper-app://bundle/assets/pdfium-worker.js",
               },
+              location: { kind: "page", page: 4 },
             },
           },
         });
@@ -123,6 +124,7 @@ describe("host-neutral review runtime", () => {
       },
     });
     expect(JSON.stringify(bootstrap)).not.toMatch(/must\/not\/cross|credential|canonicalLinkBase/u);
+    expect(bootstrap.locationHistory?.read()).toEqual({ kind: "page", page: 4 });
     expect(postToNative).toHaveBeenCalledWith(expect.objectContaining({
       type: "runtime-message",
       runtimeId,

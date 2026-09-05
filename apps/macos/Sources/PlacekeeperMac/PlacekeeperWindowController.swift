@@ -5,6 +5,8 @@ import Foundation
 @MainActor
 final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     let windowID: String
+    let canonicalReviewID: String
+    let documentDigest: String
     private let webView: WKWebView
     private let schemeHandler: MacSchemeHandler
     private let attemptID: String
@@ -17,6 +19,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     private var dragFence: DragRegionFence
     private var dragOverlays: [NSView] = []
     private let onClose: (String) -> Void
+    private let onBecameKey: (String) -> Void
     private var closed = false
     private var failed = false
     private var visiblePaintConfirmed = false
@@ -34,10 +37,14 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         runtimeID: String,
         helper: SupervisedReviewHelper,
         admission: MacReviewAdmission,
+        onBecameKey: @escaping (String) -> Void,
         onClose: @escaping (String) -> Void
     ) {
         self.windowID = windowID
+        self.canonicalReviewID = admission.projection.sessionID
+        self.documentDigest = admission.digest
         self.onClose = onClose
+        self.onBecameKey = onBecameKey
         self.attemptID = attemptID
         self.runtimeID = runtimeID
         self.admission = admission
@@ -96,6 +103,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.toolbarStyle = .unified
+        window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
@@ -187,6 +195,13 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         schemeHandler.invalidate()
         installDragOverlays([])
         onClose(windowID)
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) { onBecameKey(windowID) }
+
+    func focus() {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
     }
 
     func windowWillStartLiveResize(_ notification: Notification) { beginGeometryTransition() }

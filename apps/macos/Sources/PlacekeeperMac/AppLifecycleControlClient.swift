@@ -10,6 +10,11 @@ enum AppLifecycleReply: Equatable {
 final class AppLifecycleControlClient: @unchecked Sendable {
     typealias Completion = (AppLifecycleReply?) -> Void
 
+    private struct QueuedRequest {
+        let frame: Data
+        let completion: Completion
+    }
+
     private let appInstanceID: String
     private let process: Process
     private let stdinPipe = Pipe()
@@ -17,6 +22,7 @@ final class AppLifecycleControlClient: @unchecked Sendable {
     private let lock = NSLock()
     private var accumulator = HelperFrameAccumulator()
     private var pending: Completion?
+    private var queued: [QueuedRequest] = []
     private var finished = false
 
     init?(
@@ -70,18 +76,12 @@ final class AppLifecycleControlClient: @unchecked Sendable {
         var frame = withUnsafeBytes(of: &length) { Data($0) }
         frame.append(body)
         lock.lock()
-        guard !finished, process.isRunning, pending == nil else { lock.unlock(); return false }
-        pending = completion
-        do {
-            try stdinPipe.fileHandleForWriting.write(contentsOf: frame)
-            lock.unlock()
-            return true
-        } catch {
-            pending = nil
-            lock.unlock()
-            finish()
-            return false
-        }
+        guard !finished, process.isRunning, queued.count < 64 else { lock.unlock(); return false }
+        queued.append(.init(frame: frame, completion: completion))
+        let started = pumpLocked()
+        lock.unlock()
+        if !started { finish() }
+        return started
     }
 
     func terminate() {
@@ -111,9 +111,11 @@ final class AppLifecycleControlClient: @unchecked Sendable {
         guard let completion = pending else { lock.unlock(); terminate(); return }
         pending = nil
         let reply = parse(message)
+        let advanced = reply == nil || pumpLocked()
         lock.unlock()
         completion(reply)
         if reply == nil { terminate() }
+        else if !advanced { finish() }
     }
 
     private func parse(_ value: [String: Any]) -> AppLifecycleReply? {
@@ -140,11 +142,24 @@ final class AppLifecycleControlClient: @unchecked Sendable {
         lock.lock()
         guard !finished else { lock.unlock(); return }
         finished = true
-        let callback = pending
+        let callbacks = [pending].compactMap { $0 } + queued.map(\.completion)
         pending = nil
+        queued.removeAll()
         lock.unlock()
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
-        callback?(nil)
+        callbacks.forEach { $0(nil) }
+    }
+
+    private func pumpLocked() -> Bool {
+        guard pending == nil, !queued.isEmpty else { return true }
+        let next = queued.removeFirst()
+        pending = next.completion
+        do {
+            try stdinPipe.fileHandleForWriting.write(contentsOf: next.frame)
+            return true
+        } catch {
+            return false
+        }
     }
 
     deinit { terminate() }

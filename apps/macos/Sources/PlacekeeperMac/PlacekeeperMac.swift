@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 @MainActor
 final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
@@ -22,17 +23,22 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     private var controllers: [PlacekeeperWindowController] = []
     private var recoveryAttempts: [String: RecoveryAttempt] = [:]
     private var fallbackWindows: [NSWindow] = []
+    private var launchCoordinator = LaunchCoordinator()
+    private var windowRegistry = DocumentWindowRegistry()
     private let helperSupervisor = ReviewHelperSupervisor()
     private let appInstanceID = "app_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
     private var lifecycleControl: AppLifecycleControlClient?
     private var lifecycleRegistered = false
     private var terminating = false
     private var helperCommand: HelperLaunchCommand?
+    private var openPanelPresented = false
     private let diagnosticsEnabled = ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_DIAGNOSTICS"] == "1"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         diagnostic("application-did-finish-launching")
-        let source = CommandLine.arguments.dropFirst().first.map(URL.init(fileURLWithPath:))
+        NSWindow.allowsAutomaticWindowTabbing = false
+        enqueueLaunchURLs(CommandLine.arguments.dropFirst().map { URL(fileURLWithPath: $0) })
+        let pendingDocumentName = launchCoordinator.pending.first?.sourceURL.lastPathComponent ?? "Placekeeper"
         guard let helperCommand = resolveHelperCommand(),
               let lifecycle = AppLifecycleControlClient(
                 appInstanceID: appInstanceID,
@@ -42,7 +48,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 onExit: { [weak self] in Task { @MainActor in self?.lifecycleDidFail() } }
               ) else {
             diagnostic("lifecycle-helper-launch-failed")
-            presentCatastrophicFallback(documentName: source?.lastPathComponent ?? "No PDF selected")
+            presentCatastrophicFallback(documentName: pendingDocumentName)
             return
         }
         self.helperCommand = helperCommand
@@ -62,24 +68,41 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 guard reply == .acknowledged else {
                     self.diagnostic("lifecycle-registration-failed")
-                    self.presentCatastrophicFallback(documentName: source?.lastPathComponent ?? "No PDF selected")
+                    self.presentCatastrophicFallback(documentName: pendingDocumentName)
                     return
                 }
                 self.lifecycleRegistered = true
                 self.diagnostic("lifecycle-registered")
-                guard let source else {
-                    self.presentCatastrophicFallback(documentName: "No PDF selected")
-                    return
-                }
-                self.open(source)
+                let launches = self.launchCoordinator.markReady()
+                launches.forEach(self.open)
+                if launches.isEmpty, self.launchCoordinator.pending.isEmpty { self.showOpenPanel() }
             }
         }) else {
             diagnostic("lifecycle-registration-write-failed")
             lifecycle.terminate()
             lifecycleControl = nil
-            presentCatastrophicFallback(documentName: source?.lastPathComponent ?? "No PDF selected")
+            presentCatastrophicFallback(documentName: pendingDocumentName)
             return
         }
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        enqueueLaunchURLs(urls)
+    }
+
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        enqueueLaunchURLs(filenames.map { URL(fileURLWithPath: $0) })
+        sender.reply(toOpenOrPrint: .success)
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if let key = sender.keyWindow ?? controllers.last?.window ?? recoveryAttempts.values.first?.controller.window {
+            sender.activate(ignoringOtherApps: true)
+            key.makeKeyAndOrderFront(nil)
+        } else {
+            showOpenPanel()
+        }
+        return true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -97,30 +120,45 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func open(_ source: URL) {
+    private func enqueueLaunchURLs(_ urls: [URL]) {
+        let intents = urls.compactMap(NativeOpenIntent.parse)
+        launchCoordinator.enqueue(intents).forEach(open)
+    }
+
+    private func open(_ intent: NativeOpenIntent) {
         diagnostic("window-bootstrap-requested")
-        guard sendActivity(activeWindows: controllers.count + 1, bootstrappingWindows: 1, completion: { [weak self] accepted in
+        guard sendActivity(
+            activeWindows: reportedActiveWindowCount,
+            bootstrappingWindows: launchCoordinator.inFlightCount,
+            completion: { [weak self] accepted in
             Task { @MainActor in
                 guard let self else { return }
-                if accepted { self.beginOpen(source) }
+                if accepted { self.beginOpen(intent) }
                 else {
                     self.diagnostic("window-bootstrap-activity-rejected")
-                    self.presentCatastrophicFallback(documentName: source.lastPathComponent)
+                    self.finishLaunch(intent)
+                    self.presentCatastrophicFallback(documentName: intent.sourceURL.lastPathComponent)
                 }
             }
         }) else {
-            presentCatastrophicFallback(documentName: source.lastPathComponent)
+            finishLaunch(intent)
+            presentCatastrophicFallback(documentName: intent.sourceURL.lastPathComponent)
             return
         }
     }
 
-    private func beginOpen(_ source: URL) {
+    private func beginOpen(_ intent: NativeOpenIntent) {
         diagnostic("window-bootstrap-admitting")
+        let source = intent.sourceURL
+        if case let .placekeeperLink(link) = intent.kind, !confirmPlacekeeperLink(link, source: source) {
+            finishLaunch(intent)
+            return
+        }
         let packagedRoot = ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_WEB_ROOT"]
             .map(URL.init(fileURLWithPath:))
             ?? Bundle.main.resourceURL?.appendingPathComponent("MacWeb")
         guard let packagedRoot, source.isFileURL else {
-            _ = sendActivity(activeWindows: controllers.count, bootstrappingWindows: 0)
+            finishLaunch(intent)
             presentCatastrophicFallback(documentName: source.lastPathComponent)
             return
         }
@@ -139,19 +177,25 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 baseEnvironment: ProcessInfo.processInfo.environment,
                 onExit: { [weak self] failedWindowID in
                     Task { @MainActor in
-                        self?.controllers.first { $0.windowID == failedWindowID }?.helperDidFail()
-                        self?.helperSupervisor.helperDied(windowID: failedWindowID)
+                        self?.helperDidExit(windowID: failedWindowID)
                     }
                 }
               ), helperSupervisor.attach(helper) else {
-            _ = sendActivity(activeWindows: controllers.count, bootstrappingWindows: 0)
+            finishLaunch(intent)
             presentCatastrophicFallback(documentName: source.lastPathComponent)
             return
         }
         let canonicalSource = source.standardizedFileURL.resolvingSymlinksInPath()
+        let request: (type: String, fields: [String: Any])
+        switch intent.kind {
+        case .document:
+            request = ("admit", ["sourcePath": canonicalSource.path])
+        case let .placekeeperLink(link):
+            request = ("admit-link", ["link": link, "confirmed": true])
+        }
         guard helper.request(
-            type: "admit",
-            fields: ["sourcePath": canonicalSource.path],
+            type: request.type,
+            fields: request.fields,
             completion: { [weak self, weak helper] reply in
                 Task { @MainActor in
                     guard let self, let helper else { return }
@@ -159,7 +203,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                     self.handleAdmission(
                         reply,
                         windowID: windowID,
-                        source: source,
+                        intent: intent,
                         packagedRoot: packagedRoot,
                         attemptID: attemptID,
                         runtimeID: runtimeID,
@@ -169,7 +213,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             }
         ) != nil else {
             helperSupervisor.close(windowID: windowID)
-            _ = sendActivity(activeWindows: controllers.count, bootstrappingWindows: 0)
+            finishLaunch(intent)
             presentCatastrophicFallback(documentName: source.lastPathComponent)
             return
         }
@@ -178,14 +222,25 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     private func handleAdmission(
         _ reply: MacReviewHelperReply?,
         windowID: String,
-        source: URL,
+        intent: NativeOpenIntent,
         packagedRoot: URL,
         attemptID: String,
         runtimeID: String,
         helper: SupervisedReviewHelper
     ) {
+        let source = intent.sourceURL
+        finishLaunch(intent)
         switch reply {
         case let .admitted(admission):
+            NSDocumentController.shared.noteNewRecentDocumentURL(source)
+            if let existingWindowID = windowRegistry.matchingWindow(
+                canonicalReviewID: admission.projection.sessionID
+            ), let existing = controllers.first(where: { $0.windowID == existingWindowID }) {
+                releaseCandidate(helper, windowID: windowID)
+                windowRegistry.noteKey(windowID: existingWindowID)
+                existing.focus()
+                return
+            }
             installDocumentWindow(
                 windowID: windowID,
                 source: source,
@@ -212,11 +267,11 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 offerID: offerID,
                 offerExpiresAt: offerExpiresAt
             )
-            _ = sendActivity(activeWindows: controllers.count + recoveryAttempts.count, bootstrappingWindows: 0)
+            updateActivity()
             controller.show()
         default:
             helperSupervisor.close(windowID: windowID)
-            _ = sendActivity(activeWindows: controllers.count + recoveryAttempts.count, bootstrappingWindows: 0)
+            updateActivity()
             presentCatastrophicFallback(documentName: source.lastPathComponent)
         }
     }
@@ -256,7 +311,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     private func closeRecovery(windowID: String) {
         guard recoveryAttempts.removeValue(forKey: windowID) != nil else { return }
         helperSupervisor.close(windowID: windowID)
-        _ = sendActivity(activeWindows: controllers.count + recoveryAttempts.count, bootstrappingWindows: 0)
+        updateActivity()
     }
 
     private func installDocumentWindow(
@@ -276,20 +331,96 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             runtimeID: runtimeID,
             helper: helper,
             admission: admission,
+            onBecameKey: { [weak self] keyWindowID in self?.windowRegistry.noteKey(windowID: keyWindowID) },
             onClose: { [weak self] closedWindowID in
                 guard let self else { return }
                 self.helperSupervisor.close(windowID: closedWindowID)
+                self.windowRegistry.remove(windowID: closedWindowID)
                 self.controllers.removeAll { $0.windowID == closedWindowID }
                 _ = self.sendActivity(
-                    activeWindows: self.controllers.count + self.recoveryAttempts.count,
-                    bootstrappingWindows: 0
+                    activeWindows: self.reportedActiveWindowCount,
+                    bootstrappingWindows: self.launchCoordinator.inFlightCount
                 )
             }
         )
+        guard windowRegistry.register(
+            windowID: windowID,
+            canonicalReviewID: admission.projection.sessionID,
+            documentDigest: admission.digest
+        ) else {
+            helperSupervisor.close(windowID: windowID)
+            presentCatastrophicFallback(documentName: source.lastPathComponent)
+            return
+        }
         controllers.append(controller)
         diagnostic("document-window-starting")
-        _ = sendActivity(activeWindows: controllers.count + recoveryAttempts.count, bootstrappingWindows: 0)
+        updateActivity()
         controller.start()
+    }
+
+    private func finishLaunch(_ intent: NativeOpenIntent) {
+        let next = launchCoordinator.finish(intent)
+        _ = sendActivity(
+            activeWindows: reportedActiveWindowCount,
+            bootstrappingWindows: launchCoordinator.inFlightCount
+        )
+        next.forEach(open)
+    }
+
+    private func releaseCandidate(_ helper: SupervisedReviewHelper, windowID: String) {
+        let sent = helper.request(type: "release", fields: [:]) { [weak self] _ in
+            Task { @MainActor in self?.helperSupervisor.close(windowID: windowID) }
+        }
+        if sent == nil { helperSupervisor.close(windowID: windowID) }
+    }
+
+    private var reportedActiveWindowCount: Int {
+        max(
+            controllers.count + recoveryAttempts.count + launchCoordinator.inFlightCount,
+            helperSupervisor.activeWindowIDs.count
+        )
+    }
+
+    private func updateActivity() {
+        _ = sendActivity(
+            activeWindows: reportedActiveWindowCount,
+            bootstrappingWindows: launchCoordinator.inFlightCount
+        )
+    }
+
+    private func helperDidExit(windowID: String) {
+        controllers.first { $0.windowID == windowID }?.helperDidFail()
+        helperSupervisor.helperDied(windowID: windowID)
+        updateActivity()
+    }
+
+    private func confirmPlacekeeperLink(_ _: String, source: URL) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Open this Placekeeper link?"
+        alert.informativeText = "The link requests \(source.lastPathComponent). Placekeeper will verify the PDF before opening it."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.keyEquivalent = "\r"
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func showOpenPanel() {
+        guard lifecycleRegistered, !openPanelPresented else { return }
+        openPanelPresented = true
+        let panel = NSOpenPanel()
+        panel.title = "Open a PDF in Placekeeper"
+        panel.prompt = "Open"
+        panel.allowedContentTypes = [.pdf]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.begin { [weak self] response in
+            Task { @MainActor in
+                guard let self else { return }
+                self.openPanelPresented = false
+                if response == .OK { self.enqueueLaunchURLs(panel.urls) }
+            }
+        }
     }
 
     @discardableResult

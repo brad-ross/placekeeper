@@ -155,7 +155,7 @@ export function createRpcHostRuntime(
   let deferredCommandInvalidation: HostRuntimeInvalidation | undefined;
   let pendingHostCommand: HostRuntimeCommand | undefined;
   let disposed = false;
-  let chromeLocationHistory: MemoryReviewLocationHistory | undefined;
+  let nativeLocationHistory: MemoryReviewLocationHistory | undefined;
   const materializedPdfium = new Map<string, Promise<MaterializedViewerResource>>();
   const materializedWorkers = new Map<string, Promise<MaterializedViewerResource>>();
   const materializedDocuments = new Map<string, Promise<MaterializedViewerResource>>();
@@ -412,8 +412,8 @@ export function createRpcHostRuntime(
         (nativeResources === undefined || nativeResources.worker === undefined)) {
         throw new Error("The trusted host returned incomplete packaged resources.");
       }
-      if (host === "chrome" && chromeLocationHistory === undefined) {
-        chromeLocationHistory = new MemoryReviewLocationHistory(
+      if ((host === "chrome" || host === "macos") && nativeLocationHistory === undefined) {
+        nativeLocationHistory = new MemoryReviewLocationHistory(
           isObject(value.location)
             ? value.location as unknown as PlacekeeperLinkLocation
             : { kind: "page", page: 1 },
@@ -443,7 +443,7 @@ export function createRpcHostRuntime(
                 worker: string;
               } }
             : { host: "vscode", issued },
-        ...(chromeLocationHistory === undefined ? {} : { locationHistory: chromeLocationHistory }),
+        ...(nativeLocationHistory === undefined ? {} : { locationHistory: nativeLocationHistory }),
         ...(typeof value.canonicalLinkBase === "string"
           ? { canonicalLinkBase: value.canonicalLinkBase }
           : {}),
@@ -517,7 +517,7 @@ export function createRpcHostRuntime(
       deferredCommandInvalidation = undefined;
       pendingHostCommand = undefined;
       hostCommands.clear();
-      chromeLocationHistory?.dispose();
+      nativeLocationHistory?.dispose();
     },
   };
 }

@@ -40,6 +40,28 @@ describe("macOS helper protocols", () => {
     })).toBeUndefined();
   });
 
+  it("admits only confirmed canonical Placekeeper links", () => {
+    const link = "placekeeper:///private/tmp/Paper.pdf#v=1&page=7";
+    expect(parseMacosReviewHelperMessage({
+      ...base,
+      type: "admit-link",
+      link,
+      confirmed: true,
+    })).toMatchObject({ type: "admit-link", link, confirmed: true });
+    expect(parseMacosReviewHelperMessage({
+      ...base,
+      type: "admit-link",
+      link,
+      confirmed: false,
+    })).toBeUndefined();
+    expect(parseMacosReviewHelperMessage({
+      ...base,
+      type: "admit-link",
+      link: "placekeeper://host/private/tmp/Paper.pdf#v=1&page=7",
+      confirmed: true,
+    })).toBeUndefined();
+  });
+
   it("admits only bound recovery choices and typed invalidations", () => {
     const offer = { id: "recovery_offer_1234", expiresAt: "2026-09-05T00:00:00.000Z" };
     expect(parseMacosReviewHelperMessage({

@@ -94,6 +94,26 @@ async function admit(manager: MacosRuntimeManager): Promise<void> {
 }
 
 describe("macOS canonical review runtime", () => {
+  it("validates a confirmed Placekeeper link and projects only its safe location", async () => {
+    const service = backend();
+    const manager = new MacosRuntimeManager(service);
+    await expect(manager.handle("helper_12345678", {
+      ...envelope,
+      requestId: "request_link_admit_1",
+      type: "admit-link",
+      link: "placekeeper:///private/tmp/Paper.pdf#v=1&page=8",
+      confirmed: true,
+    })).resolves.toMatchObject({
+      type: "admitted",
+      displayName: "Paper.pdf",
+      projection: { location: { kind: "page", page: 8 } },
+    });
+    expect(service.begin).toHaveBeenCalledWith(expect.objectContaining({
+      disposition: "local",
+      fileUrl: "file:///private/tmp/Paper.pdf",
+    }));
+  });
+
   it("admits, activates, mutates, reads, builds a link, and detaches one window", async () => {
     const service = backend();
     const manager = new MacosRuntimeManager(service);
