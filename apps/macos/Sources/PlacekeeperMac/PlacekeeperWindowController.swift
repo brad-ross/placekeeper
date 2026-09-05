@@ -29,6 +29,9 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     private var readinessDiagnosticScheduled = false
     private var pdfiumData: Data?
     private var workerData: Data?
+    private(set) var commandSnapshot: MacCommandSnapshot?
+    private var commandToken = 0
+    private let onCommandSnapshot: (String) -> Void
 
     init(
         windowID: String,
@@ -40,6 +43,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         admission: MacReviewAdmission,
         restoredFrame: NSRect? = nil,
         onBecameKey: @escaping (String) -> Void,
+        onCommandSnapshot: @escaping (String) -> Void,
         onClose: @escaping (String) -> Void
     ) {
         self.windowID = windowID
@@ -48,6 +52,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         self.documentURL = documentURL
         self.onClose = onClose
         self.onBecameKey = onBecameKey
+        self.onCommandSnapshot = onCommandSnapshot
         self.attemptID = attemptID
         self.runtimeID = runtimeID
         self.admission = admission
@@ -208,6 +213,23 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         window?.makeKeyAndOrderFront(nil)
     }
 
+    @discardableResult
+    func invokeCommand(_ command: MacReviewCommand) -> Bool {
+        guard !closed, !failed, let snapshot = commandSnapshot,
+              snapshot.commands[command]?.enabled == true else { return false }
+        commandToken += 1
+        sendToPage([
+            "protocolVersion": 1,
+            "type": "invoke-command",
+            "runtimeId": runtimeID,
+            "attemptId": attemptID,
+            "command": command.rawValue,
+            "snapshotRevision": snapshot.revision,
+            "token": commandToken,
+        ])
+        return true
+    }
+
     var restorationRecord: RestorableDocumentWindow? {
         guard let window else { return nil }
         return .init(
@@ -282,6 +304,16 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
            body["attemptId"] as? String == attemptID,
            let stage = body["stage"] as? String {
             diagnostic("runtime-error: \(stage)")
+            return
+        }
+        if type == "command-snapshot",
+           body["runtimeId"] as? String == runtimeID,
+           body["attemptId"] as? String == attemptID,
+           let snapshot = MacCommandSnapshot.parse(body),
+           commandSnapshot == nil || snapshot.revision > commandSnapshot!.revision {
+            commandSnapshot = snapshot
+            diagnostic("command-snapshot-accepted: revision \(snapshot.revision)")
+            onCommandSnapshot(windowID)
             return
         }
         if type == "visible-shell-ready",

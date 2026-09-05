@@ -294,6 +294,32 @@ final class MacPoliciesTests: XCTestCase {
         XCTAssertEqual(store.load(), [record])
     }
 
+    func testCommandSnapshotIsClosedCompleteAndNonAuthorizing() throws {
+        let commands = MacReviewCommand.allCases.map { command in
+            [
+                "id": command.rawValue,
+                "label": command == .undo ? "Undo Review Change" : command.rawValue,
+                "enabled": command != .redo,
+            ] as [String: Any]
+        }
+        let value: [String: Any] = [
+            "protocolVersion": 1,
+            "type": "command-snapshot",
+            "runtimeId": "runtime_12345678",
+            "attemptId": "attempt_12345678",
+            "revision": 4,
+            "focusContext": "review",
+            "commands": commands,
+        ]
+        let snapshot = try XCTUnwrap(MacCommandSnapshot.parse(value))
+        XCTAssertEqual(snapshot.revision, 4)
+        XCTAssertTrue(snapshot.commands[.undo]?.enabled == true)
+        XCTAssertTrue(snapshot.commands[.redo]?.enabled == false)
+        XCTAssertNil(MacCommandSnapshot.parse(
+            value.merging(["presentationLease": "secret"]) { _, new in new }
+        ))
+    }
+
     func testGenerationBoundResourceAndCatastrophicSurface() {
         var vault = ResourceVault()
         XCTAssertTrue(vault.install(.init(id: "resource_12345678", generation: 1, bytes: Data("%PDF-1.7".utf8))))

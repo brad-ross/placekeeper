@@ -35,10 +35,16 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     private var helperCommand: HelperLaunchCommand?
     private var openPanelPresented = false
     private let diagnosticsEnabled = ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_DIAGNOSTICS"] == "1"
+    private lazy var menuCoordinator = MenuCoordinator(
+        activeWindow: { [weak self] in self?.activeDocumentWindow },
+        openDocument: { [weak self] in self?.showOpenPanel() },
+        openURL: { [weak self] url in self?.enqueueLaunchURLs([url]) }
+    )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         diagnostic("application-did-finish-launching")
         NSWindow.allowsAutomaticWindowTabbing = false
+        menuCoordinator.install()
         enqueueLaunchURLs(CommandLine.arguments.dropFirst().map { URL(fileURLWithPath: $0) })
         if launchCoordinator.pending.isEmpty {
             let restored = restorationStore.load()
@@ -343,6 +349,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             admission: admission,
             restoredFrame: restoredFrames.removeValue(forKey: source.standardizedFileURL.path),
             onBecameKey: { [weak self] keyWindowID in self?.windowRegistry.noteKey(windowID: keyWindowID) },
+            onCommandSnapshot: { [weak self] _ in self?.menuCoordinator.refresh() },
             onClose: { [weak self] closedWindowID in
                 guard let self else { return }
                 self.helperSupervisor.close(windowID: closedWindowID)
@@ -392,6 +399,10 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             controllers.count + recoveryAttempts.count + launchCoordinator.inFlightCount,
             helperSupervisor.activeWindowIDs.count
         )
+    }
+
+    private var activeDocumentWindow: PlacekeeperWindowController? {
+        controllers.first(where: { $0.window?.isKeyWindow == true })
     }
 
     private func updateActivity() {
