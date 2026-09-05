@@ -19,6 +19,8 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     private var readiness = ShellReadinessFence()
     private var dragFence: DragRegionFence
     private var dragOverlays: [NSView] = []
+    private var installedDragRegions: [DragRect] = []
+    private var installedDragWebHeight: CGFloat = -1
     private let onClose: (String) -> Void
     private let onBecameKey: (String) -> Void
     private var closed = false
@@ -449,6 +451,10 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     }
 
     private func installDragOverlays(_ regions: [DragRect]) {
+        let webHeight = webView.bounds.height
+        guard regions != installedDragRegions || webHeight != installedDragWebHeight else { return }
+        installedDragRegions = regions
+        installedDragWebHeight = webHeight
         dragOverlays.forEach { $0.removeFromSuperview() }
         dragOverlays.removeAll()
         for region in regions {
@@ -579,6 +585,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                             data: documentData,
                             source: self.bridge.documentResourceURL
                         ) { installed in
+                            self.schemeHandler.releaseDocumentCache()
                             guard installed else {
                                 self.diagnostic("document-install-failed")
                                 self.helperDidFail()

@@ -106,6 +106,7 @@ export class MacosRuntimeManager {
   readonly #limits: Required<MacosRuntimeManagerOptions>;
   readonly #records = new Map<string, RuntimeRecord>();
   readonly #requests = new Map<string, RequestRecord>();
+  readonly #retainedRequestsByHelper = new Map<string, number>();
   readonly #activeRequestsByHelper = new Map<string, number>();
   readonly #activeResourcesByHelper = new Map<string, number>();
   #activeRequests = 0;
@@ -150,17 +151,24 @@ export class MacosRuntimeManager {
         : this.#failure(message, "invalid");
     }
     const activeForHelper = this.#activeRequestsByHelper.get(helperId) ?? 0;
-    const retainedForHelper = [...this.#requests.keys()].filter((key) => key.startsWith(`${helperId}\0`)).length;
+    const retainedForHelper = this.#retainedRequestsByHelper.get(helperId) ?? 0;
     if (this.#activeRequests >= this.#limits.maxConcurrentRequests
       || activeForHelper >= this.#limits.maxConcurrentRequestsPerHelper
       || retainedForHelper >= this.#limits.maxRetainedRequestsPerHelper) return this.#failure(message, "budget");
     this.#activeRequests += 1;
     this.#activeRequestsByHelper.set(helperId, activeForHelper + 1);
+    this.#retainedRequestsByHelper.set(helperId, retainedForHelper + 1);
     const result = this.#dispatch(helperId, message).finally(() => {
       this.#activeRequests -= 1;
       const remaining = Math.max(0, (this.#activeRequestsByHelper.get(helperId) ?? 1) - 1);
       if (remaining === 0) this.#activeRequestsByHelper.delete(helperId);
       else this.#activeRequestsByHelper.set(helperId, remaining);
+      if (message.type === "read-resource") {
+        this.#requests.delete(requestKey);
+        const retained = Math.max(0, (this.#retainedRequestsByHelper.get(helperId) ?? 1) - 1);
+        if (retained === 0) this.#retainedRequestsByHelper.delete(helperId);
+        else this.#retainedRequestsByHelper.set(helperId, retained);
+      }
     });
     this.#requests.set(requestKey, { fingerprint, result });
     return result;
@@ -474,6 +482,7 @@ export class MacosRuntimeManager {
     for (const key of [...this.#requests.keys()]) if (key.startsWith(`${helperId}\0`)) this.#requests.delete(key);
     this.#activeRequestsByHelper.delete(helperId);
     this.#activeResourcesByHelper.delete(helperId);
+    this.#retainedRequestsByHelper.delete(helperId);
     if (record.phase === "active") {
       await this.#backend.detach(record.canonicalKey, record.presentationLease).catch(() => undefined);
     } else if (record.phase === "provisional") {

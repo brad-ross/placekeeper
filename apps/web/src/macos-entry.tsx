@@ -149,26 +149,33 @@ export function MacosLoadingShell({
     const shell = root.current;
     if (shell === null || geometryIdentity === undefined) return;
     let frame = 0;
-    const publishGeometry = (transitioning = false) => {
-      const chrome = shell.querySelector<HTMLElement>(".review-chrome");
-      if (chrome === null) return;
+    const chrome = shell.querySelector<HTMLElement>(".review-chrome");
+    if (chrome === null) return;
+    const measureGeometry = () => {
       const bounds = chrome.getBoundingClientRect();
       const interactive = [...chrome.querySelectorAll<HTMLElement>("button,input,a,[role=button]")]
         .map((element) => element.getBoundingClientRect())
         .map(({ x, y, width, height }) => ({ x, y, width, height }));
+      const chromeBounds = { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+      return { chromeBounds, interactive, signature: JSON.stringify([chromeBounds, interactive]) };
+    };
+    const publishGeometry = (measurement: ReturnType<typeof measureGeometry>, transitioning = false) => {
       postToNative(deriveMacosDragRegions({
         layoutRevision: revision.current,
         geometryIdentity,
-        chromeBounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
-        interactiveBounds: interactive,
+        chromeBounds: measurement.chromeBounds,
+        interactiveBounds: measurement.interactive,
         transitioning,
       }));
       publishedLayoutRevision = revision.current;
     };
+    let signature = "";
     let cancelled = false;
     void document.fonts.ready.then(() => queueMicrotask(() => {
       if (cancelled) return;
-      publishGeometry();
+      const measurement = measureGeometry();
+      signature = measurement.signature;
+      publishGeometry(measurement);
       postToNative({
         protocolVersion: MACOS_SHELL_PROTOCOL_VERSION,
         type: "shell-ready",
@@ -176,18 +183,27 @@ export function MacosLoadingShell({
       });
     }));
     const scheduleGeometry = () => {
-      revision.current += 1;
-      publishGeometry(true);
-      if (frame !== 0) cancelAnimationFrame(frame);
+      if (frame !== 0) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
-        publishGeometry();
+        const measurement = measureGeometry();
+        if (measurement.signature === signature) return;
+        signature = measurement.signature;
+        revision.current += 1;
+        publishGeometry(measurement, true);
+        frame = requestAnimationFrame(() => {
+          frame = 0;
+          const settled = measureGeometry();
+          signature = settled.signature;
+          publishGeometry(settled);
+        });
       });
     };
     const resize = new ResizeObserver(scheduleGeometry);
     resize.observe(shell);
+    resize.observe(chrome);
     const mutations = new MutationObserver(scheduleGeometry);
-    mutations.observe(shell, { subtree: true, childList: true, attributes: true });
+    mutations.observe(chrome, { subtree: true, childList: true, attributes: true });
     return () => {
       cancelled = true;
       if (frame !== 0) cancelAnimationFrame(frame);

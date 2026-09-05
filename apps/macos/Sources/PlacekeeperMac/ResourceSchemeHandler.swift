@@ -32,7 +32,10 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
         loading = true
         lock.unlock()
         diagnostic("resource-load-start: \(byteLength) bytes")
-        read(offset: 0, accumulated: Data())
+        guard let accumulated = NSMutableData(capacity: byteLength) else {
+            fail(URLError(.dataLengthExceedsMaximum)); return
+        }
+        read(offset: 0, accumulated: accumulated)
     }
 
     func invalidate() {
@@ -46,9 +49,16 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
         for callback in callbacks { callback(.failure(URLError(.cancelled))) }
     }
 
-    private func read(offset: Int, accumulated: Data) {
+    func releaseCache() {
+        lock.lock()
+        cached?.removeAll()
+        cached = nil
+        lock.unlock()
+    }
+
+    private func read(offset: Int, accumulated: NSMutableData) {
         let length = min(macosHelperResourceChunkBytes, byteLength - offset)
-        guard length > 0 else { finish(accumulated); return }
+        guard length > 0 else { finish(Data(referencing: accumulated)); return }
         let expectedSequence = offset / macosHelperResourceChunkBytes
         guard helper.request(type: "read-resource", fields: [
             "resourceId": resourceID,
@@ -58,6 +68,7 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
             "length": length,
         ], completion: { [weak self] reply in
             guard let self else { return }
+            guard !self.isInvalidated else { return }
             guard case let .resource(sequence, bytes, done)? = reply,
                   sequence == expectedSequence, !bytes.isEmpty, bytes.count <= length,
                   done == (offset + bytes.count >= self.byteLength) else {
@@ -65,13 +76,12 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
                 self.fail(URLError(.cannotDecodeContentData)); return
             }
             self.diagnostic("resource-chunk: sequence \(sequence), \(bytes.count) bytes, done \(done)")
-            var next = accumulated
-            next.append(bytes)
-            guard next.count <= self.byteLength else {
+            accumulated.append(bytes)
+            guard accumulated.length <= self.byteLength else {
                 self.fail(URLError(.dataLengthExceedsMaximum)); return
             }
-            if done { self.finish(next) }
-            else { self.read(offset: next.count, accumulated: next) }
+            if done { self.finish(Data(referencing: accumulated)) }
+            else { self.read(offset: accumulated.length, accumulated: accumulated) }
         }) != nil else {
             fail(URLError(.cannotConnectToHost))
             return
@@ -105,6 +115,12 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
         for callback in callbacks { callback(.failure(error)) }
     }
 
+    private var isInvalidated: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return invalidated
+    }
+
     private func diagnostic(_ message: String) {
         guard diagnosticsEnabled,
               let bytes = "[PlacekeeperMac] \(message)\n".data(using: .utf8) else { return }
@@ -135,6 +151,10 @@ final class MacSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable 
 
     func loadDocument(completion: @escaping (Result<Data, Error>) -> Void) {
         documentLoader.load(completion: completion)
+    }
+
+    func releaseDocumentCache() {
+        documentLoader.releaseCache()
     }
 
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {

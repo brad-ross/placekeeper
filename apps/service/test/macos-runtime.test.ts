@@ -315,4 +315,32 @@ describe("macOS canonical review runtime", () => {
     blocked.resolve(projection());
     await expect(stalled).resolves.toMatchObject({ type: "refreshed" });
   });
+
+  it("does not retain completed document chunks in the replay budget", async () => {
+    const service = backend();
+    const manager = new MacosRuntimeManager(service, { maxRetainedRequestsPerHelper: 3 });
+    await admit(manager);
+    await manager.handle("helper_12345678", {
+      ...envelope,
+      requestId: "request_activate_4",
+      type: "activate",
+      documentValidated: true,
+    });
+    const resourceId = manager.resourceId("helper_12345678");
+    if (resourceId === undefined) throw new Error("Expected a document resource");
+
+    for (let index = 0; index < 8; index += 1) {
+      await expect(manager.handle("helper_12345678", {
+        ...envelope,
+        requestId: `request_chunk_${index}`,
+        type: "read-resource",
+        resourceId,
+        generation: 1,
+        role: "document",
+        offset: 0,
+        length: sourceBytes.byteLength,
+      })).resolves.toMatchObject({ type: "resource-bytes" });
+    }
+    expect(service.readDocument).toHaveBeenCalledTimes(8);
+  });
 });
