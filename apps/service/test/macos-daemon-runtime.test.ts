@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { encodePlacekeeperLink } from "../../../packages/core/src/placekeeper-link.js";
 
 import {
   requestControl,
@@ -10,6 +11,7 @@ import {
   type LaunchControlServer,
 } from "../src/host/launch-control.js";
 import { PlacekeeperHost } from "../src/host/placekeeper-host.js";
+import { macosRuntimeThroughDaemon } from "../src/host/service-daemon.js";
 
 const roots: string[] = [];
 const hosts: PlacekeeperHost[] = [];
@@ -22,6 +24,111 @@ afterEach(async () => {
 });
 
 describe("macOS daemon runtime", () => {
+  it("attaches a helper when its first daemon-routed message admits a Placekeeper link", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-macos-link-runtime-"));
+    roots.push(root);
+    const recoveryRoot = join(root, "recovery");
+    const browserSourceRoot = join(root, "browser-sources");
+    const assets = join(root, "assets");
+    const sourcePath = join(root, "linked.pdf");
+    await Promise.all([mkdir(browserSourceRoot), mkdir(assets)]);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    await writeFile(sourcePath, "%PDF-1.7\nlinked review\n%%EOF");
+    const host = await PlacekeeperHost.start({
+      recoveryRoot,
+      browserSourceRoot,
+      webAssets: { root: assets },
+      port: 0,
+    });
+    hosts.push(host);
+    const socketPath = join(root, "control.sock");
+    controls.push(await startLaunchControlServer(host, socketPath));
+
+    const appInstanceId = "app_instance_link_1234";
+    const helperId = "helper_instance_link_1234";
+    await expect(requestControl(socketPath, {
+      kind: "macos-app-control",
+      message: {
+        protocolVersion: 1,
+        type: "register-app",
+        appInstanceId,
+        processId: process.pid,
+        startIdentity: "start_identity_link_1234",
+        buildIdentity: "build_identity_link_1234",
+      },
+    })).resolves.toMatchObject({ kind: "macos-app-control", response: { type: "ack" } });
+
+    const response = await macosRuntimeThroughDaemon(appInstanceId, helperId, {
+      protocolVersion: 1,
+      type: "admit-link",
+      windowId: "window_instance_link_1234",
+      attemptId: "attempt_instance_link_1234",
+      requestId: "request_admit_link_1234",
+      link: encodePlacekeeperLink({ path: sourcePath, location: { kind: "page", page: 7 } }),
+      confirmed: true,
+    }, undefined, {
+      appSupportRoot: root,
+      recoveryRoot,
+      socketPath,
+      webAssetsRoot: assets,
+      httpPort: 0,
+      lifecycleLockPath: join(root, "lifecycle.lock"),
+    });
+
+    expect(response).toMatchObject({
+      type: "admitted",
+      displayName: "linked.pdf",
+      projection: { location: { kind: "page", page: 7 } },
+    });
+    expect(host.macosLifecycle.ownsHelper(appInstanceId, helperId)).toBe(true);
+  });
+
+  it("releases first-use link ownership when daemon admission fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-macos-link-failure-"));
+    roots.push(root);
+    const assets = join(root, "assets");
+    await mkdir(assets);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    const host = await PlacekeeperHost.start({
+      recoveryRoot: join(root, "recovery"),
+      browserSourceRoot: join(root, "browser-sources"),
+      webAssets: { root: assets },
+      port: 0,
+    });
+    hosts.push(host);
+    const socketPath = join(root, "control.sock");
+    controls.push(await startLaunchControlServer(host, socketPath));
+    const appInstanceId = "app_instance_missing_1234";
+    const helperId = "helper_instance_missing_1234";
+    await requestControl(socketPath, {
+      kind: "macos-app-control",
+      message: {
+        protocolVersion: 1,
+        type: "register-app",
+        appInstanceId,
+        processId: process.pid,
+        startIdentity: "start_identity_missing_1234",
+        buildIdentity: "build_identity_missing_1234",
+      },
+    });
+
+    await expect(requestControl(socketPath, {
+      kind: "macos-runtime",
+      appInstanceId,
+      helperId,
+      message: {
+        protocolVersion: 1,
+        type: "admit-link",
+        windowId: "window_instance_missing_1234",
+        attemptId: "attempt_instance_missing_1234",
+        requestId: "request_admit_missing_1234",
+        link: encodePlacekeeperLink({ path: join(root, "missing.pdf"), location: { kind: "page", page: 1 } }),
+        confirmed: true,
+      },
+    })).resolves.toMatchObject({ kind: "macos-runtime", response: { type: "failure" } });
+    expect(host.macosLifecycle.ownsHelper(appInstanceId, helperId)).toBe(false);
+  });
+
   it("keeps app lifecycle, review authority, resources, and link construction on closed private lanes", async () => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-macos-runtime-control-"));
     roots.push(root);

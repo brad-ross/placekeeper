@@ -278,7 +278,7 @@ export async function macosRuntimeThroughDaemon(
   paths = defaultDaemonPaths(),
 ): Promise<MacosReviewHelperResponse> {
   const request = { kind: "macos-runtime" as const, appInstanceId, helperId, message };
-  const response = message.type === "admit"
+  const response = message.type === "admit" || message.type === "admit-link"
     ? await demandStartedControl(request, paths, signal)
     : await requestControl(paths.socketPath, request, {
         timeoutMs: 10 * 60_000,

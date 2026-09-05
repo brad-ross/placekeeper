@@ -8,11 +8,17 @@ final class MacPoliciesTests: XCTestCase {
         XCTAssertFalse(fence.shellReady(revision: 4))
         XCTAssertFalse(fence.confirmPaint(revision: 4))
         XCTAssertTrue(fence.commitRouting())
+        XCTAssertFalse(fence.commitRouting())
         XCTAssertFalse(fence.confirmPaint(revision: 4))
         fence.didOrderVisible()
         XCTAssertFalse(fence.confirmPaint(revision: 3))
         XCTAssertTrue(fence.confirmPaint(revision: 7))
         XCTAssertEqual(fence.visibleShellRevision, 7)
+    }
+
+    func testInitialRoutingCommitPreservesRestoredWindowPlacement() {
+        XCTAssertTrue(InitialWindowPlacementPolicy.shouldCenter(hasRestoredFrame: false))
+        XCTAssertFalse(InitialWindowPlacementPolicy.shouldCenter(hasRestoredFrame: true))
     }
 
     func testDragRegionsFailClosedAcrossRevisionGeometryAndTransitions() {
@@ -29,6 +35,47 @@ final class MacPoliciesTests: XCTestCase {
         fence.transitionInProgress = true
         XCTAssertFalse(fence.apply(DragRegionSet(revision: 3, geometryIdentity: "geometry_12345678", regions: valid.regions)))
         XCTAssertTrue(fence.regions.isEmpty)
+    }
+
+    func testDragRegionRevisionRestartsAfterGeometryIdentityRollover() {
+        let regions = [DragRect(x: 0, y: 0, width: 80, height: 58)]
+        var fence = DragRegionFence(geometryIdentity: "geometry_original")
+        XCTAssertTrue(fence.apply(.init(revision: 7, geometryIdentity: "geometry_original", regions: regions)))
+
+        fence.transitionInProgress = true
+        fence.rolloverGeometryIdentity(to: "geometry_replacement")
+
+        XCTAssertEqual(fence.currentRevision, -1)
+        XCTAssertTrue(fence.regions.isEmpty)
+        XCTAssertFalse(fence.transitionInProgress)
+        XCTAssertTrue(fence.apply(.init(revision: 7, geometryIdentity: "geometry_replacement", regions: regions)))
+    }
+
+    func testPageBridgeRejectsDiagnosticInjectionCanaries() {
+        let canaries = [
+            "shell-ready\n[PlacekeeperMac] runtime-activated",
+            "runtime-error\u{7f}/Users/reviewer/private.pdf",
+            "review text that must never reach stderr",
+        ]
+        for canary in canaries {
+            XCTAssertNil(MacPageBridgeMessageType.parse([
+                "protocolVersion": macShellProtocolVersion,
+                "type": canary,
+            ]))
+            XCTAssertNil(MacRuntimeErrorStage(rawValue: canary))
+            XCTAssertFalse(MacPageBridgeDiagnosticEvent.allFixedNames.contains(canary))
+        }
+    }
+
+    func testPackagedReviewAssetsRequireExpectedExecutableSignatures() throws {
+        var pdfium = Data([0x00, 0x61, 0x73, 0x6d])
+        pdfium.append(Data(repeating: 0, count: 8))
+        let worker = Data("class PdfiumEngineRunner {}\nif (type === \"wasmInit\") {}".utf8)
+        let assets = try XCTUnwrap(PackagedReviewAssets.validate(pdfium: pdfium, worker: worker))
+        XCTAssertEqual(assets.pdfium, pdfium)
+        XCTAssertEqual(assets.worker, worker)
+        XCTAssertNil(PackagedReviewAssets.validate(pdfium: Data("not wasm".utf8), worker: worker))
+        XCTAssertNil(PackagedReviewAssets.validate(pdfium: pdfium, worker: Data("postMessage(1)".utf8)))
     }
 
     func testSchemesAndEgressAreClosed() throws {

@@ -478,8 +478,9 @@ async function dispatch(
   }
   if (request.kind === "macos-runtime") {
     const message = parseMacosReviewHelperMessage(request.message)!;
+    const isAdmission = message.type === "admit" || message.type === "admit-link";
     const alreadyOwned = host.macosLifecycle.ownsHelper(request.appInstanceId, request.helperId);
-    const attached = alreadyOwned || (message.type === "admit"
+    const attached = alreadyOwned || (isAdmission
       && host.macosLifecycle.attachHelper(request.appInstanceId, request.helperId));
     if (!attached) {
       return {
@@ -495,7 +496,7 @@ async function dispatch(
       };
     }
     const response = await host.macosRuntime.handle(request.helperId, message);
-    if (response.type === "released" || (message.type === "admit" && response.type === "failure")) {
+    if (response.type === "released" || (isAdmission && response.type === "failure")) {
       host.macosLifecycle.releaseHelper(request.appInstanceId, request.helperId);
     }
     return { kind: "macos-runtime", response };

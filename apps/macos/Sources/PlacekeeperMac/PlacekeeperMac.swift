@@ -16,6 +16,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         let attemptID: String
         let runtimeID: String
         let helper: SupervisedReviewHelper
+        let packagedAssets: PackagedReviewAssets?
         let offerID: String
         let offerExpiresAt: String
     }
@@ -179,6 +180,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             presentCatastrophicFallback(documentName: source.lastPathComponent, sourceURL: source)
             return
         }
+        let packagedAssets = Task { await PackagedReviewAssets.load(from: packagedRoot) }
         let windowID = "window_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
         let attemptID = "attempt_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
         let helperID = "helper_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
@@ -216,6 +218,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             completion: { [weak self, weak helper] reply in
                 Task { @MainActor in
                     guard let self, let helper else { return }
+                    let assets = await packagedAssets.value
                     self.diagnostic("window-bootstrap-admission-received")
                     self.handleAdmission(
                         reply,
@@ -224,7 +227,8 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                         packagedRoot: packagedRoot,
                         attemptID: attemptID,
                         runtimeID: runtimeID,
-                        helper: helper
+                        helper: helper,
+                        packagedAssets: assets
                     )
                 }
             }
@@ -243,12 +247,19 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         packagedRoot: URL,
         attemptID: String,
         runtimeID: String,
-        helper: SupervisedReviewHelper
+        helper: SupervisedReviewHelper,
+        packagedAssets: PackagedReviewAssets?
     ) {
         let source = intent.sourceURL
         finishLaunch(intent)
         switch reply {
         case let .admitted(admission):
+            guard let packagedAssets else {
+                helperSupervisor.close(windowID: windowID)
+                updateActivity()
+                presentCatastrophicFallback(documentName: source.lastPathComponent, sourceURL: source)
+                return
+            }
             NSDocumentController.shared.noteNewRecentDocumentURL(source)
             if let existingWindowID = windowRegistry.matchingWindow(
                 canonicalReviewID: admission.projection.sessionID
@@ -265,7 +276,8 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 attemptID: attemptID,
                 runtimeID: runtimeID,
                 helper: helper,
-                admission: admission
+                admission: admission,
+                packagedAssets: packagedAssets
             )
         case let .recoveryOffered(offerID, offerExpiresAt):
             let controller = RecoveryViewController(
@@ -281,6 +293,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 attemptID: attemptID,
                 runtimeID: runtimeID,
                 helper: helper,
+                packagedAssets: packagedAssets,
                 offerID: offerID,
                 offerExpiresAt: offerExpiresAt
             )
@@ -307,6 +320,17 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                     recovery.controller.failDecision()
                     return
                 }
+                guard let packagedAssets = recovery.packagedAssets else {
+                    recovery.controller.resolve()
+                    self.recoveryAttempts.removeValue(forKey: windowID)
+                    self.helperSupervisor.close(windowID: windowID)
+                    self.updateActivity()
+                    self.presentCatastrophicFallback(
+                        documentName: recovery.source.lastPathComponent,
+                        sourceURL: recovery.source
+                    )
+                    return
+                }
                 recovery.controller.resolve()
                 self.recoveryAttempts.removeValue(forKey: windowID)
                 self.installDocumentWindow(
@@ -316,7 +340,8 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                     attemptID: recovery.attemptID,
                     runtimeID: recovery.runtimeID,
                     helper: recovery.helper,
-                    admission: admission
+                    admission: admission,
+                    packagedAssets: packagedAssets
                 )
             }
         }) != nil else {
@@ -338,7 +363,8 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         attemptID: String,
         runtimeID: String,
         helper: SupervisedReviewHelper,
-        admission: MacReviewAdmission
+        admission: MacReviewAdmission,
+        packagedAssets: PackagedReviewAssets
     ) {
         let controller = PlacekeeperWindowController(
             windowID: windowID,
@@ -348,6 +374,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             runtimeID: runtimeID,
             helper: helper,
             admission: admission,
+            packagedAssets: packagedAssets,
             restoredFrame: restoredFrames.removeValue(forKey: source.standardizedFileURL.path),
             onBecameKey: { [weak self] keyWindowID in self?.windowRegistry.noteKey(windowID: keyWindowID) },
             onCommandSnapshot: { [weak self] _ in self?.menuCoordinator.refresh() },

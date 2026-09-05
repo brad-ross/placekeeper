@@ -24,6 +24,7 @@ import type {
   ChromeRuntimeBackend,
   ChromeRuntimeProjection,
   ChromeRuntimeRecovery,
+  ChromeRuntimeSourceSink,
   ChromeRuntimeStagedReview,
 } from "../browser/chrome-runtime.js";
 
@@ -62,7 +63,11 @@ type RuntimeRecord = StagedRuntimeRecord | RecoveryRuntimeRecord;
 
 interface RequestRecord {
   readonly fingerprint: string;
-  readonly result: Promise<MacosReviewHelperResponse>;
+  readonly controller: AbortController;
+  readonly releaseRequest: () => void;
+  result: Promise<MacosReviewHelperResponse>;
+  releaseResource: (() => void) | undefined;
+  completed: boolean;
 }
 
 export interface MacosRuntimeManagerOptions {
@@ -83,6 +88,10 @@ function canonicalJson(value: unknown): string {
 
 function opaque(prefix: string): string {
   return `${prefix}_${randomBytes(12).toString("base64url")}`;
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw new Error("request-aborted");
 }
 
 function rawEnvelope(raw: unknown): {
@@ -106,7 +115,7 @@ export class MacosRuntimeManager {
   readonly #limits: Required<MacosRuntimeManagerOptions>;
   readonly #records = new Map<string, RuntimeRecord>();
   readonly #requests = new Map<string, RequestRecord>();
-  readonly #retainedRequestsByHelper = new Map<string, number>();
+  readonly #completedRequestKeysByHelper = new Map<string, string[]>();
   readonly #activeRequestsByHelper = new Map<string, number>();
   readonly #activeResourcesByHelper = new Map<string, number>();
   #activeRequests = 0;
@@ -120,7 +129,7 @@ export class MacosRuntimeManager {
       maxConcurrentRequestsPerHelper: options.maxConcurrentRequestsPerHelper ?? 8,
       maxResources: options.maxResources ?? 8,
       maxResourcesPerHelper: options.maxResourcesPerHelper ?? 1,
-      maxRetainedRequestsPerHelper: options.maxRetainedRequestsPerHelper ?? 256,
+      maxRetainedRequestsPerHelper: Math.max(0, options.maxRetainedRequestsPerHelper ?? 256),
     };
   }
 
@@ -151,34 +160,40 @@ export class MacosRuntimeManager {
         : this.#failure(message, "invalid");
     }
     const activeForHelper = this.#activeRequestsByHelper.get(helperId) ?? 0;
-    const retainedForHelper = this.#retainedRequestsByHelper.get(helperId) ?? 0;
     if (this.#activeRequests >= this.#limits.maxConcurrentRequests
-      || activeForHelper >= this.#limits.maxConcurrentRequestsPerHelper
-      || retainedForHelper >= this.#limits.maxRetainedRequestsPerHelper) return this.#failure(message, "budget");
-    this.#activeRequests += 1;
-    this.#activeRequestsByHelper.set(helperId, activeForHelper + 1);
-    this.#retainedRequestsByHelper.set(helperId, retainedForHelper + 1);
-    const result = this.#dispatch(helperId, message).finally(() => {
-      this.#activeRequests -= 1;
-      const remaining = Math.max(0, (this.#activeRequestsByHelper.get(helperId) ?? 1) - 1);
-      if (remaining === 0) this.#activeRequestsByHelper.delete(helperId);
-      else this.#activeRequestsByHelper.set(helperId, remaining);
-      if (message.type === "read-resource") {
-        this.#requests.delete(requestKey);
-        const retained = Math.max(0, (this.#retainedRequestsByHelper.get(helperId) ?? 1) - 1);
-        if (retained === 0) this.#retainedRequestsByHelper.delete(helperId);
-        else this.#retainedRequestsByHelper.set(helperId, retained);
-      }
+      || activeForHelper >= this.#limits.maxConcurrentRequestsPerHelper) return this.#failure(message, "budget");
+    const controller = new AbortController();
+    const request: RequestRecord = {
+      fingerprint,
+      controller,
+      releaseRequest: this.#reserveRequest(helperId),
+      result: Promise.resolve(this.#failure(message, "unavailable")),
+      releaseResource: undefined,
+      completed: false,
+    };
+    // Install the record before dispatch so a synchronous release request can
+    // detach and reclaim its own reservation without leaving a replay entry.
+    this.#requests.set(requestKey, request);
+    const result = this.#dispatch(helperId, message, controller.signal, request).finally(() => {
+      request.releaseRequest();
+      if (this.#requests.get(requestKey) !== request) return;
+      if (message.type === "read-resource") this.#requests.delete(requestKey);
+      else this.#retainCompletedRequest(helperId, requestKey, request);
     });
-    this.#requests.set(requestKey, { fingerprint, result });
+    request.result = result;
     return result;
   }
 
-  async #dispatch(helperId: string, message: MacosReviewHelperMessage): Promise<MacosReviewHelperResponse> {
+  async #dispatch(
+    helperId: string,
+    message: MacosReviewHelperMessage,
+    signal: AbortSignal,
+    request: RequestRecord,
+  ): Promise<MacosReviewHelperResponse> {
     const existing = this.#records.get(helperId);
     if (existing === undefined) {
       return message.type === "admit" || message.type === "admit-link"
-        ? this.#admit(helperId, message)
+        ? this.#admit(helperId, message, signal)
         : this.#failure(message, "invalid");
     }
     if (message.windowId !== existing.windowId || message.attemptId !== existing.attemptId
@@ -190,14 +205,14 @@ export class MacosRuntimeManager {
       return { ...this.#envelope(message), type: "released" };
     }
     if (existing.phase === "recovery") {
-      return message.type === "recover" ? this.#recover(existing, message) : this.#failure(message, "invalid");
+      return message.type === "recover" ? this.#recover(existing, message, signal) : this.#failure(message, "invalid");
     }
     if (message.type === "recover") return this.#failure(message, "invalid");
-    if (message.type === "activate") return this.#activate(existing, message);
-    if (message.type === "refresh") return this.#refresh(existing, message);
-    if (message.type === "keepalive") return this.#keepalive(existing, message);
-    if (message.type === "invoke") return this.#invoke(existing, message);
-    if (message.type === "read-resource") return this.#read(existing, message);
+    if (message.type === "activate") return this.#activate(existing, message, signal);
+    if (message.type === "refresh") return this.#refresh(existing, message, signal);
+    if (message.type === "keepalive") return this.#keepalive(existing, message, signal);
+    if (message.type === "invoke") return this.#invoke(existing, message, signal);
+    if (message.type === "read-resource") return this.#read(existing, message, signal, request);
     if (message.type === "copy-link") return this.#copyLink(existing, message);
     return this.#failure(message, "invalid");
   }
@@ -205,6 +220,7 @@ export class MacosRuntimeManager {
   async #admit(
     helperId: string,
     message: Extract<MacosReviewHelperMessage, { readonly type: "admit" | "admit-link" }>,
+    signal: AbortSignal,
   ): Promise<MacosReviewHelperResponse> {
     if (this.#records.size >= this.#limits.maxHelpers) return this.#failure(message, "budget");
     let sourcePath: string;
@@ -222,13 +238,17 @@ export class MacosRuntimeManager {
     }
     const fileUrl = pathToFileURL(sourcePath).href;
     let canonicalKey: string | undefined;
+    let sink: ChromeRuntimeSourceSink | undefined;
     try {
-      const sink = await this.#backend.begin({
+      sink = await this.#backend.begin({
         sourceIdentity: createHash("sha256").update(fileUrl).digest("hex"),
         disposition: "local",
         fileUrl,
-      });
-      const staged = await sink.finish();
+      }, signal);
+      throwIfAborted(signal);
+      const staged = await sink.finish(undefined, signal);
+      if (!("choose" in staged)) canonicalKey = staged.canonicalKey;
+      throwIfAborted(signal);
       const displayName = sanitizeReviewRuntimeDisplayString(basename(sourcePath));
       if (displayName === undefined) throw new Error("invalid-display-name");
       if ("choose" in staged) {
@@ -248,9 +268,9 @@ export class MacosRuntimeManager {
           offer: staged.offer,
         };
       }
-      canonicalKey = staged.canonicalKey;
       return this.#stage(helperId, message, displayName, staged, location);
     } catch {
+      if (signal.aborted) await sink?.cancel().catch(() => undefined);
       if (canonicalKey !== undefined) await this.#backend.release(canonicalKey).catch(() => undefined);
       return this.#failure(message, "unavailable");
     }
@@ -259,6 +279,7 @@ export class MacosRuntimeManager {
   async #recover(
     record: RecoveryRuntimeRecord,
     message: Extract<MacosReviewHelperMessage, { readonly type: "recover" }>,
+    signal: AbortSignal,
   ): Promise<MacosReviewHelperResponse> {
     if (message.offer.id !== record.recovery.offer.id || message.offer.expiresAt !== record.recovery.offer.expiresAt) {
       return this.#failure(message, "invalid");
@@ -266,6 +287,7 @@ export class MacosRuntimeManager {
     let staged: ChromeRuntimeStagedReview | undefined;
     try {
       staged = await record.recovery.choose(message.decision, message.idempotencyKey);
+      throwIfAborted(signal);
       return this.#stage(record.helperId, message, record.displayName, staged, record.location);
     } catch {
       if (staged !== undefined) await this.#backend.release(staged.canonicalKey).catch(() => undefined);
@@ -315,10 +337,15 @@ export class MacosRuntimeManager {
   async #activate(
     record: StagedRuntimeRecord,
     message: Extract<MacosReviewHelperMessage, { readonly type: "activate" }>,
+    signal: AbortSignal,
   ): Promise<MacosReviewHelperResponse> {
     if (record.phase !== "provisional") return this.#failure(message, "invalid");
     try {
-      const trusted = await this.#backend.activate(record.canonicalKey, record.presentationLease);
+      const trusted = await this.#backend.activate(record.canonicalKey, record.presentationLease, signal);
+      if (signal.aborted) {
+        await this.#backend.detach(record.canonicalKey, record.presentationLease).catch(() => undefined);
+        return this.#failure(message, "unavailable");
+      }
       const projection = sanitizeMacosRuntimeProjection(trusted);
       if (projection === undefined) throw new Error("invalid-projection");
       record.phase = "active";
@@ -327,7 +354,7 @@ export class MacosRuntimeManager {
       return { ...this.#envelope(message), type: "active", projection };
     } catch {
       await this.#backend.release(record.canonicalKey).catch(() => undefined);
-      this.#records.delete(record.helperId);
+      if (this.#records.get(record.helperId) === record) this.#records.delete(record.helperId);
       return this.#failure(message, "unavailable");
     }
   }
@@ -335,9 +362,11 @@ export class MacosRuntimeManager {
   async #refresh(
     record: StagedRuntimeRecord,
     message: Extract<MacosReviewHelperMessage, { readonly type: "refresh" }>,
+    signal: AbortSignal,
   ): Promise<MacosReviewHelperResponse> {
     try {
-      const trusted = await this.#backend.current(record.canonicalKey);
+      const trusted = await this.#backend.current(record.canonicalKey, signal);
+      throwIfAborted(signal);
       const projection = sanitizeMacosRuntimeProjection(trusted);
       if (projection === undefined) throw new Error("invalid-projection");
       record.trustedProjection = trusted;
@@ -351,11 +380,13 @@ export class MacosRuntimeManager {
   async #keepalive(
     record: StagedRuntimeRecord,
     message: Extract<MacosReviewHelperMessage, { readonly type: "keepalive" }>,
+    signal: AbortSignal,
   ): Promise<MacosReviewHelperResponse> {
     if (record.phase !== "active") return this.#failure(message, "invalid");
     try {
       const previous = record.projection;
-      const trusted = await this.#backend.current(record.canonicalKey);
+      const trusted = await this.#backend.current(record.canonicalKey, signal);
+      throwIfAborted(signal);
       const projection = sanitizeMacosRuntimeProjection(trusted);
       if (projection === undefined) throw new Error("invalid-projection");
       record.trustedProjection = trusted;
@@ -385,6 +416,7 @@ export class MacosRuntimeManager {
   async #invoke(
     record: StagedRuntimeRecord,
     message: Extract<MacosReviewHelperMessage, { readonly type: "invoke" }>,
+    signal: AbortSignal,
   ): Promise<MacosReviewHelperResponse> {
     if (record.phase !== "active") return this.#failure(message, "invalid");
     if (message.generation !== record.projection.generation || message.revision !== record.projection.revision) {
@@ -395,7 +427,8 @@ export class MacosRuntimeManager {
     }
     try {
       if (NON_IDEMPOTENT.has(message.method)) {
-        const trusted = await this.#backend.current(record.canonicalKey);
+        const trusted = await this.#backend.current(record.canonicalKey, signal);
+        throwIfAborted(signal);
         const projection = sanitizeMacosRuntimeProjection(trusted);
         if (projection === undefined) throw new Error("invalid-projection");
         record.trustedProjection = trusted;
@@ -410,10 +443,12 @@ export class MacosRuntimeManager {
       const result = await this.#backend.invoke(record.canonicalKey, message.method, message.payload, {
         ...(message.idempotencyKey === undefined ? {} : { idempotencyKey: message.idempotencyKey }),
         payloadDigest,
-      });
+      }, signal);
+      throwIfAborted(signal);
       const payload = sanitizeMacosReviewRuntimeResponse(message.method, result);
       if (payload === undefined) return this.#failure(message, "unavailable");
-      const current = await this.#backend.current(record.canonicalKey);
+      const current = await this.#backend.current(record.canonicalKey, signal);
+      throwIfAborted(signal);
       const projection = sanitizeMacosRuntimeProjection(current);
       if (projection !== undefined) {
         record.trustedProjection = current;
@@ -428,6 +463,8 @@ export class MacosRuntimeManager {
   async #read(
     record: StagedRuntimeRecord,
     message: Extract<MacosReviewHelperMessage, { readonly type: "read-resource" }>,
+    signal: AbortSignal,
+    request: RequestRecord,
   ): Promise<MacosReviewHelperResponse> {
     if (message.resourceId !== record.resourceId || message.generation !== record.projection.generation
       || message.offset + message.length > record.projection.document.byteLength) {
@@ -436,15 +473,17 @@ export class MacosRuntimeManager {
     const resourcesForHelper = this.#activeResourcesByHelper.get(record.helperId) ?? 0;
     if (this.#activeResources >= this.#limits.maxResources
       || resourcesForHelper >= this.#limits.maxResourcesPerHelper) return this.#failure(message, "budget");
-    this.#activeResources += 1;
-    this.#activeResourcesByHelper.set(record.helperId, resourcesForHelper + 1);
+    const releaseResource = this.#reserveResource(record.helperId);
+    request.releaseResource = releaseResource;
     try {
       const bytes = await this.#backend.readDocument(
         record.canonicalKey,
         message.generation,
         message.offset,
         message.length,
+        signal,
       );
+      throwIfAborted(signal);
       return {
         ...this.#envelope(message),
         type: "resource-bytes",
@@ -455,10 +494,8 @@ export class MacosRuntimeManager {
     } catch {
       return this.#failure(message, "unavailable");
     } finally {
-      this.#activeResources -= 1;
-      const remaining = Math.max(0, (this.#activeResourcesByHelper.get(record.helperId) ?? 1) - 1);
-      if (remaining === 0) this.#activeResourcesByHelper.delete(record.helperId);
-      else this.#activeResourcesByHelper.set(record.helperId, remaining);
+      releaseResource();
+      if (request.releaseResource === releaseResource) request.releaseResource = undefined;
     }
   }
 
@@ -477,12 +514,19 @@ export class MacosRuntimeManager {
 
   async detach(helperId: string): Promise<void> {
     const record = this.#records.get(helperId);
-    if (record === undefined) return;
-    this.#records.delete(helperId);
-    for (const key of [...this.#requests.keys()]) if (key.startsWith(`${helperId}\0`)) this.#requests.delete(key);
+    if (record !== undefined) this.#records.delete(helperId);
+    for (const [key, request] of [...this.#requests.entries()]) {
+      if (!key.startsWith(`${helperId}\0`)) continue;
+      request.controller.abort();
+      request.releaseResource?.();
+      request.releaseResource = undefined;
+      request.releaseRequest();
+      this.#requests.delete(key);
+    }
+    this.#completedRequestKeysByHelper.delete(helperId);
     this.#activeRequestsByHelper.delete(helperId);
     this.#activeResourcesByHelper.delete(helperId);
-    this.#retainedRequestsByHelper.delete(helperId);
+    if (record === undefined) return;
     if (record.phase === "active") {
       await this.#backend.detach(record.canonicalKey, record.presentationLease).catch(() => undefined);
     } else if (record.phase === "provisional") {
@@ -491,7 +535,53 @@ export class MacosRuntimeManager {
   }
 
   async close(): Promise<void> {
-    await Promise.all([...this.#records.keys()].map((helperId) => this.detach(helperId)));
+    const helperIds = new Set([
+      ...this.#records.keys(),
+      ...[...this.#requests.keys()].map((key) => key.slice(0, key.indexOf("\0"))),
+    ]);
+    await Promise.all([...helperIds].map((helperId) => this.detach(helperId)));
+  }
+
+  #reserveRequest(helperId: string): () => void {
+    this.#activeRequests += 1;
+    this.#activeRequestsByHelper.set(helperId, (this.#activeRequestsByHelper.get(helperId) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.#activeRequests = Math.max(0, this.#activeRequests - 1);
+      const remaining = Math.max(0, (this.#activeRequestsByHelper.get(helperId) ?? 0) - 1);
+      if (remaining === 0) this.#activeRequestsByHelper.delete(helperId);
+      else this.#activeRequestsByHelper.set(helperId, remaining);
+    };
+  }
+
+  #reserveResource(helperId: string): () => void {
+    this.#activeResources += 1;
+    this.#activeResourcesByHelper.set(helperId, (this.#activeResourcesByHelper.get(helperId) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.#activeResources = Math.max(0, this.#activeResources - 1);
+      const remaining = Math.max(0, (this.#activeResourcesByHelper.get(helperId) ?? 0) - 1);
+      if (remaining === 0) this.#activeResourcesByHelper.delete(helperId);
+      else this.#activeResourcesByHelper.set(helperId, remaining);
+    };
+  }
+
+  #retainCompletedRequest(helperId: string, requestKey: string, request: RequestRecord): void {
+    request.completed = true;
+    const completed = this.#completedRequestKeysByHelper.get(helperId) ?? [];
+    completed.push(requestKey);
+    this.#completedRequestKeysByHelper.set(helperId, completed);
+    while (completed.length > this.#limits.maxRetainedRequestsPerHelper) {
+      const evictedKey = completed.shift();
+      if (evictedKey === undefined) break;
+      const evicted = this.#requests.get(evictedKey);
+      if (evicted?.completed === true) this.#requests.delete(evictedKey);
+    }
+    if (completed.length === 0) this.#completedRequestKeysByHelper.delete(helperId);
   }
 
   #envelope(message: Pick<MacosReviewHelperMessage, "windowId" | "attemptId" | "requestId">) {

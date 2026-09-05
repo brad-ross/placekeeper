@@ -15,8 +15,9 @@ struct ShellReadinessFence: Equatable {
     }
 
     mutating func commitRouting() -> Bool {
+        guard !routingCommitted, shellRevision != nil else { return false }
         routingCommitted = true
-        return shellRevision != nil
+        return true
     }
 
     mutating func didOrderVisible() {
@@ -28,6 +29,10 @@ struct ShellReadinessFence: Equatable {
         visibleShellRevision = revision
         return true
     }
+}
+
+enum InitialWindowPlacementPolicy {
+    static func shouldCenter(hasRestoredFrame: Bool) -> Bool { !hasRestoredFrame }
 }
 
 struct DragRect: Equatable, Sendable {
@@ -66,6 +71,47 @@ struct DragRegionFence {
         regions = candidate.regions
         return true
     }
+
+    mutating func rolloverGeometryIdentity(to identity: String) {
+        geometryIdentity = identity
+        currentRevision = -1
+        regions = []
+        transitionInProgress = false
+    }
+}
+
+enum MacPageBridgeMessageType: String, CaseIterable {
+    case shellReady = "shell-ready"
+    case documentReady = "document-ready"
+    case runtimeMessage = "runtime-message"
+    case runtimeError = "runtime-error"
+    case commandSnapshot = "command-snapshot"
+    case visibleShellReady = "visible-shell-ready"
+    case dragRegions = "drag-regions"
+
+    static func parse(_ body: [String: Any]) -> MacPageBridgeMessageType? {
+        guard body["protocolVersion"] as? Int == macShellProtocolVersion,
+              let raw = body["type"] as? String else { return nil }
+        return Self(rawValue: raw)
+    }
+}
+
+enum MacRuntimeErrorStage: String {
+    case runtime
+}
+
+enum MacPageBridgeDiagnosticEvent: String, CaseIterable {
+    case shellReadyAccepted = "page-shell-ready-accepted"
+    case documentReadyAccepted = "page-document-ready-accepted"
+    case runtimeMessageAccepted = "page-runtime-message-accepted"
+    case runtimeErrorAccepted = "page-runtime-error-accepted"
+    case commandSnapshotAccepted = "page-command-snapshot-accepted"
+    case visibleShellReadyAccepted = "page-visible-shell-ready-accepted"
+    case visibleShellReadyRejected = "page-visible-shell-ready-rejected"
+    case dragRegionsAccepted = "page-drag-regions-accepted"
+    case dragRegionsRejected = "page-drag-regions-rejected"
+
+    static let allFixedNames = Set(allCases.map(\.rawValue))
 }
 
 enum MacSchemePolicy {

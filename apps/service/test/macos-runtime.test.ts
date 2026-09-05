@@ -111,7 +111,7 @@ describe("macOS canonical review runtime", () => {
     expect(service.begin).toHaveBeenCalledWith(expect.objectContaining({
       disposition: "local",
       fileUrl: "file:///private/tmp/Paper.pdf",
-    }));
+    }), expect.any(AbortSignal));
   });
 
   it("admits, activates, mutates, reads, builds a link, and detaches one window", async () => {
@@ -314,6 +314,205 @@ describe("macOS canonical review runtime", () => {
     })).resolves.toMatchObject({ type: "refreshed" });
     blocked.resolve(projection());
     await expect(stalled).resolves.toMatchObject({ type: "refreshed" });
+  });
+
+  it("bounds completed replay responses without imposing a helper request lifetime", async () => {
+    const service = backend();
+    const manager = new MacosRuntimeManager(service, { maxRetainedRequestsPerHelper: 2 });
+    await admit(manager);
+
+    for (let index = 0; index < 8; index += 1) {
+      await expect(manager.handle("helper_12345678", {
+        ...envelope,
+        requestId: `request_refresh_lifetime_${index}`,
+        type: "refresh",
+      })).resolves.toMatchObject({ type: "refreshed" });
+    }
+    expect(service.current).toHaveBeenCalledTimes(8);
+
+    await manager.handle("helper_12345678", {
+      ...envelope,
+      requestId: "request_refresh_lifetime_7",
+      type: "refresh",
+    });
+    expect(service.current).toHaveBeenCalledTimes(8);
+
+    await manager.handle("helper_12345678", {
+      ...envelope,
+      requestId: "request_refresh_lifetime_0",
+      type: "refresh",
+    });
+    expect(service.current).toHaveBeenCalledTimes(9);
+  });
+
+  it("reuses backend idempotency coordinates after a mutation replay is evicted", async () => {
+    const service = backend();
+    const durable = new Map<string, { readonly digest: string; readonly result: unknown }>();
+    let effects = 0;
+    vi.mocked(service.invoke).mockImplementation(async (_key, _method, _payload, operation) => {
+      const idempotencyKey = operation.idempotencyKey;
+      if (idempotencyKey === undefined) throw new Error("missing-idempotency-key");
+      const previous = durable.get(idempotencyKey);
+      if (previous !== undefined) {
+        if (previous.digest !== operation.payloadDigest) throw new Error("idempotency-conflict");
+        return previous.result;
+      }
+      effects += 1;
+      const result = projection(1).state;
+      durable.set(idempotencyKey, { digest: operation.payloadDigest, result });
+      return result;
+    });
+    const manager = new MacosRuntimeManager(service, { maxRetainedRequestsPerHelper: 1 });
+    await admit(manager);
+    await manager.handle("helper_12345678", {
+      ...envelope,
+      requestId: "request_activate_replay_1",
+      type: "activate",
+      documentValidated: true,
+    });
+    const mutation = {
+      ...envelope,
+      requestId: "request_mutation_replay_1",
+      type: "invoke" as const,
+      generation: 1,
+      revision: 0,
+      method: "command" as const,
+      payload: { type: "undo", expectedRevision: 0 },
+      idempotencyKey: "operation_mutation_replay_1",
+    };
+
+    await expect(manager.handle("helper_12345678", mutation)).resolves.toMatchObject({ type: "result" });
+    await manager.handle("helper_12345678", {
+      ...envelope,
+      requestId: "request_refresh_evict_1",
+      type: "refresh",
+    });
+    await expect(manager.handle("helper_12345678", mutation)).resolves.toMatchObject({ type: "result" });
+
+    expect(service.invoke).toHaveBeenCalledTimes(2);
+    expect(service.invoke).toHaveBeenNthCalledWith(
+      2,
+      "canonical_review_1234",
+      "command",
+      mutation.payload,
+      expect.objectContaining({ idempotencyKey: mutation.idempotencyKey }),
+      expect.any(AbortSignal),
+    );
+    expect(effects).toBe(1);
+  });
+
+  it("releases stalled request capacity when its helper detaches", async () => {
+    const service = backend();
+    const blocked = Promise.withResolvers<MacosRuntimeTrustedProjection>();
+    const signals: AbortSignal[] = [];
+    let currentCalls = 0;
+    vi.mocked(service.current).mockImplementation(async (_key, signal) => {
+      if (signal !== undefined) signals.push(signal);
+      currentCalls += 1;
+      return currentCalls === 1 ? blocked.promise : projection();
+    });
+    const manager = new MacosRuntimeManager(service, {
+      maxHelpers: 2,
+      maxConcurrentRequests: 1,
+      maxConcurrentRequestsPerHelper: 1,
+    });
+    await admit(manager);
+    const secondEnvelope = {
+      protocolVersion: 1 as const,
+      windowId: "window_abcdefgh",
+      attemptId: "attempt_abcdefgh",
+    };
+    await manager.handle("helper_abcdefgh", {
+      ...secondEnvelope,
+      requestId: "request_admit_stall_2",
+      type: "admit",
+      sourcePath: "/private/tmp/Other.pdf",
+    });
+
+    const stalled = manager.handle("helper_12345678", {
+      ...envelope,
+      requestId: "request_refresh_detach_1",
+      type: "refresh",
+    });
+    await vi.waitFor(() => expect(currentCalls).toBe(1));
+    await manager.detach("helper_12345678");
+    expect(signals[0]?.aborted).toBe(true);
+    await expect(manager.handle("helper_abcdefgh", {
+      ...secondEnvelope,
+      requestId: "request_refresh_after_detach_1",
+      type: "refresh",
+    })).resolves.toMatchObject({ type: "refreshed" });
+
+    blocked.resolve(projection());
+    await expect(stalled).resolves.toMatchObject({ type: "failure", code: "unavailable" });
+    await expect(manager.handle("helper_abcdefgh", {
+      ...secondEnvelope,
+      requestId: "request_refresh_after_late_settle_1",
+      type: "refresh",
+    })).resolves.toMatchObject({ type: "refreshed" });
+  });
+
+  it("releases stalled resource capacity when its helper detaches", async () => {
+    const service = backend();
+    const blocked = Promise.withResolvers<Buffer>();
+    const signals: AbortSignal[] = [];
+    let readCalls = 0;
+    vi.mocked(service.readDocument).mockImplementation(async (_key, _generation, offset, length, signal) => {
+      if (signal !== undefined) signals.push(signal);
+      readCalls += 1;
+      return readCalls === 1 ? blocked.promise : sourceBytes.subarray(offset, offset + length);
+    });
+    const manager = new MacosRuntimeManager(service, {
+      maxHelpers: 2,
+      maxConcurrentRequests: 2,
+      maxResources: 1,
+      maxResourcesPerHelper: 1,
+    });
+    await admit(manager);
+    const firstResourceId = manager.resourceId("helper_12345678");
+    if (firstResourceId === undefined) throw new Error("Expected a document resource");
+    const secondEnvelope = {
+      protocolVersion: 1 as const,
+      windowId: "window_abcdefgh",
+      attemptId: "attempt_abcdefgh",
+    };
+    await manager.handle("helper_abcdefgh", {
+      ...secondEnvelope,
+      requestId: "request_admit_resource_2",
+      type: "admit",
+      sourcePath: "/private/tmp/Other.pdf",
+    });
+    const secondResourceId = manager.resourceId("helper_abcdefgh");
+    if (secondResourceId === undefined) throw new Error("Expected a second document resource");
+
+    const stalled = manager.handle("helper_12345678", {
+      ...envelope,
+      requestId: "request_resource_detach_1",
+      type: "read-resource",
+      resourceId: firstResourceId,
+      generation: 1,
+      role: "document",
+      offset: 0,
+      length: sourceBytes.byteLength,
+    });
+    await vi.waitFor(() => expect(readCalls).toBe(1));
+    await manager.detach("helper_12345678");
+    expect(signals[0]?.aborted).toBe(true);
+    expect(manager.activity().resources).toBe(0);
+    await expect(manager.handle("helper_abcdefgh", {
+      ...secondEnvelope,
+      requestId: "request_resource_after_detach_1",
+      type: "read-resource",
+      resourceId: secondResourceId,
+      generation: 1,
+      role: "document",
+      offset: 0,
+      length: sourceBytes.byteLength,
+    })).resolves.toMatchObject({ type: "resource-bytes" });
+
+    blocked.resolve(sourceBytes);
+    await expect(stalled).resolves.toMatchObject({ type: "failure", code: "unavailable" });
+    expect(manager.activity().resources).toBe(0);
   });
 
   it("does not retain completed document chunks in the replay budget", async () => {

@@ -36,6 +36,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     private let onCommandSnapshot: (String) -> Void
     private let onRetry: (String) -> Void
     private let onDiagnostics: () -> Void
+    private let centersOnFirstRoutingCommit: Bool
 
     init(
         windowID: String,
@@ -45,6 +46,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         runtimeID: String,
         helper: SupervisedReviewHelper,
         admission: MacReviewAdmission,
+        packagedAssets: PackagedReviewAssets,
         restoredFrame: NSRect? = nil,
         onBecameKey: @escaping (String) -> Void,
         onCommandSnapshot: @escaping (String) -> Void,
@@ -66,22 +68,11 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         self.admission = admission
         self.displayName = admission.displayName
         self.bridge = ReviewBridge(runtimeID: runtimeID, attemptID: attemptID, helper: helper, admission: admission)
-        let pdfiumURL = packagedRoot.appendingPathComponent("assets/pdfium.wasm")
-        if let pdfium = try? Data(contentsOf: pdfiumURL),
-           pdfium.count > 8, pdfium.count <= 16 * 1024 * 1024,
-           pdfium.starts(with: Data([0x00, 0x61, 0x73, 0x6d])) {
-            pdfiumData = pdfium
-        } else {
-            pdfiumData = nil
-        }
-        let workerURL = packagedRoot.appendingPathComponent("assets/pdfium-worker.js")
-        if let worker = try? Data(contentsOf: workerURL), worker.count > 0, worker.count <= 4 * 1024 * 1024,
-           let source = String(data: worker, encoding: .utf8),
-           source.contains("class PdfiumEngineRunner"), source.contains("type === \"wasmInit\"") {
-            workerData = worker
-        } else {
-            workerData = nil
-        }
+        self.pdfiumData = packagedAssets.pdfium
+        self.workerData = packagedAssets.worker
+        self.centersOnFirstRoutingCommit = InitialWindowPlacementPolicy.shouldCenter(
+            hasRestoredFrame: restoredFrame != nil
+        )
         let geometryIdentity = "geometry_" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(16))
         self.dragFence = DragRegionFence(geometryIdentity: geometryIdentity)
 
@@ -142,7 +133,6 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         window.contentViewController = controller
         window.backgroundColor = NSColor(calibratedRed: 0.965, green: 0.949, blue: 0.918, alpha: 1)
         if let restoredFrame { window.setFrame(restoredFrame, display: false) }
-        else { window.center() }
     }
 
     required init?(coder: NSCoder) { nil }
@@ -265,23 +255,22 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "placekeeperShell", let body = message.body as? [String: Any],
-              body["protocolVersion"] as? Int == macShellProtocolVersion,
-              let type = body["type"] as? String else { return }
-        diagnostic("page-message: \(type)")
-        if type == "shell-ready",
+              let type = MacPageBridgeMessageType.parse(body) else { return }
+        if type == .shellReady,
            Set(body.keys) == Set(["protocolVersion", "type", "layoutRevision"]),
            let revision = body["layoutRevision"] as? Int, revision >= 0 {
             _ = readiness.shellReady(revision: revision)
             if readiness.commitRouting() {
-                window?.center()
+                if centersOnFirstRoutingCommit { window?.center() }
                 NSApplication.shared.activate(ignoringOtherApps: true)
                 window?.makeKeyAndOrderFront(nil)
                 readiness.didOrderVisible()
                 sendToPage(["protocolVersion": 1, "type": "commit-visible", "geometryIdentity": dragFence.geometryIdentity])
             }
+            diagnostic(.shellReadyAccepted)
             return
         }
-        if type == "document-ready",
+        if type == .documentReady,
            Set(body.keys) == Set(["protocolVersion", "type", "runtimeId", "attemptId", "generation"]),
            body["runtimeId"] as? String == runtimeID,
            body["attemptId"] as? String == attemptID,
@@ -289,35 +278,39 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
            generation == admission.generation {
             pendingDocumentReadyGeneration = generation
             activateWhenReady()
+            diagnostic(.documentReadyAccepted)
             return
         }
-        if type == "runtime-message",
+        if type == .runtimeMessage,
            Set(body.keys) == Set(["protocolVersion", "type", "runtimeId", "attemptId", "message"]),
            body["runtimeId"] as? String == runtimeID,
            body["attemptId"] as? String == attemptID,
-           let message = body["message"] {
+           let message = body["message"],
+           MacPageRuntimeRequest.parse(message, runtimeID: runtimeID) != nil {
             bridge.handle(message) { [weak self] response in self?.sendRuntimeMessage(response) }
+            diagnostic(.runtimeMessageAccepted)
             return
         }
-        if type == "runtime-error",
+        if type == .runtimeError,
            Set(body.keys) == Set(["protocolVersion", "type", "runtimeId", "attemptId", "stage"]),
            body["runtimeId"] as? String == runtimeID,
            body["attemptId"] as? String == attemptID,
-           let stage = body["stage"] as? String {
-            diagnostic("runtime-error: \(stage)")
+           let stage = (body["stage"] as? String).flatMap(MacRuntimeErrorStage.init),
+           stage == .runtime {
+            diagnostic(.runtimeErrorAccepted)
             return
         }
-        if type == "command-snapshot",
+        if type == .commandSnapshot,
            body["runtimeId"] as? String == runtimeID,
            body["attemptId"] as? String == attemptID,
            let snapshot = MacCommandSnapshot.parse(body),
            commandSnapshot == nil || snapshot.revision > commandSnapshot!.revision {
             commandSnapshot = snapshot
-            diagnostic("command-snapshot-accepted: revision \(snapshot.revision)")
+            diagnostic(.commandSnapshotAccepted)
             onCommandSnapshot(windowID)
             return
         }
-        if type == "visible-shell-ready",
+        if type == .visibleShellReady,
            Set(body.keys) == Set(["protocolVersion", "type", "layoutRevision", "geometryIdentity", "frameSequence"]),
            let revision = body["layoutRevision"] as? Int,
            let frameSequence = body["frameSequence"] as? Int, frameSequence > 0,
@@ -325,13 +318,14 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             if revision == dragFence.currentRevision, readiness.confirmPaint(revision: revision) {
                 visiblePaintConfirmed = true
                 activateWhenReady()
+                diagnostic(.visibleShellReadyAccepted)
             } else {
-                diagnostic("visible-shell-rejected: revision \(revision), latest \(dragFence.currentRevision)")
+                diagnostic(.visibleShellReadyRejected)
             }
             scheduleReadinessDiagnostic()
             return
         }
-        if type == "drag-regions",
+        if type == .dragRegions,
            Set(body.keys) == Set(["protocolVersion", "type", "layoutRevision", "geometryIdentity", "transitioning", "regions"]),
            let revision = body["layoutRevision"] as? Int,
            let identity = body["geometryIdentity"] as? String,
@@ -339,6 +333,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
            let rawRegions = body["regions"] as? [[String: Double]] {
             if transitioning {
                 installDragOverlays([])
+                diagnostic(.dragRegionsAccepted)
                 return
             }
             let regions = rawRegions.compactMap { region -> DragRect? in
@@ -354,8 +349,10 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                         "geometryIdentity": dragFence.geometryIdentity,
                     ])
                 }
+                diagnostic(.dragRegionsAccepted)
             } else {
                 installDragOverlays([])
+                diagnostic(.dragRegionsRejected)
             }
         }
     }
@@ -475,8 +472,8 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     }
 
     private func endGeometryTransition() {
-        dragFence.geometryIdentity = "geometry_" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(16))
-        dragFence.transitionInProgress = false
+        let identity = "geometry_" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(16))
+        dragFence.rolloverGeometryIdentity(to: identity)
         sendToPage([
             "protocolVersion": 1,
             "type": "geometry-changed",
@@ -499,6 +496,10 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         guard diagnosticsEnabled,
               let bytes = "[PlacekeeperMac] \(message)\n".data(using: .utf8) else { return }
         FileHandle.standardError.write(bytes)
+    }
+
+    private func diagnostic(_ event: MacPageBridgeDiagnosticEvent) {
+        diagnostic(event.rawValue)
     }
 
     private func scheduleReadinessDiagnostic() {
