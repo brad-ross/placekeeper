@@ -25,6 +25,8 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     private var fallbackWindows: [NSWindow] = []
     private var launchCoordinator = LaunchCoordinator()
     private var windowRegistry = DocumentWindowRegistry()
+    private let restorationStore = WindowRestorationStore()
+    private var restoredFrames: [String: NSRect] = [:]
     private let helperSupervisor = ReviewHelperSupervisor()
     private let appInstanceID = "app_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
     private var lifecycleControl: AppLifecycleControlClient?
@@ -38,6 +40,13 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         diagnostic("application-did-finish-launching")
         NSWindow.allowsAutomaticWindowTabbing = false
         enqueueLaunchURLs(CommandLine.arguments.dropFirst().map { URL(fileURLWithPath: $0) })
+        if launchCoordinator.pending.isEmpty {
+            let restored = restorationStore.load()
+            for record in restored {
+                restoredFrames[record.sourceURL.standardizedFileURL.path] = NSRectFromString(record.frame)
+            }
+            enqueueLaunchURLs(restored.map(\.sourceURL))
+        }
         let pendingDocumentName = launchCoordinator.pending.first?.sourceURL.lastPathComponent ?? "Placekeeper"
         guard let helperCommand = resolveHelperCommand(),
               let lifecycle = AppLifecycleControlClient(
@@ -109,6 +118,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         terminating = true
+        persistRestorableWindows()
         guard lifecycleRegistered, let lifecycleControl else {
             self.lifecycleControl?.terminate()
             return
@@ -331,12 +341,14 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             runtimeID: runtimeID,
             helper: helper,
             admission: admission,
+            restoredFrame: restoredFrames.removeValue(forKey: source.standardizedFileURL.path),
             onBecameKey: { [weak self] keyWindowID in self?.windowRegistry.noteKey(windowID: keyWindowID) },
             onClose: { [weak self] closedWindowID in
                 guard let self else { return }
                 self.helperSupervisor.close(windowID: closedWindowID)
                 self.windowRegistry.remove(windowID: closedWindowID)
                 self.controllers.removeAll { $0.windowID == closedWindowID }
+                self.persistRestorableWindows()
                 _ = self.sendActivity(
                     activeWindows: self.reportedActiveWindowCount,
                     bootstrappingWindows: self.launchCoordinator.inFlightCount
@@ -353,6 +365,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         controllers.append(controller)
+        persistRestorableWindows()
         diagnostic("document-window-starting")
         updateActivity()
         controller.start()
@@ -386,6 +399,10 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             activeWindows: reportedActiveWindowCount,
             bootstrappingWindows: launchCoordinator.inFlightCount
         )
+    }
+
+    private func persistRestorableWindows() {
+        restorationStore.save(controllers.compactMap(\.restorationRecord))
     }
 
     private func helperDidExit(windowID: String) {

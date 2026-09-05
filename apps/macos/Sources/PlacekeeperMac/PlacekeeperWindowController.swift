@@ -7,6 +7,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     let windowID: String
     let canonicalReviewID: String
     let documentDigest: String
+    let documentURL: URL
     private let webView: WKWebView
     private let schemeHandler: MacSchemeHandler
     private let attemptID: String
@@ -37,12 +38,14 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         runtimeID: String,
         helper: SupervisedReviewHelper,
         admission: MacReviewAdmission,
+        restoredFrame: NSRect? = nil,
         onBecameKey: @escaping (String) -> Void,
         onClose: @escaping (String) -> Void
     ) {
         self.windowID = windowID
         self.canonicalReviewID = admission.projection.sessionID
         self.documentDigest = admission.digest
+        self.documentURL = documentURL
         self.onClose = onClose
         self.onBecameKey = onBecameKey
         self.attemptID = attemptID
@@ -125,7 +128,8 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         controller.view = contentView
         window.contentViewController = controller
         window.backgroundColor = NSColor(calibratedRed: 0.965, green: 0.949, blue: 0.918, alpha: 1)
-        window.center()
+        if let restoredFrame { window.setFrame(restoredFrame, display: false) }
+        else { window.center() }
     }
 
     required init?(coder: NSCoder) { nil }
@@ -202,6 +206,16 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     func focus() {
         NSApplication.shared.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    var restorationRecord: RestorableDocumentWindow? {
+        guard let window else { return nil }
+        return .init(
+            sourcePath: documentURL.standardizedFileURL.path,
+            frame: NSStringFromRect(window.frame),
+            page: nil,
+            zoom: nil
+        )
     }
 
     func windowWillStartLiveResize(_ notification: Notification) { beginGeometryTransition() }

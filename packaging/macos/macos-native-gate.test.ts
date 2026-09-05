@@ -16,7 +16,7 @@ function entitlementKeys(xml: string): string[] {
 
 describe("macOS native gate packaging policy", () => {
   it("keeps the proof executable production-shaped and network-free", async () => {
-    const [windowSource, appSource, packageSource, shellHtml, shellCss, launchSource, registrySource, lifecycleSource] = await Promise.all([
+    const [windowSource, appSource, packageSource, shellHtml, shellCss, launchSource, registrySource, lifecycleSource, restorationSource] = await Promise.all([
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift"), "utf8"),
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/PlacekeeperMac.swift"), "utf8"),
       readFile(resolve("apps/macos/Package.swift"), "utf8"),
@@ -25,6 +25,7 @@ describe("macOS native gate packaging policy", () => {
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/LaunchCoordinator.swift"), "utf8"),
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/DocumentWindowRegistry.swift"), "utf8"),
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/AppLifecycleControlClient.swift"), "utf8"),
+      readFile(resolve("apps/macos/Sources/PlacekeeperMac/WindowRestoration.swift"), "utf8"),
     ]);
     expect(packageSource).toContain(".macOS(.v13)");
     expect(windowSource).toContain(".fullSizeContentView");
@@ -51,6 +52,8 @@ describe("macOS native gate packaging policy", () => {
     expect(registrySource).toContain("canonicalReviewID");
     expect(registrySource).not.toContain("sourceURL");
     expect(lifecycleSource).toContain("queued.count < 64");
+    expect(restorationSource).toContain('Set(record.keys).isSubset(of: ["sourcePath", "frame", "page", "zoom"])');
+    expect(restorationSource).not.toMatch(/sessionId|credential|lease|helperId|attemptId/u);
   });
 
   it("strips Node and dynamic-loader injection from child environments", () => {

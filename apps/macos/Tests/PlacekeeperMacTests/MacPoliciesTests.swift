@@ -266,6 +266,34 @@ final class MacPoliciesTests: XCTestCase {
         XCTAssertEqual(registry.matchingWindow(canonicalReviewID: reviewID), "window_second")
     }
 
+    func testRestorationKeepsOnlyOrdinaryDocumentPresentationState() throws {
+        let frame = NSStringFromRect(NSRect(x: 20, y: 30, width: 1200, height: 820))
+        let record = try XCTUnwrap(RestorableDocumentWindow.parse([
+            "sourcePath": "/Users/reviewer/Paper.pdf",
+            "frame": frame,
+            "page": 3,
+            "zoom": 1.25,
+        ]))
+        XCTAssertEqual(record.sourceURL.path, "/Users/reviewer/Paper.pdf")
+        XCTAssertNil(RestorableDocumentWindow.parse([
+            "sourcePath": "/Users/reviewer/Paper.pdf",
+            "frame": frame,
+            "sessionId": "779e1d9d-58c1-4b12-8dc2-3449dad132c1",
+        ]))
+        XCTAssertNil(RestorableDocumentWindow.parse([
+            "sourcePath": "/Users/reviewer/Paper.pdf",
+            "frame": frame,
+            "presentationLease": "secret",
+        ]))
+
+        let suiteName = "PlacekeeperMacTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = WindowRestorationStore(defaults: defaults)
+        store.save([record])
+        XCTAssertEqual(store.load(), [record])
+    }
+
     func testGenerationBoundResourceAndCatastrophicSurface() {
         var vault = ResourceVault()
         XCTAssertTrue(vault.install(.init(id: "resource_12345678", generation: 1, bytes: Data("%PDF-1.7".utf8))))
