@@ -32,6 +32,8 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     private(set) var commandSnapshot: MacCommandSnapshot?
     private var commandToken = 0
     private let onCommandSnapshot: (String) -> Void
+    private let onRetry: (String) -> Void
+    private let onDiagnostics: () -> Void
 
     init(
         windowID: String,
@@ -44,6 +46,8 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         restoredFrame: NSRect? = nil,
         onBecameKey: @escaping (String) -> Void,
         onCommandSnapshot: @escaping (String) -> Void,
+        onRetry: @escaping (String) -> Void,
+        onDiagnostics: @escaping () -> Void,
         onClose: @escaping (String) -> Void
     ) {
         self.windowID = windowID
@@ -53,6 +57,8 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         self.onClose = onClose
         self.onBecameKey = onBecameKey
         self.onCommandSnapshot = onCommandSnapshot
+        self.onRetry = onRetry
+        self.onDiagnostics = onDiagnostics
         self.attemptID = attemptID
         self.runtimeID = runtimeID
         self.admission = admission
@@ -173,27 +179,20 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "placekeeperShell")
         schemeHandler.invalidate()
         installDragOverlays([])
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = 14
-        stack.edgeInsets = NSEdgeInsets(top: 48, left: 48, bottom: 48, right: 48)
-        let title = NSTextField(labelWithString: displayName)
-        title.font = .preferredFont(forTextStyle: .title1)
-        stack.addArrangedSubview(title)
-        for action in CatastrophicAction.allCases {
-            stack.addArrangedSubview(NSButton(title: action.rawValue, target: nil, action: nil))
-        }
-        let controller = NSViewController()
-        controller.view = stack
+        commandSnapshot = nil
+        let controller = CatastrophicFallbackViewController(
+            documentName: displayName,
+            onRetry: { [weak self] in
+                guard let self else { return }
+                self.onRetry(self.windowID)
+            },
+            onDiagnostics: onDiagnostics,
+            onClose: { [weak self] _ in self?.window?.performClose(nil) }
+        )
         window?.contentViewController = controller
         window?.center()
         NSApplication.shared.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
-        NSAccessibility.post(element: stack, notification: .announcementRequested, userInfo: [
-            .announcement: "Placekeeper could not continue this review.",
-            .priority: NSAccessibilityPriorityLevel.high.rawValue,
-        ])
     }
 
     func windowWillClose(_ notification: Notification) {

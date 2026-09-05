@@ -53,7 +53,8 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             }
             enqueueLaunchURLs(restored.map(\.sourceURL))
         }
-        let pendingDocumentName = launchCoordinator.pending.first?.sourceURL.lastPathComponent ?? "Placekeeper"
+        let pendingSource = launchCoordinator.pending.first?.sourceURL
+        let pendingDocumentName = pendingSource?.lastPathComponent ?? "Placekeeper"
         guard let helperCommand = resolveHelperCommand(),
               let lifecycle = AppLifecycleControlClient(
                 appInstanceID: appInstanceID,
@@ -63,7 +64,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 onExit: { [weak self] in Task { @MainActor in self?.lifecycleDidFail() } }
               ) else {
             diagnostic("lifecycle-helper-launch-failed")
-            presentCatastrophicFallback(documentName: pendingDocumentName)
+            presentCatastrophicFallback(documentName: pendingDocumentName, sourceURL: pendingSource)
             return
         }
         self.helperCommand = helperCommand
@@ -83,7 +84,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 guard reply == .acknowledged else {
                     self.diagnostic("lifecycle-registration-failed")
-                    self.presentCatastrophicFallback(documentName: pendingDocumentName)
+                    self.presentCatastrophicFallback(documentName: pendingDocumentName, sourceURL: pendingSource)
                     return
                 }
                 self.lifecycleRegistered = true
@@ -96,7 +97,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             diagnostic("lifecycle-registration-write-failed")
             lifecycle.terminate()
             lifecycleControl = nil
-            presentCatastrophicFallback(documentName: pendingDocumentName)
+            presentCatastrophicFallback(documentName: pendingDocumentName, sourceURL: pendingSource)
             return
         }
     }
@@ -153,12 +154,12 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 else {
                     self.diagnostic("window-bootstrap-activity-rejected")
                     self.finishLaunch(intent)
-                    self.presentCatastrophicFallback(documentName: intent.sourceURL.lastPathComponent)
+                    self.presentCatastrophicFallback(documentName: intent.sourceURL.lastPathComponent, sourceURL: intent.sourceURL)
                 }
             }
         }) else {
             finishLaunch(intent)
-            presentCatastrophicFallback(documentName: intent.sourceURL.lastPathComponent)
+            presentCatastrophicFallback(documentName: intent.sourceURL.lastPathComponent, sourceURL: intent.sourceURL)
             return
         }
     }
@@ -175,7 +176,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             ?? Bundle.main.resourceURL?.appendingPathComponent("MacWeb")
         guard let packagedRoot, source.isFileURL else {
             finishLaunch(intent)
-            presentCatastrophicFallback(documentName: source.lastPathComponent)
+            presentCatastrophicFallback(documentName: source.lastPathComponent, sourceURL: source)
             return
         }
         let windowID = "window_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
@@ -198,7 +199,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 }
               ), helperSupervisor.attach(helper) else {
             finishLaunch(intent)
-            presentCatastrophicFallback(documentName: source.lastPathComponent)
+            presentCatastrophicFallback(documentName: source.lastPathComponent, sourceURL: source)
             return
         }
         let canonicalSource = source.standardizedFileURL.resolvingSymlinksInPath()
@@ -230,7 +231,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         ) != nil else {
             helperSupervisor.close(windowID: windowID)
             finishLaunch(intent)
-            presentCatastrophicFallback(documentName: source.lastPathComponent)
+            presentCatastrophicFallback(documentName: source.lastPathComponent, sourceURL: source)
             return
         }
     }
@@ -288,7 +289,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         default:
             helperSupervisor.close(windowID: windowID)
             updateActivity()
-            presentCatastrophicFallback(documentName: source.lastPathComponent)
+            presentCatastrophicFallback(documentName: source.lastPathComponent, sourceURL: source)
         }
     }
 
@@ -350,6 +351,8 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             restoredFrame: restoredFrames.removeValue(forKey: source.standardizedFileURL.path),
             onBecameKey: { [weak self] keyWindowID in self?.windowRegistry.noteKey(windowID: keyWindowID) },
             onCommandSnapshot: { [weak self] _ in self?.menuCoordinator.refresh() },
+            onRetry: { [weak self] failedWindowID in self?.retryDocumentWindow(windowID: failedWindowID) },
+            onDiagnostics: { [weak self] in self?.showDiagnostics() },
             onClose: { [weak self] closedWindowID in
                 guard let self else { return }
                 self.helperSupervisor.close(windowID: closedWindowID)
@@ -368,7 +371,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             documentDigest: admission.digest
         ) else {
             helperSupervisor.close(windowID: windowID)
-            presentCatastrophicFallback(documentName: source.lastPathComponent)
+            presentCatastrophicFallback(documentName: source.lastPathComponent, sourceURL: source)
             return
         }
         controllers.append(controller)
@@ -420,6 +423,26 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         controllers.first { $0.windowID == windowID }?.helperDidFail()
         helperSupervisor.helperDied(windowID: windowID)
         updateActivity()
+    }
+
+    private func retryDocumentWindow(windowID: String) {
+        guard let controller = controllers.first(where: { $0.windowID == windowID }) else { return }
+        let source = controller.documentURL
+        controller.window?.performClose(nil)
+        enqueueLaunchURLs([source])
+    }
+
+    private func showDiagnostics() {
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "development"
+        let safeBuild = build.replacingOccurrences(
+            of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression
+        )
+        let alert = NSAlert()
+        alert.messageText = "Placekeeper Diagnostics"
+        alert.informativeText = "Schema: 1\nShell: native-recovery\nBuild: \(String(safeBuild.prefix(100)))"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private func confirmPlacekeeperLink(_ _: String, source: URL) -> Bool {
@@ -504,7 +527,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         FileHandle.standardError.write(bytes)
     }
 
-    private func presentCatastrophicFallback(documentName: String) {
+    private func presentCatastrophicFallback(documentName: String, sourceURL: URL? = nil) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 420),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -513,20 +536,19 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         )
         window.title = documentName
         window.isReleasedWhenClosed = false
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = 14
-        stack.edgeInsets = NSEdgeInsets(top: 48, left: 48, bottom: 48, right: 48)
-        let title = NSTextField(labelWithString: documentName)
-        title.font = .preferredFont(forTextStyle: .title1)
-        stack.addArrangedSubview(title)
-        for action in CatastrophicAction.allCases {
-            let button = NSButton(title: action.rawValue, target: nil, action: nil)
-            button.identifier = NSUserInterfaceItemIdentifier(action.rawValue.lowercased())
-            stack.addArrangedSubview(button)
-        }
-        window.contentView = stack
+        window.contentViewController = CatastrophicFallbackViewController(
+            documentName: documentName,
+            retryEnabled: sourceURL != nil && lifecycleRegistered,
+            onRetry: { [weak self] in
+                guard let sourceURL else { return }
+                self?.enqueueLaunchURLs([sourceURL])
+            },
+            onDiagnostics: { [weak self] in self?.showDiagnostics() },
+            onClose: { [weak self] closingWindow in
+                closingWindow?.close()
+                self?.fallbackWindows.removeAll { $0 === closingWindow }
+            }
+        )
         fallbackWindows.append(window)
         window.center()
         window.makeKeyAndOrderFront(nil)

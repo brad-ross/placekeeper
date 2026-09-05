@@ -16,7 +16,7 @@ function entitlementKeys(xml: string): string[] {
 
 describe("macOS native gate packaging policy", () => {
   it("keeps the proof executable production-shaped and network-free", async () => {
-    const [windowSource, appSource, packageSource, shellHtml, shellCss, launchSource, registrySource, lifecycleSource, restorationSource, menuSource] = await Promise.all([
+    const [windowSource, appSource, packageSource, shellHtml, shellCss, launchSource, registrySource, lifecycleSource, restorationSource, menuSource, fallbackSource] = await Promise.all([
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift"), "utf8"),
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/PlacekeeperMac.swift"), "utf8"),
       readFile(resolve("apps/macos/Package.swift"), "utf8"),
@@ -27,6 +27,7 @@ describe("macOS native gate packaging policy", () => {
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/AppLifecycleControlClient.swift"), "utf8"),
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/WindowRestoration.swift"), "utf8"),
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/MenuCoordinator.swift"), "utf8"),
+      readFile(resolve("apps/macos/Sources/PlacekeeperMac/CatastrophicFallbackViewController.swift"), "utf8"),
     ]);
     expect(packageSource).toContain(".macOS(.v13)");
     expect(windowSource).toContain(".fullSizeContentView");
@@ -60,6 +61,11 @@ describe("macOS native gate packaging policy", () => {
     }
     expect(menuSource).toContain("snapshot.focusContext == .editable");
     expect(windowSource).toContain('"snapshotRevision": snapshot.revision');
+    expect(fallbackSource).toContain("onRetry()");
+    expect(fallbackSource).toContain("onDiagnostics()");
+    expect(fallbackSource).toContain("onClose(view.window)");
+    expect(appSource).toContain('Shell: native-recovery');
+    expect(appSource).not.toContain('informativeText = "Path:');
   });
 
   it("strips Node and dynamic-loader injection from child environments", () => {
