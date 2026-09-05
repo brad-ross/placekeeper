@@ -32,18 +32,31 @@ describe("packaged macOS shell entry", () => {
           digest: "a".repeat(64),
         },
       },
-      geometry: { identity: "geometry_12345678", trafficLightInset: 76, trailingInset: 12 },
+      geometry: {
+        identity: "geometry_12345678",
+        trafficLightInset: 76,
+        trafficLightBounds: [
+          { x: 16, y: 20, width: 14, height: 14 },
+          { x: 36, y: 20, width: 14, height: 14 },
+          { x: 56, y: 20, width: 14, height: 14 },
+        ],
+        trailingInset: 12,
+      },
     };
     expect(parseMacosBootstrap(safe)).toMatchObject({ document: { displayName: "Paper.pdf" } });
     expect(parseMacosBootstrap({ ...safe, path: "/tmp/Paper.pdf" })).toBeUndefined();
   });
 
-  it("keeps native traffic lights and web controls outside drag overlays", () => {
+  it("makes every noninteractive titlebar pixel around native and web controls draggable", () => {
     expect(deriveMacosDragRegions({
       layoutRevision: 8,
       geometryIdentity: "geometry_12345678",
       chromeBounds: { x: 0, y: 0, width: 1200, height: 58 },
-      leadingInset: 92,
+      trafficLightBounds: [
+        { x: 16, y: 20, width: 14, height: 14 },
+        { x: 36, y: 20, width: 14, height: 14 },
+        { x: 56, y: 20, width: 14, height: 14 },
+      ],
       interactiveBounds: [{ x: 160, y: 14, width: 820, height: 30 }],
     })).toEqual({
       protocolVersion: 1,
@@ -52,12 +65,29 @@ describe("packaged macOS shell entry", () => {
       geometryIdentity: "geometry_12345678",
       transitioning: false,
       regions: [
-        { x: 92, y: 0, width: 1108, height: 14 },
-        { x: 92, y: 14, width: 68, height: 30 },
+        { x: 0, y: 0, width: 1200, height: 14 },
+        { x: 0, y: 14, width: 160, height: 6 },
         { x: 980, y: 14, width: 220, height: 30 },
-        { x: 92, y: 44, width: 1108, height: 14 },
+        { x: 0, y: 20, width: 16, height: 14 },
+        { x: 30, y: 20, width: 6, height: 14 },
+        { x: 50, y: 20, width: 6, height: 14 },
+        { x: 70, y: 20, width: 90, height: 14 },
+        { x: 0, y: 34, width: 160, height: 10 },
+        { x: 0, y: 44, width: 1200, height: 14 },
       ],
     });
+  });
+
+  it("aligns the shared titlebar content to the measured native traffic-light center", () => {
+    const html = renderToStaticMarkup(<MacosLoadingShell
+      documentTitle="Paper.pdf"
+      trafficLightBounds={[
+        { x: 16, y: 20, width: 14, height: 14 },
+        { x: 36, y: 20, width: 14, height: 14 },
+        { x: 56, y: 20, width: 14, height: 14 },
+      ]}
+    />);
+    expect(html).toContain("--macos-traffic-light-center-y:27px");
   });
 
   it("ignores inert sizing controls when measuring native drag blockers", () => {

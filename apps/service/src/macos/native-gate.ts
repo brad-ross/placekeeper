@@ -40,7 +40,7 @@ type MacosNativeGateResponse =
 export function projectMacosAdmissionToPage(
   admission: MacosProvisionalAdmission,
   displayName: string,
-  geometry: { readonly identity: string; readonly trafficLightInset: number; readonly trailingInset: number },
+  geometry: Extract<MacosNativeMessage, { readonly type: "bootstrap" }>["geometry"],
 ): Extract<MacosNativeMessage, { readonly type: "bootstrap" }> {
   return {
     protocolVersion: 1,

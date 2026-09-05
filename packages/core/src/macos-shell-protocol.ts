@@ -109,6 +109,7 @@ export type MacosNativeMessage =
     readonly geometry: {
       readonly identity: string;
       readonly trafficLightInset: number;
+      readonly trafficLightBounds: readonly MacosRect[];
       readonly trailingInset: number;
     };
     readonly runtimeId?: string;
@@ -125,6 +126,7 @@ export type MacosNativeMessage =
     readonly geometry: {
       readonly identity: string;
       readonly trafficLightInset: number;
+      readonly trafficLightBounds: readonly MacosRect[];
       readonly trailingInset: number;
     };
   }
@@ -362,8 +364,11 @@ export function parseMacosNativeMessage(value: unknown): MacosNativeMessage | un
   }
   if (value.type === "geometry-changed") {
     return exact(value, ["protocolVersion", "type", "geometry"]) && record(value.geometry)
-      && exact(value.geometry, ["identity", "trafficLightInset", "trailingInset"])
+      && exact(value.geometry, ["identity", "trafficLightInset", "trafficLightBounds", "trailingInset"])
       && opaqueId(value.geometry.identity) && safeFinite(value.geometry.trafficLightInset, 1_000)
+      && Array.isArray(value.geometry.trafficLightBounds)
+      && value.geometry.trafficLightBounds.length <= 3
+      && value.geometry.trafficLightBounds.every(rect)
       && safeFinite(value.geometry.trailingInset, 1_000)
       ? value as unknown as MacosNativeMessage : undefined;
   }
@@ -410,8 +415,11 @@ export function parseMacosNativeMessage(value: unknown): MacosNativeMessage | un
     || typeof resource.digest !== "string" || !SHA256.test(resource.digest)) return undefined;
   const parsedResource = parseMacosResourceURL(resource.url);
   if (parsedResource === undefined || parsedResource.generation !== resource.generation
-    || !exact(value.geometry, ["identity", "trafficLightInset", "trailingInset"])
+    || !exact(value.geometry, ["identity", "trafficLightInset", "trafficLightBounds", "trailingInset"])
     || !opaqueId(value.geometry.identity) || !safeFinite(value.geometry.trafficLightInset, 1_000)
+    || !Array.isArray(value.geometry.trafficLightBounds)
+    || value.geometry.trafficLightBounds.length > 3
+    || !value.geometry.trafficLightBounds.every(rect)
     || !safeFinite(value.geometry.trailingInset, 1_000)) return undefined;
   return value as unknown as MacosNativeMessage;
 }

@@ -82,7 +82,7 @@ describe("macOS native gate packaging policy", () => {
     expect(draggableTitlebar).not.toContain("override func hitTest");
   });
 
-  it("preserves the native vertical hit frames for standard window buttons", async () => {
+  it("publishes native button frames without moving their AppKit hit targets", async () => {
     const windowSource = await readFile(
       resolve("apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift"),
       "utf8",
@@ -92,6 +92,7 @@ describe("macOS native gate packaging policy", () => {
       windowSource.indexOf("private func diagnostic"),
     );
     expect(windowSource).toContain("window.toolbar = toolbar");
+    expect(windowSource).toContain('"trafficLightBounds": trafficLightBounds()');
     expect(alignment).toContain("y: button.frame.origin.y");
     expect(alignment).not.toContain("button.frame.height / 2");
   });

@@ -402,6 +402,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             "geometry": [
                 "identity": dragFence.geometryIdentity,
                 "trafficLightInset": trafficLightInset(),
+                "trafficLightBounds": trafficLightBounds(),
                 "trailingInset": Double(Self.toolbarHorizontalMargin),
             ] as [String: Any],
         ])
@@ -504,6 +505,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             "geometry": [
                 "identity": dragFence.geometryIdentity,
                 "trafficLightInset": trafficLightInset(),
+                "trafficLightBounds": trafficLightBounds(),
                 "trailingInset": Double(Self.toolbarHorizontalMargin),
             ] as [String: Any],
         ])
@@ -521,6 +523,27 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         )
         let rightEdgeInWebView = webView.convert(rightEdgeInWindow, from: nil)
         return Double(ceil(rightEdgeInWebView.x + Self.toolbarHorizontalMargin))
+    }
+
+    private func trafficLightBounds() -> [[String: Double]] {
+        guard let window else { return [] }
+        return [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+            .compactMap(window.standardWindowButton)
+            .compactMap { button -> [String: Double]? in
+                let converted = webView.convert(button.bounds, from: button)
+                let y = webView.isFlipped
+                    ? converted.minY
+                    : webView.bounds.height - converted.maxY
+                guard converted.minX.isFinite, y.isFinite,
+                      converted.width.isFinite, converted.width > 0,
+                      converted.height.isFinite, converted.height > 0 else { return nil }
+                return [
+                    "x": Double(max(0, converted.minX)),
+                    "y": Double(max(0, y)),
+                    "width": Double(converted.width),
+                    "height": Double(converted.height),
+                ]
+            }
     }
 
     private func alignTrafficLights() {

@@ -27,6 +27,7 @@
   --review-control-group-gap: 2px;
   --review-action-group-gap: 6px;
   --review-chrome-height: 58px;
+  --review-chrome-center-y: 29px;
   --review-document-title-cap: 9rem;
   --review-workspace-header-height: 44px;
   --review-metadata-separator-gap: .3rem;
@@ -137,6 +138,11 @@
 [data-launch-surface="macos"] .review-chrome {
   padding-inline-start: max(16px, var(--macos-titlebar-leading-inset, 0px));
   padding-inline-end: max(16px, var(--macos-titlebar-trailing-inset, 0px));
+}
+
+[data-launch-surface="macos"] .review-chrome > * {
+  position: relative;
+  top: calc(var(--macos-traffic-light-center-y, var(--review-chrome-center-y)) - var(--review-chrome-center-y));
 }
 
 .review-chrome__identity {

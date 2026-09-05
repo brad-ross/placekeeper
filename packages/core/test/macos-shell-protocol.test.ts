@@ -86,6 +86,11 @@ describe("macOS packaged-shell protocol", () => {
       geometry: {
         identity: "geometry_12345678",
         trafficLightInset: 76,
+        trafficLightBounds: [
+          { x: 16, y: 20, width: 14, height: 14 },
+          { x: 36, y: 20, width: 14, height: 14 },
+          { x: 56, y: 20, width: 14, height: 14 },
+        ],
         trailingInset: 12,
       },
     });

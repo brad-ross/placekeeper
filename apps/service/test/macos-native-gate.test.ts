@@ -41,7 +41,16 @@ describe("macOS native feasibility adapter", () => {
     const pageBootstrap = parseMacosNativeMessage(projectMacosAdmissionToPage(
       admitted,
       "Paper.pdf",
-      { identity: "geometry_12345678", trafficLightInset: 76, trailingInset: 12 },
+      {
+        identity: "geometry_12345678",
+        trafficLightInset: 76,
+        trafficLightBounds: [
+          { x: 16, y: 20, width: 14, height: 14 },
+          { x: 36, y: 20, width: 14, height: 14 },
+          { x: 56, y: 20, width: 14, height: 14 },
+        ],
+        trailingInset: 12,
+      },
     ));
     expect(pageBootstrap).toMatchObject({ type: "bootstrap", document: { displayName: "Paper.pdf" } });
     expect(JSON.stringify(pageBootstrap)).not.toMatch(/private|path|credential|taskId|provisionalId|token|method/iu);

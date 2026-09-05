@@ -33,7 +33,7 @@ export function deriveMacosDragRegions(input: {
   readonly layoutRevision: number;
   readonly geometryIdentity: string;
   readonly chromeBounds: MacosRect;
-  readonly leadingInset: number;
+  readonly trafficLightBounds: readonly MacosRect[];
   readonly interactiveBounds: readonly MacosRect[];
   readonly transitioning?: boolean;
 }): Extract<MacosPageMessage, { readonly type: "drag-regions" }> {
@@ -49,14 +49,7 @@ export function deriveMacosDragRegions(input: {
   const top = input.chromeBounds.y;
   const right = left + input.chromeBounds.width;
   const bottom = top + input.chromeBounds.height;
-  const leadingInset = Number.isFinite(input.leadingInset) ? Math.max(0, input.leadingInset) : 0;
-  const nativeControls = leadingInset === 0 ? [] : [{
-    x: left,
-    y: top,
-    width: Math.min(leadingInset, input.chromeBounds.width),
-    height: input.chromeBounds.height,
-  }];
-  const blocked = [...nativeControls, ...input.interactiveBounds].map((region) => ({
+  const blocked = [...input.trafficLightBounds, ...input.interactiveBounds].map((region) => ({
     left: Math.max(left, region.x),
     top: Math.max(top, region.y),
     right: Math.min(right, region.x + region.width),
@@ -147,6 +140,7 @@ export function MacosLoadingShell({
   documentTitle,
   geometryIdentity,
   trafficLightInset = 0,
+  trafficLightBounds = [],
   trailingInset = 0,
   runtime,
   runtimeId,
@@ -157,6 +151,7 @@ export function MacosLoadingShell({
   readonly documentTitle: string;
   readonly geometryIdentity?: string;
   readonly trafficLightInset?: number;
+  readonly trafficLightBounds?: readonly MacosRect[];
   readonly trailingInset?: number;
   readonly runtime?: HostRuntime;
   readonly runtimeId?: string;
@@ -223,7 +218,7 @@ export function MacosLoadingShell({
         layoutRevision: revision.current,
         geometryIdentity,
         chromeBounds: measurement.chromeBounds,
-        leadingInset: trafficLightInset,
+        trafficLightBounds,
         interactiveBounds: measurement.interactive,
         transitioning,
       }));
@@ -270,7 +265,12 @@ export function MacosLoadingShell({
       resize.disconnect();
       mutations.disconnect();
     };
-  }, [geometryIdentity, trafficLightInset]);
+  }, [geometryIdentity, trafficLightBounds]);
+  const trafficLightTop = Math.min(...trafficLightBounds.map(({ y }) => y));
+  const trafficLightBottom = Math.max(...trafficLightBounds.map(({ y, height }) => y + height));
+  const trafficLightCenterY = Number.isFinite(trafficLightTop) && Number.isFinite(trafficLightBottom)
+    ? (trafficLightTop + trafficLightBottom) / 2
+    : undefined;
   return (
     <div
       ref={root}
@@ -278,6 +278,9 @@ export function MacosLoadingShell({
       data-macos-packaged-shell
       style={{
         "--macos-titlebar-leading-inset": `${trafficLightInset}px`,
+        ...(trafficLightCenterY === undefined ? {} : {
+          "--macos-traffic-light-center-y": `${trafficLightCenterY}px`,
+        }),
         "--macos-titlebar-trailing-inset": `${trailingInset}px`,
       } as CSSProperties}
     >
@@ -325,6 +328,7 @@ function start(): void {
       {...(current === undefined ? {} : { geometryIdentity: current.geometry.identity })}
       {...(current === undefined ? {} : {
         trafficLightInset: current.geometry.trafficLightInset,
+        trafficLightBounds: current.geometry.trafficLightBounds,
         trailingInset: current.geometry.trailingInset,
       })}
       {...(runtime === undefined ? {} : { runtime })}
