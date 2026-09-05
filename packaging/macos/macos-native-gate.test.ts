@@ -44,7 +44,8 @@ describe("macOS native gate packaging policy", () => {
     expect(shellHtml).toContain("'wasm-unsafe-eval'");
     expect(shellHtml).not.toMatch(/https?:|wss?:/u);
     expect(shellCss).toMatch(/\.macos-loading-shell\s*\{[\s\S]*height:\s*100%/u);
-    expect(appSource).toContain('environment["PLACEKEEPER_MAC_REVIEW_HELPER"]');
+    expect(appSource).toContain('named: "PLACEKEEPER_MAC_REVIEW_HELPER"');
+    expect(appSource).toContain("allowed: allowDevelopmentOverrides");
     expect(appSource).toContain("applicationShouldTerminateAfterLastWindowClosed");
     expect(appSource).toContain("openFiles filenames: [String]");
     expect(appSource).toContain("NSWindow.allowsAutomaticWindowTabbing = false");
