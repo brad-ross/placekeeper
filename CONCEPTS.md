@@ -39,9 +39,9 @@ Completion requires both exclusivity in source and built artifacts and separate 
 ## Embedded review runtime
 
 ### Review Host Runtime
-The host-neutral contract through which the production review client bootstraps state, invokes review operations, receives invalidations and host commands, and releases resources in a browser, embedded editor, or browser-extension document.
+The host-neutral contract through which the production review client bootstraps state, invokes review operations, receives any available invalidations and host commands, exports reviewed output, and releases resources in a service-backed browser, embedded editor, browser-extension document, or front-end-only static page.
 
-Each host supplies its own transport, lifecycle, resource-issuance policy, and privileged capabilities; sharing this contract does not transfer host authority into the review client.
+Each host supplies its own transport, lifecycle, durability posture, resource-issuance policy, and privileged capabilities; sharing this contract does not transfer host authority into the review client. A host with no durable authority declares and denies that capability rather than simulating service-backed persistence.
 
 ### Review Runtime Protocol
 The versioned operation vocabulary and identity envelope used when a Review Host Runtime crosses an embedded-client boundary.
