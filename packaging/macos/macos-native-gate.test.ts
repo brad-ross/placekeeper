@@ -69,6 +69,17 @@ describe("macOS native gate packaging policy", () => {
     expect(appSource).not.toContain('informativeText = "Path:');
   });
 
+  it("confines native window dragging to the declared titlebar overlays", async () => {
+    const windowSource = await readFile(
+      resolve("apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift"),
+      "utf8",
+    );
+    const draggableTitlebar = windowSource.slice(windowSource.indexOf("private final class DraggableTitlebarView"));
+    expect(draggableTitlebar).toContain("override var mouseDownCanMoveWindow: Bool { true }");
+    expect(draggableTitlebar).toContain("window?.performDrag(with: event)");
+    expect(draggableTitlebar).not.toContain("override func hitTest");
+  });
+
   it("strips Node and dynamic-loader injection from child environments", () => {
     const environment = minimalMacosChildEnvironment({
       PATH: "/usr/bin:/bin",

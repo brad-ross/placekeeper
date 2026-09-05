@@ -173,6 +173,7 @@ export function ReviewChrome({
   const zoomMenuId = `review-zoom-menu-${useId().replaceAll(':', '')}`;
   const historyMenuId = `review-history-menu-${useId().replaceAll(':', '')}`;
   const saveOptionsWereOpen = useRef(saveOptionsOpen);
+  const hasChromeActions = codexContext !== undefined;
   const saveStatusText = savePendingDestination
     ? 'protected recovery, choose where to save'
     : savePhase === 'not-saved'
@@ -713,6 +714,7 @@ export function ReviewChrome({
     className="review-chrome"
     data-review-chrome
     data-review-chrome-presentation={presentation}
+    data-review-chrome-actions={hasChromeActions ? 'present' : 'none'}
     data-top-bar-menu-open={activeTopBarMenu ?? undefined}
   >
     <div className="review-chrome__identity">
@@ -756,10 +758,11 @@ export function ReviewChrome({
         key={candidate}
         className="review-chrome review-chrome__sizing-candidate"
         data-review-chrome-candidate={candidate}
+        data-review-chrome-actions={hasChromeActions ? 'present' : 'none'}
         style={{
           position: 'absolute',
           display: 'inline-grid',
-          gridTemplateColumns: 'max-content max-content max-content',
+          gridTemplateColumns: hasChromeActions ? 'max-content max-content max-content' : 'max-content max-content',
           gridTemplateRows: 'max-content',
           width: 'max-content',
           height: 'var(--review-chrome-height)',

@@ -4,6 +4,8 @@ import Foundation
 
 @MainActor
 final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+    private static let reviewChromeHeight: CGFloat = 58
+    private static let toolbarHorizontalMargin: CGFloat = 16
     let windowID: String
     let canonicalReviewID: String
     let documentDigest: String
@@ -106,7 +108,6 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             defer: false
         )
         window.title = displayName
-        window.representedURL = documentURL
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.toolbarStyle = .unified
@@ -131,6 +132,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         ])
         controller.view = contentView
         window.contentViewController = controller
+        alignTrafficLights()
         window.backgroundColor = NSColor(calibratedRed: 0.965, green: 0.949, blue: 0.918, alpha: 1)
         if let restoredFrame { window.setFrame(restoredFrame, display: false) }
     }
@@ -233,23 +235,36 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
 
     func windowWillStartLiveResize(_ notification: Notification) { beginGeometryTransition() }
 
-    func windowDidEndLiveResize(_ notification: Notification) { endGeometryTransition() }
+    func windowDidEndLiveResize(_ notification: Notification) {
+        alignTrafficLights()
+        endGeometryTransition()
+    }
 
     func windowWillEnterFullScreen(_ notification: Notification) { beginGeometryTransition() }
 
-    func windowDidEnterFullScreen(_ notification: Notification) { endGeometryTransition() }
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        alignTrafficLights()
+        endGeometryTransition()
+    }
 
     func windowWillExitFullScreen(_ notification: Notification) { beginGeometryTransition() }
 
-    func windowDidExitFullScreen(_ notification: Notification) { endGeometryTransition() }
+    func windowDidExitFullScreen(_ notification: Notification) {
+        alignTrafficLights()
+        endGeometryTransition()
+    }
+
+    func windowDidResize(_ notification: Notification) { alignTrafficLights() }
 
     func windowDidChangeBackingProperties(_ notification: Notification) {
         beginGeometryTransition()
+        alignTrafficLights()
         endGeometryTransition()
     }
 
     func windowDidChangeScreen(_ notification: Notification) {
         beginGeometryTransition()
+        alignTrafficLights()
         endGeometryTransition()
     }
 
@@ -261,6 +276,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
            let revision = body["layoutRevision"] as? Int, revision >= 0 {
             _ = readiness.shellReady(revision: revision)
             if readiness.commitRouting() {
+                alignTrafficLights()
                 if centersOnFirstRoutingCommit { window?.center() }
                 NSApplication.shared.activate(ignoringOtherApps: true)
                 window?.makeKeyAndOrderFront(nil)
@@ -381,7 +397,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             "geometry": [
                 "identity": dragFence.geometryIdentity,
                 "trafficLightInset": trafficLightInset(),
-                "trailingInset": 12,
+                "trailingInset": Double(Self.toolbarHorizontalMargin),
             ] as [String: Any],
         ])
     }
@@ -455,9 +471,12 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         dragOverlays.forEach { $0.removeFromSuperview() }
         dragOverlays.removeAll()
         for region in regions {
+            let y = webView.isFlipped
+                ? region.y
+                : Double(webView.bounds.height) - region.y - region.height
             let overlay = DraggableTitlebarView(frame: NSRect(
                 x: region.x,
-                y: webView.bounds.height - region.y - region.height,
+                y: y,
                 width: region.width,
                 height: region.height
             ))
@@ -480,7 +499,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             "geometry": [
                 "identity": dragFence.geometryIdentity,
                 "trafficLightInset": trafficLightInset(),
-                "trailingInset": 12,
+                "trailingInset": Double(Self.toolbarHorizontalMargin),
             ] as [String: Any],
         ])
     }
@@ -489,7 +508,39 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         guard let window else { return 76 }
         let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
             .compactMap(window.standardWindowButton)
-        return buttons.map { $0.frame.maxX }.max() ?? 76
+        guard let rightmost = buttons.max(by: { $0.frame.maxX < $1.frame.maxX }),
+              let buttonSuperview = rightmost.superview else { return 76 }
+        let rightEdgeInWindow = buttonSuperview.convert(
+            NSPoint(x: rightmost.frame.maxX, y: rightmost.frame.midY),
+            to: nil
+        )
+        let rightEdgeInWebView = webView.convert(rightEdgeInWindow, from: nil)
+        return Double(ceil(rightEdgeInWebView.x + Self.toolbarHorizontalMargin))
+    }
+
+    private func alignTrafficLights() {
+        guard let window, !window.styleMask.contains(.fullScreen) else { return }
+        let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+            .compactMap(window.standardWindowButton)
+        guard let buttonSuperview = buttons.first?.superview,
+              buttons.allSatisfy({ $0.superview === buttonSuperview }) else { return }
+        window.contentView?.layoutSubtreeIfNeeded()
+        let toolbarCenterY = webView.isFlipped
+            ? Self.reviewChromeHeight / 2
+            : webView.bounds.maxY - Self.reviewChromeHeight / 2
+        let toolbarCenterInWindow = webView.convert(
+            NSPoint(x: Self.toolbarHorizontalMargin, y: toolbarCenterY),
+            to: nil
+        )
+        let toolbarCenterInButtonSuperview = buttonSuperview.convert(toolbarCenterInWindow, from: nil)
+        guard let trafficLightLeft = buttons.map(\.frame.minX).min() else { return }
+        let horizontalOffset = toolbarCenterInButtonSuperview.x - trafficLightLeft
+        for button in buttons {
+            button.setFrameOrigin(NSPoint(
+                x: button.frame.origin.x + horizontalOffset,
+                y: toolbarCenterInButtonSuperview.y - button.frame.height / 2
+            ))
+        }
     }
 
     private func diagnostic(_ message: String) {
@@ -679,5 +730,5 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
 
 private final class DraggableTitlebarView: NSView {
     override var mouseDownCanMoveWindow: Bool { true }
-    override func hitTest(_ point: NSPoint) -> NSView? { self }
+    override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
 }

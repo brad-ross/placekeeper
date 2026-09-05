@@ -126,9 +126,17 @@
   background: var(--review-surface-panel);
 }
 
+.review-chrome[data-review-chrome-actions="none"] {
+  grid-template-columns: minmax(0, 1fr) max-content;
+}
+
+.review-chrome[data-review-chrome-actions="none"] > .review-chrome__actions {
+  display: none;
+}
+
 [data-launch-surface="macos"] .review-chrome {
-  padding-inline-start: max(1rem, var(--macos-titlebar-leading-inset, 0px));
-  padding-inline-end: max(1rem, var(--macos-titlebar-trailing-inset, 0px));
+  padding-inline-start: max(16px, var(--macos-titlebar-leading-inset, 0px));
+  padding-inline-end: max(16px, var(--macos-titlebar-trailing-inset, 0px));
 }
 
 .review-chrome__identity {
