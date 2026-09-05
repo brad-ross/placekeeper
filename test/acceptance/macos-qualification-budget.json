@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "minimumSystemVersion": "13.0",
+  "architectures": ["arm64"],
+  "risks": ["RSK1", "RSK2", "RSK3", "RSK7"],
+  "fixtures": {
+    "ordinary": {
+      "path": "test/fixtures/pdfs/text-native.pdf",
+      "sha256": "6cb57709b6cfad8fa36bafcf32afdc0b41c5f71f378e1e2c6a3ae9c4ab6d1b5a",
+      "bytes": 995,
+      "contentClass": "native-text"
+    },
+    "adversarial": {
+      "path": "test/fixtures/pdfs/hostile-actions.pdf",
+      "sha256": "46bcf22f6949103f99c7930e40e9157625d4d4f6fd0eb994df7f77f6e416ddf6",
+      "bytes": 2117,
+      "contentClass": "hostile-actions"
+    }
+  },
+  "budgets": {
+    "shellReadyMs": 3000,
+    "visibleShellReadyMs": 1000,
+    "decodedDocumentBytes": 536870912,
+    "resourceChunkBytes": 65536,
+    "perWindowHelperRssBytes": 134217728,
+    "fourWindowCoalitionRssBytes": 805306368,
+    "decodeActiveCpuMs": 20000
+  },
+  "cleanup": {
+    "helperExitMs": 2000,
+    "ownershipBaselineMs": 2000,
+    "stagingResidueCount": 0
+  },
+  "evidenceRequired": [
+    "buildIdentity",
+    "osVersion",
+    "hardwareModel",
+    "fixtureSha256",
+    "shellReady",
+    "visibleShellReady",
+    "helperCountBeforeClose",
+    "helperCountAfterClose",
+    "lifecycleDetachReason",
+    "egressAttempts",
+    "egressAllowed",
+    "entitlementKeys",
+    "cleanupCounters"
+  ]
+}

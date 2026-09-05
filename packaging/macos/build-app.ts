@@ -45,6 +45,7 @@ interface BuildOptions {
   readonly outputDirectory: string;
   readonly signingIdentity?: string;
   readonly repoRoot?: string;
+  readonly enforceReviewedWebSize?: boolean;
 }
 
 async function run(command: string, args: readonly string[]): Promise<string> {
@@ -372,6 +373,9 @@ export async function buildMacApp(options: BuildOptions): Promise<string> {
     runtimeRoot: resources,
     webEntry: resolve(resources, "web/app.js"),
     noticePath: resolve(contents, CATALOG_NOTICE_RESOURCE_PATH),
+    ...(options.enforceReviewedWebSize === undefined
+      ? {}
+      : { enforceReviewedWebSize: options.enforceReviewedWebSize }),
   });
   const buildIdentity = await computePackagedBuildIdentity({
     contentsRoot: contents,

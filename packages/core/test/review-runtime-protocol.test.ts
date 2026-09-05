@@ -11,6 +11,8 @@ import {
   isReviewRuntimeMethod,
   sanitizeChromeReviewRuntimeRequest,
   sanitizeChromeReviewRuntimeResponse,
+  sanitizeMacosReviewRuntimeRequest,
+  sanitizeMacosReviewRuntimeResponse,
   sanitizeReviewRuntimeDisplayString,
 } from "../src/review-runtime-protocol.js";
 import { createReviewState } from "../src/review-model.js";
@@ -52,12 +54,35 @@ describe("shared review runtime protocol", () => {
   });
 
   it("defines Chrome as a reduced, compiler-visible RPC host", () => {
-    expect(REVIEW_RUNTIME_HOSTS).toEqual(["vscode", "chrome"]);
+    expect(REVIEW_RUNTIME_HOSTS).toEqual(["vscode", "chrome", "macos"]);
     expect(REVIEW_RUNTIME_HOST_METHODS.vscode).toEqual(REVIEW_RUNTIME_METHODS);
     expect(REVIEW_RUNTIME_HOST_METHODS.chrome).not.toContain("forwardSyncTex");
     expect(REVIEW_RUNTIME_HOST_METHODS.chrome).not.toContain("reverseSyncTex");
     expect(isReviewRuntimeMethodForHost("chrome", "command")).toBe(true);
     expect(isReviewRuntimeMethodForHost("chrome", "reverseSyncTex")).toBe(false);
+    expect(REVIEW_RUNTIME_HOST_METHODS.macos).toEqual(REVIEW_RUNTIME_HOST_METHODS.chrome);
+    expect(isReviewRuntimeMethodForHost("macos", "command")).toBe(true);
+    expect(isReviewRuntimeMethodForHost("macos", "reverseSyncTex")).toBe(false);
+  });
+
+  it("projects the Mac runtime without paths, capabilities, or a link base", () => {
+    expect(sanitizeMacosReviewRuntimeRequest("command", {
+      type: "undo",
+      expectedRevision: 0,
+    })).toEqual({ type: "undo", expectedRevision: 0 });
+    expect(sanitizeMacosReviewRuntimeResponse("scope", {
+      documentTitle: "Paper.pdf",
+      sourceDisplayName: "Paper.pdf",
+      sourceDisposition: "local",
+      launchSurface: "macos",
+      sourceRootPath: "/Users/reader/private",
+      credential: "must-not-cross",
+    })).toEqual({
+      documentTitle: "Paper.pdf",
+      sourceDisplayName: "Paper.pdf",
+      sourceDisposition: "local",
+      launchSurface: "macos",
+    });
   });
 
   it("accepts only closed Chrome request payloads without capability primitives", () => {

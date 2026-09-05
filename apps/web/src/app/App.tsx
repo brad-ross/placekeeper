@@ -224,6 +224,7 @@ export interface AppProps {
   ) => void;
   onOutlineDiscovery?: (result: PdfOutlineDiscovery) => void;
   onMainDocumentReady?: (engine: PdfEngine, document: PdfDocumentObject) => void;
+  onViewerError?: (error: Error) => void;
   searchResults?: readonly PdfSearchResult[];
 }
 
@@ -277,6 +278,7 @@ export function App({
   onViewerNavigationInitialized,
   onOutlineDiscovery,
   onMainDocumentReady,
+  onViewerError,
   searchResults = [],
 }: AppProps) {
   const [sourceAnnotations, setSourceAnnotations] = useState<readonly ExistingAnnotation[]>([]);
@@ -343,8 +345,13 @@ export function App({
   const primaryClickGesture = useRef(new ViewerPrimaryClickGesture());
   const hoveredOwnedId = useRef<string | undefined>(undefined);
   const viewer = useMemo(
-    () => createLocalPdfiumViewer(assets, resourcePolicy),
-    [assets, resourcePolicy],
+    () => createLocalPdfiumViewer(
+      assets,
+      resourcePolicy,
+      undefined,
+      () => onViewerError?.(new Error('The packaged PDF worker failed.')),
+    ),
+    [assets, onViewerError, resourcePolicy],
   );
   const emit = useCallback((event: ViewerInteractionEvent) => onViewerInteraction?.(event), [onViewerInteraction]);
   const publishInventory = useCallback((result: ExistingAnnotationsDiscovery) => {

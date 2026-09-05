@@ -44,6 +44,14 @@ import {
 import {
   type ChromeRuntimeHostMessage,
 } from "../../../../packages/core/src/chrome-native-runtime-protocol.js";
+import {
+  parseMacosReviewHelperMessage,
+  type MacosReviewHelperResponse,
+} from "../../../../packages/core/src/macos-helper-protocol.js";
+import {
+  parseMacosAppControlMessage,
+  type MacosAppControlResponse,
+} from "../../../../packages/core/src/macos-app-control-protocol.js";
 
 // Both directions are explicitly bounded. Evidence requests use a stricter
 // byte budget before base64 expansion, so a document can never turn this
@@ -149,6 +157,18 @@ export type PlacekeeperControlRequest =
   | { readonly kind: "chrome-open"; readonly request: ChromeBrowserSourceOpenRequest }
   | { readonly kind: "chrome-runtime"; readonly portId: string; readonly message: unknown }
   | { readonly kind: "chrome-runtime-detach"; readonly portId: string }
+  | {
+      readonly kind: "macos-runtime";
+      readonly appInstanceId: string;
+      readonly helperId: string;
+      readonly message: unknown;
+    }
+  | {
+      readonly kind: "macos-runtime-detach";
+      readonly appInstanceId: string;
+      readonly helperId: string;
+    }
+  | { readonly kind: "macos-app-control"; readonly message: unknown }
   | { readonly kind: "link-preflight"; readonly link: string }
   | { readonly kind: "link-open"; readonly request: LinkOpenRequest }
   | {
@@ -247,6 +267,9 @@ export type PlacekeeperControlResponse =
   | { readonly kind: "chrome-open"; readonly response: LaunchResponse }
   | { readonly kind: "chrome-runtime"; readonly messages: readonly ChromeRuntimeHostMessage[] }
   | { readonly kind: "chrome-runtime-detached" }
+  | { readonly kind: "macos-runtime"; readonly response: MacosReviewHelperResponse }
+  | { readonly kind: "macos-runtime-detached" }
+  | { readonly kind: "macos-app-control"; readonly response: MacosAppControlResponse }
   | { readonly kind: "link-preflight"; readonly response: LinkPreflightResponse }
   | { readonly kind: "link-open"; readonly response: LinkLaunchResponse }
   | { readonly kind: "binding"; readonly result: TaskBindingClaimResult }
@@ -330,6 +353,20 @@ function isControlRequest(value: unknown): value is PlacekeeperControlRequest {
   if (value.kind === "chrome-runtime-detach") {
     return Object.keys(value).length === 2 && typeof value.portId === "string" &&
       /^[A-Za-z0-9_-]{16,128}$/u.test(value.portId);
+  }
+  if (value.kind === "macos-runtime") {
+    return Object.keys(value).length === 4 && typeof value.appInstanceId === "string"
+      && /^[A-Za-z0-9_-]{8,128}$/u.test(value.appInstanceId)
+      && typeof value.helperId === "string" && /^[A-Za-z0-9_-]{8,128}$/u.test(value.helperId)
+      && parseMacosReviewHelperMessage(value.message) !== undefined;
+  }
+  if (value.kind === "macos-runtime-detach") {
+    return Object.keys(value).length === 3 && typeof value.appInstanceId === "string"
+      && /^[A-Za-z0-9_-]{8,128}$/u.test(value.appInstanceId)
+      && typeof value.helperId === "string" && /^[A-Za-z0-9_-]{8,128}$/u.test(value.helperId);
+  }
+  if (value.kind === "macos-app-control") {
+    return Object.keys(value).length === 2 && parseMacosAppControlMessage(value.message) !== undefined;
   }
   if (value.kind === "link-preflight") {
     return typeof value.link === "string" && value.link.length <= PLACEKEEPER_LINK_MAX_LENGTH;
@@ -435,6 +472,58 @@ async function dispatch(
   if (request.kind === "chrome-runtime-detach") {
     await host.chromeRuntime.detach(request.portId);
     return { kind: "chrome-runtime-detached" };
+  }
+  if (request.kind === "macos-app-control") {
+    return { kind: "macos-app-control", response: await host.macosLifecycle.handle(request.message) };
+  }
+  if (request.kind === "macos-runtime") {
+    const message = parseMacosReviewHelperMessage(request.message)!;
+    const isAdmission = message.type === "admit" || message.type === "admit-link";
+    const alreadyOwned = host.macosLifecycle.ownsHelper(request.appInstanceId, request.helperId);
+    const attached = alreadyOwned || (isAdmission
+      && host.macosLifecycle.attachHelper(request.appInstanceId, request.helperId));
+    if (!attached) {
+      return {
+        kind: "macos-runtime",
+        response: {
+          protocolVersion: 1,
+          windowId: message.windowId,
+          attemptId: message.attemptId,
+          requestId: message.requestId,
+          type: "failure",
+          code: "invalid",
+        },
+      };
+    }
+    const response = await host.macosRuntime.handle(request.helperId, message);
+    // A lifecycle detach can race an admission after ownership was attached
+    // but before the runtime installed its provisional record. Reconcile after
+    // the await so the late result cannot recreate authority for a dead helper.
+    if (!host.macosLifecycle.ownsHelper(request.appInstanceId, request.helperId)) {
+      await host.macosRuntime.detach(request.helperId);
+      return {
+        kind: "macos-runtime",
+        response: {
+          protocolVersion: 1,
+          windowId: message.windowId,
+          attemptId: message.attemptId,
+          requestId: message.requestId,
+          type: "failure",
+          code: "unavailable",
+        },
+      };
+    }
+    if (response.type === "released" || (isAdmission && response.type === "failure")) {
+      host.macosLifecycle.releaseHelper(request.appInstanceId, request.helperId);
+    }
+    return { kind: "macos-runtime", response };
+  }
+  if (request.kind === "macos-runtime-detach") {
+    if (host.macosLifecycle.ownsHelper(request.appInstanceId, request.helperId)) {
+      await host.macosRuntime.detach(request.helperId);
+      host.macosLifecycle.releaseHelper(request.appInstanceId, request.helperId);
+    }
+    return { kind: "macos-runtime-detached" };
   }
   if (request.kind === "link-preflight") {
     return { kind: "link-preflight", response: await host.preflightLink(request.link) };

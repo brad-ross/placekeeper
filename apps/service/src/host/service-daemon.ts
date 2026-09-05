@@ -28,6 +28,16 @@ import type {
   ChromeRuntimeExtensionMessage,
   ChromeRuntimeHostMessage,
 } from "../../../../packages/core/src/chrome-native-runtime-protocol.js";
+import type {
+  MacosReviewHelperMessage,
+  MacosReviewHelperResponse,
+} from "../../../../packages/core/src/macos-helper-protocol.js";
+import { validMacosReviewHelperResponse } from "../../../../packages/core/src/macos-helper-protocol.js";
+import type {
+  MacosAppControlMessage,
+  MacosAppControlResponse,
+} from "../../../../packages/core/src/macos-app-control-protocol.js";
+import { parseMacosAppControlResponse } from "../../../../packages/core/src/macos-app-control-protocol.js";
 
 export interface DaemonPaths {
   readonly appSupportRoot: string;
@@ -43,6 +53,8 @@ export const INSTALL_ARTIFACT_IDENTITY_ENV = "PLACEKEEPER_INSTALL_ARTIFACT_IDENT
 export const LIFECYCLE_LOCK_TOKEN_ENV = "PLACEKEEPER_LIFECYCLE_LOCK_TOKEN";
 export const LIFECYCLE_LOCK_PATH_ENV = "PLACEKEEPER_LIFECYCLE_LOCK_PATH";
 export const READINESS_TOKEN_ENV = "PLACEKEEPER_READINESS_TOKEN";
+export const MACOS_DEVELOPMENT_ROOT_ENV = "PLACEKEEPER_MAC_DEVELOPMENT_ROOT";
+export const MACOS_DEVELOPMENT_HTTP_PORT_ENV = "PLACEKEEPER_MAC_DEVELOPMENT_HTTP_PORT";
 export const INSTALLED_SMOKE_DAEMON_FLAG = "--isolated-installed-smoke";
 export const INSTALLED_SMOKE_HTTP_PORT_FLAG = "--http-port";
 
@@ -58,12 +70,26 @@ function currentDaemonIdentity(): string {
 }
 
 export function defaultDaemonPaths(): DaemonPaths {
-  const appSupportRoot = join(
+  const fixedAppSupportRoot = join(
     homedir(),
     "Library",
     "Application Support",
     "Placekeeper",
   );
+  const developmentRoot = currentDaemonIdentity() === "development"
+    ? process.env[MACOS_DEVELOPMENT_ROOT_ENV]
+    : undefined;
+  const appSupportRoot = developmentRoot !== undefined && developmentRoot.startsWith("/")
+    && developmentRoot.length <= 16_384 && !developmentRoot.includes("\0")
+    ? resolve(developmentRoot)
+    : fixedAppSupportRoot;
+  const developmentPortText = developmentRoot === undefined
+    ? undefined
+    : process.env[MACOS_DEVELOPMENT_HTTP_PORT_ENV];
+  const developmentPort = developmentPortText !== undefined && /^[1-9][0-9]{0,4}$/u.test(developmentPortText)
+    && Number(developmentPortText) <= 65_535
+    ? Number(developmentPortText)
+    : undefined;
   return {
     appSupportRoot,
     recoveryRoot: join(appSupportRoot, "recovery"),
@@ -74,7 +100,7 @@ export function defaultDaemonPaths(): DaemonPaths {
     // object, but an inherited environment cannot make packaged code serve
     // caller-selected browser assets under a trusted build identity.
     webAssetsRoot: resolve(dirname(process.argv[1] ?? "."), "../web"),
-    httpPort: PLACEKEEPER_HTTP_PORT,
+    httpPort: developmentPort ?? PLACEKEEPER_HTTP_PORT,
   };
 }
 
@@ -242,6 +268,57 @@ export async function detachChromeRuntimeThroughDaemon(
     { timeoutMs: 15_000 },
   );
   if (response.kind !== "chrome-runtime-detached") throw new DaemonUpgradeRequiredError("malformed");
+}
+
+export async function macosRuntimeThroughDaemon(
+  appInstanceId: string,
+  helperId: string,
+  message: MacosReviewHelperMessage,
+  signal?: AbortSignal,
+  paths = defaultDaemonPaths(),
+): Promise<MacosReviewHelperResponse> {
+  const request = { kind: "macos-runtime" as const, appInstanceId, helperId, message };
+  const response = message.type === "admit" || message.type === "admit-link"
+    ? await demandStartedControl(request, paths, signal)
+    : await requestControl(paths.socketPath, request, {
+        timeoutMs: 10 * 60_000,
+        ...(signal === undefined ? {} : { signal }),
+      });
+  if (response.kind !== "macos-runtime" || !validMacosReviewHelperResponse(response.response)) {
+    throw new DaemonUpgradeRequiredError("malformed");
+  }
+  return response.response;
+}
+
+export async function detachMacosRuntimeThroughDaemon(
+  appInstanceId: string,
+  helperId: string,
+  paths = defaultDaemonPaths(),
+): Promise<void> {
+  const response = await requestControl(
+    paths.socketPath,
+    { kind: "macos-runtime-detach", appInstanceId, helperId },
+    { timeoutMs: 15_000 },
+  );
+  if (response.kind !== "macos-runtime-detached") throw new DaemonUpgradeRequiredError("malformed");
+}
+
+export async function macosAppControlThroughDaemon(
+  message: MacosAppControlMessage,
+  signal?: AbortSignal,
+  paths = defaultDaemonPaths(),
+): Promise<MacosAppControlResponse> {
+  const request = { kind: "macos-app-control" as const, message };
+  const response = message.type === "register-app"
+    ? await demandStartedControl(request, paths, signal)
+    : await requestControl(paths.socketPath, request, {
+        timeoutMs: 15_000,
+        ...(signal === undefined ? {} : { signal }),
+      });
+  if (response.kind !== "macos-app-control" || parseMacosAppControlResponse(response.response) === undefined) {
+    throw new DaemonUpgradeRequiredError("malformed");
+  }
+  return response.response;
 }
 
 export async function preflightLinkThroughDaemon(

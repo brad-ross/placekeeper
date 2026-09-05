@@ -33,6 +33,11 @@ import {
 } from "../browser/chrome-pdf-validator.js";
 import { runChromeRegistrationCommand } from "./chrome-registration-command.js";
 import {
+  macosReviewHelperIdentity,
+  runMacosReviewHelperCommand,
+} from "../macos/review-helper-command.js";
+import { runMacosLifecycleControlCommand } from "../macos/lifecycle-control-command.js";
+import {
   isLaunchSurface,
   isRecoveryDecision,
   type RecoveryDecision,
@@ -60,6 +65,14 @@ type OpenLinkClient = (
 ) => Promise<LinkPreflightResponse | LinkLaunchResponse>;
 
 export { INSTALLED_SMOKE_DAEMON_FLAG, INSTALLED_SMOKE_HTTP_PORT_FLAG };
+
+async function writeStdoutFrame(frame: Buffer): Promise<void> {
+  if (process.stdout.write(frame)) return;
+  await new Promise<void>((resolveWrite, rejectWrite) => {
+    process.stdout.once("drain", resolveWrite);
+    process.stdout.once("error", rejectWrite);
+  });
+}
 
 /** Resolve only direct daemon launches. Management subcommands stay on their
  * existing path; the isolated installed smoke alone receives an ephemeral
@@ -357,6 +370,18 @@ export async function runOpenCommand(
 }
 
 async function main(): Promise<number> {
+  if (process.argv[2] === "macos-review-helper") {
+    const identity = macosReviewHelperIdentity(process.env);
+    if (identity === undefined) return 2;
+    return runMacosReviewHelperCommand({ input: process.stdin, write: writeStdoutFrame, identity });
+  }
+  if (process.argv[2] === "macos-lifecycle-control") {
+    return runMacosLifecycleControlCommand({
+      input: process.stdin,
+      write: writeStdoutFrame,
+      appInstanceId: process.env.PLACEKEEPER_APP_INSTANCE_ID ?? "",
+    });
+  }
   if (process.argv[2] === "chrome-registration") {
     return runChromeRegistrationCommand(process.argv.slice(2));
   }

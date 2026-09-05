@@ -121,6 +121,21 @@ describe('EmbedPDF registry configuration', () => {
     expect(() => validateViewerResourceUrl('data:text/javascript,postMessage(1)', policy, 'pdfium-worker')).toThrow();
   });
 
+  it('binds macOS document and executable schemes to their issued roles', () => {
+    const resources = {
+      document: 'placekeeper-resource://document/resource_12345678?generation=1&role=document',
+      pdfiumWasm: 'placekeeper-app://bundle/assets/pdfium.wasm',
+      worker: 'placekeeper-app://bundle/assets/pdfium-worker.js',
+    };
+    const policy = { host: 'macos', resources } as const;
+    expect(validateViewerResourceUrl(resources.document, policy, 'document')).toBe(resources.document);
+    expect(validateViewerResourceUrl(resources.pdfiumWasm, policy, 'pdfium-wasm')).toBe(resources.pdfiumWasm);
+    expect(validateViewerResourceUrl(resources.worker, policy, 'pdfium-worker')).toBe(resources.worker);
+    expect(() => validateViewerResourceUrl(resources.worker, policy, 'pdfium-wasm')).toThrow(/role/iu);
+    expect(() => validateViewerResourceUrl('https://example.com/pdfium.wasm', policy, 'pdfium-wasm')).toThrow();
+    expect(() => validateViewerResourceUrl('placekeeper-resource://document/other?generation=1&role=document', policy, 'document')).toThrow();
+  });
+
   it('creates the PDF engine worker only from the trusted worker role', () => {
     const extensionOrigin = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
     const workerUrl = `${extensionOrigin}/assets/pdfium-worker.js`;
@@ -138,5 +153,31 @@ describe('EmbedPDF registry configuration', () => {
 
     expect(created).toBe(worker);
     expect(workerFactory).toHaveBeenCalledWith(workerUrl, { type: 'module' });
+  });
+
+  it('surfaces both worker crashes and PDFium initialization failures', () => {
+    const listeners = new Map<string, (event: Event | MessageEvent<unknown>) => void>();
+    const worker = {
+      postMessage() {},
+      addEventListener(type: string, listener: (event: Event | MessageEvent<unknown>) => void) {
+        listeners.set(type, listener);
+      },
+      removeEventListener() {},
+      terminate() {},
+    } as unknown as Worker;
+    const onWorkerError = vi.fn();
+    const workerUrl = 'blob:placekeeper-worker-resource';
+    createTrustedPdfiumWorker(workerUrl, {
+      host: 'macos',
+      resources: {
+        document: 'blob:placekeeper-document-resource',
+        pdfiumWasm: 'blob:placekeeper-pdfium-resource',
+        worker: workerUrl,
+      },
+    }, () => worker, onWorkerError);
+
+    listeners.get('message')?.({ data: { type: 'wasmError' } } as MessageEvent<unknown>);
+    listeners.get('error')?.(new Event('error'));
+    expect(onWorkerError).toHaveBeenCalledTimes(2);
   });
 });

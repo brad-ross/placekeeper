@@ -1,7 +1,7 @@
 export const REVIEW_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
 export const REVIEW_RUNTIME_VERSION = 1 as const;
 
-export const REVIEW_RUNTIME_HOSTS = ["vscode", "chrome"] as const;
+export const REVIEW_RUNTIME_HOSTS = ["vscode", "chrome", "macos"] as const;
 export type ReviewRuntimeHost = typeof REVIEW_RUNTIME_HOSTS[number];
 
 export const REVIEW_RUNTIME_METHODS = [
@@ -32,6 +32,9 @@ export type ReviewRuntimeBrokerMethod = Exclude<
 export const REVIEW_RUNTIME_HOST_METHODS = {
   vscode: REVIEW_RUNTIME_METHODS,
   chrome: REVIEW_RUNTIME_METHODS.filter((method) => (
+    method !== "forwardSyncTex" && method !== "reverseSyncTex"
+  )),
+  macos: REVIEW_RUNTIME_METHODS.filter((method) => (
     method !== "forwardSyncTex" && method !== "reverseSyncTex"
   )),
 } as const satisfies Readonly<Record<ReviewRuntimeHost, readonly ReviewRuntimeMethod[]>>;
@@ -216,6 +219,17 @@ function safeChromeScope(value: unknown): unknown | undefined {
   };
 }
 
+function safeMacosScope(value: unknown): unknown | undefined {
+  if (!record(value)) return undefined;
+  const candidate = { ...value };
+  for (const key of Object.keys(candidate)) {
+    if (FORBIDDEN_CHROME_KEY.test(key)) delete candidate[key];
+  }
+  const projected = safeChromeScope({ ...candidate, launchSurface: "chrome" });
+  if (!record(projected)) return undefined;
+  return { ...projected, launchSurface: "macos" };
+}
+
 function safeChromeSaveStatus(value: unknown): unknown | undefined {
   if (!record(value) || !record(value.destination) || !record(value.sync)) return undefined;
   const destination = value.destination;
@@ -291,6 +305,15 @@ export function sanitizeChromeReviewRuntimeRequest(
       : undefined;
   }
   return undefined;
+}
+
+/** Returns a fresh, closed payload for the packaged macOS page/runtime lane. */
+export function sanitizeMacosReviewRuntimeRequest(
+  method: ReviewRuntimeMethod,
+  payload: unknown,
+): unknown | undefined {
+  if (!isReviewRuntimeMethodForHost("macos", method)) return undefined;
+  return sanitizeChromeReviewRuntimeRequest(method, payload);
 }
 
 /** Projects trusted service output onto the non-authorizing Chrome client contract. */
@@ -391,4 +414,31 @@ export function sanitizeChromeReviewRuntimeResponse(
     };
   }
   return record(value) && Object.keys(value).length === 0 ? {} : undefined;
+}
+
+/** Projects trusted service output without paths, capabilities, or link bases.
+ * Link construction stays on the trusted helper/native host-action lane. */
+export function sanitizeMacosReviewRuntimeResponse(
+  method: ReviewRuntimeMethod,
+  value: unknown,
+): unknown | undefined {
+  if (!isReviewRuntimeMethodForHost("macos", method)) return undefined;
+  if (method === "scope") return safeMacosScope(value);
+  if (method === "bootstrap") {
+    if (!record(value) || !record(value.scope)) return undefined;
+    const projected = sanitizeChromeReviewRuntimeResponse("bootstrap", {
+      ...value,
+      scope: { ...value.scope, launchSurface: "chrome" },
+      // The Mac page never receives or supplies the path-bearing link base.
+      // A fixed inert placeholder lets us reuse the remainder of Chrome's
+      // closed bootstrap validator before removing this field below.
+      canonicalLinkBase: "placekeeper:///Redacted.pdf",
+    });
+    if (!record(projected)) return undefined;
+    const scope = safeMacosScope(value.scope);
+    if (scope === undefined) return undefined;
+    const { canonicalLinkBase: _canonicalLinkBase, ...withoutLinkBase } = projected;
+    return { ...withoutLinkBase, scope };
+  }
+  return sanitizeChromeReviewRuntimeResponse(method, value);
 }

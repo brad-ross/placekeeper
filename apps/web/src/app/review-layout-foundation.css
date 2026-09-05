@@ -26,7 +26,8 @@
   --review-control-touch: 44px;
   --review-control-group-gap: 2px;
   --review-action-group-gap: 6px;
-  --review-chrome-height: 58px;
+  --review-chrome-height: 54px;
+  --review-chrome-center-y: 27px;
   --review-document-title-cap: 9rem;
   --review-workspace-header-height: 44px;
   --review-metadata-separator-gap: .3rem;
@@ -71,6 +72,18 @@
   line-height: 1.4;
 }
 
+.review-transition-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .review-shell button,
 .review-shell input,
 .review-shell textarea {
@@ -112,6 +125,19 @@
   padding: 0 1rem;
   border-bottom: 1px solid var(--review-border);
   background: var(--review-surface-panel);
+}
+
+.review-chrome[data-review-chrome-actions="none"] {
+  grid-template-columns: minmax(0, 1fr) max-content;
+}
+
+.review-chrome[data-review-chrome-actions="none"] > .review-chrome__actions {
+  display: none;
+}
+
+[data-launch-surface="macos"] .review-chrome {
+  padding-inline-start: max(16px, var(--macos-titlebar-leading-inset, 0px));
+  padding-inline-end: max(16px, var(--macos-titlebar-trailing-inset, 0px));
 }
 
 .review-chrome__identity {

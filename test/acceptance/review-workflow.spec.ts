@@ -983,14 +983,14 @@ test.describe('canonical review workflow', () => {
     }
   });
 
-  test('keeps the top bar to one contained 58px row across supported widths', async ({ page }) => {
+  test('keeps the top bar to one contained 54px row across supported widths', async ({ page }) => {
     await page.locator('#root').evaluate((element) => {
       element.setAttribute('data-production-root', 'true');
     });
     for (const width of [1280, 760, 641, 640, 521, 520, 481, 480, 390, 361, 360, 320]) {
       await page.setViewportSize({ width, height: 720 });
       const chrome = page.locator('[data-review-chrome]');
-      await expect(chrome).toHaveCSS('height', '58px');
+      await expect(chrome).toHaveCSS('height', '54px');
       await page.evaluate(() => new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
       }));
@@ -1020,7 +1020,7 @@ test.describe('canonical review workflow', () => {
         };
       });
 
-      expect(geometry.height).toBe(58);
+      expect(geometry.height).toBe(54);
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
       const visibleColumns = [geometry.identity, geometry.controls, geometry.actions]
         .filter((item) => item.width > 0.5);
@@ -1039,7 +1039,7 @@ test.describe('canonical review workflow', () => {
       );
       for (const item of [geometry.identity, geometry.controls, geometry.actions]) {
         expect(item.y).toBeGreaterThanOrEqual(-0.5);
-        expect(item.y + item.height).toBeLessThanOrEqual(58.5);
+        expect(item.y + item.height).toBeLessThanOrEqual(54.5);
       }
     }
   });

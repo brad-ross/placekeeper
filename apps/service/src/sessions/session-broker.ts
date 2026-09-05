@@ -123,6 +123,8 @@ export class ReviewGenerationConflictError extends Error {
 }
 export const LAUNCH_SURFACES = ["browser", "finder", "codex", "vscode", "chrome"] as const;
 export type LaunchSurface = typeof LAUNCH_SURFACES[number];
+export const REVIEW_PRESENTATION_SURFACES = [...LAUNCH_SURFACES, "macos"] as const;
+export type ReviewPresentationSurface = typeof REVIEW_PRESENTATION_SURFACES[number];
 
 export function isRecoveryDecision(value: unknown): value is RecoveryDecision {
   return typeof value === "string" && RECOVERY_DECISIONS.includes(value as RecoveryDecision);
@@ -138,7 +140,7 @@ export interface OpenReviewRequest {
   readonly recoveryDecision?: RecoveryDecision;
   readonly recoveryOffer?: RecoveryOfferIdentity;
   readonly recoveryOperationId?: string;
-  readonly surface?: LaunchSurface;
+  readonly surface?: ReviewPresentationSurface;
   readonly requestedLocation?: PlacekeeperLinkLocation;
   readonly workflowMode?: ReviewWorkflowMode;
 }
@@ -149,7 +151,7 @@ export interface SessionLaunch {
   readonly rootId?: string;
   readonly launchPath: string;
   readonly fragment: string;
-  readonly surface: LaunchSurface;
+  readonly surface: ReviewPresentationSurface;
   readonly documentGeneration: number;
   readonly bindProof?: string;
 }
@@ -210,7 +212,7 @@ interface ActiveSession {
 interface BrowserLaunchScope {
   readonly sessionId: string;
   documentGeneration: number;
-  readonly surface: LaunchSurface;
+  readonly surface: ReviewPresentationSurface;
   readonly browserCapabilityHash: string;
   readonly requestedLocation?: PlacekeeperLinkLocation;
   readonly expiresAtMs: number;
@@ -580,7 +582,7 @@ export class SessionBroker {
 
   #launch(
     session: ActiveSession,
-    surface: LaunchSurface,
+    surface: ReviewPresentationSurface,
     requestedLocation?: PlacekeeperLinkLocation,
   ): SessionLaunch {
     const capability = this.credentials.issueBootstrap(session.id, BOOTSTRAP_TTL_MS);
@@ -2075,7 +2077,7 @@ export class SessionBroker {
         readonly sourceDisposition: SourceDisposition;
         readonly sourceDisplayName: string;
         readonly sourceRootPath?: string;
-        readonly launchSurface?: LaunchSurface;
+        readonly launchSurface?: ReviewPresentationSurface;
         /** A browser-authenticated restart successor is waiting for its
          * owning task's next prompt. This contains no task identity. */
         readonly reconnectPending?: true;

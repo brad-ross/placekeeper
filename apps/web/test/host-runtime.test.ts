@@ -5,6 +5,10 @@ import {
   REVIEW_RUNTIME_PROTOCOL,
   REVIEW_RUNTIME_VERSION,
 } from "../../../packages/core/src/review-runtime-protocol.js";
+import {
+  parseMacosNativeMessage,
+  type MacosPageMessage,
+} from "../../../packages/core/src/macos-shell-protocol.js";
 import { createBrowserHostRuntime } from "../src/host/browser-runtime.js";
 import { subscribeRuntimeDocumentSource } from "../src/host/runtime-document-source.js";
 import type {
@@ -17,10 +21,124 @@ import {
   materializeVscodeWorkerResource,
   materializeVscodeWasmResource,
 } from "../src/host/vscode-runtime.js";
+import { createMacosHostRuntime } from "../src/host/macos-runtime.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("host-neutral review runtime", () => {
+  it("bootstraps the packaged Mac runtime through an attempt-fenced native bridge", async () => {
+    const runtimeId = "runtime_identifier_1234";
+    const attemptId = "attempt_identifier_1234";
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const state = createReviewState({
+      sessionId,
+      source: {
+        fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        digest: "a".repeat(64),
+        byteLength: 100,
+      },
+    });
+    const documentBlob = "blob:placekeeper-document-resource";
+    const pdfiumBlob = "blob:placekeeper-pdfium-resource";
+    const workerBlob = "blob:placekeeper-worker-resource";
+    vi.stubGlobal("__PLACEKEEPER_MAC_DOCUMENT_RESOURCE__", {
+      source: "placekeeper-resource://document/resource_12345678?generation=1&role=document",
+      url: documentBlob,
+    });
+    vi.stubGlobal("__PLACEKEEPER_MAC_PDFIUM_URL__", pdfiumBlob);
+    vi.stubGlobal("__PLACEKEEPER_MAC_WORKER_URL__", workerBlob);
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    const nativeListeners = new Set<(message: NonNullable<ReturnType<typeof parseMacosNativeMessage>>) => void>();
+    const postToNative = vi.fn((wrapped: MacosPageMessage) => {
+      if (wrapped.type !== "runtime-message") throw new Error("Expected a runtime request");
+      const request = wrapped.message as { readonly requestId: string; readonly method: string };
+      queueMicrotask(() => {
+        const message = parseMacosNativeMessage({
+          protocolVersion: 1,
+          type: "runtime-message",
+          runtimeId,
+          attemptId,
+          message: {
+            protocol: REVIEW_RUNTIME_PROTOCOL,
+            version: REVIEW_RUNTIME_VERSION,
+            kind: "response",
+            runtimeId,
+            sessionId,
+            generation: 1,
+            revision: 0,
+            requestId: request.requestId,
+            method: request.method,
+            ok: true,
+            payload: {
+              sessionId,
+              generation: 1,
+              revision: 0,
+              state,
+              scope: {
+                documentTitle: "Paper.pdf",
+                launchSurface: "macos",
+                sourceRootPath: "/must/not/cross",
+              },
+              saveStatus: {
+                destination: { phase: "none", generation: 0 },
+                sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 },
+              },
+              resources: {
+                document: "placekeeper-resource://document/resource_12345678?generation=1&role=document",
+                pdfiumWasm: "placekeeper-app://bundle/assets/pdfium.wasm",
+                worker: "placekeeper-app://bundle/assets/pdfium-worker.js",
+              },
+              location: { kind: "page", page: 4 },
+            },
+          },
+        });
+        if (message === undefined) throw new Error("Expected a valid native response");
+        for (const listener of nativeListeners) listener(message);
+      });
+    });
+    const runtime = createMacosHostRuntime({
+      runtimeId,
+      attemptId,
+      postToNative,
+      subscribeNative(listener) {
+        nativeListeners.add(listener);
+        return () => nativeListeners.delete(listener);
+      },
+    });
+
+    const bootstrap = await runtime.bootstrap();
+    expect(bootstrap).toMatchObject({
+      scope: { documentTitle: "Paper.pdf", launchSurface: "macos" },
+      resourcePolicy: {
+        host: "macos",
+        resources: {
+          document: documentBlob,
+          pdfiumWasm: pdfiumBlob,
+          worker: workerBlob,
+        },
+      },
+      viewerAssets: {
+        documentUrl: documentBlob,
+        pdfiumWasm: pdfiumBlob,
+        workerUrl: workerBlob,
+      },
+    });
+    expect(JSON.stringify(bootstrap)).not.toMatch(/must\/not\/cross|credential|canonicalLinkBase/u);
+    expect(bootstrap.locationHistory?.read()).toEqual({ kind: "page", page: 4 });
+    expect(postToNative).toHaveBeenCalledWith(expect.objectContaining({
+      type: "runtime-message",
+      runtimeId,
+      attemptId,
+    }));
+    runtime.dispose();
+    await Promise.resolve();
+    expect(revokeObjectURL.mock.calls.map(([url]) => url).sort()).toEqual([
+      documentBlob,
+      pdfiumBlob,
+      workerBlob,
+    ].sort());
+  });
+
   it("materializes extension-issued PDFium bytes into a worker-readable blob", async () => {
     const createObjectURL = vi.fn(() => "blob:vscode-webview://authority/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     const revokeObjectURL = vi.fn();

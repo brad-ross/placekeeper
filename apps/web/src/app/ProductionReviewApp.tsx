@@ -123,6 +123,12 @@ import {
 } from '../review/authoring-session.js';
 import type { ViewerAssetUrls, ViewerResourcePolicy } from '../pdf/embedpdf-viewer.js';
 import type { GenerationRefreshStatus, LocationRestoreStatus } from '../generation-status.js';
+import type {
+  ReviewCommandInvocation,
+  ReviewCommandSurfaceSnapshot,
+} from '../review/review-command-surface.js';
+import type { AccessibilityTransitionEffect } from './accessibility-transitions.js';
+import { renderedPdfPageIsUsable } from './document-readiness.js';
 
 export interface ProductionSession {
   readonly sessionId: string;
@@ -137,7 +143,7 @@ export interface ProductionScope {
   readonly sourceDisposition?: 'local' | 'remote-temporary';
   readonly sourceDisplayName?: string;
   readonly sourceRootPath?: string;
-  readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode' | 'chrome' | 'static';
+  readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode' | 'chrome' | 'macos' | 'static';
   /** Static hosting keeps review state only in this tab and offers explicit PDF export. */
   readonly persistenceMode?: 'export-only';
   /** A restarted browser is awaiting task-scoped Codex reattachment. */
@@ -244,8 +250,15 @@ export interface ProductionReviewAppProps {
   readonly onPresentationChange?: (presentation: { readonly pageIndex: number; readonly zoom: number }) => void;
   /** Host activation seam: emitted only after the main PDF generation is parsed. */
   readonly onDocumentReady?: (generation: number) => void;
+  /** Host failure seam for the isolated PDF worker. */
+  readonly onViewerError?: (error: Error) => void;
   /** Host-visible title seam, already resolved through metadata then filename fallback. */
   readonly onDocumentTitleChange?: (title: string, generation: number) => void;
+  /** Safe semantic command projection for native menus and shortcuts. */
+  readonly onCommandSurfaceChange?: (snapshot: ReviewCommandSurfaceSnapshot) => void;
+  /** Native commands re-enter the same handlers used by web controls and shortcuts. */
+  readonly commandInvocation?: ReviewCommandInvocation;
+  readonly accessibilityTransition?: AccessibilityTransitionEffect;
 }
 
 export function forwardSyncTexRequestReady(input: {
@@ -550,6 +563,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   // A restart successor begins as an ordinary browser view, then its next
   // task prompt promotes this same authenticated page to the Codex surface.
   const [scope, setScope] = useState(props.scope);
+  useEffect(() => setScope(props.scope), [props.scope]);
   const exportOnly = scope.persistenceMode === 'export-only';
   const [metadataPageTitle, setMetadataPageTitle] = useState<PdfMetadataPageTitle | null>(null);
   const portableItemIdsRef = useRef(initiallyPortableItemIds(
@@ -637,6 +651,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const mainNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const [mainNavigationReadyGeneration, setMainNavigationReadyGeneration] = useState<number | null>(null);
   const [mainDocumentReadyGeneration, setMainDocumentReadyGeneration] = useState<number | null>(null);
+  const notifiedDocumentReadyGenerationRef = useRef<number | null>(null);
   const [mainNavigation, setMainNavigation] = useState<PdfViewerNavigation | null>(null);
   const latestForwardSyncTexTokenRef = useRef(0);
   const handledForwardSyncTexTokenRef = useRef(0);
@@ -1466,7 +1481,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     const documentGeneration = documentGenerationRef.current;
     const documentSourceIdentity = sourceIdentity;
     setMainDocumentReadyGeneration(documentGeneration);
-    props.onDocumentReady?.(documentGeneration);
     searchControllerRef.current?.dispose();
     searchDocumentRef.current = document;
     void resolvePdfMetadataTitle(engine, document).then((title) => {
@@ -1507,7 +1521,81 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       void search.search(pendingQuery);
     }
     else if (searchRequestedRef.current) void search.prepare();
-  }, [props.onDocumentReady, sourceIdentity]);
+  }, [sourceIdentity]);
+  useEffect(() => {
+    const generation = state.workflow.documentGeneration;
+    if (props.onDocumentReady === undefined
+      || notifiedDocumentReadyGenerationRef.current === generation
+      || mainDocumentReadyGeneration !== generation) return;
+    if (scope.launchSurface !== 'macos') {
+      notifiedDocumentReadyGenerationRef.current = generation;
+      props.onDocumentReady(generation);
+      return;
+    }
+    if (mainNavigationReadyGeneration !== generation) return;
+    const root = productionRootRef.current;
+    const navigation = mainNavigationRef.current;
+    if (root === null || navigation === null) return;
+    let cancelled = false;
+    let confirming = false;
+    const frames = new Set<number>();
+    const usableRenderedPage = () => {
+      const viewport = root.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
+      if (viewport === null) return false;
+      const viewportRect = viewport.getBoundingClientRect();
+      for (const image of viewport.querySelectorAll<HTMLImageElement>('[data-page-index] img')) {
+        const style = getComputedStyle(image);
+        if (renderedPdfPageIsUsable({
+          complete: image.complete,
+          naturalWidth: image.naturalWidth,
+          naturalHeight: image.naturalHeight,
+          pageRect: image.getBoundingClientRect(),
+          viewportRect,
+          display: style.display,
+          visibility: style.visibility,
+        })) return true;
+      }
+      return false;
+    };
+    const scheduleFrame = (callback: () => void) => {
+      const frame = requestAnimationFrame(() => {
+        frames.delete(frame);
+        callback();
+      });
+      frames.add(frame);
+    };
+    const probe = () => {
+      if (cancelled || confirming || !usableRenderedPage() || navigation.captureLocation() === null) return;
+      confirming = true;
+      scheduleFrame(() => scheduleFrame(() => {
+        confirming = false;
+        if (cancelled || generation !== documentGenerationRef.current
+          || mainNavigationRef.current !== navigation || !usableRenderedPage()
+          || navigation.captureLocation() === null) return;
+        notifiedDocumentReadyGenerationRef.current = generation;
+        props.onDocumentReady?.(generation);
+      }));
+    };
+    const observer = new MutationObserver(probe);
+    observer.observe(root, { subtree: true, childList: true, attributes: true });
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(probe);
+    resize?.observe(root);
+    root.addEventListener('load', probe, true);
+    queueMicrotask(probe);
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+      resize?.disconnect();
+      root.removeEventListener('load', probe, true);
+      for (const frame of frames) cancelAnimationFrame(frame);
+    };
+  }, [
+    mainDocumentReadyGeneration,
+    mainNavigationReadyGeneration,
+    props.onDocumentReady,
+    scope.launchSurface,
+    state.workflow.documentGeneration,
+  ]);
   const onViewerFramingInitialized = useCallback((controls: ViewerFramingControls) => {
     setViewerFraming(controls);
   }, []);
@@ -1538,6 +1626,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       onOutlineDiscovery={onOutlineDiscovery}
       onViewerInitialized={onViewerInitialized}
       onMainDocumentReady={onMainDocumentReady}
+      {...(props.onViewerError === undefined ? {} : { onViewerError: props.onViewerError })}
       onViewerFramingInitialized={onViewerFramingInitialized}
       searchResults={searchResults}
     />
@@ -1785,6 +1874,15 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         search={searchWorkspace}
         viewerNavigationIntentToken={searchNavigationIntentToken}
         onCommitMainFramingPositionChange={onCommitMainFramingPositionChange}
+        {...(props.onCommandSurfaceChange === undefined
+          ? {}
+          : { onCommandSurfaceChange: props.onCommandSurfaceChange })}
+        {...(props.commandInvocation === undefined
+          ? {}
+          : { commandInvocation: props.commandInvocation })}
+        {...(props.accessibilityTransition === undefined
+          ? {}
+          : { accessibilityTransition: props.accessibilityTransition })}
         onReferenceLayoutAction={dispatchLayout}
         navigationState={navigationState}
         referenceTabs={navigationState.tabs.map((tab) => ({

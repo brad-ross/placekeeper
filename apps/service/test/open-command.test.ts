@@ -33,7 +33,11 @@ import { coordinateUpgrade } from "../src/host/upgrade-coordinator.js";
 import {
   initialDaemonIsAbsent,
 } from "../src/cli/daemon-command.js";
-import { defaultDaemonPaths } from "../src/host/service-daemon.js";
+import {
+  defaultDaemonPaths,
+  MACOS_DEVELOPMENT_HTTP_PORT_ENV,
+  MACOS_DEVELOPMENT_ROOT_ENV,
+} from "../src/host/service-daemon.js";
 import { PLACEKEEPER_HTTP_PORT } from "../src/server/http-server.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 
@@ -44,6 +48,7 @@ const responders: Server[] = [];
 const responderSockets = new Set<import("node:net").Socket>();
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(controls.splice(0).map((control) => control.close()));
   for (const socket of responderSockets) socket.destroy();
   responderSockets.clear();
@@ -54,6 +59,17 @@ afterEach(async () => {
 
 describe("open command", () => {
   it("pins the packaged daemon to the exported fixed browser origin", () => {
+    expect(defaultDaemonPaths().httpPort).toBe(PLACEKEEPER_HTTP_PORT);
+  });
+
+  it("allows only development helpers to select an isolated app-support root", () => {
+    vi.stubEnv("PLACEKEEPER_DAEMON_IDENTITY", "development");
+    vi.stubEnv(MACOS_DEVELOPMENT_ROOT_ENV, "/tmp/placekeeper-native-smoke");
+    vi.stubEnv(MACOS_DEVELOPMENT_HTTP_PORT_ENV, "43128");
+    expect(defaultDaemonPaths().appSupportRoot).toBe("/tmp/placekeeper-native-smoke");
+    expect(defaultDaemonPaths().httpPort).toBe(43_128);
+    vi.stubEnv("PLACEKEEPER_DAEMON_IDENTITY", "packaged_build_1234");
+    expect(defaultDaemonPaths().appSupportRoot).not.toBe("/tmp/placekeeper-native-smoke");
     expect(defaultDaemonPaths().httpPort).toBe(PLACEKEEPER_HTTP_PORT);
   });
 
@@ -197,6 +213,9 @@ describe("open command", () => {
     expect(() => parseOpenArguments([
       "open", "--json", "--pdf", "/a.pdf", "--recovery", "resume",
     ])).toThrow("offer and operation");
+    expect(() => parseOpenArguments([
+      "open", "--json", "--pdf", "/a.pdf", "--surface", "macos",
+    ])).toThrow("Unsupported launch surface");
   });
 
   it("prints exactly one structured response and never logs a secret on errors", async () => {

@@ -40,6 +40,14 @@ export type ViewerResourcePolicy =
         readonly pdfiumWasm: string;
         readonly worker: string;
       };
+    }
+  | {
+      readonly host: 'macos';
+      readonly resources: {
+        readonly document: string;
+        readonly pdfiumWasm: string;
+        readonly worker: string;
+      };
     };
 
 export function validateViewerResourceUrl(
@@ -74,6 +82,28 @@ export function validateViewerResourceUrl(
     }
     return rawUrl;
   }
+  if (policy.host === 'macos') {
+    const expected = role === 'document'
+      ? policy.resources.document
+      : role === 'pdfium-wasm' ? policy.resources.pdfiumWasm : policy.resources.worker;
+    if (rawUrl !== expected) throw new Error('Viewer resources must match their issued role.');
+    const url = new URL(rawUrl);
+    if (role === 'document') {
+      const issuedScheme = url.protocol === 'placekeeper-resource:' && url.hostname === 'document';
+      if (!issuedScheme && url.protocol !== 'blob:') {
+        throw new Error('The macOS document resource must be issued by its window.');
+      }
+    } else if (role === 'pdfium-wasm') {
+      const packagedScheme = url.protocol === 'placekeeper-app:' && url.hostname === 'bundle';
+      if (!packagedScheme && url.protocol !== 'blob:') {
+        throw new Error('The macOS PDF engine must be a packaged asset.');
+      }
+    } else if (url.protocol !== 'blob:' &&
+      (url.protocol !== 'placekeeper-app:' || url.hostname !== 'bundle')) {
+      throw new Error('The macOS worker must be a packaged asset.');
+    }
+    return rawUrl;
+  }
   const origin = policy.origin;
   const url = new URL(rawUrl, origin);
   if (url.origin !== origin) throw new Error('Viewer assets must be same-origin.');
@@ -86,9 +116,18 @@ export function createTrustedPdfiumWorker(
   workerUrl: string,
   policy: ViewerResourcePolicy,
   workerFactory: ViewerWorkerFactory = (url, options) => new Worker(url, options),
+  onWorkerError?: () => void,
 ): Worker {
   const trustedUrl = validateViewerResourceUrl(workerUrl, policy, 'pdfium-worker');
-  return workerFactory(trustedUrl, { type: 'module' });
+  const worker = workerFactory(trustedUrl, { type: 'module' });
+  if (onWorkerError !== undefined) {
+    worker.addEventListener('error', onWorkerError, { once: true });
+    worker.addEventListener('message', (event: MessageEvent<unknown>) => {
+      if (typeof event.data === 'object' && event.data !== null &&
+        (event.data as { readonly type?: unknown }).type === 'wasmError') onWorkerError();
+    });
+  }
+  return worker;
 }
 
 function browserPolicy(origin: string): ViewerResourcePolicy {
@@ -99,11 +138,12 @@ export function createLocalPdfiumViewer(
   assetUrls: ViewerAssetUrls,
   policy: ViewerResourcePolicy = browserPolicy(globalThis.location.origin),
   workerFactory?: ViewerWorkerFactory,
+  onWorkerError?: () => void,
 ) {
   const pdfiumWasm = validateViewerResourceUrl(assetUrls.pdfiumWasm, policy, 'pdfium-wasm');
   const worker = assetUrls.workerUrl === undefined
     ? undefined
-    : createTrustedPdfiumWorker(assetUrls.workerUrl, policy, workerFactory);
+    : createTrustedPdfiumWorker(assetUrls.workerUrl, policy, workerFactory, onWorkerError);
   const engine = createPdfiumEngine(pdfiumWasm, {
     encoderPoolSize: 1,
     fontFallback: null,
