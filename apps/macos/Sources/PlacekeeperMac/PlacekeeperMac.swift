@@ -36,6 +36,13 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     private var terminating = false
     private var helperCommand: HelperLaunchCommand?
     private var helperBaseEnvironment: [String: String] = [:]
+    private let allowsDevelopmentOverrides: Bool = {
+        #if DEBUG
+        true
+        #else
+        false
+        #endif
+    }()
     private var openPanelPresented = false
     private let diagnosticsEnabled = ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_DIAGNOSTICS"] == "1"
     private lazy var menuCoordinator = MenuCoordinator(
@@ -58,17 +65,14 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         }
         let pendingSource = launchCoordinator.pending.first?.sourceURL
         let pendingDocumentName = pendingSource?.lastPathComponent ?? "Placekeeper"
-        #if DEBUG
-        let allowDevelopmentOverrides = true
-        #else
-        let allowDevelopmentOverrides = false
-        #endif
         guard let helperEnvironment = PackagedHelperEnvironmentPolicy.resolve(
                 source: ProcessInfo.processInfo.environment,
                 resources: Bundle.main.resourceURL,
-                allowDevelopmentOverrides: allowDevelopmentOverrides
+                allowDevelopmentOverrides: allowsDevelopmentOverrides
               ),
-              let helperCommand = resolveHelperCommand(),
+              let helperCommand = resolveHelperCommand(
+                allowDevelopmentOverrides: allowsDevelopmentOverrides
+              ),
               let lifecycle = AppLifecycleControlClient(
                 appInstanceID: appInstanceID,
                 executable: helperCommand.executable,
@@ -185,7 +189,11 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             finishLaunch(intent)
             return
         }
-        let packagedRoot = ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_WEB_ROOT"]
+        let packagedRoot = PackagedHelperEnvironmentPolicy.developmentOverride(
+                named: "PLACEKEEPER_MAC_WEB_ROOT",
+                in: ProcessInfo.processInfo.environment,
+                allowed: allowsDevelopmentOverrides
+            )
             .map(URL.init(fileURLWithPath:))
             ?? Bundle.main.resourceURL?.appendingPathComponent("MacWeb")
         guard let packagedRoot, source.isFileURL else {
@@ -556,13 +564,25 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func resolveHelperCommand() -> HelperLaunchCommand? {
+    private func resolveHelperCommand(allowDevelopmentOverrides: Bool) -> HelperLaunchCommand? {
         let environment = ProcessInfo.processInfo.environment
-        if let helperPath = environment["PLACEKEEPER_MAC_REVIEW_HELPER"], helperPath.hasPrefix("/") {
+        if let helperPath = PackagedHelperEnvironmentPolicy.developmentOverride(
+                named: "PLACEKEEPER_MAC_REVIEW_HELPER",
+                in: environment,
+                allowed: allowDevelopmentOverrides
+            ), helperPath.hasPrefix("/") {
             return .init(executable: URL(fileURLWithPath: helperPath), argumentPrefix: [])
         }
-        if let nodePath = environment["PLACEKEEPER_MAC_NODE"], nodePath.hasPrefix("/"),
-           let servicePath = environment["PLACEKEEPER_MAC_SERVICE_ENTRY"], servicePath.hasPrefix("/") {
+        if let nodePath = PackagedHelperEnvironmentPolicy.developmentOverride(
+                named: "PLACEKEEPER_MAC_NODE",
+                in: environment,
+                allowed: allowDevelopmentOverrides
+            ), nodePath.hasPrefix("/"),
+           let servicePath = PackagedHelperEnvironmentPolicy.developmentOverride(
+                named: "PLACEKEEPER_MAC_SERVICE_ENTRY",
+                in: environment,
+                allowed: allowDevelopmentOverrides
+           ), servicePath.hasPrefix("/") {
             return .init(
                 executable: URL(fileURLWithPath: nodePath),
                 argumentPrefix: [servicePath]

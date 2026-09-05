@@ -229,6 +229,14 @@ enum PackagedHelperEnvironmentPolicy {
         )
     }
 
+    static func developmentOverride(
+        named key: String,
+        in source: [String: String],
+        allowed: Bool
+    ) -> String? {
+        allowed ? source[key] : nil
+    }
+
     private static func fullMatch(_ expression: NSRegularExpression, _ value: String) -> Bool {
         expression.firstMatch(in: value, range: NSRange(value.startIndex..., in: value))?.range.length
             == value.utf16.count

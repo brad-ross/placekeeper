@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   NATIVE_CANDIDATE_EXECUTABLE,
   minimalNativeCandidateEnvironment,
+  nativeCandidateDependencyIsSystem,
   nativeCandidateNodeRuntimeCandidates,
   nativeCandidateInfoPlist,
   swiftBuildArguments,
@@ -51,6 +52,17 @@ describe("macOS native candidate packaging", () => {
     expect(plist).not.toContain("droplet");
     expect(plist).not.toContain("CFBundleSignature");
     expect(plist).not.toContain("OSAAppletShowStartupScreen");
+  });
+
+  it("rejects legacy AppleScript bundle residue", async () => {
+    const candidateBuilder = await readFile(
+      resolve("packaging/macos/build-native-candidate.ts"),
+      "utf8",
+    );
+    for (const entry of ["Contents/PkgInfo", "Assets.car", "droplet.icns", "droplet.rsrc"]) {
+      expect(candidateBuilder).toContain(entry);
+    }
+    expect(candidateBuilder).toContain("Native candidate retains a legacy droplet resource");
   });
 
   it("builds a release Swift product with explicit package, SDK, and scratch roots", () => {
@@ -108,6 +120,14 @@ describe("macOS native candidate packaging", () => {
     ]);
   });
 
+  it("rejects unresolved loader-relative native dependencies", () => {
+    expect(nativeCandidateDependencyIsSystem("/System/Library/Frameworks/WebKit.framework/WebKit")).toBe(true);
+    expect(nativeCandidateDependencyIsSystem("/usr/lib/libSystem.B.dylib")).toBe(true);
+    expect(nativeCandidateDependencyIsSystem("@rpath/Unbundled.dylib")).toBe(false);
+    expect(nativeCandidateDependencyIsSystem("@loader_path/../Frameworks/Injected.dylib")).toBe(false);
+    expect(nativeCandidateDependencyIsSystem("/opt/local/lib/libInjected.dylib")).toBe(false);
+  });
+
   it("derives release helper authority from immutable bundle resources", async () => {
     const [appSource, policySource] = await Promise.all([
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/PlacekeeperMac.swift"), "utf8"),
@@ -116,6 +136,8 @@ describe("macOS native candidate packaging", () => {
 
     expect(appSource).toContain("PackagedHelperEnvironmentPolicy.resolve(");
     expect(appSource).not.toContain("baseEnvironment: ProcessInfo.processInfo.environment");
+    expect(appSource).toContain("allowed: allowsDevelopmentOverrides");
+    expect(appSource).toContain("resolveHelperCommand(\n                allowDevelopmentOverrides: allowsDevelopmentOverrides");
     expect(policySource).toContain('appendingPathComponent("build-identity.json")');
     expect(policySource).toContain('appendingPathComponent("pdfium/pdfium.wasm")');
     expect(policySource).toContain('"PLACEKEEPER_DAEMON_IDENTITY"');

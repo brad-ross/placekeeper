@@ -159,6 +159,27 @@ final class MacPoliciesTests: XCTestCase {
         XCTAssertEqual(environment["PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY"], digest)
     }
 
+    func testReleaseSelectionRejectsAmbientDevelopmentPaths() {
+        let source = [
+            "PLACEKEEPER_MAC_REVIEW_HELPER": "/tmp/helper",
+            "PLACEKEEPER_MAC_NODE": "/tmp/node",
+            "PLACEKEEPER_MAC_SERVICE_ENTRY": "/tmp/service.js",
+            "PLACEKEEPER_MAC_WEB_ROOT": "/tmp/web",
+        ]
+        for key in source.keys {
+            XCTAssertNil(PackagedHelperEnvironmentPolicy.developmentOverride(
+                named: key,
+                in: source,
+                allowed: false
+            ))
+            XCTAssertEqual(PackagedHelperEnvironmentPolicy.developmentOverride(
+                named: key,
+                in: source,
+                allowed: true
+            ), source[key])
+        }
+    }
+
     func testHelperFramesAreIncrementalAndRejectOversizedLengths() throws {
         let body = try JSONSerialization.data(withJSONObject: ["type": "released"])
         var length = UInt32(body.count).bigEndian

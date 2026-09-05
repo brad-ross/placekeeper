@@ -11,6 +11,7 @@ import {
   readFile,
   readdir,
   realpath,
+  rename,
   rm,
   stat,
   writeFile,
@@ -26,6 +27,12 @@ import {
 } from "./build-app.js";
 
 export const NATIVE_CANDIDATE_EXECUTABLE = "PlacekeeperMac";
+const LEGACY_DROPLET_ENTRIES = [
+  "Contents/PkgInfo",
+  "Contents/Resources/Assets.car",
+  "Contents/Resources/droplet.icns",
+  "Contents/Resources/droplet.rsrc",
+] as const;
 
 interface SwiftBuildArgumentOptions {
   readonly packagePath: string;
@@ -255,9 +262,13 @@ async function validateNativeDependencies(executable: string): Promise<void> {
     .map((line) => line.trim().split(" ")[0])
     .filter((dependency): dependency is string => dependency !== undefined && dependency !== "");
   for (const dependency of dependencies) {
-    if (dependency.startsWith("@") || dependency.startsWith("/System/") || dependency.startsWith("/usr/lib/")) continue;
+    if (nativeCandidateDependencyIsSystem(dependency)) continue;
     throw new Error(`Native candidate has a non-system runtime dependency: ${dependency}`);
   }
+}
+
+export function nativeCandidateDependencyIsSystem(dependency: string): boolean {
+  return dependency.startsWith("/System/") || dependency.startsWith("/usr/lib/");
 }
 
 async function smokeBundledLifecycleHelper(appPath: string, scratchRoot: string): Promise<void> {
@@ -296,6 +307,11 @@ export async function validateNativeCandidateBundle(
     || plist.includes("OSAAppletShowStartupScreen") || plist.includes("<string>droplet</string>")) {
     throw new Error("Native candidate plist still exposes the AppleScript droplet entry point");
   }
+  for (const relativePath of LEGACY_DROPLET_ENTRIES) {
+    if (await lstat(resolve(appPath, relativePath)).catch(() => undefined) !== undefined) {
+      throw new Error(`Native candidate retains a legacy droplet resource: ${relativePath}`);
+    }
+  }
   if ((await stat(executable)).mode & 0o111) {
     await validateNativeDependencies(executable);
   } else {
@@ -313,37 +329,54 @@ export async function validateNativeCandidateBundle(
 export async function buildNativeCandidate(options: NativeCandidateOptions): Promise<string> {
   const repoRoot = resolve(options.repoRoot ?? process.cwd());
   const sdkPath = await detectCommandLineToolsSDK(options.sdkPath);
+  const ownsScratchPath = options.scratchPath === undefined;
   const scratchPath = options.scratchPath ?? await mkdtemp(resolve(tmpdir(), "placekeeper-native-swift-"));
-  const swiftExecutable = await buildSwiftExecutable({ repoRoot, sdkPath, scratchPath });
-  const appPath = await buildMacApp({
-    arch: options.arch,
-    nodeRuntime: options.nodeRuntime,
-    serviceDist: options.serviceDist,
-    webDist: options.sharedWebDist,
-    outputDirectory: options.outputDirectory,
-    repoRoot,
-    enforceReviewedWebSize: false,
-  });
-  const contents = resolve(appPath, "Contents");
-  const resources = resolve(contents, "Resources");
-  const nativeExecutable = resolve(contents, `MacOS/${NATIVE_CANDIDATE_EXECUTABLE}`);
-  await copyFile(swiftExecutable, nativeExecutable);
-  await chmod(nativeExecutable, 0o755);
-  await run("/usr/bin/strip", ["-S", "-x", nativeExecutable]);
-  await cp(options.macWebDist, resolve(resources, "MacWeb"), { recursive: true, errorOnExist: true });
-  await rm(resolve(contents, "MacOS/droplet"), { force: true });
-  await rm(resolve(resources, "Scripts"), { recursive: true, force: true });
-  const plistPath = resolve(contents, "Info.plist");
-  await writeFile(plistPath, nativeCandidateInfoPlist(await readFile(plistPath, "utf8")), { mode: 0o644 });
-  const buildIdentity = await computePackagedBuildIdentity({
-    contentsRoot: contents,
-    serviceRoot: resolve(resources, "service"),
-    webRoot: resolve(resources, "web"),
-  });
-  await writeFile(resolve(resources, BUILD_IDENTITY_FILENAME), `${JSON.stringify(buildIdentity)}\n`, { mode: 0o644 });
-  await run("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", appPath]);
-  await validateNativeCandidateBundle(appPath, repoRoot, resolve(scratchPath, "independence-smoke"));
-  return appPath;
+  let stagingDirectory: string | undefined;
+  try {
+    await mkdir(options.outputDirectory, { recursive: true, mode: 0o755 });
+    stagingDirectory = await mkdtemp(resolve(options.outputDirectory, ".placekeeper-native-stage-"));
+    const swiftExecutable = await buildSwiftExecutable({ repoRoot, sdkPath, scratchPath });
+    const stagedAppPath = await buildMacApp({
+      arch: options.arch,
+      nodeRuntime: options.nodeRuntime,
+      serviceDist: options.serviceDist,
+      webDist: options.sharedWebDist,
+      outputDirectory: stagingDirectory,
+      repoRoot,
+      enforceReviewedWebSize: false,
+    });
+    const contents = resolve(stagedAppPath, "Contents");
+    const resources = resolve(contents, "Resources");
+    const nativeExecutable = resolve(contents, `MacOS/${NATIVE_CANDIDATE_EXECUTABLE}`);
+    await copyFile(swiftExecutable, nativeExecutable);
+    await chmod(nativeExecutable, 0o755);
+    await run("/usr/bin/strip", ["-S", "-x", nativeExecutable]);
+    await cp(options.macWebDist, resolve(resources, "MacWeb"), { recursive: true, errorOnExist: true });
+    await rm(resolve(contents, "MacOS/droplet"), { force: true });
+    await rm(resolve(resources, "Scripts"), { recursive: true, force: true });
+    for (const relativePath of LEGACY_DROPLET_ENTRIES) {
+      await rm(resolve(stagedAppPath, relativePath), { force: true });
+    }
+    const plistPath = resolve(contents, "Info.plist");
+    await writeFile(plistPath, nativeCandidateInfoPlist(await readFile(plistPath, "utf8")), { mode: 0o644 });
+    const buildIdentity = await computePackagedBuildIdentity({
+      contentsRoot: contents,
+      serviceRoot: resolve(resources, "service"),
+      webRoot: resolve(resources, "web"),
+    });
+    await writeFile(resolve(resources, BUILD_IDENTITY_FILENAME), `${JSON.stringify(buildIdentity)}\n`, { mode: 0o644 });
+    await run("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", stagedAppPath]);
+    await validateNativeCandidateBundle(stagedAppPath, repoRoot, resolve(scratchPath, "independence-smoke"));
+    const appPath = resolve(options.outputDirectory, basename(stagedAppPath));
+    if (await lstat(appPath).catch(() => undefined) !== undefined) {
+      throw new Error(`Refusing to overwrite existing bundle: ${appPath}`);
+    }
+    await rename(stagedAppPath, appPath);
+    return appPath;
+  } finally {
+    if (stagingDirectory !== undefined) await rm(stagingDirectory, { recursive: true, force: true });
+    if (ownsScratchPath) await rm(scratchPath, { recursive: true, force: true });
+  }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
