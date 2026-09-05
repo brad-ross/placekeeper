@@ -5,6 +5,7 @@ import {
   MacosLoadingShell,
   deriveMacosDragRegions,
   macosCommandInvocationForSnapshot,
+  measureMacosInteractiveBounds,
   parseMacosBootstrap,
 } from "../src/macos-entry.js";
 
@@ -37,12 +38,12 @@ describe("packaged macOS shell entry", () => {
     expect(parseMacosBootstrap({ ...safe, path: "/tmp/Paper.pdf" })).toBeUndefined();
   });
 
-  it("publishes only noninteractive titlebar regions with a revision fence", () => {
+  it("makes every part of the titlebar draggable except the control rectangle", () => {
     expect(deriveMacosDragRegions({
       layoutRevision: 8,
       geometryIdentity: "geometry_12345678",
       chromeBounds: { x: 0, y: 0, width: 1200, height: 58 },
-      interactiveBounds: [{ x: 80, y: 0, width: 900, height: 58 }],
+      interactiveBounds: [{ x: 80, y: 14, width: 900, height: 30 }],
     })).toEqual({
       protocolVersion: 1,
       type: "drag-regions",
@@ -50,10 +51,24 @@ describe("packaged macOS shell entry", () => {
       geometryIdentity: "geometry_12345678",
       transitioning: false,
       regions: [
-        { x: 0, y: 0, width: 80, height: 58 },
-        { x: 980, y: 0, width: 220, height: 58 },
+        { x: 0, y: 0, width: 1200, height: 14 },
+        { x: 0, y: 14, width: 80, height: 30 },
+        { x: 980, y: 14, width: 220, height: 30 },
+        { x: 0, y: 44, width: 1200, height: 14 },
       ],
     });
+  });
+
+  it("ignores inert sizing controls when measuring native drag blockers", () => {
+    const element = (bounds: { x: number; y: number; width: number; height: number }, inert: boolean) => ({
+      closest: () => inert ? {} : null,
+      getBoundingClientRect: () => bounds,
+    }) as unknown as HTMLElement;
+
+    expect(measureMacosInteractiveBounds([
+      element({ x: 80, y: 14, width: 140, height: 30 }, false),
+      element({ x: 220, y: 14, width: 500, height: 30 }, true),
+    ])).toEqual([{ x: 80, y: 14, width: 140, height: 30 }]);
   });
 
   it("drops native invocations captured from a stale command snapshot", () => {

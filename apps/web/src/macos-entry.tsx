@@ -36,37 +36,88 @@ export function deriveMacosDragRegions(input: {
   readonly interactiveBounds: readonly MacosRect[];
   readonly transitioning?: boolean;
 }): Extract<MacosPageMessage, { readonly type: "drag-regions" }> {
+  if (input.transitioning === true) return {
+    protocolVersion: MACOS_SHELL_PROTOCOL_VERSION,
+    type: "drag-regions",
+    layoutRevision: input.layoutRevision,
+    geometryIdentity: input.geometryIdentity,
+    transitioning: true,
+    regions: [],
+  };
   const left = input.chromeBounds.x;
+  const top = input.chromeBounds.y;
   const right = left + input.chromeBounds.width;
-  const blocked = input.interactiveBounds
-    .map((region) => ({ left: Math.max(left, region.x), right: Math.min(right, region.x + region.width) }))
-    .filter((region) => region.right > region.left)
-    .sort((a, b) => a.left - b.left);
-  const merged: Array<{ left: number; right: number }> = [];
-  for (const region of blocked) {
-    const previous = merged.at(-1);
-    if (previous !== undefined && region.left <= previous.right) previous.right = Math.max(previous.right, region.right);
-    else merged.push({ ...region });
-  }
+  const bottom = top + input.chromeBounds.height;
+  const blocked = input.interactiveBounds.map((region) => ({
+    left: Math.max(left, region.x),
+    top: Math.max(top, region.y),
+    right: Math.min(right, region.x + region.width),
+    bottom: Math.min(bottom, region.y + region.height),
+  })).filter((region) => region.right > region.left && region.bottom > region.top);
+  const yBoundaries = [...new Set([
+    top,
+    bottom,
+    ...blocked.flatMap((region) => [region.top, region.bottom]),
+  ])].sort((a, b) => a - b);
   const regions: MacosRect[] = [];
-  let cursor = left;
-  for (const region of merged) {
-    if (region.left > cursor) regions.push({
-      x: cursor, y: input.chromeBounds.y, width: region.left - cursor, height: input.chromeBounds.height,
-    });
-    cursor = Math.max(cursor, region.right);
+  let activeRegions = new Map<string, number>();
+  for (let index = 0; index < yBoundaries.length - 1; index += 1) {
+    const bandTop = yBoundaries[index]!;
+    const bandBottom = yBoundaries[index + 1]!;
+    const blockedInBand = blocked
+      .filter((region) => region.top < bandBottom && region.bottom > bandTop)
+      .map(({ left: regionLeft, right: regionRight }) => ({ left: regionLeft, right: regionRight }))
+      .sort((a, b) => a.left - b.left);
+    const merged: Array<{ left: number; right: number }> = [];
+    for (const region of blockedInBand) {
+      const previous = merged.at(-1);
+      if (previous !== undefined && region.left <= previous.right) previous.right = Math.max(previous.right, region.right);
+      else merged.push({ ...region });
+    }
+    const open: Array<{ left: number; right: number }> = [];
+    let cursor = left;
+    for (const region of merged) {
+      if (region.left > cursor) open.push({ left: cursor, right: region.left });
+      cursor = Math.max(cursor, region.right);
+    }
+    if (cursor < right) open.push({ left: cursor, right });
+
+    const nextActiveRegions = new Map<string, number>();
+    for (const region of open) {
+      const key = `${region.left}:${region.right}`;
+      const activeIndex = activeRegions.get(key);
+      if (activeIndex !== undefined) {
+        const active = regions[activeIndex]!;
+        regions[activeIndex] = { ...active, height: bandBottom - active.y };
+        nextActiveRegions.set(key, activeIndex);
+      } else {
+        regions.push({
+          x: region.left,
+          y: bandTop,
+          width: region.right - region.left,
+          height: bandBottom - bandTop,
+        });
+        nextActiveRegions.set(key, regions.length - 1);
+      }
+    }
+    activeRegions = nextActiveRegions;
   }
-  if (cursor < right) regions.push({
-    x: cursor, y: input.chromeBounds.y, width: right - cursor, height: input.chromeBounds.height,
-  });
   return {
     protocolVersion: MACOS_SHELL_PROTOCOL_VERSION,
     type: "drag-regions",
     layoutRevision: input.layoutRevision,
     geometryIdentity: input.geometryIdentity,
-    transitioning: input.transitioning ?? false,
-    regions: input.transitioning === true ? [] : regions,
+    transitioning: false,
+    regions,
   };
+}
+
+export function measureMacosInteractiveBounds(elements: readonly HTMLElement[]): MacosRect[] {
+  return elements
+    .filter((element) => element.closest("[inert],[hidden],[aria-hidden='true']") === null)
+    .map((element) => element.getBoundingClientRect())
+    .map(({ x, y, width, height }) => ({ x, y, width, height }))
+    .filter(({ width, height }) => width > 0 && height > 0);
 }
 
 function postToNative(value: MacosPageMessage): void {
@@ -153,9 +204,9 @@ export function MacosLoadingShell({
     if (chrome === null) return;
     const measureGeometry = () => {
       const bounds = chrome.getBoundingClientRect();
-      const interactive = [...chrome.querySelectorAll<HTMLElement>("button,input,a,[role=button]")]
-        .map((element) => element.getBoundingClientRect())
-        .map(({ x, y, width, height }) => ({ x, y, width, height }));
+      const interactive = measureMacosInteractiveBounds([
+        ...chrome.querySelectorAll<HTMLElement>("button,input,a,[role=button]"),
+      ]);
       const chromeBounds = { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
       return { chromeBounds, interactive, signature: JSON.stringify([chromeBounds, interactive]) };
     };
