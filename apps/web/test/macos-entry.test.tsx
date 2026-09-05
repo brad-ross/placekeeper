@@ -38,12 +38,13 @@ describe("packaged macOS shell entry", () => {
     expect(parseMacosBootstrap({ ...safe, path: "/tmp/Paper.pdf" })).toBeUndefined();
   });
 
-  it("makes every part of the titlebar draggable except the control rectangle", () => {
+  it("keeps native traffic lights and web controls outside drag overlays", () => {
     expect(deriveMacosDragRegions({
       layoutRevision: 8,
       geometryIdentity: "geometry_12345678",
       chromeBounds: { x: 0, y: 0, width: 1200, height: 58 },
-      interactiveBounds: [{ x: 80, y: 14, width: 900, height: 30 }],
+      leadingInset: 92,
+      interactiveBounds: [{ x: 160, y: 14, width: 820, height: 30 }],
     })).toEqual({
       protocolVersion: 1,
       type: "drag-regions",
@@ -51,10 +52,10 @@ describe("packaged macOS shell entry", () => {
       geometryIdentity: "geometry_12345678",
       transitioning: false,
       regions: [
-        { x: 0, y: 0, width: 1200, height: 14 },
-        { x: 0, y: 14, width: 80, height: 30 },
+        { x: 92, y: 0, width: 1108, height: 14 },
+        { x: 92, y: 14, width: 68, height: 30 },
         { x: 980, y: 14, width: 220, height: 30 },
-        { x: 0, y: 44, width: 1200, height: 14 },
+        { x: 92, y: 44, width: 1108, height: 14 },
       ],
     });
   });

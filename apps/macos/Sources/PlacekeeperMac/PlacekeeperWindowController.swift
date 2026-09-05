@@ -4,7 +4,6 @@ import Foundation
 
 @MainActor
 final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
-    private static let reviewChromeHeight: CGFloat = 58
     private static let toolbarHorizontalMargin: CGFloat = 16
     let windowID: String
     let canonicalReviewID: String
@@ -110,6 +109,12 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         window.title = displayName
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        let toolbar = NSToolbar(identifier: "PlacekeeperReviewToolbar")
+        toolbar.allowsUserCustomization = false
+        toolbar.autosavesConfiguration = false
+        toolbar.displayMode = .iconOnly
+        toolbar.showsBaselineSeparator = false
+        window.toolbar = toolbar
         window.toolbarStyle = .unified
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
@@ -479,7 +484,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
                 y: y,
                 width: region.width,
                 height: region.height
-            ))
+            ), webView: webView)
             webView.addSubview(overlay)
             dragOverlays.append(overlay)
         }
@@ -525,20 +530,17 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         guard let buttonSuperview = buttons.first?.superview,
               buttons.allSatisfy({ $0.superview === buttonSuperview }) else { return }
         window.contentView?.layoutSubtreeIfNeeded()
-        let toolbarCenterY = webView.isFlipped
-            ? Self.reviewChromeHeight / 2
-            : webView.bounds.maxY - Self.reviewChromeHeight / 2
-        let toolbarCenterInWindow = webView.convert(
-            NSPoint(x: Self.toolbarHorizontalMargin, y: toolbarCenterY),
+        let toolbarLeadingInWindow = webView.convert(
+            NSPoint(x: Self.toolbarHorizontalMargin, y: webView.bounds.midY),
             to: nil
         )
-        let toolbarCenterInButtonSuperview = buttonSuperview.convert(toolbarCenterInWindow, from: nil)
+        let toolbarLeadingInButtonSuperview = buttonSuperview.convert(toolbarLeadingInWindow, from: nil)
         guard let trafficLightLeft = buttons.map(\.frame.minX).min() else { return }
-        let horizontalOffset = toolbarCenterInButtonSuperview.x - trafficLightLeft
+        let horizontalOffset = toolbarLeadingInButtonSuperview.x - trafficLightLeft
         for button in buttons {
             button.setFrameOrigin(NSPoint(
                 x: button.frame.origin.x + horizontalOffset,
-                y: toolbarCenterInButtonSuperview.y - button.frame.height / 2
+                y: button.frame.origin.y
             ))
         }
     }
@@ -729,6 +731,19 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
 }
 
 private final class DraggableTitlebarView: NSView {
+    private weak var webView: WKWebView?
+
+    init(frame frameRect: NSRect, webView: WKWebView) {
+        self.webView = webView
+        super.init(frame: frameRect)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
     override var mouseDownCanMoveWindow: Bool { true }
-    override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+
+    override func mouseDown(with event: NSEvent) {
+        webView?.evaluateJavaScript("document.activeElement?.blur()")
+        window?.performDrag(with: event)
+    }
 }

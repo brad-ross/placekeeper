@@ -33,6 +33,7 @@ export function deriveMacosDragRegions(input: {
   readonly layoutRevision: number;
   readonly geometryIdentity: string;
   readonly chromeBounds: MacosRect;
+  readonly leadingInset: number;
   readonly interactiveBounds: readonly MacosRect[];
   readonly transitioning?: boolean;
 }): Extract<MacosPageMessage, { readonly type: "drag-regions" }> {
@@ -48,7 +49,14 @@ export function deriveMacosDragRegions(input: {
   const top = input.chromeBounds.y;
   const right = left + input.chromeBounds.width;
   const bottom = top + input.chromeBounds.height;
-  const blocked = input.interactiveBounds.map((region) => ({
+  const leadingInset = Number.isFinite(input.leadingInset) ? Math.max(0, input.leadingInset) : 0;
+  const nativeControls = leadingInset === 0 ? [] : [{
+    x: left,
+    y: top,
+    width: Math.min(leadingInset, input.chromeBounds.width),
+    height: input.chromeBounds.height,
+  }];
+  const blocked = [...nativeControls, ...input.interactiveBounds].map((region) => ({
     left: Math.max(left, region.x),
     top: Math.max(top, region.y),
     right: Math.min(right, region.x + region.width),
@@ -215,6 +223,7 @@ export function MacosLoadingShell({
         layoutRevision: revision.current,
         geometryIdentity,
         chromeBounds: measurement.chromeBounds,
+        leadingInset: trafficLightInset,
         interactiveBounds: measurement.interactive,
         transitioning,
       }));
@@ -261,7 +270,7 @@ export function MacosLoadingShell({
       resize.disconnect();
       mutations.disconnect();
     };
-  }, [geometryIdentity]);
+  }, [geometryIdentity, trafficLightInset]);
   return (
     <div
       ref={root}

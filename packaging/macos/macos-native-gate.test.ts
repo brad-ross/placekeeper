@@ -76,8 +76,24 @@ describe("macOS native gate packaging policy", () => {
     );
     const draggableTitlebar = windowSource.slice(windowSource.indexOf("private final class DraggableTitlebarView"));
     expect(draggableTitlebar).toContain("override var mouseDownCanMoveWindow: Bool { true }");
+    expect(draggableTitlebar).toContain('document.activeElement?.blur()');
     expect(draggableTitlebar).toContain("window?.performDrag(with: event)");
+    expect(draggableTitlebar.indexOf("activeElement?.blur")).toBeLessThan(draggableTitlebar.indexOf("performDrag"));
     expect(draggableTitlebar).not.toContain("override func hitTest");
+  });
+
+  it("preserves the native vertical hit frames for standard window buttons", async () => {
+    const windowSource = await readFile(
+      resolve("apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift"),
+      "utf8",
+    );
+    const alignment = windowSource.slice(
+      windowSource.indexOf("private func alignTrafficLights"),
+      windowSource.indexOf("private func diagnostic"),
+    );
+    expect(windowSource).toContain("window.toolbar = toolbar");
+    expect(alignment).toContain("y: button.frame.origin.y");
+    expect(alignment).not.toContain("button.frame.height / 2");
   });
 
   it("strips Node and dynamic-loader injection from child environments", () => {
