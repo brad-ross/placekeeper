@@ -249,6 +249,14 @@ final class MacPoliciesTests: XCTestCase {
         XCTAssertTrue(second.terminated)
     }
 
+    func testHelperDetachLedgerIssuesEachHelperIdentityOnce() {
+        var ledger = HelperDetachLedger()
+        XCTAssertTrue(ledger.register(windowID: "window_12345678", helperID: "helper_12345678"))
+        XCTAssertFalse(ledger.register(windowID: "window_12345678", helperID: "helper_other_1234"))
+        XCTAssertEqual(ledger.takeHelperID(windowID: "window_12345678"), "helper_12345678")
+        XCTAssertNil(ledger.takeHelperID(windowID: "window_12345678"))
+    }
+
     func testLifecycleEOFAndParentDeathDetachRegistration() {
         for reason in [LifecycleDetachReason.eof, .parentDeath, .controlledExit] {
             var lane = AppLifecycleLane()

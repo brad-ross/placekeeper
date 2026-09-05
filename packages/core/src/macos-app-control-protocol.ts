@@ -25,6 +25,12 @@ export type MacosAppControlMessage =
     }
   | {
       readonly protocolVersion: 1;
+      readonly type: "detach-helper";
+      readonly appInstanceId: string;
+      readonly helperId: string;
+    }
+  | {
+      readonly protocolVersion: 1;
       readonly type: "detach";
       readonly appInstanceId: string;
       readonly reason: "controlled-exit" | "eof" | "parent-death";
@@ -90,6 +96,11 @@ export function parseMacosAppControlMessage(value: unknown): MacosAppControlMess
   }
   if (value.type === "prepare-replacement") {
     return exact(value, ["protocolVersion", "type", "appInstanceId"])
+      ? value as unknown as MacosAppControlMessage : undefined;
+  }
+  if (value.type === "detach-helper") {
+    return exact(value, ["protocolVersion", "type", "appInstanceId", "helperId"])
+      && id(value.helperId)
       ? value as unknown as MacosAppControlMessage : undefined;
   }
   if (value.type === "detach") {

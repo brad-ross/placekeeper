@@ -14,6 +14,7 @@ interface AppRecord {
   readonly startIdentity: string;
   readonly buildIdentity: string;
   readonly helpers: Set<string>;
+  readonly retiredHelpers: Set<string>;
   activeWindows: number;
   bootstrappingWindows: number;
 }
@@ -50,6 +51,10 @@ export class MacosAppLifecycleManager {
       app.bootstrappingWindows = message.bootstrappingWindows;
       return this.#ack(message.appInstanceId);
     }
+    if (message.type === "detach-helper") {
+      await this.#detachHelper(app, message.helperId);
+      return this.#ack(message.appInstanceId);
+    }
     if (message.type === "prepare-replacement") {
       return app.activeWindows === 0 && app.helpers.size === 0
         ? {
@@ -66,7 +71,8 @@ export class MacosAppLifecycleManager {
 
   attachHelper(appInstanceId: string, helperId: string): boolean {
     const app = this.#apps.get(appInstanceId);
-    if (app === undefined || !/^[A-Za-z0-9_-]{8,128}$/u.test(helperId)) return false;
+    if (app === undefined || !/^[A-Za-z0-9_-]{8,128}$/u.test(helperId)
+      || app.retiredHelpers.has(helperId)) return false;
     for (const owner of this.#apps.values()) if (owner.helpers.has(helperId)) return false;
     app.helpers.add(helperId);
     return true;
@@ -102,6 +108,7 @@ export class MacosAppLifecycleManager {
       startIdentity: message.startIdentity,
       buildIdentity: message.buildIdentity,
       helpers: new Set(),
+      retiredHelpers: new Set(),
       activeWindows: 0,
       bootstrappingWindows: 0,
     });
@@ -113,6 +120,15 @@ export class MacosAppLifecycleManager {
     if (app === undefined) return;
     this.#apps.delete(appInstanceId);
     await Promise.all([...app.helpers].map((helperId) => this.#runtime.detach(helperId)));
+  }
+
+  async #detachHelper(app: AppRecord, helperId: string): Promise<void> {
+    // Helper IDs are single-use random capabilities. Keep their tombstones for
+    // this app registration so a detach that wins the socket race cannot be
+    // undone by a delayed first admission. App detachment drops the whole set.
+    app.retiredHelpers.add(helperId);
+    if (!app.helpers.delete(helperId)) return;
+    await this.#runtime.detach(helperId);
   }
 
   #ack(appInstanceId: string): MacosAppControlResponse {

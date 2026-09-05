@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { encodePlacekeeperLink } from "../../../packages/core/src/placekeeper-link.js";
 
 import {
@@ -24,7 +24,7 @@ afterEach(async () => {
 });
 
 describe("macOS daemon runtime", () => {
-  it("attaches a helper when its first daemon-routed message admits a Placekeeper link", async () => {
+  it("attaches a first-use link helper and authoritatively retires it", async () => {
     const root = await mkdtemp(join(tmpdir(), "placekeeper-macos-link-runtime-"));
     roots.push(root);
     const recoveryRoot = join(root, "recovery");
@@ -81,6 +81,114 @@ describe("macOS daemon runtime", () => {
       projection: { location: { kind: "page", page: 7 } },
     });
     expect(host.macosLifecycle.ownsHelper(appInstanceId, helperId)).toBe(true);
+
+    const detachHelper = {
+      protocolVersion: 1 as const,
+      type: "detach-helper" as const,
+      appInstanceId,
+      helperId,
+    };
+    await expect(requestControl(socketPath, {
+      kind: "macos-app-control",
+      message: detachHelper,
+    })).resolves.toMatchObject({ kind: "macos-app-control", response: { type: "ack" } });
+    await expect(requestControl(socketPath, {
+      kind: "macos-app-control",
+      message: detachHelper,
+    })).resolves.toMatchObject({ kind: "macos-app-control", response: { type: "ack" } });
+    expect(host.macosLifecycle.ownsHelper(appInstanceId, helperId)).toBe(false);
+    expect(host.macosRuntime.activity()).toEqual({ helpers: 0, activeHelpers: 0, resources: 0 });
+    await expect(requestControl(socketPath, {
+      kind: "macos-app-control",
+      message: {
+        protocolVersion: 1,
+        type: "activity",
+        appInstanceId,
+        activeWindows: 0,
+        bootstrappingWindows: 0,
+      },
+    })).resolves.toMatchObject({ kind: "macos-app-control", response: { type: "ack" } });
+
+    await expect(requestControl(socketPath, {
+      kind: "macos-runtime",
+      appInstanceId,
+      helperId,
+      message: {
+        protocolVersion: 1,
+        type: "admit",
+        windowId: "window_instance_link_5678",
+        attemptId: "attempt_instance_link_5678",
+        requestId: "request_admit_link_5678",
+        sourcePath,
+      },
+    })).resolves.toMatchObject({ kind: "macos-runtime", response: { type: "failure", code: "invalid" } });
+  });
+
+  it("reconciles an admission that completes after lifecycle detachment", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-macos-detach-race-"));
+    roots.push(root);
+    const recoveryRoot = join(root, "recovery");
+    const browserSourceRoot = join(root, "browser-sources");
+    const assets = join(root, "assets");
+    await Promise.all([mkdir(browserSourceRoot), mkdir(assets)]);
+    await writeFile(join(assets, "app.js"), "export function start(){}\n");
+    const host = await PlacekeeperHost.start({
+      recoveryRoot,
+      browserSourceRoot,
+      webAssets: { root: assets },
+      port: 0,
+    });
+    hosts.push(host);
+    const socketPath = join(root, "control.sock");
+    controls.push(await startLaunchControlServer(host, socketPath));
+    const appInstanceId = "app_instance_race_1234";
+    const helperId = "helper_instance_race_1234";
+    await requestControl(socketPath, {
+      kind: "macos-app-control",
+      message: {
+        protocolVersion: 1,
+        type: "register-app",
+        appInstanceId,
+        processId: process.pid,
+        startIdentity: "start_identity_race_1234",
+        buildIdentity: "build_identity_race_1234",
+      },
+    });
+
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const handle = host.macosRuntime.handle.bind(host.macosRuntime);
+    vi.spyOn(host.macosRuntime, "handle").mockImplementation(async (...args) => {
+      entered.resolve();
+      await resume.promise;
+      return handle(...args);
+    });
+    const admission = requestControl(socketPath, {
+      kind: "macos-runtime",
+      appInstanceId,
+      helperId,
+      message: {
+        protocolVersion: 1,
+        type: "admit",
+        windowId: "window_instance_race_1234",
+        attemptId: "attempt_instance_race_1234",
+        requestId: "request_admit_race_1234",
+        sourcePath: join(process.cwd(), "test/fixtures/pdfs/text-native.pdf"),
+      },
+    });
+    await entered.promise;
+    await requestControl(socketPath, {
+      kind: "macos-app-control",
+      message: { protocolVersion: 1, type: "detach-helper", appInstanceId, helperId },
+    });
+    resume.resolve();
+
+    await expect(admission).resolves.toMatchObject({
+      kind: "macos-runtime",
+      response: { type: "failure", code: "unavailable" },
+    });
+    expect(host.macosLifecycle.ownsHelper(appInstanceId, helperId)).toBe(false);
+    expect(host.macosRuntime.activity()).toEqual({ helpers: 0, activeHelpers: 0, resources: 0 });
   });
 
   it("releases first-use link ownership when daemon admission fails", async () => {

@@ -71,4 +71,39 @@ describe("macOS app lifecycle ownership", () => {
     const manager = new MacosAppLifecycleManager({ detach: vi.fn(async () => undefined) });
     expect(manager.attachHelper(appInstanceId, "helper_12345678")).toBe(false);
   });
+
+  it("detaches a helper exactly once and retires its single-use identity", async () => {
+    const detach = vi.fn(async () => undefined);
+    const manager = new MacosAppLifecycleManager({ detach });
+    await register(manager);
+    expect(manager.attachHelper(appInstanceId, "helper_12345678")).toBe(true);
+
+    const message = {
+      protocolVersion: 1 as const,
+      type: "detach-helper" as const,
+      appInstanceId,
+      helperId: "helper_12345678",
+    };
+    await expect(manager.handle(message)).resolves.toMatchObject({ type: "ack" });
+    await expect(manager.handle(message)).resolves.toMatchObject({ type: "ack" });
+
+    expect(detach).toHaveBeenCalledOnce();
+    expect(manager.ownsHelper(appInstanceId, "helper_12345678")).toBe(false);
+    expect(manager.attachHelper(appInstanceId, "helper_12345678")).toBe(false);
+  });
+
+  it("retires a helper before admission can attach it", async () => {
+    const detach = vi.fn(async () => undefined);
+    const manager = new MacosAppLifecycleManager({ detach });
+    await register(manager);
+    await manager.handle({
+      protocolVersion: 1,
+      type: "detach-helper",
+      appInstanceId,
+      helperId: "helper_late_12345678",
+    });
+
+    expect(manager.attachHelper(appInstanceId, "helper_late_12345678")).toBe(false);
+    expect(detach).not.toHaveBeenCalled();
+  });
 });

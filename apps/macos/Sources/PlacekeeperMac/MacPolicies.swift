@@ -196,6 +196,20 @@ final class ReviewHelperSupervisor {
     }
 }
 
+struct HelperDetachLedger {
+    private var helperIDsByWindow: [String: String] = [:]
+
+    mutating func register(windowID: String, helperID: String) -> Bool {
+        guard helperIDsByWindow[windowID] == nil, windowID.count >= 8, helperID.count >= 8 else { return false }
+        helperIDsByWindow[windowID] = helperID
+        return true
+    }
+
+    mutating func takeHelperID(windowID: String) -> String? {
+        helperIDsByWindow.removeValue(forKey: windowID)
+    }
+}
+
 enum LifecycleDetachReason: String, Equatable {
     case eof
     case parentDeath

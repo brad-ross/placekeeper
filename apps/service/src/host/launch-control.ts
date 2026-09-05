@@ -496,6 +496,23 @@ async function dispatch(
       };
     }
     const response = await host.macosRuntime.handle(request.helperId, message);
+    // A lifecycle detach can race an admission after ownership was attached
+    // but before the runtime installed its provisional record. Reconcile after
+    // the await so the late result cannot recreate authority for a dead helper.
+    if (!host.macosLifecycle.ownsHelper(request.appInstanceId, request.helperId)) {
+      await host.macosRuntime.detach(request.helperId);
+      return {
+        kind: "macos-runtime",
+        response: {
+          protocolVersion: 1,
+          windowId: message.windowId,
+          attemptId: message.attemptId,
+          requestId: message.requestId,
+          type: "failure",
+          code: "unavailable",
+        },
+      };
+    }
     if (response.type === "released" || (isAdmission && response.type === "failure")) {
       host.macosLifecycle.releaseHelper(request.appInstanceId, request.helperId);
     }

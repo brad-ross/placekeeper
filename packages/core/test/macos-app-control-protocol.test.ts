@@ -23,6 +23,12 @@ describe("macOS app lifecycle control protocol", () => {
       activeWindows: 2,
       bootstrappingWindows: 1,
     })).toMatchObject({ type: "activity", activeWindows: 2 });
+    expect(parseMacosAppControlMessage({
+      protocolVersion: MACOS_APP_CONTROL_PROTOCOL_VERSION,
+      type: "detach-helper",
+      appInstanceId: "app_instance_1234",
+      helperId: "helper_instance_1234",
+    })).toMatchObject({ type: "detach-helper", helperId: "helper_instance_1234" });
   });
 
   it("rejects review, resource, path, and credential authority on the lifecycle lane", () => {
@@ -40,6 +46,13 @@ describe("macOS app lifecycle control protocol", () => {
         ...extra,
       })).toBeUndefined();
     }
+    expect(parseMacosAppControlMessage({
+      protocolVersion: 1,
+      type: "detach-helper",
+      appInstanceId: "app_instance_1234",
+      helperId: "helper_instance_1234",
+      sourcePath: "/private/Paper.pdf",
+    })).toBeUndefined();
   });
 
   it("accepts only closed acknowledgement and replacement responses", () => {

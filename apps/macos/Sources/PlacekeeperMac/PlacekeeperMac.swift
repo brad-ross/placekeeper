@@ -29,6 +29,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
     private let restorationStore = WindowRestorationStore()
     private var restoredFrames: [String: NSRect] = [:]
     private let helperSupervisor = ReviewHelperSupervisor()
+    private var helperDetachLedger = HelperDetachLedger()
     private let appInstanceID = "app_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
     private var lifecycleControl: AppLifecycleControlClient?
     private var lifecycleRegistered = false
@@ -204,6 +205,12 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             presentCatastrophicFallback(documentName: source.lastPathComponent, sourceURL: source)
             return
         }
+        guard helperDetachLedger.register(windowID: windowID, helperID: helperID) else {
+            helperSupervisor.close(windowID: windowID)
+            finishLaunch(intent)
+            presentCatastrophicFallback(documentName: source.lastPathComponent, sourceURL: source)
+            return
+        }
         let canonicalSource = source.standardizedFileURL.resolvingSymlinksInPath()
         let request: (type: String, fields: [String: Any])
         switch intent.kind {
@@ -233,7 +240,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         ) != nil else {
-            helperSupervisor.close(windowID: windowID)
+            retireHelper(windowID: windowID)
             finishLaunch(intent)
             presentCatastrophicFallback(documentName: source.lastPathComponent, sourceURL: source)
             return
@@ -255,7 +262,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         switch reply {
         case let .admitted(admission):
             guard let packagedAssets else {
-                helperSupervisor.close(windowID: windowID)
+                retireHelper(windowID: windowID)
                 updateActivity()
                 presentCatastrophicFallback(documentName: source.lastPathComponent, sourceURL: source)
                 return
@@ -300,7 +307,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             updateActivity()
             controller.show()
         default:
-            helperSupervisor.close(windowID: windowID)
+            retireHelper(windowID: windowID)
             updateActivity()
             presentCatastrophicFallback(documentName: source.lastPathComponent, sourceURL: source)
         }
@@ -323,7 +330,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
                 guard let packagedAssets = recovery.packagedAssets else {
                     recovery.controller.resolve()
                     self.recoveryAttempts.removeValue(forKey: windowID)
-                    self.helperSupervisor.close(windowID: windowID)
+                    self.retireHelper(windowID: windowID)
                     self.updateActivity()
                     self.presentCatastrophicFallback(
                         documentName: recovery.source.lastPathComponent,
@@ -352,7 +359,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
 
     private func closeRecovery(windowID: String) {
         guard recoveryAttempts.removeValue(forKey: windowID) != nil else { return }
-        helperSupervisor.close(windowID: windowID)
+        retireHelper(windowID: windowID)
         updateActivity()
     }
 
@@ -382,7 +389,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             onDiagnostics: { [weak self] in self?.showDiagnostics() },
             onClose: { [weak self] closedWindowID in
                 guard let self else { return }
-                self.helperSupervisor.close(windowID: closedWindowID)
+                self.retireHelper(windowID: closedWindowID)
                 self.windowRegistry.remove(windowID: closedWindowID)
                 self.controllers.removeAll { $0.windowID == closedWindowID }
                 self.persistRestorableWindows()
@@ -397,7 +404,7 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             canonicalReviewID: admission.projection.sessionID,
             documentDigest: admission.digest
         ) else {
-            helperSupervisor.close(windowID: windowID)
+            retireHelper(windowID: windowID)
             presentCatastrophicFallback(documentName: source.lastPathComponent, sourceURL: source)
             return
         }
@@ -419,9 +426,9 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
 
     private func releaseCandidate(_ helper: SupervisedReviewHelper, windowID: String) {
         let sent = helper.request(type: "release", fields: [:]) { [weak self] _ in
-            Task { @MainActor in self?.helperSupervisor.close(windowID: windowID) }
+            Task { @MainActor in self?.retireHelper(windowID: windowID) }
         }
-        if sent == nil { helperSupervisor.close(windowID: windowID) }
+        if sent == nil { retireHelper(windowID: windowID) }
     }
 
     private var reportedActiveWindowCount: Int {
@@ -448,8 +455,17 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
 
     private func helperDidExit(windowID: String) {
         controllers.first { $0.windowID == windowID }?.helperDidFail()
-        helperSupervisor.helperDied(windowID: windowID)
+        retireHelper(windowID: windowID, helperAlreadyExited: true)
         updateActivity()
+    }
+
+    private func retireHelper(windowID: String, helperAlreadyExited: Bool = false) {
+        if let helperID = helperDetachLedger.takeHelperID(windowID: windowID),
+           lifecycleRegistered, let lifecycleControl {
+            _ = lifecycleControl.request(type: "detach-helper", fields: ["helperId": helperID]) { _ in }
+        }
+        if helperAlreadyExited { helperSupervisor.helperDied(windowID: windowID) }
+        else { helperSupervisor.close(windowID: windowID) }
     }
 
     private func retryDocumentWindow(windowID: String) {
@@ -520,11 +536,11 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
         diagnostic("lifecycle-helper-failed")
         for controller in controllers {
             controller.helperDidFail()
-            helperSupervisor.close(windowID: controller.windowID)
+            retireHelper(windowID: controller.windowID)
         }
         for (windowID, recovery) in recoveryAttempts {
             recovery.controller.failDecision()
-            helperSupervisor.close(windowID: windowID)
+            retireHelper(windowID: windowID)
         }
     }
 
