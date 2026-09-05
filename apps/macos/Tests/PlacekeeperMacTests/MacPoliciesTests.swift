@@ -11,7 +11,8 @@ final class MacPoliciesTests: XCTestCase {
         XCTAssertFalse(fence.confirmPaint(revision: 4))
         fence.didOrderVisible()
         XCTAssertFalse(fence.confirmPaint(revision: 3))
-        XCTAssertTrue(fence.confirmPaint(revision: 4))
+        XCTAssertTrue(fence.confirmPaint(revision: 7))
+        XCTAssertEqual(fence.visibleShellRevision, 7)
     }
 
     func testDragRegionsFailClosedAcrossRevisionGeometryAndTransitions() {
@@ -163,6 +164,29 @@ final class MacPoliciesTests: XCTestCase {
             scoped.merging(["runtimeId": "runtime_wrong123"]) { _, new in new },
             runtimeID: "runtime_12345678"
         ))
+    }
+
+    func testRecoveryOfferParserKeepsTheServiceOfferExact() {
+        let response: [String: Any] = [
+            "protocolVersion": 1,
+            "windowId": "window_12345678",
+            "attemptId": "attempt_12345678",
+            "requestId": "request_12345678",
+            "type": "recovery-offered",
+            "choices": ["resume", "discard", "fork"],
+            "offer": [
+                "id": "recovery_operation_12345678",
+                "expiresAt": "2026-09-05T12:00:00.000Z",
+            ],
+        ]
+        guard case let .recoveryOffered(id, expiresAt)? = MacReviewHelperReplyParser.parse(
+            response,
+            windowID: "window_12345678",
+            attemptID: "attempt_12345678",
+            requestID: "request_12345678"
+        ) else { return XCTFail("expected a recovery offer") }
+        XCTAssertEqual(id, "recovery_operation_12345678")
+        XCTAssertEqual(expiresAt, "2026-09-05T12:00:00.000Z")
     }
 
     func testHelperLossIsWindowScopedAndLastCloseLeavesNone() {

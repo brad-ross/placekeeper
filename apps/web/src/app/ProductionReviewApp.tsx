@@ -220,6 +220,8 @@ export interface ProductionReviewAppProps {
   readonly onPresentationChange?: (presentation: { readonly pageIndex: number; readonly zoom: number }) => void;
   /** Host activation seam: emitted only after the main PDF generation is parsed. */
   readonly onDocumentReady?: (generation: number) => void;
+  /** Host failure seam for the isolated PDF worker. */
+  readonly onViewerError?: (error: Error) => void;
   /** Host-visible title seam, already resolved through metadata then filename fallback. */
   readonly onDocumentTitleChange?: (title: string, generation: number) => void;
   /** Safe semantic command projection for native menus and shortcuts. */
@@ -1555,6 +1557,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       onOutlineDiscovery={onOutlineDiscovery}
       onViewerInitialized={onViewerInitialized}
       onMainDocumentReady={onMainDocumentReady}
+      {...(props.onViewerError === undefined ? {} : { onViewerError: props.onViewerError })}
       onViewerFramingInitialized={onViewerFramingInitialized}
       searchResults={searchResults}
     />

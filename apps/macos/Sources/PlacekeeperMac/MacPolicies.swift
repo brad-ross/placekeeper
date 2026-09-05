@@ -24,7 +24,7 @@ struct ShellReadinessFence: Equatable {
     }
 
     mutating func confirmPaint(revision: Int) -> Bool {
-        guard routingCommitted, orderedVisible, shellRevision == revision else { return false }
+        guard routingCommitted, orderedVisible, let shellRevision, revision >= shellRevision else { return false }
         visibleShellRevision = revision
         return true
     }
@@ -112,6 +112,10 @@ enum ChildEnvironmentPolicy {
         "HOME", "LANG", "LC_ALL", "PATH", "TMPDIR", "PLACEKEEPER_RUNTIME_ROOT",
         "PLACEKEEPER_CONTROL_SOCKET", "PLACEKEEPER_BUILD_IDENTITY", "PLACEKEEPER_WINDOW_ID",
         "PLACEKEEPER_ATTEMPT_ID", "PLACEKEEPER_APP_INSTANCE_ID", "PLACEKEEPER_HELPER_ID",
+        "PLACEKEEPER_MAC_DEVELOPMENT_ROOT", "PLACEKEEPER_DAEMON_IDENTITY",
+        "PLACEKEEPER_MAC_DEVELOPMENT_HTTP_PORT",
+        "PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY",
+        "PLACEKEEPER_PDFIUM_WASM",
     ])
 
     static func minimal(from source: [String: String]) -> [String: String] {

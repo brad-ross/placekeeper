@@ -53,6 +53,8 @@ export const INSTALL_ARTIFACT_IDENTITY_ENV = "PLACEKEEPER_INSTALL_ARTIFACT_IDENT
 export const LIFECYCLE_LOCK_TOKEN_ENV = "PLACEKEEPER_LIFECYCLE_LOCK_TOKEN";
 export const LIFECYCLE_LOCK_PATH_ENV = "PLACEKEEPER_LIFECYCLE_LOCK_PATH";
 export const READINESS_TOKEN_ENV = "PLACEKEEPER_READINESS_TOKEN";
+export const MACOS_DEVELOPMENT_ROOT_ENV = "PLACEKEEPER_MAC_DEVELOPMENT_ROOT";
+export const MACOS_DEVELOPMENT_HTTP_PORT_ENV = "PLACEKEEPER_MAC_DEVELOPMENT_HTTP_PORT";
 export const INSTALLED_SMOKE_DAEMON_FLAG = "--isolated-installed-smoke";
 export const INSTALLED_SMOKE_HTTP_PORT_FLAG = "--http-port";
 
@@ -68,12 +70,26 @@ function currentDaemonIdentity(): string {
 }
 
 export function defaultDaemonPaths(): DaemonPaths {
-  const appSupportRoot = join(
+  const fixedAppSupportRoot = join(
     homedir(),
     "Library",
     "Application Support",
     "Placekeeper",
   );
+  const developmentRoot = currentDaemonIdentity() === "development"
+    ? process.env[MACOS_DEVELOPMENT_ROOT_ENV]
+    : undefined;
+  const appSupportRoot = developmentRoot !== undefined && developmentRoot.startsWith("/")
+    && developmentRoot.length <= 16_384 && !developmentRoot.includes("\0")
+    ? resolve(developmentRoot)
+    : fixedAppSupportRoot;
+  const developmentPortText = developmentRoot === undefined
+    ? undefined
+    : process.env[MACOS_DEVELOPMENT_HTTP_PORT_ENV];
+  const developmentPort = developmentPortText !== undefined && /^[1-9][0-9]{0,4}$/u.test(developmentPortText)
+    && Number(developmentPortText) <= 65_535
+    ? Number(developmentPortText)
+    : undefined;
   return {
     appSupportRoot,
     recoveryRoot: join(appSupportRoot, "recovery"),
@@ -84,7 +100,7 @@ export function defaultDaemonPaths(): DaemonPaths {
     // object, but an inherited environment cannot make packaged code serve
     // caller-selected browser assets under a trusted build identity.
     webAssetsRoot: resolve(dirname(process.argv[1] ?? "."), "../web"),
-    httpPort: PLACEKEEPER_HTTP_PORT,
+    httpPort: developmentPort ?? PLACEKEEPER_HTTP_PORT,
   };
 }
 

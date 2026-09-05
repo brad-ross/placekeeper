@@ -38,6 +38,16 @@ describe("host-neutral review runtime", () => {
         byteLength: 100,
       },
     });
+    const documentBlob = "blob:placekeeper-document-resource";
+    const pdfiumBlob = "blob:placekeeper-pdfium-resource";
+    const workerBlob = "blob:placekeeper-worker-resource";
+    vi.stubGlobal("__PLACEKEEPER_MAC_DOCUMENT_RESOURCE__", {
+      source: "placekeeper-resource://document/resource_12345678?generation=1&role=document",
+      url: documentBlob,
+    });
+    vi.stubGlobal("__PLACEKEEPER_MAC_PDFIUM_URL__", pdfiumBlob);
+    vi.stubGlobal("__PLACEKEEPER_MAC_WORKER_URL__", workerBlob);
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     const nativeListeners = new Set<(message: NonNullable<ReturnType<typeof parseMacosNativeMessage>>) => void>();
     const postToNative = vi.fn((wrapped: MacosPageMessage) => {
       if (wrapped.type !== "runtime-message") throw new Error("Expected a runtime request");
@@ -98,9 +108,18 @@ describe("host-neutral review runtime", () => {
     const bootstrap = await runtime.bootstrap();
     expect(bootstrap).toMatchObject({
       scope: { documentTitle: "Paper.pdf", launchSurface: "macos" },
-      resourcePolicy: { host: "macos" },
+      resourcePolicy: {
+        host: "macos",
+        resources: {
+          document: documentBlob,
+          pdfiumWasm: pdfiumBlob,
+          worker: workerBlob,
+        },
+      },
       viewerAssets: {
-        documentUrl: "placekeeper-resource://document/resource_12345678?generation=1&role=document",
+        documentUrl: documentBlob,
+        pdfiumWasm: pdfiumBlob,
+        workerUrl: workerBlob,
       },
     });
     expect(JSON.stringify(bootstrap)).not.toMatch(/must\/not\/cross|credential|canonicalLinkBase/u);
@@ -110,6 +129,12 @@ describe("host-neutral review runtime", () => {
       attemptId,
     }));
     runtime.dispose();
+    await Promise.resolve();
+    expect(revokeObjectURL.mock.calls.map(([url]) => url).sort()).toEqual([
+      documentBlob,
+      pdfiumBlob,
+      workerBlob,
+    ].sort());
   });
 
   it("materializes extension-issued PDFium bytes into a worker-readable blob", async () => {

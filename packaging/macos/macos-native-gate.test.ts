@@ -16,10 +16,12 @@ function entitlementKeys(xml: string): string[] {
 
 describe("macOS native gate packaging policy", () => {
   it("keeps the proof executable production-shaped and network-free", async () => {
-    const [windowSource, appSource, packageSource] = await Promise.all([
+    const [windowSource, appSource, packageSource, shellHtml, shellCss] = await Promise.all([
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift"), "utf8"),
       readFile(resolve("apps/macos/Sources/PlacekeeperMac/PlacekeeperMac.swift"), "utf8"),
       readFile(resolve("apps/macos/Package.swift"), "utf8"),
+      readFile(resolve("apps/web/macos.html"), "utf8"),
+      readFile(resolve("apps/web/src/app/review-layout.css"), "utf8"),
     ]);
     expect(packageSource).toContain(".macOS(.v13)");
     expect(windowSource).toContain(".fullSizeContentView");
@@ -28,8 +30,15 @@ describe("macOS native gate packaging policy", () => {
     expect(windowSource).toContain('forURLScheme: "placekeeper-resource"');
     expect(windowSource).toContain("compileContentRuleList");
     expect(windowSource).toContain("callAsyncJavaScript");
+    expect(windowSource).toContain("webView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor)");
+    expect(windowSource).toContain("webView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)");
     expect(windowSource).not.toMatch(/127\.0\.0\.1|localhost|Loopback Review/iu);
-    expect(appSource).toContain('ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_REVIEW_HELPER"]');
+    expect(shellHtml).toContain("connect-src blob: placekeeper-resource:");
+    expect(shellHtml).toContain("worker-src blob: placekeeper-app:");
+    expect(shellHtml).toContain("'wasm-unsafe-eval'");
+    expect(shellHtml).not.toMatch(/https?:|wss?:/u);
+    expect(shellCss).toMatch(/\.macos-loading-shell\s*\{[\s\S]*height:\s*100%/u);
+    expect(appSource).toContain('environment["PLACEKEEPER_MAC_REVIEW_HELPER"]');
     expect(appSource).toContain("applicationShouldTerminateAfterLastWindowClosed");
   });
 
@@ -46,6 +55,9 @@ describe("macOS native gate packaging policy", () => {
       PLACEKEEPER_RUNTIME_ROOT: "/Applications/Placekeeper.app/Contents/Resources",
       PLACEKEEPER_APP_INSTANCE_ID: "app_12345678",
       PLACEKEEPER_HELPER_ID: "helper_12345678",
+      PLACEKEEPER_MAC_DEVELOPMENT_ROOT: "/tmp/placekeeper-native-smoke",
+      PLACEKEEPER_MAC_DEVELOPMENT_HTTP_PORT: "43128",
+      PLACEKEEPER_PDFIUM_WASM: "/Applications/Placekeeper.app/Contents/Resources/pdfium/pdfium.wasm",
       UNRELATED_SECRET: "no",
     });
     expect(environment).toEqual({
@@ -56,6 +68,9 @@ describe("macOS native gate packaging policy", () => {
       PLACEKEEPER_RUNTIME_ROOT: "/Applications/Placekeeper.app/Contents/Resources",
       PLACEKEEPER_APP_INSTANCE_ID: "app_12345678",
       PLACEKEEPER_HELPER_ID: "helper_12345678",
+      PLACEKEEPER_MAC_DEVELOPMENT_ROOT: "/tmp/placekeeper-native-smoke",
+      PLACEKEEPER_MAC_DEVELOPMENT_HTTP_PORT: "43128",
+      PLACEKEEPER_PDFIUM_WASM: "/Applications/Placekeeper.app/Contents/Resources/pdfium/pdfium.wasm",
     });
   });
 

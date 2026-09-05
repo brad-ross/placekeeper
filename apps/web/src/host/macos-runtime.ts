@@ -8,6 +8,16 @@ import type { HostRuntime } from "./runtime.js";
 import { createRpcHostRuntime } from "./vscode-runtime.js";
 
 const ID = /^[A-Za-z0-9_-]{8,128}$/u;
+const PACKAGED_PDFIUM_SOURCE = "placekeeper-app://bundle/assets/pdfium.wasm";
+
+declare global {
+  var __PLACEKEEPER_MAC_PDFIUM_URL__: string | undefined;
+  var __PLACEKEEPER_MAC_WORKER_URL__: string | undefined;
+  var __PLACEKEEPER_MAC_DOCUMENT_RESOURCE__: {
+    readonly source: string;
+    readonly url: string;
+  } | undefined;
+}
 
 export interface MacosRuntimeBridge {
   readonly runtimeId: string;
@@ -19,6 +29,9 @@ export function createMacosHostRuntime(bridge: MacosRuntimeBridge): HostRuntime 
   if (!ID.test(bridge.runtimeId) || !ID.test(bridge.attemptId)) {
     throw new Error("A safe macOS runtime and attempt identity are required.");
   }
+  const packagedPdfium = globalThis.__PLACEKEEPER_MAC_PDFIUM_URL__;
+  const packagedWorker = globalThis.__PLACEKEEPER_MAC_WORKER_URL__;
+  const documentResource = globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCE__;
   return createRpcHostRuntime({
     runtimeId: bridge.runtimeId,
     postMessage(message) {
@@ -39,5 +52,36 @@ export function createMacosHostRuntime(bridge: MacosRuntimeBridge): HostRuntime 
         listener(message.message);
       });
     },
-  }, { host: "macos" });
+  }, {
+    host: "macos",
+    ...(documentResource === undefined ? {} : {
+      materializeDocument: async (sourceUrl: string) => {
+        if (sourceUrl !== documentResource.source || !documentResource.url.startsWith("blob:")) {
+          throw new Error("The packaged document resource identity was invalid.");
+        }
+        return {
+          url: documentResource.url,
+          dispose: () => URL.revokeObjectURL(documentResource.url),
+        };
+      },
+    }),
+    ...(packagedPdfium === undefined ? {} : {
+      materializePdfiumWasm: async (sourceUrl: string) => {
+        if (sourceUrl !== PACKAGED_PDFIUM_SOURCE ||
+          !packagedPdfium.startsWith("blob:")) {
+          throw new Error("The packaged PDF engine identity was invalid.");
+        }
+        return { url: packagedPdfium, dispose: () => URL.revokeObjectURL(packagedPdfium) };
+      },
+    }),
+    ...(packagedWorker === undefined ? {} : {
+      materializePdfiumWorker: async (sourceUrl: string) => {
+        if (sourceUrl !== "placekeeper-app://bundle/assets/pdfium-worker.js" ||
+          !packagedWorker.startsWith("blob:")) {
+          throw new Error("The packaged PDF worker identity was invalid.");
+        }
+        return { url: packagedWorker, dispose: () => URL.revokeObjectURL(packagedWorker) };
+      },
+    }),
+  });
 }

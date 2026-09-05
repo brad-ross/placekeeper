@@ -43,6 +43,7 @@ export interface MaterializedViewerResource {
 export interface RpcHostRuntimeOptions {
   readonly host?: ReviewRuntimeHost;
   readonly extensionOrigin?: string;
+  readonly materializeDocument?: (sourceUrl: string) => Promise<MaterializedViewerResource>;
   readonly materializePdfiumWasm?: (sourceUrl: string) => Promise<MaterializedViewerResource>;
   readonly materializePdfiumWorker?: (sourceUrl: string) => Promise<MaterializedViewerResource>;
 }
@@ -157,6 +158,22 @@ export function createRpcHostRuntime(
   let chromeLocationHistory: MemoryReviewLocationHistory | undefined;
   const materializedPdfium = new Map<string, Promise<MaterializedViewerResource>>();
   const materializedWorkers = new Map<string, Promise<MaterializedViewerResource>>();
+  const materializedDocuments = new Map<string, Promise<MaterializedViewerResource>>();
+
+  const documentResource = async (sourceUrl: string): Promise<MaterializedViewerResource> => {
+    if (options.materializeDocument === undefined) return { url: sourceUrl, dispose() {} };
+    let pending = materializedDocuments.get(sourceUrl);
+    if (pending === undefined) {
+      pending = options.materializeDocument(sourceUrl);
+      materializedDocuments.set(sourceUrl, pending);
+    }
+    const resource = await pending;
+    if (disposed) {
+      resource.dispose();
+      throw new Error("The review runtime is disposed.");
+    }
+    return resource;
+  };
 
   const pdfiumResource = async (sourceUrl: string): Promise<MaterializedViewerResource> => {
     if (options.materializePdfiumWasm === undefined) return { url: sourceUrl, dispose() {} };
@@ -363,7 +380,8 @@ export function createRpcHostRuntime(
         generation: value.generation,
         revision: value.revision,
       };
-      const [pdfium, worker] = await Promise.all([
+      const [documentResourceValue, pdfium, worker] = await Promise.all([
+        documentResource(value.resources.document),
         pdfiumResource(value.resources.pdfiumWasm),
         typeof value.resources.worker === "string"
           ? workerResource(value.resources.worker)
@@ -371,19 +389,27 @@ export function createRpcHostRuntime(
       ]);
       const issued = new Set<string>([
         value.resources.document,
+        documentResourceValue.url,
         value.resources.pdfiumWasm,
         pdfium.url,
         ...(typeof value.resources.worker === "string" ? [value.resources.worker] : []),
         ...(worker === undefined ? [] : [worker.url]),
       ]);
       const nativeResources = (host === "chrome" || host === "macos") && typeof value.resources.worker === "string"
-        ? {
-            document: value.resources.document,
-            pdfiumWasm: value.resources.pdfiumWasm,
-            worker: value.resources.worker,
-          }
+        ? host === "macos"
+          ? worker === undefined ? undefined : {
+              document: documentResourceValue.url,
+              pdfiumWasm: pdfium.url,
+              worker: worker.url,
+            }
+          : {
+              document: value.resources.document,
+              pdfiumWasm: value.resources.pdfiumWasm,
+              worker: value.resources.worker,
+            }
         : undefined;
-      if ((host === "chrome" || host === "macos") && nativeResources === undefined) {
+      if ((host === "chrome" || host === "macos") &&
+        (nativeResources === undefined || nativeResources.worker === undefined)) {
         throw new Error("The trusted host returned incomplete packaged resources.");
       }
       if (host === "chrome" && chromeLocationHistory === undefined) {
@@ -400,7 +426,7 @@ export function createRpcHostRuntime(
         scope: value.scope as unknown as ProductionScope,
         saveStatus: value.saveStatus as unknown as ProductionSaveStatus,
         viewerAssets: {
-          documentUrl: value.resources.document,
+          documentUrl: documentResourceValue.url,
           pdfiumWasm: pdfium.url,
           ...(worker === undefined ? {} : { workerUrl: worker.url }),
         },
@@ -411,7 +437,11 @@ export function createRpcHostRuntime(
               resources: nativeResources!,
             }
           : host === "macos"
-            ? { host: "macos", resources: nativeResources! }
+            ? { host: "macos", resources: nativeResources as {
+                document: string;
+                pdfiumWasm: string;
+                worker: string;
+              } }
             : { host: "vscode", issued },
         ...(chromeLocationHistory === undefined ? {} : { locationHistory: chromeLocationHistory }),
         ...(typeof value.canonicalLinkBase === "string"
@@ -477,6 +507,8 @@ export function createRpcHostRuntime(
       for (const request of pending.values()) request.reject(new Error("The review runtime was disposed."));
       for (const resource of materializedPdfium.values()) void resource.then((value) => value.dispose());
       materializedPdfium.clear();
+      for (const resource of materializedDocuments.values()) void resource.then((value) => value.dispose());
+      materializedDocuments.clear();
       for (const resource of materializedWorkers.values()) void resource.then((value) => value.dispose());
       materializedWorkers.clear();
       pending.clear();

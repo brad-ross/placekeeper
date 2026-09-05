@@ -622,6 +622,7 @@ export function RuntimeProductionReviewApp(props: {
         props.onDocumentReady?.(generation);
       },
     })}
+    {...(props.onRuntimeError === undefined ? {} : { onViewerError: props.onRuntimeError })}
     {...(props.onDocumentTitleChange === undefined
       ? {}
       : { onDocumentTitleChange: props.onDocumentTitleChange })}

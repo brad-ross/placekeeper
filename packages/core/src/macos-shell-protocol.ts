@@ -70,6 +70,13 @@ export type MacosPageMessage =
   }
   | {
     readonly protocolVersion: 1;
+    readonly type: "runtime-error";
+    readonly runtimeId: string;
+    readonly attemptId: string;
+    readonly stage: "bootstrap" | "document" | "runtime";
+  }
+  | {
+    readonly protocolVersion: 1;
     readonly type: "command-snapshot";
     readonly runtimeId: string;
     readonly attemptId: string;
@@ -270,6 +277,12 @@ export function parseMacosPageMessage(value: unknown): MacosPageMessage | undefi
     return exact(value, ["protocolVersion", "type", "runtimeId", "attemptId", "generation"])
       && opaqueId(value.runtimeId) && opaqueId(value.attemptId)
       && safeInteger(value.generation) && value.generation > 0
+      ? value as unknown as MacosPageMessage : undefined;
+  }
+  if (value.type === "runtime-error") {
+    return exact(value, ["protocolVersion", "type", "runtimeId", "attemptId", "stage"])
+      && opaqueId(value.runtimeId) && opaqueId(value.attemptId)
+      && ["bootstrap", "document", "runtime"].includes(String(value.stage))
       ? value as unknown as MacosPageMessage : undefined;
   }
   if (value.type === "command-snapshot") {

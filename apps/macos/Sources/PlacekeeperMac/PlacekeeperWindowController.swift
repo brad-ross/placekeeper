@@ -22,6 +22,9 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     private var visiblePaintConfirmed = false
     private var pendingDocumentReadyGeneration: Int?
     private var activationStarted = false
+    private var readinessDiagnosticScheduled = false
+    private var pdfiumData: Data?
+    private var workerData: Data?
 
     init(
         windowID: String,
@@ -40,6 +43,22 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         self.admission = admission
         self.displayName = admission.displayName
         self.bridge = ReviewBridge(runtimeID: runtimeID, attemptID: attemptID, helper: helper, admission: admission)
+        let pdfiumURL = packagedRoot.appendingPathComponent("assets/pdfium.wasm")
+        if let pdfium = try? Data(contentsOf: pdfiumURL),
+           pdfium.count > 8, pdfium.count <= 16 * 1024 * 1024,
+           pdfium.starts(with: Data([0x00, 0x61, 0x73, 0x6d])) {
+            pdfiumData = pdfium
+        } else {
+            pdfiumData = nil
+        }
+        let workerURL = packagedRoot.appendingPathComponent("assets/pdfium-worker.js")
+        if let worker = try? Data(contentsOf: workerURL), worker.count > 0, worker.count <= 4 * 1024 * 1024,
+           let source = String(data: worker, encoding: .utf8),
+           source.contains("class PdfiumEngineRunner"), source.contains("type === \"wasmInit\"") {
+            workerData = worker
+        } else {
+            workerData = nil
+        }
         let geometryIdentity = "geometry_" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(16))
         self.dragFence = DragRegionFence(geometryIdentity: geometryIdentity)
 
@@ -64,6 +83,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         configuration.setURLSchemeHandler(handler, forURLScheme: "placekeeper-app")
         configuration.setURLSchemeHandler(handler, forURLScheme: "placekeeper-resource")
         webView = WKWebView(frame: .zero, configuration: configuration)
+        if diagnosticsEnabled, #available(macOS 13.3, *) { webView.isInspectable = true }
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 820),
@@ -85,7 +105,16 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         webView.uiDelegate = self
         webView.setValue(false, forKey: "drawsBackground")
         let controller = NSViewController()
-        controller.view = webView
+        let contentView = NSView(frame: NSRect(origin: .zero, size: window.contentLayoutRect.size))
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(webView)
+        NSLayoutConstraint.activate([
+            webView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            webView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            webView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+        ])
+        controller.view = contentView
         window.contentViewController = controller
         window.backgroundColor = NSColor(calibratedRed: 0.965, green: 0.949, blue: 0.918, alpha: 1)
         window.center()
@@ -218,15 +247,26 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             bridge.handle(message) { [weak self] response in self?.sendRuntimeMessage(response) }
             return
         }
+        if type == "runtime-error",
+           Set(body.keys) == Set(["protocolVersion", "type", "runtimeId", "attemptId", "stage"]),
+           body["runtimeId"] as? String == runtimeID,
+           body["attemptId"] as? String == attemptID,
+           let stage = body["stage"] as? String {
+            diagnostic("runtime-error: \(stage)")
+            return
+        }
         if type == "visible-shell-ready",
            Set(body.keys) == Set(["protocolVersion", "type", "layoutRevision", "geometryIdentity", "frameSequence"]),
            let revision = body["layoutRevision"] as? Int,
            let frameSequence = body["frameSequence"] as? Int, frameSequence > 0,
            body["geometryIdentity"] as? String == dragFence.geometryIdentity {
-            if readiness.confirmPaint(revision: revision) {
+            if revision == dragFence.currentRevision, readiness.confirmPaint(revision: revision) {
                 visiblePaintConfirmed = true
                 activateWhenReady()
+            } else {
+                diagnostic("visible-shell-rejected: revision \(revision), latest \(dragFence.currentRevision)")
             }
+            scheduleReadinessDiagnostic()
             return
         }
         if type == "drag-regions",
@@ -245,6 +285,13 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             }
             if regions.count == rawRegions.count, dragFence.apply(DragRegionSet(revision: revision, geometryIdentity: identity, regions: regions)) {
                 installDragOverlays(regions)
+                if readiness.orderedVisible, !visiblePaintConfirmed {
+                    sendToPage([
+                        "protocolVersion": 1,
+                        "type": "commit-visible",
+                        "geometryIdentity": dragFence.geometryIdentity,
+                    ])
+                }
             } else {
                 installDragOverlays([])
             }
@@ -252,7 +299,11 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        diagnostic("navigation-finished")
+        diagnostic("navigation-finished: web \(Int(webView.bounds.width))x\(Int(webView.bounds.height)), window \(Int(window?.frame.width ?? 0))x\(Int(window?.frame.height ?? 0))")
+        installPackagedResources()
+    }
+
+    private func sendBootstrap() {
         sendToPage([
             "protocolVersion": 1,
             "type": "bootstrap",
@@ -311,7 +362,11 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
             arguments: ["message": message],
             in: nil,
             in: .page
-        ) { _ in }
+        ) { [weak self] result in
+            if case let .failure(error) = result {
+                self?.diagnostic("page-delivery-error: \(error.localizedDescription)")
+            }
+        }
     }
 
     private func sendRuntimeMessage(_ message: [String: Any]) {
@@ -378,6 +433,178 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         guard diagnosticsEnabled,
               let bytes = "[PlacekeeperMac] \(message)\n".data(using: .utf8) else { return }
         FileHandle.standardError.write(bytes)
+    }
+
+    private func scheduleReadinessDiagnostic() {
+        guard diagnosticsEnabled, !readinessDiagnosticScheduled else { return }
+        readinessDiagnosticScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, !self.closed, self.pendingDocumentReadyGeneration == nil else { return }
+            self.webView.callAsyncJavaScript(
+                """
+                const viewport = document.querySelector('[data-viewer-framing-viewport]');
+                const workspace = document.querySelector('.pdf-workspace');
+                const macosShell = document.querySelector('.macos-loading-shell');
+                const reviewShell = document.querySelector('.review-shell');
+                const viewportBounds = viewport?.getBoundingClientRect();
+                const workspaceBounds = workspace?.getBoundingClientRect();
+                const rootBounds = document.querySelector('#root')?.getBoundingClientRect();
+                const macosShellBounds = macosShell?.getBoundingClientRect();
+                const reviewShellBounds = reviewShell?.getBoundingClientRect();
+                return JSON.stringify({
+                  documentReadyState: document.readyState,
+                  runtimeLoading: document.querySelectorAll('[data-runtime-loading-workspace]').length,
+                  viewerLoading: document.querySelectorAll('.pdf-workspace__loading').length,
+                  viewerViewport: document.querySelectorAll('[data-viewer-framing-viewport]').length,
+                  pageElements: document.querySelectorAll('[data-page-index]').length,
+                  pageImages: document.querySelectorAll('[data-page-index] img').length,
+                  completeImages: [...document.querySelectorAll('[data-page-index] img')].filter((image) => image.complete).length,
+                  nonzeroImages: [...document.querySelectorAll('[data-page-index] img')].filter((image) => image.naturalWidth > 0 && image.naturalHeight > 0).length,
+                  viewportWidth: Math.round(viewportBounds?.width ?? 0),
+                  viewportHeight: Math.round(viewportBounds?.height ?? 0),
+                  workspaceWidth: Math.round(workspaceBounds?.width ?? 0),
+                  workspaceHeight: Math.round(workspaceBounds?.height ?? 0),
+                  rootWidth: Math.round(rootBounds?.width ?? 0),
+                  rootHeight: Math.round(rootBounds?.height ?? 0),
+                  macosShellWidth: Math.round(macosShellBounds?.width ?? 0),
+                  macosShellHeight: Math.round(macosShellBounds?.height ?? 0),
+                  reviewShellWidth: Math.round(reviewShellBounds?.width ?? 0),
+                  reviewShellHeight: Math.round(reviewShellBounds?.height ?? 0),
+                  viewportChildren: viewport?.childElementCount ?? 0
+                });
+                """,
+                arguments: [:],
+                in: nil,
+                in: .page
+            ) { [weak self] result in
+                switch result {
+                case let .success(value): self?.diagnostic("readiness-snapshot: \(String(describing: value))")
+                case let .failure(error): self?.diagnostic("readiness-snapshot-failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    private func installPackagedResources() {
+        guard let pdfiumData, let workerData else {
+            diagnostic("executable-resource-install-invalid")
+            helperDidFail()
+            return
+        }
+        schemeHandler.loadDocument { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self, !self.closed else { return }
+                guard case let .success(documentData) = result else {
+                    self.diagnostic("document-install-invalid")
+                    self.helperDidFail()
+                    return
+                }
+                self.installBlob(role: "pdfium", mime: "application/wasm", data: pdfiumData) { installed in
+                    self.pdfiumData = nil
+                    guard installed else {
+                        self.diagnostic("pdfium-install-failed")
+                        self.helperDidFail()
+                        return
+                    }
+                    self.installBlob(role: "worker", mime: "application/javascript", data: workerData) { installed in
+                        self.workerData = nil
+                        guard installed else {
+                            self.diagnostic("worker-install-failed")
+                            self.helperDidFail()
+                            return
+                        }
+                        self.installBlob(
+                            role: "document",
+                            mime: "application/pdf",
+                            data: documentData,
+                            source: self.bridge.documentResourceURL
+                        ) { installed in
+                            guard installed else {
+                                self.diagnostic("document-install-failed")
+                                self.helperDidFail()
+                                return
+                            }
+                            self.diagnostic("packaged-resources-installed")
+                            self.sendBootstrap()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func installBlob(
+        role: String,
+        mime: String,
+        data: Data,
+        source: String? = nil,
+        completion: @escaping (Bool) -> Void
+    ) {
+        installBlobChunk(role: role, mime: mime, data: data, source: source, offset: 0, completion: completion)
+    }
+
+    private func installBlobChunk(
+        role: String,
+        mime: String,
+        data: Data,
+        source: String?,
+        offset: Int,
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard !closed, !failed else { completion(false); return }
+        let chunkSize = 256 * 1024
+        if offset < data.count {
+            let end = min(data.count, offset + chunkSize)
+            let encoded = data.subdata(in: offset..<end).base64EncodedString()
+            webView.callAsyncJavaScript(
+                """
+                const binary = atob(base64);
+                const bytes = new Uint8Array(binary.length);
+                for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+                const parts = globalThis.__PLACEKEEPER_MAC_BLOB_PARTS__ ??= {};
+                (parts[role] ??= []).push(bytes);
+                return bytes.length;
+                """,
+                arguments: ["base64": encoded, "role": role],
+                in: nil,
+                in: .page
+            ) { [weak self] result in
+                guard let self else { return }
+                guard case let .success(value) = result, (value as? NSNumber)?.intValue == end - offset else {
+                    completion(false)
+                    return
+                }
+                self.installBlobChunk(
+                    role: role,
+                    mime: mime,
+                    data: data,
+                    source: source,
+                    offset: end,
+                    completion: completion
+                )
+            }
+            return
+        }
+        var arguments: [String: Any] = ["role": role, "mime": mime]
+        if let source { arguments["source"] = source }
+        webView.callAsyncJavaScript(
+            """
+            const parts = globalThis.__PLACEKEEPER_MAC_BLOB_PARTS__?.[role];
+            if (!Array.isArray(parts) || parts.length === 0) return false;
+            const url = URL.createObjectURL(new Blob(parts, { type: mime }));
+            delete globalThis.__PLACEKEEPER_MAC_BLOB_PARTS__[role];
+            if (role === 'pdfium') globalThis.__PLACEKEEPER_MAC_PDFIUM_URL__ = url;
+            else if (role === 'worker') globalThis.__PLACEKEEPER_MAC_WORKER_URL__ = url;
+            else globalThis.__PLACEKEEPER_MAC_DOCUMENT_RESOURCE__ = { source, url };
+            return url.startsWith('blob:');
+            """,
+            arguments: arguments,
+            in: nil,
+            in: .page
+        ) { result in
+            guard case let .success(value) = result else { completion(false); return }
+            completion(value as? Bool == true)
+        }
     }
 
 }

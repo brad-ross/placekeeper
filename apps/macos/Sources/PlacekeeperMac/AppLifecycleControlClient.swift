@@ -22,16 +22,19 @@ final class AppLifecycleControlClient: @unchecked Sendable {
     init?(
         appInstanceID: String,
         executable: URL,
+        argumentPrefix: [String] = [],
         baseEnvironment: [String: String],
         onExit: @escaping @Sendable () -> Void
     ) {
         self.appInstanceID = appInstanceID
         process = Process()
         process.executableURL = executable
-        process.arguments = ["macos-lifecycle-control"]
+        process.arguments = argumentPrefix + ["macos-lifecycle-control"]
         process.standardInput = stdinPipe
         process.standardOutput = stdoutPipe
-        process.standardError = FileHandle.nullDevice
+        process.standardError = baseEnvironment["PLACEKEEPER_MAC_DIAGNOSTICS"] == "1"
+            ? FileHandle.standardError
+            : FileHandle.nullDevice
         var environment = ChildEnvironmentPolicy.minimal(from: baseEnvironment)
         environment["PLACEKEEPER_APP_INSTANCE_ID"] = appInstanceID
         process.environment = environment

@@ -76,6 +76,7 @@ struct MacReviewAdmission {
 
 enum MacReviewHelperReply {
     case admitted(MacReviewAdmission)
+    case recoveryOffered(id: String, expiresAt: String)
     case active(MacRuntimeProjection)
     case refreshed(MacRuntimeProjection)
     case invalidation(generation: Int, revision: Int, reason: String)
@@ -133,6 +134,17 @@ enum MacReviewHelperReplyParser {
                   let rawProjection = value["projection"] as? [String: Any],
                   let projection = projection(rawProjection) else { return nil }
             return type == "active" ? .active(projection) : .refreshed(projection)
+        case "recovery-offered":
+            guard exact(value, base.union(["choices", "offer"])),
+                  let choices = value["choices"] as? [String],
+                  choices == ["resume", "discard", "fork"],
+                  let offer = value["offer"] as? [String: Any],
+                  exact(offer, Set(["id", "expiresAt"])),
+                  let id = offer["id"] as? String,
+                  id.range(of: "^[A-Za-z0-9_-]{16,128}$", options: .regularExpression) != nil,
+                  let expiresAt = offer["expiresAt"] as? String,
+                  ISO8601DateFormatter().date(from: expiresAt) != nil else { return nil }
+            return .recoveryOffered(id: id, expiresAt: expiresAt)
         case "invalidation":
             guard exact(value, base.union(["generation", "revision", "reason"])),
                   let generation = positiveInteger(value["generation"]),
@@ -260,6 +272,7 @@ final class SupervisedReviewHelper: ReviewHelperProcess, @unchecked Sendable {
         windowID: String,
         attemptID: String,
         executable: URL,
+        argumentPrefix: [String] = [],
         baseEnvironment: [String: String],
         onExit: @escaping @Sendable (String) -> Void
     ) {
@@ -267,10 +280,12 @@ final class SupervisedReviewHelper: ReviewHelperProcess, @unchecked Sendable {
         self.attemptID = attemptID
         process = Process()
         process.executableURL = executable
-        process.arguments = ["macos-review-helper"]
+        process.arguments = argumentPrefix + ["macos-review-helper"]
         process.standardInput = stdinPipe
         process.standardOutput = stdoutPipe
-        process.standardError = FileHandle.nullDevice
+        process.standardError = baseEnvironment["PLACEKEEPER_MAC_DIAGNOSTICS"] == "1"
+            ? FileHandle.standardError
+            : FileHandle.nullDevice
         var environment = ChildEnvironmentPolicy.minimal(from: baseEnvironment)
         environment["PLACEKEEPER_APP_INSTANCE_ID"] = appInstanceID
         environment["PLACEKEEPER_HELPER_ID"] = helperID

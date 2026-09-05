@@ -135,6 +135,16 @@ export function MacosLoadingShell({
       generation,
     });
   }, [attemptId, runtimeId]);
+  const publishRuntimeError = useCallback(() => {
+    if (runtimeId === undefined || attemptId === undefined) return;
+    postToNative({
+      protocolVersion: MACOS_SHELL_PROTOCOL_VERSION,
+      type: "runtime-error",
+      runtimeId,
+      attemptId,
+      stage: "runtime",
+    });
+  }, [attemptId, runtimeId]);
   useLayoutEffect(() => {
     const shell = root.current;
     if (shell === null || geometryIdentity === undefined) return;
@@ -199,6 +209,7 @@ export function MacosLoadingShell({
         {...(runtime === undefined ? {} : { runtime })}
         loadingDocumentTitle={documentTitle}
         onDocumentReady={publishDocumentReady}
+        onRuntimeError={publishRuntimeError}
         onCommandSurfaceChange={publishCommandSurface}
         {...(commandInvocation === undefined ? {} : { commandInvocation })}
         {...(attemptId === undefined ? {} : {
@@ -259,8 +270,10 @@ function start(): void {
       current = { ...current, geometry: message.geometry };
       render();
     } else if (message?.type === "commit-visible" && current?.geometry.identity === message.geometryIdentity) {
-      visibleAttempt = true;
-      render();
+      if (!visibleAttempt) {
+        visibleAttempt = true;
+        render();
+      }
       requestAnimationFrame(() => requestAnimationFrame(() => postToNative({
         protocolVersion: MACOS_SHELL_PROTOCOL_VERSION,
         type: "visible-shell-ready",

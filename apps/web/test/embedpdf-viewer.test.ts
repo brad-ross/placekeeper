@@ -139,4 +139,30 @@ describe('EmbedPDF registry configuration', () => {
     expect(created).toBe(worker);
     expect(workerFactory).toHaveBeenCalledWith(workerUrl, { type: 'module' });
   });
+
+  it('surfaces both worker crashes and PDFium initialization failures', () => {
+    const listeners = new Map<string, (event: Event | MessageEvent<unknown>) => void>();
+    const worker = {
+      postMessage() {},
+      addEventListener(type: string, listener: (event: Event | MessageEvent<unknown>) => void) {
+        listeners.set(type, listener);
+      },
+      removeEventListener() {},
+      terminate() {},
+    } as unknown as Worker;
+    const onWorkerError = vi.fn();
+    const workerUrl = 'blob:placekeeper-worker-resource';
+    createTrustedPdfiumWorker(workerUrl, {
+      host: 'macos',
+      resources: {
+        document: 'blob:placekeeper-document-resource',
+        pdfiumWasm: 'blob:placekeeper-pdfium-resource',
+        worker: workerUrl,
+      },
+    }, () => worker, onWorkerError);
+
+    listeners.get('message')?.({ data: { type: 'wasmError' } } as MessageEvent<unknown>);
+    listeners.get('error')?.(new Event('error'));
+    expect(onWorkerError).toHaveBeenCalledTimes(2);
+  });
 });

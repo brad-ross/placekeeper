@@ -13,6 +13,7 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
     private var loading = false
     private var completions: [(Result<Data, Error>) -> Void] = []
     private var invalidated = false
+    private let diagnosticsEnabled = ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_DIAGNOSTICS"] == "1"
 
     init(helper: SupervisedReviewHelper, admission: MacReviewAdmission) {
         self.helper = helper
@@ -30,6 +31,7 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
         guard !loading else { lock.unlock(); return }
         loading = true
         lock.unlock()
+        diagnostic("resource-load-start: \(byteLength) bytes")
         read(offset: 0, accumulated: Data())
     }
 
@@ -59,8 +61,10 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
             guard case let .resource(sequence, bytes, done)? = reply,
                   sequence == expectedSequence, !bytes.isEmpty, bytes.count <= length,
                   done == (offset + bytes.count >= self.byteLength) else {
+                self.diagnostic("resource-chunk-invalid: sequence \(expectedSequence)")
                 self.fail(URLError(.cannotDecodeContentData)); return
             }
+            self.diagnostic("resource-chunk: sequence \(sequence), \(bytes.count) bytes, done \(done)")
             var next = accumulated
             next.append(bytes)
             guard next.count <= self.byteLength else {
@@ -77,6 +81,7 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
     private func finish(_ bytes: Data) {
         let computed = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
         guard bytes.count == byteLength, computed == digest, bytes.starts(with: Data("%PDF".utf8)) else {
+            diagnostic("resource-validation-failed")
             fail(URLError(.cannotDecodeContentData)); return
         }
         lock.lock()
@@ -86,6 +91,7 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
         let callbacks = completions
         completions.removeAll()
         lock.unlock()
+        diagnostic("resource-load-finished: \(bytes.count) bytes")
         for callback in callbacks { callback(.success(bytes)) }
     }
 
@@ -95,7 +101,14 @@ final class MacDocumentResourceLoader: @unchecked Sendable {
         let callbacks = completions
         completions.removeAll()
         lock.unlock()
+        diagnostic("resource-load-failed: \((error as? URLError)?.code.rawValue ?? -1)")
         for callback in callbacks { callback(.failure(error)) }
+    }
+
+    private func diagnostic(_ message: String) {
+        guard diagnosticsEnabled,
+              let bytes = "[PlacekeeperMac] \(message)\n".data(using: .utf8) else { return }
+        FileHandle.standardError.write(bytes)
     }
 }
 
@@ -105,9 +118,11 @@ final class MacSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable 
     private let documentLoader: MacDocumentResourceLoader
     private let resourceID: String
     private let generation: Int
+    private let byteLength: Int
     private let lock = NSLock()
     private var liveTasks = Set<ObjectIdentifier>()
     private var invalidated = false
+    private let diagnosticsEnabled = ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_DIAGNOSTICS"] == "1"
 
     init(packagedRoot: URL, manifestKeys: Set<String>, helper: SupervisedReviewHelper, admission: MacReviewAdmission) {
         self.packagedRoot = packagedRoot.resolvingSymlinksInPath().standardizedFileURL
@@ -115,6 +130,11 @@ final class MacSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable 
         documentLoader = MacDocumentResourceLoader(helper: helper, admission: admission)
         resourceID = admission.resourceID
         generation = admission.generation
+        byteLength = admission.byteLength
+    }
+
+    func loadDocument(completion: @escaping (Result<Data, Error>) -> Void) {
+        documentLoader.load(completion: completion)
     }
 
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
@@ -127,6 +147,7 @@ final class MacSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable 
             fail(urlSchemeTask, id: taskID, error: URLError(.unsupportedURL)); return
         }
         if let key = MacSchemePolicy.bundleKey(for: url), manifestKeys.contains(key) {
+            diagnostic("bundle-resource-request: \(key)")
             let file = packagedRoot.appendingPathComponent(key).resolvingSymlinksInPath().standardizedFileURL
             guard file.path.hasPrefix(packagedRoot.path + "/"), let bytes = try? Data(contentsOf: file) else {
                 fail(urlSchemeTask, id: taskID, error: URLError(.fileDoesNotExist)); return
@@ -135,13 +156,24 @@ final class MacSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable 
         }
         guard let identity = MacSchemePolicy.resourceIdentity(for: url), identity.id == resourceID,
               identity.generation == generation else {
+            diagnostic("resource-request-rejected")
             fail(urlSchemeTask, id: taskID, error: URLError(.noPermissionsToReadFile)); return
         }
+        diagnostic("document-resource-request")
+        guard beginResponse(
+            urlSchemeTask,
+            id: taskID,
+            url: url,
+            expectedLength: byteLength,
+            mime: "application/pdf"
+        ) else { return }
         documentLoader.load { [weak self, weak task = urlSchemeTask as AnyObject] result in
-            guard let self, let task = task as? WKURLSchemeTask else { return }
-            switch result {
-            case let .success(bytes): self.respond(task, id: taskID, url: url, bytes: bytes, mime: "application/pdf")
-            case let .failure(error): self.fail(task, id: taskID, error: error)
+            DispatchQueue.main.async {
+                guard let self, let task = task as? WKURLSchemeTask else { return }
+                switch result {
+                case let .success(bytes): self.completeResponse(task, id: taskID, bytes: bytes)
+                case let .failure(error): self.fail(task, id: taskID, error: error)
+                }
             }
         }
     }
@@ -162,8 +194,25 @@ final class MacSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable 
 
     private func respond(_ task: WKURLSchemeTask, id: ObjectIdentifier, url: URL, bytes: Data, mime: String) {
         guard consume(id) else { return }
-        let response = URLResponse(url: url, mimeType: mime, expectedContentLength: bytes.count, textEncodingName: nil)
-        task.didReceive(response)
+        task.didReceive(successResponse(url: url, mime: mime, expectedLength: bytes.count))
+        task.didReceive(bytes)
+        task.didFinish()
+    }
+
+    private func beginResponse(
+        _ task: WKURLSchemeTask,
+        id: ObjectIdentifier,
+        url: URL,
+        expectedLength: Int,
+        mime: String
+    ) -> Bool {
+        guard isLive(id) else { return false }
+        task.didReceive(successResponse(url: url, mime: mime, expectedLength: expectedLength))
+        return true
+    }
+
+    private func completeResponse(_ task: WKURLSchemeTask, id: ObjectIdentifier, bytes: Data) {
+        guard consume(id) else { return }
         task.didReceive(bytes)
         task.didFinish()
     }
@@ -179,11 +228,41 @@ final class MacSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable 
         return !invalidated && liveTasks.remove(id) != nil
     }
 
+    private func isLive(_ id: ObjectIdentifier) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !invalidated && liveTasks.contains(id)
+    }
+
+    private func successResponse(url: URL, mime: String, expectedLength: Int) -> URLResponse {
+        HTTPURLResponse(
+            url: url,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: [
+                "Cache-Control": "no-store",
+                "Content-Length": String(expectedLength),
+                "Content-Type": mime,
+            ]
+        ) ?? URLResponse(
+            url: url,
+            mimeType: mime,
+            expectedContentLength: expectedLength,
+            textEncodingName: nil
+        )
+    }
+
     private func mimeType(for key: String) -> String {
         if key.hasSuffix(".html") { return "text/html" }
         if key.hasSuffix(".js") { return "text/javascript" }
         if key.hasSuffix(".css") { return "text/css" }
         if key.hasSuffix(".wasm") { return "application/wasm" }
         return "application/octet-stream"
+    }
+
+    private func diagnostic(_ message: String) {
+        guard diagnosticsEnabled,
+              let bytes = "[PlacekeeperMac] \(message)\n".data(using: .utf8) else { return }
+        FileHandle.standardError.write(bytes)
     }
 }

@@ -62,6 +62,7 @@ final class ReviewBridge {
     private var activated = false
     private var activating = false
     private var activationWaiters: [(Bool) -> Void] = []
+    private let diagnosticsEnabled = ProcessInfo.processInfo.environment["PLACEKEEPER_MAC_DIAGNOSTICS"] == "1"
 
     init(runtimeID: String, attemptID: String, helper: SupervisedReviewHelper, admission: MacReviewAdmission) {
         self.runtimeID = runtimeID
@@ -76,13 +77,18 @@ final class ReviewBridge {
     }
 
     func handle(_ raw: Any, send: @escaping ([String: Any]) -> Void) {
-        guard let request = MacPageRuntimeRequest.parse(raw, runtimeID: runtimeID) else { return }
+        guard let request = MacPageRuntimeRequest.parse(raw, runtimeID: runtimeID) else {
+            diagnostic("runtime-request-invalid")
+            return
+        }
+        diagnostic("runtime-request: \(request.method)")
         if request.method == "bootstrap" {
             send(response(
                 request,
                 identity: projection,
                 payload: projection.pageBootstrapPayload(documentURL: documentResourceURL)
             ))
+            diagnostic("runtime-response: bootstrap")
             return
         }
         guard request.sessionID == projection.sessionID,
@@ -133,6 +139,7 @@ final class ReviewBridge {
         activationWaiters.append(completion)
         guard !activating else { return }
         activating = true
+        diagnostic("runtime-activation-requested")
         guard helper.request(type: "activate", fields: ["documentValidated": true], completion: { [weak self] reply in
             Task { @MainActor in
                 guard let self else { return }
@@ -143,6 +150,7 @@ final class ReviewBridge {
                     self.projection = projection
                     self.activated = true
                 }
+                self.diagnostic(self.activated ? "runtime-activated" : "runtime-activation-failed")
                 let waiters = self.activationWaiters
                 self.activationWaiters.removeAll()
                 for waiter in waiters { waiter(self.activated) }
@@ -271,4 +279,10 @@ final class ReviewBridge {
     private static let nonIdempotent = Set([
         "command", "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "exportReviewedCopy",
     ])
+
+    private func diagnostic(_ message: String) {
+        guard diagnosticsEnabled,
+              let bytes = "[PlacekeeperMac] \(message)\n".data(using: .utf8) else { return }
+        FileHandle.standardError.write(bytes)
+    }
 }

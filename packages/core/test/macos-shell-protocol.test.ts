@@ -40,6 +40,13 @@ describe("macOS packaged-shell protocol", () => {
       attemptId: "attempt_identifier_1234",
       generation: 0,
     })).toBeUndefined();
+    expect(parseMacosPageMessage({
+      protocolVersion: MACOS_SHELL_PROTOCOL_VERSION,
+      type: "runtime-error",
+      runtimeId: "runtime_identifier_1234",
+      attemptId: "attempt_identifier_1234",
+      stage: "runtime",
+    })).toMatchObject({ type: "runtime-error", stage: "runtime" });
   });
 
   it("accepts atomic revision-fenced drag geometry and rejects stale-shaped input", () => {
