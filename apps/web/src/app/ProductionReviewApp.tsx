@@ -1526,8 +1526,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     const generation = state.workflow.documentGeneration;
     if (props.onDocumentReady === undefined
       || notifiedDocumentReadyGenerationRef.current === generation
-      || mainDocumentReadyGeneration !== generation
-      || mainNavigationReadyGeneration !== generation) return;
+      || mainDocumentReadyGeneration !== generation) return;
+    if (scope.launchSurface !== 'macos') {
+      notifiedDocumentReadyGenerationRef.current = generation;
+      props.onDocumentReady(generation);
+      return;
+    }
+    if (mainNavigationReadyGeneration !== generation) return;
     const root = productionRootRef.current;
     const navigation = mainNavigationRef.current;
     if (root === null || navigation === null) return;
@@ -1588,6 +1593,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     mainDocumentReadyGeneration,
     mainNavigationReadyGeneration,
     props.onDocumentReady,
+    scope.launchSurface,
     state.workflow.documentGeneration,
   ]);
   const onViewerFramingInitialized = useCallback((controls: ViewerFramingControls) => {
