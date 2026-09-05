@@ -64,6 +64,24 @@ test.describe('EmbedPDF browser-worker viewer gate', () => {
     expect(result.renderedWidth).toBeGreaterThan(0);
   });
 
+  test('preserves the deterministic 13-page selection fixture in document order', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.viewerGate.inspect('/test/fixtures/pdfs/cross-page-selection.pdf'),
+    );
+
+    expect(result.pageCount).toBe(13);
+    expect(result.reliableTextGeometry).toBe(true);
+    expect(result.text.match(/PAGE \d{2}/gu)).toEqual(
+      Array.from({ length: 13 }, (_, index) => `PAGE ${String(index + 1).padStart(2, '0')}`),
+    );
+    expect(result.textRectContents).toEqual(
+      Array.from(
+        { length: 13 },
+        (_, index) => `PAGE ${String(index + 1).padStart(2, '0')}: cross-page semantic selection contract.`,
+      ),
+    );
+  });
+
   test('refuses semantic anchors for an image-only page', async ({ page }) => {
     const result = await page.evaluate(() =>
       window.viewerGate.inspect('/test/fixtures/pdfs/image-only.pdf'),

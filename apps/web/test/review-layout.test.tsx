@@ -11,6 +11,7 @@ import {
 } from '../src/app/ReviewShell.js';
 import { AnnotationList } from '../src/review/AnnotationList.js';
 import { AnnotationPeek } from '../src/review/AnnotationPeek.js';
+import { projectOwnedAnnotationReader } from '../src/review/annotation-reader.js';
 import {
   FullAnnotationReader,
   FullAnnotationReaderActions,
@@ -228,6 +229,63 @@ describe('review shell layout and accessibility contract', () => {
     expect(responsiveStyles).toMatch(
       /\.review-toast\[data-generation-status="reconciling"\] \.review-icon\s*\{[^}]*animation:\s*none;/u,
     );
+  });
+
+  it('persistently exposes the focused PDF copy owner when selections compete', () => {
+    const html = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        pdfCopyOwner="reference"
+        pdfCopySnapshots={{
+          main: {
+            kind: 'ready',
+            surface: { kind: 'main', documentGeneration: 1 },
+            generation: 2,
+            text: 'main selection',
+            pageCount: 1,
+          },
+          reference: {
+            kind: 'ready',
+            surface: {
+              kind: 'reference', documentGeneration: 1, tabIdentity: 'reference-a',
+            },
+            generation: 3,
+            text: 'reference selection',
+            pageCount: 2,
+          },
+        }}
+        onCommand={async () => state}
+      >
+        <div>Document canvas</div>
+      </ReviewShell>,
+    );
+
+    expect(html).toContain('data-pdf-copy-owner="reference"');
+    expect(html).toContain('Copy source: Reference PDF');
+    expect(html).toContain('role="status"');
+
+    const revokedHtml = renderToStaticMarkup(
+      <ReviewShell
+        state={state}
+        selectionUpdate={{ kind: 'cleared', generation: 0 }}
+        pdfCopyOwner={null}
+        pdfCopyOwnerIndicatorVisible
+        pdfCopySnapshots={{
+          main: {
+            kind: 'ready',
+            surface: { kind: 'main', documentGeneration: 1 },
+            generation: 2,
+            text: 'main selection',
+            pageCount: 1,
+          },
+          reference: null,
+        }}
+        onCommand={async () => state}
+      ><div>Document canvas</div></ReviewShell>,
+    );
+    expect(revokedHtml).toContain('data-pdf-copy-owner="none"');
+    expect(revokedHtml).toContain('Copy source: No PDF focused');
   });
 
   it('floats a reversible outline expansion toggle opposite the active workspace navbar', () => {
@@ -742,6 +800,76 @@ describe('review shell layout and accessibility contract', () => {
     expect(listHtml).toContain('tabindex="-1"');
   });
 
+  it('presents one tray row with a stable page range for a cross-page item', () => {
+    const crossPageItem = {
+      ...ownedAnnotation,
+      pageIndex: 2,
+      payload: {
+        ...ownedAnnotation.payload,
+        quote: 'First page\nMiddle page\nLast page',
+        prefix: '',
+        suffix: '',
+        rect: { x: 10, y: 80, width: 40, height: 12 },
+        segmentRects: [{ x: 10, y: 80, width: 40, height: 12 }],
+        reliable: true,
+        pages: [
+          {
+            pageIndex: 2,
+            quote: 'First page',
+            prefix: '',
+            suffix: '',
+            rect: { x: 10, y: 80, width: 40, height: 12 },
+            segmentRects: [{ x: 10, y: 80, width: 40, height: 12 }],
+          },
+          {
+            pageIndex: 3,
+            quote: 'Middle page',
+            prefix: '',
+            suffix: '',
+            rect: { x: 10, y: 20, width: 50, height: 12 },
+            segmentRects: [{ x: 10, y: 20, width: 50, height: 12 }],
+          },
+          {
+            pageIndex: 4,
+            quote: 'Last page',
+            prefix: '',
+            suffix: '',
+            rect: { x: 10, y: 20, width: 38, height: 12 },
+            segmentRects: [{ x: 10, y: 20, width: 38, height: 12 }],
+          },
+        ],
+        pageBoundaries: [
+          { afterPageIndex: 2, separator: '\n' },
+          { afterPageIndex: 3, separator: '\n' },
+        ],
+      },
+    };
+    const html = renderToStaticMarkup(
+      <AnnotationList
+        items={[crossPageItem]}
+        onNavigate={() => undefined}
+        onReadFull={() => undefined}
+        onEdit={() => undefined}
+        onDelete={() => undefined}
+      />,
+    );
+    const reader = projectOwnedAnnotationReader(crossPageItem);
+    if (reader === null) throw new Error('Expected authored reader content');
+    const readerHtml = renderToStaticMarkup(
+      <FullAnnotationReader record={reader} onBack={() => undefined} />,
+    );
+
+    expect(html.match(/data-review-item=/gu)).toHaveLength(1);
+    expect(html).toContain('<span class="annotation-item__page">3–5</span>');
+    expect(html).toContain('aria-label="Highlight · Pages 3–5');
+    expect(html).toContain('title="Go to Highlight annotation on pages 3–5"');
+    expect(html).toContain('aria-label="Edit Highlight annotation on pages 3–5"');
+    expect(html).toContain('aria-label="Remove Highlight annotation on pages 3–5"');
+    expect(html).toContain('aria-label="Read full Highlight annotation on pages 3–5"');
+    expect(readerHtml).toContain('aria-label="Full Highlight annotation on pages 3–5"');
+    expect(readerHtml).toContain('<span class="annotation-item__page">3–5</span>');
+  });
+
   it('keeps the annotation Copy Link affordance mounted and right-most while durability is pending', () => {
     const copyLink = {
       getLink: () => 'placekeeper:///tmp/Paper.pdf#v=1&page=4&item=00000000-0000-4000-8000-000000000004',
@@ -842,6 +970,7 @@ describe('review shell layout and accessibility contract', () => {
           },
         }}
         selectionPlacement={{ left: 20, top: 30, suggestTop: true }}
+        onCopySelection={() => undefined}
         onCommand={async () => state}
       >
         <div>Document canvas</div>
@@ -889,13 +1018,16 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-label="From this PDF"');
     expect(html).toContain('data-existing-annotations-state="loading"');
     expect(html).toContain('data-annotation-status="loading"');
-    for (const tool of ['Replace', 'Delete', 'Highlight']) {
+    for (const tool of ['Copy', 'Replace', 'Delete', 'Highlight']) {
       expect(html).toContain(`aria-label="${tool}"`);
       expect(html).toContain(`title="${tool}"`);
     }
-    expect(html.match(/review-action-button--icon/g)).toHaveLength(3);
-    expect(html).not.toMatch(/<\/svg>(?:Replace|Delete|Highlight)<\/button>/u);
-    expect(html.match(/class="[^"]*review-action-button[^"]*"/g)).toHaveLength(3);
+    expect(html).toContain('aria-keyshortcuts="Meta+C Control+C"');
+    expect(html.match(/review-action-button--icon/g)).toHaveLength(4);
+    expect(html.indexOf('aria-label="Copy"'))
+      .toBeGreaterThan(html.indexOf('aria-label="Highlight"'));
+    expect(html).not.toMatch(/<\/svg>(?:Copy|Replace|Delete|Highlight)<\/button>/u);
+    expect(html.match(/class="[^"]*review-action-button[^"]*"/g)).toHaveLength(4);
     expect(html).not.toMatch(/>(?:‹|›|−|\+|↶|↷)<\/button>/u);
     expect(html).not.toContain('>Insert</button>');
     expect(html).not.toContain('>Page Note</button>');

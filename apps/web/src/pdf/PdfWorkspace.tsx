@@ -17,6 +17,10 @@ import { ReviewIcon } from '../review/ReviewIcon.js';
 import { combinePageRotation, positionOwnedRect } from './owned-overlay.js';
 import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
 import {
+  mergeAuthoringPreviewProjections,
+  reviewItemIdForAnnotation,
+} from '../review/annotation-projection.js';
+import {
   sourceAnnotationLinkRenderers,
   sourceAnnotationVisualRenderers,
 } from './PdfLinkControl.js';
@@ -28,6 +32,7 @@ import {
 } from './viewer-document-ids.js';
 import {
   dispatchNeutralViewerPointerUp,
+  isContextPointerGesture,
   isReverseSyncTexPointerGesture,
   isUnsafePageContextTarget,
   normalizePageClientPoint,
@@ -54,7 +59,7 @@ export interface PdfWorkspaceProps {
   documentLabel?: string;
   onInitialized?: (registry: PluginRegistry) => Promise<void>;
   ownedAnnotations?: readonly ReviewAnnotation[];
-  authoringPreview?: ReviewAnnotation | null;
+  authoringPreview?: readonly ReviewAnnotation[] | null;
   keyboardPageNoteCursor?: ViewerPagePoint | null;
   onKeyboardPageNoteKey?: (key: string) => void;
   onPageContextMenu?: (request: PageContextMenuRequest) => boolean;
@@ -89,14 +94,6 @@ function groupByPageIndex<T extends { readonly pageIndex: number }>(
   return result;
 }
 
-function isContextPointerGesture(event: {
-  readonly button: number;
-  readonly ctrlKey: boolean;
-  readonly pointerType: string;
-}): boolean {
-  return event.button !== 0 || (event.pointerType === 'mouse' && event.ctrlKey);
-}
-
 export function PdfWorkspace({
   engine,
   plugins,
@@ -126,13 +123,12 @@ export function PdfWorkspace({
   const reverseSyncTexPointers = useRef(new ReverseSyncTexPointerGesture());
   const contextResetTarget = useRef<HTMLDivElement | null>(null);
   const visibleAnnotations = useMemo(
-    () => authoringPreview === null
-      ? ownedAnnotations
-      : [
-          ...ownedAnnotations.filter(({ id }) => id !== authoringPreview.id),
-          authoringPreview,
-        ],
+    () => mergeAuthoringPreviewProjections(ownedAnnotations, authoringPreview),
     [authoringPreview, ownedAnnotations],
+  );
+  const authoringPreviewIds = useMemo(
+    () => new Set(authoringPreview?.map(({ id }) => id) ?? []),
+    [authoringPreview],
   );
   const annotationsByPage = useMemo(
     () => groupByPageIndex(visibleAnnotations),
@@ -153,6 +149,7 @@ export function PdfWorkspace({
       aria-label={documentLabel}
       role="region"
       className="pdf-workspace"
+      data-pdf-copy-surface="main"
       style={fillContainer ? undefined : { height: '70vh', minHeight: 480 }}
     >
       <EmbedPDF
@@ -243,6 +240,7 @@ export function PdfWorkspace({
                         if (contextGesture) {
                           contextPointers.current.add(event.pointerId);
                           if (event.pointerType === 'mouse') contextResetTarget.current = event.currentTarget;
+                          event.preventDefault();
                           event.stopPropagation();
                           return;
                         }
@@ -446,10 +444,10 @@ export function PdfWorkspace({
                                 <span
                                   key={`${annotation.id}:${index}`}
                                   data-owned-mark={annotation.kind}
-                                  data-review-id={annotation.id}
-                                  data-authoring-preview={authoringPreview?.id === annotation.id ? 'true' : undefined}
-                                  data-corresponding={correspondingOwnedAnnotationId === annotation.id ? 'true' : 'false'}
-                                  data-active={activeOwnedAnnotationId === annotation.id ? 'true' : 'false'}
+                                  data-review-id={reviewItemIdForAnnotation(annotation)}
+                                  data-authoring-preview={authoringPreviewIds.has(annotation.id) ? 'true' : undefined}
+                                  data-corresponding={correspondingOwnedAnnotationId === reviewItemIdForAnnotation(annotation) ? 'true' : 'false'}
+                                  data-active={activeOwnedAnnotationId === reviewItemIdForAnnotation(annotation) ? 'true' : 'false'}
                                   style={{
                                     position: 'absolute',
                                     left: transformed.origin.x,
@@ -465,7 +463,7 @@ export function PdfWorkspace({
                       <div className="owned-mark-focus-layer" data-owned-focus-layer>
                         {(geometryByPage.get(layout.pageIndex) ?? []).map((group) => {
                           const annotation = (annotationsByPage.get(layout.pageIndex) ?? [])
-                            .find(({ id }) => id === group.id);
+                            .find((candidate) => reviewItemIdForAnnotation(candidate) === group.id);
                           const page = activePdf.pages[layout.pageIndex];
                           const rect = group.rects[0];
                           if (!annotation || !page || !rect) return null;

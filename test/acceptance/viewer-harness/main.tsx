@@ -9,6 +9,10 @@ import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing
 import type { SelectionUpdate } from '../../../apps/web/src/pdf/selection-state.js';
 import type { ViewerInteractionEvent } from '../../../apps/web/src/pdf/viewer-interaction-events.js';
 import { CommentComposer } from '../../../apps/web/src/review/CommentComposer.js';
+import {
+  readViewerSelectionEvidence,
+  type ViewerSelectionEvidence,
+} from '../../../apps/web/src/pdf/viewer-selection-adapter.js';
 
 const htmlPayload = '<img src=x onerror="globalThis.__htmlPayloadExecuted=true">';
 const root = document.querySelector('#root');
@@ -38,6 +42,14 @@ globalThis.viewerAcceptance = {
     if (!documentId) return 0;
     const selection = registry.getPlugin<SelectionPlugin>(SelectionPlugin.id)?.provides();
     return selection?.getFormattedSelection(documentId).flatMap(({ segmentRects }) => segmentRects).length ?? 0;
+  },
+  async selectionContract() {
+    if (!registry) return null;
+    const documentId = registry.getStore().getState().core.activeDocumentId;
+    if (!documentId) return null;
+    const selection = registry.getPlugin<SelectionPlugin>(SelectionPlugin.id)?.provides();
+    if (!selection) return null;
+    return readViewerSelectionEvidence(documentId, selection).catch(() => null);
   },
   zoomLevel() {
     if (!registry) return 0;
@@ -88,6 +100,8 @@ createRoot(root).render(<>
             ? '/test/fixtures/pdfs/mixed-text-image.pdf'
             : params.get('fixture') === 'multi-text'
               ? '/test/fixtures/pdfs/multi-page-text.pdf'
+              : params.get('fixture') === 'cross-page-selection'
+                ? '/test/fixtures/pdfs/cross-page-selection.pdf'
               : '/test/fixtures/pdfs/text-native-with-annotations.pdf',
       }}
       documentTitle={`Metadata ${htmlPayload}`}
@@ -161,6 +175,7 @@ declare global {
     ready: boolean;
     selectionGeometryReady(pageIndex?: number): boolean;
     selectionRectCount(): number;
+    selectionContract(): Promise<ViewerSelectionEvidence | null>;
     zoomLevel(): number;
     selectionAnchorStatus(): string;
     goToPage(pageNumber: number): void;

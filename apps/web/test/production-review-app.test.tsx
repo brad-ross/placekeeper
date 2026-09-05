@@ -23,6 +23,7 @@ import { SaveDestinationDialog } from "../src/save/SaveDestinationDialog.js";
 import {
   canDeriveAnnotationOutlineLabels,
   deriveAnnotationOutlineLabels,
+  reviewItemNavigationTarget,
 } from "../src/review/annotation-outline-context.js";
 import {
   buildReattachmentCommand,
@@ -39,6 +40,44 @@ import {
 import { MemoryReviewLocationHistory } from "../src/review/review-location-history.js";
 
 describe("one production review tree", () => {
+  it('navigates a cross-page item once through its canonical first segment', () => {
+    expect(reviewItemNavigationTarget({
+      id: 'cross-page',
+      kind: 'highlight',
+      pageIndex: 2,
+      createdAt: '2026-09-03T12:00:00.000Z',
+      updatedAt: '2026-09-03T12:00:00.000Z',
+      payload: {
+        quote: 'first\nlast',
+        prefix: '',
+        suffix: '',
+        rect: { x: 20, y: 80, width: 40, height: 12 },
+        segmentRects: [{ x: 20, y: 80, width: 40, height: 12 }],
+        pages: [
+          {
+            pageIndex: 2,
+            quote: 'first',
+            prefix: '',
+            suffix: '',
+            rect: { x: 20, y: 80, width: 40, height: 12 },
+            segmentRects: [{ x: 20, y: 80, width: 40, height: 12 }],
+          },
+          {
+            pageIndex: 3,
+            quote: 'last',
+            prefix: '',
+            suffix: '',
+            rect: { x: 12, y: 16, width: 32, height: 12 },
+            segmentRects: [{ x: 12, y: 16, width: 32, height: 12 }],
+          },
+        ],
+        pageBoundaries: [{ afterPageIndex: 2, separator: '\n' }],
+        reliable: true,
+        comment: '',
+      },
+    })).toEqual({ pageIndex: 2, point: { x: 20, y: 80 } });
+  });
+
   it("chooses the next, previous, or section fallback after attention rows disappear", () => {
     const keys = ["first", "middle", "final"];
     expect(reconciliationFocusKeyAfterRemoval(keys, "first")).toBe("middle");

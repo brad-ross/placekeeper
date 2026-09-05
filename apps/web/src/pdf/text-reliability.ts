@@ -37,6 +37,7 @@ export type ReliabilityDiagnostic =
   | 'selection-glyph-count-mismatch'
   | 'selection-geometry-invalid'
   | 'selection-geometry-out-of-bounds'
+  | 'selection-page-limit-exceeded'
   | 'selection-text-geometry-mismatch'
   | 'selection-has-ambiguous-characters'
   | 'selection-reading-order-unsupported'

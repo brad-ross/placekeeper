@@ -26,9 +26,9 @@ export const CATALOG_DISTRIBUTION_BASELINE = {
   artifactSha256: {
     runtime: "423428687dab0b6049a86d85f879df79f2fee251322d53ad314ae1effd616e3b",
     report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
-    thirdPartyNotices: "e25a92f59af5cab8b24d384aefadb93e1de4fd783492d2022200b4493233e91f",
+    thirdPartyNotices: "e93d61075ce6ff0452d9c841030d8a7125030182e324cd76ca7f640fcb244bdb",
   },
-  productionWebJavaScriptBytes: 2_514_976,
+  productionWebJavaScriptBytes: 2_535_820,
 } as const;
 
 const CATALOG_ATTRIBUTION_URLS = [

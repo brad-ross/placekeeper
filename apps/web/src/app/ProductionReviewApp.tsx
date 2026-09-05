@@ -10,10 +10,23 @@ import { sanitizeReviewRuntimeDisplayString } from "../../../../packages/core/sr
 import type { CaretAnchor } from "../pdf/selection-anchor.js";
 import type { ExistingAnnotation, ExistingAnnotationsDiscovery } from "../pdf/existing-annotations.js";
 import {
+  acceptCopySelectionUpdate,
   acceptSelectionUpdate,
+  applyPdfCopyCommand,
   INITIAL_SELECTION_UPDATE,
+  nativeCopyHasPrecedence,
+  resolvePdfCopyCommand,
+  type CopySelectionUpdate,
+  type PdfCopyOwner,
+  type PdfCopySnapshots,
   type SelectionUpdate,
 } from "../pdf/selection-state.js";
+import { PDF_SELECTION_PAGE_LIMIT_MESSAGE } from '../pdf/selection-page-limit.js';
+import {
+  NativePdfSelectionBridge,
+  nativeSelectionBelongsToPdfBridge,
+} from '../pdf/NativePdfSelectionBridge.js';
+import { isEditableTarget } from '../review/input-controller.js';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import { App } from "./App.js";
 import { ReferenceManualScrollObserver } from '../pdf/reference-manual-scroll.js';
@@ -84,7 +97,9 @@ import {
   createTrailingTaskScheduler,
   waitForReviewNavigationReady,
 } from "../review/main-location-refresh.js";
-import { reviewItemPoint } from "../review/annotation-outline-context.js";
+import {
+  reviewItemNavigationTarget,
+} from "../review/annotation-outline-context.js";
 import {
   BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN,
   RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
@@ -128,7 +143,9 @@ export interface ProductionScope {
   readonly sourceDisposition?: 'local' | 'remote-temporary';
   readonly sourceDisplayName?: string;
   readonly sourceRootPath?: string;
-  readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode' | 'chrome' | 'macos';
+  readonly launchSurface?: 'browser' | 'finder' | 'codex' | 'vscode' | 'chrome' | 'macos' | 'static';
+  /** Static hosting keeps review state only in this tab and offers explicit PDF export. */
+  readonly persistenceMode?: 'export-only';
   /** A restarted browser is awaiting task-scoped Codex reattachment. */
   readonly reconnectPending?: true;
   readonly codexContext?: LiveContextBindingStatus;
@@ -140,6 +157,19 @@ function referenceFocusRailSurface(
 ): 'bottom' | 'right' {
   if (layout.regime === 'narrow') return 'bottom';
   return hasRemainingReferences && layout.referenceDock === 'bottom' ? 'bottom' : 'right';
+}
+
+function referencePdfIsVisible(
+  layout: ReferenceWorkspaceLayoutState,
+  navigation: ReferenceNavigationState,
+): boolean {
+  if (navigation.activeTabIdentity === null) return false;
+  if (layout.regime === 'narrow') {
+    return layout.narrowOpen && layout.narrowSurface === 'references';
+  }
+  return layout.referenceDock === 'bottom'
+    ? layout.bottomReferencesOpen
+    : layout.rightWorkspaceOpen && navigation.workspace.lastMode === 'references';
 }
 
 export type ProductionSaveStatus = SaveStatus;
@@ -534,6 +564,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   // task prompt promotes this same authenticated page to the Codex surface.
   const [scope, setScope] = useState(props.scope);
   useEffect(() => setScope(props.scope), [props.scope]);
+  const exportOnly = scope.persistenceMode === 'export-only';
   const [metadataPageTitle, setMetadataPageTitle] = useState<PdfMetadataPageTitle | null>(null);
   const portableItemIdsRef = useRef(initiallyPortableItemIds(
     props.initialState,
@@ -569,10 +600,17 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [authoringAnchorNavigation, setAuthoringAnchorNavigation] = useState<
     AuthoringAnchorNavigationState | null
   >(null);
-  const [authoringPreview, setAuthoringPreview] = useState<ReviewAnnotation | null>(null);
+  const [authoringPreview, setAuthoringPreview] = useState<readonly ReviewAnnotation[] | null>(null);
   const [selectionUpdate, setSelectionUpdate] = useState<SelectionUpdate>(INITIAL_SELECTION_UPDATE);
   const selectionUpdateRef = useRef(selectionUpdate);
   selectionUpdateRef.current = selectionUpdate;
+  const [mainCopySelection, setMainCopySelection] = useState<CopySelectionUpdate | null>(null);
+  const [referenceCopySelection, setReferenceCopySelection] = useState<CopySelectionUpdate | null>(null);
+  const [pdfCopyOwner, setPdfCopyOwner] = useState<PdfCopyOwner>(null);
+  const paletteCopyOwnerRef = useRef<PdfCopyOwner>(null);
+  const [pdfCopyOwnerIndicatorVisible, setPdfCopyOwnerIndicatorVisible] = useState(false);
+  const [pdfCopyAnnouncement, setPdfCopyAnnouncement] = useState('');
+  const [pdfCopyError, setPdfCopyError] = useState<string | null>(null);
   const [commandError, setCommandError] = useState<string | null>(null);
   const [locationRestoreStatus, setLocationRestoreStatus] = useState<LocationRestoreStatus>('idle');
   const [codexContext, setCodexContext] = useState(scope.codexContext);
@@ -778,7 +816,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   ]);
   useEffect(() => props.api.presence?.(), [props.api]);
   const ownedAnnotations = useMemo(
-    () => projectReviewItems(state.items, state.workflow.documentGeneration),
+    () => projectReviewItems(
+      state.items,
+      state.workflow.documentGeneration,
+      { includePortableMetadata: false },
+    ),
     [state.items, state.workflow.documentGeneration],
   );
   useEffect(() => {
@@ -1013,9 +1055,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         resolvePortableItem: (itemId: string) => {
           if (!portableItemIdsRef.current.has(itemId)) return null;
           const item = stateRef.current.items.find(({ id }) => id === itemId);
-          return item === undefined
-            ? null
-            : { pageIndex: item.pageIndex, point: reviewItemPoint(item) };
+          return item === undefined ? null : reviewItemNavigationTarget(item);
         },
       }),
     });
@@ -1110,6 +1150,22 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const onSelectionUpdate = useCallback((update: SelectionUpdate) => {
     setSelectionUpdate((current) => acceptSelectionUpdate(current, update));
   }, []);
+  useEffect(() => {
+    setReferenceCopySelection(null);
+    setPdfCopyOwner((owner) => owner === 'reference' ? null : owner);
+  }, [navigationState.activeTabIdentity]);
+  const onCopySelectionUpdate = useCallback((update: CopySelectionUpdate) => {
+    if (update.surface.documentGeneration !== documentGenerationRef.current) return;
+    if (update.surface.kind === 'reference') {
+      if (update.surface.tabIdentity !== navigationStateRef.current.activeTabIdentity) return;
+      if (!referencePdfIsVisible(referenceLayoutStateRef.current, navigationStateRef.current)) return;
+      setReferenceCopySelection((current) => acceptCopySelectionUpdate(current, update));
+    } else {
+      setMainCopySelection((current) => acceptCopySelectionUpdate(current, update));
+      if (update.kind === 'cleared') setPdfCopyOwnerIndicatorVisible(false);
+    }
+    if (update.kind === 'pending' || update.kind === 'ready') setPdfCopyError(null);
+  }, []);
   const publishCorrespondence = () => setCorrespondingItemId(
     rowCorrespondenceRef.current ?? markFocusRef.current ?? markHoverRef.current,
   );
@@ -1194,6 +1250,11 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     searchRequestedRef.current = false;
     setSearchState(initialPdfSearchState());
     setSelectionUpdate((current) => ({ kind: 'cleared', generation: current.generation + 1 }));
+    setMainCopySelection(null);
+    setReferenceCopySelection(null);
+    setPdfCopyOwner(null);
+    setPdfCopyOwnerIndicatorVisible(false);
+    setPdfCopyError(null);
     setCaret(null);
     setSelectionPlacement(null);
     setCaretPlacement(null);
@@ -1539,6 +1600,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       {...(props.resourcePolicy === undefined ? {} : { resourcePolicy: props.resourcePolicy })}
       documentTitle={scope.documentTitle}
       onSelectionUpdate={onSelectionUpdate}
+      onCopySelectionUpdate={onCopySelectionUpdate}
       ownedAnnotations={ownedAnnotations}
       authoringPreview={authoringPreview}
       keyboardPageNoteActive={keyboardPageNoteActive}
@@ -1550,6 +1612,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       inventoryRetryGeneration={inventoryRetryGeneration}
       documentGeneration={navigationState.documentGeneration}
       referenceViewportHost={referenceViewportHost}
+      activeReferenceTabIdentity={navigationState.activeTabIdentity}
       onReferenceDocumentControls={onReferenceDocumentControls}
       onReferenceManualScroll={() => navigationCoordinator.observeReferenceManualScroll()}
       referenceManualScrollObserver={referenceManualScrollObserverRef.current}
@@ -1662,6 +1725,74 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     rightWorkspaceMode,
     navigationState.workspace.lastMode,
   );
+  const referencePdfVisible = referencePdfIsVisible(referenceLayoutState, navigationState);
+  useEffect(() => {
+    if (referencePdfVisible) return;
+    setReferenceCopySelection(null);
+    setPdfCopyOwner((owner) => owner === 'reference' ? null : owner);
+  }, [referencePdfVisible]);
+  const pdfCopySnapshots: PdfCopySnapshots = useMemo(() => ({
+    main: mainCopySelection,
+    reference: referenceCopySelection,
+  }), [mainCopySelection, referenceCopySelection]);
+  const copyMainSelectionFromPalette = useCallback(() => {
+    paletteCopyOwnerRef.current = 'main';
+    let copied = false;
+    try {
+      // Embedded browsers may deny the async Clipboard API while still allowing
+      // the user-initiated copy event path used by the platform shortcut.
+      copied = document.execCommand('copy');
+    } catch {
+      copied = false;
+    } finally {
+      paletteCopyOwnerRef.current = null;
+    }
+    setPdfCopyOwner('main');
+    if (!copied) {
+      setPdfCopyAnnouncement('');
+      setPdfCopyError('Placekeeper could not copy the selected text. Try Command-C instead.');
+    }
+  }, []);
+  useEffect(() => {
+    if (mainCopySelection !== null && mainCopySelection.kind !== 'cleared'
+      && referenceCopySelection !== null && referenceCopySelection.kind !== 'cleared') {
+      setPdfCopyOwnerIndicatorVisible(true);
+    }
+  }, [mainCopySelection, referenceCopySelection]);
+  useEffect(() => {
+    const handleCopy = (event: ClipboardEvent) => {
+      const nativeSelection = window.getSelection();
+      const activeOwner = paletteCopyOwnerRef.current ?? pdfCopyOwner;
+      const command = resolvePdfCopyCommand({
+        nativeCopyHasPrecedence: nativeCopyHasPrecedence({
+          editableTarget: isEditableTarget(event.target),
+          domSelectionCollapsed: nativeSelection?.isCollapsed ?? true,
+          domSelectionText: nativeSelection?.toString() ?? '',
+          domSelectionOwnedByPdf: nativeSelectionBelongsToPdfBridge(nativeSelection),
+        }),
+        owner: activeOwner,
+        snapshots: pdfCopySnapshots,
+      });
+      applyPdfCopyCommand(command, event, {
+        onPending: () => setPdfCopyAnnouncement(
+          'Selected text is still being read. Retry Copy when it is ready.',
+        ),
+        onError: (kind) => {
+          setPdfCopyError(kind === 'over-limit'
+            ? PDF_SELECTION_PAGE_LIMIT_MESSAGE
+            : 'Selected PDF text is unavailable. Reselect the text and try Copy again.');
+        },
+      });
+      if (command.kind === 'copy') {
+        setPdfCopyError(null);
+        setPdfCopyAnnouncement(
+          `Copied selected text from ${activeOwner === 'main' ? 'Main PDF' : 'Reference PDF'}.`,
+        );
+      }
+    };
+    window.addEventListener('copy', handleCopy);
+    return () => window.removeEventListener('copy', handleCopy);
+  }, [pdfCopyOwner, pdfCopySnapshots]);
   const activeReferenceReturn = referenceReturnForActiveTab(
     navigationState,
     referenceReturnState,
@@ -1677,23 +1808,51 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       data-production-review
       data-launch-surface={scope.launchSurface ?? 'browser'}
       ref={productionRootRef}
+      onPointerDownCapture={(event) => {
+        const surface = event.target instanceof Element
+          ? event.target.closest<HTMLElement>('[data-pdf-copy-surface]')?.dataset.pdfCopySurface
+          : undefined;
+        setPdfCopyOwner(surface === 'main' || surface === 'reference' ? surface : null);
+      }}
+      onFocusCapture={(event) => {
+        const surface = event.target instanceof Element
+          ? event.target.closest<HTMLElement>('[data-pdf-copy-surface]')?.dataset.pdfCopySurface
+          : undefined;
+        setPdfCopyOwner(surface === 'main' || surface === 'reference' ? surface : null);
+      }}
     >
+      <NativePdfSelectionBridge owner={pdfCopyOwner} snapshots={pdfCopySnapshots} />
       <ReviewShell
         state={state}
         documentTitle={scope.documentTitle}
-        savedLabel={state.workflow.mode === 'generated-output' ? 'Protected review state' : 'Saved'}
-        savePhase={state.workflow.mode === 'generated-output' ? 'clean' : saveStatus.sync.phase}
+        savedLabel={exportOnly
+          ? 'Export to keep your annotations'
+          : state.workflow.mode === 'generated-output' ? 'Protected review state' : 'Saved'}
+        savePhase={exportOnly
+          ? 'not-saved'
+          : state.workflow.mode === 'generated-output' ? 'clean' : saveStatus.sync.phase}
+        exportOnly={exportOnly}
         savePendingDestination={
           state.workflow.mode !== 'generated-output'
           && scope.sourceDisposition === 'remote-temporary'
           && saveStatus.destination.phase === 'none'
           && saveStatus.sync.phase === 'not-saved'
         }
-        saveOptionsOpen={state.workflow.mode === 'generated-output' ? false : destinationDialog !== null}
-        {...(state.workflow.mode === 'generated-output' ? {} : { onSaveOptions: () => openCopyDialog("menu") })}
+        saveOptionsOpen={state.workflow.mode === 'generated-output' || exportOnly
+          ? false
+          : destinationDialog !== null}
+        {...(state.workflow.mode === 'generated-output' || exportOnly
+          ? {}
+          : { onSaveOptions: () => openCopyDialog("menu") })}
         generationRefreshStatus={props.generationRefreshStatus ?? 'idle'}
         locationRestoreStatus={locationRestoreStatus}
-        toolError={commandError}
+        toolError={pdfCopyError ?? commandError}
+        onSelectionPageLimitExceeded={() => setCommandError(PDF_SELECTION_PAGE_LIMIT_MESSAGE)}
+        onCopySelection={copyMainSelectionFromPalette}
+        pdfCopyOwner={pdfCopyOwner}
+        pdfCopySnapshots={pdfCopySnapshots}
+        pdfCopyOwnerIndicatorVisible={pdfCopyOwnerIndicatorVisible}
+        pdfCopyAnnouncement={pdfCopyAnnouncement}
         onExportReviewedCopy={(confirmPossiblyStale) => {
           const method = props.api.exportReviewedCopy;
           if (method === undefined) return Promise.reject(new Error('Reviewed export is unavailable.'));
@@ -1960,7 +2119,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             currentState,
             saveStatus,
             command,
-            scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local',
+            exportOnly
+              ? 'ephemeral'
+              : scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local',
           );
           if (gated.kind === "choose-destination") {
             openCopyDialog("first-annotation", {
@@ -2002,11 +2163,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           return result;
         }}
         onNavigate={(item) => {
+          const target = reviewItemNavigationTarget(item);
+          if (target === null) return;
           const portable = portableItemIdsRef.current.has(item.id)
             && saveStatusIsCleanCurrent(state, saveStatus);
           void navigationCoordinator.navigateMainAnnotation({
-            pageIndex: item.pageIndex,
-            point: reviewItemPoint(item),
+            ...target,
             ...(portable
               ? { portableItemId: item.id }
               : { linkFallbackNotice: 'The shareable link uses this page until the item is saved.' }),
@@ -2022,7 +2184,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       >
         {viewer}
       </ReviewShell>
-      <SaveDestinationDialog
+      {exportOnly ? null : <SaveDestinationDialog
         open={destinationDialog !== null}
         sourceDisposition={scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local'}
         protectedRecovery={
@@ -2190,7 +2352,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             setDestinationEstablishing(false);
           }
         }}
-      />
+      />}
     </main>
   );
 }

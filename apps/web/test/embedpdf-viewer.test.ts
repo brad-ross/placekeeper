@@ -1,5 +1,6 @@
 import { DocumentManagerPlugin } from '@embedpdf/plugin-document-manager';
 import { InteractionManagerPlugin } from '@embedpdf/plugin-interaction-manager';
+import { SelectionPlugin } from '@embedpdf/plugin-selection';
 import { ZoomMode, ZoomPlugin } from '@embedpdf/plugin-zoom';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -9,6 +10,11 @@ import {
   validateViewerResourceUrl,
 } from '../src/pdf/embedpdf-viewer.js';
 import { MAIN_PDF_DOCUMENT_ID } from '../src/pdf/viewer-document-ids.js';
+import {
+  PDF_SELECTION_GEOMETRY_CACHE_PAGE_LIMIT,
+  PDF_SELECTION_PAGE_LIMIT,
+  PDF_SELECTION_PAGE_LIMIT_MESSAGE,
+} from '../src/pdf/selection-page-limit.js';
 
 describe('EmbedPDF registry configuration', () => {
   it('pins one two-document registry with a stable active main document', () => {
@@ -27,6 +33,9 @@ describe('EmbedPDF registry configuration', () => {
     const interaction = registrations.find(({ package: pluginPackage }) => (
       pluginPackage.manifest.id === InteractionManagerPlugin.id
     ));
+    const selection = registrations.find(({ package: pluginPackage }) => (
+      pluginPackage.manifest.id === SelectionPlugin.id
+    ));
     const zoom = registrations.find(({ package: pluginPackage }) => (
       pluginPackage.manifest.id === ZoomPlugin.id
     ));
@@ -44,6 +53,12 @@ describe('EmbedPDF registry configuration', () => {
     });
     expect(interaction?.config).toEqual({
       exclusionRules: { dataAttributes: ['data-pdf-link-control'] },
+    });
+    expect(PDF_SELECTION_PAGE_LIMIT).toBe(12);
+    expect(PDF_SELECTION_GEOMETRY_CACHE_PAGE_LIMIT).toBeGreaterThan(PDF_SELECTION_PAGE_LIMIT);
+    expect(PDF_SELECTION_PAGE_LIMIT_MESSAGE).toContain(String(PDF_SELECTION_PAGE_LIMIT));
+    expect(selection?.config).toMatchObject({
+      maxCachedGeometries: PDF_SELECTION_GEOMETRY_CACHE_PAGE_LIMIT,
     });
     expect(zoom?.config).toMatchObject({
       defaultZoomLevel: ZoomMode.FitWidth,

@@ -1,5 +1,9 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import type { ViewerInteractionEvent } from '../../apps/web/src/pdf/viewer-interaction-events.js';
+import { PDF_SELECTION_PAGE_LIMIT } from '../../apps/web/src/pdf/selection-page-limit.js';
+import type { ViewerSelectionEvidence } from '../../apps/web/src/pdf/viewer-selection-adapter.js';
+
+type SelectionContract = Awaited<ReturnType<Window['viewerAcceptance']['selectionContract']>>;
 
 declare global {
   interface Window {
@@ -8,6 +12,7 @@ declare global {
       ready: boolean;
       selectionGeometryReady(pageIndex?: number): boolean;
       selectionRectCount(): number;
+      selectionContract(): Promise<ViewerSelectionEvidence | null>;
       caretAnchorPageIndex(): number | null;
       caretAnchorLeftContext(): string;
       zoomLevel(): number;
@@ -17,6 +22,149 @@ declare global {
       interactionCount(type: ViewerInteractionEvent['type']): number;
     };
   }
+}
+
+async function showSelectablePdfPage(page: Page, pageIndex: number) {
+  const pdfPage = page.locator(`[data-page-index="${pageIndex}"]`);
+  await expect.poll(async () => {
+    await page.evaluate(
+      (pageNumber) => window.viewerAcceptance.goToPage(pageNumber),
+      pageIndex + 1,
+    );
+    if (await pdfPage.count() === 0) return false;
+    return pdfPage.evaluate((element) => {
+      const selectableLineY = element.getBoundingClientRect().top + 98;
+      return selectableLineY > 0 && selectableLineY < window.innerHeight;
+    });
+  }).toBe(true);
+  await expect(pdfPage).toBeVisible();
+  await page.waitForFunction(
+    (targetPageIndex) => window.viewerAcceptance.selectionGeometryReady(targetPageIndex),
+    pageIndex,
+  );
+  return pdfPage;
+}
+
+async function dragAcrossSelectionPages(
+  page: Page,
+  lastPageIndex: number,
+  direction: 'forward' | 'reverse',
+): Promise<{ evidence: NonNullable<SelectionContract>; intermediateTextOffscreen: boolean }> {
+  await page.goto('/test/acceptance/viewer-harness/index.html?fixture=cross-page-selection');
+  await page.waitForFunction(() => window.viewerAcceptance?.ready === true);
+
+  const startPageIndex = direction === 'forward' ? 0 : lastPageIndex;
+  const endPageIndex = direction === 'forward' ? lastPageIndex : 0;
+  const visitOrder = direction === 'forward'
+    ? Array.from({ length: lastPageIndex }, (_, index) => index + 1)
+    : Array.from({ length: lastPageIndex }, (_, index) => lastPageIndex - index - 1);
+  const startPage = await showSelectablePdfPage(page, startPageIndex);
+  const startBox = await startPage.boundingBox();
+  if (!startBox) throw new Error('Cross-page selection start page has no bounds.');
+  const startX = direction === 'forward' ? startBox.x + 74 : startBox.x + 300;
+  await page.mouse.move(startX, startBox.y + 98);
+  await page.mouse.down();
+  await page.mouse.move(
+    direction === 'forward' ? startX + 12 : startX - 12,
+    startBox.y + 98,
+    { steps: 3 },
+  );
+  await expect.poll(async () => (await page.evaluate(
+    () => window.viewerAcceptance.selectionContract(),
+  ))?.selecting).toBe(true);
+
+  for (const pageIndex of visitOrder) {
+    const pdfPage = await showSelectablePdfPage(page, pageIndex);
+    const box = await pdfPage.boundingBox();
+    if (!box) throw new Error(`Cross-page selection page ${pageIndex + 1} has no bounds.`);
+    await page.mouse.move(
+      direction === 'forward' ? box.x + 300 : box.x + 74,
+      box.y + 98,
+      { steps: 8 },
+    );
+  }
+
+  const intermediatePageIndex = Math.floor(lastPageIndex / 2);
+  const intermediateImage = page.locator(`[data-page-index="${intermediatePageIndex}"] > img`);
+  const intermediateTextOffscreen = await intermediateImage.evaluate((element) => {
+    const selectableLineY = element.getBoundingClientRect().top + 98;
+    return selectableLineY <= 0 || selectableLineY >= window.innerHeight;
+  }).catch(() => true);
+  const endPage = page.locator(`[data-page-index="${endPageIndex}"]`);
+  await endPage.evaluate((element) => {
+    element.dataset.crossPagePointerups = '0';
+    element.addEventListener('pointerup', () => {
+      element.dataset.crossPagePointerups = String(
+        Number(element.dataset.crossPagePointerups ?? '0') + 1,
+      );
+    }, { once: true });
+  });
+  await page.mouse.up();
+  await expect(endPage).toHaveAttribute('data-cross-page-pointerups', '1');
+
+  await expect.poll(async () => (await page.evaluate(
+    () => window.viewerAcceptance.selectionContract(),
+  ))?.selecting).toBe(false);
+  const evidence = await page.evaluate(() => window.viewerAcceptance.selectionContract());
+  if (!evidence) throw new Error('Cross-page selection did not return public semantic evidence.');
+  return { evidence, intermediateTextOffscreen };
+}
+
+async function selectAcrossPageLimit(page: Page): Promise<{
+  withinLimit: NonNullable<SelectionContract>;
+  overLimit: NonNullable<SelectionContract>;
+}> {
+  await page.goto('/test/acceptance/viewer-harness/index.html?fixture=cross-page-selection');
+  await page.waitForFunction(() => window.viewerAcceptance?.ready === true);
+
+  for (let pageIndex = 0; pageIndex <= PDF_SELECTION_PAGE_LIMIT; pageIndex += 1) {
+    await page.evaluate(
+      (pageNumber) => window.viewerAcceptance.goToPage(pageNumber),
+      pageIndex + 1,
+    );
+    await page.waitForFunction(
+      (targetPageIndex) => window.viewerAcceptance.selectionGeometryReady(targetPageIndex),
+      pageIndex,
+    );
+  }
+
+  const startPage = await showSelectablePdfPage(page, 0);
+  const startBox = await startPage.boundingBox();
+  if (!startBox) throw new Error('Page-limit selection start page has no bounds.');
+  await page.mouse.move(startBox.x + 74, startBox.y + 98);
+  await page.mouse.down();
+  await page.mouse.move(startBox.x + 86, startBox.y + 98, { steps: 3 });
+  await expect.poll(async () => (await page.evaluate(
+    () => window.viewerAcceptance.selectionContract(),
+  ))?.selecting).toBe(true);
+
+  const twelfthPage = await showSelectablePdfPage(page, PDF_SELECTION_PAGE_LIMIT - 1);
+  const twelfthBox = await twelfthPage.boundingBox();
+  if (!twelfthBox) throw new Error('Twelfth selection page has no bounds.');
+  await page.mouse.move(twelfthBox.x + 300, twelfthBox.y + 98, { steps: 8 });
+  const withinLimit = await page.evaluate(() => window.viewerAcceptance.selectionContract());
+  if (!withinLimit) throw new Error('Twelve-page selection evidence is unavailable.');
+
+  const thirteenthPage = await showSelectablePdfPage(page, PDF_SELECTION_PAGE_LIMIT);
+  const thirteenthBox = await thirteenthPage.boundingBox();
+  if (!thirteenthBox) throw new Error('Thirteenth selection page has no bounds.');
+  await page.mouse.move(thirteenthBox.x + 300, thirteenthBox.y + 98, { steps: 8 });
+  await thirteenthPage.evaluate((element) => {
+    element.dataset.crossPagePointerups = '0';
+    element.addEventListener('pointerup', () => {
+      element.dataset.crossPagePointerups = String(
+        Number(element.dataset.crossPagePointerups ?? '0') + 1,
+      );
+    }, { once: true });
+  });
+  await page.mouse.up();
+  await expect(thirteenthPage).toHaveAttribute('data-cross-page-pointerups', '1');
+  await expect.poll(async () => (await page.evaluate(
+    () => window.viewerAcceptance.selectionContract(),
+  ))?.selecting).toBe(false);
+  const overLimit = await page.evaluate(() => window.viewerAcceptance.selectionContract());
+  if (!overLimit) throw new Error('Thirteen-page selection evidence is unavailable.');
+  return { withinLimit, overLimit };
 }
 
 test.describe('shared viewer foundation', () => {
@@ -139,6 +287,56 @@ test.describe('shared viewer foundation', () => {
 
     await expect(page.getByRole('button', { name: 'Proofread mode' })).toHaveCount(0);
     expect(await page.evaluate(() => window.viewerAcceptance.reviewItemCount())).toBe(0);
+  });
+
+  for (const direction of ['forward', 'reverse'] as const) {
+    test(`completes a real ${direction} cross-page pointer selection`, async ({ page }) => {
+      const { evidence, intermediateTextOffscreen } = await dragAcrossSelectionPages(
+        page,
+        2,
+        direction,
+      );
+      expect(intermediateTextOffscreen).toBe(true);
+      expect(evidence).toMatchObject({ active: true, selecting: false, stable: true });
+      expect(evidence.formatted.map(({ pageIndex }) => pageIndex)).toEqual([0, 1, 2]);
+      expect(evidence.formatted.every(({ segmentRects }) => segmentRects.length > 0)).toBe(true);
+      expect(evidence.pages.map(({ pageIndex }) => pageIndex)).toEqual([0, 1, 2]);
+      expect(evidence.pages.every(({ geometryCached }) => geometryCached)).toBe(true);
+      expect(evidence.geometryPageIndexes).toEqual(expect.arrayContaining([0, 1, 2]));
+      expect(evidence.text).toHaveLength(3);
+      expect(evidence.text[0]).toContain('PAGE 01');
+      expect(evidence.text[1]).toContain('PAGE 02');
+      expect(evidence.text[2]).toContain('PAGE 03');
+      expect(evidence.selectionGeneration.length).toBeGreaterThan(0);
+      const repeatedEvidence = await page.evaluate(() => window.viewerAcceptance.selectionContract());
+      expect(repeatedEvidence?.selectionGeneration).toBe(evidence.selectionGeneration);
+      expect(repeatedEvidence?.text).toEqual(evidence.text);
+    });
+  }
+
+  test('retains 12-page evidence and detects a selected 13th page above cache pressure', async ({ page }) => {
+    test.setTimeout(90_000);
+    const { withinLimit, overLimit } = await selectAcrossPageLimit(page);
+    expect(withinLimit).toMatchObject({
+      pageCount: PDF_SELECTION_PAGE_LIMIT,
+      withinPageLimit: true,
+      stable: true,
+    });
+    expect(withinLimit.pages).toHaveLength(PDF_SELECTION_PAGE_LIMIT);
+    expect(withinLimit.formatted).toHaveLength(PDF_SELECTION_PAGE_LIMIT);
+    expect(withinLimit.pages.every(({ geometryCached }) => geometryCached)).toBe(true);
+
+    expect(overLimit).toMatchObject({
+      pageCount: PDF_SELECTION_PAGE_LIMIT + 1,
+      withinPageLimit: false,
+      stable: true,
+      selection: { start: { page: 0 }, end: { page: PDF_SELECTION_PAGE_LIMIT } },
+    });
+    expect(overLimit.pages).toHaveLength(PDF_SELECTION_PAGE_LIMIT + 1);
+    expect(overLimit.formatted).toHaveLength(PDF_SELECTION_PAGE_LIMIT + 1);
+    expect(overLimit.pages.every(({ geometryCached }) => geometryCached)).toBe(true);
+    expect(overLimit.pages.every(({ text }) => text === null)).toBe(true);
+    expect(overLimit.text).toEqual([]);
   });
 
   test('never arms text selection from a secondary pointer gesture', async ({ page }) => {

@@ -1,5 +1,6 @@
 import {
   anchorEvidenceFromReviewItem,
+  normalizeReviewSelectionAnchor,
   type ReviewItem,
 } from '../../../../packages/core/src/review-model.js';
 import { existingAnnotationKey, type ExistingAnnotation } from '../pdf/existing-annotations.js';
@@ -31,10 +32,18 @@ export function canDeriveAnnotationOutlineLabels(input: {
     && input.navigationGeneration === input.outlineGeneration;
 }
 
-export function reviewItemPoint(item: ReviewItem): { readonly x: number; readonly y: number } | null {
+export function reviewItemNavigationTarget(item: ReviewItem): {
+  readonly pageIndex: number;
+  readonly point: { readonly x: number; readonly y: number };
+} | null {
   try {
-    const { rect } = anchorEvidenceFromReviewItem(item);
-    return { x: rect.x, y: rect.y };
+    const anchor = anchorEvidenceFromReviewItem(item);
+    const page = anchor.kind === 'selection'
+      ? normalizeReviewSelectionAnchor(anchor).pages[0]
+      : undefined;
+    const pageIndex = page?.pageIndex ?? anchor.pageIndex;
+    const rect = page?.rect ?? anchor.rect;
+    return { pageIndex, point: { x: rect.x, y: rect.y } };
   } catch {
     return null;
   }
@@ -93,11 +102,10 @@ export function deriveAnnotationOutlineLabels(input: {
     resolveTarget,
   });
   for (const item of input.owned) {
-    const point = reviewItemPoint(item);
-    if (point === null) continue;
+    const target = reviewItemNavigationTarget(item);
+    if (target === null) continue;
     const label = annotationLabel({
-      pageIndex: item.pageIndex,
-      point,
+      ...target,
       pages: input.pages,
       resolveOutlineItem,
     });

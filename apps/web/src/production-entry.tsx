@@ -393,6 +393,7 @@ export function parseVscodePresentationState(value: unknown): VscodePresentation
 export async function startRuntime(
   runtime: HostRuntime,
   options: {
+    readonly rootElement?: HTMLElement;
     readonly initialPresentation?: VscodePresentationState;
     readonly onPresentationChange?: (presentation: { readonly pageIndex: number; readonly zoom: number }) => void;
     readonly onDocumentReady?: (generation: number) => void;
@@ -400,7 +401,7 @@ export async function startRuntime(
     readonly onRuntimeError?: (error: Error) => void;
   } = {},
 ): Promise<() => void> {
-  const root = document.querySelector("#root");
+  const root = options.rootElement ?? document.querySelector("#root");
   if (!(root instanceof HTMLElement)) throw new Error("Production review root is unavailable");
   root.dataset.productionRoot = "true";
   const loaded = await runtime.bootstrap();

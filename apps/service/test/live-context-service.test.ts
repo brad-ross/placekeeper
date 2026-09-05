@@ -2,9 +2,9 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
 import type { ExistingPdfAnnotation } from "../../../packages/core/src/live-context.js";
 import type { ReviewItem } from "../../../packages/core/src/review-model.js";
+import * as embedPdfAdapter from "../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { inspectLivePdf, LiveContextService } from "../src/context/live-context-service.js";
 import { RestartReconnectStore } from "../src/context/restart-reconnect-store.js";
 import { TaskBindingRegistry } from "../src/context/task-binding-registry.js";
@@ -112,6 +112,64 @@ async function fixture(options: {
 }
 
 describe("atomic live-context service", () => {
+  it("filters every physical projection of one owned cross-page item", async () => {
+    const pages = [0, 1].map((pageIndex) => ({
+      pageIndex,
+      quote: pageIndex === 0 ? "claim across" : "pages",
+      prefix: pageIndex === 0 ? "before " : "",
+      suffix: pageIndex === 1 ? " after" : "",
+      rect: { x: 40, y: 80, width: 100, height: 14 },
+      segmentRects: [{ x: 40, y: 80, width: 100, height: 14 }],
+    }));
+    const owned: ReviewItem = {
+      ...item(7),
+      payload: {
+        quote: "claim across\npages",
+        prefix: "before ",
+        suffix: " after",
+        rect: pages[0]!.rect,
+        segmentRects: pages[0]!.segmentRects,
+        pages,
+        pageBoundaries: [{ afterPageIndex: 0, separator: "\n" }],
+        reliable: true,
+        proposedText: "replacement",
+      },
+    };
+    const annotation = (annotationId: string, pageIndex: number, author = "Placekeeper") => ({
+      id: annotationId,
+      pageIndex,
+      subtype: "highlight",
+      contents: "replacement",
+      author,
+      flags: ["print"],
+      hasNormalAppearance: true,
+      rect: {
+        origin: { x: 40, y: 80 },
+        size: { width: 100, height: 14 },
+      },
+      preservationFingerprint: annotationId,
+    });
+    const inspect = vi.spyOn(embedPdfAdapter, "inspectPdfAnnotationCatalogWithEmbedPdf").mockResolvedValue({
+      pageCount: 2,
+      portableItems: [owned],
+      annotations: [
+        annotation(`${owned.id}:projection:1`, 0),
+        annotation(`${owned.id}:projection:2`, 1),
+        annotation("external-review", 1, "External reviewer"),
+      ],
+    });
+
+    try {
+      const inspection = await inspectLivePdf({
+        sourceBytes: Buffer.from("%PDF-1.7\nmocked catalog\n%%EOF"),
+      } as Parameters<typeof inspectLivePdf>[0]);
+
+      expect(inspection.existingAnnotations.map(({ id }) => id)).toEqual(["external-review"]);
+    } finally {
+      inspect.mockRestore();
+    }
+  });
+
   it("keeps restart reattachment fresh while the exact Codex browser remains alive", async () => {
     const directory = await mkdtemp(join(tmpdir(), "placekeeper-reconnect-heartbeat-"));
     temporaryDirectories.push(directory);

@@ -39,9 +39,9 @@ Completion requires both exclusivity in source and built artifacts and separate 
 ## Embedded review runtime
 
 ### Review Host Runtime
-The host-neutral contract through which the production review client bootstraps state, invokes review operations, receives invalidations and host commands, and releases resources in a browser, embedded editor, or browser-extension document.
+The host-neutral contract through which the production review client bootstraps state, invokes review operations, receives any available invalidations and host commands, exports reviewed output, and releases resources in a service-backed browser, embedded editor, browser-extension document, or front-end-only static page.
 
-Each host supplies its own transport, lifecycle, resource-issuance policy, and privileged capabilities; sharing this contract does not transfer host authority into the review client.
+Each host supplies its own transport, lifecycle, durability posture, resource-issuance policy, and privileged capabilities; sharing this contract does not transfer host authority into the review client. A host with no durable authority declares and denies that capability rather than simulating service-backed persistence.
 
 ### Review Runtime Protocol
 The versioned operation vocabulary and identity envelope used when a Review Host Runtime crosses an embedded-client boundary.
@@ -70,6 +70,8 @@ A durable, user-authored proofread instruction associated with PDF geometry, suc
 
 Review Items are the canonical review state: viewer markings and delivery artifacts are projections of them rather than independent editable records.
 
+A selection-based Review Item may span several pages while remaining one atomic instruction. It owns page-specific geometry for every covered page; tray presentation, history, persistence, and export operate on the item as a whole.
+
 ### Insertion Caret Anchor
 The reliable PDF insertion target that couples an exact extracted-text boundary with a thin crop-relative page position and the text immediately to either side.
 
@@ -81,6 +83,11 @@ The anchor remains the durable authority after placement. Its browser-space care
 The temporally consistent combination of selected text, extracted-text offsets, and page-space rectangles used to create a PDF text annotation anchor.
 
 Selection capture may await document work only while the selection's semantic state remains unchanged; if that state changes before capture completes, the snapshot is rejected rather than combining values from different selections.
+
+### PDF Copy Authority
+The focused Main PDF or active Reference Tab whose ready semantic selection supplies text when Placekeeper handles a PDF copy command, after editable fields and ordinary browser selections retain native precedence.
+
+Retained selections do not compete implicitly: focus grants authority, hiding a focused Reference Tab revokes it, and a contextual Copy control preserves the owning PDF for a later keyboard copy.
 
 ### Owned Annotation
 A viewer marking projected from a Review Item and identified by that item's canonical identity.

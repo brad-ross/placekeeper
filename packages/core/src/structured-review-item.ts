@@ -1,5 +1,8 @@
 import type { JsonValue, ReviewAnchorDisposition, ReviewItem } from "./review-model.js";
-import { anchorEvidenceFromReviewItem } from "./review-model.js";
+import {
+  anchorEvidenceFromReviewItem,
+  normalizeReviewSelectionAnchor,
+} from "./review-model.js";
 
 export interface SourceHint {
   readonly path: string;
@@ -13,9 +16,18 @@ export interface StructuredReviewItem {
   readonly id: string;
   readonly intent: ReviewItem["kind"];
   readonly pageIndex: number;
+  readonly pageRange?: {
+    readonly firstPageIndex: number;
+    readonly lastPageIndex: number;
+  };
   readonly coordinates: {
     readonly rect: Record<string, number>;
     readonly segmentRects?: readonly Record<string, number>[];
+    readonly pages?: readonly {
+      readonly pageIndex: number;
+      readonly rect: Record<string, number>;
+      readonly segmentRects: readonly Record<string, number>[];
+    }[];
   };
   readonly anchor:
     | { readonly kind: "selection"; readonly quote: string; readonly prefix: string; readonly suffix: string }
@@ -59,9 +71,19 @@ export function projectStructuredReviewItem(
   const evidence = anchorEvidenceFromReviewItem(item);
   const geometry = evidence.rect;
   const segmentRects = evidence.kind === "selection" ? evidence.segmentRects : undefined;
+  const selectionPages = evidence.kind === "selection"
+    ? normalizeReviewSelectionAnchor(evidence).pages
+    : undefined;
   const coordinates = {
     rect: { ...geometry },
     ...(segmentRects === undefined ? {} : { segmentRects: segmentRects.map((rect) => ({ ...rect })) }),
+    ...(selectionPages === undefined ? {} : {
+      pages: selectionPages.map((page) => ({
+        pageIndex: page.pageIndex,
+        rect: { ...page.rect },
+        segmentRects: page.segmentRects.map((rect) => ({ ...rect })),
+      })),
+    }),
   };
   const anchor: StructuredReviewItem["anchor"] = item.kind === "insert"
     ? { kind: "caret", leftContext: string(item, "leftContext"), rightContext: string(item, "rightContext") }
@@ -72,6 +94,10 @@ export function projectStructuredReviewItem(
     id: item.id,
     intent: item.kind,
     pageIndex: evidence.pageIndex,
+    pageRange: {
+      firstPageIndex: selectionPages?.[0]?.pageIndex ?? evidence.pageIndex,
+      lastPageIndex: selectionPages?.at(-1)?.pageIndex ?? evidence.pageIndex,
+    },
     coordinates,
     anchor,
     payload: payload(item),
