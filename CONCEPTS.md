@@ -39,7 +39,7 @@ Completion requires both exclusivity in source and built artifacts and separate 
 ## Embedded review runtime
 
 ### Review Host Runtime
-The host-neutral contract through which the production review client bootstraps state, invokes review operations, receives any available invalidations and host commands, exports reviewed output, and releases resources in a service-backed browser, embedded editor, browser-extension document, or front-end-only static page.
+The host-neutral contract through which the production review client bootstraps state, invokes review operations, receives any available invalidations and host commands, exports reviewed output, and releases resources in a service-backed browser, embedded editor, browser-extension document, front-end-only static page, or native document window.
 
 Each host supplies its own transport, lifecycle, durability posture, resource-issuance policy, and privileged capabilities; sharing this contract does not transfer host authority into the review client. A host with no durable authority declares and denies that capability rather than simulating service-backed persistence.
 
@@ -57,6 +57,11 @@ A source location is only a lookup coordinate: attaching changed bytes advances 
 The revocable attachment of one viewer surface to a Canonical Review, distinct from the review's durable identity and state.
 
 Reloading, duplicating, restoring, or freshly opening a document may issue a new Presentation Lease for the same Canonical Review. Releasing one lease never authorizes deletion while another presentation, protected state, or activated review still depends on it; activation is the commit point after which failures recover in Placekeeper instead of abandoning the review for a different viewer.
+
+### Native Window Attempt
+The disposable acquisition-to-activation lifetime of one native document-window candidate, binding its helper, embedded runtime, resources, readiness proofs, and provisional service admission.
+
+Starting a replacement or failure Retry invalidates the prior Native Window Attempt so late messages cannot affect its successor. Before activation, cancellation releases provisional authority; after activation, the Presentation Lease governs the attachment. Service-directed Protected Recovery can re-admit recovered state through the existing recovery helper and identities, while failure Retry starts a fresh attempt.
 
 ## PDF review
 
@@ -289,4 +294,4 @@ Activating its primary row creates a Meaningful Jump in the Main Reading Thread,
 
 ## Relationships
 
-A Review Item projects to an Owned Annotation using Crop-relative Geometry and may carry Portable Annotation Identity in the saved PDF. The PDF Annotation Catalog retains every source annotation; reviewer-facing projections remove owned and Navigational PDF Annotations before forming the separate read-only Existing PDF Annotation population. The Annotation Tray presents Review Items and Existing PDF Annotations, while a Framing Session may use Viewer Runway to keep the relevant PDF content reachable. Protected Recovery covers accepted changes until Save Sync proves that the Save Destination has caught up.
+A Native Window Attempt may activate a Presentation Lease for a Canonical Review, but the attempt remains disposable and never becomes the durable review identity. A Review Item projects to an Owned Annotation using Crop-relative Geometry and may carry Portable Annotation Identity in the saved PDF. The PDF Annotation Catalog retains every source annotation; reviewer-facing projections remove owned and Navigational PDF Annotations before forming the separate read-only Existing PDF Annotation population. The Annotation Tray presents Review Items and Existing PDF Annotations, while a Framing Session may use Viewer Runway to keep the relevant PDF content reachable. Protected Recovery covers accepted changes until Save Sync proves that the Save Destination has caught up.

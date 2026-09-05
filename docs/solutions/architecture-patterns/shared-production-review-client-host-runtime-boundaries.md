@@ -1,19 +1,18 @@
 ---
 title: Shared production review client with host-specific runtime boundaries
 date: 2026-09-02
-last_updated: 2026-09-04
+last_updated: 2026-09-05
 category: architecture-patterns
 module: Embedded review runtime
 problem_type: architecture_pattern
 component: tooling
 severity: high
 applies_when:
-  - The same interactive product client must run in a browser, editor webview, or browser extension document
+  - The same stateful product client must run in browser, editor webview, browser-extension, static, and native document hosts
   - Hosts differ in transport, resource URLs, lifecycle, presentation persistence, or privileged actions
-  - An embedded frame or extension document must remain untrusted relative to its native host or local service
-  - A one-shot document stream must join durable state across reload, duplication, restart, and suspension
-  - Document generations and review revisions can invalidate asynchronous requests and events
-  - A front-end-only host must reuse the production client while making ephemeral state and explicit-export durability truthful
+  - A native OS shell owns windows and application behavior while a separate service remains the canonical state authority
+  - Embedded web content must receive only closed, generation-bound, and attempt-bound capabilities
+  - Shell construction, visible paint, document readiness, activation, and recovery can complete on different attempts
 resolution_type: code_fix
 related_components:
   - Review Host Runtime
@@ -22,19 +21,24 @@ related_components:
   - Chrome MIME handler
   - Chrome native runtime
   - Static Review Host Runtime
+  - macOS Host Runtime
+  - AppKit document window shell
+  - Mac Review Helper
+  - Mac app lifecycle control
+  - native candidate packaging
   - Browser Document Session
   - Loopback Review URL
   - shared production web assets
-tags: [host-runtime, vscode-webview, chrome-extension, static-host, shared-client, export-only, presentation-lease, capability-safety]
+tags: [host-runtime, shared-client, macos-native-shell, appkit, wkwebview, canonical-review, attempt-fencing, capability-safety]
 ---
 
 # Shared production review client with host-specific runtime boundaries
 
 ## Context
 
-Placekeeper's complete production experience now runs in four materially different hosts: an ordinary loopback browser page, a VS Code webview, a Chrome top-level PDF handler, and a front-end-only static page. Building separate interfaces would duplicate annotations, navigation, reconciliation, and export behavior and invite the products to drift. For VS Code, a nested loopback page was unreliable inside Electron's security model, while an external browser broke the source-centered workflow. For Chrome, navigating the PDF tab to a loopback review worked but discarded the original URL and felt unlike a native PDF viewer. The static page sharpened the architectural boundary because it has no trusted local service, filesystem authority, autosave destination, or durable session to forward (session history).
+Placekeeper's complete production experience now runs in five materially different hosts: an ordinary loopback browser page, a VS Code webview, a Chrome top-level PDF handler, a front-end-only static page, and a native AppKit document application whose content is the same React review in a `WKWebView`. Building separate interfaces would duplicate annotations, navigation, reconciliation, and export behavior and invite the products to drift. For VS Code, a nested loopback page was unreliable inside Electron's security model, while an external browser broke the source-centered workflow. For Chrome, navigating the PDF tab to a loopback review worked but discarded the original URL and felt unlike a native PDF viewer. The static page sharpened the architectural boundary because it has no trusted local service, filesystem authority, autosave destination, or durable session to forward. The Mac host adds native windows, menus, restoration, and titlebar behavior without moving Canonical Review authority out of the service ([PR #77](https://github.com/brad-ross/placekeeper/pull/77)).
 
-The durable seam is the Review Host Runtime. The application depends on one host-neutral bootstrap, command, save, export, invalidation, resource, and disposal interface. Its host identity is explicitly `browser`, `vscode`, `chrome`, or `static` (`apps/web/src/host/runtime.ts:40-48`). All four entry paths converge on `startRuntime`, which renders the same `RuntimeProductionReviewApp` and `ProductionReviewApp` component tree (`apps/web/src/production-entry.tsx:383-405`, `apps/web/src/production-entry.tsx:427-486`; `apps/web/src/static-entry.tsx:273-305`).
+The durable seam is the Review Host Runtime. The application depends on one host-neutral bootstrap, command, save, export, invalidation, resource, and disposal interface. Its host identity is explicitly `browser`, `vscode`, `chrome`, `macos`, or `static` (`apps/web/src/host/runtime.ts:40-48`). Browser, VS Code, Chrome, and macOS render the same `RuntimeProductionReviewApp` and `ProductionReviewApp` tree; static mode mounts the same production application through its export-only adapter (`apps/web/src/production-entry.tsx:438-493`, `apps/web/src/macos-entry.tsx:274-300`; `apps/web/src/static-entry.tsx:273-305`).
 
 The hosts retain different authority models:
 
@@ -42,6 +46,9 @@ The hosts retain different authority models:
 - The VS Code runtime uses a versioned message bridge. Credentials, filesystem paths, SyncTeX, and resource issuance stay in the trusted extension host (`apps/web/src/host/vscode-runtime.ts:209-220`, `apps/vscode/src/webview-bridge.ts:86-125`).
 - The Chrome handler uses native messaging to reach the service, but gives the shared client only a constrained RPC port and host policy. The client receives neither native-messaging access nor service credentials (`apps/web/src/production-entry.tsx:489-513`).
 - The static runtime holds the selected bytes and Review State in the live tab, exposes an object URL and packaged browser-PDF resources, and reports `persistenceMode: "export-only"`. It supplies no invalidation channel, destination selection, SyncTeX, service credential, or durable session authority (`apps/web/src/host/static-runtime.ts:437-492`, `apps/web/src/host/static-runtime.ts:494-520`, `apps/web/src/host/static-runtime.ts:562-575`).
+- The macOS runtime is a projection across a capability-scoped Swift bridge and one service helper per window attempt. AppKit owns document windows, menus, restoration, traffic lights, dragging, and bounded native fallback; the service still owns Canonical Review identity, mutations, save state, activation, and recovery (`apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift:80-143`, `apps/service/src/macos/macos-runtime.ts:31-54`, `apps/service/src/macos/macos-runtime.ts:298-359`).
+
+The native-shell decision was tested before it entered the production package. A sandboxed Electron comparator proved that the existing client, Finder launch, and exact-origin service boundary were viable, but measured a 275 MB bundle and roughly 474–551 MB of aggregate Electron working set while still requiring the shared daemon; it remains decision evidence rather than an adopted host (`apps/electron-spike/RESULTS.md`). A disposable AppKit prototype then exercised the smaller, more Mac-native boundary. Early AppKit experiments used same-window document replacement and briefly tried a preflight window; the final design moved to concurrent document windows and removed the preflight workaround after the actual readiness transition became trustworthy (session history). The durable rule is broader than "put a website in a native window": let the native host own native presentation, let the shared client own product semantics, let the service own durable review truth, and make every handoff carry the identity and lifecycle fence appropriate to the authority crossing it.
 
 Chrome experiments first tried to infer continuity from navigation-entry IDs, replacement type, and handler-local attachment tokens. Reload replaced those values and misclassified the same review as an independent attachment. Browser navigation is presentation evidence, not canonical application identity (session history).
 
@@ -56,6 +63,12 @@ Keep one production component tree and semantic review model. Hide transport, bo
 The browser adapter remains a direct session client. The VS Code adapter translates semantic operations into webview messages and materializes only extension-issued resources. The Chrome adapter translates those same operations into native-runtime requests while preserving the PDF's source tab and URL. Each host exposes only operations it can safely supply: the shared protocol explicitly excludes SyncTeX methods from Chrome (`packages/core/src/review-runtime-protocol.ts:4-37`).
 
 Do not force every host through one physical transport. The stable abstraction is the semantic contract, not HTTP, WebSocket, webview messaging, or native messaging.
+
+### Project native behavior without duplicating review authority
+
+Add a native host as a projection of the shared product, not as a second implementation. The Mac entry can render a bounded pending bootstrap in the production component tree before native runtime authority arrives; unsupported operations reject instead of pretending that the pending state is usable (`apps/web/src/production-entry.tsx:438-493`, `apps/web/src/production-entry.tsx:587-606`). Once AppKit supplies the runtime, the macOS adapter becomes another RPC-backed `HostRuntime` and materializes only the document, PDFium, and worker resources installed for that attempt (`apps/web/src/host/macos-runtime.ts:28-86`).
+
+Keep native affordances as projections of shared meaning. The web client publishes one semantic command vocabulary and enabled-state snapshot (`apps/web/src/review/review-command-surface.ts:1-25`, `apps/web/src/review/review-command-surface.ts:34-70`). AppKit validates a complete, revisioned snapshot, follows the key document window, and keeps editable-text Undo and Redo in Cocoa's responder chain while returning review commands to the shared client (`apps/macos/Sources/PlacekeeperMac/MenuCoordinator.swift:22-63`, `apps/macos/Sources/PlacekeeperMac/MenuCoordinator.swift:97-138`). The menu is an alternate native presentation of shared commands, not a competing command implementation.
 
 ### Treat missing authority as a first-class host contract
 
@@ -79,6 +92,17 @@ Give every attachment a separate presentation lease. The backend tracks presenta
 
 This distinction also protects cleanup. A broad "opened versus created" test can delete a resumed protected draft when provisional setup fails. Cleanup must release only the provisional claim unless the service record is both newly disposable and has no activated or remaining presentation (`apps/service/src/browser/chrome-runtime-backend.ts:194-203`; session history).
 
+For a native document shell, keep four identity classes separate:
+
+- `windowID` identifies one physical AppKit presentation.
+- Canonical Review identity names the service-owned review that other hosts may already present.
+- the document digest binds that review to verified bytes.
+- `attemptID`, `runtimeID`, and `helperID` identify disposable transport and rendering work.
+
+The native registry stores window ID, Canonical Review ID, and digest separately (`apps/macos/Sources/PlacekeeperMac/DocumentWindowRegistry.swift:3-25`). A normalized file path is only an in-flight launch routing key. After service admission, the returned Canonical Review ID may focus an existing matching window and release the redundant provisional candidate; otherwise the app registers a new window against that service identity and digest (`apps/macos/Sources/PlacekeeperMac/LaunchCoordinator.swift:9-14`, `apps/macos/Sources/PlacekeeperMac/PlacekeeperMac.swift:270-308`).
+
+Persist reopening intent, not live authority. The restoration record contains a source path, window frame, and optional page and zoom. It does not persist a session, lease, helper, runtime, or attempt identifier (`apps/macos/Sources/PlacekeeperMac/WindowRestoration.swift:4-35`). Startup converts the record back into an ordinary open request after fresh app-lifecycle registration (`apps/macos/Sources/PlacekeeperMac/PlacekeeperMac.swift:54-120`).
+
 ### Make acquisition reversible and activation a commit point
 
 Separate acquisition from activation. The service may stage a canonical review as provisional, but it does not activate the presentation until the handler has validated the document and the shared client is ready (`apps/service/src/browser/chrome-runtime.ts:538-565`, `apps/service/src/browser/chrome-runtime.ts:634-642`). The extension checks byte length, SHA-256, and the PDF signature before creating the document Blob (`apps/chrome-extension/src/chrome-runtime.ts:160-167`, `apps/chrome-extension/src/chrome-runtime.ts:580-598`). The handler waits for the embedded client to report document readiness before it activates the review (`apps/chrome-extension/src/handler-entry.ts:219-249`).
@@ -89,6 +113,12 @@ The same transaction boundary applies without a backend. Static opening is divid
 
 Cancellation must also fence work that completes late. The Browser Document Session admits one operation, captures an epoch, races the writer against cancellation and timeout, increments the epoch before tearing down a cancelled writer, and rejects any result from an obsolete epoch (`packages/pdf-backends/src/browser-document-session.ts:67-159`). An old assessment or export therefore cannot activate a viewer, start a download, or mutate the export checkpoint after its owner has cancelled or closed it.
 
+The Mac host makes readiness a staged transaction rather than one boolean. The page publishes `shell-ready` only after fonts and measured drag geometry settle. Native then commits routing, shows the real window, and requests a post-visibility confirmation. The page waits two animation frames before returning `visible-shell-ready`; document readiness arrives independently from the renderer with the current attempt and document generation (`apps/web/src/macos-entry.tsx:169-239`, `apps/web/src/macos-entry.tsx:342-364`, `apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift:276-345`).
+
+Activation is the commit point. The service record remains provisional until current visible-paint and document-ready evidence agree for the same attempt. Activation installs the presentation lease; cancellation releases the provisional claim, while teardown of an active presentation detaches its lease (`apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift:334-470`, `apps/service/src/macos/macos-runtime.ts:337-359`, `apps/service/src/macos/macos-runtime.ts:515-535`). Every helper envelope carries window, attempt, and request identity, and the service rejects messages that do not match the current helper record (`packages/core/src/macos-helper-protocol.ts:23-28`, `apps/service/src/macos/macos-runtime.ts:187-216`).
+
+Invalidate the failed attempt before offering recovery. On helper or WebContent failure, the controller removes the page bridge, invalidates resource delivery, clears drag and command state, and replaces only that window with a minimal Retry, Diagnostics, and Close surface. Retry re-enters the ordinary open flow and mints fresh attempt, runtime, and helper identities (`apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift:174-195`, `apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift:421-424`, `apps/macos/Sources/PlacekeeperMac/PlacekeeperMac.swift:491-496`). Do not recover by reloading a privileged page whose capabilities belong to the failed attempt.
+
 ### Compose capabilities instead of forwarding authority
 
 Return closed, non-authorizing projections across less-trusted boundaries. Chrome-facing state is rebuilt from allowlists and recursively rejects credentials, capabilities, paths, source URLs, task identity, presentation identifiers, and SyncTeX authority (`packages/core/src/review-runtime-protocol.ts:58-62`, `packages/core/src/review-runtime-protocol.ts:90-118`, `packages/core/src/chrome-native-runtime-protocol.ts:178-206`). The trusted backend exchanges and revokes the bootstrap credential instead of forwarding it into the extension (`apps/service/src/browser/chrome-runtime-backend.ts:300-310`).
@@ -96,6 +126,18 @@ Return closed, non-authorizing projections across less-trusted boundaries. Chrom
 Compose the viewer's resource capability set at the handler boundary: a digest-verified extension-owned Blob for the PDF plus exact packaged URLs for PDFium and its worker (`apps/chrome-extension/src/chrome-runtime.ts:580-598`). The shared viewer requires the document to be an extension-origin Blob and executable resources to be packaged extension assets with the correct role (`apps/web/src/pdf/embedpdf-viewer.ts:29-74`).
 
 Keep untrusted PDF parsing away from ambient authority. Package the PDFium worker as a standalone asset, pin the engine version and extracted worker shape, and fail the build if that dependency seam changes (`apps/chrome-extension/scripts/embedpdf-worker-source.ts:3-5`, `apps/chrome-extension/scripts/embedpdf-worker-source.ts:29-48`). A caller-created trusted worker lets Chrome keep a self-only content policy rather than allowing inline or remote executable code (`apps/web/src/pdf/embedpdf-viewer.ts:82-110`, `apps/chrome-extension/manifest.json:7-14`).
+
+Apply the same rule in both directions across the Mac bridge. The page does not receive the source path, service credential, presentation lease, or generic native authority. The Swift bridge accepts an exact method set and envelope shape, requires the current runtime, session, generation, and revision, and adds an idempotency key to side-effecting requests (`packages/core/src/review-runtime-protocol.ts:419-443`, `apps/macos/Sources/PlacekeeperMac/ReviewBridge.swift:3-53`, `apps/macos/Sources/PlacekeeperMac/ReviewBridge.swift:79-117`).
+
+Treat resources as capabilities. The helper protocol binds document reads to a role, generation, range, and bounded chunk size. Native reassembles the chunks and verifies length, SHA-256, and the PDF signature before exposing the document. The custom scheme handler serves only manifest-listed packaged assets under the bundle root or the current role-bound document resource; the nonpersistent `WKWebView` blocks ordinary HTTP, HTTPS, WS, and WSS egress (`packages/core/src/macos-helper-protocol.ts:14-21`, `apps/macos/Sources/PlacekeeperMac/ResourceSchemeHandler.swift:59-105`, `apps/macos/Sources/PlacekeeperMac/ResourceSchemeHandler.swift:160-199`, `apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift:95-100`).
+
+Keep app lifecycle control disjoint from review authority. Its protocol can register the app, report activity, prepare replacement, detach a helper, or detach the app, but it cannot admit a document or mutate a review (`packages/core/src/macos-app-control-protocol.ts:5-37`). A zero-window resident Mac app can therefore remain lifecycle-visible without retaining a review helper or borrowing review capabilities for update coordination.
+
+### Treat the native titlebar as a joint geometry contract
+
+The shared layout owns one 54px top-bar token for browser, Chrome, VS Code, static, and macOS surfaces (`apps/web/src/app/review-layout-foundation.css:24-31`, `apps/web/src/app/review-layout-foundation.css:113-128`). The Mac host passes traffic-light and trailing insets into the shared layout, aligns the web bar's center with the native controls, and independently positions the standard AppKit buttons on the same leading geometry (`apps/web/src/macos-entry.tsx:269-286`, `apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift:549-569`). Do not fork the toolbar merely to gain a native titlebar.
+
+Dragging cannot be one static CSS rectangle because the toolbar contains responsive live controls. The page measures the rendered bar, subtracts traffic lights and every visible interactive control, and publishes the remaining gaps. Native accepts them only when no transition is in progress, the geometry identity matches, the revision increases, and every rectangle is valid (`apps/web/src/macos-entry.tsx:32-121`, `apps/macos/Sources/PlacekeeperMac/MacPolicies.swift:55-80`). Resize, screen, backing-scale, and full-screen transitions clear the overlays before issuing a fresh geometry identity. Safe native overlays perform ordinary drag or standard double-click zoom without stealing web-button interaction (`apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift:241-274`, `apps/macos/Sources/PlacekeeperMac/PlacekeeperWindowController.swift:756-775`).
 
 ### Make reconnect-safe mutations and invalidations explicit
 
@@ -125,6 +167,10 @@ Source and mocked tests cannot establish installed-browser behavior. Real Chrome
 
 During both VS Code and Chrome work, stale installed assets looked like product regressions even while source tests passed. Compare build and installed identities, then open a fresh host surface before changing source to explain a mismatch (session history).
 
+For a native app, prove the packaged boundary with the artifact that will run. The candidate builder compiles a release Swift executable, stages the shared service and web assets, removes the legacy droplet entry point, rewrites the bundle executable, recomputes packaged identity, signs the bundle, validates it, and only then moves it into the requested output (`packaging/macos/build-native-candidate.ts:329-379`). Validation rejects missing embedded dependencies, external symlinks, checkout-path bytes, non-system native dependencies, and invalid signatures (`packaging/macos/build-native-candidate.ts:236-327`).
+
+Run that candidate with private state rather than over the user's installed app or daemon. The runner creates a private home and launch directory, starts the candidate-contained daemon and native executable on a private port with minimal environments, waits for both document readiness and runtime activation, and removes its state afterward (`packaging/macos/run-native-candidate.ts:240-347`). This proves packaging independence and the activation path. It does not prove notarization, upgrade, accessibility, or full installed-release qualification. Earlier attempts were confounded by stale installed daemons and development override paths; isolating the candidate was the durable fix instead of killing broadly matched processes (session history).
+
 ## Why This Matters
 
 One shared client prevents cross-surface drift: annotation, navigation, toolbar, reconciliation, and save behavior flow through the same component tree in every host (`apps/web/src/production-entry.tsx:383-405`, `apps/web/src/production-entry.tsx:463-486`). Boundary-local transport and validation prevent that reuse from exposing paths, credentials, task authority, or privileged operations to an untrusted frame.
@@ -132,6 +178,10 @@ One shared client prevents cross-surface drift: annotation, navigation, toolbar,
 Chrome adds a deeper lifecycle lesson. Canonical identity, activation, operation history, and recovery cannot belong to the presentation because tabs, extension documents, native hosts, and even timer schedules are disposable. Treating presentation state as durable truth causes accidental forks, lost attachments, repeated mutations, unsafe fallback, or false idle shutdown after laptop sleep.
 
 The static host shows why a Review Host Runtime is an authority boundary rather than just a transport adapter. Reusing the same component tree is safe only if the host can declare weaker durability and deny unsupported operations without the UI inferring autosave, recovery, SyncTeX, or destination authority. Its export checkpoint is a verified revision boundary, not a generic success flag. Preserving this distinction prevents a static deployment from looking service-backed while silently losing tab-local work or claiming concurrent edits were exported.
+
+The Mac host shows the inverse case: a richer native shell still must not acquire review authority merely because it owns more presentation. Canonical review state survives native-window and WebContent failure because it remains in the service. Each window's helper and attempt contain failure locally. Shared review behavior does not drift because AppKit consumes the production client and semantic command surface, while native behavior stays native because AppKit owns windows, menus, the responder chain, traffic lights, drag, zoom, recent documents, and restoration.
+
+"Rendered something," "visible with final geometry," and "usable PDF" are independent facts. Requiring all current evidence before provisional state becomes an active presentation prevents invisible or obsolete attempts from acquiring durable ownership. The same rule applies to packaging: only the staged bundle running its own contained dependencies and private state can prove that release resources close over the artifact.
 
 These failures share one root: collapsing states that look equivalent in the UI but have different authority or lifecycle meaning. "Opened" is not "newly disposable"; "same URL" is not "same bytes"; "same revision" is not "same save freshness"; and "timer fired" is not always "peer was idle" (session history). Model those distinctions directly and test every transition where ownership changes.
 
@@ -143,6 +193,11 @@ These failures share one root: collapsing states that look equivalent in the UI 
 - Identical locators can return changed bytes, or dropped responses can hide already-committed side effects.
 - Protocol additions must fail visibly until routing, validation, redaction, and resource decisions are complete.
 - A static or offline-capable surface should reuse a service-backed production client but intentionally offers only explicit export.
+- A native document shell should add OS windows, menus, titlebar behavior, restoration, or app residency without duplicating review and persistence logic.
+- WebContent, per-window helpers, and service connections can fail and restart independently of the native application or other document windows.
+- Native hit testing depends on responsive web layout and becomes stale across resize, display, backing-scale, or full-screen transitions.
+- Restored windows should feel persistent even though credentials, presentation leases, helpers, runtimes, and attempts must not be persisted.
+- Packaging includes native code, an embedded runtime, local services, and generated web assets whose source-tree paths can mask missing bundle dependencies.
 - Long-running browser acquisition, parsing, or serialization can outlive cancellation, retry, tab disposal, or the state revision it captured.
 - Exported files must be editable when reopened, but only exact portable ownership metadata may authorize replacement.
 
@@ -184,6 +239,39 @@ The host writes an opaque panel key into webview state before importing the appl
 
 This sequence extends the same shared production client without importing service-backed durability claims into a host that cannot uphold them (`apps/web/src/static-entry.tsx:273-323`, `apps/web/src/host/static-runtime.ts:474-584`).
 
+### Activating a native document window
+
+1. Normalize the file URL only to coordinate concurrent launch intents.
+2. Mint fresh window, attempt, runtime, and helper identities.
+3. Ask the service to admit the source and return a sanitized projection plus verified document identity.
+4. Focus an existing window only when the returned Canonical Review ID matches its registry entry; otherwise register a new window.
+5. Render the shared toolbar, publish settled drag geometry, and report `shell-ready`.
+6. Commit native routing, order the window visible, and independently verify visible paint and a usable PDF page.
+7. Activate the service presentation only when both proofs belong to the current attempt and generation.
+
+The source path routes the request, the service result establishes semantic identity, and current readiness proofs authorize activation. No single identifier or callback substitutes for the others (`apps/macos/Sources/PlacekeeperMac/PlacekeeperMac.swift:204-308`, `apps/web/src/app/document-readiness.ts:14-34`, `apps/service/src/macos/macos-runtime.ts:337-359`).
+
+### Updating native titlebar geometry
+
+1. Keep 54px as the shared toolbar height.
+2. Inject native traffic-light bounds and insets instead of adding another toolbar.
+3. Measure the rendered interactive controls and publish only the gaps as drag candidates.
+4. Clear native overlays when a geometry transition starts.
+5. Mint a new geometry identity and accept only a strictly newer region revision for it.
+6. Let AppKit perform drag and double-click zoom inside accepted gaps.
+
+The web side decides where product controls are. The native side decides how a safe gap behaves as a Mac titlebar.
+
+### Qualifying a native candidate
+
+1. Build release Swift and packaged Mac web assets into a staging bundle.
+2. Reject missing dependencies, legacy launch artifacts, external symlinks, checkout references, non-system native dependencies, or invalid signatures.
+3. Start the candidate's own daemon and app from a private home and unrelated working directory.
+4. Require document-ready and runtime-activated markers from that exact run.
+5. Tear down both processes and remove the private state.
+
+This gate proves that authority, executable, and resource paths close over the bundle. It does not substitute for full distribution qualification.
+
 ## Related
 
 - [Authority boundaries for reloadable local-review URLs](./reloadable-local-review-url-authority-boundaries.md)
@@ -192,7 +280,10 @@ This sequence extends the same shared production client without importing servic
 - [Task-scoped, prompt-refreshed live PDF context](./task-scoped-prompt-refreshed-live-pdf-context.md)
 - [Recoverable autosave for editable PDF annotations](./recoverable-editable-pdf-annotation-autosave.md)
 - [Portable PDF annotations that remain visible in external viewers](../integration-issues/portable-pdf-annotations-invisible-in-external-viewers.md)
+- [Measured semantic collapse for one-row PDF review toolbars](../design-patterns/measured-one-row-responsive-review-toolbar.md)
+- [Unified macOS document shell plan](../../plans/2026-09-04-0118-feat-unified-macos-document-shell-plan.md)
 - [Web beta operation and release](../../web-beta.md)
 - [PR #68: Fully embedded VS Code LaTeX review](https://github.com/brad-ross/placekeeper/pull/68)
 - [PR #73: Embedded Chrome PDF review](https://github.com/brad-ross/placekeeper/pull/73)
 - [PR #75: Front-end-only static PDF review](https://github.com/brad-ross/placekeeper/pull/75)
+- [PR #77: Native AppKit document review shell](https://github.com/brad-ross/placekeeper/pull/77)
