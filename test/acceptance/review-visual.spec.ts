@@ -480,7 +480,7 @@ test('wide reading', async ({ page }) => {
 test('narrow responsive top-bar menu', async ({ page }) => {
   await openScene(page, 'reading', { width: 390, height: 720 });
   const chrome = page.locator('[data-review-chrome]');
-  await expect(chrome).toHaveCSS('height', '58px');
+  await expect(chrome).toHaveCSS('height', '54px');
   await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'navigationCompact');
   await page.getByRole('button', {
     name: 'Document navigation, current page 4 of 128',

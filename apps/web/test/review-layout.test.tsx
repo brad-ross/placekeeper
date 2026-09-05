@@ -704,6 +704,8 @@ describe('review shell layout and accessibility contract', () => {
   });
 
   it('keeps responsive review chrome in one fixed-height row', () => {
+    expect(foundationStyles).toMatch(/--review-chrome-height:\s*54px;/u);
+    expect(foundationStyles).toMatch(/--review-chrome-center-y:\s*27px;/u);
     expect(foundationStyles).toMatch(
       /\.review-chrome\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) max-content max-content;[^}]*height:\s*var\(--review-chrome-height\);[^}]*overflow:\s*visible;/u,
     );
