@@ -78,7 +78,7 @@ describe("packaged macOS shell entry", () => {
     });
   });
 
-  it("aligns the shared titlebar content to the measured native traffic-light center", () => {
+  it("centers the shared titlebar in a row balanced around the native traffic lights", () => {
     const html = renderToStaticMarkup(<MacosLoadingShell
       documentTitle="Paper.pdf"
       trafficLightBounds={[
@@ -88,6 +88,7 @@ describe("packaged macOS shell entry", () => {
       ]}
     />);
     expect(html).toContain("--macos-traffic-light-center-y:27px");
+    expect(html).toContain("--review-chrome-height:54px");
   });
 
   it("ignores inert sizing controls when measuring native drag blockers", () => {

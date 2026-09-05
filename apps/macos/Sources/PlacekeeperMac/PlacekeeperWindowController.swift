@@ -767,6 +767,10 @@ private final class DraggableTitlebarView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         webView?.evaluateJavaScript("document.activeElement?.blur()")
+        if event.clickCount == 2 {
+            window?.performZoom(nil)
+            return
+        }
         window?.performDrag(with: event)
     }
 }

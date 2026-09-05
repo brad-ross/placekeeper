@@ -140,11 +140,6 @@
   padding-inline-end: max(16px, var(--macos-titlebar-trailing-inset, 0px));
 }
 
-[data-launch-surface="macos"] .review-chrome > * {
-  position: relative;
-  top: calc(var(--macos-traffic-light-center-y, var(--review-chrome-center-y)) - var(--review-chrome-center-y));
-}
-
 .review-chrome__identity {
   display: flex;
   min-width: 0;

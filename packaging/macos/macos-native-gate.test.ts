@@ -77,8 +77,11 @@ describe("macOS native gate packaging policy", () => {
     const draggableTitlebar = windowSource.slice(windowSource.indexOf("private final class DraggableTitlebarView"));
     expect(draggableTitlebar).toContain("override var mouseDownCanMoveWindow: Bool { true }");
     expect(draggableTitlebar).toContain('document.activeElement?.blur()');
+    expect(draggableTitlebar).toContain("event.clickCount == 2");
+    expect(draggableTitlebar).toContain("window?.performZoom(nil)");
     expect(draggableTitlebar).toContain("window?.performDrag(with: event)");
     expect(draggableTitlebar.indexOf("activeElement?.blur")).toBeLessThan(draggableTitlebar.indexOf("performDrag"));
+    expect(draggableTitlebar.indexOf("performZoom")).toBeLessThan(draggableTitlebar.indexOf("performDrag"));
     expect(draggableTitlebar).not.toContain("override func hitTest");
   });
 

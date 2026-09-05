@@ -280,6 +280,7 @@ export function MacosLoadingShell({
         "--macos-titlebar-leading-inset": `${trafficLightInset}px`,
         ...(trafficLightCenterY === undefined ? {} : {
           "--macos-traffic-light-center-y": `${trafficLightCenterY}px`,
+          "--review-chrome-height": `${trafficLightCenterY * 2}px`,
         }),
         "--macos-titlebar-trailing-inset": `${trailingInset}px`,
       } as CSSProperties}
