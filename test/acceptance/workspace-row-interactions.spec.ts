@@ -224,3 +224,29 @@ test('bottom resize handle sits inside the tray and follows its upper corners', 
   await page.mouse.up();
   await expect.poll(async () => (await tray.boundingBox())!.height).toBeGreaterThan(trayBox.height + 30);
 });
+
+test('short reference tabs fit their titles and right resizing matches bottom styling', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout');
+  await page.getByRole('button', { name: 'Show References', exact: true }).click();
+  const tab = page.locator('.reference-tab-segment:visible').first();
+  await expect(tab).toBeVisible();
+  const title = tab.locator('.reference-tab-segment__selector span').first();
+  await title.evaluate((element) => { element.textContent = 'A long reference title that should reach the maximum tab width'; });
+  const longWidth = (await tab.boundingBox())!.width;
+  await title.evaluate((element) => { element.textContent = 'Note'; });
+  expect((await tab.boundingBox())!.width).toBeLessThan(longWidth);
+  expect((await tab.boundingBox())!.width).toBeGreaterThanOrEqual(112);
+  await page.getByRole('button', { name: 'Move References to right', exact: true }).click({ force: true });
+  const handle = page.locator('[data-reference-resize-handle="right"]');
+  const tray = page.locator('.review-workspace[data-workspace-presentation="right"]');
+  await expect(handle).toBeVisible();
+  await expect.poll(async () => Math.abs((await handle.boundingBox())!.x - (await tray.boundingBox())!.x)).toBeLessThan(.5);
+  const shape = await handle.evaluate((element) => {
+    const style = getComputedStyle(element, '::after');
+    return { radius: style.borderTopLeftRadius, gradient: style.backgroundImage, overflow: getComputedStyle(element).overflow };
+  });
+  expect(shape.radius).toBe('16px');
+  expect(shape.gradient).toContain('to right');
+  expect(shape.overflow).toBe('hidden');
+});

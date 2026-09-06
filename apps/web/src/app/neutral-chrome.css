@@ -640,8 +640,17 @@
 }
 
 .reference-resize-handle[data-reference-resize-handle="right"] {
-  top: var(--pk-radius-tray);
-  bottom: calc(var(--review-overlay-inset, 12px) + var(--pk-radius-tray));
+  top: 0;
+  right: calc(var(--reference-right-width) + var(--review-overlay-inset, 12px) - 10px);
+  bottom: var(--review-overlay-inset, 12px);
+  overflow: hidden;
+}
+
+.reference-resize-handle[data-reference-resize-handle="right"]::after {
+  inset: 0 auto 0 0;
+  width: calc(2 * var(--pk-radius-tray));
+  border-radius: var(--pk-radius-tray) 0 0 var(--pk-radius-tray);
+  background: linear-gradient(to right, #aaa 0 2px, transparent 2px);
 }
 
 .reference-resize-handle[data-reference-resize-handle="bottom"] {
@@ -1883,4 +1892,16 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   max-height: max(0px, calc(var(--review-overlay-bottom-start, 100%) - 24px));
   overflow: auto;
   transform: none;
+}
+
+/* Reference tabs fit short titles without losing their established width caps. */
+.reference-tabs .reference-tab-segment,
+.reference-tabs[data-reference-tabs-orientation="vertical"] .reference-tab-segment,
+.review-workspace[data-workspace-presentation="right"] .reference-tab-segment {
+  width: max-content;
+  min-width: min(112px, 100%);
+  flex-basis: auto;
+}
+.reference-tabs[data-reference-tabs-orientation="vertical"] .reference-tab-segment {
+  max-width: 100%;
 }
