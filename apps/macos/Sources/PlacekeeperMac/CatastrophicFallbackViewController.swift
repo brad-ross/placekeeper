@@ -27,7 +27,7 @@ final class CatastrophicFallbackViewController: NSViewController {
         stack.spacing = 14
         stack.edgeInsets = NSEdgeInsets(top: 48, left: 48, bottom: 48, right: 48)
         let title = NSTextField(labelWithString: documentName)
-        title.font = .preferredFont(forTextStyle: .title1)
+        title.font = .systemFont(ofSize: 22, weight: .medium)
         stack.addArrangedSubview(title)
         let explanation = NSTextField(labelWithString: "Placekeeper could not display this review.")
         explanation.textColor = .secondaryLabelColor

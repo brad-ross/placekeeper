@@ -21,6 +21,7 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate {
         )
         window.title = documentName
         window.isReleasedWhenClosed = false
+        window.backgroundColor = .windowBackgroundColor
         super.init(window: window)
         window.delegate = self
 
@@ -30,7 +31,7 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate {
         stack.spacing = 16
         stack.edgeInsets = NSEdgeInsets(top: 52, left: 52, bottom: 52, right: 52)
         let title = NSTextField(labelWithString: "Protected review found")
-        title.font = .preferredFont(forTextStyle: .title1)
+        title.font = .systemFont(ofSize: 22, weight: .medium)
         stack.addArrangedSubview(title)
         status.alignment = .center
         stack.addArrangedSubview(status)

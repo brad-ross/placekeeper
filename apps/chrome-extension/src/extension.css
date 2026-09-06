@@ -8,22 +8,22 @@ body {
 }
 
 .handler {
-  --review-ink-primary: #181a17;
-  --review-ink-muted: #676a63;
-  --review-surface-canvas: #e8e9e4;
-  --review-surface-panel: #fffefa;
-  --review-surface-subtle: #f1f2ed;
-  --review-surface-interactive: #e5e6e1;
-  --review-border: #d1d5cc;
-  --review-border-subtle: #e2e4de;
-  --review-border-strong: #aeb6aa;
-  --review-focus: #245c9c;
+  --review-ink-primary: #333;
+  --review-ink-muted: #707070;
+  --review-surface-canvas: #f7f7f7;
+  --review-surface-panel: #fff;
+  --review-surface-subtle: #f0f0f0;
+  --review-surface-interactive: #e9e9e9;
+  --review-border: #dedede;
+  --review-border-subtle: #e5e5e5;
+  --review-border-strong: #c7c7c7;
+  --review-focus: #335f8a;
   --review-danger: #9a3d34;
   --review-radius-control: 9px;
   --review-radius-dialog: 16px;
   --review-control-default: 34px;
   --review-action-group-gap: 6px;
-  --review-shadow-float: 0 14px 34px rgb(24 27 23 / 17%), 0 2px 7px rgb(24 27 23 / 8%);
+  --review-shadow-float: 0 12px 48px rgb(0 0 0 / 9%), 0 2px 8px rgb(0 0 0 / 5%);
   --review-motion-fast: 120ms;
 
   display: grid;
@@ -33,7 +33,7 @@ body {
   padding: 1rem;
   color: var(--review-ink-primary);
   background: var(--review-surface-canvas);
-  font-size: .875rem;
+  font-size: 13px;
   line-height: 1.4;
 }
 
@@ -79,9 +79,9 @@ body {
 .handler-dialog__header h1 {
   margin: 0;
   font-size: 17px;
-  font-weight: 730;
+  font-weight: 500;
   line-height: 1.25;
-  letter-spacing: -.02em;
+  letter-spacing: 0;
 }
 
 .handler-dialog__header h1:focus {
@@ -105,9 +105,9 @@ body {
   box-sizing: border-box;
   padding: 1rem 1.125rem 1.125rem;
   color-scheme: only light;
-  color: #181a17;
-  background: #fffefa;
-  font-size: 0.875rem;
+  color: #333;
+  background: #fff;
+  font-size: 13px;
   line-height: 1.4;
 }
 
@@ -119,9 +119,9 @@ body {
 .popup h1 {
   margin: 0;
   font-size: 1.0625rem;
-  font-weight: 730;
+  font-weight: 500;
   line-height: 1.25;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 button {
@@ -173,8 +173,8 @@ button:disabled {
   border-radius: var(--review-radius-control);
   color: var(--review-ink-primary);
   background: var(--review-surface-subtle);
-  font-size: 11px;
-  font-weight: 680;
+  font-size: 13px;
+  font-weight: 500;
   line-height: 1.3;
   text-align: center;
   cursor: pointer;
@@ -251,12 +251,12 @@ button:disabled {
 }
 
 .popup .switch:hover:not(:disabled) .switch__control {
-  border-color: #aeb6aa;
-  background: #e5e6e1;
+  border-color: #c7c7c7;
+  background: #e9e9e9;
 }
 
 .switch__label {
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .switch__control {
@@ -265,9 +265,9 @@ button:disabled {
   width: 2.375rem;
   height: 1.375rem;
   box-sizing: border-box;
-  border: 1px solid #d1d5cc;
+  border: 1px solid #dedede;
   border-radius: 999px;
-  background: #f1f2ed;
+  background: #f0f0f0;
   transition: border-color 120ms ease, background 120ms ease;
 }
 
@@ -278,8 +278,8 @@ button:disabled {
   width: 1rem;
   height: 1rem;
   border-radius: 999px;
-  background: #676a63;
-  box-shadow: 0 1px 2px rgb(24 27 23 / 18%);
+  background: #707070;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 18%);
   transition: transform 120ms ease, background 120ms ease;
 }
 
@@ -289,13 +289,13 @@ button:disabled {
 }
 
 .switch.is-enabled .switch__thumb {
-  background: #fffefa;
+  background: #fff;
   transform: translateX(1rem);
 }
 
 .popup .status {
   margin: -0.125rem 0 0;
-  color: #676a63;
+  color: #707070;
   font-size: 0.75rem;
   line-height: 1.5;
 }

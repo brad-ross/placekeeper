@@ -167,6 +167,7 @@ export function StaticLauncher(props: {
           id={inputId}
           className="static-launcher__input"
           type="file"
+          title="Choose a PDF"
           accept="application/pdf,.pdf"
           disabled={pending}
           onChange={onChange}
@@ -174,6 +175,7 @@ export function StaticLauncher(props: {
         <button
           ref={chooseButtonRef}
           type="button"
+          title="Upload PDF"
           className="static-launcher__button"
           disabled={pending}
           onClick={() => inputRef.current?.click()}
@@ -191,6 +193,7 @@ export function StaticLauncher(props: {
               ref={urlInputRef}
               id={`${inputId}-url`}
               type="url"
+              title="PDF URL"
               aria-label="PDF URL"
               inputMode="url"
               autoComplete="off"
@@ -199,7 +202,7 @@ export function StaticLauncher(props: {
               disabled={pending}
               onChange={(event) => setRemoteUrl(event.currentTarget.value)}
             />
-            <button type="submit" disabled={pending || remoteUrl.trim() === ""}>
+            <button type="submit" title="Open PDF URL" disabled={pending || remoteUrl.trim() === ""}>
               <ReviewIcon name="link" size={14} />
               Open
             </button>
@@ -207,7 +210,7 @@ export function StaticLauncher(props: {
         </form>
         {pending ? <div className="static-launcher__progress">
           <p role="status" aria-live="polite">{OPENING_STATUS[phase]}</p>
-          <button type="button" onClick={() => operationRef.current?.abort()}>Cancel</button>
+          <button type="button" title="Cancel opening" onClick={() => operationRef.current?.abort()}>Cancel</button>
         </div> : null}
         {error === undefined ? null : <p className="static-launcher__error" role="alert" tabIndex={-1}>{error}</p>}
       </div>

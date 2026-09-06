@@ -138,7 +138,7 @@ final class PlacekeeperWindowController: NSWindowController, NSWindowDelegate, W
         controller.view = contentView
         window.contentViewController = controller
         alignTrafficLights()
-        window.backgroundColor = NSColor(calibratedRed: 0.965, green: 0.949, blue: 0.918, alpha: 1)
+        window.backgroundColor = .windowBackgroundColor
         if let restoredFrame { window.setFrame(restoredFrame, display: false) }
     }
 
