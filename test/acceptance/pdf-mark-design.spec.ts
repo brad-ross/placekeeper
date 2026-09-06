@@ -170,6 +170,28 @@ test('text selection uses the shared blue wash and a plain I-beam', async ({ pag
   const selection = pdfPage.locator(':scope > div[style*="mix-blend-mode"] > div').first();
   await expect(selection).toHaveCSS('background-color', 'rgb(207, 222, 234)');
   await page.mouse.up();
+  const palette = page.getByRole('toolbar', { name: 'Selection review actions' });
+  await expect(palette).toBeVisible();
+  for (const percent of [250, 50, 150]) {
+    const zoom = page.getByRole('textbox', { name: /^Current zoom/ });
+    await zoom.fill(String(percent)); await zoom.press('Enter');
+    await expect(zoom).toHaveValue(String(percent));
+    await expect(palette).toBeVisible();
+    await expect.poll(async () => {
+      const menu = (await palette.boundingBox())!;
+      const stage = (await page.locator('[data-review-stage]').boundingBox())!;
+      return menu.x >= stage.x && menu.y >= stage.y && menu.x + menu.width <= stage.x + stage.width && menu.y + menu.height <= stage.y + stage.height ? "inside" : JSON.stringify({ menu, stage });
+    }).toBe("inside");
+  }
+
+  for (const viewport of [{ width: 620, height: 340 }, { width: 1280, height: 240 }]) {
+    await page.setViewportSize(viewport);
+    await expect.poll(async () => {
+      const menu = (await palette.boundingBox())!;
+      return menu.x >= 0 && menu.y >= 0 && menu.x + menu.width <= viewport.width && menu.y + menu.height <= viewport.height;
+    }).toBe(true);
+  }
+
 });
 
 for (const zoomPercent of [50, 100, 200]) {

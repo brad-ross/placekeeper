@@ -1030,7 +1030,10 @@ export function App({
         ? MAIN_PDF_DOCUMENT_ID
         : null;
       if (selectionPlugin && mainId) {
-        subscriptions.current.push(selectionPlugin.onMenuPlacement(mainId, (placement) => {
+        let currentMenuPlacement: Parameters<Parameters<typeof selectionPlugin.onMenuPlacement>[1]>[0] = null;
+        let placementFrame: number | undefined;
+        const refreshMenuPlacement = () => {
+          const placement = currentMenuPlacement;
           if (!placement?.isVisible) {
             emit({ type: 'selection-placement', value: null });
             return;
@@ -1064,7 +1067,31 @@ export function App({
               },
             },
           });
+        };
+        const scheduleMenuPlacement = () => {
+          if (placementFrame !== undefined) cancelAnimationFrame(placementFrame);
+          placementFrame = requestAnimationFrame(() => { placementFrame = undefined; refreshMenuPlacement(); });
+        };
+        subscriptions.current.push(selectionPlugin.onMenuPlacement(mainId, (placement) => {
+          // Zoom can transiently hide the plugin menu while its text selection
+          // remains valid. Retain the PDF anchor until the selection is cleared.
+          if (placement?.isVisible || !selection?.getState(mainId).selection) {
+            currentMenuPlacement = placement;
+          }
+          refreshMenuPlacement();
+          scheduleMenuPlacement();
         }));
+        const workspace = workspaceElementRef.current;
+        const observer = new MutationObserver(scheduleMenuPlacement);
+        if (workspace) observer.observe(workspace, { subtree: true, childList: true, attributes: true, attributeFilter: ['style', 'width', 'height'] });
+        workspace?.addEventListener('scroll', scheduleMenuPlacement, true);
+        window.addEventListener('resize', scheduleMenuPlacement);
+        subscriptions.current.push(() => {
+          observer.disconnect();
+          workspace?.removeEventListener('scroll', scheduleMenuPlacement, true);
+          window.removeEventListener('resize', scheduleMenuPlacement);
+          if (placementFrame !== undefined) cancelAnimationFrame(placementFrame);
+        });
       }
     }
 
