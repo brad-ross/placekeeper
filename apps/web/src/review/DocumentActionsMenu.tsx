@@ -66,6 +66,7 @@ export function reviewExportPresentation(input: {
 export interface DocumentActionsMenuProps {
   readonly documentTitle: string;
   readonly savedLabel: string;
+  readonly showSaveStatusDot?: boolean;
   readonly savePhase?: 'clean' | 'saving' | 'not-saved';
   readonly presentation: ReviewExportPresentation;
   readonly onExport: (confirmPossiblyStale?: true) => Promise<ReviewExportResult | void>;
@@ -97,6 +98,7 @@ const EXPORT_OUTCOME_MESSAGES: Readonly<Record<ExportOutcome, string>> = {
 };
 
 export function DocumentActionsMenu({
+  showSaveStatusDot = true,
   documentTitle,
   savedLabel,
   savePhase = 'clean',
@@ -286,7 +288,7 @@ export function DocumentActionsMenu({
     >
       <ReviewIcon name="file" size={16} />
       <span className="review-chrome__filename">{documentTitle}</span>
-      {savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
+      {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
       <span className="sr-only" data-review-saved-status>{savedLabel}</span>
     </ReviewTooltipButton>
     {open ? <div

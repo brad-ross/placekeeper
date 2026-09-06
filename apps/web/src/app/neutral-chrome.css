@@ -296,7 +296,11 @@
 
 .top-bar-menu__surface .review-chrome__control-cluster { gap: 3px; }
 
-.document-actions__menu { font-size: 13px; }
+.document-actions__menu {
+  width: max-content;
+  max-width: min(21rem, calc(100vw - 2rem));
+  font-size: 13px;
+}
 
 .document-actions__menu > button,
 .document-actions__confirmation > button,

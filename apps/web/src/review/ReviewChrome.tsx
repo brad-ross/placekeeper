@@ -80,6 +80,7 @@ export function resolveTopBarMenuRequest(input: {
 export interface ReviewChromeProps {
   readonly documentTitle: string;
   readonly savedLabel?: string;
+  readonly showSaveStatusDot?: boolean;
   readonly savePhase?: 'clean' | 'saving' | 'not-saved';
   readonly savePendingDestination?: boolean;
   readonly saveOptionsOpen?: boolean;
@@ -113,6 +114,7 @@ export interface ReviewChromeProps {
 }
 
 export function ReviewChrome({
+  showSaveStatusDot = true,
   documentTitle,
   savedLabel = 'Saved',
   savePhase = 'clean',
@@ -678,7 +680,7 @@ export function ReviewChrome({
   </div>;
 
   const sizingIdentity = <div className="review-chrome__identity">
-    {documentActions !== undefined ? <div className="document-actions"><button type="button" className="review-chrome__save-identity document-actions__trigger" title="Open document actions"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{documentTitle}</span>{savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button></div> : saveOptionsAvailable ? <button type="button" className="review-chrome__save-identity" title="Open automatic save options"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{documentTitle}</span>{savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button> : <div className="review-chrome__save-identity"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{documentTitle}</span>{savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</div>}
+    {documentActions !== undefined ? <div className="document-actions"><button type="button" className="review-chrome__save-identity document-actions__trigger" title="Open document actions"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{documentTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button></div> : saveOptionsAvailable ? <button type="button" className="review-chrome__save-identity" title="Open automatic save options"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{documentTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button> : <div className="review-chrome__save-identity"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{documentTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</div>}
     {codexContext === undefined ? null : <div className="review-chrome__context"><div className="codex-context-status"><ReviewIcon name="agent" size={16} /></div></div>}
   </div>;
 
@@ -695,6 +697,7 @@ export function ReviewChrome({
         documentTitle={documentTitle}
         savedLabel={savedLabel}
         savePhase={savePhase}
+        showSaveStatusDot={showSaveStatusDot}
         open={activeTopBarMenu === 'document'}
         onOpenChange={(open) => requestTopBarMenu('document', open)}
         onPendingChange={(pending) => {
@@ -704,12 +707,12 @@ export function ReviewChrome({
       /> : saveOptionsAvailable ? <ReviewTooltipButton ref={saveTriggerRef} label={saveControlLabel} tooltip={`${documentTitle} — Save options`} type="button" className="review-chrome__save-identity" aria-haspopup="dialog" aria-expanded={saveOptionsOpen} onClick={onSaveOptions}>
         <ReviewIcon name="file" size={16} />
         <span className="review-chrome__filename">{documentTitle}</span>
-        {savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
+        {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
         <span className="sr-only" data-review-saved-status>{saveStatusDisplay}</span>
       </ReviewTooltipButton> : <div className="review-chrome__save-identity" aria-label={`${documentTitle}, ${saveStatusText}`} title={documentTitle} tabIndex={0}>
         <ReviewIcon name="file" size={16} />
         <span className="review-chrome__filename">{documentTitle}</span>
-        {savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
+        {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
         <span className="sr-only" data-review-saved-status>{saveStatusDisplay}</span>
       </div>}
       {codexContext === undefined ? null : <div className="review-chrome__context" data-review-context-status><CodexContextStatus status={codexContext} /></div>}

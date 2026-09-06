@@ -333,3 +333,16 @@ test("exhaustive profile rejects unsupported input, announces recovery, and rest
   await expect(page.getByRole("button", { name: "Upload PDF" })).toBeFocused();
   await expect(page.locator("[data-production-review]")).toHaveCount(0);
 });
+
+test('export menu fits its action and export-only chrome omits a save-status dot', async ({ page }) => {
+  await page.goto('./');
+  await page.locator('input[type=file]').setInputFiles(annotatedPdf);
+  await waitForStaticPdf(page);
+  await expect(page.locator('.review-chrome__save-dot')).toHaveCount(0);
+  await page.getByRole('button', { name: /Open document actions$/u }).click();
+  const menu = page.locator('.document-actions__menu');
+  await expect(menu).toBeVisible();
+  const bounds = (await menu.boundingBox())!;
+  expect(bounds.width).toBeLessThan(160);
+  await expect(page.getByRole('menuitem', { name: 'Export', exact: true })).toBeVisible();
+});

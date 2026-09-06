@@ -2159,6 +2159,7 @@ export function ReviewShell(props: ReviewShellProps) {
         {transitionAnnouncement}
       </p>
       <ReviewChrome
+        showSaveStatusDot={!props.exportOnly}
         documentTitle={props.documentTitle ?? 'Local PDF'}
         {...(props.savedLabel === undefined ? {} : { savedLabel: props.savedLabel })}
         {...(props.savePhase === undefined ? {} : { savePhase: props.savePhase })}
