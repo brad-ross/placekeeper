@@ -29,6 +29,7 @@ const VISUAL_SCENE_NAMES = [
   'page-note',
   'save-destination',
   'save-recovery',
+  'save-failure',
   'exceptional',
 ] as const;
 
@@ -312,7 +313,7 @@ export function resolveVisualScenario(search: string): VisualScenario | null {
     name,
     documentTitle: 'Identification Strategy, Local Equilibria, and Robustness — Author Revision 2026-08-09.pdf',
     state,
-    listOpen: name === 'tray' || name === 'outline' || name === 'exceptional',
+    listOpen: name === 'tray' || name === 'outline' || name === 'exceptional' || name === 'save-failure',
     pageMenuOpen: name === 'page-note',
     existingAnnotations: name === 'exceptional'
       ? exceptionalAnnotations

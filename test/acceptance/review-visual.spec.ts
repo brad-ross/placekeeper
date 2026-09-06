@@ -46,6 +46,7 @@ async function expectScene(locator: Locator, name: string): Promise<void> {
   await expect(locator).toHaveScreenshot(name, {
     animations: 'disabled',
     maxDiffPixels: 100,
+    threshold: 0.05,
   });
 }
 
@@ -135,11 +136,17 @@ async function expectAnnotationEndcapGeometry(row: Locator, more: Locator): Prom
     );
     const excerpt = element.querySelector<HTMLElement>('.annotation-item__excerpt');
     const trigger = element.querySelector<HTMLElement>('[data-read-full-annotation="true"]');
-    if (!content || !excerpt || !trigger) throw new Error('Annotation reader trigger geometry is incomplete.');
+    const excerptMain = element.querySelector<HTMLElement>('.annotation-item__excerpt-main');
+    const quote = element.querySelector<HTMLElement>('.annotation-item__quote');
+    if (!content || !excerpt || !trigger || !excerptMain) {
+      throw new Error('Annotation reader trigger geometry is incomplete.');
+    }
     const contentBounds = content.getBoundingClientRect();
     const triggerBounds = trigger.getBoundingClientRect();
     const style = getComputedStyle(trigger);
     const excerptStyle = getComputedStyle(excerpt);
+    const excerptMainStyle = getComputedStyle(excerptMain);
+    const quoteStyle = quote === null ? null : getComputedStyle(quote);
     return {
       content: {
         left: contentBounds.left,
@@ -157,6 +164,10 @@ async function expectAnnotationEndcapGeometry(row: Locator, more: Locator): Prom
       isExcerptChild: trigger.parentElement === excerpt,
       backgroundImage: style.backgroundImage,
       borderRadius: style.borderRadius,
+      lineClamp: excerptMainStyle.webkitLineClamp,
+      quoteMarginTop: quoteStyle?.marginTop ?? null,
+      quoteFontSize: quoteStyle?.fontSize ?? null,
+      quoteLineHeight: quoteStyle?.lineHeight ?? null,
     };
   });
   expect(geometry.trigger.left).toBeGreaterThanOrEqual(geometry.content.left);
@@ -167,18 +178,25 @@ async function expectAnnotationEndcapGeometry(row: Locator, more: Locator): Prom
   expect(geometry.isExcerptChild).toBe(true);
   expect(geometry.backgroundImage).toBe('none');
   expect(geometry.borderRadius).toBe('0px');
+  expect(geometry.lineClamp).toBe('3');
+  if (geometry.quoteMarginTop !== null) {
+    expect(geometry.quoteMarginTop).toBe('6px');
+    expect(geometry.quoteFontSize).toBe('13px');
+    expect(geometry.quoteLineHeight).toBe('19.5px');
+  }
   await expect(more).toHaveAttribute('title', 'Read full annotation');
 }
 
 async function expectAnnotationTitleEndcapGeometry(row: Locator): Promise<void> {
   const geometry = await row.evaluate((element) => {
     const title = element.querySelector<HTMLElement>('.annotation-item__title-row');
-    const metadata = element.querySelector<HTMLElement>('.annotation-item__meta');
+    const metadata = element.querySelector<HTMLElement>('.annotation-item__kind-icon');
     const edit = element.querySelector<HTMLElement>('[data-row-action="edit"]');
     const remove = element.querySelector<HTMLElement>('[data-row-action="delete"]');
     const copy = element.querySelector<HTMLElement>('.copy-link-control__trigger--row');
     const actions = element.querySelector<HTMLElement>('.row-action-group__direct');
-    if (!title || !metadata || !edit || !remove || !copy || !actions) {
+    const page = element.querySelector<HTMLElement>('.annotation-item__page');
+    if (!title || !metadata || !edit || !remove || !copy || !actions || !page) {
       throw new Error('Annotation title endcap geometry is incomplete.');
     }
     const titleBounds = title.getBoundingClientRect();
@@ -187,6 +205,13 @@ async function expectAnnotationTitleEndcapGeometry(row: Locator): Promise<void> 
     const removeBounds = remove.getBoundingClientRect();
     const copyBounds = copy.getBoundingClientRect();
     const actionsBounds = actions.getBoundingClientRect();
+    const pageBounds = page.getBoundingClientRect();
+    const rowStyle = getComputedStyle(element);
+    const contentStyle = getComputedStyle(element.querySelector<HTMLElement>('.annotation-item__content')!);
+    const titleStyle = getComputedStyle(title);
+    const excerptStyle = getComputedStyle(element.querySelector<HTMLElement>('.annotation-item__excerpt')!);
+    const pageStyle = getComputedStyle(page);
+    const actionsStyle = getComputedStyle(actions);
     return {
       title: titleBounds.toJSON(),
       metadata: metadataBounds.toJSON(),
@@ -194,9 +219,23 @@ async function expectAnnotationTitleEndcapGeometry(row: Locator): Promise<void> 
       remove: removeBounds.toJSON(),
       copy: copyBounds.toJSON(),
       actions: actionsBounds.toJSON(),
+      page: pageBounds.toJSON(),
       editOpacity: Number.parseFloat(getComputedStyle(edit).opacity),
       removeOpacity: Number.parseFloat(getComputedStyle(remove).opacity),
       copyOpacity: Number.parseFloat(getComputedStyle(copy).opacity),
+      row: {
+        borderWidth: rowStyle.borderWidth,
+        borderRadius: rowStyle.borderRadius,
+      },
+      contentPadding: [contentStyle.paddingTop, contentStyle.paddingRight, contentStyle.paddingBottom, contentStyle.paddingLeft],
+      titleGap: titleStyle.gap,
+      titleMinHeight: titleStyle.minHeight,
+      titleMarginBottom: titleStyle.marginBottom,
+      excerptFontSize: excerptStyle.fontSize,
+      excerptLineHeight: excerptStyle.lineHeight,
+      pageFontSize: pageStyle.fontSize,
+      pageMarginLeft: pageStyle.marginLeft,
+      actionsGap: actionsStyle.gap,
     };
   });
   expect(geometry.copy.x).toBeGreaterThanOrEqual(geometry.metadata.x + geometry.metadata.width);
@@ -217,6 +256,17 @@ async function expectAnnotationTitleEndcapGeometry(row: Locator): Promise<void> 
   expect(geometry.edit.width).toBeLessThanOrEqual(34);
   expect(geometry.editOpacity).toBe(geometry.removeOpacity);
   expect(geometry.removeOpacity).toBe(geometry.copyOpacity);
+  expect(geometry.page.x + geometry.page.width)
+    .toBeCloseTo(geometry.actions.x + geometry.actions.width, 0);
+  expect(geometry.row).toEqual({ borderWidth: '0px', borderRadius: '12px' });
+  expect(geometry.contentPadding).toEqual(['8px', '12px', '8px', '12px']);
+  expect(geometry.titleGap).toBe('6px');
+  expect(geometry.titleMinHeight).toBe('27px');
+  expect(geometry.titleMarginBottom).toBe('4px');
+  expect(geometry.excerptFontSize).toBe('13px');
+  expect(geometry.excerptLineHeight).toBe('20.15px');
+  expect(geometry.pageFontSize).toBe('11px');
+  expect(geometry.actionsGap).toBe('0px');
 }
 
 async function expectCompactAnnotationReader(page: Page): Promise<Locator> {
@@ -224,19 +274,61 @@ async function expectCompactAnnotationReader(page: Page): Promise<Locator> {
   await expect(reader).toBeVisible();
   const hierarchy = await reader.evaluate((element) => {
     const metadata = element.querySelector<HTMLElement>('.full-annotation-reader__metadata');
+    const metadataBar = element.querySelector<HTMLElement>('.full-annotation-reader__metadata-bar');
     const body = element.querySelector<HTMLElement>('.full-annotation-reader__body p');
-    if (!metadata || !body) throw new Error('Full annotation reader hierarchy is incomplete.');
+    const bodyContainer = element.querySelector<HTMLElement>('.full-annotation-reader__body');
+    const back = element.querySelector<HTMLElement>('.full-annotation-reader__back');
+    if (!metadata || !metadataBar || !body || !bodyContainer || !back) {
+      throw new Error('Full annotation reader hierarchy is incomplete.');
+    }
+    const readerStyle = getComputedStyle(element);
+    const barStyle = getComputedStyle(metadataBar);
+    const metadataStyle = getComputedStyle(metadata);
+    const bodyStyle = getComputedStyle(bodyContainer);
+    const paragraphStyle = getComputedStyle(body);
+    const backBounds = back.getBoundingClientRect();
+    const backStyle = getComputedStyle(back);
     return {
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
       gap: Number.parseFloat(getComputedStyle(element).gap),
       metadataSize: Number.parseFloat(getComputedStyle(metadata).fontSize),
       bodySize: Number.parseFloat(getComputedStyle(body).fontSize),
+      display: readerStyle.display,
+      direction: readerStyle.flexDirection,
+      readerLineHeight: readerStyle.lineHeight,
+      barGap: barStyle.gap,
+      barPaddingBottom: barStyle.paddingBottom,
+      barBorderBottomWidth: barStyle.borderBottomWidth,
+      metadataGap: metadataStyle.gap,
+      metadataLineHeight: metadataStyle.lineHeight,
+      bodyDisplay: bodyStyle.display,
+      bodyOverflowY: bodyStyle.overflowY,
+      paragraphLineHeight: paragraphStyle.lineHeight,
+      paragraphWhiteSpace: paragraphStyle.whiteSpace,
+      backSize: { width: backBounds.width, height: backBounds.height },
+      backRadius: backStyle.borderRadius,
+      backColor: backStyle.color,
     };
   });
   expect(hierarchy.scrollWidth).toBeLessThanOrEqual(hierarchy.clientWidth + 1);
   expect(hierarchy.gap).toBeLessThanOrEqual(18);
   expect(hierarchy.bodySize).toBeGreaterThan(hierarchy.metadataSize);
+  expect(hierarchy.display).toBe('flex');
+  expect(hierarchy.direction).toBe('column');
+  expect(Number.parseFloat(hierarchy.readerLineHeight)).toBeCloseTo(20.8, 3);
+  expect(hierarchy.barGap).toBe('7px');
+  expect(hierarchy.barPaddingBottom).toBe('12px');
+  expect(hierarchy.barBorderBottomWidth).toBe('0px');
+  expect(hierarchy.metadataGap).toBe('7px');
+  expect(Number.parseFloat(hierarchy.metadataLineHeight)).toBeCloseTo(19.2, 3);
+  expect(hierarchy.bodyDisplay).toBe('block');
+  expect(hierarchy.bodyOverflowY).toBe('auto');
+  expect(Number.parseFloat(hierarchy.paragraphLineHeight)).toBeCloseTo(20.8, 3);
+  expect(hierarchy.paragraphWhiteSpace).toBe('pre-wrap');
+  expect(hierarchy.backSize).toEqual({ width: 32, height: 32 });
+  expect(hierarchy.backRadius).toBe('10px');
+  expect(hierarchy.backColor).toBe('rgb(51, 51, 51)');
   await expect(reader).not.toContainText('Full annotation —');
 
   const metadataBarBox = await reader.locator('.full-annotation-reader__metadata-bar').boundingBox();
@@ -265,9 +357,11 @@ async function expectCompoundReferenceTabs(
   const tablist = page.getByRole('tablist', { name: 'Open references' });
   await expect(tablist).toHaveAttribute('aria-orientation', orientation);
   await expect(tablist.getByRole('tab')).toHaveCount(3);
-  await expect(tablist.locator(
+  const activeSegment = tablist.locator(
     '.reference-tab-segment:has(> [role="tab"][aria-selected="true"])',
-  )).toHaveCount(1);
+  );
+  await expect(activeSegment).toHaveCount(1);
+  await activeSegment.hover();
   await expect(tablist.getByRole('button', { name: 'Open in main document' })).toBeVisible();
   await expect(tablist.getByRole('button', { name: 'Close active reference' })).toBeVisible();
   const actionGaps = await tablist.locator(
@@ -285,10 +379,21 @@ async function expectCompoundReferenceTabs(
       actionToAction: secondBounds.left - firstBounds.right,
     };
   });
-  expect(actionGaps.group).toBe('2px');
-  expect(actionGaps.selectorToAction).toBeCloseTo(2, 1);
-  expect(actionGaps.actionToAction).toBeCloseTo(2, 1);
+  expect(actionGaps.group).toBe('0px');
+  expect(actionGaps.selectorToAction).toBeCloseTo(0, 1);
+  expect(actionGaps.actionToAction).toBeCloseTo(0, 1);
   await expect(page.locator('.reference-panel__actions')).toHaveCount(0);
+}
+
+async function clickHoverRevealedReferenceDockAction(action: Locator): Promise<void> {
+  await action.evaluate(async (element) => {
+    await Promise.all((element.closest('aside')?.getAnimations() ?? [])
+      .map((animation) => animation.finished.catch(() => undefined)));
+  });
+  await action.locator('..').hover();
+  await expect(action).toHaveCSS('opacity', '1');
+  await expect(action).toHaveCSS('pointer-events', 'auto');
+  await action.click();
 }
 
 async function openOutlineScene(
@@ -315,7 +420,7 @@ async function expectOutlineTreeGeometry(
   const visibleRows = navigator.locator('.outline-navigator__row:visible');
   await expect(visibleRows).toHaveCount(6);
   expect(await navigator.locator('.outline-navigator__title:visible').evaluateAll((titles) => (
-    titles.every((title) => getComputedStyle(title).fontWeight === '500')
+    titles.every((title) => getComputedStyle(title).fontWeight === '400')
   ))).toBe(true);
 
   const rowSpacing = await visibleRows.evaluateAll((rows) => rows.map((row, index) => {
@@ -332,8 +437,7 @@ async function expectOutlineTreeGeometry(
   }));
   for (let index = 1; index < rowSpacing.length; index += 1) {
     const spacing = rowSpacing[index]!;
-    const previous = rowSpacing[index - 1]!;
-    expect(spacing.gapAbove).toBeGreaterThanOrEqual(spacing.depth === previous.depth ? 6 : 8);
+    expect(spacing.gapAbove).toBeGreaterThanOrEqual(4);
   }
 
   const deepestVisibleLevel = await visibleRows.evaluateAll((rows) => Math.max(...rows.map((row) => {
@@ -360,22 +464,22 @@ async function expectOutlineTreeGeometry(
       whiteSpace: style.whiteSpace,
     };
   });
-  expect(titleGeometry.scrollWidth).toBeGreaterThan(titleGeometry.clientWidth);
+  expect(titleGeometry.scrollWidth).toBeLessThanOrEqual(titleGeometry.clientWidth + 1);
   expect(titleGeometry).toMatchObject({
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+    overflow: 'visible',
+    textOverflow: 'clip',
+    whiteSpace: 'normal',
   });
   await expect(longPage).toBeVisible();
   await expect(longPage).toHaveText('18');
 
-  const visibleGuides = navigator.locator('.outline-navigator__children:visible');
-  expect(await visibleGuides.count()).toBeGreaterThanOrEqual(3);
-  for (const guide of await visibleGuides.all()) {
-    await expect.poll(() => guide.evaluate((element) => {
+  const visibleBranches = navigator.locator('.outline-navigator__children:visible');
+  expect(await visibleBranches.count()).toBeGreaterThanOrEqual(3);
+  for (const branch of await visibleBranches.all()) {
+    await expect.poll(() => branch.evaluate((element) => {
       const style = getComputedStyle(element);
       return `${style.borderLeftStyle}:${style.borderLeftWidth}`;
-    })).toBe('solid:1px');
+    })).toBe('none:0px');
   }
   const peerDisclosure = page.getByRole('button', { name: 'Collapse Robustness appendix' });
   const peerChildrenId = await peerDisclosure.getAttribute('aria-controls');
@@ -470,6 +574,7 @@ test('narrow responsive top-bar menu', async ({ page }) => {
   await expect(page).toHaveScreenshot('narrow-responsive-top-bar-menu.png', {
     animations: 'disabled',
     maxDiffPixels: 100,
+    threshold: 0.05,
   });
 });
 
@@ -538,6 +643,12 @@ test('wide Annotation Tray', async ({ page }) => {
   const fittingImported = page.locator('[data-existing-annotation="source-highlight-short"]');
   const overflowingImported = page.locator('[data-existing-annotation="source-highlight-long"]');
   await expect(more).toBeVisible();
+  await expect(page.locator('#review-tools-workspace')).toHaveCSS(
+    'background-color',
+    'rgb(240, 240, 240)',
+  );
+  expect(await row.evaluate((element) => getComputedStyle(element, '::before').content))
+    .toBe('none');
   await expect(fittingOwned.locator('[data-read-full-annotation="true"]')).toBeHidden();
   await expect(fittingImported.locator('[data-read-full-annotation="true"]')).toBeHidden();
   await expect(overflowingImported.locator('[data-read-full-annotation="true"]')).toBeVisible();
@@ -562,6 +673,15 @@ test('wide Annotation Tray', async ({ page }) => {
   await expect.poll(() => more.evaluate((element) => getComputedStyle(element).cursor))
     .toBe('pointer');
   await expectScene(product, 'wide-annotation-more-hover.png');
+
+  const fittingNavigation = fittingOwned.locator('.annotation-item__navigation');
+  await fittingNavigation.click();
+  await expect(fittingOwned).toHaveAttribute('data-active', 'true');
+  await page.mouse.move(500, 500);
+  await page.locator('.review-chrome button').first().focus();
+  await expect(fittingOwned.locator('[data-row-action="edit"]')).toBeVisible();
+  await expect.poll(() => fittingOwned.evaluate((element) => getComputedStyle(element).backgroundColor))
+    .toBe('rgb(255, 255, 255)');
 
   await more.click();
   const reader = await expectCompactAnnotationReader(page);
@@ -589,7 +709,7 @@ test('task-first generated Annotation Tray and blocked document menu', async ({ 
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
 
   const headings = page.locator('#workspace-panel-annotations h2');
-  await expect(headings).toHaveText(['Needs attention', 'From this PDF']);
+  await expect(headings).toHaveText(['Needs attention']);
   const resolved = page.locator('[data-review-item="00000000-0000-4000-8000-000000000208"]');
   await resolved.locator('.annotation-item__navigation').focus();
   await expect(resolved.locator('.row-action-group__direct')).toHaveCSS('opacity', '1');
@@ -669,6 +789,10 @@ test('narrow Annotation Tray', async ({ page }) => {
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
+  await expect(page.locator('[data-annotation-scroll-viewport]')).toHaveCSS(
+    'background-color',
+    'rgb(240, 240, 240)',
+  );
   const row = page.locator('[data-review-item="owned-highlight"]');
   const annotation = row.getByRole('button', { name: /Highlight · Page 1/u });
   await annotation.focus();
@@ -761,6 +885,8 @@ test('wide Outline tree', async ({ page }) => {
     name: 'Conditional comparison estimates, Page 24',
     exact: true,
   }).focus();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Shift+Tab');
   await expect(page.getByRole('button', {
     name: 'Copy exact destination link for Conditional comparison estimates, Page 24',
   }).locator('.lucide-link')).toBeVisible();
@@ -769,8 +895,13 @@ test('wide Outline tree', async ({ page }) => {
   await expectScene(product, 'wide-outline-tree.png');
 });
 
-test('Outline current location remains distinct while pressed', async ({ page }) => {
+test('Outline pointer and keyboard states match the canonical tree', async ({ page }) => {
   await openOutlineScene(page);
+  const navigator = page.getByRole('navigation', { name: 'Document outline' });
+  const inactiveRow = navigator.locator(
+    '.outline-navigator__row:not([data-current="true"]):has(.outline-navigator__destination:not(:disabled))',
+  ).first();
+  const inactiveDestination = inactiveRow.locator('.outline-navigator__destination');
   const currentRow = page.locator(
     '[data-outline-item="outline-long-nested"] > .outline-navigator__row',
   );
@@ -792,10 +923,37 @@ test('Outline current location remains distinct while pressed', async ({ page })
   const currentShadowWhilePressed = await currentRow.evaluate(
     (row) => getComputedStyle(row).boxShadow,
   );
-  expect(currentShadowWhilePressed).not.toBe(currentShadowAtRest);
-  expect(currentShadowWhilePressed).toContain('inset');
+  expect(currentShadowWhilePressed).toBe(currentShadowAtRest);
+  await expect(currentRow).toHaveCSS('outline-style', 'none');
   await page.mouse.up();
   await expect(currentRow).toHaveCSS('box-shadow', currentShadowAtRest);
+
+  await inactiveDestination.hover();
+  await expect(inactiveRow).toHaveCSS('background-color', 'rgb(231, 231, 231)');
+  await expect(inactiveRow).toHaveCSS('outline-style', 'none');
+
+  await page.keyboard.press('Tab');
+  await inactiveDestination.focus();
+  await expect(inactiveDestination).toBeFocused();
+  await expect(inactiveDestination).toHaveCSS('outline-width', '2px');
+  await expect(inactiveDestination).toHaveCSS('outline-color', 'rgb(73, 103, 137)');
+  await expect(inactiveDestination).toHaveCSS('outline-offset', '3px');
+  await expect(inactiveRow).toHaveCSS('outline-style', 'none');
+
+  const copyAction = currentRow.locator('.copy-link-control__trigger--row');
+  await currentRow.hover();
+  await copyAction.hover();
+  await expect(copyAction).toHaveCSS('background-color', 'rgb(231, 231, 231)');
+  await expect(copyAction).toHaveCSS('border-top-width', '0px');
+  await page.keyboard.press('Tab');
+  await copyAction.focus();
+  await expect(copyAction).toBeFocused();
+  await page.mouse.move(1, 1);
+  await expect(copyAction).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await expect(copyAction).toHaveCSS('outline-width', '2px');
+  await expect(copyAction).toHaveCSS('outline-color', 'rgb(73, 103, 137)');
+  await expect(copyAction).toHaveCSS('outline-offset', '3px');
+  await expect(currentRow).toHaveCSS('outline-style', 'none');
 });
 
 test('narrow Outline tree', async ({ page }) => {
@@ -809,6 +967,8 @@ test('narrow Outline tree', async ({ page }) => {
     name: 'Conditional comparison estimates, Page 24',
     exact: true,
   }).focus();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Shift+Tab');
   await expect(page.locator('[data-outline-item="outline-long-nested"] > .outline-navigator__row'))
     .toHaveAttribute('data-current', 'true');
   await expectScene(product, 'narrow-outline-tree.png');
@@ -835,7 +995,8 @@ test('wide coordinated References and tools trays', async ({ page }) => {
 test('wide right-docked References tray', async ({ page }) => {
   const product = await openScene(page, 'reference-layout');
   await page.getByRole('button', { name: 'Show References' }).click();
-  await page.getByRole('button', { name: 'Move References to right' }).click();
+  const moveReferences = page.getByRole('button', { name: 'Move References to right' });
+  await clickHoverRevealedReferenceDockAction(moveReferences);
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'wide-right');
   await expect(page.getByRole('tab', { name: 'References', exact: true })).toBeVisible();
   await expectCompoundReferenceTabs(page, 'horizontal');
@@ -845,7 +1006,9 @@ test('wide right-docked References tray', async ({ page }) => {
 test('reference-layout workspace mode buttons remain interactive', async ({ page }) => {
   await openScene(page, 'reference-layout');
   await page.getByRole('button', { name: 'Show References' }).click();
-  await page.getByRole('button', { name: 'Move References to right' }).click();
+  const moveReferencesRight = page.getByRole('button', { name: 'Move References to right' });
+  await clickHoverRevealedReferenceDockAction(moveReferencesRight);
+  await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'wide-right');
 
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
   await annotations.click();
@@ -874,9 +1037,9 @@ test('reference-layout reference tab selectors remain interactive', async ({ pag
   const lemma = page.getByRole('tab', {
     name: 'Lemma 2: Local identification under conditional independence, Page 18',
   });
-  await expect(equation.locator('span')).toHaveCSS('font-weight', '500');
+  await expect(equation.locator('span')).toHaveCSS('font-weight', '400');
   await expect(equation.locator('small')).toHaveCSS('font-weight', '400');
-  await expect(lemma.locator('span')).toHaveCSS('font-weight', '500');
+  await expect(lemma.locator('span')).toHaveCSS('font-weight', '400');
   await expect(lemma.locator('small')).toHaveCSS('font-weight', '400');
   await equation.click();
   await expect(equation).toHaveAttribute('aria-selected', 'true');
@@ -897,7 +1060,7 @@ test('narrow unified References tray', async ({ page }) => {
 
 for (const scene of [
   {
-    name: 'wide bottom Reference return chip',
+    name: 'wide bottom Reference row return action',
     snapshot: 'wide-bottom-reference-return.png',
     viewport: { width: 1280, height: 900 },
     prepare: async (page: Page) => {
@@ -907,18 +1070,19 @@ for (const scene of [
     },
   },
   {
-    name: 'wide right Reference return chip',
+    name: 'wide right Reference row return action',
     snapshot: 'wide-right-reference-return.png',
     viewport: { width: 1280, height: 900 },
     prepare: async (page: Page) => {
       await page.getByRole('button', { name: 'Show References' }).click();
-      await page.getByRole('button', { name: 'Move References to right' }).click();
+      const moveReferences = page.getByRole('button', { name: 'Move References to right' });
+      await clickHoverRevealedReferenceDockAction(moveReferences);
       await expect(page.locator('[data-review-stage]'))
         .toHaveAttribute('data-reference-layout', 'wide-right');
     },
   },
   {
-    name: 'narrow Reference return chip',
+    name: 'narrow Reference row return action',
     snapshot: 'narrow-reference-return.png',
     viewport: { width: 760, height: 900 },
     prepare: async (page: Page) => {
@@ -937,17 +1101,18 @@ for (const scene of [
     );
     await scene.prepare(page);
     const returnControl = page.getByRole('button', { name: 'Return to reference' });
+    await returnControl.locator('..').hover();
     await expect(returnControl).toBeVisible();
     await returnControl.scrollIntoViewIfNeeded();
     const clearance = await returnControl.evaluate((control) => {
-      const viewport = document.querySelector<HTMLElement>('[data-reference-viewport-host]');
-      if (!viewport) throw new Error('Reference viewport host is unavailable.');
+      const viewport = control.closest<HTMLElement>('.reference-tab-segment');
+      if (!viewport) throw new Error('Reference tab row is unavailable.');
       const controlBounds = control.getBoundingClientRect();
       const viewportBounds = viewport.getBoundingClientRect();
       return {
         insideLeft: controlBounds.left >= viewportBounds.left,
         insideTop: controlBounds.top >= viewportBounds.top,
-        clearOfScrollbar: controlBounds.right < viewportBounds.right - 8,
+        clearOfScrollbar: controlBounds.right <= viewportBounds.right,
         topmost: document.elementFromPoint(
           controlBounds.left + controlBounds.width / 2,
           controlBounds.top + controlBounds.height / 2,
@@ -1083,17 +1248,19 @@ test('narrow composer uses one contained bottom surface with compact actions', a
   expect(geometry.left).toBeGreaterThanOrEqual(0);
   expect(geometry.right).toBeLessThanOrEqual(viewport.width);
   expect(geometry.bottom).toBeLessThanOrEqual(viewport.height);
-  expect(Math.min(...geometry.actionHeights)).toBeGreaterThanOrEqual(34);
+  expect(geometry.actionHeights.every((height) => Math.abs(height - 30) <= 0.5)).toBe(true);
   await expectScene(product, 'narrow-contextual-composer.png');
 });
 
-test('the out-of-view anchor uses one icon button and keeps actions beneath the input', async ({ page }) => {
+test('the out-of-view anchor uses one icon return action in the composer header', async ({ page }) => {
   const product = await openScene(page, 'reading&composer=replacement&context=long&return=outside');
   const composer = page.getByRole('region', { name: 'Replacement' });
   const before = await composer.boundingBox();
   const anchor = composer.getByRole('button', { name: 'Back to passage' });
   await expect(anchor).toBeVisible();
   await expect(anchor.locator('span')).toHaveCount(0);
+  await expect(composer.locator('.comment-composer__header > .comment-composer__anchor'))
+    .toHaveCount(1);
   const inputBox = await composer.getByRole('textbox').boundingBox();
   const actionsBox = await composer.locator('.comment-composer__actions').boundingBox();
   expect(inputBox).not.toBeNull();
@@ -1119,8 +1286,10 @@ test('the out-of-view anchor uses one icon button and keeps actions beneath the 
   await openScene(page, 'reading&composer=replacement&context=long&return=visible');
   const wideVisible = await measureAnchorLayout();
   expect(wideOutside.anchor).not.toBeNull();
-  expect(wideOutside.anchor!.width).toBeCloseTo(wideOutside.anchor!.height, 0);
-  expect(wideOutside.anchor!.height).toBeCloseTo(wideOutside.cancel.height, 0);
+  expect(wideOutside.anchor!.width).toBe(wideOutside.anchor!.height);
+  expect(wideOutside.anchor!.height).toBe(32);
+  expect(wideVisible.anchor).toBeNull();
+  expect(wideOutside.cancel.height).toBe(30);
   expect(wideOutside.header.height).toBeCloseTo(wideVisible.header.height, 0);
   expect(wideOutside.body.y).toBeCloseTo(wideVisible.body.y, 0);
 
@@ -1142,8 +1311,10 @@ test('the out-of-view anchor uses one icon button and keeps actions beneath the 
   );
   const mediumVisible = await measureAnchorLayout();
   expect(mediumOutside.anchor).not.toBeNull();
-  expect(mediumOutside.anchor!.width).toBeCloseTo(mediumOutside.anchor!.height, 0);
-  expect(mediumOutside.anchor!.height).toBeCloseTo(mediumOutside.cancel.height, 0);
+  expect(mediumOutside.anchor!.width).toBe(mediumOutside.anchor!.height);
+  expect(mediumOutside.anchor!.height).toBe(32);
+  expect(mediumVisible.anchor).toBeNull();
+  expect(mediumOutside.cancel.height).toBe(30);
   expect(mediumOutside.header.height).toBeCloseTo(mediumVisible.header.height, 0);
   expect(mediumOutside.body.y).toBeCloseTo(mediumVisible.body.y, 0);
 
@@ -1161,8 +1332,10 @@ test('the out-of-view anchor uses one icon button and keeps actions beneath the 
   );
   const narrowVisible = await measureAnchorLayout();
   expect(narrowOutside.anchor).not.toBeNull();
-  expect(narrowOutside.anchor!.width).toBeCloseTo(narrowOutside.anchor!.height, 0);
-  expect(narrowOutside.anchor!.height).toBeCloseTo(narrowOutside.cancel.height, 0);
+  expect(narrowOutside.anchor!.width).toBe(narrowOutside.anchor!.height);
+  expect(narrowOutside.anchor!.height).toBe(32);
+  expect(narrowVisible.anchor).toBeNull();
+  expect(narrowOutside.cancel.height).toBe(30);
   expect(narrowOutside.header.height).toBeCloseTo(narrowVisible.header.height, 0);
   expect(narrowOutside.body.y).toBeCloseTo(narrowVisible.body.y, 0);
 });
@@ -1266,7 +1439,7 @@ for (const scene of [
     expect(geometry.right).toBeLessThanOrEqual(scene.viewport.width);
     expect(geometry.bottom).toBeLessThanOrEqual(scene.viewport.height);
     expect(geometry.buttonHeights.length).toBeGreaterThan(0);
-    expect(Math.min(...geometry.buttonHeights)).toBeGreaterThanOrEqual(34);
+    expect(Math.min(...geometry.buttonHeights)).toBeGreaterThanOrEqual(scene.openComposer ? 30 : 32);
     expect(geometry.activeIsVisible).toBe(true);
   });
 }

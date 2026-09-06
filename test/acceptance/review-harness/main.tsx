@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client';
+import { ProductionReviewApp, type ProductionSessionApi } from '../../../apps/web/src/app/ProductionReviewApp.js';
 import { createPortal } from 'react-dom';
 import { useRef, useState, useSyncExternalStore } from 'react';
 import { PdfZoomMode } from '@embedpdf/models';
@@ -9,6 +10,8 @@ import {
 } from '../../../apps/web/src/app/ReviewShell.js';
 import { SaveDestinationDialog } from '../../../apps/web/src/save/SaveDestinationDialog.js';
 import { CommentComposer } from '../../../apps/web/src/review/CommentComposer.js';
+import { PdfSearchWorkspace } from '../../../apps/web/src/review/PdfSearchWorkspace.js';
+import { initialPdfSearchState } from '../../../apps/web/src/pdf/pdf-search-model.js';
 import { projectReviewItems } from '../../../apps/web/src/review/annotation-projection.js';
 import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
 import type { CaretAnchor, SelectionAnchor } from '../../../apps/web/src/pdf/selection-anchor.js';
@@ -42,6 +45,7 @@ const responsiveFullChrome = previewParameters.get('responsive') === 'full';
 const saveEstablishing = previewParameters.has('establishing');
 const reconciliationPreview = previewParameters.get('reconciliation');
 const exportPreview = previewParameters.get('export');
+const hostExportPreview = previewParameters.has('host-export');
 const requestedRefreshPreview = previewParameters.get('refresh');
 const refreshPreview = requestedRefreshPreview === 'reconciling' || requestedRefreshPreview === 'failed'
   ? requestedRefreshPreview
@@ -101,6 +105,30 @@ function ComposerPreview({ name }: { readonly name: string }) {
     default:
       return null;
   }
+}
+
+function SearchPreview() {
+  const [query, setQuery] = useState('');
+  const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
+  const excerpts = [
+    'A more precise signal reduces uncertainty about the value of each alternative.',
+    'The signal distribution varies across consumers.',
+    'We estimate the signal parameters jointly.',
+  ];
+  const results = query.trim() ? excerpts.map((excerpt, index) => ({
+    id: `canonical-search-${index}`, pageIndex: [3, 5, 9][index]!, charIndex: 0,
+    charCount: 6, navigationPoint: { x: 72, y: 120 }, rects: [], excerpt,
+    excerptMatch: { start: excerpt.indexOf('signal'), length: 6 }, kind: 'exact' as const, matchedForm: 'signal',
+  })) : [];
+  return <PdfSearchWorkspace
+    state={{ ...initialPdfSearchState(28), query, selectedResultId,
+      status: results.length ? 'results' : 'idle',
+      groups: results.length ? [{ id: 'exact', label: 'Exact matches', results }] : [],
+    }}
+    onQueryChange={setQuery} onAlternativeActivate={(alternative) => setQuery(alternative.query)}
+    onResultActivate={(result) => setSelectedResultId(result.id)} onResultOpenReference={() => undefined}
+    copyLinkForResult={(result) => ({ getLink: () => `placekeeper:///tmp/Paper.pdf#v=1&page=${result.pageIndex + 1}`, writeText: async () => undefined })}
+  />;
 }
 
 const selection: SelectionAnchor = {
@@ -538,6 +566,11 @@ function Harness() {
   const authoringActiveRef = useRef(false);
   const [saveDestinationOpen, setSaveDestinationOpen] = useState(false);
   const [exportCount, setExportCount] = useState(0);
+  const hostExportSequenceRef = useRef(hostExportPreview ? 1 : 0);
+  const [hostExportRequestToken, setHostExportRequestToken] = useState<number | undefined>(
+    hostExportPreview ? 1 : undefined,
+  );
+  const [shellMount, setShellMount] = useState(0);
   const failNextExportRef = useRef(exportPreview === 'fail-once');
   const [outlineDiscovery, setOutlineDiscovery] = useState<PdfOutlineDiscovery>({
     status: 'loading',
@@ -580,7 +613,14 @@ function Harness() {
 
   const shell = (
     <ReviewShell
+      key={shellMount}
       state={state}
+      {...(hostExportRequestToken === undefined ? {} : {
+        documentActionsRequestToken: hostExportRequestToken,
+        onDocumentActionsRequestHandled: (token: number) => {
+          setHostExportRequestToken((current) => current === token ? undefined : current);
+        },
+      })}
       {...(responsiveFullChrome ? {
         savePendingDestination: true,
         copyLink: {
@@ -616,7 +656,16 @@ function Harness() {
       } : {})}
       {...(visualScenario ? {
         documentTitle: visualScenario.documentTitle,
+        ...(previewParameters.get('search') === 'canonical' ? { search: <SearchPreview /> } : {}),
         savedLabel: "Saved",
+        ...(visualScenario.name === 'save-failure' ? {
+          savePhase: 'not-saved' as const,
+          saveRecovery: {
+            pending: saveEstablishing,
+            onRetry: async () => undefined,
+            onSaveCopy: () => setSaveDestinationOpen(true),
+          },
+        } : {}),
         listOpen: visualScenario.listOpen,
         viewerState: visualScenario.viewerState,
         existingAnnotations: visualScenario.existingAnnotations,
@@ -947,6 +996,15 @@ function Harness() {
         >
           Revision {state.revision}
         </output>
+        {hostExportPreview ? <div data-host-export-harness>
+          <button
+            type="button"
+            onClick={() => setHostExportRequestToken(++hostExportSequenceRef.current)}
+          >Request host export</button>
+          <button type="button" onClick={() => setShellMount((value) => value + 1)}>
+            Remount review shell
+          </button>
+        </div> : null}
       </div>}
     </ReviewShell>
   );
@@ -962,7 +1020,7 @@ function Harness() {
     />
   </>;
   const visualSaveDestinationOpen = visualScenario.name === 'save-destination'
-    || visualScenario.name === 'save-recovery';
+    || visualScenario.name === 'save-recovery' || saveDestinationOpen;
   return (
     <main data-production-review data-visual-scene={visualScenario.name}>
       {shell}
@@ -1017,4 +1075,24 @@ function Harness() {
   );
 }
 
-createRoot(root).render(<Harness />);
+function HostReattachmentPreview() {
+  const [token, setToken] = useState(0);
+  const state = useRef(createReconciliationPreviewState('ready')).current;
+  const unavailable = async (): Promise<never> => { throw new Error('Unused host fixture operation'); };
+  const api = useRef<ProductionSessionApi>({
+    command: unavailable, saveStatus: unavailable, saveProposal: unavailable,
+    chooseCopy: unavailable, chooseFolder: unavailable, chooseOriginal: unavailable,
+    retrySave: unavailable, locateSave: unavailable,
+    scope: async () => ({ documentTitle: 'Paper.pdf', launchSurface: 'vscode' }),
+  }).current;
+  return <>
+    <button type="button" style={{ position: 'fixed', bottom: 10, left: 10, zIndex: 1000 }}
+      onClick={() => setToken((value) => value + 1)}>Request host reattachment</button>
+    <ProductionReviewApp session={{ sessionId: state.sessionId }} initialState={state}
+      scope={{ documentTitle: 'Paper.pdf', launchSurface: 'vscode' }} api={api}
+      hostReattachRequestToken={token} locationHistory={null}
+      viewer={<div aria-label="Host fixture document" />} />
+  </>;
+}
+
+createRoot(root).render(previewParameters.has('host-reattach') ? <HostReattachmentPreview /> : <Harness />);

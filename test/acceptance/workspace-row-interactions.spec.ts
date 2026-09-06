@@ -1,0 +1,146 @@
+import { expect, test, type Locator, type Page } from '@playwright/test';
+
+const rowPaint = (row: Locator) => row.evaluate((element) => {
+  const style = getComputedStyle(element);
+  return { background: style.backgroundColor, shadow: style.boxShadow, outline: style.outlineWidth };
+});
+
+async function leaveRow(page: Page) {
+  await page.mouse.move(0, 0);
+  await page.locator('.review-chrome__page-input').focus();
+}
+
+for (const width of [1280, 620]) {
+  test(`workspace row intent and page/action endcaps match the outline at ${width}px`, async ({ page, browserName }) => {
+    page.on('pageerror', (error) => { throw error; });
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+    const openOutlineWorkspace = page.getByRole('button', { name: 'Show workspace', exact: true });
+    if (await openOutlineWorkspace.isVisible()) await openOutlineWorkspace.click();
+    await page.getByRole('tab', { name: 'Outline', exact: true }).click();
+    const outline = page.locator('.outline-navigator__row:visible:not([data-current="true"]):has(.row-action-group)').first();
+    await outline.hover();
+    const outlineHover = await rowPaint(outline);
+    expect(outlineHover.background).toBe('rgb(231, 231, 231)');
+    await expect(outline.locator('.outline-navigator__page')).toHaveCSS('opacity', '0');
+    await expect(outline.locator('.row-action-group__direct')).toHaveCSS('opacity', '1');
+    await outline.locator('.outline-navigator__destination').click();
+    const pointerFocusesOutline = await outline.locator('.outline-navigator__destination')
+      .evaluate((element) => element === document.activeElement);
+
+    await page.goto('/test/acceptance/review-harness/index.html?visual=tray&search=canonical');
+    const openTrayWorkspace = page.getByRole('button', { name: 'Show workspace', exact: true });
+    if (await openTrayWorkspace.isVisible()) await openTrayWorkspace.click();
+    await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
+    for (const annotation of await page.locator('li[data-annotation-origin]').all()) {
+      const heading = (await annotation.locator('.annotation-item__title-row').boundingBox())!;
+      const number = (await annotation.locator('.annotation-item__page').boundingBox())!;
+      expect(Math.abs(number.x + number.width - heading.x - heading.width)).toBeLessThan(1);
+    }
+
+    for (const kind of ['Annotations', 'Search']) {
+      await page.getByRole('tab', { name: kind, exact: true }).click();
+      if (kind === 'Search') await page.getByRole('searchbox').fill('signal');
+      const row = kind === 'Search'
+        ? page.locator('[data-search-result]').first()
+        : page.locator('[data-review-item="owned-replace"]');
+      const navigation = row.locator('.annotation-item__navigation');
+      const actions = row.locator('.row-action-group__direct');
+      const number = row.locator('.annotation-item__page, .pdf-search__result-page');
+      await leaveRow(page);
+      await expect(actions).toHaveCSS('opacity', '0');
+      await expect(number).toHaveCSS('opacity', '1');
+      const body = row.locator('.annotation-item__body-row, .pdf-search__excerpt');
+      const before = await body.boundingBox();
+      await row.hover();
+      expect(await rowPaint(row)).toEqual(outlineHover);
+      await expect(actions).toHaveCSS('opacity', '1');
+      await expect(number).toHaveCSS('opacity', '0');
+      expect(await body.boundingBox()).toEqual(before);
+      const numberBox = (await number.boundingBox())!;
+      const actionBox = (await actions.boundingBox())!;
+      expect(Math.abs(numberBox.x + numberBox.width - actionBox.x - actionBox.width)).toBeLessThan(1);
+      const previousSelection = await row.getAttribute('data-active');
+      await actions.locator('.copy-link-control__trigger').click();
+      await expect(row).toHaveAttribute('data-active', previousSelection!);
+      await navigation.click();
+      await expect(row).toHaveAttribute('data-active', 'true');
+      await page.mouse.move(0, 0);
+      expect(await navigation.evaluate((element) => element === document.activeElement)).toBe(pointerFocusesOutline);
+      await expect(actions).toHaveCSS('opacity', pointerFocusesOutline ? '1' : '0');
+      await expect(number).toHaveCSS('opacity', pointerFocusesOutline ? '0' : '1');
+      await expect(row).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+      await leaveRow(page);
+      await expect(actions).toHaveCSS('opacity', '0');
+      await expect(number).toHaveCSS('opacity', '1');
+      await row.hover();
+      await expect(row).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+      await navigation.focus();
+      await page.mouse.move(0, 0);
+      await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
+      await expect(actions.locator('button').first()).toBeFocused();
+      await expect(actions).toHaveCSS('opacity', '1');
+      await expect(number).toHaveCSS('opacity', '0');
+      await expect(actions.locator('button').first()).toHaveCSS('outline-color', 'rgb(73, 103, 137)');
+      await leaveRow(page);
+    }
+  });
+}
+
+test('touch rows expose actions in the page slot while read-only rows retain page numbers', async ({ browser }) => {
+  const context = await browser.newContext({ hasTouch: true, viewport: { width: 390, height: 800 } });
+  const page = await context.newPage();
+  try {
+    await page.goto('/test/acceptance/review-harness/index.html?visual=tray&search=canonical');
+    const open = page.getByRole('button', { name: 'Show workspace', exact: true });
+    if (await open.isVisible()) await open.click();
+    await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
+    const owned = page.locator('[data-review-item="owned-highlight"]');
+    await expect(owned.locator('.annotation-item__page')).toHaveCSS('opacity', '0');
+    await expect(owned.locator('.row-action-group__direct')).toHaveCSS('opacity', '1');
+    for (const button of await owned.locator('.row-action-group__direct button').all()) {
+      await expect(button).toHaveCSS('height', '44px');
+    }
+    const source = page.locator('[data-existing-annotation="source-highlight-short"]');
+    await source.locator('.annotation-item__navigation').click();
+    await expect(source).toHaveAttribute('data-active', 'true');
+    await expect(source.locator('.annotation-item__page')).toHaveCSS('opacity', '1');
+    await expect(source.locator('.row-action-group')).toHaveCount(0);
+    await expect(source).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+    await page.getByRole('tab', { name: 'Search', exact: true }).click();
+    await page.getByRole('searchbox').fill('signal');
+    const result = page.locator('[data-search-result]').first();
+    await expect(result.locator('.pdf-search__result-page')).toHaveCSS('opacity', '0');
+    await expect(result.locator('.row-action-group__direct')).toHaveCSS('opacity', '1');
+  } finally {
+    await context.close();
+  }
+});
+
+for (const width of [1280, 620]) {
+  test(`returning from a long annotation releases pointer hover and preserves keyboard return at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?visual=tray');
+    const open = page.getByRole('button', { name: 'Show workspace', exact: true });
+    if (await open.isVisible()) await open.click();
+    await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
+    const row = page.locator('[data-review-item="owned-highlight"]');
+    const more = row.locator('[data-read-full-annotation="true"]');
+    await more.click();
+    await page.locator('[data-full-annotation-action="back"]').click();
+    await expect(page.locator('#workspace-panel-annotations')).toBeFocused();
+    await page.mouse.move(0, 0);
+    await expect(row.locator('.row-action-group__direct')).toHaveCSS('opacity', '0');
+    await expect(row.locator('.annotation-item__page')).toHaveCSS('opacity', '1');
+    await row.hover();
+    await expect(row.locator('.row-action-group__direct')).toHaveCSS('opacity', '1');
+    await expect(row.locator('.annotation-item__page')).toHaveCSS('opacity', '0');
+    await page.mouse.move(0, 0);
+    await expect(row.locator('.row-action-group__direct')).toHaveCSS('opacity', '0');
+    await more.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-full-annotation-action="back"]')).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(more).toBeFocused();
+  });
+}

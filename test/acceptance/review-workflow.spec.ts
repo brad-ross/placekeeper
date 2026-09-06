@@ -1,4 +1,11 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
+
+async function clickHoverRevealedReferenceDockAction(action: Locator) {
+  await action.locator('..').hover();
+  await expect(action).toHaveCSS('opacity', '1');
+  await expect(action).toHaveCSS('pointer-events', 'auto');
+  await action.click();
+}
 
 async function openAnnotationsWorkspace(page: Page) {
   const stage = page.locator('[data-review-stage]');
@@ -182,6 +189,8 @@ test.describe('canonical review workflow', () => {
     await expect(row).toHaveAttribute('data-active', 'true');
     await page.getByRole('application', { name: 'PDF review canvas' }).focus();
     await page.mouse.move(0, 0);
+    await expect(actions).toHaveCSS('opacity', '0');
+    await row.hover();
     await expect(actions).toHaveCSS('opacity', '1');
   });
 
@@ -308,7 +317,7 @@ test.describe('canonical review workflow', () => {
     await reconciliation.getByRole('button', {
       name: 'Reattach previous Highlight annotation on page 1',
     }).click();
-    await expect(page.getByRole('region', { name: 'Owned annotations' })).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'Annotations', exact: true })).toHaveCount(0);
     await expect(reattachDetail.getByRole('button', { name: 'Confirm' })).toBeEnabled();
 
     await reattachDetail.getByRole('button', { name: 'Confirm' }).click();
@@ -318,7 +327,7 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('button', {
       name: 'Reattach previous Delete annotation on page 2',
     })).toBeFocused();
-    await expect(page.getByRole('region', { name: 'Owned annotations' })).toContainText(
+    await expect(page.getByRole('region', { name: 'Annotations', exact: true })).toContainText(
       'Check the identifying variation.',
     );
 
@@ -378,7 +387,7 @@ test.describe('canonical review workflow', () => {
     });
 
     expect(geometry.trigger.x).toBeCloseTo(geometry.slot.x, 0);
-    expect(geometry.trigger.width).toBeLessThan(geometry.slot.width - 16);
+    expect(geometry.trigger.width).toBeCloseTo(geometry.slot.width, 0);
     await trigger.hover();
     await expect(trigger).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await page.mouse.move(
@@ -482,6 +491,40 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
   });
 
+  test('routes host export requests through blocked, stale, pending, and retry states', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=1&host-export=1');
+    let menu = page.getByRole('menu', { name: /Actions for/u });
+    await expect(menu).toHaveAttribute('data-export-eligibility', 'blocked');
+    await expect(menu.getByText('2 annotations to resolve.')).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: 'Open Annotations' })).toBeFocused();
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '0');
+
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=stale&host-export=1');
+    menu = page.getByRole('menu', { name: /Actions for/u });
+    await expect(menu.getByText('Export the last successful PDF?')).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: 'Cancel' })).toBeFocused();
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '0');
+
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&export=fail-once&host-export=1');
+    menu = page.getByRole('menu', { name: /Actions for/u });
+    const retry = menu.getByRole('menuitem', { name: 'Retry export' });
+    await expect(retry).toBeFocused();
+    await expect(menu.getByText('Export failed. Your review is still available; try again.')).toBeVisible();
+    await retry.click();
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '2');
+    await expect(menu.getByText('Reviewed PDF exported.')).toBeVisible();
+
+    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&export=delayed&host-export=1');
+    menu = page.getByRole('menu', { name: /Actions for/u });
+    await expect(menu.getByText('Exporting reviewed PDF…')).toBeVisible();
+    await page.getByRole('button', { name: 'Request host export' }).click();
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
+    await expect(menu.getByText('Reviewed PDF exported.')).toBeVisible();
+    await page.getByRole('button', { name: 'Remount review shell' }).click();
+    await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
+    await expect(page.getByRole('menu', { name: /Actions for/u })).toHaveCount(0);
+  });
+
   test('preserves stale export confirmation through responsive reflow and clears it on close', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=stale');
@@ -552,9 +595,11 @@ test.describe('canonical review workflow', () => {
     );
     await expect(page.locator('#workspace-panel-outline')).toBeFocused();
 
-    await page.getByRole('button', { name: 'Open harness reference' }).click();
+    await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
     await page.getByRole('button', { name: 'Show References' }).click();
-    await page.getByRole('button', { name: 'Move References to right' }).click();
+    await clickHoverRevealedReferenceDockAction(
+      page.getByRole('button', { name: 'Move References to right' }),
+    );
     await expect(page.locator('[data-review-stage]')).toHaveAttribute(
       'data-reference-layout',
       'wide-right',
@@ -826,7 +871,7 @@ test.describe('canonical review workflow', () => {
       getComputedStyle(element).getPropertyValue('--review-overlay-inset').trim()
     ))).toBe(`${Math.max(tracks.vertical, tracks.horizontal)}px`);
 
-    await page.getByRole('button', { name: 'Open harness reference' }).click();
+    await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
     await page.getByRole('button', { name: 'Show workspace' }).click();
     const [stageBounds, surfaceBounds, viewportBounds] = await Promise.all([
       page.locator('[data-review-stage]').boundingBox(),
@@ -1077,7 +1122,16 @@ test.describe('canonical review workflow', () => {
     expect(geometry.filePadding).toEqual(['6px', '8px']);
     expect(geometry.fileGap).toBe('7px');
     expect(geometry.fileRadius).toBe('10px');
-    expect(Math.abs(geometry.file.x + geometry.file.width + 12 - geometry.context.x)).toBeLessThanOrEqual(.5);
+    const controlGaps = await chrome.locator(':scope > .review-chrome__viewer-controls').evaluate((element) => {
+      const controls = Array.from(element.children).flatMap((child) =>
+        child.matches('.review-chrome__edit-cluster, .review-chrome__navigation-cluster')
+          ? Array.from(child.children)
+          : [child]);
+      const boxes = controls.map((control) => control.getBoundingClientRect()).filter((box) => box.width > 0);
+      return boxes.slice(1).map((box, index) => box.left - boxes[index]!.right);
+    });
+    for (const gap of controlGaps) expect(gap).toBeCloseTo(8, 1);
+    expect(Math.abs(geometry.file.x + geometry.file.width + 8 - geometry.context.x)).toBeLessThanOrEqual(.5);
     expect(Math.abs(geometry.file.y + geometry.file.height / 2 - geometry.context.y - geometry.context.height / 2)).toBeLessThanOrEqual(.5);
     expect(geometry.pageNumber.width).toBe(28);
     expect(geometry.pageAlign).toBe('center');
@@ -1091,18 +1145,21 @@ test.describe('canonical review workflow', () => {
     expect(Math.abs(geometry.zoomButton.x + geometry.zoomButton.width / 2 - geometry.zoomIcon.x - geometry.zoomIcon.width / 2)).toBeLessThanOrEqual(.5);
 
     await pagePosition.hover();
-    await expect(pagePosition).toHaveCSS('background-color', 'rgb(233, 233, 233)');
+    await expect(pagePosition).toHaveCSS('background-color', 'rgb(231, 231, 231)');
     await expect(pageDisclosure).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await pageDisclosure.click();
-    await expect(pagePosition).toHaveCSS('background-color', 'rgb(233, 233, 233)');
+    await expect(pagePosition).toHaveCSS('background-color', 'rgb(231, 231, 231)');
     await expect(pageDisclosure).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await pageDisclosure.click();
+    await expect(page.getByRole('menu', { name: 'Page navigation', exact: true })).toBeHidden();
     await zoomGroup.hover();
-    await expect(zoomGroup).toHaveCSS('background-color', 'rgb(233, 233, 233)');
+    await expect(zoomGroup).toHaveCSS('background-color', 'rgb(231, 231, 231)');
     await expect(zoomDisclosure).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await zoomDisclosure.click();
-    await expect(zoomGroup).toHaveCSS('background-color', 'rgb(233, 233, 233)');
+    await expect(zoomGroup).toHaveCSS('background-color', 'rgb(231, 231, 231)');
     await expect(zoomDisclosure).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await zoomDisclosure.click();
+    await expect(page.getByRole('menu', { name: 'PDF zoom', exact: true })).toBeHidden();
 
     await expect(filenameControl.locator(':scope > .review-icon + .review-chrome__filename')).toHaveCount(1);
     await expect(context).toBeVisible();
@@ -1682,15 +1739,17 @@ test.describe('canonical review workflow', () => {
     await workspace.evaluate((element) => element.setAttribute('data-takeover-mount-probe', 'stable'));
     await references.evaluate((element) => element.setAttribute('data-takeover-mount-probe', 'stable'));
 
-    await originEdit.click();
+    await originEdit.evaluate((button: HTMLButtonElement) => button.click());
     const composer = page.getByRole('region', { name: 'Edit Page Note' });
     await expect(composer).toBeVisible();
     await expect(workspace).toHaveAttribute('data-authoring-takeover', 'true');
     await expect(references).toHaveAttribute('data-authoring-takeover', 'true');
     await expect(workspace).toHaveAttribute('inert', '');
     await expect(references).toHaveAttribute('inert', '');
-    await expect(workspace).toHaveAttribute('aria-hidden', 'true');
+    await expect(workspace).toHaveAttribute('aria-hidden', 'false');
     await expect(references).toHaveAttribute('aria-hidden', 'true');
+    await expect(workspace).toBeVisible();
+    await expect(references).not.toBeVisible();
     await expect(page.locator('[data-workspace-edge-rail]')).toHaveCount(0);
     await expect(page.locator('[data-reference-resize-handle]')).toHaveCount(0);
     await expect(origin).toHaveAttribute('data-active', 'true');
@@ -1762,6 +1821,7 @@ test.describe('canonical review workflow', () => {
     await expect(originEdit).toBeFocused();
     expect(await canvas.boundingBox()).toEqual(canvasBefore);
 
+    await origin.hover();
     await originEdit.click();
     const acceptedComposer = page.getByRole('region', { name: 'Edit Page Note' });
     await acceptedComposer.getByRole('textbox', { name: 'Comment' }).fill('Applied from takeover');
@@ -1819,7 +1879,7 @@ test.describe('canonical review workflow', () => {
     await expect(mainViewport).toHaveJSProperty('scrollLeft', 41);
     await expect(panel.locator('[data-review-item]')).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    await back.press('Enter');
     await expect(page.locator('[data-full-annotation-reader="true"]')).toHaveCount(0);
     await expect.poll(() => panel.evaluate((element) => element.scrollTop)).toBe(scrollBefore);
     await expect(panel.locator(`[data-review-item="${previousId}"]`)).toHaveAttribute('data-active', 'true');
@@ -1956,8 +2016,8 @@ test.describe('canonical review workflow', () => {
   test('opens an imported full reader without moving the main PDF and shows Return only when available', async ({ page }) => {
     const mainViewport = await installMainScrollport(page);
     await openAnnotationsWorkspace(page);
-    const existing = page.getByRole('region', { name: 'From this PDF' });
-    await existing.getByRole('button', {
+    const annotations = page.getByRole('region', { name: 'Annotations', exact: true });
+    await annotations.getByRole('button', {
       name: /Read full Highlight annotation on page 1/u,
     }).click();
 
@@ -1989,8 +2049,8 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('#workspace-panel-annotations')).toBeFocused();
     await expect.poll(() => panel.evaluate((element) => element.scrollTop)).toBe(0);
 
-    const existing = page.getByRole('region', { name: 'From this PDF' });
-    await existing.getByRole('button', {
+    const annotations = page.getByRole('region', { name: 'Annotations', exact: true });
+    await annotations.getByRole('button', {
       name: /Read full Highlight annotation on page 1/u,
     }).click();
     await page.getByRole('button', { name: 'Refresh existing annotations' }).evaluate((button) => {
@@ -2030,9 +2090,9 @@ test.describe('canonical review workflow', () => {
     await openAnnotationsWorkspace(page);
     const row = page.locator('[data-review-item]').last();
     await row.getByRole('button', { name: /Read full Page Note annotation/u }).click();
-    await page.addStyleTag({ content: '.annotation-item__more { display: none !important; }' });
+    await page.addStyleTag({ content: '[data-read-full-annotation="true"] { display: none !important; }' });
 
-    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    await page.getByRole('button', { name: 'Back', exact: true }).press('Enter');
 
     await expect(row.locator('.annotation-item__navigation')).toBeFocused();
   });
@@ -2313,7 +2373,9 @@ test.describe('canonical review workflow', () => {
     const deleteEntry = page.getByRole('button', { name: 'Remove Replace annotation on page 1' });
     await deleteEntry.focus();
     await page.keyboard.press('Enter');
-    await expect(page.getByLabel('Annotations in document order')).toBeFocused();
+    const adjacentSource = page.locator('[data-existing-annotation][data-readonly="true"]')
+      .getByRole('button', { name: /Highlight · Page 1/u });
+    await expect(adjacentSource).toBeFocused();
   });
 
   test('keeps a focused delete-only row cohesive in the bottom annotation tray', async ({ page }) => {
@@ -2328,46 +2390,49 @@ test.describe('canonical review workflow', () => {
     const row = drawer.locator('[data-annotation-origin="owned"][data-annotation-kind="delete"]');
     const content = row.getByRole('button', { name: /Delete · Page 1/u });
     const action = row.getByRole('button', { name: 'Remove Delete annotation on page 1' });
+    await page.keyboard.press('Tab');
     await content.focus();
+    await expect(content).toBeFocused();
 
     await expect(action.locator('svg')).toHaveCount(1);
     await expect(action).toHaveText('');
-    await expect(content).toHaveCSS('outline-style', 'none');
-    await expect(row).toHaveCSS('outline-style', 'solid');
+    await expect(content).toHaveCSS('outline-style', 'solid');
+    await expect(content).toHaveCSS('outline-width', '2px');
+    await expect(content).toHaveCSS('outline-offset', '3px');
+    await expect(row).toHaveCSS('outline-style', 'none');
 
     const kind = row.locator('.annotation-item__kind-icon');
     const pageNumber = row.locator('.annotation-item__page');
-    const [kindBounds, pageBounds] = await Promise.all([
+    const [kindBounds, pageBounds, actionBounds, rowBounds] = await Promise.all([
       kind.boundingBox(),
       pageNumber.boundingBox(),
+      action.boundingBox(),
+      row.boundingBox(),
     ]);
     expect(kindBounds).not.toBeNull();
     expect(pageBounds).not.toBeNull();
+    expect(actionBounds).not.toBeNull();
+    expect(rowBounds).not.toBeNull();
     await expect(kind).toHaveAttribute('title', 'Delete');
-    expect(pageBounds!.x - (kindBounds!.x + kindBounds!.width)).toBeLessThanOrEqual(7);
+    expect(actionBounds!.x).toBeGreaterThanOrEqual(kindBounds!.x + kindBounds!.width);
+    expect(pageBounds!.x + pageBounds!.width).toBeCloseTo(actionBounds!.x + actionBounds!.width, 0);
+    await expect(pageNumber).toHaveCSS('opacity', '0');
+    expect(rowBounds!.x + rowBounds!.width - (pageBounds!.x + pageBounds!.width)).toBeLessThanOrEqual(13);
     await expect(pageNumber).toHaveText('1');
   });
 
-  test('uses matching simple section headers for owned and existing annotations', async ({ page }) => {
+  test('presents owned and source annotations in one list without provenance labels', async ({ page }) => {
     await openAnnotationsWorkspace(page);
 
-    await expect(page.getByRole('region', { name: 'Owned annotations' })).toBeVisible();
-    await expect(page.getByRole('region', { name: 'From this PDF' })).toBeVisible();
-    const headers = page.locator('.existing-annotations__header');
-    await expect(headers).toHaveCount(1);
-    const styles = await headers.evaluateAll((elements) => elements.map((element) => {
-      const heading = element.querySelector('h2');
-      const headerStyle = getComputedStyle(element);
-      const headingStyle = heading ? getComputedStyle(heading) : null;
-      return {
-        position: headerStyle.position,
-        marginBottom: headerStyle.marginBottom,
-        fontFamily: headingStyle?.fontFamily,
-        fontSize: headingStyle?.fontSize,
-        fontWeight: headingStyle?.fontWeight,
-      };
-    }));
-    expect(styles[0]).toMatchObject({ position: 'static', marginBottom: '10px' });
+    const annotations = page.getByRole('region', { name: 'Annotations', exact: true });
+    await expect(annotations).toBeVisible();
+    await expect(annotations.getByRole('list', { name: 'Annotations in document order' })).toHaveCount(1);
+    const source = annotations.locator('[data-existing-annotation][data-readonly="true"]');
+    await expect(source).toHaveCount(1);
+    await expect(source.locator('.annotation-item__provenance')).toHaveCount(0);
+    await expect(page.getByText('From this PDF', { exact: true })).toHaveCount(0);
+    await expect(source.getByRole('button', { name: /^Edit/u })).toHaveCount(0);
+    await expect(source.getByRole('button', { name: /^(Delete|Remove)/u })).toHaveCount(0);
   });
 
   test('keeps the annotations tray open while editing an owned annotation', async ({ page }) => {
@@ -2595,10 +2660,11 @@ test.describe('canonical review workflow', () => {
     await expect(row.getByRole('button', { name: /Highlight · Page 1/ })).toBeFocused();
     expect(await canvas.boundingBox()).toEqual(beforeActivation);
 
-    const existing = page.getByRole('region', { name: 'From this PDF' });
-    await expect(existing.getByRole('button', { name: /Highlight · Page 1 · Source comment/ })).toBeVisible();
-    await expect(existing.getByRole('button', { name: /^Edit/ })).toHaveCount(0);
-    await expect(existing.getByRole('button', { name: /^Delete/ })).toHaveCount(0);
+    const annotations = page.getByRole('region', { name: 'Annotations', exact: true });
+    const source = annotations.locator('[data-existing-annotation][data-readonly="true"]');
+    await expect(source.getByRole('button', { name: /Highlight · Page 1 · Source comment/ })).toBeVisible();
+    await expect(source.getByRole('button', { name: /^Edit/ })).toHaveCount(0);
+    await expect(source.getByRole('button', { name: /^Delete/ })).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(await currentWorkspaceRail(page)).toBeFocused();
     await expect(page.locator('[data-owned-mark]').first()).toHaveAttribute('data-active', 'true');
