@@ -35,6 +35,8 @@ tags:
 
 # Adaptive annotation tray framing without resizing the PDF viewer
 
+> Historical behavior: the September 5 [accepted overlay layout contract](../../plans/2026-09-05-neutral-soft-design-contract.md#accepted-overlay-layout-and-zoom-behavior) supersedes the automatic reading-area reveal and close-time restoration described below. Ordinary tray toggles and responsive reflow now preserve scroll, zoom, and page geometry while extending the scroll runway. Only explicit targets, such as an activated annotation, search result, or return-to-passage, trigger reveal. The older numeric examples are not current acceptance requirements.
+
 ## Context
 
 An annotation surface over a PDF is not an ordinary drawer. It shares space with a stateful, zoomable document whose reading position is itself user state. Opening the surface must expose annotations without remounting or resizing the viewer, cover as little of the current reading context as possible, and distinguish movement performed by the interface from movement the reviewer performs while the surface is open.

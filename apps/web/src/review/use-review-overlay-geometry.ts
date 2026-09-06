@@ -152,6 +152,12 @@ export function useReviewOverlayGeometry(input: {
           scrollport,
         });
         setGeometry((current) => sameGeometry(current, next) ? current : next);
+        // Transforms move a sliding tray without resizing it or mutating its
+        // style attribute. Keep the backing and fade attached to the moving
+        // edge until the CSS transition finishes, even without another input.
+        if (currentSurfaces().some((surface) => surface.getAnimations?.().some(
+          (animation) => animation.playState === 'running' || animation.pending,
+        ))) schedule();
       },
     });
     let revision = 0;
@@ -180,6 +186,9 @@ export function useReviewOverlayGeometry(input: {
       ],
     });
     stage.addEventListener('scroll', schedule, { capture: true, passive: true });
+    stage.addEventListener('transitionrun', schedule);
+    stage.addEventListener('transitionend', schedule);
+    stage.addEventListener('transitioncancel', schedule);
     window.addEventListener('resize', schedule);
     schedule();
     return () => {
@@ -187,6 +196,9 @@ export function useReviewOverlayGeometry(input: {
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
       stage.removeEventListener('scroll', schedule, { capture: true });
+      stage.removeEventListener('transitionrun', schedule);
+      stage.removeEventListener('transitionend', schedule);
+      stage.removeEventListener('transitioncancel', schedule);
       window.removeEventListener('resize', schedule);
     };
   }, [input.layoutGeneration, input.stageRef, input.surfaceRefs]);

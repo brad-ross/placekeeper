@@ -147,7 +147,9 @@ export interface ViewerFramingSnapshot {
   readonly maximum: ViewerPosition;
 }
 
-export type ViewerFramingEvent = { readonly type: 'zoom' };
+export type ViewerFramingEvent =
+  | { readonly type: 'zoom' }
+  | { readonly type: 'scroll' };
 
 export interface ViewerFramingControls {
   snapshot(target?: ViewerFramingTarget): ViewerFramingSnapshot;
@@ -155,6 +157,123 @@ export interface ViewerFramingControls {
   scrollTo(position: ViewerPosition, behavior?: ScrollBehavior): void;
   subscribe(listener: (event: ViewerFramingEvent) => void): () => void;
   dispose(): void;
+}
+
+/**
+ * Owns scroll positions that may survive a temporary runway clamp. Explicit
+ * semantic navigation supersedes this memory; passive layout changes do not.
+ */
+export class ViewerPositionAuthority {
+  private desired: Partial<ViewerPosition> = {};
+  private pendingAxes: { left: boolean; top: boolean } | null = null;
+  private captureRevision = 0;
+  private transition: { runway: ViewerRunway; position: ViewerPosition } | null = null;
+  private documentGeneration: string | number | undefined;
+
+  constructor(documentGeneration?: string | number) {
+    this.documentGeneration = documentGeneration;
+  }
+
+  beginUserIntent(axes: { left: boolean; top: boolean }): number {
+    this.pendingAxes = {
+      left: axes.left || this.pendingAxes?.left === true,
+      top: axes.top || this.pendingAxes?.top === true,
+    };
+    return ++this.captureRevision;
+  }
+
+  renewUserCapture(): number {
+    return ++this.captureRevision;
+  }
+
+  hasPendingUserIntent(): boolean {
+    return this.pendingAxes !== null;
+  }
+
+  observeUserPosition(position: ViewerPosition): void {
+    if (!this.pendingAxes) return;
+    this.desired = {
+      ...this.desired,
+      ...(this.pendingAxes.left ? { left: position.left } : {}),
+      ...(this.pendingAxes.top ? { top: position.top } : {}),
+    };
+  }
+
+  settleUserPosition(capture: number, position: ViewerPosition): boolean {
+    if (capture !== this.captureRevision || !this.pendingAxes) return false;
+    this.observeUserPosition(position);
+    this.pendingAxes = null;
+    return true;
+  }
+
+  commitCurrentPosition(
+    position: ViewerPosition,
+    maximum: ViewerPosition,
+    axes: { left: boolean; top: boolean },
+  ): void {
+    const retainsDesired = (axis: 'left' | 'top') => {
+      const desired = this.desired[axis];
+      return desired !== undefined
+        && Math.abs(position[axis] - clamp(desired, 0, Math.max(0, maximum[axis]))) < 1;
+    };
+    this.desired = {
+      ...this.desired,
+      ...(axes.left && this.desired.left !== undefined && !retainsDesired('left')
+        ? { left: position.left } : {}),
+      ...(axes.top && this.desired.top !== undefined && !retainsDesired('top')
+        ? { top: position.top } : {}),
+    };
+    this.pendingAxes = null;
+    this.transition = null;
+    this.captureRevision += 1;
+  }
+
+  supersedeWithExplicitNavigation(): void {
+    this.desired = {};
+    this.pendingAxes = null;
+    this.transition = null;
+    this.captureRevision += 1;
+  }
+
+  replaceControls(position?: ViewerPosition): void {
+    if (position) this.observeUserPosition(position);
+    this.pendingAxes = null;
+    this.transition = null;
+    this.captureRevision += 1;
+  }
+
+  replaceDocument(documentGeneration?: string | number): boolean {
+    if (this.documentGeneration === documentGeneration) return false;
+    this.documentGeneration = documentGeneration;
+    this.supersedeWithExplicitNavigation();
+    return true;
+  }
+
+  beginTransition(runway: ViewerRunway, position: ViewerPosition): void {
+    if (this.hasTransition(runway)) return;
+    this.transition = { runway: { ...runway }, position: { ...position } };
+  }
+
+  hasTransition(runway: ViewerRunway): boolean {
+    return this.transition?.runway.right === runway.right
+      && this.transition.runway.bottom === runway.bottom;
+  }
+
+  preservedPosition(
+    runway: ViewerRunway,
+    fallback: ViewerPosition,
+    maximum: ViewerPosition,
+  ): ViewerPosition {
+    const passive = this.hasTransition(runway) ? this.transition!.position : fallback;
+    return {
+      left: clamp(this.desired.left ?? passive.left, 0, Math.max(0, maximum.left)),
+      top: clamp(this.desired.top ?? passive.top, 0, Math.max(0, maximum.top)),
+    };
+  }
+
+  finishTransition(): void {
+    this.transition = null;
+  }
 }
 
 export interface FramingSessionToken {

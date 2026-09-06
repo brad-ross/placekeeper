@@ -559,6 +559,22 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.state().mainHistory.entries).toEqual([]);
   });
 
+  it('keeps a loading reference alive when its workspace is revealed or docked', async () => {
+    const run = harness();
+    const opened = deferred<boolean>();
+    vi.mocked(run.controller.open).mockReturnValueOnce(opened.promise);
+    const opening = run.coordinator.openReference(target(3), {
+      label: 'Pending proof', pageContext: 'Page 4',
+    });
+    expect(run.pending()).toMatchObject({ status: 'loading' });
+    expect(await run.coordinator.openReferencesWorkspace()).toBe(true);
+    expect(run.pending()).toMatchObject({ status: 'loading' });
+    opened.resolve(true);
+    expect(await opening).toBe(true);
+    expect(run.state().tabs).toEqual([expect.objectContaining({ label: 'Pending proof' })]);
+    expect(run.pending()).toBeNull();
+  });
+
   it('clears a superseded pending reference request and loading panel', async () => {
     const run = harness();
     const opened = deferred<boolean>();
@@ -651,6 +667,17 @@ describe('document-scoped navigation coordinator', () => {
       target(5).identity,
     ]);
     expect(run.referencesOpen()).toBe(true);
+  });
+
+  it('keeps the workspace open for new and repeated search destinations', async () => {
+    const run = harness();
+    await run.coordinator.openReference(target(2), { label: 'Reference', pageContext: 'Page 3' });
+    vi.mocked(run.dependencies.layout.hideReferences).mockClear();
+    expect(await run.coordinator.navigateMainTarget(target(5), 'search')).toBe(true);
+    expect(await run.coordinator.navigateMainTarget(target(5), 'search')).toBe(true);
+    expect(run.main.controls.captureLocation()?.pageIndex).toBe(5);
+    expect(run.referencesOpen()).toBe(true);
+    expect(run.dependencies.layout.hideReferences).not.toHaveBeenCalled();
   });
 
   it('follows a main-document link without changing the displaced workspace', async () => {
@@ -969,7 +996,7 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.referenceReturn()).toBeNull();
   });
 
-  it('returns to the immutable Reference origin without touching Main routing or history', async () => {
+  it('returns focus to the immutable Reference origin when the settled viewport has a different dominant page', async () => {
     const browser = locationHistory();
     const run = harness({ locationHistory: browser });
     const original = target(2);
@@ -978,6 +1005,10 @@ describe('document-scoped navigation coordinator', () => {
     vi.mocked(run.reference.controls.targetVisibility).mockReturnValue('outside');
     run.coordinator.observeReferenceManualScroll();
     vi.mocked(run.reference.controls.applyTarget).mockClear();
+    vi.mocked(run.reference.controls.applyTarget).mockImplementationOnce(async () => {
+      run.reference.set(location(3));
+      return true;
+    });
     vi.mocked(run.main.controls.applyTarget).mockClear();
     vi.mocked(run.main.controls.applyLocation).mockClear();
     vi.mocked(run.main.controls.cancelPendingNavigation).mockClear();
@@ -989,11 +1020,11 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.reference.controls.applyTarget)
       .toHaveBeenCalledWith(original, 'reference-fit-width');
     expect(run.state().tabs[0]?.originalTarget).toEqual(original);
-    expect(run.state().tabs[0]?.settledLocation).toEqual(location(2));
+    expect(run.state().tabs[0]?.settledLocation).toEqual(location(3));
     expect(run.dependencies.dispatch).toHaveBeenCalledOnce();
     expect(run.dependencies.dispatch).toHaveBeenCalledWith({
       type: 'refresh-active-reference',
-      settledLocation: location(2),
+      settledLocation: location(3),
     });
     expect(run.referenceReturn()).toBeNull();
     expect(run.announcement()).toBe('Returned to reference.');

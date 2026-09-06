@@ -9,6 +9,7 @@ import {
 import {
   LatestFrameRequest,
   ViewerGeometrySettlementAuthority,
+  ViewerPositionAuthority,
   chooseAnnotationPresentation,
   revealDelta,
   type AnnotationPresentation,
@@ -90,6 +91,10 @@ export interface WorkspaceFraming {
     axes?: { left?: boolean; top?: boolean },
     options?: { stopAutomaticScroll?: boolean; captureSettledPosition?: boolean },
   ): void;
+  commitUserPosition(
+    axes?: { left?: boolean; top?: boolean },
+    options?: { stopAutomaticScroll?: boolean },
+  ): void;
   currentScroll(): ViewerPosition | null;
 }
 
@@ -109,6 +114,13 @@ export function useWorkspaceFraming(input: {
   const layoutOperationRef = useRef(0);
   const committedControlsRef = useRef<ViewerFramingControls | null>(null);
   const committedRunwayRef = useRef<ViewerRunway>({ right: 0, bottom: 0 });
+  const runwaySettlementRef = useRef<{
+    operation: number;
+    promise: Promise<void>;
+  }>({ operation: 0, promise: Promise.resolve() });
+  const positionAuthorityRef = useRef(new ViewerPositionAuthority(input.documentGeneration));
+  const lastObservedScrollRef = useRef<ViewerPosition | null>(null);
+  const automaticScrollTargetRef = useRef<ViewerPosition | null>(null);
   const userRevisionRef = useRef(0);
   const revealedMarkTokenRef = useRef<number | null>(null);
   const [presentation, setPresentation] = useState<AnnotationPresentation>('right');
@@ -221,11 +233,32 @@ export function useWorkspaceFraming(input: {
 
   const requestSettledReframe = useCallback(() => requestGeometryFrameRef.current(), []);
   const waitForSettledGeometry = useCallback<WaitForSettledViewerGeometry>(async (signal) => {
-    requestGeometryFrameRef.current();
-    return geometrySettlementRef.current.waitForSettled(
-      signal,
-      () => waitForWorkspaceLayout(signal),
-    );
+    while (!signal.aborted) {
+      requestGeometryFrameRef.current();
+      const geometry = await geometrySettlementRef.current.waitForSettled(
+        signal,
+        () => waitForWorkspaceLayout(signal),
+      );
+      if (geometry === null) return null;
+      const runwaySettlement = runwaySettlementRef.current;
+      await runwaySettlement.promise;
+      if (signal.aborted) return null;
+      if (
+        runwaySettlement === runwaySettlementRef.current
+        && runwaySettlement.operation === layoutOperationRef.current
+        && geometry.isCurrent()
+      ) {
+        return {
+          revision: geometry.revision,
+          isCurrent: () => (
+            geometry.isCurrent()
+            && runwaySettlement === runwaySettlementRef.current
+            && runwaySettlement.operation === layoutOperationRef.current
+          ),
+        };
+      }
+    }
+    return null;
   }, []);
 
   const currentScroll = useCallback((): ViewerPosition | null => {
@@ -233,13 +266,38 @@ export function useWorkspaceFraming(input: {
     return snapshot?.ready ? snapshot.scroll : null;
   }, [input.controls]);
 
+  const clearRememberedPosition = useCallback(() => {
+    positionAuthorityRef.current.supersedeWithExplicitNavigation();
+  }, []);
+
+  const scrollAutomatically = useCallback((
+    controls: ViewerFramingControls,
+    position: ViewerPosition,
+    behavior: ScrollBehavior = 'auto',
+  ) => {
+    automaticScrollTargetRef.current = { ...position };
+    controls.scrollTo(position, behavior);
+  }, []);
+
+  const scheduleSettledUserPositionCapture = useCallback(() => {
+    const capture = positionAuthorityRef.current.renewUserCapture();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const controls = controlsRef.current;
+      if (!controls) return;
+      const settled = controls.snapshot();
+      if (!settled.ready) return;
+      positionAuthorityRef.current.settleUserPosition(capture, settled.scroll);
+    }));
+  }, []);
+
   const prepareMarkReveal = useCallback(() => {
+    clearRememberedPosition();
     const snapshot = controlsRef.current?.snapshot();
     if (!snapshot?.ready) return;
     // Cancel an older smooth reveal before the mark activation establishes a
     // new explicit navigation target. The current position remains untouched.
-    controlsRef.current?.scrollTo(snapshot.scroll, 'auto');
-  }, []);
+    scrollAutomatically(controlsRef.current!, snapshot.scroll, 'auto');
+  }, [clearRememberedPosition, scrollAutomatically]);
 
   const markUserIntent = useCallback((
     axes: { left?: boolean; top?: boolean } = { left: true, top: true },
@@ -248,29 +306,100 @@ export function useWorkspaceFraming(input: {
     const ownsLeft = axes.left === true;
     const ownsTop = axes.top === true;
     if (!ownsLeft && !ownsTop) return;
+    automaticScrollTargetRef.current = null;
     userRevisionRef.current += 1;
     const current = input.controls?.snapshot();
     // Native wheel/pointer movement owns the viewer. A same-position instant
     // write only cancels an older automatic smooth reveal when requested.
     if (current?.ready && options.stopAutomaticScroll !== false) {
-      input.controls?.scrollTo(current.scroll, 'auto');
+      scrollAutomatically(input.controls!, current.scroll, 'auto');
     }
-  }, [input.controls]);
+    if (options.captureSettledPosition === false) {
+      clearRememberedPosition();
+      return;
+    }
+    if (!input.controls) return;
+    positionAuthorityRef.current.beginUserIntent({ left: ownsLeft, top: ownsTop });
+    if (current?.ready) positionAuthorityRef.current.observeUserPosition(current.scroll);
+    scheduleSettledUserPositionCapture();
+  }, [clearRememberedPosition, input.controls, scheduleSettledUserPositionCapture, scrollAutomatically]);
+
+  const commitUserPosition = useCallback((
+    axes: { left?: boolean; top?: boolean } = { left: true, top: true },
+    options: { stopAutomaticScroll?: boolean } = {},
+  ) => {
+    const ownsLeft = axes.left === true;
+    const ownsTop = axes.top === true;
+    if (!ownsLeft && !ownsTop) return;
+    const current = input.controls?.snapshot();
+    if (!current?.ready) return;
+    userRevisionRef.current += 1;
+    // A click-time position commit supersedes every passive restoration that
+    // sampled the viewer before this interaction. Revision checks alone are
+    // insufficient when a replacement effect starts after the revision but
+    // still carries an older transition baseline.
+    layoutOperationRef.current += 1;
+    if (options.stopAutomaticScroll !== false) {
+      scrollAutomatically(input.controls!, current.scroll, 'auto');
+    }
+    positionAuthorityRef.current.commitCurrentPosition(
+      current.scroll,
+      current.maximum,
+      { left: ownsLeft, top: ownsTop },
+    );
+  }, [input.controls, scrollAutomatically]);
 
   useLayoutEffect(() => {
     if (!input.controls) return;
-    return input.controls.subscribe(() => {
-      userRevisionRef.current += 1;
+    const controls = input.controls;
+    return controls.subscribe((event) => {
+      if (event.type === 'zoom') {
+        // Zoom owns the reading position but does not change a tray's committed
+        // runway. Republishing workspace geometry here invalidates the settled
+        // token used by Fit Width in the middle of its own zoom operation.
+        userRevisionRef.current += 1;
+        return;
+      }
+      const current = controls.snapshot();
+      if (!current.ready) return;
+      const automaticTarget = automaticScrollTargetRef.current;
+      if (automaticTarget !== null) {
+        lastObservedScrollRef.current = current.scroll;
+        if (
+          Math.abs(current.scroll.left - automaticTarget.left) < 1
+          && Math.abs(current.scroll.top - automaticTarget.top) < 1
+        ) automaticScrollTargetRef.current = null;
+        return;
+      }
+      const previous = lastObservedScrollRef.current;
+      lastObservedScrollRef.current = current.scroll;
+      if (previous !== null && !positionAuthorityRef.current.hasPendingUserIntent()) {
+        const left = Math.abs(current.scroll.left - previous.left) >= 1;
+        const top = Math.abs(current.scroll.top - previous.top) >= 1;
+        if (left || top) positionAuthorityRef.current.beginUserIntent({ left, top });
+      }
+      positionAuthorityRef.current.observeUserPosition(current.scroll);
+      // Wheel inertia and smooth keyboard scrolling can span many frames.
+      // Every native scroll restarts the quiet-frame capture so the durable
+      // position is the final user offset rather than an intermediate sample.
+      scheduleSettledUserPositionCapture();
     });
-  }, [input.controls]);
+  }, [input.controls, scheduleSettledUserPositionCapture]);
 
   useLayoutEffect(() => {
     const controls = input.controls;
     if (!controls) return;
     if (committedControlsRef.current !== controls) {
       committedControlsRef.current = controls;
-      committedRunwayRef.current = { right: -1, bottom: -1 };
+      const replacement = controls.snapshot();
+      positionAuthorityRef.current.replaceControls(
+        replacement.ready ? replacement.scroll : undefined,
+      );
+      lastObservedScrollRef.current = replacement.ready ? replacement.scroll : null;
+      automaticScrollTargetRef.current = null;
     }
+    const documentChanged = positionAuthorityRef.current.replaceDocument(input.documentGeneration);
+    if (documentChanged) committedRunwayRef.current = { right: -1, bottom: -1 };
     const settlement = new AbortController();
     const operation = ++layoutOperationRef.current;
     const operationIsCurrent = () => (
@@ -294,10 +423,20 @@ export function useWorkspaceFraming(input: {
       const precedingRunway = committedRunwayRef.current;
       const runwayChanged = runway.right !== precedingRunway.right
         || runway.bottom !== precedingRunway.bottom;
-      if (!runwayChanged && !shouldRevealMark) return;
+      const pendingMatchesRunway = positionAuthorityRef.current.hasTransition(runway);
+      if (runwayChanged && !pendingMatchesRunway) {
+        positionAuthorityRef.current.beginTransition(runway, first.scroll);
+      }
+      if (!runwayChanged && !shouldRevealMark && !pendingMatchesRunway) return;
       if (runwayChanged) {
+        // Record the requested runway before the asynchronous DOM settlement.
+        // A resize can supersede this effect after updateRunway has already
+        // mutated the viewer. Keeping the ref behind the DOM would make every
+        // replacement effect start another passive transition from a stale
+        // position and could later restore that position over fresh reading.
         committedRunwayRef.current = runway;
         await controls.setRunway(runway);
+        if (!operationIsCurrent()) return;
       }
       if (!operationIsCurrent()) return;
       if (!await waitForWorkspaceLayout(settlement.signal)) return;
@@ -305,10 +444,11 @@ export function useWorkspaceFraming(input: {
       const measured = controls.snapshot(target);
       if (!first.ready || !measured.ready) return;
       const userInterrupted = userRevisionRef.current !== startingUserRevision;
-      const preserved = {
-        left: Math.min(first.scroll.left, measured.maximum.left),
-        top: Math.min(first.scroll.top, measured.maximum.top),
-      };
+      const preserved = positionAuthorityRef.current.preservedPosition(
+        runway,
+        first.scroll,
+        measured.maximum,
+      );
       // Tray visibility, docking, and resizing only alter reachable scroll
       // extent. Restore the exact pre-layout offset after native scroll
       // anchoring; passive layout never recenters or refits the PDF.
@@ -316,10 +456,14 @@ export function useWorkspaceFraming(input: {
         if (shouldRevealMark && userInterrupted && input.request.kind === 'mark') {
           revealedMarkTokenRef.current = input.request.token;
         }
-        if (userInterrupted) return;
-        if (preserved.left !== measured.scroll.left || preserved.top !== measured.scroll.top) {
-          controls.scrollTo(preserved, 'auto');
+        if (userInterrupted) {
+          positionAuthorityRef.current.finishTransition();
+          return;
         }
+        if (preserved.left !== measured.scroll.left || preserved.top !== measured.scroll.top) {
+          scrollAutomatically(controls, preserved, 'auto');
+        }
+        positionAuthorityRef.current.finishTransition();
         return;
       }
 
@@ -346,12 +490,14 @@ export function useWorkspaceFraming(input: {
       };
       if (destination.left !== measured.scroll.left || destination.top !== measured.scroll.top) {
         const reducedMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-        controls.scrollTo(destination, reducedMotion ? 'auto' : 'smooth');
+        scrollAutomatically(controls, destination, reducedMotion ? 'auto' : 'smooth');
       }
       if (input.request.kind === 'mark') revealedMarkTokenRef.current = input.request.token;
+      positionAuthorityRef.current.finishTransition();
     };
 
-    void updateRunway();
+    const runwaySettlement = updateRunway().then(() => undefined);
+    runwaySettlementRef.current = { operation, promise: runwaySettlement };
     return () => {
       settlement.abort();
     };
@@ -365,6 +511,8 @@ export function useWorkspaceFraming(input: {
     presentation,
     sideWidth,
     stageSize.height,
+    clearRememberedPosition,
+    scrollAutomatically,
   ]);
 
   return {
@@ -378,6 +526,7 @@ export function useWorkspaceFraming(input: {
     prepareMarkReveal,
     waitForSettledGeometry,
     markUserIntent,
+    commitUserPosition,
     currentScroll,
   };
 }

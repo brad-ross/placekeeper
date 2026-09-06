@@ -127,7 +127,7 @@ describe('viewer controls adapter', () => {
   it('forwards only supported whole zoom percentages and keeps zoom state event-derived', () => {
     let onZoom: ((event: { documentId: string; newZoom: number }) => void) | undefined;
     const zoom = {
-      getState: () => ({ currentZoomLevel: 1.1 }),
+      getState: () => ({ zoomLevel: 'fit-width', currentZoomLevel: 1.1 }),
       zoomOut: vi.fn(),
       zoomIn: vi.fn(),
       requestZoom: vi.fn(),
@@ -168,6 +168,9 @@ describe('viewer controls adapter', () => {
     expect(zoom.requestZoom.mock.calls).toEqual([[0.2], [1.25], [60]]);
     expect(controls.snapshot()).toMatchObject({ zoomPercent: 110 });
 
+    expect(controls.freezeCurrentZoom()).toBe(true);
+    expect(zoom.requestZoom).toHaveBeenLastCalledWith(1.1);
+
     onZoom?.({ documentId: 'doc', newZoom: 1.25 });
     expect(controls.snapshot()).toMatchObject({ zoomPercent: 125 });
   });
@@ -187,6 +190,7 @@ describe('viewer controls adapter', () => {
     controls.zoomOut();
     controls.zoomIn();
     controls.zoomToPercent(125);
+    expect(controls.freezeCurrentZoom()).toBe(false);
 
     expect(controls.snapshot()).toMatchObject({ ready: false, currentPage: 0, totalPages: 0 });
     expect(listener).toHaveBeenCalledWith(expect.objectContaining({
@@ -194,6 +198,25 @@ describe('viewer controls adapter', () => {
       ready: false,
       reason: expect.stringContaining('PDF is ready'),
     }));
+  });
+
+  it('leaves an already numeric restored or user zoom untouched', () => {
+    const zoom = {
+      getState: () => ({ zoomLevel: 1.25, currentZoomLevel: 1.25 }),
+      requestZoom: vi.fn(),
+    };
+    const registry = {
+      getStore: () => ({ getState: () => ({ core: { activeDocumentId: 'doc' } }) }),
+      getPlugin: (id: string) => id === ZoomPlugin.id
+        ? { provides: () => ({
+            forDocument: () => zoom,
+            onZoomChange: () => () => undefined,
+          }) }
+        : undefined,
+    } as unknown as PluginRegistry;
+
+    expect(createViewerControls(registry).freezeCurrentZoom()).toBe(true);
+    expect(zoom.requestZoom).not.toHaveBeenCalled();
   });
 
   it('keeps page controls available when only zoom is unavailable', () => {

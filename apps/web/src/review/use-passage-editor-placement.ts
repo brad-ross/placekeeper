@@ -11,7 +11,7 @@ import type { ViewerClientPlacement } from '../pdf/viewer-interaction-events.js'
 
 const EDGE = 12;
 const RELATION_GAP = 12;
-const DEFAULT_WIDTH = 326;
+const DEFAULT_WIDTH = 340;
 const DEFAULT_HEIGHT = 232;
 
 export type PassageEditorPlacementKind = 'side' | 'above' | 'below' | 'bottom-sheet';
@@ -19,6 +19,8 @@ export type PassageEditorPlacementKind = 'side' | 'above' | 'below' | 'bottom-sh
 export interface PassageEditorPlacement {
   readonly kind: PassageEditorPlacementKind;
   readonly style?: CSSProperties;
+  /** Visibility of the rendered passage as a whole, when its DOM marks are available. */
+  readonly targetVisibility?: 'visible' | 'outside';
 }
 
 interface RectLike {
@@ -32,6 +34,23 @@ interface RectLike {
 
 interface PlacementChoice extends PassageEditorPlacement {
   readonly visible: boolean;
+}
+
+function samePlacement(
+  current: PassageEditorPlacement | undefined,
+  next: PassageEditorPlacement | undefined,
+): boolean {
+  if (current === next) return true;
+  if (current === undefined || next === undefined || current.kind !== next.kind) return false;
+  if (current.targetVisibility !== next.targetVisibility) return false;
+  const currentStyle = current.style;
+  const nextStyle = next.style;
+  if (currentStyle === nextStyle) return true;
+  if (currentStyle === undefined || nextStyle === undefined) return false;
+  const keys = new Set([...Object.keys(currentStyle), ...Object.keys(nextStyle)]);
+  return [...keys].every((key) => (
+    currentStyle[key as keyof CSSProperties] === nextStyle[key as keyof CSSProperties]
+  ));
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -249,10 +268,13 @@ export function usePassageEditorPlacement(input: {
     readonly anchorKey: string;
     readonly kind: PassageEditorPlacementKind;
   } | undefined>(undefined);
+  const commitPlacement = (next: PassageEditorPlacement | undefined) => {
+    setPlacement((current) => samePlacement(current, next) ? current : next);
+  };
 
   useLayoutEffect(() => {
     if (!input.active || input.anchorKey === null) {
-      setPlacement(undefined);
+      commitPlacement(undefined);
       lastVisiblePlacementRef.current = undefined;
       preferredKindRef.current = undefined;
       return;
@@ -312,6 +334,13 @@ export function usePassageEditorPlacement(input: {
           height: 0,
         };
         const visibleTargets = targetRects.filter((rect) => intersects(rect, usable));
+        const targetVisibility = targetRects.length === 0
+          ? undefined
+          : visibleTargets.length > 0 ? 'visible' as const : 'outside' as const;
+        const measuredPlacement = (next: PassageEditorPlacement): PassageEditorPlacement => ({
+          ...next,
+          ...(targetVisibility === undefined ? {} : { targetVisibility }),
+        });
         const fallback = input.fallbackTarget === null || input.fallbackTarget === undefined
           ? null
           : placementRect(input.fallbackTarget);
@@ -339,29 +368,32 @@ export function usePassageEditorPlacement(input: {
           if (lastVisiblePlacementRef.current === undefined) {
             const safe = safePassageEditorPlacement({
               stage: stageBounds,
-              editorWidth: editorBounds?.width || DEFAULT_WIDTH,
+              // A rendered width can already include a preceding responsive
+              // clamp. Reusing it as the preferred width makes the editor
+              // permanently narrow after the stage grows again.
+              editorWidth: DEFAULT_WIDTH,
               editorHeight: editorBounds?.height || DEFAULT_HEIGHT,
               ...(rightBoundary === undefined ? {} : { rightBoundary }),
               ...(bottomBoundary === undefined ? {} : { bottomBoundary }),
             });
             lastVisiblePlacementRef.current = safe;
-            setPlacement(safe);
+            commitPlacement(measuredPlacement(safe));
             return;
           }
-          setPlacement(reclampPassageEditorPlacement({
+          commitPlacement(measuredPlacement(reclampPassageEditorPlacement({
             previous: lastVisiblePlacementRef.current,
             stage: stageBounds,
-            editorWidth: editorBounds?.width || DEFAULT_WIDTH,
+            editorWidth: DEFAULT_WIDTH,
             editorHeight: editorBounds?.height || DEFAULT_HEIGHT,
             ...(rightBoundary === undefined ? {} : { rightBoundary }),
             ...(bottomBoundary === undefined ? {} : { bottomBoundary }),
-          }));
+          })));
           return;
         }
         const choice = choosePassageEditorPlacement({
           stage: stageBounds,
           target,
-          editorWidth: editorBounds?.width || DEFAULT_WIDTH,
+          editorWidth: DEFAULT_WIDTH,
           editorHeight: editorBounds?.height || DEFAULT_HEIGHT,
           ...(rightBoundary === undefined ? {} : { rightBoundary }),
           ...(bottomBoundary === undefined ? {} : { bottomBoundary }),
@@ -370,16 +402,17 @@ export function usePassageEditorPlacement(input: {
             : {}),
         });
         if (!choice.visible && lastVisiblePlacementRef.current !== undefined) {
-          setPlacement(lastVisiblePlacementRef.current);
+          commitPlacement(measuredPlacement(lastVisiblePlacementRef.current));
           return;
         }
         const next: PassageEditorPlacement = {
           kind: choice.kind,
           ...(choice.style === undefined ? {} : { style: choice.style }),
+          ...(targetVisibility === undefined ? {} : { targetVisibility }),
         };
         preferredKindRef.current = { anchorKey: input.anchorKey!, kind: choice.kind };
         lastVisiblePlacementRef.current = next;
-        setPlacement(next);
+        commitPlacement(next);
       },
     });
     let revision = 0;

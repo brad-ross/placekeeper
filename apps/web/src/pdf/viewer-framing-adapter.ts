@@ -66,6 +66,9 @@ export function createViewerFramingControls(
   if (zoom) {
     subscriptions.push(zoom.onZoomChange(() => emit({ type: 'zoom' })));
   }
+  if (scroll && typeof scroll.onScroll === 'function') {
+    subscriptions.push(scroll.onScroll(() => emit({ type: 'scroll' })));
+  }
 
   const snapshot = (target?: ViewerFramingTarget): ViewerFramingSnapshot => {
     if (disposed) {
@@ -125,12 +128,28 @@ export function createViewerFramingControls(
     snapshot,
     async setRunway(runway) {
       if (disposed) return snapshot();
-      options.updateRunway({
+      const nextRunway = {
         right: Math.max(0, runway.right),
         bottom: Math.max(0, runway.bottom),
-      });
+      };
+      options.updateRunway(nextRunway);
       await nextFrame();
       await nextFrame();
+      if (nextRunway.right === 0 && nextRunway.bottom === 0) {
+        const viewportElement = options.root()
+          ?.querySelector<HTMLElement>('[data-viewer-framing-viewport]') ?? null;
+        if (viewportElement) {
+          // WebKit can retain the former scrollable overflow of a shrinking
+          // absolutely positioned runway even after both the runway and every
+          // descendant report their closed geometry. Re-establish overflow in
+          // the same layout turn so the native maximum reflects live content.
+          const inlineOverflow = viewportElement.style.overflow;
+          viewportElement.style.overflow = 'hidden';
+          void viewportElement.scrollWidth;
+          viewportElement.style.overflow = inlineOverflow;
+          void viewportElement.scrollWidth;
+        }
+      }
       return snapshot();
     },
     scrollTo(position, behavior = 'auto') {

@@ -8,6 +8,7 @@ import {
   FramingSessionAuthority,
   LatestFrameRequest,
   ViewerGeometrySettlementAuthority,
+  ViewerPositionAuthority,
   chooseAnnotationPresentation,
   frameUserOwnedPosition,
   occupiedRunway,
@@ -185,6 +186,91 @@ describe('viewer framing', () => {
       position: { left: 239, top: 20 },
       baseline: { left: 239, top: 20 },
     });
+  });
+
+  it('lets explicit navigation supersede a remembered manual pan before later tray reflow', () => {
+    const authority = new ViewerPositionAuthority(1);
+    const openRunway = { right: 336, bottom: 0 };
+    const closedRunway = { right: 0, bottom: 0 };
+
+    const capture = authority.beginUserIntent({ left: true, top: false });
+    authority.observeUserPosition({ left: 40, top: 80 });
+    expect(authority.settleUserPosition(capture, { left: 40, top: 80 })).toBe(true);
+
+    authority.beginTransition(closedRunway, { left: 40, top: 80 });
+    expect(authority.preservedPosition(
+      closedRunway,
+      { left: 0, top: 80 },
+      { left: 0, top: 500 },
+    )).toEqual({ left: 0, top: 80 });
+    authority.finishTransition();
+
+    authority.beginTransition(openRunway, { left: 0, top: 80 });
+    expect(authority.preservedPosition(
+      openRunway,
+      { left: 0, top: 80 },
+      { left: 336, top: 500 },
+    )).toEqual({ left: 40, top: 80 });
+    authority.finishTransition();
+
+    authority.supersedeWithExplicitNavigation();
+    authority.beginTransition(closedRunway, { left: 220, top: 310 });
+    expect(authority.preservedPosition(
+      closedRunway,
+      { left: 0, top: 0 },
+      { left: 500, top: 700 },
+    )).toEqual({ left: 220, top: 310 });
+  });
+
+  it('keeps scroll capture pending until the last quiet-frame token', () => {
+    const authority = new ViewerPositionAuthority(1);
+    const initial = authority.beginUserIntent({ left: true, top: false });
+    authority.observeUserPosition({ left: 20, top: 0 });
+    const trailing = authority.renewUserCapture();
+    authority.observeUserPosition({ left: 64, top: 0 });
+
+    expect(authority.settleUserPosition(initial, { left: 20, top: 0 })).toBe(false);
+    expect(authority.settleUserPosition(trailing, { left: 64, top: 0 })).toBe(true);
+    authority.beginTransition({ right: 0, bottom: 0 }, { left: 0, top: 0 });
+    expect(authority.preservedPosition(
+      { right: 0, bottom: 0 },
+      { left: 0, top: 0 },
+      { left: 200, top: 200 },
+    )).toEqual({ left: 64, top: 0 });
+  });
+
+  it('settles pending user axes at a same-document controls handoff', () => {
+    const authority = new ViewerPositionAuthority(1);
+    const staleCapture = authority.beginUserIntent({ left: true, top: false });
+    authority.beginTransition({ right: 336, bottom: 0 }, { left: 0, top: 0 });
+    authority.replaceControls({ left: 40, top: 120 });
+
+    expect(authority.settleUserPosition(staleCapture, { left: 0, top: 0 })).toBe(false);
+    expect(authority.hasTransition({ right: 336, bottom: 0 })).toBe(false);
+    authority.beginTransition({ right: 0, bottom: 0 }, { left: 0, top: 120 });
+    expect(authority.preservedPosition(
+      { right: 0, bottom: 0 },
+      { left: 0, top: 120 },
+      { left: 200, top: 500 },
+    )).toEqual({ left: 40, top: 120 });
+  });
+
+  it('keeps an unclamped desired position when a layout toggle commits its clamped value', () => {
+    const authority = new ViewerPositionAuthority(1);
+    const capture = authority.beginUserIntent({ left: true, top: false });
+    authority.settleUserPosition(capture, { left: 40, top: 0 });
+
+    authority.commitCurrentPosition(
+      { left: 0, top: 0 },
+      { left: 0, top: 500 },
+      { left: true, top: true },
+    );
+    authority.beginTransition({ right: 336, bottom: 0 }, { left: 0, top: 0 });
+    expect(authority.preservedPosition(
+      { right: 336, bottom: 0 },
+      { left: 0, top: 0 },
+      { left: 336, top: 500 },
+    )).toEqual({ left: 40, top: 0 });
   });
 
   it('invalidates stale automatic operations and document generations', () => {
