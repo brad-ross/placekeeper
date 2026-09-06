@@ -1,11 +1,13 @@
 import type { Ref } from 'react';
 
 import { ReviewIcon, type ReviewIconName } from './ReviewIcon.js';
+import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 
 export type WorkspaceEdgeRailSurface = 'right' | 'bottom';
 
 export interface WorkspaceEdgeRailProps {
   readonly surface: WorkspaceEdgeRailSurface;
+  readonly target: 'workspace' | 'References';
   readonly open: boolean;
   readonly controls: string;
   readonly onToggle: () => void;
@@ -17,27 +19,27 @@ function railIcon(surface: WorkspaceEdgeRailSurface, open: boolean): ReviewIconN
   return open ? 'chevron-down' : 'chevron-up';
 }
 
-function railLabel(surface: WorkspaceEdgeRailSurface, open: boolean): string {
-  const target = surface === 'right' ? 'right workspace' : 'References tray';
-  return `${open ? 'Close' : 'Open'} ${target}`;
+function railLabel(target: WorkspaceEdgeRailProps['target'], open: boolean): string {
+  return `${open ? 'Hide' : 'Show'} ${target}`;
 }
 
 export function WorkspaceEdgeRail({
   surface,
+  target,
   open,
   controls,
   onToggle,
   buttonRef,
 }: WorkspaceEdgeRailProps) {
   return (
-    <button
+    <ReviewTooltipButton
+      label={railLabel(target, open)}
       ref={buttonRef}
       type="button"
       className="workspace-edge-rail"
       data-workspace-edge-rail={surface}
       data-edge-rail-open={open ? 'true' : 'false'}
-      aria-label={railLabel(surface, open)}
-      title={railLabel(surface, open)}
+      aria-label={railLabel(target, open)}
       aria-expanded={open}
       aria-controls={controls}
       onClick={(event) => {
@@ -49,6 +51,6 @@ export function WorkspaceEdgeRail({
       <span className="workspace-edge-rail__glyph">
         <ReviewIcon name={railIcon(surface, open)} size={14} />
       </span>
-    </button>
+    </ReviewTooltipButton>
   );
 }

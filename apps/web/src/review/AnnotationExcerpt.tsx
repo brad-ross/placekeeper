@@ -72,6 +72,8 @@ function useAnnotationExcerptOverflow(
 
 export interface AnnotationExcerptProps {
   readonly content: string;
+  readonly sourceText?: string;
+  readonly sourceTreatment?: 'plain' | 'struck';
   readonly readerRecord: AnnotationReaderRecord | null;
   readonly onReadFull?: (record: AnnotationReaderRecord, trigger: HTMLButtonElement) => void;
   readonly onOverflowChange?: (record: AnnotationReaderRecord, overflowing: boolean) => void;
@@ -79,6 +81,8 @@ export interface AnnotationExcerptProps {
 
 export function AnnotationExcerpt({
   content,
+  sourceText,
+  sourceTreatment = 'plain',
   readerRecord,
   onReadFull,
   onOverflowChange,
@@ -97,29 +101,33 @@ export function AnnotationExcerpt({
       : (nextOverflowing) => onOverflowChange(readerRecord, nextOverflowing),
   );
 
+  const contents = <>
+    {sourceText ? (
+      <span className="annotation-item__source" data-source-treatment={sourceTreatment}>
+        {sourceText}
+      </span>
+    ) : null}
+    {sourceText && content ? <span className="annotation-item__content-separator" aria-hidden="true" /> : null}
+    {content ? <span className="annotation-item__excerpt-text">{content}</span> : null}
+  </>;
+
   return (
-    <span
-      ref={excerptRef}
-      className="annotation-item__excerpt"
-      data-full-annotation-eligible={enabled ? 'true' : 'false'}
-    >
-      {enabled ? (
+    <span ref={excerptRef} className="annotation-item__excerpt" data-full-annotation-eligible={enabled ? 'true' : 'false'}>
+      {enabled && overflowing ? (
         <button
           type="button"
-          className="annotation-item__more"
+          className="annotation-item__excerpt-trigger"
           data-read-full-annotation="true"
           aria-label={`Read full ${readerRecord.typeLabel} annotation on ${readerPageDescription}`}
           title="Read full annotation"
-          hidden={!overflowing}
           onClick={(event) => {
             event.stopPropagation();
             onReadFull(readerRecord, event.currentTarget);
           }}
         >
-          More ›
+          {contents}
         </button>
-      ) : null}
-      <span className="annotation-item__excerpt-text">{content}</span>
+      ) : contents}
     </span>
   );
 }

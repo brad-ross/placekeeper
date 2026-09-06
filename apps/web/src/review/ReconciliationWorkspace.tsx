@@ -14,6 +14,7 @@ import type { CaretAnchor } from "../pdf/selection-anchor.js";
 import { reliableSelection, type SelectionUpdate } from "../pdf/selection-state.js";
 import { AnnotationMetadata, annotationKindLabel } from "./AnnotationMetadata.js";
 import { ReviewIcon } from "./ReviewIcon.js";
+import { ReviewTooltipButton } from "./ReviewTooltipButton.js";
 
 export type ReattachmentTarget =
   | {
@@ -404,26 +405,28 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       aria-label={`Resolve previous ${typeLabel} annotation on page ${activeRecord.pageNumber}`}
     >
       <header className="reconciliation-workspace__detail-header">
-        <button
+        <ReviewTooltipButton
+          label="Back"
+          tooltip="Back to previous annotations"
           ref={detailBackRef}
           type="button"
           className="full-annotation-reader__back"
           aria-label="Back"
-          title="Back to previous annotations"
           disabled={pending}
           onClick={closeDetail}
-        ><ReviewIcon name="arrow-left" size={15} /></button>
+        ><ReviewIcon name="arrow-left" size={15} /></ReviewTooltipButton>
         <h2>{detail.mode === "reattach" ? reattachmentTitle(activeRecord.kind) : `${detail.mode === "apply" ? "Apply" : "Discard"} ${typeLabel.toLocaleLowerCase()}`}</h2>
         <span className="reconciliation-workspace__state-pill" data-reconciliation-status={activeRecord.stateLabel}>{activeRecord.stateLabel}</span>
-        {detail.mode === "discard" ? <span className="reconciliation-workspace__header-spacer" /> : <button
+        {detail.mode === "discard" ? <span className="reconciliation-workspace__header-spacer" /> : <ReviewTooltipButton
+          label={`Discard ${typeLabel} annotation on page ${activeRecord.pageNumber}`}
+          tooltip="Discard annotation"
           type="button"
           className="full-annotation-reader__edit reconciliation-workspace__discard"
           data-reconciliation-action="discard"
           aria-label={`Discard ${typeLabel} annotation on page ${activeRecord.pageNumber}`}
-          title="Discard annotation"
           disabled={pending}
           onClick={() => openDetail(activeRecord, "discard")}
-        ><ReviewIcon name="delete" size={15} /></button>}
+        ><ReviewIcon name="remove" size={15} /></ReviewTooltipButton>}
       </header>
 
       <div className="full-annotation-reader__body">
@@ -482,7 +485,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
         <p className="reconciliation-workspace__instruction">Discard this annotation from the reviewed PDF?</p>
         <div className="reconciliation-workspace__editor-actions">
           <button className="review-button review-button--secondary" type="button" title="Keep this annotation" disabled={pending} onClick={closeDetail}><ReviewIcon name="close" size={15} /><span>Cancel</span></button>
-          <button className="review-button review-button--secondary reconciliation-workspace__destructive" type="button" title="Discard this annotation" disabled={pending} onClick={() => void submit(discardCommand(activeRecord.target))}><ReviewIcon name="delete" size={15} /><span>Discard</span></button>
+          <button className="review-button review-button--secondary reconciliation-workspace__destructive" type="button" title="Discard this annotation" disabled={pending} onClick={() => void submit(discardCommand(activeRecord.target))}><ReviewIcon name="remove" size={15} /><span>Discard</span></button>
         </div>
       </section> : null}
 
@@ -530,14 +533,15 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
             <div className="annotation-item__title-row">
               <AnnotationMetadata kind={record.kind} pageNumber={record.pageNumber} sectionLabel={record.stateLabel} />
               <div className="annotation-item__title-actions" role="group" aria-label={`${typeLabel} resolution actions`}>
-                <button
+                <ReviewTooltipButton
+                  label={`Discard ${typeLabel} annotation on page ${record.pageNumber}`}
+                  tooltip="Discard annotation"
                   type="button"
                   className="annotation-item__action annotation-item__delete"
                   data-reconciliation-action="discard"
                   aria-label={`Discard ${typeLabel} annotation on page ${record.pageNumber}`}
-                  title="Discard annotation"
                   onClick={() => openDetail(record, "discard")}
-                ><ReviewIcon name="delete" size={13} /></button>
+                ><ReviewIcon name="remove" size={13} /></ReviewTooltipButton>
               </div>
             </div>
             <div className="annotation-item__body-row">

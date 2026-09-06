@@ -512,7 +512,7 @@ describe("one production review tree", () => {
     expect(html).toContain("Generation 8 viewer");
     expect(html).toContain('data-launch-surface="vscode"');
     expect(html).not.toContain('data-reconciliation-workspace');
-    expect(html).toContain('<h2>Annotations</h2>');
+    expect(html).toContain('aria-label="Owned annotations"');
     expect(html).toContain('Select text in the PDF to add an annotation.');
     expect(html).toContain('data-document-actions-trigger');
     expect(html).toContain('aria-haspopup="menu"');
@@ -837,9 +837,11 @@ describe("one production review tree", () => {
     />);
     expect(html).toContain("Real shared PDF viewer");
     expect(html).not.toContain("aria-label=\"Actions\"");
-    expect(html).toContain('aria-label="Edit history"');
-    expect(html).toContain('aria-label="Document navigation, page unavailable"');
-    expect(html).toContain('aria-label="PDF zoom unavailable"');
+    expect(html).not.toContain('aria-label="Edit history"');
+    expect(html).toContain('aria-label="Document navigation"');
+    expect(html).toContain('aria-label="Current page unavailable"');
+    expect(html).toContain('aria-label="PDF zoom"');
+    expect(html).toContain('aria-label="Zoom unavailable"');
     expect(html).toContain("paper.pdf, not saved. Open automatic save options");
     expect(html).toContain('data-save-phase="not-saved"');
     expect(html).toContain("Not saved");
@@ -971,7 +973,7 @@ describe("one production review tree", () => {
       onCancel={vi.fn()}
     />);
 
-    expect(html).toContain("Choose Where to Save Annotations");
+    expect(html).toContain("Choose where to save annotations");
     expect(html).toContain('class="save-destination-dialog compact-editorial-modal"');
     expect(html).toContain('compact-editorial-modal__header');
     expect(html).toContain('compact-editorial-modal__body');

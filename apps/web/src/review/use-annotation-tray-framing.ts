@@ -1,6 +1,5 @@
 import {
   useCallback,
-  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -8,13 +7,9 @@ import {
 } from 'react';
 
 import {
-  FramingSessionAuthority,
   LatestFrameRequest,
   ViewerGeometrySettlementAuthority,
   chooseAnnotationPresentation,
-  frameUserOwnedPosition,
-  intersectViewerRects,
-  restoreViewportPosition,
   revealDelta,
   type AnnotationPresentation,
   type ViewerFramingControls,
@@ -26,6 +21,8 @@ import {
 const WORKSPACE_SIDE_MAX_PX = 24 * 16;
 const WORKSPACE_SIDE_EDGE_GAP_PX = 3 * 16;
 const ANNOTATION_MARK_GUTTER_PX = 10;
+const OVERLAY_BACKING_PX = 12;
+const OVERLAY_FADE_PX = 18;
 
 function waitForWorkspaceLayout(signal: AbortSignal): Promise<boolean> {
   return new Promise((resolve) => {
@@ -50,15 +47,18 @@ function committedWorkspaceRunway(
   stage: Pick<DOMRect, 'width' | 'height'>,
   surfaces: readonly HTMLElement[],
 ): ViewerRunway {
-  // Reserve the open surface's resting layout extent once. Measuring its
-  // transformed bounds here would resize the PDF runway on every slide frame.
+  // Offset geometry describes the resting tray edge and remains stable while
+  // its entrance transform animates. The runway also clears the opaque outer
+  // backing and its fade, leaving the PDF reachable beside the overlay.
   const runway: ViewerRunway = { right: 0, bottom: 0 };
   for (const surface of surfaces) {
     if (!workspaceSurfaceIsOpen(surface)) continue;
     if (surface.dataset.workspacePresentation === 'bottom') {
-      runway.bottom = Math.max(runway.bottom, Math.min(stage.height, surface.offsetHeight));
+      const clearBoundary = Math.max(0, surface.offsetTop - OVERLAY_BACKING_PX - OVERLAY_FADE_PX);
+      runway.bottom = Math.max(runway.bottom, Math.min(stage.height, stage.height - clearBoundary));
     } else {
-      runway.right = Math.max(runway.right, Math.min(stage.width, surface.offsetWidth));
+      const clearBoundary = Math.max(0, surface.offsetLeft - OVERLAY_BACKING_PX - OVERLAY_FADE_PX);
+      runway.right = Math.max(runway.right, Math.min(stage.width, stage.width - clearBoundary));
     }
   }
   return runway;
@@ -73,17 +73,7 @@ export function workspaceRequestRequiresReframe(input: {
   readonly requestChanged: boolean;
   readonly requestKind: WorkspaceOpenRequest['kind'];
 }): boolean {
-  return input.presentationChanged || (input.requestChanged && input.requestKind === 'mark');
-}
-
-interface ActiveFramingSession {
-  readonly documentId: string;
-  baseline: ViewerPosition;
-  automatic: ViewerPosition;
-  userAxes: { left: boolean; top: boolean };
-  presentation: AnnotationPresentation;
-  requestToken: number;
-  closing?: ViewerPosition;
+  return input.requestChanged && input.requestKind === 'mark';
 }
 
 export interface WorkspaceFraming {
@@ -113,20 +103,18 @@ export function useWorkspaceFraming(input: {
   const referenceSurfaceRef = useRef<HTMLElement>(null);
   const toolsSurfaceRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
-  const authorityRef = useRef(new FramingSessionAuthority());
   const geometrySettlementRef = useRef(new ViewerGeometrySettlementAuthority());
-  const sessionRef = useRef<ActiveFramingSession | null>(null);
   const controlsRef = useRef(input.controls);
   controlsRef.current = input.controls;
-  const pendingMarkRevealRef = useRef<{
-    readonly documentId: string;
-    readonly baseline: ViewerPosition;
-  } | null>(null);
+  const layoutOperationRef = useRef(0);
+  const committedControlsRef = useRef<ViewerFramingControls | null>(null);
+  const committedRunwayRef = useRef<ViewerRunway>({ right: 0, bottom: 0 });
+  const userRevisionRef = useRef(0);
+  const revealedMarkTokenRef = useRef<number | null>(null);
   const [presentation, setPresentation] = useState<AnnotationPresentation>('right');
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [geometryRevision, setGeometryRevision] = useState(0);
   const requestGeometryFrameRef = useRef<() => void>(() => undefined);
-  const userPositionFrameRef = useRef<number | null>(null);
   const sideWidth = Math.min(
     WORKSPACE_SIDE_MAX_PX,
     Math.max(0, stageSize.width - WORKSPACE_SIDE_EDGE_GAP_PX),
@@ -247,290 +235,125 @@ export function useWorkspaceFraming(input: {
 
   const prepareMarkReveal = useCallback(() => {
     const snapshot = controlsRef.current?.snapshot();
-    if (!snapshot?.ready || !snapshot.documentId) return;
-    pendingMarkRevealRef.current = {
-      documentId: snapshot.documentId,
-      baseline: snapshot.scroll,
-    };
+    if (!snapshot?.ready) return;
+    // Cancel an older smooth reveal before the mark activation establishes a
+    // new explicit navigation target. The current position remains untouched.
+    controlsRef.current?.scrollTo(snapshot.scroll, 'auto');
   }, []);
 
   const markUserIntent = useCallback((
     axes: { left?: boolean; top?: boolean } = { left: true, top: true },
     options: { stopAutomaticScroll?: boolean; captureSettledPosition?: boolean } = {},
   ) => {
-    const session = sessionRef.current;
-    if (!session) return;
     const ownsLeft = axes.left === true;
     const ownsTop = axes.top === true;
     if (!ownsLeft && !ownsTop) return;
+    userRevisionRef.current += 1;
     const current = input.controls?.snapshot();
-    if (current?.ready) {
-      session.baseline = {
-        left: ownsLeft ? current.scroll.left : session.baseline.left,
-        top: ownsTop ? current.scroll.top : session.baseline.top,
-      };
-    }
-    if (ownsLeft) {
-      session.userAxes.left = true;
-    }
-    if (ownsTop) {
-      session.userAxes.top = true;
-    }
-    authorityRef.current.markUserNavigation();
-
-    if (userPositionFrameRef.current !== null) {
-      cancelAnimationFrame(userPositionFrameRef.current);
-    }
-    if (options.captureSettledPosition !== false) {
-      userPositionFrameRef.current = requestAnimationFrame(() => {
-        userPositionFrameRef.current = requestAnimationFrame(() => {
-          userPositionFrameRef.current = null;
-          if (sessionRef.current !== session) return;
-          const settled = input.controls?.snapshot();
-          if (!settled?.ready || settled.documentId !== session.documentId) return;
-          session.baseline = {
-            left: ownsLeft ? settled.scroll.left : session.baseline.left,
-            top: ownsTop ? settled.scroll.top : session.baseline.top,
-          };
-        });
-      });
-    }
-
-    // Programmatic ownership changes stop any in-flight smooth scroll. Native
-    // wheel gestures cancel through browser behavior; forcing a same-position
-    // write during wheel capture suppresses WebKit's default movement.
+    // Native wheel/pointer movement owns the viewer. A same-position instant
+    // write only cancels an older automatic smooth reveal when requested.
     if (current?.ready && options.stopAutomaticScroll !== false) {
       input.controls?.scrollTo(current.scroll, 'auto');
     }
   }, [input.controls]);
 
-  useEffect(() => () => {
-    if (userPositionFrameRef.current !== null) {
-      cancelAnimationFrame(userPositionFrameRef.current);
-      userPositionFrameRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!input.workspaceOpen || !input.controls) return;
-    return input.controls.subscribe((event) => {
-      if (event.type === 'zoom') markUserIntent();
+  useLayoutEffect(() => {
+    if (!input.controls) return;
+    return input.controls.subscribe(() => {
+      userRevisionRef.current += 1;
     });
-  }, [input.controls, input.workspaceOpen, markUserIntent]);
+  }, [input.controls]);
 
   useLayoutEffect(() => {
     const controls = input.controls;
     if (!controls) return;
+    if (committedControlsRef.current !== controls) {
+      committedControlsRef.current = controls;
+      committedRunwayRef.current = { right: -1, bottom: -1 };
+    }
     const settlement = new AbortController();
+    const operation = ++layoutOperationRef.current;
+    const operationIsCurrent = () => (
+      !settlement.signal.aborted && layoutOperationRef.current === operation
+    );
     const target = input.request.kind === 'mark'
       ? { pageIndex: input.request.pageIndex, reviewId: input.request.reviewId }
       : undefined;
     const first = controls.snapshot(target);
-    const operationDocumentId = first.documentId ?? sessionRef.current?.documentId;
-    if (!operationDocumentId) {
-      if (!input.workspaceOpen) void controls.setRunway({ right: 0, bottom: 0 });
-      return;
-    }
-    const operation = authorityRef.current.open(operationDocumentId, presentation);
-    const operationIsCurrent = () => authorityRef.current.isCurrent(operation)
-      && controls.snapshot().documentId === operationDocumentId;
-
-    const closeSession = async () => {
-      const session = sessionRef.current;
-      if (!session) {
-        await controls.setRunway({ right: 0, bottom: 0 });
-        return;
-      }
-      const current = controls.snapshot(target);
-      if (!session.closing) {
-        // A wheel gesture claims an axis before the browser applies its native
-        // scroll. Capture the final user-owned position at the close boundary
-        // so a close in the following frame cannot restore the pre-wheel value.
-        session.baseline = {
-          left: session.userAxes.left ? current.scroll.left : session.baseline.left,
-          top: session.userAxes.top ? current.scroll.top : session.baseline.top,
-        };
-      }
-      const restored = session.closing ?? restoreViewportPosition({
-        baseline: session.baseline,
-        current: current.scroll,
-        automatic: session.automatic,
-        userRevision: authorityRef.current.snapshot()?.userRevision ?? 0,
-        userAxes: session.userAxes,
-        maximum: current.maximum,
-      });
-      // A close can restart as surface/layout observers settle. Retain the
-      // first chosen target so a later pass cannot mistake native anchoring
-      // during runway removal for a new reviewer-owned position.
-      session.closing = restored;
-      await controls.setRunway({ right: 0, bottom: 0 });
-      // WebKit can report the preceding maximum until the runway removal has
-      // completed a layout turn. Clamp only against settled viewer metrics.
-      if (!await waitForWorkspaceLayout(settlement.signal)) return;
-      if (!operationIsCurrent()) return;
-      const withoutRunway = controls.snapshot(target);
-      const closedFrame = frameUserOwnedPosition({
-        baseline: session.baseline,
-        restored,
-        maximum: withoutRunway.maximum,
-        userAxes: session.userAxes,
-      });
-      controls.scrollTo(closedFrame.position, 'auto');
-      session.baseline = closedFrame.baseline;
-      session.automatic = { left: 0, top: 0 };
-      authorityRef.current.close(operation);
-      // Keep the document-scoped baseline and per-axis user ownership through
-      // a close/reopen cycle. Clearing it here made a fast reopen depend on
-      // whether the asynchronous runway close settled first (Chromium and
-      // WebKit could consequently choose different reading anchors).
-    };
-
-    const openSession = async () => {
-      if (!first.ready || !first.documentId) return;
-      const pendingMarkReveal = pendingMarkRevealRef.current;
-      const markRevealBaseline = pendingMarkReveal?.documentId === first.documentId
-        ? pendingMarkReveal.baseline
-        : null;
-      pendingMarkRevealRef.current = null;
-      let session = sessionRef.current;
-      if (session?.documentId === first.documentId && markRevealBaseline) {
-        // Explicit mark activation starts from the reader's current position,
-        // then owns only the minimal reveal needed to clear the workspace.
-        // Retaining the preceding tray session here could first rewind to an
-        // older baseline before the mark geometry was measured.
-        session.baseline = markRevealBaseline;
-        session.automatic = { left: 0, top: 0 };
-        session.userAxes = { left: false, top: false };
-        delete session.closing;
-      }
-      if (!session || session.documentId !== first.documentId) {
-        session = {
-          documentId: first.documentId,
-          baseline: markRevealBaseline ?? first.scroll,
-          automatic: { left: 0, top: 0 },
-          userAxes: { left: false, top: false },
-          presentation,
-          requestToken: input.request.token,
-        };
-        sessionRef.current = session;
-      } else if (workspaceRequestRequiresReframe({
-        presentationChanged: session.presentation !== presentation,
-        requestChanged: session.requestToken !== input.request.token,
-        requestKind: input.request.kind,
-      })) {
-        const restored = restoreViewportPosition({
-          baseline: session.baseline,
-          current: first.scroll,
-          automatic: session.automatic,
-          userRevision: authorityRef.current.snapshot()?.userRevision ?? 0,
-          userAxes: session.userAxes,
-          maximum: first.maximum,
-        });
-        const framed = frameUserOwnedPosition({
-          baseline: session.baseline,
-          restored,
-          maximum: first.maximum,
-          userAxes: session.userAxes,
-        });
-        controls.scrollTo(framed.position, 'auto');
-        session.baseline = framed.baseline;
-        session.automatic = { left: 0, top: 0 };
-        session.presentation = presentation;
-        session.requestToken = input.request.token;
-      } else {
-        // Switching workspace modes can issue a fresh reading request while the
-        // tray remains open. Preserve the established reading frame; only an
-        // explicit mark request needs a new target reveal.
-        session.requestToken = input.request.token;
-      }
-      delete session.closing;
-
+    const startingUserRevision = userRevisionRef.current;
+    const shouldRevealMark = input.request.kind === 'mark'
+      && input.workspaceOpen
+      && revealedMarkTokenRef.current !== input.request.token;
+    const updateRunway = async () => {
       const stageBounds = stageRef.current?.getBoundingClientRect();
-      if (!stageBounds) return;
       const surfaces = [referenceSurfaceRef.current, toolsSurfaceRef.current]
         .filter((surface): surface is HTMLElement => surface !== null);
-      const runway = committedWorkspaceRunway(stageBounds, surfaces);
-      const exclusionWidth = runway.right;
-      const exclusionHeight = runway.bottom;
-      await controls.setRunway(runway);
-      if (!operationIsCurrent() || !input.workspaceOpen) return;
-      // WebKit can commit the runway element before exposing its updated
-      // scroll extent. Measure only after one guarded layout frame so reveal
-      // coordinates are not clamped against the preceding maximum.
+      const runway = input.workspaceOpen && stageBounds
+        ? committedWorkspaceRunway(stageBounds, surfaces)
+        : { right: 0, bottom: 0 };
+      const precedingRunway = committedRunwayRef.current;
+      const runwayChanged = runway.right !== precedingRunway.right
+        || runway.bottom !== precedingRunway.bottom;
+      if (!runwayChanged && !shouldRevealMark) return;
+      if (runwayChanged) {
+        committedRunwayRef.current = runway;
+        await controls.setRunway(runway);
+      }
+      if (!operationIsCurrent()) return;
       if (!await waitForWorkspaceLayout(settlement.signal)) return;
-      if (!operationIsCurrent() || !input.workspaceOpen) return;
-
+      if (!operationIsCurrent()) return;
       const measured = controls.snapshot(target);
-      const stage = stageRef.current?.getBoundingClientRect();
-      if (!measured.ready || !measured.viewport || !stage) return;
-      const revealTarget = input.request.kind === 'mark'
-        ? measured.target
-        : first.page && first.viewport
-          ? intersectViewerRects(first.page, first.viewport)
-          : null;
-      if (!revealTarget) return;
+      if (!first.ready || !measured.ready) return;
+      const userInterrupted = userRevisionRef.current !== startingUserRevision;
+      const preserved = {
+        left: Math.min(first.scroll.left, measured.maximum.left),
+        top: Math.min(first.scroll.top, measured.maximum.top),
+      };
+      // Tray visibility, docking, and resizing only alter reachable scroll
+      // extent. Restore the exact pre-layout offset after native scroll
+      // anchoring; passive layout never recenters or refits the PDF.
+      if (!shouldRevealMark || userInterrupted) {
+        if (shouldRevealMark && userInterrupted && input.request.kind === 'mark') {
+          revealedMarkTokenRef.current = input.request.token;
+        }
+        if (userInterrupted) return;
+        if (preserved.left !== measured.scroll.left || preserved.top !== measured.scroll.top) {
+          controls.scrollTo(preserved, 'auto');
+        }
+        return;
+      }
 
-      let leftDelta = 0;
-      let topDelta = 0;
-      if (runway.right === 0 && !session.userAxes.left && session.automatic.left !== 0) {
-        leftDelta = session.baseline.left - measured.scroll.left;
-      } else if (runway.right > 0 && !session.userAxes.left) {
-        leftDelta = revealDelta(
+      const stage = stageRef.current?.getBoundingClientRect();
+      const revealTarget = measured.target;
+      if (!stage || !measured.viewport || !revealTarget) return;
+      const destination = {
+        left: Math.min(Math.max(0, measured.scroll.left + revealDelta(
           { start: revealTarget.left, end: revealTarget.right },
           {
             start: measured.viewport.left,
-            end: Math.min(measured.viewport.right, stage.right - exclusionWidth),
+            end: Math.min(measured.viewport.right, stage.right - runway.right),
           },
-          input.request.kind === 'mark' ? ANNOTATION_MARK_GUTTER_PX : 0,
-        );
-      }
-      if (input.request.kind === 'reading') {
-        topDelta = first.scroll.top - measured.scroll.top;
-      } else if (runway.bottom === 0 && !session.userAxes.top && session.automatic.top !== 0) {
-        topDelta = session.baseline.top - measured.scroll.top;
-      } else if (runway.bottom > 0 && input.request.kind === 'mark' && !session.userAxes.top) {
-        topDelta = revealDelta(
+          ANNOTATION_MARK_GUTTER_PX,
+        )), measured.maximum.left),
+        top: Math.min(Math.max(0, measured.scroll.top + revealDelta(
           { start: revealTarget.top, end: revealTarget.bottom },
           {
             start: measured.viewport.top,
-            end: Math.min(measured.viewport.bottom, stage.bottom - exclusionHeight),
+            end: Math.min(measured.viewport.bottom, stage.bottom - runway.bottom),
           },
           ANNOTATION_MARK_GUTTER_PX,
-        );
-      }
-
-      const destination = {
-        // WebKit may apply native scroll anchoring while the runway grows.
-        // Once the reviewer owns an axis, keep the pre-runway position instead
-        // of accepting that browser-generated shift as user movement.
-        left: Math.min(
-          Math.max(0, session.userAxes.left
-            ? session.baseline.left
-            : measured.scroll.left + leftDelta),
-          measured.maximum.left,
-        ),
-        // Opening or selecting Annotations is passive. Keep the immediate
-        // pre-open reading position even if browser scroll anchoring changes
-        // the measured position while the bottom runway is committed.
-        top: Math.min(
-          Math.max(0, session.userAxes.top
-            ? session.baseline.top
-            : measured.scroll.top + topDelta),
-          measured.maximum.top,
-        ),
+        )), measured.maximum.top),
       };
-      if (!session.userAxes.left) session.automatic.left = destination.left - session.baseline.left;
-      if (!session.userAxes.top) session.automatic.top = destination.top - session.baseline.top;
       if (destination.left !== measured.scroll.left || destination.top !== measured.scroll.top) {
         const reducedMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
         controls.scrollTo(destination, reducedMotion ? 'auto' : 'smooth');
       }
+      if (input.request.kind === 'mark') revealedMarkTokenRef.current = input.request.token;
     };
 
-    void (input.workspaceOpen ? openSession() : closeSession());
+    void updateRunway();
     return () => {
       settlement.abort();
-      authorityRef.current.supersede(operation);
     };
   }, [
     input.controls,
@@ -538,9 +361,7 @@ export function useWorkspaceFraming(input: {
     input.layoutGeneration,
     input.workspaceOpen,
     input.request,
-    // Geometry samples matter while a tray is open. Once closing begins they
-    // must not supersede the one operation restoring the reading anchor.
-    input.workspaceOpen ? geometryRevision : 0,
+    geometryRevision,
     presentation,
     sideWidth,
     stageSize.height,

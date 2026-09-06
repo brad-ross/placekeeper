@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import { CommentComposer } from '../src/review/CommentComposer.js';
+import { boundedTextAreaHeight, CommentComposer } from '../src/review/CommentComposer.js';
 
 function renderComposer(overrides: Partial<Parameters<typeof CommentComposer>[0]> = {}) {
   return renderToStaticMarkup(
@@ -40,8 +40,8 @@ describe('CommentComposer contextual authoring contract', () => {
   it.each([
     ['visible', false, false, ''],
     ['unavailable', false, false, ''],
-    ['outside', false, true, 'Return to annotation'],
-    ['outside', true, true, 'Returning to annotation'],
+    ['outside', false, true, 'Back to passage'],
+    ['outside', true, true, 'Returning to passage'],
   ] as const)('shows one icon-only anchor control only while the anchor is %s', (
     visibility,
     pending,
@@ -86,5 +86,23 @@ describe('CommentComposer contextual authoring contract', () => {
     expect(requiredWhitespace).not.toContain('class="comment-composer__label"');
     expect(requiredWhitespace).toContain('disabled=""');
     expect(allowedWhitespace).not.toContain('disabled=""');
+  });
+
+  it('clamps auto-growth before the editor becomes internally scrollable', () => {
+    expect(boundedTextAreaHeight({ scrollHeight: 40, minHeight: 84, maxHeight: 220 })).toBe(84);
+    expect(boundedTextAreaHeight({ scrollHeight: 160, minHeight: 84, maxHeight: 220 })).toBe(160);
+    expect(boundedTextAreaHeight({ scrollHeight: 360, minHeight: 84, maxHeight: 220 })).toBe(220);
+  });
+
+  it('exposes stable placement data and an original-page cue without duplicating the draft', () => {
+    const html = renderComposer({
+      initialValue: 'Persistent draft',
+      placement: { kind: 'below', style: { left: 18, top: 42 } },
+      anchorNavigation: { visibility: 'outside', pending: false, pageNumber: 7, onReturn: vi.fn() },
+    });
+    expect(html).toContain('data-composer-placement="below"');
+    expect(html).toContain('style="left:18px;top:42px"');
+    expect(html).toContain('comment-composer__page-cue">7</span>');
+    expect(html.match(/Persistent draft/g)).toHaveLength(1);
   });
 });

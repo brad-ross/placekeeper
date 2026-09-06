@@ -158,7 +158,7 @@ export function TopBarMenu({
     top: `${placement?.top ?? (initialAnchor?.bottom ?? 4) + 8}px`,
   } as CSSProperties;
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape') {
+    if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
       event.preventDefault();
       event.stopPropagation();
       dismiss('escape');

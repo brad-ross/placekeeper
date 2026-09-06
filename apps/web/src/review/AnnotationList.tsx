@@ -6,13 +6,14 @@ import {
   annotationAccessibleLabel,
   annotationKindLabel,
 } from './AnnotationMetadata.js';
-import { CopyLinkControl, type CopyLinkControlProps } from './CopyLinkControl.js';
+import type { CopyLinkControlProps } from './CopyLinkControl.js';
 import { ReviewIcon } from './ReviewIcon.js';
 import { AnnotationExcerpt } from './AnnotationExcerpt.js';
 import {
   projectOwnedAnnotationReader,
   type AnnotationReaderRecord,
 } from './annotation-reader.js';
+import { RowActionGroup, type RowAction } from './RowActionGroup.js';
 
 export interface AnnotationListProps {
   items: readonly ReviewItem[];
@@ -28,9 +29,30 @@ export interface AnnotationListProps {
   onDelete(item: ReviewItem): Promise<void> | void;
 }
 
-function payloadText(item: ReviewItem): string {
-  const fields = ['proposedText', 'comment', 'quote'];
-  return fields.map((field) => item.payload[field]).find((value): value is string => typeof value === 'string') ?? '';
+function payloadString(item: ReviewItem, field: string): string {
+  const value = item.payload[field];
+  return typeof value === 'string' ? value : '';
+}
+
+export interface AnnotationListContent {
+  readonly content: string;
+  readonly sourceText?: string;
+  readonly sourceTreatment?: 'plain' | 'struck';
+}
+
+export function annotationListContent(item: ReviewItem): AnnotationListContent {
+  const quote = payloadString(item, 'quote');
+  const proposedText = payloadString(item, 'proposedText');
+  const comment = payloadString(item, 'comment');
+  switch (item.kind) {
+    case 'replace':
+      return { content: proposedText, ...(quote ? { sourceText: quote, sourceTreatment: 'struck' as const } : {}) };
+    case 'delete':
+      return { content: '', ...(quote ? { sourceText: quote, sourceTreatment: 'struck' as const } : {}) };
+    case 'highlight': return { content: comment || quote };
+    case 'insert': return { content: proposedText || quote };
+    case 'pageNote': return { content: comment || quote };
+  }
 }
 
 function annotationState(active: boolean, corresponding: boolean): string {
@@ -38,6 +60,98 @@ function annotationState(active: boolean, corresponding: boolean): string {
   if (active) return 'active';
   if (corresponding) return 'corresponding';
   return 'default';
+}
+
+export interface AnnotationRowContentProps {
+  readonly item: ReviewItem;
+  readonly copyLink?: CopyLinkControlProps;
+  readonly readerRecord?: AnnotationReaderRecord | null;
+  readonly navigationRef?: (node: HTMLButtonElement | null) => void;
+  readonly onNavigate?: () => void;
+  readonly onReadFull?: (record: AnnotationReaderRecord, trigger: HTMLButtonElement) => void;
+  readonly onReaderOverflowChange?: (record: AnnotationReaderRecord, overflowing: boolean) => void;
+  readonly onEdit?: (trigger: HTMLButtonElement) => void;
+  readonly onDelete?: () => void;
+  readonly onDismiss?: () => void;
+}
+
+export function AnnotationRowContent({
+  item,
+  copyLink,
+  readerRecord = projectOwnedAnnotationReader(item),
+  navigationRef,
+  onNavigate,
+  onReadFull,
+  onReaderOverflowChange,
+  onEdit,
+  onDelete,
+  onDismiss,
+}: AnnotationRowContentProps) {
+  const presentation = annotationListContent(item);
+  const text = [presentation.sourceText, presentation.content].filter(Boolean).join(' ');
+  const { firstPageIndex, lastPageIndex } = readerRecord === null
+    ? reviewItemPageRange(item)
+    : {
+        firstPageIndex: readerRecord.pageNumber - 1,
+        lastPageIndex: (readerRecord.lastPageNumber ?? readerRecord.pageNumber) - 1,
+      };
+  const pageNumber = firstPageIndex + 1;
+  const lastPageNumber = lastPageIndex + 1;
+  const kindLabel = annotationKindLabel(item.kind);
+  const pageDescription = pageNumber === lastPageNumber
+    ? `page ${pageNumber}`
+    : `pages ${pageNumber}–${lastPageNumber}`;
+  const actions: RowAction[] = [];
+  if (onEdit && item.kind !== 'delete') actions.push({
+    id: 'edit', kind: 'command', icon: 'edit',
+    label: `Edit ${kindLabel} annotation on ${pageDescription}`,
+    title: 'Edit annotation', onInvoke: onEdit,
+  });
+  if (onDelete) actions.push({
+    id: 'delete', kind: 'command', icon: 'remove',
+    label: `Remove ${kindLabel} annotation on ${pageDescription}`,
+    title: 'Delete annotation', onInvoke: onDelete,
+  });
+  if (copyLink) actions.push({
+    id: 'copy-link', kind: 'copy-link',
+    label: `Copy link to ${kindLabel} annotation on ${pageDescription}`,
+    title: copyLink.disabled ? 'Save annotation before copying its link' : 'Copy annotation link',
+    copyLink,
+  });
+  if (onDismiss) actions.push({
+    id: 'close', kind: 'command', icon: 'close',
+    label: 'Close annotation preview', title: 'Close', onInvoke: onDismiss,
+  });
+
+  return <div className="annotation-item__content">
+    {onNavigate ? <button
+      ref={navigationRef}
+      type="button"
+      className="annotation-item__navigation"
+      aria-label={annotationAccessibleLabel({
+        kind: item.kind,
+        pageNumber,
+        lastPageNumber,
+        ...(text ? { excerpt: text } : {}),
+      })}
+      title={`Go to ${kindLabel} annotation on ${pageDescription}`}
+      onClick={onNavigate}
+    /> : null}
+    <div className="annotation-item__title-row">
+      <AnnotationMetadata kind={item.kind} pageNumber={pageNumber} lastPageNumber={lastPageNumber} />
+      <RowActionGroup actions={actions} rowLabel={`${kindLabel} annotation on ${pageDescription}`} />
+    </div>
+    <div className="annotation-item__body-row">
+      {text ? <AnnotationExcerpt
+        content={presentation.content}
+        {...(presentation.sourceText ? { sourceText: presentation.sourceText } : {})}
+        {...(presentation.sourceTreatment ? { sourceTreatment: presentation.sourceTreatment } : {})}
+        readerRecord={readerRecord}
+        {...(onReadFull ? { onReadFull } : {})}
+        {...(onReaderOverflowChange ? { onOverflowChange: onReaderOverflowChange } : {})}
+      /> : <span />}
+    </div>
+  </div>;
 }
 
 export function AnnotationList({
@@ -117,9 +231,6 @@ export function AnnotationList({
       aria-label="Owned annotations"
       tabIndex={-1}
     >
-      <header className="annotation-drawer__header">
-        <h2>Annotations</h2>
-      </header>
       {direction ? (
         <p className="annotation-direction-cue" data-correspondence-direction={direction}>
           <ReviewIcon name="chevron-right" className="review-icon annotation-direction-cue__icon" />
@@ -128,23 +239,10 @@ export function AnnotationList({
       ) : null}
       <ol ref={listRef} tabIndex={-1} aria-label="Annotations in document order">
         {ordered.map((item) => {
-          const text = payloadText(item);
-          const kindLabel = annotationKindLabel(item.kind);
           const active = activeId === item.id;
           const corresponding = correspondingId === item.id;
           const copyLink = copyLinkForItem?.(item);
           const readerRecord = projectOwnedAnnotationReader(item);
-          const { firstPageIndex, lastPageIndex } = readerRecord === null
-            ? reviewItemPageRange(item)
-            : {
-                firstPageIndex: readerRecord.pageNumber - 1,
-                lastPageIndex: (readerRecord.lastPageNumber ?? readerRecord.pageNumber) - 1,
-              };
-          const pageNumber = firstPageIndex + 1;
-          const lastPageNumber = lastPageIndex + 1;
-          const pageDescription = pageNumber === lastPageNumber
-            ? `page ${pageNumber}`
-            : `pages ${pageNumber}–${lastPageNumber}`;
           return (
             <li
               key={item.id}
@@ -177,68 +275,20 @@ export function AnnotationList({
                 if (!event.currentTarget.contains(event.relatedTarget)) onCorrespondenceChange?.(undefined);
               }}
             >
-              <div className="annotation-item__content">
-                <button
-                  ref={(node) => {
-                    if (node) entryRefs.current.set(item.id, node);
-                    else entryRefs.current.delete(item.id);
-                  }}
-                  type="button"
-                  className="annotation-item__navigation"
-                  aria-label={annotationAccessibleLabel({
-                    kind: item.kind,
-                    pageNumber,
-                    lastPageNumber,
-                    ...(text ? { excerpt: text } : {}),
-                  })}
-                  title={`Go to ${kindLabel} annotation on ${pageDescription}`}
-                  onClick={() => onNavigate(item)}
-                >
-                </button>
-                <div className="annotation-item__title-row">
-                  <AnnotationMetadata
-                    kind={item.kind}
-                    pageNumber={pageNumber}
-                    lastPageNumber={lastPageNumber}
-                  />
-                  <div
-                    className="annotation-item__title-actions"
-                    role="group"
-                    aria-label={`${kindLabel} annotation actions`}
-                  >
-                    {item.kind === 'delete' ? null : (
-                      <button type="button" className="annotation-item__action" data-annotation-action="edit" aria-label={`Edit ${kindLabel} annotation on ${pageDescription}`} title="Edit annotation" onClick={(event) => onEdit(item, event.currentTarget)}>
-                        <ReviewIcon name="edit" size={13} />
-                      </button>
-                    )}
-                    <button type="button" className="annotation-item__action annotation-item__delete" data-annotation-action="delete" aria-label={`Remove ${kindLabel} annotation on ${pageDescription}`} title="Delete annotation" onClick={() => void remove(item)}>
-                      <ReviewIcon name="delete" size={13} />
-                    </button>
-                    {copyLink === undefined ? null : (
-                      <CopyLinkControl
-                        {...copyLink}
-                        variant="annotation"
-                        ariaLabel={`Copy link to ${kindLabel} annotation on ${pageDescription}`}
-                        title={copyLink.disabled
-                          ? 'Save annotation before copying its link'
-                          : 'Copy annotation link'}
-                      />
-                    )}
-                  </div>
-                </div>
-                <div className="annotation-item__body-row">
-                  {text ? (
-                    <AnnotationExcerpt
-                      content={text}
-                      readerRecord={readerRecord}
-                      {...(onReadFull === undefined ? {} : { onReadFull })}
-                      {...(onReaderOverflowChange === undefined ? {} : {
-                        onOverflowChange: onReaderOverflowChange,
-                      })}
-                    />
-                  ) : <span />}
-                </div>
-              </div>
+              <AnnotationRowContent
+                item={item}
+                {...(copyLink ? { copyLink } : {})}
+                readerRecord={readerRecord}
+                navigationRef={(node) => {
+                  if (node) entryRefs.current.set(item.id, node);
+                  else entryRefs.current.delete(item.id);
+                }}
+                onNavigate={() => onNavigate(item)}
+                {...(onReadFull ? { onReadFull } : {})}
+                {...(onReaderOverflowChange ? { onReaderOverflowChange } : {})}
+                onEdit={(trigger) => onEdit(item, trigger)}
+                onDelete={() => void remove(item)}
+              />
             </li>
           );
         })}

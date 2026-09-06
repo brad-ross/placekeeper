@@ -80,9 +80,10 @@ describe('link action chooser', () => {
     expect(html).toContain('role="menu"');
     expect(html).toContain(`id="${PDF_LINK_ACTION_MENU_ID}"`);
     expect(html).toMatch(/aria-label="Open in References"[\s\S]*aria-label="Open in main document"[\s\S]*aria-label="Copy link to exact destination on page 18"/u);
-    expect(html).toMatch(/title="Open in References"[\s\S]*title="Open in main document"/u);
+    expect(html).not.toContain('title="Open in References"');
+    expect(html).not.toContain('title="Open in main document"');
     expect(html).not.toContain('title="Copy exact destination link"');
-    expect(html).toMatch(/aria-label="Open in main document"[^>]*>[\s\S]*?lucide-arrow-right/u);
+    expect(html).toMatch(/aria-label="Open in main document"[^>]*>[\s\S]*?lucide-chevron-right/u);
     expect(html).toMatch(/aria-label="Copy link to exact destination on page 18"[^>]*>[\s\S]*?lucide-link/u);
     expect(html.match(/role="menuitem"/g)).toHaveLength(3);
     expect(html.match(/<svg/g)).toHaveLength(3);
@@ -115,12 +116,12 @@ describe('link action chooser', () => {
     expect(html).toMatch(
       /aria-label="Open in References"[\s\S]*aria-label="Follow in this tab"[\s\S]*aria-label="Open in main document"[\s\S]*aria-label="Copy link to exact destination on page 3"/u,
     );
-    expect(html).toMatch(
-      /title="Open in References"[\s\S]*title="Follow in this tab"[\s\S]*title="Open in main document"/u,
-    );
+    expect(html).not.toContain('title="Open in References"');
+    expect(html).not.toContain('title="Follow in this tab"');
+    expect(html).not.toContain('title="Open in main document"');
     expect(html).not.toContain('title="Copy exact destination link"');
     expect(html).toMatch(/aria-label="Follow in this tab"[^>]*>[\s\S]*?lucide-arrow-right/u);
-    expect(html).toMatch(/aria-label="Open in main document"[^>]*>[\s\S]*?lucide-maximize-2/u);
+    expect(html).toMatch(/aria-label="Open in main document"[^>]*>[\s\S]*?lucide-square-arrow-out-up-right/u);
     expect(html).toMatch(/aria-label="Copy link to exact destination on page 3"[^>]*>[\s\S]*?lucide-link/u);
     expect(html.match(/role="menuitem"/g)).toHaveLength(4);
     expect(html.match(/<svg/g)).toHaveLength(4);
@@ -333,9 +334,9 @@ describe('shared reference workspace', () => {
     expect(html).toContain('aria-live="polite"');
     expect(html).toContain('class="review-workspace__activity-strip review-workspace__activity-strip--compound"');
     expect(html).toContain('aria-label="Outline"');
-    expect(html).toContain('title="Show Outline"');
+    expect(html).toContain('aria-label="Outline"');
     expect(html).toContain('aria-label="References"');
-    expect(html).toContain('title="Show References"');
+    expect(html).not.toContain('title="Show References"');
     expect(html.match(/data-workspace-mode-label/g)).toHaveLength(1);
     expect(html).toContain('data-workspace-mode-label="references"');
     expect(html).toContain('>References</span>');
@@ -416,11 +417,11 @@ describe('shared reference workspace', () => {
     expect(lemmaActive).toMatch(
       /data-reference-tab-segment="lemma"[\s\S]*role="tab"[\s\S]*aria-selected="true"[\s\S]*data-reference-tab-action="send"[\s\S]*data-reference-tab-action="close"/u,
     );
-    expect(lemmaActive).toContain('aria-label="Send to main document"');
-    expect(lemmaActive).toContain('title="Send to main document"');
+    expect(lemmaActive).toContain('aria-label="Open in main document"');
+    expect(lemmaActive).not.toContain('title="Open in main document"');
     expect(lemmaActive).toContain('data-workspace-focus-token="reference-send:lemma"');
     expect(lemmaActive).toContain('aria-label="Close active reference"');
-    expect(lemmaActive).toContain('title="Close active reference"');
+    expect(lemmaActive).not.toContain('title="Close active reference"');
     expect(lemmaActive).toContain('data-workspace-focus-token="reference-close:lemma"');
     expect(lemmaActive).toContain('aria-label="Lemma A.7, Page 18"');
     expect(referenceSemanticTabs).toHaveLength(2);
@@ -461,7 +462,7 @@ describe('shared reference workspace', () => {
       /class="reference-panel__return"[\s\S]*data-reference-return="lemma"[\s\S]*lucide-locate-fixed[\s\S]*<\/button>[\s\S]*class="reference-panel__viewport"/u,
     );
     expect(html).toContain('aria-label="Return to reference"');
-    expect(html).toContain('title="Return to reference"');
+    expect(html).not.toContain('title="Return to reference"');
     expect(html).toContain('aria-hidden="true"');
     expect(html).toContain('lucide-locate-fixed');
     expect(html).not.toMatch(/>Return to reference</u);
@@ -492,7 +493,7 @@ describe('shared reference workspace', () => {
     expect(html).toMatch(/data-reference-return="lemma"[^>]*aria-busy="true"[^>]*aria-disabled="true"/u);
     expect(html).not.toMatch(/data-reference-return="lemma"[^>]*\sdisabled(?:=|\s|>)/u);
     expect(html).toContain('aria-label="Return to reference"');
-    expect(html).toContain('title="Return to reference"');
+    expect(html).not.toContain('title="Returning to reference"');
     expect(html).not.toMatch(/>Return to reference</u);
   });
 
@@ -621,6 +622,7 @@ describe('shared reference workspace', () => {
     const rightRail = renderToStaticMarkup(
       <WorkspaceEdgeRail
         surface="right"
+        target="workspace"
         open
         controls="review-tools-workspace"
         onToggle={() => undefined}
@@ -629,6 +631,7 @@ describe('shared reference workspace', () => {
     const bottomRail = renderToStaticMarkup(
       <WorkspaceEdgeRail
         surface="bottom"
+        target="References"
         open={false}
         controls="review-workspace"
         onToggle={() => undefined}
@@ -874,7 +877,7 @@ describe('outline navigator', () => {
     );
     expect(introductionRow).toContain('aria-label="Open Introduction, Page 1 in References"');
     expect(introductionRow).toContain('aria-label="Copy page link for Introduction, Page 1"');
-    expect(introductionRow).toContain('title="Open in References"');
+    expect(introductionRow).toContain('aria-label="Open Introduction, Page 1 in References"');
     expect(introductionRow).toContain('lucide-panels-top-left');
     expect(resultsRow).toContain('aria-current="location"');
     expect(resultsRow).toContain('data-current="true"');
@@ -949,8 +952,8 @@ describe('outline expansion toggle', () => {
     );
 
     expect(collapse).toContain('aria-label="Collapse all outline entries"');
-    expect(collapse).toContain('lucide-chevrons-down-up');
+    expect(collapse).toContain('lucide-fold-vertical');
     expect(restore).toContain('aria-label="Restore previous outline expansion"');
-    expect(restore).toContain('lucide-chevrons-up-down');
+    expect(restore).toContain('lucide-unfold-vertical');
   });
 });

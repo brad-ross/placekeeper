@@ -1,17 +1,19 @@
 :is(#root[data-production-root="true"], .terminal-recovery, .top-bar-menu__surface, .static-launcher) {
-  --review-ink-primary: #181a17;
-  --review-ink-muted: #676a63;
-  --review-ink-quiet: #8b8e87;
-  --review-surface-canvas: #e8e9e4;
-  --review-surface-panel: #fffefa;
-  --review-surface-subtle: #f1f2ed;
-  --review-surface-interactive: #e5e6e1;
-  --review-border: #d1d5cc;
-  --review-border-subtle: #e2e4de;
-  --review-border-strong: #aeb6aa;
-  --review-selection-bg: #dbe7ff;
-  --review-selection-ink: #244b87;
-  --review-focus: #245c9c;
+  --review-font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --review-ink-primary: #333;
+  --review-ink-muted: #707070;
+  --review-ink-quiet: #8a8a8a;
+  --review-surface-canvas: #f7f7f7;
+  --review-surface-panel: #fff;
+  --review-surface-subtle: #f0f0f0;
+  --review-surface-interactive: #e9e9e9;
+  --review-surface-tray: #f0f0f0;
+  --review-border: #dedede;
+  --review-border-subtle: #e5e5e5;
+  --review-border-strong: #c7c7c7;
+  --review-selection-bg: #fff;
+  --review-selection-ink: #333;
+  --review-focus: #335f8a;
   --review-success: #2d684d;
   --review-danger: #9a3d34;
   --review-warning: #d9ad2b;
@@ -33,14 +35,14 @@
   --review-metadata-separator-gap: .3rem;
   --review-workspace-card-surface: var(--review-surface-panel);
   --review-workspace-card-hover: var(--review-surface-subtle);
-  --review-shadow-float: 0 14px 34px rgb(24 27 23 / 17%), 0 2px 7px rgb(24 27 23 / 8%);
-  --review-shadow-page: 0 2px 4px rgb(25 27 23 / 7%), 0 19px 48px rgb(25 27 23 / 10%);
-  --review-shadow-side: -14px 0 34px rgb(30 32 28 / 13%);
-  --review-shadow-bottom: 0 -14px 34px rgb(30 32 28 / 13%);
+  --review-shadow-float: 0 12px 48px rgb(0 0 0 / 9%), 0 2px 8px rgb(0 0 0 / 5%);
+  --review-shadow-page: 0 2px 4px rgb(0 0 0 / 6%), 0 18px 44px rgb(0 0 0 / 8%);
+  --review-shadow-side: 0 4px 18px rgb(0 0 0 / 5%);
+  --review-shadow-bottom: 0 4px 18px rgb(0 0 0 / 5%);
   --review-motion-fast: 120ms;
   --review-motion-surface: 160ms;
   color-scheme: only light;
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--review-font-ui);
 }
 
 #root[data-production-root="true"],
@@ -67,7 +69,7 @@
   min-height: 100dvh;
   color: var(--review-ink-primary);
   background: var(--review-surface-canvas);
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--review-font-ui);
   font-size: .875rem;
   line-height: 1.4;
 }
@@ -167,8 +169,8 @@
   overflow: hidden;
   margin: 0;
   font-size: 13px;
-  font-weight: 700;
-  letter-spacing: -.01em;
+  font-weight: 500;
+  letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -231,7 +233,7 @@
   border-radius: var(--review-radius-control);
   color: var(--review-ink-muted);
   background: transparent;
-  font-size: 11px;
+  font-size: 13px;
   transition: color var(--review-motion-fast) ease, border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
 }
 
@@ -255,7 +257,7 @@
 .review-chrome button[aria-expanded="true"] {
   border-color: var(--review-border-strong);
   background: var(--review-selection-bg);
-  font-weight: 680;
+  font-weight: 500;
 }
 
 .review-chrome__icon-control {
@@ -268,7 +270,7 @@
 .review-chrome__zoom-control {
   min-width: 52px;
   color: var(--review-ink-muted);
-  font-size: 11px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -370,9 +372,9 @@
   border-radius: var(--review-radius-round);
   color: var(--review-ink-primary);
   background: var(--review-surface-subtle);
-  font-size: 9px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  font-weight: 750;
+  font-weight: 500;
 }
 
 .review-chrome__actions {
@@ -426,7 +428,7 @@
   color: var(--review-ink-primary);
   background: var(--review-surface-subtle);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: .72rem;
+  font-size: 14px;
 }
 
 .copy-link-control__fallback button {
@@ -546,7 +548,7 @@
   align-items: center;
   gap: 7px;
   font-size: 11px;
-  font-weight: 750;
+  font-weight: 500;
 }
 
 .codex-context-status__tooltip-dot {
@@ -577,6 +579,122 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.review-overlay-frame {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.review-overlay-frame > span {
+  position: absolute;
+  display: none;
+  pointer-events: none;
+}
+
+.review-layout[data-right-overlay="true"] .review-overlay-frame__right-backing {
+  display: block;
+  inset: 0 0 0 var(--review-overlay-right-start);
+  background: var(--review-surface-canvas);
+}
+
+.review-layout[data-right-overlay="true"] .review-overlay-frame__right-fade {
+  display: block;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--review-overlay-right-start) - var(--review-overlay-fade-size));
+  width: var(--review-overlay-fade-size);
+  background: linear-gradient(to right, transparent, var(--review-surface-canvas));
+}
+
+.review-layout[data-bottom-overlay="true"] .review-overlay-frame__bottom-backing {
+  display: block;
+  inset: var(--review-overlay-bottom-start) 0 0;
+  background: var(--review-surface-canvas);
+}
+
+.review-layout[data-bottom-overlay="true"] .review-overlay-frame__bottom-fade {
+  display: block;
+  right: 0;
+  left: 0;
+  top: calc(var(--review-overlay-bottom-start) - var(--review-overlay-fade-size));
+  height: var(--review-overlay-fade-size);
+  background: linear-gradient(transparent, var(--review-surface-canvas));
+}
+
+.review-layout[data-right-overlay="false"][data-right-rail-present="true"]
+  .review-overlay-frame__right-backing {
+  display: block;
+  top: 0;
+  right: var(--review-main-scrollbar-width);
+  bottom: var(--review-main-scrollbar-height);
+  width: calc(40px - var(--review-main-scrollbar-width));
+  min-width: 0;
+  background: var(--review-surface-canvas);
+}
+
+.review-layout[data-right-overlay="false"][data-right-rail-present="true"]
+  .review-overlay-frame__right-fade {
+  display: block;
+  top: 0;
+  right: calc(40px - var(--review-main-scrollbar-width));
+  bottom: var(--review-main-scrollbar-height);
+  width: var(--review-overlay-fade-size);
+  background: linear-gradient(to right, transparent, var(--review-surface-canvas));
+}
+
+.review-layout[data-bottom-overlay="false"][data-bottom-rail-present="true"]
+  .review-overlay-frame__bottom-backing {
+  display: block;
+  right: var(--review-main-scrollbar-width);
+  bottom: var(--review-main-scrollbar-height);
+  left: 0;
+  height: calc(40px - var(--review-main-scrollbar-height));
+  min-height: 0;
+  background: var(--review-surface-canvas);
+}
+
+.review-layout[data-bottom-overlay="false"][data-bottom-rail-present="true"]
+  .review-overlay-frame__bottom-fade {
+  display: block;
+  right: var(--review-main-scrollbar-width);
+  bottom: calc(40px - var(--review-main-scrollbar-height));
+  left: 0;
+  height: var(--review-overlay-fade-size);
+  background: linear-gradient(transparent, var(--review-surface-canvas));
+}
+
+.review-layout[data-scroll-top-fade="true"] .review-overlay-frame__top-fade {
+  display: block;
+  z-index: 1;
+  top: 0;
+  right: var(--review-main-scrollbar-width);
+  left: 0;
+  height: var(--review-overlay-fade-size);
+  background: linear-gradient(var(--review-surface-canvas), transparent);
+}
+
+.review-layout[data-scroll-right-fade="true"][data-right-overlay="false"]
+  .review-overlay-frame__outer-right-fade {
+  display: block;
+  top: 0;
+  right: var(--review-main-scrollbar-width);
+  bottom: var(--review-main-scrollbar-height);
+  width: var(--review-overlay-fade-size);
+  background: linear-gradient(to right, transparent, var(--review-surface-canvas));
+}
+
+.review-layout[data-scroll-bottom-fade="true"][data-bottom-overlay="false"]
+  .review-overlay-frame__outer-bottom-fade {
+  display: block;
+  right: var(--review-main-scrollbar-width);
+  bottom: var(--review-main-scrollbar-height);
+  left: 0;
+  height: var(--review-overlay-fade-size);
+  background: linear-gradient(transparent, var(--review-surface-canvas));
 }
 
 .review-document > *,
@@ -630,7 +748,7 @@
   background: var(--review-surface-panel);
   box-shadow: 0 2px 7px rgb(24 27 23 / 8%);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 400;
   pointer-events: none;
 }
 
@@ -679,7 +797,7 @@
   box-shadow: 0 2px 7px rgb(24 27 23 / 8%);
   color: var(--review-ink-muted);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: 400;
   pointer-events: none;
 }
 
@@ -764,8 +882,8 @@
   border-radius: var(--review-radius-control);
   color: var(--review-ink-primary);
   background: transparent;
-  font-size: 11px;
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: 400;
   transition: color var(--review-motion-fast) ease, border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
 }
 

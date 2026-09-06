@@ -12,7 +12,14 @@ let pdf = "";
 let host: PlacekeeperHost;
 
 async function expectCurrentPage(page: Page, value: string): Promise<void> {
-  await expect(page.locator('.review-chrome__page-control')).toHaveText(value, { timeout: 15_000 });
+  const [currentPage, totalPages] = value.split(" / ");
+  const position = page.locator(
+    '[data-review-chrome] > .review-chrome__viewer-controls [data-review-page-position]',
+  );
+  await expect(position.locator('.review-chrome__page-input')).toHaveValue(currentPage!, {
+    timeout: 15_000,
+  });
+  await expect(position.locator('span[aria-hidden="true"]')).toHaveText(`/ ${totalPages}`);
 }
 
 async function copiedPlacekeeperLink(page: Page): Promise<string> {
@@ -231,7 +238,7 @@ test("copies canonical PDF destinations and reopens them without source UI state
   await page.goto(launched.url);
   await expectCurrentPage(page, "1 / 4");
 
-  await page.getByRole("button", { name: "Open right workspace" }).click();
+  await page.getByRole("button", { name: "Show workspace" }).click();
   const outline = page.getByRole("navigation", { name: "Document outline" });
   await expect(outline).toBeVisible();
   const overview = outline.getByRole("button", { name: "Overview, Page 2", exact: true });
@@ -265,16 +272,21 @@ test("copies canonical PDF destinations and reopens them without source UI state
   await search.fill("Detail target");
   const result = page.locator("[data-search-result]").first();
   await expect(result).toBeVisible();
+  await expect(result.locator(".pdf-search__result-match").first()).toHaveCSS("font-weight", "500");
+  await expect(result.locator(".pdf-search__result-context")).toHaveCSS("font-weight", "400");
   await result.getByRole("button").first().focus();
-  const searchCopy = result.getByRole("button", {
-    name: /Copy page link for Search result on page/u,
-  });
+  const secondaryActions = result.locator("[data-row-secondary-actions]");
+  if (await secondaryActions.isVisible()) await secondaryActions.click();
+  const searchCopy = result.getByRole(
+    await secondaryActions.isVisible() ? "menuitem" : "button",
+    { name: /Copy page link for Search result on page/u },
+  );
   await searchCopy.focus();
   await expect(searchCopy).toBeFocused();
-  await searchCopy.click();
-  expect(await copiedPlacekeeperLink(page)).toMatch(/#v=1&page=3$/u);
+  await searchCopy.press("Enter");
+  await expect.poll(() => copiedPlacekeeperLink(page)).toMatch(/#v=1&page=3$/u);
 
-  await page.getByRole("button", { name: "Close right workspace" }).click();
+  await page.getByRole("button", { name: "Hide workspace" }).click();
   const primaryLink = page.locator(".pdf-workspace:not(.pdf-workspace--reference)").getByRole(
     "button",
     { name: "Open PDF link to Primary result, Page 2" },

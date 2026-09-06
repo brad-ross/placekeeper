@@ -25,7 +25,7 @@ const ANNOTATION_KIND_ICONS: Readonly<Record<string, ReviewIconName>> = {
   text: 'note',
 };
 
-function annotationKindIcon(kind: string): ReviewIconName {
+export function annotationKindIcon(kind: string): ReviewIconName {
   return ANNOTATION_KIND_ICONS[kind.toLowerCase()] ?? 'annotations';
 }
 
@@ -48,13 +48,16 @@ export function annotationAccessibleLabel(input: AnnotationMetadataProps & {
 
 export function AnnotationMetadata({ kind, pageNumber, lastPageNumber, sectionLabel }: AnnotationMetadataProps) {
   const icon = annotationKindIcon(kind);
+  const kindLabel = annotationKindLabel(kind);
   return (
     <span className="annotation-item__meta" aria-hidden="true">
-      <span className="annotation-item__kind-icon" data-annotation-kind-icon={icon}>
-        <ReviewIcon name={icon} size={13} />
+      <span
+        className="annotation-item__kind-icon"
+        data-annotation-kind-icon={icon}
+        title={kindLabel}
+      >
+        <ReviewIcon name={icon} size={14} />
       </span>
-      <strong>{annotationKindLabel(kind)}</strong>
-      <span className="annotation-item__separator">·</span>
       <span className="annotation-item__page">
         {lastPageNumber !== undefined && lastPageNumber !== pageNumber
           ? `${pageNumber}–${lastPageNumber}`

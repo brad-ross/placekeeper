@@ -16,6 +16,7 @@ import {
 import type { CopyLinkControlProps } from './CopyLinkControl.js';
 import { RowActionGroup, type RowAction } from './RowActionGroup.js';
 import { ReviewIcon } from './ReviewIcon.js';
+import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 
 export interface PdfSearchWorkspaceProps {
   readonly state: PdfSearchState;
@@ -161,7 +162,7 @@ export function PdfSearchWorkspace({
           title="Search this PDF"
           aria-autocomplete="list"
           aria-controls="pdf-search-symbol-suggestions"
-          placeholder="Words, phrases, symbols, or formulas"
+          placeholder="Search this document"
           value={state.query}
           data-workspace-focus-token="search:query"
           onChange={updateQuery}
@@ -169,18 +170,21 @@ export function PdfSearchWorkspace({
           onClick={() => setSymbolSuggestionsOpen(true)}
           onKeyDown={handleQueryKeyDown}
         />
-        {hasEffectiveQuery ? (
-          <button
+        <span className="pdf-search__clear-slot" aria-hidden={!hasEffectiveQuery ? 'true' : undefined}>
+          <ReviewTooltipButton
+            label="Clear search"
             type="button"
             className="pdf-search__clear"
             aria-label="Clear search"
-            title="Clear search"
+            title={hasEffectiveQuery ? 'Clear search' : undefined}
+            tabIndex={hasEffectiveQuery ? 0 : -1}
+            disabled={!hasEffectiveQuery}
             onPointerDown={(event) => event.preventDefault()}
             onClick={clearQuery}
           >
             <ReviewIcon name="close" size={13} />
-          </button>
-        ) : null}
+          </ReviewTooltipButton>
+        </span>
         {indexing ? <ReviewIcon name="loading" className="review-icon pdf-search__spinner" /> : null}
         {showSymbolSuggestions ? (
           <div

@@ -74,7 +74,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
         }}
       >
         <header className="compact-editorial-modal__header">
-          <h2 id={titleId}>Choose Where to Save Annotations</h2>
+          <h2 id={titleId}>Choose where to save annotations</h2>
           <p id={descriptionId} className="compact-editorial-modal__description">
             {remote
               ? "Choose a new PDF name and location. The private browser source is never modified."
@@ -165,31 +165,31 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
           </label>
           {choice === "copy" ? (
             <div className="save-destination-copy-details">
+              {props.onChooseLocation ? (
+                <button
+                  type="button"
+                  className="save-destination-location"
+                  aria-label={proposalFolder
+                    ? `Change save location. Current location: ${proposalFolder}`
+                    : "Choose save location"}
+                  title={proposalFolder ? "Change save location" : "Choose save location"}
+                  disabled={props.establishing || restricted || (!remote && props.proposal === undefined)}
+                  onClick={() => void props.onChooseLocation?.()}
+                >
+                  <span title={proposalFolder}>{proposalFolder ?? (remote ? "Choose a location…" : "Preparing location…")}</span>
+                </button>
+              ) : proposalFolder ? <p className="save-destination-location-path" title={proposalFolder}>{proposalFolder}</p> : null}
               <label className="save-destination-filename">
-                <span>{remote ? "PDF name" : "Copy name"}</span>
+                <span className="sr-only">{remote ? "PDF name" : "Copy name"}</span>
                 <input
                   value={filename}
+                  aria-label={remote ? "PDF name" : "Copy name"}
                   title="Enter a name for the PDF copy"
                   disabled={props.establishing || restricted || (!remote && props.proposal === undefined)}
                   onChange={(event) => setFilename(event.currentTarget.value)}
                   aria-invalid={props.error !== undefined}
                 />
               </label>
-              <div className="save-destination-location-row">
-                <small title={proposalFolder}>{proposalFolder ?? (remote ? "Choose a location…" : "Preparing location…")}</small>
-                {props.onChooseLocation ? (
-                  <button
-                    type="button"
-                    className="save-destination-location"
-                    title="Change save location"
-                    disabled={props.establishing || restricted || (!remote && props.proposal === undefined)}
-                    onClick={() => void props.onChooseLocation?.()}
-                  >
-                    <ReviewIcon name="locate" />
-                    <span>Change location…</span>
-                  </button>
-                ) : null}
-              </div>
             </div>
           ) : null}
           </fieldset>

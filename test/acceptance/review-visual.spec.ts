@@ -58,9 +58,14 @@ async function openFocusedReattachment(
   const product = page.locator('.review-shell');
   await expect(product).toBeVisible();
   const workspace = viewport.width < 900
-    ? page.getByRole('button', { name: /^(?:Open|Close) References tray$/u })
-    : page.getByRole('button', { name: /^(?:Open|Close) right workspace$/u });
-  if (await workspace.getAttribute('aria-expanded') !== 'true') await workspace.click();
+    ? page.locator('#review-workspace')
+    : page.locator('#review-tools-workspace');
+  const openAttribute = viewport.width < 900 ? 'data-workspace-open' : 'data-tools-workspace-open';
+  if (await workspace.getAttribute(openAttribute) !== 'true') {
+    await page.getByRole('button', {
+      name: 'Show workspace',
+    }).click();
+  }
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
   await page.getByRole('button', {
@@ -129,23 +134,12 @@ async function expectAnnotationEndcapGeometry(row: Locator, more: Locator): Prom
       '.annotation-item__content, .existing-annotation__content',
     );
     const excerpt = element.querySelector<HTMLElement>('.annotation-item__excerpt');
-    const endcap = element.querySelector<HTMLElement>('.annotation-item__more:not([hidden])');
-    if (!content || !excerpt || !endcap) throw new Error('Annotation endcap geometry is incomplete.');
+    const trigger = element.querySelector<HTMLElement>('[data-read-full-annotation="true"]');
+    if (!content || !excerpt || !trigger) throw new Error('Annotation reader trigger geometry is incomplete.');
     const contentBounds = content.getBoundingClientRect();
-    const endcapBounds = endcap.getBoundingClientRect();
-    const style = getComputedStyle(endcap);
+    const triggerBounds = trigger.getBoundingClientRect();
+    const style = getComputedStyle(trigger);
     const excerptStyle = getComputedStyle(excerpt);
-    const overlaps = [...element.querySelectorAll<HTMLElement>(
-      '.annotation-item__action, .copy-link-control',
-    )].filter((action) => {
-      const actionStyle = getComputedStyle(action);
-      if (actionStyle.display === 'none' || actionStyle.visibility === 'hidden') return false;
-      const bounds = action.getBoundingClientRect();
-      return endcapBounds.left < bounds.right
-        && endcapBounds.right > bounds.left
-        && endcapBounds.top < bounds.bottom
-        && endcapBounds.bottom > bounds.top;
-    }).length;
     return {
       content: {
         left: contentBounds.left,
@@ -153,47 +147,37 @@ async function expectAnnotationEndcapGeometry(row: Locator, more: Locator): Prom
         top: contentBounds.top,
         bottom: contentBounds.bottom,
       },
-      endcap: {
-        left: endcapBounds.left,
-        right: endcapBounds.right,
-        top: endcapBounds.top,
-        bottom: endcapBounds.bottom,
-        width: endcapBounds.width,
-        height: endcapBounds.height,
+      trigger: {
+        left: triggerBounds.left,
+        right: triggerBounds.right,
+        top: triggerBounds.top,
+        bottom: triggerBounds.bottom,
       },
       excerptPaddingInlineEnd: Number.parseFloat(excerptStyle.paddingInlineEnd),
-      isExcerptChild: endcap.parentElement === excerpt,
+      isExcerptChild: trigger.parentElement === excerpt,
       backgroundImage: style.backgroundImage,
       borderRadius: style.borderRadius,
-      cssFloat: style.cssFloat,
-      paddingInlineStart: Number.parseFloat(style.paddingInlineStart),
-      paddingInlineEnd: Number.parseFloat(style.paddingInlineEnd),
-      overlaps,
     };
   });
-  expect(geometry.endcap.left).toBeGreaterThanOrEqual(geometry.content.left);
-  expect(geometry.endcap.right).toBeLessThanOrEqual(geometry.content.right + 0.5);
-  expect(geometry.endcap.top).toBeGreaterThanOrEqual(geometry.content.top);
-  expect(geometry.endcap.bottom).toBeLessThanOrEqual(geometry.content.bottom + 0.5);
+  expect(geometry.trigger.left).toBeGreaterThanOrEqual(geometry.content.left);
+  expect(geometry.trigger.right).toBeLessThanOrEqual(geometry.content.right + 0.5);
+  expect(geometry.trigger.top).toBeGreaterThanOrEqual(geometry.content.top);
+  expect(geometry.trigger.bottom).toBeLessThanOrEqual(geometry.content.bottom + 0.5);
   expect(geometry.excerptPaddingInlineEnd).toBe(0);
   expect(geometry.isExcerptChild).toBe(true);
-  expect(geometry.overlaps).toBe(0);
   expect(geometry.backgroundImage).toBe('none');
   expect(geometry.borderRadius).toBe('0px');
-  expect(geometry.cssFloat).toBe('right');
-  expect(geometry.paddingInlineStart).toBe(0);
-  expect(geometry.paddingInlineEnd).toBe(0);
-  await expect(more).toHaveText('More ›');
+  await expect(more).toHaveAttribute('title', 'Read full annotation');
 }
 
 async function expectAnnotationTitleEndcapGeometry(row: Locator): Promise<void> {
   const geometry = await row.evaluate((element) => {
     const title = element.querySelector<HTMLElement>('.annotation-item__title-row');
     const metadata = element.querySelector<HTMLElement>('.annotation-item__meta');
-    const edit = element.querySelector<HTMLElement>('[data-annotation-action="edit"]');
-    const remove = element.querySelector<HTMLElement>('[data-annotation-action="delete"]');
-    const copy = element.querySelector<HTMLElement>('[data-annotation-action="copy-link"]');
-    const actions = element.querySelector<HTMLElement>('.annotation-item__title-actions');
+    const edit = element.querySelector<HTMLElement>('[data-row-action="edit"]');
+    const remove = element.querySelector<HTMLElement>('[data-row-action="delete"]');
+    const copy = element.querySelector<HTMLElement>('.copy-link-control__trigger--row');
+    const actions = element.querySelector<HTMLElement>('.row-action-group__direct');
     if (!title || !metadata || !edit || !remove || !copy || !actions) {
       throw new Error('Annotation title endcap geometry is incomplete.');
     }
@@ -230,7 +214,7 @@ async function expectAnnotationTitleEndcapGeometry(row: Locator): Promise<void> 
   expect(geometry.remove.width).toBeCloseTo(geometry.copy.width, 1);
   expect(geometry.edit.height).toBeCloseTo(geometry.remove.height, 1);
   expect(geometry.remove.height).toBeCloseTo(geometry.copy.height, 1);
-  expect(geometry.edit.width).toBeLessThanOrEqual(24);
+  expect(geometry.edit.width).toBeLessThanOrEqual(34);
   expect(geometry.editOpacity).toBe(geometry.removeOpacity);
   expect(geometry.removeOpacity).toBe(geometry.copyOpacity);
 }
@@ -263,12 +247,10 @@ async function expectCompactAnnotationReader(page: Page): Promise<Locator> {
   if (!metadataBarBox || !metadataBox || !backBox) {
     throw new Error('Reader metadata actions are unavailable.');
   }
-  expect(backBox.x).toBeGreaterThanOrEqual(metadataBox.x + metadataBox.width);
-  expect(backBox.x + backBox.width).toBeLessThanOrEqual(
-    metadataBarBox.x + metadataBarBox.width + 0.5,
-  );
+  expect(backBox.x).toBeGreaterThanOrEqual(metadataBarBox.x);
+  expect(backBox.x + backBox.width).toBeLessThanOrEqual(metadataBox.x + 0.5);
   if (editBox !== null) {
-    expect(editBox.x).toBeGreaterThan(backBox.x + backBox.width);
+    expect(editBox.x).toBeGreaterThanOrEqual(metadataBox.x + metadataBox.width);
     expect(editBox.x + editBox.width).toBeLessThanOrEqual(
       metadataBarBox.x + metadataBarBox.width + 0.5,
     );
@@ -286,7 +268,7 @@ async function expectCompoundReferenceTabs(
   await expect(tablist.locator(
     '.reference-tab-segment:has(> [role="tab"][aria-selected="true"])',
   )).toHaveCount(1);
-  await expect(tablist.getByRole('button', { name: 'Send to main document' })).toBeVisible();
+  await expect(tablist.getByRole('button', { name: 'Open in main document' })).toBeVisible();
   await expect(tablist.getByRole('button', { name: 'Close active reference' })).toBeVisible();
   const actionGaps = await tablist.locator(
     '.reference-tab-segment:has(> [role="tab"][aria-selected="true"])',
@@ -315,9 +297,8 @@ async function openOutlineScene(
 ): Promise<Locator> {
   const product = await openScene(page, 'outline', viewport);
   const workspace = page.locator('#review-tools-workspace');
-  if (viewport.width <= 760) {
-    const rail = page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
-    if (await rail.getAttribute('aria-expanded') !== 'true') await rail.click();
+  if (viewport.width <= 760 && await page.locator('#review-workspace').getAttribute('data-workspace-open') !== 'true') {
+    await page.getByRole('button', { name: 'Show workspace' }).click();
   }
   const outlineTab = page.getByRole('tab', { name: 'Outline', exact: true });
   if (await outlineTab.getAttribute('aria-selected') !== 'true') await outlineTab.click();
@@ -334,7 +315,7 @@ async function expectOutlineTreeGeometry(
   const visibleRows = navigator.locator('.outline-navigator__row:visible');
   await expect(visibleRows).toHaveCount(6);
   expect(await navigator.locator('.outline-navigator__title:visible').evaluateAll((titles) => (
-    titles.every((title) => getComputedStyle(title).fontWeight === '700')
+    titles.every((title) => getComputedStyle(title).fontWeight === '500')
   ))).toBe(true);
 
   const rowSpacing = await visibleRows.evaluateAll((rows) => rows.map((row, index) => {
@@ -480,12 +461,12 @@ test('wide reading', async ({ page }) => {
 test('narrow responsive top-bar menu', async ({ page }) => {
   await openScene(page, 'reading', { width: 390, height: 720 });
   const chrome = page.locator('[data-review-chrome]');
-  await expect(chrome).toHaveCSS('height', '54px');
-  await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'navigationCompact');
+  await expect(chrome).toHaveCSS('height', '50px');
+  await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'expanded');
   await page.getByRole('button', {
-    name: 'Document navigation, current page 4 of 128',
+    name: 'Page 4 of 128. Open page navigation',
   }).click();
-  await expect(page.getByRole('menu', { name: 'Document navigation' })).toBeVisible();
+  await expect(page.getByRole('menu', { name: 'Page navigation' })).toBeVisible();
   await expect(page).toHaveScreenshot('narrow-responsive-top-bar-menu.png', {
     animations: 'disabled',
     maxDiffPixels: 100,
@@ -494,10 +475,12 @@ test('narrow responsive top-bar menu', async ({ page }) => {
 
 test('unavailable viewer controls', async ({ page }) => {
   const product = await openScene(page, 'unavailable-controls');
-  await expect(page.getByRole('button', { name: 'Previous page' })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Zoom out' })).toBeDisabled();
-  await expect(page.getByLabel('Current page')).toHaveText('— / —');
-  await expect(page.getByLabel('Zoom unavailable')).toHaveText('—%');
+  await expect(page.getByRole('button', { name: 'Previous page' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Page navigation unavailable' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Zoom out' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Open zoom controls' })).toBeDisabled();
+  await expect(page.getByLabel('Current page unavailable')).toHaveText('—');
+  await expect(page.getByLabel('Zoom unavailable')).toHaveText('—');
   await expectScene(product, 'unavailable-viewer-controls.png');
 });
 
@@ -515,7 +498,7 @@ test('installed real PDF reading', async ({ page }) => {
     '[data-review-chrome] > .review-chrome__identity .review-chrome__save-identity',
   ).boundingBox();
   const copyLinkBox = await page.locator(
-    '[data-review-chrome] > .review-chrome__identity [data-review-copy-link]',
+    '[data-review-chrome] > .review-chrome__viewer-controls [data-review-copy-link]',
   ).boundingBox();
   const viewerControlsBox = await page.locator(
     '[data-review-chrome] > .review-chrome__viewer-controls',
@@ -523,9 +506,11 @@ test('installed real PDF reading', async ({ page }) => {
   if (!identityBox || !copyLinkBox || !viewerControlsBox) {
     throw new Error('Document chrome geometry is unavailable.');
   }
-  expect(copyLinkBox.x).toBeGreaterThanOrEqual(identityBox.x + identityBox.width);
-  expect(copyLinkBox.x - (identityBox.x + identityBox.width)).toBeLessThanOrEqual(2.5);
-  expect(copyLinkBox.x + copyLinkBox.width).toBeLessThan(viewerControlsBox.x);
+  expect(viewerControlsBox.x).toBeGreaterThanOrEqual(identityBox.x + identityBox.width);
+  expect(copyLinkBox.x).toBeGreaterThan(viewerControlsBox.x);
+  expect(copyLinkBox.x + copyLinkBox.width).toBeLessThanOrEqual(
+    viewerControlsBox.x + viewerControlsBox.width + 0.5,
+  );
   await page.evaluate(async () => { await document.fonts.ready; });
   await expectScene(product, 'installed-real-pdf.png');
 });
@@ -533,7 +518,7 @@ test('installed real PDF reading', async ({ page }) => {
 test('wide Annotation Tray', async ({ page }) => {
   const product = await openScene(page, 'tray');
   await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-workspace-presentation', 'right');
-  const railBox = await page.getByRole('button', { name: 'Close right workspace' }).boundingBox();
+  const railBox = await page.getByRole('button', { name: 'Hide workspace' }).boundingBox();
   const modesBox = await page.getByRole('tablist', { name: 'Workspace modes' }).boundingBox();
   const headerBox = await page.locator('.review-workspace__header').boundingBox();
   const stripBox = await page.locator('.review-workspace__activity-strip').boundingBox();
@@ -543,9 +528,10 @@ test('wide Annotation Tray', async ({ page }) => {
   expect(Math.abs(
     railBox.y + railBox.height / 2 - (modesBox.y + modesBox.height / 2),
   )).toBeLessThanOrEqual(8);
-  expect(Math.abs(
-    (stripBox.x - headerBox.x) - (stripBox.y - headerBox.y),
-  )).toBeLessThanOrEqual(0.5);
+  expect(stripBox.x).toBeGreaterThanOrEqual(headerBox.x);
+  expect(stripBox.y).toBeGreaterThanOrEqual(headerBox.y);
+  expect(stripBox.x + stripBox.width).toBeLessThanOrEqual(headerBox.x + headerBox.width + 0.5);
+  expect(stripBox.y + stripBox.height).toBeLessThanOrEqual(headerBox.y + headerBox.height + 0.5);
   const row = page.locator('[data-review-item="owned-highlight"]');
   const more = row.getByRole('button', { name: /Read full Highlight annotation on page 1/u });
   const fittingOwned = page.locator('[data-review-item="owned-replace"]');
@@ -561,20 +547,20 @@ test('wide Annotation Tray', async ({ page }) => {
   await expect(page.getByRole('button', { name: /Copy link to Highlight annotation on page 1/u })
     .locator('.lucide-link')).toBeVisible();
   await expect(row.locator('.annotation-item__page')).toHaveText('1');
-  await expect(row.locator('.annotation-item__separator')).toHaveCount(1);
+  await expect(row.locator('.annotation-item__separator')).toHaveCount(0);
   await expect(row.locator('.annotation-item__section')).toHaveCount(0);
   await expectScene(product, 'wide-annotation-tray.png');
 
   await more.focus();
   await expect(more).toBeFocused();
-  await expect.poll(() => more.evaluate((element) => getComputedStyle(element).borderBottomWidth))
+  await expect.poll(() => more.evaluate((element) => getComputedStyle(element).outlineWidth))
     .toBe('2px');
   await expectScene(product, 'wide-annotation-more-focus.png');
 
   await more.evaluate((element) => element.blur());
   await more.hover();
-  await expect.poll(() => more.evaluate((element) => getComputedStyle(element).textDecorationLine))
-    .toContain('underline');
+  await expect.poll(() => more.evaluate((element) => getComputedStyle(element).cursor))
+    .toBe('pointer');
   await expectScene(product, 'wide-annotation-more-hover.png');
 
   await more.click();
@@ -598,16 +584,15 @@ test('focused reattachment hierarchy', async ({ page }) => {
 
 test('task-first generated Annotation Tray and blocked document menu', async ({ page }) => {
   const product = await openScene(page, 'tray&reconciliation=mixed');
-  const workspace = page.getByRole('button', { name: /^(?:Open|Close) right workspace$/u });
-  if (await workspace.getAttribute('aria-expanded') !== 'true') await workspace.click();
+  await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
 
   const headings = page.locator('#workspace-panel-annotations h2');
-  await expect(headings).toHaveText(['Needs attention', 'Annotations', 'From this PDF']);
+  await expect(headings).toHaveText(['Needs attention', 'From this PDF']);
   const resolved = page.locator('[data-review-item="00000000-0000-4000-8000-000000000208"]');
   await resolved.locator('.annotation-item__navigation').focus();
-  await expect(resolved.locator('[data-annotation-action]').first()).toHaveCSS('opacity', '1');
+  await expect(resolved.locator('.row-action-group__direct')).toHaveCSS('opacity', '1');
   await expectScene(product, 'wide-generated-annotation-tray.png');
 
   await page.getByRole('button', { name: /Open document actions$/u }).click();
@@ -617,15 +602,14 @@ test('task-first generated Annotation Tray and blocked document menu', async ({ 
     .toHaveAttribute('aria-disabled', 'true');
   const openAnnotations = menu.getByRole('menuitem', { name: 'Open Annotations' });
   await expect(openAnnotations).toBeVisible();
-  await expect(openAnnotations.locator('.lucide-list-checks')).toBeVisible();
+  await expect(openAnnotations.locator('.review-icon')).toBeVisible();
   await expectScene(product, 'wide-generated-document-actions.png');
 });
 
 test('height-constrained generated Annotation Tray stays contained', async ({ page }) => {
   const viewport = { width: 320, height: 560 };
   const product = await openScene(page, 'tray&reconciliation=mixed', viewport);
-  const rail = page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
-  if (await rail.getAttribute('aria-expanded') !== 'true') await rail.click();
+  await expect(page.locator('#review-workspace')).toHaveAttribute('data-workspace-open', 'true');
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
   const panel = page.locator('#workspace-panel-annotations');
@@ -659,13 +643,12 @@ test('coarse-pointer generated Annotation Tray keeps contextual controls visible
   const page = await context.newPage();
   try {
     const product = await openScene(page, 'tray&reconciliation=mixed', { width: 390, height: 720 });
-    const rail = page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
-    if (await rail.getAttribute('aria-expanded') !== 'true') await rail.click();
+    await expect(page.locator('#review-workspace')).toHaveAttribute('data-workspace-open', 'true');
     const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
     if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
     expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
     const action = page.locator('[data-review-item="00000000-0000-4000-8000-000000000208"]')
-      .locator('[data-annotation-action]').first();
+      .locator('[data-row-action]').first();
     await expect(action).toHaveCSS('opacity', '1');
     const bounds = await action.boundingBox();
     expect(bounds).not.toBeNull();
@@ -680,8 +663,7 @@ test('coarse-pointer generated Annotation Tray keeps contextual controls visible
 test('narrow Annotation Tray', async ({ page }) => {
   const product = await openScene(page, 'tray', { width: 320, height: 720 });
   await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-workspace-presentation', 'bottom');
-  const rail = page.getByRole('button', { name: /^(?:Open|Close) References tray$/u });
-  if (await rail.getAttribute('aria-expanded') !== 'true') await rail.click();
+  await expect(page.locator('#review-workspace')).toHaveAttribute('data-workspace-open', 'true');
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
   await page.evaluate(() => new Promise<void>((resolve) => {
@@ -691,7 +673,7 @@ test('narrow Annotation Tray', async ({ page }) => {
   const annotation = row.getByRole('button', { name: /Highlight · Page 1/u });
   await annotation.focus();
   await expect(row.locator('.annotation-item__section')).toHaveCount(0);
-  await expect(row.locator('.annotation-item__separator')).toHaveCount(1);
+  await expect(row.locator('.annotation-item__separator')).toHaveCount(0);
   await expectAnnotationTrayOverflow(page, { verticallyScrollable: true });
   const imported = page.locator('[data-existing-annotation="source-highlight-long"]');
   const more = imported.getByRole('button', {
@@ -702,10 +684,9 @@ test('narrow Annotation Tray', async ({ page }) => {
   await expectAnnotationEndcapGeometry(imported, more);
   const endcapTarget = await more.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
-    const hitArea = getComputedStyle(element, '::before');
     return {
-      width: bounds.width - Number.parseFloat(hitArea.left) - Number.parseFloat(hitArea.right),
-      height: bounds.height - Number.parseFloat(hitArea.top) - Number.parseFloat(hitArea.bottom),
+      width: bounds.width,
+      height: bounds.height,
     };
   });
   expect(endcapTarget.width).toBeGreaterThanOrEqual(44);
@@ -719,7 +700,6 @@ test('narrow Annotation Tray', async ({ page }) => {
   const reader = await expectCompactAnnotationReader(page);
   await expect.poll(() => scrollViewport.evaluate((element) => element.scrollTop)).toBe(0);
   await expect(reader).toHaveAttribute('data-annotation-origin', 'source');
-  await expect(reader).toContainText('B. Collaborator');
   await expect(reader).toContainText('Read only');
   await expect(reader).toContainText('reported robustness checks isolate the same comparison group');
   await expect(page.locator('[data-full-annotation-action="edit"]')).toHaveCount(0);
@@ -775,8 +755,8 @@ test('wide Outline tree', async ({ page }) => {
   expect(outlineToggleGeometry.centerDelta).toBeLessThanOrEqual(1);
   expect(outlineToggleGeometry.iconCenterXOffset).toBeCloseTo(0.5, 1);
   expect(outlineToggleGeometry.iconCenterYOffset).toBeCloseTo(1, 1);
-  expect(outlineToggleGeometry.rightInset).toBeCloseTo(7.5, 1);
-  await expectOutlineTreeGeometry(page, 31);
+  expect(outlineToggleGeometry.rightInset).toBeCloseTo(12, 1);
+  await expectOutlineTreeGeometry(page, 28);
   await page.getByRole('button', {
     name: 'Conditional comparison estimates, Page 24',
     exact: true,
@@ -824,7 +804,7 @@ test('narrow Outline tree', async ({ page }) => {
   const coarsePointer = await page.evaluate(() => (
     window.matchMedia('(hover: none), (pointer: coarse)').matches
   ));
-  await expectOutlineTreeGeometry(page, coarsePointer ? 44 : 31);
+  await expectOutlineTreeGeometry(page, coarsePointer ? 44 : 28);
   await page.getByRole('button', {
     name: 'Conditional comparison estimates, Page 24',
     exact: true,
@@ -836,7 +816,7 @@ test('narrow Outline tree', async ({ page }) => {
 
 test('wide bottom References tray', async ({ page }) => {
   const product = await openScene(page, 'reference-layout');
-  await page.getByRole('button', { name: 'Open References tray' }).click();
+  await page.getByRole('button', { name: 'Show References' }).click();
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'wide-bottom');
   await expectCompoundReferenceTabs(page, 'vertical');
   await expectScene(product, 'wide-bottom-references.png');
@@ -844,8 +824,8 @@ test('wide bottom References tray', async ({ page }) => {
 
 test('wide coordinated References and tools trays', async ({ page }) => {
   const product = await openScene(page, 'reference-layout');
-  await page.getByRole('button', { name: 'Open References tray' }).click();
-  await page.getByRole('button', { name: 'Open right workspace' }).click();
+  await page.getByRole('button', { name: 'Show References' }).click();
+  await page.getByRole('button', { name: 'Show workspace' }).click();
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'wide-split');
   await expect(page.locator('#review-tools-workspace')).toBeVisible();
   await expectCompoundReferenceTabs(page, 'vertical');
@@ -854,7 +834,7 @@ test('wide coordinated References and tools trays', async ({ page }) => {
 
 test('wide right-docked References tray', async ({ page }) => {
   const product = await openScene(page, 'reference-layout');
-  await page.getByRole('button', { name: 'Open References tray' }).click();
+  await page.getByRole('button', { name: 'Show References' }).click();
   await page.getByRole('button', { name: 'Move References to right' }).click();
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'wide-right');
   await expect(page.getByRole('tab', { name: 'References', exact: true })).toBeVisible();
@@ -864,7 +844,7 @@ test('wide right-docked References tray', async ({ page }) => {
 
 test('reference-layout workspace mode buttons remain interactive', async ({ page }) => {
   await openScene(page, 'reference-layout');
-  await page.getByRole('button', { name: 'Open References tray' }).click();
+  await page.getByRole('button', { name: 'Show References' }).click();
   await page.getByRole('button', { name: 'Move References to right' }).click();
 
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
@@ -886,24 +866,27 @@ test('reference-layout workspace mode buttons remain interactive', async ({ page
 
 test('reference-layout reference tab selectors remain interactive', async ({ page }) => {
   await openScene(page, 'reference-layout');
-  await page.getByRole('button', { name: 'Open References tray' }).click();
+  await page.getByRole('button', { name: 'Show References' }).click();
 
   const equation = page.getByRole('tab', {
     name: 'Equation (14): Equilibrium response mapping, Page 27',
   });
-  await equation.click();
-  await expect(equation).toHaveAttribute('aria-selected', 'true');
-
   const lemma = page.getByRole('tab', {
     name: 'Lemma 2: Local identification under conditional independence, Page 18',
   });
+  await expect(equation.locator('span')).toHaveCSS('font-weight', '500');
+  await expect(equation.locator('small')).toHaveCSS('font-weight', '400');
+  await expect(lemma.locator('span')).toHaveCSS('font-weight', '500');
+  await expect(lemma.locator('small')).toHaveCSS('font-weight', '400');
+  await equation.click();
+  await expect(equation).toHaveAttribute('aria-selected', 'true');
   await lemma.click();
   await expect(lemma).toHaveAttribute('aria-selected', 'true');
 });
 
 test('narrow unified References tray', async ({ page }) => {
   const product = await openScene(page, 'reference-layout', { width: 760, height: 900 });
-  await page.getByRole('button', { name: 'Open References tray' }).click();
+  await page.getByRole('button', { name: 'Show workspace' }).click();
   await page.getByRole('tab', { name: 'References', exact: true }).click();
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'narrow-unified');
   await expect(page.getByRole('tab', { name: 'References', exact: true })).toHaveAttribute('aria-selected', 'true');
@@ -918,7 +901,7 @@ for (const scene of [
     snapshot: 'wide-bottom-reference-return.png',
     viewport: { width: 1280, height: 900 },
     prepare: async (page: Page) => {
-      await page.getByRole('button', { name: 'Open References tray' }).click();
+      await page.getByRole('button', { name: 'Show References' }).click();
       await expect(page.locator('[data-review-stage]'))
         .toHaveAttribute('data-reference-layout', 'wide-bottom');
     },
@@ -928,7 +911,7 @@ for (const scene of [
     snapshot: 'wide-right-reference-return.png',
     viewport: { width: 1280, height: 900 },
     prepare: async (page: Page) => {
-      await page.getByRole('button', { name: 'Open References tray' }).click();
+      await page.getByRole('button', { name: 'Show References' }).click();
       await page.getByRole('button', { name: 'Move References to right' }).click();
       await expect(page.locator('[data-review-stage]'))
         .toHaveAttribute('data-reference-layout', 'wide-right');
@@ -939,7 +922,7 @@ for (const scene of [
     snapshot: 'narrow-reference-return.png',
     viewport: { width: 760, height: 900 },
     prepare: async (page: Page) => {
-      await page.getByRole('button', { name: 'Open References tray' }).click();
+      await page.getByRole('button', { name: 'Show workspace' }).click();
       await page.getByRole('tab', { name: 'References', exact: true }).click();
       await expect(page.locator('[data-review-stage]'))
         .toHaveAttribute('data-reference-layout', 'narrow-unified');
@@ -983,7 +966,7 @@ for (const scene of [
 
 test('failed Reference return preserves focus on its retryable icon control', async ({ page }) => {
   await openScene(page, 'reference-layout&referenceReturn=visible');
-  await page.getByRole('button', { name: 'Open References tray' }).click();
+  await page.getByRole('button', { name: 'Show References' }).click();
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
@@ -1034,7 +1017,7 @@ for (const composer of [
   });
 }
 
-test('wide replacement composer occupies the right edge without reframing the PDF', async ({ page }) => {
+test('wide replacement composer stays passage-adjacent without reframing the PDF', async ({ page }) => {
   const product = await openScene(page, 'contextual');
   const document = page.locator('.review-document');
   const documentBefore = await document.boundingBox();
@@ -1050,10 +1033,13 @@ test('wide replacement composer occupies the right edge without reframing the PD
   expect(composerBounds).not.toBeNull();
   expect(documentBefore).not.toBeNull();
   expect(documentAfter).toEqual(documentBefore);
-  expect(composerBounds!.x + composerBounds!.width).toBeCloseTo(
-    stageBounds!.x + stageBounds!.width,
-    0,
-  );
+  await expect(composer).toHaveAttribute('data-composer-placement', 'side');
+  expect(composerBounds!.x).toBeGreaterThanOrEqual(stageBounds!.x + 240);
+  expect(composerBounds!.x + composerBounds!.width)
+    .toBeLessThanOrEqual(stageBounds!.x + stageBounds!.width);
+  expect(composerBounds!.y).toBeGreaterThanOrEqual(stageBounds!.y);
+  expect(composerBounds!.y + composerBounds!.height)
+    .toBeLessThanOrEqual(stageBounds!.y + stageBounds!.height);
   await expect(page.locator('[data-visual-document]')).toBeVisible();
   await expectScene(product, 'wide-contextual-replacement-composer.png');
 });
@@ -1062,7 +1048,9 @@ test('wide tray takeover preserves PDF geometry behind the editor', async ({ pag
   const product = await openScene(page, 'tray');
   const document = page.locator('.review-document');
   const documentBefore = await document.boundingBox();
-  await page.getByRole('button', { name: 'Edit Highlight annotation on page 1' }).click();
+  const row = page.locator('[data-review-item="owned-highlight"]');
+  await row.hover();
+  await row.getByRole('button', { name: 'Edit Highlight annotation on page 1' }).click();
   const composer = page.getByRole('region', { name: 'Edit Highlight' });
   await expect(composer).toBeVisible();
   await expect(page.locator('#review-tools-workspace')).toHaveAttribute('inert', '');
@@ -1074,7 +1062,7 @@ test('wide tray takeover preserves PDF geometry behind the editor', async ({ pag
   await expectScene(product, 'wide-contextual-tray-takeover.png');
 });
 
-test('narrow composer uses one contained bottom surface with touch-sized actions', async ({ page }) => {
+test('narrow composer uses one contained bottom surface with compact actions', async ({ page }) => {
   const viewport = { width: 520, height: 720 };
   const product = await openScene(page, 'contextual', viewport);
   await page.getByRole('button', { name: 'Replace', exact: true }).click();
@@ -1095,7 +1083,7 @@ test('narrow composer uses one contained bottom surface with touch-sized actions
   expect(geometry.left).toBeGreaterThanOrEqual(0);
   expect(geometry.right).toBeLessThanOrEqual(viewport.width);
   expect(geometry.bottom).toBeLessThanOrEqual(viewport.height);
-  expect(Math.min(...geometry.actionHeights)).toBeGreaterThanOrEqual(44);
+  expect(Math.min(...geometry.actionHeights)).toBeGreaterThanOrEqual(34);
   await expectScene(product, 'narrow-contextual-composer.png');
 });
 
@@ -1103,7 +1091,7 @@ test('the out-of-view anchor uses one icon button and keeps actions beneath the 
   const product = await openScene(page, 'reading&composer=replacement&context=long&return=outside');
   const composer = page.getByRole('region', { name: 'Replacement' });
   const before = await composer.boundingBox();
-  const anchor = composer.getByRole('button', { name: 'Return to annotation' });
+  const anchor = composer.getByRole('button', { name: 'Back to passage' });
   await expect(anchor).toBeVisible();
   await expect(anchor.locator('span')).toHaveCount(0);
   const inputBox = await composer.getByRole('textbox').boundingBox();
@@ -1210,7 +1198,7 @@ test('Save Destination owns the modal layer above a preserved composer', async (
 test('pending Return motion respects reduced-motion preference', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await openScene(page, 'reading&composer=replacement&return=pending');
-  const pending = page.getByRole('button', { name: 'Returning to annotation' });
+  const pending = page.getByRole('button', { name: 'Returning to passage' });
   await expect(pending).toBeDisabled();
   await expect(pending.locator('.lucide-loader-circle')).toHaveCSS('animation-name', 'none');
 });
@@ -1246,7 +1234,7 @@ for (const scene of [
   { name: 'page-note', surfaceName: 'Page Note', role: 'region', openComposer: true, viewport: { width: 320, height: 720 } },
   { name: 'save-recovery', surfaceName: 'Choose Where to Save Annotations', role: 'dialog', openComposer: false, viewport: { width: 320, height: 320 } },
 ] as const) {
-  test(`narrow ${scene.surfaceName} surface remains contained and touch sized`, async ({ page }) => {
+  test(`narrow ${scene.surfaceName} surface remains contained with compact actions`, async ({ page }) => {
     await openScene(page, scene.name, scene.viewport);
     if (scene.openComposer) await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
     const surface = page.getByRole(scene.role, { name: scene.surfaceName });
@@ -1278,7 +1266,7 @@ for (const scene of [
     expect(geometry.right).toBeLessThanOrEqual(scene.viewport.width);
     expect(geometry.bottom).toBeLessThanOrEqual(scene.viewport.height);
     expect(geometry.buttonHeights.length).toBeGreaterThan(0);
-    expect(Math.min(...geometry.buttonHeights)).toBeGreaterThanOrEqual(44);
+    expect(Math.min(...geometry.buttonHeights)).toBeGreaterThanOrEqual(34);
     expect(geometry.activeIsVisible).toBe(true);
   });
 }

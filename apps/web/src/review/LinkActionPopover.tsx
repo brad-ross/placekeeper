@@ -19,6 +19,7 @@ import { PDF_LINK_ACTION_MENU_ID } from '../pdf/viewer-interaction-events.js';
 import { CopyLinkControl, type CopyLinkControlProps } from './CopyLinkControl.js';
 import { compositeFocusIndex, enabledMenuItems } from './menu-focus.js';
 import { ReviewIcon } from './ReviewIcon.js';
+import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 
 export type LinkActionChoice = 'references' | 'main' | 'same-reference';
 export type LinkActionDismissReason =
@@ -133,39 +134,39 @@ export function LinkActionMenuContent({
       onKeyDown={onKeyDown}
       onBlur={onBlur}
     >
-      <button
+      <ReviewTooltipButton
+        label="Open in References"
         ref={openInReferencesDisabled ? undefined : firstItemRef}
         type="button"
         role="menuitem"
         aria-label="Open in References"
-        title="Open in References"
         disabled={openInReferencesDisabled}
         onClick={() => onChoose('references')}
       >
         <ReviewIcon name="references" />
-      </button>
+      </ReviewTooltipButton>
       {sourceScope === 'reference' ? (
-        <button
+        <ReviewTooltipButton
+          label="Follow in this tab"
           ref={openInReferencesDisabled ? firstItemRef : undefined}
           type="button"
           role="menuitem"
           aria-label="Follow in this tab"
-          title="Follow in this tab"
           onClick={() => onChoose('same-reference')}
         >
           <ReviewIcon name="arrow-right" />
-        </button>
+        </ReviewTooltipButton>
       ) : null}
-      <button
+      <ReviewTooltipButton
+        label="Open in main document"
         ref={openInReferencesDisabled && sourceScope === 'main' ? firstItemRef : undefined}
         type="button"
         role="menuitem"
         aria-label="Open in main document"
-        title="Open in main document"
         onClick={() => onChoose('main')}
       >
-        <ReviewIcon name={sourceScope === 'main' ? 'arrow-right' : 'main'} />
-      </button>
+        <ReviewIcon name={sourceScope === 'main' ? 'chevron-right' : 'open-main'} />
+      </ReviewTooltipButton>
       {copyLink === undefined ? null : (
         <CopyLinkControl
           {...copyLink}
@@ -337,7 +338,7 @@ export function LinkActionPopover({
     onChooseRef.current(choice, request);
   };
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape') {
+    if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
       event.preventDefault();
       event.stopPropagation();
       dismiss('escape');

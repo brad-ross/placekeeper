@@ -15,6 +15,8 @@ import { OutlineNavigator } from './OutlineNavigator.js';
 import type { WorkspaceMode } from './reference-navigation-state.js';
 import type { RightWorkspaceMode } from './reference-workspace-layout.js';
 import { WorkspaceModeStrip } from './WorkspaceModeStrip.js';
+import { ReviewIcon } from './ReviewIcon.js';
+import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 
 export interface OutlineAnnotationsWorkspaceProps {
   readonly workspaceRef?: Ref<HTMLElement>;
@@ -30,6 +32,8 @@ export interface OutlineAnnotationsWorkspaceProps {
   readonly annotations: ReactNode;
   readonly search?: ReactNode;
   readonly headerAction?: ReactNode;
+  readonly onHide?: () => void;
+  readonly hideLabel?: string;
   readonly onModeChange: (mode: RightWorkspaceMode) => void;
   readonly onOutlineActivate: (item: PdfOutlineItem) => void;
   readonly onOutlineReference: (item: PdfOutlineItem) => void;
@@ -61,6 +65,8 @@ export function OutlineAnnotationsWorkspace({
   annotations,
   search,
   headerAction,
+  onHide,
+  hideLabel = 'Hide workspace',
   onModeChange,
   onOutlineActivate,
   onOutlineReference,
@@ -139,6 +145,14 @@ export function OutlineAnnotationsWorkspace({
     >
       {headerVariant === 'tools' ? (
         <header className="review-workspace__header">
+          {onHide ? <ReviewTooltipButton
+            label={hideLabel}
+            type="button"
+            className="review-workspace__close"
+            aria-expanded="true"
+            aria-controls="review-tools-workspace"
+            onClick={onHide}
+          ><ReviewIcon name={presentation === 'bottom' ? 'chevron-down' : 'chevron-right'} size={14} /></ReviewTooltipButton> : null}
           <WorkspaceModeStrip
             modes={toolModes}
             selectedMode={effectiveToolMode}

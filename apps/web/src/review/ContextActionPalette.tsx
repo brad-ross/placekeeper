@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 
 import { ReviewIcon } from './ReviewIcon.js';
+import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 import { reviewActions } from './review-actions.js';
 
 type ContextActionKind = 'copy' | 'replace' | 'delete' | 'highlight';
@@ -22,11 +23,10 @@ function ContextActionButton({ kind, iconOnly = false, onAction }: ContextAction
     ? copyAction
     : reviewActions.find((candidate) => candidate.kind === kind)!;
   return (
-    <button
+    <ReviewTooltipButton
       type="button"
       className={`review-action-button${iconOnly ? ' review-action-button--icon' : ''}`}
-      {...(iconOnly ? { 'aria-label': action.label } : {})}
-      title={action.label}
+      label={action.label}
       aria-keyshortcuts={action.shortcut}
       onClick={(event) => {
         event.currentTarget.focus({ preventScroll: true });
@@ -35,7 +35,7 @@ function ContextActionButton({ kind, iconOnly = false, onAction }: ContextAction
     >
       <ReviewIcon name={kind} />
       {iconOnly ? null : action.label}
-    </button>
+    </ReviewTooltipButton>
   );
 }
 

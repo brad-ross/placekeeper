@@ -558,7 +558,7 @@ test("searches extracted PDF text with variants, history, references, and retain
     "aria-selected",
     "true",
   );
-  await expect(page.getByRole("button", { name: "Close right workspace" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Hide workspace" })).toBeVisible();
   await query.click();
   await expect(query).toBeFocused();
   await expect.poll(() => query.evaluate((element) => getComputedStyle(element).backgroundColor))
@@ -1227,7 +1227,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     .toBeGreaterThan(initialBottomValue);
   const rememberedBottomValue = Number(await bottomSplitter.getAttribute("aria-valuenow"));
 
-  const rightRail = page.getByRole("button", { name: "Open right workspace" });
+  const rightRail = page.getByRole("button", { name: "Show workspace" });
   await rightRail.click();
   const toolsWorkspace = page.locator("#review-tools-workspace");
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
@@ -1240,7 +1240,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   ]);
   if (!toolsBounds || !bottomBounds) throw new Error("Coordinated tray geometry is unavailable.");
   expect(toolsBounds.y + toolsBounds.height).toBeCloseTo(bottomBounds.y, 0);
-  const openRightRailBox = await page.getByRole("button", { name: "Close right workspace" }).boundingBox();
+  const openRightRailBox = await page.getByRole("button", { name: "Hide workspace" }).boundingBox();
   if (!openRightRailBox) throw new Error("Right workspace rail has no bounds.");
   expect(openRightRailBox.x + openRightRailBox.width).toBeCloseTo(toolsBounds.x, 0);
   await mainPageOne.click({ position: { x: 24, y: 24 } });
@@ -1250,7 +1250,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await page.getByRole("button", { name: "Move References to right" }).click();
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "right");
   await expect(page.getByRole("button", { name: "Open References tray" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Close right workspace" })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: "Hide workspace" })).toHaveAttribute(
     "aria-expanded", "true",
   );
   const workspaceModes = page.getByRole("tablist", { name: "Workspace modes" });
@@ -1498,7 +1498,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await bottomReferencesMode.focus();
   await bottomReferencesMode.press(workspaceForwardTab);
   await expect(page.getByRole("button", { name: "Move References to right" })).toBeFocused();
-  await page.getByRole("button", { name: "Open right workspace" }).click();
+  await page.getByRole("button", { name: "Show workspace" }).click();
   await primaryTab.click();
 
   await page.setViewportSize({ width: 760, height: 900 });
@@ -3787,34 +3787,44 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   const mainViewport = mainWorkspace.locator('[data-viewer-framing-viewport]');
   const mainPage = mainWorkspace.locator("[data-page-index='0']");
   const referenceWorkspace = page.locator('[data-review-workspace]');
-  const fitWidth = page.getByRole('button', { name: 'Fit PDF to available width' });
+  const fitWidth = page.getByRole('menuitem', { name: 'Fit width' });
   const fitAndWait = async () => {
+    if (!await fitWidth.isVisible()) {
+      await page.getByRole('button', { name: 'Open zoom controls' }).click();
+    }
     await fitWidth.click();
     await expect(fitWidth).toHaveAttribute('aria-busy', 'false');
   };
-  const zoomTrigger = () => page.getByRole('button', {
+  const zoomValue = () => page.getByRole('textbox', {
     name: /Current zoom \d+ percent\. Enter a zoom percentage/u,
   });
   await expect(mainPage).toBeVisible();
   await waitForRenderedPageImage(mainPage);
+  await page.getByRole('button', { name: 'Open zoom controls' }).click();
   await expect(fitWidth).toBeEnabled();
   await expect(mainViewport).toHaveCSS('scrollbar-gutter', 'stable');
   await mainWorkspace.evaluate((element) => element.setAttribute('data-fit-width-main-mount', 'stable'));
-  await expect(page.getByLabel('Current page')).toHaveText('1 / 4');
+  await expect(page.getByRole('textbox', { name: /Current page 1 of 4/u })).toHaveValue('1');
 
   const horizontalGeometry = async (rightEdge?: number) => {
-    const [viewportBounds, pageBounds, clientBox] = await Promise.all([
+    const [viewportBounds, pageBounds, clientBox, runwayRight] = await Promise.all([
       mainViewport.boundingBox(),
       mainPage.boundingBox(),
       mainViewport.evaluate((element) => ({
         left: element.clientLeft,
         width: element.clientWidth,
       })),
+      mainWorkspace.locator('[data-viewer-runway]').evaluate((element) => {
+        const parent = element.parentElement;
+        return parent === null
+          ? 0
+          : Math.max(0, element.getBoundingClientRect().width - parent.getBoundingClientRect().width);
+      }),
     ]);
     if (!viewportBounds || !pageBounds) throw new Error('Fit Width geometry is unavailable.');
     const intervalLeft = viewportBounds.x + clientBox.left;
     const clientRight = intervalLeft + clientBox.width;
-    const intervalRight = Math.min(rightEdge ?? clientRight, clientRight);
+    const intervalRight = Math.min(rightEdge ?? clientRight, clientRight - runwayRight);
     return {
       pageWidth: pageBounds.width,
       intervalWidth: intervalRight - intervalLeft,
@@ -3843,7 +3853,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
 
   const standardGap = 10;
   const closedGeometry = await expectFitted(standardGap);
-  const closedZoom = await zoomTrigger().textContent();
+  const closedZoom = await zoomValue().inputValue();
 
   const primaryLink = mainWorkspace.getByRole('button', {
     name: 'Open PDF link to Primary result, Page 2',
@@ -3857,11 +3867,11 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     element.setAttribute('data-fit-width-workspace-mount', 'stable');
   });
 
-  expect(await zoomTrigger().textContent()).toBe(closedZoom);
+  expect(await zoomValue().inputValue()).toBe(closedZoom);
   await fitAndWait();
   const bottomGeometry = await expectFitted(standardGap);
   expect(bottomGeometry.pageWidth).toBeCloseTo(closedGeometry.pageWidth, 0);
-  await expect(page.getByLabel('Current page')).toHaveText('1 / 4');
+  await expect(page.getByRole('textbox', { name: /Current page 1 of 4/u })).toHaveValue('1');
 
   await page.getByRole('button', { name: 'Move References to right' }).click();
   await expect(referenceWorkspace).toHaveAttribute('data-workspace-presentation', 'right');
@@ -3871,17 +3881,17 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     .toBeGreaterThan(0);
   const rightWorkspaceBounds = await referenceWorkspace.boundingBox();
   if (!rightWorkspaceBounds) throw new Error('Right workspace has no bounds.');
-  const bottomFitZoom = await zoomTrigger().textContent();
+  const bottomFitZoom = await zoomValue().inputValue();
   expect(await mainPage.boundingBox().then((bounds) => bounds?.width)).toBeCloseTo(
     bottomGeometry.pageWidth,
     0,
   );
-  expect(await zoomTrigger().textContent()).toBe(bottomFitZoom);
+  expect(await zoomValue().inputValue()).toBe(bottomFitZoom);
 
   await fitAndWait();
   const initialRightGeometry = await expectFitted(standardGap, rightWorkspaceBounds.x);
   expect(initialRightGeometry.pageWidth).toBeLessThan(bottomGeometry.pageWidth);
-  const rightFitZoom = await zoomTrigger().textContent();
+  const rightFitZoom = await zoomValue().inputValue();
 
   const rightSplitter = page.getByRole('separator', { name: 'Resize References' });
   await expect(rightSplitter).toHaveAttribute('aria-orientation', 'vertical');
@@ -3890,7 +3900,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     .toBeGreaterThan(rightWorkspaceBounds.width);
   const resizedWorkspaceBounds = await referenceWorkspace.boundingBox();
   if (!resizedWorkspaceBounds) throw new Error('Resized right workspace has no bounds.');
-  expect(await zoomTrigger().textContent()).toBe(rightFitZoom);
+  expect(await zoomValue().inputValue()).toBe(rightFitZoom);
   expect(await mainPage.boundingBox().then((bounds) => bounds?.width)).toBeCloseTo(
     initialRightGeometry.pageWidth,
     0,
@@ -3899,11 +3909,11 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   await fitAndWait();
   const resizedRightGeometry = await expectFitted(standardGap, resizedWorkspaceBounds.x);
   expect(resizedRightGeometry.pageWidth).toBeLessThan(initialRightGeometry.pageWidth);
-  const resizedFitZoom = await zoomTrigger().textContent();
+  const resizedFitZoom = await zoomValue().inputValue();
 
   await page.setViewportSize({ width: 1240, height: 900 });
   await expect(referenceWorkspace).toHaveAttribute('data-workspace-presentation', 'right');
-  expect(await zoomTrigger().textContent()).toBe(resizedFitZoom);
+  expect(await zoomValue().inputValue()).toBe(resizedFitZoom);
   expect(await mainPage.boundingBox().then((bounds) => bounds?.width)).toBeCloseTo(
     resizedRightGeometry.pageWidth,
     0,
@@ -3916,12 +3926,12 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   await expect(mainWorkspace).toHaveAttribute('data-fit-width-main-mount', 'stable');
   await expect(referenceWorkspace).toHaveAttribute('data-fit-width-workspace-mount', 'stable');
   await expect(primaryTab).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByLabel('Current page')).toHaveText('1 / 4');
+  await expect(page.getByRole('textbox', { name: /Current page 1 of 4/u })).toHaveValue('1');
 
   await openFreshProductionFixture(page, pdf, 'Annotation tray Fit Width launch failed');
   await expect(mainPage).toBeVisible();
   await waitForRenderedPageImage(mainPage);
-  await page.getByRole('button', { name: 'Open right workspace' }).click();
+  await page.getByRole('button', { name: 'Show workspace' }).click();
   const toolsWorkspace = page.locator('#review-tools-workspace');
   await expect(toolsWorkspace).toHaveAttribute('data-tools-workspace-open', 'true');
   await expect.poll(() => toolsWorkspace.evaluate((element) => getComputedStyle(element).transform))
@@ -3929,11 +3939,10 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   const toolsBounds = await toolsWorkspace.boundingBox();
   if (!toolsBounds) throw new Error('Right annotation workspace has no bounds.');
 
-  await zoomTrigger().click();
-  const zoomInput = page.getByRole('spinbutton', { name: 'Zoom percentage' });
+  const zoomInput = zoomValue();
   await zoomInput.fill('100');
   await zoomInput.press('Enter');
-  await expect(zoomTrigger()).toHaveText('100%');
+  await expect(zoomValue()).toHaveValue('100');
   const preFitRightGap = (await horizontalGeometry(toolsBounds.x)).rightGap;
   const fitTransition = mainPage.evaluate(async (pageElement) => {
     const rightGaps: number[] = [];
@@ -3967,7 +3976,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   expect(Math.min(...paintedRightGaps))
     .toBeGreaterThanOrEqual(Math.min(preFitRightGap, standardGap) - 3);
   await expectFitted(standardGap, toolsBounds.x);
-  await expect(zoomTrigger()).not.toHaveText('100%');
+  await expect(zoomValue()).not.toHaveValue('100');
 });
 
 test('minimally reveals the PDF beside the adaptive annotations surface and restores untouched movement', async ({ page }) => {

@@ -5,6 +5,7 @@ import type {
 import type { PdfDestinationCopyLink } from './copy-link-model.js';
 import { RowActionGroup, type RowAction } from './RowActionGroup.js';
 import { ReviewIcon } from './ReviewIcon.js';
+import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 
 export interface OutlineNavigatorProps {
   readonly discovery: PdfOutlineDiscovery;
@@ -86,17 +87,17 @@ export function OutlineNavigator({
               data-current={currentItemId === item.id ? 'true' : undefined}
             >
               {hasChildren ? (
-                <button
+                <ReviewTooltipButton
+                  label={`${isExpanded ? 'Collapse' : 'Expand'} ${item.label}`}
                   type="button"
                   className="outline-navigator__disclosure"
                   aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${item.label}`}
-                  title={`${isExpanded ? 'Collapse' : 'Expand'} ${item.label}`}
                   aria-expanded={isExpanded}
                   aria-controls={childrenId}
                   onClick={() => toggle(item.id)}
                 >
                   <ReviewIcon name="chevron-right" />
-                </button>
+                </ReviewTooltipButton>
               ) : <span className="outline-navigator__disclosure-spacer" aria-hidden="true" />}
               <button
                 type="button"

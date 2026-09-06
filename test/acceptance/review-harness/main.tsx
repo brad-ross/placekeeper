@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client';
+import { createPortal } from 'react-dom';
 import { useRef, useState, useSyncExternalStore } from 'react';
 import { PdfZoomMode } from '@embedpdf/models';
 
@@ -515,6 +516,7 @@ function Harness() {
   const [visualReferenceReturn, setVisualReferenceReturn] = useState(
     visualScenario?.referenceReturn ?? null,
   );
+  const [visualReferenceViewportHost, setVisualReferenceViewportHost] = useState<HTMLDivElement | null>(null);
   const [harnessReferenceNavigation, setHarnessReferenceNavigation] = useState(
     () => createReferenceNavigationState(reconciliationPreview === null ? 0 : 2),
   );
@@ -621,6 +623,7 @@ function Harness() {
         outlineDiscovery: visualScenario.outlineDiscovery,
         currentOutlineItemId: visualScenario.currentOutlineItemId,
         referenceTabs: visualScenario.referenceTabs,
+        onReferenceViewportHost: setVisualReferenceViewportHost,
         referenceReturn: visualReferenceReturn,
         ...(visualReferenceNavigation === undefined ? {} : {
           navigationState: visualReferenceNavigation,
@@ -691,11 +694,30 @@ function Harness() {
         return { kind: 'reviewed-copy' };
       }}
       onAuthoringActiveChange={(active) => { authoringActiveRef.current = active; }}
-      onAuthoringPreviewChange={() => {
+      onAuthoringPreviewChange={(preview) => {
         rootElement.setAttribute(
           'data-authoring-preview-updates',
           String(Number(rootElement.getAttribute('data-authoring-preview-updates') ?? '0') + 1),
         );
+        rootElement.querySelectorAll('[data-harness-authoring-preview]').forEach((element) => {
+          element.remove();
+        });
+        const layer = rootElement.querySelector('[data-owned-annotation-layer]');
+        const projectedPreview = previewParameters.get('placement') === 'targets'
+          ? preview ?? []
+          : [];
+        for (const annotation of projectedPreview) {
+          const rects = annotation.quadPoints ?? [annotation.rect];
+          rects.forEach((_rect, index) => {
+            const mark = document.createElement('span');
+            mark.dataset.harnessAuthoringPreview = '';
+            mark.dataset.ownedMark = annotation.kind;
+            mark.dataset.reviewId = annotation.reviewItemId ?? annotation.id;
+            mark.dataset.previewPage = String(annotation.pageIndex);
+            mark.dataset.previewSegment = String(index);
+            layer?.append(mark);
+          });
+        }
       }}
       onNavigate={(item) => setNavigated(item.id)}
       {...(correspondingItemId === undefined ? {} : { correspondingItemId })}
@@ -710,7 +732,7 @@ function Harness() {
           subtype: 'Highlight',
           pageIndex: 0,
           rect: { x: 72, y: 92, width: 120, height: 14 },
-          contents: 'Source comment with enough authored detail to overflow the compact annotation row and prove that opening the imported full annotation reader still navigates to the highlighted PDF location before showing its complete read-only contents. '.repeat(5),
+          contents: 'Source comment with enough authored detail to overflow the compact annotation row and prove that opening the imported full annotation reader preserves the main PDF location while showing its complete read-only contents. '.repeat(5),
         }]),
       }}
       onNavigateExisting={(item) => setNavigated(`source:${item.id}`)}
@@ -944,6 +966,24 @@ function Harness() {
   return (
     <main data-production-review data-visual-scene={visualScenario.name}>
       {shell}
+      {visualReferenceViewportHost !== null && visualReferenceNavigation?.activeTabIdentity
+        ? createPortal(
+          <div
+            data-visual-reference-document
+            style={{ height: '100%', overflow: 'auto', padding: '28px', background: 'var(--review-surface-subtle)' }}
+          >
+            <article
+              aria-label="Rendered reference PDF page"
+              style={{ boxSizing: 'border-box', width: 'min(520px, 100%)', minHeight: 620, margin: '0 auto', padding: '52px 56px', background: 'var(--review-surface-panel)', border: '1px solid var(--review-border-subtle)', boxShadow: 'var(--review-shadow-page)', color: 'var(--review-ink-primary)', fontFamily: 'Georgia, Times New Roman, serif' }}
+            >
+              <p style={{ margin: 0, font: '600 10px/1.4 ui-sans-serif, system-ui', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--review-ink-muted)' }}>Reference · Appendix</p>
+              <h2 style={{ margin: '18px 0 16px', fontSize: 22 }}>Lemma A.3</h2>
+              <p style={{ fontSize: 14, lineHeight: 1.7 }}>The local equilibrium is unique whenever the response map is a contraction on the maintained neighborhood.</p>
+              <p style={{ fontSize: 14, lineHeight: 1.7 }}>The proof applies the implicit function theorem after conditioning on the market-level innovation.</p>
+            </article>
+          </div>,
+          visualReferenceViewportHost,
+        ) : null}
       {visualSaveDestinationOpen ? (
         <SaveDestinationDialog
           open

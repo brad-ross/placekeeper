@@ -12,6 +12,7 @@ import type { ReviewStateSummaryV1 } from '../../../../packages/core/src/live-co
 import type { GenerationRefreshStatus } from '../generation-status.js';
 import { enabledMenuItems, menuRovingFocusIndex } from './menu-focus.js';
 import { ReviewIcon } from './ReviewIcon.js';
+import { ReviewTooltipButton } from './ReviewTooltipButton.js';
 
 export interface ReviewExportPresentation {
   readonly canExport: boolean;
@@ -189,7 +190,7 @@ export function DocumentActionsMenu({
   };
 
   const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape') {
+    if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
       event.preventDefault();
       event.stopPropagation();
       closeAndRestore();
@@ -236,7 +237,9 @@ export function DocumentActionsMenu({
     data-document-actions-open={open ? 'true' : undefined}
     onBlur={onBlur}
   >
-    <button
+    <ReviewTooltipButton
+      label={`${documentTitle}, ${savedLabel}. Open document actions`}
+      tooltip={`${documentTitle} — Document actions`}
       ref={triggerRef}
       type="button"
       className="review-chrome__save-identity document-actions__trigger"
@@ -245,16 +248,16 @@ export function DocumentActionsMenu({
       aria-haspopup="menu"
       aria-expanded={open}
       aria-controls={menuId}
-      title="Open document actions"
       onClick={() => {
         if (open) closeAndRestore();
         else setOpen(true);
       }}
     >
-      <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />
+      <ReviewIcon name="file" size={16} />
       <strong>{documentTitle}</strong>
+      {savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
       <span className="sr-only" data-review-saved-status>{savedLabel}</span>
-    </button>
+    </ReviewTooltipButton>
     {open ? <div
       id={menuId}
       className="document-actions__menu"

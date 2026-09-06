@@ -201,7 +201,7 @@ describe('viewer framing', () => {
     expect(authority.isCurrent(second)).toBe(false);
   });
 
-  it('preserves framing for reading-mode switches but reframes explicit mark requests', () => {
+  it('preserves framing for passive layout changes but reframes explicit mark requests', () => {
     expect(workspaceRequestRequiresReframe({
       presentationChanged: false,
       requestChanged: true,
@@ -216,7 +216,7 @@ describe('viewer framing', () => {
       presentationChanged: true,
       requestChanged: false,
       requestKind: 'reading',
-    })).toBe(true);
+    })).toBe(false);
   });
 
   it('falls back to the native viewport when instant plugin framing is a no-op', () => {

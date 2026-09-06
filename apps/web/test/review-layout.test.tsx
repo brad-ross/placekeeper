@@ -171,6 +171,8 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('role="menu"');
     expect(html).toContain('data-document-actions-open="true"');
+    expect(html).toContain('lucide-file-text');
+    expect(html).not.toContain('review-chrome__save-dot');
   });
 
   it('includes inputs in menu focus order without roving editable key presses', () => {
@@ -321,7 +323,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html.match(/data-outline-expansion-toggle/g)).toHaveLength(1);
     expect(html).toContain('aria-label="Collapse all outline entries"');
     expect(html).toContain('aria-pressed="false"');
-    expect(html).toContain('lucide-chevrons-down-up');
+    expect(html).toContain('lucide-fold-vertical');
     expect(html).toContain(
       'class="review-workspace__move review-workspace__move--activity review-workspace__move--header-action review-workspace__outline-toggle"',
     );
@@ -355,7 +357,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('data-full-annotation-reader="true"');
     expect(html).toContain('aria-label="Full Highlight annotation on page 4"');
     expect(html).not.toContain('Full annotation — Highlight, page 4');
-    expect(html).toContain('Identification');
+    expect(html).not.toContain('Identification');
     expect(html).toContain('Comment');
     expect(html).toContain('Clarify the identifying variation behind this claim.');
     expect(html).not.toContain('Original text');
@@ -385,7 +387,7 @@ describe('review shell layout and accessibility contract', () => {
       />,
     );
 
-    expect(html).toContain('Reviewer');
+    expect(html).not.toContain('Reviewer');
     expect(html).toContain('Read only');
     expect(html).not.toContain('>Edit<');
   });
@@ -590,7 +592,7 @@ describe('review shell layout and accessibility contract', () => {
     />,
   );
 
-  it('places the document Copy Link control beside the file title', () => {
+  it('places the document Copy Link control after navigation and zoom', () => {
     const html = renderToStaticMarkup(
       <ReviewChrome
         documentTitle="paper.pdf"
@@ -612,10 +614,13 @@ describe('review shell layout and accessibility contract', () => {
     const trailingActions = html.indexOf('class="review-chrome__actions"');
 
     expect(identityStart).toBeGreaterThanOrEqual(0);
-    expect(copyLink).toBeGreaterThan(identityStart);
-    expect(copyLink).toBeLessThan(viewerControlsIndex);
+    expect(viewerControlsIndex).toBeGreaterThan(identityStart);
+    expect(copyLink).toBeGreaterThan(viewerControlsIndex);
+    expect(copyLink).toBeLessThan(trailingActions);
     expect(trailingActions).toBeGreaterThan(viewerControlsIndex);
-    expect(html.slice(trailingActions)).not.toContain('data-review-copy-link');
+    const identityMarkup = html.slice(identityStart, viewerControlsIndex);
+    expect(identityMarkup).toContain('lucide-file-text');
+    expect(identityMarkup).not.toContain('review-chrome__save-dot');
   });
 
   it('keeps review icons decorative and button labels authoritative', () => {
@@ -649,8 +654,8 @@ describe('review shell layout and accessibility contract', () => {
     );
     const centerStart = html.indexOf('aria-label="PDF editing, navigation, and zoom"');
     const editGroup = html.indexOf('aria-label="Edit history"');
-    const navigationGroup = html.indexOf('aria-label="Document navigation, current page 3 of 12"');
-    const zoomGroup = html.indexOf('aria-label="PDF zoom, current zoom 100 percent"');
+    const navigationGroup = html.indexOf('aria-label="Document navigation"');
+    const zoomGroup = html.indexOf('aria-label="PDF zoom"');
 
     expect(centerStart).toBeGreaterThanOrEqual(0);
     const orderedControls = [
@@ -673,9 +678,11 @@ describe('review shell layout and accessibility contract', () => {
     for (const presentation of ['expanded', 'zoomCompact', 'historyCompact', 'navigationCompact']) {
       expect(html).toContain(`data-review-chrome-candidate="${presentation}"`);
     }
-    expect(html).toContain('aria-label="Document navigation, current page 3 of 12"');
-    expect(html).toContain('aria-label="PDF zoom, current zoom 100 percent"');
-    expect(html).toContain('aria-label="Edit history"');
+    expect(html).toContain('aria-label="Document navigation"');
+    expect(html).toContain('aria-label="Current page 3 of 12. Enter a page number"');
+    expect(html).toContain('aria-label="PDF zoom"');
+    expect(html).toContain('aria-label="Current zoom 100 percent. Enter a zoom percentage"');
+    expect(html).not.toContain('aria-label="Edit history"');
   });
 
   it('measures every fixed identity and icon footprint in the sizing rack', () => {
@@ -777,22 +784,20 @@ describe('review shell layout and accessibility contract', () => {
     );
 
     expect(listHtml).toContain('data-annotation-origin="owned"');
-    expect(listHtml).toContain('<h2>Annotations</h2>');
+    expect(listHtml).not.toContain('<h2>Annotations</h2>');
     expect(listHtml).not.toContain('annotation-drawer__count');
     expect(listHtml).toContain('data-annotation-kind="highlight"');
     expect(listHtml).toContain('data-annotation-kind-icon="highlight"');
     expect(listHtml).toContain('data-annotation-state="active-corresponding"');
-    expect(listHtml).toContain('<span class="annotation-item__separator">·</span><span class="annotation-item__page">4</span>');
+    expect(listHtml).toContain('<span class="annotation-item__page">4</span>');
     expect(listHtml).not.toContain('annotation-item__section');
     expect(listHtml).toContain('aria-label="Highlight · Page 4 · Clarify the identifying variation behind this claim."');
-    expect(listHtml).toContain('data-read-full-annotation="true"');
-    expect(listHtml).toContain('aria-label="Read full Highlight annotation on page 4"');
-    expect(listHtml).toContain('title="Read full annotation"');
-    expect(listHtml).toContain('hidden=""');
-    expect(listHtml).toMatch(/annotation-item__navigation[\s\S]*<\/button>[\s\S]*annotation-item__more/u);
+    expect(listHtml).not.toContain('data-read-full-annotation="true"');
+    expect(listHtml).toContain('data-full-annotation-eligible="true"');
+    expect(listHtml).not.toContain('annotation-item__more');
     expect(listHtml).not.toContain('>Page 4<');
     expect(unsectionedListHtml).not.toContain('annotation-item__section');
-    expect(unsectionedListHtml.match(/annotation-item__separator/gu)).toHaveLength(1);
+    expect(unsectionedListHtml).not.toContain('annotation-item__separator');
     expect(peekHtml).toContain('data-annotation-origin="owned"');
     expect(peekHtml).toContain('data-annotation-kind="highlight"');
     expect(peekHtml).toContain('Clarify the identifying variation behind this claim.');
@@ -867,7 +872,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('title="Go to Highlight annotation on pages 3–5"');
     expect(html).toContain('aria-label="Edit Highlight annotation on pages 3–5"');
     expect(html).toContain('aria-label="Remove Highlight annotation on pages 3–5"');
-    expect(html).toContain('aria-label="Read full Highlight annotation on pages 3–5"');
+    expect(html).toContain('data-full-annotation-eligible="true"');
     expect(readerHtml).toContain('aria-label="Full Highlight annotation on pages 3–5"');
     expect(readerHtml).toContain('<span class="annotation-item__page">3–5</span>');
   });
@@ -910,13 +915,13 @@ describe('review shell layout and accessibility contract', () => {
     expect(copyableList).toContain('data-item-copy-link="true"');
     expect(copyableList).toContain('aria-label="Copy link to Highlight annotation on page 4"');
     expect(copyableList).toContain('annotation-item__title-row');
-    expect(copyableList).toContain('annotation-item__title-actions');
+    expect(copyableList).toContain('row-action-group');
     expect(copyableList).toContain('annotation-item__body-row');
-    expect(copyableList.indexOf('data-annotation-action="edit"')).toBeLessThan(
-      copyableList.indexOf('data-annotation-action="delete"'),
+    expect(copyableList.indexOf('data-row-action="edit"')).toBeLessThan(
+      copyableList.indexOf('data-row-action="delete"'),
     );
-    expect(copyableList.indexOf('data-annotation-action="delete"')).toBeLessThan(
-      copyableList.indexOf('data-annotation-action="copy-link"'),
+    expect(copyableList.indexOf('data-row-action="delete"')).toBeLessThan(
+      copyableList.indexOf('copy-link-control--row'),
     );
     expect(copyablePeek).toContain('aria-label="Copy link to Highlight annotation on page 4"');
     expect(pendingList).toContain('data-item-copy-link="true"');
@@ -998,9 +1003,11 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('data-review-nested-host');
     expect(html.match(/Document canvas/g)).toHaveLength(1);
     expect(html).not.toContain('Codex');
-    expect(html).toContain('aria-label="Edit history"');
-    expect(html).toContain('aria-label="Document navigation, page unavailable"');
-    expect(html).toContain('aria-label="PDF zoom unavailable"');
+    expect(html).not.toContain('aria-label="Edit history"');
+    expect(html).toContain('aria-label="Document navigation"');
+    expect(html).toContain('aria-label="Current page unavailable"');
+    expect(html).toContain('aria-label="PDF zoom"');
+    expect(html).toContain('aria-label="Zoom unavailable"');
     expect(html).not.toContain('aria-label="Workspace (0 annotations)"');
     expect(html).toContain('data-workspace-edge-rail="right"');
     expect(html).not.toContain('data-workspace-edge-rail="bottom"');
@@ -1015,14 +1022,14 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('data-annotation-drawer');
     expect(html).not.toContain('aria-label="Close annotations"');
     expect(html).not.toContain('aria-label="Close workspace"');
-    expect(html).toContain('class="annotation-drawer__header"');
+    expect(html).not.toContain('class="annotation-drawer__header"');
     expect(html).toContain('aria-label="Owned annotations"');
     expect(html).toContain('aria-label="From this PDF"');
     expect(html).toContain('data-existing-annotations-state="loading"');
     expect(html).toContain('data-annotation-status="loading"');
     for (const tool of ['Copy', 'Replace', 'Delete', 'Highlight']) {
       expect(html).toContain(`aria-label="${tool}"`);
-      expect(html).toContain(`title="${tool}"`);
+      expect(html).not.toContain(`title="${tool}"`);
     }
     expect(html).toContain('aria-keyshortcuts="Meta+C Control+C"');
     expect(html.match(/review-action-button--icon/g)).toHaveLength(4);
@@ -1154,7 +1161,7 @@ describe('review shell layout and accessibility contract', () => {
       /\.review-workspace__header\s*\{[^}]*height:\s*var\(--review-workspace-header-height, 44px\);[^}]*align-items:\s*center;[^}]*padding:\s*8px 7\.5px 2px;/u,
     );
     expect(annotationStyles).toMatch(
-      /\.annotation-drawer__header h2,\s*\.existing-annotations__header h2\s*\{[^}]*font-size:\s*15px;[^}]*font-weight:\s*760;/u,
+      /\.annotation-drawer__header h2,\s*\.existing-annotations__header h2\s*\{[^}]*font-size:\s*15px;[^}]*font-weight:\s*500;/u,
     );
     expect(annotationStyles).toMatch(
       /\.annotation-drawer__header,\s*\.existing-annotations__header\s*\{[^}]*margin-bottom:\s*10px;/u,
@@ -1199,13 +1206,13 @@ describe('review shell layout and accessibility contract', () => {
     expect(annotationStyles).toContain(
       'transition: transform var(--review-motion-surface) ease-out',
     );
-    expect(annotationStyles).toContain(
+    expect(annotationStyles).not.toContain(
       'translateX(calc(-1 * var(--tools-right-width)))',
     );
     expect(annotationStyles).not.toContain(
       'translateY(calc(-50% + (var(--review-workspace-header-height, 44px) / 2) + 3px))',
     );
-    expect(annotationStyles).toContain(
+    expect(annotationStyles).not.toContain(
       'transform: translateY(calc(-1 * var(--reference-bottom-height)))',
     );
     expect(annotationStyles).toMatch(
@@ -1269,9 +1276,9 @@ describe('review shell layout and accessibility contract', () => {
     );
 
     expect(html).toContain('data-reference-layout="wide-right"');
-    expect(html.match(/data-workspace-edge-rail="right"/g)).toHaveLength(1);
+    expect(html).not.toContain('data-workspace-edge-rail="right"');
     expect(html).not.toContain('data-workspace-edge-rail="bottom"');
-    expect(html).toContain('aria-controls="review-workspace review-tools-workspace"');
+    expect(html).toContain('aria-controls="review-workspace"');
   });
 
   it('keeps annotations task-first and source annotations explicitly read-only', () => {
@@ -1325,8 +1332,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(existingAnnotationsHtml).not.toContain('Representative review');
     expect(existingAnnotationsHtml).not.toContain('annotation-item__section');
     expect(html).toContain('aria-label="Highlight · Page 2 · Source-only comment"');
-    expect(html).toContain('aria-label="Read full Highlight annotation on page 2"');
-    expect(html).toContain('data-read-full-annotation="true"');
+    expect(html).toContain('data-full-annotation-eligible="true"');
     expect(html).not.toContain('>Page 2<');
     expect(html).not.toContain('aria-label="Edit Highlight on page 2"');
     expect(html).not.toContain('aria-label="Delete Highlight on page 2"');
@@ -1362,7 +1368,7 @@ describe('review shell layout and accessibility contract', () => {
     );
 
     const attention = html.indexOf('<h2>Needs attention</h2>');
-    const owned = html.indexOf('<h2>Annotations</h2>');
+    const owned = html.indexOf('aria-label="Owned annotations"');
     const existing = html.indexOf('<h2>From this PDF</h2>');
     expect(attention).toBeGreaterThan(-1);
     expect(owned).toBeGreaterThan(attention);
@@ -1433,7 +1439,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('id="workspace-mode-annotations"');
     expect(html).toMatch(/id="workspace-mode-search"[^>]*aria-selected="true"/u);
     expect(html).not.toContain('Methods and data');
-    expect(html).toContain('<h2>Annotations</h2>');
+    expect(html).toContain('aria-label="Owned annotations"');
     expect(html).toContain('<h2>From this PDF</h2>');
     expect(html).not.toContain('Review comments');
     expect(html).not.toContain('Source PDF');
@@ -1472,15 +1478,18 @@ describe('review shell layout and accessibility contract', () => {
 
     expect(html).toContain('Page controls become available when PDF navigation is ready.');
     expect(html).toContain('Zoom controls become available when PDF zoom is ready.');
-    expect(html).toContain('aria-label="Document navigation, page unavailable"');
-    expect(html).toContain('aria-label="PDF zoom unavailable"');
+    expect(html).toContain('aria-label="Document navigation"');
+    expect(html).toContain('aria-label="Current page unavailable"');
+    expect(html).toContain('aria-label="PDF zoom"');
+    expect(html).toContain('aria-label="Zoom unavailable"');
   });
 
   it('keeps unavailable page status noneditable with its existing description', () => {
     const html = renderChrome(false);
 
-    expect(html).toContain('aria-label="Document navigation, page unavailable"');
-    expect(html).toContain('>— / —</button>');
+    expect(html).toContain('aria-label="Document navigation"');
+    expect(html).toContain('aria-label="Current page unavailable"');
+    expect(html).toContain('aria-label="Page navigation unavailable"');
     expect(html).not.toContain('aria-label="Page number"');
     expect(html).toContain('Page controls become available when PDF navigation is ready.');
   });
@@ -1488,16 +1497,17 @@ describe('review shell layout and accessibility contract', () => {
   it('renders the ready current page as an activation control with numeric metadata and visible total', () => {
     const html = renderChrome(true);
 
-    expect(html).toContain('aria-label="Document navigation, current page 3 of 12"');
-    expect(html).toContain('>3<span aria-hidden="true"> / 12</span></button>');
+    expect(html).toContain('aria-label="Current page 3 of 12. Enter a page number"');
+    expect(html).toContain('value="3"');
+    expect(html).toContain('<span aria-hidden="true">/ 12</span>');
     expect(html).not.toContain('aria-label="Page number"');
   });
 
   it('accepts only whole one-based page numbers within the latest total', () => {
     expect(validPageNumber('1', 12)).toBe(1);
     expect(validPageNumber(' 12 ', 12)).toBe(12);
-    expect(validPageNumber('0', 12)).toBeUndefined();
-    expect(validPageNumber('13', 12)).toBeUndefined();
+    expect(validPageNumber('0', 12)).toBe(1);
+    expect(validPageNumber('13', 12)).toBe(12);
     expect(validPageNumber('1.5', 12)).toBeUndefined();
     expect(validPageNumber('1e1', 12)).toBeUndefined();
     expect(validPageNumber('', 12)).toBeUndefined();
@@ -1506,8 +1516,9 @@ describe('review shell layout and accessibility contract', () => {
   it('renders ready page and zoom context in compact triggers before measurement', () => {
     const html = renderChrome(true, true);
 
-    expect(html).toContain('aria-label="PDF zoom, current zoom 100 percent"');
-    expect(html).toContain('>100<span aria-hidden="true">%</span></button>');
+    expect(html).toContain('aria-label="Current zoom 100 percent. Enter a zoom percentage"');
+    expect(html).toContain('value="100"');
+    expect(html).toContain('<span aria-hidden="true" class="review-chrome__zoom-suffix">%</span>');
     expect(html).not.toContain('aria-label="Zoom percentage"');
     expect(html).toContain('data-review-chrome-presentation="navigationCompact"');
   });
@@ -1516,8 +1527,8 @@ describe('review shell layout and accessibility contract', () => {
     expect(validZoomPercent(String(VIEWER_ZOOM_MIN_PERCENT))).toBe(VIEWER_ZOOM_MIN_PERCENT);
     expect(validZoomPercent(' 125 ')).toBe(125);
     expect(validZoomPercent(String(VIEWER_ZOOM_MAX_PERCENT))).toBe(VIEWER_ZOOM_MAX_PERCENT);
-    expect(validZoomPercent(String(VIEWER_ZOOM_MIN_PERCENT - 1))).toBeUndefined();
-    expect(validZoomPercent(String(VIEWER_ZOOM_MAX_PERCENT + 1))).toBeUndefined();
+    expect(validZoomPercent(String(VIEWER_ZOOM_MIN_PERCENT - 1))).toBe(VIEWER_ZOOM_MIN_PERCENT);
+    expect(validZoomPercent(String(VIEWER_ZOOM_MAX_PERCENT + 1))).toBe(VIEWER_ZOOM_MAX_PERCENT);
     expect(validZoomPercent('125.5')).toBeUndefined();
     expect(validZoomPercent('1e2')).toBeUndefined();
     expect(validZoomPercent('Infinity')).toBeUndefined();
@@ -1541,8 +1552,9 @@ describe('review shell layout and accessibility contract', () => {
   it('keeps unavailable zoom noneditable and disables every zoom action with one explanation', () => {
     const html = renderChrome(false);
 
-    expect(html).toContain('aria-label="PDF zoom unavailable"');
-    expect(html).toContain('>—%</button>');
+    expect(html).toContain('aria-label="PDF zoom"');
+    expect(html).toContain('aria-label="Zoom unavailable"');
+    expect(html).toContain('aria-label="Open zoom controls"');
     expect(html).not.toContain('aria-label="Zoom percentage"');
     expect(html).toContain('Zoom controls become available when PDF zoom is ready.');
   });
