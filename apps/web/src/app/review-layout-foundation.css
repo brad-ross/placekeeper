@@ -12,7 +12,7 @@
   --review-border-subtle: #e5e5e5;
   --review-border-strong: #c7c7c7;
   --review-selection-bg: #fff;
-  --review-pdf-selection-bg: #dbe7ff;
+  --review-pdf-selection-bg: #cfdeea;
   --review-selection-ink: #333;
   --review-focus: #496789;
   --review-success: #2d684d;
@@ -830,25 +830,22 @@
 .review-insertion-caret {
   position: fixed;
   z-index: 3;
-  width: 2px;
+  width: 1.25px;
   height: 1.15rem;
-  border-radius: var(--review-radius-round);
-  background: var(--review-focus);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--review-surface-panel) 72%, transparent);
+  background: var(--pdf-active-ink);
+  border-radius: 1px;
+  box-shadow: none;
   pointer-events: none;
   transform: translate(-50%, -50%);
-  animation: review-insertion-caret-blink 1.05s steps(1, end) infinite;
-}
-
-.review-insertion-caret[hidden] {
-  display: none;
+  animation: review-insertion-caret-blink 1.2s ease-in-out infinite;
 }
 
 @keyframes review-insertion-caret-blink {
-  0%, 48% { opacity: 1; }
-  49%, 96% { opacity: 0; }
-  97%, 100% { opacity: 1; }
+  0%, 40%, 100% { opacity: 1; }
+  60%, 80% { opacity: .2; }
 }
+
+.review-insertion-caret[hidden] { display: none; }
 
 .review-context-palette button,
 .review-page-menu button {

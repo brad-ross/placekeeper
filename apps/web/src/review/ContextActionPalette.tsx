@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import type { Rotation } from '@embedpdf/models';
 
 import { ReviewIcon } from './ReviewIcon.js';
 import { ReviewTooltipButton } from './ReviewTooltipButton.js';
@@ -45,6 +46,7 @@ export interface ContextPlacement {
   readonly width?: number;
   readonly height?: number;
   readonly suggestTop?: boolean;
+  readonly rotation?: Rotation;
 }
 
 export interface ContextActionPaletteProps {
@@ -86,11 +88,15 @@ export interface InsertionCaretProps {
 }
 
 export function InsertionCaret({ placement, hidden }: InsertionCaretProps) {
+  const rotation = placement.rotation ?? 0;
+  const width = rotation % 2 === 0 ? placement.width : placement.height;
+  const height = rotation % 2 === 0 ? placement.height : placement.width;
   const style: CSSProperties = {
     left: placement.left,
     top: placement.top,
-    ...(placement.width === undefined ? {} : { width: placement.width }),
-    ...(placement.height === undefined ? {} : { height: placement.height }),
+    ...(width === undefined ? {} : { width }),
+    ...(height === undefined ? {} : { height }),
+    transform: `translate(-50%, -50%) rotate(${rotation * 90}deg)`,
   };
   return (
     <span

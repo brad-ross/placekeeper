@@ -13,8 +13,9 @@ import { useMemo, useRef } from 'react';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { PdfSearchResult } from './pdf-search-model.js';
 import type { ReferenceScrollPosition } from './reference-manual-scroll.js';
+import { OwnedTextMark } from './OwnedTextMark.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
-import { combinePageRotation, positionOwnedRect } from './owned-overlay.js';
+import { combinePageRotation, ownedMarkStyle, positionOwnedRect } from './owned-overlay.js';
 import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
 import {
   mergeAuthoringPreviewProjections,
@@ -344,6 +345,7 @@ export function PdfWorkspace({
                         if (hitTestOwnedMark(
                           geometryByPage.get(layout.pageIndex) ?? [],
                           point,
+                          mainDocument.scale,
                         )) return;
                         const accepted = onPageContextMenu({
                           pageIndex: layout.pageIndex,
@@ -434,28 +436,27 @@ export function PdfWorkspace({
                             const page = activePdf.pages[layout.pageIndex];
                             if (!page) return [];
                             return (annotation.quadPoints ?? [annotation.rect]).map((rect, index) => {
-                              const transformed = positionOwnedRect(
+                              const markStyle = ownedMarkStyle(
                                 page,
                                 layout,
                                 mainDocument.rotation,
                                 rect,
                               );
                               return (
-                                <span
+                                <OwnedTextMark
+                                  engine={engine} document={activePdf} page={page} rect={rect}
+                                  textAnchored={['highlight', 'delete', 'replace'].includes(annotation.kind)}
                                   key={`${annotation.id}:${index}`}
                                   data-owned-mark={annotation.kind}
+                                  data-has-attached-text={annotation.contents.trim().length > 0 ? 'true' : 'false'}
                                   data-review-id={reviewItemIdForAnnotation(annotation)}
                                   data-authoring-preview={authoringPreviewIds.has(annotation.id) ? 'true' : undefined}
                                   data-corresponding={correspondingOwnedAnnotationId === reviewItemIdForAnnotation(annotation) ? 'true' : 'false'}
                                   data-active={activeOwnedAnnotationId === reviewItemIdForAnnotation(annotation) ? 'true' : 'false'}
-                                  style={{
-                                    position: 'absolute',
-                                    left: transformed.origin.x,
-                                    top: transformed.origin.y,
-                                    width: transformed.size.width,
-                                    height: transformed.size.height,
-                                  }}
-                                />
+                                  style={markStyle}
+                                >
+                                  {annotation.kind === 'pageNote' ? <ReviewIcon name="note" size={14} /> : null}
+                                </OwnedTextMark>
                               );
                             });
                           })}

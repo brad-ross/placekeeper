@@ -16,6 +16,7 @@ export interface OwnedMarkGeometry {
     readonly height: number;
   }[];
   readonly paintOrder: number;
+  readonly insertion?: boolean;
 }
 
 export function groupOwnedMarkGeometry(
@@ -40,6 +41,7 @@ export function groupOwnedMarkGeometry(
       pageIndex: annotation.pageIndex,
       rects: rects.map((rect) => ({ ...rect })),
       paintOrder: paintOrderForIndex(index),
+      ...(annotation.kind === 'insert' ? { insertion: true } : {}),
     });
   });
   return [...groups.values()];
@@ -70,10 +72,22 @@ function contains(rect: OwnedMarkGeometry['rects'][number], point: OwnedMarkPoin
 export function hitTestOwnedMark(
   groups: readonly OwnedMarkGeometry[],
   point: OwnedMarkPoint,
+  scale = 1,
 ): string | undefined {
   let best: OwnedMarkGeometry | undefined;
   for (const group of groups) {
-    if (!group.rects.some((rect) => contains(rect, point))) continue;
+    if (!group.rects.some((rect) => {
+      if (!group.insertion) return contains(rect, point);
+      // The visible caret extends below and beside the original narrow anchor.
+      // Keep its hit area usable at every zoom without changing saved geometry.
+      const padding = 7 / (Number.isFinite(scale) && scale > 0 ? scale : 1);
+      return contains({
+        x: rect.x - padding,
+        y: rect.y,
+        width: rect.width + padding * 2,
+        height: rect.height + padding,
+      }, point);
+    })) continue;
     if (
       best === undefined ||
       group.paintOrder > best.paintOrder ||
@@ -101,12 +115,13 @@ export class OwnedMarkPointerGesture {
     button: number | undefined,
     point: OwnedMarkPoint,
     groups: readonly OwnedMarkGeometry[],
+    scale = 1,
   ): string | undefined {
     if (button !== 0) {
       this.#pending = null;
       return undefined;
     }
-    const id = hitTestOwnedMark(groups, point);
+    const id = hitTestOwnedMark(groups, point, scale);
     this.#pending = id === undefined ? null : { pointerId, id, start: point, dragged: false };
     return id;
   }
@@ -124,13 +139,14 @@ export class OwnedMarkPointerGesture {
     button: number | undefined,
     point: OwnedMarkPoint,
     groups: readonly OwnedMarkGeometry[],
+    scale = 1,
   ): string | undefined {
     const pending = this.#pending;
     this.#pending = null;
     if (button !== 0 || !pending || pending.pointerId !== pointerId || pending.dragged) {
       return undefined;
     }
-    return hitTestOwnedMark(groups, point) === pending.id ? pending.id : undefined;
+    return hitTestOwnedMark(groups, point, scale) === pending.id ? pending.id : undefined;
   }
 
   pointerCancel(pointerId: number): void {

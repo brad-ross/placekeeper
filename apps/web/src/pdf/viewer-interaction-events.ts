@@ -17,6 +17,7 @@ export interface ViewerClientPlacement {
   readonly width?: number;
   readonly height?: number;
   readonly suggestTop?: boolean;
+  readonly rotation?: Rotation;
 }
 
 export interface ViewerFixedClientRect {

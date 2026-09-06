@@ -3346,10 +3346,12 @@ test('creates an insertion from middle-of-line PDFium caret geometry', async ({ 
   await expect(insertionCaret).toBeVisible();
   await expect(page.getByRole('toolbar', { name: 'Insertion review action' })).toHaveCount(0);
   await expect(insertionCaret).toHaveCSS('animation-name', 'review-insertion-caret-blink');
+  await expect(insertionCaret).toHaveCSS('background-color', 'rgb(73, 103, 137)');
   const [pageBox, caretBox] = await Promise.all([pdfPage.boundingBox(), insertionCaret.boundingBox()]);
   if (!pageBox || !caretBox) throw new Error('Insertion caret geometry is unavailable.');
   const pageScale = pageBox.width / 612;
-  expect(caretBox.x - pageBox.x).toBeCloseTo(149 * pageScale, 0);
+  expect(caretBox.width).toBeCloseTo(1.25, 2);
+  expect(caretBox.x + caretBox.width / 2 - pageBox.x).toBeCloseTo(149 * pageScale, 0);
   expect(caretBox.y - pageBox.y).toBeCloseTo(89 * pageScale, 0);
 
   const mainViewport = page.locator('[data-viewer-framing-viewport]');
@@ -3430,6 +3432,7 @@ test('keeps the insertion caret visible beside an open workspace', async ({ page
   const insertionCaret = page.locator('[data-review-insertion-caret]');
   await expect(insertionCaret).toBeVisible();
   await expect(insertionCaret).toHaveCSS('animation-name', 'review-insertion-caret-blink');
+  await expect(insertionCaret).toHaveCSS('background-color', 'rgb(73, 103, 137)');
   await expect(workspaceControl).toHaveAttribute('aria-expanded', 'true');
 });
 
@@ -3514,7 +3517,7 @@ test("one installed-style browser tree preserves review state across responsive 
       const selectionOverlay = pageCanvas.locator(':scope > div[style*="mix-blend-mode"]');
       await expect(selectionOverlay).toBeVisible();
       await expect(selectionOverlay.locator(':scope > div').first())
-        .toHaveCSS('background-color', 'rgb(219, 231, 255)');
+        .toHaveCSS('background-color', 'rgb(207, 222, 234)');
       expect(await renderedPageImage.evaluate((image) => {
         const selection = window.getSelection();
         if (!selection) return false;

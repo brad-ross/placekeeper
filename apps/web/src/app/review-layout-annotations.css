@@ -39,11 +39,11 @@
   padding: 0;
   place-items: center;
   transform: translate(-50%, -50%);
-  border: 2px solid var(--review-focus);
-  border-radius: var(--review-radius-round);
-  color: var(--review-focus);
-  background: var(--review-surface-panel);
-  box-shadow: 0 0 0 2px var(--review-surface-panel), var(--review-shadow-float);
+  border: 1px solid var(--pdf-note-ink);
+  border-radius: 6px;
+  color: var(--pdf-note-ink);
+  background: #efe5cb;
+  box-shadow: 0 2px 7px rgb(0 0 0 / 6%);
 }
 
 .workspace-edge-rail {
@@ -91,7 +91,7 @@
 .workspace-edge-rail:focus-visible,
 .reference-resize-handle:focus-visible {
   outline: 3px solid var(--review-focus);
-  outline-offset: -2px;
+  outline-offset: 0;
 }
 
 .reference-resize-handle {
@@ -1214,7 +1214,6 @@
 li[data-annotation-origin]:hover .row-action-group__direct,
 li[data-annotation-origin]:focus-within .row-action-group__direct,
 li[data-annotation-origin][data-active="true"] .row-action-group__direct,
-.annotation-peek .row-action-group__direct,
 li[data-search-result]:hover .row-action-group__direct,
 li[data-search-result]:focus-within .row-action-group__direct,
 li[data-search-result][data-active="true"] .row-action-group__direct {
@@ -1400,7 +1399,7 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   background: var(--review-surface-interactive, #e5e6e1);
   box-shadow: inset 0 1px 2px rgb(24 26 23 / 16%);
 }
-.link-action-popover [role="menuitem"]:focus-visible { outline: 3px solid var(--review-focus, #245c9c); outline-offset: -2px; }
+.link-action-popover [role="menuitem"]:focus-visible { outline: 3px solid var(--review-focus, #245c9c); outline-offset: 0; }
 .link-action-popover [role="menuitem"] .review-icon { color: var(--review-ink-muted, #676a63); }
 
 .annotation-drawer__owned,
@@ -1964,34 +1963,77 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   pointer-events: none;
 }
 
+/* The mark follows the text baseline, including rotated pages. Its original
+   anchor bounds stay available for navigation and text selection. */
 [data-owned-mark] {
+  --pdf-mark-ink: var(--pdf-edit-ink);
+  --pdf-mark-line-width: calc(1.5px * var(--pdf-mark-scale, 1));
+  --pdf-underline-width: calc(1px * var(--pdf-mark-scale, 1));
   box-sizing: border-box;
+  border-radius: 3px;
+  mix-blend-mode: multiply;
 }
 
-[data-owned-mark="highlight"] {
-  border-bottom: 1px solid var(--review-warning);
-  background: color-mix(in srgb, var(--review-warning) 42%, transparent);
+[data-owned-mark="highlight"] { --pdf-mark-ink: var(--pdf-note-ink); background: var(--pdf-note-fill); }
+[data-owned-mark="highlight"][data-has-attached-text="true"] {
+  background: var(--pdf-comment-fill);
 }
 
-[data-owned-mark="insert"] {
-  border-left: 3px solid var(--review-selection-ink);
-  background: color-mix(in srgb, var(--review-selection-bg) 76%, transparent);
+[data-owned-mark="highlight"], [data-owned-mark="replace"] { overflow: hidden; }
+
+/* An underline consistently means that the annotation has attached text. */
+:is([data-owned-mark="highlight"], [data-owned-mark="replace"])[data-has-attached-text="true"]::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: var(--pdf-underline-width);
+  background: var(--pdf-note-ink);
+}
+[data-owned-mark="replace"][data-has-attached-text="true"]::after {
+  background: var(--pdf-edit-ink);
+}
+[data-owned-mark="replace"] { background: var(--pdf-edit-fill); }
+:is([data-owned-mark="replace"], [data-owned-mark="delete"])::before {
+  content: '';
+  position: absolute;
+  top: var(--pdf-strike-position, 50%);
+  right: 0;
+  left: 0;
+  height: var(--pdf-mark-line-width);
+  transform: translateY(-50%);
+  background: var(--pdf-edit-ink);
+}
+
+/* Saved insertions retain a small, steady caret below the text. */
+[data-owned-mark="insert"]::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -3px;
+  width: 6px;
+  height: 6px;
+  box-sizing: border-box;
+  border-top: 1.5px solid var(--pdf-edit-ink);
+  border-left: 1.5px solid var(--pdf-edit-ink);
+  transform: translateX(-50%) rotate(45deg);
 }
 
 [data-owned-mark="pageNote"] {
-  border: 1px solid var(--review-selection-ink);
+  --pdf-mark-ink: var(--pdf-note-ink);
+  display: grid;
+  place-items: center;
   border-radius: 3px;
-  background: color-mix(in srgb, var(--review-selection-bg) 68%, transparent);
+  color: var(--pdf-note-ink);
+  background: var(--pdf-note-fill);
 }
-
-[data-owned-mark="replace"] {
-  border-bottom: 2px solid var(--review-danger);
-  background: color-mix(in srgb, var(--review-danger) 18%, transparent);
-}
-
-[data-owned-mark="delete"] {
-  border-block: 1px dashed var(--review-danger);
-  background: color-mix(in srgb, var(--review-danger) 26%, transparent);
+[data-owned-mark="pageNote"] > .review-icon {
+  width: 70%;
+  height: 70%;
+  max-width: 18px;
+  max-height: 18px;
+  stroke-width: 1.5px;
 }
 
 .owned-mark-focus-proxy {
@@ -2001,29 +2043,52 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   height: 1rem;
   padding: 0;
   transform: translate(-50%, -50%);
-  opacity: .01;
+  opacity: 0;
   border: 0;
-  border-radius: 50%;
   pointer-events: none;
 }
 
-.owned-mark-focus-proxy:focus-visible {
-  opacity: 1;
-  outline: 3px solid var(--review-focus);
-  outline-offset: 2px;
-  background: var(--review-surface-panel);
+[data-owned-mark][data-active="true"] {
+  --pdf-underline-width: var(--pdf-mark-line-width);
 }
 
 [data-owned-mark][data-corresponding="true"] {
-  outline: 2px dashed var(--review-selection-ink);
-  outline-offset: 1px;
-  box-shadow: inset 3px 0 var(--review-selection-ink);
+  --pdf-underline-width: calc(1.25px * var(--pdf-mark-scale, 1));
+  --pdf-note-fill: rgb(245 196 35 / 48%);
+  --pdf-comment-fill: rgb(245 196 35 / 37%);
+  --pdf-edit-fill: rgb(105 148 169 / 35%);
+  --pdf-note-ink: #967006;
+  --pdf-edit-ink: #455f74;
 }
 
-[data-owned-mark][data-active="true"] {
-  outline: 2px solid var(--review-selection-ink);
-  outline-offset: 2px;
-  filter: saturate(.8);
+[data-owned-mark][data-corresponding="true"]:not([data-owned-mark="insert"]) {
+  outline: 1.25px solid var(--pdf-mark-ink);
+  outline-offset: 0;
+}
+[data-owned-mark="highlight"][data-corresponding="true"],
+[data-owned-mark="pageNote"][data-corresponding="true"] {
+  outline-color: var(--pdf-note-ink);
+}
+[data-owned-mark][data-active="true"]:not([data-owned-mark="insert"]):not([data-corresponding="true"]) {
+  outline: 1.5px solid var(--pdf-active-ink);
+  outline-offset: 0;
+}
+[data-owned-mark="insert"]:is([data-corresponding="true"], [data-active="true"])::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--pdf-edit-fill);
+  transform: translateX(-50%);
+}
+[data-owned-mark="insert"][data-active="true"]::before,
+.pdf-workspace:has(.owned-mark-focus-proxy:focus-visible)
+  [data-owned-mark="insert"][data-corresponding="true"]::before {
+  outline: 1.5px solid var(--pdf-active-ink);
+  outline-offset: 1px;
 }
 
 .reconciliation-workspace {
@@ -2207,4 +2272,18 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
 
 .reconciliation-workspace__editor-actions .review-button {
   flex: none;
+}
+
+.pdf-workspace[data-owned-mark-hovered="true"],
+.pdf-workspace[data-owned-mark-hovered="true"] * {
+  cursor: pointer !important;
+}
+
+:is([data-owned-mark="delete"], [data-owned-mark="replace"]) {
+  --pdf-edit-fill: var(--pdf-correction-fill);
+  --pdf-edit-ink: var(--pdf-correction-ink);
+}
+:is([data-owned-mark="delete"], [data-owned-mark="replace"])[data-corresponding="true"] {
+  --pdf-edit-fill: rgb(218 78 78 / 30%);
+  --pdf-edit-ink: #ac373f;
 }
