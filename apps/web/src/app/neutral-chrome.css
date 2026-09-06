@@ -641,8 +641,19 @@
 }
 
 .reference-resize-handle[data-reference-resize-handle="bottom"] {
-  right: calc(var(--review-overlay-inset, 12px) + var(--pk-radius-tray));
-  left: calc(var(--review-overlay-inset, 12px) + var(--pk-radius-tray));
+  right: var(--review-overlay-inset, 12px);
+  left: var(--review-overlay-inset, 12px);
+  bottom: calc(var(--reference-bottom-height) + var(--review-overlay-inset, 12px) - 10px);
+  overflow: hidden;
+}
+
+.reference-resize-handle[data-reference-resize-handle="bottom"]::after {
+  inset: 0 0 auto;
+  height: calc(2 * var(--pk-radius-tray));
+  box-sizing: border-box;
+  border: 0;
+  border-radius: var(--pk-radius-tray) var(--pk-radius-tray) 0 0;
+  background: linear-gradient(#aaa 0 2px, transparent 2px);
 }
 
 .reference-resize-handle:hover::after,
@@ -1581,6 +1592,7 @@
   :is(li[data-annotation-origin], li[data-search-result])[data-active="true"]
     .row-action-group__direct,
   .reference-tab-segment :is(.reference-tab-segment__action, .reference-panel__return),
+  .review-workspace__header > .review-workspace__outline-toggle,
   .review-workspace__activity-strip--compound > .review-workspace__move--activity {
     opacity: 0;
     pointer-events: none;
@@ -1594,6 +1606,8 @@
     :is(.reference-tab-segment__action, .reference-panel__return),
   .reference-tab-segment:has(:focus-visible)
     :is(.reference-tab-segment__action, .reference-panel__return),
+  .review-workspace__header:hover > .review-workspace__outline-toggle,
+  .review-workspace__header:has(:focus-visible) > .review-workspace__outline-toggle,
   .review-workspace__activity-strip--compound:hover
     > .review-workspace__move--activity,
   .review-workspace__activity-strip--compound:has(:focus-visible)
@@ -1802,6 +1816,7 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 
   li[data-search-result] .row-action-group__direct,
   .reference-tab-segment :is(.reference-tab-segment__action, .reference-panel__return),
+  .review-workspace__header > .review-workspace__outline-toggle,
   .review-workspace__activity-strip--compound > .review-workspace__move--activity {
     opacity: 1;
     pointer-events: auto;

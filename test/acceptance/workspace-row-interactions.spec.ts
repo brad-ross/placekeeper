@@ -18,6 +18,17 @@ for (const width of [1280, 620]) {
     const openOutlineWorkspace = page.getByRole('button', { name: 'Show workspace', exact: true });
     if (await openOutlineWorkspace.isVisible()) await openOutlineWorkspace.click();
     await page.getByRole('tab', { name: 'Outline', exact: true }).click();
+    const collapse = page.locator('[data-outline-expansion-toggle]:visible');
+    await page.mouse.move(0, 0);
+    await page.locator('.review-chrome__page-input').focus();
+    await expect(collapse).toHaveCSS('opacity', '0');
+    await page.locator('.review-workspace__header:visible').first().hover();
+    await expect(collapse).toHaveCSS('opacity', '1');
+    await page.mouse.move(0, 0);
+    await page.keyboard.press('Tab');
+    await collapse.focus();
+    await expect(collapse).toHaveCSS('opacity', '1');
+
     const outline = page.locator('.outline-navigator__row:visible:not([data-current="true"]):has(.row-action-group)').first();
     await outline.hover();
     const outlineHover = await rowPaint(outline);
@@ -186,4 +197,30 @@ test('collapsed narrow workspace matches the bottom References rail backing and 
     await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
     await expect.poll(appearance).toEqual(reference);
   }
+});
+
+test('bottom resize handle sits inside the tray and follows its upper corners', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout');
+  await page.getByRole('button', { name: 'Show References', exact: true }).click();
+  const handle = page.locator('[data-reference-resize-handle="bottom"]');
+  const tray = page.locator('.review-workspace[data-workspace-presentation="bottom"]');
+  await expect(handle).toBeVisible();
+  await expect.poll(async () => Math.abs((await handle.boundingBox())!.y - (await tray.boundingBox())!.y)).toBeLessThan(0.5);
+  const trayBox = (await tray.boundingBox())!;
+  const handleBox = (await handle.boundingBox())!;
+  expect(handleBox.y).toBeCloseTo(trayBox.y, 0);
+  expect(handleBox.x).toBeCloseTo(trayBox.x, 0);
+  expect(handleBox.width).toBeCloseTo(trayBox.width, 0);
+  await handle.hover();
+  const paint = await handle.evaluate((element) => {
+    const line = getComputedStyle(element, '::after');
+    return { radius: line.borderTopLeftRadius, top: line.top, border: line.borderTopWidth, opacity: line.opacity };
+  });
+  expect(paint).toMatchObject({ radius: '16px', top: '0px', border: '0px' });
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y - 45, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => (await tray.boundingBox())!.height).toBeGreaterThan(trayBox.height + 30);
 });
