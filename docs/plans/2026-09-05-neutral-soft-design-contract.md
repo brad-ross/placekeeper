@@ -1,6 +1,6 @@
 # Placekeeper: neutral, soft design and interaction contract
 
-Status: proposed implementation contract, September 5, 2026. Product implementation has not started.
+Status: implemented and verified, September 5, 2026. The complete interface and host-surface update is implemented. Automated behavior, visual, build, and packaging checks passed; see the [verification record](2026-09-05-neutral-soft-design-verification.md) for evidence and remaining platform-specific release checks.
 
 ## Direction and authority
 
@@ -333,4 +333,4 @@ Where a lifecycle or host condition is not fully simulated, this contract and ex
 
 ## 10. Decision status
 
-The interface direction is settled: the user chose soft, spacious neutral gray, retained icon-forward navigation, and delegated editor placement on design merit. The recommendation is the passage-attached editor specified above. The app icon is explicitly in scope: B — Soft pages is selected, including borderless layered pages, subtle depth, a muted blue path, and a small amber dot. Production artwork and optical refinement at small sizes remain implementation work. Dark-mode interface delivery is explicitly outside the first implementation scope; testing the icon against a dark desktop background does not expand that scope. The plan does not authorize starting product implementation; the user is reviewing the design before commissioning it.
+The interface direction is settled: the user chose soft, spacious neutral gray, retained icon-forward navigation, and delegated editor placement on design merit. The recommendation is the passage-attached editor specified above. The app icon is explicitly in scope: B — Soft pages is selected, including borderless layered pages, subtle depth, a muted blue path, and a small amber dot. Production artwork, regenerated 16–1024 px icon representations, and distributed host/plugin assets are complete and validated. Dark-mode interface delivery is explicitly outside the first implementation scope; testing the icon against a dark desktop background does not expand that scope. The user subsequently authorized complete product implementation across all app surfaces, following this contract and the canonical visual reference.
