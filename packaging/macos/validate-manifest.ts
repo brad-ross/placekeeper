@@ -700,7 +700,7 @@ export async function validateCodexPlugin(pluginRoot: string): Promise<void> {
     readFile(resolve(pluginRoot, "assets/placekeeper.svg"), "utf8"),
     readFile(resolve(pluginRoot, `skills/${CODEX_SKILL_NAME}/assets/placekeeper.svg`), "utf8"),
   ]);
-  if (pluginIcon !== skillIcon || !pluginIcon.includes("Placekeeper reference and return icon")) {
+  if (pluginIcon !== skillIcon || !pluginIcon.includes("B — Soft pages")) {
     throw new Error("The packaged Placekeeper plugin and skill icons must match the app artwork");
   }
   validatePluginIdentity(record(JSON.parse(pluginSource) as unknown, "Codex plugin manifest"));

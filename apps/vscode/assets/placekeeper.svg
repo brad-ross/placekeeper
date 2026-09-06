@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 220 220" role="img" aria-labelledby="title desc">
-  <title id="title">Placekeeper reference and return icon</title>
-  <desc id="desc">Two tucked and fanned pages with a smooth blue reference detour, an amber destination dot on the lower page, and a bookmark-like return.</desc>
-  <rect width="220" height="220" fill="#e7e8e2"/>
-  <g transform="translate(1 0.5)">
-    <rect x="76" y="54" width="101" height="112" rx="17" fill="#f4efe3" stroke="#c8c9c1" stroke-width="2" transform="rotate(23 126 110)"/>
-    <rect x="43" y="34" width="118" height="151" rx="18" fill="#fffdf6" stroke="#c8c9c1" stroke-width="2"/>
-    <path d="M68 73H133M68 96H120M68 143H128M68 163H109" fill="none" stroke="#22251f" stroke-linecap="round" stroke-width="5" opacity=".66"/>
-    <path d="M92 34V65C92 77 99 83 111 83H151C166 83 173 91 173 102C173 113 166 121 151 121H111C99 121 92 129 92 141V157" fill="none" stroke="#264f7d" stroke-linecap="round" stroke-linejoin="round" stroke-width="8"/>
-    <path d="M82 153L92 165L102 153" fill="#264f7d"/>
-    <circle cx="173" cy="102" r="7" fill="#bd713e"/>
+  <title id="title">B — Soft pages</title>
+  <desc id="desc">Two closely tucked soft pages. The back page is raised slightly and extends diagonally behind the front sheet, with its upper and lower corners concealed. A muted blue path visits an amber dot and returns to the front page.</desc>
+  <rect width="220" height="220" fill="#ededed" />
+  <g transform="translate(-12.1647 1.5)">
+    <rect x="76" y="54" width="101" height="134" rx="22" fill="#d6d6d6" stroke="none" stroke-width="2" transform="translate(12 -10) rotate(27 126.5 110)" />
+    <rect x="43" y="36" width="118" height="151" rx="23" fill="#dedede" stroke="none" stroke-width="2" /><rect x="43" y="34" width="118" height="151" rx="23" fill="#fcfcfc" stroke="none" stroke-width="2" />
+    <path d="M68 73H127M68 96H114M68 149H125" fill="none" stroke="#a0a0a0" stroke-linecap="round" stroke-width="3.5" />
+    <path d="M92 34V65C92 77 99 83 111 83H158C173 83 180 91 180 102C180 113 173 121 158 121H111C99 121 92 129 92 141V157" fill="none" stroke="#526d89" stroke-linecap="round" stroke-linejoin="round" stroke-width="8" />
+    <path d="M82 153L92 165L102 153" fill="#526d89" />
+    <circle cx="180" cy="102" r="6" fill="#b98960" />
   </g>
 </svg>

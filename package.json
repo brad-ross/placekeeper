@@ -25,6 +25,7 @@
     "catalog:audit": "tsx scripts/pdf-symbol-catalog/generate.ts --audit-only",
     "catalog:check": "tsx scripts/pdf-symbol-catalog/generate.ts --check",
     "catalog:update": "tsx scripts/pdf-symbol-catalog/update.ts",
+    "icons:generate": "sh packaging/macos/icon/generate-icons.sh",
     "fixtures:pdf": "tsx test/fixtures/pdfs/generate.ts",
     "test": "pnpm test:service && pnpm test:u4 && pnpm test:u5 && pnpm test:u6 && pnpm test:u7-host",
     "test:pdf-writer": "vitest run test/conformance/pdf-writer.conformance.test.ts",
