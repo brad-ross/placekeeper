@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
 import {
   existingAnnotationKey,
@@ -252,25 +252,6 @@ export function AnnotationList({
   const listRef = useRef<HTMLOListElement>(null);
   const entryRefs = useRef(new Map<string, HTMLButtonElement>());
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
-  const [direction, setDirection] = useState<'above' | 'below'>();
-
-  useLayoutEffect(() => {
-    if (!correspondingId) {
-      setDirection(undefined);
-      return;
-    }
-    const row = rowRefs.current.get(correspondingId);
-    const viewport = listRef.current?.closest<HTMLElement>('[data-annotation-scroll-viewport], .review-workspace');
-    if (!row || !viewport) return;
-    const rowBounds = row.getBoundingClientRect();
-    const viewportBounds = viewport.getBoundingClientRect();
-    setDirection(rowBounds.bottom < viewportBounds.top
-      ? 'above'
-      : rowBounds.top > viewportBounds.bottom
-        ? 'below'
-        : undefined);
-  }, [correspondingId, items]);
-
   useLayoutEffect(() => {
     if (!activationRequest) return;
     const row = rowRefs.current.get(activationRequest.id);
@@ -313,12 +294,6 @@ export function AnnotationList({
       aria-label="Annotations"
       tabIndex={-1}
     >
-      {direction ? (
-        <p className="annotation-direction-cue" data-correspondence-direction={direction}>
-          <ReviewIcon name="chevron-right" className="review-icon annotation-direction-cue__icon" />
-          <span>Matching annotation {direction}</span>
-        </p>
-      ) : null}
       <ol ref={listRef} tabIndex={-1} aria-label="Annotations in document order">
         {combined.map((entry) => {
           if (entry.origin === 'source') {

@@ -448,6 +448,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const [commandFocusContext, setCommandFocusContext] = useState<ReviewCommandFocusContext>('review');
   const handledCommandInvocationRef = useRef(0);
   const peekHeldRef = useRef(false);
+  const dismissedPeekIdRef = useRef<string | undefined>(undefined);
   const peekTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [announcement, setAnnouncement] = useState(`Review revision ${props.state.revision}.`);
   const [transitionAnnouncement, setTransitionAnnouncement] = useState('');
@@ -1142,18 +1143,26 @@ export function ReviewShell(props: ReviewShellProps) {
       setPeekItemId(undefined);
       return;
     }
+    if (activeItemId !== undefined) {
+      setPeekItemId(activeItemId);
+      return;
+    }
     const id = props.correspondingItemId;
+    if (id && id === dismissedPeekIdRef.current) return;
+    dismissedPeekIdRef.current = undefined;
     if (id) {
-      peekTimerRef.current = setTimeout(() => setPeekItemId(id), 320);
+      setPeekItemId(id);
     } else if (!peekHeldRef.current) {
       peekTimerRef.current = setTimeout(() => setPeekItemId(undefined), 180);
     }
     return clearPeekTimer;
-  }, [anyWorkspaceOpen, props.correspondingItemId]);
+  }, [anyWorkspaceOpen, props.correspondingItemId, activeItemId]);
 
   useEffect(() => {
     const request = props.activationRequest;
     if (!request || authoringSessionRef.current !== null) return;
+    clearPeekTimer();
+    dismissedPeekIdRef.current = undefined;
     setActiveItem(request.id);
     setListActivation(request);
     const item = props.state.items.find(({ id }) => id === request.id);
@@ -1436,10 +1445,13 @@ export function ReviewShell(props: ReviewShellProps) {
         ? null
         : [...shell.querySelectorAll<HTMLElement>('[data-review-item]')]
           .find((element) => element.dataset.reviewItem === current.workspace.activeItemId);
+      const restoredPeek = current.workspace.activeItemId === undefined ? null
+        : [...shell.querySelectorAll<HTMLElement>('[data-annotation-peek]')]
+          .find((element) => element.dataset.annotationPeek === current.workspace.activeItemId);
       const target = originTrigger?.isConnected === true
         ? originTrigger
         : current.origin.kind === 'tray-edit'
-          ? restoredItem?.querySelector<HTMLElement>('[data-annotation-action="edit"]')
+          ? (restoredPeek ?? restoredItem)?.querySelector<HTMLElement>('[data-row-action="edit"]')
           : current.origin.kind === 'reader-edit'
             ? restoredItem?.querySelector<HTMLElement>('.annotation-item__navigation')
           : null;
@@ -1574,6 +1586,8 @@ export function ReviewShell(props: ReviewShellProps) {
         event.preventDefault();
         clearPeekTimer();
         peekHeldRef.current = false;
+        dismissedPeekIdRef.current = peekItemId;
+        setActiveItem(undefined);
         setPeekItemId(undefined);
         return;
       }
@@ -2122,7 +2136,7 @@ export function ReviewShell(props: ReviewShellProps) {
           && (activeItemId !== undefined || activeExistingAnnotationKey !== undefined)
           && event.button === 0
           && event.target instanceof Element
-          && event.target.closest('[data-review-item], [data-existing-annotation], [data-owned-focus-id], [data-page-index]') === null
+          && event.target.closest('[data-review-item], [data-existing-annotation], [data-owned-focus-id], [data-page-index], .annotation-peek') === null
         ) {
           setActiveItem(undefined);
           setActiveExistingAnnotationKey(undefined);
@@ -2351,15 +2365,15 @@ export function ReviewShell(props: ReviewShellProps) {
             return (
               <AnnotationPeek
                 item={item}
+                selected={activeItemId === item.id}
                 {...(copyLink === undefined ? {} : { copyLink })}
                 onHoldChange={(held) => {
                   peekHeldRef.current = held;
                   clearPeekTimer();
-                  if (!held && props.correspondingItemId === undefined) {
+                  if (!held && activeItemId === undefined && props.correspondingItemId === undefined) {
                     peekTimerRef.current = setTimeout(() => setPeekItemId(undefined), 180);
                   }
                 }}
-                onDismiss={() => setPeekItemId(undefined)}
                 onNavigate={() => {
                   workspaceFraming.markUserIntent();
                   setActiveItem(item.id);

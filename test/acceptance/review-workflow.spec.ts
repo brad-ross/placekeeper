@@ -2671,7 +2671,7 @@ test.describe('canonical review workflow', () => {
     await expect(row).toHaveAttribute('data-active', 'true');
   });
 
-  test('shows an offscreen direction cue without scrolling until explicit mark activation', async ({ page }) => {
+  test('keeps offscreen correspondence quiet without scrolling until explicit mark activation', async ({ page }) => {
     for (let index = 0; index < 7; index += 1) {
       if (index > 0) {
         await page.getByRole('button', { name: 'Clear anchors' }).click();
@@ -2691,7 +2691,7 @@ test.describe('canonical review workflow', () => {
     const scrollBefore = await drawer.evaluate((element) => element.scrollTop);
 
     await lastMark.focus();
-    await expect(page.locator('[data-correspondence-direction="below"]')).toBeVisible();
+    await expect(page.locator('[data-correspondence-direction]')).toHaveCount(0);
     expect(await drawer.evaluate((element) => element.scrollTop)).toBe(scrollBefore);
 
     await page.keyboard.press('Enter');

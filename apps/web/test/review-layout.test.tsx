@@ -942,12 +942,12 @@ describe('review shell layout and accessibility contract', () => {
     );
     const copyablePeek = renderToStaticMarkup(
       <AnnotationPeek
+        selected
         item={ownedAnnotation}
         copyLink={copyLink}
         onHoldChange={() => undefined}
         onEdit={() => undefined}
         onDelete={() => undefined}
-        onDismiss={() => undefined}
       />,
     );
 
@@ -970,10 +970,8 @@ describe('review shell layout and accessibility contract', () => {
     expect(copyablePeek.indexOf('copy-link-control--row')).toBeLessThan(
       copyablePeek.indexOf('data-row-action="delete"'),
     );
-    expect(copyablePeek.indexOf('data-row-action="delete"')).toBeLessThan(
-      copyablePeek.indexOf('data-row-action="close"'),
-    );
-    expect(copyablePeek.match(/width="16" height="16"/gu)).toHaveLength(6);
+    expect(copyablePeek).not.toContain('data-row-action="close"');
+    expect(copyablePeek.match(/width="16" height="16"/gu)).toHaveLength(5);
     expect(annotationStyles).toMatch(
       /\.annotation-item__kind-icon\s*\{[^}]*width:\s*16px;[^}]*height:\s*16px;/u,
     );

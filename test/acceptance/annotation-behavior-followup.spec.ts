@@ -123,19 +123,9 @@ test('uses the new hover card and opens long PDF marks in a deletable full reade
   await expect(peek.locator('.annotation-item__excerpt-main')).toHaveCSS('-webkit-line-clamp', '3');
   await expect(peek).toHaveCSS('border-radius', '16px');
   await expect(peek).not.toHaveCSS('box-shadow', 'none');
-  const peekActions = peek.locator('.row-action-group__direct button');
-  await expect(peekActions).toHaveCount(4);
-  expect(await peekActions.evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label'))))
-    .toEqual([
-      'Edit Page Note annotation on page 1',
-      'Copy link to Page Note annotation on page 1',
-      'Remove Page Note annotation on page 1',
-      'Close annotation preview',
-    ]);
-  const peekCopy = peek.getByRole('button', { name: 'Copy link to Page Note annotation on page 1' });
-  await peekCopy.hover();
+  await expect(peek.locator('.row-action-group')).toHaveCount(0);
+  await peek.hover();
   await expect(peek).toBeVisible();
-  await expect(peekCopy).toBeEnabled();
   await page.mouse.move(1, 1);
   await expect(peek).toHaveCount(0);
 

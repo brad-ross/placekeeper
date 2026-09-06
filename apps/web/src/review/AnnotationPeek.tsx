@@ -6,6 +6,7 @@ import type { AnnotationReaderRecord } from './annotation-reader.js';
 
 export interface AnnotationPeekProps {
   item: ReviewItem;
+  selected?: boolean;
   onHoldChange(held: boolean): void;
   copyLink?: CopyLinkControlProps;
   onNavigate?(): void;
@@ -13,11 +14,11 @@ export interface AnnotationPeekProps {
   onReaderOverflowChange?(record: AnnotationReaderRecord, overflowing: boolean): void;
   onEdit?(trigger: HTMLButtonElement): void;
   onDelete?(): void;
-  onDismiss?(): void;
 }
 
 export function AnnotationPeek({
   item,
+  selected = false,
   onHoldChange,
   copyLink,
   onNavigate,
@@ -25,7 +26,6 @@ export function AnnotationPeek({
   onReaderOverflowChange,
   onEdit,
   onDelete,
-  onDismiss,
 }: AnnotationPeekProps) {
   const kindLabel = annotationKindLabel(item.kind);
   return (
@@ -34,20 +34,20 @@ export function AnnotationPeek({
       data-annotation-peek={item.id}
       data-annotation-origin="owned"
       data-annotation-kind={item.kind}
-      data-annotation-state="preview"
+      data-annotation-state={selected ? 'selected' : 'preview'}
+      data-peek-selected={selected ? 'true' : 'false'}
       aria-label={`${kindLabel} annotation preview`}
       onPointerEnter={() => onHoldChange(true)}
       onPointerLeave={() => onHoldChange(false)}
     >
       <AnnotationRowContent
         item={item}
-        {...(copyLink ? { copyLink } : {})}
+        {...(selected && copyLink ? { copyLink } : {})}
         {...(onNavigate ? { onNavigate } : {})}
         {...(onReadFull ? { onReadFull } : {})}
         {...(onReaderOverflowChange ? { onReaderOverflowChange } : {})}
-        {...(onEdit ? { onEdit } : {})}
-        {...(onDelete ? { onDelete } : {})}
-        {...(onDismiss ? { onDismiss } : {})}
+        {...(selected && onEdit ? { onEdit } : {})}
+        {...(selected && onDelete ? { onDelete } : {})}
       />
     </aside>
   );

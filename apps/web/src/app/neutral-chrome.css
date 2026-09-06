@@ -947,7 +947,7 @@
   box-shadow: 0 2px 6px rgb(0 0 0 / 2%), 0 8px 24px rgb(0 0 0 / 1.6%);
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-search-result][data-active="true"]:is(:hover, :focus-within, :active) {
+:is(.review-workspace, .review-tools-workspace) li[data-search-result][data-active="true"]:is(:hover, :focus-within, :active, [data-corresponding="true"]) {
   background: var(--pk-raised);
 }
 
@@ -1586,7 +1586,7 @@
     pointer-events: none;
   }
 
-  :is(li[data-annotation-origin], li[data-search-result]):hover
+  :is(li[data-annotation-origin], li[data-search-result]):is(:hover, [data-corresponding="true"])
     .row-action-group__direct,
   :is(li[data-annotation-origin], li[data-search-result]):focus-within
     .row-action-group__direct,
@@ -1615,7 +1615,7 @@
 }
 
 .review-shell .review-layout :is(.review-workspace, .review-tools-workspace)
-  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):is(:hover, :focus-within, :active) {
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):is(:hover, :focus-within, :active, [data-corresponding="true"]) {
   --workspace-row-surface: #e7e7e7;
   background: var(--workspace-row-surface);
   box-shadow: none;
@@ -1643,7 +1643,7 @@
   box-shadow: 0 2px 7px rgb(0 0 0 / 2.4%);
 }
 
-:is(li[data-annotation-origin], li[data-search-result]) .annotation-item__title-row > .row-action-group {
+:is(li[data-annotation-origin], li[data-search-result], .annotation-peek) .annotation-item__title-row > .row-action-group {
   position: absolute;
   top: 50%;
   right: 0;
@@ -1656,14 +1656,14 @@
   transition: none;
 }
 
-li[data-annotation-origin] .annotation-item__title-row
+:is(li[data-annotation-origin], .annotation-peek) .annotation-item__title-row
   > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > .annotation-item__page,
 li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   margin-left: auto;
 }
 
 @media (hover: hover) and (pointer: fine) {
-  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(.row-action-group):is(:hover, :focus-within)
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(.row-action-group):is(:hover, :focus-within, [data-corresponding="true"])
     :is(.outline-navigator__page, .annotation-item__page, .pdf-search__result-page) {
     opacity: 0;
   }
@@ -1836,3 +1836,21 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 .review-context-palette button .review-icon,
 .review-page-menu button .review-icon,
 .link-action-popover [role="menuitem"] .review-icon { color: inherit; }
+
+/* Selected PDF popups share the workspace card's page/action endcap. */
+.annotation-peek .row-action-group__direct {
+  opacity: 0;
+  pointer-events: none;
+  transition: none;
+}
+.annotation-peek[data-peek-selected="true"]:is(:hover, :has(:focus-visible)) .row-action-group__direct {
+  opacity: 1;
+  pointer-events: auto;
+}
+.annotation-peek[data-peek-selected="true"]:is(:hover, :has(:focus-visible)):has(.row-action-group) .annotation-item__page {
+  opacity: 0;
+}
+@media (pointer: coarse), (hover: none) {
+  .annotation-peek[data-peek-selected="true"] .row-action-group__direct { opacity: 1; pointer-events: auto; }
+  .annotation-peek[data-peek-selected="true"]:has(.row-action-group) .annotation-item__page { opacity: 0; }
+}
