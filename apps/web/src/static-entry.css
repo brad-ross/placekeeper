@@ -233,3 +233,10 @@ body,
     scroll-behavior: auto !important;
   }
 }
+
+.static-launcher__toasts { position: fixed; }
+.static-launcher__spinner { animation: static-launcher-spin .8s linear infinite; }
+@keyframes static-launcher-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .static-launcher__spinner { animation: none; }
+}

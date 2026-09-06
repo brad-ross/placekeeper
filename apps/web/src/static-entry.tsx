@@ -84,6 +84,7 @@ export function StaticLauncher(props: {
   const chooseButtonRef = useRef<HTMLButtonElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
   const operationRef = useRef<AbortController | undefined>(undefined);
+  const [openingSource, setOpeningSource] = useState<SourceControl>();
   const [phase, setPhase] = useState<OpeningPhase>("idle");
   const [error, setError] = useState<string>();
   const [remoteUrl, setRemoteUrl] = useState("");
@@ -103,6 +104,7 @@ export function StaticLauncher(props: {
     const controller = new AbortController();
     operationRef.current = controller;
     if (typeof source === "string") setRemoteUrl("");
+    setOpeningSource(control);
     setPhase("acquiring");
     setError(undefined);
     try {
@@ -136,7 +138,12 @@ export function StaticLauncher(props: {
     }
   };
 
-  return <main className="static-launcher">
+  return <main className="static-launcher" onKeyDown={(event) => {
+    if (event.key === "Escape" && pending) operationRef.current?.abort();
+  }}>
+    {error === undefined ? null : <div className="review-toast-stack static-launcher__toasts">
+      <aside className="review-toast review-toast--error" role="alert"><ReviewIcon name="alert" /><span>{error}</span></aside>
+    </div>}
     <section
       className="static-launcher__card compact-editorial-modal"
       onDragOver={(event) => event.preventDefault()}
@@ -175,18 +182,19 @@ export function StaticLauncher(props: {
         <button
           ref={chooseButtonRef}
           type="button"
-          title="Upload PDF"
+          title={pending && openingSource === "file" ? "Cancel opening" : "Upload PDF"}
           className="static-launcher__button"
-          disabled={pending}
-          onClick={() => inputRef.current?.click()}
+          disabled={pending && openingSource !== "file"}
+          onClick={() => pending ? operationRef.current?.abort() : inputRef.current?.click()}
         >
-          <ReviewIcon name="upload" size={14} />
+          <ReviewIcon name={pending && openingSource === "file" ? "loading" : "upload"} size={14} className={pending && openingSource === "file" ? "review-icon static-launcher__spinner" : "review-icon"} />
           Upload PDF
         </button>
         <div className="static-launcher__separator"><span>or</span></div>
         <form className="static-launcher__url" onSubmit={(event) => {
           event.preventDefault();
-          void open(remoteUrl.trim(), "url");
+          if (pending) operationRef.current?.abort();
+          else void open(remoteUrl.trim(), "url");
         }}>
           <div>
             <input
@@ -202,17 +210,13 @@ export function StaticLauncher(props: {
               disabled={pending}
               onChange={(event) => setRemoteUrl(event.currentTarget.value)}
             />
-            <button type="submit" title="Open PDF URL" disabled={pending || remoteUrl.trim() === ""}>
-              <ReviewIcon name="link" size={14} />
+            <button type="submit" title={pending && openingSource === "url" ? "Cancel opening" : "Open PDF URL"} disabled={pending ? openingSource !== "url" : remoteUrl.trim() === ""}>
+              <ReviewIcon name={pending && openingSource === "url" ? "loading" : "link"} size={14} className={pending && openingSource === "url" ? "review-icon static-launcher__spinner" : "review-icon"} />
               Open
             </button>
           </div>
         </form>
-        {pending ? <div className="static-launcher__progress">
-          <p role="status" aria-live="polite">{OPENING_STATUS[phase]}</p>
-          <button type="button" title="Cancel opening" onClick={() => operationRef.current?.abort()}>Cancel</button>
-        </div> : null}
-        {error === undefined ? null : <p className="static-launcher__error" role="alert" tabIndex={-1}>{error}</p>}
+        {pending ? <p className="sr-only" role="status" aria-live="polite">{OPENING_STATUS[phase]}</p> : null}
       </div>
     </section>
   </main>;
