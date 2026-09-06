@@ -144,3 +144,46 @@ for (const width of [1280, 620]) {
     await expect(more).toBeFocused();
   });
 }
+
+test('collapsed narrow workspace matches the bottom References rail backing and fade', async ({ page }) => {
+  const appearance = () => page.locator('[data-review-stage]').evaluate((stage) => {
+    const rail = stage.querySelector<HTMLElement>('[data-workspace-edge-rail="bottom"]')!;
+    const backing = stage.querySelector<HTMLElement>('.review-overlay-frame__bottom-backing')!;
+    const fade = stage.querySelector<HTMLElement>('.review-overlay-frame__bottom-fade')!;
+    const stageBox = stage.getBoundingClientRect();
+    const railBox = rail.getBoundingClientRect();
+    const backingStyle = getComputedStyle(backing);
+    const fadeStyle = getComputedStyle(fade);
+    return {
+      left: railBox.left - stageBox.left,
+      bottom: stageBox.bottom - railBox.bottom,
+      width: railBox.width,
+      height: railBox.height,
+      backingDisplay: backingStyle.display,
+      backingColor: backingStyle.backgroundColor,
+      backingHeight: backing.getBoundingClientRect().height,
+      fadeDisplay: fadeStyle.display,
+      fadeBackground: fadeStyle.backgroundImage,
+      fadeHeight: fade.getBoundingClientRect().height,
+    };
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout');
+  await expect(page.getByRole('button', { name: 'Show References', exact: true })).toBeVisible();
+  const reference = await appearance();
+  expect(reference.backingDisplay).toBe('block');
+  expect(reference.fadeDisplay).toBe('block');
+  expect(reference.fadeBackground).toContain('linear-gradient');
+  for (const width of [760, 620, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?visual=reading');
+    const close = page.getByRole('button', { name: 'Hide workspace', exact: true });
+    if (await close.isVisible()) await close.click();
+    const open = page.getByRole('button', { name: 'Show workspace', exact: true });
+    await expect(open).toHaveAttribute('data-workspace-edge-rail', 'bottom');
+    await expect.poll(appearance).toEqual(reference);
+    await open.click();
+    await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+    await expect.poll(appearance).toEqual(reference);
+  }
+});

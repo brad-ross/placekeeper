@@ -2199,9 +2199,9 @@ export function ReviewShell(props: ReviewShellProps) {
         data-bottom-surface-open={effectiveReferenceLayout.kind === 'wide-split'
           && effectiveReferenceLayout.bottomReferencesOpen ? 'true' : 'false'}
         data-right-rail-present={effectiveReferenceLayout.kind === 'narrow-unified' ? 'false' : 'true'}
-        data-bottom-rail-present={referencesAvailable && (
+        data-bottom-rail-present={(
           effectiveReferenceLayout.kind === 'narrow-unified'
-          || effectiveReferenceLayout.referenceDock === 'bottom'
+          || (referencesAvailable && effectiveReferenceLayout.referenceDock === 'bottom')
         ) ? 'true' : 'false'}
         data-right-overlay={overlayFrame.geometry.rightStart === null ? 'false' : 'true'}
         data-bottom-overlay={overlayFrame.geometry.bottomStart === null ? 'false' : 'true'}
