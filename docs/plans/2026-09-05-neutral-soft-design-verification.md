@@ -179,3 +179,37 @@ TypeScript, rebuilt viewer/host web bundles, Chrome manifest checks, and static 
 Pointer Back from a full annotation now focuses the annotation panel instead of an inner row control, releasing the row's focus-driven hover state. Keyboard Back still restores the Read full control (or its navigation fallback), and selection/scroll restoration remains intact. Search suppresses a sole suggestion whose query already exactly matches the trimmed search key. Search-result navigation preserves the workspace for both new destinations and repeated clicks on the current result.
 
 TypeScript and 167 focused unit/packaging tests passed. Chromium and WebKit each passed five row-interaction cases, two real-PDF search cases covering wide/narrow layouts, and nine reader restoration/editing cases. Shared, Mac, static, Chrome, and VS Code web assets were rebuilt; distribution validation passed. The in-app PDF preview was refreshed and its open Outline workspace restored.
+
+## PDF interaction marks — September 6
+
+Implemented the settled warm-note / cool-edit styles, attached-text underlines, replacement strikethrough, steady below-line insertion caret, sticky-note icon, and fill-preserving active outlines. Mark geometry and transient caret orientation follow all four page rotations. The native I-beam remains the text cursor, and proposed text stays in annotation detail.
+
+TypeScript and all 848 web/packaging unit tests passed. Seven new real-PDF cases passed in both Chromium and WebKit, covering all four rotations, zoom, attached-comment changes, hover/active appearance, insertion hit targets, replacement detail, and selection styling. Three existing insertion and repeated-click cases also passed in each engine. Shared, macOS, static, Chrome, and VS Code web assets were rebuilt, and distribution validation passed. The existing in-app PDF preview was refreshed.
+
+Visual review identified three expected baseline changes: the removed proxy focus circle and the previously approved narrow bottom fade. Their screenshots were inspected and updated. The narrow reader test now checks the already-approved pointer return to the annotation panel; keyboard return remains covered by the reader interaction suite.
+
+The final complete visual regression run passed all 49 cases. `git diff --check` passed.
+
+PDF mark polish: corrected the cursor boundary offset and centered adjacent glyph gaps; fixed the placement line at 1.25 screen pixels and removed its halo. Strengthened semantic fills, added hover darkening, and increased underline/strikethrough strokes to 2px. All 101 focused unit tests, TypeScript, and nine real-PDF cases in each of Chromium and WebKit passed. Inspected the rendered mark sheet, rebuilt all viewer distributions, and validated manifests.
+
+Stroke calibration: six overlay unit tests, TypeScript, and ten real-PDF cases per engine (Chromium and WebKit) passed. Browser assertions cover 50%, 100%, and 200% zoom, proportional stroke thickness, a 2px inset hover outline, and the underline at the mark bottom. Reviewed the 200% hover screenshot.
+
+Hover-border refinement passed ten browser cases per engine, including semantic border/underline color equality, 4px rounding, zero outside outline offset, and zoom scaling. Reviewed the 200% screenshot; rebuilt host assets and validated manifests.
+
+Rounded underline clipping and glyph-centered strikes passed TypeScript, seven geometry unit tests (including padded highlight bounds), and ten cases per browser engine. Four rotated real-PDF cases confirm that glyph positioning replaces the old 50% midpoint. Inspected the rendered PDF mark sheet and rebuilt/validated viewer distributions.
+
+Centered fills passed TypeScript and ten browser cases per engine, including rotated marks, proportional strokes, hover, and comment changes. Reviewed the rendered PDF, rebuilt host assets, and validated distribution manifests.
+
+Tight-ink centering and taller fills passed TypeScript, eight geometry unit tests, and twenty browser cases. Inspected the rendered result; rebuilt and validated host viewer bundles.
+
+Optical centering passed nine geometry unit tests and twenty browser cases. Inspected the actual user preview: the details replacement now shifts 1.24px at 124% zoom, matching the deletion center on that line; the heading highlight shifts upward relative to its prior position. Rebuilt and validated host bundles.
+
+Unified text-mark geometry passed TypeScript, ten unit tests, and twenty Chromium/WebKit cases. Comment-removal coverage explicitly asserts identical height and transform before/after. Viewer bundles were rebuilt and distribution manifests validated.
+
+Shared optical balance passed ten unit tests and ten Chromium cases. Geometry tests explicitly verify that the box adjustment leaves the strikethrough at the original text center at multiple zoom levels; comment-removal tests preserve box geometry. Rebuilt and validated viewer distributions.
+
+Popup persistence and stroke refinement passed TypeScript and 90 unit tests. Chromium and WebKit coverage checks resting/active underline thickness, thinner outlines, persistent clicked popups, hover-only action/page-number swapping, edit/cancel focus restoration, and Escape dismissal. Existing long-reader hover behavior also passes both engines. The visual suite passed 48 unchanged cases; the remaining popup snapshot was inspected and updated for the intentional removal of hover-preview actions, and its targeted rerun passed. All viewer bundles were rebuilt and distribution manifests validated.
+
+Corner, cursor, and popup-close refinements passed TypeScript, 51 layout unit tests, and 11 real-PDF tests each in Chromium and WebKit. Tests verify the new radius, pointer on marked text, text cursor on unmarked text, and absence of the popup close action. Viewer bundles rebuilt and distribution manifests validated.
+
+Brighter gold/red palette passed all 11 Chromium PDF-mark cases. Visually inspected the rendered PDF mark sheet, including gold highlight/comment and red deletion/replacement. Rebuilt viewer distributions and validated all manifests.

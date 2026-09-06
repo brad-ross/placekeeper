@@ -830,7 +830,7 @@ test('narrow Annotation Tray', async ({ page }) => {
   await expectScene(product, 'narrow-full-annotation-reader-imported.png');
 
   await page.locator('[data-full-annotation-action="back"]').click();
-  await expect(more).toBeFocused();
+  await expect(page.locator('#workspace-panel-annotations')).toBeFocused();
   await expect.poll(() => scrollViewport.evaluate((element) => element.scrollTop)).toBe(scrollBefore);
 });
 

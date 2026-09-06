@@ -357,3 +357,43 @@ VS Code editor commands enter the shared export and annotation workflows. Export
 Chrome's protected recovery and popup use the neutral dialog/button language, including destructive-action styling, keyboard traversal, narrow layouts, and enabled-switch hover contrast. The extension's document export uses the shared reviewed-PDF workflow. The static launcher uses matching hover states.
 
 The macOS toolbar centers the PDF title on measured native traffic-light geometry. Drag regions exclude all visible interactive controls and open menus, including portaled menus as they move or resize. Fullscreen uses independent web-toolbar geometry because AppKit retains offscreen native button frames. Native recovery and fatal-error sheets use standard AppKit controls, compact readable layout, and Return-key defaults.
+
+### PDF interaction marks — September 6
+
+The settled PDF mark palette uses warm ochre for notes and muted slate blue for text edits. A plain highlight has a translucent ochre fill; a highlight with a comment has a lighter warm fill and a fine underline indicating attached text. Deletion uses a slate strikethrough. Replacement combines a pale blue fill, a strikethrough through the original text, and an underline indicating attached replacement text. Proposed insertion and replacement text remain in the annotation detail. Insertion uses a small, steady slate caret below the text baseline. Page notes use a warm sticky-note icon.
+
+Active marks retain their semantic fill and gain a blue outline. Hover and keyboard focus preserve the same mark geometry. Transient text selection uses a stronger blue fill, and the mouse retains the native text cursor. Underlines, strikethroughs, and insertion carets rotate with the PDF baseline. Insertion hit areas accommodate the below-line symbol at every zoom without changing saved annotation geometry.
+
+The insertion placement cursor uses a thin, full-height slate-blue line with a gentle 1.2-second blink for visibility. It remains steady under reduced motion. Saved insertion annotations retain their below-line caret.
+
+PDF mark refinement: strengthen warm and cool fills, darken each semantic palette on hover/correspondence, and use 2px underlines and strikethroughs. The insertion placement line is 1.25 screen pixels wide with no halo, centered on its insertion boundary at every zoom. Exact adjacent glyph geometry centers the boundary in their gap.
+
+Stroke calibration supersedes the fixed 2px annotation lines: underlines and strikethroughs use 1.5 PDF units, scaling continuously with the page zoom. Filled strips preserve fractional pixel thickness. The underline ends at the highlight bottom edge; the 2px hover/active outline sits inside that same edge with no offset gap.
+
+Hover-border refinement: use the annotation’s underline ink for hover (including an active mark under the pointer), 4px rounded boxes, and a 2px outline immediately outside the box. Its bottom edge sits below the underline without a gap or overlap. Blue remains the active state when not hovered.
+
+Underline strips are clipped to the highlight’s rounded lower corners. Strikethrough position follows the vertical union of intersecting nonempty, nonspace PDF glyphs for each mark segment, rather than the highlight midpoint. Glyph measurements are cached per document/page and remain in PDF coordinates through zoom and rotation. When glyph geometry is unavailable, the anchor midpoint remains the fallback.
+
+Highlight and replacement fills now center vertically on their intersecting visible glyphs. Their existing height is preserved, distributing padding evenly above and below the text; the local-axis adjustment follows zoom and rotation. Replacement strikes remain at the glyph center after the box moves.
+
+Use PDFium tight glyph bounds (actual letter shapes) for visual centering, falling back to loose glyph bounds only when tight bounds are unavailable. Highlight/replacement boxes gain 1.5 PDF points on each side vertically while retaining their text center.
+
+Optical centering uses a glyph-width-weighted median of tight letter centers, so individual ascenders, descenders, and punctuation do not shift an entire passage. Fill and replacement strike share that center; deletion uses the same measure within its unchanged anchor.
+
+Unified geometry supersedes annotation-specific positioning: `text-mark-geometry.ts` owns text-center measurement and padded paint bounds for highlights (with or without comments), replacements, and deletions. All share the same center, height, and strikethrough position. Kind and comment content affect CSS appearance only. The plain-highlight optical offset is removed. Insertion carets and page notes retain their distinct point-based geometry.
+
+Shared optical balance: every text annotation box receives the same 0.75-PDF-point upward optical adjustment. Strikethrough position compensates within the box to remain at the measured glyph-body center. No annotation-specific positioning exception is used.
+
+Annotation interaction refinement: hover and selection outlines use 1.5px. Attached-text underlines share the same 1-PDF-point resting thickness and increase to 1.5 PDF points on hover or selection; strike thickness stays unchanged. With the workspace closed, clicking a mark keeps its detail popup open until dismissal or another selection. Hover previews have no editing actions. Selected popup actions appear over the page number when the popup is hovered or keyboard-focused, following the workspace card behavior. Editing and canceling restore popup focus, and Escape dismisses the selection without reopening the same hover preview.
+
+Annotation corners use 3px radii (2px for the small insertion focus box). Popups omit the close action and retain outside-click/Escape dismissal. Hovering a PDF annotation uses the standard pointer; unmarked PDF text retains its normal text cursor.
+
+Brighter annotation palette: highlights and page notes use yellow-gold (245/196/35), with gold attached-text underlines. Deletion and replacement ink uses red #c34f54; replacements add a light red fill (218/78/78 at 20%). Hover increases saturation/opacity with deeper red ink. Insertion carets retain their slate styling.
+
+Hover-only text/page-note outlines refined to 1.25px; active selection outlines retain 1.5px.
+
+Hover underline thickness is 1.25 PDF points, reduced from 1.5; resting remains 1 point and active selection without hover remains 1.5 points. Highlight comments and replacements use the same rule.
+
+Main-PDF annotation hover opens the popup immediately, with no opening timer. The 180ms dismissal grace period remains so the pointer can move into the popup.
+
+PDF-to-card correspondence shares direct card hover styling, including the background and page-number/action swap. Offscreen hover no longer displays a directional matching-annotation cue or scrolls the tray; explicit activation retains reveal-and-focus behavior.
