@@ -56,7 +56,14 @@ import {
   type SourceCursorLocation,
 } from "./rebuild-navigation.js";
 import { ReviewPanelController, type ReviewBinding } from "./review-panel-controller.js";
-import { buildReviewWebviewHtml, parseSharedAssetManifest, reviewPanelOptions } from "./review-panel.js";
+import {
+  RECOVERY_CHOICE_LABELS,
+  buildReviewPanelReattachmentHtml,
+  buildReviewWebviewHtml,
+  parseSharedAssetManifest,
+  recoveryDecisionForLabel,
+  reviewPanelOptions,
+} from "./review-panel.js";
 import { openSourceEditor, sourceLineNumber, sourceLineReveal } from "./source-navigation.js";
 import {
   VersionedWebviewBridge,
@@ -69,6 +76,7 @@ import {
 } from "./webview-bridge.js";
 
 const VIEW_COMMANDS = ["placekeeper.open", "placekeeper.viewPdf"] as const;
+const RECONNECT_REVIEW_MESSAGE = "Reopen this PDF in Placekeeper to reconnect its review.";
 const PANEL_TYPE = "placekeeper.review";
 const PANEL_BINDINGS_KEY = "placekeeper.panel-bindings.v1";
 const COMPATIBILITY_SETUP_KEY = "placekeeper.latex-workshop-setup.v1";
@@ -335,11 +343,12 @@ export function activate(context: vscode.ExtensionContext): void {
     requireOpenPanel();
     while (launched.ok && launched.kind === "recovery-offered") {
       const recoveryLaunch = launched;
-      const decision = await vscode.window.showQuickPick(recoveryLaunch.choices, {
-        title: "Recover Placekeeper draft",
-        placeHolder: "Resume, discard, or start an independent review",
+      const selectedRecovery = await vscode.window.showQuickPick(RECOVERY_CHOICE_LABELS, {
+        title: "Recover Placekeeper review",
+        placeHolder: "Choose how to continue this generated PDF review",
       });
-      if (decision !== "resume" && decision !== "discard" && decision !== "fork") throw new Error("Recovery was cancelled");
+      const decision = recoveryDecisionForLabel(selectedRecovery);
+      if (decision === undefined) throw new Error("Recovery was cancelled");
       launched = await attachStage("launch", () => runLaunchClient(executable, binding.outputPath, binding.sourceRoot, undefined, {
         decision,
         offer: recoveryLaunch.recoveryOffer,
@@ -587,10 +596,16 @@ export function activate(context: vscode.ExtensionContext): void {
       });
     }),
     vscode.commands.registerCommand("placekeeper.reattach", async () => {
-      if (activePanel === undefined) return;
+      if (activePanel === undefined) {
+        await vscode.window.showInformationMessage("Open a generated PDF in Placekeeper first.");
+        return;
+      }
       const runtime = runtimes.get(activePanel);
-      if (runtime === undefined) return;
-      await activePanel.webview.postMessage({
+      if (runtime === undefined) {
+        await vscode.window.showInformationMessage(RECONNECT_REVIEW_MESSAGE);
+        return;
+      }
+      const posted = await activePanel.webview.postMessage({
         protocol: REVIEW_RUNTIME_PROTOCOL,
         version: REVIEW_RUNTIME_VERSION,
         kind: "event",
@@ -598,12 +613,23 @@ export function activate(context: vscode.ExtensionContext): void {
         panelId: runtime.client.identity.panelId,
         payload: { command: "reattach" },
       });
+      if (!posted) await vscode.window.showInformationMessage(RECONNECT_REVIEW_MESSAGE);
     }),
     vscode.commands.registerCommand("placekeeper.exportReviewedPdf", async () => {
       const runtime = activePanel === undefined ? undefined : runtimes.get(activePanel);
-      if (runtime === undefined) return;
-      try { await runtime.client.invoke("exportReviewedCopy", {}, new AbortController().signal); }
-      catch { await vscode.window.showWarningMessage("Export is blocked until unresolved review work is reconciled."); }
+      if (runtime === undefined) {
+        await vscode.window.showInformationMessage("Open a generated PDF in Placekeeper first.");
+        return;
+      }
+      const posted = await activePanel!.webview.postMessage({
+        protocol: REVIEW_RUNTIME_PROTOCOL,
+        version: REVIEW_RUNTIME_VERSION,
+        kind: "event",
+        event: "host-command",
+        panelId: runtime.client.identity.panelId,
+        payload: { command: "export-reviewed-pdf" },
+      });
+      if (!posted) await vscode.window.showInformationMessage(RECONNECT_REVIEW_MESSAGE);
     }),
     vscode.commands.registerCommand("placekeeper.configureLatexWorkshop", async () => {
       if (!vscode.workspace.isTrusted) { await vscode.window.showWarningMessage("Trust this workspace before changing LaTeX Workshop settings."); return; }
@@ -682,7 +708,7 @@ export function activate(context: vscode.ExtensionContext): void {
       async deserializeWebviewPanel(panel, state) {
         const restored = await controller.restore(panel, state);
         if (restored.status === "retry") {
-          panel.webview.html = "<!doctype html><html><body><main><h1>Placekeeper review needs reattachment</h1><p>The saved output or service is unavailable.</p></main></body></html>";
+          panel.webview.html = buildReviewPanelReattachmentHtml();
         }
       },
     }),

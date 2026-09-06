@@ -15,6 +15,7 @@ test/fixtures/latex/*.pdf
 test/fixtures/latex/*.synctex.gz
 dist/
 apps/*/dist/
+apps/macos/.build/
 .local/
 scripts/pdf-symbol-catalog/generated/catalog.audit.json
 

@@ -25,32 +25,53 @@ final class RecoveryViewController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
         window.delegate = self
 
+        let content = NSView()
         let stack = NSStackView()
         stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = 16
-        stack.edgeInsets = NSEdgeInsets(top: 52, left: 52, bottom: 52, right: 52)
+        stack.alignment = .leading
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
         let title = NSTextField(labelWithString: "Protected review found")
-        title.font = .systemFont(ofSize: 22, weight: .medium)
+        title.font = .systemFont(ofSize: 17, weight: .semibold)
+        title.lineBreakMode = .byTruncatingTail
         stack.addArrangedSubview(title)
-        status.alignment = .center
+        status.textColor = .secondaryLabelColor
+        status.maximumNumberOfLines = 2
+        status.lineBreakMode = .byWordWrapping
         stack.addArrangedSubview(status)
 
         let actions = NSStackView()
         actions.orientation = .horizontal
-        actions.spacing = 10
+        actions.alignment = .centerY
+        actions.spacing = 8
+        let actionSpacer = NSView()
+        actionSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        actions.addArrangedSubview(actionSpacer)
         for (label, decision) in [
-            ("Resume", "resume"),
             ("Discard Changes", "discard"),
             ("Independent Review", "fork"),
+            ("Resume", "resume"),
         ] {
             let button = NSButton(title: label, target: self, action: #selector(choose(_:)))
             button.identifier = NSUserInterfaceItemIdentifier(decision)
+            button.bezelStyle = .rounded
+            button.controlSize = .large
+            if decision == "discard" { button.hasDestructiveAction = true }
+            if decision == "resume" { button.keyEquivalent = "\r" }
             buttons.append(button)
             actions.addArrangedSubview(button)
         }
         stack.addArrangedSubview(actions)
-        window.contentView = stack
+        content.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 28),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -28),
+            stack.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+            title.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            status.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            actions.widthAnchor.constraint(equalTo: stack.widthAnchor),
+        ])
+        window.contentView = content
         window.center()
     }
 

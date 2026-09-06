@@ -511,6 +511,8 @@ export function RuntimeProductionReviewApp(props: {
   const [loaded, setLoaded] = useState(props.initial);
   const [refreshStatus, setRefreshStatus] = useState<"idle" | "reconciling" | "failed">("idle");
   const [hostReattachRequestToken, setHostReattachRequestToken] = useState(0);
+  const hostExportSequenceRef = useRef(0);
+  const [hostExportRequest, setHostExportRequest] = useState<{ readonly token: number }>();
   const [hostForwardSyncTexRequest, setHostForwardSyncTexRequest] = useState<HostForwardSyncTexRequest>();
   const [hostReverseSyncTexRequestToken, setHostReverseSyncTexRequestToken] = useState(0);
   const transitionCoordinator = useRef(new AccessibilityTransitionCoordinator());
@@ -548,6 +550,10 @@ export function RuntimeProductionReviewApp(props: {
   useEffect(() => props.runtime?.subscribeHostCommands?.((command) => {
     if (command.command === "reattach") {
       setHostReattachRequestToken((token) => token + 1);
+      return;
+    }
+    if (command.command === "export-reviewed-pdf") {
+      setHostExportRequest({ token: ++hostExportSequenceRef.current });
       return;
     }
     if (command.command === "reverse-synctex") {
@@ -608,6 +614,12 @@ export function RuntimeProductionReviewApp(props: {
     {...(visible.canonicalLinkBase === undefined ? {} : { copyLinkBase: visible.canonicalLinkBase })}
     generationRefreshStatus={refreshStatus}
     hostReattachRequestToken={hostReattachRequestToken}
+    {...(hostExportRequest === undefined ? {} : {
+      hostExportRequestToken: hostExportRequest.token,
+      onHostExportRequestHandled: (token: number) => {
+        setHostExportRequest((current) => current?.token === token ? undefined : current);
+      },
+    })}
     hostReverseSyncTexRequestToken={hostReverseSyncTexRequestToken}
     {...(hostForwardSyncTexRequest === undefined ? {} : { hostForwardSyncTexRequest })}
     {...(props.runtime?.host === "vscode"

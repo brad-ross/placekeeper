@@ -65,6 +65,7 @@ describe("macOS native gate packaging policy", () => {
     expect(fallbackSource).toContain("onRetry()");
     expect(fallbackSource).toContain("onDiagnostics()");
     expect(fallbackSource).toContain("onClose(view.window)");
+    expect(fallbackSource).toContain('retryButton.keyEquivalent = "\\r"');
     expect(appSource).toContain('Shell: native-recovery');
     expect(appSource).not.toContain('informativeText = "Path:');
   });
@@ -82,6 +83,10 @@ describe("macOS native gate packaging policy", () => {
     expect(draggableTitlebar).toContain("window?.performDrag(with: event)");
     expect(draggableTitlebar.indexOf("activeElement?.blur")).toBeLessThan(draggableTitlebar.indexOf("performDrag"));
     expect(draggableTitlebar.indexOf("performZoom")).toBeLessThan(draggableTitlebar.indexOf("performDrag"));
+    const mouseDown = draggableTitlebar.slice(draggableTitlebar.indexOf("override func mouseDown"));
+    expect(mouseDown.match(/dismissWebTopBarMenus\(\)/gu)).toHaveLength(2);
+    expect(mouseDown.indexOf("dismissWebTopBarMenus()")).toBeLessThan(mouseDown.indexOf("performZoom"));
+    expect(mouseDown.lastIndexOf("dismissWebTopBarMenus()")).toBeGreaterThan(mouseDown.indexOf("performDrag"));
     expect(draggableTitlebar).not.toContain("override func hitTest");
   });
 
@@ -98,6 +103,14 @@ describe("macOS native gate packaging policy", () => {
     expect(windowSource).toContain('"trafficLightBounds": trafficLightBounds()');
     expect(alignment).toContain("y: button.frame.origin.y");
     expect(alignment).not.toContain("button.frame.height / 2");
+    const buttonGeometry = windowSource.slice(
+      windowSource.indexOf("private func trafficLightInset"),
+      windowSource.indexOf("private func alignTrafficLights"),
+    );
+    expect(buttonGeometry).toContain('guard !window.styleMask.contains(.fullScreen) else { return Double(Self.toolbarHorizontalMargin) }');
+    expect(buttonGeometry).toContain('guard let window, !window.styleMask.contains(.fullScreen) else { return [] }');
+    expect(windowSource).toContain('window?.toolbar?.isVisible = false');
+    expect(windowSource).toContain('window?.toolbar?.isVisible = true');
   });
 
   it("strips Node and dynamic-loader injection from child environments", () => {

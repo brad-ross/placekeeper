@@ -21,7 +21,18 @@ declare global {
   interface Window {
     webkit?: { readonly messageHandlers?: { readonly placekeeperShell?: { postMessage(value: unknown): void } } };
     __PLACEKEEPER_MAC_RECEIVE__?: (value: unknown) => void;
+    __PLACEKEEPER_MAC_DISMISS_TOP_BAR_MENUS__?: () => void;
   }
+}
+
+export function dismissMacosTopBarMenus(documentRef: Document = document): void {
+  const PointerEventType = documentRef.defaultView?.PointerEvent;
+  if (PointerEventType === undefined) return;
+  documentRef.dispatchEvent(new PointerEventType("pointerdown", {
+    bubbles: true,
+    cancelable: true,
+    pointerType: "mouse",
+  }));
 }
 
 export function parseMacosBootstrap(value: unknown): Extract<MacosNativeMessage, { readonly type: "bootstrap" }> | undefined {
@@ -121,6 +132,21 @@ export function measureMacosInteractiveBounds(elements: readonly HTMLElement[]):
     .filter(({ width, height }) => width > 0 && height > 0);
 }
 
+export const MACOS_TITLEBAR_INTERACTIVE_SELECTOR = [
+  "button",
+  "input",
+  "select",
+  "textarea",
+  "a[href]",
+  "summary",
+  "[contenteditable]:not([contenteditable='false'])",
+  "[role='button']",
+  "[role='link']",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+export const MACOS_TITLEBAR_POPUP_SELECTOR = ".document-actions__menu";
+
 function postToNative(value: MacosPageMessage): void {
   window.webkit?.messageHandlers?.placekeeperShell?.postMessage(value);
 }
@@ -205,10 +231,33 @@ export function MacosLoadingShell({
     let frame = 0;
     const chrome = shell.querySelector<HTMLElement>(".review-chrome");
     if (chrome === null) return;
+    let observedPopups = new Set<HTMLElement>();
+    const resize = new ResizeObserver(scheduleGeometry);
+    const popupMutations = new MutationObserver(scheduleGeometry);
+    const syncPopupObservers = (popups: readonly HTMLElement[]) => {
+      const nextPopups = new Set(popups);
+      for (const popup of observedPopups) {
+        if (!nextPopups.has(popup)) resize.unobserve(popup);
+      }
+      popupMutations.disconnect();
+      for (const popup of nextPopups) {
+        resize.observe(popup);
+        popupMutations.observe(popup, {
+          attributes: true,
+          attributeFilter: ["style", "data-placement"],
+        });
+      }
+      observedPopups = nextPopups;
+    };
     const measureGeometry = () => {
       const bounds = chrome.getBoundingClientRect();
+      const popups = [
+        ...shell.ownerDocument.querySelectorAll<HTMLElement>(MACOS_TITLEBAR_POPUP_SELECTOR),
+      ];
+      syncPopupObservers(popups);
       const interactive = measureMacosInteractiveBounds([
-        ...chrome.querySelectorAll<HTMLElement>("button,input,a,[role=button]"),
+        ...chrome.querySelectorAll<HTMLElement>(MACOS_TITLEBAR_INTERACTIVE_SELECTOR),
+        ...popups,
       ]);
       const chromeBounds = { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
       return { chromeBounds, interactive, signature: JSON.stringify([chromeBounds, interactive]) };
@@ -237,7 +286,7 @@ export function MacosLoadingShell({
         layoutRevision: revision.current,
       });
     }));
-    const scheduleGeometry = () => {
+    function scheduleGeometry() {
       if (frame !== 0) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
@@ -253,8 +302,7 @@ export function MacosLoadingShell({
           publishGeometry(settled);
         });
       });
-    };
-    const resize = new ResizeObserver(scheduleGeometry);
+    }
     resize.observe(shell);
     resize.observe(chrome);
     const mutations = new MutationObserver(scheduleGeometry);
@@ -264,6 +312,8 @@ export function MacosLoadingShell({
       if (frame !== 0) cancelAnimationFrame(frame);
       resize.disconnect();
       mutations.disconnect();
+      popupMutations.disconnect();
+      observedPopups.clear();
     };
   }, [geometryIdentity, trafficLightBounds]);
   const trafficLightTop = Math.min(...trafficLightBounds.map(({ y }) => y));
@@ -280,7 +330,6 @@ export function MacosLoadingShell({
         "--macos-titlebar-leading-inset": `${trafficLightInset}px`,
         ...(trafficLightCenterY === undefined ? {} : {
           "--macos-traffic-light-center-y": `${trafficLightCenterY}px`,
-          "--review-chrome-height": `${trafficLightCenterY * 2}px`,
         }),
         "--macos-titlebar-trailing-inset": `${trailingInset}px`,
       } as CSSProperties}
@@ -306,6 +355,7 @@ function start(): void {
   if (rootElement === null) throw new Error("Packaged macOS shell root is missing");
   rootElement.dataset.productionRoot = "true";
   const root = createRoot(rootElement);
+  window.__PLACEKEEPER_MAC_DISMISS_TOP_BAR_MENUS__ = () => dismissMacosTopBarMenus();
   let current: Extract<MacosNativeMessage, { readonly type: "bootstrap" }> | undefined;
   let runtime: HostRuntime | undefined;
   let nativeCommandInvocation: Extract<MacosNativeMessage, { readonly type: "invoke-command" }> | undefined;
@@ -373,7 +423,10 @@ function start(): void {
       render();
     }
   };
-  globalThis.addEventListener("pagehide", () => runtime?.dispose(), { once: true });
+  globalThis.addEventListener("pagehide", () => {
+    delete window.__PLACEKEEPER_MAC_DISMISS_TOP_BAR_MENUS__;
+    runtime?.dispose();
+  }, { once: true });
   render();
 }
 

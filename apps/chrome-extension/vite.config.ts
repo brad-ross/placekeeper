@@ -15,6 +15,13 @@ function manifestAsset(): Plugin {
         fileName: "manifest.json",
         source: readFileSync(resolve(root, "manifest.json"), "utf8"),
       });
+      for (const size of [16, 32, 48, 128]) {
+        this.emitFile({
+          type: "asset",
+          fileName: `icons/icon${size}.png`,
+          source: readFileSync(resolve(root, `assets/icon${size}.png`)),
+        });
+      }
     },
   };
 }

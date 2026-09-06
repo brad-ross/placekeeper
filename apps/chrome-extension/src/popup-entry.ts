@@ -9,6 +9,9 @@ function requiredElement<T extends Element>(selector: string): T {
 
 const control = requiredElement<HTMLButtonElement>("#automatic-open");
 const status = requiredElement<HTMLElement>("#status");
+const title = requiredElement<HTMLElement>("#title");
+let keyboardInteraction = false;
+document.addEventListener("keydown", () => { keyboardInteraction = true; });
 
 const ports = chromeAutoOpenPorts(chrome);
 let enabled = false;
@@ -31,7 +34,8 @@ async function refresh(): Promise<void> {
   render(state.enabled);
 }
 
-control.addEventListener("click", async () => {
+control.addEventListener("click", async (event) => {
+  const restoreKeyboardFocus = event.detail === 0;
   control.disabled = true;
   status.textContent = enabled ? "Pausing…" : "Enabling…";
   const nextEnabled = !enabled;
@@ -46,7 +50,7 @@ control.addEventListener("click", async () => {
     status.textContent = "Couldn’t update Chrome’s PDF setting. Try again.";
   } finally {
     control.disabled = false;
-    control.focus();
+    if (restoreKeyboardFocus) control.focus({ preventScroll: true });
   }
 });
 
@@ -57,5 +61,5 @@ void refresh()
   })
   .finally(() => {
     control.disabled = false;
-    control.focus();
+    if (!keyboardInteraction) title.focus({ preventScroll: true });
   });

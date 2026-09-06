@@ -6,6 +6,9 @@ repo_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
 master="$script_dir/Placekeeper.svg"
 renderer="$script_dir/render-svg.js"
 iconset="$script_dir/Placekeeper.iconset"
+chrome_icons="$repo_root/apps/chrome-extension/assets"
+
+mkdir -p "$chrome_icons"
 
 render() {
   /usr/bin/osascript -l JavaScript "$renderer" "$master" "$2" "$1" >/dev/null
@@ -21,6 +24,10 @@ render 256 "$iconset/icon_256x256.png"
 render 512 "$iconset/icon_256x256@2x.png"
 render 512 "$iconset/icon_512x512.png"
 render 1024 "$iconset/icon_512x512@2x.png"
+render 16 "$chrome_icons/icon16.png"
+render 32 "$chrome_icons/icon32.png"
+render 48 "$chrome_icons/icon48.png"
+render 128 "$chrome_icons/icon128.png"
 render 128 "$repo_root/apps/vscode/assets/placekeeper.png"
 
 cp "$master" "$repo_root/apps/vscode/assets/placekeeper.svg"

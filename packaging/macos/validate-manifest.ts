@@ -28,7 +28,7 @@ export const CATALOG_DISTRIBUTION_BASELINE = {
     report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
     thirdPartyNotices: "e93d61075ce6ff0452d9c841030d8a7125030182e324cd76ca7f640fcb244bdb",
   },
-  productionWebJavaScriptBytes: 2_552_094,
+  productionWebJavaScriptBytes: 2_584_913,
 } as const;
 
 const CATALOG_ATTRIBUTION_URLS = [
@@ -241,7 +241,15 @@ export const MAC_ICON_REPRESENTATIONS = [
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
-function pngPixelEvidence(bytes: Buffer, filename: string): { width: number; height: number } {
+interface PngPixelEvidence {
+  readonly width: number;
+  readonly height: number;
+  readonly contentBounds: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+  readonly solidBounds: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+  readonly artworkBounds: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+}
+
+function pngPixelEvidence(bytes: Buffer, filename: string): PngPixelEvidence {
   if (bytes.byteLength < 33 || !bytes.subarray(0, PNG_SIGNATURE.byteLength).equals(PNG_SIGNATURE)) {
     throw new Error(`Icon representation ${filename} must be a PNG file`);
   }
@@ -291,6 +299,18 @@ function pngPixelEvidence(bytes: Buffer, filename: string): { width: number; hei
   const current = Buffer.alloc(rowBytes);
   const visibleColors = new Set<string>();
   let hasVisiblePixel = false;
+  let minimumX = width;
+  let minimumY = height;
+  let maximumX = -1;
+  let maximumY = -1;
+  let solidMinimumX = width;
+  let solidMinimumY = height;
+  let solidMaximumX = -1;
+  let solidMaximumY = -1;
+  let artworkMinimumX = width;
+  let artworkMinimumY = height;
+  let artworkMaximumX = -1;
+  let artworkMaximumY = -1;
   for (let y = 0; y < height; y += 1) {
     const rowOffset = y * (rowBytes + 1);
     const filter = decoded[rowOffset]!;
@@ -320,6 +340,27 @@ function pngPixelEvidence(bytes: Buffer, filename: string): { width: number; hei
       const alpha = channels === 4 ? current[x + 3]! : 255;
       if (alpha === 0) continue;
       hasVisiblePixel = true;
+      const pixelX = x / channels;
+      minimumX = Math.min(minimumX, pixelX);
+      minimumY = Math.min(minimumY, y);
+      maximumX = Math.max(maximumX, pixelX);
+      maximumY = Math.max(maximumY, y);
+      if (alpha >= 240) {
+        solidMinimumX = Math.min(solidMinimumX, pixelX);
+        solidMinimumY = Math.min(solidMinimumY, y);
+        solidMaximumX = Math.max(solidMaximumX, pixelX);
+        solidMaximumY = Math.max(solidMaximumY, y);
+        if (
+          Math.abs(current[x]! - 237) > 5
+          || Math.abs(current[x + 1]! - 237) > 5
+          || Math.abs(current[x + 2]! - 237) > 5
+        ) {
+          artworkMinimumX = Math.min(artworkMinimumX, pixelX);
+          artworkMinimumY = Math.min(artworkMinimumY, y);
+          artworkMaximumX = Math.max(artworkMaximumX, pixelX);
+          artworkMaximumY = Math.max(artworkMaximumY, y);
+        }
+      }
       if (visibleColors.size < 2) {
         visibleColors.add(`${current[x]},${current[x + 1]},${current[x + 2]},${alpha}`);
       }
@@ -329,7 +370,48 @@ function pngPixelEvidence(bytes: Buffer, filename: string): { width: number; hei
   if (!hasVisiblePixel || visibleColors.size < 2) {
     throw new Error(`Icon representation ${filename} must have nonempty alpha and content bounds`);
   }
-  return { width, height };
+  if (solidMaximumX < solidMinimumX || solidMaximumY < solidMinimumY) {
+    throw new Error(`Icon representation ${filename} must have a solid app-tile contour`);
+  }
+  if (artworkMaximumX < artworkMinimumX || artworkMaximumY < artworkMinimumY) {
+    throw new Error(`Icon representation ${filename} must retain the soft-pages artwork`);
+  }
+  return {
+    width,
+    height,
+    contentBounds: {
+      x: minimumX,
+      y: minimumY,
+      width: maximumX - minimumX + 1,
+      height: maximumY - minimumY + 1,
+    },
+    solidBounds: {
+      x: solidMinimumX,
+      y: solidMinimumY,
+      width: solidMaximumX - solidMinimumX + 1,
+      height: solidMaximumY - solidMinimumY + 1,
+    },
+    artworkBounds: {
+      x: artworkMinimumX,
+      y: artworkMinimumY,
+      width: artworkMaximumX - artworkMinimumX + 1,
+      height: artworkMaximumY - artworkMinimumY + 1,
+    },
+  };
+}
+
+export function validateMacIconMaster(iconMaster: string): void {
+  const standardTile = /<rect\s+(?=[^>]*\bx="22")(?=[^>]*\by="22")(?=[^>]*\bwidth="176")(?=[^>]*\bheight="176")(?=[^>]*\brx="42")(?=[^>]*\bfill="#ededed")[^>]*\/?\s*>/u;
+  if (
+    !/<svg\b[^>]*\bviewBox="0 0 220 220"/u.test(iconMaster)
+    || !standardTile.test(iconMaster)
+    || !/<g\s+id="tile-shadow"\s+fill="#000000">[\s\S]*?<rect x="14" y="16" width="192" height="192" rx="48" opacity="0\.035" \/>/u.test(iconMaster)
+    || !iconMaster.includes('transform="translate(110 110) scale(0.78) translate(-110 -110) translate(-12.1647 1.5)"')
+    || !iconMaster.includes('stroke="#526d89"')
+    || !iconMaster.includes('fill="#b98960"')
+  ) {
+    throw new Error("The production icon master must retain the soft-pages mark on the standard 176-unit rounded tile and shadow");
+  }
 }
 
 export async function validateMacIconSet(iconsetPath: string): Promise<Array<[string, number]>> {
@@ -339,9 +421,49 @@ export async function validateMacIconSet(iconsetPath: string): Promise<Array<[st
     throw new Error(`Placekeeper iconset filenames must be exactly: ${expected.join(", ")}`);
   }
   for (const [filename, expectedPixels] of MAC_ICON_REPRESENTATIONS) {
-    const { width, height } = pngPixelEvidence(await readFile(resolve(iconsetPath, filename)), filename);
+    const { width, height, contentBounds, solidBounds, artworkBounds } = pngPixelEvidence(await readFile(resolve(iconsetPath, filename)), filename);
     if (width !== expectedPixels || height !== expectedPixels) {
       throw new Error(`Icon representation ${filename} dimensions must be ${expectedPixels}x${expectedPixels}`);
+    }
+    const minimumContentPixels = Math.floor(expectedPixels * 0.84);
+    const maximumContentPixels = Math.ceil(expectedPixels * 0.94);
+    const minimumSolidPixels = Math.floor(expectedPixels * 0.77);
+    const maximumSolidPixels = Math.ceil(expectedPixels * 0.83);
+    const centerTolerance = Math.max(1, Math.ceil(expectedPixels * 0.025));
+    const contentCenterX = contentBounds.x + contentBounds.width / 2;
+    const contentCenterY = contentBounds.y + contentBounds.height / 2;
+    const solidCenterX = solidBounds.x + solidBounds.width / 2;
+    const solidCenterY = solidBounds.y + solidBounds.height / 2;
+    const artworkCenterX = artworkBounds.x + artworkBounds.width / 2;
+    const artworkCenterY = artworkBounds.y + artworkBounds.height / 2;
+    const minimumArtworkWidth = Math.floor(solidBounds.width * 0.66);
+    const maximumArtworkWidth = Math.ceil(solidBounds.width * 0.76);
+    const minimumArtworkHeight = Math.floor(solidBounds.height * 0.66);
+    const maximumArtworkHeight = Math.ceil(solidBounds.height * 0.76);
+    if (
+      expectedPixels > 32
+      && (
+        contentBounds.width < minimumContentPixels
+        || contentBounds.width > maximumContentPixels
+        || contentBounds.height < minimumContentPixels
+        || contentBounds.height > maximumContentPixels
+        || solidBounds.width < minimumSolidPixels
+        || solidBounds.width > maximumSolidPixels
+        || solidBounds.height < minimumSolidPixels
+        || solidBounds.height > maximumSolidPixels
+        || Math.abs(contentCenterX - width / 2) > centerTolerance
+        || Math.abs(contentCenterY - height / 2) > centerTolerance
+        || Math.abs(solidCenterX - width / 2) > centerTolerance
+        || Math.abs(solidCenterY - height / 2) > centerTolerance
+        || artworkBounds.width < minimumArtworkWidth
+        || artworkBounds.width > maximumArtworkWidth
+        || artworkBounds.height < minimumArtworkHeight
+        || artworkBounds.height > maximumArtworkHeight
+        || Math.abs(artworkCenterX - width / 2) > centerTolerance
+        || Math.abs(artworkCenterY - height / 2) > centerTolerance
+      )
+    ) {
+      throw new Error(`Icon representation ${filename} must use the centered standard macOS tile with comfortable soft-pages margins`);
     }
   }
   return MAC_ICON_REPRESENTATIONS.map(([filename, pixels]) => [filename, pixels]);
@@ -700,7 +822,7 @@ export async function validateCodexPlugin(pluginRoot: string): Promise<void> {
     readFile(resolve(pluginRoot, "assets/placekeeper.svg"), "utf8"),
     readFile(resolve(pluginRoot, `skills/${CODEX_SKILL_NAME}/assets/placekeeper.svg`), "utf8"),
   ]);
-  if (pluginIcon !== skillIcon || !pluginIcon.includes("B — Soft pages")) {
+  if (pluginIcon !== skillIcon || !pluginIcon.includes("Placekeeper — Soft pages")) {
     throw new Error("The packaged Placekeeper plugin and skill icons must match the app artwork");
   }
   validatePluginIdentity(record(JSON.parse(pluginSource) as unknown, "Codex plugin manifest"));
@@ -716,10 +838,12 @@ async function validateVscodeIdentity(
   iconMaster: string,
   iconPng: Buffer,
 ): Promise<void> {
-  const [manifestSource, commandIcon, extensionIcon] = await Promise.all([
+  const [manifestSource, commandIcon, extensionIcon, lightCommandIcon, darkCommandIcon] = await Promise.all([
     readFile(resolve(extensionRoot, "package.json"), "utf8"),
     readFile(resolve(extensionRoot, "assets/placekeeper.svg"), "utf8"),
     readFile(resolve(extensionRoot, "assets/placekeeper.png")),
+    readFile(resolve(extensionRoot, "assets/placekeeper-light.svg"), "utf8"),
+    readFile(resolve(extensionRoot, "assets/placekeeper-dark.svg"), "utf8"),
   ]);
   const manifest = record(JSON.parse(manifestSource) as unknown, "VS Code extension manifest");
   const contributes = record(manifest.contributes, "VS Code extension contributions");
@@ -745,12 +869,15 @@ async function validateVscodeIdentity(
   if (
     manifest.publisher !== "placekeeper-local" ||
     manifest.icon !== "assets/placekeeper.png" ||
-    commandIconPaths.light !== "assets/placekeeper.svg" ||
-    commandIconPaths.dark !== "assets/placekeeper.svg" ||
+    commandIconPaths.light !== "assets/placekeeper-light.svg" ||
+    commandIconPaths.dark !== "assets/placekeeper-dark.svg" ||
+    !lightCommandIcon.includes('viewBox="0 0 16 16"') ||
+    !darkCommandIcon.includes('viewBox="0 0 16 16"') ||
+    lightCommandIcon === darkCommandIcon ||
     commandIcon !== iconMaster ||
     !extensionIcon.equals(iconPng)
   ) {
-    throw new Error("The Placekeeper VS Code extension must use the canonical app icon resources");
+    throw new Error("The Placekeeper VS Code extension must retain canonical app artwork and theme-specific 16px command icons");
   }
 }
 
@@ -839,9 +966,7 @@ export async function validateDistributionManifests(
   const backend = validateBackendRuntimeManifest(JSON.parse(await readFile(resolve(repoRoot, "packaging/macos/backend-runtime-manifest.json"), "utf8")) as unknown);
   if (app.nodeVersion !== backend.nodeVersion) throw new Error("App and backend Node versions differ");
   const iconMaster = await readFile(resolve(repoRoot, app.icon.master), "utf8");
-  if (!iconMaster.includes("<svg") || /<rect[^>]+width="220"[^>]+rx=/u.test(iconMaster)) {
-    throw new Error("The production icon master must be an SVG without a pre-masked system corner");
-  }
+  validateMacIconMaster(iconMaster);
   await validateMacIconSet(resolve(repoRoot, app.icon.source));
   await validateVscodeIdentity(
     resolve(repoRoot, app.embeddedArtifacts.vscodeExtension),

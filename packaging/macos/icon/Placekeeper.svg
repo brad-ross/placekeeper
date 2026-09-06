@@ -1,8 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 220 220" role="img" aria-labelledby="title desc">
-  <title id="title">B — Soft pages</title>
-  <desc id="desc">Two closely tucked soft pages. The back page is raised slightly and extends diagonally behind the front sheet, with its upper and lower corners concealed. A muted blue path visits an amber dot and returns to the front page.</desc>
-  <rect width="220" height="220" fill="#ededed" />
-  <g transform="translate(-12.1647 1.5)">
+  <title id="title">Placekeeper — Soft pages</title>
+  <desc id="desc">Two closely tucked soft pages on a standard rounded macOS app-icon tile. The back page is raised slightly and extends diagonally behind the front sheet, with its upper and lower corners concealed. A muted blue path visits an amber dot and returns to the front page.</desc>
+  <g id="tile-shadow" fill="#000000">
+    <rect x="14" y="16" width="192" height="192" rx="48" opacity="0.035" />
+    <rect x="18" y="19" width="184" height="184" rx="45" opacity="0.06" />
+    <rect x="21" y="22" width="178" height="178" rx="43" opacity="0.09" />
+  </g>
+  <rect x="22" y="22" width="176" height="176" rx="42" fill="#ededed" />
+  <g transform="translate(110 110) scale(0.78) translate(-110 -110) translate(-12.1647 1.5)">
     <rect x="76" y="54" width="101" height="134" rx="22" fill="#d6d6d6" stroke="none" stroke-width="2" transform="translate(12 -10) rotate(27 126.5 110)" />
     <rect x="43" y="36" width="118" height="151" rx="23" fill="#dedede" stroke="none" stroke-width="2" /><rect x="43" y="34" width="118" height="151" rx="23" fill="#fcfcfc" stroke="none" stroke-width="2" />
     <path d="M68 73H127M68 96H114M68 149H125" fill="none" stroke="#a0a0a0" stroke-linecap="round" stroke-width="3.5" />

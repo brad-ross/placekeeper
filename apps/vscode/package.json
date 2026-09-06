@@ -32,16 +32,16 @@
         "command": "placekeeper.open",
         "title": "Placekeeper: Open Local PDF",
         "icon": {
-          "light": "assets/placekeeper.svg",
-          "dark": "assets/placekeeper.svg"
+          "light": "assets/placekeeper-light.svg",
+          "dark": "assets/placekeeper-dark.svg"
         }
       },
       {
         "command": "placekeeper.viewPdf",
         "title": "Placekeeper: View PDF",
         "icon": {
-          "light": "assets/placekeeper.svg",
-          "dark": "assets/placekeeper.svg"
+          "light": "assets/placekeeper-light.svg",
+          "dark": "assets/placekeeper-dark.svg"
         }
       },
       {

@@ -20,6 +20,7 @@ import {
   validateCatalogThirdPartyNotices,
   validateCodexPlugin,
   validateDistributionManifests,
+  validateMacIconMaster,
   validateMacIconSet,
   validateSharedWebDistribution,
 } from "./validate-manifest.js";
@@ -184,6 +185,12 @@ describe("macOS distribution manifests", () => {
   );
 
   it("validates the complete Placekeeper iconset before packaging", async () => {
+    const master = await readFile(resolve("packaging/macos/icon/Placekeeper.svg"), "utf8");
+    expect(() => validateMacIconMaster(master)).not.toThrow();
+    expect(() => validateMacIconMaster(master.replace('x="22"', 'x="0"')))
+      .toThrow(/standard 176-unit rounded tile/u);
+    expect(() => validateMacIconMaster(master.replace('scale(0.78)', 'scale(0.9)')))
+      .toThrow(/standard 176-unit rounded tile/u);
     const iconset = resolve("packaging/macos/icon/Placekeeper.iconset");
     await expect(validateMacIconSet(iconset)).resolves.toEqual([
       ["icon_16x16.png", 16],
@@ -264,7 +271,7 @@ describe("macOS distribution manifests", () => {
         report: "84bda58674d8174a0a94bbaed846ce23628cbf62fcab018cef14b182d38db797",
         thirdPartyNotices: "e93d61075ce6ff0452d9c841030d8a7125030182e324cd76ca7f640fcb244bdb",
       },
-      productionWebJavaScriptBytes: 2_552_094,
+      productionWebJavaScriptBytes: 2_584_913,
     });
 
     const root = await mkdtemp(resolve(tmpdir(), "placekeeper-catalog-baseline-"));
@@ -451,8 +458,8 @@ describe("macOS distribution manifests", () => {
           expect.objectContaining({
             command: "placekeeper.open",
             icon: {
-              light: "assets/placekeeper.svg",
-              dark: "assets/placekeeper.svg",
+              light: "assets/placekeeper-light.svg",
+              dark: "assets/placekeeper-dark.svg",
             },
           }),
           expect.objectContaining({ command: "placekeeper.forwardSyncTex" }),

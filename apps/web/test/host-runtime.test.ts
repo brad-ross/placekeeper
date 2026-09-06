@@ -801,7 +801,7 @@ describe("host-neutral review runtime", () => {
     runtime.dispose();
   });
 
-  it("accepts a bounded VS Code reattach event for its exact panel only", () => {
+  it("accepts only bounded VS Code host commands for its exact panel", () => {
     const listeners = new Set<(message: unknown) => void>();
     const runtime = createRpcHostRuntime({
       panelId: "panel_identifier_1234",
@@ -839,6 +839,22 @@ describe("host-neutral review runtime", () => {
       panelId: "panel_identifier_1234",
       payload: { command: "reattach" },
     });
+    publish({
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
+      kind: "event",
+      event: "host-command",
+      panelId: "panel_identifier_1234",
+      payload: { command: "export-reviewed-pdf", path: "/Users/reader/reviewed.pdf" },
+    });
+    publish({
+      protocol: REVIEW_RUNTIME_PROTOCOL,
+      version: REVIEW_RUNTIME_VERSION,
+      kind: "event",
+      event: "host-command",
+      panelId: "panel_identifier_1234",
+      payload: { command: "export-reviewed-pdf" },
+    });
 
     publish({
       protocol: REVIEW_RUNTIME_PROTOCOL,
@@ -875,6 +891,7 @@ describe("host-neutral review runtime", () => {
 
     expect(commands).toEqual([
       { command: "reattach" },
+      { command: "export-reviewed-pdf" },
       { command: "forward-synctex", documentGeneration: 4, pageIndex: 2, point: { x: 72, y: 144 } },
       { command: "reverse-synctex" },
     ]);

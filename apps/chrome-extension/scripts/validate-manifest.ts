@@ -13,6 +13,8 @@ interface Manifest {
   readonly content_security_policy?: unknown;
   readonly host_permissions?: unknown;
   readonly mime_types_handler?: unknown;
+  readonly icons?: unknown;
+  readonly action?: { readonly default_icon?: unknown };
 }
 
 function validate(manifest: Manifest, label: string): void {
@@ -35,6 +37,12 @@ function validate(manifest: Manifest, label: string): void {
     typeof handler !== "object" || handler === null || Array.isArray(handler) ||
     JSON.stringify(handler) !== JSON.stringify({ "application/pdf": { handler_url: "handler.html" } })
   ) throw new Error(`${label}: expected top-level PDF-only MIME handler`);
+  if (JSON.stringify(manifest.icons) !== JSON.stringify({
+    "16": "icons/icon16.png", "32": "icons/icon32.png",
+    "48": "icons/icon48.png", "128": "icons/icon128.png",
+  }) || JSON.stringify(manifest.action?.default_icon) !== JSON.stringify({
+    "16": "icons/icon16.png", "32": "icons/icon32.png",
+  })) throw new Error(`${label}: Placekeeper extension and toolbar icons are missing`);
 }
 
 for (const [label, path] of [
@@ -42,6 +50,18 @@ for (const [label, path] of [
   ["built manifest", resolve(root, "dist/manifest.json")],
 ] as const) {
   validate(JSON.parse(await readFile(path, "utf8")) as Manifest, label);
+}
+
+for (const size of [16, 32, 48, 128]) {
+  const [source, built] = await Promise.all([
+    readFile(resolve(root, `assets/icon${size}.png`)),
+    readFile(resolve(root, `dist/icons/icon${size}.png`)),
+  ]);
+  if (!source.equals(built) || built.length < 24 ||
+    !built.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
+    built.readUInt32BE(16) !== size || built.readUInt32BE(20) !== size) {
+    throw new Error(`built extension: invalid Placekeeper ${size}px icon`);
+  }
 }
 
 const sharedRoot = resolve(root, "dist/shared");

@@ -1,8 +1,12 @@
+import { readFileSync } from "node:fs";
+
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
   MacosLoadingShell,
+  MACOS_TITLEBAR_INTERACTIVE_SELECTOR,
+  MACOS_TITLEBAR_POPUP_SELECTOR,
   deriveMacosDragRegions,
   macosCommandInvocationForSnapshot,
   measureMacosInteractiveBounds,
@@ -88,7 +92,54 @@ describe("packaged macOS shell entry", () => {
       ]}
     />);
     expect(html).toContain("--macos-traffic-light-center-y:27px");
-    expect(html).toContain("--review-chrome-height:54px");
+    const layoutCss = readFileSync(new URL("../src/app/review-layout-foundation.css", import.meta.url), "utf8");
+    expect(layoutCss).toMatch(/\[data-launch-surface="macos"\] \.review-chrome\s*\{[^}]*--review-chrome-height:\s*calc\(var\(--macos-traffic-light-center-y, 25px\) \* 2\)/u);
+  });
+
+  it("keeps every focusable titlebar control out of native drag overlays", () => {
+    for (const selector of [
+      "button",
+      "input",
+      "select",
+      "textarea",
+      "a[href]",
+      "summary",
+      "[contenteditable]:not([contenteditable='false'])",
+      "[role='button']",
+      "[role='link']",
+      "[tabindex]:not([tabindex='-1'])",
+    ]) expect(MACOS_TITLEBAR_INTERACTIVE_SELECTOR.split(",")).toContain(selector);
+    expect(MACOS_TITLEBAR_POPUP_SELECTOR).toBe(".document-actions__menu");
+  });
+
+  it("never overlaps controls or the portion of an open menu inside the draggable band", () => {
+    const blocked = [
+      { x: 86, y: 11, width: 220, height: 32 },
+      { x: 900, y: 11, width: 260, height: 32 },
+      { x: 850, y: 48, width: 180, height: 120 },
+    ];
+    const { regions } = deriveMacosDragRegions({
+      layoutRevision: 9,
+      geometryIdentity: "geometry_12345678",
+      chromeBounds: { x: 0, y: 0, width: 1200, height: 54 },
+      trafficLightBounds: [
+        { x: 16, y: 20, width: 14, height: 14 },
+        { x: 36, y: 20, width: 14, height: 14 },
+        { x: 56, y: 20, width: 14, height: 14 },
+      ],
+      interactiveBounds: blocked,
+    });
+    const overlaps = (first: typeof blocked[number], second: typeof blocked[number]) => (
+      first.x < second.x + second.width && first.x + first.width > second.x
+      && first.y < second.y + second.height && first.y + first.height > second.y
+    );
+    expect(regions.some((region) => (
+      region.x <= 500 && region.x + region.width > 500
+      && region.y <= 27 && region.y + region.height > 27
+    ))).toBe(true);
+    for (const region of regions) {
+      for (const blocker of blocked) expect(overlaps(region, blocker)).toBe(false);
+    }
   });
 
   it("ignores inert sizing controls when measuring native drag blockers", () => {
