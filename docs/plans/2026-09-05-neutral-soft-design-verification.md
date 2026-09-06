@@ -1,6 +1,6 @@
 # Neutral Soft Design Verification
 
-Status: implementation complete; automated verification passed on September 5, 2026. Platform-specific release checks are listed below.
+Status: the September 5 completion claim was premature. The September 6 audit below records the subsequent corrections against the rendered canonical mockup. Platform-specific release checks remain listed below.
 
 This note records the automated evidence for the neutral soft design contract and the platform checks that still require a real operating-system session. The acceptance coverage measures rendered geometry and focus in the browser; it does not treat the illustrative HTML reference as product evidence.
 
@@ -30,9 +30,9 @@ The enlarged-text automation is a deterministic 20 px user-style simulation. It 
 
 The automated classic-scrollbar case validates an actual 20 px Chromium vertical track. The macOS headless runtime retains an overlay horizontal scrollbar, and WebKit does not expose a deterministic forced-classic metric in this setup. Before release, enable always-visible scrollbars in a real macOS session and repeat on a Windows session. Confirm both main scrollbar tracks remain usable, neither tray covers a thumb, the common left/right/bottom outside inset expands when either track exceeds 12 px, workspace content stays symmetric, and header actions retain an unclipped focus ring.
 
-The real-PDF Fit Width flow runs in Chromium because the production host fixture is configured there. A manual second-engine check should activate Fit Width after opening and resizing both References and Annotations, then confirm the current page remains wholly inside the usable PDF area with both edge margins visible.
+The original real-PDF Fit Width flow ran in Chromium. The September 6 production audit also exercises WebKit; the final results below distinguish automated engine coverage from the remaining native platform checks.
 
-## Final integration evidence
+## Historical September 5 integration evidence
 
 - Full web unit suite: 59 files, 785 tests passed after the final source changes.
 - Chromium and WebKit workflow coverage passed, including reader position preservation, editor focus/IME, direct page/zoom validation, draft retention, and responsive geometry. Newly added geometry cases and the corrected selector/gating cases passed their focused reruns.
@@ -43,4 +43,139 @@ The real-PDF Fit Width flow runs in Chromium because the production host fixture
 - The selected B icon is synchronized across the macOS master/iconset, VS Code, and Codex plugin assets. ICNS compilation and reverse expansion validate representations from 16 through 1024 px.
 - Native macOS application sources compiled. Native unit tests could not run because the installed command-line toolchain lacks XCTest. The installed Finder/Dock appearance was not manually checked.
 
-All plan implementation work is complete. The operating-system checks above are release validation limits, not unimplemented interface features. The implementation is organized into separate commits for icon assets, host styling, the shared review interface with its tests, and this completion record.
+These are historical results. The subsequent audits below supersede the original interface-completion claim.
+
+
+## September 6 correction audit
+
+The earlier verification missed inherited CSS overrides and interaction states. This pass compared rendered mockup controls with product controls, inspected real-PDF screenshots, and measured computed styles and geometry.
+
+| Requested correction | Verified behavior |
+| --- | --- |
+| 1. Agent status position | Filename then agent indicator, both left aligned with the shared 8px toolbar gap. |
+| 2. Page and zoom spacing | The complete numeric controls, including their buttons, use canonical widths, padding, and 8px group spacing. |
+| 3. Numeric-control hover and focus | The whole numeric group fills only on hover. An open dropdown alone adds no fill; keyboard focus outlines the individual button. A second opener click closes the dropdown. Pointer opening retains opener focus; keyboard opening focuses the first menu control. |
+| 4. Workspace interiors | Neutral gray trays, transparent resting rows, and white current rows follow the mockup. Shared empty tool shells remain transparent so they cannot cover References. |
+| 5. Link tooltip | Pointer opening a link menu does not create a tooltip; actual hover and keyboard focus do. |
+| 6. Reference action insets | Bottom split rows use equal 5px top, bottom, and right insets; horizontal rows use equal 3px insets. |
+| 7. Search field | Borderless 36px field, canonical focus treatment, fixed 28px clear button with equal 4px insets. Result spacing, typography, and match fills also follow the mockup. |
+| 8. Return to reference | The return action sits inside the reference row. Completing the return preserves destination focus. |
+| 9. PDF selection visibility | Main and Reference selections retain the visible blue PDF overlay independently of neutral workspace selection colors. |
+| 10. Filename button | Normalized product and canonical captures are pixel-identical, including 32px height, 7px gap, 6px/8px padding, 13px/15.6px text, radius, and ellipsis. |
+| 11. Header alignment | Mode controls align left; Outline collapse and dock actions align right. The bottom dock control ends one 12px gap before the reference viewer. |
+| 12. Reference viewer margins | One 12px inset at each outer viewer edge, including wide split and narrow unified layouts. Removed nested duplicate margins. |
+| Outline design | Canonical indentation, disclosure controls, regular text, inline page numbers, wrapping, row fills, subtle current-row shadow, and control-level keyboard focus. Touch controls remain at least 44px. |
+| Save destination dialog | Canonical 414px dialog, 23px content inset, 41.5px radio rows, 36px filename input, and 32px text actions. Normal, recovery, pending, and narrow states checked in both engines. |
+
+The audit also corrected loading-reference cancellation during workspace reveal, prevents rehosting a still-loading viewer through the dock action, and prevents a removed return button from stealing focus back from the PDF.
+
+Validation for this correction pass: 786 web unit tests; 67 Chromium workflow tests; 13 targeted WebKit toolbar/workflow tests; six real-PDF regression scenarios in each engine; seven Outline/save-dialog visual and interaction tests; focused save-dialog checks in Chromium and WebKit; production search/reference-chain, reference return, narrow keyboard order, and coarse-pointer checks. TypeScript and the production web build pass. The historical full-suite counts above describe the earlier integration run and are not claimed as a new complete release run.
+
+
+## Exhaustive rendered-mockup audit, September 6
+
+The source of truth is the final rendered canonical iframe in `docs/plans/assets/neutral-soft-design/index.html`. Early CSS declarations in the artifact are overridden later; measurements use the final computed style. Each of its 14 scenes was captured and inspected. Product PDF page sizes and document text remain real document data; the illustrative paper is not a prescribed PDF layout.
+
+| Canonical scene | Product surface and checked details |
+| --- | --- |
+| Reading | Filename, agent status, page and zoom inputs, popovers, copy link, tooltips; resting, hover, disabled, pointer-open, keyboard-open, Escape and second-click behavior. |
+| Annotations | Transparent resting rows, white current rows with the subtle canonical shadow, hover/focus fills, 9/12/11px content padding, 13px text, inline page numbers, 26px actions in edit/copy/remove order with zero padding, comments and their quoted source. |
+| Full annotation | Whole-row three-line truncation with ellipsis opens the full reader; 12px metadata, read-only provenance, 32px actions, 13px/1.6 full text, paragraph spacing, independently scrolling text and preserved return position. |
+| Outline | Indentation, disclosures, regular-weight text, page labels, current and hover fills, row controls, focus outlines, unavailable and long branches. |
+| Search | Borderless input, clear action, result typography, padding, match fill, current result and shared tray geometry. |
+| Text selection | Five-pixel palette inset, two-pixel action gaps, 32px controls, border, radius, shadow and keyboard focus; visible PDF selection retained. |
+| Passage editor | 340px surface, 12px padding, 16px radius, canonical shadow, 32px header, 12px metadata, 14px/1.65 input, 94px minimum input height and 30px text actions. Add and edit flows share this surface. |
+| Editor offscreen | Inline page cue in the header, labeled 32px-high Back to passage action above the field, 16px icon, canonical text styling, preserved draft and explicit return behavior. |
+| Annotation peek | 340px surface, 16px radius, one border, shared annotation row content/actions, comment and quoted source, full-text access. |
+| Split references | Current-tab fill/shadow, regular typography, muted 26px actions, canonical insets, row-level return action, one 12px viewer margin and coordinated tools. |
+| Reference link | Popover dimensions, action styling, actual hover versus pointer opening, nested reference navigation and focus restoration. |
+| Save setup | 414px dialog, 23px inset, radio rows, filename field, hover state, action typography and pending state. |
+| Save failure | Canonical inline pale-red notice, Retry and Save a copy actions; pending, failed retry and successful recovery exercised against production UI. |
+| Narrow editor | Adaptive passage placement, viewport containment, unchanged draft and focus, compact actions; narrow Page Notes and modal overlap checked separately. |
+
+Product states absent from the illustrative scenes use the same shared design rules: imported/read-only annotations, empty/loading/error trays, generated-document export menus, reattachment, symbol suggestions, terminal recovery and the browser PDF launcher. Their behavior remains covered by workflow and production checks. Coarse-pointer controls preserve 44px targets and reduced-motion settings suppress movement.
+
+`test/acceptance/neutral-design-conformance.spec.ts` compares rendered product components directly with the rendered approved artifact. It checks typography, padding, radius, colors, shadows, control sizes and interaction states; it does not merely compare the application with its own regenerated screenshots. Visual baselines were updated only after inspecting the changed product captures.
+
+The final audit also corrected production defects found while exercising the design: same-page layout settling no longer resets a moved keyboard Page Note cursor; Reference return restores focus to its original target page after reflow; editing an overflowing annotation opened from a peek resumes the full reader; and the editor restores its intended width after a desktop–narrow–desktop resize instead of reusing its previously clamped width. Each correction has an actual production-PDF regression check. Initial Fit Width is converted to its settled numeric zoom after location restoration, so a delayed automatic resize cannot change the main PDF scale when References opens.
+
+Current validation:
+
+The scroll audit also found that WebKit retained obsolete horizontal overflow after the tray runway closed. The adapter now invalidates that stale overflow after the closed geometry settles. Manual pan coordinates survive temporary clamps, but explicit page/search/annotation navigation and zoom changes supersede them; pending captures reset on document replacement, and scrolling updates the remembered position through its final settled offset.
+
+Fit Width now waits for the current asynchronous runway operation as well as the visible tray geometry. Its own zoom notification does not invalidate that settlement. Native scroll changes supersede stale passive restores, while the framing hook distinguishes its own automatic scrolling from user movement. The three previously failing framing cases passed together in both engines and passed a repeated Chromium run.
+
+| Check | Result |
+| --- | --- |
+| Direct computed-style comparisons against the rendered canonical artifact | 8 passed in Chromium; 8 passed in WebKit. |
+| Visual scenarios | 49 Chromium screenshot comparisons passed after the design corrections; all 49 WebKit behavior/layout scenarios passed (Chromium owns the pixel baselines). Later framing fixes also passed focused browser regressions. |
+| Canonical workflows | 67 passed in Chromium; 66 passed in WebKit, with one explicit forced-classic-scrollbar skip. |
+| Targeted real-PDF interface regressions | 8 passed in Chromium and WebKit, including save recovery and narrow terminal recovery. |
+| Web-client unit suite | 795 passed across 59 test files. |
+| Production workflows | All 67 cases passed across full runs and focused reruns in each engine. Chromium: 62 passed initially; all five failures passed in the final eight-case batch. WebKit: 66 passed in the final full run; the reference-loading timeout passed on isolated rerun. |
+| Build/type checks | Repository TypeScript check and service, web, VS Code, and Chrome extension bundles passed. |
+| Distribution checks | Shared app/VS Code/Chrome manifests, static distribution, and catalog checks passed; 37 packaging tests passed. Host/static tests: 130 passed, one skipped. Static and macOS web bundles also built successfully. |
+
+The production JavaScript bundle measures 2,576,473 bytes, 24,379 bytes above the previous reviewed bundle. The distribution baseline records that exact measured output without extra headroom. Catalog record counts, runtime payload, attribution, and hashes are unchanged.
+
+The preview was refreshed from the final bundle and visually inspected with Annotations at the right and References at the bottom. No annotation draft was left behind. One Chromium tray-scroll check and one WebKit Page Note placement precondition also passed after isolated reruns during the audit; the full-run reference-loading timeout above remains a recorded intermittent test failure rather than a claim of a clean uninterrupted run.
+
+The Page Note selection-clear regression uses actual pointer input in Chromium. In this headless WebKit case, native input stopped delivering DOM events after the context-menu gesture and left hover latched. WebKit uses semantic pointer-move/click events at the verified unobscured PDF point, the preview's Close action to release that hover, and a semantic zoom action, while retaining the active-selection and zoom assertions. This case does not certify native WebKit pointer delivery.
+
+The platform-specific manual release checks above remain explicit limits; this audit does not claim a new native Windows or always-visible macOS scrollbar certification.
+
+## Host interface completion — September 6
+
+This follow-up audited the VS Code, Chrome, static-browser, and native macOS interfaces against the shared design. VS Code export now enters the shared document-action flow; host reattachment provides focused recovery or a transient neutral no-work status. Chrome recovery, popup controls, VS Code recovery/fallback, and native recovery/error sheets were updated. CI entrypoints now include the new host and macOS interface regressions.
+
+Native testing found an additional fullscreen defect beyond the browser geometry checks: the empty AppKit toolbar covered the shared controls, and retained offscreen traffic-light frames could collapse the web toolbar. Fullscreen now hides the empty native toolbar, publishes no traffic-light bounds, and restores native toolbar geometry when returning to windowed mode. Control–Command–F is reserved for the native fullscreen action instead of entering PDF Find.
+
+| Verification | Result |
+| --- | --- |
+| Integrated web, VS Code, Chrome, and host-protocol unit checks | 948 passed, one existing skip. |
+| Chromium host and complete shared workflow acceptance run | 73 passed, including real production-component no-work reattachment feedback, protected Chrome recovery, host export, and macOS geometry. |
+| WebKit host acceptance checks | Five passed; Chrome-specific Tab traversal is explicitly skipped outside Chromium. |
+| Shared visual comparisons | All 49 passed without baseline updates in this follow-up. |
+| Final Find/fullscreen shortcut and real-PDF search workflow | Passed. Stale test expectations were aligned with the already-approved 12px search row radius, 26px actions, and separate metadata heading. |
+| Final targeted unit/distribution checks | 97 passed; the subsequent native toolbar lifecycle assertion also passed (six native packaging checks). |
+| Build and distribution | TypeScript, service, shared web, macOS web, static web, VS Code, and Chrome bundles passed. Shared/static asset validation passed. Reviewed web bundle: 2,580,973 bytes; catalog data/hashes unchanged. |
+| Native app verification | Isolated signed candidate compiled and launched with a disposable PDF. Visually verified traffic-light/title alignment, title/save and zoom controls, corrected fullscreen toolbar, and return to windowed mode through Control–Command–F. Blank-title-bar drag was exercised; automated geometry checks verify exclusion of controls and popup areas. |
+| Native recovery and fatal-sheet layout | Standalone AppKit assertions passed for button semantics, layout, and Return defaults. |
+
+The installed application and extensions were not updated by these checks. Native compilation used the installed macOS 15.4 SDK because the default SDK and compiler versions differ. XCTest could not run in this Command Line Tools environment (XCTest module unavailable); standalone native assertions, browser geometry tests, and the actual app checks above provide the recorded validation instead.
+
+## Thirteen reported interface defects — September 6
+
+This follow-up covers compact native page/zoom popovers and blank-title-bar dismissal, consistent adaptive workspace surfaces and row actions, neutral search pointer feedback, removal of annotation correspondence stripes, full-reader deletion and long-mark activation, stable annotation editing, standard Mac icon sizing, inset reference resize handles, Chrome popup focus/icons, and annotation hover cards. Validation results are recorded below as the combined audit completes.
+
+Annotation saves now preserve semantically unchanged viewer asset and resource-policy objects, which prevents the PDF engine from remounting during a review update. Real-PDF tests sample 45 animation frames across saves and verify renderer continuity, wide and narrow tray bounds, full-reader actions, long-mark activation, and hover-card retention in Chromium and WebKit. Both trays remain in their existing positions during editing, with mutations temporarily disabled.
+
+The Mac icon uses the standard tile contour and shadow proportions, with the page artwork scaled to 78% to provide approximately 15% interior margins. The final isolated native candidate was rebuilt and its page/zoom dismissal and title-bar drag behavior checked in the actual app.
+
+TypeScript, all host bundles, and shared/static/Chrome distribution validation passed. Integrated unit checks passed 942 tests with one existing skip; packaging checks passed 46 tests. The reviewed shared JavaScript bundle is 2,584,128 bytes, with unchanged catalog data and hashes. Ten corrected hover-action regression cases passed in each browser engine; selected rows retain their selection while hiding actions after pointer and keyboard focus leave the row.
+
+The combined 156-case browser audit and focused reruns resolved every failure: 156 Chromium cases passed; WebKit passed 154 with two deliberate Chrome-specific skips. Test corrections make hover-only controls visible before pointer activation, settle offscreen PDF-link scrolling before opening a popover, verify physical PDF position instead of comparing offsets from different layout coordinates, and check clipboard interception directly after Reference transitions. These corrections retain the underlying interaction and clipboard assertions without depending on transient status UI.
+
+The final visual gate passed all 49 cases after refreshing the approved appearance and lowering the pixel-comparison threshold to 0.05 (100 differing pixels maximum). Fresh image review and live computed styles confirm matching `rgb(240, 240, 240)` tray surfaces, removal of the annotation stripe, full-reader Delete, reference actions, and trays retained behind the editor. The default 0.2 comparison threshold had tolerated some of the subtle neutral-color changes, so unchanged old baseline images were explicitly refreshed.
+
+## Compact workspace spacing — September 6
+
+Search and annotation rows now use 2px vertical margins and 8px vertical content padding, replacing 5px/6px margins and 9px/11px padding. Vertical Reference tabs use a 4px gap. Text line height, horizontal padding, and action sizes are unchanged; annotation hover cards retain their existing padding. The shared viewer and host web bundles were rebuilt, and the existing search/annotation style-equivalence check passed. Visual baselines were refreshed for the denser layout.
+
+Chrome popup pointer and keyboard verification passed against the real extension entrypoint. The actual packaged popup in isolated Chrome for Testing 152.0.7977.82 focuses its title on opening, leaves the toggle without a focus ring, and loads the Placekeeper favicon. The extension's toolbar and management icons now ship at 16, 32, 48, and 128 pixels; distribution validation checks PNG dimensions and equality with the generated source assets.
+
+The owning PDF tab's favicon remains a Chrome limitation. An isolated Chrome 152 run rendered a real four-page PDF through the MIME handler and confirmed that `handler.html` loaded the Placekeeper favicon. The enclosing PDF tab still exposed no `favIconUrl`, while the popup tab exposed the correct Placekeeper PNG. Tab metadata was inspected using a disposable diagnostic copy with `tabs` permission; that permission is absent from the source and shipping extension. Chromium's MIME-handler guest implementation forwards title notifications but does not forward favicon notifications, and the public [mimeHandler API](https://developer.chrome.com/docs/extensions/reference/api/mimeHandler) provides no tab-favicon setter. The handler favicon declaration is present, but this report does not count the enclosing-tab request as fixed.
+
+## Workspace interaction and history fixes — September 6
+
+Search results and annotation rows now share the outline's hover, focus, selected, and action-disclosure behavior. Actions occupy the page-number position without moving the row body. Touch layouts retain visible actions; immutable source-PDF rows retain their page numbers. Source and owned annotations use the same row component in one document-ordered list, with no editing or deletion controls on source entries. Deleting an owned entry restores focus to the adjacent entry in the combined list.
+
+Search restores query focus only when the query was the last focused search control. Returning from the PDF or changing tabs no longer replays an old Find request. Back/Forward navigation preserves the primary button node and its hover appearance during pending navigation, eliminating the transient disabled/mount animation flash.
+
+TypeScript, rebuilt viewer/host web bundles, Chrome manifest checks, and static distribution validation passed. Scoped unit verification passed 974 tests with one skip (the VS Code extension suite required an unsandboxed rerun for its local server). Browser verification and focused reruns passed 148 Chromium cases and 147 WebKit cases with one intentional skip. The full production-flow runs had timing-sensitive context, geometry, and pointer failures that passed in isolated reruns. All 49 visual cases passed. Fresh macOS snapshot review and computed geometry confirm that both annotation origins align their page numbers at the right edge; the interaction regression suite now checks that alignment explicitly. The existing in-app preview was refreshed; installed host applications were not reinstalled.
+
+## Annotation return and search retention — September 6
+
+Pointer Back from a full annotation now focuses the annotation panel instead of an inner row control, releasing the row's focus-driven hover state. Keyboard Back still restores the Read full control (or its navigation fallback), and selection/scroll restoration remains intact. Search suppresses a sole suggestion whose query already exactly matches the trimmed search key. Search-result navigation preserves the workspace for both new destinations and repeated clicks on the current result.
+
+TypeScript and 167 focused unit/packaging tests passed. Chromium and WebKit each passed five row-interaction cases, two real-PDF search cases covering wide/narrow layouts, and nine reader restoration/editing cases. Shared, Mac, static, Chrome, and VS Code web assets were rebuilt; distribution validation passed. The in-app PDF preview was refreshed and its open Outline workspace restored.
