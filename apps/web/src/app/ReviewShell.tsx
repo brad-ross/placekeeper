@@ -640,7 +640,7 @@ export function ReviewShell(props: ReviewShellProps) {
     requestedEffectiveWorkspaceMode,
   ) ? requestedEffectiveWorkspaceMode : rightWorkspaceMode;
   const anyWorkspaceOpen = workspaceOpen || referenceSurfaceOpen || toolsSurfaceOpen;
-  const annotationsVisible = anyWorkspaceOpen && effectiveWorkspaceMode === 'annotations';
+  const annotationsVisible = toolsSurfaceOpen && effectiveWorkspaceMode === 'annotations';
   const outlineExpansionToggleVisible = toolsSurfaceOpen && effectiveWorkspaceMode === 'outline';
   const annotationReaderRecord = annotationReaderSession === null
     || !authoringAuthorityMatches(annotationReaderSession.authority, currentAuthoringAuthority)
@@ -1139,11 +1139,11 @@ export function ReviewShell(props: ReviewShellProps) {
   };
   useEffect(() => {
     clearPeekTimer();
-    if (anyWorkspaceOpen) {
+    if (annotationsVisible) {
       setPeekItemId(undefined);
       return;
     }
-    if (activeItemId !== undefined) {
+    if (!anyWorkspaceOpen && activeItemId !== undefined) {
       setPeekItemId(activeItemId);
       return;
     }
@@ -1156,7 +1156,7 @@ export function ReviewShell(props: ReviewShellProps) {
       peekTimerRef.current = setTimeout(() => setPeekItemId(undefined), 180);
     }
     return clearPeekTimer;
-  }, [anyWorkspaceOpen, props.correspondingItemId, activeItemId]);
+  }, [annotationsVisible, anyWorkspaceOpen, props.correspondingItemId, activeItemId]);
 
   useEffect(() => {
     const request = props.activationRequest;
@@ -2332,7 +2332,7 @@ export function ReviewShell(props: ReviewShellProps) {
             />
           ) : null}
           {authoringSession === null
-            && !anyWorkspaceOpen
+            && !annotationsVisible
             && annotationReaderSession?.origin === 'peek'
             && annotationReaderRecord !== null ? (
               <aside className="annotation-peek annotation-peek--reader">
@@ -2356,7 +2356,7 @@ export function ReviewShell(props: ReviewShellProps) {
               </aside>
             ) : null}
           {authoringSession === null
-            && !anyWorkspaceOpen
+            && !annotationsVisible
             && annotationReaderSession?.origin !== 'peek'
             && peekItemId ? (() => {
             const item = props.state.items.find(({ id }) => id === peekItemId);
@@ -2365,12 +2365,12 @@ export function ReviewShell(props: ReviewShellProps) {
             return (
               <AnnotationPeek
                 item={item}
-                selected={activeItemId === item.id}
+                selected={!anyWorkspaceOpen && activeItemId === item.id}
                 {...(copyLink === undefined ? {} : { copyLink })}
                 onHoldChange={(held) => {
                   peekHeldRef.current = held;
                   clearPeekTimer();
-                  if (!held && activeItemId === undefined && props.correspondingItemId === undefined) {
+                  if (!held && (anyWorkspaceOpen || activeItemId === undefined) && props.correspondingItemId === undefined) {
                     peekTimerRef.current = setTimeout(() => setPeekItemId(undefined), 180);
                   }
                 }}

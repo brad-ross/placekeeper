@@ -1869,3 +1869,14 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   .annotation-peek[data-peek-selected="true"] .row-action-group__direct { opacity: 1; pointer-events: auto; }
   .annotation-peek[data-peek-selected="true"]:has(.row-action-group) .annotation-item__page { opacity: 0; }
 }
+
+/* Keep annotation previews in the exposed PDF area beside open workspaces. */
+.review-layout:is([data-right-overlay="true"], [data-bottom-overlay="true"]) .annotation-peek {
+  top: auto;
+  right: max(12px, calc(100% - var(--review-overlay-right-start, 100%)));
+  bottom: max(12px, calc(100% - var(--review-overlay-bottom-start, 100%)));
+  width: min(340px, calc(var(--review-overlay-right-start, 100%) - 24px));
+  max-height: max(0px, calc(var(--review-overlay-bottom-start, 100%) - 24px));
+  overflow: auto;
+  transform: none;
+}
