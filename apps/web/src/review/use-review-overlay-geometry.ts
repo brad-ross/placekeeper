@@ -8,7 +8,7 @@ import {
 import { LatestFrameRequest } from '../pdf/viewer-framing.js';
 
 const BASE_INSET = 12;
-const FADE_SIZE = 18;
+const FADE_SIZE = 12;
 
 interface RectLike {
   readonly left: number;
