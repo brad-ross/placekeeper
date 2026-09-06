@@ -6,7 +6,7 @@
   --review-surface-canvas: #f7f7f7;
   --review-surface-panel: #fff;
   --review-surface-subtle: #f0f0f0;
-  --review-surface-interactive: #e9e9e9;
+  --review-surface-interactive: #e7e7e7;
   --review-surface-tray: #f0f0f0;
   --review-border: #dedede;
   --review-border-subtle: #e5e5e5;
@@ -14,7 +14,7 @@
   --review-selection-bg: #fff;
   --review-pdf-selection-bg: #dbe7ff;
   --review-selection-ink: #333;
-  --review-focus: #335f8a;
+  --review-focus: #496789;
   --review-success: #2d684d;
   --review-danger: #9a3d34;
   --review-warning: #d9ad2b;
@@ -71,8 +71,8 @@
   color: var(--review-ink-primary);
   background: var(--review-surface-canvas);
   font-family: var(--review-font-ui);
-  font-size: .875rem;
-  line-height: 1.4;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .review-transition-announcement {
@@ -102,15 +102,15 @@
 :is(.review-shell, .compact-editorial-modal, .terminal-recovery) button:focus-visible,
 :is(.review-shell, .compact-editorial-modal, .terminal-recovery) input:focus-visible,
 :is(.review-shell, .compact-editorial-modal, .terminal-recovery) textarea:focus-visible {
-  outline: 3px solid var(--review-focus);
-  outline-offset: 2px;
+  outline: 2px solid var(--review-focus);
+  outline-offset: 3px;
 }
 
 :is(.review-shell, .compact-editorial-modal, .terminal-recovery) button:disabled,
 :is(.review-shell, .compact-editorial-modal, .terminal-recovery) input:disabled,
 :is(.review-shell, .compact-editorial-modal, .terminal-recovery) textarea:disabled {
-  cursor: not-allowed;
-  opacity: .52;
+  cursor: default;
+  opacity: .35;
 }
 
 .review-chrome {
@@ -131,6 +131,7 @@
 }
 
 [data-launch-surface="macos"] .review-chrome {
+  --review-chrome-height: calc(var(--macos-traffic-light-center-y, 25px) * 2);
   padding-inline-start: max(16px, var(--macos-titlebar-leading-inset, 0px));
   padding-inline-end: max(16px, var(--macos-titlebar-trailing-inset, 0px));
 }

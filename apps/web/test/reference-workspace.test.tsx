@@ -428,7 +428,7 @@ describe('shared reference workspace', () => {
     expect(semanticTabs.every((tab) => !/<button/u.test(tab.slice(1)))).toBe(true);
     expect(lemmaActive).not.toContain('reference-panel__actions');
     expect(lemmaActive.match(/>Lemma A\.7</g)).toHaveLength(1);
-    expect(lemmaActive.match(/>Page 18</g)).toHaveLength(1);
+    expect(lemmaActive.match(/>18</g)).toHaveLength(1);
 
     expect(proofActive).toMatch(
       /data-reference-tab-segment="proof"[\s\S]*aria-selected="true"[\s\S]*data-workspace-focus-token="reference-send:proof"[\s\S]*data-workspace-focus-token="reference-close:proof"/u,
@@ -890,8 +890,9 @@ describe('outline navigator', () => {
     expect(resultsRow).toContain('aria-expanded="false"');
     expect(resultsRow).toMatch(/aria-controls="row-actions-menu-[^"]+"/u);
     expect(resultsRow).toContain(
-      '<span class="outline-navigator__summary"><span class="outline-navigator__title">Results</span><span class="outline-navigator__separator" aria-hidden="true">·</span><small class="outline-navigator__page" aria-hidden="true">8</small></span>',
+      '<span class="outline-navigator__summary"><span class="outline-navigator__title">Results</span><small class="outline-navigator__page" aria-hidden="true">8</small></span>',
     );
+    expect(resultsRow).not.toContain('outline-navigator__separator');
     expect(resultsRow).not.toContain('>Page 8</small>');
     expect(html.match(/data-row-action="open-reference"/g)).toHaveLength(3);
   });

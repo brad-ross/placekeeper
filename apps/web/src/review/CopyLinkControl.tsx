@@ -178,7 +178,7 @@ export function CopyLinkControl({
         disabled={disabled}
         onClick={(event) => run(event.currentTarget, event.detail > 0)}
       >
-        <ReviewIcon name="link" />
+        <ReviewIcon name="link" size={16} />
         {presentation === 'labeled' ? (
           <span className="copy-link-control__label">{ariaLabel}</span>
         ) : null}

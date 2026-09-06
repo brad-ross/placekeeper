@@ -10,6 +10,7 @@ export interface AnnotationPeekProps {
   copyLink?: CopyLinkControlProps;
   onNavigate?(): void;
   onReadFull?(record: AnnotationReaderRecord, trigger: HTMLButtonElement): void;
+  onReaderOverflowChange?(record: AnnotationReaderRecord, overflowing: boolean): void;
   onEdit?(trigger: HTMLButtonElement): void;
   onDelete?(): void;
   onDismiss?(): void;
@@ -21,6 +22,7 @@ export function AnnotationPeek({
   copyLink,
   onNavigate,
   onReadFull,
+  onReaderOverflowChange,
   onEdit,
   onDelete,
   onDismiss,
@@ -42,6 +44,7 @@ export function AnnotationPeek({
         {...(copyLink ? { copyLink } : {})}
         {...(onNavigate ? { onNavigate } : {})}
         {...(onReadFull ? { onReadFull } : {})}
+        {...(onReaderOverflowChange ? { onReaderOverflowChange } : {})}
         {...(onEdit ? { onEdit } : {})}
         {...(onDelete ? { onDelete } : {})}
         {...(onDismiss ? { onDismiss } : {})}

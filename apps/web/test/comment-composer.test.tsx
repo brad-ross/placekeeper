@@ -57,6 +57,9 @@ describe('CommentComposer contextual authoring contract', () => {
     if (visible) {
       expect(html).toContain(`aria-label="${label}"`);
       expect(html).not.toContain(`<span>${label}</span>`);
+      expect(html.indexOf('comment-composer__anchor')).toBeLessThan(
+        html.indexOf('comment-composer__body'),
+      );
     }
     expect(html).toContain('Draft remains here');
   });
@@ -102,7 +105,7 @@ describe('CommentComposer contextual authoring contract', () => {
     });
     expect(html).toContain('data-composer-placement="below"');
     expect(html).toContain('style="left:18px;top:42px"');
-    expect(html).toContain('comment-composer__page-cue">7</span>');
+    expect(html).toContain('comment-composer__page-cue"> · 7</span>');
     expect(html.match(/Persistent draft/g)).toHaveLength(1);
   });
 });

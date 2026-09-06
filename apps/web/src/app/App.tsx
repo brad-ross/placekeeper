@@ -353,7 +353,27 @@ export function App({
     ),
     [assets, onViewerError, resourcePolicy],
   );
-  const emit = useCallback((event: ViewerInteractionEvent) => onViewerInteraction?.(event), [onViewerInteraction]);
+  const emit = useCallback((event: ViewerInteractionEvent) => {
+    if (event.type === 'pdf-link' || event.type === 'pdf-link-unavailable') {
+      const registry = registryRef.current;
+      const selection = registry
+        ?.getPlugin<SelectionPlugin>(SelectionPlugin.id)
+        ?.provides();
+      let clearedPdfSelection = false;
+      if (registry && selection) {
+        for (const documentId of [MAIN_PDF_DOCUMENT_ID, REFERENCE_PDF_DOCUMENT_ID]) {
+          if (registry.getStore().getState().core.documents[documentId] === undefined) continue;
+          if (selection.getState(documentId).selection === null) continue;
+          selection.clear(documentId);
+          clearedPdfSelection = true;
+        }
+      }
+      if (clearedPdfSelection && typeof window !== 'undefined') {
+        window.getSelection()?.removeAllRanges();
+      }
+    }
+    onViewerInteraction?.(event);
+  }, [onViewerInteraction]);
   const publishInventory = useCallback((result: ExistingAnnotationsDiscovery) => {
     setInventoryState(result);
     if (result.status === 'ready') setSourceAnnotations(result.items);
@@ -512,12 +532,17 @@ export function App({
     const pageIndex = Math.max(0, (scroll?.getCurrentPage() ?? 1) - 1);
     const page = document?.pages[pageIndex];
     if (!page) return;
+    const previous = keyboardCursorRef.current;
+    // Layout and scroll notifications refresh authority without discarding
+    // keyboard movement already made on this page.
+    const position = previous?.documentId === documentId && previous.pageIndex === pageIndex
+      ? clampPageNotePoint(previous, page)
+      : { x: page.size.width / 2, y: page.size.height / 2 };
     publishKeyboardCursor({
       documentId,
       pageIndex,
       viewportGeneration: viewportGenerationRef.current,
-      x: page.size.width / 2,
-      y: page.size.height / 2,
+      ...position,
     });
   }, [publishKeyboardCursor]);
 

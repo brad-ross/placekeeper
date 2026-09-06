@@ -73,6 +73,8 @@ export interface DocumentActionsMenuProps {
   readonly open?: boolean;
   readonly onOpenChange?: (open: boolean) => void;
   readonly onPendingChange?: (pending: boolean) => void;
+  readonly requestToken?: number;
+  readonly onRequestHandled?: (token: number) => void;
 }
 
 type ExportOutcome = 'idle' | 'pending' | 'success' | 'failure';
@@ -104,6 +106,8 @@ export function DocumentActionsMenu({
   open: controlledOpen,
   onOpenChange,
   onPendingChange,
+  requestToken,
+  onRequestHandled,
 }: DocumentActionsMenuProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen ?? uncontrolledOpen;
@@ -117,8 +121,10 @@ export function DocumentActionsMenu({
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const exportRef = useRef<HTMLButtonElement>(null);
+  const annotationActionRef = useRef<HTMLButtonElement>(null);
   const confirmationRef = useRef<HTMLButtonElement>(null);
   const pendingRef = useRef(false);
+  const handledRequestTokenRef = useRef(0);
   const pending = outcome === 'pending';
 
   const setOpen = (nextOpen: boolean) => {
@@ -145,9 +151,13 @@ export function DocumentActionsMenu({
 
   useLayoutEffect(() => {
     if (!open) return;
-    const target = staleConfirmation ? confirmationRef.current : exportRef.current;
+    const target = staleConfirmation
+      ? confirmationRef.current
+      : presentation.canExport
+        ? exportRef.current
+        : annotationActionRef.current ?? exportRef.current;
     target?.focus({ preventScroll: true });
-  }, [open, staleConfirmation]);
+  }, [open, presentation.canExport, staleConfirmation]);
 
   useEffect(() => {
     if (!open) return;
@@ -188,6 +198,27 @@ export function DocumentActionsMenu({
     }
     requestAnimationFrame(() => exportRef.current?.focus({ preventScroll: true }));
   };
+
+  useEffect(() => {
+    const token = requestToken ?? 0;
+    if (token <= 0 || token === handledRequestTokenRef.current) return;
+    handledRequestTokenRef.current = token;
+    onRequestHandled?.(token);
+    setOpen(true);
+    if (pendingRef.current) return;
+    setOutcome('idle');
+    setExportDetail('');
+    if (!presentation.canExport) {
+      setStaleConfirmation(false);
+      return;
+    }
+    if (presentation.requiresStaleConfirmation) {
+      setStaleConfirmation(true);
+      return;
+    }
+    setStaleConfirmation(false);
+    void exportReviewedPdf();
+  }, [requestToken]);
 
   const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
@@ -281,14 +312,14 @@ export function DocumentActionsMenu({
               setStaleConfirmation(false);
               queueMicrotask(() => exportRef.current?.focus({ preventScroll: true }));
             }}
-          ><ReviewIcon name="close" size={15} /><span>Cancel</span></button>
+          ><ReviewIcon name="close" /><span>Cancel</span></button>
           <button
             type="button"
             role="menuitem"
             title="Confirm export"
             aria-disabled={pending}
             onClick={() => void exportReviewedPdf(true)}
-          ><ReviewIcon name="download" size={15} /><span>Confirm export</span></button>
+          ><ReviewIcon name="download" /><span>Confirm export</span></button>
         </div>
         {resultMessage ? <p
           id={resultId}
@@ -317,7 +348,7 @@ export function DocumentActionsMenu({
         >
           <ReviewIcon
             name={pending ? 'loading' : outcome === 'success' ? 'check' : 'download'}
-            size={15}
+
             className={pending ? 'review-icon document-actions__loading' : 'review-icon'}
           />
           <span>{exportLabel}</span>
@@ -327,10 +358,11 @@ export function DocumentActionsMenu({
           data-document-actions-attention
         >
           <p id={reasonId} className="document-actions__attention-label">
-            <ReviewIcon name="warning" size={14} />
+            <ReviewIcon name="warning" />
             <span>{presentation.message}</span>
           </p>
           <button
+            ref={annotationActionRef}
             type="button"
             role="menuitem"
             title="Open Annotations"
@@ -339,7 +371,7 @@ export function DocumentActionsMenu({
               closeForAction();
               requestAnimationFrame(onOpenAnnotations);
             }}
-          ><ReviewIcon name="annotations" size={15} /><span>Open Annotations</span></button>
+          ><ReviewIcon name="annotations" /><span>Open Annotations</span></button>
         </div> : reasonVisible ? <p id={reasonId} className="document-actions__message">
           {presentation.message}
         </p> : null}

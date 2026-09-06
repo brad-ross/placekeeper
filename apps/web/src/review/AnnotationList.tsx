@@ -1,5 +1,10 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
+import {
+  existingAnnotationKey,
+  type ExistingAnnotation,
+  type ExistingAnnotationsDiscovery,
+} from '../pdf/existing-annotations.js';
 import { documentOrderedItems, reviewItemPageRange } from './annotation-projection.js';
 import {
   AnnotationMetadata,
@@ -11,6 +16,7 @@ import { ReviewIcon } from './ReviewIcon.js';
 import { AnnotationExcerpt } from './AnnotationExcerpt.js';
 import {
   projectOwnedAnnotationReader,
+  projectExistingAnnotationReader,
   type AnnotationReaderRecord,
 } from './annotation-reader.js';
 import { RowActionGroup, type RowAction } from './RowActionGroup.js';
@@ -18,15 +24,68 @@ import { RowActionGroup, type RowAction } from './RowActionGroup.js';
 export interface AnnotationListProps {
   items: readonly ReviewItem[];
   activeId?: string;
+  activeExistingAnnotationKey?: string;
   correspondingId?: string;
   activationRequest?: { readonly id: string; readonly token: number };
   onNavigate(item: ReviewItem): void;
+  existingAnnotations?: ExistingAnnotationsDiscovery;
+  documentGeneration?: number;
+  onNavigateExisting?(item: ExistingAnnotation): void;
+  onReadFullExisting?(
+    annotation: ExistingAnnotation,
+    record: AnnotationReaderRecord,
+    trigger: HTMLButtonElement,
+  ): void;
+  onRetryExistingAnnotations?(): void;
   onReadFull?(record: AnnotationReaderRecord, trigger: HTMLButtonElement): void;
   onReaderOverflowChange?(record: AnnotationReaderRecord, overflowing: boolean): void;
+  onReaderOverflowChangeExisting?(record: AnnotationReaderRecord, overflowing: boolean): void;
   onCorrespondenceChange?(id: string | undefined): void;
   copyLinkForItem?(item: ReviewItem): CopyLinkControlProps | undefined;
   onEdit(item: ReviewItem, trigger: HTMLButtonElement): void;
   onDelete(item: ReviewItem): Promise<void> | void;
+}
+
+type AnnotationListEntry =
+  | { readonly origin: 'owned'; readonly item: ReviewItem; readonly pageIndex: number; readonly x: number; readonly y: number; readonly stableIndex: number }
+  | { readonly origin: 'source'; readonly annotation: ExistingAnnotation; readonly pageIndex: number; readonly x: number; readonly y: number; readonly stableIndex: number };
+
+function entryFocusKey(entry: AnnotationListEntry): string {
+  return entry.origin === 'owned'
+    ? `owned:${entry.item.id}`
+    : `source:${existingAnnotationKey(entry.annotation)}`;
+}
+
+function ownedCoordinate(item: ReviewItem, field: 'x' | 'y'): number {
+  const candidate = item.reconciliation?.anchor.rect
+    ?? (item.payload.rect && typeof item.payload.rect === 'object' && !Array.isArray(item.payload.rect) ? item.payload.rect : undefined)
+    ?? (item.payload.position && typeof item.payload.position === 'object' && !Array.isArray(item.payload.position) ? item.payload.position : undefined);
+  const value = candidate?.[field];
+  return typeof value === 'number' ? value : Number.MAX_SAFE_INTEGER;
+}
+
+/** One stable reading order across editable and source-PDF annotations. */
+export function combinedDocumentOrderedAnnotations(
+  items: readonly ReviewItem[],
+  existingAnnotations: ExistingAnnotationsDiscovery,
+): AnnotationListEntry[] {
+  const owned: AnnotationListEntry[] = documentOrderedItems(items).map((item, stableIndex) => ({
+    origin: 'owned', item, pageIndex: reviewItemPageRange(item).firstPageIndex,
+    x: ownedCoordinate(item, 'x'), y: ownedCoordinate(item, 'y'), stableIndex,
+  }));
+  const source: AnnotationListEntry[] = existingAnnotations.status === 'ready'
+    ? existingAnnotations.items.map((annotation, stableIndex) => ({
+        origin: 'source', annotation, pageIndex: annotation.pageIndex,
+        x: annotation.rect.x, y: annotation.rect.y, stableIndex,
+      }))
+    : [];
+  return [...owned, ...source].toSorted((left, right) =>
+    left.pageIndex - right.pageIndex
+    || left.y - right.y
+    || left.x - right.x
+    || left.origin.localeCompare(right.origin)
+    || left.stableIndex - right.stableIndex,
+  );
 }
 
 function payloadString(item: ReviewItem, field: string): string {
@@ -38,6 +97,7 @@ export interface AnnotationListContent {
   readonly content: string;
   readonly sourceText?: string;
   readonly sourceTreatment?: 'plain' | 'struck';
+  readonly quoteText?: string;
 }
 
 export function annotationListContent(item: ReviewItem): AnnotationListContent {
@@ -49,7 +109,10 @@ export function annotationListContent(item: ReviewItem): AnnotationListContent {
       return { content: proposedText, ...(quote ? { sourceText: quote, sourceTreatment: 'struck' as const } : {}) };
     case 'delete':
       return { content: '', ...(quote ? { sourceText: quote, sourceTreatment: 'struck' as const } : {}) };
-    case 'highlight': return { content: comment || quote };
+    case 'highlight': return {
+      content: comment,
+      ...(quote ? { quoteText: quote } : {}),
+    };
     case 'insert': return { content: proposedText || quote };
     case 'pageNote': return { content: comment || quote };
   }
@@ -64,6 +127,10 @@ function annotationState(active: boolean, corresponding: boolean): string {
 
 export interface AnnotationRowContentProps {
   readonly item: ReviewItem;
+  readonly presentation?: AnnotationListContent;
+  readonly kind?: string;
+  readonly pageNumber?: number;
+  readonly lastPageNumber?: number;
   readonly copyLink?: CopyLinkControlProps;
   readonly readerRecord?: AnnotationReaderRecord | null;
   readonly navigationRef?: (node: HTMLButtonElement | null) => void;
@@ -77,6 +144,10 @@ export interface AnnotationRowContentProps {
 
 export function AnnotationRowContent({
   item,
+  presentation: suppliedPresentation,
+  kind: suppliedKind,
+  pageNumber: suppliedPageNumber,
+  lastPageNumber: suppliedLastPageNumber,
   copyLink,
   readerRecord = projectOwnedAnnotationReader(item),
   navigationRef,
@@ -87,17 +158,18 @@ export function AnnotationRowContent({
   onDelete,
   onDismiss,
 }: AnnotationRowContentProps) {
-  const presentation = annotationListContent(item);
-  const text = [presentation.sourceText, presentation.content].filter(Boolean).join(' ');
+  const presentation = suppliedPresentation ?? annotationListContent(item);
+  const text = [presentation.sourceText, presentation.content, presentation.quoteText].filter(Boolean).join(' ');
   const { firstPageIndex, lastPageIndex } = readerRecord === null
     ? reviewItemPageRange(item)
     : {
         firstPageIndex: readerRecord.pageNumber - 1,
         lastPageIndex: (readerRecord.lastPageNumber ?? readerRecord.pageNumber) - 1,
       };
-  const pageNumber = firstPageIndex + 1;
-  const lastPageNumber = lastPageIndex + 1;
-  const kindLabel = annotationKindLabel(item.kind);
+  const pageNumber = suppliedPageNumber ?? firstPageIndex + 1;
+  const lastPageNumber = suppliedLastPageNumber ?? (suppliedPageNumber ?? lastPageIndex + 1);
+  const kind = suppliedKind ?? item.kind;
+  const kindLabel = annotationKindLabel(kind);
   const pageDescription = pageNumber === lastPageNumber
     ? `page ${pageNumber}`
     : `pages ${pageNumber}–${lastPageNumber}`;
@@ -107,16 +179,16 @@ export function AnnotationRowContent({
     label: `Edit ${kindLabel} annotation on ${pageDescription}`,
     title: 'Edit annotation', onInvoke: onEdit,
   });
-  if (onDelete) actions.push({
-    id: 'delete', kind: 'command', icon: 'remove',
-    label: `Remove ${kindLabel} annotation on ${pageDescription}`,
-    title: 'Delete annotation', onInvoke: onDelete,
-  });
   if (copyLink) actions.push({
     id: 'copy-link', kind: 'copy-link',
     label: `Copy link to ${kindLabel} annotation on ${pageDescription}`,
     title: copyLink.disabled ? 'Save annotation before copying its link' : 'Copy annotation link',
     copyLink,
+  });
+  if (onDelete) actions.push({
+    id: 'delete', kind: 'command', icon: 'remove',
+    label: `Remove ${kindLabel} annotation on ${pageDescription}`,
+    title: 'Delete annotation', onInvoke: onDelete,
   });
   if (onDismiss) actions.push({
     id: 'close', kind: 'command', icon: 'close',
@@ -129,7 +201,7 @@ export function AnnotationRowContent({
       type="button"
       className="annotation-item__navigation"
       aria-label={annotationAccessibleLabel({
-        kind: item.kind,
+        kind,
         pageNumber,
         lastPageNumber,
         ...(text ? { excerpt: text } : {}),
@@ -138,7 +210,7 @@ export function AnnotationRowContent({
       onClick={onNavigate}
     /> : null}
     <div className="annotation-item__title-row">
-      <AnnotationMetadata kind={item.kind} pageNumber={pageNumber} lastPageNumber={lastPageNumber} />
+      <AnnotationMetadata kind={kind} pageNumber={pageNumber} lastPageNumber={lastPageNumber} rowHead />
       <RowActionGroup actions={actions} rowLabel={`${kindLabel} annotation on ${pageDescription}`} />
     </div>
     <div className="annotation-item__body-row">
@@ -146,6 +218,7 @@ export function AnnotationRowContent({
         content={presentation.content}
         {...(presentation.sourceText ? { sourceText: presentation.sourceText } : {})}
         {...(presentation.sourceTreatment ? { sourceTreatment: presentation.sourceTreatment } : {})}
+        {...(presentation.quoteText ? { quoteText: presentation.quoteText } : {})}
         readerRecord={readerRecord}
         {...(onReadFull ? { onReadFull } : {})}
         {...(onReaderOverflowChange ? { onOverflowChange: onReaderOverflowChange } : {})}
@@ -157,17 +230,25 @@ export function AnnotationRowContent({
 export function AnnotationList({
   items,
   activeId,
+  activeExistingAnnotationKey,
   correspondingId,
   activationRequest,
   onNavigate,
+  existingAnnotations = { status: 'empty', generation: 0, items: [] },
+  documentGeneration = 0,
+  onNavigateExisting,
+  onReadFullExisting,
+  onRetryExistingAnnotations,
   onReadFull,
   onReaderOverflowChange,
+  onReaderOverflowChangeExisting,
   onCorrespondenceChange,
   copyLinkForItem,
   onEdit,
   onDelete,
 }: AnnotationListProps) {
   const ordered = documentOrderedItems(items);
+  const combined = combinedDocumentOrderedAnnotations(items, existingAnnotations);
   const listRef = useRef<HTMLOListElement>(null);
   const entryRefs = useRef(new Map<string, HTMLButtonElement>());
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
@@ -193,7 +274,7 @@ export function AnnotationList({
   useLayoutEffect(() => {
     if (!activationRequest) return;
     const row = rowRefs.current.get(activationRequest.id);
-    const entry = entryRefs.current.get(activationRequest.id);
+    const entry = entryRefs.current.get(`owned:${activationRequest.id}`);
     if (row && entry) {
       const viewport = listRef.current?.closest<HTMLElement>('[data-annotation-scroll-viewport], .review-workspace');
       if (viewport) {
@@ -212,13 +293,13 @@ export function AnnotationList({
   }, [activationRequest?.id, activationRequest?.token]);
 
   const remove = async (item: ReviewItem) => {
-    const index = ordered.findIndex(({ id }) => id === item.id);
-    const nextId = ordered[index + 1]?.id;
-    const previousId = ordered[index - 1]?.id;
+    const index = combined.findIndex((entry) => entry.origin === 'owned' && entry.item.id === item.id);
+    const nextKey = combined[index + 1] === undefined ? undefined : entryFocusKey(combined[index + 1]!);
+    const previousKey = combined[index - 1] === undefined ? undefined : entryFocusKey(combined[index - 1]!);
     await onDelete(item);
     queueMicrotask(() => {
-      if (nextId) entryRefs.current.get(nextId)?.focus();
-      else if (previousId) entryRefs.current.get(previousId)?.focus();
+      if (nextKey) entryRefs.current.get(nextKey)?.focus();
+      else if (previousKey) entryRefs.current.get(previousKey)?.focus();
       else listRef.current?.focus();
     });
   };
@@ -226,9 +307,10 @@ export function AnnotationList({
   return (
     <section
       className="annotation-drawer__owned"
-      data-annotation-origin="owned"
+      data-annotation-origin="combined"
+      data-existing-annotations-state={existingAnnotations.status}
       data-workspace-focus-token="annotations:section"
-      aria-label="Owned annotations"
+      aria-label="Annotations"
       tabIndex={-1}
     >
       {direction ? (
@@ -238,7 +320,51 @@ export function AnnotationList({
         </p>
       ) : null}
       <ol ref={listRef} tabIndex={-1} aria-label="Annotations in document order">
-        {ordered.map((item) => {
+        {combined.map((entry) => {
+          if (entry.origin === 'source') {
+            const { annotation } = entry;
+            const key = existingAnnotationKey(annotation);
+            const active = activeExistingAnnotationKey === key;
+            const readerRecord = projectExistingAnnotationReader(annotation, {
+              documentGeneration,
+              discoveryGeneration: existingAnnotations.generation,
+            });
+            return <li
+              key={`source:${key}`}
+              data-existing-annotation={annotation.id}
+              data-existing-annotation-key={key}
+              data-annotation-origin="source"
+              data-annotation-kind={annotation.subtype}
+              data-annotation-state={active ? 'active-readonly' : 'readonly'}
+              data-active={active ? 'true' : 'false'}
+              data-readonly="true"
+            >
+              <AnnotationRowContent
+                item={{
+                  id: key,
+                  kind: 'highlight',
+                  pageIndex: annotation.pageIndex,
+                  payload: { comment: annotation.contents },
+                  createdAt: '', updatedAt: '',
+                }}
+                presentation={{ content: annotation.contents }}
+                kind={annotation.subtype}
+                pageNumber={annotation.pageIndex + 1}
+                readerRecord={readerRecord}
+                navigationRef={(node) => {
+                  const focusKey = `source:${key}`;
+                  if (node) entryRefs.current.set(focusKey, node);
+                  else entryRefs.current.delete(focusKey);
+                }}
+                onNavigate={() => onNavigateExisting?.(annotation)}
+                {...(onReadFullExisting && readerRecord ? {
+                  onReadFull: (record, trigger) => onReadFullExisting(annotation, record, trigger),
+                } : {})}
+                {...(onReaderOverflowChangeExisting ? { onReaderOverflowChange: onReaderOverflowChangeExisting } : {})}
+              />
+            </li>;
+          }
+          const { item } = entry;
           const active = activeId === item.id;
           const corresponding = correspondingId === item.id;
           const copyLink = copyLinkForItem?.(item);
@@ -280,8 +406,9 @@ export function AnnotationList({
                 {...(copyLink ? { copyLink } : {})}
                 readerRecord={readerRecord}
                 navigationRef={(node) => {
-                  if (node) entryRefs.current.set(item.id, node);
-                  else entryRefs.current.delete(item.id);
+                  const focusKey = `owned:${item.id}`;
+                  if (node) entryRefs.current.set(focusKey, node);
+                  else entryRefs.current.delete(focusKey);
                 }}
                 onNavigate={() => onNavigate(item)}
                 {...(onReadFull ? { onReadFull } : {})}
@@ -293,7 +420,20 @@ export function AnnotationList({
           );
         })}
       </ol>
-      {ordered.length === 0 ? <p className="annotation-empty" data-annotation-status="empty">Select text in the PDF to add an annotation.</p> : null}
+      {existingAnnotations.status === 'loading' ? (
+        <p className="annotation-status" data-annotation-status="loading" role="status">
+          <ReviewIcon name="loading" className="review-icon annotation-status__icon" />
+          <span>Existing annotations are loading…</span>
+        </p>
+      ) : null}
+      {existingAnnotations.status === 'error' ? (
+        <div className="annotation-status annotation-status--error" data-annotation-status="error" role="alert">
+          <ReviewIcon name="alert" className="review-icon annotation-status__icon" />
+          <p><strong>Existing annotations unavailable.</strong><span>{existingAnnotations.message}</span></p>
+          <button type="button" title="Retry loading existing annotations" onClick={onRetryExistingAnnotations}>Retry</button>
+        </div>
+      ) : null}
+      {ordered.length === 0 && existingAnnotations.status === 'empty' ? <p className="annotation-empty" data-annotation-status="empty">Select text in the PDF to add an annotation.</p> : null}
     </section>
   );
 }

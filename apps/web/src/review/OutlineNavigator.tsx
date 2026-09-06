@@ -119,7 +119,6 @@ export function OutlineNavigator({
                     ? null
                     : (
                       <>
-                        <span className="outline-navigator__separator" aria-hidden="true">·</span>
                         <small className="outline-navigator__page" aria-hidden="true">{pageNumber}</small>
                       </>
                     )}

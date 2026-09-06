@@ -49,7 +49,7 @@ export function WorkspaceEdgeRail({
       }}
     >
       <span className="workspace-edge-rail__glyph">
-        <ReviewIcon name={railIcon(surface, open)} size={14} />
+        <ReviewIcon name={railIcon(surface, open)} />
       </span>
     </ReviewTooltipButton>
   );

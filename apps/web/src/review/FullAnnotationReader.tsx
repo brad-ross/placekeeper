@@ -14,16 +14,19 @@ export interface FullAnnotationReaderSourceNavigation {
 
 export interface FullAnnotationReaderProps {
   readonly record: AnnotationReaderRecord;
-  readonly onBack: () => void;
+  readonly onBack: (restoreRowFocus?: boolean) => void;
   readonly onEdit?: (trigger: HTMLButtonElement) => void;
+  readonly onDelete?: (trigger: HTMLButtonElement) => void | Promise<void>;
   readonly sourceNavigation?: FullAnnotationReaderSourceNavigation;
 }
 
 export interface FullAnnotationReaderActionsProps {
-  readonly onBack: () => void;
+  readonly onBack: (restoreRowFocus?: boolean) => void;
   readonly onEdit?: (trigger: HTMLButtonElement) => void;
+  readonly onDelete?: (trigger: HTMLButtonElement) => void | Promise<void>;
   readonly backRef?: Ref<HTMLButtonElement>;
   readonly editRef?: Ref<HTMLButtonElement>;
+  readonly deleteRef?: Ref<HTMLButtonElement>;
 }
 
 export function shouldRestoreFullAnnotationReaderFocus(
@@ -34,7 +37,14 @@ export function shouldRestoreFullAnnotationReaderFocus(
   return locateWasShown && !locateIsShown && locateHeldFocus;
 }
 
-export function FullAnnotationReaderActions({ onBack, onEdit, backRef, editRef }: FullAnnotationReaderActionsProps) {
+export function FullAnnotationReaderActions({
+  onBack,
+  onEdit,
+  onDelete,
+  backRef,
+  editRef,
+  deleteRef,
+}: FullAnnotationReaderActionsProps) {
   return <>
     <ReviewTooltipButton
       ref={backRef}
@@ -43,9 +53,9 @@ export function FullAnnotationReaderActions({ onBack, onEdit, backRef, editRef }
       data-full-annotation-action="back"
       label="Back"
       tooltip="Back to annotations"
-      onClick={onBack}
+      onClick={(event) => onBack(event.detail === 0)}
     >
-      <ReviewIcon name="arrow-left" size={15} />
+      <ReviewIcon name="arrow-left" size={16} />
     </ReviewTooltipButton>
     {onEdit === undefined ? null : (
       <ReviewTooltipButton
@@ -57,13 +67,26 @@ export function FullAnnotationReaderActions({ onBack, onEdit, backRef, editRef }
         tooltip="Edit annotation"
         onClick={(event) => onEdit(event.currentTarget)}
       >
-        <ReviewIcon name="edit" size={15} />
+        <ReviewIcon name="edit" size={16} />
+      </ReviewTooltipButton>
+    )}
+    {onDelete === undefined ? null : (
+      <ReviewTooltipButton
+        ref={deleteRef}
+        type="button"
+        className="full-annotation-reader__delete"
+        data-full-annotation-action="delete"
+        label="Delete"
+        tooltip="Delete annotation"
+        onClick={(event) => { void onDelete(event.currentTarget); }}
+      >
+        <ReviewIcon name="remove" size={16} />
       </ReviewTooltipButton>
     )}
   </>;
 }
 
-export function FullAnnotationReader({ record, onBack, onEdit, sourceNavigation }: FullAnnotationReaderProps) {
+export function FullAnnotationReader({ record, onBack, onEdit, onDelete, sourceNavigation }: FullAnnotationReaderProps) {
   const pageDescription = record.lastPageNumber === undefined
     ? `page ${record.pageNumber}`
     : `pages ${record.pageNumber}–${record.lastPageNumber}`;
@@ -74,6 +97,7 @@ export function FullAnnotationReader({ record, onBack, onEdit, sourceNavigation 
   const backRef = useRef<HTMLButtonElement>(null);
   const locateHeldFocus = useRef(false);
   const previousShowLocate = useRef(showLocate);
+  const paragraphs = record.content.split(/\n\s*\n/u);
   useLayoutEffect(() => {
     if (shouldRestoreFullAnnotationReaderFocus(
       previousShowLocate.current,
@@ -98,7 +122,7 @@ export function FullAnnotationReader({ record, onBack, onEdit, sourceNavigation 
         </div>
         <div className="full-annotation-reader__metadata annotation-item__meta" aria-label="Annotation details">
           <span className="annotation-item__kind-icon" title={record.typeLabel}>
-            <ReviewIcon name={annotationKindIcon(record.kind)} size={14} />
+            <ReviewIcon name={annotationKindIcon(record.kind)} size={16} />
           </span>
           <span className="annotation-item__page">{pageLabel}</span>
           {record.origin === 'source' ? <span className="full-annotation-reader__readonly">Read only</span> : null}
@@ -116,7 +140,7 @@ export function FullAnnotationReader({ record, onBack, onEdit, sourceNavigation 
               locateHeldFocus.current = true;
               sourceNavigation?.onReturn();
             }}
-          ><ReviewIcon name={sourceNavigation?.pending ? 'loading' : 'locate'} size={15} /></ReviewTooltipButton> : null}
+          ><ReviewIcon name={sourceNavigation?.pending ? 'loading' : 'locate'} size={16} /></ReviewTooltipButton> : null}
           {onEdit === undefined ? null : <ReviewTooltipButton
             type="button"
             className="full-annotation-reader__edit"
@@ -124,13 +148,21 @@ export function FullAnnotationReader({ record, onBack, onEdit, sourceNavigation 
             label="Edit"
             tooltip="Edit annotation"
             onClick={(event) => onEdit(event.currentTarget)}
-          ><ReviewIcon name="edit" size={15} /></ReviewTooltipButton>}
+          ><ReviewIcon name="edit" size={16} /></ReviewTooltipButton>}
+          {onDelete === undefined ? null : <ReviewTooltipButton
+            type="button"
+            className="full-annotation-reader__delete"
+            data-full-annotation-action="delete"
+            label="Delete"
+            tooltip="Delete annotation"
+            onClick={(event) => { void onDelete(event.currentTarget); }}
+          ><ReviewIcon name="remove" size={16} /></ReviewTooltipButton>}
         </div>
       </header>
 
       <div className="full-annotation-reader__body">
         <h3 className="sr-only">{record.contentLabel}</h3>
-        <p>{record.content}</p>
+        {paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}
       </div>
     </section>
   );

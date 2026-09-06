@@ -1,6 +1,7 @@
 import {
   useLayoutEffect,
   useRef,
+  type FocusEvent,
   type KeyboardEvent,
   type ReactNode,
   type Ref,
@@ -127,6 +128,17 @@ export function OutlineAnnotationsWorkspace({
     const token = target.dataset.workspaceFocusToken ?? target.dataset.ownedFocusId;
     if (token) onModeFocusTokenChange?.(targetMode, token);
   };
+  const forgetSearchQueryFocus = (event: FocusEvent<HTMLElement>) => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    if (
+      event.relatedTarget instanceof Element
+      && event.relatedTarget.closest('[data-workspace-mode]') !== null
+    ) return;
+    const remembered = focusMemory.current.get('search');
+    if (remembered?.dataset.workspaceFocusToken !== 'search:query') return;
+    focusMemory.current.set('search', event.currentTarget);
+    onModeFocusTokenChange?.('search', 'search:panel');
+  };
 
   return (
     <aside
@@ -140,7 +152,7 @@ export function OutlineAnnotationsWorkspace({
       aria-label={outlineAvailable
         ? annotationsAvailable ? 'Outline, search, and annotations' : 'Outline and search'
         : annotationsAvailable ? 'Search and annotations' : 'Search'}
-      aria-hidden={!open || authoringTakeover}
+      aria-hidden={!open}
       inert={!open || authoringTakeover}
     >
       {headerVariant === 'tools' ? (
@@ -152,7 +164,7 @@ export function OutlineAnnotationsWorkspace({
             aria-expanded="true"
             aria-controls="review-tools-workspace"
             onClick={onHide}
-          ><ReviewIcon name={presentation === 'bottom' ? 'chevron-down' : 'chevron-right'} size={14} /></ReviewTooltipButton> : null}
+          ><ReviewIcon name={presentation === 'bottom' ? 'chevron-down' : 'chevron-right'} /></ReviewTooltipButton> : null}
           <WorkspaceModeStrip
             modes={toolModes}
             selectedMode={effectiveToolMode}
@@ -177,9 +189,11 @@ export function OutlineAnnotationsWorkspace({
         role="tabpanel"
         aria-labelledby="workspace-mode-search"
         tabIndex={-1}
+        data-workspace-focus-token="search:panel"
         hidden={effectiveMode !== 'search'}
         inert={effectiveMode !== 'search'}
         onFocusCapture={(event) => rememberFocus('search', event.target)}
+        onBlurCapture={forgetSearchQueryFocus}
       >
         {search}
       </section>

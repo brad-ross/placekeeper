@@ -61,6 +61,7 @@ export interface LinkActionPopoverPlacementInput {
   readonly viewport: ViewportRect;
   readonly gap?: number;
   readonly margin?: number;
+  readonly alignment?: 'start' | 'end';
 }
 
 export interface LinkActionPopoverPlacement {
@@ -79,6 +80,7 @@ export function placeLinkActionPopover({
   viewport,
   gap = 8,
   margin = 12,
+  alignment = 'start',
 }: LinkActionPopoverPlacementInput): LinkActionPopoverPlacement {
   const minimumLeft = viewport.left + margin;
   const maximumLeft = viewport.right - margin - menu.width;
@@ -87,7 +89,7 @@ export function placeLinkActionPopover({
   const fitsBelow = belowTop + menu.height <= viewport.bottom - margin;
   const placement = fitsBelow || aboveTop < viewport.top + margin ? 'below' : 'above';
   return {
-    left: clamp(anchor.left, minimumLeft, maximumLeft),
+    left: clamp(alignment === 'end' ? anchor.right - menu.width : anchor.left, minimumLeft, maximumLeft),
     top: clamp(
       placement === 'below' ? belowTop : aboveTop,
       viewport.top + margin,

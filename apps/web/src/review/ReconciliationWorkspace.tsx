@@ -414,7 +414,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
           aria-label="Back"
           disabled={pending}
           onClick={closeDetail}
-        ><ReviewIcon name="arrow-left" size={15} /></ReviewTooltipButton>
+        ><ReviewIcon name="arrow-left" /></ReviewTooltipButton>
         <h2>{detail.mode === "reattach" ? reattachmentTitle(activeRecord.kind) : `${detail.mode === "apply" ? "Apply" : "Discard"} ${typeLabel.toLocaleLowerCase()}`}</h2>
         <span className="reconciliation-workspace__state-pill" data-reconciliation-status={activeRecord.stateLabel}>{activeRecord.stateLabel}</span>
         {detail.mode === "discard" ? <span className="reconciliation-workspace__header-spacer" /> : <ReviewTooltipButton
@@ -426,7 +426,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
           aria-label={`Discard ${typeLabel} annotation on page ${activeRecord.pageNumber}`}
           disabled={pending}
           onClick={() => openDetail(activeRecord, "discard")}
-        ><ReviewIcon name="remove" size={15} /></ReviewTooltipButton>}
+        ><ReviewIcon name="remove" /></ReviewTooltipButton>}
       </header>
 
       <div className="full-annotation-reader__body">
@@ -449,7 +449,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
         <div className="reconciliation-workspace__editor-actions">
           <button className="review-button review-button--secondary" type="button" title="Keep this annotation unresolved" disabled={pending} onClick={() => {
             closeDetail();
-          }}><ReviewIcon name="close" size={15} /><span>Cancel</span></button>
+          }}><ReviewIcon name="close" /><span>Cancel</span></button>
           <button className="review-button review-button--primary" type="button" title="Attach this annotation to the selected text" disabled={pending || candidate.anchor === null} onClick={() => {
             if (candidate.anchor === null) return;
             if (!reattachmentGenerationIsCurrent(detail.generation, props.state.workflow.documentGeneration)) {
@@ -463,13 +463,13 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
               anchor: candidate.anchor,
               updatedAt: new Date().toISOString(),
             }));
-          }}><ReviewIcon name="check" size={15} /><span>Confirm</span></button>
+          }}><ReviewIcon name="check" /><span>Confirm</span></button>
         </div>
       </section> : null}
 
       {detail.mode === "apply" && canApplyDraft ? <section className="reconciliation-workspace__resolution" data-apply-confirmation>
         <div className="reconciliation-workspace__editor-actions">
-          <button className="review-button review-button--secondary" type="button" title="Keep this draft pending" disabled={pending} onClick={closeDetail}><ReviewIcon name="close" size={15} /><span>Cancel</span></button>
+          <button className="review-button review-button--secondary" type="button" title="Keep this draft pending" disabled={pending} onClick={closeDetail}><ReviewIcon name="close" /><span>Cancel</span></button>
           <button className="review-button review-button--primary" type="button" title="Add this draft to the current PDF" disabled={pending} onClick={() => void submit({
             type: "apply-draft",
             expectedRevision: props.state.revision,
@@ -477,15 +477,15 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
             expectedDraftRevision: draft.revision,
             ownerViewId: draft.ownerViewId,
             updatedAt: new Date().toISOString(),
-          })}><ReviewIcon name="check" size={15} /><span>Apply</span></button>
+          })}><ReviewIcon name="check" /><span>Apply</span></button>
         </div>
       </section> : null}
 
       {detail.mode === "discard" ? <section className="reconciliation-workspace__resolution" data-discard-confirmation>
         <p className="reconciliation-workspace__instruction">Discard this annotation from the reviewed PDF?</p>
         <div className="reconciliation-workspace__editor-actions">
-          <button className="review-button review-button--secondary" type="button" title="Keep this annotation" disabled={pending} onClick={closeDetail}><ReviewIcon name="close" size={15} /><span>Cancel</span></button>
-          <button className="review-button review-button--secondary reconciliation-workspace__destructive" type="button" title="Discard this annotation" disabled={pending} onClick={() => void submit(discardCommand(activeRecord.target))}><ReviewIcon name="remove" size={15} /><span>Discard</span></button>
+          <button className="review-button review-button--secondary" type="button" title="Keep this annotation" disabled={pending} onClick={closeDetail}><ReviewIcon name="close" /><span>Cancel</span></button>
+          <button className="review-button review-button--secondary reconciliation-workspace__destructive" type="button" title="Discard this annotation" disabled={pending} onClick={() => void submit(discardCommand(activeRecord.target))}><ReviewIcon name="remove" /><span>Discard</span></button>
         </div>
       </section> : null}
 
@@ -541,7 +541,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
                   data-reconciliation-action="discard"
                   aria-label={`Discard ${typeLabel} annotation on page ${record.pageNumber}`}
                   onClick={() => openDetail(record, "discard")}
-                ><ReviewIcon name="remove" size={13} /></ReviewTooltipButton>
+                ><ReviewIcon name="remove" /></ReviewTooltipButton>
               </div>
             </div>
             <div className="annotation-item__body-row">

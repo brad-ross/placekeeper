@@ -12,14 +12,12 @@
   min-height: 0;
 }
 
-/* The stale document owns the canvas, while the recovery task uses the same
- * contained card geometry as Compact Editorial modals. It remains a page,
- * not a dialog over an interactive review. */
+/* Recovery uses the same quiet surface and field treatment as save setup. */
 html:has(.terminal-recovery),
 body:has(.terminal-recovery) {
   min-height: 100%;
   margin: 0;
-  background: var(--review-surface-canvas, #e8e9e4);
+  background: var(--review-surface-canvas, #f7f7f7);
 }
 
 body:has(.terminal-recovery) {
@@ -38,12 +36,12 @@ body:has(.terminal-recovery) {
   max-height: calc(100dvh - 2rem);
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
-  border: 1px solid var(--review-border-strong);
-  border-radius: var(--review-radius-dialog);
+  border: 0;
+  border-radius: 17px;
   color: var(--review-ink-primary);
   background: var(--review-surface-panel);
-  box-shadow: var(--review-shadow-float);
-  font-size: .875rem;
+  box-shadow: 0 12px 48px #00000018;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -54,15 +52,14 @@ body:has(.terminal-recovery) {
 }
 
 .terminal-recovery__header {
-  padding: 16px 18px 13px;
-  border-bottom: 1px solid var(--review-border-subtle);
+  padding: 23px 23px 11px;
 }
 
 .terminal-recovery__header h1 {
   margin: 0;
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 500;
-  line-height: 1.25;
+  line-height: 1.4;
   letter-spacing: 0;
 }
 
@@ -74,8 +71,8 @@ body:has(.terminal-recovery) {
   display: grid;
   min-height: 0;
   align-content: start;
-  gap: .875rem;
-  padding: 16px 18px;
+  gap: 14px;
+  padding: 0 23px 19px;
   overflow: auto;
 }
 
@@ -99,16 +96,16 @@ body:has(.terminal-recovery) {
 }
 
 .terminal-recovery__status:not([hidden]) {
-  padding: .7rem .8rem;
-  border-left: 3px solid var(--review-selection-ink);
-  border-radius: 0 var(--review-radius-row) var(--review-radius-row) 0;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 10px;
   color: var(--review-ink-primary);
-  background: color-mix(in srgb, var(--review-selection-bg) 52%, var(--review-surface-panel));
+  background: var(--review-surface-subtle);
 }
 
 .terminal-recovery__status[role="alert"] {
-  border-left-color: var(--review-danger);
-  background: color-mix(in srgb, var(--review-danger) 8%, var(--review-surface-panel));
+  color: #843b33;
+  background: #faf0ee;
 }
 
 .terminal-recovery__actions {
@@ -134,9 +131,9 @@ body:has(.terminal-recovery) {
   align-items: center;
   gap: .75rem;
   padding: .7rem;
-  border: 1px solid var(--review-border-subtle);
-  border-radius: var(--review-radius-row);
-  background: color-mix(in srgb, var(--review-surface-subtle) 46%, var(--review-surface-panel));
+  border: 0;
+  border-radius: 10px;
+  background: var(--review-surface-subtle);
 }
 
 .terminal-recovery__choice p {
@@ -150,9 +147,8 @@ body:has(.terminal-recovery) {
 .terminal-recovery__footer {
   display: grid;
   gap: .6rem;
-  padding: 12px 18px 14px;
-  border-top: 1px solid var(--review-border-subtle);
-  background: color-mix(in srgb, var(--review-surface-subtle) 42%, var(--review-surface-panel));
+  padding: 0 23px 23px;
+  background: transparent;
 }
 
 .terminal-recovery__footer-actions,
@@ -203,13 +199,33 @@ body:has(.terminal-recovery) {
   min-width: 0;
   max-width: 100%;
   flex: 1 1 18rem;
-  padding: .65rem .7rem;
-  border: 1px solid var(--review-border);
-  border-radius: var(--review-radius-control);
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 10px;
   color: var(--review-ink-primary);
-  background: var(--review-surface-panel);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 14px;
+  background: #f3f3f3;
+  font: 400 13px/1.4 var(--review-font-ui);
+}
+
+.terminal-recovery input:hover { background: #ededed; }
+
+.terminal-recovery button {
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+  font: 400 13px/1.2 var(--review-font-ui);
+}
+
+.terminal-recovery button:hover:not(:disabled) { background: #e7e7e7; }
+.terminal-recovery .terminal-recovery__primary { background: #333; color: #fff; }
+.terminal-recovery .terminal-recovery__primary:hover:not(:disabled) { background: #222; }
+.terminal-recovery .terminal-recovery__destructive { color: #843b33; background: #faf0ee; box-shadow: none; }
+
+@media (pointer: coarse) {
+  .terminal-recovery button { min-height: 44px; }
 }
 
 .terminal-recovery [hidden] {
@@ -218,15 +234,15 @@ body:has(.terminal-recovery) {
 
 .terminal-recovery__button-icon {
   display: grid;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   flex: none;
   place-items: center;
 }
 
 .terminal-recovery__button-icon .review-icon {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .terminal-recovery button[data-icon="loading"] .review-icon {
@@ -309,6 +325,14 @@ body:has(.terminal-recovery) {
   gap: 5px;
   font-size: 13px;
   pointer-events: auto;
+}
+
+body:has([data-macos-packaged-shell]) .top-bar-menu__surface {
+  height: fit-content;
+  min-height: 0;
+  max-height: calc(100dvh - 24px);
+  align-content: start;
+  overflow-y: auto;
 }
 
 .top-bar-menu__surface *,

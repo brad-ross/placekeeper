@@ -35,7 +35,7 @@ import { projectReviewItems } from "../../../../packages/core/src/annotation-pro
 import {
   createViewerControls,
   unavailableViewerControls,
-  type ViewerControls,
+  type InitializedViewerControls,
   type ViewerControlsSnapshot,
 } from "../pdf/viewer-controls.js";
 import type { ViewerFramingControls } from "../pdf/viewer-framing.js";
@@ -243,6 +243,8 @@ export interface ProductionReviewAppProps {
   readonly viewer?: ReactNode;
   readonly generationRefreshStatus?: GenerationRefreshStatus;
   readonly hostReattachRequestToken?: number;
+  readonly hostExportRequestToken?: number;
+  readonly onHostExportRequestHandled?: (token: number) => void;
   readonly hostForwardSyncTexRequest?: HostForwardSyncTexRequest;
   readonly hostReverseSyncTexRequestToken?: number;
   readonly onReverseSyncTex?: (input: ReverseSyncTexRequest) => Promise<unknown>;
@@ -546,6 +548,55 @@ function reviewStateRequestKey(state: ReviewState): string {
   ]);
 }
 
+function equalStringRecord(
+  first: Readonly<Record<string, string>> | undefined,
+  second: Readonly<Record<string, string>> | undefined,
+): boolean {
+  if (first === second) return true;
+  if (first === undefined || second === undefined) return false;
+  const firstEntries = Object.entries(first);
+  const secondKeys = Object.keys(second);
+  return firstEntries.length === secondKeys.length
+    && firstEntries.every(([key, value]) => second[key] === value);
+}
+
+export function viewerAssetUrlsEqual(
+  first: ViewerAssetUrls | undefined,
+  second: ViewerAssetUrls | undefined,
+): boolean {
+  return first === second || (
+    first !== undefined
+    && second !== undefined
+    && first.pdfiumWasm === second.pdfiumWasm
+    && first.workerUrl === second.workerUrl
+    && first.documentUrl === second.documentUrl
+    && equalStringRecord(first.requestHeaders, second.requestHeaders)
+  );
+}
+
+export function viewerResourcePoliciesEqual(
+  first: ViewerResourcePolicy | undefined,
+  second: ViewerResourcePolicy | undefined,
+): boolean {
+  if (first === second) return true;
+  if (first === undefined || second === undefined || first.host !== second.host) return false;
+  if (first.host === 'browser' && second.host === 'browser') return first.origin === second.origin;
+  if (first.host === 'vscode' && second.host === 'vscode') {
+    return first.issued.size === second.issued.size
+      && [...first.issued].every((url) => second.issued.has(url));
+  }
+  if (first.host === 'chrome' && second.host === 'chrome') {
+    return first.extensionOrigin === second.extensionOrigin
+      && first.resources.document === second.resources.document
+      && first.resources.pdfiumWasm === second.resources.pdfiumWasm
+      && first.resources.worker === second.resources.worker;
+  }
+  return first.host === 'macos' && second.host === 'macos'
+    && first.resources.document === second.resources.document
+    && first.resources.pdfiumWasm === second.resources.pdfiumWasm
+    && first.resources.worker === second.resources.worker;
+}
+
 function updateCodexContext(
   current: LiveContextBindingStatus | undefined,
   next: LiveContextBindingStatus,
@@ -612,6 +663,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [pdfCopyAnnouncement, setPdfCopyAnnouncement] = useState('');
   const [pdfCopyError, setPdfCopyError] = useState<string | null>(null);
   const [commandError, setCommandError] = useState<string | null>(null);
+  const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const [locationRestoreStatus, setLocationRestoreStatus] = useState<LocationRestoreStatus>('idle');
   const [codexContext, setCodexContext] = useState(scope.codexContext);
   const stateRef = useRef(state);
@@ -645,7 +697,8 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [searchState, setSearchState] = useState(() => initialPdfSearchState());
   const [searchNavigationIntentToken, setSearchNavigationIntentToken] = useState(0);
   const commitMainFramingPositionRef = useRef<() => void>(() => undefined);
-  const viewerControlsRef = useRef<ViewerControls | undefined>(undefined);
+  const viewerControlsRef = useRef<InitializedViewerControls | undefined>(undefined);
+  const viewerControlsGenerationRef = useRef<number | null>(null);
   const [viewerFraming, setViewerFraming] = useState<ViewerFramingControls>();
   const productionRootRef = useRef<HTMLElement | null>(null);
   const mainNavigationRef = useRef<PdfViewerNavigation | null>(null);
@@ -729,7 +782,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   useEffect(() => {
     if (props.hostReattachRequestToken === undefined || props.hostReattachRequestToken <= 0) return;
     const id = firstUnresolvedReviewItemId(stateRef.current.items);
-    if (id === undefined) return;
+    setCommandNotice(null);
+    if (id === undefined) {
+      setCommandNotice('No annotations need reattachment.');
+      const timer = window.setTimeout(() => setCommandNotice(null), 6_000);
+      return () => window.clearTimeout(timer);
+    }
     setActiveItemId(id);
     setActivationRequest({ id, token: ++activationTokenRef.current });
   }, [props.hostReattachRequestToken]);
@@ -795,7 +853,15 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     }
     void requestReverseSyncTex({ pageIndex: location.pageIndex, point: location.anchor });
   }, [mainNavigation, props.hostReverseSyncTexRequestToken, props.onReverseSyncTex, requestReverseSyncTex]);
-  const viewerAssets = useMemo(() => props.viewerAssets ?? ({
+  const providedViewerAssetsRef = useRef(props.viewerAssets);
+  if (!viewerAssetUrlsEqual(providedViewerAssetsRef.current, props.viewerAssets)) {
+    providedViewerAssetsRef.current = props.viewerAssets;
+  }
+  const resourcePolicyRef = useRef(props.resourcePolicy);
+  if (!viewerResourcePoliciesEqual(resourcePolicyRef.current, props.resourcePolicy)) {
+    resourcePolicyRef.current = props.resourcePolicy;
+  }
+  const viewerAssets = useMemo(() => providedViewerAssetsRef.current ?? ({
     pdfiumWasm: props.session.appLinkBase === undefined
       ? `/s/${props.session.sessionId}/assets/pdfium.wasm`
       : '/assets/pdfium.wasm',
@@ -807,7 +873,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       ? {}
       : { requestHeaders: { authorization: `Bearer ${props.session.credential}` } }),
   }), [
-    props.viewerAssets,
+    providedViewerAssetsRef.current,
     props.session.appLinkBase,
     props.session.credential,
     props.session.sessionId,
@@ -936,6 +1002,19 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setDestinationError(undefined);
     setCopyProposal(undefined);
     setDestinationDialog({ reason, ...(pending === undefined ? {} : { pending }) });
+  };
+  const retrySave = async () => {
+    if (destinationEstablishing) return;
+    setDestinationEstablishing(true);
+    setDestinationError(undefined);
+    try {
+      setSaveStatus(await props.api.retrySave());
+      setDestinationDialog(null);
+    } catch {
+      setDestinationError('Saving could not be retried safely.');
+    } finally {
+      setDestinationEstablishing(false);
+    }
   };
   const dispatchNavigation = (action: ReferenceNavigationAction) => {
     const next = reduceReferenceNavigation(navigationStateRef.current, action);
@@ -1085,7 +1164,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         : navigation.pointVisibility(
           anchor.pageIndex,
           anchor.point,
-          authoringViewportRef.current ?? undefined,
         ),
     };
   }, []);
@@ -1239,6 +1317,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setExistingAnnotations({ status: 'loading', generation: 0 });
     setMainNavigationReadyGeneration(null);
     setMainDocumentReadyGeneration(null);
+    viewerControlsGenerationRef.current = null;
     navigationCoordinator.replaceDocument(nextGeneration, { preservePresentation: true });
     searchControllerRef.current?.dispose();
     searchControllerRef.current = null;
@@ -1298,7 +1377,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     const restoreWhenSettled = async () => {
       const ready = await waitForReviewNavigationReady({
         isCurrent: () => !cancelled && generation === documentGenerationRef.current,
-        isReady: () => mainNavigationRef.current?.fitToWidthReady() ?? false,
+        isReady: () => (
+          viewerControlsGenerationRef.current === generation
+          && (mainNavigationRef.current?.fitToWidthReady() ?? false)
+        ),
       });
       if (!ready) {
         if (restoringLocationGenerationRef.current === generation) {
@@ -1317,6 +1399,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           : await navigationCoordinator.restorePresentationLocation(presentation, generation)
         : await navigationCoordinator.restoreCurrentLocation();
       if (!cancelled && generation === documentGenerationRef.current) {
+        if (restored) viewerControlsRef.current?.freezeCurrentZoom();
         restoredLocationGenerationRef.current = generation;
         pendingPresentationLocationRef.current = null;
         setLocationRestoreStatus(restored ? 'idle' : 'fallback');
@@ -1454,6 +1537,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     viewerControlsRef.current?.dispose();
     const controls = createViewerControls(registry);
     viewerControlsRef.current = controls;
+    viewerControlsGenerationRef.current = documentGenerationRef.current;
     setViewerState(controls.snapshot());
     if (!initialPresentationAppliedRef.current) {
       initialPresentationAppliedRef.current = true;
@@ -1603,7 +1687,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     <App
       embeddedInReviewShell
       assets={viewerAssets}
-      {...(props.resourcePolicy === undefined ? {} : { resourcePolicy: props.resourcePolicy })}
+      {...(resourcePolicyRef.current === undefined ? {} : { resourcePolicy: resourcePolicyRef.current })}
       documentTitle={scope.documentTitle}
       onSelectionUpdate={onSelectionUpdate}
       onCopySelectionUpdate={onCopySelectionUpdate}
@@ -1838,6 +1922,15 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           ? 'not-saved'
           : state.workflow.mode === 'generated-output' ? 'clean' : saveStatus.sync.phase}
         exportOnly={exportOnly}
+        {...(!exportOnly && state.workflow.mode !== 'generated-output'
+          && saveStatus.sync.phase === 'not-saved' && saveStatus.destination.phase === 'active'
+          ? { saveRecovery: {
+              pending: destinationEstablishing,
+              ...(destinationError === undefined ? {} : { error: destinationError }),
+              onRetry: retrySave,
+              onSaveCopy: () => openCopyDialog('menu'),
+            } }
+          : {})}
         savePendingDestination={
           state.workflow.mode !== 'generated-output'
           && scope.sourceDisposition === 'remote-temporary'
@@ -1853,6 +1946,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         generationRefreshStatus={props.generationRefreshStatus ?? 'idle'}
         locationRestoreStatus={locationRestoreStatus}
         toolError={pdfCopyError ?? commandError}
+        commandNotice={commandNotice}
         onSelectionPageLimitExceeded={() => setCommandError(PDF_SELECTION_PAGE_LIMIT_MESSAGE)}
         onCopySelection={copyMainSelectionFromPalette}
         pdfCopyOwner={pdfCopyOwner}
@@ -1896,15 +1990,20 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         currentOutlineItemId={currentOutlineItemId}
         linkActionRequest={linkActionRequest}
         navigationAnnouncement={navigationAnnouncement}
-        canNavigateBack={navigationState.pendingMainNavigation === null
-          && (locationHistory === undefined
-            ? navigationState.mainHistory.index > 0
-            : locationHistorySnapshot.canBack)}
-        canNavigateForward={navigationState.pendingMainNavigation === null
-          && (locationHistory === undefined
-            ? navigationState.mainHistory.index >= 0
-              && navigationState.mainHistory.index < navigationState.mainHistory.entries.length - 1
-            : locationHistorySnapshot.canForward)}
+        {...(props.hostExportRequestToken === undefined ? {} : {
+          documentActionsRequestToken: props.hostExportRequestToken,
+        })}
+        {...(props.onHostExportRequestHandled === undefined ? {} : {
+          onDocumentActionsRequestHandled: props.onHostExportRequestHandled,
+        })}
+        canNavigateBack={locationHistory === undefined
+          ? navigationState.mainHistory.index > 0
+          : locationHistorySnapshot.canBack}
+        canNavigateForward={locationHistory === undefined
+          ? navigationState.mainHistory.index >= 0
+            && navigationState.mainHistory.index < navigationState.mainHistory.entries.length - 1
+          : locationHistorySnapshot.canForward}
+        documentNavigationPending={navigationState.pendingMainNavigation !== null}
         {...(scope.launchSurface === 'codex'
           ? { codexContext: visibleCodexContext(codexContext, state) ?? UNAVAILABLE_CODEX_CONTEXT }
           : {})}
@@ -2212,19 +2311,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
                 : { recoveryFailure: saveStatus.sync.failure }),
             }
           : {})}
-        onRetry={async () => {
-          if (destinationEstablishing) return;
-          setDestinationEstablishing(true);
-          setDestinationError(undefined);
-          try {
-            setSaveStatus(await props.api.retrySave());
-            setDestinationDialog(null);
-          } catch {
-            setDestinationError("Saving could not be retried safely.");
-          } finally {
-            setDestinationEstablishing(false);
-          }
-        }}
+        onRetry={retrySave}
         onLocate={async () => {
           if (destinationEstablishing) return;
           setDestinationEstablishing(true);

@@ -14,7 +14,7 @@ import {
 import { createPortal } from 'react-dom';
 
 export const REVIEW_TOOLTIP_HOVER_DELAY_MS = 600;
-const TOOLTIP_MARGIN = 8;
+const TOOLTIP_MARGIN = 6;
 
 // Programmatic menu focus inherits the input that opened the menu. WebKit can
 // report :focus-visible for that focus even after a pointer click.
@@ -117,11 +117,12 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
       const viewportLeft = globalThis.visualViewport?.offsetLeft ?? 0;
       const viewportTop = globalThis.visualViewport?.offsetTop ?? 0;
       const centeredLeft = anchor.left + (anchor.width - bounds.width) / 2;
-      const below = anchor.bottom + 7;
-      const above = anchor.top - bounds.height - 7;
+      const below = anchor.bottom + 6;
+      const above = anchor.top - bounds.height - 6;
       setStyle({
         left: clamp(centeredLeft, viewportLeft + TOOLTIP_MARGIN, viewportLeft + viewportWidth - bounds.width - TOOLTIP_MARGIN),
-        top: below + bounds.height <= viewportTop + viewportHeight - TOOLTIP_MARGIN ? below : Math.max(viewportTop + TOOLTIP_MARGIN, above),
+        top: above >= viewportTop + 2 ? above : Math.max(viewportTop + TOOLTIP_MARGIN,
+          Math.min(below, viewportTop + viewportHeight - bounds.height - TOOLTIP_MARGIN)),
       });
     }, [visible, tooltip]);
 

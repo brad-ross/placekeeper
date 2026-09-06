@@ -72,7 +72,7 @@ function DirectAction({ action }: { readonly action: RowAction }) {
       tooltip={action.title}
       onClick={(event) => action.onInvoke(event.currentTarget)}
     >
-      <ReviewIcon name={action.icon} size={15} />
+      <ReviewIcon name={action.icon} size={16} />
     </ReviewTooltipButton>
   );
 }
@@ -183,7 +183,7 @@ export function RowActionGroup({ actions, rowLabel }: RowActionGroupProps) {
                   closeAndRestore();
                 }}
               >
-                <ReviewIcon name={action.icon} size={15} />
+                <ReviewIcon name={action.icon} size={16} />
                 <span>{action.label}</span>
               </button>
             ))}

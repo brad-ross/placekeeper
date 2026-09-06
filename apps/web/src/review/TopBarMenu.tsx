@@ -27,6 +27,7 @@ export interface TopBarMenuProps {
   readonly openerRef: RefObject<HTMLElement | null>;
   readonly onDismiss: (reason: TopBarMenuDismissReason) => void;
   readonly focusFallback?: () => HTMLElement | null;
+  readonly focusOnOpen?: boolean;
   readonly children: ReactNode;
 }
 
@@ -37,10 +38,12 @@ export function TopBarMenu({
   openerRef,
   onDismiss,
   focusFallback,
+  focusOnOpen = true,
   children,
 }: TopBarMenuProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const dismissingRef = useRef(false);
+  const openerPointerRef = useRef(false);
   const onDismissRef = useRef(onDismiss);
   const focusFallbackRef = useRef(focusFallback);
   const [placement, setPlacement] = useState<LinkActionPopoverPlacement | null>(null);
@@ -64,6 +67,7 @@ export function TopBarMenu({
 
   useLayoutEffect(() => {
     dismissingRef.current = false;
+    openerPointerRef.current = false;
     setPlacement(null);
     if (!open) return;
     const surface = surfaceRef.current;
@@ -85,6 +89,7 @@ export function TopBarMenu({
         anchor,
         menu: { width: bounds.width, height: bounds.height },
         viewport: visibleReviewViewport(),
+        alignment: 'end',
       });
       setPlacement((current) => current?.left === next.left
         && current.top === next.top
@@ -100,7 +105,8 @@ export function TopBarMenu({
       // Fixed positioning remains usable when the Popover API is unavailable.
     }
     update();
-    (enabledMenuItems(surface)[0] ?? surface).focus({ preventScroll: true });
+    if (focusOnOpen) (enabledMenuItems(surface)[0] ?? surface).focus({ preventScroll: true });
+    else opener.focus({ preventScroll: true });
 
     let updateFrame = 0;
     const scheduleUpdate = () => {
@@ -108,11 +114,25 @@ export function TopBarMenu({
       updateFrame = requestAnimationFrame(update);
     };
     const outsidePointer = (event: PointerEvent) => {
+      openerPointerRef.current = event.target instanceof Node
+        && openerRef.current?.contains(event.target) === true;
       if (event.target instanceof Node && surface.contains(event.target)) return;
       if (event.target instanceof Node && openerRef.current?.contains(event.target)) return;
       const switchingTopBarMenu = event.target instanceof Element
         && event.target.closest('[data-review-chrome-group], [data-document-actions-trigger]') !== null;
       dismiss('outside', !switchingTopBarMenu);
+    };
+    const openerKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!(event.target instanceof Node) || !opener.contains(event.target) || event.isComposing) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        dismiss('escape');
+      } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const items = enabledMenuItems(surface);
+        (event.key === 'ArrowUp' ? items.at(-1) : items[0])?.focus({ preventScroll: true });
+      } else if (event.key === 'Tab') dismiss('tab', false);
     };
     const connectionObserver = new MutationObserver(() => {
       if (!openerRef.current?.isConnected) {
@@ -134,6 +154,7 @@ export function TopBarMenu({
     boundsObserver?.observe(opener);
     if (chrome) boundsObserver?.observe(chrome);
     document.addEventListener('pointerdown', outsidePointer, true);
+    document.addEventListener('keydown', openerKeyDown, true);
     window.addEventListener('resize', scheduleUpdate);
     globalThis.visualViewport?.addEventListener('resize', scheduleUpdate);
     globalThis.visualViewport?.addEventListener('scroll', scheduleUpdate);
@@ -142,11 +163,12 @@ export function TopBarMenu({
       connectionObserver.disconnect();
       boundsObserver?.disconnect();
       document.removeEventListener('pointerdown', outsidePointer, true);
+      document.removeEventListener('keydown', openerKeyDown, true);
       window.removeEventListener('resize', scheduleUpdate);
       globalThis.visualViewport?.removeEventListener('resize', scheduleUpdate);
       globalThis.visualViewport?.removeEventListener('scroll', scheduleUpdate);
     };
-  }, [dismiss, open, openerRef]);
+  }, [dismiss, open, openerRef, focusOnOpen]);
 
   if (!open || typeof document === 'undefined') return null;
 
@@ -158,6 +180,7 @@ export function TopBarMenu({
     top: `${placement?.top ?? (initialAnchor?.bottom ?? 4) + 8}px`,
   } as CSSProperties;
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    openerPointerRef.current = false;
     if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
       event.preventDefault();
       event.stopPropagation();
@@ -179,6 +202,10 @@ export function TopBarMenu({
     // WebKit may report null while a pointer activation is still resolving.
     if (event.relatedTarget === null) return;
     if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    // Let the opener's click toggle the menu. Dismissing on pointer-induced
+    // blur would close it before that click and immediately reopen it.
+    if (openerPointerRef.current && event.relatedTarget instanceof Node
+      && openerRef.current?.contains(event.relatedTarget)) return;
     dismiss('tab');
   };
 

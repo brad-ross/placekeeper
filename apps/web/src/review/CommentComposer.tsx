@@ -67,7 +67,7 @@ function AnchorReturn({ navigation }: {
       disabled={state === 'pending'}
       onClick={() => navigation?.onReturn()}
     >
-      <ReviewIcon name={state === 'pending' ? 'loading' : 'locate'} />
+      <ReviewIcon name={state === 'pending' ? 'loading' : 'locate'} size={16} />
     </ReviewTooltipButton>
   );
 }
@@ -212,13 +212,15 @@ export function CommentComposer({
       }}
     >
       <header className="comment-composer__header compact-editorial-modal__header">
-        <h2 id={titleId}><ReviewIcon name={composerIcon(title)} size={14} />{title}</h2>
-        <div className="comment-composer__context">
-          {anchorNavigation?.visibility === 'outside' && anchorNavigation.pageNumber !== undefined
-            ? <span className="comment-composer__page-cue">{anchorNavigation.pageNumber}</span>
-            : null}
-          <AnchorReturn navigation={anchorNavigation} />
-        </div>
+        <h2 id={titleId}>
+          <ReviewIcon name={composerIcon(title)} size={16} />
+          <span>{title}{anchorNavigation?.visibility === 'outside' && anchorNavigation.pageNumber !== undefined
+            ? <span className="comment-composer__page-cue"> · {anchorNavigation.pageNumber}</span>
+            : null}</span>
+        </h2>
+        {anchorNavigation?.visibility === 'outside' || anchorNavigation?.pending
+          ? <AnchorReturn navigation={anchorNavigation} />
+          : null}
       </header>
       <div className="comment-composer__body compact-editorial-modal__body">
         <label className="comment-composer__field">
@@ -227,6 +229,7 @@ export function CommentComposer({
             className="comment-composer__input"
             ref={inputRef}
             title={fieldLabel}
+            placeholder="Add a comment…"
             value={value}
             onChange={(event) => {
               const next = event.currentTarget.value;
@@ -259,7 +262,6 @@ export function CommentComposer({
               title="Keep highlight without comment"
               onClick={() => void onSkip()}
             >
-              <ReviewIcon name="arrow-right" />
               <span>Keep</span>
             </button>
           ) : null}

@@ -16,6 +16,7 @@ const MODE_PRESENTATION: Readonly<Record<WorkspaceMode, {
 
 export interface WorkspaceDockAction {
   readonly destination: 'bottom' | 'right';
+  readonly disabled?: boolean;
   readonly onClick: () => void;
   readonly onFocus?: (event: FocusEvent<HTMLButtonElement>) => void;
   readonly onBlur?: (event: FocusEvent<HTMLButtonElement>) => void;
@@ -93,7 +94,7 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
                 onBlur={(event) => onModeBlur?.(mode, event)}
                 onClick={() => onModeChange(mode)}
               >
-                <ReviewIcon name={presentation.icon} size={15} />
+                <ReviewIcon name={presentation.icon} />
                 {selected ? (
                   <span
                     className="review-workspace__mode-label"
@@ -114,6 +115,7 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
           type="button"
           className="review-workspace__move review-workspace__move--activity review-workspace__move--header-action"
           data-reference-move={dockAction.destination}
+          disabled={dockAction.disabled}
           aria-label={`Move References to ${dockAction.destination}`}
           onClick={dockAction.onClick}
           onFocus={dockAction.onFocus}

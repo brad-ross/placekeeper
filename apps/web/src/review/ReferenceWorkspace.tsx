@@ -217,6 +217,7 @@ export function ReferenceWorkspace({
     ? presentation === 'right' && onMoveReferencesBottom
       ? {
           destination: 'bottom',
+          disabled: pendingReference?.status === 'loading',
           onClick: onMoveReferencesBottom,
           onFocus: onDockActionFocus,
           onBlur: onDockActionBlur,
@@ -224,6 +225,7 @@ export function ReferenceWorkspace({
       : presentation === 'bottom' && headerVariant === 'references' && onMoveReferencesRight
         ? {
             destination: 'right',
+            disabled: pendingReference?.status === 'loading',
             onClick: onMoveReferencesRight,
             onFocus: onDockActionFocus,
             onBlur: onDockActionBlur,
@@ -300,7 +302,8 @@ export function ReferenceWorkspace({
   useLayoutEffect(() => {
     if (referenceReturn?.pending || !restoreReferenceReturnFocus.current) return;
     restoreReferenceReturnFocus.current = false;
-    const active = referenceReturnRef.current?.ownerDocument.activeElement;
+    const tab = activeTabIdentity ? referenceTabRefs.current.get(activeTabIdentity) : null;
+    const active = (referenceReturnRef.current ?? tab)?.ownerDocument.activeElement;
     if (
       active instanceof HTMLElement
       && active !== active.ownerDocument.body
@@ -308,7 +311,7 @@ export function ReferenceWorkspace({
     ) return;
     focusWithoutScroll(
       referenceReturnRef.current
-        ?? (activeTabIdentity ? referenceTabRefs.current.get(activeTabIdentity) : null),
+        ?? tab,
     );
   }, [activeTabIdentity, referenceReturn?.available, referenceReturn?.pending]);
 
@@ -386,7 +389,7 @@ export function ReferenceWorkspace({
       data-list-open={open ? 'true' : 'false'}
       data-authoring-takeover={authoringTakeover ? 'true' : undefined}
       aria-label={headerVariant === 'references' ? 'References' : 'Review workspace'}
-      aria-hidden={!open || authoringTakeover}
+      aria-hidden={!open}
       inert={!open || authoringTakeover}
     >
       {modes.length > 0 ? <header className="review-workspace__header">
@@ -397,7 +400,7 @@ export function ReferenceWorkspace({
           aria-expanded="true"
           aria-controls="review-workspace"
           onClick={onHide}
-        ><ReviewIcon name={presentation === 'bottom' ? 'chevron-down' : 'chevron-right'} size={14} /></ReviewTooltipButton> : null}
+        ><ReviewIcon name={presentation === 'bottom' ? 'chevron-down' : 'chevron-right'} /></ReviewTooltipButton> : null}
         <WorkspaceModeStrip
           modes={modes}
           selectedMode={mode}
@@ -478,8 +481,8 @@ export function ReferenceWorkspace({
                     onKeyDown={moveReferenceFocus}
                     onClick={() => onReferenceTabActivate(tab.identity)}
                   >
-                    <span>{tab.label}</span>
-                    {tab.label === tab.pageContext ? null : <small>{tab.pageContext}</small>}
+                    <span>{tab.label === tab.pageContext ? tab.pageContext.replace(/^Page\s+/u, '') : tab.label}</span>
+                    {tab.label === tab.pageContext ? null : <small>{tab.pageContext.replace(/^Page\s+/u, '')}</small>}
                   </ReviewTooltipButton>
                   {showActions && showReferenceReturn ? (
                     <ReferenceReturnButton

@@ -71,13 +71,13 @@ body,
   gap: 7px;
   width: 100%;
   min-height: 44px;
-  border: 1px solid var(--review-ink-primary);
-  border-radius: var(--review-radius-control);
+  border: 0;
+  border-radius: 10px;
   color: var(--review-surface-panel);
   background: var(--review-ink-primary);
   font: inherit;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
   cursor: pointer;
 }
 
@@ -86,8 +86,8 @@ body,
 }
 
 .static-launcher__button:focus-visible {
-  outline: 3px solid var(--review-focus);
-  outline-offset: 2px;
+  outline: 2px solid var(--review-focus);
+  outline-offset: 3px;
 }
 
 .static-launcher__button:disabled {
@@ -122,8 +122,8 @@ body,
 .static-launcher__url input,
 .static-launcher__url button {
   min-height: 40px;
-  border: 1px solid var(--review-border);
-  border-radius: var(--review-radius-control);
+  border: 0;
+  border-radius: 10px;
   font: inherit;
 }
 
@@ -131,8 +131,8 @@ body,
   min-width: 0;
   padding: 0 11px;
   color: var(--review-ink-primary);
-  background: var(--review-surface-panel);
-  font-size: 14px;
+  background: #f0f0f0;
+  font-size: 13px;
 }
 
 .static-launcher__url button {
@@ -141,18 +141,24 @@ body,
   color: var(--review-ink-primary);
   background: var(--review-surface-subtle);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
   cursor: pointer;
 }
 
 .static-launcher__url :is(input, button):focus-visible {
-  outline: 3px solid var(--review-focus);
-  outline-offset: 2px;
+  outline: 2px solid var(--review-focus);
+  outline-offset: 3px;
 }
 
 .static-launcher__url button:disabled {
   cursor: default;
   opacity: .55;
+}
+
+.static-launcher__url input:hover,
+.static-launcher__url button:hover:not(:disabled),
+.static-launcher__progress button:hover:not(:disabled) {
+  background: var(--review-surface-interactive);
 }
 
 .static-launcher__description a {
@@ -163,9 +169,10 @@ body,
 .static-launcher__error {
   margin: 16px 0 0;
   padding: 10px 12px;
-  border-left: 3px solid var(--review-danger);
-  color: var(--review-danger);
-  background: color-mix(in srgb, var(--review-danger) 9%, var(--review-surface-panel));
+  border: 0;
+  border-radius: 10px;
+  color: #843b33;
+  background: #faf0ee;
   font-size: 13px;
   line-height: 1.45;
 }
@@ -188,15 +195,15 @@ body,
 }
 
 .static-launcher__progress button {
-  min-height: 34px;
-  padding: 0 12px;
-  border: 1px solid var(--review-border);
-  border-radius: var(--review-radius-control);
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 10px;
   color: var(--review-ink-primary);
-  background: var(--review-surface-panel);
+  background: transparent;
   font: inherit;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
   cursor: pointer;
 }
 

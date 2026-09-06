@@ -80,7 +80,7 @@ const reviewIcons = {
   search: Search,
   note: StickyNote,
   insert: TextCursorInput,
-  delete: Minus,
+  delete: Trash2,
   remove: Trash2,
   warning: TriangleAlert,
   undo: Undo2,

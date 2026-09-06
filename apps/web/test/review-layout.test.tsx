@@ -404,13 +404,18 @@ describe('review shell layout and accessibility contract', () => {
       <FullAnnotationReaderActions
         onBack={() => undefined}
         onEdit={() => undefined}
+        onDelete={() => undefined}
       />,
     );
 
     expect(html).toContain('aria-label="Back"');
     expect(html).toContain('aria-label="Edit"');
+    expect(html).toContain('aria-label="Delete"');
+    expect(html.indexOf('data-full-annotation-action="edit"'))
+      .toBeLessThan(html.indexOf('data-full-annotation-action="delete"'));
     expect(html).not.toContain('>Back<');
     expect(html).not.toContain('>Edit<');
+    expect(html).not.toContain('>Delete<');
   });
 
   it('switches row actions at one shared geometry-derived container boundary', () => {
@@ -675,6 +680,28 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('data-review-chrome-presentation="navigationCompact"');
   });
 
+  it('keeps document-history controls mounted but inert while navigation is pending', () => {
+    const html = renderToStaticMarkup(
+      <ReviewChrome
+        documentTitle="paper.pdf"
+        controls={viewerControls}
+        viewerState={viewerControls.snapshot()}
+        canUndo={false}
+        canRedo={false}
+        canNavigateBack
+        documentNavigationPending
+        onUndo={vi.fn()}
+        onRedo={vi.fn()}
+        onNavigateBack={vi.fn()}
+      />,
+    );
+
+    expect(html).toMatch(
+      /<button(?=[^>]*aria-label="Back in document history")(?=[^>]*aria-busy="true")(?=[^>]*disabled="")[^>]*>/u,
+    );
+    expect(html).toContain('data-main-history="back"');
+  });
+
   it('starts with a compact measured presentation and an inert sizing rack', () => {
     const html = renderChrome(true, true);
 
@@ -884,7 +911,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(readerHtml).toContain('<span class="annotation-item__page">3–5</span>');
   });
 
-  it('keeps the annotation Copy Link affordance mounted and right-most while durability is pending', () => {
+  it('keeps annotation row actions in canonical edit, copy, remove, dismiss order', () => {
     const copyLink = {
       getLink: () => 'placekeeper:///tmp/Paper.pdf#v=1&page=4&item=00000000-0000-4000-8000-000000000004',
       writeText: async () => undefined,
@@ -916,7 +943,14 @@ describe('review shell layout and accessibility contract', () => {
       />,
     );
     const copyablePeek = renderToStaticMarkup(
-      <AnnotationPeek item={ownedAnnotation} copyLink={copyLink} onHoldChange={() => undefined} />,
+      <AnnotationPeek
+        item={ownedAnnotation}
+        copyLink={copyLink}
+        onHoldChange={() => undefined}
+        onEdit={() => undefined}
+        onDelete={() => undefined}
+        onDismiss={() => undefined}
+      />,
     );
 
     expect(copyableList).toContain('data-item-copy-link="true"');
@@ -925,12 +959,26 @@ describe('review shell layout and accessibility contract', () => {
     expect(copyableList).toContain('row-action-group');
     expect(copyableList).toContain('annotation-item__body-row');
     expect(copyableList.indexOf('data-row-action="edit"')).toBeLessThan(
-      copyableList.indexOf('data-row-action="delete"'),
-    );
-    expect(copyableList.indexOf('data-row-action="delete"')).toBeLessThan(
       copyableList.indexOf('copy-link-control--row'),
     );
+    expect(copyableList.indexOf('copy-link-control--row')).toBeLessThan(
+      copyableList.indexOf('data-row-action="delete"'),
+    );
+    expect(copyableList.match(/width="16" height="16"/gu)).toHaveLength(5);
     expect(copyablePeek).toContain('aria-label="Copy link to Highlight annotation on page 4"');
+    expect(copyablePeek.indexOf('data-row-action="edit"')).toBeLessThan(
+      copyablePeek.indexOf('copy-link-control--row'),
+    );
+    expect(copyablePeek.indexOf('copy-link-control--row')).toBeLessThan(
+      copyablePeek.indexOf('data-row-action="delete"'),
+    );
+    expect(copyablePeek.indexOf('data-row-action="delete"')).toBeLessThan(
+      copyablePeek.indexOf('data-row-action="close"'),
+    );
+    expect(copyablePeek.match(/width="16" height="16"/gu)).toHaveLength(6);
+    expect(annotationStyles).toMatch(
+      /\.annotation-item__kind-icon\s*\{[^}]*width:\s*16px;[^}]*height:\s*16px;/u,
+    );
     expect(pendingList).toContain('data-item-copy-link="true"');
     expect(pendingList).toContain('title="Save annotation before copying its link"');
     expect(pendingList).toContain('disabled=""');
@@ -1030,8 +1078,8 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('aria-label="Close annotations"');
     expect(html).not.toContain('aria-label="Close workspace"');
     expect(html).not.toContain('class="annotation-drawer__header"');
-    expect(html).toContain('aria-label="Owned annotations"');
-    expect(html).toContain('aria-label="From this PDF"');
+    expect(html).toContain('aria-label="Annotations"');
+    expect(html).not.toContain('aria-label="From this PDF"');
     expect(html).toContain('data-existing-annotations-state="loading"');
     expect(html).toContain('data-annotation-status="loading"');
     for (const tool of ['Copy', 'Replace', 'Delete', 'Highlight']) {
@@ -1159,7 +1207,7 @@ describe('review shell layout and accessibility contract', () => {
       /\.reference-panel__viewport\s*\{[^}]*margin:\s*12px;[^}]*border-radius:/u,
     );
     expect(neutralStyles).toMatch(
-      /\.reference-tab-segment--compound\s*\{[^}]*padding-right:\s*9px;/u,
+      /\.reference-tab-segment--compound\s*\{[^}]*padding-right:\s*3px;/u,
     );
     const coarsePointerRules = responsiveStyles.match(
       /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*?)\n\}/u,
@@ -1262,18 +1310,44 @@ describe('review shell layout and accessibility contract', () => {
     );
   });
 
-  it('keeps Outline interaction rings separated across rows and branches', () => {
+  it('matches the compact, guide-free canonical Outline nesting rhythm', () => {
     expect(annotationStyles).toMatch(
-      /\.outline-navigator\s*\{[^}]*--outline-tree-row-gap:\s*6px;[^}]*--outline-tree-branch-gap:\s*8px;/u,
+      /\.outline-navigator\s*\{[^}]*--outline-tree-indent:\s*14px;[^}]*--outline-tree-row-gap:\s*0px;[^}]*--outline-tree-branch-gap:\s*0px;/u,
     );
     expect(annotationStyles).toMatch(
       /\.outline-navigator ul\s*\{[^}]*gap:\s*var\(--outline-tree-row-gap\);/u,
     );
     expect(annotationStyles).toMatch(
-      /\.outline-navigator__children\s*\{[^}]*margin-top:\s*var\(--outline-tree-branch-gap\);/u,
+      /\.outline-navigator__children\s*\{[^}]*margin-top:\s*var\(--outline-tree-branch-gap\);[^}]*padding-left:\s*var\(--outline-tree-indent\);[^}]*border-left:\s*0;/u,
     );
     expect(annotationStyles).toMatch(
       /\.outline-navigator li:has\(> \.outline-navigator__children:not\(\[hidden\]\)\) \+ li\s*\{[^}]*margin-top:\s*calc\(var\(--outline-tree-branch-gap\) - var\(--outline-tree-row-gap\)\);/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.outline-navigator__row\s*\{[^}]*grid-template-columns:\s*var\(--outline-tree-leading-size\) minmax\(0, 1fr\);[^}]*margin:\s*2px 0;[^}]*padding:\s*0 4px;/u,
+    );
+    expect(annotationStyles).not.toContain('.outline-navigator__row[data-current="true"]::before');
+    expect(annotationStyles).toMatch(
+      /\.outline-navigator__summary\s*\{[^}]*width:\s*100%;[^}]*justify-content:\s*space-between;[^}]*gap:\s*10px;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.outline-navigator__title\s*\{[^}]*overflow:\s*visible;[^}]*overflow-wrap:\s*anywhere;[^}]*white-space:\s*normal;/u,
+    );
+    expect(annotationStyles).not.toContain('.outline-navigator__row:active');
+    expect(annotationStyles).not.toMatch(
+      /\.outline-navigator__row:focus-within[^\{]*\{[^}]*outline:/u,
+    );
+    expect(neutralStyles).toMatch(
+      /\.outline-navigator__row:hover,\s*\.outline-navigator__row:focus-within\s*\{[^}]*background:\s*#e7e7e7;/u,
+    );
+    expect(neutralStyles).toMatch(
+      /\.outline-navigator__row\[data-current="true"\]\s*\{[^}]*box-shadow:\s*0 2px 7px rgb\(0 0 0 \/ 2\.4%\);/u,
+    );
+    expect(neutralStyles).toContain(
+      '.outline-navigator__disclosure .review-icon { width: 16px; height: 16px; }',
+    );
+    expect(neutralStyles).toContain(
+      '):focus-visible {\n  outline: 2px solid #496789;\n  outline-offset: 3px;',
     );
   });
 
@@ -1336,17 +1410,17 @@ describe('review shell layout and accessibility contract', () => {
     );
 
     expect(html).toContain('data-existing-annotations-state="ready"');
-    expect(html).toContain('<h2>From this PDF</h2>');
+    expect(html).not.toContain('From this PDF');
     expect(html).toContain('data-annotation-origin="source"');
     expect(html).toContain('data-annotation-kind="Highlight"');
     expect(html).toContain('data-annotation-state="readonly"');
     expect(html).toContain('data-readonly="true"');
-    const existingAnnotationsHtml = html.slice(
-      html.indexOf('<section class="existing-annotations"'),
-      html.indexOf('</section>', html.indexOf('<section class="existing-annotations"')),
+    const annotationsHtml = html.slice(
+      html.indexOf('<section class="annotation-drawer__owned"'),
+      html.indexOf('</section>', html.indexOf('<section class="annotation-drawer__owned"')),
     );
-    expect(existingAnnotationsHtml).not.toContain('Representative review');
-    expect(existingAnnotationsHtml).not.toContain('annotation-item__section');
+    expect(annotationsHtml).not.toContain('Representative review');
+    expect(annotationsHtml).not.toContain('annotation-item__section');
     expect(html).toContain('aria-label="Highlight · Page 2 · Source-only comment"');
     expect(html).toContain('data-full-annotation-eligible="true"');
     expect(html).not.toContain('>Page 2<');
@@ -1356,7 +1430,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('id="workspace-mode-annotations"');
   });
 
-  it('orders attention, owned, and read-only populations without duplicating unresolved items', () => {
+  it('orders attention before one document-ordered owned and source population without duplicating unresolved items', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={{ ...generatedState, items: [ownedAnnotation, unresolvedAnnotation] }}
@@ -1384,11 +1458,13 @@ describe('review shell layout and accessibility contract', () => {
     );
 
     const attention = html.indexOf('<h2>Needs attention</h2>');
-    const owned = html.indexOf('aria-label="Owned annotations"');
-    const existing = html.indexOf('<h2>From this PDF</h2>');
+    const annotations = html.indexOf('<section class="annotation-drawer__owned"');
+    const source = html.indexOf('data-existing-annotation="source-highlight"');
+    const owned = html.indexOf('data-review-item="owned-highlight"');
     expect(attention).toBeGreaterThan(-1);
-    expect(owned).toBeGreaterThan(attention);
-    expect(existing).toBeGreaterThan(owned);
+    expect(annotations).toBeGreaterThan(attention);
+    expect(source).toBeGreaterThan(annotations);
+    expect(owned).toBeGreaterThan(source);
     expect(html.match(/data-reconciliation-item="unresolved-highlight"/gu)).toHaveLength(1);
     expect(html).not.toContain('data-review-item="unresolved-highlight"');
     expect(html).toContain('data-review-item="owned-highlight"');
@@ -1410,11 +1486,11 @@ describe('review shell layout and accessibility contract', () => {
       </ReviewShell>,
     );
 
-    expect(html).toContain('aria-label="Owned annotations"');
+    expect(html).toContain('aria-label="Annotations"');
     expect(html).toContain('Select text in the PDF to add an annotation.');
     expect(html.match(/Select text in the PDF to add an annotation\./gu)).toHaveLength(1);
     expect(html).not.toContain('aria-label="From this PDF"');
-    expect(html).not.toContain('data-existing-annotations-state');
+    expect(html).toContain('data-existing-annotations-state="empty"');
     expect(html).not.toContain('No existing annotations.');
     expect(html).toContain('id="workspace-mode-annotations"');
     expect(html).toContain('id="workspace-panel-annotations"');
@@ -1455,8 +1531,8 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('id="workspace-mode-annotations"');
     expect(html).toMatch(/id="workspace-mode-search"[^>]*aria-selected="true"/u);
     expect(html).not.toContain('Methods and data');
-    expect(html).toContain('aria-label="Owned annotations"');
-    expect(html).toContain('<h2>From this PDF</h2>');
+    expect(html).toContain('aria-label="Annotations"');
+    expect(html).not.toContain('From this PDF');
     expect(html).not.toContain('Review comments');
     expect(html).not.toContain('Source PDF');
     expect(html).not.toContain('existing-annotations__readonly');

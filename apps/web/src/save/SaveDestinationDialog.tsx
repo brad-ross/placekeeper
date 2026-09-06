@@ -29,6 +29,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
   const titleId = useId();
   const descriptionId = useId();
   const firstRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
   const lastProposalFilename = useRef<string | undefined>(undefined);
   const remote = props.sourceDisposition === "remote-temporary";
   const proposalFilename = props.proposal?.sourceDisposition === "local"
@@ -41,7 +42,11 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
     setChoice("copy");
     lastProposalFilename.current = proposalFilename;
     setFilename(proposalFilename ?? "");
-    requestAnimationFrame(() => firstRef.current?.focus());
+    requestAnimationFrame(() => {
+      const first = firstRef.current;
+      if (first && !first.disabled) first.focus();
+      else dialogRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    });
   }, [props.open]);
 
   useLayoutEffect(() => {
@@ -58,6 +63,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
   return (
     <div className="save-destination-backdrop" data-save-destination-backdrop>
       <section
+        ref={dialogRef}
         className="save-destination-dialog compact-editorial-modal"
         role="dialog"
         aria-modal="true"
@@ -142,6 +148,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
           <legend className="sr-only">Automatic save location</legend>
           {remote ? null : <label className="save-destination-choice" data-selected={choice === "original"}>
             <input
+              ref={restricted ? undefined : firstRef}
               type="radio"
               title="Modify the original PDF"
               name="save-destination"
@@ -149,11 +156,11 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
               disabled={restricted}
               onChange={() => setChoice("original")}
             />
-            <strong>Modify the original PDF</strong>
+            <span className="save-destination-choice__label">Modify the original PDF</span>
           </label>}
           <label className="save-destination-choice" data-selected={choice === "copy"}>
             <input
-              ref={firstRef}
+              ref={remote || restricted ? firstRef : undefined}
               type="radio"
               title="Save to a new copy"
               name="save-destination"
@@ -161,7 +168,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
               disabled={restricted}
               onChange={() => setChoice("copy")}
             />
-            <strong>Save to a new copy</strong>
+            <span className="save-destination-choice__label">Save to a new copy</span>
           </label>
           {choice === "copy" ? (
             <div className="save-destination-copy-details">
@@ -206,7 +213,6 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
             disabled={props.establishing}
             onClick={props.onCancel}
           >
-            <ReviewIcon name="close" />
             <span>Cancel</span>
           </button>
           <button
@@ -223,7 +229,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
             }
             onClick={() => void props.onConfirm(choice, filename)}
           >
-            <ReviewIcon name={props.establishing ? "loading" : "check"} />
+            {props.establishing ? <ReviewIcon name="loading" /> : null}
             <span>{props.establishing ? "Setting up…" : "Confirm"}</span>
           </button>
         </footer>
