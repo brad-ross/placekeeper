@@ -1008,7 +1008,7 @@ test.describe('canonical review workflow', () => {
     const chrome = page.locator('[data-review-chrome]');
     await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'expanded');
 
-    const longTitle = chrome.locator(':scope > .review-chrome__identity strong');
+    const longTitle = chrome.locator(':scope > .review-chrome__identity .review-chrome__filename');
     const originalTitle = await longTitle.textContent();
     const longTitleGeometry = await longTitle.evaluate((element) => ({
       width: element.getBoundingClientRect().width,
@@ -1034,6 +1034,83 @@ test.describe('canonical review workflow', () => {
     }
   });
 
+  test('matches the canonical filename, agent, page, and zoom geometry', async ({ page }) => {
+    await page.goto('/test/acceptance/review-harness/index.html?responsive=full');
+    await page.setViewportSize({ width: 1280, height: 720 });
+    const chrome = page.locator('[data-review-chrome]');
+    const filenameControl = chrome.locator(':scope > .review-chrome__identity > .review-chrome__save-identity');
+    const context = chrome.locator(':scope > .review-chrome__identity > [data-review-context-status]');
+    const pagePosition = chrome.locator('[data-review-page-position]');
+    const pageDisclosure = chrome.locator('.review-chrome__page-disclosure');
+    const zoomGroup = chrome.locator('[data-review-chrome-group="zoom"]');
+    const zoomValue = zoomGroup.locator('.review-chrome__zoom-value');
+    const zoomInput = zoomGroup.locator('.review-chrome__zoom-input');
+    const zoomSuffix = zoomGroup.locator('.review-chrome__zoom-suffix');
+    const zoomDisclosure = zoomGroup.locator('.review-chrome__zoom-disclosure');
+
+    const geometry = await chrome.evaluate((element) => {
+      const bounds = (selector: string) => element.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
+      const styles = (selector: string) => getComputedStyle(element.querySelector<HTMLElement>(selector)!);
+      const file = bounds(':scope > .review-chrome__identity > .review-chrome__save-identity');
+      const contextStatus = bounds(':scope > .review-chrome__identity > [data-review-context-status]');
+      const pageGroup = bounds('[data-review-page-position]');
+      const pageNumber = bounds('.review-chrome__page-input');
+      const pageButton = bounds('.review-chrome__page-disclosure');
+      const pageText = bounds('.review-chrome__page-disclosure > span');
+      const zoom = bounds('[data-review-chrome-group="zoom"]');
+      const zoomNumber = bounds('.review-chrome__zoom-input');
+      const zoomUnit = bounds('.review-chrome__zoom-suffix');
+      const zoomButton = bounds('.review-chrome__zoom-disclosure');
+      const zoomIcon = bounds('.review-chrome__zoom-disclosure .review-icon');
+      return {
+        file: file.toJSON(), context: contextStatus.toJSON(),
+        pageGroup: pageGroup.toJSON(), pageNumber: pageNumber.toJSON(), pageButton: pageButton.toJSON(), pageText: pageText.toJSON(),
+        zoom: zoom.toJSON(), zoomNumber: zoomNumber.toJSON(), zoomUnit: zoomUnit.toJSON(), zoomButton: zoomButton.toJSON(), zoomIcon: zoomIcon.toJSON(),
+        filePadding: [styles(':scope > .review-chrome__identity > .review-chrome__save-identity').paddingTop, styles(':scope > .review-chrome__identity > .review-chrome__save-identity').paddingRight],
+        fileGap: styles(':scope > .review-chrome__identity > .review-chrome__save-identity').gap,
+        fileRadius: styles(':scope > .review-chrome__identity > .review-chrome__save-identity').borderRadius,
+        pageAlign: styles('.review-chrome__page-input').textAlign,
+      };
+    });
+
+    expect(geometry.file.height).toBe(32);
+    expect(geometry.filePadding).toEqual(['6px', '8px']);
+    expect(geometry.fileGap).toBe('7px');
+    expect(geometry.fileRadius).toBe('10px');
+    expect(Math.abs(geometry.file.x + geometry.file.width + 12 - geometry.context.x)).toBeLessThanOrEqual(.5);
+    expect(Math.abs(geometry.file.y + geometry.file.height / 2 - geometry.context.y - geometry.context.height / 2)).toBeLessThanOrEqual(.5);
+    expect(geometry.pageNumber.width).toBe(28);
+    expect(geometry.pageAlign).toBe('center');
+    expect(Math.abs(geometry.pageNumber.x + geometry.pageNumber.width - geometry.pageButton.x)).toBeLessThanOrEqual(.5);
+    expect(Math.abs(geometry.pageButton.width - geometry.pageText.width - 6)).toBeLessThanOrEqual(.5);
+    expect(Math.abs(geometry.zoom.x + 5 - geometry.zoomNumber.x)).toBeLessThanOrEqual(.5);
+    expect(Math.abs(geometry.zoomNumber.x + geometry.zoomNumber.width - geometry.zoomUnit.x)).toBeLessThanOrEqual(.5);
+    expect(Math.abs(geometry.zoomUnit.x + geometry.zoomUnit.width - geometry.zoomButton.x)).toBeLessThanOrEqual(.5);
+    expect(geometry.zoomButton.width).toBe(20);
+    expect(geometry.zoomButton.height).toBe(32);
+    expect(Math.abs(geometry.zoomButton.x + geometry.zoomButton.width / 2 - geometry.zoomIcon.x - geometry.zoomIcon.width / 2)).toBeLessThanOrEqual(.5);
+
+    await pagePosition.hover();
+    await expect(pagePosition).toHaveCSS('background-color', 'rgb(233, 233, 233)');
+    await expect(pageDisclosure).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await pageDisclosure.click();
+    await expect(pagePosition).toHaveCSS('background-color', 'rgb(233, 233, 233)');
+    await expect(pageDisclosure).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await pageDisclosure.click();
+    await zoomGroup.hover();
+    await expect(zoomGroup).toHaveCSS('background-color', 'rgb(233, 233, 233)');
+    await expect(zoomDisclosure).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await zoomDisclosure.click();
+    await expect(zoomGroup).toHaveCSS('background-color', 'rgb(233, 233, 233)');
+    await expect(zoomDisclosure).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+
+    await expect(filenameControl.locator(':scope > .review-icon + .review-chrome__filename')).toHaveCount(1);
+    await expect(context).toBeVisible();
+    await expect(zoomValue).toBeVisible();
+    await expect(zoomInput).toBeVisible();
+    await expect(zoomSuffix).toBeVisible();
+  });
+
   test('keeps the top bar to one contained 50px row across supported widths', async ({ page }) => {
     await page.locator('#root').evaluate((element) => {
       element.setAttribute('data-production-root', 'true');
@@ -1049,12 +1126,10 @@ test.describe('canonical review workflow', () => {
       const geometry = await chrome.evaluate((element) => {
         const identity = element.querySelector<HTMLElement>(':scope > .review-chrome__identity');
         const controls = element.querySelector<HTMLElement>(':scope > .review-chrome__viewer-controls');
-        const actions = element.querySelector<HTMLElement>(':scope > .review-chrome__actions');
-        if (!identity || !controls || !actions) throw new Error('Review chrome geometry is incomplete.');
+        if (!identity || !controls) throw new Error('Review chrome geometry is incomplete.');
         const chromeBounds = element.getBoundingClientRect();
         const identityBounds = identity.getBoundingClientRect();
         const controlsBounds = controls.getBoundingClientRect();
-        const actionsBounds = actions.getBoundingClientRect();
         const visibleBounds = (selector: string) => [...element.querySelectorAll<HTMLElement>(selector)]
           .filter((child) => getComputedStyle(child).display !== 'none')
           .map((child) => child.getBoundingClientRect().toJSON());
@@ -1064,16 +1139,15 @@ test.describe('canonical review workflow', () => {
           height: chromeBounds.height,
           identity: identityBounds.toJSON(),
           controls: controlsBounds.toJSON(),
-          actions: actionsBounds.toJSON(),
           identityChildren: visibleBounds(':scope > .review-chrome__identity > *'),
           saveChildren: visibleBounds(':scope > .review-chrome__identity .review-chrome__save-identity > :not(.sr-only)'),
-          filename: element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__save-identity strong')?.getBoundingClientRect().toJSON(),
+          filename: element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__filename')?.getBoundingClientRect().toJSON(),
         };
       });
 
       expect(geometry.height).toBe(50);
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
-      const visibleColumns = [geometry.identity, geometry.controls, geometry.actions]
+      const visibleColumns = [geometry.identity, geometry.controls]
         .filter((item) => item.width > 0.5);
       for (let index = 1; index < visibleColumns.length; index += 1) {
         expect(visibleColumns[index - 1]!.x + visibleColumns[index - 1]!.width)
@@ -1088,7 +1162,7 @@ test.describe('canonical review workflow', () => {
       if ((geometry.filename?.width ?? 0) > 0) {
         expect(geometry.filename!.width).toBeGreaterThanOrEqual(40);
       }
-      for (const item of [geometry.identity, geometry.controls, geometry.actions]) {
+      for (const item of [geometry.identity, geometry.controls]) {
         expect(item.y).toBeGreaterThanOrEqual(-0.5);
         expect(item.y + item.height).toBeLessThanOrEqual(50.5);
       }
@@ -1136,9 +1210,11 @@ test.describe('canonical review workflow', () => {
             controls: bounds(':scope > .review-chrome__viewer-controls'),
             saveIdentity: bounds(':scope > .review-chrome__identity .review-chrome__save-identity'),
             copy: bounds(':scope > .review-chrome__viewer-controls [data-review-copy-link]'),
-            filename: bounds(':scope > .review-chrome__identity .review-chrome__save-identity strong'),
-            recoveryDisplay: getComputedStyle(element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__save-recovery')!).display,
-            contextDisplay: getComputedStyle(element.querySelector<HTMLElement>(':scope > .review-chrome__actions .review-chrome__context')!).display,
+            filename: bounds(':scope > .review-chrome__identity .review-chrome__filename'),
+            recoveryDisplay: element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__save-recovery') === null
+              ? null
+              : getComputedStyle(element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__save-recovery')!).display,
+            contextDisplay: getComputedStyle(element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__context')!).display,
           };
         });
         expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
@@ -1156,7 +1232,7 @@ test.describe('canonical review workflow', () => {
             .toBeLessThanOrEqual(geometry.copy!.x + 0.5);
           expect(geometry.controls!.x + geometry.controls!.width)
             .toBeLessThanOrEqual(geometry.chrome.x + geometry.chrome.width + 0.5);
-          expect(geometry.recoveryDisplay).toBe('none');
+          expect(geometry.recoveryDisplay).toBeNull();
           expect(geometry.contextDisplay).toBe('none');
         }
       }

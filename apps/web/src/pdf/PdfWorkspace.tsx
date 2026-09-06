@@ -79,7 +79,7 @@ export interface PdfWorkspaceProps {
 }
 
 const PDF_TEXT_SELECTION_STYLE = {
-  background: 'var(--review-selection-bg)',
+  background: 'var(--review-pdf-selection-bg)',
 } as const;
 
 function groupByPageIndex<T extends { readonly pageIndex: number }>(

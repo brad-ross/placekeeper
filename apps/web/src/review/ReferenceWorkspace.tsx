@@ -481,6 +481,18 @@ export function ReferenceWorkspace({
                     <span>{tab.label}</span>
                     {tab.label === tab.pageContext ? null : <small>{tab.pageContext}</small>}
                   </ReviewTooltipButton>
+                  {showActions && showReferenceReturn ? (
+                    <ReferenceReturnButton
+                      tabIdentity={tab.identity}
+                      pending={referenceReturn.pending}
+                      buttonRef={referenceReturnRef}
+                      onReturn={(identity) => {
+                        restoreReferenceReturnFocus.current = referenceReturnRef.current?.matches(':focus')
+                          ?? false;
+                        onReferenceReturn(identity);
+                      }}
+                    />
+                  ) : null}
                   {showActions ? (
                     <ReviewTooltipButton
                       label="Open in main document"
@@ -554,19 +566,6 @@ export function ReferenceWorkspace({
               <strong>No references open.</strong>
               <span>An internal PDF link can open a reference here.</span>
             </div>
-          ) : null}
-
-          {showReferenceReturn ? (
-            <ReferenceReturnButton
-              tabIdentity={activeTab.identity}
-              pending={referenceReturn.pending}
-              buttonRef={referenceReturnRef}
-              onReturn={(identity) => {
-                restoreReferenceReturnFocus.current = referenceReturnRef.current?.matches(':focus')
-                  ?? false;
-                onReferenceReturn(identity);
-              }}
-            />
           ) : null}
 
           <div

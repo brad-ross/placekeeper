@@ -254,7 +254,7 @@ body:has(.terminal-recovery) {
   background: var(--review-surface-interactive);
 }
 
-.review-chrome__save-identity strong {
+.review-chrome__filename {
   overflow: hidden;
   min-width: 0;
   max-width: var(--review-document-title-cap);
@@ -272,7 +272,7 @@ body:has(.terminal-recovery) {
 }
 
 .review-chrome__identity > .document-actions {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
 }
 
 .review-chrome__identity .document-actions__trigger {

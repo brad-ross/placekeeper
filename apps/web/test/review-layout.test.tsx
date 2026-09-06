@@ -81,6 +81,10 @@ const layoutStyles = readFileSync(
   new URL('../src/app/review-layout.css', import.meta.url),
   'utf8',
 );
+const neutralStyles = readFileSync(
+  new URL('../src/app/neutral-chrome.css', import.meta.url),
+  'utf8',
+);
 
 const ownedAnnotation: ReviewItem = {
   id: 'owned-highlight',
@@ -172,6 +176,9 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('role="menu"');
     expect(html).toContain('data-document-actions-open="true"');
     expect(html).toContain('lucide-file-text');
+    expect(html).toContain('class="review-chrome__filename"');
+    expect(html).not.toContain('<strong>paper.pdf</strong>');
+    expect(html).toContain('aria-label="paper.pdf, Saved. Open document actions"');
     expect(html).not.toContain('review-chrome__save-dot');
   });
 
@@ -611,13 +618,11 @@ describe('review shell layout and accessibility contract', () => {
     const identityStart = html.indexOf('class="review-chrome__identity"');
     const copyLink = html.indexOf('data-review-copy-link');
     const viewerControlsIndex = html.indexOf('class="review-chrome__viewer-controls"');
-    const trailingActions = html.indexOf('class="review-chrome__actions"');
 
     expect(identityStart).toBeGreaterThanOrEqual(0);
     expect(viewerControlsIndex).toBeGreaterThan(identityStart);
     expect(copyLink).toBeGreaterThan(viewerControlsIndex);
-    expect(copyLink).toBeLessThan(trailingActions);
-    expect(trailingActions).toBeGreaterThan(viewerControlsIndex);
+    expect(html).not.toContain('class="review-chrome__actions"');
     const identityMarkup = html.slice(identityStart, viewerControlsIndex);
     expect(identityMarkup).toContain('lucide-file-text');
     expect(identityMarkup).not.toContain('review-chrome__save-dot');
@@ -690,6 +695,7 @@ describe('review shell layout and accessibility contract', () => {
       <ReviewChrome
         documentTitle="A very long paper title that must be allowed to truncate.pdf"
         savePendingDestination
+        codexContext={{ status: 'unbound' }}
         controls={viewerControls}
         viewerState={viewerControls.snapshot()}
         copyLink={{
@@ -704,17 +710,18 @@ describe('review shell layout and accessibility contract', () => {
     );
 
     const rack = html.slice(html.indexOf('data-review-chrome-sizing-rack'));
-    expect(rack.match(/Protected Recovery/gu)).toHaveLength(4);
+    expect(rack).not.toContain('Protected Recovery');
+    expect(rack.match(/codex-context-status/gu)?.length).toBeGreaterThanOrEqual(4);
     expect(rack).toContain('review-chrome__icon-control');
     expect(rack).toContain('review-chrome__link');
-    expect(rack).toContain('review-chrome__save-recovery');
+    expect(rack).toContain('review-chrome__filename');
   });
 
   it('keeps responsive review chrome in one fixed-height row', () => {
     expect(foundationStyles).toMatch(/--review-chrome-height:\s*54px;/u);
     expect(foundationStyles).toMatch(/--review-chrome-center-y:\s*27px;/u);
     expect(foundationStyles).toMatch(
-      /\.review-chrome\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) max-content max-content;[^}]*height:\s*var\(--review-chrome-height\);[^}]*overflow:\s*visible;/u,
+      /\.review-chrome\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) max-content;[^}]*height:\s*var\(--review-chrome-height\);[^}]*overflow:\s*visible;/u,
     );
     expect(foundationStyles).toMatch(
       /\.review-chrome__identity\s*\{[^}]*min-width:\s*0;/u,
@@ -727,11 +734,11 @@ describe('review shell layout and accessibility contract', () => {
       /\.review-chrome__sizing-candidate \.review-chrome__identity\s*\{[^}]*width:\s*max-content;/u,
     );
     expect(foundationStyles).toMatch(
-      /\.review-chrome__sizing-candidate \.review-chrome__save-identity strong\s*\{[^}]*width:\s*var\(--review-document-title-cap\);[^}]*min-width:\s*var\(--review-document-title-cap\);[^}]*max-width:\s*var\(--review-document-title-cap\);[^}]*flex:\s*none;/u,
+      /\.review-chrome__sizing-candidate \.review-chrome__filename\s*\{[^}]*width:\s*var\(--review-document-title-cap\);[^}]*min-width:\s*var\(--review-document-title-cap\);[^}]*max-width:\s*var\(--review-document-title-cap\);[^}]*flex:\s*none;/u,
     );
     expect(foundationStyles).toMatch(/--review-document-title-cap:\s*9rem;/u);
     expect(layoutStyles).toMatch(
-      /\.review-chrome__save-identity strong\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*var\(--review-document-title-cap\);[^}]*flex:\s*0 1 auto;/u,
+      /\.review-chrome__filename\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*var\(--review-document-title-cap\);[^}]*flex:\s*0 1 auto;/u,
     );
     expect(layoutStyles).toMatch(
       /\.review-chrome__identity \.document-actions__trigger\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;/u,
@@ -1129,12 +1136,12 @@ describe('review shell layout and accessibility contract', () => {
     expect(html.match(/data-reference-viewport-host/g)).toHaveLength(1);
   });
 
-  it('keeps the Reference return overlay out of grid sizing and enlarges only its coarse target', () => {
+  it('keeps the Reference return in the tab action row and enlarges its coarse target', () => {
     expect(annotationStyles).toMatch(
       /\.reference-panel\s*\{[^}]*position:\s*relative;[^}]*isolation:\s*isolate;/u,
     );
     expect(annotationStyles).toMatch(
-      /\.reference-panel__return\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*2;[^}]*top:\s*12px;[^}]*left:\s*12px;[^}]*inline-size:\s*var\(--review-control-compact\);/u,
+      /\.reference-panel__return\s*\{[^}]*display:\s*grid;[^}]*width:\s*var\(--review-control-compact\);[^}]*flex:\s*0 0 var\(--review-control-compact\);/u,
     );
     expect(annotationStyles).toMatch(
       /\.reference-panel__return:focus-visible\s*\{[^}]*outline:\s*3px solid var\(--review-focus\);/u,
@@ -1148,6 +1155,12 @@ describe('review shell layout and accessibility contract', () => {
     expect(annotationStyles).not.toMatch(
       /\.reference-panel__return\s*\{[^}]*(?:grid-area|margin-bottom|height:\s*100%)/u,
     );
+    expect(annotationStyles).toMatch(
+      /\.reference-panel__viewport\s*\{[^}]*margin:\s*12px;[^}]*border-radius:/u,
+    );
+    expect(neutralStyles).toMatch(
+      /\.reference-tab-segment--compound\s*\{[^}]*padding-right:\s*9px;/u,
+    );
     const coarsePointerRules = responsiveStyles.match(
       /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*?)\n\}/u,
     )?.[1];
@@ -1156,7 +1169,7 @@ describe('review shell layout and accessibility contract', () => {
     );
   });
 
-  it('shares simple annotation section headers and keeps the activity strip intrinsic', () => {
+  it('shares simple annotation section headers and lets the activity strip fill its navbar', () => {
     expect(annotationStyles).toMatch(
       /\.review-workspace__header\s*\{[^}]*height:\s*var\(--review-workspace-header-height, 44px\);[^}]*align-items:\s*center;[^}]*padding:\s*8px 7\.5px 2px;/u,
     );
@@ -1172,7 +1185,10 @@ describe('review shell layout and accessibility contract', () => {
     expect(annotationStyles).not.toContain('grid-auto-flow');
     expect(annotationStyles).not.toContain('.review-tools-workspace .review-workspace__tabs');
     expect(annotationStyles).toMatch(
-      /\.review-workspace__activity-strip\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;/u,
+      /\.review-workspace__activity-strip\s*\{[^}]*width:\s*auto;[^}]*max-width:\s*100%;[^}]*flex:\s*1 1 auto;/u,
+    );
+    expect(annotationStyles).toMatch(
+      /\.review-workspace__move--activity\s*\{[^}]*margin-left:\s*auto;/u,
     );
     expect(annotationStyles).toMatch(
       /\.review-workspace__activity-strip--title\s*\{[^}]*padding:\s*0;[^}]*background:\s*transparent;/u,

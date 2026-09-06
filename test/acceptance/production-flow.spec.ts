@@ -1156,9 +1156,16 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   const bottomPanelGeometry = await page.locator('.reference-panel').evaluate((panel) => {
     const viewport = panel.querySelector<HTMLElement>('[data-reference-viewport-host]');
     if (!viewport) throw new Error('Reference viewport host is missing.');
-    return { panelHeight: panel.clientHeight, viewportHeight: viewport.clientHeight };
+    const panelBounds = panel.getBoundingClientRect();
+    const viewportBounds = viewport.getBoundingClientRect();
+    return {
+      top: viewportBounds.top - panelBounds.top,
+      right: panelBounds.right - viewportBounds.right,
+      bottom: panelBounds.bottom - viewportBounds.bottom,
+      left: viewportBounds.left - panelBounds.left,
+    };
   });
-  expect(bottomPanelGeometry.viewportHeight).toBe(bottomPanelGeometry.panelHeight);
+  expect(bottomPanelGeometry).toEqual({ top: 12, right: 12, bottom: 12, left: 12 });
   await expect(page.locator('.reference-panel__actions')).toHaveCount(0);
   await expect.poll(() => documentRequests.length).toBe(2);
   expect(new Set(documentRequests.map(({ url }) => url)).size).toBe(1);

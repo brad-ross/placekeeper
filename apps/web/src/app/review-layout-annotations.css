@@ -297,9 +297,10 @@
 
 .review-workspace__activity-strip {
   display: flex;
-  width: fit-content;
+  width: auto;
   max-width: 100%;
   min-width: 0;
+  flex: 1 1 auto;
   align-items: center;
   gap: var(--review-control-group-gap);
   padding: 2px;
@@ -383,6 +384,7 @@
 }
 
 .review-workspace__move--activity {
+  margin-left: auto;
   flex: none;
   border-color: var(--review-border-subtle);
   background: color-mix(in srgb, var(--review-surface-panel) 62%, transparent);
@@ -689,7 +691,7 @@
 [data-pdf-search-highlight] {
   border: 1px solid var(--review-focus);
   border-radius: 2px;
-  background: color-mix(in srgb, var(--review-selection-bg) 72%, transparent);
+  background: color-mix(in srgb, var(--review-pdf-selection-bg) 72%, transparent);
   box-shadow: 0 0 0 1px rgb(255 255 255 / 55%), 0 1px 4px rgb(25 31 23 / 24%);
 }
 
@@ -819,6 +821,7 @@
 }
 
 .reference-tabs .reference-tab-segment__action,
+.reference-tabs .reference-panel__return,
 .annotation-item__action,
 .pdf-search__clear {
   display: grid;
@@ -836,6 +839,7 @@
 }
 
 .reference-tabs .reference-tab-segment__action:hover,
+.reference-tabs .reference-panel__return:hover:not([aria-disabled="true"]),
 .annotation-item__action:hover,
 .pdf-search__clear:hover {
   border-color: var(--review-border-strong);
@@ -844,6 +848,7 @@
 }
 
 .reference-tabs .reference-tab-segment__action:active,
+.reference-tabs .reference-panel__return:active,
 .annotation-item__action:active,
 .pdf-search__clear:active {
   box-shadow: inset 0 1px 2px rgb(24 26 23 / 16%);
@@ -928,30 +933,25 @@
 }
 
 .reference-panel__return {
-  position: absolute;
-  z-index: 2;
-  top: 12px;
-  left: 12px;
-  display: inline-flex;
-  inline-size: var(--review-control-compact);
+  display: grid;
+  align-self: center;
+  width: var(--review-control-compact);
+  min-width: var(--review-control-compact);
   min-height: var(--review-control-compact);
-  align-items: center;
-  justify-content: center;
+  flex: 0 0 var(--review-control-compact);
   padding: 0;
-  border: 1px solid var(--review-border-strong);
-  border-radius: var(--review-radius-round);
-  color: var(--review-ink-primary);
-  background: color-mix(in srgb, var(--review-surface-panel) 94%, transparent);
-  box-shadow: 0 2px 7px rgb(24 27 23 / 12%);
-  font-size: 11px;
-  font-weight: 720;
-  line-height: 1;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--review-radius-control);
+  color: var(--review-ink-muted);
+  background: transparent;
+  box-shadow: none;
   cursor: pointer;
-  pointer-events: auto;
 }
 
 .reference-panel__return:hover:not([aria-disabled="true"]) {
-  border-color: var(--review-focus);
+  border-color: var(--review-border-strong);
+  color: var(--review-ink-primary);
   background: var(--review-surface-interactive);
 }
 
@@ -971,7 +971,9 @@
   grid-area: 1 / 1;
   min-width: 0;
   min-height: 0;
+  margin: 12px;
   overflow: hidden;
+  border-radius: calc(var(--review-radius-row) - 2px);
 }
 
 .reference-panel__viewport > .pdf-workspace {

@@ -16,6 +16,41 @@ import { createPortal } from 'react-dom';
 export const REVIEW_TOOLTIP_HOVER_DELAY_MS = 600;
 const TOOLTIP_MARGIN = 8;
 
+// Programmatic menu focus inherits the input that opened the menu. WebKit can
+// report :focus-visible for that focus even after a pointer click.
+const inputModalities = new WeakMap<Document, {
+  pointer: boolean;
+  users: number;
+  release: () => void;
+}>();
+
+function observeTooltipInputModality(owner: Document): () => void {
+  let state = inputModalities.get(owner);
+  if (!state) {
+    const next = { pointer: false, users: 0, release: () => {} };
+    const pointer = () => { next.pointer = true; };
+    const keyboard = (event: globalThis.KeyboardEvent) => {
+      if (!['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) next.pointer = false;
+    };
+    owner.addEventListener('pointerdown', pointer, true);
+    owner.addEventListener('keydown', keyboard, true);
+    next.release = () => {
+      owner.removeEventListener('pointerdown', pointer, true);
+      owner.removeEventListener('keydown', keyboard, true);
+    };
+    inputModalities.set(owner, next);
+    state = next;
+  }
+  state.users += 1;
+  const current = state;
+  return () => {
+    if (--current.users === 0) {
+      current.release();
+      inputModalities.delete(owner);
+    }
+  };
+}
+
 export interface ReviewTooltipButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   readonly label: string;
   readonly tooltip?: string;
@@ -57,6 +92,10 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
     const pointerActivation = useRef(false);
     const [visible, setVisible] = useState(false);
     const [style, setStyle] = useState<CSSProperties>({});
+    useLayoutEffect(() => {
+      const owner = buttonRef.current?.ownerDocument;
+      return owner ? observeTooltipInputModality(owner) : undefined;
+    }, []);
     const clearHoverTimer = () => {
       if (hoverTimer.current !== null) clearTimeout(hoverTimer.current);
       hoverTimer.current = null;
@@ -126,7 +165,10 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
         onFocus={(event: FocusEvent<HTMLButtonElement>) => {
           onFocus?.(event);
           clearHoverTimer();
-          if (reviewTooltipFocusOpens(pointerActivation.current)) setVisible(true);
+          const pointerFocus = pointerActivation.current
+            || inputModalities.get(event.currentTarget.ownerDocument)?.pointer === true;
+          if (reviewTooltipFocusOpens(pointerFocus)
+            && event.currentTarget.matches(':focus-visible')) setVisible(true);
         }}
         onBlur={(event: FocusEvent<HTMLButtonElement>) => {
           onBlur?.(event);

@@ -239,7 +239,7 @@ export function DocumentActionsMenu({
   >
     <ReviewTooltipButton
       label={`${documentTitle}, ${savedLabel}. Open document actions`}
-      tooltip={`${documentTitle} — Document actions`}
+      tooltip={`${documentTitle} — Save options`}
       ref={triggerRef}
       type="button"
       className="review-chrome__save-identity document-actions__trigger"
@@ -254,7 +254,7 @@ export function DocumentActionsMenu({
       }}
     >
       <ReviewIcon name="file" size={16} />
-      <strong>{documentTitle}</strong>
+      <span className="review-chrome__filename">{documentTitle}</span>
       {savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
       <span className="sr-only" data-review-saved-status>{savedLabel}</span>
     </ReviewTooltipButton>

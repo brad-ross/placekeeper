@@ -172,7 +172,6 @@ export function ReviewChrome({
   const navigationMenuId = `review-navigation-menu-${useId().replaceAll(':', '')}`;
   const zoomMenuId = `review-zoom-menu-${useId().replaceAll(':', '')}`;
   const saveOptionsWereOpen = useRef(saveOptionsOpen);
-  const hasChromeActions = codexContext !== undefined;
   const saveStatusText = savePendingDestination
     ? 'protected recovery, choose where to save'
     : savePhase === 'not-saved'
@@ -651,7 +650,8 @@ export function ReviewChrome({
   </div>;
 
   const sizingIdentity = <div className="review-chrome__identity">
-    {documentActions !== undefined ? <div className="document-actions"><button type="button" className="review-chrome__save-identity document-actions__trigger" title="Open document actions"><ReviewIcon name="file" size={16} /><strong>{documentTitle}</strong>{savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}{savePendingDestination ? <span className="review-chrome__save-recovery">Protected Recovery</span> : null}</button></div> : saveOptionsAvailable ? <button type="button" className="review-chrome__save-identity" title="Open automatic save options"><ReviewIcon name="file" size={16} /><strong>{documentTitle}</strong>{savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}{savePendingDestination ? <span className="review-chrome__save-recovery">Protected Recovery</span> : null}</button> : <div className="review-chrome__save-identity"><ReviewIcon name="file" size={16} /><strong>{documentTitle}</strong>{savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</div>}
+    {documentActions !== undefined ? <div className="document-actions"><button type="button" className="review-chrome__save-identity document-actions__trigger" title="Open document actions"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{documentTitle}</span>{savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button></div> : saveOptionsAvailable ? <button type="button" className="review-chrome__save-identity" title="Open automatic save options"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{documentTitle}</span>{savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button> : <div className="review-chrome__save-identity"><ReviewIcon name="file" size={16} /><span className="review-chrome__filename">{documentTitle}</span>{savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</div>}
+    {codexContext === undefined ? null : <div className="review-chrome__context"><div className="codex-context-status"><ReviewIcon name="agent" size={16} /></div></div>}
   </div>;
 
   return <header
@@ -659,7 +659,6 @@ export function ReviewChrome({
     className="review-chrome"
     data-review-chrome
     data-review-chrome-presentation={presentation}
-    data-review-chrome-actions={hasChromeActions ? 'present' : 'none'}
     data-top-bar-menu-open={activeTopBarMenu ?? undefined}
   >
     <div className="review-chrome__identity">
@@ -676,22 +675,19 @@ export function ReviewChrome({
         }}
       /> : saveOptionsAvailable ? <ReviewTooltipButton ref={saveTriggerRef} label={saveControlLabel} tooltip={`${documentTitle} — Save options`} type="button" className="review-chrome__save-identity" aria-haspopup="dialog" aria-expanded={saveOptionsOpen} onClick={onSaveOptions}>
         <ReviewIcon name="file" size={16} />
-        <strong>{documentTitle}</strong>
+        <span className="review-chrome__filename">{documentTitle}</span>
         {savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
-        {savePendingDestination ? <span className="review-chrome__save-recovery">Protected Recovery</span> : null}
         <span className="sr-only" data-review-saved-status>{saveStatusDisplay}</span>
       </ReviewTooltipButton> : <div className="review-chrome__save-identity" aria-label={`${documentTitle}, ${saveStatusText}`} title={documentTitle} tabIndex={0}>
         <ReviewIcon name="file" size={16} />
-        <strong>{documentTitle}</strong>
+        <span className="review-chrome__filename">{documentTitle}</span>
         {savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
         <span className="sr-only" data-review-saved-status>{saveStatusDisplay}</span>
       </div>}
+      {codexContext === undefined ? null : <div className="review-chrome__context" data-review-context-status><CodexContextStatus status={codexContext} /></div>}
     </div>
     <div className="review-chrome__viewer-controls" role="group" aria-label="PDF editing, navigation, and zoom">
       {controlsForPresentation(presentation)}
-    </div>
-    <div className="review-chrome__actions">
-      {codexContext === undefined ? null : <div className="review-chrome__context" data-review-context-status><CodexContextStatus status={codexContext} /></div>}
     </div>
     <div
       ref={sizingRackRef}
@@ -704,11 +700,10 @@ export function ReviewChrome({
         key={candidate}
         className="review-chrome review-chrome__sizing-candidate"
         data-review-chrome-candidate={candidate}
-        data-review-chrome-actions={hasChromeActions ? 'present' : 'none'}
         style={{
           position: 'absolute',
           display: 'inline-grid',
-          gridTemplateColumns: hasChromeActions ? 'max-content max-content max-content' : 'max-content max-content',
+          gridTemplateColumns: 'max-content max-content',
           gridTemplateRows: 'max-content',
           width: 'max-content',
           height: 'var(--review-chrome-height)',
@@ -716,7 +711,6 @@ export function ReviewChrome({
       >
         {sizingIdentity}
         {sizingCluster(candidate)}
-        <div className="review-chrome__actions">{codexContext === undefined ? null : <div className="review-chrome__context"><div className="codex-context-status"><ReviewIcon name="agent" size={16} /></div></div>}</div>
       </div>)}
     </div>
     {!viewerState.pageReady ? <p id={pageUnavailableId} className="sr-only">{viewerState.pageUnavailableReason}</p> : null}

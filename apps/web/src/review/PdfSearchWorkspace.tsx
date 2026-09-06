@@ -155,7 +155,7 @@ export function PdfSearchWorkspace({
         <ReviewIcon name="search" className="review-icon pdf-search__search-icon" />
         <input
           ref={queryInputRef}
-          className="review-chrome__page-input pdf-search__input"
+          className="pdf-search__input"
           type="search"
           role="searchbox"
           aria-label="Search this PDF"

@@ -437,7 +437,7 @@ describe('shared reference workspace', () => {
     expect(proofActive).not.toContain('data-workspace-focus-token="reference-close:lemma"');
   });
 
-  it('overlays an icon-only Reference return control immediately before the viewport host', () => {
+  it('places the icon-only Reference return control in the active tab actions', () => {
     const onReturn = vi.fn();
     const html = renderToStaticMarkup(
       <ReferenceWorkspace
@@ -459,8 +459,10 @@ describe('shared reference workspace', () => {
     );
 
     expect(html).toMatch(
-      /class="reference-panel__return"[\s\S]*data-reference-return="lemma"[\s\S]*lucide-locate-fixed[\s\S]*<\/button>[\s\S]*class="reference-panel__viewport"/u,
+      /data-reference-tab-segment="lemma"[\s\S]*aria-selected="true"[\s\S]*class="reference-panel__return"[\s\S]*data-reference-return="lemma"[\s\S]*lucide-locate-fixed[\s\S]*data-reference-tab-action="send"[\s\S]*data-reference-tab-action="close"/u,
     );
+    expect(html.indexOf('data-reference-return="lemma"'))
+      .toBeLessThan(html.indexOf('class="reference-panel__viewport"'));
     expect(html).toContain('aria-label="Return to reference"');
     expect(html).not.toContain('title="Return to reference"');
     expect(html).toContain('aria-hidden="true"');

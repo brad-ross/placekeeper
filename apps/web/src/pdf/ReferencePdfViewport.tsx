@@ -22,7 +22,7 @@ import type { ViewerInteractionEvent } from './viewer-interaction-events.js';
 import { isContextPointerGesture } from './viewer-interaction-events.js';
 
 const PDF_TEXT_SELECTION_STYLE = {
-  background: 'var(--review-selection-bg)',
+  background: 'var(--review-pdf-selection-bg)',
 } as const;
 
 export interface ReferencePdfViewportProps {
