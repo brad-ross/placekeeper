@@ -273,3 +273,33 @@ for (const width of [620, 360]) {
     } finally { await context.close(); }
   });
 }
+
+for (const width of [1280, 620, 360]) {
+  test(`Recovery matches the current save dialog at ${width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ bypassCSP: true, viewport: { width, height: 800 } });
+    const page = await context.newPage();
+    const appearance = async () => page.locator('.review-choice-dialog').evaluate((dialog) => {
+      const styles = (element: Element, properties: string[]) => {
+        const computed = getComputedStyle(element);
+        return Object.fromEntries(properties.map((property) => [property, computed.getPropertyValue(property)]));
+      };
+      const text = ['font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'color'];
+      const box = ['padding', 'border', 'border-radius', 'background-color', 'box-shadow'];
+      return {
+        surface: styles(dialog, [...box, 'width']),
+        heading: styles(dialog.querySelector('h2')!, [...text, 'margin']),
+        description: styles(dialog.querySelector('.compact-editorial-modal__description')!, [...text, 'margin']),
+        primary: styles(dialog.querySelector('.review-button--primary')!, [...box, ...text, 'min-height', 'gap']),
+        secondary: styles(dialog.querySelector('.review-button:not(.review-button--primary)')!, [...box, ...text, 'min-height', 'gap']),
+      };
+    });
+    try {
+      await page.goto('/test/acceptance/review-harness/index.html?visual=save-destination');
+      await expect(page.locator('.save-destination-dialog')).toBeVisible();
+      const current = await appearance();
+      await page.goto('/apps/web/recovery.html');
+      await expect(page.getByRole('button', { name: 'Resume', exact: true })).toBeVisible();
+      expect(await appearance()).toEqual(current);
+    } finally { await context.close(); }
+  });
+}

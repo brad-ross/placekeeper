@@ -64,7 +64,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
     <div className="save-destination-backdrop" data-save-destination-backdrop>
       <section
         ref={dialogRef}
-        className="save-destination-dialog compact-editorial-modal"
+        className="save-destination-dialog review-choice-dialog compact-editorial-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

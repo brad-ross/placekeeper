@@ -474,12 +474,6 @@
   font-weight: 400;
 }
 
-.save-destination-dialog {
-  border: 0;
-  background: var(--pk-raised);
-  box-shadow: 0 12px 48px #00000018;
-}
-
 .save-destination-choice {
   border: 0;
   background: transparent;
@@ -488,11 +482,6 @@
 .save-destination-choice[data-selected="true"] {
   background: var(--pk-tray);
   box-shadow: none;
-}
-
-.save-destination-dialog .compact-editorial-modal__footer {
-  border-color: var(--pk-border);
-  background: transparent;
 }
 
 .save-destination-copy-details {

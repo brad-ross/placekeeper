@@ -56,7 +56,7 @@ export function setHandlerButtonContent(
   }
   const text = button.ownerDocument.createElement("span");
   text.textContent = label;
-  button.className = `handler-button${tone === "secondary" ? "" : ` handler-button--${tone}`}`;
+  button.className = `handler-button review-button review-button--${tone === "primary" ? "primary" : "secondary"}${tone === "secondary" ? "" : ` handler-button--${tone}`}`;
   button.dataset.icon = iconName;
   button.replaceChildren(icon, text);
 }
