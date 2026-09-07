@@ -34,7 +34,7 @@ if [ "$(/usr/bin/uname -s)" != "Darwin" ] || [ "$(/usr/bin/uname -m)" != "arm64"
   printf '%s\n' "Placekeeper currently supports source installation on Apple-silicon macOS only." >&2
   exit 1
 fi
-for command in /usr/bin/curl /usr/bin/ditto /usr/bin/shasum /usr/bin/tar /usr/bin/mktemp /usr/bin/osacompile /usr/bin/codesign; do
+for command in /usr/bin/curl /usr/bin/ditto /usr/bin/shasum /usr/bin/tar /usr/bin/mktemp /usr/bin/osacompile /usr/bin/codesign /usr/bin/swift; do
   if [ ! -x "$command" ]; then
     printf 'Required macOS tool is unavailable: %s\n' "$command" >&2
     exit 1
@@ -46,7 +46,7 @@ if [ "$install_mode" = "dry-run" ]; then
     "Placekeeper Apple-silicon source install (dry run)" \
     "Toolchain: Node ${NODE_VERSION}, pnpm ${PNPM_VERSION}" \
     "App destination: ${app_path}" \
-    "Finder entry point: native Open With document handler" \
+    "Finder entry point: native Placekeeper window" \
     "Chrome extension: packaged but paused until you load and enable it" \
     "No files were changed"
   exit 0
@@ -159,8 +159,10 @@ build_root="$work_dir/build"
 /bin/mkdir -p "$build_root"
 run_pnpm package:macos -- --arch arm64 --node-runtime "$node_bin" --output "$build_root"
 built_app="$build_root/Placekeeper.app"
-if [ ! -x "$built_app/Contents/MacOS/placekeeper" ]; then
-  printf '%s\n' "The app build did not produce its launcher." >&2
+if [ ! -x "$built_app/Contents/MacOS/PlacekeeperMac" ] || \
+   [ ! -x "$built_app/Contents/MacOS/placekeeper" ] || \
+   [ ! -f "$built_app/Contents/Resources/MacWeb/macos.html" ]; then
+  printf '%s\n' "The app build did not produce its native window and bundled launchers." >&2
   exit 1
 fi
 

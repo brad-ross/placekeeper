@@ -24,7 +24,8 @@ case "$installed_smoke_port" in
 esac
 
 if [ ! -x "$built_app/Contents/MacOS/placekeeper" ] || \
-   [ ! -x "$built_app/Contents/MacOS/droplet" ] || \
+   [ ! -x "$built_app/Contents/MacOS/PlacekeeperMac" ] || \
+   [ ! -f "$built_app/Contents/Resources/MacWeb/macos.html" ] || \
    [ ! -x "$built_app/Contents/MacOS/placekeeper-chrome-host" ] || \
    [ ! -x "$built_app/Contents/Resources/node/bin/node" ] || \
    [ ! -f "$built_app/Contents/Resources/service/main.js" ] || \

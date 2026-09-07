@@ -17,7 +17,7 @@ const identity = {
 };
 
 describe("macOS native candidate runner", () => {
-  it("exposes a candidate-only command without changing production package or install commands", async () => {
+  it("keeps the isolated runner available alongside native installation", async () => {
     const packageManifest = JSON.parse(await readFile(resolve("package.json"), "utf8")) as {
       scripts: Record<string, string>;
     };
@@ -26,7 +26,7 @@ describe("macOS native candidate runner", () => {
       "tsx packaging/macos/run-native-candidate.ts",
     );
     expect(packageManifest.scripts["package:macos"]).toBe(
-      "pnpm build && tsx packaging/macos/build-app.ts",
+      "pnpm build && pnpm build:macos:web && tsx packaging/macos/build-native-candidate.ts",
     );
     expect(packageManifest.scripts["install:local"]).toBe("/bin/sh ./install.sh");
   });

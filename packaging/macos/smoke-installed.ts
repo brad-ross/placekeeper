@@ -10,6 +10,7 @@ import {
   validateSharedWebDistribution,
 } from "./validate-manifest.js";
 import { BUILD_IDENTITY_FILENAME, computePackagedBuildIdentity } from "./build-app.js";
+import { runNativeCandidate } from "./run-native-candidate.js";
 import { encodePlacekeeperLink } from "../../packages/core/src/placekeeper-link.js";
 import {
   INSTALLED_SMOKE_DAEMON_FLAG,
@@ -700,7 +701,7 @@ export async function smokeInstalledBundle(appPath: string, fixturePath: string,
     () => { throw new Error("Installed scoped VS Code launcher accepted an invalid registration"); },
     () => undefined,
   );
-  await smokeInstalledLaunchServicesBridge(appPath);
+  await runNativeCandidate(["--app", resolve(appPath), "--pdf", resolve(fixturePath), "--smoke"]);
   await smokeInstalledHookLifecycle(appPath, fixturePath, repoRoot);
   return evidence;
 }
