@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { createServer } from "node:net";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -186,20 +186,39 @@ async function waitForGurlDeliveries(logPath: string, expected: readonly string[
   throw new Error("Launch Services did not deliver the complete cold and warm Placekeeper URLs");
 }
 
+export function rewriteSmokeProbeBundleIdentifier(plist: string, runIdentity: string): string {
+  const declaration = /<key>CFBundleIdentifier<\/key>\s*<string>([^<]+)<\/string>/u;
+  const match = declaration.exec(plist);
+  if (match === null) throw new Error("Smoke probe plist has no bundle identifier");
+  return plist.replace(
+    declaration,
+    `<key>CFBundleIdentifier</key><string>${match[1]}.gurl-smoke.${runIdentity}</string>`,
+  );
+}
+
 /** Exercise the compiled shipping applet through Launch Services without
  * touching a user's daemon or opening a browser. A copied bundle replaces
- * only the Node launcher with an argv recorder; the GURL handler and plist are
- * the same bytes that ship. */
+ * the Node launcher with an argv recorder and receives a unique bundle identity;
+ * the shipping GURL handler, URL scheme, and Finder executable stay unchanged. */
 export async function smokeInstalledLaunchServicesBridge(appPath: string): Promise<void> {
   if (process.platform !== "darwin") return;
   const root = await mkdtemp(join("/tmp", "placekeeper-gurl-smoke-"));
   const probeApp = join(root, "Placekeeper GURL Smoke.app");
   const probeLauncher = join(probeApp, "Contents/MacOS/placekeeper");
+  const probePlist = join(probeApp, "Contents/Info.plist");
   const logPath = join(probeApp, "Contents/Resources/gurl-smoke.log");
   const cold = "placekeeper:///tmp/Cold%20Paper%20%E2%9C%93.pdf#v=1&page=12";
   const warm = "placekeeper:///tmp/Warm%20Paper%20%252F.pdf#v=1&page=7";
   try {
     await cp(resolve(appPath), probeApp, { recursive: true });
+    const runIdentity = basename(root);
+    await writeFile(
+      probePlist,
+      rewriteSmokeProbeBundleIdentifier(
+        await readFile(probePlist, "utf8"),
+        runIdentity,
+      ),
+    );
     await writeFile(probeLauncher, `#!/bin/sh
 set -eu
 contents_dir=$(CDPATH= cd -- "$(/usr/bin/dirname -- "$0")/.." && pwd)
