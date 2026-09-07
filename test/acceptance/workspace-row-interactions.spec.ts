@@ -76,6 +76,9 @@ for (const width of [1280, 620, 390]) {
 
     const outline = page.locator('.outline-navigator__row:visible:not([data-current="true"]):has(.row-action-group)').first();
     await outline.hover();
+    const outlineBounds = (await outline.boundingBox())!;
+    const outlineTitleBounds = (await outline.locator('.outline-navigator__title').boundingBox())!;
+    expect(outlineBounds.height - outlineTitleBounds.height).toBeCloseTo(20, 1);
     const outlineHover = await rowPaint(outline);
     expect(outlineHover.background).toBe('rgb(231, 231, 231)');
     await expect(outline.locator('.outline-navigator__page')).toHaveCSS('opacity', '0');
@@ -351,5 +354,92 @@ test('workspace scrollbars retain native appearance and scroll normally', async 
     await page.mouse.wheel(0, 30);
     await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
     await expect(scroller).not.toHaveAttribute('data-scrollbar-active');
+  }
+});
+
+
+async function openReferences(page: Page, width: number) {
+  await page.setViewportSize({ width, height: 900 });
+  await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout&referenceReturn=visible');
+  if (width >= 900) await page.getByRole('button', { name: 'Show References', exact: true }).click();
+  else {
+    await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+    await page.getByRole('tab', { name: 'References', exact: true }).click();
+  }
+  const tabs = page.locator('.reference-tabs:visible');
+  await expect(tabs).toBeVisible();
+  return tabs;
+}
+
+async function referenceTabGeometry(tab: Locator) {
+  return tab.evaluate((element) => {
+    const page = element.querySelector('.reference-tab-segment__page')!;
+    const textRange = document.createRange();
+    textRange.selectNodeContents(page);
+    const number = textRange.getBoundingClientRect();
+    const icon = element.querySelector('[data-reference-tab-action="close"] .review-icon')!.getBoundingClientRect();
+    return {
+      tab: element.getBoundingClientRect().toJSON(),
+      title: element.querySelector('.reference-tab-segment__selector')!.getBoundingClientRect().toJSON(),
+      numberX: number.x + number.width / 2,
+      numberY: number.y + number.height / 2,
+      iconX: icon.x + icon.width / 2,
+      iconY: icon.y + icon.height / 2,
+    };
+  });
+}
+
+for (const width of [1280, 620]) {
+  test(`reference pages swap with actions without moving ${width >= 900 ? 'vertical' : 'horizontal'} tabs`, async ({ page, browserName }) => {
+    const tabs = await openReferences(page, width);
+    const active = tabs.locator('.reference-tab-segment[data-reference-page-swap="true"]');
+    const number = active.locator('.reference-tab-segment__page');
+    const actions = active.locator('.reference-tab-segment__action, .reference-panel__return');
+    const selector = active.getByRole('tab');
+    await page.mouse.move(0, 0);
+    await page.locator('.review-chrome__page-input').focus();
+    // The title contains "Lemma 2"; page metadata correctly supplies 18.
+    await expect(number).toHaveText('18');
+    await expect(number).toHaveCSS('opacity', '1');
+    for (const action of await actions.all()) await expect(action).toHaveCSS('opacity', '0');
+    const before = await referenceTabGeometry(active);
+    expect(Math.abs(before.numberX - before.iconX)).toBeLessThan(.5);
+    expect(Math.abs(before.numberY - before.iconY)).toBeLessThan(1);
+    await active.hover();
+    await expect(number).toHaveCSS('opacity', '0');
+    for (const action of await actions.all()) await expect(action).toHaveCSS('opacity', '1');
+    expect(await referenceTabGeometry(active)).toEqual(before);
+    const inactive = tabs.locator('.reference-tab-segment:not([data-reference-page-swap])').first();
+    await inactive.hover();
+    await expect(inactive.locator('.reference-tab-segment__page-label')).toBeVisible();
+    await expect(inactive.locator('.reference-tab-segment__action')).toHaveCount(0);
+    await page.mouse.move(0, 0);
+    await selector.focus();
+    await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
+    await expect(actions.first()).toBeFocused();
+    await expect(number).toHaveCSS('opacity', '0');
+    await expect(actions.first()).toHaveCSS('opacity', '1');
+    expect(await referenceTabGeometry(active)).toEqual(before);
+  });
+}
+
+test('touch reference tabs expose actions instead of page metadata only on the active tab', async ({ browser }) => {
+  const context = await browser.newContext({ hasTouch: true, viewport: { width: 620, height: 900 } });
+  const page = await context.newPage();
+  try {
+    const tabs = await openReferences(page, 620);
+    const active = tabs.locator('[data-reference-page-swap="true"]');
+    await expect(active.locator('.reference-tab-segment__page')).toHaveCSS('opacity', '0');
+    for (const action of await active.locator('.reference-tab-segment__action, .reference-panel__return').all()) {
+      await expect(action).toHaveCSS('opacity', '1');
+      await expect(action).toHaveCSS('height', '44px');
+    }
+    const measured = await referenceTabGeometry(active);
+    expect(Math.abs(measured.numberX - measured.iconX)).toBeLessThan(.5);
+    expect(Math.abs(measured.numberY - measured.iconY)).toBeLessThan(1);
+    await expect(tabs.locator('.reference-tab-segment:not([data-reference-page-swap])').first()
+      .locator('.reference-tab-segment__page-label')).toBeVisible();
+  } finally {
+    await context.close();
   }
 });

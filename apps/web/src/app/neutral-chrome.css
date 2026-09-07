@@ -723,6 +723,8 @@
 
 .reference-tab-segment,
 .reference-tab-segment--compound {
+  --reference-tab-action-size: 26px;
+  position: relative;
   gap: 0;
   padding: 0;
   border: 0;
@@ -733,6 +735,47 @@
 
 .reference-tab-segment--compound {
   padding-right: 3px;
+}
+
+.reference-tab-segment__page-placeholder {
+  /* Preserve the original title/page width in content-sized horizontal tabs. */
+  visibility: hidden;
+}
+
+.reference-tab-segment__page {
+  position: absolute;
+  top: 50%;
+  right: 3px;
+  width: var(--reference-tab-action-size);
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--pk-muted);
+  font: 400 11px/1.2 var(--pk-font-ui);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.reference-tab-segment[data-reference-page-swap="true"] > .reference-tab-segment__page {
+  opacity: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reference-tab-segment[data-reference-page-swap="true"] > .reference-tab-segment__page {
+    opacity: 1;
+  }
+
+  .reference-tab-segment[data-reference-page-swap="true"]:is(:hover, :has(:focus-visible))
+    > .reference-tab-segment__page {
+    opacity: 0;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .reference-tab-segment {
+    --reference-tab-action-size: 44px;
+  }
 }
 
 .reference-tab-segment:has(.reference-tab-segment__selector[aria-selected="true"]) {
@@ -1105,7 +1148,6 @@
 .outline-navigator__page {
   display: grid;
   width: var(--review-control-compact);
-  min-height: var(--review-control-compact);
   margin-right: -6px;
   place-items: center;
   color: var(--pk-muted);
@@ -1789,8 +1831,12 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 }
 
 @media (pointer: coarse), (hover: none) {
-  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result])
-    :is(.outline-navigator__page, .annotation-item__page, .pdf-search__result-page) {
+  .outline-navigator__page {
+    width: 44px;
+  }
+
+  :is(li[data-annotation-origin], li[data-search-result])
+    :is(.annotation-item__page, .pdf-search__result-page) {
     width: 44px;
     height: 44px;
   }

@@ -209,6 +209,7 @@ const visualReferenceTabs: readonly ReferenceWorkspaceTab[] = visualReferences.m
   identity: reference.identity,
   label: reference.label,
   pageContext: `Page ${reference.pageIndex + 1}`,
+  pageNumber: reference.pageIndex + 1,
 }));
 
 const visualReferenceLocation = (pageIndex: number) => ({

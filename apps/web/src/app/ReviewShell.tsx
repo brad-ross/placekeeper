@@ -583,6 +583,7 @@ export function ReviewShell(props: ReviewShellProps) {
     identity: tab.identity,
     label: `Page ${tab.originalTarget.pageIndex + 1}`,
     pageContext: `Page ${tab.originalTarget.pageIndex + 1}`,
+    pageNumber: tab.originalTarget.pageIndex + 1,
   }));
   const referencesAvailable = referenceTabs.length > 0 || props.workspace.pendingReference != null;
   const outlineDiscovery = props.workspace.outlineDiscovery;
