@@ -52,11 +52,15 @@ export type PdfTargetApplicationPolicy = 'author' | 'reference-fit-width';
 export interface ViewerNavigationAdapterOptions {
   readonly registry: PluginRegistry;
   readonly root: () => HTMLElement | null;
+  /** Visible reading frame when the native scrollport extends beside a dock. */
+  readonly readingViewport?: () => HTMLElement | null;
   /** Stable EmbedPDF document scope; it need not be the globally active document. */
   readonly documentId: string;
   readonly documentGeneration: number;
   /** Live right/bottom area covered by trays in this viewer's DOM viewport. */
   readonly runway?: () => ViewerRunway;
+  /** Optional layout-owned margin for explicit width fitting. */
+  readonly fitWidthMargins?: () => { left: number; right: number } | undefined;
   readonly timeoutMs?: number;
   readonly coordinateTolerancePixels?: number;
   readonly zoomTolerance?: number;
@@ -553,7 +557,10 @@ export function createViewerNavigation(
     const scrollportRight = Math.min(bounds.right, left + viewportElement.clientWidth);
     const scrollportBottom = Math.min(bounds.bottom, top + viewportElement.clientHeight);
     const runway = currentRunway();
-    const right = Math.max(left, Math.min(scrollportRight, bounds.right - runway.right));
+    const readingBounds = options.readingViewport?.()?.getBoundingClientRect();
+    const right = Math.max(left, Math.min(
+      scrollportRight, bounds.right - runway.right, readingBounds?.right ?? bounds.right,
+    ));
     const bottom = Math.max(top, Math.min(scrollportBottom, bounds.bottom - runway.bottom));
     return {
       left,
@@ -1130,10 +1137,12 @@ export function createViewerNavigation(
       if (geometry === null) return false;
       const { page, viewportRect, rotation } = geometry;
       const rotatedPage = transformSize(page.size, rotation, 1);
+      const fitMargins = options.fitWidthMargins?.() ?? { left: viewer.viewportGap, right: viewer.viewportGap };
+      const fitGap = (fitMargins.left + fitMargins.right) / 2;
       const requestedZoom = fitViewerWidthZoom({
         viewportWidth: viewportRect.width,
         pageWidth: rotatedPage.width,
-        viewportGap: viewer.viewportGap,
+        viewportGap: fitGap,
       });
       if (requestedZoom === null || !operationIsCurrent(operation)) return false;
 
@@ -1151,7 +1160,7 @@ export function createViewerNavigation(
         pageIndex: visible.pageIndex,
         anchor,
         alignment: {
-          xPercent: 50,
+          xPercent: 50 + 50 * (fitMargins.left - fitMargins.right) / viewportRect.width,
           yPercent: origin?.alignment.yPercent ?? 50,
         },
         zoom: requestedZoom,
@@ -1250,15 +1259,15 @@ export function createViewerNavigation(
         : null;
       const boundedFit = requestedZoom <= VIEWER_ZOOM_MIN_PERCENT / 100 + zoomTolerance
         || requestedZoom >= VIEWER_ZOOM_MAX_PERCENT / 100 - zoomTolerance;
-      const widthTarget = visible.viewportRect.width - 2 * viewer.viewportGap;
+      const widthTarget = visible.viewportRect.width - 2 * fitGap;
       const widthMatches = settledGeometry !== null
         && (boundedFit || Math.abs(settledGeometry.pageRect.width - widthTarget) <= coordinateTolerance);
       const edgesFit = settledGeometry !== null
         && (boundedFit || (
           settledGeometry.pageRect.left
-            >= settledGeometry.viewportRect.left + viewer.viewportGap - coordinateTolerance
+            >= settledGeometry.viewportRect.left + fitMargins.left - coordinateTolerance
           && settledGeometry.pageRect.right
-            <= settledGeometry.viewportRect.right - viewer.viewportGap + coordinateTolerance
+            <= settledGeometry.viewportRect.right - fitMargins.right + coordinateTolerance
         ));
       let currentPageMatches = false;
       try {
@@ -1508,6 +1517,22 @@ export function createViewerNavigation(
     pointVisibility,
     applyLocation,
     fitToWidth,
+    isFitToWidth() {
+      const viewer = activeViewer();
+      if (!viewer) return false;
+      const visible = mostVisibleMountedPageIndex(viewer);
+      if (!visible) return false;
+      const geometry = pageGeometry(viewer, visible.pageIndex, visible);
+      if (!geometry) return false;
+      const pageWidth = transformSize(geometry.page.size, geometry.rotation, 1).width;
+      const margins = options.fitWidthMargins?.() ?? { left: viewer.viewportGap, right: viewer.viewportGap };
+      const zoom = fitViewerWidthZoom({
+        viewportWidth: geometry.viewportRect.width,
+        pageWidth,
+        viewportGap: (margins.left + margins.right) / 2,
+      });
+      return zoom !== null && Math.abs(viewer.zoom.getState().currentZoomLevel - zoom) * pageWidth <= 1;
+    },
     fitToWidthReady() {
       const viewer = activeViewer();
       return viewer !== null && hasUsablePageTree(viewer);

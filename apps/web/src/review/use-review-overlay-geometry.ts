@@ -1,6 +1,7 @@
 import {
   useLayoutEffect,
   useState,
+  useRef,
   type CSSProperties,
   type RefObject,
 } from 'react';
@@ -113,10 +114,16 @@ export function useReviewOverlayGeometry(input: {
   readonly stageRef: RefObject<HTMLElement | null>;
   readonly surfaceRefs: readonly RefObject<HTMLElement | null>[];
   readonly layoutGeneration: string | number;
+  readonly isFitToWidth?: () => boolean;
 }): {
   readonly geometry: ReviewOverlayGeometry;
+  readonly fitWidthCurrent: boolean;
+  readonly horizontalScrollAvailable: boolean;
   readonly style: CSSProperties;
 } {
+  const fitQuery = useRef(input.isFitToWidth);
+  fitQuery.current = input.isFitToWidth;
+  const [zoomActions, setZoomActions] = useState({ fitWidthCurrent: false, horizontalScrollAvailable: false });
   const [geometry, setGeometry] = useState<ReviewOverlayGeometry>(EMPTY_GEOMETRY);
 
   useLayoutEffect(() => {
@@ -152,6 +159,11 @@ export function useReviewOverlayGeometry(input: {
           })),
           scrollport,
         });
+        const fitWidthCurrent = fitQuery.current?.() ?? false;
+        const horizontalScrollAvailable = scrollport !== null && scrollport.scrollWidth - scrollport.clientWidth > 1;
+        setZoomActions((current) => current.fitWidthCurrent === fitWidthCurrent
+          && current.horizontalScrollAvailable === horizontalScrollAvailable
+          ? current : { fitWidthCurrent, horizontalScrollAvailable });
         setGeometry((current) => sameGeometry(current, next) ? current : next);
         // Transforms move a sliding tray without resizing it or mutating its
         // style attribute. Keep the backing and fade attached to the moving
@@ -205,6 +217,7 @@ export function useReviewOverlayGeometry(input: {
   }, [input.layoutGeneration, input.stageRef, input.surfaceRefs]);
 
   return {
+    ...zoomActions,
     geometry,
     style: {
       '--review-collapsed-rail-size': `${REVIEW_COLLAPSED_RAIL_SIZE}px`,

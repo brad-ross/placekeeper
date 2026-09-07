@@ -53,7 +53,7 @@ function observeTooltipInputModality(owner: Document): () => void {
 
 export interface ReviewTooltipButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   readonly label: string;
-  readonly tooltip?: string;
+  readonly tooltip?: string | false;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -106,22 +106,27 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
     };
 
     useLayoutEffect(() => {
-      if (!visible) return;
+      if (!visible || tooltip === false) return;
       const button = buttonRef.current;
       const surface = tooltipRef.current;
       if (!button || !surface) return;
+      // A portal alone cannot paint above native popovers.
+      surface.showPopover?.();
       const anchor = button.getBoundingClientRect();
+      const menu = button.closest('.top-bar-menu__surface');
+      const placementAnchor = menu?.getBoundingClientRect() ?? anchor;
       const bounds = surface.getBoundingClientRect();
       const viewportWidth = globalThis.visualViewport?.width ?? document.documentElement.clientWidth;
       const viewportHeight = globalThis.visualViewport?.height ?? document.documentElement.clientHeight;
       const viewportLeft = globalThis.visualViewport?.offsetLeft ?? 0;
       const viewportTop = globalThis.visualViewport?.offsetTop ?? 0;
       const centeredLeft = anchor.left + (anchor.width - bounds.width) / 2;
-      const below = anchor.bottom + 6;
-      const above = anchor.top - bounds.height - 6;
+      const below = placementAnchor.bottom + TOOLTIP_MARGIN;
+      const above = placementAnchor.top - bounds.height - TOOLTIP_MARGIN;
+      const belowFits = below + bounds.height <= viewportTop + viewportHeight - TOOLTIP_MARGIN;
       setStyle({
         left: clamp(centeredLeft, viewportLeft + TOOLTIP_MARGIN, viewportLeft + viewportWidth - bounds.width - TOOLTIP_MARGIN),
-        top: above >= viewportTop + 2 ? above : Math.max(viewportTop + TOOLTIP_MARGIN,
+        top: menu && belowFits ? below : above >= viewportTop + TOOLTIP_MARGIN ? above : Math.max(viewportTop + TOOLTIP_MARGIN,
           Math.min(below, viewportTop + viewportHeight - bounds.height - TOOLTIP_MARGIN)),
       });
     }, [visible, tooltip]);
@@ -152,12 +157,12 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
           else if (forwardedRef) forwardedRef.current = element;
         }}
         aria-label={buttonProps['aria-label'] ?? label}
-        title={buttonProps.disabled ? tooltip : undefined}
+        title={buttonProps.disabled && tooltip !== false ? tooltip : undefined}
         aria-describedby={[describedBy, visible ? tooltipId : ''].filter(Boolean).join(' ') || undefined}
         onMouseEnter={(event: MouseEvent<HTMLButtonElement>) => {
           onMouseEnter?.(event);
           clearHoverTimer();
-          hoverTimer.current = setTimeout(() => setVisible(true), REVIEW_TOOLTIP_HOVER_DELAY_MS);
+          if (tooltip !== false) hoverTimer.current = setTimeout(() => setVisible(true), REVIEW_TOOLTIP_HOVER_DELAY_MS);
         }}
         onMouseLeave={(event: MouseEvent<HTMLButtonElement>) => {
           onMouseLeave?.(event);
@@ -168,7 +173,7 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
           clearHoverTimer();
           const pointerFocus = pointerActivation.current
             || inputModalities.get(event.currentTarget.ownerDocument)?.pointer === true;
-          if (reviewTooltipFocusOpens(pointerFocus)
+          if (tooltip !== false && reviewTooltipFocusOpens(pointerFocus)
             && event.currentTarget.matches(':focus-visible')) setVisible(true);
         }}
         onBlur={(event: FocusEvent<HTMLButtonElement>) => {
@@ -198,8 +203,8 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
           onKeyDown?.(event);
         }}
       />
-      {visible && typeof document !== 'undefined' ? createPortal(
-        <span ref={tooltipRef} id={tooltipId} className="review-tooltip" role="tooltip" style={style}>
+      {visible && tooltip !== false && typeof document !== 'undefined' ? createPortal(
+        <span ref={tooltipRef} id={tooltipId} className="review-tooltip" popover="manual" role="tooltip" style={style}>
           {tooltip}
         </span>,
         document.body,

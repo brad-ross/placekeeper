@@ -386,6 +386,7 @@ function cssAttributeValue(value: string): string {
 }
 
 export function ReviewShell(props: ReviewShellProps) {
+  const [horizontalScrollLocked, setHorizontalScrollLocked] = useState(false);
   const [localReferenceLayout, dispatchLocalReferenceLayout] = useReducer(
     reduceReferenceWorkspaceLayout,
     undefined,
@@ -527,6 +528,23 @@ export function ReviewShell(props: ReviewShellProps) {
   const rightWorkspaceRailRef = useRef<HTMLButtonElement>(null);
   const bottomWorkspaceRailRef = useRef<HTMLButtonElement>(null);
   const shellRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!horizontalScrollLocked || !shell) return;
+    const lockHorizontalWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey || (event.deltaX === 0 && !event.shiftKey)) return;
+      const viewport = shell.querySelector<HTMLElement>('.review-document .pdf-workspace__viewport');
+      if (!viewport || !(event.target instanceof Node) || !viewport.contains(event.target)) return;
+      // WebKit can scroll the hidden horizontal axis during diagonal gestures.
+      // Consume that gesture and apply only its vertical component.
+      event.preventDefault();
+      const unit = event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? viewport.clientHeight
+        : event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1;
+      if (!event.shiftKey) viewport.scrollTop += event.deltaY * unit;
+    };
+    shell.addEventListener('wheel', lockHorizontalWheel, { passive: false });
+    return () => shell.removeEventListener('wheel', lockHorizontalWheel);
+  }, [horizontalScrollLocked]);
   const pointerScrollRef = useRef<PointerScrollGesture | undefined>(undefined);
   const annotationRequestTokenRef = useRef(0);
   const [workspaceRequest, setWorkspaceRequest] = useState<WorkspaceOpenRequest>({
@@ -766,6 +784,7 @@ export function ReviewShell(props: ReviewShellProps) {
     workspaceFraming.presentation,
   ].join(':');
   const overlayFrame = useReviewOverlayGeometry({
+    isFitToWidth: () => props.viewerNavigation?.isFitToWidth?.() ?? false,
     stageRef: workspaceFraming.stageRef,
     surfaceRefs: overlaySurfaceRefs,
     layoutGeneration: overlayLayoutGeneration,
@@ -2192,7 +2211,7 @@ export function ReviewShell(props: ReviewShellProps) {
         if (
           workspaceOpen
           && event.target instanceof Element
-          && event.target.closest('.review-chrome__viewer-controls') !== null
+          && event.target.closest('.review-chrome__viewer-controls, .review-chrome__left-controls') !== null
         ) {
           markFramingUserIntent();
         }
@@ -2227,6 +2246,10 @@ export function ReviewShell(props: ReviewShellProps) {
         {...(props.viewerControls === undefined ? {} : { controls: props.viewerControls })}
         viewerState={props.viewerState ?? unavailableViewerControls()}
         fitWidthReady={props.viewerNavigation?.fitToWidthReady() ?? false}
+        fitWidthCurrent={overlayFrame.fitWidthCurrent}
+        horizontalScrollAvailable={overlayFrame.horizontalScrollAvailable}
+        horizontalScrollLocked={horizontalScrollLocked}
+        onToggleHorizontalScrollLock={() => setHorizontalScrollLocked((locked) => !locked)}
         {...(props.viewerNavigation === undefined ? {} : {
           beforeViewerAction: async () => {
             await props.viewerNavigation?.cancelPendingNavigation();
@@ -2250,6 +2273,7 @@ export function ReviewShell(props: ReviewShellProps) {
         ref={workspaceFraming.stageRef}
         className="review-layout"
         data-review-stage
+        data-horizontal-scroll-locked={horizontalScrollLocked ? 'true' : undefined}
         data-reference-layout={effectiveReferenceLayout.kind}
         data-workspace-presentation={workspaceFraming.presentation}
         data-annotation-presentation={workspaceFraming.presentation}

@@ -71,8 +71,8 @@
 
 .review-chrome {
   --review-chrome-height: 50px;
-  grid-template-columns: minmax(0, 1fr) max-content;
-  gap: 12px;
+  grid-template-columns: minmax(0, max-content) max-content minmax(0, 1fr);
+  gap: var(--pk-toolbar-gap);
   padding-inline: 12px;
   border: 0;
   color: var(--pk-ink);
@@ -132,6 +132,30 @@
 .review-chrome__viewer-controls {
   gap: var(--pk-toolbar-gap);
   font-size: 13px;
+  justify-self: end;
+}
+
+.review-chrome__left-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--pk-toolbar-gap);
+  min-width: max-content;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  [data-review-chrome] > .review-chrome__viewer-controls,
+  [data-review-chrome] :is([data-review-copy-link], [data-main-history]) {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  [data-review-chrome]:is(:hover, :has(:focus-visible), [data-top-bar-menu-open="zoom"])
+    > .review-chrome__viewer-controls,
+  [data-review-chrome]:is(:hover, :has(:focus-visible))
+    :is([data-review-copy-link], [data-main-history]) {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 .review-chrome__control-cluster {
@@ -143,9 +167,8 @@
   gap: var(--pk-toolbar-gap);
 }
 
-.review-chrome__navigation-cluster > [data-main-history="forward"] + .review-chrome__page-position,
-.review-chrome__navigation-cluster > [data-main-history="back"] + .review-chrome__page-position {
-  margin-left: 0;
+.review-chrome__navigation-cluster > [data-main-history] + [data-main-history] {
+  margin-left: calc(2px - var(--pk-toolbar-gap));
 }
 
 .review-chrome button,
@@ -296,6 +319,15 @@
 
 .top-bar-menu__surface .review-chrome__control-cluster { gap: 3px; }
 
+.top-bar-menu__surface [data-review-horizontal-lock][aria-checked="true"] {
+  background: var(--pk-selected);
+}
+
+.review-layout[data-horizontal-scroll-locked="true"] .review-document .pdf-workspace__viewport {
+  overflow-x: hidden !important;
+  touch-action: pan-y pinch-zoom;
+}
+
 .document-actions__menu {
   width: max-content;
   max-width: min(21rem, calc(100vw - 2rem));
@@ -326,6 +358,8 @@
 }
 
 .review-tooltip {
+  margin: 0;
+  inset: auto;
   position: fixed;
   z-index: 10000;
   display: block;
@@ -1061,6 +1095,22 @@
 }
 
 .outline-navigator__page { color: var(--pk-muted); font-size: 11px; }
+
+.outline-navigator[data-flat="true"] .outline-navigator__destination {
+  grid-column: 1 / span 2;
+  padding-inline: 6px;
+}
+
+.outline-navigator__loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.outline-navigator__loading .review-icon {
+  flex: none;
+  animation: review-loader-spin 900ms linear infinite;
+}
 
 .review-context-palette,
 .review-page-menu,

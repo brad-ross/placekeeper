@@ -20,7 +20,6 @@ import {
 } from '../pdf/viewer-framing.js';
 
 import {
-  REVIEW_COLLAPSED_RAIL_SIZE,
   REVIEW_OVERLAY_INSET,
   REVIEW_OVERLAY_FADE_SIZE,
 } from './use-review-overlay-geometry.js';
@@ -51,13 +50,14 @@ function workspaceSurfaceIsOpen(surface: HTMLElement): boolean {
 function committedWorkspaceRunway(
   stage: Pick<DOMRect, 'width' | 'height'>,
   surfaces: readonly HTMLElement[],
-  rightRailPresent: boolean,
+  rightDockOpen: boolean,
 ): ViewerRunway {
   // Offset geometry describes the resting tray edge and remains stable while
   // its entrance transform animates. The runway also clears the opaque outer
-  // backing and its fade, leaving the PDF reachable beside the overlay.
+  // backing and its fade. A right dock already reduces the real viewport,
+  // so it must not also subtract a runway from that reduced width.
   const runway: ViewerRunway = {
-    right: rightRailPresent ? REVIEW_COLLAPSED_RAIL_SIZE + REVIEW_OVERLAY_FADE_SIZE : 0,
+    right: 0,
     bottom: 0,
   };
   for (const surface of surfaces) {
@@ -65,7 +65,7 @@ function committedWorkspaceRunway(
     if (surface.dataset.workspacePresentation === 'bottom') {
       const clearBoundary = Math.max(0, surface.offsetTop - REVIEW_OVERLAY_INSET - REVIEW_OVERLAY_FADE_SIZE);
       runway.bottom = Math.max(runway.bottom, Math.min(stage.height, stage.height - clearBoundary));
-    } else {
+    } else if (!rightDockOpen) {
       const clearBoundary = Math.max(0, surface.offsetLeft - REVIEW_OVERLAY_INSET - REVIEW_OVERLAY_FADE_SIZE);
       runway.right = Math.max(runway.right, Math.min(stage.width, stage.width - clearBoundary));
     }
@@ -426,7 +426,10 @@ export function useWorkspaceFraming(input: {
       const surfaces = [referenceSurfaceRef.current, toolsSurfaceRef.current]
         .filter((surface): surface is HTMLElement => surface !== null);
       const runway = stageBounds
-        ? committedWorkspaceRunway(stageBounds, surfaces, stageRef.current?.dataset.rightRailPresent === 'true')
+        ? committedWorkspaceRunway(
+          stageBounds, surfaces,
+          stageRef.current?.dataset.rightSurfaceOpen === 'true',
+        )
         : { right: 0, bottom: 0 };
       const precedingRunway = committedRunwayRef.current;
       const runwayChanged = runway.right !== precedingRunway.right

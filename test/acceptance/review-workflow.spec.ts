@@ -679,7 +679,7 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Begin outline replacement' }).evaluate((button) => (
       button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     ));
-    await expect(page.locator('[data-outline-state="loading"]')).toHaveText('Outline is loading…');
+    await expect(page.locator('[data-outline-state="loading"]')).toHaveText('Outline is loading');
     await expect(page.getByRole('button', {
       name: 'Restore previous outline expansion',
     })).toHaveCount(0);
@@ -1028,7 +1028,8 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('textbox', {
       name: 'Current zoom 120 percent. Enter a zoom percentage',
     })).toBeFocused();
-    await page.getByRole('button', { name: 'Open zoom controls' }).click();
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.getByRole('button', { name: 'Open zoom controls' }).hover();
     const zoomMenu = page.getByRole('menu', { name: 'PDF zoom' });
     await expect(zoomMenu.getByRole('menuitem')).toHaveCount(3);
     await expect(zoomMenu.getByRole('menuitem', { name: 'Fit width' })).toBeVisible();
@@ -1168,6 +1169,60 @@ test.describe('canonical review workflow', () => {
     await expect(zoomSuffix).toBeVisible();
   });
 
+  test('reveals right-side controls on bar hover and dismisses hover menus outside their trigger and popup', async ({ page }) => {
+    const bar = page.locator('[data-review-chrome]');
+    const rightControls = bar.locator(':scope > .review-chrome__viewer-controls');
+    const canvas = page.getByRole('application', { name: 'PDF review canvas' });
+    await canvas.hover();
+    await expect(rightControls).toHaveCSS('opacity', '0');
+    for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
+      await expect(control).toHaveCSS('opacity', '0');
+    }
+    await bar.hover({ position: { x: 2, y: 2 } });
+    await expect(rightControls).toHaveCSS('opacity', '1');
+    for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
+      await expect(control).toHaveCSS('opacity', '1');
+    }
+    await page.getByRole('button', { name: 'Open zoom controls' }).hover();
+    const zoomMenu = page.getByRole('menu', { name: 'PDF zoom', exact: true });
+    await expect(zoomMenu).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open zoom controls' })).not.toBeFocused();
+    await page.waitForTimeout(700);
+    await expect(page.getByRole('tooltip')).toHaveCount(0);
+    await zoomMenu.getByRole('menuitem', { name: 'Zoom out', exact: true }).hover();
+    const tooltip = page.getByRole('tooltip');
+    await expect(tooltip).toBeVisible();
+    expect(await tooltip.evaluate((element) => element.matches(':popover-open'))).toBe(true);
+    const tooltipBounds = await tooltip.boundingBox();
+    const menuBounds = await zoomMenu.boundingBox();
+    expect(tooltipBounds!.y).toBeGreaterThanOrEqual(menuBounds!.y + menuBounds!.height + 5);
+
+    await zoomMenu.hover();
+    await expect(zoomMenu).toBeVisible();
+    await expect(rightControls).toHaveCSS('opacity', '1');
+    await canvas.hover();
+    await expect(zoomMenu).toHaveCount(0);
+    await expect(rightControls).toHaveCSS('opacity', '0');
+
+    await page.locator('[data-review-page-position]').hover();
+    const pageMenu = page.getByRole('menu', { name: 'Page navigation', exact: true });
+    await expect(pageMenu).toBeVisible();
+    await pageMenu.getByRole('menuitem', { name: 'Next page' }).hover();
+    await expect(pageMenu).toBeVisible();
+    await canvas.hover();
+    await expect(pageMenu).toHaveCount(0);
+
+    const zoomTrigger = page.getByRole('button', { name: 'Open zoom controls' });
+    await zoomTrigger.focus();
+    await zoomTrigger.press('Enter');
+    await expect(zoomMenu.getByRole('menuitem', { name: 'Zoom out' })).toBeFocused();
+    await page.keyboard.press('End');
+    await expect(zoomMenu.getByRole('menuitem', { name: 'Fit width' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(zoomMenu).toHaveCount(0);
+    await expect(zoomTrigger).toBeFocused();
+  });
+
   test('keeps the top bar to one contained 50px row across supported widths', async ({ page }) => {
     await page.locator('#root').evaluate((element) => {
       element.setAttribute('data-production-root', 'true');
@@ -1183,7 +1238,8 @@ test.describe('canonical review workflow', () => {
       const geometry = await chrome.evaluate((element) => {
         const identity = element.querySelector<HTMLElement>(':scope > .review-chrome__identity');
         const controls = element.querySelector<HTMLElement>(':scope > .review-chrome__viewer-controls');
-        if (!identity || !controls) throw new Error('Review chrome geometry is incomplete.');
+        const navigation = element.querySelector<HTMLElement>(':scope > .review-chrome__left-controls');
+        if (!identity || !controls || !navigation) throw new Error('Review chrome geometry is incomplete.');
         const chromeBounds = element.getBoundingClientRect();
         const identityBounds = identity.getBoundingClientRect();
         const controlsBounds = controls.getBoundingClientRect();
@@ -1196,6 +1252,7 @@ test.describe('canonical review workflow', () => {
           height: chromeBounds.height,
           identity: identityBounds.toJSON(),
           controls: controlsBounds.toJSON(),
+          navigation: navigation.getBoundingClientRect().toJSON(),
           identityChildren: visibleBounds(':scope > .review-chrome__identity > *'),
           saveChildren: visibleBounds(':scope > .review-chrome__identity .review-chrome__save-identity > :not(.sr-only)'),
           filename: element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__filename')?.getBoundingClientRect().toJSON(),
@@ -1204,7 +1261,7 @@ test.describe('canonical review workflow', () => {
 
       expect(geometry.height).toBe(50);
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
-      const visibleColumns = [geometry.identity, geometry.controls]
+      const visibleColumns = [geometry.identity, geometry.navigation, geometry.controls]
         .filter((item) => item.width > 0.5);
       for (let index = 1; index < visibleColumns.length; index += 1) {
         expect(visibleColumns[index - 1]!.x + visibleColumns[index - 1]!.width)
@@ -1219,7 +1276,7 @@ test.describe('canonical review workflow', () => {
       if ((geometry.filename?.width ?? 0) > 0) {
         expect(geometry.filename!.width).toBeGreaterThanOrEqual(40);
       }
-      for (const item of [geometry.identity, geometry.controls]) {
+      for (const item of [geometry.identity, geometry.navigation, geometry.controls]) {
         expect(item.y).toBeGreaterThanOrEqual(-0.5);
         expect(item.y + item.height).toBeLessThanOrEqual(50.5);
       }
@@ -1245,7 +1302,7 @@ test.describe('canonical review workflow', () => {
         await touchPage.evaluate(() => new Promise<void>((resolve) => {
           requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
         }));
-        const chromeButtons = chrome.locator(':scope > .review-chrome__identity button, :scope > .review-chrome__viewer-controls button');
+        const chromeButtons = chrome.locator(':scope > .review-chrome__identity button, :scope > .review-chrome__left-controls button, :scope > .review-chrome__viewer-controls button');
         const chromeButtonHeights = await chromeButtons.evaluateAll((buttons) => (
           buttons.map((button) => button.getBoundingClientRect().height)
         ));
@@ -1266,7 +1323,7 @@ test.describe('canonical review workflow', () => {
             identity: bounds(':scope > .review-chrome__identity'),
             controls: bounds(':scope > .review-chrome__viewer-controls'),
             saveIdentity: bounds(':scope > .review-chrome__identity .review-chrome__save-identity'),
-            copy: bounds(':scope > .review-chrome__viewer-controls [data-review-copy-link]'),
+            copy: bounds(':scope > .review-chrome__left-controls [data-review-copy-link]'),
             filename: bounds(':scope > .review-chrome__identity .review-chrome__filename'),
             recoveryDisplay: element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__save-recovery') === null
               ? null
@@ -1298,7 +1355,7 @@ test.describe('canonical review workflow', () => {
 
       await touchPage.getByRole('button', {
         name: 'Page 3 of 12. Open page navigation',
-      }).click();
+      }).tap();
       const menu = touchPage.getByRole('menu', { name: 'Page navigation' });
       await expect(menu).toBeVisible();
       const menuButtonHeights = await menu.locator('button').evaluateAll((buttons) => (
@@ -1306,6 +1363,10 @@ test.describe('canonical review workflow', () => {
       ));
       expect(menuButtonHeights.length).toBeGreaterThan(0);
       for (const height of menuButtonHeights) expect(height).toBeGreaterThanOrEqual(44);
+      await touchPage.getByRole('button', {
+        name: 'Page 3 of 12. Open page navigation',
+      }).tap();
+      await expect(menu).toHaveCount(0);
     } finally {
       await context.close();
     }
@@ -1508,6 +1569,7 @@ test.describe('canonical review workflow', () => {
     const zoomLevel = page.getByRole('textbox', {
       name: 'Current zoom 110 percent. Enter a zoom percentage',
     });
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
     await zoomLevel.click();
 
     let zoomPercentage = zoomLevel;
@@ -1546,7 +1608,8 @@ test.describe('canonical review workflow', () => {
   });
 
   test('keeps an exact fitted scale when an unchanged zoom edit closes', async ({ page }) => {
-    await page.getByRole('button', { name: 'Open zoom controls' }).click();
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.getByRole('button', { name: 'Open zoom controls' }).hover();
     await page.getByRole('menuitem', { name: 'Fit width' }).click();
     const fitResult = page.getByRole('textbox', {
       name: 'Current zoom 88 percent. Enter a zoom percentage',
@@ -1625,8 +1688,11 @@ test.describe('canonical review workflow', () => {
   test('cancels zoom editing with Escape without closing workspace or Finish', async ({ page }) => {
     const { annotations, workspace } = await openAnnotationsWorkspace(page);
     const zoomLevel = page.getByRole('textbox', {
-      name: 'Current zoom 110 percent. Enter a zoom percentage',
+      name: /Current zoom \d+ percent\. Enter a zoom percentage/u,
     });
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    const originalZoom = await zoomLevel.inputValue();
+    const originalRequests = await page.locator('[data-viewer-zoom-requests]').getAttribute('data-viewer-zoom-requests');
     await zoomLevel.click();
     const zoomPercentage = zoomLevel;
     await zoomPercentage.fill('125');
@@ -1640,23 +1706,25 @@ test.describe('canonical review workflow', () => {
     await expect(zoomPercentage).toBeFocused();
     await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
       'data-viewer-zoom-requests',
-      'direct:;commands:;fit:',
+      originalRequests!,
     );
 
     await zoomPercentage.press('Escape');
     await expect(zoomLevel).toBeFocused();
+    await expect(zoomLevel).toHaveValue(originalZoom);
     await expect(workspace).toBeVisible();
     await expect(annotations).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('#review-tools-workspace')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Finish review' })).toHaveCount(0);
     await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
       'data-viewer-zoom-requests',
-      'direct:;commands:;fit:',
+      originalRequests!,
     );
   });
 
   test('runs Zoom Out, Zoom In, and Fit Width exactly once from the zoom menu', async ({ page }) => {
-    await page.getByRole('button', { name: 'Open zoom controls' }).click();
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.getByRole('button', { name: 'Open zoom controls' }).hover();
     const zoomOut = page.getByRole('menuitem', { name: 'Zoom out' });
     await zoomOut.click();
     await expect(zoomOut).toBeFocused();

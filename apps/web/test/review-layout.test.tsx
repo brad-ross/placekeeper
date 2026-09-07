@@ -602,7 +602,7 @@ describe('review shell layout and accessibility contract', () => {
     />,
   );
 
-  it('places the document Copy Link control after navigation and zoom', () => {
+  it('places the document Copy Link control after the page box and before zoom', () => {
     const html = renderToStaticMarkup(
       <ReviewChrome
         documentTitle="paper.pdf"
@@ -624,7 +624,9 @@ describe('review shell layout and accessibility contract', () => {
 
     expect(identityStart).toBeGreaterThanOrEqual(0);
     expect(viewerControlsIndex).toBeGreaterThan(identityStart);
-    expect(copyLink).toBeGreaterThan(viewerControlsIndex);
+    expect(copyLink).toBeGreaterThan(identityStart);
+    expect(copyLink).toBeGreaterThan(html.indexOf('data-review-page-position'));
+    expect(copyLink).toBeLessThan(viewerControlsIndex);
     expect(html).not.toContain('class="review-chrome__actions"');
     const identityMarkup = html.slice(identityStart, viewerControlsIndex);
     expect(identityMarkup).toContain('lucide-file-text');
@@ -644,7 +646,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toMatch(/class="[^"]*review-icon[^"]*"/);
   });
 
-  it('groups compact edit history, document navigation, and zoom in task order before measurement', () => {
+  it('keeps document navigation on the left and edit history with zoom on the right', () => {
     const html = renderToStaticMarkup(
       <ReviewChrome
         documentTitle="paper.pdf"
@@ -660,20 +662,17 @@ describe('review shell layout and accessibility contract', () => {
         onNavigateForward={vi.fn()}
       />,
     );
-    const centerStart = html.indexOf('aria-label="PDF editing, navigation, and zoom"');
+    const centerStart = html.indexOf('aria-label="PDF editing and zoom"');
     const editGroup = html.indexOf('aria-label="Edit history"');
     const navigationGroup = html.indexOf('aria-label="Document navigation"');
     const zoomGroup = html.indexOf('aria-label="PDF zoom"');
 
     expect(centerStart).toBeGreaterThanOrEqual(0);
-    const orderedControls = [
-      editGroup,
-      navigationGroup,
-      zoomGroup,
-    ];
-    for (const [index, control] of orderedControls.entries()) {
-      expect(control).toBeGreaterThan(index === 0 ? centerStart : orderedControls[index - 1]!);
-    }
+    expect(navigationGroup).toBeLessThan(centerStart);
+    expect(editGroup).toBeGreaterThan(centerStart);
+    expect(zoomGroup).toBeGreaterThan(editGroup);
+    expect(html.indexOf('data-review-page-position')).toBeLessThan(html.indexOf('data-main-history="forward"'));
+    expect(html.indexOf('data-main-history="back"')).toBeLessThan(html.indexOf('data-main-history="forward"'));
     expect(html).not.toContain('aria-label="Actions"');
     expect(html).toContain('data-review-chrome-presentation="navigationCompact"');
   });

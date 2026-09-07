@@ -27,6 +27,7 @@ export function horizontalTabFocusIndex(
 export function enabledMenuItems(surface: HTMLElement): readonly HTMLElement[] {
   const candidates = surface.querySelectorAll<HTMLElement>([
     '[role="menuitem"]:not(:disabled):not([aria-disabled="true"])',
+    '[role="menuitemcheckbox"]:not(:disabled):not([aria-disabled="true"])',
     'input:not(:disabled):not([aria-disabled="true"])',
     'select:not(:disabled):not([aria-disabled="true"])',
     'textarea:not(:disabled):not([aria-disabled="true"])',

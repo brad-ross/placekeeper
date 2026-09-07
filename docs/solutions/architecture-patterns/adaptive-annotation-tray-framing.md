@@ -18,7 +18,7 @@ tags: ["pdf-review", "annotation-tray", "viewer-framing", "scroll-runway", "resp
 
 ## Context
 
-The workspace and References surfaces cover a stateful PDF reader. The [accepted overlay layout contract](../../plans/2026-09-05-neutral-soft-design-contract.md#accepted-overlay-layout-and-zoom-behavior) keeps the viewport full-sized and covered content reachable. Initial placement, explicit Fit width, and opening the workspace fit the clear reading width up to the inner right fade edge. Opening bottom References alone does not refit the main document.
+The right workspace now reserves actual layout space beside the stateful PDF reader. Its left edge bounds the reading frame, and Fit width leaves a 24 px margin on each side of that frame, matching the right tray’s 12 px solid backing plus 12 px fade. This September 7 revision supersedes the right-overlay portion of the [earlier layout contract](../../plans/2026-09-05-neutral-soft-design-contract.md#accepted-overlay-layout-and-zoom-behavior). Bottom surfaces still overlay the full-height viewport and use runway; the collapsed rail reserves 40 px of layout width, with its 12 px fade inside the remaining viewport. Fit width uses 52 px on the left and 12 px on the right of that viewport, keeping the page centered across the full stage without synthetic horizontal runway. Horizontal scrolling is available only when the page content exceeds the scrollport. Opening bottom References alone does not refit the main document.
 
 Workspace opening is a one-shot zoom request that waits for committed geometry and runway settlement. Closing, resizing, and docking remain passive changes that preserve scale and reading position subject to actual scroll limits. This September 7 policy supersedes the earlier no-fit-on-opening rule; it does not restore close-time zoom reversal or repeated fitting during resize.
 
@@ -28,11 +28,13 @@ Changing scroll extent can provoke native anchoring or clamping. The implementat
 
 ### Separate reachability from page layout
 
-Keep the viewer mounted at full stage size. Add runway with an invisible, pointer-transparent, absolutely positioned element that extends scroll extent without entering page layout (`apps/web/src/pdf/PdfWorkspace.tsx:550`).
+Keep one native scrollport mounted at full stage width, including the rightmost scrollbar. The narrower `.review-document` supplies explicit `readingViewport` bounds to navigation and framing. Reserve the dock inside the scrollport with padding, subtracting the scrollbar width already included in that reservation; native padding also owns horizontal centering. Clip only the decorative overlay frame away from the scrollbar strip, so the thumb stays visible and interactive. Do not introduce a proxy scrollbar or a second scroll position.
+
+For bottom overlays, add runway with an invisible, pointer-transparent, absolutely positioned element that extends scroll extent without entering page layout (`apps/web/src/pdf/PdfWorkspace.tsx:550`).
 
 ### Commit resting occupancy, not animation frames
 
-Derive runway from each logically open surface's untransformed offset geometry. A present collapsed right rail also reserves its 40 px backing and 12 px fade. Share these constants with the painted overlay geometry so Fit width and the visible boundary agree. Current occupancy includes the outer backing and fade: the clear boundary is the surface's resting start minus the framing policy's backing and fade allowances, and the runway extends from that boundary to the stage edge. Combine same-edge surfaces by maximum extent, not sum (`apps/web/src/review/use-annotation-tray-framing.ts:47`). This is more precise than treating runway as the tray width alone, especially for inset overlays.
+A right dock contributes zero horizontal runway because CSS already reserves its width and outside inset. Derive remaining overlay runway from each logically open surface's untransformed offset geometry. The collapsed right rail also uses actual layout space and contributes no horizontal runway. Share these constants with the painted overlay geometry so Fit width and the visible boundary agree. Current occupancy includes the outer backing and fade: the clear boundary is the surface's resting start minus the framing policy's backing and fade allowances, and the runway extends from that boundary to the stage edge. Combine same-edge surfaces by maximum extent, not sum (`apps/web/src/review/use-annotation-tray-framing.ts:47`). This is more precise than treating runway as the tray width alone, especially for inset overlays.
 
 Record the requested runway before awaiting its DOM settlement. Otherwise a superseding effect can encounter already-mutated DOM with an old committed-runway reference and begin another transition from a stale position. Retain a matching transition's original position across replacement effects (`apps/web/src/review/use-annotation-tray-framing.ts:423`, `apps/web/src/pdf/viewer-framing.ts:252`).
 
@@ -64,7 +66,7 @@ Use this pattern when an inspector overlays a stateful, zoomable document or can
 
 ## Examples
 
-An ordinary right workspace opens over the current page. It adds committed runway and performs one Fit width to the clear boundary after settlement. A later manual zoom remains unchanged through tray resizing or closing. Reopening requests a new fit.
+An ordinary right workspace reduces the main viewport width and performs one Fit width with the 24 px margin after settlement. A later manual zoom remains unchanged through tray resizing or closing. Reopening requests a new fit.
 
 A reviewer pans to horizontal offset 40 while runway is available. A passive layout change can reduce the natural maximum to zero, so the visible offset becomes zero while the desired offset remains 40. A later passive expansion restores 40 if reachable. A workspace-opening fit or explicit navigation clears that memory and establishes a new position instead.
 
