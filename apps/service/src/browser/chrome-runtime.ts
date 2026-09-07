@@ -18,6 +18,7 @@ import {
 import { deadlineWasSubstantiallyDelayed } from "../../../../packages/core/src/suspend-aware-deadline.js";
 import { CHROME_EXTENSION_ORIGIN } from "./chrome-handoff.js";
 import { ensurePrivateDirectory } from "../recovery/source-snapshot.js";
+import { canonicalJson } from "../runtime/canonical-json.js";
 
 const SHA256 = /^[a-f0-9]{64}$/u;
 const NON_IDEMPOTENT_METHODS = new Set<ReviewRuntimeBrokerMethod>([
@@ -145,13 +146,6 @@ export class ChromeRuntimeAggregateQuota {
 interface OperationRecord {
   readonly fingerprint: string;
   readonly result: Promise<unknown>;
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
 }
 
 /** Connection-independent operation results. Production can retain one

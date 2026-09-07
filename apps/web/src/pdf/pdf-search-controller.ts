@@ -452,7 +452,7 @@ export function createPdfSearchController(
     readonly matchKind: PdfSearchMatchKind;
     readonly formula: boolean;
     readonly pageIndexes: Set<number>;
-    readonly results: PdfSearchResult[];
+    readonly results: Map<string, PdfSearchResult>;
   } | null = null;
   let disposed = false;
 
@@ -556,25 +556,25 @@ export function createPdfSearchController(
         matchKind,
         formula,
         pageIndexes: new Set(),
-        results: [],
+        results: new Map(),
       };
     }
     for (const page of pages) {
       if (progressiveExact.pageIndexes.has(page.pageIndex)) continue;
       progressiveExact.pageIndexes.add(page.pageIndex);
       for (const effectiveQuery of effectiveQueries) {
-        progressiveExact.results.push(...findPageMatches({
+        for (const result of findPageMatches({
           page,
           documentGeneration: options.documentGeneration,
           query: effectiveQuery,
           kind: matchKind,
           formula,
-        }));
+        })) {
+          progressiveExact.results.set(result.id, result);
+        }
       }
     }
-    const exact = ordered([...new Map(
-      progressiveExact.results.map((result) => [result.id, result]),
-    ).values()]);
+    const exact = ordered([...progressiveExact.results.values()]);
 
     const relatedQueries = complete && queryKind === 'prose' && !symbolAlias && !literalScalar
       ? relatedPhraseQueries(query, documentWords(pages))

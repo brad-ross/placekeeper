@@ -233,7 +233,7 @@ export interface ReviewShellProps {
   onAuthoringAnchorChange?(anchor: AuthoringAnchorSnapshot | null): void;
   onAuthoringActiveChange?(active: boolean): void;
   onAuthoringPreviewChange?(preview: readonly ReviewAnnotation[] | null): void;
-  /** U3/U4 may publish measured overlay geometry without affecting viewer framing. */
+  /** Publishes measured overlay geometry without changing viewer framing. */
   onAuthoringViewportChange?(viewport: PdfViewportQuery | null): void;
   onNavigate?(item: ReviewItem): void;
   onNavigateExisting?(item: ExistingAnnotation): void;
@@ -320,10 +320,6 @@ export function controlledWorkspaceSurfaceAction(input: {
   return input.baseSurface === 'workspace'
     ? { type: 'hide-workspace', focusReturnToken: BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN }
     : null;
-}
-
-export function workspaceIsVisible(requestedOpen: boolean, _baseSurface: ReviewBaseSurface): boolean {
-  return requestedOpen;
 }
 
 interface PointerScrollGesture {
@@ -600,8 +596,7 @@ export function ReviewShell(props: ReviewShellProps) {
         ? 'The prior reading position could not be restored; review remains available.'
         : '',
   ].filter(Boolean);
-  const workspaceRequestedOpen = props.workspaceOpen ?? surface.baseSurface === 'workspace';
-  const workspaceOpen = workspaceIsVisible(workspaceRequestedOpen, surface.baseSurface);
+  const workspaceOpen = props.workspaceOpen ?? surface.baseSurface === 'workspace';
   const workspaceMode = navigation.workspace.lastMode;
   const visibleWorkspaceModes = WORKSPACE_MODES.filter((mode) => (
     (referencesAvailable || mode !== 'references')

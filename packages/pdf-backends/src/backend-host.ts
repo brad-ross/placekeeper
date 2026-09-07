@@ -22,20 +22,6 @@ function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-function abortPromise(signal: AbortSignal | undefined): Promise<never> | undefined {
-  if (!signal) return undefined;
-  if (signal.aborted) {
-    return Promise.reject(new PdfWriterError('cancelled', 'PDF write was cancelled.'));
-  }
-  return new Promise((_, reject) => {
-    signal.addEventListener(
-      'abort',
-      () => reject(new PdfWriterError('cancelled', 'PDF write was cancelled.')),
-      { once: true },
-    );
-  });
-}
-
 export async function runPdfBackend(
   writer: PdfWriter,
   request: PdfWriteRequest,
@@ -58,27 +44,39 @@ export async function runPdfBackend(
     );
   }
 
-  const abort = abortPromise(options.signal);
+  const signal = options.signal;
+  let onAbort: (() => void) | undefined;
+  const abort = signal === undefined ? undefined : new Promise<never>((_, reject) => {
+    onAbort = () => reject(new PdfWriterError('cancelled', 'PDF write was cancelled.'));
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    const timer = setTimeout(
+    timer = setTimeout(
       () => reject(new PdfWriterError('timeout', `PDF backend exceeded ${timeoutMs} ms.`)),
       timeoutMs,
     );
     timer.unref?.();
   });
 
-  const pending: Array<Promise<PdfWriteResult>> = [writer.write(request), timeout];
-  if (abort) pending.push(abort);
-  const result = await Promise.race(pending);
+  try {
+    const pending: Array<Promise<PdfWriteResult>> = [writer.write(request), timeout];
+    if (abort) pending.push(abort);
+    const result = await Promise.race(pending);
 
-  if (result.pdfBytes.byteLength > maxOutputBytes) {
-    throw new PdfWriterError(
-      'resource-limit',
-      `Output PDF exceeds the ${maxOutputBytes}-byte backend limit.`,
-    );
+    if (result.pdfBytes.byteLength > maxOutputBytes) {
+      throw new PdfWriterError(
+        'resource-limit',
+        `Output PDF exceeds the ${maxOutputBytes}-byte backend limit.`,
+      );
+    }
+    if (sha256(result.pdfBytes) !== result.evidence.outputSha256) {
+      throw new PdfWriterError('backend-error', 'Backend output digest does not match its evidence.');
+    }
+    return result;
+  } finally {
+    clearTimeout(timer);
+    if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort);
   }
-  if (sha256(result.pdfBytes) !== result.evidence.outputSha256) {
-    throw new PdfWriterError('backend-error', 'Backend output digest does not match its evidence.');
-  }
-  return result;
 }

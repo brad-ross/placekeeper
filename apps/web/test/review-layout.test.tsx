@@ -7,7 +7,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   controlledWorkspaceSurfaceAction,
   ReviewShell,
-  workspaceIsVisible,
 } from '../src/app/ReviewShell.js';
 import { AnnotationList } from '../src/review/AnnotationList.js';
 import { AnnotationPeek } from '../src/review/AnnotationPeek.js';
@@ -462,7 +461,6 @@ describe('review shell layout and accessibility contract', () => {
       baseSurface: 'reading',
       transientSurface: 'none',
     });
-    expect(workspaceIsVisible(true, 'workspace')).toBe(true);
   });
 
   it('keeps selection actions available beside an externally opened workspace', () => {

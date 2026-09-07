@@ -7,6 +7,8 @@ export default defineConfig({
       'apps/chrome-extension/test/*.test.ts',
       'test/conformance/pdf-writer.conformance.test.ts',
       'test/conformance/reviewed-pdf.test.ts',
+      'packages/pdf-backends/test/backend-host.test.ts',
+      'apps/service/test/canonical-json.test.ts',
       'apps/service/test/session-security.test.ts',
       'apps/service/test/recovery.test.ts',
       'apps/service/test/pdf-save-coordinator.test.ts',
