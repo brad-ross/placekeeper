@@ -69,6 +69,29 @@ export function TopBarMenu({
     if (restoreFocus && reason !== 'tab') restoreOpenerFocus();
   }, [restoreOpenerFocus]);
 
+  const updatePlacement = useCallback(() => {
+    const surface = surfaceRef.current;
+    if (!surface) return;
+    const currentOpener = openerRef.current;
+    if (!currentOpener?.isConnected) {
+      dismiss('anchor-invalidated');
+      return;
+    }
+    const anchor = currentOpener.getBoundingClientRect();
+    const bounds = surface.getBoundingClientRect();
+    const next = placeLinkActionPopover({
+      anchor,
+      menu: { width: bounds.width, height: bounds.height },
+      viewport: visibleReviewViewport(),
+      alignment: 'end',
+    });
+    setPlacement((current) => current?.left === next.left
+      && current.top === next.top
+      && current.placement === next.placement
+      ? current
+      : next);
+  }, [dismiss, openerRef]);
+
   useLayoutEffect(() => {
     dismissingRef.current = false;
     openerPointerRef.current = false;
@@ -81,34 +104,13 @@ export function TopBarMenu({
       return;
     }
 
-    const update = () => {
-      const currentOpener = openerRef.current;
-      if (!currentOpener?.isConnected) {
-        dismiss('anchor-invalidated');
-        return;
-      }
-      const anchor = currentOpener.getBoundingClientRect();
-      const bounds = surface.getBoundingClientRect();
-      const next = placeLinkActionPopover({
-        anchor,
-        menu: { width: bounds.width, height: bounds.height },
-        viewport: visibleReviewViewport(),
-        alignment: 'end',
-      });
-      setPlacement((current) => current?.left === next.left
-        && current.top === next.top
-        && current.placement === next.placement
-        ? current
-        : next);
-    };
-
     const popover = surface as HTMLDivElement & { showPopover?: () => void };
     try {
       popover.showPopover?.();
     } catch {
       // Fixed positioning remains usable when the Popover API is unavailable.
     }
-    update();
+    updatePlacement();
     if (!hoverOpen) {
       if (focusOnOpen) (enabledMenuItems(surface)[0] ?? surface).focus({ preventScroll: true });
       else opener.focus({ preventScroll: true });
@@ -137,7 +139,7 @@ export function TopBarMenu({
     let updateFrame = 0;
     const scheduleUpdate = () => {
       cancelAnimationFrame(updateFrame);
-      updateFrame = requestAnimationFrame(update);
+      updateFrame = requestAnimationFrame(updatePlacement);
     };
     const outsidePointer = (event: PointerEvent) => {
       openerPointerRef.current = event.target instanceof Node
@@ -200,7 +202,14 @@ export function TopBarMenu({
       globalThis.visualViewport?.removeEventListener('resize', scheduleUpdate);
       globalThis.visualViewport?.removeEventListener('scroll', scheduleUpdate);
     };
-  }, [dismiss, open, openerRef, focusOnOpen, hoverOpen, hoverRegionRef]);
+  }, [dismiss, open, openerRef, focusOnOpen, hoverOpen, hoverRegionRef, updatePlacement]);
+
+  // Conditional actions resize an already-open menu during a React commit.
+  // ResizeObserver + rAF is a frame too late: it paints the wider menu at its
+  // old left edge before restoring end alignment. Measure before that paint.
+  useLayoutEffect(() => {
+    if (open) updatePlacement();
+  }, [children, open, updatePlacement]);
 
   if (!open || typeof document === 'undefined') return null;
 
