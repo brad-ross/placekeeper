@@ -29,7 +29,7 @@ export function OutlineNavigator({
   onFocusTokenChange,
 }: OutlineNavigatorProps) {
   if (discovery.status === 'loading') {
-    return <p className="workspace-state" data-outline-state="loading">Outline is loading…</p>;
+    return <p className="workspace-empty" data-outline-state="loading">Outline is loading…</p>;
   }
   if (discovery.status === 'loaded-empty') {
     return <p className="workspace-state" data-outline-state="empty">This PDF has no embedded outline.</p>;

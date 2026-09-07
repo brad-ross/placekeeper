@@ -1226,6 +1226,7 @@
 }
 
 /* Exceptional states extend the same surface system as the approved scenes. */
+.workspace-empty,
 .annotation-empty,
 .annotation-status {
   padding: 24px 12px;
