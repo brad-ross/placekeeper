@@ -310,8 +310,13 @@ final class PlacekeeperAppDelegate: NSObject, NSApplicationDelegate {
             let controller = RecoveryViewController(
                 windowID: windowID,
                 documentName: source.lastPathComponent,
+                packagedRoot: packagedRoot,
                 onDecision: { [weak self] decision in self?.recover(windowID: windowID, decision: decision) },
-                onClose: { [weak self] in self?.closeRecovery(windowID: windowID) }
+                onClose: { [weak self] in self?.closeRecovery(windowID: windowID) },
+                onUnavailable: { [weak self] in
+                    self?.closeRecovery(windowID: windowID)
+                    self?.presentCatastrophicFallback(documentName: source.lastPathComponent, sourceURL: source)
+                }
             )
             recoveryAttempts[windowID] = .init(
                 controller: controller,

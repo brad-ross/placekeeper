@@ -77,3 +77,14 @@ export function createHandlerButton(
   setHandlerButtonContent(button, options.icon, options.label, options.tone);
   return button;
 }
+
+/** Shared recovery choices for the Chrome handler and the Mac recovery window. */
+export function createRecoveryButtons(document: Document): HTMLButtonElement[] {
+  return ([
+    ["discard", "Discard", "delete", "destructive"],
+    ["fork", "Fork", "git-fork", "secondary"],
+    ["resume", "Resume", "redo", "primary"],
+  ] as const).map(([choice, label, icon, tone]) => createHandlerButton(document, {
+    choice, label, icon, tone,
+  }));
+}

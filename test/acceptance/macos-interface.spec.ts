@@ -229,3 +229,47 @@ test('publishes aligned, control-safe macOS drag geometry across menus and fulls
   }
   await context.close();
 });
+
+for (const width of [620, 360]) {
+  test(`Mac recovery shares Placekeeper controls and sends one choice at ${width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ bypassCSP: true, viewport: { width, height: 380 } });
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      const target = window as typeof window & { __recoveryChoices: unknown[]; webkit?: unknown };
+      target.__recoveryChoices = [];
+      Object.defineProperty(target, "webkit", { value: { messageHandlers: { placekeeperRecovery: {
+        postMessage: (message: unknown) => target.__recoveryChoices.push(message),
+      } } } });
+    });
+    try {
+      for (const choice of ['resume', 'fork', 'discard']) {
+        await page.goto('/apps/web/recovery.html');
+        await expect(page.getByRole('heading', { name: 'Existing review recovered' })).toBeVisible();
+        const resume = page.getByRole('button', { name: 'Resume', exact: true });
+        await expect(resume).toBeFocused();
+        await expect(resume).toHaveCSS('background-color', 'rgb(60, 60, 60)');
+        await expect(page.getByRole('dialog')).toHaveCSS('border-radius', '17px');
+        const buttons = page.locator('[data-recovery-choice]');
+        await expect(buttons).toHaveCount(3);
+        for (const button of await buttons.all()) {
+          const rect = (await button.boundingBox())!;
+          expect(rect.x).toBeGreaterThanOrEqual(0);
+          expect(rect.x + rect.width).toBeLessThanOrEqual(width);
+          await expect(button.locator('svg')).toBeVisible();
+        }
+        if (choice === 'resume') await page.screenshot({ path: test.info().outputPath(`recovery-ready-${width}.png`) });
+        if (choice === 'resume') await page.keyboard.press('Enter');
+        else await page.locator(`[data-recovery-choice="${choice}"]`).click();
+        await expect(page.getByRole('status')).toHaveText('Opening the protected review…');
+        for (const button of await buttons.all()) await expect(button).toBeDisabled();
+        await expect.poll(() => page.evaluate(() => (window as typeof window & { __recoveryChoices: unknown[] }).__recoveryChoices))
+          .toEqual([{ ready: true }, { decision: choice }]);
+      }
+      await page.goto('/apps/web/recovery.html');
+      await page.evaluate(() => window.dispatchEvent(new Event('placekeeper-recovery-failed')));
+      await expect(page.getByRole('status')).toContainText('Close this window and try again');
+      for (const button of await page.locator('[data-recovery-choice]').all()) await expect(button).toBeDisabled();
+      await page.screenshot({ path: test.info().outputPath(`recovery-failed-${width}.png`) });
+    } finally { await context.close(); }
+  });
+}

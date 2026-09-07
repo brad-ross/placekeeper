@@ -9,7 +9,7 @@ import {
 } from "./chrome-runtime.js";
 import { readAutoOpenState } from "./opt-in.js";
 import {
-  createHandlerButton,
+  createRecoveryButtons,
   setHandlerButtonContent,
 } from "./handler-ui.js";
 
@@ -124,17 +124,7 @@ async function chooseProtectedRecovery(
   title!.textContent = "Existing review recovered";
   status!.textContent = "Choose how Placekeeper should reopen your unfinished review.";
   handlerActions!.setAttribute("aria-label", "Protected recovery choices");
-  const choices = [
-    ["discard", "Discard", "delete", "destructive"],
-    ["fork", "Fork", "git-fork", "secondary"],
-    ["resume", "Resume", "redo", "primary"],
-  ] as const;
-  const buttons = choices.map(([choice, label, icon, tone]) => createHandlerButton(document, {
-    choice,
-    label,
-    icon,
-    tone,
-  }));
+  const buttons = createRecoveryButtons(document);
   const recoveryActions = document.createElement("div");
   recoveryActions.className = "handler-recovery-actions";
   recoveryActions.append(...buttons);

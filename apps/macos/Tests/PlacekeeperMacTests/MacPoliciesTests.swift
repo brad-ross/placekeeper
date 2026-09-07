@@ -3,6 +3,22 @@ import XCTest
 @testable import PlacekeeperMac
 
 final class MacPoliciesTests: XCTestCase {
+    func testRecoveryChoiceRequiresBundledMainFrameAndSettlesOnlyOnce() {
+        let source = URL(fileURLWithPath: "/app/MacWeb/recovery.html")
+        for decision in ["resume", "discard", "fork"] {
+            var gate = RecoveryDecisionGate()
+            XCTAssertNil(gate.accept(["decision": decision], isMainFrame: false, source: source, expectedSource: source))
+            XCTAssertNil(gate.accept(["decision": decision], isMainFrame: true, source: URL(string: "https://example.com"), expectedSource: source))
+            XCTAssertNil(gate.accept(["decision": decision, "extra": true], isMainFrame: true, source: source, expectedSource: source))
+            XCTAssertNil(gate.accept(["decision": "other"], isMainFrame: true, source: source, expectedSource: source))
+            XCTAssertEqual(gate.accept(["decision": decision], isMainFrame: true, source: source, expectedSource: source), decision)
+            XCTAssertNil(gate.accept(["decision": decision], isMainFrame: true, source: source, expectedSource: source))
+        }
+        var failed = RecoveryDecisionGate()
+        failed.fail()
+        XCTAssertNil(failed.accept(["decision": "resume"], isMainFrame: true, source: source, expectedSource: source))
+    }
+
     func testVisibleShellRequiresRoutingVisibilityAndSubsequentPaint() {
         var fence = ShellReadinessFence()
         XCTAssertFalse(fence.shellReady(revision: 4))

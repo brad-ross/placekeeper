@@ -45,12 +45,14 @@ export default defineConfig({
   build: {
     outDir: resolve("dist/macos-web"),
     emptyOutDir: true,
+    modulePreload: { polyfill: false },
     rollupOptions: {
-      input: resolve("apps/web/macos.html"),
+      input: { shell: resolve("apps/web/macos.html"), recovery: resolve("apps/web/recovery.html") },
       output: {
-        entryFileNames: "assets/shell.js",
+        entryFileNames: "assets/[name].js",
         chunkFileNames: "assets/[name].js",
-        assetFileNames: "assets/shell.[ext]",
+        assetFileNames: (asset) => asset.names.some((name) => name.startsWith("recovery"))
+          ? "assets/recovery.[ext]" : "assets/shell.[ext]",
       },
     },
   },

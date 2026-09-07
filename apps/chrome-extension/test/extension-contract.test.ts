@@ -94,9 +94,9 @@ describe("Chrome extension static contract", () => {
     expect(handlerEntry).toContain('handlerActions!.setAttribute("aria-label", "Protected recovery choices")');
     expect(handlerEntry).toContain('title!.textContent = "Existing review recovered"');
     expect(handlerEntry).toContain('setHandlerButtonContent(bypass, "chrome", "Default")');
-    expect(handlerEntry).toContain('["discard", "Discard", "delete", "destructive"]');
-    expect(handlerEntry).toContain('["fork", "Fork", "git-fork", "secondary"]');
-    expect(handlerEntry).toContain('["resume", "Resume", "redo", "primary"]');
+    expect(handlerUi).toContain('["discard", "Discard", "delete", "destructive"]');
+    expect(handlerUi).toContain('["fork", "Fork", "git-fork", "secondary"]');
+    expect(handlerUi).toContain('["resume", "Resume", "redo", "primary"]');
     expect(handlerEntry).toContain('recoveryActions.className = "handler-recovery-actions"');
     expect(handlerEntry).toContain('resume.focus({ preventScroll: true })');
     expect(handlerUi).toContain('button.className = `handler-button');
