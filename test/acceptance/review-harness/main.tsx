@@ -94,7 +94,7 @@ function ComposerPreview({ name }: { readonly name: string }) {
     case 'insertion':
       return <CommentComposer title="Insertion" fieldLabel="Insertion" saveLabel="Apply" allowWhitespace {...common} />;
     case 'highlight':
-      return <CommentComposer title="Highlight Comment" optional onSkip={async () => undefined} {...common} />;
+      return <CommentComposer title="Highlight Comment" optional {...common} />;
     case 'page-note':
       return <CommentComposer title="Page Note" {...common} />;
     case 'edit-highlight':

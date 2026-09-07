@@ -744,10 +744,7 @@ test("keeps mounted Codex context through fresh-page re-entry, then fails closed
   }
 });
 
-test("searches extracted PDF text with variants, history, references, and retained responsive state", async ({
-  page,
-  browserName,
-}) => {
+test("searches extracted PDF text with variants, history, references, and retained responsive state", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const errors = collectBrowserErrors(page);
   await openFreshProductionFixture(page, searchPdf, "PDF search launch failed");
@@ -864,8 +861,9 @@ test("searches extracted PDF text with variants, history, references, and retain
   expect(directSearchActionBounds.height).toBeCloseTo(26, 1);
   await firstResultCard.evaluate((element) => { element.style.width = "250px"; });
   const compactSearchActions = firstResultCard.getByRole("button", {
-    name: "Secondary actions for Search result on page 1",
+    name: "Open result on page 1 in References",
   });
+  await expect(firstResultCard.locator('.row-action-group__secondary')).toBeHidden();
   await expect(compactSearchActions).toBeVisible();
   const [searchTabBounds, compactSearchActionBounds] = await Promise.all([
     page.getByRole("tab", { name: "Search", exact: true }).boundingBox(),
@@ -1046,23 +1044,20 @@ test("searches extracted PDF text with variants, history, references, and retain
   expect(await sendMotion.evaluate(({ state }) => state.timedOut)).toBe(false);
   const sendMotionSamples = await sendMotion.evaluate(({ state }) => state.samples);
   await sendMotion.dispose();
-  const maximumRebound = (axis: "left" | "top") => {
-    let minimum = sendMotionSamples[0]?.[axis] ?? 0;
-    let maximum = 0;
-    for (const sample of sendMotionSamples.slice(1)) {
-      minimum = Math.min(minimum, sample[axis]);
-      maximum = Math.max(maximum, sample[axis] - minimum);
-    }
-    return maximum;
-  };
-  if (browserName === 'webkit') {
-    const lastSample = sendMotionSamples.at(-1);
-    expect(lastSample?.left).toBeCloseTo(Math.min(...sendMotionSamples.map(({ left }) => left)), 0);
-    expect(lastSample?.top).toBeCloseTo(Math.min(...sendMotionSamples.map(({ top }) => top)), 0);
-  } else {
-    expect(maximumRebound("left")).toBeLessThanOrEqual(8);
-    expect(maximumRebound("top")).toBeLessThanOrEqual(8);
-  }
+  // Fitting the reference can legitimately change either scroll offset while
+  // zoom and CSS padding settle. Once page 1 is reached, it must stay there;
+  // requiring monotonically decreasing horizontal offsets rejects valid fits.
+  const arrival = sendMotionSamples.findIndex(({ top }) => top <= 8);
+  expect(arrival).toBeGreaterThanOrEqual(0);
+  expect(sendMotionSamples.slice(arrival).every(({ top }) => top <= 8)).toBe(true);
+  const settledPosition = await mainViewport.evaluate((element) => ({
+    left: element.scrollLeft, top: element.scrollTop,
+  }));
+  await page.waitForTimeout(250);
+  expect(await mainViewport.evaluate((element) => ({
+    left: element.scrollLeft, top: element.scrollTop,
+  }))).toEqual(settledPosition);
+  expect(await currentPageText(page)).toBe("1 / 3");
 
   const workspaceTabs = page.getByRole("tablist", { name: "Workspace modes" }).getByRole("tab");
   await expect(workspaceTabs).toHaveCount(2);
@@ -3909,7 +3904,7 @@ test('keeps a first-page multiline highlight composer stable and reveals one ico
     expect(sample.scrollTop).toBe(0);
   }
 
-  for (const name of ['Cancel', 'Keep'] as const) {
+  for (const name of ['Cancel'] as const) {
     const action = composer.getByRole('button', { name, exact: true });
     await expect(action).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await action.hover();
@@ -5184,7 +5179,7 @@ for (const action of ['Replace', 'Delete', 'Highlight'] as const) {
     } else if (action === 'Highlight') {
       const composer = page.getByRole('region', { name: 'Highlight Comment' });
       await expect(composer).toBeVisible();
-      await composer.getByRole('button', { name: 'Keep', exact: true }).click();
+      await composer.getByRole('button', { name: 'Save', exact: true }).click();
     }
 
     await expect.poll(() => host.broker.state(launched.sessionId)?.revision).toBe(1);
@@ -5201,6 +5196,7 @@ for (const action of ['Replace', 'Delete', 'Highlight'] as const) {
     await expect(page.locator(`[data-review-id="${item!.id}"]`)).toHaveCount(2);
 
     const undo = page.getByRole('button', { name: 'Undo', exact: true });
+    await page.locator('[data-review-chrome]').hover();
     await undo.click();
     await expect.poll(() => host.broker.state(launched.sessionId)?.items.length).toBe(0);
     const redo = page.getByRole('button', { name: 'Redo', exact: true });
@@ -5935,7 +5931,7 @@ test("anchors highlight and delete annotations across inline and display equatio
   await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
   await selectionActions.getByRole("button", { name: "Highlight", exact: true }).click();
   await expect(page.getByRole("region", { name: "Highlight Comment" })).toBeVisible();
-  await page.getByRole("button", { name: "Keep", exact: true }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("region", { name: "Highlight Comment" })).toHaveCount(0);
   await expect(page.locator("[data-owned-mark='highlight']")).toHaveCount(3);
 

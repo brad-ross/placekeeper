@@ -180,6 +180,9 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     switch (method) {
       case "command":
         result = await this.#broker.acceptMutation(record.sessionId, payload as ReviewCommand, { expectedGeneration: record.generation });
+        if (this.#broker.saveStatus(record.sessionId)?.destination.phase === "active") {
+          void this.#saving.requestSave(record.sessionId);
+        }
         break;
       case "saveStatus": result = this.#broker.saveStatus(record.sessionId); break;
       case "saveProposal": result = this.#saving.proposal(record.sessionId); break;

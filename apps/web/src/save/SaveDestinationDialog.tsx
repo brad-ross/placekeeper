@@ -230,7 +230,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
             onClick={() => void props.onConfirm(choice, filename)}
           >
             {props.establishing ? <ReviewIcon name="loading" /> : null}
-            <span>{props.establishing ? "Setting up…" : "Confirm"}</span>
+            <span>Confirm</span>
           </button>
         </footer>
       </section>

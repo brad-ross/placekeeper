@@ -1303,15 +1303,13 @@ li[data-search-result][data-active="true"] .row-action-group__direct {
   overflow: visible;
 }
 
-/* Matches ROW_ACTION_DIRECT_BREAKPOINT_PX: stable label + outline lead + two actions + gaps. */
-@container row-actions (max-width: 272px) {
-  li[data-search-result] .row-action-group__direct {
-    display: none;
-  }
+/* Search results have at most two actions; keep them directly accessible. */
+li[data-search-result] .row-action-group__direct {
+  display: flex;
+}
 
-  li[data-search-result] .row-action-group__secondary {
-    display: block;
-  }
+li[data-search-result] .row-action-group__secondary {
+  display: none;
 }
 
 @container row-actions (max-width: 148px) {

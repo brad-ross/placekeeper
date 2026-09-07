@@ -1,3 +1,4 @@
+import { addPageNote } from "../../../packages/core/src/review-commands.js";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -46,12 +47,42 @@ async function runtimeFixture() {
       }
       return sink.finish();
     };
-    return { broker, backend, authority, stage };
+    return { broker, backend, authority, stage, saving };
   };
   return { root, create, chooseFolder, ...create() };
 }
 
 describe("canonical review retention", () => {
+  it("starts automatic PDF saving after native commands without blocking the edit response", async () => {
+    const data = await runtimeFixture();
+    const staged = await data.stage();
+    if ("choose" in staged) throw new Error("Expected initial review");
+    await data.authority.activate(staged.canonicalKey, "presentation");
+    const sessionId = staged.projection.sessionId;
+    const state = data.broker.state(sessionId)!;
+    await data.broker.establishSaveDestination(sessionId, {
+      kind: "original", targetPath: join(data.root, "paper.pdf"),
+      capabilityId: state.source.fileId, fingerprint: state.source.digest,
+    });
+    const save = Promise.withResolvers<void>();
+    const requestSave = vi.spyOn(data.saving, "requestSave").mockReturnValue(save.promise);
+    try {
+      const command = addPageNote(state, 0, { x: 10, y: 10, width: 10, height: 10 }, "Review this page");
+      await expect(data.authority.invoke(staged.canonicalKey, "command", command, {
+        idempotencyKey: "add-note-operation", payloadDigest: "a".repeat(64),
+      })).resolves.toMatchObject({ revision: 1 });
+      await expect(data.authority.invoke(staged.canonicalKey, "command", command, {
+        idempotencyKey: "add-note-operation", payloadDigest: "a".repeat(64),
+      })).resolves.toMatchObject({ revision: 1 });
+      expect(requestSave).toHaveBeenCalledExactlyOnceWith(sessionId);
+      await expect(data.authority.invoke(staged.canonicalKey, "command", {
+        type: "undo", expectedRevision: 1,
+      }, { idempotencyKey: "undo-note-operation", payloadDigest: "b".repeat(64) }))
+        .resolves.toMatchObject({ revision: 2 });
+      expect(requestSave).toHaveBeenCalledTimes(2);
+    } finally { save.resolve(); }
+  });
+
   it("retains detached reviews for replay and clears all canonical state on explicit finish", async () => {
     const data = await runtimeFixture();
     const staged = await data.stage();

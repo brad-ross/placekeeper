@@ -727,7 +727,7 @@ test.describe('canonical review workflow', () => {
     const highlight = page.getByRole('button', { name: 'Highlight', exact: true });
     await highlight.click();
     await expect(page.getByRole('region', { name: 'Highlight Comment' })).toBeVisible();
-    await page.getByRole('button', { name: 'Keep', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(highlight).toHaveCount(0);
     await page.getByRole('button', { name: 'Clear anchors' }).click();
     await page.getByRole('button', { name: 'Use selection' }).click();
@@ -775,7 +775,7 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Clear anchors' }).click();
     await page.getByRole('button', { name: 'Use selection' }).click();
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
-    await page.getByRole('button', { name: 'Keep', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(selectionActions).toHaveCount(0);
   });
 
@@ -2505,7 +2505,7 @@ test.describe('canonical review workflow', () => {
 
   test('keeps the annotations tray open while editing an owned annotation', async ({ page }) => {
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
-    await page.getByRole('button', { name: 'Keep', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     const { annotations, workspace } = await openAnnotationsWorkspace(page);
 
     const edit = page.getByRole('button', { name: 'Edit Highlight annotation on page 1' });
@@ -2659,7 +2659,7 @@ test.describe('canonical review workflow', () => {
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+H');
     await expect(page.getByRole('region', { name: 'Highlight Comment' })).toBeVisible();
-    await page.getByRole('button', { name: 'Keep', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
 
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+N');
@@ -2697,7 +2697,7 @@ test.describe('canonical review workflow', () => {
 
   test('delays a hoverable mark peek and opens one selected owned row without shifting the document', async ({ page }) => {
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
-    await page.getByRole('button', { name: 'Keep', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
 
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     const markTarget = page.locator('[data-owned-focus-id]').first();
@@ -2746,7 +2746,7 @@ test.describe('canonical review workflow', () => {
         await page.getByRole('button', { name: 'Use selection' }).click();
       }
       await page.getByRole('button', { name: 'Highlight', exact: true }).click();
-      await page.getByRole('button', { name: 'Keep', exact: true }).click();
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
     }
     await openAnnotationsWorkspace(page);
     const drawer = page.locator('[data-annotation-scroll-viewport]');

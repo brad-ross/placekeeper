@@ -189,13 +189,13 @@
     display: block;
   }
 
-  :is(li[data-annotation-origin], .annotation-peek) .row-action-group__direct {
+  :is(li[data-annotation-origin], li[data-search-result], .annotation-peek) .row-action-group__direct {
     display: flex;
     opacity: 1;
     pointer-events: auto;
   }
 
-  :is(li[data-annotation-origin], .annotation-peek) .row-action-group__secondary {
+  :is(li[data-annotation-origin], li[data-search-result], .annotation-peek) .row-action-group__secondary {
     display: none;
   }
 

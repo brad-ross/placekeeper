@@ -299,6 +299,17 @@ final class MacPoliciesTests: XCTestCase {
         ) else { return XCTFail("expected a recovery offer") }
         XCTAssertEqual(id, "recovery_operation_12345678")
         XCTAssertEqual(expiresAt, "2026-09-05T12:00:00.000Z")
+        for expiry in ["2026-09-05T12:00:00.123Z", "2026-09-05T12:00:00Z", "invalid"] {
+            var variant = response
+            variant["offer"] = ["id": id, "expiresAt": expiry]
+            let parsed = MacReviewHelperReplyParser.parse(
+                variant, windowID: "window_12345678", attemptID: "attempt_12345678",
+                requestID: "request_12345678"
+            )
+            if expiry == "invalid" { XCTAssertNil(parsed) }
+            else if case let .recoveryOffered(_, value)? = parsed { XCTAssertEqual(value, expiry) }
+            else { XCTFail("expected a recovery offer for \(expiry)") }
+        }
     }
 
     func testHelperLossIsWindowScopedAndLastCloseLeavesNone() {
@@ -461,5 +472,78 @@ private final class FakeHelper: ReviewHelperProcess {
     func terminate() {
         isRunning = false
         terminated = true
+    }
+}
+
+private final class BridgeTestHelper: ReviewHelperRequesting {
+    var requests: [(type: String, fields: [String: Any], completion: (MacReviewHelperReply?) -> Void)] = []
+    func request(type: String, fields: [String: Any], completion: @escaping (MacReviewHelperReply?) -> Void) -> String? {
+        requests.append((type, fields, completion))
+        return "request_test1234"
+    }
+}
+
+extension MacPoliciesTests {
+    @MainActor
+    func testBridgeAllowsCommittedRevisionWhileRefreshIsPending() async {
+        func projection(_ revision: Int) -> MacRuntimeProjection {
+            .init(sessionID: "11111111-1111-4111-8111-111111111111", generation: 1,
+                  revision: revision, state: [:], scope: [:], saveStatus: [:], protected: false,
+                  location: nil, documentDigest: String(repeating: "a", count: 64), documentByteLength: 100)
+        }
+        let helper = BridgeTestHelper()
+        let admission = MacReviewAdmission(provisionalID: "provisional_test", resourceID: "resource_test1234",
+            generation: 1, byteLength: 100, digest: String(repeating: "a", count: 64),
+            displayName: "Paper.pdf", projection: projection(0))
+        let bridge = ReviewBridge(runtimeID: "runtime_test1234", attemptID: "attempt_test1234", helper: helper, admission: admission)
+        bridge.activate(generation: 1) { _ in }
+        helper.requests.removeFirst().completion(.active(projection(0)))
+        await Task.yield()
+        func request(_ method: String, revision: Int) -> [String: Any] {
+            ["protocol": "placekeeper.review-runtime", "version": 1, "kind": "request",
+             "runtimeId": "runtime_test1234", "requestId": "request_" + method,
+             "sessionId": projection(0).sessionID, "generation": 1, "revision": revision,
+             "method": method, "payload": [String: Any]()]
+        }
+        var responses: [[String: Any]] = []
+        bridge.handle(request("command", revision: 0)) { message in
+            responses.append(message)
+            if message["kind"] as? String == "response", message["ok"] as? Bool == true {
+                // The web runtime immediately asks for status at the returned revision.
+                bridge.handle(request("saveStatus", revision: 1)) { responses.append($0) }
+            }
+        }
+        XCTAssertEqual(helper.requests.first?.type, "invoke")
+        helper.requests.removeFirst().completion(.result(method: "command", payload: ["revision": 1]))
+        await Task.yield()
+        // Even while the cached native projection is old, the follow-up uses
+        // the committed revision and must reach the authoritative helper.
+        XCTAssertEqual(bridge.projection.revision, 0)
+        XCTAssertEqual(helper.requests.first?.fields["method"] as? String, "saveStatus")
+        XCTAssertEqual(helper.requests.first?.fields["revision"] as? Int, 1)
+        guard helper.requests.first?.type == "invoke" else { XCTFail("Missing immediate status request"); return }
+        helper.requests.removeFirst().completion(.result(method: "saveStatus", payload: [:]))
+        await Task.yield()
+        XCTAssertTrue(responses.contains { $0["method"] as? String == "saveStatus" && $0["ok"] as? Bool == true })
+        XCTAssertEqual(helper.requests.first?.type, "refresh")
+        helper.requests.removeFirst().completion(.failure(code: "unavailable"))
+        await Task.yield()
+
+        // A transient refresh failure must not turn a committed save into a
+        // rejection or prevent the next mutation (including delete/undo).
+        var nextResponse: [String: Any] = [:]
+        bridge.handle(request("command", revision: 1)) { nextResponse = $0 }
+        XCTAssertEqual(helper.requests.first?.fields["revision"] as? Int, 1)
+        guard helper.requests.first?.type == "invoke" else { XCTFail("Missing next mutation"); return }
+        helper.requests.removeFirst().completion(.result(method: "command", payload: ["revision": 2]))
+        await Task.yield()
+        XCTAssertEqual(nextResponse["ok"] as? Bool, true)
+        helper.requests.removeFirst().completion(.refreshed(projection(2)))
+        await Task.yield()
+        XCTAssertEqual(bridge.projection.revision, 2)
+        var stale: [String: Any] = [:]
+        bridge.handle(request("command", revision: 0)) { stale = $0 }
+        XCTAssertEqual(stale["ok"] as? Bool, false)
+        XCTAssertEqual(stale["revision"] as? Int, 0, "A rejection must match the pending request so it can settle")
     }
 }

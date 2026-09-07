@@ -10,7 +10,7 @@ async function leaveRow(page: Page) {
   await page.locator('.review-chrome__page-input').focus();
 }
 
-for (const width of [1280, 620]) {
+for (const width of [1280, 620, 390]) {
   test(`workspace row intent and page/action endcaps match the outline at ${width}px`, async ({ page, browserName }) => {
     page.on('pageerror', (error) => { throw error; });
     await page.setViewportSize({ width, height: 900 });
@@ -59,6 +59,8 @@ for (const width of [1280, 620]) {
       const actions = row.locator('.row-action-group__direct');
       const number = row.locator('.annotation-item__page, .pdf-search__result-page');
       await leaveRow(page);
+      await expect(actions).toHaveCSS('display', 'flex');
+      await expect(row.locator('.row-action-group__secondary')).toBeHidden();
       await expect(actions).toHaveCSS('opacity', '0');
       await expect(number).toHaveCSS('opacity', '1');
       const body = row.locator('.annotation-item__body-row, .pdf-search__excerpt');

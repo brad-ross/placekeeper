@@ -10,7 +10,6 @@ function renderComposer(overrides: Partial<Parameters<typeof CommentComposer>[0]
       optional
       anchorNavigation={{ visibility: 'visible', pending: false, onReturn: vi.fn() }}
       onSave={vi.fn()}
-      onSkip={vi.fn()}
       onDismiss={vi.fn()}
       {...overrides}
     />,
@@ -32,7 +31,7 @@ describe('CommentComposer contextual authoring contract', () => {
     expect(html).not.toContain('Return to Editor');
     expect(html).not.toContain('Anchor in view');
     expect(html).toContain('>Cancel</span>');
-    expect(html).toContain('>Keep</span>');
+    expect(html).not.toContain('>Keep</span>');
     expect(html).toContain('>Save</span>');
     expect(html.indexOf('</textarea>')).toBeLessThan(html.indexOf('comment-composer__actions'));
   });
@@ -73,7 +72,6 @@ describe('CommentComposer contextual authoring contract', () => {
       fieldLabel: 'Replacement',
       initialValue: '   ',
       saveLabel: 'Apply',
-      onSkip: undefined,
     });
     const allowedWhitespace = renderComposer({
       title: 'Replacement',
@@ -81,7 +79,6 @@ describe('CommentComposer contextual authoring contract', () => {
       allowWhitespace: true,
       initialValue: ' ',
       saveLabel: 'Apply',
-      onSkip: undefined,
     });
 
     expect(optional).not.toContain('disabled=""');

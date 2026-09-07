@@ -2151,9 +2151,6 @@ export function ReviewShell(props: ReviewShellProps) {
         }
       }}
       onDismiss={() => dismissAuthoring(authoringSession)}
-      {...(source.kind !== 'highlight'
-        ? {}
-        : { onSkip: () => saveAuthoring(authoringSession, '') })}
       onSave={(value) => saveAuthoring(authoringSession, value)}
     />;
   })();
