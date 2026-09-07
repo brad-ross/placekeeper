@@ -728,10 +728,9 @@
   background: var(--review-surface-canvas);
 }
 
-/* Clear the main page shadow, whose soft layer is offset downward.
-   Override the viewer library's inline, uniform 10px padding. */
+/* Use the same small shadow clearance at both ends of the document. */
 .review-document .pdf-workspace__viewport {
-  padding-block: 24px 48px !important;
+  padding-block: 12px !important;
 }
 
 .pdf-workspace__page {
