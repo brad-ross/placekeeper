@@ -4126,9 +4126,16 @@ test('keeps the bottom workspace evenly inset across open and close', async ({ p
   await expect(tray).toHaveAttribute('data-tools-workspace-open', 'false');
 });
 
-test('defaults a real PDF to fit width and refits bottom and resizable right reading widths', async ({ page }) => {
+test('defaults a real PDF to fit width and refits bottom and resizable right reading widths', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, 'Fit Width production launch failed');
+  // Exercise native scrollbar occupancy without changing the host's preferences.
+  await page.route('**/__test-scrollbar.css', (route) => route.fulfill({
+    contentType: 'text/css',
+    body: `.review-document .pdf-workspace__viewport::-webkit-scrollbar { width: 12px; height: 12px; }
+      .review-document .pdf-workspace__viewport::-webkit-scrollbar-thumb { background: #888; }`,
+  }));
+  await page.addStyleTag({ url: new URL('/__test-scrollbar.css', page.url()).href });
 
   const mainWorkspace = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
   const mainViewport = mainWorkspace.locator('[data-viewer-framing-viewport]');
@@ -4173,7 +4180,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     const clientRight = intervalLeft + clientBox.width;
     const fade = page.locator('.review-overlay-frame__right-fade:visible');
     const fadeLeft = await fade.count() > 0 ? (await fade.boundingBox())?.x : undefined;
-    const intervalRight = Math.min(rightEdge ?? clientRight, clientRight - runwayRight, fadeLeft ?? clientRight);
+    const intervalRight = Math.min(rightEdge ?? clientRight, clientRight - runwayRight, rightEdge === undefined ? (fadeLeft ?? clientRight) : clientRight);
     return {
       pageWidth: pageBounds.width,
       intervalWidth: intervalRight - intervalLeft,
@@ -4186,23 +4193,59 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     };
   };
   const expectFitted = async (standardGap: number, rightEdge?: number) => {
+    const rightGap = rightEdge === undefined ? 0 : standardGap;
     await expect.poll(async () => {
       const geometry = await horizontalGeometry(rightEdge);
       return Math.max(
-        Math.abs(geometry.pageWidth - (geometry.intervalWidth - 2 * standardGap)),
+        Math.abs(geometry.pageWidth - (geometry.intervalWidth - standardGap - rightGap)),
         Math.abs(geometry.leftGap - standardGap),
-        Math.abs(geometry.rightGap - standardGap),
+        Math.abs(geometry.rightGap - rightGap),
       );
     }).toBeLessThan(3);
     const geometry = await horizontalGeometry(rightEdge);
     expect(geometry.pageLeft).toBeGreaterThanOrEqual(geometry.intervalLeft + standardGap - 3);
-    expect(geometry.pageRight).toBeLessThanOrEqual(geometry.intervalRight - standardGap + 3);
+    expect(geometry.pageRight).toBeLessThanOrEqual(geometry.intervalRight - rightGap + 3);
     return geometry;
   };
 
-  const standardGap = 10;
+  const standardGap = 52;
   const closedGeometry = await expectFitted(standardGap);
+  const expectScrollbarAtWindowEdge = async () => {
+    if (await fitWidth.isVisible()) await page.getByRole('button', { name: 'Open zoom controls' }).click();
+    const stageBounds = (await page.locator('[data-review-stage]').boundingBox())!;
+    await expect.poll(async () => {
+      const bounds = (await mainViewport.boundingBox())!;
+      return Math.abs(bounds.x + bounds.width - stageBounds.x - stageBounds.width);
+    }).toBeLessThan(1);
+    const before = await mainViewport.evaluate((element) => element.scrollTop);
+    const x = stageBounds.x + stageBounds.width - 6;
+    const y = stageBounds.y + stageBounds.height * 0.8;
+    expect(await mainViewport.evaluate((element, point) => document.elementFromPoint(point.x, point.y) === element, { x, y })).toBe(true);
+    if (testInfo.project.use.headless === false) {
+      await page.mouse.click(x, y);
+    } else {
+      // Headless browsers suppress native scrollbar clicks. Wheel input still
+      // proves the outer gutter reaches the actual PDF scrollport.
+      await page.mouse.move(x, y);
+      await page.mouse.wheel(0, 300);
+    }
+    await expect.poll(() => mainViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(before);
+    await mainViewport.evaluate((element, top) => { element.scrollTop = top; }, before);
+  };
+  await expectScrollbarAtWindowEdge();
+  await expect.poll(() => mainViewport.evaluate((element) => element.scrollWidth - element.clientWidth))
+    .toBe(0);
+  await mainViewport.evaluate((element) => { element.scrollLeft = 30; });
+  expect(await mainViewport.evaluate((element) => element.scrollLeft)).toBe(0);
   const closedZoom = await zoomValue().inputValue();
+  await zoomValue().fill('250');
+  await zoomValue().press('Enter');
+  await expect.poll(() => mainViewport.evaluate((element) => element.scrollWidth - element.clientWidth))
+    .toBeGreaterThan(0);
+  await fitAndWait();
+  await expectFitted(standardGap);
+  await expect.poll(() => mainViewport.evaluate((element) => element.scrollWidth - element.clientWidth))
+    .toBe(0);
 
   const primaryLink = mainWorkspace.getByRole('button', {
     name: 'Open PDF link to Primary result, Page 2',
@@ -4242,8 +4285,13 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   expect(await zoomValue().inputValue()).toBe(closedZoom);
   expect(await mainPage.boundingBox().then((bounds) => bounds?.width))
     .toBeCloseTo(bottomGeometry.pageWidth, 0);
+  await expect.poll(async () => {
+    const bounds = (await mainWorkspace.boundingBox())!;
+    return Math.abs(bounds.x + bounds.width - rightWorkspaceBounds.x);
+  }).toBeLessThan(1);
   await fitAndWait();
-  const initialRightGeometry = await expectFitted(standardGap, rightWorkspaceBounds.x);
+  const initialRightGeometry = await expectFitted(24, rightWorkspaceBounds.x);
+  await expectScrollbarAtWindowEdge();
   expect(initialRightGeometry.pageWidth).toBeLessThan(bottomGeometry.pageWidth);
   const rightFitZoom = await zoomValue().inputValue();
 
@@ -4261,7 +4309,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   );
 
   await fitAndWait();
-  const resizedRightGeometry = await expectFitted(standardGap, resizedWorkspaceBounds.x);
+  const resizedRightGeometry = await expectFitted(24, resizedWorkspaceBounds.x);
   expect(resizedRightGeometry.pageWidth).toBeLessThan(initialRightGeometry.pageWidth);
   const resizedFitZoom = await zoomValue().inputValue();
 
@@ -4275,7 +4323,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   await fitAndWait();
   const resizedViewportWorkspaceBounds = await referenceWorkspace.boundingBox();
   if (!resizedViewportWorkspaceBounds) throw new Error('Responsive right workspace has no bounds.');
-  await expectFitted(standardGap, resizedViewportWorkspaceBounds.x);
+  await expectFitted(24, resizedViewportWorkspaceBounds.x);
 
   await expect(mainWorkspace).toHaveAttribute('data-fit-width-main-mount', 'stable');
   await expect(referenceWorkspace).toHaveAttribute('data-fit-width-workspace-mount', 'stable');
@@ -4292,7 +4340,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     .toBe('none');
   const toolsBounds = await toolsWorkspace.boundingBox();
   if (!toolsBounds) throw new Error('Right annotation workspace has no bounds.');
-  await expectFitted(standardGap, toolsBounds.x);
+  await expectFitted(24, toolsBounds.x);
 
   const zoomInput = zoomValue();
   await zoomInput.fill('100');
@@ -4329,8 +4377,8 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   const paintedRightGaps = await fitTransition;
   expect(paintedRightGaps.length).toBeGreaterThan(0);
   expect(Math.min(...paintedRightGaps))
-    .toBeGreaterThanOrEqual(Math.min(preFitRightGap, standardGap) - 3);
-  await expectFitted(standardGap, toolsBounds.x);
+    .toBeGreaterThanOrEqual(Math.min(preFitRightGap, 24) - 3);
+  await expectFitted(24, toolsBounds.x);
   await expect(zoomValue()).not.toHaveValue('100');
 });
 
@@ -4382,10 +4430,11 @@ test('fits opening workspaces and preserves manual reading through passive layou
       const pageBounds = (await pdfPage.boundingBox())!;
       const viewportBounds = (await viewport.boundingBox())!;
       const client = await viewport.evaluate((element) => ({ left: element.clientLeft, width: element.clientWidth }));
-      const fade = page.locator('.review-overlay-frame__right-fade:visible');
-      const right = await fade.count() ? (await fade.boundingBox())!.x : viewportBounds.x + client.left + client.width;
-      return Math.max(Math.abs(pageBounds.x - viewportBounds.x - client.left - 10),
-        Math.abs(right - pageBounds.x - pageBounds.width - 10));
+      const readingBounds = (await workspace.boundingBox())!;
+      const right = Math.min(viewportBounds.x + client.left + client.width, readingBounds.x + readingBounds.width);
+      const gap = await stage.getAttribute('data-right-surface-open') === 'true' ? 24 : 10;
+      return Math.max(Math.abs(pageBounds.x - viewportBounds.x - client.left - gap),
+        Math.abs(right - pageBounds.x - pageBounds.width - gap));
     }).toBeLessThan(3);
   };
   await expectOpeningFit();

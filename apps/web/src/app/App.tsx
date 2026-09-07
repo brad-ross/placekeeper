@@ -91,6 +91,7 @@ import {
   subscribeToReferenceManualScroll,
 } from '../pdf/reference-manual-scroll.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+import { REVIEW_COLLAPSED_RAIL_SIZE, REVIEW_OVERLAY_INSET, REVIEW_OVERLAY_FADE_SIZE } from '../review/use-review-overlay-geometry.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
 import type { PdfSearchResult } from '../pdf/pdf-search-model.js';
 
@@ -580,6 +581,7 @@ export function App({
       const framingControls = createViewerFramingControls({
         registry,
         root: () => workspaceElementRef.current,
+        readingViewport: () => workspaceElementRef.current,
         updateRunway: updateViewerRunway,
       });
       framingControlsRef.current = framingControls;
@@ -683,9 +685,22 @@ export function App({
       const mainNavigation = createViewerNavigation({
         registry,
         root: () => workspaceElementRef.current,
+        readingViewport: () => workspaceElementRef.current,
         documentId: MAIN_PDF_DOCUMENT_ID,
         documentGeneration,
         runway: () => viewerRunwayRef.current,
+        fitWidthMargins: () => {
+          const stage = workspaceElementRef.current?.closest<HTMLElement>('[data-review-stage]');
+          if (stage?.dataset.rightSurfaceOpen === 'true') {
+            const gap = REVIEW_OVERLAY_INSET + REVIEW_OVERLAY_FADE_SIZE;
+            return { left: gap, right: gap };
+          }
+          // Layout reserves the collapsed rail. Leave room for its fade
+          // inside the scrollport and match both on the left.
+          return stage?.dataset.rightRailPresent === 'true'
+            ? { left: REVIEW_COLLAPSED_RAIL_SIZE + REVIEW_OVERLAY_FADE_SIZE, right: REVIEW_OVERLAY_FADE_SIZE }
+            : undefined;
+        },
       });
       mainNavigationRef.current = mainNavigation;
       onViewerNavigationInitialized?.('main', mainNavigation);

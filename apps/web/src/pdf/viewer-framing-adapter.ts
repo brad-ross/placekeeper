@@ -4,6 +4,7 @@ import { ViewportPlugin } from '@embedpdf/plugin-viewport';
 import { ZoomPlugin } from '@embedpdf/plugin-zoom';
 
 import {
+  intersectViewerRects,
   unionViewerRects,
   type ViewerFramingControls,
   type ViewerFramingEvent,
@@ -16,6 +17,8 @@ import {
 export interface ViewerFramingAdapterOptions {
   readonly registry: PluginRegistry;
   readonly root: () => HTMLElement | null;
+  /** Visible reading frame when the native scrollport extends beside a dock. */
+  readonly readingViewport?: () => HTMLElement | null;
   readonly updateRunway: (runway: ViewerRunway) => void;
   readonly nextFrame?: () => Promise<void>;
 }
@@ -92,7 +95,11 @@ export function createViewerFramingControls(
     const targetRect = unionViewerRects(targetElements
       .map((element) => elementRect(element))
       .filter((rect): rect is ViewerRect => rect !== undefined));
-    const viewportRect = elementRect(viewportElement);
+    const scrollportRect = elementRect(viewportElement);
+    const readingRect = elementRect(options.readingViewport?.() ?? null);
+    const viewportRect = scrollportRect && readingRect
+      ? intersectViewerRects(scrollportRect, readingRect) ?? undefined
+      : scrollportRect;
     const pageRect = elementRect(pageElement);
 
     return {
