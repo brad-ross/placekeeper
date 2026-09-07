@@ -12,13 +12,13 @@ import {
 } from "./build-native-candidate.js";
 
 describe("macOS native candidate packaging", () => {
-  it("keeps production packaging unchanged and exposes an explicit candidate path", async () => {
+  it("packages the native window for normal installation and the candidate path", async () => {
     const packageManifest = JSON.parse(await readFile(resolve("package.json"), "utf8")) as {
       scripts: Record<string, string>;
     };
 
     expect(packageManifest.scripts["package:macos"]).toBe(
-      "pnpm build && tsx packaging/macos/build-app.ts",
+      "pnpm build && pnpm build:macos:web && tsx packaging/macos/build-native-candidate.ts",
     );
     expect(packageManifest.scripts["package:macos:native-candidate"]).toBe(
       "pnpm build && pnpm build:macos:web && tsx packaging/macos/build-native-candidate.ts",
@@ -27,7 +27,7 @@ describe("macOS native candidate packaging", () => {
     expect(packageManifest.scripts["notarize:macos"]).toBe("tsx packaging/macos/notarize.ts");
   });
 
-  it("labels the reviewed web-size exception as candidate-only", async () => {
+  it("keeps the existing native payload size policy explicit", async () => {
     const [productionBuilder, candidateBuilder] = await Promise.all([
       readFile(resolve("packaging/macos/build-app.ts"), "utf8"),
       readFile(resolve("packaging/macos/build-native-candidate.ts"), "utf8"),

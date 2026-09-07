@@ -4,13 +4,13 @@ Placekeeper is a focused, local-only PDF reader and annotator for Apple-silicon 
 
 ## Install from source
 
-Requirements are macOS 13 or newer, an Apple-silicon Mac, internet access during installation, and the standard macOS command-line tools (`curl`, `tar`, `shasum`, and `ditto`). Download or clone the repository, open Terminal in the repository folder, and run:
+Requirements are macOS 13 or newer, an Apple-silicon Mac, internet access during installation, the standard macOS command-line tools (`curl`, `tar`, `shasum`, and `ditto`), and Apple Command Line Tools with Swift and a macOS SDK (`xcode-select --install`). Download or clone the repository, open Terminal in the repository folder, and run:
 
 ```sh
 ./install.sh
 ```
 
-The installer downloads the checksum-pinned Node 24.14.0 arm64 toolchain into the checkout, runs the exact pnpm 11.16.0 dependency graph from the lockfile, builds the app, and checks the packaged writer with networking disabled. It then transactionally installs `~/Applications/Placekeeper.app`, its exact-origin Chrome native-host registration, and the native document bridge. Placekeeper remains an alternate macOS PDF viewer. The installer does not modify the system Node installation, make Placekeeper the macOS default PDF handler, or enable Chrome interception.
+The installer downloads the checksum-pinned Node 24.14.0 arm64 toolchain into the checkout, runs the exact pnpm 11.16.0 dependency graph from the lockfile, builds the app, and checks the packaged writer with networking disabled. It then transactionally installs `~/Applications/Placekeeper.app`, its exact-origin Chrome native-host registration, and the native Mac window. Placekeeper remains an alternate macOS PDF viewer. The installer does not modify the system Node installation, make Placekeeper the macOS default PDF handler, or enable Chrome interception.
 
 Preview the actions without downloading or changing anything:
 
@@ -31,7 +31,7 @@ The packaged service reuses one fixed numeric-loopback origin so a browser tab c
 
 Because the source build is intentionally not Developer ID-signed or notarized (it receives only a local ad-hoc signature), macOS may warn on first launch. In Finder, Control-click `~/Applications/Placekeeper.app`, choose **Open**, and confirm once. Do not disable Gatekeeper globally and do not recursively remove quarantine attributes.
 
-After installation, select one local PDF in Finder and use **Open With -> Placekeeper**. Alternatively, open Placekeeper from `~/Applications` and choose a PDF. No terminal is needed for ordinary use.
+After installation, select one local PDF in Finder and use **Open With -> Placekeeper**. Alternatively, open Placekeeper from `~/Applications` and choose a PDF. The PDF opens in Placekeeper’s own Mac window. Opening a PDF through the Codex plugin continues to use the Codex in-app browser. No terminal is needed for ordinary use.
 
 ## Open Chrome PDFs automatically
 

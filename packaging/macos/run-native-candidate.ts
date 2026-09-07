@@ -237,7 +237,7 @@ async function readAndValidateCandidate(paths: NativeCandidatePaths, pdfPath: st
   return parsePackagedBuildIdentity(raw);
 }
 
-async function runNativeCandidate(args: readonly string[]): Promise<void> {
+export async function runNativeCandidate(args: readonly string[]): Promise<void> {
   if (process.platform !== "darwin") throw new Error("The native candidate runner requires macOS");
   const repoRoot = process.cwd();
   const options = parseNativeCandidateRunnerArguments(args, repoRoot);

@@ -48,6 +48,8 @@ const execFileAsync = promisify(execFile);
 async function prepareChromeInstallFixture(app: string): Promise<void> {
   const extension = resolve(app, "Contents/Resources/integrations/chrome-extension");
   const node = resolve(app, "Contents/Resources/node/bin/node");
+  await mkdir(resolve(app, "Contents/Resources/MacWeb"), { recursive: true });
+  await writeFile(resolve(app, "Contents/Resources/MacWeb/macos.html"), "native review shell");
   await mkdir(extension, { recursive: true });
   await mkdir(resolve(app, "Contents/Resources/service"), { recursive: true });
   await mkdir(resolve(app, "Contents/MacOS"), { recursive: true });
@@ -538,6 +540,28 @@ describe("macOS distribution manifests", () => {
     expect(installer).not.toContain("spctl --master-disable");
   });
 
+  it.runIf(process.platform === "darwin")("rejects incomplete native bundles before replacing the installed app", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "placekeeper-incomplete-native-"));
+    const built = resolve(root, "built/Placekeeper.app");
+    const app = resolve(root, "home/Applications/Placekeeper.app");
+    try {
+      await prepareChromeInstallFixture(built);
+      await writeFile(resolve(built, "Contents/MacOS/placekeeper"), "launcher", { mode: 0o755 });
+      await mkdir(app, { recursive: true });
+      await writeFile(resolve(app, "existing"), "previous app");
+      const replace = () => execFileAsync("/bin/sh", [
+        resolve("packaging/macos/install-built-app.sh"), built, app,
+      ], { env: { ...process.env, PLACEKEEPER_USER_HOME: resolve(root, "home") } });
+      await expect(replace()).rejects.toThrow("The built app is incomplete");
+      await writeFile(resolve(built, "Contents/MacOS/PlacekeeperMac"), "native", { mode: 0o755 });
+      await rm(resolve(built, "Contents/Resources/MacWeb/macos.html"));
+      await expect(replace()).rejects.toThrow("The built app is incomplete");
+      expect(await readFile(resolve(app, "existing"), "utf8")).toBe("previous app");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it.runIf(process.platform === "darwin")("replaces the app transactionally", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "placekeeper-install-test-"));
     const built = resolve(root, "built/Placekeeper.app");
@@ -547,7 +571,7 @@ describe("macOS distribution manifests", () => {
       await mkdir(resolve(built, "Contents/MacOS"), { recursive: true });
       await prepareChromeInstallFixture(built);
       await writeFile(resolve(built, "Contents/MacOS/placekeeper"), "new launcher", { mode: 0o755 });
-      await writeFile(resolve(built, "Contents/MacOS/droplet"), "native bridge", { mode: 0o755 });
+      await writeFile(resolve(built, "Contents/MacOS/PlacekeeperMac"), "native bridge", { mode: 0o755 });
       await writeFile(resolve(built, "new-app"), "new app");
       await execFileAsync("/bin/sh", [helper, built, app], {
         env: { ...process.env, PLACEKEEPER_USER_HOME: resolve(root, "home") },
@@ -585,7 +609,7 @@ describe("macOS distribution manifests", () => {
         await mkdir(resolve(built, "Contents/MacOS"), { recursive: true });
         await prepareChromeInstallFixture(built);
         await writeFile(resolve(built, "Contents/MacOS/placekeeper"), "launcher", { mode: 0o755 });
-        await writeFile(resolve(built, "Contents/MacOS/droplet"), "bridge", { mode: 0o755 });
+        await writeFile(resolve(built, "Contents/MacOS/PlacekeeperMac"), "bridge", { mode: 0o755 });
         await mkdir(extension, { recursive: true });
         await writeFile(resolve(extension, "user-data.txt"), "keep me");
 
@@ -613,7 +637,7 @@ describe("macOS distribution manifests", () => {
           await mkdir(resolve(built, "Contents/MacOS"), { recursive: true });
           await prepareChromeInstallFixture(built);
           await writeFile(resolve(built, "Contents/MacOS/placekeeper"), "launcher", { mode: 0o755 });
-          await writeFile(resolve(built, "Contents/MacOS/droplet"), "bridge", { mode: 0o755 });
+          await writeFile(resolve(built, "Contents/MacOS/PlacekeeperMac"), "bridge", { mode: 0o755 });
           await mkdir(userHome, { mode: condition === "writable" ? 0o777 : 0o700 });
           if (condition === "symlink") {
             const outside = resolve(root, "outside-library");
@@ -652,7 +676,7 @@ describe("macOS distribution manifests", () => {
         "#!/bin/sh\nif [ \"${2:-}\" = \"stop-ready\" ]; then exit 0; fi\nexit 1\n",
         { mode: 0o755 },
       );
-      await writeFile(resolve(built, "Contents/MacOS/droplet"), "candidate bridge", { mode: 0o755 });
+      await writeFile(resolve(built, "Contents/MacOS/PlacekeeperMac"), "candidate bridge", { mode: 0o755 });
       await writeFile(resolve(built, "candidate-marker"), "candidate");
       await mkdir(app, { recursive: true });
       await writeFile(resolve(app, "previous-marker"), "previous");
@@ -698,7 +722,7 @@ describe("macOS distribution manifests", () => {
         await mkdir(resolve(built, "Contents/MacOS"), { recursive: true });
         await prepareChromeInstallFixture(built);
         await writeFile(resolve(built, "Contents/MacOS/placekeeper"), "new launcher", { mode: 0o755 });
-        await writeFile(resolve(built, "Contents/MacOS/droplet"), "new bridge", { mode: 0o755 });
+        await writeFile(resolve(built, "Contents/MacOS/PlacekeeperMac"), "new bridge", { mode: 0o755 });
         await mkdir(app, { recursive: true });
         await writeFile(resolve(app, "previous-app"), "previous app");
         await cp(resolve(built, "Contents/Resources/integrations/chrome-extension"), extension, {
@@ -757,7 +781,7 @@ describe("macOS distribution manifests", () => {
         await mkdir(resolve(built, "Contents/MacOS"), { recursive: true });
         await prepareChromeInstallFixture(built);
         await writeFile(resolve(built, "Contents/MacOS/placekeeper"), launcher, { mode: 0o755 });
-        await writeFile(resolve(built, "Contents/MacOS/droplet"), "candidate bridge", { mode: 0o755 });
+        await writeFile(resolve(built, "Contents/MacOS/PlacekeeperMac"), "candidate bridge", { mode: 0o755 });
         await writeFile(resolve(built, "candidate-marker"), "candidate");
         await mkdir(app, { recursive: true });
         await writeFile(resolve(app, "previous-marker"), "previous");
