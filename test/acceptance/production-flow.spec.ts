@@ -6197,3 +6197,240 @@ test("keeps only typing for the newest pending selection", async ({ page }) => {
   });
   expect(state?.items[0]?.payload.quote).not.toBe("");
 });
+
+for (const dock of ['closed', 'bottom', 'right'] as const) {
+  test(`keeps the PDF point under wheel zoom and centers toolbar zoom with workspace ${dock}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openFreshProductionFixture(page, referencePdf, 'Anchored zoom launch failed');
+    const workspace = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
+    const viewport = workspace.locator('[data-viewer-framing-viewport]');
+    const sheet = workspace.locator('[data-page-index="0"]');
+    await waitForRenderedPageImage(sheet);
+    if (dock !== 'closed') {
+      await openLinkInReferences(page, workspace.getByRole('button', { name: 'Open PDF link to Primary result, Page 2' }));
+      if (dock === 'right') await clickHoverRevealedReferenceDockAction(page.getByRole('button', { name: 'Move References to right' }));
+      await expect(page.locator('[data-review-workspace]')).toHaveAttribute('data-workspace-presentation', dock);
+      await expect.poll(() => page.locator('[data-review-workspace]').evaluate((element) => getComputedStyle(element).transform)).toBe('none');
+    }
+    const rect = (await sheet.boundingBox())!;
+    const reading = (await workspace.boundingBox())!;
+    const pointer = { x: Math.round(reading.x + reading.width * 0.65), y: Math.round(rect.y + 200) };
+    const normalized = { x: (pointer.x - rect.x) / rect.width, y: (pointer.y - rect.y) / rect.height };
+    await page.mouse.move(pointer.x, pointer.y);
+    for (const delta of [-70, -70, 70]) {
+      const before = (await sheet.boundingBox())!.width;
+      await page.keyboard.down('Control');
+      await page.mouse.wheel(0, delta);
+      await expect.poll(async () => Math.abs((await sheet.boundingBox())!.width - before)).toBeGreaterThan(10);
+      await page.keyboard.up('Control');
+      await expect.poll(async () => {
+        const next = (await sheet.boundingBox())!;
+        return Math.max(Math.abs(next.x + normalized.x * next.width - pointer.x),
+          Math.abs(next.y + normalized.y * next.height - pointer.y));
+      }).toBeLessThan(2);
+    }
+    // Several events in one task must not capture geometry from an unfinished zoom.
+    const burstBefore = (await sheet.boundingBox())!;
+    const burstFraction = { x: (pointer.x - burstBefore.x) / burstBefore.width, y: (pointer.y - burstBefore.y) / burstBefore.height };
+    await viewport.evaluate((element, point) => {
+      for (let i = 0; i < 4; i += 1) element.dispatchEvent(new WheelEvent('wheel', {
+        bubbles: true, cancelable: true, ctrlKey: true, deltaY: -12, clientX: point.x, clientY: point.y,
+      }));
+    }, pointer);
+    await expect.poll(async () => (await sheet.boundingBox())!.width).toBeGreaterThan(burstBefore.width * 1.2);
+    await expect.poll(async () => {
+      const next = (await sheet.boundingBox())!;
+      return Math.max(Math.abs(next.x + burstFraction.x * next.width - pointer.x),
+        Math.abs(next.y + burstFraction.y * next.height - pointer.y));
+    }).toBeLessThan(3);
+    const pinchBefore = (await sheet.boundingBox())!;
+    const pinchFraction = { x: (pointer.x - pinchBefore.x) / pinchBefore.width, y: (pointer.y - pinchBefore.y) / pinchBefore.height };
+    await viewport.evaluate((element, point) => {
+      const send = (type: string, radius: number) => {
+        const touches = [-radius, radius].map((offset, identifier) => ({
+          identifier, target: element, clientX: point.x + offset, clientY: point.y,
+        }));
+        const event = new Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperty(event, 'touches', { value: touches });
+        element.dispatchEvent(event);
+      };
+      send('touchstart', 50);
+      send('touchmove', 60);
+      send('touchmove', 70);
+      const end = new Event('touchend', { bubbles: true });
+      Object.defineProperty(end, 'touches', { value: [] });
+      element.dispatchEvent(end);
+    }, pointer);
+    await expect.poll(async () => (await sheet.boundingBox())!.width).toBeGreaterThan(pinchBefore.width * 1.35);
+    await expect.poll(async () => {
+      const next = (await sheet.boundingBox())!;
+      return Math.max(Math.abs(next.x + pinchFraction.x * next.width - pointer.x),
+        Math.abs(next.y + pinchFraction.y * next.height - pointer.y));
+    }).toBeLessThan(2);
+    const box = (await viewport.boundingBox())!;
+    const area = (await workspace.boundingBox())!;
+    const client = await viewport.evaluate((element) => ({ width: element.clientWidth, height: element.clientHeight }));
+    const bottom = dock === 'bottom' ? (await page.locator('[data-review-workspace]').boundingBox())!.y : box.y + client.height;
+    const center = { x: (box.x + Math.min(box.x + client.width, area.x + area.width)) / 2, y: (box.y + bottom) / 2 };
+    const before = (await sheet.boundingBox())!;
+    const fraction = { x: (center.x - before.x) / before.width, y: (center.y - before.y) / before.height };
+    await zoomInOnce(page);
+    await expect.poll(async () => {
+      const next = (await sheet.boundingBox())!;
+      return Math.max(Math.abs(next.x + fraction.x * next.width - center.x),
+        Math.abs(next.y + fraction.y * next.height - center.y));
+    }).toBeLessThan(2);
+  });
+}
+
+test('keeps page and zoom popups aligned on every painted frame as actions appear', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFreshProductionFixture(page, referencePdf, 'Popup resize launch failed');
+  const checkResize = async (label: string, trigger: Locator, action: string) => {
+    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await trigger.hover();
+    const menu = page.getByRole('menu', { name: label, exact: true });
+    await expect(menu).toBeVisible();
+    const id = await menu.getAttribute('id');
+    await expect.poll(async () => {
+      const [popup, anchor] = await Promise.all([menu.boundingBox(), trigger.boundingBox()]);
+      return Math.abs(popup!.x + popup!.width - anchor!.x - anchor!.width);
+    }).toBeLessThan(1);
+    const samples = page.evaluate(async (menuId) => {
+      const surface = document.getElementById(menuId!)!;
+      const opener = document.querySelector<HTMLElement>(`[aria-controls="${menuId}"]`)!;
+      const frames: Array<{ error: number; connected: boolean; open: boolean; width: number }> = [];
+      await new Promise<void>((resolve) => {
+        let count = 0;
+        const sample = () => requestAnimationFrame(() => setTimeout(() => {
+          const bounds = surface.getBoundingClientRect();
+          frames.push({ error: Math.abs(bounds.right - opener.getBoundingClientRect().right),
+            connected: surface.isConnected, open: surface.matches(':popover-open'), width: bounds.width });
+          if (++count < 30) sample();
+          else resolve();
+        }, 0));
+        document.documentElement.dataset.popupSampler = 'ready';
+        sample();
+      });
+      delete document.documentElement.dataset.popupSampler;
+      return frames;
+    }, id);
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.popupSampler)).toBe('ready');
+    await menu.getByRole('menuitem', { name: action, exact: true }).click();
+    const frames = await samples;
+    expect(frames.every((frame) => frame.connected && frame.open)).toBe(true);
+    expect(Math.max(...frames.map((frame) => frame.width)) - Math.min(...frames.map((frame) => frame.width))).toBeGreaterThan(20);
+    expect(Math.max(...frames.map((frame) => frame.error))).toBeLessThan(1);
+    await page.keyboard.press('Escape');
+  };
+  const zoomTrigger = page.getByRole('button', { name: 'Open zoom controls' });
+  await checkResize('PDF zoom', zoomTrigger, 'Zoom in');
+  await checkResize('PDF zoom', zoomTrigger, 'Fit width');
+  const pageTrigger = page.getByRole('button', { name: /Page \d+ of 4\. Open page navigation/u });
+  await checkResize('Page navigation', pageTrigger, 'Next page');
+  await checkResize('Page navigation', pageTrigger, 'Previous page');
+  const pageInput = page.getByRole('textbox', { name: /Current page \d+ of 4/u });
+  await pageInput.fill('4');
+  await pageInput.press('Enter');
+  await expect(pageInput).toHaveValue('4');
+  await checkResize('Page navigation', pageTrigger, 'Previous page');
+  await checkResize('Page navigation', pageTrigger, 'Next page');
+});
+
+test('zooms continuously without rebuilding PDF page layout on every gesture frame', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFreshProductionFixture(page, referencePdf, 'Smooth zoom launch failed');
+  const workspace = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
+  const viewport = workspace.locator('[data-viewer-framing-viewport]');
+  const sheet = workspace.locator('[data-page-index="0"]');
+  await waitForRenderedPageImage(sheet);
+  const result = await viewport.evaluate(async (element) => {
+    const sheet = element.querySelector<HTMLElement>('[data-page-index="0"]')!;
+    const widths = new Set([sheet.style.width]);
+    const observer = new MutationObserver(() => widths.add(sheet.style.width));
+    observer.observe(sheet, { attributes: true, attributeFilter: ['style'] });
+    const bounds = element.getBoundingClientRect();
+    const before = sheet.getBoundingClientRect();
+    const point = { x: Math.round(bounds.left + element.clientWidth * 0.6), y: Math.round(bounds.top + 200) };
+    const normalized = { x: (point.x - before.left) / before.width, y: (point.y - before.top) / before.height };
+    const intervals: number[] = [];
+    const drift: number[] = [];
+    let previous = performance.now();
+    for (let i = 0; i < 30; i += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const now = performance.now();
+      intervals.push(now - previous);
+      previous = now;
+      element.dispatchEvent(new WheelEvent('wheel', {
+        bubbles: true, cancelable: true, ctrlKey: true, deltaY: -2, clientX: point.x, clientY: point.y,
+      }));
+      const rect = sheet.getBoundingClientRect();
+      drift.push(Math.max(Math.abs(rect.left + normalized.x * rect.width - point.x),
+        Math.abs(rect.top + normalized.y * rect.height - point.y)));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    observer.disconnect();
+    const final = sheet.getBoundingClientRect();
+    return { layoutChanges: widths.size - 1, p95FrameMs: intervals.sort((a, b) => a - b)[Math.floor(intervals.length * .95)],
+      maxDrift: Math.max(...drift), finalDrift: Math.max(Math.abs(final.left + normalized.x * final.width - point.x), Math.abs(final.top + normalized.y * final.height - point.y)), scale: final.width / before.width };
+  });
+  await testInfo.attach('zoom-performance.json', { body: JSON.stringify(result), contentType: 'application/json' });
+  console.log('ZOOM_PERFORMANCE', JSON.stringify(result));
+  expect(result.scale).toBeGreaterThan(1.25);
+  expect(result.maxDrift).toBeLessThan(3);
+  expect(result.finalDrift).toBeLessThan(2);
+  expect(result.layoutChanges).toBeLessThanOrEqual(2);
+});
+
+test('animates toolbar zoom through intermediate sizes and respects reduced motion', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await openFreshProductionFixture(page, referencePdf, 'Animated zoom launch failed');
+  const workspace = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
+  const sheet = workspace.locator('[data-page-index="0"]');
+  await waitForRenderedPageImage(sheet);
+  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+  await page.getByRole('button', { name: 'Open zoom controls' }).hover();
+  const widths = sheet.evaluate(async (element) => {
+    const result: number[] = [];
+    for (let i = 0; i < 30; i += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      result.push(element.getBoundingClientRect().width);
+    }
+    return result;
+  });
+  await page.getByRole('menuitem', { name: 'Zoom in', exact: true }).click();
+  const samples = await widths;
+  expect(new Set(samples.map(Math.round)).size).toBeGreaterThan(3);
+  expect(samples.at(-1)!).toBeGreaterThan(samples[0]!);
+  for (let i = 1; i < samples.length; i += 1) expect(samples[i]!).toBeGreaterThanOrEqual(samples[i - 1]! - 1);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const before = (await sheet.boundingBox())!.width;
+  await page.getByRole('menuitem', { name: 'Zoom in', exact: true }).click();
+  await expect.poll(async () => (await sheet.boundingBox())!.width).toBeGreaterThan(before);
+  expect(await workspace.locator('[data-viewer-zoom-content]').evaluate((element) => element.getAnimations().length)).toBe(0);
+});
+
+test('settles an interrupted zoom before keyboard page navigation', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFreshProductionFixture(page, referencePdf, 'Interrupted zoom launch failed');
+  const workspace = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
+  const viewport = workspace.locator('[data-viewer-framing-viewport]');
+  const sheet = workspace.locator('[data-page-index="0"]');
+  await waitForRenderedPageImage(sheet);
+  const input = page.getByRole('textbox', { name: /Current page \d+ of 4/u });
+  await input.fill('3');
+  // Start zoom while the page editor owns focus, then immediately submit it.
+  await viewport.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    element.dispatchEvent(new WheelEvent('wheel', {
+      bubbles: true, cancelable: true, ctrlKey: true, deltaY: -30,
+      clientX: bounds.left + 300, clientY: bounds.top + 200,
+    }));
+  });
+  await input.press('Enter');
+  await expect(input).toHaveValue('3');
+  await expect(workspace.locator('[data-viewer-zoom-content]')).toHaveCSS('transform', 'none');
+  await page.waitForTimeout(200);
+  await expect(input).toHaveValue('3');
+});
