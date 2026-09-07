@@ -2176,6 +2176,90 @@ test("keeps main PDF link hit targets below an open References viewer", async ({
   expect(hitState.topmost).not.toBe("main");
 });
 
+for (const width of [1280, 760]) {
+  for (const destination of ['outline', 'search', 'annotation'] as const) {
+    test(`keeps Back unpainted until toolbar interaction after ${destination} navigation at ${width}px`, async ({ page, browserName }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await openFreshProductionFixture(
+        page,
+        destination === 'search' ? searchPdf : referencePdf,
+        'Document history visibility launch failed',
+        destination === 'annotation' ? async (sessionId) => {
+          const state = host.broker.state(sessionId);
+          if (!state) throw new Error('Annotation history state is missing');
+          await host.broker.acceptMutation(sessionId, addPageNote(
+            state, 2, { x: 80, y: 160, width: 18, height: 18 }, 'History visibility destination.',
+          ));
+        } : undefined,
+      );
+      await openAnnotationsWorkspace(page);
+      let destinationButton: Locator;
+      if (destination === 'outline') {
+        await page.getByRole('tab', { name: 'Outline', exact: true }).click();
+        destinationButton = page.getByRole('button', { name: 'Details, Page 3', exact: true });
+      } else if (destination === 'search') {
+        await page.getByRole('tab', { name: 'Search', exact: true }).click();
+        await page.getByRole('searchbox', { name: 'Search this PDF' }).fill('stable');
+        const results = page.locator('[data-search-group="exact"] [data-search-result]');
+        await expect(results).toHaveCount(2);
+        destinationButton = results.nth(1).locator('.annotation-item__navigation');
+      } else {
+        destinationButton = page.locator('#workspace-panel-annotations').getByRole('button', {
+          name: /^Page Note · Page 3 · .*History visibility destination\.$/u,
+        }).first();
+      }
+      const targetPage = destination === 'search' ? '2' : '3';
+      const [samples] = await Promise.all([
+        page.evaluate(async (target) => new Promise<Array<{ clipPath: string; revealed: boolean }>>((resolve) => {
+          const samples: Array<{ clipPath: string; revealed: boolean }> = [];
+          const deadline = performance.now() + 5_000;
+          let settledFrames = 0;
+          const capture = () => {
+            const bar = document.querySelector('[data-review-chrome]');
+            const back = bar?.querySelector('[data-main-history="back"]');
+            if (back) samples.push({
+              clipPath: getComputedStyle(back).clipPath,
+              revealed: bar!.matches(':hover, :has(:focus-visible)'),
+            });
+            const reached = document.querySelector<HTMLInputElement>('.review-chrome__page-input')?.value === target;
+            settledFrames = back && reached ? settledFrames + 1 : 0;
+            if (settledFrames >= 12 || performance.now() >= deadline) resolve(samples);
+            else requestAnimationFrame(capture);
+          };
+          requestAnimationFrame(capture);
+        }), targetPage),
+        destinationButton.click(),
+      ]);
+      expect(samples.length).toBeGreaterThan(0);
+      expect(samples.every(({ clipPath, revealed }) => clipPath === 'inset(50%)' && !revealed)).toBe(true);
+      const pageInput = page.locator('.review-chrome__page-input');
+      await expect(pageInput).toHaveValue(targetPage);
+      const bar = page.locator('[data-review-chrome]');
+      const back = bar.locator('[data-main-history="back"]');
+      await bar.hover({ position: { x: 2, y: 2 } });
+      await expect(back).toHaveCSS('clip-path', 'none');
+      await page.locator('.pdf-workspace:not(.pdf-workspace--reference)').hover({ position: { x: 30, y: 100 } });
+      await expect(back).toHaveCSS('clip-path', 'inset(50%)');
+      // Keyboard entry through the page control reveals history without
+      // removing its buttons from the normal tab order.
+      await pageInput.focus();
+      const tabKey = browserName === 'webkit' ? 'Alt+Tab' : 'Tab';
+      await page.keyboard.press(tabKey);
+      await expect(back).toHaveCSS('clip-path', 'none');
+      for (let steps = 0; steps < 5 && !await back.evaluate((element) => element === document.activeElement); steps += 1) {
+        await page.keyboard.press(tabKey);
+      }
+      await expect(back).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(pageInput).toHaveValue('1');
+      await expect(bar.locator('[data-main-history="forward"]')).toHaveCSS('clip-path', 'inset(50%)');
+      await bar.hover({ position: { x: 2, y: 2 } });
+      await page.getByRole('button', { name: 'Forward in document history', exact: true }).click();
+      await expect(pageInput).toHaveValue(targetPage);
+    });
+  }
+}
+
 test("records annotation tray jumps in document history", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(
@@ -4219,12 +4303,14 @@ test('locks horizontal PDF scrolling at the current offset without blocking vert
   await expect.poll(() => viewport.evaluate((element) => element.scrollLeft)).toBeLessThan(locked.x);
 });
 
-test('keeps opaque PDF scrollbar tracks exposed beside bottom trays', async ({ page }) => {
+test('keeps slim PDF scrollbar tracks exposed and reveals thumbs only while scrolling without shifting pages', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, 'Scrollbar fixture launch failed');
   const main = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
   const viewport = main.locator('[data-viewer-framing-viewport]');
   await openLinkInReferences(page, main.getByRole('button', { name: 'Open PDF link to Primary result, Page 2' }));
+  const referencePanel = page.locator('.review-workspace__panel--references');
+  expect(await referencePanel.evaluate((element) => (element as HTMLElement).offsetWidth - element.clientWidth)).toBe(0);
   await expect(page.locator('[data-review-workspace]')).toHaveAttribute('data-workspace-presentation', 'bottom');
   await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   const zoom = page.getByRole('textbox', { name: /Current zoom \d+ percent\. Enter a zoom percentage/u });
@@ -4248,8 +4334,27 @@ test('keeps opaque PDF scrollbar tracks exposed beside bottom trays', async ({ p
       };
     });
     expect(geometry.track).toBe(geometry.canvas);
+    // The overlay keeps its 12px minimum outside inset even with an 8px gutter.
     expect(geometry.clip).toBe('inset(0px 12px 12px 0px)');
     expect(geometry.bottom).toBe(900);
+    await expect(viewport).not.toHaveAttribute('data-scrollbar-active', 'true', { timeout: 2_000 });
+    const scrollGeometry = () => viewport.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      clientHeight: element.clientHeight,
+      gutter: getComputedStyle(element, '::-webkit-scrollbar').width,
+      thumb: getComputedStyle(element, '::-webkit-scrollbar-thumb').backgroundColor,
+      pageLeft: element.querySelector('[data-page-index]')!.getBoundingClientRect().left,
+    }));
+    const beforeScroll = await scrollGeometry();
+    expect(beforeScroll.gutter).toBe('8px');
+    expect(beforeScroll.thumb).toBe('rgba(0, 0, 0, 0)');
+    await viewport.evaluate((element) => { element.scrollTop += 25; });
+    await expect(viewport).toHaveAttribute('data-scrollbar-active', 'true');
+    const duringScroll = await scrollGeometry();
+    expect(duringScroll.thumb).not.toBe(beforeScroll.thumb);
+    expect({ ...duringScroll, thumb: beforeScroll.thumb }).toEqual(beforeScroll);
+    await expect(viewport).not.toHaveAttribute('data-scrollbar-active', 'true', { timeout: 2_000 });
+    expect(await scrollGeometry()).toEqual(beforeScroll);
   }
 });
 

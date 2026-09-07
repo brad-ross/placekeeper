@@ -10,6 +10,20 @@ async function leaveRow(page: Page) {
   await page.locator('.review-chrome__page-input').focus();
 }
 
+async function expectPageCenteredOnLastAction(row: Locator) {
+  const centers = await row.evaluate((element) => {
+    const number = element.querySelector('.outline-navigator__page, .annotation-item__page, .pdf-search__result-page')!;
+    const range = document.createRange();
+    range.selectNodeContents(number);
+    const text = range.getBoundingClientRect();
+    const icon = element.querySelector('.row-action-group__direct > :last-child .review-icon')!.getBoundingClientRect();
+    return { textX: text.x + text.width / 2, textY: text.y + text.height / 2,
+      iconX: icon.x + icon.width / 2, iconY: icon.y + icon.height / 2 };
+  });
+  expect(Math.abs(centers.textX - centers.iconX)).toBeLessThan(.5);
+  expect(Math.abs(centers.textY - centers.iconY)).toBeLessThan(1);
+}
+
 for (const scrollbarWidth of [8, 17]) {
   test(`workspace right inset includes its ${scrollbarWidth}px scrollbar`, async ({ page, browserName }) => {
     test.skip(browserName !== 'chromium', 'Custom classic scrollbar sizes are a Chromium geometry fixture.');
@@ -66,6 +80,7 @@ for (const width of [1280, 620, 390]) {
     expect(outlineHover.background).toBe('rgb(231, 231, 231)');
     await expect(outline.locator('.outline-navigator__page')).toHaveCSS('opacity', '0');
     await expect(outline.locator('.row-action-group__direct')).toHaveCSS('opacity', '1');
+    await expectPageCenteredOnLastAction(outline);
     await outline.locator('.outline-navigator__destination').click();
     const pointerFocusesOutline = await outline.locator('.outline-navigator__destination')
       .evaluate((element) => element === document.activeElement);
@@ -87,6 +102,7 @@ for (const width of [1280, 620, 390]) {
         ? page.locator('[data-search-result]').first()
         : page.locator('[data-review-item="owned-replace"]');
       await row.hover();
+      await expectPageCenteredOnLastAction(row);
       const cardBounds = (await row.locator('.annotation-item__content').boundingBox())!;
       const lastActionBounds = (await row.locator('.row-action-group__direct > :last-child').boundingBox())!;
       expect(Math.abs((lastActionBounds.y - cardBounds.y)
@@ -313,4 +329,47 @@ test('horizontal reference tabs in a bottom workspace fit short titles', async (
   await title.evaluate((element) => { element.textContent = 'Note'; });
   expect((await tab.boundingBox())!.width).toBeLessThan(longWidth);
   expect((await tab.boundingBox())!.width).toBeGreaterThanOrEqual(112);
+});
+
+test('workspace scrollbars stay slim and reveal only while their own panel scrolls without moving rows', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/test/acceptance/review-harness/index.html?visual=tray&search=canonical');
+  await page.addStyleTag({ content: `
+    #workspace-panel-annotations, #workspace-panel-outline, .pdf-search__results {
+      max-height: 24px; min-height: 0; overflow-y: scroll; scrollbar-gutter: stable;
+    }
+  ` });
+  for (const mode of ['Outline', 'Annotations', 'Search']) {
+    await page.getByRole('tab', { name: mode, exact: true }).click();
+    if (mode === 'Search') await page.getByRole('searchbox').fill('signal');
+    const scroller = page.locator(mode === 'Search' ? '.pdf-search__results'
+      : `#workspace-panel-${mode.toLowerCase()}`);
+    const row = scroller.locator('.outline-navigator__row, li[data-annotation-origin], [data-search-result]').first();
+    await expect(row).toBeVisible();
+    await expect.poll(() => scroller.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeGreaterThan(0);
+    await expect(scroller).not.toHaveAttribute('data-scrollbar-active', 'true');
+    const metrics = () => scroller.evaluate((element) => ({
+      width: element.clientWidth,
+      gutter: getComputedStyle(element, '::-webkit-scrollbar').width,
+      thumb: getComputedStyle(element, '::-webkit-scrollbar-thumb').backgroundColor,
+      rowLeft: element.querySelector('.outline-navigator__row, li[data-annotation-origin], [data-search-result]')!.getBoundingClientRect().left,
+    }));
+    const before = await metrics();
+    if (mode === 'Search') {
+      const outer = page.locator('.review-workspace__panel--search');
+      expect(await outer.evaluate((element) => (element as HTMLElement).offsetWidth - element.clientWidth)).toBe(0);
+    }
+    expect(before.gutter).toBe('8px');
+    expect(before.thumb).toBe('rgba(0, 0, 0, 0)');
+    await scroller.hover();
+    await expect(scroller).not.toHaveAttribute('data-scrollbar-active', 'true');
+    await scroller.evaluate((element) => { element.scrollTop += 30; });
+    await expect(scroller).toHaveAttribute('data-scrollbar-active', 'true');
+    const during = await metrics();
+    expect(during.thumb).not.toBe(before.thumb);
+    expect(during.width).toBe(before.width);
+    expect(during.rowLeft).toBe(before.rowLeft);
+    await expect(scroller).not.toHaveAttribute('data-scrollbar-active', 'true', { timeout: 2_000 });
+    expect(await metrics()).toEqual(before);
+  }
 });

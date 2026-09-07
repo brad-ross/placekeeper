@@ -156,6 +156,16 @@
     opacity: 1;
     pointer-events: auto;
   }
+
+  /* Prevent hidden history controls from painting without removing them from
+     keyboard navigation or the accessibility tree. */
+  [data-review-chrome] [data-main-history] {
+    clip-path: inset(50%);
+  }
+
+  [data-review-chrome]:is(:hover, :has(:focus-visible)) [data-main-history] {
+    clip-path: none;
+  }
 }
 
 .review-chrome__control-cluster {
@@ -648,8 +658,6 @@
 .review-workspace__panel {
   background: var(--pk-tray);
   overscroll-behavior: contain;
-  scrollbar-color: #aaa transparent;
-  scrollbar-width: auto;
 }
 
 .workspace-edge-rail {
@@ -1094,7 +1102,15 @@
   line-height: 1.5;
 }
 
-.outline-navigator__page { color: var(--pk-muted); font-size: 11px; }
+.outline-navigator__page {
+  display: grid;
+  width: var(--review-control-compact);
+  min-height: var(--review-control-compact);
+  margin-right: -6px;
+  place-items: center;
+  color: var(--pk-muted);
+  font-size: 11px;
+}
 
 .outline-navigator[data-flat="true"] .outline-navigator__destination {
   grid-column: 1 / span 2;
@@ -1645,8 +1661,6 @@
   padding-top: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  scrollbar-color: #b8b8b8 transparent;
-  scrollbar-width: thin;
 }
 
 .full-annotation-reader__body p {
@@ -1757,6 +1771,16 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   margin-left: auto;
 }
 
+:is(li[data-annotation-origin], li[data-search-result])
+  :is(.annotation-item__page, .pdf-search__result-page) {
+  display: grid;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  align-self: flex-start;
+  place-items: center;
+}
+
 @media (hover: hover) and (pointer: fine) {
   :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(.row-action-group):is(:hover, :focus-within, [data-corresponding="true"])
     :is(.outline-navigator__page, .annotation-item__page, .pdf-search__result-page) {
@@ -1765,6 +1789,12 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 }
 
 @media (pointer: coarse), (hover: none) {
+  :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result])
+    :is(.outline-navigator__page, .annotation-item__page, .pdf-search__result-page) {
+    width: 44px;
+    height: 44px;
+  }
+
   :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]) .row-action-group__direct {
     opacity: 1;
     pointer-events: auto;

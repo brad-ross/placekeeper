@@ -584,22 +584,48 @@
     calc(var(--review-document-right-gap) + max(0px, var(--review-document-right-space) - var(--review-main-scrollbar-width, 0px))) !important;
 }
 
-/* Opaque native tracks keep zoomed PDF pages out of the outer gutters. */
-.review-document .pdf-workspace__viewport::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
-  background: var(--review-surface-canvas);
+/* Scroll activity changes paint only. Stable gutters preserve PDF and tray
+   geometry, including hosts configured to always reserve native scrollbars. */
+.review-shell :is(.pdf-workspace__viewport, .review-workspace__panel:not(:where(.review-workspace__panel--search, .review-workspace__panel--references)), [data-workspace-scroll-viewport], .full-annotation-reader__body) {
+  --review-scrollbar-thumb: transparent;
+  --review-scrollbar-track: transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--review-scrollbar-thumb) var(--review-scrollbar-track);
 }
 
-.review-document .pdf-workspace__viewport::-webkit-scrollbar-track,
-.review-document .pdf-workspace__viewport::-webkit-scrollbar-corner {
-  background: var(--review-surface-canvas);
+.review-shell :is(.pdf-workspace__viewport, .review-workspace__panel:not(:where(.review-workspace__panel--search, .review-workspace__panel--references)), [data-workspace-scroll-viewport], .full-annotation-reader__body)[data-scrollbar-active="true"] {
+  --review-scrollbar-thumb: #aaa;
 }
 
-.review-document .pdf-workspace__viewport::-webkit-scrollbar-thumb {
-  border: 3px solid var(--review-surface-canvas);
+/* Opaque PDF tracks keep zoomed pages out of the outer gutters. */
+.review-shell .pdf-workspace__viewport {
+  --review-scrollbar-track: var(--review-surface-canvas);
+}
+
+@supports selector(::-webkit-scrollbar) {
+  .review-shell :is(.pdf-workspace__viewport, .review-workspace__panel:not(:where(.review-workspace__panel--search, .review-workspace__panel--references)), [data-workspace-scroll-viewport], .full-annotation-reader__body) {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+}
+
+:where(.review-shell) :is(.pdf-workspace__viewport, .review-workspace__panel:not(:where(.review-workspace__panel--search, .review-workspace__panel--references)), [data-workspace-scroll-viewport], .full-annotation-reader__body)::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background: var(--review-scrollbar-track);
+}
+
+.review-shell :is(.pdf-workspace__viewport, .review-workspace__panel:not(:where(.review-workspace__panel--search, .review-workspace__panel--references)), [data-workspace-scroll-viewport], .full-annotation-reader__body)::-webkit-scrollbar-track,
+.review-shell :is(.pdf-workspace__viewport, .review-workspace__panel:not(:where(.review-workspace__panel--search, .review-workspace__panel--references)), [data-workspace-scroll-viewport], .full-annotation-reader__body)::-webkit-scrollbar-corner {
+  background: var(--review-scrollbar-track);
+}
+
+.review-shell :is(.pdf-workspace__viewport, .review-workspace__panel:not(:where(.review-workspace__panel--search, .review-workspace__panel--references)), [data-workspace-scroll-viewport], .full-annotation-reader__body)::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
   border-radius: 8px;
-  background: #aaa;
+  background: var(--review-scrollbar-thumb);
+  background-clip: padding-box;
 }
 
 /* The zoom wrapper's synthetic margin assumes uniform library padding.

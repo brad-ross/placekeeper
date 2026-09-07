@@ -1178,6 +1178,9 @@ test.describe('canonical review workflow', () => {
     for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
       await expect(control).toHaveCSS('opacity', '0');
     }
+    for (const control of await bar.locator('[data-main-history]').all()) {
+      await expect(control).toHaveCSS('clip-path', 'inset(50%)');
+    }
     await bar.hover({ position: { x: 2, y: 2 } });
     await expect(rightControls).toHaveCSS('opacity', '1');
     for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
