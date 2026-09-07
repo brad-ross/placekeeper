@@ -1,5 +1,8 @@
 import { createRoot } from 'react-dom/client';
 import { ProductionReviewApp, type ProductionSessionApi } from '../../../apps/web/src/app/ProductionReviewApp.js';
+import { RuntimeProductionReviewApp } from '../../../apps/web/src/production-entry.js';
+import type { HostRuntime, HostRuntimeBootstrap } from '../../../apps/web/src/host/runtime.js';
+import { MemoryReviewLocationHistory } from '../../../apps/web/src/review/review-location-history.js';
 import { createPortal } from 'react-dom';
 import { useRef, useState, useSyncExternalStore } from 'react';
 import { PdfZoomMode } from '@embedpdf/models';
@@ -1095,4 +1098,54 @@ function HostReattachmentPreview() {
   </>;
 }
 
-createRoot(root).render(previewParameters.has('host-reattach') ? <HostReattachmentPreview /> : <Harness />);
+function DeferredHostHistoryPreview() {
+  const fixture = useRef<{
+    runtime: HostRuntime;
+    release: () => void;
+  } | null>(null);
+  if (fixture.current === null) {
+    const state = createReviewState({
+      sessionId: '00000000-0000-4000-8000-000000000301',
+      source: { fileId: '00000000-0000-4000-8000-000000000302', digest: 'a'.repeat(64), byteLength: 12 },
+    });
+    const scope = { documentTitle: 'reference-navigation.pdf', launchSurface: 'macos' as const };
+    const saveStatus = {
+      destination: { phase: 'none' as const, generation: 0 as const },
+      sync: { phase: 'clean' as const, desiredRevision: 0, savedRevision: 0 },
+    };
+    const bootstrap: HostRuntimeBootstrap = {
+      sessionId: state.sessionId, generation: state.workflow.documentGeneration, revision: state.revision,
+      session: { sessionId: state.sessionId }, state, scope, saveStatus,
+      viewerAssets: {
+        documentUrl: '/test/fixtures/pdfs/reference-navigation.pdf',
+        pdfiumWasm: '/dist/web/pdfium.wasm', workerUrl: '/dist/web/pdfium-worker.js',
+      },
+      resourcePolicy: { host: 'browser', origin: window.location.origin },
+      locationHistory: new MemoryReviewLocationHistory(),
+    };
+    let release!: () => void;
+    const ready = new Promise<HostRuntimeBootstrap>((resolve) => { release = () => resolve(bootstrap); });
+    const unavailable = async (): Promise<never> => { throw new Error('Unused host history fixture operation'); };
+    fixture.current = {
+      release,
+      runtime: {
+        host: 'macos', bootstrap: () => ready, subscribeInvalidations: () => () => undefined,
+        scope: async () => scope, saveStatus: async () => saveStatus,
+        command: unavailable, saveProposal: unavailable, chooseCopy: unavailable,
+        chooseFolder: unavailable, chooseOriginal: unavailable, retrySave: unavailable,
+        locateSave: unavailable, exportReviewedCopy: unavailable, forwardSyncTex: unavailable,
+        reverseSyncTex: unavailable, dispose: () => undefined,
+      },
+    };
+  }
+  const activeFixture = fixture.current;
+  if (activeFixture === null) throw new Error('Host history fixture is missing');
+  return <>
+    <button type="button" style={{ position: 'fixed', bottom: 10, left: 10, zIndex: 1000 }}
+      onClick={activeFixture.release}>Finish host bootstrap</button>
+    <RuntimeProductionReviewApp runtime={activeFixture.runtime} loadingDocumentTitle="Loading history fixture" />
+  </>;
+}
+
+createRoot(root).render(previewParameters.has('host-history') ? <DeferredHostHistoryPreview />
+  : previewParameters.has('host-reattach') ? <HostReattachmentPreview /> : <Harness />);

@@ -498,6 +498,32 @@ test("uses PDF metadata for the tab title and the filename when metadata is abse
   await expect(page).toHaveTitle("plain-text.pdf");
 });
 
+test('records links opened from References in Main document history', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFreshProductionFixture(page, referencePdf, 'Reference link history launch failed');
+  const main = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
+  await openLinkInReferences(page, main.getByRole('button', {
+    name: 'Open PDF link to Primary result, Page 2',
+  }));
+  await expectReferenceReady(page, page.getByRole('tab', { name: /Primary result/u }));
+  const link = page.locator('[data-reference-pdf-viewport]').getByRole('button', {
+    name: 'Open PDF link to Target-to-target detail link, Page 3',
+  });
+  await link.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  await link.click();
+  await page.getByRole('menuitem', { name: 'Open in main document', exact: true }).click();
+  await expect.poll(() => currentPageText(page)).toBe('3 / 4');
+  const back = page.getByRole('button', { name: 'Back in document history' });
+  await expect(back).toBeVisible();
+  await expect(back).toBeEnabled();
+  await back.click();
+  await expect.poll(() => currentPageText(page)).toBe('1 / 4');
+  const forward = page.getByRole('button', { name: 'Forward in document history' });
+  await expect(forward).toBeEnabled();
+  await forward.click();
+  await expect.poll(() => currentPageText(page)).toBe('3 / 4');
+});
+
 test('keeps toolbar icons visible throughout document-history navigation', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, 'Toolbar icon continuity launch failed');

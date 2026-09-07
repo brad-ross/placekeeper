@@ -82,7 +82,8 @@ export interface NavigationCoordinatorDependencies {
   readonly setCurrentOutlineItemId: (identity: string | null) => void;
   /** Active document page count used to rehydrate generation-free destinations. */
   readonly getPageCount: () => number;
-  readonly locationHistory?: ReviewLocationHistoryPort;
+  /** May become available when a host's loading shell finishes bootstrapping. */
+  readonly locationHistory?: ReviewLocationHistoryPort | undefined;
   readonly resolvePortableItem?: (itemId: string) => {
     readonly pageIndex: number;
     readonly point: PdfNaturalPoint | null;
@@ -1635,8 +1636,11 @@ export class NavigationCoordinator {
     });
     const applied = await apply();
     if (!this.isCurrent(operation)) return null;
+    // The viewer verifies the destination before reporting success. Layout can
+    // briefly prevent a fresh capture; that must not discard a completed jump
+    // or its Back entry after the document has already moved.
     const settledLocation = applied
-      ? settledLocationAfterApply?.() ?? main.captureLocation()
+      ? settledLocationAfterApply?.() ?? main.captureLocation() ?? destination
       : null;
     this.dependencies.dispatch({
       type: 'complete-main-jump',

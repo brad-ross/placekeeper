@@ -448,6 +448,33 @@ describe('document-scoped navigation coordinator', () => {
     expect(browser.history.push).toHaveBeenCalledOnce();
   });
 
+  it.each(['main', 'reference'] as const)(
+    'records a link from %s in Main history when verified navigation precedes geometry recapture',
+    async (sourceScope) => {
+      const browser = locationHistory();
+      const run = harness({ locationHistory: browser });
+      run.coordinator.startLocationHistory();
+      if (sourceScope === 'reference') {
+        await run.coordinator.openReference(target(2), { label: 'Reference', pageContext: 'Page 3' });
+      }
+      const origin = location(1, 90, 1.3);
+      run.main.set(origin);
+      const request = linkRequest(5, sourceScope);
+      expect(run.coordinator.requestLink(request)).toBe(true);
+      vi.mocked(run.main.controls.captureLocation)
+        .mockReturnValueOnce(origin)
+        .mockReturnValueOnce(null);
+
+      expect(await run.coordinator.chooseLink('main', request)).toBe(true);
+      expect(run.main.controls.applyTarget).toHaveBeenCalledOnce();
+      expect(run.state().mainHistory.entries).toEqual([origin, location(5)]);
+      expect(browser.history.push).toHaveBeenCalledExactlyOnceWith({ kind: 'page', page: 6 });
+      expect(browser.history.snapshot().canBack).toBe(true);
+      expect(await run.coordinator.historyBack()).toBe(true);
+      expect(browser.history.back).toHaveBeenCalledOnce();
+    },
+  );
+
   it('keeps an item fragment through zoom settling and clears it only after moving away', async () => {
     const itemId = '00000000-0000-4000-8000-000000000055';
     const browser = locationHistory();
