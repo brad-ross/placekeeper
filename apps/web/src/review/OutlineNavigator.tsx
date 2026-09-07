@@ -43,6 +43,17 @@ export function OutlineNavigator({
     return <p className="workspace-state" data-outline-state="unavailable">Outline unavailable.</p>;
   }
 
+  // Resolve presentation only: collapsing a branch does not change the PDF location.
+  const visibleCurrentItem = (items: readonly PdfOutlineItem[]): string | null => {
+    for (const item of items) {
+      if (item.id === currentItemId) return item.id;
+      const child = visibleCurrentItem(item.children);
+      if (child !== null) return expandedItemIds.has(item.id) ? child : item.id;
+    }
+    return null;
+  };
+  const highlightedItemId = visibleCurrentItem(discovery.items);
+
   const flat = discovery.items.every((item) => item.children.length === 0);
   const toggle = (id: string) => {
     const next = new Set(expandedItemIds);
@@ -90,7 +101,7 @@ export function OutlineNavigator({
           <li key={item.id} data-outline-item={item.id}>
             <div
               className="outline-navigator__row"
-              data-current={currentItemId === item.id ? 'true' : undefined}
+              data-current={highlightedItemId === item.id ? 'true' : undefined}
             >
               {hasChildren ? (
                 <ReviewTooltipButton
@@ -110,7 +121,7 @@ export function OutlineNavigator({
                 className="outline-navigator__destination"
                 aria-label={destinationLabel}
                 title={item.target === null ? `${destinationLabel} is unavailable` : `Go to ${destinationLabel}`}
-                aria-current={currentItemId === item.id ? 'location' : undefined}
+                aria-current={highlightedItemId === item.id ? 'location' : undefined}
                 aria-disabled={item.target === null ? true : undefined}
                 disabled={item.target === null}
                 inert={item.target === null}
