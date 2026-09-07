@@ -597,11 +597,34 @@ export function viewerResourcePoliciesEqual(
     && first.resources.worker === second.resources.worker;
 }
 
+// Scope responses are parsed JSON records. Compare all fields, including nested
+// observation identities and lease timestamps, without depending on key order.
+// An unknown/new response field conservatively triggers a publication as well.
+function jsonValuesEqual(current: unknown, next: unknown): boolean {
+  if (current === next) return true;
+  if (Array.isArray(current) !== Array.isArray(next)) return false;
+  if (typeof current !== 'object' || current === null
+    || typeof next !== 'object' || next === null) return false;
+  const currentRecord = current as Record<string, unknown>;
+  const nextRecord = next as Record<string, unknown>;
+  const keys = Object.keys(currentRecord);
+  return keys.length === Object.keys(nextRecord).length
+    && keys.every((key) => Object.hasOwn(nextRecord, key)
+      && jsonValuesEqual(currentRecord[key], nextRecord[key]));
+}
+
+export function updateProductionScope(
+  current: ProductionScope,
+  next: ProductionScope,
+): ProductionScope {
+  return jsonValuesEqual(current, next) ? current : next;
+}
+
 function updateCodexContext(
   current: LiveContextBindingStatus | undefined,
   next: LiveContextBindingStatus,
 ): LiveContextBindingStatus {
-  return JSON.stringify(current) === JSON.stringify(next) ? current ?? next : next;
+  return jsonValuesEqual(current, next) ? current ?? next : next;
 }
 
 export function ProductionReviewApp(props: ProductionReviewAppProps) {
@@ -911,7 +934,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           }),
         ]);
         if (!stopped && requestedStateKey === reviewStateRequestKey(stateRef.current)) {
-          setScope(next);
+          setScope((current) => updateProductionScope(current, next));
           const nextContext = next.launchSurface === 'codex'
             ? next.codexContext ?? UNAVAILABLE_CODEX_CONTEXT
             : UNAVAILABLE_CODEX_CONTEXT;
@@ -1925,59 +1948,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       <ReviewShell
         state={state}
         documentTitle={scope.documentTitle}
-        savedLabel={exportOnly
-          ? 'Export to keep your annotations'
-          : state.workflow.mode === 'generated-output' ? 'Protected review state' : 'Saved'}
-        savePhase={exportOnly
-          ? 'not-saved'
-          : state.workflow.mode === 'generated-output' ? 'clean' : saveStatus.sync.phase}
-        exportOnly={exportOnly}
-        {...(!exportOnly && state.workflow.mode !== 'generated-output'
-          && saveStatus.sync.phase === 'not-saved' && saveStatus.destination.phase === 'active'
-          ? { saveRecovery: {
-              pending: destinationEstablishing,
-              ...(destinationError === undefined ? {} : { error: destinationError }),
-              onRetry: retrySave,
-              onSaveCopy: () => openCopyDialog('menu'),
-            } }
-          : {})}
-        savePendingDestination={
-          state.workflow.mode !== 'generated-output'
-          && scope.sourceDisposition === 'remote-temporary'
-          && saveStatus.destination.phase === 'none'
-          && saveStatus.sync.phase === 'not-saved'
-        }
-        saveOptionsOpen={state.workflow.mode === 'generated-output' || exportOnly
-          ? false
-          : destinationDialog !== null}
-        {...(state.workflow.mode === 'generated-output' || exportOnly
-          ? {}
-          : { onSaveOptions: () => openCopyDialog("menu") })}
         generationRefreshStatus={props.generationRefreshStatus ?? 'idle'}
         locationRestoreStatus={locationRestoreStatus}
         toolError={pdfCopyError ?? commandError}
         commandNotice={commandNotice}
-        onSelectionPageLimitExceeded={() => setCommandError(PDF_SELECTION_PAGE_LIMIT_MESSAGE)}
-        onCopySelection={copyMainSelectionFromPalette}
-        pdfCopyOwner={pdfCopyOwner}
-        pdfCopySnapshots={pdfCopySnapshots}
-        pdfCopyOwnerIndicatorVisible={pdfCopyOwnerIndicatorVisible}
-        pdfCopyAnnouncement={pdfCopyAnnouncement}
-        onExportReviewedCopy={(confirmPossiblyStale) => {
-          const method = props.api.exportReviewedCopy;
-          if (method === undefined) return Promise.reject(new Error('Reviewed export is unavailable.'));
-          return method(confirmPossiblyStale);
-        }}
-        {...(viewerControlsRef.current === undefined ? {} : { viewerControls: viewerControlsRef.current })}
-        {...(viewerFraming === undefined ? {} : { viewerFraming })}
-        {...(mainNavigation === null ? {} : { viewerNavigation: mainNavigation })}
-        viewerState={viewerState}
-        workspaceOpen={anyTrayOpen}
-        referenceLayoutState={referenceLayoutState}
-        rightWorkspaceMode={rightWorkspaceMode}
-        search={searchWorkspace}
-        viewerNavigationIntentToken={searchNavigationIntentToken}
-        onCommitMainFramingPositionChange={onCommitMainFramingPositionChange}
         {...(props.onCommandSurfaceChange === undefined
           ? {}
           : { onCommandSurfaceChange: props.onCommandSurfaceChange })}
@@ -1987,33 +1961,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         {...(props.accessibilityTransition === undefined
           ? {}
           : { accessibilityTransition: props.accessibilityTransition })}
-        onReferenceLayoutAction={dispatchLayout}
-        navigationState={navigationState}
-        referenceTabs={navigationState.tabs.map((tab) => ({
-          identity: tab.identity,
-          label: tab.label ?? `Page ${tab.originalTarget.pageIndex + 1}`,
-          pageContext: tab.pageContext ?? `Page ${tab.originalTarget.pageIndex + 1}`,
-        }))}
-        pendingReference={pendingReference}
-        referenceReturn={activeReferenceReturn}
-        outlineDiscovery={outlineDiscovery}
-        currentOutlineItemId={currentOutlineItemId}
-        linkActionRequest={linkActionRequest}
-        navigationAnnouncement={navigationAnnouncement}
         {...(props.hostExportRequestToken === undefined ? {} : {
           documentActionsRequestToken: props.hostExportRequestToken,
         })}
         {...(props.onHostExportRequestHandled === undefined ? {} : {
           onDocumentActionsRequestHandled: props.onHostExportRequestHandled,
         })}
-        canNavigateBack={locationHistory === undefined
-          ? navigationState.mainHistory.index > 0
-          : locationHistorySnapshot.canBack}
-        canNavigateForward={locationHistory === undefined
-          ? navigationState.mainHistory.index >= 0
-            && navigationState.mainHistory.index < navigationState.mainHistory.entries.length - 1
-          : locationHistorySnapshot.canForward}
-        documentNavigationPending={navigationState.pendingMainNavigation !== null}
         {...(scope.launchSurface === 'codex'
           ? { codexContext: visibleCodexContext(codexContext, state) ?? UNAVAILABLE_CODEX_CONTEXT }
           : {})}
@@ -2046,112 +1999,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             writeText: writePlacekeeperLink,
           },
         })}
-        onLinkActionChoose={(choice, request) => {
-          if (authoringActiveRef.current && choice === 'references') return;
-          void navigationCoordinator.chooseLink(choice, request, {
-            preserveWorkspace: authoringActiveRef.current,
-          });
-        }}
-        onLinkActionDismiss={(request) => navigationCoordinator.dismissLink(request)}
-        {...(copyLinkForLinkAction === undefined ? {} : { copyLinkForLinkAction })}
-        onNavigateBack={() => {
-          void navigationCoordinator.historyBack(
-            authoringActiveRef.current ? authoringViewportRef.current ?? undefined : undefined,
-          );
-        }}
-        onNavigateForward={() => {
-          void navigationCoordinator.historyForward(
-            authoringActiveRef.current ? authoringViewportRef.current ?? undefined : undefined,
-          );
-        }}
-        onWorkspaceModeChange={(mode) => {
-          if (mode === 'references') {
-            void navigationCoordinator.openReferencesWorkspace();
-            return;
-          }
-          if (mode === 'search') {
-            searchRequestedRef.current = true;
-            void searchControllerRef.current?.prepare();
-          }
-          setRightWorkspaceMode(mode);
-          dispatchNavigation({ type: 'select-workspace-mode', mode });
-          if (referenceLayoutState.regime !== 'narrow' || !referenceLayoutState.narrowOpen) {
-            dispatchLayout({ type: 'show-right-workspace' });
-          }
-          dispatchLayout({ type: 'focus-surface', surface: 'right' });
-        }}
-        onWorkspaceDismiss={() => {
-          dispatchLayout({ type: 'hide-references' });
-          dispatchNavigation({
-            type: 'hide-workspace',
-            focusReturnToken: referenceLayoutState.regime === 'narrow'
-              || referenceLayoutState.referenceDock === 'bottom'
-              ? BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN
-              : RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
-          });
-        }}
-        onReferenceTabActivate={(identity) => {
-          void navigationCoordinator.switchReference(identity);
-        }}
-        onReferenceTabClose={(identity) => {
-          void navigationCoordinator.closeReference(identity);
-        }}
-        onReferenceSendToMain={(identity) => {
-          void navigationCoordinator.sendToMain(identity);
-        }}
-        onReferenceRetry={() => { void navigationCoordinator.retryReference(); }}
-        onReferenceReturn={(identity) => {
-          void navigationCoordinator.returnToReference(identity);
-        }}
-        onOutlineActivate={(item) => {
-          if (item.target === null) navigationCoordinator.unavailableDestination();
-          else void navigationCoordinator.navigateMainTarget(item.target, 'outline');
-        }}
-        onOutlineReference={(item) => {
-          if (item.target === null) return;
-          void navigationCoordinator.openReference(item.target, {
-            label: item.label,
-            pageContext: item.pageContext ?? `Page ${item.target.pageIndex + 1}`,
-          });
-        }}
-        {...(copyLinkForOutlineItem === undefined ? {} : { copyLinkForOutlineItem })}
-        onReferenceViewportHost={setReferenceViewportHost}
-        onWorkspaceModeFocusTokenChange={(mode, token) => {
-          const current = navigationStateRef.current.workspace.modes[mode];
-          dispatchNavigation({
-            type: 'remember-workspace-view',
-            mode,
-            logicalScrollToken: current.logicalScrollToken,
-            logicalFocusToken: token,
-          });
-          dispatchLayout({
-            type: 'focus-surface',
-            surface: mode === 'references' ? 'references' : 'right',
-          });
-        }}
-        selectionUpdate={selectionUpdate}
-        selectionPlacement={selectionPlacement}
-        caretAnchor={caret}
-        caretPlacement={caretPlacement}
-        pageMenu={pageMenu === null ? null : {
-          invocationId: pageMenu.invocationId,
-          placement: pageMenu.placement,
-          pageIndex: pageMenu.point.pageIndex,
-          position: { x: pageMenu.point.x, y: pageMenu.point.y, width: 18, height: 18 },
-        }}
-        {...(props.onReverseSyncTex === undefined ? {} : {
-          onGoToSource: (menu: {
-            readonly pageIndex: number;
-            readonly position: { readonly x: number; readonly y: number };
-          }) => {
-            requestReverseSyncTex({
-              pageIndex: menu.pageIndex,
-              point: { x: menu.position.x, y: menu.position.y },
-            });
-          },
-        })}
-        placedPageNote={placedPageNote}
-        keyboardPageNoteActive={keyboardPageNoteActive}
         existingAnnotations={existingAnnotations}
         activeItemId={activeItemId ?? null}
         {...(correspondingItemId === undefined ? {} : { correspondingItemId })}
@@ -2162,121 +2009,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           publishCorrespondence();
         }}
         onActiveItemChange={setActiveItemId}
-        onRequestKeyboardPageNote={() => {
-          if (pageMenu) placementAuthority.current.dismissContext(pageMenu.invocationId);
-          setPageMenu(null);
-          placementAuthority.current.clearKeyboardCursor();
-          setKeyboardPageNoteActive(true);
-        }}
-        onCancelKeyboardPageNote={() => {
-          placementAuthority.current.clearKeyboardCursor();
-          setKeyboardPageNoteActive(false);
-        }}
-        onPageMenuDismiss={(invocationId) => {
-          placementAuthority.current.dismissContext(invocationId);
-          setPageMenu((current) => current?.invocationId === invocationId ? null : current);
-        }}
-        onPageMenuConsumed={(invocationId) => {
-          const point = placementAuthority.current.consumeContextPoint(invocationId);
-          if (!point) return;
-          setPageMenu(null);
-        }}
-        onPlacedPageNoteConsumed={(token) => {
-          setPlacedPageNote((current) => current?.token === token ? null : current);
-        }}
-        {...(authoringSessionResolution === undefined
-          ? {}
-          : { authoringSessionResolution })}
-        onAuthoringAnchorChange={onAuthoringAnchorChange}
-        onAuthoringActiveChange={(active) => { authoringActiveRef.current = active; }}
-        onAuthoringPreviewChange={setAuthoringPreview}
-        onAuthoringViewportChange={onAuthoringViewportChange}
-        {...(authoringAnchorNavigation === null ? {} : {
-          authoringAnchorNavigation: {
-            ...authoringAnchorNavigation,
-            onReturn: () => {
-              void returnToAuthoringAnchor(authoringAnchorNavigation.token);
-            },
-            onCancelReturn: () => cancelAuthoringAnchorReturn(authoringAnchorNavigation.token),
-          },
-        })}
-        onPageNoteComposerComplete={() => {
-          placementAuthority.current.clear();
-          setPageMenu(null);
-          setKeyboardPageNoteActive(false);
-        }}
-        onSelectionConsumed={(generation) => {
-          const currentSelection = selectionUpdateRef.current;
-          if (currentSelection.kind !== "reliable" || currentSelection.generation !== generation) return;
-          const registry = viewerRegistry.current;
-          const documentId = registry?.getStore().getState().core.activeDocumentId;
-          if (!documentId) return;
-          registry.getPlugin<SelectionPlugin>(SelectionPlugin.id)?.provides()?.clear(documentId);
-        }}
-        onCommand={async (command, authority) => {
-          const currentState = stateRef.current;
-          const currentAuthority = authoringAuthorityFor(
-            currentState,
-            documentGenerationRef.current,
-          );
-          if (
-            authority !== undefined
-            && !authoringAuthorityMatches(authority, currentAuthority)
-          ) {
-            return {
-              accepted: false,
-              state: currentState,
-              message: 'This draft belonged to the previous document and was not applied.',
-              reason: 'stale-authoring',
-            };
-          }
-          const gated = gateReviewCommand(
-            currentState,
-            saveStatus,
-            command,
-            exportOnly
-              ? 'ephemeral'
-              : scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local',
-          );
-          if (gated.kind === "choose-destination") {
-            openCopyDialog("first-annotation", {
-              command,
-              authority: authority ?? currentAuthority,
-            });
-            return {
-              accepted: false,
-              state: currentState,
-              message: "Choose where annotations should be saved.",
-              reason: 'save-destination',
-            };
-          }
-          const result = await props.api.command(command);
-          if (
-            authority !== undefined
-            && !authoringAuthorityMatches(
-              authority,
-              authoringAuthorityFor(stateRef.current, documentGenerationRef.current),
-            )
-          ) {
-            return {
-              accepted: false,
-              state: stateRef.current,
-              message: 'This draft belonged to the previous document and was not applied.',
-              reason: 'stale-authoring',
-            };
-          }
-          const next = "accepted" in result ? result.state : result;
-          setState(next);
-          if (!("accepted" in result)) {
-            const nextSaveStatus = await props.api.saveStatus();
-            setSaveStatus(nextSaveStatus);
-            if (gated.kind === 'submit-and-choose-destination') {
-              openCopyDialog("first-annotation");
-            }
-          }
-          setCommandError("accepted" in result ? result.message : null);
-          return result;
-        }}
         onNavigate={(item) => {
           const target = reviewItemNavigationTarget(item);
           if (target === null) return;
@@ -2295,6 +2027,307 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             point: { x: annotation.rect.x, y: annotation.rect.y },
             linkFallbackNotice: 'External PDF annotations use page links.',
           });
+        }}
+        save={{
+          savedLabel: exportOnly
+            ? 'Export to keep your annotations'
+            : state.workflow.mode === 'generated-output' ? 'Protected review state' : 'Saved',
+          savePhase: exportOnly
+            ? 'not-saved'
+            : state.workflow.mode === 'generated-output' ? 'clean' : saveStatus.sync.phase,
+          exportOnly,
+          ...(!exportOnly && state.workflow.mode !== 'generated-output'
+            && saveStatus.sync.phase === 'not-saved' && saveStatus.destination.phase === 'active'
+            ? {
+              saveRecovery: {
+                pending: destinationEstablishing,
+                ...(destinationError === undefined ? {} : { error: destinationError }),
+                onRetry: retrySave,
+                onSaveCopy: () => openCopyDialog('menu'),
+              }
+            }
+            : {}),
+          savePendingDestination: state.workflow.mode !== 'generated-output'
+            && scope.sourceDisposition === 'remote-temporary'
+            && saveStatus.destination.phase === 'none'
+            && saveStatus.sync.phase === 'not-saved',
+          saveOptionsOpen: state.workflow.mode === 'generated-output' || exportOnly
+            ? false
+            : destinationDialog !== null,
+          ...(state.workflow.mode === 'generated-output' || exportOnly
+            ? {}
+            : { onSaveOptions: () => openCopyDialog("menu") }),
+          onExportReviewedCopy: (confirmPossiblyStale) => {
+            const method = props.api.exportReviewedCopy;
+            if (method === undefined) return Promise.reject(new Error('Reviewed export is unavailable.'));
+            return method(confirmPossiblyStale);
+          },
+        }}
+        selection={{
+          onSelectionPageLimitExceeded: () => setCommandError(PDF_SELECTION_PAGE_LIMIT_MESSAGE),
+          onCopySelection: copyMainSelectionFromPalette,
+          pdfCopyOwner,
+          pdfCopySnapshots,
+          pdfCopyOwnerIndicatorVisible,
+          pdfCopyAnnouncement,
+          selectionUpdate,
+          selectionPlacement,
+          caretAnchor: caret,
+          caretPlacement,
+          onSelectionConsumed: (generation) => {
+            const currentSelection = selectionUpdateRef.current;
+            if (currentSelection.kind !== "reliable" || currentSelection.generation !== generation) return;
+            const registry = viewerRegistry.current;
+            const documentId = registry?.getStore().getState().core.activeDocumentId;
+            if (!documentId) return;
+            registry.getPlugin<SelectionPlugin>(SelectionPlugin.id)?.provides()?.clear(documentId);
+          },
+        }}
+        authoring={{
+          pageMenu: pageMenu === null ? null : {
+            invocationId: pageMenu.invocationId,
+            placement: pageMenu.placement,
+            pageIndex: pageMenu.point.pageIndex,
+            position: { x: pageMenu.point.x, y: pageMenu.point.y, width: 18, height: 18 },
+          },
+          ...(props.onReverseSyncTex === undefined ? {} : {
+            onGoToSource: (menu: {
+              readonly pageIndex: number;
+              readonly position: { readonly x: number; readonly y: number };
+            }) => {
+              requestReverseSyncTex({
+                pageIndex: menu.pageIndex,
+                point: { x: menu.position.x, y: menu.position.y },
+              });
+            },
+          }),
+          placedPageNote,
+          keyboardPageNoteActive,
+          onRequestKeyboardPageNote: () => {
+            if (pageMenu) placementAuthority.current.dismissContext(pageMenu.invocationId);
+            setPageMenu(null);
+            placementAuthority.current.clearKeyboardCursor();
+            setKeyboardPageNoteActive(true);
+          },
+          onCancelKeyboardPageNote: () => {
+            placementAuthority.current.clearKeyboardCursor();
+            setKeyboardPageNoteActive(false);
+          },
+          onPageMenuDismiss: (invocationId) => {
+            placementAuthority.current.dismissContext(invocationId);
+            setPageMenu((current) => current?.invocationId === invocationId ? null : current);
+          },
+          onPageMenuConsumed: (invocationId) => {
+            const point = placementAuthority.current.consumeContextPoint(invocationId);
+            if (!point) return;
+            setPageMenu(null);
+          },
+          onPlacedPageNoteConsumed: (token) => {
+            setPlacedPageNote((current) => current?.token === token ? null : current);
+          },
+          ...(authoringSessionResolution === undefined
+            ? {}
+            : { authoringSessionResolution }),
+          onAuthoringAnchorChange,
+          onAuthoringActiveChange: (active) => { authoringActiveRef.current = active; },
+          onAuthoringPreviewChange: setAuthoringPreview,
+          onAuthoringViewportChange,
+          ...(authoringAnchorNavigation === null ? {} : {
+            authoringAnchorNavigation: {
+              ...authoringAnchorNavigation,
+              onReturn: () => {
+                void returnToAuthoringAnchor(authoringAnchorNavigation.token);
+              },
+              onCancelReturn: () => cancelAuthoringAnchorReturn(authoringAnchorNavigation.token),
+            },
+          }),
+          onPageNoteComposerComplete: () => {
+            placementAuthority.current.clear();
+            setPageMenu(null);
+            setKeyboardPageNoteActive(false);
+          },
+          onCommand: async (command, authority) => {
+            const currentState = stateRef.current;
+            const currentAuthority = authoringAuthorityFor(
+              currentState,
+              documentGenerationRef.current,
+            );
+            if (
+              authority !== undefined
+              && !authoringAuthorityMatches(authority, currentAuthority)
+            ) {
+              return {
+                accepted: false,
+                state: currentState,
+                message: 'This draft belonged to the previous document and was not applied.',
+                reason: 'stale-authoring',
+              };
+            }
+            const gated = gateReviewCommand(
+              currentState,
+              saveStatus,
+              command,
+              exportOnly
+                ? 'ephemeral'
+                : scope.sourceDisposition === 'remote-temporary' ? 'remote-temporary' : 'local',
+            );
+            if (gated.kind === "choose-destination") {
+              openCopyDialog("first-annotation", {
+                command,
+                authority: authority ?? currentAuthority,
+              });
+              return {
+                accepted: false,
+                state: currentState,
+                message: "Choose where annotations should be saved.",
+                reason: 'save-destination',
+              };
+            }
+            const result = await props.api.command(command);
+            if (
+              authority !== undefined
+              && !authoringAuthorityMatches(
+                authority,
+                authoringAuthorityFor(stateRef.current, documentGenerationRef.current),
+              )
+            ) {
+              return {
+                accepted: false,
+                state: stateRef.current,
+                message: 'This draft belonged to the previous document and was not applied.',
+                reason: 'stale-authoring',
+              };
+            }
+            const next = "accepted" in result ? result.state : result;
+            setState(next);
+            if (!("accepted" in result)) {
+              const nextSaveStatus = await props.api.saveStatus();
+              setSaveStatus(nextSaveStatus);
+              if (gated.kind === 'submit-and-choose-destination') {
+                openCopyDialog("first-annotation");
+              }
+            }
+            setCommandError("accepted" in result ? result.message : null);
+            return result;
+          },
+        }}
+        viewer={{
+          ...(viewerControlsRef.current === undefined ? {} : { viewerControls: viewerControlsRef.current }),
+          ...(viewerFraming === undefined ? {} : { viewerFraming }),
+          ...(mainNavigation === null ? {} : { viewerNavigation: mainNavigation }),
+          viewerState,
+          viewerNavigationIntentToken: searchNavigationIntentToken,
+          onCommitMainFramingPositionChange,
+        }}
+        workspace={{
+          workspaceOpen: anyTrayOpen,
+          referenceLayoutState,
+          rightWorkspaceMode,
+          search: searchWorkspace,
+          onReferenceLayoutAction: dispatchLayout,
+          navigationState,
+          referenceTabs: navigationState.tabs.map((tab) => ({
+            identity: tab.identity,
+            label: tab.label ?? `Page ${tab.originalTarget.pageIndex + 1}`,
+            pageContext: tab.pageContext ?? `Page ${tab.originalTarget.pageIndex + 1}`,
+          })),
+          pendingReference,
+          referenceReturn: activeReferenceReturn,
+          outlineDiscovery,
+          currentOutlineItemId,
+          linkActionRequest,
+          navigationAnnouncement,
+          canNavigateBack: locationHistory === undefined
+            ? navigationState.mainHistory.index > 0
+            : locationHistorySnapshot.canBack,
+          canNavigateForward: locationHistory === undefined
+            ? navigationState.mainHistory.index >= 0
+            && navigationState.mainHistory.index < navigationState.mainHistory.entries.length - 1
+            : locationHistorySnapshot.canForward,
+          documentNavigationPending: navigationState.pendingMainNavigation !== null,
+          onLinkActionChoose: (choice, request) => {
+            if (authoringActiveRef.current && choice === 'references') return;
+            void navigationCoordinator.chooseLink(choice, request, {
+              preserveWorkspace: authoringActiveRef.current,
+            });
+          },
+          onLinkActionDismiss: (request) => navigationCoordinator.dismissLink(request),
+          ...(copyLinkForLinkAction === undefined ? {} : { copyLinkForLinkAction }),
+          onNavigateBack: () => {
+            void navigationCoordinator.historyBack(
+              authoringActiveRef.current ? authoringViewportRef.current ?? undefined : undefined,
+            );
+          },
+          onNavigateForward: () => {
+            void navigationCoordinator.historyForward(
+              authoringActiveRef.current ? authoringViewportRef.current ?? undefined : undefined,
+            );
+          },
+          onWorkspaceModeChange: (mode) => {
+            if (mode === 'references') {
+              void navigationCoordinator.openReferencesWorkspace();
+              return;
+            }
+            if (mode === 'search') {
+              searchRequestedRef.current = true;
+              void searchControllerRef.current?.prepare();
+            }
+            setRightWorkspaceMode(mode);
+            dispatchNavigation({ type: 'select-workspace-mode', mode });
+            if (referenceLayoutState.regime !== 'narrow' || !referenceLayoutState.narrowOpen) {
+              dispatchLayout({ type: 'show-right-workspace' });
+            }
+            dispatchLayout({ type: 'focus-surface', surface: 'right' });
+          },
+          onWorkspaceDismiss: () => {
+            dispatchLayout({ type: 'hide-references' });
+            dispatchNavigation({
+              type: 'hide-workspace',
+              focusReturnToken: referenceLayoutState.regime === 'narrow'
+                || referenceLayoutState.referenceDock === 'bottom'
+                ? BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN
+                : RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
+            });
+          },
+          onReferenceTabActivate: (identity) => {
+            void navigationCoordinator.switchReference(identity);
+          },
+          onReferenceTabClose: (identity) => {
+            void navigationCoordinator.closeReference(identity);
+          },
+          onReferenceSendToMain: (identity) => {
+            void navigationCoordinator.sendToMain(identity);
+          },
+          onReferenceRetry: () => { void navigationCoordinator.retryReference(); },
+          onReferenceReturn: (identity) => {
+            void navigationCoordinator.returnToReference(identity);
+          },
+          onOutlineActivate: (item) => {
+            if (item.target === null) navigationCoordinator.unavailableDestination();
+            else void navigationCoordinator.navigateMainTarget(item.target, 'outline');
+          },
+          onOutlineReference: (item) => {
+            if (item.target === null) return;
+            void navigationCoordinator.openReference(item.target, {
+              label: item.label,
+              pageContext: item.pageContext ?? `Page ${item.target.pageIndex + 1}`,
+            });
+          },
+          ...(copyLinkForOutlineItem === undefined ? {} : { copyLinkForOutlineItem }),
+          onReferenceViewportHost: setReferenceViewportHost,
+          onWorkspaceModeFocusTokenChange: (mode, token) => {
+            const current = navigationStateRef.current.workspace.modes[mode];
+            dispatchNavigation({
+              type: 'remember-workspace-view',
+              mode,
+              logicalScrollToken: current.logicalScrollToken,
+              logicalFocusToken: token,
+            });
+            dispatchLayout({
+              type: 'focus-surface',
+              surface: mode === 'references' ? 'references' : 'right',
+            });
+          },
         }}
       >
         {viewer}

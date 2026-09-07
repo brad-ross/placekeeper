@@ -1,6 +1,4 @@
 import { createHash, randomBytes } from "node:crypto";
-import { chmod, open, readFile, rename, rm, type FileHandle } from "node:fs/promises";
-import { join } from "node:path";
 
 import {
   CHROME_RUNTIME_PROTOCOL,
@@ -17,7 +15,9 @@ import {
 } from "../../../../packages/core/src/review-runtime-protocol.js";
 import { deadlineWasSubstantiallyDelayed } from "../../../../packages/core/src/suspend-aware-deadline.js";
 import { CHROME_EXTENSION_ORIGIN } from "./chrome-handoff.js";
-import { ensurePrivateDirectory } from "../recovery/source-snapshot.js";
+import { canonicalJson } from "../runtime/canonical-json.js";
+import { ChromeRuntimeOperationJournal } from "./runtime-operation-journal.js";
+export { ChromeRuntimeOperationJournal } from "./runtime-operation-journal.js";
 
 const SHA256 = /^[a-f0-9]{64}$/u;
 const NON_IDEMPOTENT_METHODS = new Set<ReviewRuntimeBrokerMethod>([
@@ -142,119 +142,6 @@ export class ChromeRuntimeAggregateQuota {
   }
 }
 
-interface OperationRecord {
-  readonly fingerprint: string;
-  readonly result: Promise<unknown>;
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
-}
-
-/** Connection-independent operation results. Production can retain one
- * journal with the service host so dropped native responses replay the result
- * rather than the side effect. */
-export class ChromeRuntimeOperationJournal {
-  readonly #records = new Map<string, OperationRecord>();
-  readonly #admissions = new Map<string, Promise<void>>();
-  readonly #root: string | undefined;
-
-  constructor(options: { readonly root?: string } = {}) {
-    this.#root = options.root;
-  }
-
-  async commit<T>(canonicalKey: string, operationKey: string, payload: unknown, operation: () => Promise<T>): Promise<T> {
-    const key = `${canonicalKey}\0${operationKey}`;
-    const fingerprint = createHash("sha256").update(canonicalJson(payload)).digest("hex");
-    const predecessor = this.#admissions.get(key) ?? Promise.resolve();
-    const { promise: admission, resolve: releaseAdmission } = Promise.withResolvers<void>();
-    this.#admissions.set(key, admission);
-    await predecessor;
-    try {
-      const persisted = this.#root === undefined ? undefined : await this.#readPersisted(key);
-      const existing = this.#records.get(key) ?? persisted;
-      if (existing !== undefined) {
-        if (existing.fingerprint !== fingerprint) throw new Error("idempotency-conflict");
-        return await existing.result as T;
-      }
-      // Persist the fingerprint before executing. If the service exits after
-      // the effect but before its completed result is durable, a restarted
-      // service returns outcome-unknown and never repeats the effect.
-      if (this.#root !== undefined) await this.#persist(key, fingerprint, undefined, "pending");
-      const result = operation();
-      this.#records.set(key, { fingerprint, result });
-      try {
-        const resolved = await result;
-        if (this.#root !== undefined) await this.#persist(key, fingerprint, resolved, "completed");
-        return resolved;
-      } catch (error) {
-        this.#records.delete(key);
-        throw error;
-      }
-    } finally {
-      releaseAdmission();
-      if (this.#admissions.get(key) === admission) this.#admissions.delete(key);
-    }
-  }
-
-  async #readPersisted(key: string): Promise<OperationRecord | undefined> {
-    const path = join(this.#root!, `${createHash("sha256").update(key).digest("hex")}.json`);
-    try {
-      const bytes = await readFile(path);
-      if (bytes.byteLength > 8 * 1024 * 1024) throw new Error("operation-journal-invalid");
-      const value = JSON.parse(bytes.toString("utf8")) as { readonly schemaVersion?: unknown; readonly fingerprint?: unknown; readonly status?: unknown; readonly result?: unknown };
-      if (value.schemaVersion !== 1 || typeof value.fingerprint !== "string" || !SHA256.test(value.fingerprint) ||
-        (value.status !== "pending" && value.status !== "completed")) {
-        throw new Error("operation-journal-invalid");
-      }
-      const record = {
-        fingerprint: value.fingerprint,
-        result: value.status === "completed"
-          ? Promise.resolve(value.result)
-          : Promise.reject(new Error("operation-outcome-unknown")),
-      };
-      record.result.catch(() => undefined);
-      this.#records.set(key, record);
-      return record;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-      throw error;
-    }
-  }
-
-  async #persist(key: string, fingerprint: string, result: unknown, status: "pending" | "completed"): Promise<void> {
-    await ensurePrivateDirectory(this.#root!);
-    const stem = createHash("sha256").update(key).digest("hex");
-    const destination = join(this.#root!, `${stem}.json`);
-    const temporary = join(this.#root!, `.${stem}.${randomBytes(12).toString("hex")}.tmp`);
-    const body = Buffer.from(JSON.stringify({
-      schemaVersion: 1,
-      fingerprint,
-      status,
-      ...(status === "completed" ? { result } : {}),
-    }), "utf8");
-    if (body.byteLength > 8 * 1024 * 1024) throw new Error("operation-result-too-large");
-    let handle: FileHandle | undefined = await open(temporary, "wx", 0o600);
-    try {
-      await handle.writeFile(body);
-      await handle.sync();
-      await handle.close();
-      handle = undefined;
-      await rename(temporary, destination);
-      await chmod(destination, 0o600);
-      const directory = await open(this.#root!, "r");
-      try { await directory.sync(); } finally { await directory.close(); }
-    } catch (error) {
-      await handle?.close().catch(() => undefined);
-      await rm(temporary, { force: true }).catch(() => undefined);
-      throw error;
-    }
-  }
-}
-
 /** Long-lived daemon owner for admission and exactly-once operation records.
  * Native-host processes connect through this authority; they do not own the
  * authoritative counters or replay journal. */
@@ -317,6 +204,8 @@ export interface CanonicalReviewResolution<T> {
  * A source URL identity by itself can never join a review. */
 export class ChromeCanonicalReviewIndex<T> {
   readonly #reviews = new Map<string, Promise<T>>();
+
+  get size(): number { return this.#reviews.size; }
 
   async resolve(input: { readonly sourceIdentity: string; readonly sha256: string; readonly generation: number }, create: () => Promise<T>): Promise<CanonicalReviewResolution<T>> {
     if (!SHA256.test(input.sourceIdentity) || !SHA256.test(input.sha256) ||

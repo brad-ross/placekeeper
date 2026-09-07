@@ -20,6 +20,8 @@ import {
   viewerAssetUrlsEqual,
   viewerResourcePoliciesEqual,
   visibleCodexContext,
+  updateProductionScope,
+  type ProductionScope,
 } from "../src/app/ProductionReviewApp.js";
 import { SaveDestinationDialog } from "../src/save/SaveDestinationDialog.js";
 import {
@@ -40,6 +42,114 @@ import {
   reviewExportPresentation,
 } from "../src/review/DocumentActionsMenu.js";
 import { MemoryReviewLocationHistory } from "../src/review/review-location-history.js";
+
+describe('scope polling identity', () => {
+  const scope: ProductionScope = {
+    documentTitle: 'paper.pdf',
+    sourceDisposition: 'local',
+    sourceDisplayName: 'Paper',
+    sourceRootPath: '/papers',
+    launchSurface: 'codex',
+    codexContext: {
+      status: 'current',
+      identity: {
+        placekeeperSessionId: 'session',
+        documentGeneration: 1,
+        source: { fileId: 'file', digest: 'a'.repeat(64), byteLength: 12 },
+        reviewRevision: 0,
+        stateDigest: 'b'.repeat(64),
+      },
+      leaseExpiresAt: '2026-09-07T13:00:00.000Z',
+    },
+  };
+
+  it('retains the current object for equivalent independently decoded poll responses', () => {
+    const decoded = JSON.parse(JSON.stringify(scope)) as ProductionScope;
+    expect(updateProductionScope(scope, decoded)).toBe(scope);
+    const { documentTitle, ...rest } = decoded;
+    expect(updateProductionScope(scope, { ...rest, documentTitle })).toBe(scope);
+  });
+
+  it('publishes unknown fields when their JSON shape changes', () => {
+    const current = { ...scope, future: [] };
+    const next = { ...scope, future: {} };
+    expect(updateProductionScope(current, next)).toBe(next);
+  });
+
+  it.each([
+    { documentTitle: 'next.pdf' },
+    { sourceDisposition: 'remote-temporary' as const },
+    { sourceDisplayName: 'Next paper' },
+    { sourceRootPath: '/other' },
+    { launchSurface: 'browser' as const },
+    { persistenceMode: 'export-only' as const },
+    { reconnectPending: true as const },
+    { codexContext: { status: 'unbound' as const } },
+  ])('publishes a changed scope field: %j', (change) => {
+    const next = { ...scope, ...change };
+    expect(updateProductionScope(scope, next)).toBe(next);
+  });
+
+  it('publishes renewed leases, identity changes, and removed context', () => {
+    if (scope.codexContext?.status !== 'current') throw new Error('Expected current fixture');
+    const context = scope.codexContext;
+    const identity = context.identity;
+    const contexts = [
+      { ...context, leaseExpiresAt: '2026-09-07T13:01:00.000Z' },
+      ...[
+        { placekeeperSessionId: 'other' },
+        { documentGeneration: 2 },
+        { reviewRevision: 1 },
+        { stateDigest: 'c'.repeat(64) },
+        { source: { ...identity.source, digest: 'd'.repeat(64) } },
+        { source: { ...identity.source, fileId: 'other' } },
+        { source: { ...identity.source, byteLength: 13 } },
+      ].map((change) => ({ ...context, identity: { ...identity, ...change } })),
+    ];
+    for (const codexContext of contexts) {
+      const next = { ...scope, codexContext };
+      expect(updateProductionScope(scope, next)).toBe(next);
+    }
+    const { codexContext: _context, ...withoutContext } = scope;
+    expect(updateProductionScope(scope, withoutContext)).toBe(withoutContext);
+  });
+
+  it('retains pending/refreshing/unavailable identities but publishes every changed lease or status detail', () => {
+    if (scope.codexContext?.status !== 'current') throw new Error('Expected current fixture');
+    const lastVerified = scope.codexContext.identity;
+    type Context = NonNullable<ProductionScope['codexContext']>;
+    const pending = { status: 'pending' as const, placekeeperSessionId: 'session', documentGeneration: 1, expiresAt: '2026-09-07T13:00:00.000Z' };
+    const refreshing = { status: 'refreshing' as const, placekeeperSessionId: 'session', documentGeneration: 1, lastVerified };
+    const unavailable = { status: 'unavailable' as const, reason: 'expired' as const, lastVerified };
+    const cases: readonly (readonly [Context, readonly Context[]])[] = [
+      [pending, [
+        { ...pending, placekeeperSessionId: 'other' },
+        { ...pending, documentGeneration: 2 },
+        { ...pending, expiresAt: '2026-09-07T13:01:00.000Z' },
+      ]],
+      [refreshing, [
+        { ...refreshing, placekeeperSessionId: 'other' },
+        { ...refreshing, documentGeneration: 2 },
+        { ...refreshing, lastVerified: { ...lastVerified, reviewRevision: 1 } },
+        { status: 'refreshing', placekeeperSessionId: 'session', documentGeneration: 1 },
+      ]],
+      [unavailable, [
+        { ...unavailable, reason: 'unauthorized' },
+        { ...unavailable, lastVerified: { ...lastVerified, reviewRevision: 1 } },
+        { status: 'unavailable', reason: 'expired' },
+      ]],
+      [{ status: 'unbound' }, [pending]],
+    ];
+    for (const [codexContext, changedContexts] of cases) {
+      const current = { ...scope, codexContext };
+      expect(updateProductionScope(current, JSON.parse(JSON.stringify(current)))).toBe(current);
+      for (const changedContext of changedContexts) {
+        const next = { ...scope, codexContext: changedContext };
+        expect(updateProductionScope(current, next)).toBe(next);
+      }
+    }
+  });
+});
 
 describe("one production review tree", () => {
   it('keeps equivalent runtime viewer authority stable across review-state snapshots', () => {

@@ -28,6 +28,8 @@ import type {
   ChromeRuntimeStagedReview,
 } from "../browser/chrome-runtime.js";
 
+import { canonicalJson } from "../runtime/canonical-json.js";
+
 export type MacosRuntimeBackend = ChromeRuntimeBackend;
 export type MacosRuntimeTrustedProjection = ChromeRuntimeProjection;
 export type { MacosRuntimeProjection };
@@ -77,13 +79,6 @@ export interface MacosRuntimeManagerOptions {
   readonly maxResources?: number;
   readonly maxResourcesPerHelper?: number;
   readonly maxRetainedRequestsPerHelper?: number;
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
 }
 
 function opaque(prefix: string): string {

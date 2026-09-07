@@ -427,7 +427,8 @@ export class SessionBroker {
   readonly #reconnectBindingsByCapabilityHash = new Map<string, ReconnectBindingMetadata>();
   readonly #pendingRestartReconnects = new Map<string, PendingRestartReconnect>();
   readonly #restartReconnectWaiters = new Map<string, Set<() => void>>();
-  readonly #sessionEndListeners = new Set<(sessionId: string) => void>();
+  readonly #sessionEndListeners = new Set<(sessionId: string, reason: "ended" | "shutdown") => void>();
+  readonly #snapshotStores = new Map<string, DraftSnapshotStore>();
   readonly #generationListeners = new Set<(event: DocumentGenerationEvent) => void>();
   #sourceWorkInterruptionCollector: SourceWorkInterruptionCollector | undefined;
   readonly #privateSourceRoots = new Set<string>();
@@ -489,7 +490,7 @@ export class SessionBroker {
     );
   }
 
-  onSessionEnd(listener: (sessionId: string) => void): () => void {
+  onSessionEnd(listener: (sessionId: string, reason: "ended" | "shutdown") => void): () => void {
     this.#sessionEndListeners.add(listener);
     return () => this.#sessionEndListeners.delete(listener);
   }
@@ -514,37 +515,47 @@ export class SessionBroker {
   }
 
   #store(sessionId: string): DraftSnapshotStore {
-    return new DraftSnapshotStore(
-      join(this.recoveryRoot, sessionId),
-      this.#snapshotHooks,
-    );
+    const active = this.#activeById.get(sessionId);
+    if (active !== undefined) return active.store;
+    let store = this.#snapshotStores.get(sessionId);
+    if (store === undefined) {
+      store = new DraftSnapshotStore(join(this.recoveryRoot, sessionId), this.#snapshotHooks);
+    }
+    // This cache only avoids repeated cleanup scans; eviction loses no state.
+    this.#snapshotStores.delete(sessionId);
+    this.#snapshotStores.set(sessionId, store);
+    if (this.#snapshotStores.size > 256) {
+      this.#snapshotStores.delete(this.#snapshotStores.keys().next().value!);
+    }
+    return store;
   }
 
-  async initialize(): Promise<void> {
+  async #initializeRecoveryRoot(): Promise<void> {
     await ensurePrivateDirectory(this.recoveryRoot);
     this.#canonicalRecoveryRoot = await realpath(this.recoveryRoot);
     this.#privateSourceRoots.add(this.#canonicalRecoveryRoot);
     await this.restartReconnects.initialize();
+  }
+
+  async #initializeRecoveryStores(): Promise<DraftSnapshotStore[]> {
+    await this.#initializeRecoveryRoot();
     const entries = await readdir(this.recoveryRoot, { withFileTypes: true });
-    await Promise.all(
-      entries
-        .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-        .map((entry) =>
-          this.#store(entry.name).initialize(),
-        ),
-    );
+    const stores = entries
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+      .map((entry) => this.#store(entry.name));
+    await Promise.all(stores.map((store) => store.initialize()));
+    return stores;
+  }
+
+  async initialize(): Promise<void> {
+    await this.#initializeRecoveryStores();
   }
 
   async #recoverableDrafts(): Promise<RecoverableDraftV3[]> {
-    await this.initialize();
-    const entries = await readdir(this.recoveryRoot, { withFileTypes: true });
-    const recovered = await Promise.all(
-      entries
-        .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-        .map((entry) =>
-          this.#store(entry.name).recover(),
-        ),
-    );
+    // Finish cleanup for every directory before reading any drafts, and reuse
+    // this enumeration rather than immediately traversing the root again.
+    const stores = await this.#initializeRecoveryStores();
+    const recovered = await Promise.all(stores.map((store) => store.recover()));
     return recovered.filter(
       (draft): draft is RecoverableDraftV3 => draft !== undefined,
     );
@@ -3100,8 +3111,9 @@ export class SessionBroker {
       this.credentials.revokeSession(session.id);
       this.taskBindings.revokeSession(session.id);
       this.controls.cancel(session.id);
-      for (const listener of this.#sessionEndListeners) listener(session.id);
+      for (const listener of this.#sessionEndListeners) listener(session.id, "shutdown");
     }
+    this.#snapshotStores.clear();
     this.#activeById.clear();
     this.#activeBySource.clear();
     this.#activeByOutputPath.clear();
@@ -3135,61 +3147,65 @@ export class SessionBroker {
     session.ending = true;
     this.#clearRecoveryRecordsForSession(sessionId);
     this.#activeById.delete(sessionId);
-    const chromeSourceKey = this.#chromeSourceKeyBySession.get(sessionId);
-    if (chromeSourceKey !== undefined && this.#activeChromeBySource.get(chromeSourceKey) === sessionId) {
-      this.#activeChromeBySource.delete(chromeSourceKey);
-    }
-    this.#chromeSourceKeyBySession.delete(sessionId);
-    if (this.#activeByOutputPath.get(session.canonicalSourcePath) === sessionId) {
-      this.#activeByOutputPath.delete(session.canonicalSourcePath);
-    }
-    for (const [key, owner] of this.#activeBySource) {
-      if (owner === sessionId) this.#activeBySource.delete(key);
-    }
-    for (const candidate of this.#activeById.values()) {
-      if (!candidate.ending && candidate.canonicalSourcePath === session.canonicalSourcePath) {
-        this.#activeBySource.set(
-          activeKey(candidate.canonicalSourcePath, candidate.currentOriginalDigest),
-          candidate.id,
-        );
-        if (candidate.state.workflow.mode === "generated-output") {
-          this.#activeByOutputPath.set(candidate.canonicalSourcePath, candidate.id);
+    try {
+      const chromeSourceKey = this.#chromeSourceKeyBySession.get(sessionId);
+      if (chromeSourceKey !== undefined && this.#activeChromeBySource.get(chromeSourceKey) === sessionId) {
+        this.#activeChromeBySource.delete(chromeSourceKey);
+      }
+      this.#chromeSourceKeyBySession.delete(sessionId);
+      if (this.#activeByOutputPath.get(session.canonicalSourcePath) === sessionId) {
+        this.#activeByOutputPath.delete(session.canonicalSourcePath);
+      }
+      for (const [key, owner] of this.#activeBySource) {
+        if (owner === sessionId) this.#activeBySource.delete(key);
+      }
+      for (const candidate of this.#activeById.values()) {
+        if (!candidate.ending && candidate.canonicalSourcePath === session.canonicalSourcePath) {
+          this.#activeBySource.set(
+            activeKey(candidate.canonicalSourcePath, candidate.currentOriginalDigest),
+            candidate.id,
+          );
+          if (candidate.state.workflow.mode === "generated-output") {
+            this.#activeByOutputPath.set(candidate.canonicalSourcePath, candidate.id);
+          }
         }
       }
-    }
-    this.controls.cancel(sessionId);
-    this.taskBindings.revokeSession(sessionId);
-    await this.restartReconnects.revokeSession(sessionId);
-    await session.writeTail;
-    this.credentials.revokeSession(sessionId);
-    for (const [key, scope] of this.#bootstrapScopes) {
-      if (scope.sessionId === sessionId) this.#bootstrapScopes.delete(key);
-    }
-    for (const [proofHash, metadata] of this.#reconnectByBindProofHash) {
-      if (metadata.reviewSessionId === sessionId) {
-        this.#reconnectByBindProofHash.delete(proofHash);
+      this.controls.cancel(sessionId);
+      this.taskBindings.revokeSession(sessionId);
+      await this.restartReconnects.revokeSession(sessionId);
+      await session.writeTail;
+      this.credentials.revokeSession(sessionId);
+      for (const [key, scope] of this.#bootstrapScopes) {
+        if (scope.sessionId === sessionId) this.#bootstrapScopes.delete(key);
       }
-    }
-    for (const [key, scope] of this.#credentialScopes) {
-      if (scope.sessionId === sessionId) this.#credentialScopes.delete(key);
-    }
-    for (const [viewId, view] of this.#viewsById) {
-      if (view.sessionId === sessionId) this.#viewsById.delete(viewId);
-    }
-    for (const [capabilityHash, binding] of this.#reconnectBindingsByCapabilityHash) {
-      if (binding.reviewSessionId === sessionId) {
-        this.#reconnectBindingsByCapabilityHash.delete(capabilityHash);
+      for (const [proofHash, metadata] of this.#reconnectByBindProofHash) {
+        if (metadata.reviewSessionId === sessionId) {
+          this.#reconnectByBindProofHash.delete(proofHash);
+        }
       }
-    }
-    for (const [capabilityHash, pending] of this.#pendingRestartReconnects) {
-      if (pending.reviewSessionId === sessionId) {
-        this.#notifyRestartReconnectExchange(capabilityHash);
-        this.#pendingRestartReconnects.delete(capabilityHash);
+      for (const [key, scope] of this.#credentialScopes) {
+        if (scope.sessionId === sessionId) this.#credentialScopes.delete(key);
       }
+      for (const [viewId, view] of this.#viewsById) {
+        if (view.sessionId === sessionId) this.#viewsById.delete(viewId);
+      }
+      for (const [capabilityHash, binding] of this.#reconnectBindingsByCapabilityHash) {
+        if (binding.reviewSessionId === sessionId) {
+          this.#reconnectBindingsByCapabilityHash.delete(capabilityHash);
+        }
+      }
+      for (const [capabilityHash, pending] of this.#pendingRestartReconnects) {
+        if (pending.reviewSessionId === sessionId) {
+          this.#notifyRestartReconnectExchange(capabilityHash);
+          this.#pendingRestartReconnects.delete(capabilityHash);
+        }
+      }
+      this.capabilities.revokeFile(session.fileId);
+      if (session.rootId !== undefined) this.capabilities.revokeRoot(session.rootId);
+      await session.store.remove();
+    } finally {
+      this.#snapshotStores.delete(sessionId);
+      for (const listener of this.#sessionEndListeners) listener(sessionId, "ended");
     }
-    this.capabilities.revokeFile(session.fileId);
-    if (session.rootId !== undefined) this.capabilities.revokeRoot(session.rootId);
-    await session.store.remove();
-    for (const listener of this.#sessionEndListeners) listener(sessionId);
   }
 }

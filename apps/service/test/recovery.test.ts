@@ -25,6 +25,7 @@ import {
   type RecoverableDraft,
 } from "../src/recovery/draft-snapshot.js";
 import { assessGenerationRetention, enforceRetention } from "../src/recovery/retention.js";
+import { trackRecoveryTemporaryPath } from "../src/recovery/temporary-path-registry.js";
 import { createSourceSnapshot } from "../src/recovery/source-snapshot.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
 import { hashFile } from "../src/files/file-capabilities.js";
@@ -109,6 +110,60 @@ function draft(revision: number): RecoverableDraft {
 }
 
 describe("atomic recovery generations", () => {
+  it("rechecks an active temporary when its owner releases it without changing the directory", async () => {
+    const directory = await temporaryDirectory();
+    const store = new DraftSnapshotStore(directory);
+    const path = join(directory, ".draft-active.tmp");
+    await writeFile(path, "staging");
+    const release = trackRecoveryTemporaryPath(path);
+    try {
+      await store.initialize();
+      await store.initialize();
+      await expect(access(path)).resolves.toBeUndefined();
+    } finally {
+      release();
+    }
+    await store.initialize();
+    await expect(access(path)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("validates permissions and detects external temporary files and directory recreation", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "session");
+    const store = new DraftSnapshotStore(directory);
+    await store.persist(draft(1));
+    await store.initialize();
+    await chmod(directory, 0o777);
+    await store.initialize();
+    expect((await stat(directory)).mode & 0o777).toBe(0o700);
+    await writeFile(join(directory, ".draft-external.tmp"), "abandoned");
+    await store.initialize();
+    await expect(access(join(directory, ".draft-external.tmp"))).rejects.toMatchObject({ code: "ENOENT" });
+    await rename(directory, join(root, "old-session"));
+    await mkdir(directory);
+    await writeFile(join(directory, ".source-external.tmp"), "abandoned");
+    await store.initialize();
+    await expect(access(join(directory, ".source-external.tmp"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(store.recover()).resolves.toBeUndefined();
+    await store.persist(draft(3));
+    await expect(store.recover()).resolves.toMatchObject({ state: { revision: 3 } });
+  });
+
+  it("retries initialization after a path error", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "session");
+    const store = new DraftSnapshotStore(directory);
+    await store.initialize();
+    await rm(directory, { recursive: true });
+    await writeFile(directory, "not a directory");
+    await expect(store.initialize()).rejects.toBeDefined();
+    await rm(directory);
+    await mkdir(directory);
+    await writeFile(join(directory, ".draft-external.tmp"), "abandoned");
+    await store.initialize();
+    await expect(access(join(directory, ".draft-external.tmp"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("recovers one unresolved cross-page logical item without splitting its page evidence", async () => {
     const directory = await temporaryDirectory();
     const store = new DraftSnapshotStore(directory);
@@ -288,6 +343,80 @@ describe("atomic recovery generations", () => {
 });
 
 describe("broker acknowledgement and restart recovery", () => {
+  it("notifies terminal listeners even when recovery removal fails", async () => {
+    const root = await temporaryDirectory();
+    const pdf = join(root, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\noriginal\n%%EOF");
+    const broker = new SessionBroker({ recoveryRoot: join(root, "recovery") });
+    const opened = await broker.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected opened review");
+    const listener = vi.fn();
+    broker.onSessionEnd(listener);
+    vi.spyOn(DraftSnapshotStore.prototype, "remove").mockRejectedValueOnce(new Error("remove failed"));
+    await expect(broker.finish(opened.launch.sessionId)).rejects.toThrow("remove failed");
+    expect(listener).toHaveBeenCalledExactlyOnceWith(opened.launch.sessionId, "ended");
+    expect(broker.state(opened.launch.sessionId)).toBeUndefined();
+    await broker.finish(opened.launch.sessionId);
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it("notifies terminal listeners and releases the cached store when reconnect revocation fails", async () => {
+    const root = await temporaryDirectory();
+    const pdf = join(root, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\noriginal\n%%EOF");
+    const broker = new SessionBroker({ recoveryRoot: join(root, "recovery") });
+    const initialization = vi.spyOn(DraftSnapshotStore.prototype, "initialize");
+    const opened = await broker.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected opened review");
+    const sessionDirectory = join(broker.recoveryRoot, opened.launch.sessionId);
+    const previousStore = initialization.mock.contexts.find((store) => store instanceof DraftSnapshotStore && store.directory === sessionDirectory);
+    expect(previousStore).toBeDefined();
+    const listener = vi.fn();
+    broker.onSessionEnd(listener);
+    vi.spyOn(broker.restartReconnects, "revokeSession")
+      .mockRejectedValueOnce(new Error("revocation failed"));
+    await expect(broker.finish(opened.launch.sessionId)).rejects.toThrow("revocation failed");
+    expect(listener).toHaveBeenCalledExactlyOnceWith(opened.launch.sessionId, "ended");
+    expect(broker.state(opened.launch.sessionId)).toBeUndefined();
+    // Failed cleanup leaves the recovery directory available. The next scan
+    // must create a new store rather than retain the terminal session's cache.
+    initialization.mockClear();
+    await broker.initialize();
+    const nextStore = initialization.mock.contexts.find((store) => store instanceof DraftSnapshotStore && store.directory === sessionDirectory);
+    expect(nextStore).toBeDefined();
+    expect(nextStore).not.toBe(previousStore);
+    await broker.finish(opened.launch.sessionId);
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it("distinguishes shutdown notification from an explicit terminal end", async () => {
+    const root = await temporaryDirectory();
+    const pdf = join(root, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\noriginal\n%%EOF");
+    const broker = new SessionBroker({ recoveryRoot: join(root, "recovery") });
+    const opened = await broker.openReview({ pdfPath: pdf });
+    if (opened.kind !== "opened") throw new Error("Expected opened review");
+    const listener = vi.fn();
+    broker.onSessionEnd(listener);
+    await broker.quiesceForShutdown();
+    expect(listener).toHaveBeenCalledExactlyOnceWith(opened.launch.sessionId, "shutdown");
+  });
+
+  it("does not discover recovery drafts when rewrite assessment fails", async () => {
+    const root = await temporaryDirectory();
+    const pdf = join(root, "paper.pdf");
+    await writeFile(pdf, "%PDF-1.7\noriginal\n%%EOF");
+    const recoveryRoot = join(root, "recovery");
+    await new DraftSnapshotStore(join(recoveryRoot, "retained")).persist(draft(1));
+    const recover = vi.spyOn(DraftSnapshotStore.prototype, "recover");
+    const broker = new SessionBroker({
+      recoveryRoot,
+      rewriteAssessor: async () => { throw new Error("assessment failed"); },
+    });
+    await expect(broker.openReview({ pdfPath: pdf })).rejects.toThrow("assessment failed");
+    expect(recover).not.toHaveBeenCalled();
+  });
+
   it("keeps generated-output mode canonical across browser, VS Code, and Codex joins", async () => {
     const directory = await temporaryDirectory();
     const pdf = join(directory, "paper.pdf");
@@ -1066,6 +1195,19 @@ describe("save-aware recovery migration", () => {
 });
 
 describe("retention", () => {
+  it("counts all complete files across stat batches while excluding temporary files", async () => {
+    const root = await temporaryDirectory();
+    const store = new DraftSnapshotStore(join(root, "session"));
+    await store.initialize();
+    for (let index = 0; index < 25; index++) {
+      await writeFile(join(store.directory, `generation-${index}.pdf`), Buffer.alloc(index + 1));
+    }
+    await mkdir(join(store.directory, "nested"));
+    await writeFile(join(store.directory, "nested", "ignored.pdf"), Buffer.alloc(500));
+    await writeFile(join(store.directory, "unrelated.tmp"), Buffer.alloc(100));
+    expect(await store.allocatedBytes()).toBe(325);
+  });
+
   it("rejects an over-budget successor instead of evicting referenced generations", () => {
     expect(assessGenerationRetention(
       [{ byteLength: 60 }, { byteLength: 30 }],

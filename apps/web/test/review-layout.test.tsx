@@ -7,7 +7,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   controlledWorkspaceSurfaceAction,
   ReviewShell,
-  workspaceIsVisible,
 } from '../src/app/ReviewShell.js';
 import { AnnotationList } from '../src/review/AnnotationList.js';
 import { AnnotationPeek } from '../src/review/AnnotationPeek.js';
@@ -215,8 +214,15 @@ describe('review shell layout and accessibility contract', () => {
         generationRefreshStatus="reconciling"
         locationRestoreStatus="restoring"
         toolError="Forward SyncTeX could not reveal this PDF location."
-        selectionUpdate={{ kind: 'cleared', generation: 0 }}
-        onCommand={async () => generatedState}
+        save={{}}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 0 },
+        }}
+        authoring={{
+          onCommand: async () => generatedState,
+        }}
+        viewer={{}}
+        workspace={{}}
       >
         <div>Document canvas</div>
       </ReviewShell>,
@@ -244,27 +250,34 @@ describe('review shell layout and accessibility contract', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
-        selectionUpdate={{ kind: 'cleared', generation: 0 }}
-        pdfCopyOwner="reference"
-        pdfCopySnapshots={{
-          main: {
-            kind: 'ready',
-            surface: { kind: 'main', documentGeneration: 1 },
-            generation: 2,
-            text: 'main selection',
-            pageCount: 1,
-          },
-          reference: {
-            kind: 'ready',
-            surface: {
-              kind: 'reference', documentGeneration: 1, tabIdentity: 'reference-a',
+        save={{}}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 0 },
+          pdfCopyOwner: "reference",
+          pdfCopySnapshots: {
+            main: {
+              kind: 'ready',
+              surface: { kind: 'main', documentGeneration: 1 },
+              generation: 2,
+              text: 'main selection',
+              pageCount: 1,
             },
-            generation: 3,
-            text: 'reference selection',
-            pageCount: 2,
+            reference: {
+              kind: 'ready',
+              surface: {
+                kind: 'reference', documentGeneration: 1, tabIdentity: 'reference-a',
+              },
+              generation: 3,
+              text: 'reference selection',
+              pageCount: 2,
+            },
           },
         }}
-        onCommand={async () => state}
+        authoring={{
+          onCommand: async () => state,
+        }}
+        viewer={{}}
+        workspace={{}}
       >
         <div>Document canvas</div>
       </ReviewShell>,
@@ -277,20 +290,27 @@ describe('review shell layout and accessibility contract', () => {
     const revokedHtml = renderToStaticMarkup(
       <ReviewShell
         state={state}
-        selectionUpdate={{ kind: 'cleared', generation: 0 }}
-        pdfCopyOwner={null}
-        pdfCopyOwnerIndicatorVisible
-        pdfCopySnapshots={{
-          main: {
-            kind: 'ready',
-            surface: { kind: 'main', documentGeneration: 1 },
-            generation: 2,
-            text: 'main selection',
-            pageCount: 1,
+        save={{}}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 0 },
+          pdfCopyOwner: null,
+          pdfCopyOwnerIndicatorVisible: true,
+          pdfCopySnapshots: {
+            main: {
+              kind: 'ready',
+              surface: { kind: 'main', documentGeneration: 1 },
+              generation: 2,
+              text: 'main selection',
+              pageCount: 1,
+            },
+            reference: null,
           },
-          reference: null,
         }}
-        onCommand={async () => state}
+        authoring={{
+          onCommand: async () => state,
+        }}
+        viewer={{}}
+        workspace={{}}
       ><div>Document canvas</div></ReviewShell>,
     );
     expect(revokedHtml).toContain('data-pdf-copy-owner="none"');
@@ -301,27 +321,35 @@ describe('review shell layout and accessibility contract', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
-        workspaceOpen
-        navigationState={createReferenceNavigationState(0)}
-        outlineDiscovery={{
-          status: 'loaded-tree',
-          documentGeneration: 0,
-          items: [{
-            id: 'intro',
-            label: 'Introduction',
-            pageContext: null,
-            target: null,
-            children: [{
-              id: 'motivation',
-              label: 'Motivation',
+        save={{}}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 0 },
+        }}
+        authoring={{
+          onCommand: async () => state,
+        }}
+        viewer={{}}
+        workspace={{
+          workspaceOpen: true,
+          navigationState: createReferenceNavigationState(0),
+          outlineDiscovery: {
+            status: 'loaded-tree',
+            documentGeneration: 0,
+            items: [{
+              id: 'intro',
+              label: 'Introduction',
               pageContext: null,
               target: null,
-              children: [],
+              children: [{
+                id: 'motivation',
+                label: 'Motivation',
+                pageContext: null,
+                target: null,
+                children: [],
+              }],
             }],
-          }],
+          },
         }}
-        selectionUpdate={{ kind: 'cleared', generation: 0 }}
-        onCommand={async () => state}
       >
         <div>Document canvas</div>
       </ReviewShell>,
@@ -462,28 +490,35 @@ describe('review shell layout and accessibility contract', () => {
       baseSurface: 'reading',
       transientSurface: 'none',
     });
-    expect(workspaceIsVisible(true, 'workspace')).toBe(true);
   });
 
   it('keeps selection actions available beside an externally opened workspace', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
-        workspaceOpen
-        selectionUpdate={{
-          kind: 'reliable', generation: 1,
-          anchor: {
-            pageIndex: 0, quote: 'text', prefix: '', suffix: '', reliable: true,
-            rect: { x: 1, y: 1, width: 2, height: 2 },
-            segmentRects: [{ x: 1, y: 1, width: 2, height: 2 }],
+        save={{}}
+        selection={{
+          selectionUpdate: {
+            kind: 'reliable', generation: 1,
+            anchor: {
+              pageIndex: 0, quote: 'text', prefix: '', suffix: '', reliable: true,
+              rect: { x: 1, y: 1, width: 2, height: 2 },
+              segmentRects: [{ x: 1, y: 1, width: 2, height: 2 }],
+            },
           },
+          selectionPlacement: { left: 10, top: 10 },
         }}
-        selectionPlacement={{ left: 10, top: 10 }}
-        pageMenu={{
-          invocationId: 'menu', placement: { left: 10, top: 10 }, pageIndex: 0,
-          position: { x: 1, y: 1, width: 2, height: 2 },
+        authoring={{
+          pageMenu: {
+            invocationId: 'menu', placement: { left: 10, top: 10 }, pageIndex: 0,
+            position: { x: 1, y: 1, width: 2, height: 2 },
+          },
+          onCommand: async () => state,
         }}
-        onCommand={async () => state}
+        viewer={{}}
+        workspace={{
+          workspaceOpen: true,
+        }}
       >
         <div>Document canvas</div>
       </ReviewShell>,
@@ -497,16 +532,23 @@ describe('review shell layout and accessibility contract', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
-        selectionUpdate={{ kind: 'cleared', generation: 1 }}
-        caretAnchor={{
-          pageIndex: 0,
-          position: { x: 149, y: 89, width: 2, height: 16 },
-          leftContext: 'Selectable p',
-          rightContext: 'lacekeeper text',
-          reliable: true,
+        save={{}}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 1 },
+          caretAnchor: {
+            pageIndex: 0,
+            position: { x: 149, y: 89, width: 2, height: 16 },
+            leftContext: 'Selectable p',
+            rightContext: 'lacekeeper text',
+            reliable: true,
+          },
+          caretPlacement: { left: 250, top: 180, width: 2, height: 16 },
         }}
-        caretPlacement={{ left: 250, top: 180, width: 2, height: 16 }}
-        onCommand={async () => state}
+        authoring={{
+          onCommand: async () => state,
+        }}
+        viewer={{}}
+        workspace={{}}
       >
         <div>Document canvas</div>
       </ReviewShell>,
@@ -527,17 +569,25 @@ describe('review shell layout and accessibility contract', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
-        workspaceOpen
-        selectionUpdate={{ kind: 'cleared', generation: 1 }}
-        caretAnchor={{
-          pageIndex: 0,
-          position: { x: 149, y: 89, width: 2, height: 16 },
-          leftContext: 'Selectable p',
-          rightContext: 'lacekeeper text',
-          reliable: true,
+        save={{}}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 1 },
+          caretAnchor: {
+            pageIndex: 0,
+            position: { x: 149, y: 89, width: 2, height: 16 },
+            leftContext: 'Selectable p',
+            rightContext: 'lacekeeper text',
+            reliable: true,
+          },
+          caretPlacement: { left: 250, top: 180, width: 2, height: 16 },
         }}
-        caretPlacement={{ left: 250, top: 180, width: 2, height: 16 }}
-        onCommand={async () => state}
+        authoring={{
+          onCommand: async () => state,
+        }}
+        viewer={{}}
+        workspace={{
+          workspaceOpen: true,
+        }}
       >
         <div>Document canvas</div>
       </ReviewShell>,
@@ -551,9 +601,17 @@ describe('review shell layout and accessibility contract', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
-        saveOptionsOpen
-        selectionUpdate={{ kind: 'cleared', generation: 0 }}
-        onCommand={async () => state}
+        save={{
+          saveOptionsOpen: true,
+        }}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 0 },
+        }}
+        authoring={{
+          onCommand: async () => state,
+        }}
+        viewer={{}}
+        workspace={{}}
       >
         <div>Document canvas</div>
       </ReviewShell>,
@@ -1013,22 +1071,29 @@ describe('review shell layout and accessibility contract', () => {
       <ReviewShell
         state={state}
         documentTitle="paper.pdf"
-        selectionUpdate={{
-          kind: 'reliable',
-          generation: 0,
-          anchor: {
-            pageIndex: 0,
-            quote: 'text',
-            prefix: '',
-            suffix: '',
-            rect: { x: 10, y: 10, width: 20, height: 10 },
-            segmentRects: [{ x: 10, y: 10, width: 20, height: 10 }],
-            reliable: true,
+        save={{}}
+        selection={{
+          selectionUpdate: {
+            kind: 'reliable',
+            generation: 0,
+            anchor: {
+              pageIndex: 0,
+              quote: 'text',
+              prefix: '',
+              suffix: '',
+              rect: { x: 10, y: 10, width: 20, height: 10 },
+              segmentRects: [{ x: 10, y: 10, width: 20, height: 10 }],
+              reliable: true,
+            },
           },
+          selectionPlacement: { left: 20, top: 30, suggestTop: true },
+          onCopySelection: () => undefined,
         }}
-        selectionPlacement={{ left: 20, top: 30, suggestTop: true }}
-        onCopySelection={() => undefined}
-        onCommand={async () => state}
+        authoring={{
+          onCommand: async () => state,
+        }}
+        viewer={{}}
+        workspace={{}}
       >
         <div>Document canvas</div>
       </ReviewShell>,
@@ -1101,10 +1166,18 @@ describe('review shell layout and accessibility contract', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
-        referenceLayoutState={layout}
-        referenceTabs={[{ identity: 'reference', label: 'Reference', pageContext: 'Page 2' }]}
-        selectionUpdate={{ kind: 'cleared', generation: 0 }}
-        onCommand={async () => state}
+        save={{}}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 0 },
+        }}
+        authoring={{
+          onCommand: async () => state,
+        }}
+        viewer={{}}
+        workspace={{
+          referenceLayoutState: layout,
+          referenceTabs: [{ identity: 'reference', label: 'Reference', pageContext: 'Page 2' }],
+        }}
       ><div>Document canvas</div></ReviewShell>,
     );
     expect(html).toContain('data-reference-layout="wide-split"');
@@ -1127,10 +1200,18 @@ describe('review shell layout and accessibility contract', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
-        referenceLayoutState={layout}
-        referenceTabs={[{ identity: 'reference', label: 'Reference', pageContext: 'Page 2' }]}
-        selectionUpdate={{ kind: 'cleared', generation: 0 }}
-        onCommand={async () => state}
+        save={{}}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 0 },
+        }}
+        authoring={{
+          onCommand: async () => state,
+        }}
+        viewer={{}}
+        workspace={{
+          referenceLayoutState: layout,
+          referenceTabs: [{ identity: 'reference', label: 'Reference', pageContext: 'Page 2' }],
+        }}
       ><div>Document canvas</div></ReviewShell>,
     );
 
@@ -1165,12 +1246,20 @@ describe('review shell layout and accessibility contract', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
-        workspaceOpen
-        navigationState={navigationState}
-        referenceReturn={{ tabIdentity: 'lemma-origin', available: true, pending: false }}
-        onReferenceReturn={() => undefined}
-        selectionUpdate={{ kind: 'cleared', generation: 0 }}
-        onCommand={async () => state}
+        save={{}}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 0 },
+        }}
+        authoring={{
+          onCommand: async () => state,
+        }}
+        viewer={{}}
+        workspace={{
+          workspaceOpen: true,
+          navigationState,
+          referenceReturn: { tabIdentity: 'lemma-origin', available: true, pending: false },
+          onReferenceReturn: () => undefined,
+        }}
       ><div>Document canvas</div></ReviewShell>,
     );
 
@@ -1353,10 +1442,18 @@ describe('review shell layout and accessibility contract', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
-        referenceLayoutState={layout}
-        referenceTabs={[{ identity: 'reference', label: 'Reference', pageContext: 'Page 2' }]}
-        selectionUpdate={{ kind: 'cleared', generation: 0 }}
-        onCommand={async () => state}
+        save={{}}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 0 },
+        }}
+        authoring={{
+          onCommand: async () => state,
+        }}
+        viewer={{}}
+        workspace={{
+          referenceLayoutState: layout,
+          referenceTabs: [{ identity: 'reference', label: 'Reference', pageContext: 'Page 2' }],
+        }}
       ><div>Document canvas</div></ReviewShell>,
     );
 
@@ -1371,7 +1468,6 @@ describe('review shell layout and accessibility contract', () => {
       <ReviewShell
         state={state}
         documentTitle="paper.pdf"
-        selectionUpdate={{ kind: 'cleared', generation: 0 }}
         existingAnnotations={{
           status: 'ready',
           generation: 1,
@@ -1387,18 +1483,27 @@ describe('review shell layout and accessibility contract', () => {
             supportedAppearance: true,
           }],
         }}
-        outlineDiscovery={{
-          status: 'loaded-tree',
-          documentGeneration: 0,
-          items: [{
-            id: 'outline-0',
-            label: 'Representative review',
-            pageContext: null,
-            target: null,
-            children: [],
-          }],
+        save={{}}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 0 },
         }}
-        onCommand={async () => state}
+        authoring={{
+          onCommand: async () => state,
+        }}
+        viewer={{}}
+        workspace={{
+          outlineDiscovery: {
+            status: 'loaded-tree',
+            documentGeneration: 0,
+            items: [{
+              id: 'outline-0',
+              label: 'Representative review',
+              pageContext: null,
+              target: null,
+              children: [],
+            }],
+          },
+        }}
       >
         <div>Document canvas</div>
       </ReviewShell>,
@@ -1430,7 +1535,6 @@ describe('review shell layout and accessibility contract', () => {
       <ReviewShell
         state={{ ...generatedState, items: [ownedAnnotation, unresolvedAnnotation] }}
         documentTitle="paper.pdf"
-        selectionUpdate={{ kind: 'cleared', generation: 0 }}
         existingAnnotations={{
           status: 'ready',
           generation: 4,
@@ -1446,7 +1550,15 @@ describe('review shell layout and accessibility contract', () => {
             supportedAppearance: true,
           }],
         }}
-        onCommand={async () => generatedState}
+        save={{}}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 0 },
+        }}
+        authoring={{
+          onCommand: async () => generatedState,
+        }}
+        viewer={{}}
+        workspace={{}}
       >
         <div>Document canvas</div>
       </ReviewShell>,
@@ -1470,12 +1582,20 @@ describe('review shell layout and accessibility contract', () => {
       <ReviewShell
         state={state}
         documentTitle="paper.pdf"
-        workspaceOpen
-        outlineDiscovery={{ status: 'loaded-empty', documentGeneration: 0 }}
-        rightWorkspaceMode="annotations"
-        selectionUpdate={{ kind: 'cleared', generation: 0 }}
         existingAnnotations={{ status: 'empty', generation: 1, items: [] }}
-        onCommand={async () => state}
+        save={{}}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 0 },
+        }}
+        authoring={{
+          onCommand: async () => state,
+        }}
+        viewer={{}}
+        workspace={{
+          workspaceOpen: true,
+          outlineDiscovery: { status: 'loaded-empty', documentGeneration: 0 },
+          rightWorkspaceMode: "annotations",
+        }}
       >
         <div>Document canvas</div>
       </ReviewShell>,
@@ -1496,10 +1616,6 @@ describe('review shell layout and accessibility contract', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={{ ...state, items: [ownedAnnotation] }}
-        workspaceOpen
-        outlineDiscovery={{ status: 'loaded-empty', documentGeneration: 0 }}
-        rightWorkspaceMode="outline"
-        selectionUpdate={{ kind: 'cleared', generation: 0 }}
         existingAnnotations={{
           status: 'ready',
           generation: 1,
@@ -1515,7 +1631,19 @@ describe('review shell layout and accessibility contract', () => {
             supportedAppearance: true,
           }],
         }}
-        onCommand={async () => state}
+        save={{}}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 0 },
+        }}
+        authoring={{
+          onCommand: async () => state,
+        }}
+        viewer={{}}
+        workspace={{
+          workspaceOpen: true,
+          outlineDiscovery: { status: 'loaded-empty', documentGeneration: 0 },
+          rightWorkspaceMode: "outline",
+        }}
       >
         <div>Document canvas</div>
       </ReviewShell>,
@@ -1537,10 +1665,18 @@ describe('review shell layout and accessibility contract', () => {
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
-        workspaceOpen
-        outlineDiscovery={{ status: 'loaded-empty', documentGeneration: -1 }}
-        selectionUpdate={{ kind: 'cleared', generation: 0 }}
-        onCommand={async () => state}
+        save={{}}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 0 },
+        }}
+        authoring={{
+          onCommand: async () => state,
+        }}
+        viewer={{}}
+        workspace={{
+          workspaceOpen: true,
+          outlineDiscovery: { status: 'loaded-empty', documentGeneration: -1 },
+        }}
       >
         <div>Document canvas</div>
       </ReviewShell>,
@@ -1556,8 +1692,15 @@ describe('review shell layout and accessibility contract', () => {
       <ReviewShell
         state={state}
         documentTitle="paper.pdf"
-        selectionUpdate={{ kind: 'cleared', generation: 0 }}
-        onCommand={async () => state}
+        save={{}}
+        selection={{
+          selectionUpdate: { kind: 'cleared', generation: 0 },
+        }}
+        authoring={{
+          onCommand: async () => state,
+        }}
+        viewer={{}}
+        workspace={{}}
       >
         <div>Document canvas</div>
       </ReviewShell>,
