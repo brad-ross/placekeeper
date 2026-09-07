@@ -331,12 +331,11 @@ test('horizontal reference tabs in a bottom workspace fit short titles', async (
   expect((await tab.boundingBox())!.width).toBeGreaterThanOrEqual(112);
 });
 
-test('workspace scrollbars stay slim and reveal only while their own panel scrolls without moving rows', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 900 });
+test('workspace scrollbars retain native appearance and scroll normally', async ({ page }) => {
   await page.goto('/test/acceptance/review-harness/index.html?visual=tray&search=canonical');
   await page.addStyleTag({ content: `
     #workspace-panel-annotations, #workspace-panel-outline, .pdf-search__results {
-      max-height: 24px; min-height: 0; overflow-y: scroll; scrollbar-gutter: stable;
+      max-height: 24px; min-height: 0; overflow-y: scroll;
     }
   ` });
   for (const mode of ['Outline', 'Annotations', 'Search']) {
@@ -344,32 +343,13 @@ test('workspace scrollbars stay slim and reveal only while their own panel scrol
     if (mode === 'Search') await page.getByRole('searchbox').fill('signal');
     const scroller = page.locator(mode === 'Search' ? '.pdf-search__results'
       : `#workspace-panel-${mode.toLowerCase()}`);
-    const row = scroller.locator('.outline-navigator__row, li[data-annotation-origin], [data-search-result]').first();
-    await expect(row).toBeVisible();
-    await expect.poll(() => scroller.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeGreaterThan(0);
-    await expect(scroller).not.toHaveAttribute('data-scrollbar-active', 'true');
-    const metrics = () => scroller.evaluate((element) => ({
-      width: element.clientWidth,
-      gutter: getComputedStyle(element, '::-webkit-scrollbar').width,
-      thumb: getComputedStyle(element, '::-webkit-scrollbar-thumb').backgroundColor,
-      rowLeft: element.querySelector('.outline-navigator__row, li[data-annotation-origin], [data-search-result]')!.getBoundingClientRect().left,
-    }));
-    const before = await metrics();
-    if (mode === 'Search') {
-      const outer = page.locator('.review-workspace__panel--search');
-      expect(await outer.evaluate((element) => (element as HTMLElement).offsetWidth - element.clientWidth)).toBe(0);
-    }
-    expect(before.gutter).toBe('8px');
-    expect(before.thumb).toBe('rgba(0, 0, 0, 0)');
+    await expect(scroller).toHaveCSS('scrollbar-width', 'auto');
+    await expect(scroller).toHaveCSS('scrollbar-color', await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue('scrollbar-color')));
+    expect(await scroller.evaluate((element) => getComputedStyle(element, '::-webkit-scrollbar').width)).toBe('auto');
     await scroller.hover();
-    await expect(scroller).not.toHaveAttribute('data-scrollbar-active', 'true');
-    await scroller.evaluate((element) => { element.scrollTop += 30; });
-    await expect(scroller).toHaveAttribute('data-scrollbar-active', 'true');
-    const during = await metrics();
-    expect(during.thumb).not.toBe(before.thumb);
-    expect(during.width).toBe(before.width);
-    expect(during.rowLeft).toBe(before.rowLeft);
-    await expect(scroller).not.toHaveAttribute('data-scrollbar-active', 'true', { timeout: 2_000 });
-    expect(await metrics()).toEqual(before);
+    await page.mouse.wheel(0, 30);
+    await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await expect(scroller).not.toHaveAttribute('data-scrollbar-active');
   }
 });

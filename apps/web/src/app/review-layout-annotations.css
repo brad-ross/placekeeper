@@ -621,7 +621,6 @@
   border-radius: var(--review-radius-control);
   background: var(--review-surface-panel);
   box-shadow: 0 8px 20px rgb(24 26 23 / 16%);
-  scrollbar-width: thin;
 }
 
 .pdf-search__symbol-suggestions button {
@@ -747,7 +746,6 @@
   padding: 8px 10px;
   overflow-x: auto;
   border-bottom: 1px solid var(--review-border-subtle);
-  scrollbar-width: thin;
 }
 
 .reference-tab-segment {

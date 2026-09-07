@@ -4303,7 +4303,7 @@ test('locks horizontal PDF scrolling at the current offset without blocking vert
   await expect.poll(() => viewport.evaluate((element) => element.scrollLeft)).toBeLessThan(locked.x);
 });
 
-test('keeps slim PDF scrollbar tracks exposed and reveals thumbs only while scrolling without shifting pages', async ({ page }) => {
+test('keeps native PDF scrollbars exposed without shifting pages', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, 'Scrollbar fixture launch failed');
   const main = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
@@ -4325,36 +4325,28 @@ test('keeps slim PDF scrollbar tracks exposed and reveals thumbs only while scro
     }
     const geometry = await viewport.evaluate((element) => {
       const frame = document.querySelector('.review-overlay-frame')!;
-      const viewportStyle = getComputedStyle(element);
       return {
         clip: getComputedStyle(frame).clipPath,
-        track: getComputedStyle(element, '::-webkit-scrollbar-track').backgroundColor,
-        canvas: viewportStyle.backgroundColor,
+        inset: Math.max(12, (element as HTMLElement).offsetWidth - element.clientWidth, (element as HTMLElement).offsetHeight - element.clientHeight),
         bottom: element.getBoundingClientRect().bottom,
       };
     });
-    expect(geometry.track).toBe(geometry.canvas);
-    // The overlay keeps its 12px minimum outside inset even with an 8px gutter.
-    expect(geometry.clip).toBe('inset(0px 12px 12px 0px)');
+    // Decorative overlays leave the native scrollbar edge unobstructed.
+    expect(geometry.clip).toBe(`inset(0px ${geometry.inset}px ${geometry.inset}px 0px)`);
     expect(geometry.bottom).toBe(900);
-    await expect(viewport).not.toHaveAttribute('data-scrollbar-active', 'true', { timeout: 2_000 });
+    await expect(viewport).toHaveCSS('scrollbar-width', 'auto');
+    await expect(viewport).toHaveCSS('scrollbar-color', await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue('scrollbar-color')));
+    expect(await viewport.evaluate((element) => getComputedStyle(element, '::-webkit-scrollbar').width)).toBe('auto');
     const scrollGeometry = () => viewport.evaluate((element) => ({
       clientWidth: element.clientWidth,
       clientHeight: element.clientHeight,
-      gutter: getComputedStyle(element, '::-webkit-scrollbar').width,
-      thumb: getComputedStyle(element, '::-webkit-scrollbar-thumb').backgroundColor,
       pageLeft: element.querySelector('[data-page-index]')!.getBoundingClientRect().left,
     }));
     const beforeScroll = await scrollGeometry();
-    expect(beforeScroll.gutter).toBe('8px');
-    expect(beforeScroll.thumb).toBe('rgba(0, 0, 0, 0)');
     await viewport.evaluate((element) => { element.scrollTop += 25; });
-    await expect(viewport).toHaveAttribute('data-scrollbar-active', 'true');
-    const duringScroll = await scrollGeometry();
-    expect(duringScroll.thumb).not.toBe(beforeScroll.thumb);
-    expect({ ...duringScroll, thumb: beforeScroll.thumb }).toEqual(beforeScroll);
-    await expect(viewport).not.toHaveAttribute('data-scrollbar-active', 'true', { timeout: 2_000 });
     expect(await scrollGeometry()).toEqual(beforeScroll);
+
   }
 });
 

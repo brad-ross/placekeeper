@@ -121,7 +121,6 @@ import {
   type WorkspaceOpenRequest,
 } from '../review/use-annotation-tray-framing.js';
 import { useReviewOverlayGeometry } from '../review/use-review-overlay-geometry.js';
-import { useTransientScrollbars } from '../review/use-transient-scrollbars.js';
 import { usePassageEditorPlacement } from '../review/use-passage-editor-placement.js';
 import {
   INITIAL_REVIEW_SURFACE_STATE,
@@ -545,7 +544,6 @@ export function ReviewShell(props: ReviewShellProps) {
   const rightWorkspaceRailRef = useRef<HTMLButtonElement>(null);
   const bottomWorkspaceRailRef = useRef<HTMLButtonElement>(null);
   const shellRef = useRef<HTMLElement>(null);
-  useTransientScrollbars(shellRef);
   useEffect(() => {
     const shell = shellRef.current;
     if (!horizontalScrollLocked || !shell) return;
